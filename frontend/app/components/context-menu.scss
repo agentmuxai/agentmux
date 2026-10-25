@@ -56,6 +56,20 @@
     }
 }
 
+.ctx-menu-main {
+    display: flex;
+    align-items: center;
+    flex: 1;
+    min-width: 0;
+}
+
+// The row's icon sits in the shared `.menu-item-icon` slot (flyoutmenu.scss: 14 px, muted); it takes
+// the row's colour, so a danger row's icon is the danger colour too.
+.ctx-menu-main .menu-item-icon {
+    display: inline-block;
+    text-align: center;
+}
+
 .ctx-menu-label {
     flex: 1;
     @include mixins.truncate;

@@ -13,11 +13,12 @@ import { splitBlockDefFor } from "./split-block-def";
 import { createBlockSplitHorizontally, createBlockSplitVertically, getApi } from "@/app/store/global";
 import { readText as clipboardReadText, writeText as clipboardWriteText } from "@/util/clipboard";
 import { shortcutFor } from "@/app/keybindings";
+import { MENU_ICON } from "@/app/util/menu-icons";
 
 /** A menu item's shortcut, from the shortcut table; undefined when it has none. */
 const hint = (command: string): string | undefined => shortcutFor(command) || undefined;
 
-type SplitDirection = "up" | "down" | "left" | "right";
+type SplitDirection = "down" | "right";
 
 // ─── Copy / Paste helpers ─────────────────────────────────────────────────────
 
@@ -78,14 +79,8 @@ async function handleSplitPane(blockData: Block, direction: SplitDirection): Pro
 
     try {
         switch (direction) {
-            case "up":
-                await createBlockSplitVertically(blockDef, blockData.oid, "before");
-                break;
             case "down":
                 await createBlockSplitVertically(blockDef, blockData.oid, "after");
-                break;
-            case "left":
-                await createBlockSplitHorizontally(blockDef, blockData.oid, "before");
                 break;
             case "right":
                 await createBlockSplitHorizontally(blockDef, blockData.oid, "after");
@@ -123,7 +118,7 @@ export function joinMenuGroups(groups: ContextMenuItem[][]): ContextMenuItem[] {
 export type PaneMenuSection =
     | "viewItems" // viewModel.getBodyContextMenuItems()
     | "clipboard" // Copy / Paste
-    | "split" // Split Up / Down / Left / Right
+    | "split" // Split Down / Right
     | "magnify" // Magnify / Un-Magnify Pane
     | "close" // Close Pane
     | "inspect"; // Inspect Element
@@ -167,6 +162,7 @@ export function buildPaneContextMenu(
         // Copy — always present; disabled when nothing is selected
         clipboard.push({
             label: "Copy",
+            icon: MENU_ICON.copy,
             enabled: selection.length > 0,
             click: () => {
                 if (selection) {
@@ -178,6 +174,7 @@ export function buildPaneContextMenu(
         if (paneAcceptsInput(blockData)) {
             clipboard.push({
                 label: "Paste",
+                icon: MENU_ICON.paste,
                 click: () => {
                     void (async () => {
                         try {
@@ -198,18 +195,16 @@ export function buildPaneContextMenu(
 
     const split: ContextMenuItem[] = has("split")
         ? [
-              { label: "Split Up", sublabel: hint("split:up"), click: () => void handleSplitPane(blockData, "up") },
-              { label: "Split Down", sublabel: hint("split:down"), click: () => void handleSplitPane(blockData, "down") },
-              { label: "Split Left", sublabel: hint("split:left"), click: () => void handleSplitPane(blockData, "left") },
-              { label: "Split Right", sublabel: hint("split:right"), click: () => void handleSplitPane(blockData, "right") },
+              { label: "Split Down", icon: MENU_ICON.splitDown, sublabel: hint("split:down"), click: () => void handleSplitPane(blockData, "down") },
+              { label: "Split Right", icon: MENU_ICON.splitRight, sublabel: hint("split:right"), click: () => void handleSplitPane(blockData, "right") },
           ]
         : [];
 
     const paneActions: ContextMenuItem[] = [
         ...(has("magnify")
-            ? [{ label: opts.magnified ? "Un-Magnify Pane" : "Magnify Pane", sublabel: hint("pane:magnify"), click: opts.onMagnifyToggle }]
+            ? [{ label: opts.magnified ? "Un-Magnify Pane" : "Magnify Pane", icon: opts.magnified ? MENU_ICON.unmagnify : MENU_ICON.magnify, sublabel: hint("pane:magnify"), click: opts.onMagnifyToggle }]
             : []),
-        ...(has("close") ? [{ label: "Close Pane", sublabel: hint("pane:close"), click: opts.onClose }] : []),
+        ...(has("close") ? [{ label: "Close Pane", icon: MENU_ICON.close, sublabel: hint("pane:close"), click: opts.onClose }] : []),
     ];
 
     // Inspect Element — opens CEF DevTools focused on whatever was
@@ -222,6 +217,7 @@ export function buildPaneContextMenu(
             ? [
                   {
                       label: "Inspect Element",
+                      icon: MENU_ICON.inspect,
                       click: () => {
                           try {
                               getApi().inspectElementAt(opts.inspectAt!.x, opts.inspectAt!.y);

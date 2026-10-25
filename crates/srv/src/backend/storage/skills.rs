@@ -338,11 +338,13 @@ impl Store {
     }
 
     /// Effective skills for an agent at launch/config-materialization time:
-    /// this agent's own ref-bound skills (via `skill_list`) take over
-    /// *entirely* when present (globals still included), otherwise fall back
-    /// to the legacy `db_agent_skills` table with globals layered on top. The
-    /// fallback decision is gated on *own* refs only — not the
-    /// global-inclusive list — so adding a global skill never discards a
+    /// this agent's own private skills take over *entirely* when present,
+    /// otherwise fall back to the legacy `db_agent_skills` table. Either way
+    /// the global skills the agent (or its bundle) holds a bind to are layered
+    /// on top, and no others: an unbound global skill is catalog content only,
+    /// so what is written to the agent matches the count Memory → Skills and
+    /// the agent's Skills tab show. The fallback decision is gated on *own*
+    /// private skills only, so binding a global skill never discards a
     /// legacy-only agent's skills.
     ///
     /// Single source of truth for two call sites that must stay consistent:
@@ -364,6 +366,7 @@ impl Store {
             .skill_list(catalog, agent_id)
             .unwrap_or_default()
             .into_iter()
+            .filter(|item| item.bound_to_agent || !item.skill.is_global)
             .map(|item| item.skill)
             .collect();
         // reagentx P1 on PR #2639: `has_own_skill_refs` must be decided
@@ -561,8 +564,8 @@ impl Store {
 
     /// The first existing GLOBAL row matching `name` alone, for the
     /// migration's first-wins dedup among global skills that aren't a
-    /// recognized starter (those converge on `starter_skill_id` instead —
-    /// see `skill_seed::starter_skill_trigger_for_name`).
+    /// recognized starter (those converged on a fixed id derived from their
+    /// trigger instead — see `0031_carry_skills_and_mcp_servers_to_identity_store`).
     ///
     /// Name-only, not `(name, skill_type)` — matching `idx_ids_skills_global_name`
     /// (`IDENTITY_STORE_SCHEMA_VERSION` v8, `SPEC_DURABLE_BINDINGS_2026_09_10.md`
@@ -697,9 +700,8 @@ impl Store {
     /// bound directly to a bundle, enforcing bundle-scoped name uniqueness
     /// — the bundle-level analog of `skill_upsert_unique`. Binding can only
     /// reference global skills (binding another entity's private one would
-    /// hand this bundle read access to it), and a global skill already
-    /// reaches every agent, so this is how a bundle gets a skill of its own
-    /// (PR #2639).
+    /// hand this bundle read access to it); a bundle can bind a global skill,
+    /// or hold a private skill of its own (PR #2639).
     pub fn bundle_skill_upsert_unique(
         &self,
         catalog: &Store,
@@ -736,7 +738,7 @@ mod effective_skills_tests {
     use super::*;
     use crate::backend::storage::store::AgentDefinition;
 
-    fn make_store() -> Store {
+    pub(super) fn make_store() -> Store {
         Store::open_in_memory().unwrap()
     }
 
@@ -776,7 +778,7 @@ mod effective_skills_tests {
         store.agent_def_insert(&mut def).unwrap();
     }
 
-    fn global_skill(id: &str, name: &str) -> Skill {
+    pub(super) fn global_skill(id: &str, name: &str) -> Skill {
         Skill {
             id: id.to_string(),
             name: name.to_string(),
@@ -807,7 +809,8 @@ mod effective_skills_tests {
         }).unwrap();
 
         store.skill_upsert_unique_global(&global_skill("global-1", "Global Skill")).unwrap();
-        // Not bound to agent-1 -- has_own_skill_refs must stay false.
+        store.skill_bind(&store, "agent-1", "global-1").unwrap();
+        // A bound global is not an own skill -- has_own_skill_refs must stay false.
 
         let effective = store.effective_skills(&store, "agent-1");
         let names: Vec<&str> = effective.iter().map(|s| s.name.as_str()).collect();
@@ -833,6 +836,7 @@ mod effective_skills_tests {
         }).unwrap();
 
         store.skill_upsert_unique_global(&global_skill("global-1", "Global Skill")).unwrap();
+        store.skill_bind(&store, "agent-1", "global-1").unwrap();
 
         // Bind a NEW (non-global) skill to agent-1 -- this must flip
         // has_own_skill_refs to true and discard the legacy skill entirely.
@@ -884,7 +888,7 @@ mod effective_skills_tests {
         assert_eq!(effective[0].skill_type, "agent-skill");
     }
 
-    fn insert_agent_with_bundle(store: &Store, id: &str, memory_id: &str) {
+    pub(super) fn insert_agent_with_bundle(store: &Store, id: &str, memory_id: &str) {
         let mut def = AgentDefinition {
             seat: None,
             conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
@@ -920,7 +924,7 @@ mod effective_skills_tests {
         store.agent_def_insert(&mut def).unwrap();
     }
 
-    fn insert_test_bundle(store: &Store, id: &str) {
+    pub(super) fn insert_test_bundle(store: &Store, id: &str) {
         store
             .bundle_upsert(&crate::backend::storage::bundles::Bundle {
                 id: id.to_string(),
@@ -1072,6 +1076,8 @@ mod effective_skills_tests {
         insert_test_bundle(&store, "bundle-1");
         insert_agent_with_bundle(&store, "agent-1", "bundle-1");
         store.skill_upsert_unique_global(&global_skill("global-1", "Global Skill")).unwrap();
+        store.skill_bind(&store, "agent-1", "global-1").unwrap();
+        store.bundle_skill_bind(&store, &store, "bundle-1", "global-1").unwrap();
 
         let effective = store.effective_skills(&store, "agent-1");
         let matches: Vec<_> = effective.iter().filter(|s| s.name == "Global Skill").collect();
@@ -1453,3 +1459,7 @@ mod rewrite_ref_id_and_delete_ordering_tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "skills_scope_tests.rs"]
+mod skills_scope_tests;

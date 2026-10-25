@@ -13,6 +13,7 @@ import { addWidgetAsPaneTab, effectiveStack, setActiveBlockInStack } from "@/lay
 import { CONNECTORS_SECTION_KEY, CONNECTORS_VIEW } from "@/app/view/section-pane/panes";
 import { fireAndForget } from "@/util/util";
 import { META_REMOTES_EXPAND } from "./remotes-sections";
+import { MENU_ICON } from "@/app/util/menu-icons";
 
 /** Open Connectors → Remotes in the pane holding `fromBlockId` (switching to
  *  its Connectors tab if it has one), with `connection`'s row expanded when given. */
@@ -42,6 +43,6 @@ export function remoteSettingsMenuItems(blockId: string, connection: string | nu
     if (!conn || conn === "local") return [];
     return [
         { type: "separator" },
-        { label: "Remote settings…", click: () => fireAndForget(() => openRemotesInPane(blockId, conn)) },
+        { label: "Remote settings…", icon: MENU_ICON.settings, click: () => fireAndForget(() => openRemotesInPane(blockId, conn)) },
     ];
 }

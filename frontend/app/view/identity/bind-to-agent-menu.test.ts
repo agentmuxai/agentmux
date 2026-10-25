@@ -40,6 +40,7 @@ import {
     buildAccountRowMenu,
 } from "./bind-to-agent-menu";
 import { RpcApi } from "@/app/store/rpc-api";
+import { MENU_ICON } from "@/app/util/menu-icons";
 import type { Account } from "./identity-model";
 import type { AgentDefinition, AgentDefinitionIdentity } from "@/app/store/rpc-api";
 
@@ -309,6 +310,17 @@ describe("buildAccountRowMenu — Delete account… (SPEC_ARMORY_ACCOUNTS_DELETE
         expect(menu[menu.length - 2].type).toBe("separator");
         last.click?.();
         expect(onDelete).toHaveBeenCalledTimes(1);
+    });
+
+    it("gives Bind to Agent, Copy account ID and Delete account their icons", async () => {
+        const agent = { id: "a1", name: "Korp", provider: "claude", is_seeded: 0 } as AgentDefinition;
+        const menu = await buildAccountRowMenu(mkAccount(), [agent], [], undefined, undefined, vi.fn());
+        const icon = (label: string) => menu.find((m) => m.label === label)?.icon;
+        expect(icon("Bind to Agent")).toBe(MENU_ICON.bind);
+        expect(icon("Copy account ID")).toBe(MENU_ICON.copy);
+        expect(icon("Delete account…")).toBe(MENU_ICON.delete);
+        // The agent rows inside the submenu are checkable and keep their check, not an icon.
+        expect(menu[0].submenu?.every((r) => r.type === "checkbox" && !r.icon)).toBe(true);
     });
 
     it("is absent when the caller offers no delete", async () => {

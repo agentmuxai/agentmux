@@ -9,6 +9,7 @@
 import { createEffect, createMemo, createSignal, For, Show, type JSX } from "solid-js";
 import { ContextMenu, type ContextMenuItem } from "@/app/components/context-menu";
 import type { RemoteRecord } from "@/app/store/rpc-api/remotes";
+import { MENU_ICON } from "@/app/util/menu-icons";
 import type { RemotesViewModel } from "./remotes-model";
 import {
     displayName,
@@ -523,25 +524,28 @@ export function rowMenu(model: RemotesViewModel, r: RemoteRecord): ContextMenuIt
         ...extra,
     });
     const items: ContextMenuItem[] = [
-        act("New terminal", () => model.newTerminal(r.name)),
-        act("Browse files", () => model.browseFiles(r.name)),
+        act("New terminal", () => model.newTerminal(r.name), { icon: MENU_ICON.openTerminal }),
+        act("Browse files", () => model.browseFiles(r.name), { icon: MENU_ICON.openFolder }),
     ];
-    if (r.kind === "ssh") items.push(act("Sessions…", () => model.showSessions(r.name)));
+    if (r.kind === "ssh") items.push(act("Sessions…", () => model.showSessions(r.name), { icon: MENU_ICON.sessions }));
     const connection = connectionAction(r);
     if (connection) {
-        items.push({ type: "separator" }, act(connection, () => runConnectionAction(model, r, connection)));
+        items.push({ type: "separator" }, act(connection, () => runConnectionAction(model, r, connection), {
+            icon: connection === "Connect" ? MENU_ICON.connect : MENU_ICON.disconnect,
+        }));
     }
     items.push({ type: "separator" });
     items.push(
-        isPinned(r) ? act("Unpin", () => model.setPinned(r.name, false)) : act("Pin", () => model.setPinned(r.name, true)),
-        isHidden(r) ? act("Unhide", () => model.setHidden(r.name, false)) : act("Hide", () => model.setHidden(r.name, true))
+        isPinned(r) ? act("Unpin", () => model.setPinned(r.name, false), { icon: MENU_ICON.unpin }) : act("Pin", () => model.setPinned(r.name, true), { icon: MENU_ICON.pin }),
+        isHidden(r) ? act("Unhide", () => model.setHidden(r.name, false), { icon: MENU_ICON.show }) : act("Hide", () => model.setHidden(r.name, true), { icon: MENU_ICON.hide })
     );
-    if (r.sources.includes("recent")) items.push(act("Forget", () => model.forget(r.name)));
-    if (r.helper.installed) items.push(act("Remove helper", () => model.removeHelper(r.name), { danger: true }));
+    if (r.sources.includes("recent")) items.push(act("Forget", () => model.forget(r.name), { icon: MENU_ICON.delete }));
+    if (r.helper.installed) items.push(act("Remove helper", () => model.removeHelper(r.name), { icon: MENU_ICON.delete, danger: true }));
     items.push({ type: "separator" });
     items.push({
         type: "action",
         label: "Settings",
+        icon: MENU_ICON.settings,
         onSelect: () => model.setExpanded(r.name),
     });
     return items;

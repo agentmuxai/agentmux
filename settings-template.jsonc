@@ -154,6 +154,16 @@
     // Sites whose panes never hibernate, by host or origin.
     // "browser:keepawakesites": [],
 
+    // -- Jobs: spending caps (on by default; a day ends at your local midnight) --
+    // The most one job run may spend, in US dollars. A run that reaches it is stopped.
+    // "jobs:cap:runusd": 5,
+    // The most one job may spend in a day. A run starts only if the day's spend plus its cap fits.
+    // "jobs:cap:jobdayusd": 20,
+    // The most all job runs on one account may spend in a day.
+    // "jobs:cap:accountdayusd": 50,
+    // The most messages one job may send in a day to an agent other than its owner.
+    // "jobs:cap:messagesday": 24,
+
     // -- Network --
     // Discover other AgentMux instances on your local network (mDNS/Bonjour)
     // so agents on different machines can message each other directly,
@@ -194,9 +204,10 @@
     // agents run. Off until it has been through a soak.
     // "agent:transcriptsinglecopy": false,
     // Compress the finished parts of agent transcripts in the shared store
-    // (about 6x smaller); what a reader sees doesn't change. With it on,
-    // transcriptdeltas also stores each streamed reply's text once.
-    // "agent:transcriptframes":    false,
+    // (about 6x smaller); what a reader sees doesn't change. On by default;
+    // set false to turn it off. With it on, transcriptdeltas also stores each
+    // streamed reply's text once.
+    // "agent:transcriptframes":    true,
     // "agent:transcriptdeltas":    true,
 
     // -- Other --

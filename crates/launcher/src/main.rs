@@ -31,6 +31,7 @@ mod diag;
 mod event_log;
 mod hash;
 mod host_pipe;
+mod host_quit;
 mod host_spawn;
 mod incidents;
 mod ipc;

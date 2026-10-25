@@ -225,6 +225,10 @@ pub(crate) fn deferred_delivery_text(to: &str) -> String {
     )
 }
 
+/// `held_reason` of a message kept for a session gone cold (srv's
+/// `cold_hold::REASON_IDLE`).
+pub(crate) const HELD_IDLE: &str = "idle";
+
 /// What `SendMessage` tells the sender, from srv's `/agentmux/reactive/inject`
 /// body. Each answer keeps its first word (`Delivered`, `QUEUED`, `HELD`) so
 /// existing prompts keep working, and adds the message id and the receiver's
@@ -302,10 +306,19 @@ pub(crate) fn send_message_outcome(to: &str, result: &Value) -> Result<String> {
                  resend it.{id}"
             ));
         }
+        if result.get("held_reason").and_then(|v| v.as_str()) == Some(HELD_IDLE) {
+            return Ok(format!(
+                "HELD for {to} (idle) — not delivered yet. {to}'s session has been idle for about an \
+                 hour, so waking it costs a full restart of its context; this AgentMux instance \
+                 (channel) keeps the message and delivers it when {to} is next active, for up to 24 \
+                 hours. If it is work for {to} or cannot wait, pass urgent: true (send it again) \
+                 to wake it now; the held copy is dropped. Otherwise do not resend it.{id}"
+            ));
+        }
         if result.get("held_reason").and_then(|v| v.as_str()) == Some("needs_login") {
             return Ok(format!(
-                "HELD for {to} (needs_login) — not delivered yet. {to}'s agent cannot start \
-                 because it is not signed in; this AgentMux instance (channel) keeps the message \
+                "HELD for {to} (needs_login) — not delivered yet. {to}'s agent needs to sign in \
+                 again; this AgentMux instance (channel) keeps the message \
                  and delivers it within about a minute of their signing in, for up to 24 hours. \
                  Do not resend it.{id}"
             ));
@@ -330,12 +343,17 @@ pub(crate) fn send_message_outcome(to: &str, result: &Value) -> Result<String> {
     if err.starts_with("agent not found") {
         anyhow::bail!("Message delivery failed (not_found): {err}")
     }
-    // An agent out of quota, where the message can't be held (a LAN or
+    // An agent out of quota or signed out, where it can't be held (a LAN or
     // cross-channel hop): srv's `UNAVAILABLE_PREFIX`.
     if let Some(why) = err.strip_prefix("agent unavailable: ") {
+        let retry = if why.ends_with(" needs to sign in again") {
+            "after they sign in".to_string()
+        } else {
+            format!("when {to} can work (an account move or the reset)")
+        };
         anyhow::bail!(
             "Message delivery failed (unavailable): {why}, and the message was NOT kept. Send it \
-             again when {to} can work (an account move or the reset)."
+             again {retry}."
         )
     }
     anyhow::bail!("Message delivery failed: {err}")

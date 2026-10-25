@@ -88,6 +88,7 @@ mod m0037_retire_old_pane_names;
 mod m0038_drop_drone_runs_definition_fk;
 mod m0039_vault_into_warden;
 mod m0040_cron_jobs_to_db_jobs;
+mod m0041_retire_untouched_starter_skills;
 mod backup;
 mod gate;
 mod prepare;
@@ -268,4 +269,5 @@ static REGISTRY: &[&(dyn Migration + Sync)] = &[
     &m0038_drop_drone_runs_definition_fk::M0038DropDroneRunsDefinitionFk,
     &m0039_vault_into_warden::M0039VaultIntoWarden,
     &m0040_cron_jobs_to_db_jobs::M0040CronJobsToDbJobs,
+    &m0041_retire_untouched_starter_skills::M0041RetireUntouchedStarterSkills,
 ];

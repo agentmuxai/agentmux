@@ -87,9 +87,11 @@ fn register_fleet_broadcast(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let state = state.clone();
     engine.register_typed(
         COMMAND_FLEET_BROADCAST,
-        move |cmd: CommandFleetBroadcastData, _ctx| {
+        move |cmd: CommandFleetBroadcastData, ctx| {
             let state = state.clone();
             async move {
+                // A broadcast arrives as the user's own turn, so only the operator's window sends one.
+                ctx.operator_only("a Swarm broadcast arrives as the operator's own words, so only the AgentMux window sends one; an agent broadcasts as itself with the Message tool")?;
                 let result = fleet_broadcast_impl(&state, cmd.targets, cmd.message).await;
                 Ok(result)
             }
@@ -198,7 +200,7 @@ pub(crate) async fn deliver_broadcast_turn(
     text: String,
     origin: TurnOrigin,
 ) -> Result<(), String> {
-    // An agent out of quota would fail the turn at once: say so
+    // An agent out of quota or signed out would fail the turn at once: say so
     // in the broadcast's result, where the operator sees it, rather than lose
     // their words in a failed turn (SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §5).
     let mstore = deps.mstore.clone();

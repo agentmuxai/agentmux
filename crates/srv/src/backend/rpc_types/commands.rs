@@ -105,6 +105,12 @@ pub const COMMAND_BACKGROUND_TASK_PID: &str = "backgroundtaskpid";
 pub const COMMAND_LIST_BACKGROUND_TASKS: &str = "listbackgroundtasks";
 /// Who holds this machine's build slot (`agentmux_common::build_slot`), or null: the Swarm row note.
 pub const COMMAND_GET_BUILD_SLOT: &str = "getbuildslot";
+/// The keys and installs pinned to the names of agents that speak from elsewhere (operator only).
+pub const COMMAND_PINS_LIST: &str = "pins.list";
+/// Forget one pin, so the next key or install shown for the name is pinned (operator only).
+pub const COMMAND_PINS_FORGET: &str = "pins.forget";
+/// Pin the key or install that was last refused for a name (operator only).
+pub const COMMAND_PINS_ADOPT: &str = "pins.adopt";
 
 // Subprocess agent commands
 pub const COMMAND_SUBPROCESS_SPAWN: &str = "subprocessspawn";
@@ -298,6 +304,10 @@ pub const COMMAND_GET_CLAUDE_GLOBAL_CONFIG: &str = "getclaudeglobalconfig";
 pub const COMMAND_GLOBAL_MEMORY_HISTORY: &str = "globalmemory:history";
 pub const COMMAND_GLOBAL_MEMORY_DIFF: &str = "globalmemory:diff";
 pub const COMMAND_GLOBAL_MEMORY_REVERT: &str = "globalmemory:revert";
+/// The Global Memory entries taken out of Global Memory and not restored, with
+/// who removed each and when; `globalmemory:revert` to a removed entry's
+/// version restores it.
+pub const COMMAND_GLOBAL_MEMORY_REMOVED: &str = "globalmemory:removed";
 /// SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.6 (phase M4): bring
 /// Global Memory into an isolated channel from another scope's record.
 pub const COMMAND_GLOBAL_MEMORY_IMPORT_SOURCES: &str = "globalmemory:import_sources";
@@ -437,6 +447,13 @@ pub const COMMAND_KANBAN_ACT: &str = "kanban.act";
 pub const COMMAND_JOBS_LIST: &str = "jobs.list";
 pub const COMMAND_JOBS_RUNS: &str = "jobs.runs";
 pub const COMMAND_JOBS_ACT: &str = "jobs.act";
+/// The Jobs tab's editor (§5.1, §5.2, §5.4): a job's definition, create or
+/// edit one (the operator's window only), what one would do, and what a
+/// template's newer version would change in a job.
+pub const COMMAND_JOBS_GET: &str = "jobs.get";
+pub const COMMAND_JOBS_SAVE: &str = "jobs.save";
+pub const COMMAND_JOBS_DRYRUN: &str = "jobs.dryrun";
+pub const COMMAND_JOBS_TEMPLATES_UPDATE_DIFF: &str = "jobs.templates.update_diff";
 // Connections (SPEC_REMOTE_TERMINALS_AND_DURABLE_SESSIONS_2026_10_02.md). The
 // names are the ones the frontend's connection UI has always called
 // (rpc-api/workspace.ts); they had no handler until P0.
@@ -729,11 +746,9 @@ pub const COMMAND_SKILL_CATALOG_BIND_TO_BUNDLE: &str = "skill.catalog.bind_to_bu
 pub const COMMAND_SKILL_CATALOG_UNBIND_FROM_BUNDLE: &str = "skill.catalog.unbind_from_bundle";
 pub const COMMAND_SKILL_CATALOG_LIST_FOR_BUNDLE: &str = "skill.catalog.list_for_bundle";
 // reagentx P1 review on PR #2639: bind_to_bundle can only reference an
-// EXISTING global skill, but a global skill already reaches every agent
-// unconditionally regardless of bundle binding — so binding one has no
-// effect. This creates a BRAND-NEW private skill scoped to the bundle
-// (never previously visible to anyone), giving the bundle a genuinely
-// bundle-specific skill. See Store::bundle_skill_upsert_unique.
+// EXISTING global skill. This creates a BRAND-NEW private skill scoped to
+// the bundle (never previously visible to anyone), giving the bundle a
+// genuinely bundle-specific skill. See Store::bundle_skill_upsert_unique.
 pub const COMMAND_SKILL_CATALOG_UPSERT_FOR_BUNDLE: &str = "skill.catalog.upsert_for_bundle";
 
 // MuxAPI — v1 standalone MCP Server primitives

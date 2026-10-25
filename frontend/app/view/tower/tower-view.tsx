@@ -24,6 +24,7 @@ import { createEffect, createMemo, createSignal, For, type JSX, Match, Show, Swi
 import { agentColor, AgentsView } from "./tower-agents";
 import { KindBreakdown, KindIcon, LoadCells } from "./tower-kind-ui";
 import { type KindGroup, kindGroups, kindOf, KINDS, sortKindGroups } from "./tower-kinds";
+import { MemoryView, seriesLabel } from "./tower-memory";
 import type { TowerViewModel } from "./tower-model";
 import { PanesView } from "./tower-panes";
 import { ProcessName } from "./tower-process-name";
@@ -32,9 +33,13 @@ import {
     count,
     type CpuMode,
     filterProcesses,
+    formatChange,
+    formatClock,
     formatCpu,
     formatMem,
     groupProcesses,
+    growthText,
+    hourChange,
     loadLevel,
     type OwnerGroup,
     ownerGroups,
@@ -123,6 +128,17 @@ export function TowerView(props: { model: TowerViewModel }): JSX.Element {
                                   },
                               ]
                             : [
+                                  // This computer's AgentMux only, like Panes.
+                                  ...(m.remote()
+                                      ? []
+                                      : [
+                                            {
+                                                id: "memory" as const,
+                                                label: "Memory",
+                                                icon: "memory",
+                                                tooltip: "AgentMux's memory, and what it is made of",
+                                            },
+                                        ]),
                                   {
                                       id: "agents",
                                       label: "Agents",
@@ -195,6 +211,9 @@ export function TowerView(props: { model: TowerViewModel }): JSX.Element {
                 <Show when={m.snapshot()} fallback={<div class="tower-empty">Measuring…</div>}>
                     {(snap) => (
                         <Switch>
+                            <Match when={m.effectiveView() === "memory"}>
+                                <MemoryView model={m} />
+                            </Match>
                             <Match when={m.effectiveView() === "agents"}>
                                 <AgentsView model={m} cpu={cpu} />
                             </Match>
@@ -233,6 +252,14 @@ function Headline(props: { model: TowerViewModel }) {
         }
         return { mem, processes, metric: snap.memory_metric };
     });
+    // What the Memory view knows: the hour's change, and what grows unusually
+    // (spec section 7.2, 7.3). The other views are not sent it.
+    const inMemoryView = () => m.effectiveView() === "memory";
+    const change = createMemo(() => (inMemoryView() ? hourChange(m.memoryHistory()) : null));
+    const grows = createMemo(() => {
+        const memory = inMemoryView() ? m.snapshot()?.memory : undefined;
+        return memory ? memory.growth.map((g) => `${seriesLabel(g.key, memory)} ${growthText(g)}`) : [];
+    });
     return (
         <Show when={total()}>
             {(t) => {
@@ -248,6 +275,27 @@ function Headline(props: { model: TowerViewModel }) {
                             {formatMem(t().mem)}
                         </span>
                         <span class="tower-headline-note tower-muted">{count(t().processes, "process")}</span>
+                        <Show when={change()}>
+                            {(c) => (
+                                <span
+                                    class="tower-headline-change tower-num tower-muted"
+                                    data-testid="tower-headline-change"
+                                    title="How AgentMux's memory changed over the last hour (since srv began keeping it, if that was less than an hour ago)"
+                                >
+                                    {formatChange(c().change)}{" "}
+                                    {c().since === null ? "in the last hour" : `since ${formatClock(c().since!)}`}
+                                </span>
+                            )}
+                        </Show>
+                        <Show when={grows().length > 0}>
+                            <span
+                                class="tower-headline-grow"
+                                role="img"
+                                data-testid="tower-headline-grow"
+                                aria-label={`Grows unusually: ${grows().join("; ")}`}
+                                title={grows().join("; ")}
+                            />
+                        </Show>
                     </div>
                 );
             }}

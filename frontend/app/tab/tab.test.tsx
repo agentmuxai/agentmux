@@ -10,7 +10,7 @@
  * CloseTab on the backend and produced the select/deselect flash.
  */
 
-import { cleanup, render } from "@solidjs/testing-library";
+import { cleanup, fireEvent, render } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -98,6 +98,19 @@ describe("Tab close button", () => {
 
         expect(onSelect).toHaveBeenCalledTimes(1);
         expect(onClose).not.toHaveBeenCalled();
+    });
+});
+
+// The tab's right-click panel: Font Awesome icons in place of the old emoji glyphs
+// (SPEC_CONTEXT_MENU_ICONS_2026_10_25.md §3).
+describe("Tab context panel", () => {
+    it("draws Rename and Close menu with Font Awesome icons, not emoji", async () => {
+        const { container } = renderTab();
+        fireEvent.contextMenu(container.querySelector(".tab")!);
+        const buttons = [...document.querySelectorAll<HTMLButtonElement>(".tab-context-btn")];
+        expect(buttons.map((b) => b.textContent?.trim())).toEqual(["Rename", "Close menu"]);
+        expect(buttons[0].querySelector("i.fa-pen")).not.toBeNull();
+        expect(buttons[1].querySelector("i.fa-xmark")).not.toBeNull();
     });
 });
 

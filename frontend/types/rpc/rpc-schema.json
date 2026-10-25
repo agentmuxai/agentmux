@@ -3275,6 +3275,25 @@
     }
   },
   {
+    "command": "globalmemory:removed",
+    "request": "agentmux_srv::backend::rpc_types::bundle::CommandGlobalMemoryRemovedData",
+    "requestName": "CommandGlobalMemoryRemovedData",
+    "requestTs": {
+      "imports": [
+        "CommandGlobalMemoryRemovedData"
+      ],
+      "name": "CommandGlobalMemoryRemovedData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::bundle::GlobalMemoryRemovedResult",
+    "responseName": "GlobalMemoryRemovedResult",
+    "responseTs": {
+      "imports": [
+        "GlobalMemoryRemovedResult"
+      ],
+      "name": "GlobalMemoryRemovedResult"
+    }
+  },
+  {
     "command": "globalmemory:revert",
     "request": "agentmux_srv::backend::rpc_types::bundle::CommandGlobalMemoryRevertData",
     "requestName": "CommandGlobalMemoryRevertData",
@@ -3712,6 +3731,44 @@
     }
   },
   {
+    "command": "jobs.dryrun",
+    "request": "agentmux_srv::server::app_api::jobs_edit::JobsDryRunRequest",
+    "requestName": "JobsDryRunRequest",
+    "requestTs": {
+      "imports": [
+        "JobsDryRunRequest"
+      ],
+      "name": "JobsDryRunRequest"
+    },
+    "response": "agentmux_srv::server::app_api::jobs_edit::JobsDryRunResult",
+    "responseName": "JobsDryRunResult",
+    "responseTs": {
+      "imports": [
+        "JobsDryRunResult"
+      ],
+      "name": "JobsDryRunResult"
+    }
+  },
+  {
+    "command": "jobs.get",
+    "request": "agentmux_srv::server::app_api::jobs_edit::JobsGetRequest",
+    "requestName": "JobsGetRequest",
+    "requestTs": {
+      "imports": [
+        "JobsGetRequest"
+      ],
+      "name": "JobsGetRequest"
+    },
+    "response": "agentmux_srv::server::app_api::jobs_edit::JobsGetResult",
+    "responseName": "JobsGetResult",
+    "responseTs": {
+      "imports": [
+        "JobsGetResult"
+      ],
+      "name": "JobsGetResult"
+    }
+  },
+  {
     "command": "jobs.list",
     "request": "serde_json::value::Value",
     "requestName": "Value",
@@ -3747,6 +3804,44 @@
         "JobsRunsResult"
       ],
       "name": "JobsRunsResult"
+    }
+  },
+  {
+    "command": "jobs.save",
+    "request": "agentmux_srv::server::app_api::jobs_edit::JobsSaveRequest",
+    "requestName": "JobsSaveRequest",
+    "requestTs": {
+      "imports": [
+        "JobsSaveRequest"
+      ],
+      "name": "JobsSaveRequest"
+    },
+    "response": "agentmux_srv::server::app_api::jobs_edit::JobsSaveResult",
+    "responseName": "JobsSaveResult",
+    "responseTs": {
+      "imports": [
+        "JobsSaveResult"
+      ],
+      "name": "JobsSaveResult"
+    }
+  },
+  {
+    "command": "jobs.templates.approve",
+    "request": "agentmux_srv::server::job_template_handlers::JobTemplateApproveReq",
+    "requestName": "JobTemplateApproveReq",
+    "requestTs": {
+      "imports": [
+        "JobTemplateApproveReq"
+      ],
+      "name": "JobTemplateApproveReq"
+    },
+    "response": "agentmux_srv::server::job_template_handlers::JobTemplatesResult",
+    "responseName": "JobTemplatesResult",
+    "responseTs": {
+      "imports": [
+        "JobTemplatesResult"
+      ],
+      "name": "JobTemplatesResult"
     }
   },
   {
@@ -3861,6 +3956,25 @@
         "JobTemplatesResult"
       ],
       "name": "JobTemplatesResult"
+    }
+  },
+  {
+    "command": "jobs.templates.update_diff",
+    "request": "agentmux_srv::server::app_api::jobs_edit::JobsUpdateDiffRequest",
+    "requestName": "JobsUpdateDiffRequest",
+    "requestTs": {
+      "imports": [
+        "JobsUpdateDiffRequest"
+      ],
+      "name": "JobsUpdateDiffRequest"
+    },
+    "response": "agentmux_srv::backend::jobs::from_template::TemplateUpdateDiff",
+    "responseName": "TemplateUpdateDiff",
+    "responseTs": {
+      "imports": [
+        "TemplateUpdateDiff"
+      ],
+      "name": "TemplateUpdateDiff"
     }
   },
   {
@@ -5143,6 +5257,63 @@
         "PaneTabEditResult"
       ],
       "name": "PaneTabEditResult"
+    }
+  },
+  {
+    "command": "pins.adopt",
+    "request": "agentmux_srv::backend::rpc_types::pins::CommandPinsChangeData",
+    "requestName": "CommandPinsChangeData",
+    "requestTs": {
+      "imports": [
+        "CommandPinsChangeData"
+      ],
+      "name": "CommandPinsChangeData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::pins::PinnedSendersResult",
+    "responseName": "PinnedSendersResult",
+    "responseTs": {
+      "imports": [
+        "PinnedSendersResult"
+      ],
+      "name": "PinnedSendersResult"
+    }
+  },
+  {
+    "command": "pins.forget",
+    "request": "agentmux_srv::backend::rpc_types::pins::CommandPinsChangeData",
+    "requestName": "CommandPinsChangeData",
+    "requestTs": {
+      "imports": [
+        "CommandPinsChangeData"
+      ],
+      "name": "CommandPinsChangeData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::pins::PinnedSendersResult",
+    "responseName": "PinnedSendersResult",
+    "responseTs": {
+      "imports": [
+        "PinnedSendersResult"
+      ],
+      "name": "PinnedSendersResult"
+    }
+  },
+  {
+    "command": "pins.list",
+    "request": "agentmux_srv::backend::rpc_types::pins::CommandPinsListData",
+    "requestName": "CommandPinsListData",
+    "requestTs": {
+      "imports": [
+        "CommandPinsListData"
+      ],
+      "name": "CommandPinsListData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::pins::PinnedSendersResult",
+    "responseName": "PinnedSendersResult",
+    "responseTs": {
+      "imports": [
+        "PinnedSendersResult"
+      ],
+      "name": "PinnedSendersResult"
     }
   },
   {

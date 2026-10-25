@@ -87,8 +87,12 @@ fn parse_priority(s: &Option<String>) -> Priority {
 /// POST /api/bus/register
 pub(super) async fn handle_register(
     State(state): State<AppState>,
+    caller: Option<axum::Extension<super::caller::Caller>>,
     Json(req): Json<RegisterRequest>,
 ) -> Json<Value> {
+    if let Err(error) = super::actor::require_token_naming(&state, caller.as_deref(), super::actor::ActorSite::BusRegister, &req.agent_id).await {
+        return Json(json!({ "status": "error", "error": error }));
+    }
     // HTTP-registered agents use polling via /api/bus/messages.
     // WebSocket agents get their push channel wired in the WS handler.
     state.messagebus.register_http(&req.agent_id);
@@ -104,12 +108,9 @@ pub(super) async fn handle_send(
     caller: Option<axum::Extension<super::caller::Caller>>,
     Json(req): Json<SendRequest>,
 ) -> Json<Value> {
-    super::actor::check_actor(
-        &state,
-        caller.as_deref(),
-        super::actor::ActorSite::BusSend,
-        Some(&req.from),
-    );
+    if let Err(error) = super::actor::require_actor(&state, caller.as_deref(), super::actor::ActorSite::BusSend, Some(&req.from)).await {
+        return Json(json!({ "status": "error", "error": error }));
+    }
     let priority = parse_priority(&req.priority);
     let msg = BusMessage::new(&req.from, &req.to, MessageType::Send, &req.payload, priority)
         .with_from_uid(&super::caller::attributed_uid(caller.as_deref()));
@@ -137,12 +138,9 @@ pub(super) async fn handle_inject(
     caller: Option<axum::Extension<super::caller::Caller>>,
     Json(req): Json<InjectRequest>,
 ) -> Json<Value> {
-    super::actor::check_actor(
-        &state,
-        caller.as_deref(),
-        super::actor::ActorSite::BusInject,
-        Some(&req.from),
-    );
+    if let Err(error) = super::actor::require_actor(&state, caller.as_deref(), super::actor::ActorSite::BusInject, Some(&req.from)).await {
+        return Json(json!({ "status": "error", "error": error }));
+    }
     // Try direct PTY injection via ReactiveHandler (agent has registered
     // block_id). The request carries no signature: a caller whose own token
     // names the claimed sender reads TRUST=host-verified, and any other claim
@@ -199,12 +197,9 @@ pub(super) async fn handle_broadcast(
     caller: Option<axum::Extension<super::caller::Caller>>,
     Json(req): Json<BroadcastRequest>,
 ) -> Json<Value> {
-    super::actor::check_actor(
-        &state,
-        caller.as_deref(),
-        super::actor::ActorSite::BusBroadcast,
-        Some(&req.from),
-    );
+    if let Err(error) = super::actor::require_actor(&state, caller.as_deref(), super::actor::ActorSite::BusBroadcast, Some(&req.from)).await {
+        return Json(json!({ "status": "error", "error": error }));
+    }
     let priority = parse_priority(&req.priority);
 
     let from_uid = super::caller::attributed_uid(caller.as_deref());
@@ -223,8 +218,12 @@ pub(super) async fn handle_broadcast(
 /// GET /api/bus/messages?agent_id=...&limit=...
 pub(super) async fn handle_read_messages(
     State(state): State<AppState>,
+    caller: Option<axum::Extension<super::caller::Caller>>,
     Query(query): Query<ReadMessagesQuery>,
 ) -> Json<Value> {
+    if let Err(error) = super::actor::require_token_naming(&state, caller.as_deref(), super::actor::ActorSite::BusRead, &query.agent_id).await {
+        return Json(json!({ "status": "error", "error": error }));
+    }
     let messages = state.messagebus.read_messages(&query.agent_id, query.limit);
     Json(json!({
         "agent_id": query.agent_id,
@@ -247,8 +246,12 @@ pub(super) async fn handle_list_agents(
 /// POST /api/bus/messages/delete
 pub(super) async fn handle_delete_messages(
     State(state): State<AppState>,
+    caller: Option<axum::Extension<super::caller::Caller>>,
     Json(req): Json<DeleteMessagesRequest>,
 ) -> Json<Value> {
+    if let Err(error) = super::actor::require_token_naming(&state, caller.as_deref(), super::actor::ActorSite::BusRead, &req.agent_id).await {
+        return Json(json!({ "status": "error", "error": error }));
+    }
     let deleted = state.messagebus.delete_messages(&req.agent_id, &req.message_ids);
     Json(json!({
         "status": "deleted",

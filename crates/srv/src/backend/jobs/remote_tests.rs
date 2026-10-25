@@ -368,6 +368,13 @@ async fn following_a_forwarded_run_publishes_jobs_changed_for_its_job() {
         "end": "completed", "cost_usd": 0.01, "output_tokens": 1, "steps": 1,
     }));
     p.wait_for(&id, |r| r.state == state::FINISHED).await;
+    // The row closes before the event goes out: give the publish a moment.
+    for _ in 0..100 {
+        if seen.lock().unwrap().len() >= 2 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
     let after = seen.lock().unwrap().clone();
     assert!(after.len() >= 2 && after.iter().all(|d| d["job_id"] == "j-x"), "the close publishes too: {after:?}");
 }

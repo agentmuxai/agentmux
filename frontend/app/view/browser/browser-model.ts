@@ -29,6 +29,7 @@ import { errorPageFailedUrl } from "./error-page-url";
 import { findTabHolding } from "@/app/util/reveal-block";
 import { getLayoutModelForStaticTab, getLayoutModelForTabById } from "@/layout/lib/layoutModelHooks";
 import { closeBlockInStack, effectiveStack } from "@/layout/lib/layoutStack";
+import { MENU_ICON } from "@/app/util/menu-icons";
 import {
     KEEPAWAKE_META_KEY,
     LOADMS_META_KEY,
@@ -38,6 +39,7 @@ import {
     type BrowserSleep,
     type SleepReason,
 } from "./hibernation";
+import { recordLoad } from "./load-history";
 
 /** Close `blockId` the way its × would: just its tab when the pane holds
  *  others, else the pane. Looks in the window tab on screen, then in the
@@ -840,14 +842,16 @@ export class BrowserViewModel {
         canGoForward?: boolean;
     }): ContextMenuItem[] {
         const items: ContextMenuItem[] = [
-            { label: "Back", enabled: browserCtx?.canGoBack ?? this.canGoBackAtom(), click: () => this.goBack() },
+            { label: "Back", icon: MENU_ICON.back, enabled: browserCtx?.canGoBack ?? this.canGoBackAtom(), click: () => this.goBack() },
             {
                 label: "Forward",
+                icon: MENU_ICON.forward,
                 enabled: browserCtx?.canGoForward ?? this.canGoForwardAtom(),
                 click: () => this.goForward(),
             },
             {
                 label: "Reload",
+                icon: MENU_ICON.reload,
                 // NOT this.reload() -- that method only does local reducer
                 // state tricks (UrlCleared + re-Navigate) and never touches
                 // the real native CEF browser view, so it's a no-op against
@@ -870,18 +874,21 @@ export class BrowserViewModel {
             if (browserCtx.isEditable && browserCtx.selectionText) {
                 editItems.push({
                     label: "Cut",
+                    icon: MENU_ICON.cut,
                     click: () => { getApi().browserPanes.cut(this.blockId).catch(() => {}); },
                 });
             }
             if (browserCtx.selectionText) {
                 editItems.push({
                     label: "Copy",
+                    icon: MENU_ICON.copy,
                     click: () => { getApi().browserPanes.copy(this.blockId).catch(() => {}); },
                 });
             }
             if (browserCtx.isEditable) {
                 editItems.push({
                     label: "Paste",
+                    icon: MENU_ICON.paste,
                     click: () => { getApi().browserPanes.paste(this.blockId).catch(() => {}); },
                 });
             }
@@ -892,6 +899,7 @@ export class BrowserViewModel {
                 { type: "separator" },
                 {
                     label: "Copy Link Address",
+                    icon: MENU_ICON.copyLink,
                     click: () => { void clipboardWriteText(browserCtx.linkUrl!); },
                 },
             );
@@ -900,16 +908,19 @@ export class BrowserViewModel {
             { type: "separator" },
             {
                 label: "Print",
+                icon: MENU_ICON.print,
                 click: () => { getApi().browserPanes.print(this.blockId).catch(() => {}); },
             },
             {
                 label: "View Page Source",
+                icon: MENU_ICON.viewSource,
                 click: () => {
                     getApi().browserPanes.viewSource(this.blockId).catch(() => {});
                 },
             },
             {
                 label: "Inspect Element",
+                icon: MENU_ICON.inspect,
                 click: () => {
                     getApi()
                         .browserPanes.inspectElement(this.blockId, browserCtx?.x ?? 0, browserCtx?.y ?? 0)
@@ -1035,7 +1046,7 @@ export class BrowserViewModel {
     /** Put the pane to sleep: record what it needs to come back; the view
      *  then discards its page in place, or closes it on an engine without the
      *  Discard API (SPEC_BROWSER_PANE_HIBERNATION_2026_10_20.md §4, §10). */
-    hibernate(reason: SleepReason): Promise<void> {
+    hibernate(reason: SleepReason, memoryBytes?: number): Promise<void> {
         const sleep: BrowserSleep = {
             since: Date.now(),
             reason,
@@ -1043,6 +1054,7 @@ export class BrowserViewModel {
             title: this._titleIsReal[0]() ? this.titleAtom() : "",
             favicon: this.faviconUrlAtom(),
             loadMs: this.loadMsAtom(),
+            ...(memoryBytes != null && memoryBytes > 0 ? { memoryBytes: Math.round(memoryBytes) } : {}),
         };
         this.diag(`hibernate reason=${reason} url=${JSON.stringify(sleep.url)}`);
         return this.ctx.setMeta({ [SLEEP_META_KEY]: sleep });
@@ -1065,6 +1077,7 @@ export class BrowserViewModel {
 
     /** The page has loaded again after a wake: the pane is awake. */
     endSleep(loadMs: number | undefined): Promise<void> {
+        if (loadMs != null && loadMs > 0) recordLoad(this.sleepAtom()?.url || this.urlAtom(), loadMs);
         return this.ctx.setMeta({
             [SLEEP_META_KEY]: null,
             [WAKE_META_KEY]: null,
@@ -1074,6 +1087,7 @@ export class BrowserViewModel {
 
     /** How long the page took to load, for the next wake's estimate. */
     recordLoadMs(loadMs: number): Promise<void> {
+        recordLoad(this.urlAtom(), loadMs);
         return this.ctx.setMeta({ [LOADMS_META_KEY]: Math.round(loadMs) });
     }
 

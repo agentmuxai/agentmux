@@ -14,6 +14,16 @@ host?: boolean,
  */
 panes?: boolean, 
 /**
+ * Also total AgentMux's memory and split it into parts (the Memory view,
+ * SPEC_TOWER_MEMORY_FIRST_AND_AGENTMUX_BREAKDOWN_2026_10_25.md).
+ */
+memory?: boolean, 
+/**
+ * With `memory`, also send the last hour of it (a point every 10 s, about
+ * 100 KB), which changes slowly: ask once in a while, not every sample.
+ */
+memory_history?: boolean, 
+/**
  * Another machine: an SSH connection or `wsl://<distro>`, as a pane's
  * `connection` meta names it, or a paired AgentMux computer
  * (`peer:<id>`). Absent or `local`: this computer.

@@ -146,7 +146,8 @@ pub struct WorkEvent {
     pub at: i64,
     /// Who: an agent's name, `operator`, or `agentmux`.
     pub actor: String,
-    /// `agent`, `operator` or `system`.
+    /// `agent`, `operator`, `system`, or `delegate` (a leader, on the
+    /// operator's word).
     pub actor_kind: String,
     /// `created`, `filed_for_later`, `claimed`, `started`, `held`, `unheld`,
     /// `assigned`, `ranked`, `edited`, `updated`, `asked`, `answered`,
@@ -799,6 +800,70 @@ impl Store {
             &[],
             now_ms,
         )
+    }
+
+    /// Whether one of the tasks numbered `nums` is waiting on `agent`: open,
+    /// on hold, claimed or blocked, and targeted at it or held by it (by
+    /// UID, else by name). A message that names such a task is handing the
+    /// agent work (`backend::cold_hold`).
+    pub fn work_numbers_waiting_on(&self, nums: &[i64], agent_uid: &str, agent_slug: &str) -> Result<bool, StoreError> {
+        if nums.is_empty() {
+            return Ok(false);
+        }
+        let conn = self.conn().lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT 1 FROM db_work_queue q JOIN db_work_cards c ON c.work_id = q.id
+              WHERE c.num = ?1 AND q.state IN ('open', 'held', 'claimed', 'blocked')
+                AND (q.target_agent_uid = ?2 OR q.claimed_by_uid = ?2
+                     OR (q.target_agent_uid = '' AND ?3 != '' AND q.target_agent = ?3)
+                     OR (q.claimed_by_uid = '' AND ?3 != '' AND q.claimed_by = ?3))
+              LIMIT 1",
+        )?;
+        for n in nums {
+            if stmt.exists(params![n, agent_uid, agent_slug])? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    /// Whether `filer` filed a task for `agent` at or after `since_ms` that is
+    /// still waiting or being worked (open, on hold, claimed or blocked). A
+    /// message from the filer right after is the nudge that task needs
+    /// (`backend::cold_hold`).
+    pub fn work_filed_for_since(&self, filer_uid: &str, filer_name: &str, agent_uid: &str, agent_slug: &str, since_ms: i64) -> Result<bool, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        let found: Option<i64> = conn
+            .query_row(
+                "SELECT 1 FROM db_work_queue q
+                  WHERE q.created_at >= ?1 AND q.state IN ('open', 'held', 'claimed', 'blocked')
+                    AND ((?2 != '' AND q.created_by_uid = ?2) OR (q.created_by_uid = '' AND ?3 != '' AND q.created_by = ?3))
+                    AND (q.target_agent_uid = ?4 OR (q.target_agent_uid = '' AND ?5 != '' AND q.target_agent = ?5))
+                  LIMIT 1",
+                params![since_ms, filer_uid, filer_name, agent_uid, agent_slug],
+                |r| r.get(0),
+            )
+            .optional()?;
+        Ok(found.is_some())
+    }
+
+    /// The tasks whose latest acceptance, since `since_ms`, was a leader's on
+    /// the operator's word: work id to (the leader, the history line's body,
+    /// when).
+    pub fn work_delegate_accepts(&self, since_ms: i64) -> Result<std::collections::HashMap<String, (String, String, i64)>, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT e.work_id, e.actor, e.body, e.at FROM db_work_events e
+              WHERE e.kind = 'accepted' AND e.actor_kind = 'delegate' AND e.at >= ?1
+                AND e.id = (SELECT MAX(id) FROM db_work_events WHERE work_id = e.work_id AND kind = 'accepted')",
+        )?;
+        let rows = stmt.query_map(params![since_ms], |r| Ok((r.get::<_, String>(0)?, (r.get(1)?, r.get(2)?, r.get(3)?))))?;
+        rows.collect::<Result<_, _>>().map_err(Into::into)
+    }
+
+    /// The operator takes back a leader's acceptance: Done to Review again.
+    pub fn work_reopen(&self, work_id: &str, now_ms: i64) -> Result<Option<Moved>, StoreError> {
+        self.work_move(work_id, &[work_state::DONE], work_state::REVIEW, "", &[], now_ms)
     }
 
     /// The operator tries a failed task again: it waits, with its attempts

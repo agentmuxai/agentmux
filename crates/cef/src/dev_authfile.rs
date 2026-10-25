@@ -104,14 +104,14 @@ pub fn write_dev_auth_file(
 }
 
 #[cfg(unix)]
-fn apply_owner_only_mode(path: &Path) -> Result<(), String> {
+pub(crate) fn apply_owner_only_mode(path: &Path) -> Result<(), String> {
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
         .map_err(|e| format!("chmod 0600 {}: {}", path.display(), e))
 }
 
 #[cfg(target_os = "windows")]
-fn apply_owner_only_dacl(path: &Path) -> Result<(), String> {
+pub(crate) fn apply_owner_only_dacl(path: &Path) -> Result<(), String> {
     use std::ffi::c_void;
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, HANDLE};

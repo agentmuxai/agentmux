@@ -151,6 +151,7 @@ fn send_message_outcome_names_the_state_and_the_id() {
     let t = ok(json!({ "success": false, "held": true, "held_reason": "needs_login", "request_id": "1-2-3",
         "error": "agent Camper is not signed in — held" }));
     assert!(t.starts_with("HELD for Camper (needs_login)"), "{t}");
+    assert!(t.contains("needs to sign in again") && t.contains("24 hours") && t.contains("Do not resend"), "{t}");
     assert!(t.contains("signing in") && t.ends_with(" id=1-2-3"), "{t}");
     assert!(!t.contains("  "), "no runs of spaces: {t:?}");
 
@@ -164,10 +165,22 @@ fn send_message_outcome_names_the_state_and_the_id() {
     let t = ok(json!({ "success": false, "held": true, "held_reason": "usage_limit", "request_id": "1-2-3" }));
     assert!(t.starts_with("HELD for Camper (usage_limit) "), "{t}");
 
+    // Held because the receiver's session has been idle: how to wake it is in the answer.
+    let t = ok(json!({ "success": false, "held": true, "held_reason": "idle", "request_id": "1-2-3",
+        "error": "agent Camper's session has been idle" }));
+    assert!(t.starts_with("HELD for Camper (idle)"), "{t}");
+    assert!(t.contains("urgent: true") && t.contains("next active") && t.ends_with(" id=1-2-3"), "{t}");
+    assert!(!t.contains("  "), "no runs of spaces: {t:?}");
+
     // Out of quota where it can't be held (a LAN hop): refused, not kept.
     let e = err(json!({ "success": false, "error": "agent unavailable: Camper's account is out of quota until Sun 7:00 PM" }));
     assert!(e.starts_with("Message delivery failed (unavailable): Camper's account is out of quota until Sun 7:00 PM, and"), "{e}");
-    assert!(e.contains("NOT kept"), "{e}");
+    assert!(e.contains("NOT kept") && e.contains("account move or the reset"), "{e}");
+
+    let signed_out = err(json!({ "success": false, "error": "agent unavailable: Camper needs to sign in again" }));
+    assert!(signed_out.starts_with("Message delivery failed (unavailable): Camper needs to sign in again"), "{signed_out}");
+    assert!(signed_out.contains("NOT kept") && signed_out.contains("Send it again after they sign in."), "{signed_out}");
+    assert!(!signed_out.contains("reset"), "{signed_out}");
 
     let e = err(json!({ "success": false, "block_id": "b1",
         "error": "identity spawn gate: no credentials for claude: the bound account was deleted or is unresolvable." }));

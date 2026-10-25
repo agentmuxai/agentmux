@@ -19,6 +19,7 @@ pub mod agent_native_memory;
 pub mod agent_native_memory_versions;
 pub mod jekt_held;
 pub mod job_incidents;
+pub mod job_run_spend;
 pub mod job_runs;
 pub mod lan_peer_pubkey_pins;
 pub mod lan_peer_uid_pins;

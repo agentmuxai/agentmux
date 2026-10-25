@@ -8,13 +8,14 @@ use serde_json::json;
 
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::{
-    COMMAND_LIST_MEMORIES, COMMAND_GET_MEMORY,
+    RpcContext, COMMAND_LIST_MEMORIES, COMMAND_GET_MEMORY,
     COMMAND_GET_AGENT_BUNDLES, COMMAND_SET_AGENT_BUNDLES,
     AgentBundlesResult, CommandGetAgentBundlesData, CommandSetAgentBundlesData,
     COMMAND_UPSERT_MEMORY, COMMAND_DELETE_MEMORY, COMMAND_REORDER_GLOBAL_BRAIN,
     COMMAND_UPSERT_SYSTEM_MEMORY, COMMAND_DELETE_SYSTEM_MEMORY,
     COMMAND_GET_CLAUDE_GLOBAL_CONFIG,
     COMMAND_GLOBAL_MEMORY_HISTORY, COMMAND_GLOBAL_MEMORY_DIFF, COMMAND_GLOBAL_MEMORY_REVERT,
+    COMMAND_GLOBAL_MEMORY_REMOVED, CommandGlobalMemoryRemovedData, GlobalMemoryRemovedResult,
     COMMAND_GLOBAL_MEMORY_IMPORT_SOURCES, COMMAND_GLOBAL_MEMORY_IMPORT, COMMAND_GLOBAL_MEMORY_SECTIONS,
     CommandGlobalMemoryImportSourcesData, CommandGlobalMemoryImportData, CommandGlobalMemorySectionsData,
     CommandGetBundleData, CommandDeleteBundleData, DeleteBundleResult, CommandReorderGlobalBundlesData,
@@ -69,7 +70,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let broker = state.broker.clone();
     engine.register_typed(
         COMMAND_UPSERT_MEMORY,
-        move |req: CommandUpsertBundleData, _ctx| {
+        move |req: CommandUpsertBundleData, ctx| {
             let mstore = mstore.clone();
             let broker = broker.clone();
             async move {
@@ -100,21 +101,23 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // writes through GlobalMemoryWrite recorded a version, so a
                 // future history/diff view would present a false sequence
                 // with operator edits silently missing from it (codex P2,
-                // PR #3237). "armory-ui" as written_by: this handler runs
-                // over the frontend's authenticated WebSocket connection,
-                // which has no per-request trusted AGENT identity the way
-                // the REST/MCP path does (see BundleVersion::written_by's
-                // own doc comment) — a human via the UI is the only thing
-                // this code path can honestly claim. No writer UID either
-                // (identity M4c-1): the WebSocket is always Unattributed.
+                // PR #3237). "armory-ui" as written_by: a connection that did
+                // not register as an agent is the window, which has no
+                // per-request trusted AGENT identity the way the REST/MCP
+                // path does (see BundleVersion::written_by's own doc
+                // comment). No writer UID either (identity M4c-1): the
+                // WebSocket is always Unattributed.
                 // `base_sha256` (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md
                 // §2.4): the Memory editor says which content its draft
                 // started from, so a concurrent write (an agent's
                 // GlobalMemoryWrite, another window) becomes a `conflict:`
                 // refusal instead of being silently overwritten. Absent =
                 // the unconditional save every other caller still gets.
+                // A write made by a registered agent is recorded as that agent,
+                // never as the person at the window.
+                let (written_by, source) = writer_of(&ctx, "human");
                 mstore
-                    .bundle_upsert_with_version_based(&memory, "armory-ui", "", "human", "{}", base_sha256.as_deref())
+                    .bundle_upsert_with_version_based(&memory, written_by, "", source, "{}", base_sha256.as_deref())
                     .map_err(|e| format!("upsertmemory: {e}"))?;
                 broker.publish_event::<crate::backend::mps_events::MemoriesChanged>(&(), vec![], 0);
                 Ok(memory)
@@ -292,13 +295,28 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let broker = state.broker.clone();
     engine.register_typed(
         COMMAND_GLOBAL_MEMORY_REVERT,
-        move |cmd: CommandGlobalMemoryRevertData, _ctx| {
+        move |cmd: CommandGlobalMemoryRevertData, ctx| {
             let mstore = mstore.clone();
             let broker = broker.clone();
             async move {
-                let result = global_memory_ui_revert(&mstore, &cmd)?;
+                let result = global_memory_ui_revert(&mstore, &cmd, writer_of(&ctx, "revert").0)?;
                 broker.publish_event::<crate::backend::mps_events::MemoriesChanged>(&(), vec![], 0);
                 Ok(result)
+            }
+        },
+    );
+
+    // The entries taken out of Global Memory, so the pane can offer to restore
+    // them: a restore is `globalmemory:revert` to the version listed here.
+    let mstore = state.id_store.clone();
+    engine.register_typed(
+        COMMAND_GLOBAL_MEMORY_REMOVED,
+        move |_cmd: CommandGlobalMemoryRemovedData, _ctx| {
+            let mstore = mstore.clone();
+            async move {
+                crate::server::app_api::removed_global_entries(&mstore)
+                    .map(|entries| GlobalMemoryRemovedResult { entries })
+                    .map_err(|e| format!("globalmemory:removed: {e}"))
             }
         },
     );
@@ -418,8 +436,9 @@ pub(crate) fn register_global_memory_import(engine: &WshRpcEngine, state: &AppSt
 }
 
 /// Loads a Global Memory entry for Memory → Global's history commands: it must
-/// exist, be `is_global`, and not be the blank singleton. System-tier rows
-/// are allowed (see the comment above the registrations).
+/// exist, be `is_global` (or removed from Global Memory and not restored since,
+/// so it can be inspected and restored), and not be the blank singleton.
+/// System-tier rows are allowed (see the comment above the registrations).
 fn load_global_bundle_for_ui(store: &Store, id: &str, verb: &str) -> Result<Bundle, String> {
     let bundle = store
         .bundle_get(id)
@@ -428,7 +447,9 @@ fn load_global_bundle_for_ui(store: &Store, id: &str, verb: &str) -> Result<Bund
     if bundle.is_blank || bundle.id == "blank" {
         return Err(format!("globalmemory:{verb}: cannot {verb} the blank Bundle singleton"));
     }
-    if !bundle.is_global {
+    if !bundle.is_global
+        && (bundle.is_system || !store.bundle_is_removed_global(id).map_err(|e| format!("globalmemory:{verb}: store: {e}"))?)
+    {
         return Err(format!("globalmemory:{verb}: id={id} is not a Global Memory entry"));
     }
     Ok(bundle)
@@ -497,10 +518,22 @@ fn global_memory_ui_diff(store: &Store, cmd: &CommandGlobalMemoryDiffData) -> Re
     Ok(GlobalMemoryDiffResult { diff: crate::server::app_api::bundle_version_diff(&from, &to) })
 }
 
+/// Who a window-side Global Memory write is recorded as: the agent when the
+/// connection registered as one, otherwise the window (`armory-ui`, with
+/// `window_source`).
+fn writer_of<'a>(ctx: &'a RpcContext, window_source: &'a str) -> (&'a str, &'a str) {
+    if ctx.agent_id.is_empty() {
+        ("armory-ui", window_source)
+    } else {
+        (ctx.agent_id.as_str(), "agent")
+    }
+}
+
 /// Restores `name` + `instructions` from `target_version_id` as a NEW
-/// version (`source: "revert"`, `written_by: "armory-ui"`), through the same
-/// atomic upsert-plus-version primitive each tier's ordinary save uses.
-fn global_memory_ui_revert(store: &Store, cmd: &CommandGlobalMemoryRevertData) -> Result<GlobalMemoryRevertResult, String> {
+/// version (`source: "revert"`, `written_by`: `writer`, which is `armory-ui`
+/// for the window), through the same atomic upsert-plus-version primitive
+/// each tier's ordinary save uses.
+fn global_memory_ui_revert(store: &Store, cmd: &CommandGlobalMemoryRevertData, writer: &str) -> Result<GlobalMemoryRevertResult, String> {
     let mut bundle = load_global_bundle_for_ui(store, &cmd.id, "revert")?;
     let target = store
         .bundle_version_get(&cmd.target_version_id)
@@ -512,6 +545,10 @@ fn global_memory_ui_revert(store: &Store, cmd: &CommandGlobalMemoryRevertData) -
             cmd.target_version_id, cmd.id
         ));
     }
+    // An entry removed from Global Memory comes back as Global Memory, last in
+    // the order.
+    let restoring = !bundle.is_global;
+    bundle.is_global = true;
     bundle.name = target.name;
     bundle.instructions = target.instructions;
     bundle.updated_at = agentmux_common::time::now_ms();
@@ -522,12 +559,15 @@ fn global_memory_ui_revert(store: &Store, cmd: &CommandGlobalMemoryRevertData) -
         // recording it as a human edit would opt it out of them for good
         // (`bundle_reseed_system_if_owned` skips any non-seeder last writer).
         let seeder = crate::backend::operator_config_seed::WRITTEN_BY;
-        let written_by = if target.written_by == seeder { seeder } else { "armory-ui" };
+        let written_by = if target.written_by == seeder { seeder } else { writer };
         store.bundle_upsert_system_if_changed(&bundle, written_by, "revert", &detail)
     } else {
-        store.bundle_upsert_with_version(&bundle, "armory-ui", "", "revert", &detail)
+        store.bundle_upsert_with_version(&bundle, writer, "", "revert", &detail)
     }
     .map_err(|e| format!("globalmemory:revert: {e}"))?;
+    if restoring {
+        crate::server::app_api::append_to_global_order(store, writer, &cmd.id, "globalmemory:revert")?;
+    }
     tracing::info!(bundle_id = %cmd.id, version_id = %cmd.target_version_id, "globalmemory:revert");
     Ok(GlobalMemoryRevertResult { version: version.map(version_meta) })
 }
@@ -772,6 +812,7 @@ mod delete_memory_tests {
             (COMMAND_GLOBAL_MEMORY_HISTORY, "CommandGlobalMemoryHistoryData", "GlobalMemoryHistoryResult"),
             (COMMAND_GLOBAL_MEMORY_DIFF, "CommandGlobalMemoryDiffData", "GlobalMemoryDiffResult"),
             (COMMAND_GLOBAL_MEMORY_REVERT, "CommandGlobalMemoryRevertData", "GlobalMemoryRevertResult"),
+            (COMMAND_GLOBAL_MEMORY_REMOVED, "CommandGlobalMemoryRemovedData", "GlobalMemoryRemovedResult"),
             (
                 COMMAND_REORDER_GLOBAL_BRAIN,
                 "CommandReorderGlobalBundlesData",
@@ -1013,6 +1054,45 @@ mod global_memory_ui_tests {
         .await;
         let resp = call(&engine, &mut rx, COMMAND_GLOBAL_MEMORY_HISTORY, json!({ "id": saved.id })).await;
         assert!(resp.error.contains("not a Global Memory entry"), "got {:?}", resp.error);
+    }
+
+    // The pane's Remove leaves a record; the removed entry is listed with who
+    // removed it, and `globalmemory:revert` to that record restores it as
+    // Global Memory, last in the order (it would sort first by name).
+    #[tokio::test]
+    async fn a_removed_entry_is_listed_and_restored_through_revert() {
+        let state = test_state();
+        let (engine, mut rx) = WshRpcEngine::new();
+        register(&engine, &state);
+        let id = create_entry(&engine, &mut rx, "Alpha", "the rules").await;
+        let other = create_entry(&engine, &mut rx, "Zed", "other rules").await;
+        ok::<Bundle>(&engine, &mut rx, COMMAND_UPSERT_MEMORY, json!({
+            "id": id, "name": "Alpha", "is_global": false, "instructions": "the rules",
+        }))
+        .await;
+
+        let removed: GlobalMemoryRemovedResult = ok(&engine, &mut rx, COMMAND_GLOBAL_MEMORY_REMOVED, json!({})).await;
+        assert_eq!(removed.entries.len(), 1);
+        let entry = removed.entries[0].clone();
+        assert_eq!((entry.id.as_str(), entry.name.as_str(), entry.removed_by.as_str()), (id.as_str(), "Alpha", "armory-ui"));
+        assert!(entry.removed_at > 0);
+
+        // Its history is still reachable, and says what happened.
+        let history: GlobalMemoryHistoryResult = ok(&engine, &mut rx, COMMAND_GLOBAL_MEMORY_HISTORY, json!({ "id": id })).await;
+        assert_eq!((history.versions[0].id.as_str(), history.versions[0].source.as_str()), (entry.version_id.as_str(), "remove"));
+
+        let restored: GlobalMemoryRevertResult = ok(&engine, &mut rx, COMMAND_GLOBAL_MEMORY_REVERT, json!({
+            "id": id, "target_version_id": entry.version_id,
+        }))
+        .await;
+        assert_eq!(restored.version.expect("a restore records a version").source, "revert");
+        let row = state.id_store.bundle_get(&id).unwrap().unwrap();
+        assert!(row.is_global);
+        assert_eq!(row.instructions, "the rules");
+        let order: Vec<String> = state.id_store.bundle_list_global().unwrap().into_iter().map(|b| b.id).collect();
+        assert_eq!(order, [other, id], "restored last");
+        let after: GlobalMemoryRemovedResult = ok(&engine, &mut rx, COMMAND_GLOBAL_MEMORY_REMOVED, json!({})).await;
+        assert!(after.entries.is_empty());
     }
 
     // Unlike the MCP tools, Memory → Global sees system-tier history — it can

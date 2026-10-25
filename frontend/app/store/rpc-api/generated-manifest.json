@@ -619,6 +619,11 @@
             "send": "{}"
         },
         {
+            "command": "globalmemory:removed",
+            "method": "GlobalMemoryRemovedCommand",
+            "send": "{}"
+        },
+        {
             "command": "globalmemory:revert",
             "method": "GlobalMemoryRevertCommand"
         },
@@ -660,6 +665,14 @@
             "method": "JobsActCommand"
         },
         {
+            "command": "jobs.dryrun",
+            "method": "JobsDryrunCommand"
+        },
+        {
+            "command": "jobs.get",
+            "method": "JobsGetCommand"
+        },
+        {
             "command": "jobs.list",
             "method": "JobsListCommand",
             "dataType": "Record<string, never>"
@@ -667,6 +680,14 @@
         {
             "command": "jobs.runs",
             "method": "JobsRunsCommand"
+        },
+        {
+            "command": "jobs.save",
+            "method": "JobsSaveCommand"
+        },
+        {
+            "command": "jobs.templates.approve",
+            "method": "JobsTemplatesApproveCommand"
         },
         {
             "command": "jobs.templates.catalog",
@@ -692,6 +713,10 @@
         {
             "command": "jobs.templates.uninstall",
             "method": "JobsTemplatesUninstallCommand"
+        },
+        {
+            "command": "jobs.templates.update_diff",
+            "method": "JobsTemplatesUpdateDiffCommand"
         },
         {
             "command": "kanban.act",
@@ -1031,6 +1056,19 @@
         {
             "command": "presence.status",
             "method": "PresenceStatusCommand"
+        },
+        {
+            "command": "pins.adopt",
+            "method": "PinsAdoptCommand"
+        },
+        {
+            "command": "pins.forget",
+            "method": "PinsForgetCommand"
+        },
+        {
+            "command": "pins.list",
+            "method": "PinsListCommand",
+            "send": "data ?? {}"
         },
         {
             "command": "layout.preview",

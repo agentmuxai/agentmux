@@ -46,7 +46,7 @@ describe("appHandleKeyDown", () => {
         "tab:new": vi.fn(() => true),
         "pane:close": vi.fn(() => true),
         "view:command-palette": vi.fn(() => true),
-        "split:up": vi.fn(() => true),
+        "split:down": vi.fn(() => true),
     };
     let field: HTMLElement | null = null;
 
@@ -119,8 +119,8 @@ describe("appHandleKeyDown", () => {
 
     it("runs the split chord's second key", () => {
         expect(press({ key: "S", code: "KeyS", ctrlKey: true, shiftKey: true })).toBe(true);
-        expect(press({ key: "ArrowUp", code: "ArrowUp" })).toBe(true);
-        expect(handlers["split:up"]).toHaveBeenCalledTimes(1);
+        expect(press({ key: "ArrowDown", code: "ArrowDown" })).toBe(true);
+        expect(handlers["split:down"]).toHaveBeenCalledTimes(1);
     });
 
     it("keeps a chord waiting while a modifier is pressed on its own", () => {
@@ -128,8 +128,8 @@ describe("appHandleKeyDown", () => {
         // A bare Shift, Control or Alt isn't the chord's second key.
         expect(press({ key: "Shift", code: "ShiftLeft", shiftKey: true })).toBe(false);
         expect(press({ key: "Control", code: "ControlLeft", ctrlKey: true })).toBe(false);
-        expect(press({ key: "ArrowUp", code: "ArrowUp" })).toBe(true);
-        expect(handlers["split:up"]).toHaveBeenCalledTimes(1);
+        expect(press({ key: "ArrowDown", code: "ArrowDown" })).toBe(true);
+        expect(handlers["split:down"]).toHaveBeenCalledTimes(1);
     });
 
     describe("pane:swap (GNOME takes Ctrl+Alt+Shift+Arrow, plan §8.3)", () => {
@@ -153,7 +153,7 @@ describe("appHandleKeyDown", () => {
             expect(press({ key: "Shift", code: "ShiftLeft", shiftKey: true })).toBe(false);
             expect(press({ key: "ArrowUp", code: "ArrowUp", shiftKey: true })).toBe(true);
             expect(swapUp).toHaveBeenCalledTimes(1);
-            expect(handlers["split:up"]).not.toHaveBeenCalled();
+            expect(handlers["split:down"]).not.toHaveBeenCalled();
         });
 
         it("takes the chord's second key before a pane that uses it (the Files list's Shift+↑)", () => {
@@ -203,8 +203,8 @@ describe("appHandleKeyDown", () => {
                 const toShell = vi.fn();
                 field!.addEventListener("keydown", toShell);
                 expect(press({ key: "S", code: "KeyS", ctrlKey: true, shiftKey: true })).toBe(true);
-                field!.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", code: "ArrowUp", bubbles: true, cancelable: true }));
-                expect(handlers["split:up"]).toHaveBeenCalledTimes(1);
+                field!.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", code: "ArrowDown", bubbles: true, cancelable: true }));
+                expect(handlers["split:down"]).toHaveBeenCalledTimes(1);
                 expect(toShell).not.toHaveBeenCalled();
             });
         }

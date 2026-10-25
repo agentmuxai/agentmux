@@ -21,6 +21,7 @@ use crate::backend::rpc_types::{
 };
 use crate::backend::storage::store::{AgentIdentityLink, AgentInstance, IdentityAccount};
 
+use super::super::actor::require_own_transcript;
 use super::super::AppState;
 use super::read_session_preview;
 
@@ -717,11 +718,14 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
     // ---- agent:session:write_state ----
     let filestore = state.filestore.clone();
+    let mstore = state.mstore.clone();
     engine.register_typed(
         COMMAND_AGENT_SESSION_WRITE_STATE,
-        move |cmd: CommandAgentSessionWriteStateData, _ctx| {
+        move |cmd: CommandAgentSessionWriteStateData, ctx| {
             let filestore = filestore.clone();
+            let mstore = mstore.clone();
             async move {
+                require_own_transcript(&ctx, &mstore, &cmd.definition_id, "an agent's session state")?;
                 let bytes = cmd.content.as_bytes();
                 let bytes_written = bytes.len() as u64;
                 crate::backend::agent_session::write_session_state(
@@ -737,11 +741,14 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
     // ---- agent:session:append_output ----
     let filestore = state.filestore.clone();
+    let mstore = state.mstore.clone();
     engine.register_typed(
         COMMAND_AGENT_SESSION_APPEND_OUTPUT,
-        move |cmd: CommandAgentSessionAppendOutputData, _ctx| {
+        move |cmd: CommandAgentSessionAppendOutputData, ctx| {
             let filestore = filestore.clone();
+            let mstore = mstore.clone();
             async move {
+                require_own_transcript(&ctx, &mstore, &cmd.definition_id, "an agent's transcript")?;
                 let bytes_written = crate::backend::agent_session::append_session_output(
                     &filestore,
                     &cmd.definition_id,
@@ -755,11 +762,14 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
     // ---- agent:session:archive ----
     let filestore = state.filestore.clone();
+    let mstore = state.mstore.clone();
     engine.register_typed(
         COMMAND_AGENT_SESSION_ARCHIVE,
-        move |cmd: CommandAgentSessionArchiveData, _ctx| {
+        move |cmd: CommandAgentSessionArchiveData, ctx| {
             let filestore = filestore.clone();
+            let mstore = mstore.clone();
             async move {
+                require_own_transcript(&ctx, &mstore, &cmd.definition_id, "an agent's session")?;
                 let result =
                     crate::backend::agent_session::archive_session(&filestore, &cmd.definition_id)
                         .map_err(|e| format!("agent:session:archive: {e}"))?;

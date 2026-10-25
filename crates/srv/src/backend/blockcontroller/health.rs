@@ -657,7 +657,7 @@ impl TurnActivityTracker {
         tracker
     }
 
-    fn with_clock(block_id: String, clock: Box<dyn Fn() -> u64 + Send + Sync>) -> Self {
+    pub(crate) fn with_clock(block_id: String, clock: Box<dyn Fn() -> u64 + Send + Sync>) -> Self {
         Self {
             block_id,
             inner: Mutex::new(TurnActivityTrackerInner {

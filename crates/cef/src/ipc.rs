@@ -24,7 +24,6 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use agentmux_common::secret_eq::secret_eq;
 use tower_http::cors::CorsLayer;
 use tower_http::services::ServeDir;
 
@@ -135,15 +134,11 @@ async fn handle_ipc(
     headers: HeaderMap,
     Json(req): Json<IpcRequest>,
 ) -> (StatusCode, Json<IpcResponse>) {
-    // Verify IPC token
-    let authorized = headers
-        .get("authorization")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer "))
-        .map(|token| secret_eq(token.as_bytes(), state.ipc_token.as_bytes()))
-        .unwrap_or(false);
-
-    if !authorized {
+    // The operator's token opens every command; the forwarding token only the
+    // launcher's (ipc_forward/mod.rs).
+    let presented = headers.get("authorization").and_then(|v| v.to_str().ok()).and_then(|v| v.strip_prefix("Bearer "));
+    let access = crate::ipc_forward::access_for(presented, &state.ipc_token, crate::ipc_forward::forward_token());
+    if !crate::ipc_forward::allows(access, &req.cmd) {
         return (
             StatusCode::UNAUTHORIZED,
             Json(IpcResponse {
@@ -604,6 +599,7 @@ async fn route_command(
             let frozen = args.get("frozen").and_then(|v| v.as_bool()).unwrap_or(false);
             crate::browser_api::hibernation::set_frozen(state, block_id, frozen).await
         }
+        "browser_pane_memory" => crate::browser_api::hibernation::pane_memory(state, args).await,
         "memory_pressure_level" => Ok(serde_json::json!(crate::memory_pressure::current_level().as_str())),
         "browser_pane_close" => {
             let block_id = args.get("block_id").and_then(|v| v.as_str()).unwrap_or("");
@@ -1329,4 +1325,47 @@ fn focus_app(state: &Arc<AppState>, window_label: &str) {
     crate::input_owner::windows::select_app(state, &label);
     #[cfg(not(target_os = "windows"))]
     crate::input_owner::views::select_app(state, &label);
+}
+
+#[cfg(test)]
+mod access_tests {
+    use super::*;
+
+    async fn status_of(bearer: Option<&str>, cmd: &str) -> StatusCode {
+        let mut headers = HeaderMap::new();
+        if let Some(b) = bearer {
+            headers.insert("authorization", format!("Bearer {b}").parse().unwrap());
+        }
+        let req = IpcRequest { cmd: cmd.to_string(), args: serde_json::Value::Null };
+        let (status, _) = handle_ipc(State(Arc::new(AppState::default())), headers, Json(req)).await;
+        status
+    }
+
+    // The port file holds the forwarding token, so a process that reads it must
+    // not be able to run an operator-only command with it.
+    #[tokio::test]
+    async fn the_forwarding_token_does_not_open_an_operator_command() {
+        let forward = crate::ipc_forward::forward_token();
+        for cmd in ["vault_op", "desktop_request", "upgrade_request", "ssh_approval_decide"] {
+            assert_eq!(status_of(Some(forward), cmd).await, StatusCode::UNAUTHORIZED, "{cmd}");
+        }
+    }
+
+    #[tokio::test]
+    async fn no_token_or_a_wrong_one_opens_nothing() {
+        assert_eq!(status_of(None, "open_new_window").await, StatusCode::UNAUTHORIZED);
+        assert_eq!(status_of(Some("guess"), "open_new_window").await, StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn the_operators_token_still_gets_past_the_door() {
+        // A command that doesn't exist is answered by the router (200, success false), not refused at the door.
+        let state = Arc::new(AppState::default());
+        assert_ne!(state.ipc_token, crate::ipc_forward::forward_token());
+        let mut headers = HeaderMap::new();
+        headers.insert("authorization", format!("Bearer {}", state.ipc_token).parse().unwrap());
+        let req = IpcRequest { cmd: "no_such_command".to_string(), args: serde_json::Value::Null };
+        let (status, _) = handle_ipc(State(state), headers, Json(req)).await;
+        assert_eq!(status, StatusCode::OK);
+    }
 }

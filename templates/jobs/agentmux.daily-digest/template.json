@@ -1,0 +1,29 @@
+{
+  "templateVersion": 1,
+  "id": "agentmux.daily-digest",
+  "name": "Daily digest",
+  "version": "1.0.0",
+  "kind": "job",
+  "description": "Summarizes cost or usage since yesterday and month to date from the sources you name, and flags anything over a budget or jumping. Sends the digest, keeps a JSON history, and files a task on a budget breach.",
+  "params": {
+    "type": "object",
+    "properties": {
+      "sources": { "type": "array", "items": { "type": "string" }, "title": "Sources", "description": "Files, folders or URLs that report cost or usage." },
+      "thresholds": { "type": "string", "title": "Thresholds", "description": "Budgets and jump size, such as: day=20 month=400 jump=50%.", "default": "" }
+    },
+    "required": ["sources"]
+  },
+  "trigger": { "kind": "cron", "cron": "0 8 * * *" },
+  "action": { "kind": "message" },
+  "policy": {
+    "overlap": "skip",
+    "catch_up": "latest",
+    "timeout_minutes": 15,
+    "retries": 2,
+    "caps": { "run_usd": 0.25 },
+    "approval": "none",
+    "results": ["ledger", "task_on_failure"]
+  },
+  "outputs": ["report_file", "message:owner", "kanban_task"],
+  "secrets": []
+}

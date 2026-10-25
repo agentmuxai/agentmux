@@ -44,6 +44,7 @@ vi.mock("@/app/block/pane-identity", () => ({
 
 import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
 import type { TowerSnapshot } from "@/app/store/rpc-api";
+import { chartKey } from "./tower-memory";
 import { TowerViewModel } from "./tower-model";
 import { TowerView } from "./tower-view";
 
@@ -141,11 +142,17 @@ const setMetaMock = vi.fn((patch: Record<string, unknown>) => {
     return Promise.resolve();
 });
 
-function renderTower() {
+/** The pane's meta as the tests set it. Tower opens on Memory, and almost
+ *  every test is about another view, so a test that doesn't name its view is
+ *  on Agents, as it was before the Memory view; `renderTower({ rawMeta: true })`
+ *  is the pane with nothing set. */
+const withAgentsView = () => ({ "tower:view": "agents", ...meta() });
+
+function renderTower(opts: { rawMeta?: boolean } = {}) {
     return render(() => {
         const model = new TowerViewModel({
             blockId: "tower-1",
-            meta: meta as unknown as PaneTabHostContext["meta"],
+            meta: (opts.rawMeta ? meta : withAgentsView) as unknown as PaneTabHostContext["meta"],
             setMeta: setMetaMock,
             isFocused: () => true,
             visibility,
@@ -848,7 +855,7 @@ describe("Tower", () => {
         expect(setMetaMock).toHaveBeenLastCalledWith({ "tower:connection": "peer:p1", "tower:only": null });
         setMeta({ "tower:view": "processes", "tower:only": "block-a" });
         fireEvent.click(await screen.findByRole("tab", { name: "Agents" }));
-        expect(setMetaMock).toHaveBeenLastCalledWith({ "tower:view": null, "tower:only": null });
+        expect(setMetaMock).toHaveBeenLastCalledWith({ "tower:view": "agents", "tower:only": null });
     });
 
     it("a pane opened on Processes isn't filtered, and switching within it carries nothing", async () => {
@@ -1375,7 +1382,7 @@ describe("Tower: memory first", () => {
         });
         const model = new TowerViewModel({
             blockId: "tower-hist",
-            meta: meta as unknown as PaneTabHostContext["meta"],
+            meta: withAgentsView as unknown as PaneTabHostContext["meta"],
             setMeta: setMetaMock,
             isFocused: () => true,
             visibility,
@@ -1385,5 +1392,360 @@ describe("Tower: memory first", () => {
         const points = model.recentMem("block-a");
         expect(points.length).toBeGreaterThan(3);
         expect(points[points.length - 1]).toBeGreaterThan(points[0]);
+    });
+});
+
+const MB_ = 1024 * 1024;
+
+/** The Memory view's part of a sample: four parts, an agent with its roles, a
+ *  stray Claude, and another instance beside the total. */
+function withMemory(snap: TowerSnapshot, opts: { hour?: number; growth?: boolean } = {}): TowerSnapshot {
+    const row = (key: string, label: string, mem: number, extra: object = {}) => ({
+        key,
+        label,
+        mem: mem * MB_,
+        processes: 1,
+        children: [],
+        ...extra,
+    });
+    snap.memory = {
+        total: 1000 * MB_,
+        processes: 14,
+        unreadable: 2,
+        metric: "private working set",
+        growth: [],
+        other_instances: 512 * MB_,
+        parts: [
+            {
+                part: "core",
+                mem: 300 * MB_,
+                processes: 4,
+                rows: [row("core:gpu-process", "GPU process", 200), row("core:server-srv", "Server (srv)", 100)],
+            },
+            {
+                part: "panes",
+                mem: 100 * MB_,
+                processes: 2,
+                rows: [row("terminal:t1", "Terminal", 100, { task: "t1", kind: "shells", processes: 2 })],
+            },
+            {
+                part: "agents",
+                mem: 550 * MB_,
+                processes: 6,
+                rows: [
+                    row("agent:block-a", "AgentX", 550, {
+                        task: "block-a",
+                        kind: "agents",
+                        processes: 6,
+                        children: [
+                            { key: "agent:block-a:cli", label: "CLI", mem: 400 * MB_, processes: 2 },
+                            { key: "agent:block-a:tools", label: "Tools it started", mem: 150 * MB_, processes: 4 },
+                        ],
+                    }),
+                ],
+            },
+            {
+                part: "not_placed",
+                mem: 50 * MB_,
+                processes: 2,
+                rows: [row("np:claude-exe", "claude.exe", 50, { processes: 2, kind: "agents" })],
+            },
+        ],
+    };
+    if (opts.growth) {
+        snap.memory.growth = [{ key: "agent:block-a", from: 400 * MB_, to: 550 * MB_, minutes: 20 }];
+    }
+    if (opts.hour) snap.memory.history = hourOf(opts.hour);
+    return snap;
+}
+
+/** The srv ledger's hour: `n` points ten seconds apart. The total climbs
+ *  800 to 1000 MB, Agents 400 to 550; Core is flat; Not placed has no line. */
+function hourOf(n: number) {
+    const ramp = (a: number, b: number) =>
+        Array.from({ length: n }, (_, i) => Math.round(a + ((b - a) * i) / (n - 1)) * MB_);
+    const start_ms = 1_700_000_000_000;
+    return {
+        step_ms: 10_000,
+        since_ms: start_ms,
+        series: [
+            { key: "total", start_ms, points: ramp(800, 1000) },
+            { key: "part:core", start_ms, points: ramp(300, 300) },
+            { key: "part:agents", start_ms, points: ramp(400, 550) },
+            { key: "agent:block-a", start_ms, points: ramp(400, 550) },
+            { key: "core:gpu-process", start_ms, points: ramp(200, 200) },
+        ],
+    };
+}
+
+/** What the mocked srv sends on the next Memory sample. */
+let memoryExtras: { growth?: boolean; hourPoints?: number } = {};
+
+describe("Tower: the Memory view", () => {
+    beforeEach(() => {
+        peersCmd.mockResolvedValue({ peers: [studio] });
+        memoryExtras = {};
+        sample.mockImplementation(
+            (_client: unknown, req: { host: boolean; memory?: boolean; memory_history?: boolean }) =>
+                Promise.resolve(
+                    req.memory
+                        ? withMemory(snapshot(req.host), {
+                              growth: memoryExtras.growth,
+                              hour: req.memory_history ? memoryExtras.hourPoints : undefined,
+                          })
+                        : snapshot(req.host)
+                )
+        );
+    });
+    afterEach(() => {
+        cleanup();
+        vi.useRealTimers();
+        vi.clearAllMocks();
+        setMeta({});
+    });
+
+    it("is where Tower opens, and asks for the memory", async () => {
+        renderTower({ rawMeta: true });
+        await screen.findByTestId("tower-memory");
+        expect(sample).toHaveBeenCalledWith(expect.anything(), { host: false, memory: true, memory_history: true });
+        expect(screen.getByRole("tab", { name: /Memory/ })).toHaveAttribute("aria-selected", "true");
+        // The Agents view is one click away, and is remembered.
+        fireEvent.click(screen.getByRole("tab", { name: /Agents/ }));
+        expect(setMetaMock).toHaveBeenLastCalledWith({ "tower:view": "agents" });
+    });
+
+    it("opens a pane that chose Agents on Agents", async () => {
+        setMeta({ "tower:view": "agents" });
+        renderTower({ rawMeta: true });
+        await screen.findByTestId("tower-rail-block-a");
+        expect(screen.queryByTestId("tower-memory")).toBeNull();
+    });
+
+    it("draws one bar of the four parts, each its share of the total", async () => {
+        renderTower({ rawMeta: true });
+        await screen.findByTestId("tower-memory");
+        const widths = ["core", "panes", "agents", "not_placed"].map(
+            (p) => (screen.getByTestId(`tower-memory-segment-${p}`) as HTMLElement).style.width
+        );
+        expect(widths.map((w) => Math.round(parseFloat(w)))).toEqual([30, 10, 55, 5]);
+        expect(
+            screen.getByRole("group", { name: /^AgentMux's memory by part: Core: 300.0 MB, 30%; Panes/ })
+        ).toBeInTheDocument();
+    });
+
+    it("lists the parts in order with their memory and share, the busiest open", async () => {
+        renderTower({ rawMeta: true });
+        const agents = await screen.findByTestId("tower-memory-part-agents");
+        const order = screen.getAllByTestId(/^tower-memory-part-/).map((r) => r.dataset.testid);
+        expect(order).toEqual([
+            "tower-memory-part-core",
+            "tower-memory-part-panes",
+            "tower-memory-part-agents",
+            "tower-memory-part-not_placed",
+        ]);
+        expect(within(agents).getByText("550.0 MB")).toBeInTheDocument();
+        expect(within(agents).getByText("55%")).toBeInTheDocument();
+        // Agents is the biggest: its agent is shown, the smaller parts are shut.
+        expect(screen.getByTestId("tower-memory-row-agent:block-a")).toBeInTheDocument();
+        expect(screen.queryByTestId("tower-memory-row-core:gpu-process")).toBeNull();
+    });
+
+    it("opens a part to its rows, and an agent to its CLI, helpers and tools", async () => {
+        renderTower({ rawMeta: true });
+        const core = await screen.findByTestId("tower-memory-part-core");
+        fireEvent.click(within(core).getByRole("button", { name: /Show what's in Core/ }));
+        expect(
+            within(screen.getByTestId("tower-memory-row-core:gpu-process")).getByText("200.0 MB")
+        ).toBeInTheDocument();
+        const agent = screen.getByTestId("tower-memory-row-agent:block-a");
+        fireEvent.click(within(agent).getByRole("button", { name: /Show AgentX's parts/ }));
+        expect(
+            within(screen.getByTestId("tower-memory-child-agent:block-a:cli")).getByText("400.0 MB")
+        ).toBeInTheDocument();
+        expect(screen.getByTestId("tower-memory-child-agent:block-a:tools")).toHaveTextContent("Tools it started");
+    });
+
+    it("says what Not placed is, by name, and never puts it in Core", async () => {
+        renderTower({ rawMeta: true });
+        const np = await screen.findByTestId("tower-memory-part-not_placed");
+        fireEvent.click(within(np).getByRole("button", { name: /Show what's in Not placed/ }));
+        expect(screen.getByText(/AgentMux started these and no pane claims them/)).toBeInTheDocument();
+        const claude = screen.getByTestId("tower-memory-row-np:claude-exe");
+        expect(claude).toHaveTextContent("claude.exe");
+        expect(claude).toHaveTextContent("×2");
+        const core = screen.getByTestId("tower-memory-part-core");
+        fireEvent.click(within(core).getByRole("button", { name: /Show what's in Core/ }));
+        expect(within(screen.getByTestId("tower-memory")).getAllByText(/claude/)).toHaveLength(1);
+    });
+
+    it("goes from an agent's row to that agent in the Agents view", async () => {
+        renderTower({ rawMeta: true });
+        const agent = await screen.findByTestId("tower-memory-row-agent:block-a");
+        fireEvent.click(within(agent).getByRole("button", { name: /in the Agents view/ }));
+        expect(setMetaMock).toHaveBeenCalledWith({ "tower:agent": "block-a" });
+        expect(setMetaMock).toHaveBeenLastCalledWith({ "tower:view": "agents" });
+    });
+
+    it("says what the number is, what could not be read, and another instance beside it", async () => {
+        renderTower({ rawMeta: true });
+        const note = await screen.findByTestId("tower-memory-note");
+        expect(note).toHaveTextContent("14 processes, measured as private working set");
+        expect(note).toHaveTextContent(
+            "Shared libraries and shared memory aren't counted twice, and video memory isn't counted"
+        );
+        expect(note).toHaveTextContent("2 processes couldn't be read");
+        expect(screen.getByTestId("tower-memory-others")).toHaveTextContent("512.0 MB, not counted here");
+    });
+
+    it("isn't offered for another computer", async () => {
+        setMeta({ "tower:connection": "peer:p1" });
+        renderTower({ rawMeta: true });
+        await screen.findByTestId("tower-rail-block-a");
+        expect(screen.queryByRole("tab", { name: /Memory/ })).toBeNull();
+        expect(screen.queryByTestId("tower-memory")).toBeNull();
+    });
+});
+
+describe("Tower: which line the Memory chart draws", () => {
+    const memory = withMemory(snapshot()).memory!;
+    const series = (key: string) => ({ key, start_ms: 0, points: [1, 2] });
+    const trend = {
+        byKey: new Map(["total", "part:agents", "agent:block-a", "agent:gone"].map((k) => [k, series(k)])),
+        end: 10_000,
+        spanMs: 3_600_000,
+    };
+
+    it("is the picked part or row while it is on screen and the ledger has it", () => {
+        expect(chartKey("part:agents", memory, trend)).toBe("part:agents");
+        expect(chartKey("agent:block-a", memory, trend)).toBe("agent:block-a");
+    });
+
+    it("is the total for a row that has left the table, though the ledger still holds its line", () => {
+        expect(chartKey("agent:gone", memory, trend)).toBe("total");
+    });
+
+    it("is the total for a line the ledger has none of, or before the hour arrives", () => {
+        expect(chartKey("part:not_placed", memory, trend)).toBe("total");
+        expect(chartKey("agent:block-a", memory, null)).toBe("total");
+    });
+});
+
+describe("Tower: the Memory view's hour and what grows", () => {
+    beforeEach(() => {
+        peersCmd.mockResolvedValue({ peers: [studio] });
+        memoryExtras = {};
+        sample.mockImplementation(
+            (_client: unknown, req: { host: boolean; memory?: boolean; memory_history?: boolean }) =>
+                Promise.resolve(
+                    req.memory
+                        ? withMemory(snapshot(req.host), {
+                              growth: memoryExtras.growth,
+                              hour: req.memory_history ? memoryExtras.hourPoints : undefined,
+                          })
+                        : snapshot(req.host)
+                )
+        );
+    });
+    afterEach(() => {
+        cleanup();
+        vi.useRealTimers();
+        vi.clearAllMocks();
+        setMeta({});
+    });
+
+    it("asks for the hour with the first sample and then every ten seconds, not every sample", async () => {
+        vi.useFakeTimers();
+        memoryExtras = { hourPoints: 360 };
+        const model = new TowerViewModel({
+            blockId: "tower-hour",
+            meta: meta as unknown as PaneTabHostContext["meta"],
+            setMeta: setMetaMock,
+            isFocused: () => true,
+            visibility,
+        });
+        render(() => <TowerView model={model} />);
+        const withHour = () =>
+            sample.mock.calls.filter((c) => (c[1] as { memory_history?: boolean }).memory_history).length;
+        await vi.advanceTimersByTimeAsync(100);
+        expect(withHour()).toBe(1);
+        await vi.advanceTimersByTimeAsync(6000);
+        expect(sample.mock.calls.length).toBeGreaterThan(2);
+        expect(withHour()).toBe(1);
+        await vi.advanceTimersByTimeAsync(5000);
+        expect(withHour()).toBe(2);
+    });
+
+    it("draws the hour as a line per part and row, none where the ledger has no line", async () => {
+        memoryExtras = { hourPoints: 360 };
+        renderTower({ rawMeta: true });
+        const line = async (testid: string) => {
+            const row = await screen.findByTestId(testid);
+            return row.querySelector(".tower-memory-spark polyline")?.getAttribute("points") ?? "";
+        };
+        await waitFor(async () => expect(await line("tower-memory-part-agents")).not.toBe(""));
+        expect((await line("tower-memory-row-agent:block-a")).split(" ").length).toBe(360);
+        expect(await line("tower-memory-part-not_placed")).toBe("");
+        // Before the hour arrives, no line and no chart: the table still reads.
+    });
+
+    it("charts the total, then whichever part or row is chosen, over 1 hour or 10 minutes", async () => {
+        memoryExtras = { hourPoints: 360 };
+        renderTower({ rawMeta: true });
+        const label = async () => (await screen.findByTestId("tower-memory-chart-label")).textContent;
+        await waitFor(async () => expect(await label()).toBe("AgentMux"));
+        const chart = screen.getByTestId("tower-memory-chart");
+        expect(chart).toHaveTextContent("1 hour ago");
+        fireEvent.click(screen.getByTestId("tower-memory-part-agents"));
+        expect(await label()).toBe("Agents");
+        fireEvent.click(screen.getByTestId("tower-memory-row-agent:block-a"));
+        expect(await label()).toBe("AgentX");
+        fireEvent.click(within(chart).getByRole("radio", { name: "10 min" }));
+        expect(chart).toHaveTextContent("10 min ago");
+        // A row with no line charts the total.
+        fireEvent.click(screen.getByTestId("tower-memory-part-not_placed"));
+        expect(await label()).toBe("AgentMux");
+    });
+
+    it("says what changed over the hour, and since when before an hour exists", async () => {
+        memoryExtras = { hourPoints: 360 };
+        renderTower({ rawMeta: true });
+        const change = await screen.findByTestId("tower-headline-change");
+        expect(change).toHaveTextContent("+200.0 MB in the last hour");
+        cleanup();
+        memoryExtras = { hourPoints: 90 };
+        renderTower({ rawMeta: true });
+        const since = await screen.findByTestId("tower-headline-change");
+        expect(since).toHaveTextContent(/^\+200\.0 MB since \d/);
+        expect(await screen.findByTestId("tower-memory-chart")).toHaveTextContent(/since \d/);
+    });
+
+    it("flags what grows unusually on the row, on its part and on the headline", async () => {
+        memoryExtras = { hourPoints: 360, growth: true };
+        renderTower({ rawMeta: true });
+        const row = await screen.findByTestId("tower-memory-grow-agent:block-a");
+        expect(row).toHaveTextContent("grew 150.0 MB in 20 min");
+        // The part carries it too, with the row's name, visible with the table shut.
+        expect(screen.getByTestId("tower-memory-grow-part-agents")).toHaveTextContent("AgentX grew 150.0 MB in 20 min");
+        expect(screen.queryByTestId("tower-memory-grow-part-core")).toBeNull();
+        const dot = screen.getByTestId("tower-headline-grow");
+        expect(dot).toHaveAttribute("title", "AgentX grew 150.0 MB in 20 min");
+        expect(dot).toHaveAccessibleName(/Grows unusually: AgentX grew 150.0 MB in 20 min/);
+    });
+
+    it("shows no warning when nothing grows", async () => {
+        memoryExtras = { hourPoints: 360 };
+        renderTower({ rawMeta: true });
+        await screen.findByTestId("tower-memory-chart");
+        expect(screen.queryByTestId("tower-headline-grow")).toBeNull();
+        expect(document.querySelector(".tower-memory-grow")).toBeNull();
+    });
+
+    it("keeps the hour out of the other views", async () => {
+        memoryExtras = { hourPoints: 360, growth: true };
+        renderTower();
+        await screen.findByTestId("tower-rail-block-a");
+        expect(screen.queryByTestId("tower-headline-change")).toBeNull();
+        expect(screen.queryByTestId("tower-headline-grow")).toBeNull();
+        expect(sample).toHaveBeenCalledWith(expect.anything(), { host: false });
     });
 });

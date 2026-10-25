@@ -1,5 +1,80 @@
 # AgentMux Version History
 
+## 0.60.1 — 2026-10-25
+
+- A browser pane that went to sleep comes back with its back and forward history, scroll position and anything typed into it, once AgentMux runs on a browser engine with in-place discard; until then it reloads fresh as before
+- Settings → Browser lists the sites whose panes never sleep, and you can add and remove them there; on an up-to-date browser engine a browser pane hidden for 5 minutes is also frozen until you look at it again
+- Ctrl+click (Cmd+click on macOS) picks several pane tabs, in different panes too, and dragging any one of them moves all of them into the pane you drop on; Escape or a plain click clears the pick. A tab dropped on a collapsed pane expands it.
+- On the Kanban, an agent's colour is its name's text colour instead of a small square beside the name, and in the narrow single list each section has an extra-large label
+- Dragging a minimized pane over another minimized pane shows its drop outline on the nearer seam between them, half over each, instead of over the pane under the cursor
+- A Message broadcast with files now sends them to every recipient, including agents on the LAN, as a direct send does
+- An agent whose account ran out of quota is woken a minute after the reset: its failure clears, held messages replay, and if it holds a claimed task it is told once to continue
+- New tabs load their helper modules once, which fixes a test that failed at random on CI when two New Tabs started together
+- Tooltips now appear above dialogs, popovers and menus instead of behind them
+- Job templates: install, approve and pin signed job templates (from a folder, a zip or a private catalog), with the Rule of Two checked when a template is read; agentmux-widget sign now signs job templates too
+- fix(agents): a spawned worker's brief names the worker and says to sign as itself, not as its leader
+- Jobs get a definition: scheduled jobs are stored as job definitions (trigger, action, policy), cron triggers take an IANA time zone with daylight-saving handling and a fixed per-job jitter, and the Schedule tool can set tz and policy; jobs are served on /agentmux/jobs with /agentmux/cron kept as an alias
+- An agent's AgentMux tools no longer stop answering for hours when one call hangs: every call has its own deadline and the others keep working, and a wedged tool server is detected and restarted
+- The watchdog now releases the claimed tasks of an agent it stopped and raises one notification saying why
+- An agent can no longer upgrade AgentMux on the strength of a Swarm broadcast: you are asked in every window, as for any agent's own request. A broadcast can still tell agents to quit.
+- Actions only the operator may take now require proof that they come from the AgentMux window
+- Tower puts memory first: AgentMux's total memory is always on screen, Memory is the first and the last column to go in every table, and tables sort by memory
+- fix(agents): a renamed agent's environment carries its former names, so gh-agent keeps the old name on its PRs
+- ci: a PR opened through the shared App fails the title check when its title and its last agent tag name different agents
+- A leader seat can accept or send back a Kanban task in Review when the operator tells it to in its own pane; the card says who accepted it and the operator can reopen it for a week
+- Jobs run under their policy: overlap (skip, buffer one, cancel the other), a timeout, retries of infrastructure failures with backoff, concurrency groups with deploys one at a time, and at most three unattended agent runs at once; task jobs file a Kanban task, and spawn jobs, which only the operator's host can create, open a worker
+- Pane history compression is now on by default; turn it off with agent:transcriptframes false
+- fix(jekt): a jekt from an agent whose own process attached no LAN signature (a Codex agent's) is now signed by srv at the origin, so it arrives lan-verified instead of network-claimed; receiver checks are unchanged
+- Ten generic starter job templates ship built in: weekly report, pull request review, nightly build, daily digest, dependency scan, docs drift, stale sweep, backup verify, on event and weekly status.
+- Jobs have spending caps, on by default: $5 a run, $20 a job a day and $50 an account a day, adjustable in Settings and lowered per job. A run starts only if its cap still fits the day's room, a run that reaches its cap is stopped, and a job over a daily cap or its messages a day is skipped with one alert a day.
+- ci: the title check requires the agent tag, and lets a renamed agent keep its new name when the Agent line has it
+- Skills: AgentMux no longer installs six starter skills nobody used, and removes them from existing installs when you never edited or bound them. A global skill now reaches only the agents and bundles it is bound to, so what an agent is given matches the count in its Skills tab.
+- Tower opens on a Memory view: AgentMux's total split into Core, Panes, Agents and what no pane claims, each opening to its processes
+- A routine message to an agent whose Claude session has been idle for about an hour is now held until that agent is next active, instead of waking it; pass urgent: true on Message (or name the task's #) to deliver it at once. The jekt:cold_hold_minutes setting changes the hour, and 0 turns the hold off
+- feat(agents): on Linux and macOS an agent's process tree runs at nice 10, so its builds yield to AgentMux (agent:belownormalpriority, which was Windows-only)
+- fix(security): a token's sender claim must be its own agent, and only the operator's window broadcasts as the user
+- Claude agents' sub-agents now run on cheaper models: general-purpose on Sonnet and Explore on Haiku, set by two Advanced settings (Sub-agent model, Explore sub-agent model) that can be set to inherit
+- A fresh session after an account switch or upgrade no longer gets Global Memory a second time in its catch-up message when its startup file already carries it, only Personal Memory
+- A message sent to a Codex, Kimi, Antigravity or Qwen agent by another agent, a broadcast or a schedule now shows in that agent's pane as an incoming turn, as it does for a Claude agent
+- A leader's note that a worker finished a turn without reporting, and the Kanban note that the operator is following an agent's work, now wait for the agent's next turn when its session has been idle for about an hour, instead of waking it
+- The main window now reopens where you left it, and maximized if it was, after a quit, a crash or an upgrade (Windows).
+- Split Up and Split Left are gone from the pane menus, the command palette and the keyboard shortcuts; Split Down and Split Right stay
+- A Global Memory save by an agent is recorded under that agent's name, never as the person at the window, and a request can't write Global Memory as another agent
+- Checking for updates no longer fails with 403 when this computer has used GitHub's hourly allowance for anonymous requests: the latest release is read from its web page, the details are asked for only when there is something new, and if GitHub still limits the check the message says when to try again. The Kanban's PR check also asks less of that allowance.
+- Right-click menus can show an icon beside each item (the groundwork; the menus get their icons in the next releases)
+- Registering on the message bus, and reading or deleting its inbox over HTTP, now needs the token of the agent being named
+- fix(agent-pane): dropped tool chunks are logged once per burst per pane, not once per chunk (a pane mounting logged ~1400 lines in 2 s)
+- fix(agent-pane): a pane that mounts keeps the live-log lines of a running tool: tool chunks replayed before the history made its node are held and applied, not dropped
+- The Warden Jobs tab can now create, edit and clone jobs, make one from an approved template, show a dry run (the brief, the next five fire times, the caps and what it declares) and offer a template's newer version with a diff to accept
+- Reading or writing an agent's memory, accounts and presets over HTTP now needs that agent's token, instead of trusting the agent_id in the request
+- A LAN jekt whose sender's UID claim doesn't hold up is marked as failing verification, and a WAN instance is treated as revoked only when its signed revocation checks out
+- The headless srv container image can now be built for arm64 on an x86 machine: it is cross-compiled instead of compiled under emulation, and CI smoke-tests both architectures.
+- fix(widgets): opening a web page from a widget needs the new `links:open` permission (shown in the install prompt); a widget's frame can no longer navigate outside its own package or show alert, confirm or prompt dialogs
+- A WAN message for an agent name that is pinned to another install of your account fails verification: the first install seen speaking for a name on a channel is pinned, and a later message from a different install for it is refused until the pin is moved
+- A window tab's content no longer freezes on an older tab after an error in a transcript row: rows handle their own errors, a watchdog shows the right tab (or offers a reload), and Swarm panes nobody can see stop rebuilding
+- The pane, browser, agent, composer, shell-drawer and doc-tab right-click menus now show an icon beside each item
+- Removing a Global Memory entry is now recorded under the agent or window that did it, and can be undone from the entry's history
+- The work queue and jobs routes now act only for the agent whose token the request carries; a request with no token is refused instead of being taken as the operator or as whoever the body names
+- fix(security): the host's ipc-port file is created readable by its owner only (it was readable by every local user on Linux)
+- Hardening: a browser pane can no longer open AgentMux's own pages, and the window's startup log no longer records its credentials.
+- The bundle import preview shows each skill's full text before you import it, and a skill too long to show whole starts unticked
+- Right-click menus in the Files pane, the code editor's file tree and the Remotes list now show an icon beside each action.
+- The title bar, widget bar, tab and widget-picker right-click menus now show an icon beside each action; the tab menu's emoji are replaced by matching icons.
+- Right-click menus on the Swarm and Drone lists, MCP servers, accounts, the install log, the status bar's closed windows and the System Info pane now show an icon beside each action.
+- Settings > Paired devices lists the keys and installs pinned to agent names, shows what was refused beside each, and lets you accept the new one or forget the pin
+- Agents' cargo builds now really take the shared build slot, so only one heavy compile runs at a time on a machine (a cargo earlier on the PATH used to skip it), and a machine can allow two
+- fix(security): the host's ipc-port file no longer holds the token that proves a request comes from the operator's window; it holds a forwarding token that opens only a new window, raising a window and quitting
+- Tower's Memory view keeps the last hour: a line per part and row, a chart of the one you pick (10 minutes or the hour), the hour's change in the headline, and an amber note on what grows unusually
+- Presence claims and posts to a repository's channel are made as the agent whose token the request carries; a request with no token, or naming another agent, is refused
+- fix(security): the tray's Quit and the restart into a new version reach the host over the launcher's own pipe, so the token in the ipc-port file can only open and raise windows
+- Debug and test builds are about 14% faster and a little smaller: they keep file and line tables instead of full debug info (panic backtraces are unchanged)
+- A sleeping browser pane's wake estimate now uses how long its site usually takes to load, when the pane has no load time of its own.
+- Under memory pressure the biggest hidden browser pages now go to sleep first, and a sleeping pane's card says how much memory it freed.
+- The Codex review check passes a head on Codex's usage-limit notice even when that head was asked for twice
+- Memory → Global lists the entries that were removed, with who removed each and when, and a Restore puts one back
+- History compression no longer fails when two AgentMux instances compress the same history store at once: a busy store ends the pass and the next one carries on, and each frame leaves the lock free for the other instance.
+- An agent can write only its own transcript and session state over the WebSocket; other connections must be the AgentMux window
+
 ## 0.60.0 — 2026-10-24
 
 - Scheduled cron jobs: a fire that reaches no agent is recorded as a miss (Swarm shows "missed N · agent not running") instead of counting as a fire, and an agent can pause or delete only its own jobs or ones aimed at it

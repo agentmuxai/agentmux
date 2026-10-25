@@ -245,6 +245,14 @@ export type {
 } from "./session";
 export type {
     TowerMachine,
+    TowerMemory,
+    TowerMemoryChild,
+    TowerMemoryGrowth,
+    TowerMemoryHistory,
+    TowerMemoryPart,
+    TowerMemoryPartId,
+    TowerMemoryRow,
+    TowerMemorySeries,
     TowerPane,
     TowerPanes,
     TowerPaneTab,

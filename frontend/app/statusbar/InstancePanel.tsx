@@ -32,6 +32,7 @@ import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { formatUtcTimestamp } from "@/util/format-time";
 import { ObjectService, WindowService, type ClosedWindow } from "@/store/services";
 import { ContextMenuModel } from "@/app/store/contextmenu";
+import { MENU_ICON } from "@/app/util/menu-icons";
 import { removeClosedWindow, reopenClosedWindow, requestRemoveWindow } from "@/app/window/window-close";
 import { getObjectValue, makeORef } from "@/store/mos";
 import { liveWindowOpacity, setWindowOpacityFor } from "@/app/store/window-opacity-store";
@@ -720,7 +721,7 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                                 e.preventDefault();
                                 e.stopPropagation();
                                 ContextMenuModel.showContextMenu(
-                                    [{ label: "Remove from workspace", click: () => removeClosed(w) }],
+                                    [{ label: "Remove from workspace", icon: MENU_ICON.close, click: () => removeClosed(w) }],
                                     e
                                 );
                             }}

@@ -149,6 +149,8 @@ describe("operator proof", () => {
         for (const c of [
             "kanban.act",
             "jobs.act",
+            "jobs.save",
+            "jobs.templates.approve",
             "agent.setSeat",
             "identity.account.move_agents",
             "tower.sample",
@@ -156,10 +158,11 @@ describe("operator proof", () => {
             "jobs.templates.uninstall",
             "jobs.templates.catalog",
             "jobs.templates.catalog.install",
+            "fleet.broadcast",
         ]) {
             expect(isOperatorCommand(c)).toBe(true);
         }
-        for (const c of ["kanban.list", "kanban.task", "operator.challenge", "jobs.list"]) {
+        for (const c of ["kanban.list", "kanban.task", "operator.challenge", "jobs.list", "jobs.dryrun", "jobs.get"]) {
             expect(isOperatorCommand(c)).toBe(false);
         }
     });

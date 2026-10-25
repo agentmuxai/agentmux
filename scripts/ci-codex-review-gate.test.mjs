@@ -191,6 +191,38 @@ describe("Codex out of review quota", () => {
         expect(evaluateCodexGate({ headSha: HEAD, comments }).state).toBe("pending");
     });
 
+    it("passes the head when it was asked twice and one notice answered both", () => {
+        // An automatic ask, then a manual re-review of the same head, then one
+        // usage-limit notice: it is the same request, so the notice answers it.
+        const comments = [
+            trigger(HEAD, "2026-10-25T02:23:56Z"),
+            trigger(HEAD, "2026-10-25T13:38:17Z"),
+            quotaComment("2026-10-25T13:38:33Z"),
+        ];
+        const r = evaluateCodexGate({ headSha: HEAD, comments });
+        expect(r.state).toBe("success");
+        expect(r.description).toMatch(/quota/);
+    });
+
+    it("takes an abbreviated repeat of the head for the same request", () => {
+        const comments = [
+            trigger(HEAD, "2026-10-25T02:23:56Z"),
+            trigger(HEAD.slice(0, 10), "2026-10-25T13:38:17Z"),
+            quotaComment("2026-10-25T13:38:33Z"),
+        ];
+        expect(evaluateCodexGate({ headSha: HEAD, comments }).state).toBe("success");
+    });
+
+    it("still stays pending when another head was asked too", () => {
+        const comments = [
+            trigger(OLD, "2026-10-25T02:23:56Z"),
+            trigger(HEAD, "2026-10-25T02:30:00Z"),
+            trigger(HEAD, "2026-10-25T13:38:17Z"),
+            quotaComment("2026-10-25T13:38:33Z"),
+        ];
+        expect(evaluateCodexGate({ headSha: HEAD, comments }).state).toBe("pending");
+    });
+
     it("lets an answer close only its own request (Codex P1 on #3589, second)", () => {
         // findings(OLD) answers only OLD, so the quota notice answers HEAD alone.
         const comments = [
@@ -425,7 +457,7 @@ const skipComment = (sha, { login = SKIP_AUTHOR, created = "2026-09-30T10:00:00Z
     ...(updated ? { updated_at: updated } : {}),
     body:
         `Codex not asked about \`${sha.slice(0, 10)}\`: out of review quota until 11:00 UTC. Comment ` +
-        "`@reagentx-workflow codex re-review` to try sooner.\n" +
+        "`@muxreview codex re-review` to try sooner.\n" +
         `<!-- reagent:codex-skipped reason=quota head=${sha} -->`,
 });
 
@@ -443,11 +475,16 @@ describe("muxreview quota skip marker", () => {
         }
     });
 
-    // The App was renamed reagentx-workflow -> muxreview on 2026-10-07.
-    it("counts the marker from the renamed App and from its old login", () => {
-        for (const login of ["muxreview[bot]", "reagentx-workflow[bot]"]) {
+    it("counts the marker from the App's own login only", () => {
+        const r = evaluateCodexGate({ headSha: HEAD, comments: [skipComment(HEAD, { login: "muxreview[bot]" })] });
+        expect(r.state).toBe("success");
+    });
+
+    // A name the App used before a rename can be registered by anyone.
+    it("does not count the marker from the App's old names", () => {
+        for (const login of ["reagentx-workflow[bot]", "reagentx-workflow", "reagent-bot"]) {
             const r = evaluateCodexGate({ headSha: HEAD, comments: [skipComment(HEAD, { login })] });
-            expect(r.state).toBe("success");
+            expect(r.state).toBe("pending");
         }
     });
 
@@ -515,7 +552,7 @@ describe("muxreview quota skip marker", () => {
 // and on docs-only PRs, with the same note and a different reason.
 describe("muxreview skip reasons", () => {
     const note = (reason, sha = HEAD) => ({
-        user: { login: "reagentx-workflow[bot]" },
+        user: { login: "muxreview[bot]" },
         created_at: "2026-10-01T12:00:00Z",
         body: `Codex not asked about \`${sha.slice(0, 10)}\`: x.\n\n<!-- reagent:codex-skipped reason=${reason} head=${sha} -->`,
     });

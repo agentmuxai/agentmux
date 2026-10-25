@@ -1043,15 +1043,15 @@ impl AgentMuxHandler {
 
     /// An app window's main frame shows only the frontend
     /// (`app_navigation.rs`): another website opens in the system browser
-    /// instead of replacing the app, a local file is refused. Subframes are
-    /// left alone. Returns 1 to cancel.
+    /// instead of replacing the app, a local file is refused. A widget's
+    /// subframe stays on its package (`refuse_subframe_navigation`). Returns 1 to cancel.
     fn guard_app_window_navigation(
         &self,
         frame: Option<&mut Frame>,
         request: Option<&mut Request>,
     ) -> ::std::os::raw::c_int {
         if !frame.as_ref().is_some_and(|f| f.is_main() == 1) {
-            return 0;
+            return super::app_navigation::refuse_subframe_navigation(frame, request).into();
         }
         let url = request
             .as_ref()
@@ -1165,7 +1165,7 @@ impl AgentMuxHandler {
         let is_main_frame = frame.as_ref().map(|f| f.is_main() == 1).unwrap_or(false);
         // Off an agent's site list: cancelled before anything below marks the
         // pane as loading (client/allowed_origins.rs).
-        if is_main_frame && browser.as_deref().is_some_and(|b| self.stop_off_list_navigation(b, &url)) {
+        if is_main_frame && browser.as_deref().is_some_and(|b| self.stop_frontend_navigation(b, &url) || self.stop_off_list_navigation(b, &url)) {
             return 1;
         }
         if is_main_frame {

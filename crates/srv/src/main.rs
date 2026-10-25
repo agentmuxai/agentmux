@@ -42,6 +42,9 @@ use std::sync::Arc;
 use server::build_routers;
 
 fn main() {
+    // Before anything is spawned or any thread exists: the launcher's secrets leave
+    // the environment, so no child inherits them and /proc/<pid>/environ shows none.
+    agentmux_common::secret_env::stash_startup_secrets();
     // Linux (glibc): cap malloc arenas before any thread exists, so the runtime's
     // workers below share them (malloc_arenas.rs).
     #[cfg(all(target_os = "linux", target_env = "gnu"))]
@@ -179,6 +182,7 @@ async fn app_main() {
     // before `cron_scheduler.start()` below, so no fire takes the HTTP
     // fallback.
     bootstrap::install_cron_delivery(&state);
+    server::job_actions::install(&state);
 
     // Durable jekt: replay messages held for an agent that was not running
     // (SPEC_DURABLE_JEKT_DELIVERY_2026_09_24.md).
@@ -217,6 +221,22 @@ async fn app_main() {
         Some(state.mstore.clone()),
         state.broker.clone(),
     );
+    // A `spawn` job's worker is closed when its run ends: its tab goes, so it
+    // doesn't count against the leader's worker limit for the next run.
+    let worker_state = state.clone();
+    run_ledger.install_worker_stop(std::sync::Arc::new(move |block_id: &str| {
+        sagas::pending_shutdown::request(
+            &worker_state,
+            block_id,
+            "jobs",
+            "JobWorker",
+            "its run ended",
+            sagas::pending_shutdown::Action::CloseTab { detail: "a job's worker, its run ended".to_string() },
+        );
+    }));
+    // Runs are weighed against Settings' spending caps before they start, and
+    // stopped when they reach their own (jobs spec §5.3).
+    server::job_caps::install(&state, &run_ledger);
     // A failing job opens one incident for its owner (jobs spec §3.4).
     run_ledger.install_incidents(server::cron::jobs_store(&state));
     {
@@ -377,6 +397,7 @@ async fn app_main() {
         state.srv_events_tx.subscribe(),
         Arc::clone(&state.mstore),
         Arc::clone(&state.filestore),
+        Arc::clone(&state.config_watcher),
     );
     let routers = build_routers(state);
     let router = routers.full;

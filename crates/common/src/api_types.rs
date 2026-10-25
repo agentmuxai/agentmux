@@ -409,6 +409,11 @@ pub struct InjectRequest {
     /// signature (`agentmux_common::jekt_files`). Absent on a text-only jekt.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub files: Option<Vec<crate::jekt_files::JektFile>>,
+    /// `urgent` when the sender wants it delivered now even to a session that
+    /// has been idle (`Message` `urgent: true`); absent otherwise. Not part of
+    /// any signature: it only skips a wait.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub priority: Option<String>,
 }
 
 // ── Pane ──────────────────────────────────────────────────────────────────────
@@ -647,7 +652,7 @@ pub struct UiRunCommandRequest {
     pub auth: UiAutomationAuth,
     /// A command id from `ListShortcuts` (`split:right`, `files:refresh`).
     pub command: String,
-    /// A pane in the active tab to focus first; absent = the focused pane.
+    /// Your own pane, or a browser pane you opened, to focus first; absent = your own pane.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<String>,
 }
@@ -660,7 +665,7 @@ pub struct UiPressKeysRequest {
     /// A key from `ListShortcuts`' `raw` list, in the table's syntax
     /// (`ctrl+shift+d`; a chord is two keys separated by a space).
     pub keys: String,
-    /// A pane in the active tab to focus first; absent = the focused pane.
+    /// Your own pane, or a browser pane you opened, to focus first; absent = your own pane.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<String>,
 }

@@ -10,7 +10,8 @@
 //! [`Caller::Unattributed`] — the UI, `bashwrap`, `muxsh`, a tokenless agent,
 //! a peer srv. **This is attribution, never authorization:** at the same-user
 //! boundary a request that omits its token cannot be told apart from the UI
-//! (§6.5.1), so nothing here refuses a request. An unknown or foreign-channel
+//! (§6.5.1), so nothing here refuses a request; the routes that act for an
+//! agent refuse one without a token themselves (`agent_only`). An unknown or foreign-channel
 //! token is counted and treated as absent — an agent deleted while running,
 //! or a token that reached another channel's srv through a forwarded
 //! environment, keeps working exactly as before.

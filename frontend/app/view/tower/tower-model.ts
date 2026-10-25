@@ -8,7 +8,13 @@
 
 import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
 import { remotesList } from "@/app/store/remotes-store";
-import { RpcApi, type TowerPeerInfo, type TowerProcessKind, type TowerSnapshot } from "@/app/store/rpc-api";
+import {
+    RpcApi,
+    type TowerMemoryHistory,
+    type TowerPeerInfo,
+    type TowerProcessKind,
+    type TowerSnapshot,
+} from "@/app/store/rpc-api";
 import type { RemoteRecord } from "@/app/store/rpc-api/remotes";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { readZoom } from "@/app/store/zoom-factor";
@@ -31,6 +37,9 @@ import {
 /** A sample with no CPU rates yet (the first one) is followed up this soon,
  *  instead of a whole interval of dashes. */
 const FIRST_RATE_DELAY_MS = 1000;
+/** The last hour of memory moves slowly (a point every 10 s) and is large:
+ *  ask for it this often, not with every sample. */
+const MEMORY_HISTORY_EVERY_MS = 10_000;
 const RETRY_DELAY_MS = 5000;
 /** Another machine's first answer may wait on ssh asking the user something,
  *  or on installing the helper there. */
@@ -102,6 +111,20 @@ export class TowerViewModel {
     kindFilter: Accessor<TowerProcessKind | "">;
     /** The list grouped by type has opened its busiest kinds once. */
     kindsOpened = false;
+    /** The Memory view has opened its busiest part once. */
+    memoryOpened = false;
+    /** The last hour of AgentMux's memory, from srv's ledger, refreshed every
+     *  10 s; `null` before the first answer. */
+    memoryHistory: Accessor<TowerMemoryHistory | null>;
+    private setMemoryHistory: Setter<TowerMemoryHistory | null>;
+    /** When it was last asked for, ms. */
+    private memoryHistoryAt = 0;
+    /** What the Memory view charts: `total`, `part:<id>` or a row's key. */
+    memoryChart: Accessor<string>;
+    setMemoryChart: Setter<string>;
+    /** How much of the hour the chart shows. */
+    memoryWindow: Accessor<"10m" | "1h">;
+    setMemoryWindow: Setter<"10m" | "1h">;
     /** The Agents view's tree shows CPU time and peak memory too. */
     moreColumns: Accessor<boolean>;
     viewName: Accessor<string>;
@@ -120,7 +143,7 @@ export class TowerViewModel {
     private inFlight: Promise<void> = Promise.resolve();
     /** The machine `inFlight` asks (`""` for this computer). */
     private inFlightFor = "";
-    private lastStart: [boolean, string, string, boolean] | undefined;
+    private lastStart: [boolean, string, string, boolean, boolean] | undefined;
     /** The machine that failed and waits for Retry. */
     private stalledFor: string | null = null;
     private setStalled: Setter<boolean>;
@@ -136,7 +159,14 @@ export class TowerViewModel {
         // "host" is what the Processes view was called until 2026-10-10.
         this.view = createMemo<TowerView>(() => {
             const v = ctx.meta()?.["tower:view"];
-            return v === "processes" || v === "host" ? "processes" : v === "panes" ? "panes" : "agents";
+            // Memory is the default (SPEC_TOWER_MEMORY_FIRST_AND_AGENTMUX_BREAKDOWN_2026_10_25.md §4).
+            return v === "processes" || v === "host"
+                ? "processes"
+                : v === "panes"
+                  ? "panes"
+                  : v === "agents"
+                    ? "agents"
+                    : "memory";
         });
         this.connection = createMemo(() => {
             const c = ctx.meta()?.["tower:connection"];
@@ -146,9 +176,14 @@ export class TowerViewModel {
         // Another AgentMux computer has panes, so it has tasks too; an SSH host
         // or WSL distribution has only processes.
         this.hasTasks = () => !this.remote() || this.connection().startsWith("peer:");
-        // The Panes view is this computer's AgentMux only (SPEC_TOWER_PANES_VIEW_2026_10_21.md §6.4).
+        // The Panes and Memory views are this computer's AgentMux only
+        // (SPEC_TOWER_PANES_VIEW_2026_10_21.md §6.4, the memory spec §4).
         this.effectiveView = createMemo<TowerView>(() =>
-            !this.hasTasks() ? "processes" : this.remote() && this.view() === "panes" ? "agents" : this.view()
+            !this.hasTasks()
+                ? "processes"
+                : this.remote() && (this.view() === "panes" || this.view() === "memory")
+                  ? "agents"
+                  : this.view()
         );
         this.selected = createMemo(() => {
             const v = ctx.meta()?.["tower:agent"];
@@ -163,6 +198,9 @@ export class TowerViewModel {
             return RAIL_SORTS.includes(v as RailSort) ? (v as RailSort) : "pane";
         });
         [this.history, this.setHistory] = createSignal<ReadonlyMap<string, readonly HistoryPoint[]>>(new Map());
+        [this.memoryHistory, this.setMemoryHistory] = createSignal<TowerMemoryHistory | null>(null);
+        [this.memoryChart, this.setMemoryChart] = createSignal("total");
+        [this.memoryWindow, this.setMemoryWindow] = createSignal<"10m" | "1h">("1h");
         this.remotes = remotesList();
         [this.peers, this.setPeers] = createSignal<TowerPeerInfo[]>([]);
         void this.refreshPeers();
@@ -234,7 +272,7 @@ export class TowerViewModel {
                     // ssh and ask about installing again.
                     if (connection && this.stalledFor === connection) return;
                     this.stalledFor = null;
-                    if (visible) this.start(view === "processes", connection, filter, view === "panes");
+                    if (visible) this.start(view === "processes", connection, filter, view === "panes", view === "memory");
                 }
             )
         );
@@ -256,7 +294,7 @@ export class TowerViewModel {
                   ? ""
                   : undefined;
         this.setMeta({
-            "tower:view": view === "agents" ? null : view,
+            "tower:view": view === "memory" ? null : view,
             ...(carried !== undefined ? { "tower:only": carried || null } : {}),
         });
     }
@@ -425,9 +463,10 @@ export class TowerViewModel {
         this.start(...last);
     }
 
-    private start(host: boolean, connection: string, filter: string, panes = false): void {
+    private start(host: boolean, connection: string, filter: string, panes = false, memory = false): void {
         const gen = ++this.generation;
-        this.lastStart = [host, connection, filter, panes];
+        this.lastStart = [host, connection, filter, panes, memory];
+        this.memoryHistoryAt = 0;
         this.setStalled(false);
         // At most one request in flight: a new one (another filter, say)
         // waits for the last to answer. Another machine's helper measures CPU
@@ -436,7 +475,7 @@ export class TowerViewModel {
         // waiting on a password) mustn't hold up this one.
         const wait = this.inFlightFor === connection ? this.inFlight : Promise.resolve();
         void wait.then(() => {
-            if (gen === this.generation) this.poll(gen, host, connection, filter, panes);
+            if (gen === this.generation) this.poll(gen, host, connection, filter, panes, memory);
         });
     }
 
@@ -446,14 +485,29 @@ export class TowerViewModel {
         this.timer = undefined;
     }
 
-    private poll(gen: number, host: boolean, connection: string, filter: string, panes = false): void {
+    private poll(
+        gen: number,
+        host: boolean,
+        connection: string,
+        filter: string,
+        panes = false,
+        memory = false
+    ): void {
+        // The hour comes with the first Memory sample, then every 10 s.
+        const wantHistory = memory && !connection && Date.now() - this.memoryHistoryAt >= MEMORY_HISTORY_EVERY_MS;
+        if (wantHistory) this.memoryHistoryAt = Date.now();
         const request = connection
             ? RpcApi.TowerSampleCommand(
                   TabRpcClient,
                   { host: host || !connection.startsWith("peer:"), connection, filter, block_id: this.blockId },
                   { timeout: REMOTE_TIMEOUT_MS }
               )
-            : RpcApi.TowerSampleCommand(TabRpcClient, { host, ...(panes ? { panes } : {}) });
+            : RpcApi.TowerSampleCommand(TabRpcClient, {
+                  host,
+                  ...(panes ? { panes } : {}),
+                  ...(memory ? { memory } : {}),
+                  ...(wantHistory ? { memory_history: true } : {}),
+              });
         this.inFlightFor = connection;
         this.inFlight = request.then(
             () => undefined,
@@ -461,12 +515,19 @@ export class TowerViewModel {
         );
         const again = (delay: number) => {
             if (gen === this.generation) {
-                this.timer = setTimeout(() => this.poll(gen, host, connection, filter, panes), delay);
+                this.timer = setTimeout(() => this.poll(gen, host, connection, filter, panes, memory), delay);
             }
         };
         request.then(
             (snap) => {
                 if (gen !== this.generation) return;
+                // The hour is kept apart from the snapshot, which is merged on every
+                // sample: it changes every 10 s and is large.
+                const hour = snap.memory?.history;
+                if (hour && snap.memory) {
+                    this.setMemoryHistory(hour);
+                    snap = { ...snap, memory: { ...snap.memory, history: undefined } };
+                }
                 this.setSnapshot(snap);
                 this.setError(null);
                 again(hasNoRatesYet(snap) ? FIRST_RATE_DELAY_MS : snap.interval_ms);

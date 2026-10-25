@@ -18,6 +18,7 @@
 #![allow(dead_code, unused_imports)]
 
 mod atomic;
+mod complete_enumeration;
 mod def_migrate;
 mod def_record_lock;
 mod def_schema;
@@ -48,6 +49,7 @@ pub use paths::{
 // migrations/runner.rs must call this directly instead of deriving `home`
 // from resolve_shared_store_path()'s (isolation-aware) return value.
 pub(crate) use paths::resolve_global_shared_root;
+pub use complete_enumeration::enumerate_objects_dbs_complete;
 pub use def_migrate::{migrate_definitions_global_once, DefMigrateStats};
 pub use def_schema::{
     DefContentBlob, DefSkillBlob, DefValidationError, DefinitionRecord, DefinitionRecordV1,

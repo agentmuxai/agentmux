@@ -34,6 +34,9 @@ fn ids_versions_and_permissions_are_checked() {
     assert!(!valid_id("Acme.x") && !valid_id("acme") && !valid_id("a.b.c") && !valid_id("acme."));
     assert!(valid_semver("1.2.0") && valid_semver("1.2.0-beta.1") && !valid_semver("1.2"));
     assert!(valid_permission("storage") && valid_permission("net:https://api.github.com"));
+    // `ui.openUrl` needs its own permission; a near-miss name is not one.
+    assert!(valid_permission("links:open"));
+    assert!(!valid_permission("links") && !valid_permission("links:open:any") && !valid_permission("openUrl"));
     assert!(valid_permission("net:https://*.example.com") && valid_permission("net:http://127.0.0.1:8188"));
     assert!(!valid_permission("net:https://*") && !valid_permission("net:https://a.com/path"));
     assert!(!valid_permission("net:ftp://a.com") && !valid_permission("everything"));

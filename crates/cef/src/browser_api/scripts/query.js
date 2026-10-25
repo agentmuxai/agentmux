@@ -89,8 +89,14 @@
   // dispatches at a centroid that could land inside any of those panes.
   // A container is only genuinely "shared chrome" if none of its OWN
   // descendants belong to a different block either.
+  //
+  // Never allowed either: a prompt addressed to the operator, marked
+  // [data-operator-only] (an approval, a grant, a "use this secret"). Its
+  // answer is recorded as the operator's, so an agent can neither read nor press
+  // it, and neither can it take something that CONTAINS one (the page body).
   window.__amq_allowed_for = (el, blockId) => {
     if (!blockId) return true;
+    if (el.closest('[data-operator-only]') || el.querySelector('[data-operator-only]')) return false;
     const owner = el.closest('[data-blockid]');
     if (owner) {
       return owner.getAttribute('data-blockid') === blockId;
@@ -116,7 +122,17 @@
     // would look like a successful call that does nothing.
     el.scrollIntoView({ block: 'center', inline: 'center' });
     const r = el.getBoundingClientRect();
-    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+    const x = r.x + r.width / 2;
+    const y = r.y + r.height / 2;
+    // On the shared page, a real click lands on whatever is on top at that
+    // point. If that is not the element (a dialog or its backdrop drawn over
+    // it, a prompt for the operator), the click would press something the
+    // allowed check never looked at: refuse it.
+    if (blockId) {
+      const top = document.elementFromPoint(x, y);
+      if (!top || !el.contains(top)) return { covered: true };
+    }
+    return { x, y };
   };
 
   // Boxes of what an agent may never capture ([data-agent-hidden]: the

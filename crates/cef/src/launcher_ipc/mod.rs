@@ -285,6 +285,15 @@ pub async fn connect_to_launcher(
                             // silence IS the signal.
                             crate::ui_tasks::post_probe_ui_thread_reply(nonce);
                         }
+                        Ok(HostFrame::Command(Command::QuitApp)) => {
+                            // The tray's Quit / the agreed upgrade restart. Not a saga command.
+                            let state = std::sync::Arc::clone(&state_for_reader);
+                            tokio::task::spawn_blocking(move || {
+                                if let Err(e) = crate::commands::window::quit_app(&state) {
+                                    tracing::warn!("[launcher-ipc] QuitApp: {e}");
+                                }
+                            });
+                        }
                         Ok(HostFrame::Command(Command::NotifySrvLatency { level, avg_ms })) => {
                             // Not a saga command: a display-only signal the launcher
                             // derives from its srv health probes (analysis §8.2).
@@ -501,6 +510,15 @@ pub async fn connect_to_launcher(
                             // task never executes and no reply is sent —
                             // silence IS the signal.
                             crate::ui_tasks::post_probe_ui_thread_reply(nonce);
+                        }
+                        Ok(HostFrame::Command(Command::QuitApp)) => {
+                            // The tray's Quit / the agreed upgrade restart. Not a saga command.
+                            let state = std::sync::Arc::clone(&state_for_reader);
+                            tokio::task::spawn_blocking(move || {
+                                if let Err(e) = crate::commands::window::quit_app(&state) {
+                                    tracing::warn!("[launcher-ipc] QuitApp: {e}");
+                                }
+                            });
                         }
                         Ok(HostFrame::Command(Command::NotifySrvLatency { level, avg_ms })) => {
                             // Not a saga command: a display-only signal the launcher

@@ -3,9 +3,9 @@
 
 /**
  * BundleSkillsSection — the "Skills" section of the Bundle editor's detail
- * view. Binding an existing global skill is offered but has no effect on an
- * agent (a global already reaches every agent); adding a private skill is
- * the functional path (see BundleSkillModel's doc comment).
+ * view. Binding an existing global skill gives it to every agent with the
+ * bundle; adding a private skill gives the bundle a skill of its own (see
+ * BundleSkillModel's doc comment).
  *
  * Deliberately a flat inline list, not a nested PrimitiveListDetail — this
  * section already lives inside the bundle's own detail pane (itself one side
@@ -90,9 +90,9 @@ export const BundleSkillsSection = (props: BundleSkillsSectionProps): JSX.Elemen
                 </ul>
             </Show>
             <p class="bundle-primitive-section-caveat">
-                Binding an existing global skill here has no effect on a spawned agent
-                — it's already applied to every agent regardless of bundle binding. Add a
-                new private skill below to give this bundle its own skill.
+                Binding a global skill here gives it to every agent with this bundle. A
+                global skill nothing is bound to reaches no agent. Add a new private skill
+                below to give this bundle its own skill.
             </p>
             <form class="bundle-primitive-section-add" onSubmit={handleAdd}>
                 <input

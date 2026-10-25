@@ -50,6 +50,7 @@ import { copyIntoWorkdir, type CopySource } from "@/app/drag/file-drop-actions";
 import type { AttachmentRef } from "@/types/rpc/AttachmentRef";
 import { shortcutFor } from "@/app/keybindings";
 import { META_SUGGESTION, META_SUGGESTION_GEN } from "@/app/store/meta-keys";
+import { MENU_ICON } from "@/app/util/menu-icons";
 
 function pickThinkingPhrase(_exclude?: string): string {
     return "Working";
@@ -1078,6 +1079,7 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
     const composerUndoItems = (): ContextMenuItem[] => [
         {
             label: "Undo",
+            icon: MENU_ICON.undo,
             enabled: escClearedDraft != null || (textareaRef?.value.length ?? 0) > 0,
             click: undoComposer,
         },

@@ -4,8 +4,9 @@
 //! The framer: compresses finished parts of the shared transcript store into
 //! frames (SPEC_HISTORY_STORE_COMPRESSION_AND_COMPACTION_2026_10_21.md §5).
 //!
-//! Off unless `agent:transcriptframes` is `true`. Every srv whose own setting
-//! is on runs it (settings are per channel, so no one srv's speaks for the
+//! On unless `agent:transcriptframes` is `false` (the operator's call,
+//! 2026-10-25: on by default, the setting stays as the way out). Every srv whose
+//! own setting is on runs it (settings are per channel, so no one srv's speaks for the
 //! machine); each frame is one transaction that checks its parts first, so
 //! two srvs framing at once never conflict. Before each pass it checks that **every** running `agentmux-srv` has said
 //! it reads frames, in a file under `readers/` beside the store (written by
@@ -27,7 +28,7 @@ use std::sync::{Arc, OnceLock};
 use crate::backend::storage::error::StoreError;
 use crate::backend::storage::filestore::{FileStore, FrameOutcome, CODEC_DELTAS, CODEC_ZSTD, FRAME_PARTS};
 
-/// `agent:transcriptframes`: compress the shared transcript store. Off unless `true`.
+/// `agent:transcriptframes`: compress the shared transcript store. On unless `false`.
 pub const SETTING_FRAMES: &str = "agent:transcriptframes";
 /// `agent:transcriptdeltas`: with frames on, also store the streaming deltas as
 /// uuid and length (codec 2). On unless `false`.
@@ -41,6 +42,8 @@ const MARGIN_BYTES: i64 = 8 << 20;
 const MARGIN_MS: i64 = 24 * 60 * 60 * 1000;
 /// Frames written per pass, so a pass stays short (about 64 MiB).
 pub const PASS_FRAMES: usize = 64;
+/// The wait after each frame, so another srv's writes get the lock between frames.
+const FRAME_PAUSE: std::time::Duration = std::time::Duration::from_millis(40);
 /// The frame codecs this build reads, written in its readers file.
 const READS_CODECS: [i64; 2] = [CODEC_ZSTD, CODEC_DELTAS];
 
@@ -51,9 +54,14 @@ pub fn install_config(config: Arc<crate::backend::wconfig::ConfigState>) {
     let _ = CONFIG.set(config);
 }
 
-/// Whether the framer runs (`agent:transcriptframes`).
+/// Whether the framer runs (`agent:transcriptframes`): unset means on, only an
+/// explicit `false` turns it off.
 pub fn enabled() -> bool {
-    CONFIG.get().and_then(|c| c.extra_bool(SETTING_FRAMES)).unwrap_or(false)
+    on_unless_false(CONFIG.get().and_then(|c| c.extra_bool(SETTING_FRAMES)))
+}
+
+fn on_unless_false(setting: Option<bool>) -> bool {
+    setting.unwrap_or(true)
 }
 
 fn deltas_enabled() -> bool {
@@ -191,6 +199,9 @@ pub struct PassReport {
     pub waiting: Option<String>,
     /// Every eligible part is framed (no more work until transcripts grow).
     pub done: bool,
+    /// The pass stopped early because another srv held the store's write lock
+    /// past the busy timeout; the next pass picks up where this one left off.
+    pub busy: bool,
 }
 
 /// The receive time of the line holding byte `offset` of a transcript, from
@@ -219,9 +230,43 @@ fn pass_with(
     now_ms: i64,
 ) -> Result<PassReport, StoreError> {
     let mut report = PassReport::default();
+    match pass_into(store, blocks, budget, skip, now_ms, &mut report) {
+        Ok(()) => Ok(report),
+        // Another srv held the store's write lock past the busy timeout (a loaded
+        // machine, or a long run of frames from the other srv). Nothing is lost:
+        // what this pass framed stays framed, and the next pass carries on.
+        Err(e) if is_busy(&e) => {
+            tracing::debug!(error = %e, frames = report.frames, "framer: the store is busy; the next pass carries on");
+            report.busy = true;
+            report.done = false;
+            Ok(report)
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// A store error that means "another connection holds the lock", not "something broke".
+fn is_busy(e: &StoreError) -> bool {
+    matches!(
+        e,
+        StoreError::Sqlite(rusqlite::Error::SqliteFailure(f, _))
+            if matches!(f.code, rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked)
+    )
+}
+
+/// The body of [`pass_with`], filling `report` as it goes so a pass that fails
+/// part-way still reports the frames it wrote.
+fn pass_into(
+    store: &FileStore,
+    blocks: &dyn Fn() -> Option<String>,
+    budget: usize,
+    skip: &mut HashSet<(String, i32)>,
+    now_ms: i64,
+    report: &mut PassReport,
+) -> Result<(), StoreError> {
     if let Some(who) = blocks() {
         report.waiting = Some(who);
-        return Ok(report);
+        return Ok(());
     }
     // Stamp first, then look again: a build that opened the store before the
     // stamp is a running process now, and one that starts after it refuses
@@ -229,7 +274,7 @@ fn pass_with(
     store.stamp_frames_version()?;
     if let Some(who) = blocks() {
         report.waiting = Some(who);
-        return Ok(report);
+        return Ok(());
     }
     let codec = if deltas_enabled() { CODEC_DELTAS } else { CODEC_ZSTD };
     let pds = 65536i64;
@@ -267,13 +312,18 @@ fn pass_with(
                 }
             }
             if report.frames >= budget {
-                return Ok(report);
+                return Ok(());
             }
+            // Between frames, with no lock held: SQLite's busy wait is a sleep and
+            // retry, not a queue, so a writer that frames back to back keeps the
+            // lock from another srv's writes (and its framer) for as long as it
+            // runs, past their busy timeout.
+            std::thread::sleep(FRAME_PAUSE);
             first += step;
         }
     }
     report.done = true;
-    Ok(report)
+    Ok(())
 }
 
 #[cfg(test)]

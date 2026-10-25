@@ -41,6 +41,7 @@ import { onMuxEvent } from "@/app/store/mps";
 import { PROVIDERS } from "@/app/view/agent/providers";
 import type { Bundle, GlobalMemoryVersionMeta } from "@/app/store/rpc-api";
 import type { GlobalMemorySection } from "@/types/rpc/GlobalMemorySection";
+import type { GlobalMemoryRemovedEntry } from "@/types/rpc/GlobalMemoryRemovedEntry";
 import { MemoryDraftModel } from "@/app/view/memory-editor/memory-draft-model";
 import type { MemoryHistorySource } from "@/app/view/memory-editor/memory-history-model";
 import { sha256Hex } from "@/util/sha256";
@@ -79,6 +80,11 @@ export function globalMemoryHistorySource(id: string): MemoryHistorySource<Globa
         revert: (versionId) =>
             RpcApi.GlobalMemoryRevertCommand(TabRpcClient, { id, target_version_id: versionId }).then(() => undefined),
     };
+}
+
+/** Who removed an entry, for the person: the window is them. */
+export function removedByLabel(removedBy: string): string {
+    return removedBy === "armory-ui" ? "you" : removedBy;
 }
 
 /** UTF-8 byte length — the "size" on an entry tile. */
@@ -191,6 +197,12 @@ export class GlobalBundleViewModel {
 
     /** The one draft for whatever entry is open (or being created). */
     readonly draft: MemoryDraftModel<GlobalMemoryDraft>;
+
+    /** Entries taken out of Global Memory and not restored, most recently
+     *  removed first: each is offered a Restore. */
+    private _removed = createSignal<GlobalMemoryRemovedEntry[]>([]);
+    removedAtom: Accessor<GlobalMemoryRemovedEntry[]> = this._removed[0];
+    private setRemoved = this._removed[1];
 
     /** Bumped on every refresh, so an open full view can reload its history
      *  in place when the entry changes underneath it. */
@@ -381,6 +393,7 @@ export class GlobalBundleViewModel {
             this.setError(null);
             this.setRefreshNonce((n) => n + 1);
             void this.fetchDelivered();
+            void this.fetchRemoved(requestId);
             // The open entry may have changed underneath its view: hand the
             // new content to the draft model, which updates silently when
             // there's no unsaved draft and raises the banner (only on a real
@@ -391,6 +404,31 @@ export class GlobalBundleViewModel {
         } catch (e) {
             if (requestId !== this.latestRefreshId) return;
             this.setError(`Failed to load global bundles: ${(e as Error).message ?? e}`);
+        }
+    }
+
+    /** Fetches the removed entries. A failure leaves the last list rather
+     *  than raising `errorAtom`: the live entries still load and edit. A reply
+     *  for an older refresh is dropped. */
+    private async fetchRemoved(requestId: number): Promise<void> {
+        try {
+            const res = await RpcApi.GlobalMemoryRemovedCommand(TabRpcClient);
+            if (requestId === this.latestRefreshId) this.setRemoved(res.entries);
+        } catch {
+            // Silent — see doc comment above.
+        }
+    }
+
+    /** Bring a removed entry back: revert it to the version that recorded its
+     *  removal, which makes it Global Memory again (last in the order) and is
+     *  itself recorded. */
+    async restore(entry: GlobalMemoryRemovedEntry): Promise<void> {
+        this.setError(null);
+        try {
+            await RpcApi.GlobalMemoryRevertCommand(TabRpcClient, { id: entry.id, target_version_id: entry.version_id });
+            await this.refresh();
+        } catch (e) {
+            this.setError(`Restore failed: ${(e as Error).message ?? e}`);
         }
     }
 

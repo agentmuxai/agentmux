@@ -261,6 +261,8 @@ pub(crate) struct PersistedAgentIdentity {
     /// on first spawn. `None` only if minting failed — logged, and the
     /// spawn proceeds without it, because M1 has no reader for it yet.
     pub token: Option<String>,
+    /// The names it had before its renames (`former_names_env`).
+    pub former: super::former_names_env::FormerNames,
 }
 
 /// The `db_agents` row for the agent shown on `block_id`, if it has one,
@@ -318,11 +320,8 @@ pub(crate) fn persisted_agent_identity(
             tracing::warn!(block_id, uid = %instance.id, error = %e, "spawn env: UID key ensure failed");
         }
     }
-    Some(PersistedAgentIdentity {
-        uid: instance.id,
-        slug,
-        token,
-    })
+    let former = super::former_names_env::read(mstore, block_id, &instance.id);
+    Some(PersistedAgentIdentity { uid: instance.id, slug, token, former })
 }
 
 /// Identity M1 — spec §9.1: carry the UID and the token into the process.
@@ -355,6 +354,7 @@ pub(crate) fn carry_agent_uid_env(
 ) {
     const UID: &str = "AGENTMUX_AGENT_UID";
     const TOKEN: &str = "AGENTMUX_AGENT_TOKEN";
+    super::former_names_env::carry(env_vars, identity.map(|i| &i.former));
     match identity {
         Some(id) => {
             env_vars.insert(UID.to_string(), id.uid.clone());
@@ -636,6 +636,7 @@ pub(crate) async fn build_persistent_spawn_env(
         super::identity_env::carry_agent_identity_env(&mut env_vars, &display_name, identity.as_ref().and_then(|i| i.slug.as_deref()));
     }
     carry_agent_workdir_env(&mut env_vars, block_meta);
+    crate::backend::subagent_model::carry(&mut env_vars, block_meta);
     crate::server::browser_uploads::record_launch_workspace(block_id, &env_vars);
     // PATH gets the bundled tools dir (portable builds, runtime/tools/bin/)
     // and the user tools dir (~/.agentmux/tools/bin/), both ahead of the
@@ -1802,11 +1803,7 @@ mod tests {
     use super::{carry_agent_uid_env, PersistedAgentIdentity};
 
     fn identity(uid: &str, token: Option<&str>) -> PersistedAgentIdentity {
-        PersistedAgentIdentity {
-            uid: uid.to_string(),
-            slug: Some("agenty-3".to_string()),
-            token: token.map(str::to_string),
-        }
+        PersistedAgentIdentity { uid: uid.to_string(), slug: Some("agenty-3".to_string()), token: token.map(str::to_string), former: Default::default() }
     }
 
     /// Positive case first: a known row carries both values into the env.

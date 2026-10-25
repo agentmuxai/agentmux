@@ -11,6 +11,7 @@ import {
     writeText as clipboardWriteText,
 } from "@/util/clipboard";
 import * as util from "@/util/util";
+import { MENU_ICON } from "@/app/util/menu-icons";
 
 class ContextMenuModelType {
     handlers: Map<string, () => void> = new Map(); // id -> handler
@@ -38,6 +39,7 @@ class ContextMenuModelType {
                 type: item.type,
                 label: item.label,
                 sublabel: item.sublabel,
+                icon: item.icon,
                 id: crypto.randomUUID(),
                 checked: item.checked,
                 swatchColor: item.swatchColor,
@@ -231,6 +233,7 @@ async function showTextInputContextMenu(
     if (canCut) {
         menu.push({
             label: "Cut",
+            icon: MENU_ICON.cut,
             role: "cut",
             click: () => {
                 const text = selectedTextIn(target);
@@ -245,6 +248,7 @@ async function showTextInputContextMenu(
     if (canCopy) {
         menu.push({
             label: "Copy",
+            icon: MENU_ICON.copy,
             role: "copy",
             click: () => void clipboardWriteText(selectedTextIn(target)),
         });
@@ -252,6 +256,7 @@ async function showTextInputContextMenu(
     if (canPaste) {
         menu.push({
             label: "Paste",
+            icon: MENU_ICON.paste,
             role: "paste",
             click: () => {
                 const onPasteAttachments = opts?.onPasteAttachments;
@@ -276,6 +281,7 @@ async function showTextInputContextMenu(
         menu.push({ type: "separator" });
         menu.push({
             label: "Open Clipboard URL (" + clipboardURL.hostname + ")",
+            icon: MENU_ICON.open,
             click: () => {
                 openLink(clipboardURL.toString());
             },
@@ -308,7 +314,7 @@ function showCopyContextMenu(entries: CopyMenuEntry[], e: MouseEvent): boolean {
     const menu: ContextMenuItem[] = [];
     for (const { label, value } of entries) {
         if (!value) continue;
-        menu.push({ label, click: () => void clipboardWriteText(value) });
+        menu.push({ label, icon: MENU_ICON.copy, click: () => void clipboardWriteText(value) });
     }
     if (menu.length === 0) return false;
     e.preventDefault();

@@ -39,3 +39,40 @@ describe("PopoverMenu sections", () => {
         expect(container.querySelector(".popover-menu-section-items")).toBeNull();
     });
 });
+
+describe("PopoverMenu icons", () => {
+    const rows = (): HTMLElement[] => [...document.body.querySelectorAll<HTMLElement>(".popover-menu-action")];
+    const rowOf = (label: string) => rows().find((r) => r.querySelector(".label")?.textContent === label)!;
+
+    it("draws an action row's icon in the leading slot, hidden from assistive tech", () => {
+        render(() => (
+            <PopoverMenu
+                items={[
+                    { label: "New Tab", icon: "plus", click: vi.fn() },
+                    { label: "Plain", click: vi.fn() },
+                ]}
+                pos={{ x: 0, y: 0 }}
+                onClose={vi.fn()}
+            />
+        ));
+        const icon = rowOf("New Tab").querySelector(".menu-item-icon")!;
+        expect(icon.classList.contains("fa-plus")).toBe(true);
+        expect(icon.getAttribute("aria-hidden")).toBe("true");
+        expect(rowOf("New Tab").querySelector(".menu-item-icon-spacer")).toBeNull();
+        // A row with no icon keeps the blank slot, so the labels line up as they did.
+        expect(rowOf("Plain").querySelector(".menu-item-icon-spacer")).not.toBeNull();
+    });
+
+    it("keeps a checkbox row's check in the slot and gives it no icon", () => {
+        render(() => (
+            <PopoverMenu
+                items={[{ type: "checkbox", label: "Show Icons Only", checked: true, icon: "plus", click: vi.fn() }]}
+                pos={{ x: 0, y: 0 }}
+                onClose={vi.fn()}
+            />
+        ));
+        const slot = rowOf("Show Icons Only").querySelector(".menu-item-icon")!;
+        expect(slot.classList.contains("fa-check")).toBe(true);
+        expect(slot.classList.contains("fa-plus")).toBe(false);
+    });
+});

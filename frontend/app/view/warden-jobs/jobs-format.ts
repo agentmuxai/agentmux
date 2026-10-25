@@ -24,9 +24,9 @@ function dowNumbers(dow: string): string {
 const two = (n: number) => String(n).padStart(2, "0");
 const isNum = (s: string) => /^\d+$/.test(s);
 
-/** A 5-field UTC cron expression in words for the common shapes ("every 15 min", "daily 06:00 UTC",
- *  "Mondays 06:00 UTC"); anything else stays the expression. */
-export function describeCron(expression: string): string {
+/** A 5-field cron expression, read in `zone`, in words for the common shapes ("every 15 min", "daily
+ *  06:00 UTC", "Mondays 06:00 UTC"); anything else stays the expression. */
+export function describeCron(expression: string, zone: string = "UTC"): string {
     const f = expression.trim().split(/\s+/);
     if (f.length !== 5) return expression;
     const [min, hour, dom, mon] = f;
@@ -43,7 +43,7 @@ export function describeCron(expression: string): string {
         if (every) return `every ${every[1]} h at :${two(Number(min))}`;
     }
     if (!isNum(min) || !isNum(hour)) return expression;
-    const time = `${two(Number(hour))}:${two(Number(min))} UTC`;
+    const time = `${two(Number(hour))}:${two(Number(min))} ${zone}`;
     if (anyDay && dow === "*") return `daily ${time}`;
     if (anyDay && dow === "1-5") return `weekdays ${time}`;
     if (anyDay && /^\d(,\d)*$/.test(dow) && dow.split(",").every((d) => Number(d) <= 7)) {
@@ -52,6 +52,24 @@ export function describeCron(expression: string): string {
     }
     if (mon === "*" && dow === "*" && isNum(dom)) return `monthly on day ${Number(dom)} ${time}`;
     return expression;
+}
+
+/** A job's trigger in words: its cron expression in its zone, "every 2 h", "once, <date>", "by hand". */
+export function describeTrigger(job: Pick<JobView, "source" | "trigger_kind" | "expression" | "tz" | "every_secs" | "once_at_ms">): string {
+    if (job.source === "drone") return "by hand";
+    switch (job.trigger_kind) {
+        case "every": {
+            const s = job.every_secs ?? 0;
+            if (s % 3600 === 0 && s >= 3600) return `every ${s / 3600} h`;
+            return s % 60 === 0 ? `every ${s / 60} min` : `every ${s} s`;
+        }
+        case "once":
+            return job.once_at_ms != null ? `once, ${new Date(job.once_at_ms).toLocaleString()}` : "once";
+        case "manual":
+            return "by hand";
+        default:
+            return describeCron(job.expression, job.tz || "UTC");
+    }
 }
 
 /** "in 3 h", "in 12 min", "in 40 s", or "now" for a time just reached. */
@@ -78,6 +96,7 @@ const REASON_TEXT: Record<string, string> = {
     group_busy: "waiting for its group",
     job_cap: "job's daily cap reached",
     account_cap: "account's daily cap reached",
+    message_cap: "daily message limit reached",
     run_cap: "run cap reached",
     timeout: "timed out",
     no_report: "never reported",

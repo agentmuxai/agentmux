@@ -108,7 +108,7 @@ describe("resolveKey", () => {
     it("resolves the split chord in two steps", () => {
         const first = resolveKey(ev("S", "KeyS", { ctrlKey: true, shiftKey: true }), NONE, "other");
         expect(first?.chordStart).toBe(true);
-        expect(resolveKey(ev("ArrowUp", "ArrowUp"), NONE, "other", "ctrl+shift+s")?.row.command).toBe("split:up");
+        expect(resolveKey(ev("ArrowDown", "ArrowDown"), NONE, "other", "ctrl+shift+s")?.row.command).toBe("split:down");
     });
 
     it("resolves the pane swap / resize, tab move and rename keys", () => {
@@ -270,9 +270,9 @@ describe("the keybindings setting", () => {
     });
 
     it("normalizes the space between chord steps", () => {
-        setUserKeybindings([{ key: "ctrl+shift+e   ArrowUp", command: "split:up" }]);
+        setUserKeybindings([{ key: "ctrl+shift+e   ArrowDown", command: "split:down" }]);
         expect(() => helpSections("other")).not.toThrow();
-        expect(formatCommand("split:up", "other")).toBe("Ctrl+Shift+E then ↑");
+        expect(formatCommand("split:down", "other")).toBe("Ctrl+Shift+E then ↓");
     });
 
     it("in a terminal: table commands keep their rule; others and terminalFocus keys apply", () => {

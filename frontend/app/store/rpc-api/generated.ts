@@ -180,6 +180,8 @@ import type { CommandPaneMoveTabData } from "@/types/rpc/CommandPaneMoveTabData"
 import type { CommandPaneMoveTabsData } from "@/types/rpc/CommandPaneMoveTabsData";
 import type { CommandPaneOpenData } from "@/types/rpc/CommandPaneOpenData";
 import type { CommandPaneTabData } from "@/types/rpc/CommandPaneTabData";
+import type { CommandPinsChangeData } from "@/types/rpc/CommandPinsChangeData";
+import type { CommandPinsListData } from "@/types/rpc/CommandPinsListData";
 import type { CommandReadEditorFileData } from "@/types/rpc/CommandReadEditorFileData";
 import type { CommandReadEditorFileResult } from "@/types/rpc/CommandReadEditorFileResult";
 import type { CommandRemoteAddData } from "@/types/rpc/CommandRemoteAddData";
@@ -284,6 +286,7 @@ import type { GlobalMemoryDiffResult } from "@/types/rpc/GlobalMemoryDiffResult"
 import type { GlobalMemoryHistoryResult } from "@/types/rpc/GlobalMemoryHistoryResult";
 import type { GlobalMemoryImportReport } from "@/types/rpc/GlobalMemoryImportReport";
 import type { GlobalMemoryImportSources } from "@/types/rpc/GlobalMemoryImportSources";
+import type { GlobalMemoryRemovedResult } from "@/types/rpc/GlobalMemoryRemovedResult";
 import type { GlobalMemoryRevertResult } from "@/types/rpc/GlobalMemoryRevertResult";
 import type { GlobalMemorySection } from "@/types/rpc/GlobalMemorySection";
 import type { HideNamedAgentResult } from "@/types/rpc/HideNamedAgentResult";
@@ -317,6 +320,7 @@ import type { InstallStartReq } from "@/types/rpc/InstallStartReq";
 import type { InstallStartResult } from "@/types/rpc/InstallStartResult";
 import type { InstallSystemToolResult } from "@/types/rpc/InstallSystemToolResult";
 import type { InstallToolResult } from "@/types/rpc/InstallToolResult";
+import type { JobTemplateApproveReq } from "@/types/rpc/JobTemplateApproveReq";
 import type { JobTemplateCatalogInstallReq } from "@/types/rpc/JobTemplateCatalogInstallReq";
 import type { JobTemplateCatalogReq } from "@/types/rpc/JobTemplateCatalogReq";
 import type { JobTemplateCatalogResult } from "@/types/rpc/JobTemplateCatalogResult";
@@ -328,9 +332,16 @@ import type { JobTemplateInstallResult } from "@/types/rpc/JobTemplateInstallRes
 import type { JobTemplatesResult } from "@/types/rpc/JobTemplatesResult";
 import type { JobsActRequest } from "@/types/rpc/JobsActRequest";
 import type { JobsActResult } from "@/types/rpc/JobsActResult";
+import type { JobsDryRunRequest } from "@/types/rpc/JobsDryRunRequest";
+import type { JobsDryRunResult } from "@/types/rpc/JobsDryRunResult";
+import type { JobsGetRequest } from "@/types/rpc/JobsGetRequest";
+import type { JobsGetResult } from "@/types/rpc/JobsGetResult";
 import type { JobsListResult } from "@/types/rpc/JobsListResult";
 import type { JobsRunsRequest } from "@/types/rpc/JobsRunsRequest";
 import type { JobsRunsResult } from "@/types/rpc/JobsRunsResult";
+import type { JobsSaveRequest } from "@/types/rpc/JobsSaveRequest";
+import type { JobsSaveResult } from "@/types/rpc/JobsSaveResult";
+import type { JobsUpdateDiffRequest } from "@/types/rpc/JobsUpdateDiffRequest";
 import type { LaunchCost } from "@/types/rpc/LaunchCost";
 import type { LayoutIntentResult } from "@/types/rpc/LayoutIntentResult";
 import type { LayoutOpenResult } from "@/types/rpc/LayoutOpenResult";
@@ -394,6 +405,7 @@ import type { OperatorChallengeResult } from "@/types/rpc/OperatorChallengeResul
 import type { OtherBuildLayoutsResult } from "@/types/rpc/OtherBuildLayoutsResult";
 import type { PaneOpenResult } from "@/types/rpc/PaneOpenResult";
 import type { PaneTabEditResult } from "@/types/rpc/PaneTabEditResult";
+import type { PinnedSendersResult } from "@/types/rpc/PinnedSendersResult";
 import type { PollProviderAuthReq } from "@/types/rpc/PollProviderAuthReq";
 import type { PollSessionResult } from "@/types/rpc/PollSessionResult";
 import type { PresencePublishNowResult } from "@/types/rpc/PresencePublishNowResult";
@@ -446,6 +458,7 @@ import type { StartProviderAuthReq } from "@/types/rpc/StartProviderAuthReq";
 import type { StartSessionResult } from "@/types/rpc/StartSessionResult";
 import type { SubmitAuthCallbackReq } from "@/types/rpc/SubmitAuthCallbackReq";
 import type { SubscriptionRequest } from "@/types/rpc/SubscriptionRequest";
+import type { TemplateUpdateDiff } from "@/types/rpc/TemplateUpdateDiff";
 import type { ToolIdReq } from "@/types/rpc/ToolIdReq";
 import type { ToolchainEnvResult } from "@/types/rpc/ToolchainEnvResult";
 import type { ToolchainPruneReq } from "@/types/rpc/ToolchainPruneReq";
@@ -1377,6 +1390,10 @@ export const GeneratedApi = {
   GlobalMemoryImportSourcesCommand(client: RpcClient, opts?: RpcOpts): Promise<GlobalMemoryImportSources> {
     return client.rpcCall("globalmemory:import_sources", {}, opts);
   },
+  // command "globalmemory:removed"
+  GlobalMemoryRemovedCommand(client: RpcClient, opts?: RpcOpts): Promise<GlobalMemoryRemovedResult> {
+    return client.rpcCall("globalmemory:removed", {}, opts);
+  },
   // command "globalmemory:revert"
   GlobalMemoryRevertCommand(
     client: RpcClient,
@@ -1437,6 +1454,14 @@ export const GeneratedApi = {
   JobsActCommand(client: RpcClient, data: JobsActRequest, opts?: RpcOpts): Promise<JobsActResult> {
     return client.rpcCall("jobs.act", data, opts);
   },
+  // command "jobs.dryrun"
+  JobsDryrunCommand(client: RpcClient, data: JobsDryRunRequest, opts?: RpcOpts): Promise<JobsDryRunResult> {
+    return client.rpcCall("jobs.dryrun", data, opts);
+  },
+  // command "jobs.get"
+  JobsGetCommand(client: RpcClient, data: JobsGetRequest, opts?: RpcOpts): Promise<JobsGetResult> {
+    return client.rpcCall("jobs.get", data, opts);
+  },
   // command "jobs.list"
   JobsListCommand(client: RpcClient, data: Record<string, never>, opts?: RpcOpts): Promise<JobsListResult> {
     return client.rpcCall("jobs.list", data, opts);
@@ -1444,6 +1469,18 @@ export const GeneratedApi = {
   // command "jobs.runs"
   JobsRunsCommand(client: RpcClient, data: JobsRunsRequest, opts?: RpcOpts): Promise<JobsRunsResult> {
     return client.rpcCall("jobs.runs", data, opts);
+  },
+  // command "jobs.save"
+  JobsSaveCommand(client: RpcClient, data: JobsSaveRequest, opts?: RpcOpts): Promise<JobsSaveResult> {
+    return client.rpcCall("jobs.save", data, opts);
+  },
+  // command "jobs.templates.approve"
+  JobsTemplatesApproveCommand(
+    client: RpcClient,
+    data: JobTemplateApproveReq,
+    opts?: RpcOpts
+  ): Promise<JobTemplatesResult> {
+    return client.rpcCall("jobs.templates.approve", data, opts);
   },
   // command "jobs.templates.catalog"
   JobsTemplatesCatalogCommand(
@@ -1484,6 +1521,14 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<JobTemplatesResult> {
     return client.rpcCall("jobs.templates.uninstall", data, opts);
+  },
+  // command "jobs.templates.update_diff"
+  JobsTemplatesUpdateDiffCommand(
+    client: RpcClient,
+    data: JobsUpdateDiffRequest,
+    opts?: RpcOpts
+  ): Promise<TemplateUpdateDiff> {
+    return client.rpcCall("jobs.templates.update_diff", data, opts);
   },
   // command "kanban.act"
   KanbanActCommand(
@@ -1922,6 +1967,18 @@ export const GeneratedApi = {
   // command "presence.status"
   PresenceStatusCommand(client: RpcClient, opts?: RpcOpts): Promise<PresenceStatusResult> {
     return client.rpcCall("presence.status", {}, opts);
+  },
+  // command "pins.adopt"
+  PinsAdoptCommand(client: RpcClient, data: CommandPinsChangeData, opts?: RpcOpts): Promise<PinnedSendersResult> {
+    return client.rpcCall("pins.adopt", data, opts);
+  },
+  // command "pins.forget"
+  PinsForgetCommand(client: RpcClient, data: CommandPinsChangeData, opts?: RpcOpts): Promise<PinnedSendersResult> {
+    return client.rpcCall("pins.forget", data, opts);
+  },
+  // command "pins.list"
+  PinsListCommand(client: RpcClient, data?: CommandPinsListData, opts?: RpcOpts): Promise<PinnedSendersResult> {
+    return client.rpcCall("pins.list", data ?? {}, opts);
   },
   // command "layout.preview"
   PreviewLayoutCommand(

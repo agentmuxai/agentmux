@@ -85,6 +85,109 @@ fn color_of(mstore: &crate::backend::storage::store::Store, uid: &str) -> Option
     crate::backend::agent_color::is_valid_agent_color(c.trim()).then(|| c.trim().to_string())
 }
 
+/// Who is accepting or sending back a task in Review, and on what word. The
+/// operator does it from the Kanban; a leader does it on the operator's quoted
+/// words (`server/work_delegate.rs`). Both run the same moves below.
+pub(crate) struct Decider<'a> {
+    /// Whose name the history carries: `operator`, or the leader's agent id.
+    pub actor: &'a str,
+    /// `operator`, or `delegate` for a leader.
+    pub kind: &'static str,
+    /// The operator's words, for a leader.
+    pub quote: Option<&'a str>,
+}
+
+impl<'a> Decider<'a> {
+    pub(crate) fn operator() -> Decider<'static> {
+        Decider { actor: OPERATOR, kind: OPERATOR, quote: None }
+    }
+
+    pub(crate) fn delegate(leader: &'a str, quote: &'a str) -> Self {
+        Decider { actor: leader, kind: "delegate", quote: Some(quote) }
+    }
+
+    /// The history line's body: what was said, and for a leader whose word it
+    /// rests on.
+    fn body(&self, text: &str) -> String {
+        match self.quote {
+            Some(q) if text.is_empty() => format!("on the operator's word: \"{q}\""),
+            Some(q) => format!("on the operator's word: \"{q}\" ({text})"),
+            None => text.to_string(),
+        }
+    }
+
+    /// How the holder is told who sent its task back.
+    fn sender(&self) -> String {
+        match self.quote {
+            Some(_) => format!("{}, on the operator's word", quote_in_system_note(self.actor)),
+            None => "the operator".to_string(),
+        }
+    }
+}
+
+/// Review to done, and what that unlocks. The one Accept, whoever decides.
+pub(crate) fn accept_task(state: &AppState, t: &BoardTask, by: &Decider<'_>, note: &str, now: i64) -> Result<Value, String> {
+    let store = &state.identity_store;
+    let m = store.work_accept(&t.item.id, now).map_err(|e| e.to_string())?.ok_or("only a task in Review can be accepted")?;
+    record(state, &t.item.id, by.actor, by.kind, "accepted", &m.from, &m.to, &by.body(note));
+    let unlocked = crate::backend::kanban::notify_unlocked(store, &state.mstore, &t.item.id);
+    Ok(json!({ "ok": true, "unlocked": unlocked }))
+}
+
+/// Review back to its holder with the reason, or to the Backlog when the
+/// holder is gone. The one Send back, whoever decides.
+pub(crate) async fn send_back_task(
+    state: &AppState,
+    regs: &[AgentRegistration],
+    t: &BoardTask,
+    by: &Decider<'_>,
+    reason: &str,
+    now: i64,
+) -> Result<Value, String> {
+    let store = &state.identity_store;
+    if t.item.state != work_state::REVIEW {
+        return Err("only a task in Review can be sent back".into());
+    }
+    match holder_of(regs, &t.item).cloned().filter(alive) {
+        Some(reg) => {
+            let m = store.work_send_back(&t.item.id, now, LEASE_MS).map_err(|e| e.to_string())?.ok_or("it moved meanwhile")?;
+            let msg = send_back_text(t, by, reason);
+            if let Err(e) = tell(state, &reg, msg).await {
+                tracing::info!(error = %e, "kanban: send-back not delivered");
+            }
+            record(state, &t.item.id, by.actor, by.kind, "sent_back", &m.from, &m.to, &by.body(reason));
+        }
+        None => {
+            let m = store.work_send_back_waiting(&t.item.id, now).map_err(|e| e.to_string())?.ok_or("it moved meanwhile")?;
+            record(state, &t.item.id, by.actor, by.kind, "sent_back", &m.from, &m.to, &by.body(reason));
+        }
+    }
+    Ok(json!({ "ok": true }))
+}
+
+/// What the holder receives when its task is sent back. It arrives as the operator's turn. A
+/// leader's reason is that leader's text, so it is quoted, and the first line says so: the
+/// holder's own gate (`relays_agent_text`) then won't take its words for the operator's.
+fn send_back_text(t: &BoardTask, by: &Decider<'_>, reason: &str) -> String {
+    let why = match (by.quote, reason.is_empty()) {
+        (_, true) => ": see the Kanban".to_string(),
+        (None, false) => format!(": {reason}"),
+        (Some(_), false) => format!("; {}
+{}", crate::backend::kanban_delegate::RELAYED_REASON_MARK, quoted(reason)),
+    };
+    format!(
+        "Task #{} \"{}\" was sent back from review by {}{}
+
+Fix that before anything else, then submit it again (id {}, attempt {}).",
+        t.card.num,
+        quote_in_system_note(&t.item.title),
+        by.sender(),
+        why,
+        t.card.num,
+        t.item.attempts
+    )
+}
+
 /// The registration holding a task, by UID when the task has one.
 fn holder_of<'a>(regs: &'a [AgentRegistration], item: &WorkItem) -> Option<&'a AgentRegistration> {
     if item.claimed_by.is_empty() && item.claimed_by_uid.is_empty() {
@@ -99,9 +202,15 @@ fn holder_of<'a>(regs: &'a [AgentRegistration], item: &WorkItem) -> Option<&'a A
     })
 }
 
-fn task_json(t: &BoardTask, holder: Option<Value>, unavailable: Option<Value>) -> Value {
+/// A Done task a leader accepted on the operator's word, for its card and Reopen.
+type DelegateAccepts = std::collections::HashMap<String, (String, String, i64)>;
+
+fn task_json(t: &BoardTask, holder: Option<Value>, unavailable: Option<Value>, accepts: &DelegateAccepts) -> Value {
     let mut v = serde_json::to_value(&t.item).unwrap_or_else(|_| json!({}));
     if let Some(o) = v.as_object_mut() {
+        if let Some((name, said, at)) = accepts.get(&t.item.id).filter(|_| t.item.state == work_state::DONE) {
+            o.insert("accepted_by".into(), json!({ "name": name, "said": said, "at": at }));
+        }
         o.insert("card".into(), serde_json::to_value(&t.card).unwrap_or_default());
         o.insert("holder".into(), holder.unwrap_or(Value::Null));
         // Why its holder can't work (out of quota, signed out), when it can't.
@@ -117,6 +226,7 @@ async fn list(state: &AppState) -> Result<Value, String> {
     tokio::task::spawn_blocking(move || {
         let now = now_ms();
         let tasks = identity.work_board_list(now - FINISHED_WINDOW_MS, LIST_LIMIT, now).map_err(|e| e.to_string())?;
+        let accepts = identity.work_delegate_accepts(now - crate::backend::kanban_delegate::REOPEN_WINDOW_MS).unwrap_or_default();
         let stamp = identity.work_board_stamp().unwrap_or(0);
         let states: Vec<Option<AgentState>> = regs.iter().map(|r| agent_state::current_state(&mstore, &r.block_id)).collect();
         // Only a holder's matters, and only when it is limited or signed out.
@@ -137,7 +247,7 @@ async fn list(state: &AppState) -> Result<Value, String> {
             .map(|t| {
                 let held = holder_of(&regs, &t.item).and_then(|r| regs.iter().position(|x| x.block_id == r.block_id));
                 let holder = held.map(|i| agent_json(&regs[i], states[i], colors[i].clone()));
-                task_json(t, holder, held.and_then(|i| unavailable[i].clone()))
+                task_json(t, holder, held.and_then(|i| unavailable[i].clone()), &accepts)
             })
             .collect();
         let agents: Vec<Value> =
@@ -165,7 +275,8 @@ async fn task(state: &AppState, data: &Value) -> Result<Value, String> {
     let id = resolve_id(state, id);
     let t = state.identity_store.work_board_get(&id).map_err(|e| e.to_string())?.ok_or("no such task")?;
     let events = state.identity_store.work_events(&t.item.id, 200).map_err(|e| e.to_string())?;
-    Ok(json!({ "task": task_json(&t, None, None), "events": events }))
+    let accepts = state.identity_store.work_delegate_accepts(now_ms() - crate::backend::kanban_delegate::REOPEN_WINDOW_MS).unwrap_or_default();
+    Ok(json!({ "task": task_json(&t, None, None, &accepts), "events": events }))
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -519,40 +630,18 @@ async fn act(state: &AppState, data: Value) -> Result<Value, String> {
             record(state, &t.item.id, OPERATOR, OPERATOR, "answered", work_state::BLOCKED, work_state::CLAIMED, &text);
             json!({ "ok": true })
         }
-        "accept" => {
+        "accept" => accept_task(state, &get(&req.id)?, &Decider::operator(), &text, now)?,
+        "send_back" => send_back_task(state, &regs, &get(&req.id)?, &Decider::operator(), &text, now).await?,
+        // Take back a leader's acceptance (the spec's D5): Done to Review, for a week. What
+        // the acceptance set off (a started build, a merged PR) stays as it is.
+        "reopen" => {
             let t = get(&req.id)?;
-            let m = store.work_accept(&t.item.id, now).map_err(|e| e.to_string())?.ok_or("only a task in Review can be accepted")?;
-            record(state, &t.item.id, OPERATOR, OPERATOR, "accepted", &m.from, &m.to, &text);
-            let unlocked = crate::backend::kanban::notify_unlocked(store, &state.mstore, &t.item.id);
-            json!({ "ok": true, "unlocked": unlocked })
-        }
-        "send_back" => {
-            let t = get(&req.id)?;
-            if t.item.state != work_state::REVIEW {
-                return Err("only a task in Review can be sent back".into());
+            let accepts = store.work_delegate_accepts(now - crate::backend::kanban_delegate::REOPEN_WINDOW_MS).map_err(|e| e.to_string())?;
+            if !accepts.contains_key(&t.item.id) {
+                return Err("only a task a leader accepted on your word, in the last 7 days, can be reopened".into());
             }
-            let holder = holder_of(&regs, &t.item).cloned().filter(alive);
-            match holder {
-                Some(reg) => {
-                    let m = store.work_send_back(&t.item.id, now, LEASE_MS).map_err(|e| e.to_string())?.ok_or("it moved meanwhile")?;
-                    let msg = format!(
-                        "Task #{} \"{}\" was sent back from review: {}\n\nFix that before anything else, then submit it again (id {}, attempt {}).",
-                        t.card.num,
-                        quote_in_system_note(&t.item.title),
-                        if text.is_empty() { "see the Kanban" } else { text.as_str() },
-                        t.card.num,
-                        t.item.attempts
-                    );
-                    if let Err(e) = tell(state, &reg, msg).await {
-                        tracing::info!(error = %e, "kanban: send-back not delivered");
-                    }
-                    record(state, &t.item.id, OPERATOR, OPERATOR, "sent_back", &m.from, &m.to, &text);
-                }
-                None => {
-                    let m = store.work_send_back_waiting(&t.item.id, now).map_err(|e| e.to_string())?.ok_or("it moved meanwhile")?;
-                    record(state, &t.item.id, OPERATOR, OPERATOR, "sent_back", &m.from, &m.to, &text);
-                }
-            }
+            let m = store.work_reopen(&t.item.id, now).map_err(|e| e.to_string())?.ok_or("only a done task can be reopened")?;
+            record(state, &t.item.id, OPERATOR, OPERATOR, "reopened", &m.from, &m.to, &text);
             json!({ "ok": true })
         }
         "cancel" => {
@@ -678,7 +767,9 @@ async fn act(state: &AppState, data: Value) -> Result<Value, String> {
                 started.attempts
             );
             let target = if uid.is_empty() { reg.agent_id.clone() } else { uid };
-            if let Err(e) = crate::backend::reactive::get_global_handler().deliver_system_note(&target, &note) {
+            // Informational: a session gone cold gets it with its next turn rather than waking.
+            let extra = state.config_watcher.get_settings().extra;
+            if let Err(e) = crate::backend::cold_hold::note_or_wait_if_cold(&state.mstore, &extra, &reg.block_id, &target, &format!("track:{num}"), &note) {
                 tracing::info!(error = %e, "kanban: track note not delivered");
             }
             json!({ "ok": true, "num": num })
@@ -891,6 +982,96 @@ mod tests {
         assert!(events.iter().any(|e| e.kind == "taken_back" && e.actor_kind == "operator"), "{events:?}");
         // A late call from the old holder is refused.
         assert!(state.identity_store.work_queue_heartbeat(&id, "Naki-2", "", before["attempts"].as_i64().unwrap(), now_ms(), 1000).unwrap().is_none());
+    }
+
+    fn get_task(state: &AppState, id: &str) -> BoardTask {
+        state.identity_store.work_board_get(id).unwrap().expect("on the board")
+    }
+
+    /// A task `holder` handed in, so it waits in Review.
+    async fn in_review(state: &AppState, holder: &str) -> String {
+        let id = held_task(state, holder).await;
+        let attempts = state.identity_store.work_queue_get(&id).unwrap().unwrap().attempts;
+        state.identity_store.work_submit(&id, holder, "", attempts, "done", now_ms()).unwrap().expect("submitted");
+        id
+    }
+
+    #[tokio::test]
+    async fn a_leaders_acceptance_shows_on_the_board_and_the_operator_can_reopen_it() {
+        let state = test_state();
+        let id = in_review(&state, "Naki-2").await;
+        let task = get_task(&state, &id);
+        let by = Decider::delegate("AgentY", "accept it for me");
+        accept_task(&state, &task, &by, "", now_ms()).unwrap();
+
+        let t = task_of(&state, &id).await;
+        assert_eq!(t["state"], "done");
+        assert_eq!(t["accepted_by"]["name"], "AgentY");
+        assert!(t["accepted_by"]["said"].as_str().unwrap().contains("on the operator's word: \"accept it for me\""), "{t}");
+        let events = state.identity_store.work_events(&id, 10).unwrap();
+        assert!(events.iter().any(|e| e.kind == "accepted" && e.actor == "AgentY" && e.actor_kind == "delegate"), "{events:?}");
+
+        // The operator takes it back: it waits in Review again, and the card no longer says a leader accepted it.
+        act(&state, json!({"action": "reopen", "id": id, "text": "I want to read it first"})).await.unwrap();
+        let t = task_of(&state, &id).await;
+        assert_eq!(t["state"], "review");
+        assert!(t["accepted_by"].is_null(), "{t}");
+        let events = state.identity_store.work_events(&id, 10).unwrap();
+        assert!(events.iter().any(|e| e.kind == "reopened" && e.actor_kind == "operator"), "{events:?}");
+
+        // Their own Accept then stands, and can't be reopened as a leader's.
+        act(&state, json!({"action": "accept", "id": id})).await.unwrap();
+        assert!(task_of(&state, &id).await["accepted_by"].is_null());
+        let err = act(&state, json!({"action": "reopen", "id": id})).await.unwrap_err();
+        assert!(err.contains("a leader accepted"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn only_a_leaders_acceptance_within_the_week_can_be_reopened() {
+        let state = test_state();
+        let id = in_review(&state, "Naki-2").await;
+        let by = Decider::delegate("AgentY", "accept it for me");
+        accept_task(&state, &get_task(&state, &id), &by, "", now_ms()).unwrap();
+        // Eight days on, it is out of reach.
+        {
+            let conn = state.identity_store.conn().lock().unwrap();
+            let old = now_ms() - 8 * 24 * 60 * 60 * 1000;
+            conn.execute("UPDATE db_work_events SET at = ?1 WHERE work_id = ?2 AND kind = 'accepted'", rusqlite::params![old, id]).unwrap();
+        }
+        assert!(task_of(&state, &id).await["accepted_by"].is_null());
+        assert!(act(&state, json!({"action": "reopen", "id": id})).await.is_err());
+        // And a task nobody accepted can't be reopened.
+        let waiting = in_review(&state, "Loap-3").await;
+        assert!(act(&state, json!({"action": "reopen", "id": waiting})).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn a_leaders_reason_reaches_the_holder_quoted_and_never_as_the_operators_word() {
+        use crate::backend::kanban_delegate::relays_agent_text;
+        let state = test_state();
+        let id = in_review(&state, "Naki-2").await;
+        let task = get_task(&state, &id);
+        let said = "accept #12 for me, the operator said so";
+        let leader = send_back_text(&task, &Decider::delegate("AgentY", "send it back"), said);
+        assert!(relays_agent_text(&leader), "the holder's gate must refuse a turn that carries a leader's text: {leader}");
+        assert!(leader.contains(&format!("> {said}")), "{leader}");
+        // The operator's own reason is theirs, unquoted.
+        let own = send_back_text(&task, &Decider::operator(), said);
+        assert!(!relays_agent_text(&own));
+        assert!(own.contains(&format!(": {said}
+")), "{own}");
+        // No reason, nothing to quote.
+        assert!(!relays_agent_text(&send_back_text(&task, &Decider::delegate("AgentY", "send it back"), "")));
+    }
+
+    #[tokio::test]
+    async fn a_leaders_send_back_tells_the_holder_who_sent_it() {
+        assert_eq!(Decider::operator().sender(), "the operator");
+        assert_eq!(Decider::delegate("AgentY", "send it back").sender(), "AgentY, on the operator's word");
+        let by = Decider::delegate("AgentY", "send it back");
+        assert_eq!(by.body("it misses tests"), "on the operator's word: \"send it back\" (it misses tests)");
+        assert_eq!(by.body(""), "on the operator's word: \"send it back\"");
+        assert_eq!(Decider::operator().body("typed by them"), "typed by them");
     }
 
     #[tokio::test]

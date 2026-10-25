@@ -328,8 +328,14 @@ impl SubprocessController {
     /// [`UserRecordSink`]. Cloned out so the delivery paths (the stdin writer
     /// thread, the container exec task) can write it once the prompt has
     /// actually reached the CLI.
-    pub(super) fn user_record_sink(&self) -> UserRecordSink {
+    ///
+    /// `shown_by_pane`: the pane typed this message and already shows it (the
+    /// turn carries the pane's `message_id`). A message from anywhere else (a
+    /// jekt, a broadcast, a schedule, the app API) is not on screen, so its
+    /// record is published for the pane to show.
+    pub(super) fn user_record_sink(&self, shown_by_pane: bool) -> UserRecordSink {
         UserRecordSink {
+            shown_by_pane,
             broker: self.broker.clone(),
             block_id: self.block_id.clone(),
             filestore: self.filestore.clone(),
@@ -460,12 +466,23 @@ pub(crate) fn user_record(message: &str) -> serde_json::Value {
     })
 }
 
+/// [`user_record`] for a message no pane typed: `amx.via` says so, and the pane
+/// shows a live record that carries it (`injectedOrigin`, translator.ts).
+pub(crate) fn injected_user_record(message: &str) -> serde_json::Value {
+    let mut record = user_record(message);
+    record["amx"] = serde_json::json!({ "via": "inject" });
+    record
+}
+
 /// Writes the user's message to the transcript, as the record the persistent
 /// Claude controller writes for each stdin line (Phase 5a-3c): a
 /// `{"type":"user","message":{...}}` line in the block's file and the agent's
 /// global zone, published as an `echo: "stdin"` event — the pane already shows
 /// the message (its `agent-message-accepted` node), so the event only keeps
-/// its stream gap-free. Without it these CLIs' transcripts hold no trace of
+/// its stream gap-free. A message the pane did not type (`shown_by_pane` false:
+/// a jekt, a broadcast, a schedule) is published as a plain record instead, so
+/// the pane shows it as an incoming turn, as it does for a Claude agent. Without
+/// it these CLIs' transcripts hold no trace of
 /// what the user sent: gone on reload, absent from History, and a turn the
 /// live feed can't roll off
 /// (SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md §6.9).
@@ -477,6 +494,7 @@ pub(crate) fn user_record(message: &str) -> serde_json::Value {
 /// Only for output formats whose CLI doesn't echo the prompt itself (see
 /// [`persists_user_record`]).
 pub(super) struct UserRecordSink {
+    shown_by_pane: bool,
     broker: Option<Arc<mps::Broker>>,
     block_id: String,
     filestore: Option<Arc<FileStore>>,
@@ -496,8 +514,14 @@ impl UserRecordSink {
             return;
         }
         let global_zone = crate::backend::agent_session::agent_zone_for_block_meta(&block.meta);
-        let line = format!("{}\n", user_record(message));
-        crate::backend::transcript::append::persist_user_line(
+        let record = if self.shown_by_pane { user_record(message) } else { injected_user_record(message) };
+        let line = format!("{record}\n");
+        let persist = if self.shown_by_pane {
+            crate::backend::transcript::append::persist_user_line
+        } else {
+            crate::backend::transcript::append::persist_injected_user_line
+        };
+        persist(
             self.broker.as_deref(),
             &self.block_id,
             line.as_bytes(),

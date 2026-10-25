@@ -200,12 +200,30 @@ async fn fetch_record_for(dir: &Directory<'_>, agent: &str, instance: &str, chan
 #[derive(serde::Deserialize)]
 struct InstanceStatusResp {
     revoked: bool,
+    /// The signed record behind `revoked` (§2.2). The directory returns it
+    /// whenever it says an instance is revoked.
+    #[serde(default)]
+    revocation: Option<jekt_sign::WanRevocation>,
 }
 
+/// Whether `instance_id` is revoked, `None` when that can't be told.
+///
+/// A revocation is sticky and turns every later message from the install into
+/// a sensitive one, so a bare `revoked: true` is not enough: the directory has
+/// to hand over the revocation itself, and it has to be the one the instance
+/// signed with its own key for this id. An answer that says revoked without it
+/// is not acted on.
 async fn fetch_revoked(dir: &Directory<'_>, instance_id: &str) -> Option<bool> {
     let url = format!("{}/wan-instances/{}", dir.base_url.trim_end_matches('/'), instance_id);
     match get_json::<InstanceStatusResp>(dir, &url).await {
-        Fetched::Found(s) => Some(s.revoked),
+        Fetched::Found(s) if !s.revoked => Some(false),
+        Fetched::Found(s) => match s.revocation {
+            Some(r) if r.old_instance_id == instance_id && r.verify() => Some(true),
+            _ => {
+                tracing::warn!(instance_id, "wan verify: the directory says an instance is revoked without a revocation it signed: not acted on");
+                None
+            }
+        },
         // An older cloud with no such route: not known to be revoked.
         Fetched::NotFound => Some(false),
         // No verdict carries this one, so it is the only place to say it.
@@ -214,6 +232,88 @@ async fn fetch_revoked(dir: &Directory<'_>, instance_id: &str) -> Option<bool> {
             None
         }
     }
+}
+
+#[derive(serde::Deserialize)]
+struct PresenceList {
+    #[serde(default)]
+    instances: Vec<PresenceRow>,
+}
+
+#[derive(serde::Deserialize)]
+struct PresenceRow {
+    instance_id: String,
+    /// A tombstone: the install said goodbye and is listed only as offline.
+    #[serde(default)]
+    gone: bool,
+}
+
+/// Whether the account's presence list shows `instance_id` as a live install.
+/// The directory lists only installs that published a record signed by their
+/// own key and that are not revoked, so this is what separates an install of
+/// the account from a key someone merely published. `None` when the list
+/// couldn't be read.
+async fn fetch_listed(dir: &Directory<'_>, instance_id: &str) -> Option<bool> {
+    let url = format!("{}/wan-instances", dir.base_url.trim_end_matches('/'));
+    match get_json::<PresenceList>(dir, &url).await {
+        Fetched::Found(list) => Some(list.instances.iter().any(|row| !row.gone && row.instance_id == instance_id)),
+        Fetched::NotFound => Some(false),
+        Fetched::Unavailable(cause) => {
+            tracing::warn!(instance_id, cause = %cause, "wan verify: the presence list couldn't be read");
+            None
+        }
+    }
+}
+
+/// What the pin said about the install that signed a message.
+enum PinCheck {
+    /// Pinned to this install, or not pinnable yet.
+    Allowed,
+    /// The name is pinned to another install.
+    Mismatch(String),
+    /// The pin store couldn't be read.
+    Unavailable(String),
+}
+
+/// `(agent, channel)` is pinned to the first install the account's presence
+/// list shows speaking for it. A message from another install for a pinned
+/// name fails; a name with no pin is pinned only once its install is listed,
+/// so a key published by something that is not an install of the account
+/// pins nothing. This install's own agents never go through here.
+async fn check_agent_instance_pin(
+    wan: &WanIdentityStore,
+    record: &WanKeyRecord,
+    agent: &str,
+    channel: &str,
+    dir: &Directory<'_>,
+    now: i64,
+) -> PinCheck {
+    let hint = if jekt_sign::is_valid_wan_host_hint(&record.host_hint) { record.host_hint.as_str() } else { "?" };
+    let pinned = match wan.agent_instance_pin_get(agent, channel) {
+        Ok(p) => p,
+        Err(e) => return PinCheck::Unavailable(e.to_string()),
+    };
+    let pin = match pinned {
+        Some(pin) => pin,
+        None => {
+            if fetch_listed(dir, &record.instance_id).await != Some(true) {
+                return PinCheck::Allowed;
+            }
+            match wan.agent_instance_pin_get_or_set(agent, channel, &record.instance_id, hint, now) {
+                Ok(pin) => pin,
+                Err(e) => return PinCheck::Unavailable(e.to_string()),
+            }
+        }
+    };
+    if pin.instance_id == record.instance_id {
+        return PinCheck::Allowed;
+    }
+    let _ = wan.agent_instance_pin_note_conflict(agent, channel, &record.instance_id, hint, now);
+    PinCheck::Mismatch(format!(
+        "pinned to {}, this came from {}",
+        jekt_sign::wan_instance_display_label(&pin.host_hint, &pin.instance_id),
+        jekt_sign::wan_instance_display_label(hint, &record.instance_id),
+    ))
 }
 
 /// The instance's status (§2.6). This install is approved implicitly. Any
@@ -311,6 +411,16 @@ pub(crate) async fn verify(
 
     if wan.seen_sig_contains(&record.instance_id, source_agent, msg_id).unwrap_or(false) {
         return WanVerdict::failed("wan_sig_replay");
+    }
+
+    if record.instance_id != own_instance_id {
+        match check_agent_instance_pin(wan, &record, source_agent, source_channel, dir, now).await {
+            PinCheck::Allowed => {}
+            PinCheck::Mismatch(detail) => {
+                return WanVerdict { detail: Some(detail), ..WanVerdict::failed("wan_instance_pin_mismatch") };
+            }
+            PinCheck::Unavailable(cause) => return WanVerdict::unchecked("wan_pin_unavailable", cause),
+        }
     }
 
     let status = instance_status(wan, own_instance_id, &record, dir, now).await;

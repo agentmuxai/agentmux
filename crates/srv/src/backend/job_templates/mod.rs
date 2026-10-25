@@ -44,9 +44,33 @@ pub struct Builtin {
     pub files: &'static [(&'static str, &'static [u8])],
 }
 
+/// A built-in template: its id, and its two files from `templates/jobs/<id>/`.
+macro_rules! builtin {
+    ($name:literal) => {
+        Builtin {
+            id: concat!("agentmux.", $name),
+            files: &[
+                ("template.json", include_bytes!(concat!("../../../../../templates/jobs/agentmux.", $name, "/template.json"))),
+                ("brief.md", include_bytes!(concat!("../../../../../templates/jobs/agentmux.", $name, "/brief.md"))),
+            ],
+        }
+    };
+}
+
 /// The templates AgentMux ships (§5.5, §5.6). Each still needs the
 /// operator's approval once, so they see its outputs.
-pub static BUILTINS: &[Builtin] = &[];
+pub static BUILTINS: &[Builtin] = &[
+    builtin!("weekly-report"),
+    builtin!("pr-review"),
+    builtin!("nightly-build"),
+    builtin!("daily-digest"),
+    builtin!("dependency-scan"),
+    builtin!("docs-drift"),
+    builtin!("stale-sweep"),
+    builtin!("backup-verify"),
+    builtin!("on-event"),
+    builtin!("weekly-status"),
+];
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
@@ -95,7 +119,6 @@ struct Approval {
 
 /// A template the operator approved, exactly as approved: what a job is
 /// made from. A job records its id, version and hash.
-#[allow(dead_code, reason = "the job definition reads it when it makes a job from a template")]
 #[derive(Debug, Clone)]
 pub struct ApprovedTemplate {
     pub id: String,
@@ -103,11 +126,8 @@ pub struct ApprovedTemplate {
     pub hash: String,
     pub manifest: JobTemplateManifest,
     pub brief: Option<String>,
-    pub source: JobTemplateSource,
-    pub signer: Option<String>,
 }
 
-#[allow(dead_code, reason = "the job definition renders the brief when it makes a job")]
 impl ApprovedTemplate {
     /// Its brief with `params` filled in.
     pub fn render(&self, params: &Map<String, Value>) -> Result<RenderedBrief, String> {
@@ -333,7 +353,6 @@ impl JobTemplates {
     /// The approved template `id` at `version`, read from disk now: an
     /// error if it isn't installed at that version, isn't approved, or
     /// changed since the operator approved it.
-    #[allow(dead_code, reason = "the job definition resolves a template when it makes a job")]
     pub fn resolve_approved(&self, id: &str, version: &str) -> Result<ApprovedTemplate, String> {
         let f = self.find(id).ok_or_else(|| format!("no job template {id}"))?;
         let pkg = f.package.map_err(|e| format!("{id} isn't a valid template: {e}"))?;
@@ -353,8 +372,6 @@ impl JobTemplates {
             hash: pkg.hash,
             manifest: pkg.manifest,
             brief: pkg.brief,
-            source: f.source,
-            signer: pkg.signer,
         })
     }
 
@@ -421,5 +438,7 @@ impl JobTemplates {
     }
 }
 
+#[cfg(test)]
+mod starters_tests;
 #[cfg(test)]
 mod tests;

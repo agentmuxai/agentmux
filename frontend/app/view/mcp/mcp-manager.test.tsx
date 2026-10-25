@@ -41,6 +41,7 @@ vi.mock("@/app/store/contextmenu", () => ({
     showTextInputContextMenu: vi.fn(),
 }));
 
+import { MENU_ICON } from "@/app/util/menu-icons";
 import { McpManager } from "./mcp-manager";
 import { MCP_PRELOAD_CATALOG } from "./mcp-preload-catalog";
 
@@ -256,6 +257,7 @@ describe("McpManager", () => {
         const items = menu.show.mock.calls[0][0] as ContextMenuItem[];
         expect(items.map((i) => i.label ?? i.type)).toEqual(["Edit", "Bind to agent", "separator", "Delete…"]);
         expect(items[1].submenu?.map((i) => i.label)).toEqual(["Korp", "AgentY"]);
+        expect([items[0].icon, items[1].icon, items[3].icon]).toEqual([MENU_ICON.rename, MENU_ICON.bind, MENU_ICON.delete]);
 
         items[0].click?.();
         expect(await screen.findByRole("form", { name: "Edit git" })).toBeTruthy();

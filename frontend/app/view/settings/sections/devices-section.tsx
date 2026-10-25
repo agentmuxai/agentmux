@@ -19,6 +19,7 @@ import type { SettingsIndexEntry } from "../settings-model";
 import { SectionHeader, set, SettingRow, ToggleControl } from "../settings-controls";
 import { CLOUD_PRESENCE_SETTING, CloudPresence } from "./cloud-presence";
 import { MUXBUS_SIGN_IN_SETTING, MuxBusSignIn } from "./muxbus-sign-in";
+import { PINNED_SENDERS_SETTING, PinnedSenders } from "./pinned-senders";
 
 // ── Search index — see appearance-section.tsx's header comment for the pattern. ──
 
@@ -41,6 +42,7 @@ export const DEVICES_SETTINGS = {
     },
     muxbus: MUXBUS_SIGN_IN_SETTING,
     cloudPresence: CLOUD_PRESENCE_SETTING,
+    pinnedSenders: PINNED_SENDERS_SETTING,
     publishPresence: {
         id: "devices.publish_presence",
         label: "Publish this computer to my devices",
@@ -218,6 +220,8 @@ export function DevicesSection(): JSX.Element {
             <MuxBusSignIn />
             <SectionHeader label={DEVICES_SETTINGS.cloudPresence.label} />
             <CloudPresence />
+            <SectionHeader label={DEVICES_SETTINGS.pinnedSenders.label} />
+            <PinnedSenders />
             <SettingRow
                 id={DEVICES_SETTINGS.publishPresence.id}
                 label={DEVICES_SETTINGS.publishPresence.label}

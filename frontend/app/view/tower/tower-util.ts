@@ -4,7 +4,13 @@
 // Tower's pure helpers: formatting, sorting and filtering. The model and view
 // hold no logic of their own beyond wiring these to signals.
 
-import type { TowerProcess, TowerSnapshot, TowerTask } from "@/app/store/rpc-api";
+import type {
+    TowerMemoryGrowth,
+    TowerMemoryHistory,
+    TowerProcess,
+    TowerSnapshot,
+    TowerTask,
+} from "@/app/store/rpc-api";
 import { formatBytes } from "@/util/format-bytes";
 
 /** `machine`: percent of the whole machine, 0–100 whatever the core count
@@ -14,7 +20,7 @@ export type CpuMode = "machine" | "core";
 
 /** `agents`: the rail of agents and what each runs. `processes`: every
  *  process on the machine. SPEC_TOWER_AGENT_CENTRIC_VIEWS_2026_10_08.md §3. */
-export type TowerView = "agents" | "processes" | "panes";
+export type TowerView = "memory" | "agents" | "processes" | "panes";
 
 export type SortKey = "name" | "cpu" | "mem" | "count";
 export interface Sort {
@@ -539,4 +545,33 @@ export function processDetail(p: TowerProcess, memoryMetric: string): string {
     const role = roleLabel(p.role);
     if (role) lines.push(`Role: ${role}`);
     return lines.join("\n");
+}
+
+/** A change in memory with its sign: "+120 MB", "−45 MB". */
+export function formatChange(bytes: number): string {
+    const rounded = formatMem(Math.abs(bytes));
+    return bytes === 0 ? rounded : `${bytes > 0 ? "+" : "−"}${rounded}`;
+}
+
+/** A time of day, as the user's locale writes it ("14:20", "2:20 PM"). */
+export function formatClock(ms: number): string {
+    return new Date(ms).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+
+/** What AgentMux's total did over the ledger's hour (spec §7.2): the change
+ *  from its first point to its last, and when srv began keeping it if that
+ *  was less than an hour ago (it starts empty on a restart). `null` before
+ *  there are a few points to compare. */
+export function hourChange(history: TowerMemoryHistory | null): { change: number; since: number | null } | null {
+    const total = history?.series.find((s) => s.key === "total");
+    if (!history || !total || total.points.length < 6) return null;
+    const first = total.points[0];
+    const last = total.points[total.points.length - 1];
+    const spanMs = (total.points.length - 1) * history.step_ms;
+    return { change: last - first, since: spanMs < 59 * 60_000 ? total.start_ms : null };
+}
+
+/** "grew 310 MB in 20 min". */
+export function growthText(g: TowerMemoryGrowth): string {
+    return `grew ${formatMem(g.to - g.from)} in ${Math.max(1, g.minutes)} min`;
 }

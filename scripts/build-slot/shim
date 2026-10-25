@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# agentmux-build-slot-shim v2: written by AgentMux; edits here are overwritten.
+# agentmux-build-slot-shim v3: written by AgentMux; edits here are overwritten.
 #
 # The same file is installed as `cargo`, `task`, `npm`, `npx` and `docker`; it acts for the
 # tool whose name it carries. A heavy subcommand (`cargo test`, `task package`, `npm run build`,
@@ -146,6 +146,16 @@ case "$tool" in
     esac
     ;;
 esac
+
+# What the tool starts (task -> cargo, npm run build -> cargo, a build script -> cargo) finds
+# this directory first again, whatever order the shell's profile left the PATH in: a profile
+# that puts ~/bin first, with a cargo there, would otherwise let those calls skip the slot.
+# Inside a held slot they pass straight through (BUILD_SLOT_HELD), and a light call runs at once.
+case "$PATH" in
+  "$self_dir":*) ;;
+  *) PATH="$self_dir:$PATH" ;;
+esac
+export PATH
 
 slot="${AGENTMUX_BUILD_SLOT_SCRIPT:-$HOME/.agentmux/shared/locks/build-slot.sh}"
 if [ "$heavy" = 1 ] && [ -z "${AGENTMUX_BUILD_SLOT_OFF:-}" ] && [ -f "$slot" ]; then

@@ -164,6 +164,20 @@ pub struct SettingsType {
     /// Sites whose browser panes never hibernate, by origin or host.
     #[serde(rename = "browser:keepawakesites", default, skip_serializing_if = "Option::is_none")]
     pub browser_keep_awake_sites: Option<Vec<String>>,
+    /// The most one job run may spend, in US dollars (default 5;
+    /// docs/specs/SPEC_JOBS_AND_TEMPLATES_2026_10_24.md §5.3).
+    #[serde(rename = "jobs:cap:runusd", default, skip_serializing_if = "Option::is_none")]
+    pub jobs_cap_run_usd: Option<f64>,
+    /// The most one job may spend in a local calendar day (default 20).
+    #[serde(rename = "jobs:cap:jobdayusd", default, skip_serializing_if = "Option::is_none")]
+    pub jobs_cap_job_day_usd: Option<f64>,
+    /// The most all job runs on one account may spend in a local day (default 50).
+    #[serde(rename = "jobs:cap:accountdayusd", default, skip_serializing_if = "Option::is_none")]
+    pub jobs_cap_account_day_usd: Option<f64>,
+    /// The most messages one job may send a day to an agent other than its
+    /// owner (default 24).
+    #[serde(rename = "jobs:cap:messagesday", default, skip_serializing_if = "Option::is_none")]
+    pub jobs_cap_messages_day: Option<u32>,
 
     /// Maximum runtime in hours before the watchdog kills an agent pane.
     /// 0 (default) disables the limit.

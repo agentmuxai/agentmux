@@ -49,9 +49,7 @@ describe("buildPaneContextMenu — baseline (no omit)", () => {
             "Copy",
             "Paste",
             "-",
-            "Split Up",
             "Split Down",
-            "Split Left",
             "Split Right",
             "-",
             "Magnify Pane",
@@ -66,14 +64,34 @@ describe("buildPaneContextMenu — baseline (no omit)", () => {
         expect(shape(menu)).toEqual([
             "Copy",
             "-",
-            "Split Up",
             "Split Down",
-            "Split Left",
             "Split Right",
             "-",
             "Un-Magnify Pane",
             "Close Pane",
         ]);
+    });
+});
+
+describe("buildPaneContextMenu — icons (SPEC_CONTEXT_MENU_ICONS_2026_10_25.md §4)", () => {
+    const icons = (items: ContextMenuItem[]) => Object.fromEntries(items.filter((i) => i.type !== "separator").map((i) => [i.label, i.icon]));
+
+    it("gives every row its icon", () => {
+        const menu = buildPaneContextMenu(termBlock, opts({ inspectAt: { x: 1, y: 2 } }));
+        expect(icons(menu)).toEqual({
+            Copy: "copy",
+            Paste: "paste",
+            "Split Down": "table-rows",
+            "Split Right": "table-columns",
+            "Magnify Pane": "regular@window-maximize",
+            "Close Pane": "xmark",
+            "Inspect Element": "bug",
+        });
+    });
+
+    it("swaps the Magnify icon when the pane is magnified", () => {
+        const menu = buildPaneContextMenu(agentBlock, opts({ magnified: true }));
+        expect(icons(menu)["Un-Magnify Pane"]).toBe("regular@window-restore");
     });
 });
 
@@ -163,12 +181,10 @@ describe("split — a view's splitBlockDef replaces copying its meta", () => {
         expect(blockDef).toEqual({ meta: PICKER_META });
     });
 
-    it("every direction splits into the declared block", async () => {
+    it("both directions split into the declared block", async () => {
         const g = (await import("@/app/store/global")) as any;
         const expected: Record<string, [any, string]> = {
-            "Split Up": [g.createBlockSplitVertically, "before"],
             "Split Down": [g.createBlockSplitVertically, "after"],
-            "Split Left": [g.createBlockSplitHorizontally, "before"],
             "Split Right": [g.createBlockSplitHorizontally, "after"],
         };
         for (const [label, [fn, position]] of Object.entries(expected)) {

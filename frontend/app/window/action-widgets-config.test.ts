@@ -234,6 +234,19 @@ describe("buildPaneWidgetMenuItems", () => {
         expect(items.map((i) => i.label)).not.toContain("Messengers");
     });
 
+    it("draws each widget with its own icon, a parent's on its submenu row", () => {
+        const wmap = paneWmap();
+        wmap["defwidget@editor"].icon = "pen-to-square";
+        const items = buildPaneWidgetMenuItems(wmap, {}, vi.fn());
+        expect(items.find((i) => i.label === "Editor")?.icon).toBe("pen-to-square");
+        const messengers = items.find((i) => i.label === "Messengers");
+        expect(messengers?.icon).toBe(wmap["defwidget@messengers"].icon);
+        expect(messengers?.submenu?.map((c) => c.icon)).toEqual([
+            wmap["defwidget@discord"].icon,
+            wmap["defwidget@slack"].icon,
+        ]);
+    });
+
     it("invokes onSelect with the chosen widget's blockdef", () => {
         const onSelect = vi.fn();
         const items = buildPaneWidgetMenuItems(paneWmap(), {}, onSelect);

@@ -9,6 +9,7 @@ pub(crate) mod account_episodes;
 // to start a turn outside the RPC path.
 pub mod agent_resources;
 pub mod agent_handlers;
+mod agent_only;
 mod agent_takeover;
 mod editor_handlers;
 mod fs_handlers;
@@ -30,12 +31,14 @@ pub(crate) mod caller;
 pub(crate) mod agent_self_keys;
 pub(crate) mod jekt_held;
 mod jekt_hold;
+mod jekt_cold;
 pub(crate) mod jekt_files;
 pub(crate) mod jekt_cloud;
 pub(crate) mod jekt_seal;
 mod jekt_echo;
 pub(crate) mod jekt_entry;
 pub(crate) mod actor;
+mod bus_frames;
 pub(crate) mod service;
 mod shell_handlers;
 mod tool_handlers;
@@ -46,8 +49,11 @@ pub(crate) mod mux_obj_bridge;
 mod websocket;
 mod drone_handlers;
 pub(crate) mod cron;
+pub(crate) mod job_actions;
+pub(crate) mod job_caps;
 pub(crate) mod work_queue;
 mod work_tasks;
+mod work_delegate;
 mod messaging_handlers;
 mod muxbus_handlers;
 mod muxspect_handlers;
@@ -88,6 +94,9 @@ pub(crate) mod job_template_handlers;
 
 #[cfg(test)]
 pub(crate) mod tests;
+#[cfg(test)]
+#[path = "tests/sender_claims_tests.rs"]
+mod sender_claims_tests;
 #[cfg(test)]
 mod rpc_schema_export;
 

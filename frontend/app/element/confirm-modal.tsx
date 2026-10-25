@@ -31,6 +31,8 @@ export interface ConfirmModalProps {
     /** An agent waits on this answer: the filled attention button (ignored
      *  when `destructive`). */
     attention?: boolean;
+    /** The answer is the person's own: agents' UI tool can't read or press it (see `Modal`). */
+    operatorOnly?: boolean;
     onConfirm: () => void | Promise<void>;
     onCancel: () => void;
 }
@@ -53,6 +55,7 @@ export const ConfirmModal: Component<ConfirmModalProps> = (props) => {
         <Modal
             open={props.open}
             scope={props.scope}
+            operatorOnly={props.operatorOnly}
             onClose={() => { if (!pending()) props.onCancel(); }}
             closeOnBackdropClick={!pending()}
             closeOnEscape={!pending()}

@@ -24,6 +24,7 @@
 import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, type JSX } from "solid-js";
 
 import { ContextMenuModel } from "@/app/store/contextmenu";
+import { MENU_ICON } from "@/app/util/menu-icons";
 import { redactSecrets } from "@/app/errors/redact";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { followControllerOn } from "@/app/view/agent/scroll/follow-setting";
@@ -203,11 +204,13 @@ export const LogView = (props: LogViewProps): JSX.Element => {
                     [
                         {
                             label: "Copy",
+                            icon: MENU_ICON.copy,
                             enabled: sel.length > 0,
                             click: () => void clipboardWriteText(redactSecrets(sel)).catch((err) => console.log("clipboard write failed", err)),
                         },
                         {
                             label: "Copy All",
+                            icon: MENU_ICON.copy,
                             enabled: props.lines().length > 0,
                             click: () =>
                                 void clipboardWriteText(redactSecrets(props.copyAllText())).catch((err) =>

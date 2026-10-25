@@ -113,6 +113,18 @@ async fn spawn_worker(
     req: SpawnAgentRequest,
 ) -> Result<SpawnAgentResult, SpawnError> {
     let leader = leader_of(state, caller, &req)?;
+    spawn_with(state, leader, &req, false).await
+}
+
+/// Open a worker for `leader` as `req` asks. `operator_approved`: the
+/// operator made the decision beforehand (a job they created), so the user
+/// isn't asked; the limits and the leader's checks still apply.
+async fn spawn_with(
+    state: &AppState,
+    leader: Leader,
+    req: &SpawnAgentRequest,
+    operator_approved: bool,
+) -> Result<SpawnAgentResult, SpawnError> {
     let brief = req.brief.trim();
     if brief.is_empty() {
         return Err(refuse(StatusCode::BAD_REQUEST, "INVALID_ARG: a brief is required: the worker's task, its first message"));
@@ -146,7 +158,11 @@ async fn spawn_worker(
 
     let account = choose_account(state, &leader, &provider, req.account.as_deref())?;
 
-    let asked_user = consent(state, &leader, name, runtime.model.as_deref(), &account, brief, &req.user_instruction).await?;
+    let asked_user = if operator_approved {
+        false
+    } else {
+        consent(state, &leader, name, runtime.model.as_deref(), &account, brief, &req.user_instruction).await?
+    };
 
     let name = match name {
         Some(n) => n.to_string(),
@@ -241,6 +257,12 @@ fn leader_of(
 ) -> Result<Leader, SpawnError> {
     let block_id = crate::server::ui_handlers::verified_block_id(state, caller, &req.auth)
         .map_err(|e| refuse(StatusCode::UNAUTHORIZED, format!("could not verify which agent is asking: {e}")))?;
+    leader_at(state, block_id)
+}
+
+/// The leader whose pane is `block_id`, if it may spawn: a host agent, not a
+/// worker.
+fn leader_at(state: &AppState, block_id: String) -> Result<Leader, SpawnError> {
     let block = state
         .mstore
         .get::<Block>(&block_id)
@@ -267,6 +289,46 @@ fn leader_of(
         return Err(refuse(StatusCode::FORBIDDEN, "CONTAINER_AGENT: a container agent can't start workers"));
     }
     Ok(Leader { block_id, def })
+}
+
+/// Open a worker for the job whose leader is `leader_uid`, from its running
+/// pane: the same path as an agent's `spawn`, without asking the user, since
+/// the operator created the job. `MAX_LIVE_WORKERS` and "workers can't
+/// spawn" apply.
+pub(crate) async fn spawn_for_job(
+    state: &AppState,
+    leader_uid: &str,
+    brief: &str,
+    model: Option<String>,
+    account: Option<String>,
+) -> Result<SpawnAgentResult, String> {
+    let block_id = state
+        .reactive_handler
+        .block_for_uid(leader_uid)
+        .ok_or_else(|| "the job's leader isn't running: start it, or the worker has no pane to open beside".to_string())?;
+    let leader = leader_at(state, block_id).map_err(|e| e.message)?;
+    let req = SpawnAgentRequest {
+        auth: agentmux_common::api_types::UiAutomationAuth { agent_id: leader.def.name.clone(), ts_secs: 0, sig: String::new() },
+        name: None,
+        model,
+        effort: None,
+        account,
+        brief: brief.to_string(),
+        user_instruction: String::new(),
+    };
+    spawn_with(state, leader, &req, true).await.map_err(|e| e.message)
+}
+
+/// The account and provider the next worker of a `spawn` job led by
+/// `leader_uid` would run on (`choose_account`), without opening it: what the
+/// spending caps weigh before the run starts (jobs spec §5.3). `None` when
+/// the leader isn't running or no account can take a worker.
+pub(crate) fn account_for_job(state: &AppState, leader_uid: &str, requested: Option<&str>) -> Option<(String, String)> {
+    let block_id = state.reactive_handler.block_for_uid(leader_uid)?;
+    let leader = leader_at(state, block_id).ok()?;
+    let provider = state.id_store.resolve_effective_provider_id(&leader.def);
+    let account = choose_account(state, &leader, &provider, requested).ok()?;
+    Some((account.id, account.provider))
 }
 
 /// The worker's remembered runtime (`agentlastruntime`): the leader's, with

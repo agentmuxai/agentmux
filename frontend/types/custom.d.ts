@@ -275,6 +275,9 @@ declare global {
         setFrozen?(blockId: string, frozen: boolean): Promise<boolean>;
         /** The host's memory pressure level (memory_pressure.rs). */
         memoryPressure?(): Promise<"normal" | "warn" | "critical">;
+        /** The memory (bytes) each of these browser panes holds in renderers of its own, by block id; a pane
+         *  with no figure is missing. All panes when none are named. Empty where the host can't tell (Linux). */
+        paneMemory?(blockIds?: string[]): Promise<Record<string, number>>;
         /** Bring a popup window a pane's page opened (`popup-…`) to the front. */
         showPopup(popupId: string): Promise<void>;
         /** Close a popup window a pane's page opened. */
@@ -683,6 +686,8 @@ declare global {
         sublabel?: string;
         /** CSS color for an inline swatch square rendered before the label. */
         swatchColor?: string;
+        /** A Font Awesome name (`"copy"`, `"regular@window-maximize"`) drawn in the row's leading slot; decoration only. See app/util/menu-icons.ts. */
+        icon?: string;
     };
 
     type ContextMenuItem = {
@@ -697,6 +702,8 @@ declare global {
         sublabel?: string;
         /** CSS color for an inline swatch square rendered before the label. */
         swatchColor?: string;
+        /** A Font Awesome name (`"copy"`, `"regular@window-maximize"`) drawn in the row's leading slot; decoration only. See app/util/menu-icons.ts. */
+        icon?: string;
     };
 
     type KeyPressDecl = {

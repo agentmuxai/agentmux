@@ -94,10 +94,10 @@ async fn still_needs_login(state: &AppState, uid: &str) -> bool {
     true
 }
 
-/// Whether the agent of `uid` is out of quota (`jekt_hold::holding_unavailable`):
+/// Whether the agent of `uid` is unavailable (`jekt_hold::holding_unavailable`):
 /// a delivery now would start a turn that fails at once and loses the
-/// message. A read of its block, no gate check; it ends at the reset or an
-/// account move, which wakes the replay (SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §5).
+/// message. A read of its block, no gate check; it ends at the reset, confirmed
+/// sign-in or account move (SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §5).
 async fn target_unavailable(state: &AppState, uid: &str) -> bool {
     let Some(block_id) = state.reactive_handler.block_for_uid(uid) else {
         return false;
@@ -109,6 +109,25 @@ async fn target_unavailable(state: &AppState, uid: &str) -> bool {
     .await
     // A panicked read never delivers into a turn that may fail.
     .unwrap_or(true)
+}
+
+/// Whether the session of `uid` is cold now (`jekt_cold::session_last_output`,
+/// the setting's limit). A target with no controller or another provider is
+/// not: its held messages are not waiting for a warm session.
+async fn target_cold(state: &AppState, uid: &str) -> bool {
+    let Some(block_id) = state.reactive_handler.block_for_uid(uid) else {
+        return false;
+    };
+    let Some(after_ms) = crate::backend::cold_hold::cold_after_ms(&state.config_watcher.get_full_config().settings.extra) else {
+        return false;
+    };
+    let mstore = state.mstore.clone();
+    tokio::task::spawn_blocking(move || {
+        let last = crate::backend::cold_hold::session_last_output(&mstore, &block_id);
+        crate::backend::cold_hold::is_cold(last, agentmux_common::time::now_ms(), after_ms)
+    })
+    .await
+    .unwrap_or(false)
 }
 
 /// Replay held jekts: once now, then whenever an agent registers and every
@@ -184,9 +203,13 @@ pub(crate) async fn replay_pass(state: &AppState) -> Vec<(String, ReplayOutcome)
         if target_unavailable(state, &uid).await {
             continue;
         }
+        // What was held because the session was cold waits until it is warm (the agent wrote
+        // something since: the operator typed, or an urgent message started a turn), or
+        // until it has waited out its 24 hours.
+        let warm = !target_cold(state, &uid).await;
         let mstore = state.mstore.clone();
         let budget = REPLAY_PER_PASS - spent;
-        let rows = tokio::task::spawn_blocking(move || mstore.jekt_held_for_target(&uid, budget))
+        let rows = tokio::task::spawn_blocking(move || mstore.jekt_held_ready(&uid, budget, warm, now))
             .await
             .ok()
             .and_then(Result::ok)

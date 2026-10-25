@@ -376,6 +376,7 @@ partial list.
 | [`SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13`](SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md) | Spec: Completing the jekt sender-trust layer (host-tier signing + WAN binding enforcement) |
 | [`SPEC_LAN_DISCOVERY_TXT_CLOBBER_FIX_2026_08_16`](SPEC_LAN_DISCOVERY_TXT_CLOBBER_FIX_2026_08_16.md) | SPEC: LAN discovery peer metadata gets clobbered blank by TXT-less mDNS re-resolutions |
 | [`SPEC_LAN_FLEET_FEED_2026_10_03`](SPEC_LAN_FLEET_FEED_2026_10_03.md) | SPEC: A names-only fleet feed for LAN peers — snapshot, event stream, UDP siblings |
+| [`SPEC_LAN_JEKT_SIGNED_BY_SRV_2026_10_25`](SPEC_LAN_JEKT_SIGNED_BY_SRV_2026_10_25.md) | SPEC: srv signs LAN jekts for an agent that signed nothing |
 | [`SPEC_LAN_UDP_PEER_DISCOVERY_2026_10_02`](SPEC_LAN_UDP_PEER_DISCOVERY_2026_10_02.md) | SPEC: Desktops find each other without mDNS — UDP broadcast peer discovery |
 | [`SPEC_LAUNCH_MODAL_STATE_MACHINE_2026_05_19`](SPEC_LAUNCH_MODAL_STATE_MACHINE_2026_05_19.md) | SPEC: Launch Modal — State Machine Hardening |
 | [`SPEC_LAYOUT_MINIMIZE_LOCKED_STATE_REDESIGN_2026_07_16`](SPEC_LAYOUT_MINIMIZE_LOCKED_STATE_REDESIGN_2026_07_16.md) | Spec — Pane Minimize as a Locked State (redesign) |
@@ -491,6 +492,7 @@ partial list.
 | [`SPEC_STORE_MODULARIZATION_2026_05_27`](SPEC_STORE_MODULARIZATION_2026_05_27.md) | SPEC: `wstore` → `store` rename + modularization |
 | [`SPEC_STRONG_REDUCER_AUTHORITY_LAYOUT_2026_06_30`](SPEC_STRONG_REDUCER_AUTHORITY_LAYOUT_2026_06_30.md) | SPEC — Strong Reducer-Authority for Layout (Intent-Driven srv Reducer) |
 | [`SPEC_SUBAGENT_LIFECYCLE_RECONCILIATION_2026_07_12`](SPEC_SUBAGENT_LIFECYCLE_RECONCILIATION_2026_07_12.md) | SPEC — subagent lifecycle: no reducer, no liveness, "working" forever |
+| [`SPEC_SUBAGENT_MODELS_2026_10_25`](SPEC_SUBAGENT_MODELS_2026_10_25.md) | Sub-agent Models: general-purpose on Sonnet, Explore on Haiku |
 | [`SPEC_SUBAGENT_WATCHER_IDENTITY_BOUND_CONFIG_DIR_2026_08_22`](SPEC_SUBAGENT_WATCHER_IDENTITY_BOUND_CONFIG_DIR_2026_08_22.md) | SPEC: subagent_watcher watches the identity-bound Claude config dir, not a stale spawn-time snapshot |
 | [`SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24`](SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md) | SPEC: Surface `~/.claude/CLAUDE.md` (read-only) in Global Memory |
 | [`SPEC_SWARM_BROADCAST_AS_USER_MESSAGE_2026_10_01`](SPEC_SWARM_BROADCAST_AS_USER_MESSAGE_2026_10_01.md) | Spec: a Swarm broadcast reaches agents as the user's own message, marked as a broadcast |
@@ -658,6 +660,7 @@ partial list.
 | [`SPEC_CONNECTORS_MCP_WHAT_AGENTS_RUN_2026_10_10`](SPEC_CONNECTORS_MCP_WHAT_AGENTS_RUN_2026_10_10.md) | SPEC: Connectors → MCP servers shows what agents run |
 | [`SPEC_CONTENT_RESIZE_CONTRACT_2026_08_31`](SPEC_CONTENT_RESIZE_CONTRACT_2026_08_31.md) | SPEC: A single content-resize contract for the agent pane |
 | [`SPEC_CONTEXT_DELIVERY_2026_09_30`](SPEC_CONTEXT_DELIVERY_2026_09_30.md) | SPEC: Context deliveries — what the agent was given, one item at a time |
+| [`SPEC_CONTEXT_MENU_ICONS_2026_10_25`](SPEC_CONTEXT_MENU_ICONS_2026_10_25.md) | SPEC: Icons in every right-click (context) menu |
 | [`SPEC_CROSS_CHANNEL_AGENT_HISTORY_RESOLUTION_2026_09_21`](SPEC_CROSS_CHANNEL_AGENT_HISTORY_RESOLUTION_2026_09_21.md) | SPEC: cross-channel agent history resolution |
 | [`SPEC_DECISION_PROMPT_2026_04_24`](SPEC_DECISION_PROMPT_2026_04_24.md) | Spec: Per-Tool-Call Permission Decision Prompt |
 | [`SPEC_DESKTOP_DRIVING_2026_10_20`](SPEC_DESKTOP_DRIVING_2026_10_20.md) | SPEC: Desktop driving: an agent looks at and controls a native app, with the user's consent for each app |
@@ -695,7 +698,9 @@ partial list.
 | [`SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09`](SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md) | Spec: Instruction and Memory Portability |
 | [`SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02`](SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md) | SPEC: Cross-channel jekt trust — closing the last unverifiable same-machine tier |
 | [`SPEC_JEKT_DELIVERY_STATES_AND_MAILBOX_2026_10_01`](SPEC_JEKT_DELIVERY_STATES_AND_MAILBOX_2026_10_01.md) | SPEC: jekt delivery that tells the truth — receiver state, one mailbox, receipts |
+| [`SPEC_JEKT_HOLD_FOR_COLD_SESSIONS_2026_10_25`](SPEC_JEKT_HOLD_FOR_COLD_SESSIONS_2026_10_25.md) | Spec: hold a routine message for an agent whose session has gone cold |
 | [`SPEC_JOBS_AND_TEMPLATES_2026_10_24`](SPEC_JOBS_AND_TEMPLATES_2026_10_24.md) | SPEC: Jobs and templates: one ledger for everything that runs by itself |
+| [`SPEC_KANBAN_ACCEPT_ON_THE_OPERATORS_WORD_2026_10_23`](SPEC_KANBAN_ACCEPT_ON_THE_OPERATORS_WORD_2026_10_23.md) | Spec: a leader accepts, or sends back, a Kanban task when the operator tells it to |
 | [`SPEC_KANBAN_AGENTS_HOLD_AND_UNHOLD_2026_10_22`](SPEC_KANBAN_AGENTS_HOLD_AND_UNHOLD_2026_10_22.md) | Spec: agents put Kanban tasks on hold and take them off hold |
 | [`SPEC_KANBAN_REMINDER_OFF_BY_DEFAULT_2026_10_22`](SPEC_KANBAN_REMINDER_OFF_BY_DEFAULT_2026_10_22.md) | Spec: the Kanban's backlog reminder off by default, with a setting to turn it on |
 | [`SPEC_KANBAN_STAGES_COLOURS_AND_NARROW_VIEW_2026_10_23`](SPEC_KANBAN_STAGES_COLOURS_AND_NARROW_VIEW_2026_10_23.md) | Spec: the Kanban's stages (Backlog, In Research, Spec'd, In progress, Review, Merged, Released), its colours, and its narrow view |

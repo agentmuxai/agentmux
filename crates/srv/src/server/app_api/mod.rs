@@ -78,11 +78,12 @@ pub(crate) use bundle::SelfOwner;
 pub(crate) use global_memory::GlobalMemoryWriteProvenance;
 pub(crate) use memory::MemoryWriteProvenance;
 pub(crate) use memory::{memory_list_impl, memory_read_impl, memory_write_impl, memory_history_impl, memory_diff_impl, memory_revert_impl};
-pub(crate) use global_memory::{global_memory_write_impl, global_memory_list_impl, global_memory_read_impl, global_memory_remove_impl, global_memory_history_impl, global_memory_diff_impl, bundle_version_diff, global_memory_revert_impl};
+pub(crate) use global_memory::{append_to_global_order, removed_global_entries, global_memory_write_impl, global_memory_list_impl, global_memory_read_impl, global_memory_remove_impl, global_memory_history_impl, global_memory_diff_impl, bundle_version_diff, global_memory_revert_impl};
 mod skill;
 mod mcp;
 mod bookmarks;
 mod browser_profiles;
+mod pins;
 pub(crate) use browser_profiles::list as browser_profiles_list;
 mod layout;
 mod other_build_layouts;
@@ -102,8 +103,9 @@ mod blockstats;
 mod history_agents;
 mod history_usage;
 mod shells;
-mod kanban;
+pub(crate) mod kanban;
 mod jobs;
+mod jobs_edit;
 mod connectivity;
 pub(crate) mod layout_intent;
 
@@ -123,6 +125,7 @@ pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     mcp::register(engine, state);
     bookmarks::register(engine, state);
     browser_profiles::register(engine, state);
+    pins::register(engine, state);
     layout::register(engine, state);
     other_build_layouts::register(engine, state);
     layout_intent::register(engine, state);
@@ -144,6 +147,7 @@ pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     shells::register(engine, state);
     kanban::register(engine, state);
     jobs::register(engine, state);
+    jobs_edit::register(engine, state);
     crate::server::account_episodes::register(engine, state);
     connectivity::register(engine);
 }

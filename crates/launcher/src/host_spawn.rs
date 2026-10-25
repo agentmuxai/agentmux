@@ -90,6 +90,9 @@ pub(crate) fn spawn_host_supervised(
         // spawned a second srv on the same data dir (#3868 follow-up). See
         // crates/cef/src/lib.rs::launcher_is_genuine_parent.
         .env("AGENTMUX_LAUNCHER_PID", std::process::id().to_string())
+        // This launcher quits the host over the host pipe (host_quit.rs): the host
+        // then refuses `quit_app` on the port-file token.
+        .env("AGENTMUX_LAUNCHER_QUIT_PIPE", "1")
         .envs(host_env.iter().cloned())
         // Auto-start (issue #2977 WS2): translate the launcher's own
         // `--background` flag into the env the HOST actually reads. The flag
@@ -208,6 +211,9 @@ pub(crate) fn spawn_host_unix(
         // and adopt our launcher-owned srv instead of double-spawning. See
         // crates/cef/src/main.rs::launcher_is_genuine_parent.
         .env("AGENTMUX_LAUNCHER_PID", std::process::id().to_string())
+        // This launcher quits the host over the host pipe (host_quit.rs): the host
+        // then refuses `quit_app` on the port-file token.
+        .env("AGENTMUX_LAUNCHER_QUIT_PIPE", "1")
         .envs(host_env.iter().cloned())
         // Auto-start (issue #2977 WS2) — same translation as the Windows
         // spawn path. macOS and Linux are the platforms whose generated

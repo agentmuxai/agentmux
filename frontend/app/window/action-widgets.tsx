@@ -20,6 +20,7 @@
 import { Tooltip } from "@/app/element/tooltip";
 import { PopoverMenu, type PopoverMenuItem } from "@/app/element/popover-menu";
 import { ContextMenuModel } from "@/app/store/contextmenu";
+import { MENU_ICON } from "@/app/util/menu-icons";
 import { createPeerRegistry, createSubmenuHover, type SubmenuHoverController } from "@/app/util/submenu-hover";
 import { atoms } from "@/store/global";
 import { isBlank, makeIconClass } from "@/util/util";
@@ -363,7 +364,7 @@ const ActionWidgets = (): JSX.Element => {
     const hideItem = (key: string, group: boolean) =>
         UNHIDEABLE_WIDGET_KEYS.has(key)
             ? []
-            : [{ label: group ? "Hide group from widget bar" : "Hide from widget bar", click: () => hideFromWidgetBar(key, settings(), wmap()) }];
+            : [{ label: group ? "Hide group from widget bar" : "Hide from widget bar", icon: MENU_ICON.hide, click: () => hideFromWidgetBar(key, settings(), wmap()) }];
 
     const buildItemMenuItems = (key: string, shortName: string): PopoverMenuItem[] => {
         const widgetDef = resolveWidgetDef(shortName);
@@ -374,13 +375,14 @@ const ActionWidgets = (): JSX.Element => {
         if ((widgetDef?.children?.length ?? 0) > 0) {
             return [
                 getPinnedKeys(settings(), wmap()).includes(shortName)
-                    ? { label: "Unpin group from bar", click: () => { unpinWidget(shortName, settings(), wmap()); } }
-                    : { label: "Pin group to bar", click: () => { pinWidget(shortName, settings(), wmap()); } },
+                    ? { label: "Unpin group from bar", icon: MENU_ICON.unpin, click: () => { unpinWidget(shortName, settings(), wmap()); } }
+                    : { label: "Pin group to bar", icon: MENU_ICON.pin, click: () => { pinWidget(shortName, settings(), wmap()); } },
                 ...hideItem(key, true),
             ];
         }
         const items: PopoverMenuItem[] = buildWidgetOpenActions(shortName, wmap()).map((action) => ({
             label: action.label,
+            icon: action.icon,
             click: () => {
                 closeMore();
                 action.run();
@@ -399,8 +401,8 @@ const ActionWidgets = (): JSX.Element => {
         items.push({ type: "separator" } as PopoverMenuItem);
         items.push(
             getPinnedKeys(settings(), wmap()).includes(shortName)
-                ? { label: "Unpin from bar", click: () => { unpinWidget(shortName, settings(), wmap()); } }
-                : { label: "Pin to bar", click: () => { pinWidget(shortName, settings(), wmap()); } }
+                ? { label: "Unpin from bar", icon: MENU_ICON.unpin, click: () => { unpinWidget(shortName, settings(), wmap()); } }
+                : { label: "Pin to bar", icon: MENU_ICON.pin, click: () => { pinWidget(shortName, settings(), wmap()); } }
         );
         items.push(...hideItem(key, false));
         return items;
@@ -466,7 +468,7 @@ const ActionWidgets = (): JSX.Element => {
         if (isParent) {
             closeParentFlyout(key);
             ContextMenuModel.showContextMenu(
-                [{ label: "Unpin group from bar", click: () => unpinWidget(shortName, settings(), wmap()) }, ...hideItem(key, true)],
+                [{ label: "Unpin group from bar", icon: MENU_ICON.unpin, click: () => unpinWidget(shortName, settings(), wmap()) }, ...hideItem(key, true)],
                 e
             );
             return;
@@ -474,9 +476,9 @@ const ActionWidgets = (): JSX.Element => {
         const actions = buildWidgetOpenActions(shortName, wmap());
         ContextMenuModel.showContextMenu(
             [
-                ...actions.map((action) => ({ label: action.label, click: action.run })),
+                ...actions.map((action) => ({ label: action.label, icon: action.icon, click: action.run })),
                 { type: "separator" },
-                { label: "Unpin from bar", click: () => unpinWidget(shortName, settings(), wmap()) },
+                { label: "Unpin from bar", icon: MENU_ICON.unpin, click: () => unpinWidget(shortName, settings(), wmap()) },
                 ...hideItem(key, false),
             ],
             e

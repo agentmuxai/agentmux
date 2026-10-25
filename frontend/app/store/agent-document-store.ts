@@ -19,7 +19,7 @@
 
 import { type Accessor, createSignal, type Setter } from "solid-js";
 
-import type { DocumentNode } from "../view/agent/types";
+import type { DocumentNode, ToolLogChunk } from "../view/agent/types";
 import { markDispatch } from "../view/agent/virtualization/perf-probe";
 import { RpcApi } from "./rpc-api";
 import { TabRpcClient } from "./rpc-util";
@@ -65,8 +65,27 @@ function pushResolvedDockNodes(blockId: string, events: AgentDocumentEvent[]) {
     }
 }
 
+/**
+ * Tool chunks a mounting pane could not place yet: the broker replays up to
+ * 1024 persisted `tool_chunk` events at a pane that mounts, about 1.7 s after
+ * the window loads and before its transcript history has made the tool nodes.
+ * They wait here, in arrival order, and are appended to their tool as soon as
+ * its node exists.
+ */
+interface ChunkHold {
+    chunks: Array<{ toolId: string; chunk: ToolLogChunk }>;
+    timer: ReturnType<typeof setTimeout> | null;
+}
+
+/** The most chunks a pane holds: the broker's replay cap per scope. */
+const CHUNK_HOLD_MAX = 1024;
+/** A pane stops holding this long after it mounted, if its history load has not ended first. */
+const CHUNK_HOLD_TIMEOUT_MS = 10_000;
+
 interface Slot {
     state: AgentDocumentState;
+    /** Open while the pane mounts (see `ChunkHold`); `null` once its history load ended or timed out. */
+    hold: ChunkHold | null;
     /**
      * Reactive read side of `state.nodes`. Referential equality, same as
      * the view-owned signal it replaced: the reducer produces a fresh array
@@ -95,13 +114,78 @@ let eventSink: EventSink = (blockId, event) => {
         );
     } else if (event.type === "tool-chunk-dropped") {
         // Real signal — chunk arrived before the matching ToolNode
-        // existed in state (or the tool was already terminated).
-        // Indicates an ordering bug, not a transient — keep loud.
-        console.warn(
-            `[agent-document-store] dropped chunk for ${blockId.slice(0, 7)} toolId=${event.toolId.slice(0, 14)} reason=${event.reason}`,
-        );
+        // existed in state (or the tool was already terminated). Counted
+        // and logged once per burst: a pane that mounts has up to 1024
+        // persisted chunks replayed at it before its history has made the
+        // tool nodes, and one console.warn (one IPC log line) per chunk
+        // was ~1400 lines in 2 s on a tab tear-off.
+        noteChunkDropped(blockId, event.toolId, event.reason);
     }
 };
+
+/** A burst of dropped chunks ends after this long without another one. */
+const DROP_BURST_QUIET_MS = 1000;
+/** Distinct (tool, reason) pairs a burst names; the rest are counted as "other". */
+const DROP_BURST_MAX_TOOLS = 200;
+/** Tools named in the summary line, busiest first. */
+const DROP_SUMMARY_TOP = 3;
+
+interface DropBurst {
+    /** `${reason} ${toolId}` → chunks dropped. */
+    byTool: Map<string, number>;
+    total: number;
+    /** Drops past `DROP_BURST_MAX_TOOLS` distinct pairs. */
+    other: number;
+    timer: ReturnType<typeof setTimeout> | null;
+}
+
+const dropBursts = new Map<string, DropBurst>();
+
+function noteChunkDropped(blockId: string, toolId: string, reason: string): void {
+    let burst = dropBursts.get(blockId);
+    if (burst == null) {
+        burst = { byTool: new Map(), total: 0, other: 0, timer: null };
+        dropBursts.set(blockId, burst);
+    }
+    const key = `${reason} ${toolId}`;
+    const seen = burst.byTool.get(key);
+    if (seen != null) burst.byTool.set(key, seen + 1);
+    else if (burst.byTool.size < DROP_BURST_MAX_TOOLS) burst.byTool.set(key, 1);
+    else burst.other++;
+    burst.total++;
+    if (burst.timer != null) clearTimeout(burst.timer);
+    burst.timer = setTimeout(() => flushDropBurst(blockId), DROP_BURST_QUIET_MS);
+}
+
+/** Logs the pane's burst of dropped chunks as ONE line, and ends the burst. */
+function flushDropBurst(blockId: string): void {
+    const burst = dropBursts.get(blockId);
+    if (burst == null) return;
+    dropBursts.delete(blockId);
+    if (burst.timer != null) clearTimeout(burst.timer);
+    const pane = blockId.slice(0, 7);
+    if (burst.total === 1) {
+        const [reason, toolId] = [...burst.byTool.keys()][0].split(" ");
+        console.warn(`[agent-document-store] dropped chunk for ${pane} toolId=${toolId.slice(0, 14)} reason=${reason}`);
+        return;
+    }
+    const byReason = new Map<string, number>();
+    for (const [key, n] of burst.byTool) {
+        const reason = key.slice(0, key.indexOf(" "));
+        byReason.set(reason, (byReason.get(reason) ?? 0) + n);
+    }
+    if (burst.other > 0) byReason.set("other", burst.other);
+    const reasons = [...byReason].map(([r, n]) => `${r}=${n}`).join(" ");
+    const busiest = [...burst.byTool]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, DROP_SUMMARY_TOP)
+        .map(([key, n]) => `${key.slice(key.indexOf(" ") + 1, key.indexOf(" ") + 15)}x${n}`)
+        .join(" ");
+    const tools = burst.byTool.size + (burst.other > 0 ? "+" : "");
+    console.warn(
+        `[agent-document-store] dropped ${burst.total} chunks for ${tools} tool ids in ${pane} (${reasons}); busiest: ${busiest}`,
+    );
+}
 
 /**
  * Register a pane with the store. The slot owns the pane's reducer
@@ -120,7 +204,54 @@ let eventSink: EventSink = (blockId, event) => {
 export function registerPane(blockId: string): void {
     const state = initialState();
     const [nodes, setNodes] = createSignal<DocumentNode[]>(state.nodes);
-    slots.set(blockId, { state, nodes, setNodes });
+    const previous = slots.get(blockId);
+    if (previous?.hold?.timer != null) clearTimeout(previous.hold.timer);
+    const hold: ChunkHold = { chunks: [], timer: null };
+    hold.timer = setTimeout(() => endChunkHold(blockId), CHUNK_HOLD_TIMEOUT_MS);
+    // Node's timers keep a process alive; a unit test must not wait for this one.
+    (hold.timer as { unref?: () => void }).unref?.();
+    slots.set(blockId, { state, hold, nodes, setNodes });
+}
+
+/**
+ * The pane's history load has ended (or failed): chunks still held belong to
+ * tools the history does not have, so they are dropped, counted into the
+ * pane's one summary line (`noteChunkDropped`), and later chunks for an
+ * unknown tool are dropped as before. A no-op for a pane that is not holding.
+ */
+export function endHistoryLoad(blockId: string): void {
+    endChunkHold(blockId);
+}
+
+function endChunkHold(blockId: string): void {
+    const hold = slots.get(blockId)?.hold;
+    if (hold == null) return;
+    const slot = slots.get(blockId)!;
+    slot.hold = null;
+    if (hold.timer != null) clearTimeout(hold.timer);
+    for (const held of hold.chunks) noteChunkDropped(blockId, held.toolId, "unknown-tool-id");
+    hold.chunks.length = 0;
+}
+
+/** Holds `chunk` for `toolId`; past the cap the oldest held chunk is dropped (and counted). */
+function holdChunk(blockId: string, hold: ChunkHold, toolId: string, chunk: ToolLogChunk): void {
+    if (hold.chunks.length >= CHUNK_HOLD_MAX) {
+        const oldest = hold.chunks.shift()!;
+        noteChunkDropped(blockId, oldest.toolId, "unknown-tool-id");
+    }
+    hold.chunks.push({ toolId, chunk });
+}
+
+/** Appends the held chunks whose tool now has a node to it, in arrival order; the rest keep waiting. */
+function applyHeldChunks(blockId: string, slot: Slot): void {
+    const hold = slot.hold;
+    if (hold == null || hold.chunks.length === 0) return;
+    const waiting: ChunkHold["chunks"] = [];
+    const ready: ChunkHold["chunks"] = [];
+    for (const held of hold.chunks) (slot.state.nodeIndexById.has(held.toolId) ? ready : waiting).push(held);
+    if (ready.length === 0) return;
+    hold.chunks = waiting;
+    for (const held of ready) dispatch(blockId, { type: "ToolChunkAppend", toolId: held.toolId, chunk: held.chunk });
 }
 
 /**
@@ -140,7 +271,9 @@ export function documentNodes(blockId: string): Accessor<DocumentNode[]> | null 
  * `unregisterPane` from `agent-pane-registration.ts`.
  */
 export function unregisterPane(blockId: string): void {
+    endChunkHold(blockId);
     slots.delete(blockId);
+    flushDropBurst(blockId);
 }
 
 /**
@@ -179,6 +312,16 @@ export function dispatch(
     const result = update(slot.state, command, Date.now(), opts);
     const prevNodes = slot.state.nodes;
     slot.state = result.state;
+    // A mounting pane holds a chunk for a tool it does not have yet instead of
+    // dropping it (`ChunkHold`); every other event goes on as the reducer made it.
+    let events = result.events;
+    if (slot.hold != null && command.type === "ToolChunkAppend") {
+        const unknown = (e: AgentDocumentEvent) => e.type === "tool-chunk-dropped" && e.reason === "unknown-tool-id";
+        if (events.some(unknown)) {
+            holdChunk(blockId, slot.hold, command.toolId, command.chunk);
+            events = events.filter((e) => !unknown(e));
+        }
+    }
     // Publish only if nodes changed (referential equality). Avoids no-op
     // signal writes that would still schedule a Solid effect. Thunk form
     // so Solid never mistakes the array for an updater function.
@@ -199,18 +342,22 @@ export function dispatch(
             );
         }
     }
-    for (const ev of result.events) eventSink(blockId, ev);
-    pushResolvedDockNodes(blockId, result.events);
+    for (const ev of events) eventSink(blockId, ev);
+    pushResolvedDockNodes(blockId, events);
     recordDispatch({
         slice: "agent-document",
         key: blockId,
         command,
-        events: result.events,
+        events,
         source,
         at: Date.now(),
     });
     stopDispatchTiming();
-    return result.events;
+    // New nodes may be the tools held chunks wait for.
+    if (slot.hold != null && command.type !== "ToolChunkAppend" && slot.state.nodes !== prevNodes && slots.get(blockId) === slot) {
+        applyHeldChunks(blockId, slot);
+    }
+    return events;
 }
 
 /**
@@ -251,7 +398,10 @@ export function getNodeIdSet(blockId: string): Set<string> {
 
 /** Test/dev helper — wipe all slots. Never call in production. */
 export function __resetAllSlots(): void {
+    for (const slot of slots.values()) if (slot.hold?.timer != null) clearTimeout(slot.hold.timer);
     slots.clear();
+    for (const burst of dropBursts.values()) if (burst.timer != null) clearTimeout(burst.timer);
+    dropBursts.clear();
 }
 
 // Re-export types for ergonomic imports at the call site.
