@@ -163,3 +163,23 @@ async fn only_the_operators_window_may_broadcast_as_the_user() {
     let sent = rpc(&state, RpcContext::operator_for_tests(), "fleet.broadcast", data).await.unwrap();
     assert_eq!(sent["failed"].as_array().map(Vec::len), Some(1), "the operator's broadcast ran, and its one target was unknown: {sent}");
 }
+
+/// The bus's HTTP inbox routes act for the agent they name, so each needs that agent's token.
+#[tokio::test]
+async fn the_bus_inbox_routes_need_the_token_of_the_agent_they_name() {
+    let _counters = M4_ACTOR_COUNTERS.lock().await;
+    let (state, token) = state_with_alpha();
+    let reads = |agent: &str| (json!({ "agent_id": agent }), json!({ "agent_id": agent, "message_ids": [] }));
+    for (agent, token, allowed) in [
+        ("sc-alpha", Some(token.as_str()), true),
+        ("Alpha Agent", Some(token.as_str()), true),
+        ("sc-beta", Some(token.as_str()), false),
+        ("sc-alpha", None, false),
+    ] {
+        let (register, delete) = reads(agent);
+        for (uri, body) in [("/api/bus/register", register), ("/api/bus/messages/delete", delete)] {
+            let (_, v) = post(&state, token, uri, body).await;
+            assert_eq!(!refused(&v), allowed, "{uri} for {agent} (token: {}): {v}", token.is_some());
+        }
+    }
+}

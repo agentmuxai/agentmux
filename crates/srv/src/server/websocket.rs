@@ -59,6 +59,8 @@ struct WSIncoming {
     termsize: Option<serde_json::Value>,
     // Fields for bus:* commands
     agent_id: Option<String>,
+    /// The agent's `AGENTMUX_AGENT_TOKEN`: proof for `bus:register`.
+    token: Option<String>,
     from: Option<String>,
     to: Option<String>,
     target: Option<String>,
@@ -550,6 +552,10 @@ async fn handle_incoming_text(
             }
             "bus:register" => {
                 if let Some(ref agent_id) = incoming.agent_id {
+                    if let Err(error) = super::bus_frames::register_allowed(&state.mstore, incoming.token.as_deref(), agent_id) {
+                        let msg = serde_json::to_string(&json!({ "type": "bus:error", "error": error })).unwrap_or_default();
+                        return if socket.send(Message::Text(msg.into())).await.is_err() { Err(true) } else { Ok(None) };
+                    }
                     let rx = state.messagebus.register(agent_id, "websocket");
                     // Stamp agent_id on the RPC context so MuxAPI S1 checks work.
                     engine.set_rpc_context(crate::backend::rpc_types::RpcContext {

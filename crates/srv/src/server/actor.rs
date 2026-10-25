@@ -88,6 +88,8 @@ actor_sites! {
     WorkRelease => "work_release",
     CronCreate => "cron_create",
     Inject => "inject",
+    BusRegister => "bus_register",
+    BusRead => "bus_read",
     BusSend => "bus_send",
     BusInject => "bus_inject",
     BusBroadcast => "bus_broadcast",
@@ -247,6 +249,24 @@ pub(crate) async fn require_actor(
     } else {
         Err("FORBIDDEN: the sender must be the agent this request's token names".to_string())
     }
+}
+
+/// Like [`require_actor`], but for a route that acts for an agent and has no
+/// meaning without one: the request must carry the token of the agent it
+/// names. A request with no token (or one this srv didn't mint) is refused
+/// instead of being taken at its word, and so is one whose token names another
+/// agent.
+pub(crate) async fn require_token_naming(
+    state: &AppState,
+    caller: Option<&Caller>,
+    site: ActorSite,
+    actor: &str,
+) -> Result<(), String> {
+    if caller.and_then(Caller::uid).is_none() {
+        check_actor(state, caller, site, Some(actor));
+        return Err("FORBIDDEN: this acts for an agent, so the request must carry that agent's token (AGENTMUX_AGENT_TOKEN)".to_string());
+    }
+    require_actor(state, caller, site, Some(actor)).await
 }
 
 /// Whether `actor` is a name the agent behind `uid` answers to: its slug,

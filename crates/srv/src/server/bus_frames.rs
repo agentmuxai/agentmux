@@ -5,7 +5,8 @@
 //! as its sender. A frame carries no token, so the only identity a connection
 //! has is the one it registered with (`bus:register`); the frame's `from` has
 //! to be that agent. A frame that names no sender is sent as `unknown`, which
-//! claims nothing.
+//! claims nothing. A registration is itself proven: it carries the agent's
+//! token, and the agent it names must be the one that token was minted for.
 
 use crate::backend::messagebus::Priority;
 use crate::backend::storage::store::Store;
@@ -16,6 +17,23 @@ pub(super) fn priority(requested: Option<&str>) -> Priority {
         Some("high") => Priority::High,
         Some("urgent") => Priority::Urgent,
         _ => Priority::Normal,
+    }
+}
+
+/// Whether a `bus:register` frame carrying `token` may register `agent_id`: the
+/// token has to be one this srv minted, for the agent that name selects.
+pub(super) fn register_allowed(store: &Store, token: Option<&str>, agent_id: &str) -> Result<(), String> {
+    let uid = token
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .and_then(|t| store.token_index()?.uid_for(t));
+    let Some(uid) = uid else {
+        return Err("FORBIDDEN: bus:register needs the agent's token (AGENTMUX_AGENT_TOKEN)".to_string());
+    };
+    if super::actor::names_the_caller(store, &uid, agent_id) {
+        Ok(())
+    } else {
+        Err("FORBIDDEN: bus:register may register only the agent its token names".to_string())
     }
 }
 
@@ -74,6 +92,22 @@ mod tests {
         let e = sender_allowed(store, "alpha", Some("beta")).unwrap_err();
         assert!(e.starts_with("FORBIDDEN"), "{e}");
         assert!(sender_allowed(store, "alpha", Some("nobody-at-all")).is_err(), "a name that is no agent");
+        });
+    }
+
+    #[test]
+    fn a_registration_is_proven_by_the_token_of_the_agent_it_names() {
+        with_store(|store| {
+            store.attach_token_index().unwrap();
+            let token = store.agent_token_ensure("uid-bf-a").unwrap();
+            assert!(register_allowed(store, Some(&token), "alpha").is_ok());
+            assert!(register_allowed(store, Some(&token), "Alpha").is_ok(), "by display name");
+            let other = register_allowed(store, Some(&token), "beta").unwrap_err();
+            assert!(other.starts_with("FORBIDDEN"), "{other}");
+            for missing in [None, Some(""), Some("  "), Some("not-a-token")] {
+                let e = register_allowed(store, missing, "alpha").unwrap_err();
+                assert!(e.contains("needs the agent's token"), "{missing:?}: {e}");
+            }
         });
     }
 
