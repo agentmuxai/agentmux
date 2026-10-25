@@ -103,7 +103,7 @@ pub(crate) const UI_TOOL: &str = r#"{
       "limit":           { "type": "number", "description": "query: the most matches to return (default all)" },
       "command":         { "type": "string", "description": "command: a command id from shortcuts" },
       "keys":            { "type": "string", "description": "keys: a raw key from shortcuts, in its syntax" },
-      "target":          { "type": "string", "description": "command, keys: a pane in your window (in any tab), or one of a pane's tabs, to focus first" },
+      "target":          { "type": "string", "description": "command, keys: your own pane, or a browser pane you opened, to focus first (default: your own pane)" },
       "include_foreign": { "type": "boolean", "description": "windows: also list other applications' windows" },
       "include_self":    { "type": "boolean", "description": "windows: include your own instance's windows (a torn-off floating pane, say)" },
       "pid":             { "type": "number", "description": "window: the owning process id, from windows" },

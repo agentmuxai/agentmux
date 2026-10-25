@@ -135,6 +135,41 @@ fn names_missing_a_key(content: &str, slug: &str) -> bool {
         && (env.get("AGENTMUX_JEKT_KEY").is_none() || env.get("AGENTMUX_LAN_KEY").is_none())
 }
 
+/// A launch's generated `.mcp.json` (`writeagentconfig`): named for the definition's agent id, and,
+/// when `hands_out_keys`, carrying that agent's host-tier and LAN-tier signing keys.
+///
+/// Keys go only to the AgentMux window, proven by its host (`RpcContext::operator_only`): the file
+/// lands where the caller says, and the keys it carries sign as the agent it names, so a caller
+/// that could name any agent would be handed the right to speak as it. Without them the agent's
+/// MCP fetches its own keys from srv (`/agentmux/agents/self/keys`).
+pub(crate) fn finish_launch(
+    files: &mut [crate::backend::rpc_types::AgentConfigFile],
+    mstore: &crate::backend::storage::store::Store,
+    agent_id: Option<&str>,
+    hands_out_keys: bool,
+) {
+    let Some(pos) = files.iter().position(|f| f.path == ".mcp.json") else { return };
+    // The definition's slug, over one the launch computed (P0.3).
+    let Some(agent_slug) = launch_agent_id(&mut files[pos].content, mstore, agent_id) else { return };
+    crate::server::agent_self_keys::record_config_id_drift(
+        "m4d.config_id_drift.write_agent_config",
+        &agent_slug,
+        crate::server::agent_self_keys::single_row_slug_folded(mstore, &agent_slug).as_deref(),
+    );
+    if !hands_out_keys {
+        tracing::info!(agent_slug = %agent_slug, "WriteAgentConfig: signing keys not injected: the caller isn't the AgentMux window");
+        return;
+    }
+    match crate::backend::agent_config::inject_jekt_signing_keys_into_mcp_json(&files[pos].content, mstore, &agent_slug) {
+        Some(rewritten) => files[pos].content = rewritten,
+        None => tracing::warn!(
+            agent_slug = %agent_slug,
+            "WriteAgentConfig: jekt/LAN signing keys not injected into .mcp.json — this agent's jekts will render \
+             TRUST=self-declared / TRUST=network-claimed instead of verified"
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
