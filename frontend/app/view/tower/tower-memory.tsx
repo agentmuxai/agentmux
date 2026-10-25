@@ -162,6 +162,16 @@ export function MemoryView(props: { model: TowerViewModel }): JSX.Element {
     );
 }
 
+/** The line to chart: the one picked while it is still a part or row on
+ *  screen and the ledger has its series, else the total. The ledger keeps a
+ *  row that ended for an hour, but its line would be drawn ending at "now". */
+export function chartKey(picked: string, memory: TowerMemory, trend: Trend | null): string {
+    const current =
+        picked === "total" ||
+        memory.parts.some((p) => partSeriesKey(p.part) === picked || p.rows.some((r) => r.key === picked));
+    return current && trend?.byKey.has(picked) ? picked : "total";
+}
+
 /** What a ledger key is called. */
 export function seriesLabel(key: string, memory: TowerMemory): string {
     if (key === "total") return "AgentMux";
@@ -177,7 +187,7 @@ export function seriesLabel(key: string, memory: TowerMemory): string {
  *  (spec section 7.2); AgentMux's total until a part or row is chosen. */
 function MemoryChart(props: { model: TowerViewModel; memory: TowerMemory; trend: Trend | null }): JSX.Element {
     const m = props.model;
-    const key = () => (props.trend?.byKey.has(m.memoryChart()) ? m.memoryChart() : "total");
+    const key = () => chartKey(m.memoryChart(), props.memory, props.trend);
     const series = () => props.trend?.byKey.get(key());
     const step = () => m.memoryHistory()?.step_ms ?? 10_000;
     const points = createMemo<HistoryPoint[]>(() => {

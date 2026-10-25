@@ -44,6 +44,7 @@ vi.mock("@/app/block/pane-identity", () => ({
 
 import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
 import type { TowerSnapshot } from "@/app/store/rpc-api";
+import { chartKey } from "./tower-memory";
 import { TowerViewModel } from "./tower-model";
 import { TowerView } from "./tower-view";
 
@@ -1602,6 +1603,30 @@ describe("Tower: the Memory view", () => {
         await screen.findByTestId("tower-rail-block-a");
         expect(screen.queryByRole("tab", { name: /Memory/ })).toBeNull();
         expect(screen.queryByTestId("tower-memory")).toBeNull();
+    });
+});
+
+describe("Tower: which line the Memory chart draws", () => {
+    const memory = withMemory(snapshot()).memory!;
+    const series = (key: string) => ({ key, start_ms: 0, points: [1, 2] });
+    const trend = {
+        byKey: new Map(["total", "part:agents", "agent:block-a", "agent:gone"].map((k) => [k, series(k)])),
+        end: 10_000,
+        spanMs: 3_600_000,
+    };
+
+    it("is the picked part or row while it is on screen and the ledger has it", () => {
+        expect(chartKey("part:agents", memory, trend)).toBe("part:agents");
+        expect(chartKey("agent:block-a", memory, trend)).toBe("agent:block-a");
+    });
+
+    it("is the total for a row that has left the table, though the ledger still holds its line", () => {
+        expect(chartKey("agent:gone", memory, trend)).toBe("total");
+    });
+
+    it("is the total for a line the ledger has none of, or before the hour arrives", () => {
+        expect(chartKey("part:not_placed", memory, trend)).toBe("total");
+        expect(chartKey("agent:block-a", memory, null)).toBe("total");
     });
 });
 
