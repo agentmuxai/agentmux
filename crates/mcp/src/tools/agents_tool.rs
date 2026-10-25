@@ -28,6 +28,8 @@ pub(super) const ACTS: &[Act] = &[
     Act { action: "context", tool: "AgentContext", rename: &[] },
     Act { action: "compact", tool: "AgentCompact", rename: &[] },
     Act { action: "fresh", tool: "AgentFresh", rename: &[] },
+    Act { action: "env_get", tool: "AgentEnvGet", rename: &[] },
+    Act { action: "env_set", tool: "AgentEnvSet", rename: &[] },
 ];
 
 pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
@@ -53,6 +55,8 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                     Some(handoff) => own_context(cx, "fresh", Some(handoff)).await,
                     None => Err(anyhow::anyhow!("Agents fresh needs a handoff: what your next session must know")),
                 },
+                "AgentEnvGet" => env(cx, "get", &args).await,
+                "AgentEnvSet" => env(cx, "set", &args).await,
                 _ => history::call(act.tool, &args, cx).await,
             };
             let result = result.map_err(|e| anyhow::anyhow!(public_params(&format!("{e:#}"), act.rename)));
@@ -185,6 +189,60 @@ async fn own_context(cx: &ToolCtx<'_>, route: &str, focus: Option<String>) -> Re
     Ok(serde_json::to_string_pretty(&body)?)
 }
 
+/// What `env_get` and `env_set` send srv (`/api/v1/agent/env`): the definition
+/// (the caller's own when none is named) and, for a set, the whole text or the
+/// variables to set and unset. `lines` goes as written, not trimmed. A number
+/// or a boolean given as a value is sent as its text.
+fn env_request(action: &str, args: &Value) -> Result<Value> {
+    let mut set = None;
+    if let Some(given) = args.get("set").filter(|v| !v.is_null()) {
+        let Some(object) = given.as_object() else {
+            anyhow::bail!("Agents env_set: set is an object of NAME: value");
+        };
+        let mut texts = serde_json::Map::new();
+        for (name, value) in object {
+            let text = match value {
+                Value::String(t) => t.clone(),
+                Value::Number(n) => n.to_string(),
+                Value::Bool(b) => b.to_string(),
+                _ => anyhow::bail!("Agents env_set: the value of {name} must be text"),
+            };
+            texts.insert(name.clone(), Value::String(text));
+        }
+        set = Some(Value::Object(texts));
+    }
+    Ok(json!({
+        "action": action,
+        "agent": str_arg(args, "agent"),
+        "lines": args.get("lines").and_then(Value::as_str),
+        "set": set,
+        "unset": args.get("unset").filter(|v| !v.is_null()),
+    }))
+}
+
+/// `env_get` and `env_set`: a definition's extra environment variables, read or
+/// changed by srv as the agent this process's token names, which records the
+/// change under that agent (`/api/v1/agent/env`).
+async fn env(cx: &ToolCtx<'_>, action: &str, args: &Value) -> Result<String> {
+    require_agent_env(cx.local_url, cx.auth_key, cx.block_id)?;
+    let request = env_request(action, args)?;
+    let url = format!("{}/api/v1/agent/env", cx.local_url.trim_end_matches('/'));
+    let resp = cx
+        .client
+        .post(&url)
+        .header(AUTH_KEY_HEADER, cx.auth_key)
+        .json(&request)
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+    let status = resp.status();
+    let body: Value = resp.json().await.unwrap_or(Value::Null);
+    if !status.is_success() {
+        anyhow::bail!("Agents env_{action}: {}", body["error"].as_str().map(str::to_string).unwrap_or_else(|| format!("srv answered {status}: {body}")));
+    }
+    Ok(serde_json::to_string_pretty(&body)?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -269,5 +327,56 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(e.starts_with("Agents search_history searches only your own history"), "{e}");
+    }
+
+    #[test]
+    fn env_actions_run_their_handlers() {
+        for (action, tool) in [("env_get", "AgentEnvGet"), ("env_set", "AgentEnvSet")] {
+            let (act, args) = pick("Agents", ACTS, &json!({ "action": action, "agent": "korp" })).unwrap();
+            assert_eq!((act.tool, args), (tool, json!({ "agent": "korp" })));
+        }
+    }
+
+    #[test]
+    fn an_env_get_names_the_agent_or_leaves_it_to_srv() {
+        assert_eq!(
+            env_request("get", &json!({ "agent": " korp " })).unwrap(),
+            json!({ "action": "get", "agent": "korp", "lines": null, "set": null, "unset": null })
+        );
+        assert_eq!(env_request("get", &json!({})).unwrap()["agent"], Value::Null);
+    }
+
+    #[test]
+    fn an_env_set_sends_the_text_as_written_or_the_edits() {
+        let text = "# note
+
+EDITOR=vim  
+";
+        let sent = env_request("set", &json!({ "lines": text })).unwrap();
+        assert_eq!(sent["lines"], text);
+        assert_eq!((sent["set"].clone(), sent["unset"].clone()), (Value::Null, Value::Null));
+        let sent = env_request("set", &json!({ "agent": "korp", "set": { "A": "1", "B": 2, "C": true }, "unset": ["D"] })).unwrap();
+        assert_eq!(sent["set"], json!({ "A": "1", "B": "2", "C": "true" }));
+        assert_eq!((sent["unset"].clone(), sent["lines"].clone(), sent["agent"].clone()), (json!(["D"]), Value::Null, json!("korp")));
+        // Clearing the environment is an empty text, not a missing one.
+        assert_eq!(env_request("set", &json!({ "lines": "" })).unwrap()["lines"], "");
+    }
+
+    #[test]
+    fn an_env_set_value_that_is_not_text_is_refused_before_anything_is_sent() {
+        let e = env_request("set", &json!({ "set": { "A": ["x"] } })).unwrap_err().to_string();
+        assert_eq!(e, "Agents env_set: the value of A must be text");
+        let e = env_request("set", &json!({ "set": "A=1" })).unwrap_err().to_string();
+        assert_eq!(e, "Agents env_set: set is an object of NAME: value");
+    }
+
+    /// Without an agent's own environment nothing is sent: the change would have no one to be attributed to.
+    #[tokio::test]
+    async fn env_set_needs_an_agent_pane() {
+        let client = reqwest::Client::new();
+        let loops = LoopRegistry::default();
+        let counter = std::sync::atomic::AtomicU64::new(0);
+        let cx = ToolCtx { local_url: "", auth_key: "", block_id: "", client: &client, loops: &loops, loop_counter: &counter };
+        assert!(call("Agents", &json!({ "action": "env_set", "set": { "A": "1" } }), &cx).await.is_err());
     }
 }

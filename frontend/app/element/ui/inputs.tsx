@@ -53,6 +53,31 @@ export function TextInput(props: TextInputProps): JSX.Element {
     );
 }
 
+// ── TextArea ──────────────────────────────────────────────────────────────────
+
+export interface TextAreaProps extends Omit<JSX.TextareaHTMLAttributes<HTMLTextAreaElement>, "class" | "classList"> {
+    density?: UiDensity;
+    invalid?: boolean;
+    /** Monospace, for text where columns and characters matter (KEY=VALUE lines, code). */
+    mono?: boolean;
+    class?: string;
+}
+
+/** A multi-line text box in the line style of TextInput. */
+export function TextArea(props: TextAreaProps): JSX.Element {
+    const [local, rest] = splitProps(props, ["density", "invalid", "mono", "class", "id"]);
+    const field = fieldAttrs(() => local.id, () => local.invalid);
+    return (
+        <textarea
+            {...rest}
+            id={field.id()}
+            class={clsx("ui-input", "ui-textarea", local.mono && "ui-textarea--mono", densityClass(local.density), local.class)}
+            aria-describedby={field.describedBy()}
+            aria-invalid={field.invalid()}
+        />
+    );
+}
+
 // ── NumberInput ───────────────────────────────────────────────────────────────
 
 export interface NumberInputProps {

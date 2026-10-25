@@ -15,11 +15,13 @@ export {
     NumberInput,
     Select,
     Switch,
+    TextArea,
     TextInput,
     type NumberInputProps,
     type SelectOption,
     type SelectProps,
     type SwitchProps,
+    type TextAreaProps,
     type TextInputProps,
 } from "./inputs";
 export { Pill, type PillProps, type PillTone } from "./Pill";

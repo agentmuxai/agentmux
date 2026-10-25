@@ -13,6 +13,7 @@ import { buildAgentPaneIcon } from "./components/AgentPaneIcon";
 import { useAgentDefinitions } from "./components/AgentPicker";
 import { getProvider, isAccountListed, PROVIDERS, resolveProviderAlias } from "./providers";
 import { resolveVendorEnvOverride } from "./providers/vendor-env";
+import { ENV_CONTENT_TYPE, parseEnvText } from "./agent-env";
 import { Logger } from "@/util/logger";
 import { translateError } from "@/app/errors/translate";
 import { buildInstanceSlug } from "./defaults/instance-slug";
@@ -574,17 +575,8 @@ export class AgentViewModel {
                 envVars[key] = "";
             }
         }
-        if (contentMap["env"]) {
-            for (const line of contentMap["env"].split("\n")) {
-                const trimmed = line.trim();
-                if (!trimmed || trimmed.startsWith("#")) continue;
-                const eqIdx = trimmed.indexOf("=");
-                if (eqIdx < 1) continue;
-                const key = trimmed.substring(0, eqIdx);
-                const val = trimmed.substring(eqIdx + 1);
-                if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(key)) continue;
-                envVars[key] = val;
-            }
+        if (contentMap[ENV_CONTENT_TYPE]) {
+            Object.assign(envVars, parseEnvText(contentMap[ENV_CONTENT_TYPE]).vars);
         }
 
         // Per-agent GitHub config isolation — keyed by the stable

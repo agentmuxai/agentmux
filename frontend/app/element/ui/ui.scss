@@ -403,6 +403,19 @@
     }
 }
 
+// TextArea: the input box, taller, with its own padding and a vertical handle.
+textarea.ui-textarea {
+    width: 100%;
+    min-height: calc(var(--ui-height) * 4);
+    padding: var(--space-1) var(--space-2);
+    line-height: var(--leading-normal);
+    resize: vertical;
+}
+
+textarea.ui-textarea--mono {
+    font-family: var(--font-mono);
+}
+
 select.ui-input {
     cursor: var(--cursor-interactive);
 

@@ -21,6 +21,7 @@ export type ModalLayerRequest =
     | AgentIdentityRequest
     | AgentMemoryRequest
     | AgentSeatRequest
+    | AgentEnvRequest
     | BundleImportSelectRequest
     | BundleImportPreviewRequest
     | BundleImportConfirmRequest;
@@ -96,6 +97,17 @@ export interface AgentMemoryRequest {
  */
 export interface AgentSeatRequest {
     kind: "agent-seat";
+    agentId: string;
+    agentName: string;
+}
+
+/**
+ * An agent's extra environment variables, opened by "Environment…" in My
+ * Agents' row menu. Same panel as the Stash drawer's Environment tab
+ * (AgentEnvPanel).
+ */
+export interface AgentEnvRequest {
+    kind: "agent-env";
     agentId: string;
     agentName: string;
 }
