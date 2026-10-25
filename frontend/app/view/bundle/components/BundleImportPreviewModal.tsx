@@ -248,9 +248,8 @@ export const BundleImportPreviewModalPanel = (
                                         </Show>
                                         <Show when={skill.content_total_chars > 0}>
                                             <div class="bundle-import-skill-text-block">
-                                                <button
-                                                    type="button"
-                                                    class="bundle-import-link-btn"
+                                                <Button
+                                                    className="ghost"
                                                     onClick={() =>
                                                         setSkillTextHidden((prev) => ({
                                                             ...prev,
@@ -259,7 +258,7 @@ export const BundleImportPreviewModalPanel = (
                                                     }
                                                 >
                                                     {skillTextHidden()[skill.source_dir] ? "Show" : "Hide"} skill text
-                                                </button>
+                                                </Button>
                                                 <Show when={!skillTextHidden()[skill.source_dir]}>
                                                     <pre class="bundle-import-skill-text">{skill.content}</pre>
                                                 </Show>

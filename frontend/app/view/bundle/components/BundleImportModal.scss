@@ -165,7 +165,7 @@
     white-space: pre-wrap;
     font-size: 0.85em;
     padding: 8px;
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     background: var(--tint-4);
 }
 
