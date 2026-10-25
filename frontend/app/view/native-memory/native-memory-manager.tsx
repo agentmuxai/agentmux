@@ -178,7 +178,11 @@ export function NativeMemoryManager(props: { pane?: NativeMemoryPane }): JSX.Ele
         const wanted = agents().find((a) => a.id === id);
         if (!wanted || untrack(selectedAgent)?.id === id) return;
         // Unsaved edits in the open file stay: the same confirm Back asks.
-        if (untrack(detailDirty) && !window.confirm("Discard your unsaved changes?")) return;
+        if (untrack(detailDirty) && !window.confirm("Discard your unsaved changes?")) {
+            // Declined: the pane's request is withdrawn, so a later refresh doesn't ask again.
+            props.pane?.setMeta({ [MEMORY_AGENT_KEY]: untrack(selectedAgent)?.id ?? null });
+            return;
+        }
         setSelectedAgentState(wanted);
     });
     const [files, setFiles] = createSignal<NativeMemoryFileMeta[]>([]);
@@ -734,7 +738,9 @@ export function NativeMemoryManager(props: { pane?: NativeMemoryPane }): JSX.Ele
                                             // another agent: its file isn't theirs to open.
                                             if (selectedAgent()?.id !== createdFor) return;
                                             refetchSelectedAgentFiles(agent());
-                                            setSelectedFilename(filename);
+                                            // Only from the grid: a file opened meanwhile, with edits
+                                            // in it, stays open.
+                                            if (selectedFilename() === "") setSelectedFilename(filename);
                                         }}
                                     />
                                     {/* Distinct from the "no files" empty state below:

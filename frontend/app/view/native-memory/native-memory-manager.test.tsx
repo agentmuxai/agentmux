@@ -1205,6 +1205,23 @@ describe("NativeMemoryManager — create actions", () => {
         expect(screen.getByRole("button", { name: "Create MEMORY.md" })).toBeDisabled();
     });
 
+    test("a write that finishes after another file was opened leaves that file open", async () => {
+        folderWith([meta("MEMORY.md", { is_index: true }), meta("notes.md")]);
+        let finish: (v: unknown) => void = () => {};
+        nativeMemoryWriteMock.mockImplementation(() => new Promise((resolve) => (finish = resolve)));
+        await openManoz();
+        fireEvent.click(await screen.findByRole("button", { name: "New file" }));
+        fireEvent.input(screen.getByLabelText("File name"), { target: { value: "late" } });
+        fireEvent.click(screen.getByRole("button", { name: "Create" }));
+        await waitFor(() => expect(nativeMemoryWriteMock).toHaveBeenCalledTimes(1));
+
+        fireEvent.click(screen.getByText("notes.md"));
+        expect((await screen.findByTestId("history-panel")).textContent).toBe("a1:notes.md");
+        finish({});
+        await new Promise((r) => setTimeout(r, 30));
+        expect(screen.getByTestId("history-panel").textContent).toBe("a1:notes.md");
+    });
+
     test("New file waits while the folder's list is loading or failed, so a name can't replace a file it hasn't seen", async () => {
         nativeMemoryListMock.mockImplementation(() => new Promise(() => {}));
         await openManoz();
