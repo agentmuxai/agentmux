@@ -95,6 +95,24 @@ $kanban-narrow: 760px;
         background: var(--main-bg-color);
     }
 
+    // Extra-large section labels, so where one section ends and the next begins reads at a glance
+    // while scrolling. Qualified by the board for the same reason as the rules above: the base
+    // label and count rules come later in this file.
+    .kanban-board .kanban-column__label {
+        font-size: var(--text-2xl);
+        line-height: var(--leading-tight);
+
+        // The stage's dot grows with the label.
+        &::before {
+            width: 0.5em;
+            height: 0.5em;
+        }
+    }
+
+    .kanban-board .kanban-column__count {
+        font-size: var(--text-base);
+    }
+
     .kanban-board .kanban-column--empty .kanban-column__list {
         display: none;
     }
@@ -389,15 +407,10 @@ $kanban-narrow: 760px;
     font-size: var(--text-xs);
 }
 
+// The agent's colour when it has one (set inline), else the text colour it sits in.
 .kanban-agent-chip__name {
     font-weight: 500;
-}
-
-.kanban-agent-chip__swatch {
-    flex: none;
-    width: 8px;
-    height: 8px;
-    background: var(--kanban-agent-color);
+    color: var(--kanban-agent-text, inherit);
 }
 
 .kanban-new {
