@@ -34,6 +34,11 @@ async fn stub(serve: Serve, revoked: bool) -> Stub {
 }
 
 async fn stub_with_status(serve: Serve, instance_body: String) -> Stub {
+    stub_full(serve, instance_body, None).await
+}
+
+/// `list`: what `GET /wan-instances` answers; without it the route is absent (404).
+async fn stub_full(serve: Serve, instance_body: String, list: Option<(axum::http::StatusCode, String)>) -> Stub {
     let record_hits = Arc::new(Mutex::new(0u32));
     let instance_hits = Arc::new(Mutex::new(0u32));
     let (rh, ih) = (record_hits.clone(), instance_hits.clone());
@@ -63,6 +68,16 @@ async fn stub_with_status(serve: Serve, instance_body: String) -> Stub {
                 }
             }),
         );
+    let app = match list {
+        Some((status, body)) => app.route(
+            "/wan-instances",
+            axum::routing::get(move || {
+                let body = body.clone();
+                async move { (status, [(axum::http::header::CONTENT_TYPE, "application/json")], body) }
+            }),
+        ),
+        None => app,
+    };
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let token = tokio_util::sync::CancellationToken::new();
@@ -355,6 +370,122 @@ async fn a_revoked_instance_verifies_but_reads_revoked_and_stays_revoked() {
     let later = w.verify(&s2, &w.row_at("msg-2", "hi", t), "agent2", "hi", t).await;
     assert_eq!(later.instance.unwrap().status, WanInstanceStatus::Revoked);
     assert_eq!(*s2.instance_hits.lock().unwrap(), 0, "a revoked instance is never re-asked");
+}
+
+/// `GET /wan-instances` for the given installs.
+fn listing(ids: &[&str]) -> (axum::http::StatusCode, String) {
+    let rows: Vec<_> = ids.iter().map(|id| serde_json::json!({ "instance_id": id })).collect();
+    (axum::http::StatusCode::OK, serde_json::json!({ "instances": rows }).to_string())
+}
+
+/// `receiver` verifies a message that `sender`'s install signed as camper.
+async fn verify_from(receiver: &World, sender: &World, stub: &Stub, msg_id: &str) -> WanVerdict {
+    let budget = FetchBudget::new(100);
+    let http = reqwest::Client::new();
+    let dir = Directory { base_url: &stub.url, http: &http, token: "tok", budget: &budget };
+    let row = sender.row(msg_id, "hello");
+    verify(&receiver.receiver, &receiver.receiver_instance, "agent2", "camper", &row, "hello", NOW, &dir).await
+}
+
+fn pin_of(w: &World) -> Option<crate::backend::storage::wan_identity::pins::AgentInstancePin> {
+    w.receiver.agent_instance_pin_get("camper", "stable").unwrap()
+}
+
+#[tokio::test]
+async fn the_first_listed_install_is_pinned_to_the_agent_name() {
+    let w = world();
+    let s = stub_full(Serve::Record(w.record.clone()), "{\"revoked\":false}".into(), Some(listing(&[&w.record.instance_id]))).await;
+    let v = w.verify(&s, &w.row("m1", "hello"), "agent2", "hello", NOW).await;
+    assert_eq!(v.verified, Some(true), "{v:?}");
+    let pin = pin_of(&w).expect("pinned");
+    assert_eq!((pin.instance_id.as_str(), pin.host_hint.as_str(), pin.pinned_at), (w.record.instance_id.as_str(), "narko", NOW));
+    // The same install keeps verifying.
+    let again = w.verify(&s, &w.row("m2", "hello"), "agent2", "hello", NOW).await;
+    assert_eq!(again.verified, Some(true));
+}
+
+#[tokio::test]
+async fn an_install_the_presence_list_does_not_show_pins_nothing() {
+    let w = world();
+    // Not listed; listed only as gone; the list unreadable.
+    let gone = (axum::http::StatusCode::OK, serde_json::json!({ "instances": [{ "instance_id": w.record.instance_id, "gone": true }] }).to_string());
+    let cases = [None, Some(listing(&[])), Some(gone), Some((axum::http::StatusCode::SERVICE_UNAVAILABLE, "{}".to_string()))];
+    for (n, list) in cases.into_iter().enumerate() {
+        let s = stub_full(Serve::Record(w.record.clone()), "{\"revoked\":false}".into(), list).await;
+        let v = w.verify(&s, &w.row(&format!("m{n}"), "hello"), "agent2", "hello", NOW).await;
+        assert_eq!(v.verified, Some(true), "case {n}: still verifies as before");
+        assert!(pin_of(&w).is_none(), "case {n}: nothing pinned");
+    }
+}
+
+#[tokio::test]
+async fn another_install_speaking_for_a_pinned_name_fails_and_is_remembered() {
+    let (first, second) = (world(), world());
+    let s = stub_full(
+        Serve::Record(first.record.clone()),
+        "{\"revoked\":false}".into(),
+        Some(listing(&[&first.record.instance_id, &second.record.instance_id])),
+    )
+    .await;
+    assert_eq!(verify_from(&first, &first, &s, "m1").await.verified, Some(true));
+
+    // The second install's record, served by its own stub.
+    let s2 = stub_full(
+        Serve::Record(second.record.clone()),
+        "{\"revoked\":false}".into(),
+        Some(listing(&[&first.record.instance_id, &second.record.instance_id])),
+    )
+    .await;
+    let v = verify_from(&first, &second, &s2, "m2").await;
+    assert_eq!(v.verified, Some(false));
+    assert_eq!(v.reason, Some("wan_instance_pin_mismatch"));
+    let detail = v.detail.expect("says which installs");
+    assert!(detail.contains(&format!("narko~{}", &first.record.instance_id[..8])), "{detail}");
+    assert!(detail.contains(&format!("narko~{}", &second.record.instance_id[..8])), "{detail}");
+
+    let pin = pin_of(&first).unwrap();
+    assert_eq!(pin.instance_id, first.record.instance_id, "the pin did not move");
+    let c = pin.conflict.expect("the refused install is remembered");
+    assert_eq!((c.instance_id.as_str(), c.count), (second.record.instance_id.as_str(), 1));
+}
+
+#[tokio::test]
+async fn moving_the_pin_lets_the_new_install_through() {
+    let (first, second) = (world(), world());
+    let both = [first.record.instance_id.as_str(), second.record.instance_id.as_str()];
+    let s = stub_full(Serve::Record(first.record.clone()), "{\"revoked\":false}".into(), Some(listing(&both))).await;
+    assert_eq!(verify_from(&first, &first, &s, "m1").await.verified, Some(true));
+    let s2 = stub_full(Serve::Record(second.record.clone()), "{\"revoked\":false}".into(), Some(listing(&both))).await;
+    assert_eq!(verify_from(&first, &second, &s2, "m2").await.verified, Some(false));
+
+    first.receiver.agent_instance_pin_replace("camper", "stable", &second.record.instance_id, "narko", NOW).unwrap();
+    assert_eq!(verify_from(&first, &second, &s2, "m3").await.verified, Some(true));
+    assert_eq!(verify_from(&first, &first, &s, "m4").await.verified, Some(false), "and the old install is now the stranger");
+}
+
+#[tokio::test]
+async fn this_installs_own_agents_are_never_pinned() {
+    let w = world();
+    let own = w.receiver.instance_ensure("area54").unwrap();
+    let key = w.receiver.agent_key_ensure("camper", None).unwrap();
+    let record = crate::muxbus::wan_publish::certify(&own, "camper", "stable", &key).unwrap();
+    let private = base64::engine::general_purpose::STANDARD.decode(&key.private_key).unwrap();
+    let sig = jekt_sign::sign_wan_jekt(&private, "m", "camper", &own.instance_id, "stable", "agent2", NOW, "hi").unwrap();
+    let row = CarriedRow {
+        wan_sig: Some(sig),
+        wan_msg_id: Some("m".into()),
+        wan_ts_secs: Some(NOW),
+        wan_source_agent: Some("camper".into()),
+        wan_target_agent: Some("agent2".into()),
+        wan_source_host: Some(own.instance_id.clone()),
+        wan_source_channel: Some("stable".into()),
+        wan_key_fp: Some(record.key_fp.clone()),
+        sender_same_account: Some(true),
+    };
+    let s = stub_full(Serve::Record(record), "{\"revoked\":false}".into(), Some(listing(&[&own.instance_id]))).await;
+    let v = w.verify(&s, &row, "agent2", "hi", NOW).await;
+    assert_eq!(v.verified, Some(true));
+    assert!(pin_of(&w).is_none());
 }
 
 #[tokio::test]

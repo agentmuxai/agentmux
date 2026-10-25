@@ -1236,7 +1236,7 @@ impl Handler {
         // ("actually verified") rather than collapsing both to the same
         // label — see `wrap_jekt_message`'s doc comment.
         let wrapped = wrap_jekt_message_with_files(
-            &sanitized,
+            &super::sanitize::with_wan_pin_note(&sanitized, delivery_tier, &req),
             req.source_agent.as_deref(),
             &req.target_agent,
             effective_tier,

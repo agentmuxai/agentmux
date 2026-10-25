@@ -180,6 +180,8 @@ import type { CommandPaneMoveTabData } from "@/types/rpc/CommandPaneMoveTabData"
 import type { CommandPaneMoveTabsData } from "@/types/rpc/CommandPaneMoveTabsData";
 import type { CommandPaneOpenData } from "@/types/rpc/CommandPaneOpenData";
 import type { CommandPaneTabData } from "@/types/rpc/CommandPaneTabData";
+import type { CommandPinsChangeData } from "@/types/rpc/CommandPinsChangeData";
+import type { CommandPinsListData } from "@/types/rpc/CommandPinsListData";
 import type { CommandReadEditorFileData } from "@/types/rpc/CommandReadEditorFileData";
 import type { CommandReadEditorFileResult } from "@/types/rpc/CommandReadEditorFileResult";
 import type { CommandRemoteAddData } from "@/types/rpc/CommandRemoteAddData";
@@ -402,6 +404,7 @@ import type { OperatorChallengeResult } from "@/types/rpc/OperatorChallengeResul
 import type { OtherBuildLayoutsResult } from "@/types/rpc/OtherBuildLayoutsResult";
 import type { PaneOpenResult } from "@/types/rpc/PaneOpenResult";
 import type { PaneTabEditResult } from "@/types/rpc/PaneTabEditResult";
+import type { PinnedSendersResult } from "@/types/rpc/PinnedSendersResult";
 import type { PollProviderAuthReq } from "@/types/rpc/PollProviderAuthReq";
 import type { PollSessionResult } from "@/types/rpc/PollSessionResult";
 import type { PresencePublishNowResult } from "@/types/rpc/PresencePublishNowResult";
@@ -1959,6 +1962,18 @@ export const GeneratedApi = {
   // command "presence.status"
   PresenceStatusCommand(client: RpcClient, opts?: RpcOpts): Promise<PresenceStatusResult> {
     return client.rpcCall("presence.status", {}, opts);
+  },
+  // command "pins.adopt"
+  PinsAdoptCommand(client: RpcClient, data: CommandPinsChangeData, opts?: RpcOpts): Promise<PinnedSendersResult> {
+    return client.rpcCall("pins.adopt", data, opts);
+  },
+  // command "pins.forget"
+  PinsForgetCommand(client: RpcClient, data: CommandPinsChangeData, opts?: RpcOpts): Promise<PinnedSendersResult> {
+    return client.rpcCall("pins.forget", data, opts);
+  },
+  // command "pins.list"
+  PinsListCommand(client: RpcClient, data?: CommandPinsListData, opts?: RpcOpts): Promise<PinnedSendersResult> {
+    return client.rpcCall("pins.list", data ?? {}, opts);
   },
   // command "layout.preview"
   PreviewLayoutCommand(

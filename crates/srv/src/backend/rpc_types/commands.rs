@@ -105,6 +105,12 @@ pub const COMMAND_BACKGROUND_TASK_PID: &str = "backgroundtaskpid";
 pub const COMMAND_LIST_BACKGROUND_TASKS: &str = "listbackgroundtasks";
 /// Who holds this machine's build slot (`agentmux_common::build_slot`), or null: the Swarm row note.
 pub const COMMAND_GET_BUILD_SLOT: &str = "getbuildslot";
+/// The keys and installs pinned to the names of agents that speak from elsewhere (operator only).
+pub const COMMAND_PINS_LIST: &str = "pins.list";
+/// Forget one pin, so the next key or install shown for the name is pinned (operator only).
+pub const COMMAND_PINS_FORGET: &str = "pins.forget";
+/// Pin the key or install that was last refused for a name (operator only).
+pub const COMMAND_PINS_ADOPT: &str = "pins.adopt";
 
 // Subprocess agent commands
 pub const COMMAND_SUBPROCESS_SPAWN: &str = "subprocessspawn";

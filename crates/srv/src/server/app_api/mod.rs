@@ -83,6 +83,7 @@ mod skill;
 mod mcp;
 mod bookmarks;
 mod browser_profiles;
+mod pins;
 pub(crate) use browser_profiles::list as browser_profiles_list;
 mod layout;
 mod other_build_layouts;
@@ -124,6 +125,7 @@ pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     mcp::register(engine, state);
     bookmarks::register(engine, state);
     browser_profiles::register(engine, state);
+    pins::register(engine, state);
     layout::register(engine, state);
     other_build_layouts::register(engine, state);
     layout_intent::register(engine, state);

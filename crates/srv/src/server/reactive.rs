@@ -392,10 +392,7 @@ pub(super) async fn verify_lan_signature(state: &AppState, req: &mut InjectionRe
         return;
     };
     if pinned_key_b64 != observed_key_b64 {
-        tracing::warn!(
-            agent_id = %claimed,
-            "LAN pubkey mismatch against pinned key — possible identity spoofing attempt"
-        );
+        lan_refusals::pin_mismatch(&claimed, &observed_key_b64);
         req.lan_verified = Some(false);
         return;
     }
@@ -421,6 +418,7 @@ pub(super) async fn verify_lan_signature(state: &AppState, req: &mut InjectionRe
 mod channel_v2;
 pub(crate) mod former_slug;
 mod lan_v2;
+pub(crate) mod lan_refusals;
 pub(super) mod replay;
 
 /// Anti-replay window for cross-channel `channel_sig` —

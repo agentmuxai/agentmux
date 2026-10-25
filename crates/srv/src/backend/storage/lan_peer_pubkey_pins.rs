@@ -72,6 +72,54 @@ impl Store {
         let mut stmt = conn.prepare("SELECT public_key FROM db_lan_peer_pubkey_pins WHERE agent_id = ?1")?;
         stmt.query_row(params![key], |row| row.get(0)).map_err(Into::into)
     }
+
+    /// Every pinned LAN name with the number of UID pins beside it, for the
+    /// operator's screen: `(agent_id, public_key, first_seen_at, uid pins)`.
+    pub fn lan_peer_pins_list(&self) -> Result<Vec<(String, String, i64, u32)>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT p.agent_id, p.public_key, p.first_seen_at,                     (SELECT COUNT(*) FROM db_lan_peer_uid_pins u WHERE u.agent_id = p.agent_id)              FROM db_lan_peer_pubkey_pins p ORDER BY p.agent_id",
+        )?;
+        let rows = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get::<_, i64>(3)? as u32)))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    /// Forget the pin for a LAN name and the UID pins beside it, so the next
+    /// key a peer shows for it is pinned. Only the operator's window calls
+    /// this. Returns the name key it dropped, if there was one.
+    pub fn lan_peer_pin_forget(&self, agent_id: &str) -> Result<Option<String>, StoreError> {
+        let key = agent_id.to_lowercase();
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        let old: Option<String> = tx
+            .query_row("SELECT public_key FROM db_lan_peer_pubkey_pins WHERE agent_id = ?1", params![key], |r| r.get(0))
+            .ok();
+        tx.execute("DELETE FROM db_lan_peer_uid_pins WHERE agent_id = ?1", params![key])?;
+        tx.execute("DELETE FROM db_lan_peer_pubkey_pins WHERE agent_id = ?1", params![key])?;
+        tx.commit()?;
+        Ok(old)
+    }
+
+    /// Move a LAN name's pin to `key_b64` and drop the UID pins beside it,
+    /// which were set against the old key. Only the operator's window calls
+    /// this. Returns the key it replaced.
+    pub fn lan_peer_pubkey_pin_replace(&self, agent_id: &str, key_b64: &str) -> Result<Option<String>, StoreError> {
+        let key = agent_id.to_lowercase();
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        let old: Option<String> = tx
+            .query_row("SELECT public_key FROM db_lan_peer_pubkey_pins WHERE agent_id = ?1", params![key], |r| r.get(0))
+            .ok();
+        tx.execute("DELETE FROM db_lan_peer_uid_pins WHERE agent_id = ?1", params![key])?;
+        tx.execute(
+            "INSERT OR REPLACE INTO db_lan_peer_pubkey_pins (agent_id, public_key, first_seen_at) VALUES (?1, ?2, ?3)",
+            params![key, key_b64, now_secs()],
+        )?;
+        tx.commit()?;
+        Ok(old)
+    }
 }
 
 #[cfg(test)]
@@ -80,6 +128,28 @@ mod tests {
 
     fn object_store() -> Store {
         Store::open(std::path::Path::new(":memory:")).unwrap()
+    }
+
+    #[test]
+    fn the_operator_can_list_forget_and_replace_a_pin() {
+        let store = object_store();
+        store.lan_peer_pubkey_pin_get_or_set("Maop", "key-a").unwrap();
+        store.lan_peer_uid_pin_get_or_set("maop", "uid-1", "ukey-a").unwrap();
+        let listed = store.lan_peer_pins_list().unwrap();
+        assert_eq!((listed[0].0.as_str(), listed[0].1.as_str(), listed[0].3), ("maop", "key-a", 1));
+
+        // Replacing moves the name pin and drops the UID pins set against the old key.
+        assert_eq!(store.lan_peer_pubkey_pin_replace("maop", "key-b").unwrap().as_deref(), Some("key-a"));
+        assert_eq!(store.lan_peer_pubkey_pin_load("maop").unwrap().as_deref(), Some("key-b"));
+        assert_eq!(store.lan_peer_pins_list().unwrap()[0].3, 0);
+
+        // Forgetting leaves nothing; the next key seen is pinned.
+        store.lan_peer_uid_pin_get_or_set("maop", "uid-1", "ukey-b").unwrap();
+        assert_eq!(store.lan_peer_pin_forget("MAOP").unwrap().as_deref(), Some("key-b"));
+        assert!(store.lan_peer_pin_forget("maop").unwrap().is_none());
+        assert!(store.lan_peer_pins_list().unwrap().is_empty());
+        assert_eq!(store.lan_peer_pubkey_pin_get_or_set("maop", "key-c").unwrap(), "key-c");
+        assert_eq!(store.lan_peer_uid_pin_get_or_set("maop", "uid-1", "ukey-c").unwrap(), "ukey-c");
     }
 
     #[test]
