@@ -942,6 +942,7 @@ partial list.
 | [`SPEC_UNIFIED_MENU_SYSTEM_2026_05_11`](SPEC_UNIFIED_MENU_SYSTEM_2026_05_11.md) | Unified menu system |
 | [`SPEC_UNIFIED_TOOL_HOVER_OVERLAY_2026_05_13`](SPEC_UNIFIED_TOOL_HOVER_OVERLAY_2026_05_13.md) | Spec: Unified tool-block hover overlay (no double-popup) |
 | [`SPEC_UNIVERSAL_INSTALL_DIALOG_2026_09_23`](SPEC_UNIVERSAL_INSTALL_DIALOG_2026_09_23.md) | SPEC: Universal install dialog — plain-language steps by default, full console under "Details" |
+| [`SPEC_UNIX_SRV_RESTART_BUDGET_2026_10_24`](SPEC_UNIX_SRV_RESTART_BUDGET_2026_10_24.md) | Unix srv restart budget: recycle srv instead of ending the app |
 | [`SPEC_UPGRADE_PANEL_2026_06_27`](SPEC_UPGRADE_PANEL_2026_06_27.md) | Maintenance Section in InstancePanel |
 | [`SPEC_WEBSEARCH_CARD_FULL_CONTENT_AND_STYLING_2026_08_13`](SPEC_WEBSEARCH_CARD_FULL_CONTENT_AND_STYLING_2026_08_13.md) | Spec: WebSearch tool-card — full (unclamped) content + styling fixes |
 | [`SPEC_WEBSEARCH_RICH_VIEW_2026_06_19`](SPEC_WEBSEARCH_RICH_VIEW_2026_06_19.md) | SPEC: Web-search rich result view |

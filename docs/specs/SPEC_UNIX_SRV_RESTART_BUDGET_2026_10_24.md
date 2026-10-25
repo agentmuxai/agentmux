@@ -1,6 +1,6 @@
 # Unix srv restart budget: recycle srv instead of ending the app
 
-**Status:** proposed
+**Status:** proposed — approved by the operator 2026-10-25 (via AgentY); built in the PR that carries this file
 **Owner:** Maricon (launcher, Linux); macOS verification: Clare
 **Task:** Kanban #58
 **Related:** `SPEC_SRV_SUPERVISION_RECYCLE_2026_07_11` (#942 phase 2, the Windows recycle), `SPEC_RECOVERY_NOTICES_AND_TOASTS_2026_10_16` §4.4 (the restart notice), PR #5407 (agent CLIs in their own process group), PR #5404 (the signal is logged)
@@ -82,6 +82,21 @@ Unix has no srv liveness prober (`srv_liveness::RecyclePolicy`) yet; Windows doe
 - **Ports.** srv binds new ports on each start; the host gets them through its spawn env, as on Windows.
 - **Data-dir lock.** The dead srv's `flock` is released by the kernel when it dies; `stale_srv` isn't needed.
 
-## 7. Order
+## 7. Built as specified, with these details
+
+- The decision is `classify_srv_exit` (`supervisor/srv_exit.rs`): clean exit and SIGINT/SIGTERM/SIGHUP shut down; low commit waits (own budget, `OOM_RESTART_BUDGET`); everything else is charged to `SRV_RESTART_BUDGET`. `srv_exit_action` wraps it with the logging and the give-up incidents, and the three places that see srv exit (the srv arm, and the host-OOM wait) call it.
+- `respawn_srv` ends what the dead srv left (`agent_roots::kill_orphans`, then a SIGKILL to srv's own group while it still has members), builds the `srv_restarted` incident, starts srv with its id, points the notification presenter at it (`notify::update_endpoint` now builds on every platform) and records the incident.
+- The recycle ends the host with SIGTERM to its process group (CEF flushes its profile) and SIGKILL 1.5 s later if it hasn't stopped (`host_kill_at`). The host arm reads `srv_recycle_kill` before anything else, so the SIGTERM is never taken for a group shutdown, and relaunches against the new srv without touching the host budget, the GPU ladder or `host_degraded`.
+- srv's exit by a signal is named in the notice (`SrvStop::Signal`): "Its process was ended by signal 9 (SIGKILL)."
+- A srv that dies while the host waits for memory is noted; the wait goes on, and srv starts again once memory is back, before the host.
+
+## 8. Verified (isolated instance on charlie, packaged build, fake HOME, own display)
+
+- SIGKILL of srv: a new srv within 1 s, the same launcher, a new host, the same panes back, and the notice "AgentMux's background service restarted: Its process was ended by signal 9 (SIGKILL)" on screen.
+- Planted a root for a process in its own group in `agent-roots.json`, then SIGKILL of srv: the launcher logged "killed 0 agent cgroup(s) and 1 CLI process group(s)"; the process was gone and the file deleted.
+- Three kills in 12 s were restarted (1/3 .. 3/3); the fourth ended the launcher with "the srv restart budget is spent (3 in 120s)", exit code 1, and the `srv_give_up` notice on the next start.
+- Not run: an agent with a live session resuming after the restart. The spawn gate refuses to start an agent without a linked account, and the isolated home has none; the agent half is the Windows path's, unchanged. Clare repeats the checks on macOS.
+
+## 9. Order
 
 This builds on #5407 (`agent_roots::kill_orphans`), so it is branched after #5407 merges.
