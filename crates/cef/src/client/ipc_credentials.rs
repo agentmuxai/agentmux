@@ -5,19 +5,32 @@
 //!
 //! The window's address carries no token: the host puts the port and token into
 //! the page's globals itself, as the page starts loading (`on_load_start`, so
-//! they are there before the app's scripts need them) and again when the load
-//! ends (`on_load_end`, a safety net for a page that began before its browser
-//! was registered). Only the frontend's own pages get them (see
+//! they are there before the app's scripts need them, for a browser already
+//! registered as an app window) and when the load ends (`on_load_end`, for any
+//! page that began before its browser was registered). Only the frontend's own pages get them (see
 //! `app_navigation::injects_ipc_credentials`).
 
 use cef::*;
 
 use super::AgentMuxHandler;
+use crate::state::BrowserKind;
+
+/// Whether the credentials may go in as a page starts loading: only for a browser
+/// registered as one of the app's own windows. A browser not registered yet might be
+/// a browser pane (registration can trail the first navigation), so it waits for
+/// `on_load_end`, which has always been the first hook to inject.
+pub(super) fn may_inject_at_start(kind: Option<&BrowserKind>) -> bool {
+    matches!(kind, Some(BrowserKind::TopLevel { .. } | BrowserKind::Floater { .. }))
+}
 
 impl AgentMuxHandler {
     /// Injects `window.__AGENTMUX_IPC_PORT__` / `__AGENTMUX_IPC_TOKEN__` into the
-    /// browser's main frame when it shows the frontend.
-    pub(crate) fn inject_ipc_credentials(&self, browser: &Browser) {
+    /// browser's main frame when it shows the frontend. `at_start`: called as the
+    /// page starts loading, where an unregistered browser gets nothing yet.
+    pub(crate) fn inject_ipc_credentials(&self, browser: &Browser, at_start: bool) {
+        if at_start && !may_inject_at_start(self.registered_kind(browser).as_ref()) {
+            return;
+        }
         // Re-inject the host IPC creds on EVERY main-frame load of OUR OWN
         // frontend — crucially INCLUDING `is_browser_pane` floating-pane /
         // pool windows, which host our frontend (on our localhost origin)
@@ -65,10 +78,31 @@ impl AgentMuxHandler {
             let empty = CefString::from("");
             frame.execute_java_script(Some(&code), Some(&empty), 0);
             tracing::info!(
-                "Injected IPC port {} into page: {}",
+                "Injected IPC port {} into page ({}): {}",
                 ipc_port,
+                if at_start { "load start" } else { "load end" },
                 super::app_navigation::redact_ipc_token(&frame_url)
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_a_registered_app_window_gets_the_credentials_as_the_page_starts() {
+        assert!(may_inject_at_start(Some(&BrowserKind::TopLevel { is_pool: false })));
+        assert!(may_inject_at_start(Some(&BrowserKind::TopLevel { is_pool: true })));
+        assert!(may_inject_at_start(Some(&BrowserKind::Floater { is_pool: false })));
+        assert!(may_inject_at_start(Some(&BrowserKind::Floater { is_pool: true })));
+    }
+
+    #[test]
+    fn a_pane_a_popup_and_a_browser_not_registered_yet_wait_for_the_load_to_end() {
+        assert!(!may_inject_at_start(Some(&BrowserKind::Pane { block_id: "b".into() })));
+        assert!(!may_inject_at_start(Some(&BrowserKind::Popup)));
+        assert!(!may_inject_at_start(None));
     }
 }

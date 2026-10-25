@@ -717,7 +717,7 @@ impl AgentMuxHandler {
         // The frontend's own pages get the host creds as they start loading.
         if frame.as_deref().is_some_and(|f| f.is_main() == 1) {
             if let Some(b) = browser.as_deref() {
-                self.inject_ipc_credentials(b);
+                self.inject_ipc_credentials(b, true);
             }
         }
         if !self.is_browser_pane {
@@ -773,7 +773,7 @@ impl AgentMuxHandler {
 
         // The host IPC creds go into every load of our own frontend (ipc_credentials.rs).
         if let Some(b) = browser.as_deref() {
-            self.inject_ipc_credentials(b);
+            self.inject_ipc_credentials(b, false);
         }
 
         // Pane-specific on_load_end work (focus subclass re-install after
