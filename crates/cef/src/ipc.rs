@@ -899,6 +899,27 @@ async fn route_command(
             relayed?;
             Ok(serde_json::json!(true))
         }
+        "operator_attest" => {
+            // The window proves its own websocket connection is the
+            // operator's: srv issued it `nonce` over that connection, and only
+            // this host's token makes srv accept it. Operator-only actions need
+            // that proof; the instance key every agent holds isn't enough.
+            let nonce = args.get("nonce").and_then(|v| v.as_str()).unwrap_or("");
+            if nonce.is_empty() {
+                return Err("operator_attest: nonce is required".to_string());
+            }
+            let body = serde_json::json!({ "nonce": nonce });
+            let web_endpoint = state.backend_endpoints.lock().web_endpoint.clone();
+            let auth_key = state.auth_key.lock().clone();
+            let ipc_token = state.ipc_token.clone();
+            let relayed: Result<(), String> = tokio::task::spawn_blocking(move || {
+                crate::client::backend_operator_attest(&web_endpoint, &auth_key, &ipc_token, &body)
+            })
+            .await
+            .map_err(|e| format!("operator_attest: {e}"))?;
+            relayed?;
+            Ok(serde_json::json!(true))
+        }
         "browser_pane_focus" => {
             let block_id = args.get("block_id").and_then(|v| v.as_str()).unwrap_or("");
             tracing::info!("[ipc] browser_pane_focus block_id={}", block_id);

@@ -157,6 +157,11 @@ declare global {
         decideDesktop?(id: string, choice: "timed" | "session" | "deny"): Promise<void>;
         /** The user's Stop for the agent in this pane: its desktop grants end. */
         stopDesktop?(blockId: string): Promise<void>;
+        /** Prove this window's websocket connection is the operator's: hand the
+         *  host the `nonce` srv issued over it (`operator.challenge`), and the
+         *  host vouches for it with its own token, which agents never see.
+         *  Operator-only RPCs are refused until then. */
+        attestOperator?(nonce: string): Promise<void>;
         /** The version panel's Download, Upgrade & restart (`now`: Restart now)
          *  and Cancel. Relayed by the host, which srv trusts and agents can't
          *  impersonate; answers srv's update status after the action. */

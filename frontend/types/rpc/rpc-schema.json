@@ -5032,6 +5032,25 @@
     }
   },
   {
+    "command": "operator.challenge",
+    "request": "core::option::Option<agentmux_srv::backend::rpc_types::websocket::NoArgsReq>",
+    "requestName": "core::option::Option<agentmux_srv::backend::rpc_types::websocket::NoArgsReq>",
+    "requestTs": {
+      "imports": [
+        "NoArgsReq"
+      ],
+      "name": "NoArgsReq | null"
+    },
+    "response": "agentmux_srv::server::operator_proof::OperatorChallengeResult",
+    "responseName": "OperatorChallengeResult",
+    "responseTs": {
+      "imports": [
+        "OperatorChallengeResult"
+      ],
+      "name": "OperatorChallengeResult"
+    }
+  },
+  {
     "command": "pane.activateTab",
     "request": "agentmux_srv::backend::rpc_types::block::CommandPaneTabData",
     "requestName": "CommandPaneTabData",

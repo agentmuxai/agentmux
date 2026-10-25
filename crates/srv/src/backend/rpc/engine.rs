@@ -356,6 +356,20 @@ impl WshRpcEngine {
         inner.rpc_context = Some(ctx);
     }
 
+    /// Record that the CEF host vouched for this connection as the AgentMux
+    /// window's (`server::operator_proof`). Refused, returning false, once the
+    /// connection has registered as an agent. [`Self::set_rpc_context`]
+    /// replaces the whole context, so registering afterwards drops the proof.
+    pub fn mark_operator_proven(&self) -> bool {
+        let mut inner = self.lock_inner();
+        let ctx = inner.rpc_context.get_or_insert_with(RpcContext::default);
+        if !ctx.agent_id.is_empty() {
+            return false;
+        }
+        ctx.operator_proven = true;
+        true
+    }
+
     /// Process an incoming message (from the transport layer).
     pub fn handle_message(self: &Arc<Self>, msg: RpcMessage) {
         // Cancel handling

@@ -980,6 +980,10 @@
             "method": "OpenInShellCommand"
         },
         {
+            "command": "operator.challenge",
+            "method": "OperatorChallengeCommand"
+        },
+        {
             "command": "pane.open",
             "method": "PaneOpenCommand"
         },
