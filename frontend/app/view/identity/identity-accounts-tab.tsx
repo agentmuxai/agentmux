@@ -278,7 +278,7 @@ export function AccountDetailPanel({ model, account }: { model: IdentityViewMode
     const unbind = async (agent: AccountAgent) => {
         setUnbinding(agent.id);
         try {
-            await unbindAccountFromAgent(agent);
+            await unbindAccountFromAgent(account.id, agent);
         } catch (e) {
             model.showNotice(`Couldn't unbind ${agent.name} from "${accountLabel(account)}": ${(e as Error)?.message ?? e}`);
         } finally {

@@ -25,6 +25,9 @@ export interface AccountAgent {
 const [linksRevision, setLinksRevision] = createSignal(0);
 export { linksRevision };
 
+/** A bind landed somewhere: lists built from the links reload. */
+export const notifyLinksChanged = (): void => void setLinksRevision((n) => n + 1);
+
 /** The agents using `account`: its link rows (what a launch uses) plus the
  *  legacy index, by name, ordered as found. `links` is the all-agents link
  *  list the caller fetched. */
@@ -53,12 +56,16 @@ export function agentsUsingAccount(
     return [...out.values()];
 }
 
-/** Removes the account from `agent` (every link row it holds for it), then
+/** Removes `accountId` from `agent`: the link rows the agent holds for that
+ *  account right now, read again at click time (the open list may be stale,
+ *  and an unlink by provider would remove whichever account holds it). Then
  *  tells the lists built from the links to reload. Throws if srv refuses. */
-export async function unbindAccountFromAgent(agent: AccountAgent): Promise<void> {
+export async function unbindAccountFromAgent(accountId: string, agent: AccountAgent): Promise<void> {
     try {
-        for (const provider of agent.providers) {
-            await RpcApi.UnlinkAgentIdentityCommand(TabRpcClient, { agent_id: agent.id, provider });
+        const links = await RpcApi.ListAllAgentIdentitiesCommand(TabRpcClient);
+        for (const link of links) {
+            if (link.agent_id !== agent.id || link.account_id !== accountId) continue;
+            await RpcApi.UnlinkAgentIdentityCommand(TabRpcClient, { agent_id: agent.id, provider: link.provider });
         }
     } finally {
         setLinksRevision((n) => n + 1);

@@ -138,6 +138,22 @@ describe("Accounts as cards", () => {
         expect(screen.queryByText("Used by 1 agent")).toBeNull();
     });
 
+    it("unbinds only what the agent holds for this account when the click happens, not a binding made since", async () => {
+        const link = { agent_id: "ag1", account_id: "a1", provider: "github" };
+        rpc.ListAgentDefinitionsCommand.mockResolvedValue([{ id: "ag1", name: "Korp", accounts: "{}" }]);
+        rpc.ListAllAgentIdentitiesCommand.mockResolvedValue([link]);
+        render(() => <AccountsManager />);
+        await waitFor(() => expect(screen.getByText("Used by 1 agent")).toBeTruthy());
+        fireEvent.click(screen.getByRole("button", { name: /^octo@example\.com/ }));
+        await screen.findByRole("list", { name: "Agents using this account" });
+        // The agent was bound to another account for that provider after the panel loaded.
+        rpc.UnlinkAgentIdentityCommand.mockClear();
+        rpc.ListAllAgentIdentitiesCommand.mockResolvedValue([{ agent_id: "ag1", account_id: "a2", provider: "github" }]);
+        fireEvent.click(await screen.findByRole("button", { name: "Unbind Korp" }));
+        await waitFor(() => expect(rpc.ListAllAgentIdentitiesCommand.mock.calls.length).toBeGreaterThan(1));
+        expect(rpc.UnlinkAgentIdentityCommand).not.toHaveBeenCalled();
+    });
+
     it("offers no Unbind for an agent that is only in the old account index", async () => {
         rpc.ListAgentDefinitionsCommand.mockResolvedValue([{ id: "ag9", name: "Old", accounts: '{"aws":"a3"}' }]);
         rpc.ListAllAgentIdentitiesCommand.mockResolvedValue([]);
