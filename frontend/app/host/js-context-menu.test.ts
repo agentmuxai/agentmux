@@ -67,10 +67,17 @@ describe("JS context menu icons", () => {
         expect(row("Word Wrap").querySelectorAll(".menu-item-icon").length).toBe(1);
     });
 
-    it("leaves a swatch row's swatch as its leading mark", () => {
-        show([item("Default", { icon: "palette" }), item("Blue", { swatchColor: "#3366ff" })]);
+    it("leaves a swatch row's swatch as its leading mark, even if it names an icon", () => {
+        show([item("Default", { icon: "palette" }), item("Blue", { swatchColor: "#3366ff" }), item("Red", { swatchColor: "#ff3333", icon: "copy" })]);
         expect(row("Blue").querySelector(".menu-item-swatch")).not.toBeNull();
         expect(row("Blue").querySelector(".menu-item-icon")).toBeNull();
+        expect(row("Red").querySelector(".menu-item-swatch")).not.toBeNull();
+        expect(row("Red").querySelector(".menu-item-icon")).toBeNull();
+    });
+
+    it("doesn't reserve the slot for a menu whose only icon is on a swatch row", () => {
+        show([item("Default"), item("Red", { swatchColor: "#ff3333", icon: "copy" })]);
+        expect(document.querySelectorAll(".menu-item-icon").length).toBe(0);
     });
 
     it("decides the slot per menu level: a submenu of bare rows has none", () => {

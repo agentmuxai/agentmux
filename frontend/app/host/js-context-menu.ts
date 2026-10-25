@@ -178,7 +178,7 @@ export function showJsContextMenu(
         // per renderItems call — each call is exactly one menu level, so
         // nested submenus never reach across levels to close an ancestor.
         const peers: SubmenuHoverController[] = [];
-        const reserveIconSlot = itemList.some((i) => i.type !== "separator" && i.visible !== false && !!menuIconClass(i.icon));
+        const reserveIconSlot = itemList.some((i) => i.type !== "separator" && i.visible !== false && !i.swatchColor && !!menuIconClass(i.icon));
         for (const item of itemList) {
             if (item.type === "separator") {
                 const sep = document.createElement("div");
@@ -212,7 +212,7 @@ export function showJsContextMenu(
                 // §3). A menu level where any row has one reserves the slot on every row, so the
                 // labels line up; a level with none is drawn as before. Decoration only: the label
                 // is the row's name.
-                const iconClass = menuIconClass(item.icon);
+                const iconClass = item.swatchColor ? null : menuIconClass(item.icon);
                 if (iconClass) {
                     const icon = document.createElement("i");
                     icon.className = iconClass;
