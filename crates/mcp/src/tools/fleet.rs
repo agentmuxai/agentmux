@@ -565,7 +565,7 @@ mod broadcast_files_tests {
         let out = broadcast(&srv, json!({ "targets": ["lan-a"], "message": "hi" })).await.unwrap();
         assert_eq!(out, json!({ "succeeded": ["lan-a"], "failed": [] }));
         let sent = srv.injected.lock().unwrap();
-        assert!(sent[0].get("files").map_or(true, Value::is_null));
+        assert!(sent[0].get("files").is_none_or(Value::is_null));
     }
 }
 
