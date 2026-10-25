@@ -1033,6 +1033,19 @@
             "method": "PresenceStatusCommand"
         },
         {
+            "command": "pins.adopt",
+            "method": "PinsAdoptCommand"
+        },
+        {
+            "command": "pins.forget",
+            "method": "PinsForgetCommand"
+        },
+        {
+            "command": "pins.list",
+            "method": "PinsListCommand",
+            "send": "data ?? {}"
+        },
+        {
             "command": "layout.preview",
             "method": "PreviewLayoutCommand"
         },

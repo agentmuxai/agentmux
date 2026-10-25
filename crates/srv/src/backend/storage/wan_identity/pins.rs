@@ -147,6 +147,16 @@ impl WanIdentityStore {
         Ok(previous)
     }
 
+    /// Drop the pin for `(agent_id, channel)`, so the next listed install to
+    /// speak for it is pinned. The operator's window is the only caller.
+    pub fn agent_instance_pin_forget(&self, agent_id: &str, channel: &str) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        Ok(conn.execute(
+            "DELETE FROM wan_agent_instance_pins WHERE agent_id = ?1 AND channel = ?2",
+            params![agent_id.to_lowercase(), channel],
+        )? > 0)
+    }
+
     /// Every pin, for the operator's window.
     pub fn agent_instance_pins_list(&self) -> Result<Vec<AgentInstancePin>, StoreError> {
         let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
@@ -209,6 +219,15 @@ mod tests {
         let now = s.agent_instance_pin_get("lazo", "stable").unwrap().unwrap();
         assert_eq!((now.instance_id.as_str(), now.pinned_at, now.conflict), ("inst-b", 50, None));
         assert!(s.agent_instance_pin_replace("kim", "stable", "inst-z", "box", 60).unwrap().is_none(), "replace also pins a new name");
+    }
+
+    #[test]
+    fn forgetting_a_pin_lets_the_next_install_be_pinned() {
+        let (_dir, s) = store();
+        s.agent_instance_pin_get_or_set("lazo", "stable", "inst-a", "narko", 10).unwrap();
+        assert!(s.agent_instance_pin_forget("LAZO", "stable").unwrap());
+        assert!(!s.agent_instance_pin_forget("lazo", "stable").unwrap());
+        assert_eq!(s.agent_instance_pin_get_or_set("lazo", "stable", "inst-b", "area54", 20).unwrap().instance_id, "inst-b");
     }
 
     #[test]
