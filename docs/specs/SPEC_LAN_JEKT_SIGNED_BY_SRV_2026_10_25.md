@@ -1,7 +1,7 @@
 # SPEC: srv signs LAN jekts for an agent that signed nothing
 
 **Date:** 2026-10-25
-**Status:** implemented in the PR that adds this file.
+**Status:** implemented — #5452.
 **Builds on:** `SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md` (the signed tuple, the receiver's pubkey lookup, trust-on-first-use pinning), `SPEC_WAN_JEKT_SIGNED_BY_SRV_2026_10_14.md` (srv signs at the origin for the agent its token names; this spec is the LAN half of it), `SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md` (the agent token, the v2 UID signature).
 **Asked for:** a leader, after jekts from a Codex agent reached a LAN peer as `TRUST=network-claimed` while jekts from Claude agents on the same AgentMux arrived `lan-verified`.
 
