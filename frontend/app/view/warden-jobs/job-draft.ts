@@ -39,6 +39,9 @@ export interface JobDraft {
     tz: string;
     everyMinutes: string;
     onceAt: string;
+    /** The stored time a `once` job was loaded with, and how the date field showed it: the field has
+     *  minute precision, so an untouched field sends the stored time back as it was. */
+    onceStored: { at: number; shown: string } | null;
     actionKind: ActionKind;
     /** A message's target. */
     to: string;
@@ -99,6 +102,7 @@ export function blankDraft(tz: string = localZone()): JobDraft {
         tz,
         everyMinutes: "60",
         onceAt: "",
+        onceStored: null,
         actionKind: "message",
         to: "",
         brief: "",
@@ -214,7 +218,10 @@ function applyTrigger(d: JobDraft, trigger: Json): void {
     }
     if (kind === "every" && typeof trigger.seconds === "number")
         d.everyMinutes = String(Math.round((trigger.seconds / 60) * 100) / 100);
-    if (kind === "once" && typeof trigger.at === "number") d.onceAt = toLocalInput(trigger.at);
+    if (kind === "once" && typeof trigger.at === "number") {
+        d.onceAt = toLocalInput(trigger.at);
+        d.onceStored = { at: trigger.at, shown: d.onceAt };
+    }
 }
 
 function applyPolicy(d: JobDraft, policy: Json): void {
@@ -321,7 +328,8 @@ function buildTrigger(d: JobDraft, errors: string[]): Json {
             return { kind: "every", seconds: Math.round(minutes * 60) };
         }
         case "once": {
-            const at = d.onceAt ? new Date(d.onceAt).getTime() : NaN;
+            const untouched = d.onceStored != null && d.onceStored.shown === d.onceAt;
+            const at = untouched ? d.onceStored!.at : d.onceAt ? new Date(d.onceAt).getTime() : NaN;
             if (!Number.isFinite(at)) errors.push("Once: pick the date and time.");
             return { kind: "once", at };
         }

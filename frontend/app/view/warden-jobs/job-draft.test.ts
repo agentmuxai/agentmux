@@ -248,4 +248,22 @@ describe("a draft from a stored job", () => {
         });
         expect(built.definition.template).toBeUndefined();
     });
+
+    it("sends a once job's stored time back as it was unless the date field is changed", () => {
+        const at = new Date(2030, 0, 2, 3, 4, 27, 500).getTime();
+        const stored = {
+            name: "n",
+            owner: "a",
+            brief: "b",
+            action: { kind: "message", to: "a" },
+            trigger: { kind: "once", at },
+        };
+        const d = draftFromDefinition(stored, null, "edit");
+        d.name = "renamed";
+        expect((buildDefinition(d, null).definition.trigger as { at: number }).at).toBe(at);
+        d.onceAt = "2030-02-03T04:05";
+        expect((buildDefinition(d, null).definition.trigger as { at: number }).at).toBe(
+            new Date("2030-02-03T04:05").getTime()
+        );
+    });
 });

@@ -31,8 +31,6 @@ pub const MIN_EVERY_SECS: i64 = 60;
 /// What a kind reserved for a later phase answers (§6).
 pub const LATER: &str = "available in a later version";
 
-
-
 /// Trigger kinds (`trigger.kind`).
 pub mod trigger_kind {
     pub const CRON: &str = "cron";
