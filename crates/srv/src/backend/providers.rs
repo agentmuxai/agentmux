@@ -825,8 +825,10 @@ pub fn seed_managed_claude_settings(provider: &ProviderConfig, config_dir: &str)
     if let Err(e) = seed_auto_compact_window(provider, config_dir, compact_at_setting()) {
         failed.push(("the auto-compact window", e));
     }
-    if let Err(e) = crate::backend::subagent_model::seed_explore_agent(config_dir, crate::backend::subagent_model::explore_model().as_deref()) {
-        failed.push(("the Explore sub-agent's model", e));
+    if provider.auth_dir_name == "claude" {
+        if let Err(e) = crate::backend::subagent_model::seed_explore_agent(config_dir, crate::backend::subagent_model::explore_model().as_deref()) {
+            failed.push(("the Explore sub-agent's model", e));
+        }
     }
     failed
 }
