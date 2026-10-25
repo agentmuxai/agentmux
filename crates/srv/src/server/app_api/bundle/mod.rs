@@ -692,8 +692,9 @@ impl<'a> SelfOwner<'a> {
     /// The owner of an HTTP request: the caller's own row when attributed,
     /// whatever `agent_id` names — a name that is not the caller's is counted
     /// by M4a-2 — so a name two agents share no longer selects the other's
-    /// memory, accounts or history. An Unattributed request keeps the slug, counted as
-    /// `by_name_counter`.
+    /// memory, accounts or history. The HTTP handlers refuse an Unattributed request
+    /// before this (`actor::require_token`); one that gets here anyway keeps the slug,
+    /// counted as `by_name_counter`.
     pub(crate) fn of(
         caller: Option<&'a crate::server::caller::Caller>,
         slug: &'a str,

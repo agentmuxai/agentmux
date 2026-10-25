@@ -33,12 +33,9 @@ pub(super) async fn handle_agent_preset_get(
     if q.id.is_empty() && q.name.is_empty() {
         // Self mode: `agent_id` is the actor (owner = actor). By id or name
         // it is only an optional hint, so it is not checked there.
-        actor::check_actor(
-            &state,
-            caller.as_deref(),
-            actor::ActorSite::PresetGet,
-            Some(&q.agent_id),
-        );
+        if let Err(e) = actor::require_token(&state, caller.as_deref(), actor::ActorSite::PresetGet, &q.agent_id) {
+            return app_api_response::<()>(Err(e));
+        }
         if q.agent_id.is_empty() {
             return (
                 StatusCode::BAD_REQUEST,
@@ -70,12 +67,9 @@ pub(super) async fn handle_agent_identity_accounts(
     caller: Option<Extension<caller::Caller>>,
     Query(q): Query<AgentIdentityAccountsQuery>,
 ) -> impl IntoResponse {
-    actor::check_actor(
-        &state,
-        caller.as_deref(),
-        actor::ActorSite::IdentityAccounts,
-        Some(&q.agent_id),
-    );
+    if let Err(e) = actor::require_token(&state, caller.as_deref(), actor::ActorSite::IdentityAccounts, &q.agent_id) {
+        return app_api_response::<()>(Err(e));
+    }
     app_api_response(
         app_api::identity_self_accounts_impl(
             &state,
@@ -99,12 +93,9 @@ pub(super) async fn handle_agent_identity_validate(
     caller: Option<Extension<caller::Caller>>,
     Json(req): Json<AgentIdentityValidateRequest>,
 ) -> impl IntoResponse {
-    actor::check_actor(
-        &state,
-        caller.as_deref(),
-        actor::ActorSite::IdentityValidate,
-        Some(&req.agent_id),
-    );
+    if let Err(e) = actor::require_token(&state, caller.as_deref(), actor::ActorSite::IdentityValidate, &req.agent_id) {
+        return app_api_response::<()>(Err(e));
+    }
     app_api_response(
         app_api::identity_account_validate_stored_impl(
             &state,
