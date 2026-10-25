@@ -212,6 +212,23 @@ async fn a_restart_leaves_waiting_runs_waiting() {
     assert_eq!(rig.store.job_run_get(&waits).unwrap().unwrap().state, state::RUNNING, "it starts once the group is free");
 }
 
+/// A run the job cancels doesn't hold the job's group against its replacement.
+#[tokio::test(flavor = "multi_thread")]
+async fn cancel_other_works_inside_a_concurrency_group() {
+    let rig = rig();
+    let stopped = interrupts(&rig);
+    let job = make(&rig, "j-cancel-g", |j| {
+        j.policy.overlap = Overlap::CancelOther;
+        j.policy.group = Some("g".into());
+    });
+    let first = rig.sched.fire(&job, slot(0)).await.run_id.unwrap();
+    let second = rig.sched.fire(&job, slot(1)).await.run_id.unwrap();
+    let old = rig.store.job_run_get(&first).unwrap().unwrap();
+    assert_eq!((old.state.as_str(), old.infra.as_str()), (state::FINISHED, infra::INTERRUPTED));
+    assert_eq!(stopped.lock().unwrap().len(), 1);
+    assert_eq!(rig.store.job_run_get(&second).unwrap().unwrap().state, state::RUNNING);
+}
+
 // ── groups and the global limit ─────────────────────────────────────────
 
 #[tokio::test(flavor = "multi_thread")]

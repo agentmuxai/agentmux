@@ -86,6 +86,16 @@ pub fn decide(job: &CronJob, occ: &Occupancy, waiting: bool) -> Decision {
             Overlap::CancelOther => cancel = true,
         }
     }
+    // The runs a cancel_other stops don't hold the group or a place in the limit
+    // against the run that replaces them.
+    let mut occ = occ.clone();
+    if cancel {
+        occ.group_running = occ.group_running.saturating_sub(occ.job_started);
+        if starts_an_agent(job) {
+            occ.agents_running = occ.agents_running.saturating_sub(occ.job_started);
+        }
+    }
+    let occ = &occ;
     // A run of this job already waits for a place: a further slot is the same
     // overlap as one behind a running run, whatever the policy keeps.
     if !waiting && occ.job_running == 0 && occ.job_blocked > 0 {
