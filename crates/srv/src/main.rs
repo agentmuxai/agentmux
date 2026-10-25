@@ -42,6 +42,9 @@ use std::sync::Arc;
 use server::build_routers;
 
 fn main() {
+    // Before anything is spawned or any thread exists: the launcher's secrets leave
+    // the environment, so no child inherits them and /proc/<pid>/environ shows none.
+    agentmux_common::secret_env::stash_startup_secrets();
     // Linux (glibc): cap malloc arenas before any thread exists, so the runtime's
     // workers below share them (malloc_arenas.rs).
     #[cfg(all(target_os = "linux", target_env = "gnu"))]
