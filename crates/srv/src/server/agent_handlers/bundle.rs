@@ -499,9 +499,6 @@ fn global_memory_ui_diff(store: &Store, cmd: &CommandGlobalMemoryDiffData) -> Re
     Ok(GlobalMemoryDiffResult { diff: crate::server::app_api::bundle_version_diff(&from, &to) })
 }
 
-/// Restores `name` + `instructions` from `target_version_id` as a NEW
-/// version (`source: "revert"`, `written_by: "armory-ui"`), through the same
-/// atomic upsert-plus-version primitive each tier's ordinary save uses.
 /// Who a window-side Global Memory write is recorded as: the agent when the
 /// connection registered as one, otherwise the window (`armory-ui`, with
 /// `window_source`).
@@ -513,6 +510,10 @@ fn writer_of<'a>(ctx: &'a RpcContext, window_source: &'a str) -> (&'a str, &'a s
     }
 }
 
+/// Restores `name` + `instructions` from `target_version_id` as a NEW
+/// version (`source: "revert"`, `written_by`: `writer`, which is `armory-ui`
+/// for the window), through the same atomic upsert-plus-version primitive
+/// each tier's ordinary save uses.
 fn global_memory_ui_revert(store: &Store, cmd: &CommandGlobalMemoryRevertData, writer: &str) -> Result<GlobalMemoryRevertResult, String> {
     let mut bundle = load_global_bundle_for_ui(store, &cmd.id, "revert")?;
     let target = store
