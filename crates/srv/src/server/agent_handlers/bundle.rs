@@ -182,7 +182,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let broker = state.broker.clone();
     engine.register_typed(
         COMMAND_UPSERT_SYSTEM_MEMORY,
-        move |req: CommandUpsertBundleData, _ctx| {
+        move |req: CommandUpsertBundleData, ctx| {
             let mstore = mstore.clone();
             let broker = broker.clone();
             async move {
@@ -211,8 +211,11 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // instance's own reseed) between the read and the write.
                 // Codex P1/P2, ReAgent P2, PR #3244.
                 // Same optional base check as `upsertmemory` above.
+                // A registered agent's save is recorded as that agent: like the window's it is not the
+                // seeder's, so a reseed leaves the entry alone, and it never reads as the person's.
+                let (written_by, source) = writer_of(&ctx, "human");
                 mstore
-                    .bundle_upsert_system_if_changed_based(&memory, "armory-ui", "human", "{}", base_sha256.as_deref())
+                    .bundle_upsert_system_if_changed_based(&memory, written_by, source, "{}", base_sha256.as_deref())
                     .map_err(|e| format!("upsertsystemmemory: {e}"))?;
                 broker.publish_event::<crate::backend::mps_events::MemoriesChanged>(&(), vec![], 0);
                 // Return the row actually persisted, not the client-supplied
@@ -983,6 +986,29 @@ mod global_memory_ui_tests {
         }))
         .await;
         assert_eq!(state.id_store.bundle_get("sys-base").unwrap().unwrap().instructions, "v2");
+    }
+
+    /// A system-tier save by a registered agent is recorded as that agent, not the window; both are non-seeder writers.
+    #[tokio::test]
+    async fn upsertsystemmemory_records_an_agent_as_the_agent() {
+        use crate::backend::rpc_types::RpcContext;
+        let state = test_state();
+        let (engine, mut rx) = WshRpcEngine::new();
+        register(&engine, &state);
+        engine.set_rpc_context(RpcContext { agent_id: "sys-writer".to_string(), ..Default::default() });
+        ok::<Bundle>(&engine, &mut rx, COMMAND_UPSERT_SYSTEM_MEMORY, json!({
+            "id": "sys-attr", "name": "Policy", "instructions": "v1",
+        }))
+        .await;
+        let versions = state.id_store.bundle_version_list("sys-attr").unwrap();
+        assert_eq!((versions[0].written_by.as_str(), versions[0].source.as_str()), ("sys-writer", "agent"));
+        engine.set_rpc_context(RpcContext::operator_for_tests());
+        ok::<Bundle>(&engine, &mut rx, COMMAND_UPSERT_SYSTEM_MEMORY, json!({
+            "id": "sys-attr", "name": "Policy", "instructions": "v2",
+        }))
+        .await;
+        let versions = state.id_store.bundle_version_list("sys-attr").unwrap();
+        assert_eq!((versions[0].written_by.as_str(), versions[0].source.as_str()), ("armory-ui", "human"));
     }
 
     #[tokio::test]
