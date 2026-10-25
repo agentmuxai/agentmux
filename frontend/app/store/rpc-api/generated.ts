@@ -27,6 +27,7 @@ import type { AgentKillTreeCommand } from "@/types/rpc/AgentKillTreeCommand";
 import type { AgentLastRuntime } from "@/types/rpc/AgentLastRuntime";
 import type { AgentOpenPanesResult } from "@/types/rpc/AgentOpenPanesResult";
 import type { AgentOpenTailResult } from "@/types/rpc/AgentOpenTailResult";
+import type { AgentPaneUnregisterResult } from "@/types/rpc/AgentPaneUnregisterResult";
 import type { AgentProcessListCommand } from "@/types/rpc/AgentProcessListCommand";
 import type { AgentProcessListResult } from "@/types/rpc/AgentProcessListResult";
 import type { AgentSessionAppendOutputResult } from "@/types/rpc/AgentSessionAppendOutputResult";
@@ -36,6 +37,7 @@ import type { AgentSessionWriteStateResult } from "@/types/rpc/AgentSessionWrite
 import type { AgentSetSeatResult } from "@/types/rpc/AgentSetSeatResult";
 import type { AgentShutdownKeepResult } from "@/types/rpc/AgentShutdownKeepResult";
 import type { AgentSkill } from "@/types/rpc/AgentSkill";
+import type { AgentTakeoverResult } from "@/types/rpc/AgentTakeoverResult";
 import type { AgentTrackedBlocksResult } from "@/types/rpc/AgentTrackedBlocksResult";
 import type { ApiRetryEvent } from "@/types/rpc/ApiRetryEvent";
 import type { AppInfoResult } from "@/types/rpc/AppInfoResult";
@@ -71,6 +73,7 @@ import type { CommandAgentDefHideData } from "@/types/rpc/CommandAgentDefHideDat
 import type { CommandAgentInputData } from "@/types/rpc/CommandAgentInputData";
 import type { CommandAgentLastRuntimeData } from "@/types/rpc/CommandAgentLastRuntimeData";
 import type { CommandAgentOpenTailData } from "@/types/rpc/CommandAgentOpenTailData";
+import type { CommandAgentPaneUnregisterData } from "@/types/rpc/CommandAgentPaneUnregisterData";
 import type { CommandAgentSessionAppendOutputData } from "@/types/rpc/CommandAgentSessionAppendOutputData";
 import type { CommandAgentSessionArchiveData } from "@/types/rpc/CommandAgentSessionArchiveData";
 import type { CommandAgentSessionListArchivesData } from "@/types/rpc/CommandAgentSessionListArchivesData";
@@ -79,6 +82,7 @@ import type { CommandAgentSessionWriteStateData } from "@/types/rpc/CommandAgent
 import type { CommandAgentSetSeatData } from "@/types/rpc/CommandAgentSetSeatData";
 import type { CommandAgentShutdownKeepData } from "@/types/rpc/CommandAgentShutdownKeepData";
 import type { CommandAgentStopData } from "@/types/rpc/CommandAgentStopData";
+import type { CommandAgentTakeoverData } from "@/types/rpc/CommandAgentTakeoverData";
 import type { CommandAmbientNarrateData } from "@/types/rpc/CommandAmbientNarrateData";
 import type { CommandAppendAgentHistoryData } from "@/types/rpc/CommandAppendAgentHistoryData";
 import type { CommandAskSideQuestionData } from "@/types/rpc/CommandAskSideQuestionData";
@@ -693,9 +697,25 @@ export const GeneratedApi = {
   ): Promise<AgentSessionWriteStateResult> {
     return client.rpcCall("agent:session:write_state", data, opts);
   },
+  // command "agent.pane.unregister"
+  AgentPaneUnregisterCommand(
+    client: RpcClient,
+    data: CommandAgentPaneUnregisterData,
+    opts?: RpcOpts
+  ): Promise<AgentPaneUnregisterResult> {
+    return client.rpcCall("agent.pane.unregister", data, opts);
+  },
   // command "agent.setSeat"
   AgentSetSeatCommand(client: RpcClient, data: CommandAgentSetSeatData, opts?: RpcOpts): Promise<AgentSetSeatResult> {
     return client.rpcCall("agent.setSeat", data, opts);
+  },
+  // command "agent.takeover"
+  AgentTakeoverCommand(
+    client: RpcClient,
+    data: CommandAgentTakeoverData,
+    opts?: RpcOpts
+  ): Promise<AgentTakeoverResult> {
+    return client.rpcCall("agent.takeover", data, opts);
   },
   // command "agentshutdownkeep"
   AgentShutdownKeepCommand(

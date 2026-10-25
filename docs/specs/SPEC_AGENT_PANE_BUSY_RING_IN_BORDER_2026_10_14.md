@@ -2,6 +2,7 @@
 
 **Status:** implemented — in PR #4934 (spec and change together); the live check in §3 runs on a dev build.
 **Date:** 2026-10-14
+**Update 2026-10-25:** a collapsed pane no longer shows the ring (`.pane-stack-collapsed .pane-progress-bar-slot { display: none }`); its pills' progress lines say who works there. See [SPEC_PANE_TAB_PROGRESS_LINE_2026_10_24.md](SPEC_PANE_TAB_PROGRESS_LINE_2026_10_24.md) §3.4.
 **Author:** AgentA@Area54
 **Verified against:** `agentmux` `main` @ `5a8c98829`, by reading code and a
 capture of a busy agent pane in the operator's 0.59.24 window (app zoom

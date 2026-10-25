@@ -104,9 +104,14 @@
         border-color: var(--ui-line-danger);
     }
 
-    &.is-muted .ui-card-icon,
-    &.is-muted .ui-card-text {
+    // A muted card (an optional tool that isn't installed) is quieter, not faded: text keeps the
+    // secondary colour, which passes AA on every theme, where `opacity` took it to 2:1 on light ones.
+    &.is-muted .ui-card-icon {
         opacity: 0.6;
+    }
+
+    &.is-muted .ui-card-title {
+        color: var(--secondary-text-color);
     }
 
     &.has-edge {
@@ -189,7 +194,9 @@
     border: 1px solid var(--ui-line-accent);
     border-radius: var(--radius-full);
     background: color-mix(in srgb, var(--accent-color) var(--ui-tint-hover), transparent);
-    color: var(--accent-color);
+    // The count is text on a tint of the accent: the main text colour, as the shared pills use, since the
+    // accent itself is 3.5 to 4.3:1 there on most themes.
+    color: var(--main-text-color);
     font-size: var(--text-2xs);
     font-weight: 700;
     line-height: 14px;

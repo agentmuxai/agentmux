@@ -25,10 +25,13 @@
     // UI body text. This token is app-chrome-only, so it doesn't affect
     // the terminal's authentic Solarized rendering.
     --main-text-color: #46555b;
-    --secondary-text-color: #839496;
-    --grey-text-color: #93a1a1;
+    // base0 and base1 (#839496, #93a1a1) are 2.9:1 and 2.5:1 on --main-bg-color, below AA for
+    // text. Both are darkened to 5.4:1 and 4.7:1 so secondary and faint text stay readable.
+    --secondary-text-color: #53696f;
+    --grey-text-color: #5c7279;
 
     --accent-color: #268bd2;
+    --accent-fg-color: #176398;
     --accent-color-rgb: 38, 139, 210;
     --link-color: #268bd2;
 

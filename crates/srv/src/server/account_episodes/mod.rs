@@ -387,7 +387,7 @@ fn held_tasks(state: &AppState, block_ids: &[&str]) -> HashMap<String, Vec<(Acco
     let regs = state.reactive_handler.list_agents();
     let now = agentmux_common::time::now_ms();
     let tasks = state
-        .identity_store
+        .work_store
         .work_board_list(now - crate::backend::kanban::FINISHED_WINDOW_MS, 500, now)
         .unwrap_or_default();
     let mut out: HashMap<String, Vec<(AccountEpisodeTask, String)>> = HashMap::new();

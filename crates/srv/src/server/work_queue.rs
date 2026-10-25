@@ -17,12 +17,13 @@
 //!
 //! Auth-gated by the same middleware as the cron and reactive routes.
 //!
-//! **Store choice:** every handler uses `state.identity_store` — the
-//! always-global store — NOT `state.shared_store`, which is what the cron
-//! handlers next door still use. That difference is deliberate, not an
-//! inconsistency to tidy up later: a per-channel queue would only ever mean
-//! "any agent in this channel can pick it up". Cron's own placement is a known
-//! unmigrated case (`SPEC_IDENTITY_STORE_SPLIT_2026_08_17.md` step 1b).
+//! **Store choice:** every handler uses `state.work_store`. In an installed or
+//! `task package` build that is the always-global identity store, not
+//! `state.shared_store` (cron's place until it moves, `SPEC_IDENTITY_STORE_SPLIT_2026_08_17.md`
+//! step 1b), and deliberately so: a per-channel queue would only ever mean
+//! "any agent in this channel can pick it up". A `task dev` build is the one
+//! exception, with a `work-store.db` of its own (`agentmux_common::work_store`),
+//! so a test there never reads or changes the operator's real queue.
 
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
@@ -221,7 +222,7 @@ pub(super) async fn handle_work_enqueue(
 /// claimed by an agent no unlock note reached (it was filed for anyone) finds
 /// its spec's path here.
 fn claimed_body(state: &AppState, item: &WorkItem, num: Option<i64>) -> Value {
-    let after = state.identity_store.work_deps_of(&item.id).unwrap_or_default();
+    let after = state.work_store.work_deps_of(&item.id).unwrap_or_default();
     json!({ "claimed": true, "attempt": item.attempts, "num": num, "item": item, "after": after })
 }
 
@@ -242,9 +243,9 @@ fn enqueue_one(
     card: &crate::backend::storage::work_board::NewCard,
 ) -> Result<Option<i64>, (StatusCode, Json<Value>)> {
     let enqueued = if after.is_empty() {
-        state.identity_store.work_queue_enqueue(item).map(|()| None)
+        state.work_store.work_queue_enqueue(item).map(|()| None)
     } else {
-        state.identity_store.work_queue_enqueue_after(item, after)
+        state.work_store.work_queue_enqueue_after(item, after)
     };
     match enqueued {
         Ok(Some(why)) => Err(err(StatusCode::BAD_REQUEST, format!("after: {why}"))),
@@ -337,14 +338,14 @@ pub(super) async fn handle_work_claim(
     // heartbeat (Kanban §6.8); what still expires is recorded as such.
     super::work_tasks::extend_live_leases(&state, now);
     let expiring = super::work_tasks::expiring(&state, now);
-    if let Err(e) = state.identity_store.work_queue_reap(now) {
+    if let Err(e) = state.work_store.work_queue_reap(now) {
         // Not fatal — a claim against a not-yet-reaped queue is still correct,
         // just possibly emptier than it could be. Log and continue rather than
         // failing the caller's request.
         tracing::warn!(target: "workqueue", error = %e, "reap before claim failed");
     }
     for gone in expiring {
-        let to = state.identity_store.work_queue_get(&gone.id).ok().flatten().map(|i| i.state).unwrap_or_default();
+        let to = state.work_store.work_queue_get(&gone.id).ok().flatten().map(|i| i.state).unwrap_or_default();
         if to != crate::backend::storage::work_queue::work_state::CLAIMED {
             super::work_tasks::record(&state, &gone.id, &gone.claimed_by, "system", "expired", "claimed", &to, "lease expired");
         }
@@ -378,9 +379,9 @@ pub(super) async fn handle_work_claim(
 
     if let Some(named) = req.id.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
         let id = super::work_tasks::resolve_id(&state, named);
-        return match state.identity_store.work_claim_one(&id, &filter, now, lease) {
+        return match state.work_store.work_claim_one(&id, &filter, now, lease) {
             Ok(Some((item, from))) => {
-                let num = state.identity_store.work_card_ensure(&item.id, now).ok();
+                let num = state.work_store.work_card_ensure(&item.id, now).ok();
                 if from == crate::backend::storage::work_queue::work_state::HELD {
                     super::work_tasks::record(&state, &item.id, &item.claimed_by, "agent", "unheld", "held", "open", "claimed by name");
                 }
@@ -396,9 +397,9 @@ pub(super) async fn handle_work_claim(
         };
     }
 
-    match state.identity_store.work_queue_claim(&filter, now, lease) {
+    match state.work_store.work_queue_claim(&filter, now, lease) {
         Ok(Some(item)) => {
-            let num = state.identity_store.work_card_ensure(&item.id, now).ok();
+            let num = state.work_store.work_card_ensure(&item.id, now).ok();
             super::work_tasks::record(&state, &item.id, &item.claimed_by, "agent", "claimed", "open", "claimed", "");
             publish_changed(&state);
             // `attempt` is echoed at the top level as well as inside `item`
@@ -474,7 +475,7 @@ pub(super) async fn handle_work_heartbeat(
     let id = super::work_tasks::resolve_id(&state, &id);
     let lease = req.lease_ms.filter(|&n| n > 0).unwrap_or(DEFAULT_LEASE_MS);
     match state
-        .identity_store
+        .work_store
         .work_queue_heartbeat(&id, &req.agent_id, holder_uid(caller.as_deref()), req.attempt, now_ms(), lease)
     {
         Ok(matched) => {
@@ -527,7 +528,7 @@ pub(super) async fn handle_work_release(
     );
     let id = super::work_tasks::resolve_id(&state, &id);
     match state
-        .identity_store
+        .work_store
         .work_queue_release(&id, &req.agent_id, holder_uid(caller.as_deref()), req.attempt, &req.result, now_ms())
     {
         Ok(Some(matched)) => {
@@ -537,7 +538,7 @@ pub(super) async fn handle_work_release(
             // attempts-vs-max_attempts decision, and duplicating that rule
             // here is exactly how the two drift.
             let resulting = state
-                .identity_store
+                .work_store
                 .work_queue_get(&id)
                 .ok()
                 .flatten()
@@ -564,14 +565,14 @@ pub(super) async fn handle_work_list(
     Query(q): Query<ListQuery>,
 ) -> (StatusCode, Json<Value>) {
     let limit = q.limit.unwrap_or(50).clamp(1, 500);
-    match state.identity_store.work_queue_list(&q.state, limit) {
+    match state.work_store.work_queue_list(&q.state, limit) {
         Ok(items) => {
             // Each with its number, which agents and the operator use.
             let now = now_ms();
             let items: Vec<Value> = items
                 .into_iter()
                 .map(|i| {
-                    let num = state.identity_store.work_card_ensure(&i.id, now).ok();
+                    let num = state.work_store.work_card_ensure(&i.id, now).ok();
                     let mut v = serde_json::to_value(&i).unwrap_or_default();
                     if let Some(o) = v.as_object_mut() {
                         o.insert("num".into(), json!(num));

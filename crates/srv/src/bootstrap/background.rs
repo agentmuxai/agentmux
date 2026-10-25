@@ -33,6 +33,7 @@ pub fn spawn_background_subsystems(
     filestore: &Arc<FileStore>,
     id_store: &Arc<Store>,
     identity_store: &Arc<Store>,
+    work_store: &Arc<Store>,
 ) -> BackgroundSubsystems {
     // Agents' cargo waits for the host-wide build slot (build_slot.rs).
     std::thread::spawn(|| match agentmux_common::build_slot::install_for_current_user() {
@@ -142,8 +143,8 @@ pub fn spawn_background_subsystems(
     // Start agent process watchdog (kills panes that exceed max-runtime or idle-output limits)
     let watchdog_config = config_watcher.clone();
     let watchdog_store = Arc::clone(mstore);
-    // The work queue's store (the identity store today).
-    let watchdog_work_store = Arc::clone(identity_store);
+    // The work queue's store (`AppState::work_store`): a stopped agent's claims are released there.
+    let watchdog_work_store = Arc::clone(work_store);
     let watchdog_broker = broker.clone();
     tokio::spawn(async move {
         backend::blockcontroller::watchdog::run_watchdog_loop(watchdog_config, watchdog_store, watchdog_work_store, watchdog_broker).await;

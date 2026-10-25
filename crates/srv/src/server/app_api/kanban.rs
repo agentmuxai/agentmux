@@ -127,7 +127,7 @@ impl<'a> Decider<'a> {
 
 /// Review to done, and what that unlocks. The one Accept, whoever decides.
 pub(crate) fn accept_task(state: &AppState, t: &BoardTask, by: &Decider<'_>, note: &str, now: i64) -> Result<Value, String> {
-    let store = &state.identity_store;
+    let store = &state.work_store;
     let m = store.work_accept(&t.item.id, now).map_err(|e| e.to_string())?.ok_or("only a task in Review can be accepted")?;
     record(state, &t.item.id, by.actor, by.kind, "accepted", &m.from, &m.to, &by.body(note));
     let unlocked = crate::backend::kanban::notify_unlocked(store, &state.mstore, &t.item.id);
@@ -144,7 +144,7 @@ pub(crate) async fn send_back_task(
     reason: &str,
     now: i64,
 ) -> Result<Value, String> {
-    let store = &state.identity_store;
+    let store = &state.work_store;
     if t.item.state != work_state::REVIEW {
         return Err("only a task in Review can be sent back".into());
     }
@@ -221,13 +221,14 @@ fn task_json(t: &BoardTask, holder: Option<Value>, unavailable: Option<Value>, a
 
 async fn list(state: &AppState) -> Result<Value, String> {
     let regs = state.reactive_handler.list_agents();
-    let identity = state.identity_store.clone();
+    // The board is in the work store; an agent's accounts (below) are in the identity store.
+    let (work, identity) = (state.work_store.clone(), state.identity_store.clone());
     let mstore = state.mstore.clone();
     tokio::task::spawn_blocking(move || {
         let now = now_ms();
-        let tasks = identity.work_board_list(now - FINISHED_WINDOW_MS, LIST_LIMIT, now).map_err(|e| e.to_string())?;
-        let accepts = identity.work_delegate_accepts(now - crate::backend::kanban_delegate::REOPEN_WINDOW_MS).unwrap_or_default();
-        let stamp = identity.work_board_stamp().unwrap_or(0);
+        let tasks = work.work_board_list(now - FINISHED_WINDOW_MS, LIST_LIMIT, now).map_err(|e| e.to_string())?;
+        let accepts = work.work_delegate_accepts(now - crate::backend::kanban_delegate::REOPEN_WINDOW_MS).unwrap_or_default();
+        let stamp = work.work_board_stamp().unwrap_or(0);
         let states: Vec<Option<AgentState>> = regs.iter().map(|r| agent_state::current_state(&mstore, &r.block_id)).collect();
         // Only a holder's matters, and only when it is limited or signed out.
         let unavailable: Vec<Option<Value>> = regs
@@ -273,9 +274,9 @@ async fn list(state: &AppState) -> Result<Value, String> {
 async fn task(state: &AppState, data: &Value) -> Result<Value, String> {
     let id = data.get("id").and_then(Value::as_str).ok_or("kanban.task: id is required")?;
     let id = resolve_id(state, id);
-    let t = state.identity_store.work_board_get(&id).map_err(|e| e.to_string())?.ok_or("no such task")?;
-    let events = state.identity_store.work_events(&t.item.id, 200).map_err(|e| e.to_string())?;
-    let accepts = state.identity_store.work_delegate_accepts(now_ms() - crate::backend::kanban_delegate::REOPEN_WINDOW_MS).unwrap_or_default();
+    let t = state.work_store.work_board_get(&id).map_err(|e| e.to_string())?.ok_or("no such task")?;
+    let events = state.work_store.work_events(&t.item.id, 200).map_err(|e| e.to_string())?;
+    let accepts = state.work_store.work_delegate_accepts(now_ms() - crate::backend::kanban_delegate::REOPEN_WINDOW_MS).unwrap_or_default();
     Ok(json!({ "task": task_json(&t, None, None, &accepts), "events": events }))
 }
 
@@ -416,7 +417,7 @@ fn create_one(
     after: &[String],
     now: i64,
 ) -> Result<(String, i64), String> {
-    let store = &state.identity_store;
+    let store = &state.work_store;
     let (target, target_uid) = match req.agent.as_deref().map(str::trim).filter(|a| !a.is_empty()) {
         Some(a) => match agent_named(regs, a) {
             Some(r) => (r.agent_id.clone(), r.uid.clone().unwrap_or_default()),
@@ -475,7 +476,7 @@ async fn act(state: &AppState, data: Value) -> Result<Value, String> {
     let req: ActRequest = serde_json::from_value(data).map_err(|e| format!("kanban.act: {e}"))?;
     let now = now_ms();
     let regs = state.reactive_handler.list_agents();
-    let store = &state.identity_store;
+    let store = &state.work_store;
     let get = |id: &Option<String>| -> Result<BoardTask, String> {
         let id = id.as_deref().ok_or("id is required")?;
         let id = resolve_id(state, id);
@@ -1181,5 +1182,25 @@ mod tests {
         assert!(call(Some(agent), COMMAND_KANBAN_ACT, create.clone()).await.starts_with("FORBIDDEN"));
         assert_eq!(call(Some(RpcContext::operator_for_tests()), COMMAND_KANBAN_ACT, create).await, "");
         assert_eq!(call(None, COMMAND_KANBAN_LIST, json!({})).await, "");
+    }
+
+    /// A build with a work store of its own lists that store's board, never the
+    /// identity store's, where the operator's real queue is.
+    #[tokio::test]
+    async fn the_board_is_the_work_stores_not_the_identity_stores() {
+        use crate::backend::storage::store::Store;
+        let mut state = crate::server::tests::test_state();
+        // The test state aliases both stores, so this one is "the host's".
+        let real = act(&state, json!({"action": "create", "title": "A real one", "payload": "p"})).await.unwrap();
+        let own = Store::open_in_memory().unwrap();
+        own.apply_identity_schema_for_tests().unwrap();
+        state.work_store = std::sync::Arc::new(own);
+        let mine = act(&state, json!({"action": "create", "title": "A dev one", "payload": "p"})).await.unwrap();
+
+        let board = list(&state).await.unwrap();
+        let ids: Vec<&str> = board["tasks"].as_array().unwrap().iter().filter_map(|t| t["id"].as_str()).collect();
+        assert_eq!(ids, vec![mine["id"].as_str().unwrap()], "the host's task {real} is not on this board");
+        let seen = task(&state, &json!({"id": real["id"]})).await;
+        assert!(seen.is_err(), "nor can this build open it: {seen:?}");
     }
 }

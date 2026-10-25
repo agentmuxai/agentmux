@@ -6,6 +6,8 @@
 // Extracted from termwrap.ts — standalone async functions, no TermWrap dependency.
 
 import { authHeaders } from "@/app/store/auth-headers";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 import { getWebServerEndpoint } from "@/util/endpoints";
 import { fireAndForget } from "@/util/util";
 
@@ -44,29 +46,15 @@ async function registerAgent(agentId: string, blockId: string, tabId?: string): 
 // `blockId` is optional on the wire but always sent from here: since identity
 // M2 (SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md §4.4.4 Q7) a name
 // can be held by several live panes, and the server refuses to tear down an
-// ambiguous name without a block id (HTTP 409) rather than guess.
+// ambiguous name without a block id rather than guess. Sent over the window's
+// own socket (`agent.pane.unregister`): srv answers only a connection the host
+// has proven is the AgentMux window.
 export async function unregisterAgent(agentId: string, blockId?: string): Promise<void> {
     try {
-        const url = getWebServerEndpoint() + "/agentmux/reactive/unregister";
-        const response = await fetch(url, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", ...authHeaders() },
-            body: JSON.stringify({ agent_id: agentId, block_id: blockId ?? "" }),
-        });
-        if (!response.ok) {
-            let errorMsg = `HTTP ${response.status}`;
-            try {
-                const data = await response.json();
-                errorMsg = data.error || errorMsg;
-            } catch {
-                // Response body not JSON, use status
-            }
-            console.error("[reactive] failed to unregister agent:", errorMsg);
-        } else {
-            console.log("[reactive] unregistered agent", agentId);
-        }
+        await RpcApi.AgentPaneUnregisterCommand(TabRpcClient, { agent_id: agentId, block_id: blockId ?? "" });
+        console.log("[reactive] unregistered agent", agentId);
     } catch (e) {
-        console.error("[reactive] error unregistering agent:", e);
+        console.error("[reactive] failed to unregister agent:", e);
     }
 }
 

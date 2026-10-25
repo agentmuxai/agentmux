@@ -35,6 +35,7 @@ const MAX_NAMED: usize = 3;
 
 struct Context {
     mstore: Arc<Store>,
+    /// Where the Kanban queue is (`AppState::work_store`), for the claimed tasks.
     identity: Arc<Store>,
     event_bus: Arc<EventBus>,
 }

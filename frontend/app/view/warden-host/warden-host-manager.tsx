@@ -13,6 +13,8 @@ import { useTick } from "@/app/hook/useTick";
 import { IconButton } from "@/app/element/ui";
 
 import { authHeaders } from "@/app/store/auth-headers";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 import { getWebServerEndpoint } from "@/util/endpoints";
 import { ageMs, formatAge, pollWhileVisible, WARDEN_REFRESH_MS } from "@/app/view/warden-shared/warden-shared";
 
@@ -53,20 +55,12 @@ async function fetchHostAgents(): Promise<HostAgent[]> {
  */
 async function deregisterAgent(agentId: string, blockId: string): Promise<void> {
     // `block_id` alongside the name: since identity M2 a name can be held
-    // by several live panes, and the server refuses (HTTP 409) to tear down
-    // an ambiguous name without the block — an operator's enforcement
+    // by several live panes, and the server refuses to tear down an
+    // ambiguous name without the block — an operator's enforcement
     // action must land on exactly the row they clicked, never a guess.
-    const resp = await fetch(
-        getWebServerEndpoint() + "/agentmux/reactive/unregister",
-        {
-            method: "POST",
-            headers: { ...authHeaders(), "Content-Type": "application/json" },
-            body: JSON.stringify({ agent_id: agentId, block_id: blockId }),
-        },
-    );
-    if (!resp.ok) {
-        throw new Error(`warden: POST /agentmux/reactive/unregister → ${resp.status}`);
-    }
+    // Sent over the window's own socket: srv answers only a connection the
+    // host has proven is the AgentMux window.
+    await RpcApi.AgentPaneUnregisterCommand(TabRpcClient, { agent_id: agentId, block_id: blockId });
 }
 
 function agentState(agent: HostAgent, now: number): "active" | "idle" {

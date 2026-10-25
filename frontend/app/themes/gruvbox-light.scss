@@ -18,9 +18,12 @@
 
     --main-text-color: #2c2928;
     --secondary-text-color: #504945;
-    --grey-text-color: #928374;
+    // Darkened from Gruvbox's "gray" (#928374, 3.2:1 on --main-bg-color) to 4.6:1: text set in this
+    // token has to pass AA on a light theme.
+    --grey-text-color: #756a60;
 
     --accent-color: #af3a03;
+    --accent-fg-color: #a03503;
     --accent-color-rgb: 175, 58, 3;
     --link-color: #076678;
 

@@ -52,12 +52,8 @@ function entryFor(providerId: string): Entry {
             begin: async () => {
                 const prov = getProvider(providerId);
                 if (!prov?.npmPackage) throw new Error(`${displayName(providerId)} isn't installed by AgentMux`);
-                return RpcApi.InstallStartCommand(TabRpcClient, {
-                    providerId: prov.id,
-                    cliCommand: prov.cliCommand,
-                    npmPackage: prov.npmPackage,
-                    pinnedVersion: prov.pinnedVersion,
-                });
+                // srv installs its own registry's package for this id.
+                return RpcApi.InstallStartCommand(TabRpcClient, { providerId: prov.id });
             },
             cancel: (sessionId) => RpcApi.InstallCancelCommand(TabRpcClient, { sessionId }),
             // The root is never disposed; a run stops only on Cancel.
