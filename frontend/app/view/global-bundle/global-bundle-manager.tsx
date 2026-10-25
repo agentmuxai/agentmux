@@ -35,7 +35,8 @@ import { shareLabel, tokensTitle } from "@/app/view/native-memory/memory-tokens"
 import { estimateTokenCount } from "@/util/format-count";
 import "@/app/view/native-memory/native-memory-manager.scss";
 import { GlobalMemoryFullView } from "./GlobalMemoryFullView";
-import { agentKindLabel, GlobalBundleViewModel, utf8Bytes, type GlobalMemoryView } from "./global-bundle-model";
+import { Button } from "@/element/button";
+import { agentKindLabel, GlobalBundleViewModel, removedByLabel, utf8Bytes, type GlobalMemoryView } from "./global-bundle-model";
 import { GlobalMemoryTokenStrip } from "./GlobalMemoryTokenStrip";
 import "./global-bundle.scss";
 
@@ -246,6 +247,29 @@ export const GlobalBundleManager = (): JSX.Element => {
 
             <Show when={memoryEntries().length === 0}>
                 <div class="global-bundle-empty">No memories yet.</div>
+            </Show>
+
+            {/* What was taken out of Global Memory: kept in history, so it can
+                come back. */}
+            <Show when={model.removedAtom().length > 0}>
+                <section class="global-bundle-removed" data-testid="global-memory-removed">
+                    <h3 class="global-bundle-removed-title">Removed</h3>
+                    <p class="global-bundle-removed-hint">
+                        Taken out of Global Memory and kept in history. Restoring puts an entry back at the end of the
+                        order.
+                    </p>
+                    <For each={model.removedAtom()}>
+                        {(entry) => (
+                            <div class="global-bundle-removed-row" data-id={entry.id}>
+                                <span class="global-bundle-removed-name">{entry.name}</span>
+                                <span class="global-bundle-removed-meta">
+                                    {`Removed by ${removedByLabel(entry.removed_by)} · ${formatFileAge(entry.removed_at)}`}
+                                </span>
+                                <Button onClick={() => void model.restore(entry)}>Restore</Button>
+                            </div>
+                        )}
+                    </For>
+                </section>
             </Show>
         </div>
     );

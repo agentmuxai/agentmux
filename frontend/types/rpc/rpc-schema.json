@@ -3275,6 +3275,25 @@
     }
   },
   {
+    "command": "globalmemory:removed",
+    "request": "agentmux_srv::backend::rpc_types::bundle::CommandGlobalMemoryRemovedData",
+    "requestName": "CommandGlobalMemoryRemovedData",
+    "requestTs": {
+      "imports": [
+        "CommandGlobalMemoryRemovedData"
+      ],
+      "name": "CommandGlobalMemoryRemovedData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::bundle::GlobalMemoryRemovedResult",
+    "responseName": "GlobalMemoryRemovedResult",
+    "responseTs": {
+      "imports": [
+        "GlobalMemoryRemovedResult"
+      ],
+      "name": "GlobalMemoryRemovedResult"
+    }
+  },
+  {
     "command": "globalmemory:revert",
     "request": "agentmux_srv::backend::rpc_types::bundle::CommandGlobalMemoryRevertData",
     "requestName": "CommandGlobalMemoryRevertData",

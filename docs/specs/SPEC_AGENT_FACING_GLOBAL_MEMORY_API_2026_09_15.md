@@ -148,6 +148,10 @@ described).
   newest version is a `remove` one, which only a removal writes), and a revert
   restores it as Global Memory, last in the order. `list` returns the removed
   entries separately under `removed` (`{id, name, removed_at, removed_by}`).
+  The Memory pane shows the same list under "Removed" (`globalmemory:removed`:
+  each entry with the `remove` version that recorded it) with a Restore, which
+  is `globalmemory:revert` to that version, so a restore is recorded like any
+  revert.
 
 None of these routes accept or infer `is_system` from the caller under any
 circumstance. The system tier remains reachable only through
