@@ -230,9 +230,118 @@ pub fn snapshot(state: &AppState) -> Vec<RendererEntry> {
     out
 }
 
+/// Each browser pane's own memory in bytes, by block id: the private memory of the
+/// renderers that serve that pane and no other browser, so it is what the pane frees
+/// when its page goes (a renderer a pane shares with a window or another pane would
+/// free nothing, and says nothing about the pane). Panes with no such renderer, or
+/// whose renderers could not be measured, are left out. `only`, when not empty,
+/// limits the answer to those block ids.
+pub fn pane_memory(
+    entries: &[RendererEntry],
+    procs: &[agentmux_procstats::ProcInfo],
+    only: &[String],
+) -> HashMap<String, u64> {
+    let mut labels_of: HashMap<u32, std::collections::HashSet<&str>> = HashMap::new();
+    for e in entries {
+        labels_of.entry(e.pid).or_default().insert(e.label.as_str());
+    }
+    let private: HashMap<u32, u64> = procs.iter().filter_map(|p| Some((p.pid, p.mem_private?))).collect();
+    let mut counted: HashMap<&str, std::collections::HashSet<u32>> = HashMap::new();
+    let mut out: HashMap<String, u64> = HashMap::new();
+    for e in entries {
+        let Some(block_id) = e.block_id.as_deref() else { continue };
+        if !only.is_empty() && !only.iter().any(|b| b == block_id) {
+            continue;
+        }
+        if labels_of.get(&e.pid).is_some_and(|labels| labels.len() > 1) {
+            continue;
+        }
+        let Some(bytes) = private.get(&e.pid) else { continue };
+        if counted.entry(block_id).or_default().insert(e.pid) {
+            *out.entry(block_id.to_string()).or_default() += bytes;
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn entry(pid: u32, label: &str, block_id: Option<&str>) -> RendererEntry {
+        RendererEntry {
+            pid,
+            label: label.into(),
+            main: true,
+            block_id: block_id.map(Into::into),
+            pool: false,
+            window_id: None,
+        }
+    }
+
+    fn proc(pid: u32, private: Option<u64>) -> agentmux_procstats::ProcInfo {
+        agentmux_procstats::ProcInfo {
+            pid,
+            ppid: None,
+            start_key: 0,
+            started_at_ms: None,
+            name: "agentmux-cef".into(),
+            cpu_ns: None,
+            mem_private: private,
+            mem_resident: None,
+            mem_commit: None,
+        }
+    }
+
+    #[test]
+    fn a_pane_has_the_memory_of_its_own_renderers() {
+        // Pane a: its page and a cross-site iframe in two processes. Pane b: one.
+        let entries = [
+            entry(10, "browser-pane-a-1", Some("a")),
+            entry(11, "browser-pane-a-1", Some("a")),
+            entry(20, "browser-pane-b-1", Some("b")),
+        ];
+        let procs = [proc(10, Some(100)), proc(11, Some(40)), proc(20, Some(70)), proc(99, Some(5))];
+        let m = pane_memory(&entries, &procs, &[]);
+        assert_eq!(m.get("a"), Some(&140));
+        assert_eq!(m.get("b"), Some(&70));
+    }
+
+    #[test]
+    fn a_renderer_shared_with_another_browser_is_nobodys() {
+        // Pane a shares renderer 10 with the main window: closing a frees none of it.
+        let entries = [
+            entry(10, "browser-pane-a-1", Some("a")),
+            entry(10, "main", None),
+            entry(11, "browser-pane-a-1", Some("a")),
+        ];
+        let procs = [proc(10, Some(900)), proc(11, Some(40))];
+        assert_eq!(pane_memory(&entries, &procs, &[]).get("a"), Some(&40));
+        // Nothing of its own left: no figure, rather than a made-up one.
+        assert!(pane_memory(&entries[..2], &procs, &[]).is_empty());
+    }
+
+    #[test]
+    fn a_process_is_counted_once_and_an_unmeasured_one_not_at_all() {
+        let entries = [
+            entry(10, "browser-pane-a-1", Some("a")),
+            entry(10, "browser-pane-a-1", Some("a")),
+            entry(12, "browser-pane-c-1", Some("c")),
+        ];
+        let procs = [proc(10, Some(100)), proc(12, None)];
+        let m = pane_memory(&entries, &procs, &[]);
+        assert_eq!(m.get("a"), Some(&100));
+        assert!(!m.contains_key("c"));
+    }
+
+    #[test]
+    fn the_answer_can_be_limited_to_some_panes() {
+        let entries = [entry(10, "browser-pane-a-1", Some("a")), entry(20, "browser-pane-b-1", Some("b"))];
+        let procs = [proc(10, Some(100)), proc(20, Some(70))];
+        let m = pane_memory(&entries, &procs, &["b".to_string()]);
+        assert_eq!(m.len(), 1);
+        assert_eq!(m.get("b"), Some(&70));
+    }
 
     #[test]
     fn a_browser_keeps_its_own_renderer_and_each_frames() {

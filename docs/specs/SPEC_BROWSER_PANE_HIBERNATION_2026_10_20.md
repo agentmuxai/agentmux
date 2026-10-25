@@ -63,7 +63,7 @@ A browser pane is in one of three states. The state is block meta, so every wind
 **The window decides, with two answers from the host.** (An earlier draft had the host propose candidates, as the recycle governor does. Built, the window already held everything but two facts, so it asks for those instead.)
 - **The window** (`frontend/app/view/browser/hibernation.ts` `policyTick`, every 30 s) knows how long each browser pane has been hidden (the pane-tab visibility signal: a hidden window tab, an inactive pane tab, a minimized window), what agents and the person are doing with it, and its settings.
 - **The host** answers `memory_pressure_level` (Normal, Warn, Critical) and, per candidate, `browser_pane_hibernation_check`: whether its page plays media, has a changed form field, has a `beforeunload` listener, or has DevTools open (`crates/cef/src/browser_api/hibernation.rs`, read in an isolated world). A check that can't run keeps the pane awake.
-- **Order:** the longest-hidden first, as Chrome orders its discards. Ordering by renderer size, as the first draft had, needs a pane-to-process map the window doesn't have; it is a later refinement if memory pressure shows it matters.
+- **Order:** the longest-hidden first, as Chrome orders its discards. Under memory pressure, when more panes are due than may sleep in a tick, the biggest pages go first (the host answers `browser_pane_memory` from the renderer map: the private memory of the renderers that serve that pane alone; panes with no figure follow, longest-hidden first). Not on Linux, where the host can't read renderer sizes: there it stays longest-hidden first.
 - A pane that declines says why in the log (`[hibernate] stays awake reason=…`) and is asked again next tick.
 
 ### 5.2 Thresholds
@@ -131,7 +131,7 @@ Shown in place of the page from the moment the pane is visible until its page ha
 
 - The **first line** names the page by its saved title and icon (the address when there's no title).
 - The **estimate** (§7.2), or "Still loading…" once the estimate has passed by more than half.
-- The **reason**, in one sentence, with the typical saving. Under pressure it says so: "Your computer was low on memory, so AgentMux put this browser pane to sleep…"
+- The **reason**, in one sentence, with the saving: what the pane's own renderers held when it went to sleep ("about 180 MB"), or "usually 100 to 200 MB" where that wasn't measured. Under pressure it says so: "Your computer was low on memory, so AgentMux put this browser pane to sleep…"
 - **What isn't kept**, only while it isn't: Phase 3 (§10) removes the line.
 - **Keep this pane awake** sets `browser:keepawake`. **Settings** opens `browser:hibernate`.
 - The card shows only the first time the user sees each pane after it slept. A pane that wakes on hover and finishes before it is shown never shows one.

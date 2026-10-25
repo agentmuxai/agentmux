@@ -183,7 +183,7 @@ function BrowserSleepCard(props: { sleep: BrowserSleep; startedAt: () => number;
                     <BrainSpinner class="browser-sleep-card-spinner" />
                     <span>{eta()}</span>
                 </div>
-                <p class="browser-sleep-card-why">{sleepReasonText(props.sleep.reason)}</p>
+                <p class="browser-sleep-card-why">{sleepReasonText(props.sleep.reason, props.sleep.memoryBytes)}</p>
                 <Show when={!props.sleep.kept}>
                     <p class="browser-sleep-card-lost">{NOT_KEPT_TEXT}</p>
                 </Show>
@@ -412,7 +412,10 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
         }
         // The check is async: the pane may have been shown meanwhile.
         if (visible() || sleeping()) return visible() ? "visible" : "already asleep";
-        await model.hibernate(reason);
+        // What it holds now, while it still has a page, for the card to say what sleeping freed.
+        const memory = await getApi().browserPanes.paneMemory?.([model.blockId]).catch(() => undefined);
+        if (visible() || sleeping()) return visible() ? "visible" : "already asleep";
+        await model.hibernate(reason, memory?.[model.blockId]);
         return null;
     };
     // A thaw the host failed leaves the page frozen: a shown pane would stay blank, so try again.
