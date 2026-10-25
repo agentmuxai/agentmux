@@ -501,7 +501,12 @@ pub(super) async fn handle_work_complete(
     // A task that needs review goes to Review instead of done (the agent
     // can't accept its own work); either way the answer names the agent's
     // next waiting task (Kanban §6.5).
-    super::work_tasks::finish(&state, caller.as_deref(), &id, &req.agent_id, req.attempt, &req.result, None).await
+    let done = super::work_tasks::finish(&state, caller.as_deref(), &id, &req.agent_id, req.attempt, &req.result, None).await;
+    if done.0.is_success() {
+        // The agent's build caches are cleared in the background (SPEC_BUILD_CACHE_CLEANUP_2026_10_26.md).
+        crate::backend::build_cache_service::agent_task_done(state.mstore.clone(), state.config_watcher.clone(), req.agent_id.clone());
+    }
+    done
 }
 
 /// Returns the item's RESULTING state alongside `ok` (Codex P2 on PR #2902).
