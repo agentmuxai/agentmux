@@ -22,6 +22,9 @@
 //! The turn is `BROADCAST_TURN_ORIGIN` (`User`): a broadcast is the human's own
 //! message, with the same powers as typing it into each pane, including
 //! authorizing an agent's self-quit (owner decision 2026-10-06, spec §6 q2).
+//! The one exception is `App` `upgrade`: it is once per machine, so a broadcast
+//! doesn't count and the user is asked (`self_quit::gate_upgrade`, owner decision
+//! 2026-10-23).
 //! That adds no power to anything holding the pane key, which could already send
 //! any pane a plain `User` turn through `agent.input` (spec §2 finding 7, §4.2).
 //! srv, not the text, still decides: the label comes from this module only.
