@@ -64,10 +64,12 @@ impl World {
     }
 
     async fn post(&self, uri: &str, body: Value) -> (StatusCode, Value) {
+        let token = crate::server::tests::token_for(&self.state, &crate::server::tests::actor_in(&body));
         let req = Request::builder()
             .uri(uri)
             .method("POST")
             .header("X-AuthKey", "test-secret-key")
+            .header("X-Agent-Token", token)
             .header("Content-Type", "application/json")
             .body(Body::from(body.to_string()))
             .unwrap();

@@ -110,20 +110,22 @@ async fn an_agents_lower_caps_are_kept() {
     assert!(v["notes"].as_array().unwrap().is_empty(), "{v}");
 }
 
-/// The ordinary routes can't tell the app's window from an agent that left
-/// its token out, so neither of them raises a cap.
+/// The ordinary routes serve agents, never the app's window, so a request on
+/// them (or one without the host's token) raises no cap.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_request_without_the_hosts_token_cannot_raise_a_cap() {
-    let (state, _owner) = state();
+    let (state, owner) = state();
     *state.host_ipc.lock().await = Some(crate::server::state::HostIpc { port: 1, token: HOST_TOKEN.into() });
     let body = definition("uid-caps-claude", json!({ "run_usd": 50 }));
-    let (status, v) = send(&state, None, Method::POST, "/agentmux/jobs", Some(body.clone())).await;
+    let (status, _) = send(&state, None, Method::POST, "/agentmux/jobs", Some(body.clone())).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "a request with no token is refused");
+    let (status, v) = send(&state, Some(&owner), Method::POST, "/agentmux/jobs", Some(body.clone())).await;
     assert_eq!(status, StatusCode::CREATED, "{v}");
     let id = created_id(&v);
     state.cron_scheduler.cancel_job(&id);
-    assert_eq!(caps_of(&state, &id)["run_usd"], 5.0, "an unattributed create is held to the defaults");
+    assert_eq!(caps_of(&state, &id)["run_usd"], 5.0, "a create is held to the defaults");
 
-    let (status, v) = send(&state, None, Method::PATCH, &format!("/agentmux/jobs/{id}"), Some(json!({ "policy": { "caps": { "run_usd": 80 } } }))).await;
+    let (status, v) = send(&state, Some(&owner), Method::PATCH, &format!("/agentmux/jobs/{id}"), Some(json!({ "policy": { "caps": { "run_usd": 80 } } }))).await;
     assert_eq!(status, StatusCode::OK, "{v}");
     assert_eq!(caps_of(&state, &id)["run_usd"], 5.0);
 

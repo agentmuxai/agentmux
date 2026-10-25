@@ -101,18 +101,20 @@ async fn run_now_is_for_the_owner_or_the_operator_and_shows_in_history() {
     let (status, v) = send(&state, Method::POST, Some(&owner), &uri, Some(json!({}))).await;
     assert_eq!((status, v["outcome"].as_str()), (StatusCode::OK, Some("delivered")), "{v}");
     // While the first runs, the default overlap policy (skip) refuses another.
-    let (_, busy) = send(&state, Method::POST, None, &uri, Some(json!({}))).await;
+    let (_, busy) = send(&state, Method::POST, Some(&owner), &uri, Some(json!({}))).await;
     assert_eq!(busy["outcome"], "failed", "{busy}");
     let first = v["run_id"].as_str().unwrap().to_string();
     state.cron_scheduler.runs().unwrap().turn_finished(&first, crate::backend::storage::job_runs::infra::OK, None, "");
     let (status, v) = send(&state, Method::POST, None, &uri, Some(json!({}))).await;
-    assert_eq!((status, v["outcome"].as_str()), (StatusCode::OK, Some("delivered")), "the operator: {v}");
+    assert_eq!(status, StatusCode::FORBIDDEN, "a request with no token is nobody's: {v}");
+    let (status, v) = send(&state, Method::POST, Some(&owner), &uri, Some(json!({}))).await;
+    assert_eq!((status, v["outcome"].as_str()), (StatusCode::OK, Some("delivered")), "the owner again: {v}");
 
     let (status, v) = send(&state, Method::GET, None, &format!("/agentmux/cron/{id}/runs?limit=5"), None).await;
     assert_eq!(status, StatusCode::OK, "{v}");
     let runs = v["runs"].as_array().unwrap();
     assert_eq!(runs.len(), 2);
-    assert_eq!(runs[0]["triggered_by"], "operator");
+    assert_eq!(runs[0]["triggered_by"], "uid-jobs-owner");
     assert_eq!(runs[1]["triggered_by"], "uid-jobs-owner");
     assert_eq!(runs[0]["trigger"], "manual");
 
@@ -129,13 +131,15 @@ async fn run_now_is_for_the_owner_or_the_operator_and_shows_in_history() {
 async fn a_run_is_reported_by_the_agent_that_ran_it() {
     let (state, owner, other) = state();
     let id = create(&state, &owner, json!({})).await;
-    let (_, v) = send(&state, Method::POST, None, &format!("/agentmux/cron/{id}/run"), Some(json!({}))).await;
+    let (_, v) = send(&state, Method::POST, Some(&owner), &format!("/agentmux/cron/{id}/run"), Some(json!({}))).await;
     let run_id = v["run_id"].as_str().unwrap().to_string();
     let uri = format!("/agentmux/cron/runs/{run_id}/report");
 
     let (status, _) = send(&state, Method::POST, Some(&other), &uri, Some(json!({"outcome": "ok"}))).await;
     assert_eq!(status, StatusCode::FORBIDDEN, "neither the runner nor the owner");
-    let (status, _) = send(&state, Method::POST, None, &uri, Some(json!({"outcome": "unknown"}))).await;
+    let (status, _) = send(&state, Method::POST, None, &uri, Some(json!({"outcome": "ok"}))).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "no token, no reporter");
+    let (status, _) = send(&state, Method::POST, Some(&owner), &uri, Some(json!({"outcome": "unknown"}))).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
 
     // The target agent itself (here: the owner may too).
@@ -153,7 +157,7 @@ async fn a_run_is_reported_by_the_agent_that_ran_it() {
     assert_eq!((run.outcome.as_str(), run.summary.as_str()), ("findings", "2 stale branches"));
     assert_eq!(run.links["reported"][0], "https://example.com/r");
 
-    let (status, _) = send(&state, Method::POST, None, "/agentmux/cron/runs/no-such-run/report", Some(json!({"outcome": "ok"}))).await;
+    let (status, _) = send(&state, Method::POST, Some(&owner), "/agentmux/cron/runs/no-such-run/report", Some(json!({"outcome": "ok"}))).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
@@ -183,7 +187,7 @@ async fn the_target_of_a_name_only_job_reports_its_run() {
         state.cron_scheduler.cancel_job(&id);
         assert_eq!(state.mstore.cron_get(&id).unwrap().unwrap().target_uid, "", "a job by name");
 
-        let (_, v) = send(&state, Method::POST, None, &format!("/agentmux/cron/{id}/run"), Some(json!({}))).await;
+        let (_, v) = send(&state, Method::POST, Some(&owner), &format!("/agentmux/cron/{id}/run"), Some(json!({}))).await;
         let run_id = v["run_id"].as_str().unwrap().to_string();
         let run = state.identity_store.job_run_get(&run_id).unwrap().unwrap();
         assert_eq!((run.target_agent_uid.as_str(), run.block_id.as_str()), (uid.as_str(), block), "via_meta={via_meta}");
@@ -237,8 +241,8 @@ fn definition(extra: Value) -> Value {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_definition_is_created_with_its_time_zone_and_listed_on_both_routes() {
     use chrono::Timelike;
-    let (state, _, _) = state();
-    let (status, v) = send(&state, Method::POST, None, "/agentmux/jobs", Some(definition(json!({})))).await;
+    let (state, owner, _) = state();
+    let (status, v) = send(&state, Method::POST, Some(&owner), "/agentmux/jobs", Some(definition(json!({})))).await;
     assert_eq!(status, StatusCode::CREATED, "{v}");
     let id = v["job"]["id"].as_str().unwrap().to_string();
     state.cron_scheduler.cancel_job(&id);
@@ -246,7 +250,7 @@ async fn a_definition_is_created_with_its_time_zone_and_listed_on_both_routes() 
     assert_eq!(v["job"]["definition"]["action"]["to"], "uid-jobs-owner");
     let job = state.mstore.cron_get(&id).unwrap().unwrap();
     assert_eq!((job.target.as_str(), job.target_uid.as_str()), ("jobs-owner", "uid-jobs-owner"), "a UID names its agent");
-    assert_eq!(job.created_by, "operator");
+    assert_eq!(job.created_by, "jobs-owner");
     let next = chrono::DateTime::parse_from_rfc3339(v["job"]["next_fire"].as_str().unwrap()).unwrap();
     let local = next.with_timezone(&chrono_tz::America::New_York);
     assert_eq!((local.hour(), local.minute()), (6, 0));
@@ -271,7 +275,7 @@ async fn refused_definitions_say_why() {
         (definition(json!({ "policy": { "retries": 4 } })), "policy.retries: at most 3"),
     ];
     for (body, why) in cases {
-        let (status, v) = send(&state, Method::POST, None, "/agentmux/jobs", Some(body)).await;
+        let (status, v) = send(&state, Method::POST, Some(&owner), "/agentmux/jobs", Some(body)).await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{why}: {v}");
         assert!(v["error"].as_str().unwrap().contains(why), "{why}: {v}");
     }
@@ -375,8 +379,8 @@ async fn an_edit_changes_the_definition_and_keeps_old_jobs_editable() {
 }
 
 /// A job with no recorded creator is the operator's (the UI is unattributed,
-/// and so are jobs from before creators were recorded): any caller may pause
-/// it, but only the operator rewrites what it sends.
+/// and so are jobs from before creators were recorded): any agent may pause
+/// it, but only the operator rewrites what it sends, and not through this route.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_job_without_a_creator_is_rewritten_only_by_the_operator() {
     let (state, owner, _other) = state();
@@ -388,8 +392,9 @@ async fn a_job_without_a_creator_is_rewritten_only_by_the_operator() {
     assert_eq!(status, StatusCode::FORBIDDEN, "an agent may not rewrite an operator's job");
     let (status, _) = send(&state, Method::PATCH, Some(&owner), uri, Some(json!({ "action": "pause" }))).await;
     assert_eq!(status, StatusCode::OK, "any caller may pause it");
+    // The operator rewrites it in the app, over its RPC socket; this route needs an agent's token.
     let (status, v) = send(&state, Method::PATCH, None, uri, Some(json!({ "name": "renamed" }))).await;
-    assert_eq!(status, StatusCode::OK, "the operator may rewrite it: {v}");
+    assert_eq!(status, StatusCode::FORBIDDEN, "no token, no rewrite: {v}");
     state.cron_scheduler.cancel_job("jobs-nobody");
 }
 
@@ -425,9 +430,9 @@ async fn a_spawn_job_is_created_and_run_only_through_the_host() {
 
     let (status, v) = send(&state, Method::POST, None, "/agentmux/jobs", Some(spawn_definition("uid-jobs-owner"))).await;
     assert_eq!(status, StatusCode::FORBIDDEN, "even the instance key without a token: {v}");
-    assert!(v["error"].as_str().unwrap().contains("operator's own host"), "{v}");
-    let (status, _) = send(&state, Method::POST, Some(&owner), "/agentmux/jobs", Some(spawn_definition("uid-jobs-owner"))).await;
+    let (status, v) = send(&state, Method::POST, Some(&owner), "/agentmux/jobs", Some(spawn_definition("uid-jobs-owner"))).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
+    assert!(v["error"].as_str().unwrap().contains("needs the operator's approval"), "{v}");
     assert!(state.mstore.cron_list().unwrap().is_empty());
 
     let create_body = json!({ "action": "create", "definition": spawn_definition("uid-jobs-owner") });
@@ -443,19 +448,19 @@ async fn a_spawn_job_is_created_and_run_only_through_the_host() {
     assert!(crate::server::job_actions::operator_made(&job));
 
     // It can't be run, rewritten or turned into a different job from the ordinary routes.
-    let (status, _) = send(&state, Method::POST, None, &format!("/agentmux/jobs/{id}/run"), Some(json!({}))).await;
+    let (status, _) = send(&state, Method::POST, Some(&owner), &format!("/agentmux/jobs/{id}/run"), Some(json!({}))).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
-    let (status, _) = send(&state, Method::PATCH, None, &format!("/agentmux/jobs/{id}"), Some(json!({ "name": "x" }))).await;
+    let (status, _) = send(&state, Method::PATCH, Some(&owner), &format!("/agentmux/jobs/{id}"), Some(json!({ "name": "x" }))).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
-    let (status, _) = send(&state, Method::PATCH, None, &format!("/agentmux/jobs/{id}"), Some(json!({ "action": "pause" }))).await;
+    let (status, _) = send(&state, Method::PATCH, Some(&owner), &format!("/agentmux/jobs/{id}"), Some(json!({ "action": "pause" }))).await;
     assert_eq!(status, StatusCode::OK, "pausing and deleting stay open");
-    let (status, _) = send(&state, Method::DELETE, None, &format!("/agentmux/jobs/{id}"), None).await;
+    let (status, _) = send(&state, Method::DELETE, Some(&owner), &format!("/agentmux/jobs/{id}"), None).await;
     assert_eq!(status, StatusCode::OK);
 
     // Another job can't be edited into a spawn job.
     let plain = create(&state, &owner, json!({})).await;
     let edit = json!({ "action": { "kind": "spawn", "leader": "uid-jobs-owner", "brief": "go" } });
-    let (status, _) = send(&state, Method::PATCH, None, &format!("/agentmux/jobs/{plain}"), Some(edit)).await;
+    let (status, _) = send(&state, Method::PATCH, Some(&owner), &format!("/agentmux/jobs/{plain}"), Some(edit)).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
     assert_eq!(state.mstore.cron_get(&plain).unwrap().unwrap().action_kind, "message");
 
@@ -549,7 +554,7 @@ async fn manual_once_and_every_triggers() {
     assert!((now + 3_500_000..=now + 3_700_000).contains(&next), "one period after creation: {}", next - now);
     let (status, v) = send(&state, Method::POST, Some(&owner), "/agentmux/jobs", Some(make(json!({ "kind": "every", "seconds": 600 })))).await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "10 minutes is under the agent minimum: {v}");
-    // The operator's own is the same rule: an agent runs unattended either way.
+    // A request with no token is refused before any rule applies.
     let (status, _) = send(&state, Method::POST, None, "/agentmux/jobs", Some(make(json!({ "kind": "every", "seconds": 600 })))).await;
-    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(status, StatusCode::FORBIDDEN, "a request with no token never gets as far as the rule");
 }

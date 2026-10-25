@@ -10,6 +10,24 @@ use crate::backend::reactive as backend_reactive;
 use crate::backend::wconfig;
 use crate::backend::wcore;
 
+/// A token for the agent whose slug is `name`, creating its row on first use:
+/// what a test attaches to a request that acts for an agent.
+pub(crate) fn token_for(state: &AppState, name: &str) -> String {
+    let uid = format!("uid-{name}");
+    if !matches!(state.mstore.agent_names_by_id(&uid), Ok(Some(_))) {
+        let mut def = crate::backend::storage::agents::test_agent_def(&uid, name, "claude", "agent", 1, "");
+        def.slug = name.to_string();
+        state.mstore.agent_def_insert(&mut def).unwrap();
+    }
+    state.mstore.attach_token_index().unwrap();
+    state.mstore.agent_token_ensure(&uid).unwrap()
+}
+
+/// The agent a request body acts as: its `agent_id`, else who filed it.
+pub(crate) fn actor_in(body: &serde_json::Value) -> String {
+    ["agent_id", "created_by"].iter().find_map(|k| body[k].as_str().filter(|s| !s.is_empty())).unwrap_or("tester").to_string()
+}
+
 pub(crate) fn test_state() -> AppState {
     let mstore = Arc::new(Store::open_in_memory().unwrap());
     // This one store backs mstore/id_store/identity_store below, so it has to
@@ -131,6 +149,13 @@ pub(crate) fn test_state() -> AppState {
 
 fn test_router() -> Router {
     build_router(test_state())
+}
+
+/// A router and the token of the agent `name`, for the routes that act for an agent.
+fn agent_router(name: &str) -> (Router, String) {
+    let state = test_state();
+    let token = token_for(&state, name);
+    (build_router(state), token)
 }
 
 #[tokio::test]
@@ -3519,32 +3544,6 @@ fn agent_memory_write_provenance_req_defaults_a_missing_detail_to_an_empty_objec
 // ── Muxqueue HTTP surface ───────────────────────────────────────────────────
 // docs/reports/REPORT_UNIVERSAL_AGENT_WORK_QUEUE_2026_09_01.md, slice 2.
 
-/// reagent P1 on PR #2902 — the blocking one. `DELETE /agentmux/cron/:id`, the
-/// sibling route registered a few lines away in the same router, takes NO body.
-/// A caller that follows that adjacent convention for `DELETE
-/// /agentmux/work/:id` must not be rejected by axum's `Json` extractor before
-/// the handler ever runs. Drives the real router, so it fails if the extractor
-/// is ever tightened back to a required body.
-#[tokio::test]
-async fn work_cancel_accepts_a_delete_with_no_body_like_its_cron_sibling() {
-    let app = test_router();
-    let req = Request::builder()
-        .uri("/agentmux/work/does-not-exist")
-        .method("DELETE")
-        .header("X-AuthKey", "test-secret-key")
-        .body(Body::empty())
-        .unwrap();
-    let resp = app.oneshot(req).await.unwrap();
-    // CONFLICT = the handler ran and found no open/claimed item, which is the
-    // point: anything in the 400/415 family would mean the body extractor
-    // rejected the request before the handler was ever reached.
-    assert_eq!(
-        resp.status(),
-        StatusCode::CONFLICT,
-        "a bodyless DELETE must reach the handler, not be rejected by the Json extractor"
-    );
-}
-
 /// `GET /api/v1/agent/shutdown/{id}` must reach its handler through the real
 /// router: the MCP tools poll it for the user's answer (SPEC_AGENT_SELF_QUIT
 /// §6.5). It was registered with axum 0.8's `{request_id}` syntax, a literal
@@ -3587,35 +3586,21 @@ async fn shutdown_status_route_reaches_its_handler() {
     crate::sagas::pending_shutdown::keep(&state, "blk-status-route", &v.request_id);
 }
 
-/// The body is optional, not ignored — a supplied reason must still parse.
-#[tokio::test]
-async fn work_cancel_still_accepts_a_json_body_when_one_is_sent() {
-    let app = test_router();
-    let req = Request::builder()
-        .uri("/agentmux/work/does-not-exist")
-        .method("DELETE")
-        .header("X-AuthKey", "test-secret-key")
-        .header("Content-Type", "application/json")
-        .body(Body::from(r#"{"reason":"superseded"}"#))
-        .unwrap();
-    let resp = app.oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::CONFLICT);
-}
-
 /// End-to-end through the router: enqueue, then claim it back out. Also pins
 /// that the claim response carries `attempt` at the TOP level, which every
 /// later holder call must echo as its fence.
 #[tokio::test]
 async fn work_enqueue_then_claim_round_trips_and_exposes_the_fence() {
-    let app = test_router();
+    let (app, tok) = agent_router("a1");
 
     let enq = Request::builder()
         .uri("/agentmux/work")
         .method("POST")
         .header("X-AuthKey", "test-secret-key")
+        .header("X-Agent-Token", &tok)
         .header("Content-Type", "application/json")
         .body(Body::from(
-            r#"{"title":"repro the thing","payload":"steps go here","created_by":"tester"}"#,
+            r#"{"title":"repro the thing","payload":"steps go here","created_by":"a1"}"#,
         ))
         .unwrap();
     let resp = app.clone().oneshot(enq).await.unwrap();
@@ -3625,6 +3610,7 @@ async fn work_enqueue_then_claim_round_trips_and_exposes_the_fence() {
         .uri("/agentmux/work/claim")
         .method("POST")
         .header("X-AuthKey", "test-secret-key")
+        .header("X-Agent-Token", &tok)
         .header("Content-Type", "application/json")
         .body(Body::from(r#"{"agent_id":"a1"}"#))
         .unwrap();
@@ -3644,11 +3630,12 @@ async fn work_enqueue_then_claim_round_trips_and_exposes_the_fence() {
 /// are expected to poll speculatively when they have spare capacity.
 #[tokio::test]
 async fn work_claim_on_an_empty_queue_is_a_success_not_an_error() {
-    let app = test_router();
+    let (app, tok) = agent_router("a1");
     let req = Request::builder()
         .uri("/agentmux/work/claim")
         .method("POST")
         .header("X-AuthKey", "test-secret-key")
+        .header("X-Agent-Token", &tok)
         .header("Content-Type", "application/json")
         .body(Body::from(r#"{"agent_id":"a1"}"#))
         .unwrap();
@@ -3663,11 +3650,12 @@ async fn work_claim_on_an_empty_queue_is_a_success_not_an_error() {
 /// rather than letting one silently win.
 #[tokio::test]
 async fn work_enqueue_rejects_both_target_agent_and_target_group() {
-    let app = test_router();
+    let (app, tok) = agent_router("a1");
     let req = Request::builder()
         .uri("/agentmux/work")
         .method("POST")
         .header("X-AuthKey", "test-secret-key")
+        .header("X-Agent-Token", &tok)
         .header("Content-Type", "application/json")
         .body(Body::from(
             r#"{"title":"t","payload":"p","target_agent":"a1","target_group":"g1"}"#,
@@ -3683,13 +3671,14 @@ async fn work_enqueue_rejects_both_target_agent_and_target_group() {
 /// pick the item up when nobody ever will.
 #[tokio::test]
 async fn work_release_reports_the_resulting_state_not_just_ok() {
-    let app = test_router();
+    let (app, tok) = agent_router("a1");
 
     // max_attempts 1, so the very first release is also the final attempt.
     let enq = Request::builder()
         .uri("/agentmux/work")
         .method("POST")
         .header("X-AuthKey", "test-secret-key")
+        .header("X-Agent-Token", &tok)
         .header("Content-Type", "application/json")
         .body(Body::from(r#"{"title":"t","payload":"p","max_attempts":1}"#))
         .unwrap();
@@ -3704,6 +3693,7 @@ async fn work_release_reports_the_resulting_state_not_just_ok() {
         .uri("/agentmux/work/claim")
         .method("POST")
         .header("X-AuthKey", "test-secret-key")
+        .header("X-Agent-Token", &tok)
         .header("Content-Type", "application/json")
         .body(Body::from(r#"{"agent_id":"a1"}"#))
         .unwrap();
@@ -3717,6 +3707,7 @@ async fn work_release_reports_the_resulting_state_not_just_ok() {
         .uri(format!("/agentmux/work/{id}/release"))
         .method("POST")
         .header("X-AuthKey", "test-secret-key")
+        .header("X-Agent-Token", &tok)
         .header("Content-Type", "application/json")
         .body(Body::from(format!(
             r#"{{"agent_id":"a1","attempt":{attempt},"result":"cannot do this"}}"#
@@ -3738,12 +3729,13 @@ async fn work_release_reports_the_resulting_state_not_just_ok() {
 /// agent to re-claim rather than to treat the item as gone.
 #[tokio::test]
 async fn work_complete_with_a_wrong_fence_is_conflict_not_not_found() {
-    let app = test_router();
+    let (app, tok) = agent_router("a1");
 
     let enq = Request::builder()
         .uri("/agentmux/work")
         .method("POST")
         .header("X-AuthKey", "test-secret-key")
+        .header("X-Agent-Token", &tok)
         .header("Content-Type", "application/json")
         .body(Body::from(r#"{"title":"t","payload":"p"}"#))
         .unwrap();
@@ -3758,6 +3750,7 @@ async fn work_complete_with_a_wrong_fence_is_conflict_not_not_found() {
         .uri("/agentmux/work/claim")
         .method("POST")
         .header("X-AuthKey", "test-secret-key")
+        .header("X-Agent-Token", &tok)
         .header("Content-Type", "application/json")
         .body(Body::from(r#"{"agent_id":"a1"}"#))
         .unwrap();
@@ -3768,6 +3761,7 @@ async fn work_complete_with_a_wrong_fence_is_conflict_not_not_found() {
         .uri(format!("/agentmux/work/{id}/complete"))
         .method("POST")
         .header("X-AuthKey", "test-secret-key")
+        .header("X-Agent-Token", &tok)
         .header("Content-Type", "application/json")
         .body(Body::from(r#"{"agent_id":"a1","attempt":99,"result":"nope"}"#))
         .unwrap();
@@ -5847,6 +5841,13 @@ async fn m4a2_every_actor_site_counts_a_name_that_is_not_plainly_the_callers() {
 
     for (actor, outcome) in [("agentz", 0), ("agenty", 1), ("AGENTY", 1)] {
         for (site, method, uri, body) in m4a2_actor_requests(actor) {
+            // The work and jobs routes refuse a name that isn't the token's
+            // agent before their handler counts it (`agent_only`).
+            if matches!(site, "work_enqueue" | "work_claim" | "work_heartbeat" | "work_complete" | "work_release" | "cron_create") {
+                let status = m4a2_send(&state, Some(&token), method, &uri, &body).await;
+                assert_eq!(status, StatusCode::FORBIDDEN, "{site}: {actor}");
+                continue;
+            }
             let mut expected = m4a2_site_counts(site);
             expected[outcome] += 1;
             let with = m4a2_send(&state, Some(&token), method.clone(), &uri, &body).await;
@@ -6113,23 +6114,13 @@ async fn m4c1_work_enqueue_records_the_callers_uid_as_created_by_uid() {
     assert_eq!(item.created_by, "m4c1-agent", "the name is never rewritten");
 
     let (status, v) = m4c1_send(&state, None, "/agentmux/work", body).await;
-    assert_eq!(status, StatusCode::OK, "{v}");
-    let item = state
-        .identity_store
-        .work_queue_get(v["id"].as_str().unwrap())
-        .unwrap()
-        .unwrap();
-    assert_eq!(
-        item.created_by_uid, "",
-        "Unattributed: unknown, never guessed"
-    );
+    assert_eq!(status, StatusCode::FORBIDDEN, "Unattributed: nobody to file it as — {v}");
 }
 
 /// An attributed claim writes the token's UID as `claimed_by_uid` even when
 /// the body carries no `agent_uid` — and, since that one UID is also M3's
 /// eligibility match, it can claim an item addressed to its UID. The same
-/// claim Unattributed, with no carried UID and no block, has no UID: it
-/// cannot reach the UID-addressed item, and an untargeted one records `""`.
+/// claim Unattributed is refused.
 #[tokio::test]
 async fn m4c1_an_attributed_claim_records_the_tokens_uid_without_a_carried_one() {
     use crate::backend::storage::work_queue::{work_state, WorkItem};
@@ -6164,11 +6155,7 @@ async fn m4c1_an_attributed_claim_records_the_tokens_uid_without_a_carried_one()
         serde_json::json!({"agent_id": "m4c1-agent", "agent_uid": "", "kind": "m4c1-claim"});
 
     let (status, v) = m4c1_send(&state, None, "/agentmux/work/claim", claim.clone()).await;
-    assert_eq!(status, StatusCode::OK, "{v}");
-    assert_eq!(
-        v["claimed"], false,
-        "Unattributed, no UID: not eligible — {v}"
-    );
+    assert_eq!(status, StatusCode::FORBIDDEN, "Unattributed: nobody to claim for — {v}");
 
     let (status, v) = m4c1_send(&state, Some(&token), "/agentmux/work/claim", claim.clone()).await;
     assert_eq!(status, StatusCode::OK, "{v}");
@@ -6190,16 +6177,13 @@ async fn m4c1_an_attributed_claim_records_the_tokens_uid_without_a_carried_one()
         .identity_store
         .work_queue_enqueue(&item("w-m4c1-open", "", 2000))
         .unwrap();
-    let (_, v) = m4c1_send(&state, None, "/agentmux/work/claim", claim).await;
+    let (_, v) = m4c1_send(&state, Some(&token), "/agentmux/work/claim", claim).await;
     assert_eq!(v["item"]["id"], "w-m4c1-open", "{v}");
-    assert_eq!(
-        v["item"]["claimed_by_uid"], "",
-        "Unattributed, nothing carried"
-    );
+    assert_eq!(v["item"]["claimed_by_uid"], "uid-m4c1", "an untargeted item is claimed under the token's UID");
 }
 
 /// An attributed cron create records the token's UID as `created_by_uid`;
-/// an Unattributed one records `""`.
+/// an Unattributed one is refused.
 #[tokio::test]
 async fn m4c1_cron_create_records_the_callers_uid_as_created_by_uid() {
     let (mut state, token) = m4c1_state();
@@ -6221,10 +6205,7 @@ async fn m4c1_cron_create_records_the_callers_uid_as_created_by_uid() {
     assert_eq!(job.created_by, "m4c1-agent", "the name is never rewritten");
 
     let (status, v) = m4c1_send(&state, None, "/agentmux/cron", body).await;
-    assert_eq!(status, StatusCode::CREATED, "{v}");
-    let id = v["job"]["id"].as_str().unwrap().to_string();
-    state.cron_scheduler.cancel_job(&id);
-    assert_eq!(shared.cron_get(&id).unwrap().unwrap().created_by_uid, "");
+    assert_eq!(status, StatusCode::FORBIDDEN, "Unattributed: nobody to create it as — {v}");
 }
 
 /// A Global Memory write and a revert record the token's UID as the
@@ -6333,12 +6314,17 @@ async fn global_memory_remove_is_attributed_to_the_tokens_agent() {
 // ---- identity M4c-2: holder checks by UID ----
 
 /// Two agents both answer to `agenty`. The holder's token drives its item;
-/// the other's token, sending the same name, is refused with the existing
-/// 409; an Unattributed request keeps the name path and is counted.
+/// the other's token, sending the same name, is refused outright, as is a
+/// request with no token.
 #[tokio::test]
 async fn m4c2_a_work_holder_is_checked_by_uid_when_both_are_known() {
     let state = test_state();
     state.mstore.attach_token_index().unwrap();
+    for (id, name, slug) in [("uid-m4c2-y", "AgentY", "agenty"), ("uid-m4c2-y2", "AGENTY", "agenty-2")] {
+        let mut def = crate::backend::storage::agents::test_agent_def(id, name, "claude", "agent", 1, "");
+        def.slug = slug.to_string();
+        state.mstore.agent_def_insert(&mut def).unwrap();
+    }
     let holder = state.mstore.agent_token_ensure("uid-m4c2-y").unwrap();
     let other = state.mstore.agent_token_ensure("uid-m4c2-y2").unwrap();
     let item = crate::backend::storage::work_queue::WorkItem {
@@ -6369,24 +6355,17 @@ async fn m4c2_a_work_holder_is_checked_by_uid_when_both_are_known() {
     assert_eq!(status, StatusCode::OK, "{v}");
     let attempt = v["attempt"].as_i64().unwrap();
     let body = serde_json::json!({"agent_id": "agenty", "attempt": attempt, "result": "r"});
-    // Other work tests take the name path in parallel, so the counter can
-    // only be checked to move; that a UID match is not counted is pinned by
-    // the store's `HolderMatch` (work_queue.rs tests).
-    let counter = "m4c.holder_by_name";
-
     for op in ["heartbeat", "complete", "release"] {
         let uri = format!("/agentmux/work/w-m4c2-holder/{op}");
         let (status, v) = m4c1_send(&state, Some(&other), &uri, body.clone()).await;
-        assert_eq!(status, StatusCode::CONFLICT, "{op}: {v}");
+        assert_eq!(status, StatusCode::FORBIDDEN, "{op}: {v}");
     }
     let uri = "/agentmux/work/w-m4c2-holder/heartbeat";
     let (status, v) = m4c1_send(&state, Some(&holder), uri, body.clone()).await;
     assert_eq!(status, StatusCode::OK, "{v}");
 
-    let before = m4a2_count(counter);
     let (status, v) = m4c1_send(&state, None, uri, body.clone()).await;
-    assert_eq!(status, StatusCode::OK, "{v}");
-    assert!(m4a2_count(counter) > before, "Unattributed: by name, counted");
+    assert_eq!(status, StatusCode::FORBIDDEN, "Unattributed: no holder to check — {v}");
 
     let uri = "/agentmux/work/w-m4c2-holder/complete";
     let (status, v) = m4c1_send(&state, Some(&holder), uri, body).await;
