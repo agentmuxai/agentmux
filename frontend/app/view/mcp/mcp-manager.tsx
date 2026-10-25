@@ -16,6 +16,7 @@ import { createMemo, createSignal, onCleanup, Show, type JSX } from "solid-js";
 import { ConfirmModal } from "@/app/element/confirm-modal";
 import { Button, Card, CardGrid, FilterInput } from "@/app/element/ui";
 import { ContextMenuModel } from "@/app/store/contextmenu";
+import { MENU_ICON } from "@/app/util/menu-icons";
 import { matchesEveryWord } from "@/app/util/fuzzysearch";
 import type { McpServerCatalogItem } from "@/types/rpc/McpServerCatalogItem";
 import { McpObservedDetail, observedStatus } from "./mcp-in-use";
@@ -125,15 +126,17 @@ export const McpManager = (): JSX.Element => {
         return [
             {
                 label: "Edit",
+                icon: MENU_ICON.rename,
                 click: () => {
                     setObservedOpen(null);
                     model.startEdit(server);
                 },
             },
             agents.length === 0
-                ? { label: "Bind to agent", sublabel: "no agents", enabled: false }
+                ? { label: "Bind to agent", icon: MENU_ICON.bind, sublabel: "no agents", enabled: false }
                 : {
                       label: "Bind to agent",
+                      icon: MENU_ICON.bind,
                       type: "submenu",
                       submenu: agents.map((a) => ({
                           label: a.name,
@@ -142,7 +145,7 @@ export const McpManager = (): JSX.Element => {
                   },
             // Last, after a separator, so it is never under the pointer.
             { type: "separator" },
-            { label: "Delete…", click: () => requestDelete(server) },
+            { label: "Delete…", icon: MENU_ICON.delete, click: () => requestDelete(server) },
         ];
     };
 

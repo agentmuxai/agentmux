@@ -18,6 +18,7 @@ vi.mock("@/app/store/rpc-api", () => ({ RpcApi: { EventReadHistoryCommand: env.r
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 
 import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
+import { MENU_ICON } from "@/app/util/menu-icons";
 import { SysinfoViewModel } from "./sysinfo-model";
 import { DefaultNumPoints } from "./sysinfo-types";
 
@@ -191,6 +192,9 @@ describe("SysinfoViewModel menus", () => {
             // The settings menu's Plot Type holds the same two.
             const plotType = sub(m.getSettingsMenuItems(), "Plot Type");
             expect(plotType.map((i) => i.label)).toEqual(["Simple", "Advanced"]);
+            // The parent row carries the icon; its radio rows keep their check.
+            expect(m.getSettingsMenuItems()[0].icon).toBe(MENU_ICON.plotType);
+            expect(plotType.some((i) => i.icon)).toBe(false);
             dispose();
         });
     });
