@@ -398,19 +398,19 @@ describe("Tower", () => {
         await vi.advanceTimersByTimeAsync(2000);
         const charts = screen.getAllByRole("img", { name: /over the last 10 minutes/ });
         expect(charts.map((c) => c.getAttribute("aria-label"))).toEqual([
-            "CPU over the last 10 minutes: now 50%, peak 50%",
             "Memory over the last 10 minutes: now 1.0 GB, peak 1.0 GB",
+            "CPU over the last 10 minutes: now 50%, peak 50%",
         ]);
         // A share of one core when the pane shows that.
         fireEvent.click(screen.getByRole("radio", { name: "% of a core" }));
         expect(
-            screen.getAllByRole("img", { name: /over the last 10 minutes/ })[0].getAttribute("aria-label")
+            screen.getAllByRole("img", { name: /over the last 10 minutes/ })[1].getAttribute("aria-label")
         ).toContain("now 200%");
 
         // Under the pointer: when, and how much.
-        fireEvent.pointerMove(charts[0], { clientX: 10_000 });
+        fireEvent.pointerMove(charts[1], { clientX: 10_000 });
         expect(screen.getByTestId("tower-chart-tip")).toHaveTextContent("0 s ago · 200%");
-        fireEvent.pointerLeave(charts[0]);
+        fireEvent.pointerLeave(charts[1]);
         expect(screen.queryByTestId("tower-chart-tip")).toBeNull();
     });
 
@@ -1079,7 +1079,7 @@ describe("Tower: kinds of process", () => {
         renderTower();
         await vi.advanceTimersByTimeAsync(0);
         await vi.advanceTimersByTimeAsync(2000);
-        const [cpu, mem] = screen.getAllByRole("img", { name: /over the last 10 minutes/ });
+        const [mem, cpu] = screen.getAllByRole("img", { name: /over the last 10 minutes/ });
         expect((cpu.querySelector(".tower-chart-line") as SVGElement).style.stroke).toBe("rgb(255, 136, 0)");
         expect((mem.querySelector(".tower-chart-line") as SVGElement).style.stroke).toBe("var(--sysinfo-mem-color)");
     });

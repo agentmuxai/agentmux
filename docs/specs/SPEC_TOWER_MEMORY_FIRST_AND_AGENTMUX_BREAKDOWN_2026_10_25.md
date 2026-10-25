@@ -1,6 +1,6 @@
 # SPEC: Tower puts memory first, and shows what AgentMux's memory is made of
 
-**Status:** draft — awaiting the operator's approval in conversation (decisions marked ◆ in §10)
+**Status:** active — approved by the operator 2026-10-25 (all nine ◆ decisions in §10 as recommended); phase 1 (memory first, frontend only) built in #PRNUM; remaining: phase 2 (the total and the breakdown, srv and the Memory view) and phase 3 (trends and the growth warning), §9
 **Date:** 2026-10-25
 **Author:** Loap@narko
 **Requested by:** the operator, 2026-10-25, through AgentY (Kanban #2858):
@@ -391,6 +391,8 @@ Phase 1 can go first and alone: it answers "hard to get the memory to appear", t
 ---
 
 ## 10. Decisions for the operator
+
+**Approved 2026-10-25.** The operator's words, relayed by AgentY: "tower spec looks good, proceed". All nine decisions take the recommendation given with each.
 
 Recommended answers first. Each is cheap to change before the build.
 

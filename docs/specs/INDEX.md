@@ -758,6 +758,7 @@ partial list.
 | [`SPEC_TOOL_PREVIEW_CONTENT_FIRST_2026_09_26`](SPEC_TOOL_PREVIEW_CONTENT_FIRST_2026_09_26.md) | Spec: Content-first tool previews — WebSearch expanded, no chevron "tree parent", a clean header row |
 | [`SPEC_TOOL_PREVIEW_SCROLL_CHAINING_2026_07_03`](SPEC_TOOL_PREVIEW_SCROLL_CHAINING_2026_07_03.md) | Spec: Scroll Chaining for Nested Tool-Preview Regions |
 | [`SPEC_TOPBAR_LABELS_DROP_BEFORE_TABS_SHRINK_2026_10_07`](SPEC_TOPBAR_LABELS_DROP_BEFORE_TABS_SHRINK_2026_10_07.md) | Top bar: widget labels drop before tabs shrink |
+| [`SPEC_TOWER_MEMORY_FIRST_AND_AGENTMUX_BREAKDOWN_2026_10_25`](SPEC_TOWER_MEMORY_FIRST_AND_AGENTMUX_BREAKDOWN_2026_10_25.md) | SPEC: Tower puts memory first, and shows what AgentMux's memory is made of |
 | [`SPEC_TOWER_PANES_VIEW_2026_10_21`](SPEC_TOWER_PANES_VIEW_2026_10_21.md) | Spec: Tower's Panes view: CPU and memory for every pane, measured where it can be and labeled where it can't |
 | [`SPEC_TOWER_TASK_MANAGER_PANE_2026_10_08`](SPEC_TOWER_TASK_MANAGER_PANE_2026_10_08.md) | SPEC: Tower, a read-only task manager pane (CPU and memory per task) |
 | [`SPEC_TOWER_THEME_SURFACE_AND_COLOR_2026_10_17`](SPEC_TOWER_THEME_SURFACE_AND_COLOR_2026_10_17.md) | SPEC: Tower in the theme's colours, with process types you can see |
