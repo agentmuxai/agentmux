@@ -71,6 +71,7 @@ import { HiddenTemplatesSection } from "./HiddenTemplatesSection";
 import { MyAgentsList } from "./MyAgentsList";
 
 import { WpsEvent } from "@/app/store/mps-events";
+import { MENU_ICON } from "@/app/util/menu-icons";
 /** This-machine-only preference — no cross-device sync, no existing
  *  localStorage precedent in this component tree to extend (a new small
  *  pattern, not a reuse). Wrapped defensively: localStorage can throw in
@@ -752,6 +753,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
             [
                 {
                     label: `Hide template "${caption}"`,
+                    icon: MENU_ICON.hide,
                     click: () => {
                         void (async () => {
                             try {

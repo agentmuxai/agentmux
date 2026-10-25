@@ -53,6 +53,7 @@ import { blockRoleColor, isLightThemeActive, widgetColorView, type PaneIdentityO
 import { PaneSizeBadge } from "./pane-size-badge";
 import { TitleBar } from "./titlebar";
 import { UnseenTurnsDot } from "./UnseenTurnsDot";
+import { MENU_ICON } from "@/app/util/menu-icons";
 
 const NumActiveConnColors = 8;
 
@@ -192,6 +193,7 @@ export function buildPaneColorSubmenu(blockData: Block): ContextMenuItem[] {
             { type: "separator" as const },
             {
                 label: `Use for all ${paneTabLabelFor(widgetView)} panes`,
+                icon: MENU_ICON.paneColorAll,
                 click: () => applyHueToAllPanes(blockData.oid, widgetView, currentHue),
             }
         );
@@ -200,7 +202,7 @@ export function buildPaneColorSubmenu(blockData: Block): ContextMenuItem[] {
     // group that also starts with a separator. A trailing separator here would
     // collide with it and render two consecutive dividers for views that
     // implement getSettingsMenuItems (sysinfo).
-    return [{ type: "separator" as const }, { label: "Pane Color", type: "submenu" as const, submenu: colorItems }];
+    return [{ type: "separator" as const }, { label: "Pane Color", icon: MENU_ICON.paneColor, type: "submenu" as const, submenu: colorItems }];
 }
 
 function handleHeaderContextMenu(

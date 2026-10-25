@@ -10,6 +10,8 @@
  * docs/specs/SPEC_AGENT_SHELL_DRAWER_CONTEXT_MENU_PASTE_AND_REGIONS_2026_09_25.md §3.
  */
 
+import { MENU_ICON } from "@/app/util/menu-icons";
+
 /** Largest clipboard the drawer's Paste will send. Above this the paste is
  *  refused with an explanation rather than streamed: a shell is the wrong
  *  place for megabytes of text (the line editor re-renders it, scrollback
@@ -92,6 +94,7 @@ export function buildShellDrawerClipboardItems(deps: ShellDrawerMenuDeps): Conte
     return [
         {
             label: "Copy",
+            icon: MENU_ICON.copy,
             enabled: selection.length > 0,
             click: () => {
                 if (selection) deps.writeClipboard(selection).catch(console.error);
@@ -99,6 +102,7 @@ export function buildShellDrawerClipboardItems(deps: ShellDrawerMenuDeps): Conte
         },
         {
             label: pasteLabel,
+            icon: MENU_ICON.paste,
             // Disabled while the agent is driving the shell: sendDataHandler
             // would silently drop the input, which would look like a broken menu.
             enabled: terminal != null && !locked,

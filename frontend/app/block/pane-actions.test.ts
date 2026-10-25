@@ -73,6 +73,28 @@ describe("buildPaneContextMenu — baseline (no omit)", () => {
     });
 });
 
+describe("buildPaneContextMenu — icons (SPEC_CONTEXT_MENU_ICONS_2026_10_25.md §4)", () => {
+    const icons = (items: ContextMenuItem[]) => Object.fromEntries(items.filter((i) => i.type !== "separator").map((i) => [i.label, i.icon]));
+
+    it("gives every row its icon", () => {
+        const menu = buildPaneContextMenu(termBlock, opts({ inspectAt: { x: 1, y: 2 } }));
+        expect(icons(menu)).toEqual({
+            Copy: "copy",
+            Paste: "paste",
+            "Split Down": "table-rows",
+            "Split Right": "table-columns",
+            "Magnify Pane": "regular@window-maximize",
+            "Close Pane": "xmark",
+            "Inspect Element": "bug",
+        });
+    });
+
+    it("swaps the Magnify icon when the pane is magnified", () => {
+        const menu = buildPaneContextMenu(agentBlock, opts({ magnified: true }));
+        expect(icons(menu)["Un-Magnify Pane"]).toBe("regular@window-restore");
+    });
+});
+
 describe("buildPaneContextMenu — omit", () => {
     it("drops Clipboard and Split, keeping Magnify/Close/Inspect grouped correctly", () => {
         const menu = buildPaneContextMenu(
