@@ -144,6 +144,15 @@ describe("a template's parameters", () => {
         const bad = paramsFromForm(m, { ...paramForm(m), repo: "", max_items: "lots" });
         expect(bad.errors).toEqual({ repo: "Required.", max_items: "A number." });
     });
+
+    it("leaves out a switch that is off when nothing gives it a value, and keeps one that was stored", () => {
+        const m = manifest();
+        m.params.properties.dry = { type: "boolean", title: "Dry" };
+        const form = { ...paramForm(m), repo: "acme/site" };
+        expect(paramsFromForm(m, form).params).not.toHaveProperty("dry");
+        expect(paramsFromForm(m, { ...form, dry: true }).params).toMatchObject({ dry: true });
+        expect(paramsFromForm(m, form, { dry: true }).params).toMatchObject({ dry: false });
+    });
 });
 
 describe("a draft from a template", () => {

@@ -163,10 +163,13 @@ export function paramForm(m: JobTemplateManifest, given: Json = {}): Record<stri
     return out;
 }
 
-/** The parameters as the definition has them, and a message for each one that can't be sent. */
+/** The parameters as the definition has them, and a message for each one that can't be sent. `stored`
+ *  is the job's own parameters: a switch left off is sent only when the job, the template's default or
+ *  the template's `required` list gives it a value, so editing another field doesn't add a key. */
 export function paramsFromForm(
     m: JobTemplateManifest,
-    form: Record<string, ParamValue>
+    form: Record<string, ParamValue>,
+    stored: Json = {}
 ): { params: Json; errors: Record<string, string> } {
     const params: Json = {};
     const errors: Record<string, string> = {};
@@ -175,7 +178,8 @@ export function paramsFromForm(
         const raw = form[name];
         const kind = paramKind(p);
         if (kind === "boolean") {
-            params[name] = raw === true;
+            if (raw === true || name in stored || p.default !== undefined || required.has(name))
+                params[name] = raw === true;
             continue;
         }
         const text = typeof raw === "string" ? raw.trim() : "";
@@ -404,7 +408,7 @@ export function buildDefinition(d: JobDraft, manifest: JobTemplateManifest | nul
     let params: Json = {};
     let paramErrors: Record<string, string> = {};
     if (d.template && manifest) {
-        ({ params, errors: paramErrors } = paramsFromForm(manifest, d.params));
+        ({ params, errors: paramErrors } = paramsFromForm(manifest, d.params, d.keep.params));
         if (Object.keys(paramErrors).length > 0) errors.push("Some of the template's settings need a value.");
     } else {
         params = d.keep.params;
