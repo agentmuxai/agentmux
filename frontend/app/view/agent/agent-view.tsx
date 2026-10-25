@@ -24,7 +24,7 @@ import { AgentPaneProviders } from "./agent-media";
 import { usePaneTabVisibility } from "@/app/block/pane-tab-visibility";
 import { getRecentDispatches } from "@/app/store/command-source";
 import { resolveContextMenuRegion } from "@/app/block/context-menu-region";
-import { ContextMenuModel } from "@/app/store/contextmenu";
+import { showCopyContextMenu } from "@/app/store/contextmenu";
 import {
     getApi,
     getBlockMetaKeyAtom,
@@ -43,7 +43,6 @@ import { handleAgentIdChange } from "@/app/view/term/termagent";
 import { makeWindowFocusSignal } from "@/app/window/window-focus";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { getTrail } from "@/log/render-trail";
-import { writeText as clipboardWriteText } from "@/util/clipboard";
 import {
     createEffect,
     createMemo,
@@ -119,7 +118,6 @@ import type { DocumentNode } from "./types";
 import { ShutdownOverlay } from "./shutdown/ShutdownOverlay";
 import { useAgentStream } from "./useAgentStream";
 import { setBlockMeta } from "@/app/store/block-meta";
-import { MENU_ICON } from "@/app/util/menu-icons";
 
 // Launch flow lives in `flows/launch-flow.ts` — Step 2 of
 // docs/specs/SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13.md.
@@ -1209,7 +1207,7 @@ export const AgentPresentationView = ({
         const sel = window.getSelection()?.toString();
         if (!sel) return; // no selection, let default behavior
         e.preventDefault();
-        ContextMenuModel.showContextMenu([{ label: "Copy", icon: MENU_ICON.copy, click: () => clipboardWriteText(sel) }], e);
+        showCopyContextMenu([{ label: "Copy", value: sel }], e);
     };
 
     return (
