@@ -42,7 +42,9 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    color: var(--grey-text-color);
+    // The secondary colour, which passes AA on every theme: the faint grey is a tertiary tone, about 3:1 on
+    // the dark themes.
+    color: var(--secondary-text-color);
     pointer-events: none;
 }
 
