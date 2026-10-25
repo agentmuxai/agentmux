@@ -576,8 +576,7 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
         ))?;
     }
 
-    for sql in [super::agent_input_history::SCHEMA, super::agents::FORMER_SLUGS_SCHEMA] { conn.execute_batch(sql)?; } // typed input; renamed-from slugs
-    super::agent_input_history::purge_trash(conn, agentmux_common::time::now_ms())?; // forgotten typing past its 7 days, at every start
+    for sql in [super::agent_input_history::SCHEMA, super::agents::FORMER_SLUGS_SCHEMA] { conn.execute_batch(sql)?; } super::agent_input_history::purge_trash(conn, agentmux_common::time::now_ms())?; // typed input (forgotten entries past 7 days go at start); renamed-from slugs
     // ---- Agent + identity + memory + drone schema ----
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS db_agent_content (
