@@ -183,6 +183,8 @@ pub mod work_facts;
 pub mod kanban;
 /// The wake at an out-of-quota agent's reset (SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §7).
 pub mod limit_wake;
+/// A leader accepting or sending back a task on the operator's word.
+pub mod kanban_delegate;
 /// A leader hears when its workers end a turn without reporting, fail or stop.
 pub mod worker_notes;
 
