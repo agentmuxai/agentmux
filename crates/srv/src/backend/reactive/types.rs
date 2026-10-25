@@ -330,11 +330,15 @@ pub struct InjectionRequest {
     pub wan_instance: Option<WanInstanceInfo>,
     /// Why `wan_verified` isn't `Some(true)`, when there's something to say
     /// (`wan_sig_stale`, `wan_sig_replay`, `wan_key_unavailable`,
-    /// `wan_cert_invalid`, …) — audit only, never rendered.
+    /// `wan_cert_invalid`, …) — audit only, never rendered. One exception: with
+    /// `wan_instance_pin_mismatch` the delivered message opens with `wan_detail`
+    /// (`sanitize::with_wan_pin_note`).
     #[serde(skip_deserializing, default, skip_serializing_if = "Option::is_none")]
     pub wan_reason: Option<String>,
     /// The cause behind `wan_reason`, when there is one to read (e.g.
-    /// `directory answered 403 Forbidden`) — audit only, never rendered.
+    /// `directory answered 403 Forbidden`) — audit only, except for
+    /// `wan_instance_pin_mismatch`, whose detail names the pinned install and
+    /// the one the message came from and is shown to the receiving agent.
     #[serde(skip_deserializing, default, skip_serializing_if = "Option::is_none")]
     pub wan_detail: Option<String>,
     /// Server-computed: this jekt's `message` is a `transcript_request`

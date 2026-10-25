@@ -103,7 +103,7 @@ export function PinnedSenders(): JSX.Element {
                     {error()}
                 </div>
             </Show>
-            <Show when={pins()} fallback={<div class="setting-devices-empty">Loading…</div>}>
+            <Show when={pins()} fallback={<Show when={!error()}><div class="setting-devices-empty">Loading…</div></Show>}>
                 {(all) => (
                     <Show
                         when={all().lan.length + all().wan.length > 0}

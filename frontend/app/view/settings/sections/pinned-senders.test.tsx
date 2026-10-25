@@ -100,5 +100,6 @@ describe("PinnedSenders", () => {
         list.mockRejectedValueOnce(new Error("FORBIDDEN: only the user lists or changes the keys"));
         render(() => <PinnedSenders />);
         await screen.findByText(/FORBIDDEN: only the user/);
+        expect(screen.queryByText("Loading…")).toBeNull();
     });
 });

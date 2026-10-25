@@ -88,15 +88,18 @@ impl Store {
 
     /// Forget the pin for a LAN name and the UID pins beside it, so the next
     /// key a peer shows for it is pinned. Only the operator's window calls
-    /// this. Returns whether a name pin existed.
-    pub fn lan_peer_pin_forget(&self, agent_id: &str) -> Result<bool, StoreError> {
+    /// this. Returns the name key it dropped, if there was one.
+    pub fn lan_peer_pin_forget(&self, agent_id: &str) -> Result<Option<String>, StoreError> {
         let key = agent_id.to_lowercase();
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction()?;
+        let old: Option<String> = tx
+            .query_row("SELECT public_key FROM db_lan_peer_pubkey_pins WHERE agent_id = ?1", params![key], |r| r.get(0))
+            .ok();
         tx.execute("DELETE FROM db_lan_peer_uid_pins WHERE agent_id = ?1", params![key])?;
-        let removed = tx.execute("DELETE FROM db_lan_peer_pubkey_pins WHERE agent_id = ?1", params![key])?;
+        tx.execute("DELETE FROM db_lan_peer_pubkey_pins WHERE agent_id = ?1", params![key])?;
         tx.commit()?;
-        Ok(removed > 0)
+        Ok(old)
     }
 
     /// Move a LAN name's pin to `key_b64` and drop the UID pins beside it,
@@ -142,8 +145,8 @@ mod tests {
 
         // Forgetting leaves nothing; the next key seen is pinned.
         store.lan_peer_uid_pin_get_or_set("maop", "uid-1", "ukey-b").unwrap();
-        assert!(store.lan_peer_pin_forget("MAOP").unwrap());
-        assert!(!store.lan_peer_pin_forget("maop").unwrap());
+        assert_eq!(store.lan_peer_pin_forget("MAOP").unwrap().as_deref(), Some("key-b"));
+        assert!(store.lan_peer_pin_forget("maop").unwrap().is_none());
         assert!(store.lan_peer_pins_list().unwrap().is_empty());
         assert_eq!(store.lan_peer_pubkey_pin_get_or_set("maop", "key-c").unwrap(), "key-c");
         assert_eq!(store.lan_peer_uid_pin_get_or_set("maop", "uid-1", "ukey-c").unwrap(), "ukey-c");

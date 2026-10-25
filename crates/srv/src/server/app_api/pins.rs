@@ -137,12 +137,13 @@ fn change_lan(state: &AppState, agent: &str, how: Change) -> Result<Moved, Strin
     let store_err = |e: crate::backend::storage::error::StoreError| format!("pins: {e}");
     match how {
         Change::Forget => {
-            let existed = state.mstore.lan_peer_pin_forget(agent).map_err(store_err)?;
-            if !existed {
-                return Err(format!("pins: no LAN pin for {agent}"));
-            }
+            let old = state
+                .mstore
+                .lan_peer_pin_forget(agent)
+                .map_err(store_err)?
+                .ok_or_else(|| format!("pins: no LAN pin for {agent}"))?;
             lan_refusals::clear(agent);
-            Ok((None, None))
+            Ok((Some(fingerprint(&old)), None))
         }
         Change::Adopt => {
             let refused = lan_refusals::get(agent).ok_or_else(|| format!("pins: no other key has been shown for {agent} since AgentMux started"))?;
