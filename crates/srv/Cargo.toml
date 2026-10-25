@@ -133,6 +133,10 @@ futures-util = { version = "0.3", default-features = false, features = ["std"] }
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
 # Cron expression parsing for the persistent cron scheduler
 cron = "0.12"
+# IANA time zones for a job's cron trigger (backend/cron/schedule.rs): `cron`
+# itself evaluates in one fixed offset, so daylight-saving changes are handled
+# there, against this crate's zone data.
+chrono-tz = "0.10"
 # Move to the OS Trash / Recycle Bin, and restore from it, for the Files
 # pane's `fs.trash` / `fs.restore` (backend/fs_ops/trash_worker.rs). Called
 # from one dedicated thread only (its docs warn of UB from several threads

@@ -6196,9 +6196,8 @@ async fn m4c1_an_attributed_claim_records_the_tokens_uid_without_a_carried_one()
 #[tokio::test]
 async fn m4c1_cron_create_records_the_callers_uid_as_created_by_uid() {
     let (mut state, token) = m4c1_state();
-    // The cron handlers use the shared store; the test store carries the
-    // identity schema, which has its own `db_cron_jobs`.
-    state.shared_store = Some(state.mstore.clone());
+    // The test store carries every schema, `db_jobs` included.
+    crate::server::cron::use_test_store_for_jobs(&mut state);
     let body = serde_json::json!({
         "name": "m4c1", "expression": "0 0 1 1 *", "prompt": "hi",
         "target": "m4c1-nobody", "created_by": "m4c1-agent",

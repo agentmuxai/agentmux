@@ -13,6 +13,7 @@
 //! `missed`, or, under catch-up `latest`, the job's one `pending` fire (§3.2,
 //! §5.2), which the scheduler delivers when the agent is back.
 
+pub mod definition;
 pub mod follower;
 pub mod incidents;
 pub mod paused;
@@ -574,23 +575,24 @@ pub fn drone_cost(block_states: &std::collections::HashMap<String, crate::drone:
     cost
 }
 
-/// Missed cron slots after `base_ms` and before `now_ms`: the newest, and
-/// the earlier ones as `(first, count)`. The newest is the schedule's last
-/// occurrence before now, found directly, so it is right after any
+/// Missed slots of a job's `schedule` after `base_ms` and before `now_ms`:
+/// the newest, and the earlier ones as `(first, count)`. The newest is the
+/// schedule's last slot before now, found directly, so it is right after any
 /// downtime; only the count of earlier ones stops at `cap`, so a one-minute
 /// job off for a year costs bounded work.
-pub fn missed_slots(expression: &str, base_ms: i64, now_ms: i64, cap: usize) -> Option<(i64, Option<(i64, i64)>)> {
-    let schedule = crate::backend::cron::expr::parse(expression).ok()?;
-    let now = chrono::DateTime::from_timestamp_millis(now_ms)?;
-    let newest = schedule.after(&now).next_back()?.timestamp_millis();
-    if newest <= base_ms || newest >= now_ms {
+pub fn missed_slots(
+    schedule: &crate::backend::cron::schedule::JobSchedule,
+    base_ms: i64,
+    now_ms: i64,
+    cap: usize,
+) -> Option<(i64, Option<(i64, i64)>)> {
+    let newest = schedule.prev_before(now_ms)?;
+    if newest <= base_ms {
         return None;
     }
-    let base = chrono::DateTime::from_timestamp_millis(base_ms)?;
     let mut first = None;
     let mut count: i64 = 0;
-    for t in schedule.after(&base).take(cap) {
-        let ms = t.timestamp_millis();
+    for ms in schedule.after(base_ms).take(cap) {
         if ms >= newest {
             break;
         }
@@ -613,11 +615,10 @@ pub fn registered_in_another_channel(shared_dir: &std::path::Path, uid: &str, ch
 }
 
 /// The job's next fire time after `slot_ms`: when a pending fire for that
-/// slot expires (§5.2).
-pub fn next_slot_after(expression: &str, slot_ms: i64) -> Option<i64> {
-    let schedule = crate::backend::cron::expr::parse(expression).ok()?;
-    let base = chrono::DateTime::from_timestamp_millis(slot_ms)?;
-    schedule.after(&base).next().map(|t| t.timestamp_millis())
+/// slot expires (§5.2). `None` for a job whose trigger has no later slot or
+/// doesn't read.
+pub fn next_slot_after(job: &crate::backend::storage::cron::CronJob, slot_ms: i64) -> Option<i64> {
+    crate::backend::cron::schedule::JobSchedule::of(job).ok()?.next_after(slot_ms)
 }
 
 #[cfg(test)]

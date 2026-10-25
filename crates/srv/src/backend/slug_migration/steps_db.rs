@@ -386,8 +386,9 @@ struct S6Before {
 }
 
 /// The name-only rules: (table, the name column, its uid column, extra filter).
-const NAME_ONLY: [(&str, &str, &str, &str); 3] = [
+const NAME_ONLY: [(&str, &str, &str, &str); 4] = [
     ("db_cron_jobs", "target", "target_uid", ""),
+    ("db_jobs", "target", "target_uid", ""),
     ("db_work_queue", "target_agent", "target_agent_uid", "AND state IN ('open', 'claimed')"),
     ("db_work_queue", "claimed_by", "claimed_by_uid", "AND state = 'claimed'"),
 ];

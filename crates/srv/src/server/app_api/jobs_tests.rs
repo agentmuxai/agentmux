@@ -16,7 +16,7 @@ use crate::backend::storage::job_runs::{infra, state as run_state};
 /// answered as delivered to `b-jobs` and counted in the returned list.
 fn state() -> (AppState, Arc<Mutex<Vec<String>>>) {
     let mut state = crate::server::tests::test_state();
-    state.shared_store = Some(state.mstore.clone());
+    crate::server::cron::use_test_store_for_jobs(&mut state);
     let ledger = RunLedger::new(state.identity_store.clone(), None, state.broker.clone());
     state.cron_scheduler.install_runs(ledger);
     let fired: Arc<Mutex<Vec<String>>> = Arc::default();

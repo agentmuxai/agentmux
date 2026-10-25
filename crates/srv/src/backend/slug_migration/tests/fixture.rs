@@ -162,7 +162,7 @@ impl Fx {
         std::fs::write(shared.join(format!("{channel}.json")), &bytes).unwrap();
     }
 
-    /// The host stores, with a cron job, a queue item and a MuxBus credential
+    /// The host stores, with a cron job, a job, a queue item and a MuxBus credential
     /// that name `slug` and carry no uid.
     pub fn host_rows(&self, slug: &str) {
         let shared = &self.home.shared;
@@ -173,6 +173,8 @@ impl Fx {
             &format!(
                 "INSERT INTO db_cron_jobs (id, name, expression, prompt, target, target_uid) VALUES ('cron-1', 'nightly', '0 0 * * *', 'hi', '{slug}', '');
                  INSERT INTO db_cron_jobs (id, name, expression, prompt, target, target_uid) VALUES ('cron-2', 'other', '0 0 * * *', 'hi', 'naki', '');
+                 INSERT INTO db_jobs (id, name, expression, prompt, target, target_uid) VALUES ('job-1', 'nightly', '0 0 * * *', 'hi', '{slug}', '');
+                 INSERT INTO db_jobs (id, name, expression, prompt, target, target_uid) VALUES ('job-2', 'other', '0 0 * * *', 'hi', 'naki', '');
                  INSERT INTO db_agent_credentials (agent_id, client_id) VALUES ('{slug}', 'cid');"
             ),
         );

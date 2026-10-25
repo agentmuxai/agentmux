@@ -129,6 +129,8 @@ fn s6_and_s7_rewrite_names_and_keep_everything_else() {
     let store_db = fx.home.shared.join("store.db");
     assert_eq!(query::<String>(&store_db, "SELECT target || '/' || target_uid FROM db_cron_jobs WHERE id = 'cron-1'").as_deref(), Some(&*format!("loap-2/{LOAP2}")));
     assert_eq!(query::<String>(&store_db, "SELECT target_uid FROM db_cron_jobs WHERE id = 'cron-2'").as_deref(), Some(""));
+    assert_eq!(query::<String>(&store_db, "SELECT target || '/' || target_uid FROM db_jobs WHERE id = 'job-1'").as_deref(), Some(&*format!("loap-2/{LOAP2}")));
+    assert_eq!(query::<String>(&store_db, "SELECT target_uid FROM db_jobs WHERE id = 'job-2'").as_deref(), Some(""));
     let queue = fx.home.shared.join("identity-store.db");
     assert_eq!(query::<String>(&queue, "SELECT target_agent_uid FROM db_work_queue WHERE id = 'w-1'").as_deref(), Some(LOAP2));
     let stable_a = fx.home.root.join("channels/stable/versions/0.59.1/data/db/objects.db");

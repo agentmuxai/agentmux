@@ -25,7 +25,7 @@ fn state() -> (AppState, String, String) {
 /// [`state`], with fires delivered to the pane `block`.
 fn state_delivering_to(block: &'static str) -> (AppState, String, String) {
     let mut state = crate::server::tests::test_state();
-    state.shared_store = Some(state.mstore.clone());
+    crate::server::cron::use_test_store_for_jobs(&mut state);
     for (uid, slug) in [("uid-jobs-owner", "jobs-owner"), ("uid-jobs-other", "jobs-other")] {
         let mut def = test_agent_def(uid, slug, "claude", "agent", 1, "");
         def.slug = slug.to_string();
@@ -213,4 +213,175 @@ async fn a_standard_weekday_expression_is_kept_as_written_and_fires_on_its_day()
     assert_eq!(state.mstore.cron_get(&id).unwrap().unwrap().expression, "0 6 * * 0", "stored as written");
     let next = chrono::DateTime::parse_from_rfc3339(v["job"]["next_fire"].as_str().unwrap()).unwrap();
     assert_eq!(next.weekday(), chrono::Weekday::Sun);
+}
+
+/// A job definition the operator sends to `/agentmux/jobs`.
+fn definition(extra: Value) -> Value {
+    let mut body = json!({
+        "jobVersion": 1, "name": "docs drift",
+        "trigger": { "kind": "cron", "cron": "0 6 * * 1", "tz": "America/New_York" },
+        "action": { "kind": "message", "to": "uid-jobs-owner", "brief": "check the docs" },
+    });
+    body.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+    body
+}
+
+/// A definition is created on `/agentmux/jobs`, kept with its zone, listed
+/// on both routes, and its next fire is 06:00 in New York.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_definition_is_created_with_its_time_zone_and_listed_on_both_routes() {
+    use chrono::Timelike;
+    let (state, _, _) = state();
+    let (status, v) = send(&state, Method::POST, None, "/agentmux/jobs", Some(definition(json!({})))).await;
+    assert_eq!(status, StatusCode::CREATED, "{v}");
+    let id = v["job"]["id"].as_str().unwrap().to_string();
+    state.cron_scheduler.cancel_job(&id);
+    assert_eq!((v["job"]["tz"].as_str(), v["job"]["trigger_kind"].as_str()), (Some("America/New_York"), Some("cron")));
+    assert_eq!(v["job"]["definition"]["action"]["to"], "uid-jobs-owner");
+    let job = state.mstore.cron_get(&id).unwrap().unwrap();
+    assert_eq!((job.target.as_str(), job.target_uid.as_str()), ("jobs-owner", "uid-jobs-owner"), "a UID names its agent");
+    assert_eq!(job.created_by, "operator");
+    let next = chrono::DateTime::parse_from_rfc3339(v["job"]["next_fire"].as_str().unwrap()).unwrap();
+    let local = next.with_timezone(&chrono_tz::America::New_York);
+    assert_eq!((local.hour(), local.minute()), (6, 0));
+
+    for route in ["/agentmux/jobs", "/agentmux/cron"] {
+        let (_, v) = send(&state, Method::GET, None, route, None).await;
+        assert!(v["jobs"].as_array().unwrap().iter().any(|j| j["id"] == id.as_str()), "{route}");
+    }
+}
+
+/// What the definition refuses, the route refuses, with the reason.
+#[tokio::test(flavor = "multi_thread")]
+async fn refused_definitions_say_why() {
+    let (state, owner, _) = state();
+    let cases = [
+        (definition(json!({ "trigger": { "kind": "event", "source": "github" } })), "trigger kind event is available in a later version"),
+        (definition(json!({ "action": { "kind": "drone", "drone_id": "d" } })), "action kind drone is available in a later version"),
+        (definition(json!({ "policy": { "approval": "operator" } })), "policy.approval"),
+        (definition(json!({ "trigger": { "kind": "cron", "cron": "*/5 * * * *" } })), "at most every 15 minutes"),
+        (definition(json!({ "template": { "id": "agentmux.weekly-report", "version": "1.0.0" } })), "templates are not available yet"),
+        (definition(json!({ "action": { "kind": "task", "title": "triage" } })), "action kind task is available in a later version"),
+        (definition(json!({ "policy": { "retries": 2 } })), "policy.retries is available in a later version"),
+    ];
+    for (body, why) in cases {
+        let (status, v) = send(&state, Method::POST, None, "/agentmux/jobs", Some(body)).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{why}: {v}");
+        assert!(v["error"].as_str().unwrap().contains(why), "{why}: {v}");
+    }
+    // The cron shape the Schedule tool sends: the same rules.
+    let body = json!({ "name": "n", "expression": "*/5 * * * *", "prompt": "p", "target": "jobs-target" });
+    let (status, v) = send(&state, Method::POST, Some(&owner), "/agentmux/cron", Some(body)).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{v}");
+    let body = json!({ "name": "n", "expression": "0 9 * * *", "prompt": "p", "target": "t", "template": { "id": "a.b", "version": "1" } });
+    let (_, v) = send(&state, Method::POST, Some(&owner), "/agentmux/cron", Some(body)).await;
+    assert_eq!(v["error"], "templates are not available yet");
+}
+
+/// The Schedule tool's shape takes a zone and a policy too.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_cron_shape_takes_a_time_zone_and_a_policy() {
+    let (state, owner, _) = state();
+    let id = create(&state, &owner, json!({ "tz": "Europe/Berlin", "policy": { "catch_up": "latest" } })).await;
+    let job = state.mstore.cron_get(&id).unwrap().unwrap();
+    assert_eq!((job.tz.as_str(), job.catch_up.as_str(), job.owner_uid()), ("Europe/Berlin", "latest", "uid-jobs-owner"));
+    let body = json!({ "name": "n", "expression": "0 9 * * *", "prompt": "p", "target": "t", "tz": "Nowhere/Land" });
+    let (status, v) = send(&state, Method::POST, Some(&owner), "/agentmux/cron", Some(body)).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(v["error"].as_str().unwrap().contains("unknown time zone"), "{v}");
+}
+
+/// Section 7: an agent's job is its own; a spawn job needs the operator; a
+/// container agent reads only.
+#[tokio::test(flavor = "multi_thread")]
+async fn agents_create_their_own_message_jobs_and_containers_only_read() {
+    let (state, owner, _) = state();
+    let (status, v) = send(&state, Method::POST, Some(&owner), "/agentmux/jobs", Some(definition(json!({ "owner": "uid-jobs-other" })))).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{v}");
+    let spawn = json!({ "action": { "kind": "spawn", "leader": "uid-jobs-other", "brief": "go" } });
+    let (status, v) = send(&state, Method::POST, Some(&owner), "/agentmux/jobs", Some(definition(spawn))).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{v}");
+    assert!(v["error"].as_str().unwrap().contains("itself as the leader"), "{v}");
+    let spawn = json!({ "action": { "kind": "spawn", "leader": "uid-jobs-owner", "brief": "go" } });
+    let (status, v) = send(&state, Method::POST, Some(&owner), "/agentmux/jobs", Some(definition(spawn))).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{v}");
+    assert!(v["error"].as_str().unwrap().contains("approval"), "{v}");
+
+    let (status, v) = send(&state, Method::POST, Some(&owner), "/agentmux/jobs", Some(definition(json!({})))).await;
+    assert_eq!(status, StatusCode::CREATED, "{v}");
+    let id = v["job"]["id"].as_str().unwrap().to_string();
+    state.cron_scheduler.cancel_job(&id);
+    let job = state.mstore.cron_get(&id).unwrap().unwrap();
+    assert_eq!((job.owner_uid(), job.created_by.as_str()), ("uid-jobs-owner", "jobs-owner"));
+
+    let mut boxed = test_agent_def("uid-jobs-boxed", "jobs-boxed", "claude", "container", 1, "");
+    boxed.slug = "jobs-boxed".into();
+    state.mstore.agent_def_insert(&mut boxed).unwrap();
+    let boxed = state.mstore.agent_token_ensure("uid-jobs-boxed").unwrap();
+    let (status, _) = send(&state, Method::POST, Some(&boxed), "/agentmux/jobs", Some(definition(json!({})))).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    for (method, uri, body) in [
+        (Method::PATCH, format!("/agentmux/jobs/{id}"), Some(json!({ "action": "pause" }))),
+        (Method::POST, format!("/agentmux/jobs/{id}/run"), Some(json!({}))),
+        (Method::DELETE, format!("/agentmux/jobs/{id}"), None),
+    ] {
+        let (status, v) = send(&state, method.clone(), Some(&boxed), &uri, body).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{method} {uri}: {v}");
+    }
+    let (status, _) = send(&state, Method::GET, Some(&boxed), &format!("/agentmux/jobs/{id}/runs"), None).await;
+    assert_eq!(status, StatusCode::OK, "history is readable");
+}
+
+/// An edit lays fields over the definition. The 15-minute minimum applies
+/// when the edit sets the trigger, not to a job kept as it was; the agent a
+/// job messages may pause it but not rewrite it.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_edit_changes_the_definition_and_keeps_old_jobs_editable() {
+    let (state, owner, other) = state();
+    let mut old = crate::backend::cron::test_job("jobs-minutely", "tick", "jobs-other", "uid-jobs-other", "uid-jobs-owner");
+    old.created_at = agentmux_common::time::now_ms() / 1000;
+    state.mstore.cron_create(&old).unwrap();
+    let uri = "/agentmux/jobs/jobs-minutely";
+
+    let (status, v) = send(&state, Method::PATCH, Some(&owner), uri, Some(json!({ "name": "renamed" }))).await;
+    assert_eq!(status, StatusCode::OK, "a one-minute job from before can still be renamed: {v}");
+    state.cron_scheduler.cancel_job("jobs-minutely");
+    let job = state.mstore.cron_get("jobs-minutely").unwrap().unwrap();
+    assert_eq!((job.name.as_str(), job.expression.as_str(), job.target_uid.as_str()), ("renamed", "* * * * *", "uid-jobs-other"));
+
+    let (status, v) = send(&state, Method::PATCH, Some(&owner), uri, Some(json!({ "trigger": { "kind": "cron", "cron": "*/5 * * * *" } }))).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{v}");
+    let edit = json!({ "trigger": { "kind": "cron", "cron": "30 2 * * *", "tz": "America/New_York" } });
+    let (status, v) = send(&state, Method::PATCH, Some(&owner), uri, Some(edit)).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    state.cron_scheduler.cancel_job("jobs-minutely");
+    let job = state.mstore.cron_get("jobs-minutely").unwrap().unwrap();
+    assert_eq!((job.expression.as_str(), job.tz.as_str()), ("30 2 * * *", "America/New_York"));
+    assert_eq!(job.fire_count, 0, "fires and misses are not part of an edit");
+
+    let (status, _) = send(&state, Method::PATCH, Some(&other), uri, Some(json!({ "name": "mine now" }))).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "the target may not rewrite it");
+    let (status, _) = send(&state, Method::PATCH, Some(&other), uri, Some(json!({ "action": "pause" }))).await;
+    assert_eq!(status, StatusCode::OK, "the target may pause it");
+    let (status, v) = send(&state, Method::PATCH, Some(&owner), uri, Some(json!({ "id": "other-id" }))).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{v}");
+}
+
+/// A job with no recorded creator is the operator's (the UI is unattributed,
+/// and so are jobs from before creators were recorded): any caller may pause
+/// it, but only the operator rewrites what it sends.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_job_without_a_creator_is_rewritten_only_by_the_operator() {
+    let (state, owner, _other) = state();
+    let mut job = crate::backend::cron::test_job("jobs-nobody", "tick", "jobs-other", "uid-jobs-other", "");
+    job.created_at = agentmux_common::time::now_ms() / 1000;
+    state.mstore.cron_create(&job).unwrap();
+    let uri = "/agentmux/jobs/jobs-nobody";
+    let (status, _) = send(&state, Method::PATCH, Some(&owner), uri, Some(json!({ "name": "mine now" }))).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "an agent may not rewrite an operator's job");
+    let (status, _) = send(&state, Method::PATCH, Some(&owner), uri, Some(json!({ "action": "pause" }))).await;
+    assert_eq!(status, StatusCode::OK, "any caller may pause it");
+    let (status, v) = send(&state, Method::PATCH, None, uri, Some(json!({ "name": "renamed" }))).await;
+    assert_eq!(status, StatusCode::OK, "the operator may rewrite it: {v}");
+    state.cron_scheduler.cancel_job("jobs-nobody");
 }

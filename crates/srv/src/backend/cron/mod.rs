@@ -4,7 +4,9 @@
 //! Persistent cron scheduler for AgentMux.
 //!
 //! Backs each enabled `CronJob` with a tokio task that sleeps until the
-//! next scheduled fire time (computed from the 5-field UTC cron expression),
+//! next scheduled fire time (its trigger's next slot, [`schedule`]: a cron
+//! expression in the job's time zone, an interval or one time), plus the
+//! job's fixed jitter,
 //! delivers the prompt as `/agentmux/reactive/inject` would — in process
 //! since identity M4c-3 (see [`FireDelivery`]) — and records the fire in the
 //! DB.
@@ -25,6 +27,7 @@
 //! See `docs/specs/SPEC_CRON_LOOP_ROBUSTNESS_2026_06_25.md §3.2`.
 
 pub mod expr;
+pub mod schedule;
 
 use agentmux_common::AUTH_KEY_HEADER;
 use std::collections::HashMap;
@@ -167,7 +170,8 @@ struct Missed {
 
 pub struct CronScheduler {
     handles: HandleMap,
-    shared_store: Option<Arc<Store>>,
+    /// Where jobs are: `db_jobs` in the shared store.
+    jobs_store: Option<Arc<Store>>,
     http_client: reqwest::Client,
     local_url: String,
     auth_key: String,
@@ -185,7 +189,7 @@ pub struct CronScheduler {
 
 impl CronScheduler {
     pub fn new(
-        shared_store: Option<Arc<Store>>,
+        jobs_store: Option<Arc<Store>>,
         http_client: reqwest::Client,
         local_url: String,
         auth_key: String,
@@ -193,7 +197,7 @@ impl CronScheduler {
     ) -> Arc<Self> {
         Arc::new(Self {
             handles: Mutex::new(HashMap::new()),
-            shared_store,
+            jobs_store,
             http_client,
             local_url,
             auth_key,
@@ -233,10 +237,10 @@ impl CronScheduler {
 
     /// Load all enabled jobs from the DB and schedule them. Call once at startup.
     pub async fn start(self: &Arc<Self>) {
-        let store = match &self.shared_store {
+        let store = match &self.jobs_store {
             Some(s) => s.clone(),
             None => {
-                tracing::warn!("cron: no shared store — cron scheduler disabled");
+                tracing::warn!("cron: no job store — cron scheduler disabled");
                 return;
             }
         };
@@ -275,8 +279,8 @@ impl CronScheduler {
             let seen = last.last_skip_at_ms.or(last.scheduled_for_ms).unwrap_or(last.started_at_ms);
             base_ms = base_ms.max(seen);
         }
-        let (newest_ms, earlier) =
-            jobs::missed_slots(&job.expression, base_ms, now_dt.timestamp_millis(), MISSED_SLOTS_CAP)?;
+        let schedule = schedule::JobSchedule::of(job).ok()?;
+        let (newest_ms, earlier) = jobs::missed_slots(&schedule, base_ms, now_dt.timestamp_millis(), MISSED_SLOTS_CAP)?;
         Some(Missed { newest_ms, earlier })
     }
 
@@ -289,13 +293,15 @@ impl CronScheduler {
     fn schedule_job_inner(self: &Arc<Self>, job: &CronJob, missed: Option<Missed>) {
         self.cancel_job(&job.id);
 
-        let schedule = match expr::parse(&job.expression) {
+        let schedule = match schedule::JobSchedule::of(job) {
+            Ok(schedule::JobSchedule::Manual) => return,
             Ok(s) => s,
             Err(e) => {
-                tracing::warn!(id = %job.id, expr = %job.expression, error = %e, "cron: invalid expression — skipping job");
+                tracing::warn!(id = %job.id, expr = %job.expression, error = %e, "cron: invalid trigger — skipping job");
                 return;
             }
         };
+        let jitter = schedule::jitter_ms(&job.id);
 
         let sched = self.clone();
         let job = job.clone();
@@ -305,6 +311,10 @@ impl CronScheduler {
             // Seeded from the persisted fire_count so max_fires is enforced
             // across restarts, not per process run.
             let mut fires: i64 = job.fire_count;
+            // The last slot this loop handled: the next is the one after it,
+            // so the jitter (a fire up to 2 minutes after its slot) never
+            // skips a slot.
+            let mut last_slot: Option<i64> = None;
             if let Some(m) = missed {
                 // `latest` catches up the newest missed slot; `skip` leaves
                 // every missed slot in the collapsed skip row.
@@ -342,10 +352,10 @@ impl CronScheduler {
                     sched.disable_job(&job.id, "max_age_secs reached");
                     break;
                 }
-                let next = match schedule.upcoming(Utc).next() {
-                    Some(t) => t,
-                    None => break,
-                };
+                let now_ms = agentmux_common::time::now_ms();
+                let from = last_slot.map_or(now_ms, |l| l.max(now_ms - jitter));
+                let Some(next_ms) = schedule.next_after(from) else { break };
+                let Some(next) = DateTime::from_timestamp_millis(next_ms) else { break };
                 // Reviewer-caught gap (P1, PR #2418): checking age only in "now"
                 // terms at the top of the loop lets one extra fire slip through
                 // when the cron interval is longer than the remaining time to
@@ -359,8 +369,9 @@ impl CronScheduler {
                     sched.disable_job(&job.id, "max_age_secs would be reached before the next scheduled fire");
                     break;
                 }
-                let delay = (next - Utc::now()).to_std().unwrap_or_default();
-                tokio::time::sleep(delay).await;
+                let due = next_ms + jitter - agentmux_common::time::now_ms();
+                tokio::time::sleep(std::time::Duration::from_millis(due.max(0) as u64)).await;
+                last_slot = Some(next_ms);
                 // A pending fire may have been delivered meanwhile: count from
                 // the DB, so max_fires holds across both.
                 if let Some(n) = sched.persisted_fire_count(&job.id) {
@@ -370,7 +381,7 @@ impl CronScheduler {
                     sched.disable_job(&job.id, "max_fires reached");
                     break;
                 }
-                if sched.fire(&job, Slot::Scheduled(next.timestamp_millis())).await.outcome.is_some_and(|o| o.delivered()) {
+                if sched.fire(&job, Slot::Scheduled(next_ms)).await.outcome.is_some_and(|o| o.delivered()) {
                     fires += 1;
                 }
                 // Post-fire check: enforce max_fires. The top-of-loop guard
@@ -412,7 +423,7 @@ impl CronScheduler {
         if reason.starts_with("max_age_secs") {
             self.aged_out.lock().unwrap().insert(job_id.to_string());
         }
-        if let Some(store) = &self.shared_store {
+        if let Some(store) = &self.jobs_store {
             let _ = store.cron_set_enabled(job_id, false);
         }
         self.handles.lock().unwrap().remove(job_id);
@@ -581,7 +592,7 @@ impl CronScheduler {
 
     /// The job's `fire_count` in the DB.
     fn persisted_fire_count(&self, id: &str) -> Option<i64> {
-        self.shared_store.as_ref()?.cron_get(id).ok().flatten().map(|j| j.fire_count)
+        self.jobs_store.as_ref()?.cron_get(id).ok().flatten().map(|j| j.fire_count)
     }
 
     /// After a fire the job's own loop didn't make (a pending fire), stop
@@ -589,7 +600,7 @@ impl CronScheduler {
     /// already disabled the job in the DB.
     fn stop_at_max_fires(&self, id: &str) {
         let at_max = self
-            .shared_store
+            .jobs_store
             .as_ref()
             .and_then(|s| s.cron_get(id).ok().flatten())
             .is_some_and(|j| j.max_fires.is_some_and(|max| j.fire_count >= max));
@@ -604,7 +615,7 @@ impl CronScheduler {
     /// a miss (`missed_count`, `last_missed_at`, `last_miss_reason`), which
     /// Swarm's Cron bucket and `Schedule list` show.
     fn record_result(&self, id: &str, outcome: &FireOutcome) {
-        if let Some(store) = &self.shared_store {
+        if let Some(store) = &self.jobs_store {
             let now = Utc::now().timestamp();
             let recorded = match outcome.miss_reason() {
                 None => store.cron_record_fire(id, now),
@@ -650,14 +661,14 @@ impl CronScheduler {
         };
         let mut delivered = 0;
         for run in waiting {
-            let job = self.shared_store.as_ref().and_then(|s| s.cron_get(&run.job_id).ok().flatten());
+            let job = self.jobs_store.as_ref().and_then(|s| s.cron_get(&run.job_id).ok().flatten());
             let expired = match (&job, run.scheduled_for_ms) {
                 (Some(job), Some(slot)) => {
                     // A pause ends it at once; an age bound only once passed;
                     // max_fires reached means it may not fire at all.
                     let stopped = !job.enabled && !self.within_age_bound(job, now);
                     let at_max = job.max_fires.is_some_and(|max| job.fire_count >= max);
-                    stopped || at_max || jobs::next_slot_after(&job.expression, slot).is_none_or(|next| next <= now)
+                    stopped || at_max || jobs::next_slot_after(job, slot).is_none_or(|next| next <= now)
                 }
                 _ => true,
             };
@@ -737,12 +748,12 @@ fn should_catchup(job: &CronJob, now_dt: DateTime<Utc>) -> bool {
         Some(dt) => dt,
         None => return false,
     };
-    let Ok(schedule) = expr::parse(&job.expression) else {
+    let Ok(schedule) = schedule::JobSchedule::of(job) else {
         return false;
     };
     // First scheduled time after last_fired — if it's already past, a fire was missed.
-    match schedule.after(&last_dt).next() {
-        Some(next_after_last) => next_after_last < now_dt,
+    match schedule.next_after(last_dt.timestamp_millis()) {
+        Some(next_after_last) => next_after_last < now_dt.timestamp_millis(),
         None => false,
     }
 }
@@ -827,9 +838,7 @@ pub(crate) fn test_job(id: &str, prompt: &str, target: &str, target_uid: &str, c
         created_at: 0,
         max_age_secs: None,
         catch_up: jobs::CATCH_UP_SKIP.to_string(),
-        missed_count: 0,
-        last_missed_at: None,
-        last_miss_reason: String::new(),
+        ..Default::default()
     }
 }
 

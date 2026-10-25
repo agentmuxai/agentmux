@@ -1766,7 +1766,7 @@ pub fn run_shared_store_schema(conn: &Connection) -> Result<(), StoreError> {
         // v12: identity M4c-1 — the actor's UID beside each actor name.
         "ALTER TABLE db_cron_jobs ADD COLUMN created_by_uid TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE db_bundle_versions ADD COLUMN written_by_uid TEXT NOT NULL DEFAULT ''",
-    ].iter().chain(super::cron::CRON_JOBS_COLUMNS.iter()) {
+    ].iter().chain(super::cron::JOB_TABLES.iter()) {
         if let Err(e) = conn.execute_batch(stmt) {
             let msg = e.to_string();
             if !msg.contains("duplicate column") {
@@ -2243,7 +2243,7 @@ pub fn run_identity_store_schema(conn: &Connection) -> Result<(), StoreError> {
         "ALTER TABLE db_work_queue ADD COLUMN created_by_uid TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE db_cron_jobs ADD COLUMN created_by_uid TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE db_bundle_versions ADD COLUMN written_by_uid TEXT NOT NULL DEFAULT ''",
-    ].iter().chain(super::cron::CRON_JOBS_COLUMNS.iter()) {
+    ].iter().chain(super::cron::JOB_TABLES.iter()) {
         if let Err(e) = conn.execute_batch(stmt) {
             let msg = e.to_string();
             if !msg.contains("duplicate column") {
