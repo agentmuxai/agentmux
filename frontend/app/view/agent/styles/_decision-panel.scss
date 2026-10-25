@@ -49,7 +49,7 @@
     background: color-mix(in srgb, var(--warning-color) 6%, var(--main-bg-color));
     border: 1px solid var(--warning-line-strong);
     border-radius: 0;
-    color: var(--warning-color);
+    color: var(--warning-text-color);
     font-family: inherit;
     font-size: var(--text-xs);
     cursor: default;
@@ -67,7 +67,7 @@
     &--high-risk {
         background: color-mix(in srgb, var(--error-color) 8%, var(--main-bg-color));
         border-color: var(--error-line-heavy);
-        color: var(--error-color);
+        color: var(--error-text-color);
 
         &:hover {
             background: color-mix(in srgb, var(--error-color) 14%, var(--main-bg-color));
@@ -92,10 +92,10 @@
     align-items: center;
     gap: var(--space-1-5);
     font-weight: 600;
-    color: var(--warning-color);
+    color: var(--warning-text-color);
 
     .agent-decision-panel--high-risk & {
-        color: var(--error-color);
+        color: var(--error-text-color);
     }
 }
 
@@ -122,7 +122,7 @@
 
 .agent-decision-panel-risk {
     background: var(--error-bg-heavy);
-    color: var(--error-color);
+    color: var(--error-text-color);
 }
 
 .agent-decision-panel-meta {
@@ -254,7 +254,7 @@
 
 .agent-decision-panel-feedback-error {
     font-size: var(--text-xs);
-    color: var(--error-color);
+    color: var(--error-text-color);
     margin-top: var(--space-0-5);
 }
 
@@ -294,7 +294,7 @@
     .agent-decision-panel--high-risk &--allow {
         background: var(--success-bg-heavy);
         border-color: var(--success-line-heavy);
-        color: var(--success-color);
+        color: var(--success-text-color);
         font-weight: 500;
         box-shadow: none;
 
@@ -323,7 +323,7 @@
     &--deny {
         background: var(--error-bg-strong);
         border-color: var(--error-line-heavy);
-        color: var(--error-color);
+        color: var(--error-text-color);
 
         &:hover {
             background: var(--error-line);

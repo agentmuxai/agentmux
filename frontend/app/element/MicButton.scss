@@ -11,7 +11,7 @@
     // specificity here the generic accent tint would silently win over this
     // deliberately-different red.
     &.mic-active .wave-iconbutton.toggle.active {
-        color: var(--error-color);
+        color: var(--error-text-color);
         position: relative;
 
         &::after {
@@ -29,7 +29,7 @@
     // the recognition service is unavailable). Muted, no pulse — signals the
     // mic can't be used until the user resolves it (see the button tooltip).
     &.mic-blocked .wave-iconbutton {
-        color: var(--error-color);
+        color: var(--error-text-color);
         opacity: 0.65;
     }
 }

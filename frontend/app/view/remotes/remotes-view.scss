@@ -22,7 +22,7 @@
 }
 
 .remotes-error {
-    color: var(--error-color);
+    color: var(--error-text-color);
 }
 
 .remotes-notice {
@@ -84,7 +84,7 @@
 }
 
 .remotes-detail-error {
-    color: var(--error-color);
+    color: var(--error-text-color);
     white-space: pre-wrap;
 }
 
@@ -150,7 +150,7 @@
 }
 
 .remotes-test-ok {
-    color: var(--success-color);
+    color: var(--success-text-color);
 }
 
 // ── Add remote (§4.4), opened from the header, styled as a details panel ────

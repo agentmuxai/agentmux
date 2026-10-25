@@ -27,11 +27,11 @@ const UpdateStatus = (): JSX.Element => {
 
     const color = () => {
         switch (updaterStatus()) {
-            case "available": return "var(--success-color)";
-            case "downloading": return "var(--warning-color)";
+            case "available": return "var(--success-text-color)";
+            case "downloading": return "var(--warning-text-color)";
             case "ready": return "var(--accent-color)";
-            case "installing": return "var(--warning-color)";
-            case "error": return "var(--error-color)";
+            case "installing": return "var(--warning-text-color)";
+            case "error": return "var(--error-text-color)";
             default: return null;
         }
     };

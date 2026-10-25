@@ -39,13 +39,13 @@
 
     &--container {
         background: var(--success-bg-strong);
-        color: var(--success-color);
+        color: var(--success-text-color);
         border: 1px solid var(--success-line);
     }
 
     &--host {
         background: var(--warning-bg-strong);
-        color: var(--warning-color);
+        color: var(--warning-text-color);
         border: 1px solid var(--warning-line);
     }
 
@@ -53,7 +53,7 @@
     // is invalid Sass. `#{&}` (interpolation) sidesteps that restriction while
     // compiling to the exact same compound selector: `.runtime-badge--tag.runtime-badge--host`.
     &--tag#{&}--host {
-        color: var(--warning-color);
+        color: var(--warning-text-color);
         background: var(--warning-bg);
         border: none;
     }

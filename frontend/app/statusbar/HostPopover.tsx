@@ -149,7 +149,7 @@ const HostPopoverPanel = (props: HostPopoverPanelProps): JSX.Element => {
                         style={{
                             "padding-left": "12px",
                             "font-size": "0.85em",
-                            color: "var(--warning-color, #d97706)",
+                            color: "var(--warning-text-color, #d97706)",
                         }}
                     >
                         <span>⚠ {openDirError()}</span>
@@ -180,7 +180,7 @@ const HostPopoverPanel = (props: HostPopoverPanelProps): JSX.Element => {
                         style={{
                             "padding-left": "12px",
                             "font-size": "0.85em",
-                            color: "var(--warning-color, #d97706)",
+                            color: "var(--warning-text-color, #d97706)",
                         }}
                     >
                         <span>⚠ {props.lanDiscoveryError()}</span>
@@ -194,7 +194,7 @@ const HostPopoverPanel = (props: HostPopoverPanelProps): JSX.Element => {
                             style={{
                                 "padding-left": "12px",
                                 "font-size": "0.85em",
-                                color: "var(--warning-color, #d97706)",
+                                color: "var(--warning-text-color, #d97706)",
                             }}
                         >
                             <span>⚠ {message()}</span>
@@ -208,7 +208,7 @@ const HostPopoverPanel = (props: HostPopoverPanelProps): JSX.Element => {
                         style={{
                             "padding-left": "12px",
                             "font-size": "0.85em",
-                            color: "var(--warning-color, #d97706)",
+                            color: "var(--warning-text-color, #d97706)",
                         }}
                     >
                         <span>
@@ -331,7 +331,7 @@ const HostPopoverPanel = (props: HostPopoverPanelProps): JSX.Element => {
                         </div>
                     </Show>
                     <Show when={muxbus.error()}>
-                        <div class="status-bar-popover-row" style={{ "font-size": "0.85em", color: "var(--warning-color, #d97706)" }}>
+                        <div class="status-bar-popover-row" style={{ "font-size": "0.85em", color: "var(--warning-text-color, #d97706)" }}>
                             <span>⚠ {muxbus.error()}</span>
                         </div>
                     </Show>

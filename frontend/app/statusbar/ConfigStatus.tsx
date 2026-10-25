@@ -22,10 +22,10 @@ const ConfigStatus = (): JSX.Element => {
                 data-tip="Config errors, click to view"
                 aria-label="Config errors"
             >
-                <span class="status-icon" style={{ color: "var(--error-color)" }}>
+                <span class="status-icon" style={{ color: "var(--error-text-color)" }}>
                     ⚠
                 </span>
-                <span style={{ color: "var(--error-color)" }}>Config error</span>
+                <span style={{ color: "var(--error-text-color)" }}>Config error</span>
             </div>
         </Show>
     );

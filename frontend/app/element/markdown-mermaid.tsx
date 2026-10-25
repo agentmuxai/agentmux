@@ -67,7 +67,7 @@ const Mermaid = ({ chart }: { chart: string }) => {
             when={!error()}
             fallback={
                 <div class="mermaid error">
-                    <div style={{ color: "var(--error-color, #f44)", "margin-bottom": "8px" }}>
+                    <div style={{ color: "var(--error-text-color, #f44)", "margin-bottom": "8px" }}>
                         Failed to render diagram
                     </div>
                     <pre style={{ "white-space": "pre-wrap", opacity: 0.7, "font-size": "0.85em" }}>{chart}</pre>
@@ -86,7 +86,7 @@ const Mermaid = ({ chart }: { chart: string }) => {
 
 const MermaidErrorFallback = ({ error, chart }: { error?: Error; chart: string }) => (
     <div class="mermaid error">
-        <div style={{ color: "var(--error-color, #f44)", "margin-bottom": "8px" }}>Failed to render diagram</div>
+        <div style={{ color: "var(--error-text-color, #f44)", "margin-bottom": "8px" }}>Failed to render diagram</div>
         <pre style={{ "white-space": "pre-wrap", opacity: 0.7, "font-size": "0.85em" }}>{chart}</pre>
     </div>
 );

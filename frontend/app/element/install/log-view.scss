@@ -54,11 +54,11 @@
     }
 
     &[data-tone="warning"] {
-        color: var(--warning-color);
+        color: var(--warning-text-color);
     }
 
     &[data-tone="error"] {
-        color: var(--error-color);
+        color: var(--error-text-color);
     }
 }
 
@@ -70,17 +70,17 @@
 
 .log-fg-red,
 .log-fg-bright-red {
-    color: var(--error-color);
+    color: var(--error-text-color);
 }
 
 .log-fg-yellow,
 .log-fg-bright-yellow {
-    color: var(--warning-color);
+    color: var(--warning-text-color);
 }
 
 .log-fg-green,
 .log-fg-bright-green {
-    color: var(--success-color);
+    color: var(--success-text-color);
 }
 
 .log-fg-blue,

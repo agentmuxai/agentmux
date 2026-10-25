@@ -35,7 +35,7 @@
             display: flex;
             align-items: center;
             gap: var(--space-1-5);
-            color: var(--warning-color);
+            color: var(--warning-text-color);
             font-size: var(--text-2xs);
             @include mixins.label-caps;
             opacity: 0.9;
@@ -126,7 +126,7 @@
                 }
 
                 &.bang-command {
-                    color: var(--error-color);
+                    color: var(--error-text-color);
                     border-color: var(--error-color);
                     caret-color: var(--error-color);
 

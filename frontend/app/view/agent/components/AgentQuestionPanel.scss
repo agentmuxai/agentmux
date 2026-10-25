@@ -105,12 +105,12 @@
     white-space: nowrap;
 
     &--warning {
-        color: var(--warning-color);
+        color: var(--warning-text-color);
         font-weight: var(--font-weight-medium);
     }
 
     &--critical {
-        color: var(--error-color);
+        color: var(--error-text-color);
         font-weight: var(--font-weight-medium);
         // Subtle urgency pulse for the final 5 seconds: opacity only (the colour
         // comes from the modifier classes), so it reads as urgent without being

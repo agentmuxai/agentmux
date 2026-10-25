@@ -89,7 +89,7 @@
     color: var(--main-text-color);
 
     &.is-warning {
-        color: var(--warning-color);
+        color: var(--warning-text-color);
     }
 }
 
@@ -109,7 +109,7 @@
 
 .native-memory-history-item-warning {
     font-size: var(--text-xs);
-    color: var(--warning-color);
+    color: var(--warning-text-color);
 }
 
 .native-memory-history-revert-btn {
@@ -174,12 +174,12 @@
     color: var(--main-text-color);
 
     &.is-added {
-        color: var(--success-color);
+        color: var(--success-text-color);
         background: var(--success-bg-subtle);
     }
 
     &.is-removed {
-        color: var(--error-color);
+        color: var(--error-text-color);
         background: var(--error-bg-subtle);
     }
 }

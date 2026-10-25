@@ -86,10 +86,10 @@ $gap: 6px;
 
         &__summary {
             &.is-warn {
-                color: var(--warning-color);
+                color: var(--warning-text-color);
             }
             &.is-over {
-                color: var(--error-color);
+                color: var(--error-text-color);
             }
         }
 
@@ -180,7 +180,7 @@ $gap: 6px;
     .agent-attachment-send-hint {
         padding: 2px 6px;
         font-size: var(--text-xs);
-        color: var(--warning-color);
+        color: var(--warning-text-color);
         background: var(--main-bg-color);
         border-left: 1px solid var(--border-color);
         border-right: 1px solid var(--border-color);
@@ -282,7 +282,7 @@ $gap: 6px;
         }
         &__warn {
             left: 3px;
-            color: var(--warning-color);
+            color: var(--warning-text-color);
         }
 
         &__badge {
@@ -376,7 +376,7 @@ $gap: 6px;
             border-color: var(--error-color);
         }
         &.is-error &__placeholder {
-            color: var(--error-color);
+            color: var(--error-text-color);
         }
 
         &.is-flash &__main {
@@ -521,7 +521,7 @@ $gap: 6px;
             color: var(--main-text-color);
         }
         .warn {
-            color: var(--warning-color);
+            color: var(--warning-text-color);
         }
     }
 

@@ -34,6 +34,11 @@
     --error-color: #ff5555;
     --warning-color: #ffb86c;
     --success-color: #50fa7b;
+    // Text in the status colours: each colour with its lightness moved until it reads at 4.6:1 on this
+    // theme's surface and on its own 12% wash (themes/status-text.test.ts); the colour itself where it already does.
+    --error-text-color: #ff7878;
+    --success-text-color: var(--success-color);
+    --warning-text-color: var(--warning-color);
 
 
     --scrollbar-thumb-color: rgba(189, 147, 249, 0.5);

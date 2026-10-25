@@ -22,9 +22,9 @@ function gpuColor(c: ReturnType<typeof getGpuInfo>["classification"]): string {
         case "hardware":
             return "var(--accent-color)";
         case "software":
-            return "var(--warning-color)";
+            return "var(--warning-text-color)";
         default:
-            return "var(--error-color)";
+            return "var(--error-text-color)";
     }
 }
 
@@ -139,7 +139,7 @@ const BackendStatusPanel = (props: BackendStatusPanelProps): JSX.Element => {
             <Show when={termRendererAtom() != null}>
                 <div class="status-bar-popover-row">
                     <span class="status-bar-popover-label">Terminal</span>
-                    <span style={{ color: termRendererAtom() === "webgl" ? "var(--accent-color)" : "var(--warning-color)" }}>
+                    <span style={{ color: termRendererAtom() === "webgl" ? "var(--accent-color)" : "var(--warning-text-color)" }}>
                         {termRendererAtom() === "webgl" ? "WebGL (GPU)" : "DOM (software)"}
                     </span>
                 </div>
