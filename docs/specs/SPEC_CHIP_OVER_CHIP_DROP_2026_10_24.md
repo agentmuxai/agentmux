@@ -21,7 +21,8 @@ So most of a chip's area never reaches the seam case, and the ghost sits on the 
 When the pane being dragged is a chip and the pane under the cursor is a chip in the same tree, the drop direction is the nearer seam along the parent's axis, from where the cursor is inside the target chip:
 
 - in a column (a strip of chips), the upper half is **Top** and the lower half **Bottom**;
-- in a row, the left half is **Left** and the right half **Right**.
+- in a row of chips (every sibling minimized), the left half is **Left** and the right half **Right**;
+- in a Row that has an expanded sibling, the geometry docks its chips in a vertical stack over that sibling (`resolveRowSlipTargets`), whatever the Row's direction. The seam shows between stacked chips, so the upper half is **Left** (before) and the lower half **Right** (after), and the placeholder is placed along the vertical axis (`chipDropRect`, with `slipStack`). Found by the Codex review of #5426.
 
 That is a plain insert between two panes, so the existing placeholder rule applies: centred on the seam, flush inside the edge at the first or last place. Nothing else changes:
 
@@ -29,7 +30,7 @@ That is a plain insert between two panes, so the existing placeholder rule appli
 - a pane dragged from another tab uses the generic zones (srv's redock can't place it in a strip);
 - a drop that would not move the chip (its own neighbouring seams) still shows no placeholder.
 
-`chipOverChipDirection` (`frontend/layout/lib/chipPlaceholder.ts`) is a pure function of the tree, the two node ids, the target's rect and the cursor. `OverlayNode` and the dead-spot fallback in `tilelayout-shared.tsx` call it before `determineDropDirection`. `layoutModel` is not touched.
+`chipOverChipDirection` (`frontend/layout/lib/chipPlaceholder.ts`) is a pure function of the tree, the two node ids, the target's rect and the cursor. `OverlayNode` and the dead-spot fallback in `tilelayout-shared.tsx` call it before `determineDropDirection`. `getPlaceholderTransform` in `layoutModel` calls the new `chipDropRect` for the chip placeholder instead of computing the arguments itself.
 
 ## 3. Tests
 
@@ -39,7 +40,8 @@ That is a plain insert between two panes, so the existing placeholder rule appli
 2. The lower half gives Bottom and the seam below.
 3. At the strip's first and last place it is flush inside the edge.
 4. In a row, the left and right halves pick the nearer vertical seam.
-5. It applies only to chip over chip, inside the chip, in the same tree.
+5. A stack over an expanded pane in a Row: the halves pick the seam above or below, at one x, and the placeholder straddles it; flush at the stack's top.
+6. It applies only to chip over chip, inside the chip, in the same tree.
 
 ## 4. Manual check
 

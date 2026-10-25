@@ -1,6 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { resolveRowSlipTargets } from "./layoutGeometry";
 import { isNodeLocked } from "./layoutInvariants";
 import { findNode, findParent } from "./layoutNode";
 import { DropDirection, FlexDirection, type LayoutNode } from "./types";
@@ -37,9 +38,47 @@ export function chipPlaceholderRect(
 }
 
 /**
+ * The chips docked above the same expanded pane as `nodeId`, in row order, when `nodeId` is a
+ * minimized child of a Row that has an expanded sibling: the geometry stacks them vertically over
+ * that sibling (`resolveRowSlipTargets`), whatever the Row's own direction. Undefined for any other
+ * pane, whose chips lie along the parent's axis.
+ */
+export function slipStack(parent: LayoutNode, nodeId: string): LayoutNode[] | undefined {
+    if (parent.flexDirection !== FlexDirection.Row || !parent.children?.length) return undefined;
+    const targets = resolveRowSlipTargets(parent.children);
+    const dock = targets.get(nodeId);
+    if (!dock) return undefined;
+    return parent.children.filter((c) => targets.get(c.id)?.id === dock.id);
+}
+
+/**
+ * The drop placeholder for a dragged chip inserted at `index` in `parent`, placed against `target`
+ * (the pane before the seam, or the first pane at index 0) whose rect is `targetRect`. A chip in a
+ * stack over an expanded pane is placed along the vertical axis, since that is where the seam shows.
+ */
+export function chipDropRect(
+    parent: LayoutNode,
+    target: LayoutNode,
+    targetIndex: number,
+    index: number,
+    targetRect: Dimensions,
+    chip: { width: number; height: number }
+): Dimensions {
+    const after = index > targetIndex;
+    let outerEdge = !after || index >= (parent.children?.length ?? 1);
+    let direction = parent.flexDirection;
+    const stack = slipStack(parent, target.id);
+    if (stack) {
+        direction = FlexDirection.Column;
+        outerEdge = after ? stack[stack.length - 1].id === target.id : stack[0].id === target.id;
+    }
+    return chipPlaceholderRect(targetRect, chip, direction, after, outerEdge);
+}
+
+/**
  * Where a chip dropped on another chip goes: to the nearer of the two seams around that chip, in
- * the direction the chips are laid out (the upper or lower half of a chip in a column, the left or
- * right half in a row). A chip is thin, so the generic zones resolve most of its area to a swap
+ * the direction the chips are laid out (the upper or lower half of a chip in a column or in the
+ * stack over an expanded pane, the left or right half in a row of chips). A chip is thin, so the generic zones resolve most of its area to a swap
  * (centre) or a split of the chip (its ends), and the placeholder then covers the chip instead of
  * sitting between two (SPEC_CHIP_OVER_CHIP_DROP_2026_10_24.md).
  *
@@ -65,5 +104,7 @@ export function chipOverChipDirection(
     if (x < 0 || y < 0 || x > rect.width || y > rect.height) return undefined;
     if (parent.flexDirection === FlexDirection.Column)
         return y < rect.height / 2 ? DropDirection.Top : DropDirection.Bottom;
+    // The chips of a Row stack vertically over an expanded sibling: the upper half is before.
+    if (slipStack(parent, targetId)) return y < rect.height / 2 ? DropDirection.Left : DropDirection.Right;
     return x < rect.width / 2 ? DropDirection.Left : DropDirection.Right;
 }

@@ -5,7 +5,7 @@
 // flush inside the edge at the first or last place. SPEC_CHIP_DROP_PLACEHOLDER_ON_THE_SEAM_2026_10_21.md.
 
 import { describe, expect, it } from "vitest";
-import { chipOverChipDirection, chipPlaceholderRect } from "../lib/chipPlaceholder";
+import { chipDropRect, chipOverChipDirection, chipPlaceholderRect } from "../lib/chipPlaceholder";
 import { newLayoutNode } from "../lib/layoutNode";
 import { computeMoveNode } from "../lib/layoutTree";
 import {
@@ -101,14 +101,14 @@ describe("a chip dropped on another chip", () => {
         }) as LayoutTreeMoveNodeAction;
         if (!move) return { direction, move };
         const targetIndex = Math.max(0, Math.min(move.index - 1, strip.children!.length - 1));
-        const after = move.index > targetIndex;
-        const outerEdge = !after || move.index >= strip.children!.length;
-        const rect = chipPlaceholderRect(
+        const chip = { width: dir === FlexDirection.Column ? 600 : 200, height: 36 };
+        const rect = chipDropRect(
+            strip,
+            strip.children![targetIndex],
+            targetIndex,
+            move.index,
             rects(targetIndex),
-            { width: dir === FlexDirection.Column ? 600 : 200, height: 36 },
-            dir,
-            after,
-            outerEdge
+            chip
         );
         return { direction, move, rect };
     };
@@ -167,5 +167,58 @@ describe("a chip dropped on another chip", () => {
             chipOverChipDirection(root, "m2", "elsewhere", r, { x: 400, y: 140 }),
             "dragged from another tab"
         ).toBeUndefined();
+    });
+});
+
+// In a Row with an expanded sibling the chips stack vertically over it (the slip geometry), so the
+// nearer seam is chosen by the vertical half and the placeholder lies along the vertical axis.
+describe("a chip dropped on a chip stacked over an expanded pane in a Row", () => {
+    const build = () => {
+        const chips = ["m1", "m2", "m3"].map((id) => node(id, true, FlexDirection.Column));
+        const root = branch("r", FlexDirection.Row, [
+            ...chips,
+            node("e", false, FlexDirection.Column),
+            node("d", true, FlexDirection.Column),
+        ]);
+        return root;
+    };
+    // The stack, 36 px each over the expanded pane, x 100..600.
+    const stackRect = (i: number): Dimensions => ({ top: 100 + i * 36, left: 100, width: 500, height: 36 });
+    const chip = { width: 500, height: 36 };
+    const drop = (targetId: string, at: { x: number; y: number }) => {
+        const root = build();
+        const idx = root.children!.findIndex((c) => c.id === targetId);
+        const direction = chipOverChipDirection(root, targetId, "d", stackRect(idx), at);
+        const move = computeMoveNode(newLayoutTreeState(root), {
+            type: LayoutTreeActionType.ComputeMove,
+            nodeId: targetId,
+            nodeToMoveId: "d",
+            direction: direction!,
+        }) as LayoutTreeMoveNodeAction;
+        const targetIndex = Math.max(0, Math.min(move.index - 1, root.children!.length - 1));
+        const rect = chipDropRect(
+            root,
+            root.children![targetIndex],
+            targetIndex,
+            move.index,
+            stackRect(targetIndex),
+            chip
+        );
+        return { direction, move, rect };
+    };
+
+    it("the upper half of the middle chip is the seam above it, the lower half the seam below, at one x", () => {
+        const up = drop("m2", { x: 300, y: 140 });
+        expect(up.direction).toBe(DropDirection.Left);
+        expect(up.move).toMatchObject({ parentId: "r", index: 1 });
+        expect(up.rect).toEqual({ top: 118, left: 100, width: 500, height: 36 });
+        const down = drop("m2", { x: 300, y: 160 });
+        expect(down.direction).toBe(DropDirection.Right);
+        expect(down.move).toMatchObject({ parentId: "r", index: 2 });
+        expect(down.rect).toEqual({ top: 154, left: 100, width: 500, height: 36 });
+    });
+
+    it("at the top of the stack it is flush inside the stack's top edge", () => {
+        expect(drop("m1", { x: 300, y: 110 }).rect).toEqual({ top: 100, left: 100, width: 500, height: 36 });
     });
 });
