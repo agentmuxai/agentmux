@@ -3104,7 +3104,7 @@ mod fleet_tests {
         std::env::set_var("AGENTMUX_HOME_OVERRIDE", tmp.path());
         let state = test_state();
 
-        let result = forward_stop_to_shared_channel(&state, "no-such-block", None).await;
+        let result = forward_stop_to_shared_channel(&state, "no-such-block", None, "").await;
         std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
 
         assert!(result.is_none(), "no matching shared entry must fall through to the caller's local-error path");
@@ -3124,7 +3124,7 @@ mod fleet_tests {
         write_raw_shared_entry(&shared_dir, "remote-agent", "http://203.0.113.5:9999", &block_id, "some-key");
         let state = test_state();
 
-        let result = forward_stop_to_shared_channel(&state, &block_id, None).await;
+        let result = forward_stop_to_shared_channel(&state, &block_id, None, "").await;
         std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
 
         assert!(result.is_none(), "a non-loopback entry must never be forwarded to");
@@ -3144,7 +3144,7 @@ mod fleet_tests {
         // self-registration from a prior crash, not a real peer.
         write_raw_shared_entry(&shared_dir, "self-agent", &state.local_web_url.clone(), &block_id, "some-key");
 
-        let result = forward_stop_to_shared_channel(&state, &block_id, None).await;
+        let result = forward_stop_to_shared_channel(&state, &block_id, None, "").await;
         std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
 
         assert!(result.is_none(), "a stale self-entry must never be forwarded to (would be forwarding to itself)");
@@ -3163,7 +3163,7 @@ mod fleet_tests {
         write_raw_shared_entry(&shared_dir, "peer-agent", &peer_url, &block_id, "peer-secret-key");
         let state = test_state();
 
-        let result = forward_stop_to_shared_channel(&state, &block_id, None).await;
+        let result = forward_stop_to_shared_channel(&state, &block_id, None, "").await;
         std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
 
         let (agent_name, outcome) = result.expect("a loopback entry must be forwarded to");
@@ -3189,7 +3189,7 @@ mod fleet_tests {
         write_raw_shared_entry(&shared_dir, "peer-agent", &peer_url, &block_id, "peer-secret-key");
         let state = test_state();
 
-        let result = forward_stop_to_shared_channel(&state, &block_id, None).await;
+        let result = forward_stop_to_shared_channel(&state, &block_id, None, "").await;
         std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
 
         let (_agent_name, outcome) = result.expect("a loopback entry must still be forwarded to");

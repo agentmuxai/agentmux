@@ -511,6 +511,7 @@ pub(crate) async fn forward_stop_to_shared_channel(
     state: &AppState,
     block_id: &str,
     signal: Option<&str>,
+    by: &str,
 ) -> Option<(String, Result<(), String>)> {
     let entry = shared_channel_for(state, block_id)?;
 
@@ -518,6 +519,7 @@ pub(crate) async fn forward_stop_to_shared_channel(
     let mut req = state.http_client.post(&url).json(&serde_json::json!({
         "block_id": block_id,
         "signal": signal,
+        "by": by,
     }));
     if !entry.auth_key.is_empty() {
         req = req.header(AUTH_KEY_HEADER, &entry.auth_key);
@@ -573,7 +575,7 @@ pub(crate) async fn fleet_bulk_stop_impl(
             // §3.2 — this was host-tier-only before).
             let (target_agent, outcome) = match state.reactive_handler.get_agent_by_block(&block_id) {
                 Some(agent) => (agent.agent_id, stop_one_agent_block(state, &block_id, signal, None).await.map(|_| ())),
-                None => match forward_stop_to_shared_channel(state, &block_id, signal).await {
+                None => match forward_stop_to_shared_channel(state, &block_id, signal, "").await {
                     Some((agent_name, outcome)) => (agent_name, outcome),
                     None => (block_id.clone(), stop_one_agent_block(state, &block_id, signal, None).await.map(|_| ())),
                 },
@@ -676,7 +678,7 @@ async fn forward_stop_pending(
         Err(e) => return Forwarded::Refused(format!("cross-channel forward failed: {e}")),
     };
     if resp.status() == reqwest::StatusCode::NOT_FOUND {
-        let outcome = forward_stop_to_shared_channel(state, block_id, signal)
+        let outcome = forward_stop_to_shared_channel(state, block_id, signal, by)
             .await
             .map(|(_, o)| o)
             .unwrap_or_else(|| Err("cross-channel forward: target vanished".to_string()));

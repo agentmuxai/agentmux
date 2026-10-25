@@ -33,6 +33,7 @@ use super::AppState;
 use crate::backend::agent_admission;
 use crate::backend::blockcontroller;
 use crate::backend::obj::{self, Block};
+use crate::sagas::pending_shutdown::Action;
 
 /// How long the holder lets a turn in flight finish before killing it.
 const RELEASE_GRACE: std::time::Duration = std::time::Duration::from_secs(10);
@@ -208,28 +209,30 @@ pub(super) async fn handle_agent_release(
         .unwrap_or_default()
     };
     let to = describe_requester(&req.requested_by_channel, &req.requested_by_version);
-    let deadline = std::time::Instant::now() + RELEASE_GRACE;
+    let live: Vec<Block> = blocks.into_iter().filter(|b| can_release(&b.oid)).collect();
     let mut released = 0usize;
-    for block in blocks {
-        let Some(ctrl) = blockcontroller::get_controller(&block.oid) else { continue };
-        let Some(p) = ctrl
-            .as_any()
-            .downcast_ref::<blockcontroller::persistent::PersistentSubprocessController>()
-        else {
-            continue;
-        };
-        if !p.release_to_other_instance(deadline) {
-            continue;
+    if caller.as_deref().and_then(super::caller::Caller::uid).is_some() {
+        // An agent's token: the agent letting go of itself.
+        for block in &live {
+            if release_block(&state, &block.oid, &to).is_ok() {
+                released += 1;
+            }
         }
-        released += 1;
-        let name = obj::meta_get_string(&block.meta, "agentName", "");
-        let who = if name.is_empty() { "This agent" } else { name.as_str() };
-        let reason = format!(
-            "{who} was taken over by another AgentMux instance on this host{}. \
-             Use Take over to bring it back here.",
-            if to.is_empty() { String::new() } else { format!(" ({to})") }
-        );
-        surface_failure(&state, &block.oid, &reason);
+    } else if !live.is_empty() {
+        // Another AgentMux asks, and what it says about itself can't be checked: this instance's user is shown
+        // it and can keep the agent running.
+        let by = if to.is_empty() { "another AgentMux".to_string() } else { format!("AgentMux {to} (as claimed by another AgentMux)") };
+        let asked: Vec<_> = live
+            .iter()
+            .map(|b| crate::sagas::pending_shutdown::request(&state, &b.oid, &by, "Takeover", "", Action::Release { to: to.clone() }))
+            .collect();
+        let settled = wait_for_user(&asked).await;
+        released = settled.iter().filter(|s| **s == "shut_down").count();
+        if settled.contains(&"kept_by_user") {
+            let who = if req.agent.trim().is_empty() { "this agent" } else { req.agent.trim() };
+            let error = format!("The user of the AgentMux instance running {who} chose to keep it running there.");
+            return (StatusCode::CONFLICT, Json(json!({ "error": error }))).into_response();
+        }
     }
     // The relay may still see this srv as the holder — even with no pane
     // running it: a subscription that outlived its panes (charlie,
@@ -273,6 +276,57 @@ pub(super) async fn handle_agent_release(
     }
     tracing::info!(uid = %uid, released, to = %to, "agent_admission.takeover: release handled");
     (StatusCode::OK, Json(json!({ "ok": true, "released": released }))).into_response()
+}
+
+/// Whether this pane holds the agent's lease and has a process to stop.
+fn can_release(block_id: &str) -> bool {
+    blockcontroller::get_controller(block_id).is_some_and(|c| {
+        c.as_any()
+            .downcast_ref::<blockcontroller::persistent::PersistentSubprocessController>()
+            .is_some_and(|p| p.can_release())
+    })
+}
+
+/// Let go of one pane's agent for another instance: gracefully stop its CLI (a turn in flight finishes, then it is
+/// killed at `RELEASE_GRACE`) and say so in the pane. `Err` when this pane holds nothing.
+pub(crate) fn release_block(state: &AppState, block_id: &str, to: &str) -> Result<(), String> {
+    let ctrl = blockcontroller::get_controller(block_id).ok_or_else(|| format!("NOT_RUNNING: no controller for block {block_id}"))?;
+    let released = ctrl
+        .as_any()
+        .downcast_ref::<blockcontroller::persistent::PersistentSubprocessController>()
+        .is_some_and(|p| p.release_to_other_instance(std::time::Instant::now() + RELEASE_GRACE));
+    if !released {
+        return Err(format!("NOT_RUNNING: block {block_id} holds nothing to release"));
+    }
+    let name = state
+        .mstore
+        .get::<Block>(block_id)
+        .ok()
+        .flatten()
+        .map(|b| obj::meta_get_string(&b.meta, "agentName", ""))
+        .unwrap_or_default();
+    let who = if name.is_empty() { "This agent" } else { name.as_str() };
+    let reason = format!(
+        "{who} was taken over by another AgentMux instance on this host{}. \
+         Use Take over to bring it back here.",
+        if to.is_empty() { String::new() } else { format!(" ({to})") }
+    );
+    surface_failure(state, block_id, &reason);
+    Ok(())
+}
+
+/// Wait for the user to decide on each request (their override window, then the release itself); each one's
+/// final status. A request still open after the window and the grace has no final status and reads `pending`.
+async fn wait_for_user(asked: &[crate::sagas::pending_shutdown::PendingView]) -> Vec<&'static str> {
+    use crate::sagas::pending_shutdown as ps;
+    let give_up = std::time::Instant::now() + ps::OVERRIDE_WINDOW + RELEASE_GRACE + std::time::Duration::from_secs(5);
+    loop {
+        let now: Vec<&'static str> = asked.iter().map(|v| ps::status(&v.request_id).map_or("superseded", |s| s.status)).collect();
+        if now.iter().all(|s| !matches!(*s, "pending" | "proceeding")) || std::time::Instant::now() >= give_up {
+            return now;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    }
 }
 
 fn describe_requester(channel: &str, version: &str) -> String {
