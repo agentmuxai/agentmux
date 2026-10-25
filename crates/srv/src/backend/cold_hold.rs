@@ -11,6 +11,7 @@
 use std::collections::HashMap;
 
 use super::reactive::types::{InjectionRequest, JektTier};
+use super::storage::store::Store;
 
 /// The setting: minutes of quiet after which a session counts as cold. 0
 /// turns the hold off.
@@ -87,6 +88,46 @@ pub fn task_numbers(text: &str) -> Vec<i64> {
         }
     }
     found
+}
+
+/// When the Claude session of `block_id` last wrote output, or `None` when it
+/// is not one to hold for: another provider (its cache works differently),
+/// no controller, or a turn in flight (it is working, whatever it last wrote).
+pub fn session_last_output(mstore: &Store, block_id: &str) -> Option<i64> {
+    let block = mstore.get::<super::obj::Block>(block_id).ok().flatten()?;
+    let raw = super::obj::meta_get_string(&block.meta, "agentProvider", "");
+    if super::providers::resolve_provider_alias(&raw) != "claude" {
+        return None;
+    }
+    let ctrl = super::blockcontroller::get_controller(block_id)?;
+    if ctrl.turn_tracker().and_then(|t| t.pass_started_ms()).is_some() {
+        return None;
+    }
+    ctrl.last_output_ms()
+}
+
+/// Whether the agent in `block_id` is a cold Claude session now, by the setting's limit.
+pub fn block_is_cold(mstore: &Store, extra: &HashMap<String, serde_json::Value>, block_id: &str) -> bool {
+    let Some(after_ms) = cold_after_ms(extra) else { return false };
+    is_cold(session_last_output(mstore, block_id), agentmux_common::time::now_ms(), after_ms)
+}
+
+/// srv's own `[AgentMux]` note `text` for the agent in `block_id` (`target`), for a note that
+/// asks nothing urgent of it: delivered now, which starts a turn, to a warm session; kept under
+/// `key` for the agent's next turn, never starting one, when the session has gone cold.
+pub fn note_or_wait_if_cold(
+    mstore: &Store,
+    extra: &HashMap<String, serde_json::Value>,
+    block_id: &str,
+    target: &str,
+    key: &str,
+    text: &str,
+) -> Result<(), String> {
+    if block_is_cold(mstore, extra, block_id) {
+        super::blockcontroller::system_note_into_turn_or_hold(block_id, key, text);
+        return Ok(());
+    }
+    super::reactive::get_global_handler().deliver_system_note(target, text)
 }
 
 #[cfg(test)]
@@ -167,5 +208,45 @@ mod tests {
         let many: String = (1..=20).map(|n| format!("#{n} ")).collect();
         assert_eq!(task_numbers(&many).len(), MAX_TASK_NUMBERS);
         assert_eq!(task_numbers("#12345678901"), Vec::<i64>::new(), "too long to be a task number");
+    }
+
+    fn claude_block(m: &Store) -> String {
+        let mut block = crate::backend::obj::Block { oid: uuid::Uuid::new_v4().to_string(), ..Default::default() };
+        block.meta.insert("agentProvider".into(), serde_json::json!("claude"));
+        m.insert(&mut block).unwrap();
+        block.oid
+    }
+
+    #[test]
+    fn a_note_for_a_cold_session_waits_for_its_next_turn_instead_of_starting_one() {
+        use crate::backend::agent_state::test_support::register_quiet;
+        let m = Store::open_in_memory().unwrap();
+        let block = claude_block(&m);
+        register_quiet(&block, 2 * 60 * 60 * 1000);
+        assert!(block_is_cold(&m, &HashMap::new(), &block));
+        note_or_wait_if_cold(&m, &HashMap::new(), &block, "nobody", "track:7", "[AgentMux] following task #7").unwrap();
+        let (with_notes, _attached) = crate::backend::reactive::held_notes::attach(&block, "hello");
+        assert!(with_notes.starts_with("hello") && with_notes.contains("following task #7"), "{with_notes}");
+        crate::backend::blockcontroller::delete_controller(&block);
+    }
+
+    #[test]
+    fn a_warm_session_or_a_switched_off_hold_gets_the_note_at_once() {
+        use crate::backend::agent_state::test_support::register_quiet;
+        let m = Store::open_in_memory().unwrap();
+        let block = claude_block(&m);
+        // Delivered means handed to the handler, which here has no such agent: an error, and
+        // nothing held.
+        register_quiet(&block, 1000);
+        assert!(!block_is_cold(&m, &HashMap::new(), &block));
+        assert!(note_or_wait_if_cold(&m, &HashMap::new(), &block, "nobody-here", "track:8", "[AgentMux] x").is_err());
+        register_quiet(&block, 2 * 60 * 60 * 1000);
+        let mut off = HashMap::new();
+        off.insert(SETTING_COLD_MINUTES.to_string(), serde_json::json!(0));
+        assert!(!block_is_cold(&m, &off, &block));
+        assert!(note_or_wait_if_cold(&m, &off, &block, "nobody-here", "track:8", "[AgentMux] x").is_err());
+        let (plain, _attached) = crate::backend::reactive::held_notes::attach(&block, "hello");
+        assert_eq!(plain, "hello", "nothing was held");
+        crate::backend::blockcontroller::delete_controller(&block);
     }
 }

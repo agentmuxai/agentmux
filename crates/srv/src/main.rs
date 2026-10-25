@@ -394,6 +394,7 @@ async fn app_main() {
         state.srv_events_tx.subscribe(),
         Arc::clone(&state.mstore),
         Arc::clone(&state.filestore),
+        Arc::clone(&state.config_watcher),
     );
     let routers = build_routers(state);
     let router = routers.full;

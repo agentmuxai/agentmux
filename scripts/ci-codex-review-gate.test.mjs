@@ -191,6 +191,38 @@ describe("Codex out of review quota", () => {
         expect(evaluateCodexGate({ headSha: HEAD, comments }).state).toBe("pending");
     });
 
+    it("passes the head when it was asked twice and one notice answered both", () => {
+        // An automatic ask, then a manual re-review of the same head, then one
+        // usage-limit notice: it is the same request, so the notice answers it.
+        const comments = [
+            trigger(HEAD, "2026-10-25T02:23:56Z"),
+            trigger(HEAD, "2026-10-25T13:38:17Z"),
+            quotaComment("2026-10-25T13:38:33Z"),
+        ];
+        const r = evaluateCodexGate({ headSha: HEAD, comments });
+        expect(r.state).toBe("success");
+        expect(r.description).toMatch(/quota/);
+    });
+
+    it("takes an abbreviated repeat of the head for the same request", () => {
+        const comments = [
+            trigger(HEAD, "2026-10-25T02:23:56Z"),
+            trigger(HEAD.slice(0, 10), "2026-10-25T13:38:17Z"),
+            quotaComment("2026-10-25T13:38:33Z"),
+        ];
+        expect(evaluateCodexGate({ headSha: HEAD, comments }).state).toBe("success");
+    });
+
+    it("still stays pending when another head was asked too", () => {
+        const comments = [
+            trigger(OLD, "2026-10-25T02:23:56Z"),
+            trigger(HEAD, "2026-10-25T02:30:00Z"),
+            trigger(HEAD, "2026-10-25T13:38:17Z"),
+            quotaComment("2026-10-25T13:38:33Z"),
+        ];
+        expect(evaluateCodexGate({ headSha: HEAD, comments }).state).toBe("pending");
+    });
+
     it("lets an answer close only its own request (Codex P1 on #3589, second)", () => {
         // findings(OLD) answers only OLD, so the quota notice answers HEAD alone.
         const comments = [

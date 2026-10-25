@@ -49,7 +49,7 @@ Swarm broadcasts and the operator's own words never go through this path.
 ## 6. Files
 
 - `backend/cold_hold.rs`: the rules, the setting, the task-number reader.
-- `server/jekt_cold.rs`: the decision and the hold; `server/reactive.rs` calls it after the quota check.
+- `server/jekt_cold.rs`: the decision and the hold; `backend/cold_hold.rs` also holds the note helper (§8); `server/reactive.rs` calls it after the quota check.
 - `server/jekt_held.rs`, `backend/storage/jekt_held.rs`, `migrations.rs`: the reason column, the ready query, expiry.
 - `storage/work_board.rs`: the two task lookups.
 - `crates/mcp`: `urgent` on `Message`, the `idle` answer, broadcast's `held`.
@@ -63,7 +63,18 @@ Swarm broadcasts and the operator's own words never go through this path.
 - End to end through the inject route: held, left alone while cold, delivered once warm, urgent and sensitive messages not held.
 - The MCP answer and `urgent` flag.
 
-## 8. Out of v1
+## 8. Notes that wait
+
+Two of srv's own `[AgentMux]` notes are informational and now wait for a cold session instead of waking it (a warm session gets them at once, as before). They are kept under a key and go with the agent's next message, after its text, as the held notes already do (`reactive::held_notes`); they never start a turn.
+
+| Note | Key | Why it can wait |
+|---|---|---|
+| "The operator is following your current work as task #N" (Kanban track) | `track:<num>` | It tells the agent to hand the task in when done; nothing is lost if that is a turn later |
+| "Your worker X finished a turn without reporting to you" | `worker:<worker id>` (a newer one replaces an older) | A status line for a leader; the worker's own failure or stop, and a worker waiting on an answer, still wake the leader |
+
+Everything else that wakes today still does: reminders, "build unlocked", the wake at a quota reset, a worker that failed or stopped or is waiting for an answer, job incident notes, account notices, the operator taking a task back, and the replies to upgrade and desktop requests.
+
+## 9. Out of v1
 
 | What | Why not now |
 |---|---|

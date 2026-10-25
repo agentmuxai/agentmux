@@ -26,22 +26,6 @@ pub(super) enum Decision {
     Hold,
 }
 
-/// When the Claude session of `block_id` last wrote output, or `None` when it
-/// is not one to hold for: another provider (its cache works differently),
-/// no controller, or a turn in flight (it is working, whatever it last wrote).
-pub(super) fn session_last_output(mstore: &Store, block_id: &str) -> Option<i64> {
-    let block = mstore.get::<crate::backend::obj::Block>(block_id).ok().flatten()?;
-    let raw = crate::backend::obj::meta_get_string(&block.meta, "agentProvider", "");
-    if crate::backend::providers::resolve_provider_alias(&raw) != "claude" {
-        return None;
-    }
-    let ctrl = crate::backend::blockcontroller::get_controller(block_id)?;
-    if ctrl.turn_tracker().and_then(|t| t.pass_started_ms()).is_some() {
-        return None;
-    }
-    ctrl.last_output_ms()
-}
-
 /// Whether the message hands `target` work, so it must not wait: it names a
 /// task (`#N`) that is waiting on the target, or its sender filed the target
 /// a task a moment ago.
@@ -121,7 +105,7 @@ pub(super) async fn hold_if_cold(
         if !cold_hold::is_routine(&request) && !cold_hold::asks_to_wake(request.priority.as_deref()) {
             return None;
         }
-        let last_output = session_last_output(&mstore, &reg.block_id);
+        let last_output = cold_hold::session_last_output(&mstore, &reg.block_id);
         match decide(&mstore, &identity, &request, &target_uid, &reg.agent_id, last_output, now, after_ms) {
             Decision::Deliver => None,
             Decision::Hold => {
@@ -281,6 +265,6 @@ mod tests {
     #[test]
     fn a_block_with_no_claude_session_is_never_cold() {
         let m = Store::open_in_memory().unwrap();
-        assert_eq!(session_last_output(&m, "no-such-block"), None);
+        assert_eq!(cold_hold::session_last_output(&m, "no-such-block"), None);
     }
 }
