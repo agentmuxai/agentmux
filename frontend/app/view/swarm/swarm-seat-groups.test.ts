@@ -10,7 +10,8 @@
 import { describe, expect, it } from "vitest";
 
 import type { SeatSummary } from "@/types/rpc/SeatSummary";
-import { groupRowsByLead, readGroupBy, type SeatListEntry, type SeatRowInfo } from "./swarm-seat-groups";
+import type { RemoteRow } from "./swarm-remote";
+import { groupRowsByLead, readGroupBy, remoteSeatInfo, type SeatListEntry, type SeatRowInfo } from "./swarm-seat-groups";
 
 const seat = (role: SeatSummary["role"], lead?: [string, string | null]): SeatSummary => ({
     role,
@@ -113,6 +114,60 @@ describe("groupRowsByLead", () => {
             "# Other instances (1)",
             "r1",
         ]);
+    });
+});
+
+/** An agent of another instance, in a section, with the seat it reports. */
+const remoteRow = (name: string, s?: SeatSummary): RemoteRow =>
+    ({
+        section: { key: "lan:area54#1/stable" },
+        agent: { name, block_id: "", ...(s ? { seat: s } : {}) },
+    }) as RemoteRow;
+
+describe("remote agents with a seat", () => {
+    it("are grouped by their lead's name within their own section", () => {
+        const info = new Map<string, SeatRowInfo>([
+            ["manoz", remoteSeatInfo(remoteRow("Manoz", seat("worker", ["uid-on-area54", "AgentX"])))],
+            ["agentx", remoteSeatInfo(remoteRow("AgentX", seat("leader")))],
+            ["bare", remoteSeatInfo(remoteRow("Bare"))],
+            ["mine", local("uid-mine", seat("leader"))],
+        ]);
+        expect(show(groupRowsByLead(["manoz", "bare", "mine", "agentx"], info))).toEqual([
+            "# The operator (3)",
+            "mine",
+            "agentx",
+            "  manoz",
+            "# Other instances (1)",
+            "bare",
+        ]);
+    });
+
+    it("do not follow a local agent that happens to share the lead's name", () => {
+        const info = new Map<string, SeatRowInfo>([
+            ["manoz", remoteSeatInfo(remoteRow("Manoz", seat("worker", ["uid-x", "Camper"])))],
+            ["camper", local("uid-camper", seat("leader"))],
+        ]);
+        expect(show(groupRowsByLead(["manoz", "camper"], info))).toEqual([
+            "# The operator (1)",
+            "camper",
+            "# Camper (1)",
+            "manoz",
+        ]);
+    });
+
+    it("keep a lead the peer could not name under the unnamed-lead heading", () => {
+        const info = remoteSeatInfo(remoteRow("Manoz", seat("worker", ["uid-gone", null])));
+        expect(info.seat?.lead).toEqual({ id: "uid-gone", name: null });
+        expect(show(groupRowsByLead(["manoz"], new Map([["manoz", info]])))).toEqual([
+            "# an agent on another machine (1)",
+            "manoz",
+        ]);
+    });
+
+    it("drop a role this build does not know, so the agent has no seat", () => {
+        const odd = { ...seat("worker"), role: "captain" } as unknown as SeatSummary;
+        expect(remoteSeatInfo(remoteRow("Manoz", odd)).seat).toBeNull();
+        expect(remoteSeatInfo(remoteRow("Manoz")).seat).toBeNull();
     });
 });
 

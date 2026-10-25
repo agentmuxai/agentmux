@@ -6,13 +6,15 @@
  * to (docs/specs/SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md §4). The operator
  * heads the agents that report to it, leaders among them; each agent's
  * reports follow it, one step in; a lead with no row here heads its own
- * group, its name as the heading; agents with no seat go under "No seat", and other instances' agents,
- * whose seats the Swarm isn't sent, under their own heading. Within a group
+ * group, its name as the heading; agents with no seat go under "No seat", and other instances' agents
+ * with no seat under their own heading. An other instance's agent that has a seat is grouped like any
+ * other, by its lead's name within its own section (swarm-seats.tsx gives it the keys). Within a group
  * the rows keep the order they are given (swarm-order.ts).
  */
 
-import { leadName } from "@/app/view/agent/seat-format";
+import { leadName, readSeatMeta, SEAT_META_KEY } from "@/app/view/agent/seat-format";
 import type { SeatSummary } from "@/types/rpc/SeatSummary";
+import type { RemoteRow } from "./swarm-remote";
 
 export type SwarmGroupBy = "none" | "lead";
 
@@ -28,8 +30,25 @@ export interface SeatRowInfo {
     /** The agent's uid (block meta `agentId`); null when the pane names none. */
     agentId: string | null;
     seat: SeatSummary | null;
-    /** An agent of another instance. */
+    /** An agent of another instance. One with a `seat` is grouped by it; one without goes under its own heading. */
     remote: boolean;
+}
+
+/** Another instance's agents have no uid here, so within a section a name stands for one. */
+const remoteAgentId = (sectionKey: string, name: string) => `remote:${sectionKey}/${name.toLowerCase()}`;
+
+/**
+ * What grouping knows about an agent of another instance: its seat as it
+ * reports it (an unknown role is dropped), with the agent and its lead named
+ * by section and name, so a remote worker follows a remote lead of the same
+ * section. A lead the peer couldn't name stays as it was: its group is
+ * headed "an agent on another machine".
+ */
+export function remoteSeatInfo(row: RemoteRow): SeatRowInfo {
+    const seat = readSeatMeta({ [SEAT_META_KEY]: row.agent.seat });
+    const lead = seat?.lead;
+    const named = seat && lead?.name ? { ...seat, lead: { id: remoteAgentId(row.section.key, lead.name), name: lead.name } } : seat;
+    return { agentId: remoteAgentId(row.section.key, row.agent.name), seat: named, remote: true };
 }
 
 /** How deep a row sits under its group's heading: its lead's depth plus one, cut here. */
@@ -50,7 +69,7 @@ export function groupRowsByLead(order: readonly string[], info: ReadonlyMap<stri
     const remote: string[] = [];
     for (const key of order) {
         const row = info.get(key);
-        if (row?.remote) remote.push(key);
+        if (row?.remote && !row.seat) remote.push(key);
         else if (row?.seat) seated.push(key);
         else unseated.push(key);
     }
@@ -119,7 +138,7 @@ export function groupRowsByLead(order: readonly string[], info: ReadonlyMap<stri
     group(
         "remote",
         REMOTE_HEADING,
-        "Agents of other AgentMux instances",
+        "Agents of other AgentMux instances that share no seat",
         remote.map((key) => ({ kind: "row", key, depth: 0 }))
     );
     return entries;

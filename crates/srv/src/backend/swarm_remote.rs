@@ -62,6 +62,12 @@ pub struct RemoteAgent {
     /// provider icon (SPEC_SWARM_REFINEMENTS_2026_10_17.md §3).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider: Option<String>,
+    /// Its seat as its instance reported it: a LAN peer's `agent_seats`
+    /// (SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md §5), bounded by
+    /// `agent_seat::sanitize_peer_summary`. Absent when it has none, or for
+    /// this machine's other channels, which don't report one. Display only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub seat: Option<crate::backend::rpc_types::SeatSummary>,
 }
 
 /// What one channel of this machine said about its agents, by lower-cased name.
@@ -168,6 +174,7 @@ pub fn other_channels(
                     status: report.and_then(|r| r.status.get(&key)).copied(),
                     line: report.and_then(|r| r.lines.get(&key)).cloned(),
                     provider: report.and_then(|r| r.providers.get(&key)).cloned(),
+                    seat: None,
                 }
             });
     }
@@ -252,6 +259,7 @@ pub fn lan_hosts(
                 status: p.agent_status.get(&name.to_lowercase()).copied(),
                 line: p.agent_lines.get(&name.to_lowercase()).cloned(),
                 provider: p.agent_providers.get(&name.to_lowercase()).cloned(),
+                seat: p.agent_seats.get(&name.to_lowercase()).cloned(),
             })
             .collect();
         agents.sort_by_key(|a| a.name.to_lowercase());
@@ -942,6 +950,22 @@ mod tests {
     }
 
     #[test]
+    fn a_lan_peers_agents_carry_the_seat_it_reported() {
+        let mut p = peer("Area54", "stable", "10.0.0.26", 29700, &["Manoz", "Opaz"], 5);
+        let seat = crate::backend::rpc_types::SeatSummary {
+            role: "specialist".into(),
+            qualifier: None,
+            lead: Some(crate::backend::rpc_types::SeatLead { id: "uid-agentx".into(), name: Some("AgentX".into()) }),
+            area: Some("agent pane lifecycle".into()),
+        };
+        p.agent_seats.insert("manoz".into(), seat.clone());
+        let hosts = lan_hosts(&[p], &HashSet::new(), NOW);
+        let got: Vec<Option<&crate::backend::rpc_types::SeatSummary>> =
+            hosts[0].channels[0].agents.iter().map(|a| a.seat.as_ref()).collect();
+        assert_eq!(got, [Some(&seat), None]);
+    }
+
+    #[test]
     fn status_targets_are_live_loopback_instances_other_than_this_one() {
         let at = |name: &str, channel: &str, url: &str, age_ms: u64| {
             let mut e = entry(name, channel, age_ms);
@@ -1093,7 +1117,7 @@ mod tests {
     fn lan_hosts_are_left_as_they_are() {
         let entries = [with_uid("Camper", "dev", "uid-camper")];
         let defined: DefinedProviders = [("uid-camper".to_string(), "claude".to_string())].into();
-        let agent = RemoteAgent { name: "Camper".into(), block_id: String::new(), status: None, line: None, provider: None };
+        let agent = RemoteAgent { name: "Camper".into(), block_id: String::new(), status: None, line: None, provider: None, seat: None };
         let channel = RemoteChannel { channel: "dev".into(), seen_at_ms: NOW, stale: false, os: String::new(), agents: vec![agent], route: None };
         let mut snap = SwarmOtherInstancesResult {
             hostname: "narko".into(),
