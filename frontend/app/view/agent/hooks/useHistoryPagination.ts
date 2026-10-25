@@ -42,6 +42,7 @@ import { parseHistoryLines, type ParsedHistory } from "../parseHistoryLines";
 import { historyPin, type TranscriptSettleLatch } from "../transcript-cursor";
 
 import type { DocumentState, FilterState, LogFn } from "../types";
+import { endHistoryLoad } from "@/app/store/agent-document-store";
 import { logAgentOpenRest, markAgentOpen } from "../open-trace";
 import { linesBytes, planFill, runHistoryFill } from "./history-fill";
 import { OPEN_TAIL_BYTES, readOpenTail, startsAtTurn } from "./open-tail";
@@ -535,6 +536,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
             const began = performance.now();
             if (!plan || turnCapped) {
                 markAgentOpen(opts.blockId, "rest_loaded", { rest_pages: 0 });
+                endHistoryLoad(opts.blockId);
                 return;
             }
             let fillBytes = 0;
@@ -563,6 +565,8 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
             opts.log("history", `background fill ${out.outcome}: ${out.pages} pages, ${out.lines} lines, ${out.bytes} bytes in ${took} ms`);
             markAgentOpen(opts.blockId, "rest_loaded", { rest_pages: out.pages, rest_lines: out.lines });
             logAgentOpenRest(opts.blockId, out.outcome, { pages: out.pages, lines: out.lines, bytes: out.bytes, ms: took });
+            // The history is as loaded as it will be: tool chunks the pane held for tools it still lacks are dropped.
+            endHistoryLoad(opts.blockId);
         };
 
         // Init lifecycle (issue #728 gap 1): dispatch InitStart before the

@@ -19,7 +19,7 @@
 
 import { type Accessor, createSignal, type Setter } from "solid-js";
 
-import type { DocumentNode } from "../view/agent/types";
+import type { DocumentNode, ToolLogChunk } from "../view/agent/types";
 import { markDispatch } from "../view/agent/virtualization/perf-probe";
 import { RpcApi } from "./rpc-api";
 import { TabRpcClient } from "./rpc-util";
@@ -65,8 +65,27 @@ function pushResolvedDockNodes(blockId: string, events: AgentDocumentEvent[]) {
     }
 }
 
+/**
+ * Tool chunks a mounting pane could not place yet: the broker replays up to
+ * 1024 persisted `tool_chunk` events at a pane that mounts, about 1.7 s after
+ * the window loads and before its transcript history has made the tool nodes.
+ * They wait here, in arrival order, and are appended to their tool as soon as
+ * its node exists.
+ */
+interface ChunkHold {
+    chunks: Array<{ toolId: string; chunk: ToolLogChunk }>;
+    timer: ReturnType<typeof setTimeout> | null;
+}
+
+/** The most chunks a pane holds: the broker's replay cap per scope. */
+const CHUNK_HOLD_MAX = 1024;
+/** A pane stops holding this long after it mounted, if its history load has not ended first. */
+const CHUNK_HOLD_TIMEOUT_MS = 10_000;
+
 interface Slot {
     state: AgentDocumentState;
+    /** Open while the pane mounts (see `ChunkHold`); `null` once its history load ended or timed out. */
+    hold: ChunkHold | null;
     /**
      * Reactive read side of `state.nodes`. Referential equality, same as
      * the view-owned signal it replaced: the reducer produces a fresh array
@@ -185,7 +204,54 @@ function flushDropBurst(blockId: string): void {
 export function registerPane(blockId: string): void {
     const state = initialState();
     const [nodes, setNodes] = createSignal<DocumentNode[]>(state.nodes);
-    slots.set(blockId, { state, nodes, setNodes });
+    const previous = slots.get(blockId);
+    if (previous?.hold?.timer != null) clearTimeout(previous.hold.timer);
+    const hold: ChunkHold = { chunks: [], timer: null };
+    hold.timer = setTimeout(() => endChunkHold(blockId), CHUNK_HOLD_TIMEOUT_MS);
+    // Node's timers keep a process alive; a unit test must not wait for this one.
+    (hold.timer as { unref?: () => void }).unref?.();
+    slots.set(blockId, { state, hold, nodes, setNodes });
+}
+
+/**
+ * The pane's history load has ended (or failed): chunks still held belong to
+ * tools the history does not have, so they are dropped, counted into the
+ * pane's one summary line (`noteChunkDropped`), and later chunks for an
+ * unknown tool are dropped as before. A no-op for a pane that is not holding.
+ */
+export function endHistoryLoad(blockId: string): void {
+    endChunkHold(blockId);
+}
+
+function endChunkHold(blockId: string): void {
+    const hold = slots.get(blockId)?.hold;
+    if (hold == null) return;
+    const slot = slots.get(blockId)!;
+    slot.hold = null;
+    if (hold.timer != null) clearTimeout(hold.timer);
+    for (const held of hold.chunks) noteChunkDropped(blockId, held.toolId, "unknown-tool-id");
+    hold.chunks.length = 0;
+}
+
+/** Holds `chunk` for `toolId`; past the cap the oldest held chunk is dropped (and counted). */
+function holdChunk(blockId: string, hold: ChunkHold, toolId: string, chunk: ToolLogChunk): void {
+    if (hold.chunks.length >= CHUNK_HOLD_MAX) {
+        const oldest = hold.chunks.shift()!;
+        noteChunkDropped(blockId, oldest.toolId, "unknown-tool-id");
+    }
+    hold.chunks.push({ toolId, chunk });
+}
+
+/** Appends the held chunks whose tool now has a node to it, in arrival order; the rest keep waiting. */
+function applyHeldChunks(blockId: string, slot: Slot): void {
+    const hold = slot.hold;
+    if (hold == null || hold.chunks.length === 0) return;
+    const waiting: ChunkHold["chunks"] = [];
+    const ready: ChunkHold["chunks"] = [];
+    for (const held of hold.chunks) (slot.state.nodeIndexById.has(held.toolId) ? ready : waiting).push(held);
+    if (ready.length === 0) return;
+    hold.chunks = waiting;
+    for (const held of ready) dispatch(blockId, { type: "ToolChunkAppend", toolId: held.toolId, chunk: held.chunk });
 }
 
 /**
@@ -205,6 +271,7 @@ export function documentNodes(blockId: string): Accessor<DocumentNode[]> | null 
  * `unregisterPane` from `agent-pane-registration.ts`.
  */
 export function unregisterPane(blockId: string): void {
+    endChunkHold(blockId);
     slots.delete(blockId);
     flushDropBurst(blockId);
 }
@@ -245,6 +312,16 @@ export function dispatch(
     const result = update(slot.state, command, Date.now(), opts);
     const prevNodes = slot.state.nodes;
     slot.state = result.state;
+    // A mounting pane holds a chunk for a tool it does not have yet instead of
+    // dropping it (`ChunkHold`); every other event goes on as the reducer made it.
+    let events = result.events;
+    if (slot.hold != null && command.type === "ToolChunkAppend") {
+        const unknown = (e: AgentDocumentEvent) => e.type === "tool-chunk-dropped" && e.reason === "unknown-tool-id";
+        if (events.some(unknown)) {
+            holdChunk(blockId, slot.hold, command.toolId, command.chunk);
+            events = events.filter((e) => !unknown(e));
+        }
+    }
     // Publish only if nodes changed (referential equality). Avoids no-op
     // signal writes that would still schedule a Solid effect. Thunk form
     // so Solid never mistakes the array for an updater function.
@@ -265,18 +342,22 @@ export function dispatch(
             );
         }
     }
-    for (const ev of result.events) eventSink(blockId, ev);
-    pushResolvedDockNodes(blockId, result.events);
+    for (const ev of events) eventSink(blockId, ev);
+    pushResolvedDockNodes(blockId, events);
     recordDispatch({
         slice: "agent-document",
         key: blockId,
         command,
-        events: result.events,
+        events,
         source,
         at: Date.now(),
     });
     stopDispatchTiming();
-    return result.events;
+    // New nodes may be the tools held chunks wait for.
+    if (slot.hold != null && command.type !== "ToolChunkAppend" && slot.state.nodes !== prevNodes && slots.get(blockId) === slot) {
+        applyHeldChunks(blockId, slot);
+    }
+    return events;
 }
 
 /**
@@ -317,6 +398,7 @@ export function getNodeIdSet(blockId: string): Set<string> {
 
 /** Test/dev helper — wipe all slots. Never call in production. */
 export function __resetAllSlots(): void {
+    for (const slot of slots.values()) if (slot.hold?.timer != null) clearTimeout(slot.hold.timer);
     slots.clear();
     for (const burst of dropBursts.values()) if (burst.timer != null) clearTimeout(burst.timer);
     dropBursts.clear();
