@@ -795,7 +795,17 @@ impl AgentMuxHandler {
         // Only the frontend's own pages get the creds, in every window: an
         // app window that somehow loaded another site, or a browser pane on a
         // remote one, gets nothing (app_navigation.rs).
-        let should_inject = super::app_navigation::injects_ipc_credentials(&frame_url, &self.frontend_origins());
+        // A browser pane gets none, even when it is showing the frontend's address: that is
+        // decided from what the browser is registered as. A browser not registered yet falls
+        // back to the origin alone, as before; a pane is registered when it is created.
+        let registered_as_pane = browser
+            .as_deref()
+            .is_some_and(|b| super::pane_frontend_guard::shows_web_pages(self.registered_kind(b).as_ref()));
+        let should_inject =
+            super::app_navigation::injects_ipc_credentials(&frame_url, &self.frontend_origins(), registered_as_pane);
+        if registered_as_pane && super::app_navigation::is_frontend_address(&frame_url, &self.frontend_origins()) {
+            tracing::warn!("a browser pane is showing the app's own address: it gets no IPC credentials");
+        }
         if should_inject {
             let ipc_token = &self.state.ipc_token;
             let js = format!(
@@ -805,7 +815,11 @@ impl AgentMuxHandler {
             let code = CefString::from(js.as_str());
             let empty = CefString::from("");
             frame.execute_java_script(Some(&code), Some(&empty), 0);
-            tracing::info!("Injected IPC port {} into page: {}", ipc_port, frame_url);
+            tracing::info!(
+                "Injected IPC port {} into page: {}",
+                ipc_port,
+                super::app_navigation::redact_ipc_token(&frame_url)
+            );
         }
 
         // Pane-specific on_load_end work (focus subclass re-install after

@@ -1165,7 +1165,7 @@ impl AgentMuxHandler {
         let is_main_frame = frame.as_ref().map(|f| f.is_main() == 1).unwrap_or(false);
         // Off an agent's site list: cancelled before anything below marks the
         // pane as loading (client/allowed_origins.rs).
-        if is_main_frame && browser.as_deref().is_some_and(|b| self.stop_off_list_navigation(b, &url)) {
+        if is_main_frame && browser.as_deref().is_some_and(|b| self.stop_frontend_navigation(b, &url) || self.stop_off_list_navigation(b, &url)) {
             return 1;
         }
         if is_main_frame {

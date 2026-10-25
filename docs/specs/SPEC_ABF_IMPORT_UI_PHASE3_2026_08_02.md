@@ -347,6 +347,17 @@ the one the modal actually uses):
 }
 ```
 
+**Revised 2026-10-25: each skill row also carries its text.** `content` is the
+skill's body exactly as the commit writes it, `content_total_chars` its length
+in characters, and `content_truncated` is true when a size cap cut `content`
+(50,000 characters per skill, 1,000,000 across the response). A skill is text an
+agent is told to follow, so the modal shows it before anything is imported, and
+a skill whose text was cut starts unticked: it is imported only if the person
+chooses to take what they could not read in full. The commit still re-parses the
+archive and matches `expected_content_digest`, so the text shown is the text
+imported. An imported skill is global but bound only to the new bundle, so it
+reaches only agents on that bundle.
+
 `source_dir`/`source_path` are the §3.0 selection keys — always present,
 always unique per row, independent of whatever the row's own `slug`/JSON
 `name` field says. **codex P2 on PR #2381, round 7: `mcp_servers[].config`

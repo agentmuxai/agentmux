@@ -638,3 +638,27 @@ describe("BrowserViewModel close requested by its page", () => {
         expect(model.closeNode).not.toHaveBeenCalled();
     });
 });
+
+describe("BrowserViewModel body context menu icons (SPEC_CONTEXT_MENU_ICONS_2026_10_25.md §4)", () => {
+    const iconsOf = (items: ContextMenuItem[]) => Object.fromEntries(items.filter((i) => i.type !== "separator").map((i) => [i.label, i.icon]));
+
+    it("gives the navigation and page rows their icons", () => {
+        const vm = makeVM();
+        expect(iconsOf(vm.getBodyContextMenuItems({ x: 1, y: 2 }))).toEqual({
+            Back: "arrow-left",
+            Forward: "arrow-right",
+            Reload: "arrows-rotate",
+            Print: "print",
+            "View Page Source": "code",
+            "Inspect Element": "bug",
+        });
+    });
+
+    it("gives the edit and link rows theirs", () => {
+        const vm = makeVM();
+        const icons = iconsOf(
+            vm.getBodyContextMenuItems({ x: 1, y: 2, selectionText: "x", isEditable: true, linkUrl: "https://example.com" })
+        );
+        expect(icons).toMatchObject({ Cut: "scissors", Copy: "copy", Paste: "paste", "Copy Link Address": "link" });
+    });
+});

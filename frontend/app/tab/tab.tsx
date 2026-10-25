@@ -104,10 +104,10 @@ const TabContextPanel = (props: TabContextPanelProps): JSX.Element => {
                 />
                 <div class="tab-context-actions">
                     <button class="tab-context-btn" onClick={() => { props.onRename(); props.onClose(); }}>
-                        ✏️ Rename
+                        <i class="fa-solid fa-pen" aria-hidden="true" /> Rename
                     </button>
                     <button class="tab-context-btn tab-context-btn-close" onClick={() => props.onClose()}>
-                        ✕ Close menu
+                        <i class="fa-solid fa-xmark" aria-hidden="true" /> Close menu
                     </button>
                 </div>
             </div>

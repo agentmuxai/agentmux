@@ -105,6 +105,12 @@ pub const COMMAND_BACKGROUND_TASK_PID: &str = "backgroundtaskpid";
 pub const COMMAND_LIST_BACKGROUND_TASKS: &str = "listbackgroundtasks";
 /// Who holds this machine's build slot (`agentmux_common::build_slot`), or null: the Swarm row note.
 pub const COMMAND_GET_BUILD_SLOT: &str = "getbuildslot";
+/// The keys and installs pinned to the names of agents that speak from elsewhere (operator only).
+pub const COMMAND_PINS_LIST: &str = "pins.list";
+/// Forget one pin, so the next key or install shown for the name is pinned (operator only).
+pub const COMMAND_PINS_FORGET: &str = "pins.forget";
+/// Pin the key or install that was last refused for a name (operator only).
+pub const COMMAND_PINS_ADOPT: &str = "pins.adopt";
 
 // Subprocess agent commands
 pub const COMMAND_SUBPROCESS_SPAWN: &str = "subprocessspawn";
@@ -437,6 +443,13 @@ pub const COMMAND_KANBAN_ACT: &str = "kanban.act";
 pub const COMMAND_JOBS_LIST: &str = "jobs.list";
 pub const COMMAND_JOBS_RUNS: &str = "jobs.runs";
 pub const COMMAND_JOBS_ACT: &str = "jobs.act";
+/// The Jobs tab's editor (§5.1, §5.2, §5.4): a job's definition, create or
+/// edit one (the operator's window only), what one would do, and what a
+/// template's newer version would change in a job.
+pub const COMMAND_JOBS_GET: &str = "jobs.get";
+pub const COMMAND_JOBS_SAVE: &str = "jobs.save";
+pub const COMMAND_JOBS_DRYRUN: &str = "jobs.dryrun";
+pub const COMMAND_JOBS_TEMPLATES_UPDATE_DIFF: &str = "jobs.templates.update_diff";
 // Connections (SPEC_REMOTE_TERMINALS_AND_DURABLE_SESSIONS_2026_10_02.md). The
 // names are the ones the frontend's connection UI has always called
 // (rpc-api/workspace.ts); they had no handler until P0.

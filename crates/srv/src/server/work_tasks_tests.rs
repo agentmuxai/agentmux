@@ -8,19 +8,27 @@ use axum::http::{Request, StatusCode};
 use serde_json::{json, Value};
 use tower::ServiceExt;
 
-fn app() -> axum::Router {
-    crate::server::build_router(crate::server::tests::test_state())
+/// A router and the state behind it; a request acts as the agent its body names.
+struct Api {
+    router: axum::Router,
+    state: crate::server::AppState,
 }
 
-async fn post(app: &axum::Router, uri: &str, body: Value) -> (StatusCode, Value) {
+fn app() -> Api {
+    app_and_state().0
+}
+
+async fn post(app: &Api, uri: &str, body: Value) -> (StatusCode, Value) {
+    let token = crate::server::tests::token_for(&app.state, &crate::server::tests::actor_in(&body));
     let req = Request::builder()
         .uri(uri)
         .method("POST")
         .header("X-AuthKey", "test-secret-key")
+        .header("X-Agent-Token", token)
         .header("Content-Type", "application/json")
         .body(Body::from(body.to_string()))
         .unwrap();
-    let resp = app.clone().oneshot(req).await.unwrap();
+    let resp = app.router.clone().oneshot(req).await.unwrap();
     let status = resp.status();
     let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
     (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
@@ -141,9 +149,9 @@ async fn filing_for_later_can_hold_a_task_out_of_reach() {
 // SPEC_KANBAN_AGENTS_HOLD_AND_UNHOLD_2026_10_22.md: agents hold and unhold.
 
 /// A router and the state behind it, to read a task's history.
-fn app_and_state() -> (axum::Router, crate::server::AppState) {
+fn app_and_state() -> (Api, crate::server::AppState) {
     let state = crate::server::tests::test_state();
-    (crate::server::build_router(state.clone()), state)
+    (Api { router: crate::server::build_router(state.clone()), state: state.clone() }, state)
 }
 
 fn history(state: &crate::server::AppState, num: i64) -> Vec<(String, String, String)> {

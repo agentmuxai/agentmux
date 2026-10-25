@@ -15,6 +15,7 @@
 import { hostHas } from "@/app/host/host-caps";
 import { openViewInNewTab } from "@/app/tab/tab-presets";
 import { RpcApi } from "@/app/store/rpc-api";
+import { MENU_ICON } from "@/app/util/menu-icons";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getApi } from "@/store/global";
 import { openWindowInheriting } from "@/app/store/window-appearance";
@@ -23,6 +24,7 @@ import { keyOfPinId } from "./action-widgets-config";
 
 export interface WidgetOpenAction {
     label: string;
+    icon: string;
     run: () => void;
 }
 
@@ -43,6 +45,7 @@ export function buildWidgetOpenActions(
     if (!view) return [];
     const inNewTab: WidgetOpenAction = {
         label: "Open in New Tab",
+        icon: MENU_ICON.open,
         run: () => fireAndForget(async () => openViewInNewTab(view, blockMeta)),
     };
     // A new window and a floating pane are both native windows.
@@ -50,10 +53,12 @@ export function buildWidgetOpenActions(
     return [
         {
             label: "Open in New Window",
+            icon: MENU_ICON.open,
             run: () => fireAndForget(() => openWindowInheriting(() => getApi().openNewWindowWithView(view, blockMeta))),
         },
         {
             label: "Open in Floating Pane",
+            icon: MENU_ICON.floatingPane,
             run: () =>
                 fireAndForget(async () =>
                     RpcApi.PaneOpenCommand(TabRpcClient, { view, meta: blockMeta, floating: true }, {})

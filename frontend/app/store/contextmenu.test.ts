@@ -62,6 +62,12 @@ describe("showCopyContextMenu", () => {
         expect(mocks.writeText).toHaveBeenCalledExactlyOnceWith("BBB");
     });
 
+    it("draws the Copy icon on every row (SPEC_CONTEXT_MENU_ICONS_2026_10_25.md D5)", () => {
+        showCopyContextMenu([{ label: "Copy a", value: "AAA" }, { label: "Copy b", value: "BBB" }], rightClick());
+        const items = mocks.showContextMenu.mock.calls[0][1] as { icon?: string }[];
+        expect(items.map((i) => i.icon)).toEqual(["copy", "copy"]);
+    });
+
     it("drops entries with an empty or missing value", () => {
         showCopyContextMenu(
             [
@@ -121,6 +127,24 @@ describe("showTextInputContextMenu", () => {
         clickItem("Paste");
         await vi.waitFor(() => expect(onPasteAttachments).toHaveBeenCalledWith(["C:/tmp/clipboard-1.png"]));
         expect(ta.value).toBe("see");
+        ta.remove();
+    });
+
+    it("draws Cut, Copy and Paste with their icons, and the clipboard URL with the open icon", async () => {
+        const ta = document.createElement("textarea");
+        document.body.appendChild(ta);
+        ta.value = "hello world";
+        ta.focus();
+        ta.setSelectionRange(0, 5);
+        mocks.readText.mockResolvedValue("https://example.com/x");
+        await showTextInputContextMenu(rightClick());
+        const items = mocks.showContextMenu.mock.calls.at(-1)![1] as { label?: string; icon?: string }[];
+        const iconOf = (label: string) => items.find((i) => i.label?.startsWith(label))?.icon;
+        expect(iconOf("Cut")).toBe("scissors");
+        expect(iconOf("Copy")).toBe("copy");
+        expect(iconOf("Paste")).toBe("paste");
+        expect(iconOf("Open Clipboard URL")).toBe("arrow-up-right-from-square");
+        mocks.readText.mockResolvedValue("");
         ta.remove();
     });
 

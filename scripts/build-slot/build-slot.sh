@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# build-slot-version: 6
+# build-slot-version: 7
 # build-slot: run one heavy build or test command while holding the host-wide
 # build slot, so only one such command runs on this machine at a time.
 # Spec: docs/specs/SPEC_BUILD_SLOT_ENFORCEMENT_2026_10_20.md. AgentMux installs this file to
@@ -10,7 +10,8 @@
 #   build-slot history                                    waits and holds of past runs, by reason
 #
 # Works in Git Bash (Windows), Linux and macOS: it needs only bash, mkdir, date, sleep.
-# The slot is a directory created with mkdir (atomic). The holder refreshes a heartbeat
+# One run at a time by default; BUILD_SLOT_MAX, or a number in <locks>/build/limit, allows more
+# (a machine with the memory for two srv compiles). A slot is a directory created with mkdir (atomic). The holder refreshes a heartbeat
 # file every 20 s; a slot whose heartbeat is older than STALE_SECS belongs to a dead
 # process and is taken over. Waiters line up by ticket, oldest first.
 # The whole script is one function, called on the last line. Bash reads a script a piece
@@ -20,11 +21,12 @@ main() {
 set -u
 
 ROOT="${AGENTMUX_BUILD_SLOT_DIR:-$HOME/.agentmux/shared/locks/build}"
-SLOT="$ROOT/slot"
+SLOT="$ROOT/slot"   # the slot this run holds (slot, slot-2, ...) once it has one
 QUEUE="$ROOT/queue"
 HISTORY="$ROOT/history.log"   # one line per run: epoch, agent, reason, waited, held, exit (tab-separated)
 STALE_SECS="${BUILD_SLOT_STALE_SECS:-90}"
 MAX_WAIT="${BUILD_SLOT_MAX_WAIT:-3600}"
+LIMIT_FILE="$ROOT/limit"   # the number of runs allowed at once on this machine, if not 1
 POLL="${BUILD_SLOT_POLL:-3}"
 ME="${AGENTMUX_AGENT_ID:-${USER:-unknown}}"
 PARENT="$PPID"
@@ -46,12 +48,25 @@ mtime() { # file -> epoch seconds of last change, 0 if missing
   t=$(stat -c %Y "$f" 2>/dev/null) || t=$(stat -f %m "$f" 2>/dev/null) || t=0
   echo "$t"
 }
-field() { sed -n "s/^$1=//p" "$SLOT/owner" 2>/dev/null | head -1; }
+# How many runs may hold a slot at once: $BUILD_SLOT_MAX, else the first number in the limit
+# file, else 1. At most 16.
+slot_limit() {
+  local n="${BUILD_SLOT_MAX:-}"
+  [ -n "$n" ] || n=$(head -1 "$LIMIT_FILE" 2>/dev/null | tr -dc '0-9')
+  case "$n" in ''|*[!0-9]*) n=1 ;; esac
+  n=$((10#$n))
+  [ "$n" -ge 1 ] || n=1
+  [ "$n" -le 16 ] || n=16
+  echo "$n"
+}
+slot_dir() { if [ "$1" -le 1 ]; then echo "$ROOT/slot"; else echo "$ROOT/slot-$1"; fi; }
+dfield() { sed -n "s/^$2=//p" "$1/owner" 2>/dev/null | head -1; } # slot dir, key
+field() { dfield "$SLOT" "$1"; }
 # A field as a number: an owner file still being written, or a slot released a
 # moment ago, reads as empty, which must not break the arithmetic around it.
-num_field() { local v; v=$(field "$1"); case "$v" in ''|*[!0-9]*) v=$(now);; esac; echo "$v"; }
+num_field() { local v; v=$(dfield "$SLOT" "$1"); case "$v" in ''|*[!0-9]*) v=$(now);; esac; echo "$v"; }
 
-slot_is_stale() { # the slot exists but nobody is keeping it alive
+slot_is_stale() { # the slot (the dir in $SLOT) exists but nobody is keeping it alive
   local hb age
   hb=$(mtime "$SLOT/heartbeat")
   [ "$hb" -eq 0 ] && hb=$(mtime "$SLOT")   # owner not written yet: use the dir's age
@@ -60,13 +75,27 @@ slot_is_stale() { # the slot exists but nobody is keeping it alive
 }
 
 status() {
-  if [ -d "$SLOT" ]; then
-    if slot_is_stale; then echo "slot: STALE (previous holder died), free to take over"
-    else
-      echo "slot: HELD by $(field agent) since $(( ($(now) - $(num_field start)) / 60 )) min: $(field cmd)"
-      echo "      in $(field cwd)${BUILD_SLOT_VERBOSE:+ (pid $(field pid))}"
-    fi
-  else echo "slot: free"; fi
+  # Every slot there is room for: "slot" for the first, "slot-2", ... for the others.
+  local lim i d free=0 saved="$SLOT"
+  lim=$(slot_limit)
+  for d in "$ROOT"/slot-*; do # a slot left from a higher limit that is still held shows too
+    [ -d "$d" ] || continue
+    i="${d##*/slot-}"; case "$i" in ''|*[!0-9]*) continue ;; esac
+    [ "$i" -gt "$lim" ] && lim="$i"
+  done
+  for i in $(seq 1 "$lim"); do
+    d=$(slot_dir "$i"); SLOT="$d"
+    local label="slot"; [ "$i" -gt 1 ] && label="slot-$i"
+    if [ -d "$d" ]; then
+      if slot_is_stale; then free=$((free+1)); [ "$lim" -eq 1 ] && echo "$label: STALE (previous holder died), free to take over"
+      else
+        echo "$label: HELD by $(field agent) since $(( ($(now) - $(num_field start)) / 60 )) min: $(field cmd)"
+        echo "      in $(field cwd)${BUILD_SLOT_VERBOSE:+ (pid $(field pid))}"
+      fi
+    else free=$((free+1)); [ "$lim" -eq 1 ] && echo "$label: free"; fi
+  done
+  SLOT="$saved"
+  [ "$lim" -gt 1 ] && echo "slots: $((lim - free)) of $lim in use"
   local n=0 t
   for t in "$QUEUE"/*; do
     [ -e "$t" ] || continue
@@ -118,7 +147,12 @@ if [ "${1:-}" = "--reason" ]; then REASON="${2:-}"; shift 2; fi
 # A command started inside a held slot (task -> cargo) must not wait for itself.
 if [ "${BUILD_SLOT_HELD:-}" = "1" ]; then exec "$@"; fi
 
-mkdir -p "$QUEUE" || exit 70
+# A lock folder that can't be made or written must never stop the build: say so and run the
+# command without the slot.
+if ! { mkdir -p "$QUEUE" 2>/dev/null && [ -w "$ROOT" ] && [ -w "$QUEUE" ]; }; then
+  echo "build-slot: can't use the lock folder $ROOT; running without the build slot" >&2
+  exec "$@"
+fi
 QUEUED_AT=$(now)
 TICKET="$QUEUE/$QUEUED_AT-$$"
 CMDLINE="$*"
@@ -157,19 +191,50 @@ first_in_line() {
   [ "$oldest" = "$TICKET" ]
 }
 
-waited=0; said=0
+# Take the first free slot, up to the limit. Only the run at the head of the queue tries.
+# Returns 0 with SLOT set when it got one, 1 when all are held, 3 when a mkdir failed and left no
+# slot behind (a holder that released in that instant, or a folder that can't be used: the
+# caller tells the two apart by whether it keeps happening).
+try_slots() {
+  local lim i d
+  lim=$(slot_limit)
+  for i in $(seq 1 "$lim"); do
+    d=$(slot_dir "$i")
+    SLOT="$d"
+    if [ -d "$d" ] && slot_is_stale; then rm -rf "$d"; fi
+    if mkdir "$d" 2>/dev/null; then return 0; fi
+    # Neither made nor there any more: a holder released between the two steps, or the folder
+    # can't be written. Try once more before calling it unusable.
+    if [ ! -d "$d" ]; then
+      mkdir "$d" 2>/dev/null && return 0
+      [ -d "$d" ] || return 3
+    fi
+  done
+  SLOT="$ROOT/slot"
+  return 1
+}
+
+waited=0; said=0; unusable=0
 while :; do
-  touch "$TICKET"
+  touch "$TICKET" 2>/dev/null
   if first_in_line; then
-    if [ -d "$SLOT" ] && slot_is_stale; then rm -rf "$SLOT"; fi
-    if mkdir "$SLOT" 2>/dev/null; then HOLDING=1; ACQUIRED_AT=$(now); break; fi
+    try_slots; got=$?
+    if [ "$got" -eq 0 ]; then HOLDING=1; ACQUIRED_AT=$(now); break; fi
+    # A slot that can't be created three polls running means the folder is unusable (a single
+    # failure is a holder releasing at that instant): run without the slot instead of waiting.
+    if [ "$got" -eq 3 ]; then unusable=$((unusable + 1)); else unusable=0; fi
+    if [ "$unusable" -ge 3 ] || [ ! -w "$ROOT" ]; then
+      rm -f "$TICKET"
+      echo "build-slot: can't create a slot under $ROOT; running without the build slot" >&2
+      exec "$@"
+    fi
   fi
   if [ "$waited" -ge "$MAX_WAIT" ]; then
     log_history "$(( $(now) - QUEUED_AT ))" 0 75
     echo "build-slot: gave up after ${MAX_WAIT}s waiting. $(status | head -2 | tr '\n' ' ')" >&2; exit 75
   fi
   if [ "$said" -eq 0 ] || [ $((waited % 60)) -lt "$POLL" ]; then
-    wait_note "build-slot: waiting ($ME) — $(status | head -2 | tr '\n' ' ')"; said=1
+    wait_note "build-slot: waiting for the build slot ($ME has waited $(( $(now) - QUEUED_AT ))s, gives up after ${MAX_WAIT}s) — $(status | head -2 | tr '\n' ' ')"; said=1
   fi
   # A wait whose parent is gone (the tool or shell that started it was stopped) must not
   # keep a ticket in the queue: leave. BUILD_SLOT_DETACHED=1 turns this off for a wait

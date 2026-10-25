@@ -4,6 +4,7 @@
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RemoteRecord } from "@/app/store/rpc-api/remotes";
+import { MENU_ICON } from "@/app/util/menu-icons";
 
 const rpc = vi.hoisted(() => ({
     RemotesListCommand: vi.fn(),
@@ -417,5 +418,23 @@ describe("RemotesView", () => {
         expect(labels("connected")).toContain("Disconnect");
         expect(labels("connecting")).not.toContain("Connect");
         expect(labels("connecting")).not.toContain("Disconnect");
+    });
+
+    it("gives every action row its icon", async () => {
+        const { model } = await renderWith([]);
+        const icons = (r: RemoteRecord) =>
+            Object.fromEntries(
+                rowMenu(model, r)
+                    .filter((i) => i.type === "action")
+                    .map((i) => [i.label, i.icon])
+            );
+        const up = icons(remote("db1", { status: { state: "connected", error: "" } }));
+        expect(up["Disconnect"]).toBe(MENU_ICON.disconnect);
+        expect(up["Sessions…"]).toBe(MENU_ICON.sessions);
+        const down = icons(remote("me@box", { sources: ["recent"] }));
+        expect(down["Connect"]).toBe(MENU_ICON.connect);
+        expect(down["Forget"]).toBe(MENU_ICON.delete);
+        // No action row is left without an icon, so the slot is filled on every row.
+        for (const [label, icon] of Object.entries({ ...up, ...down })) expect(icon, label).toBeTruthy();
     });
 });

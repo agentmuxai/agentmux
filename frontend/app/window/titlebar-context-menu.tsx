@@ -4,6 +4,7 @@
 import { PopoverMenu, type PopoverMenuItem } from "@/app/element/popover-menu";
 import { hostHas } from "@/app/host/host-caps";
 import { RpcApi } from "@/app/store/rpc-api";
+import { MENU_ICON } from "@/app/util/menu-icons";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { createTab } from "@/store/global";
 import { openNewWindowFromHere } from "@/app/store/window-appearance";
@@ -62,6 +63,7 @@ const TitleBarContextMenu = (props: TitleBarContextMenuProps): JSX.Element => {
         if (hostHas("multiWindow")) {
             items.push({
                 label: "New Window",
+                icon: MENU_ICON.add,
                 click: () => {
                     fireAndForget(async () => openNewWindowFromHere());
                 },
@@ -70,6 +72,7 @@ const TitleBarContextMenu = (props: TitleBarContextMenuProps): JSX.Element => {
 
         items.push({
             label: "New Tab",
+            icon: MENU_ICON.add,
             click: () => {
                 createTab();
             },

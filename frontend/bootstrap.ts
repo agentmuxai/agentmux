@@ -12,6 +12,7 @@ import { tryAutoRecover, clearStartupReloadCount, StartupFailureHandled, reloadK
 import { benchMark } from "@/util/startup-bench";
 import { initPerf } from "@/perf";
 import { isTerminalContext } from "@/app/platform/webgl-context-loss";
+import { redactIpcToken } from "@/util/redact-ipc-token";
 
 // The host's early hooks (the desktop host pipes logs and uncaught errors to
 // its log file). Must run before any other code so early messages are captured.
@@ -126,7 +127,7 @@ async function bootstrap() {
         benchMark("bootstrap-start");
         log("INFO", "=== AgentMux Bootstrap Starting ===");
         log("INFO", "User Agent:", navigator.userAgent);
-        log("INFO", "Location:", window.location.href);
+        log("INFO", "Location:", redactIpcToken(window.location.href));
 
         if (import.meta.env.DEV) {
             console.log("%c[DEV MODE] Loading from Vite dev server — HMR active", "color: lime; font-size: 14px; font-weight: bold");

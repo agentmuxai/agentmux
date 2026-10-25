@@ -97,6 +97,13 @@ describe("pinning a section to the widget bar", () => {
         expect(setConfig).toHaveBeenCalledWith({}, { "widget:hidden": null, "widget:pinned": ["warden", "kanban"] });
     });
 
+    it("draws the pin icon on Pin and the unpin icon on Unpin", () => {
+        const icons = (section: string) => sectionPinMenuItems({ view: "warden", "warden:section": section }).map((i) => i.icon);
+        expect(icons("kanban")).toEqual(["thumbtack"]);
+        config.settings["widget:pinned"] = ["warden", "kanban"];
+        expect(icons("kanban")).toEqual(["thumbtack-slash"]);
+    });
+
     it("offers to unpin a section whose entry is pinned", () => {
         config.settings["widget:pinned"] = ["warden", "kanban"];
         expect(sectionPinMenuItems({ view: "warden", "warden:section": "kanban" }).map((i) => i.label)).toEqual(["Unpin “Kanban” from bar"]);

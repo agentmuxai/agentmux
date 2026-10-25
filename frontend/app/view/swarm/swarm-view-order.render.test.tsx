@@ -82,7 +82,7 @@ function setup(initial: Record<string, RemoteAgentState>) {
         clearSelection: () => {},
         selectAll: () => {},
     } as unknown as SwarmViewModel;
-    const ctx = { meta: () => ({}), setMeta: async () => {} } as unknown as PaneTabHostContext;
+    const ctx = { meta: () => ({}), setMeta: async () => {}, visibility: () => "active" } as unknown as PaneTabHostContext;
     const view = render(() => <SwarmView model={model} ctx={ctx} />);
     const names = () => [...view.container.querySelectorAll(".swarm-remote-agent-name")].map((el) => el.textContent);
     return { ...view, names, change: (states: Record<string, RemoteAgentState>) => setData(others(states)) };

@@ -365,6 +365,7 @@ fn legacy_definition(req: &CronCreateRequest, check: Check) -> Result<JobDefinit
             def[key] = v.clone();
         }
     }
+    jobs::from_template::apply(&mut def, None)?;
     JobDefinition::parse(&def, check)
 }
 
@@ -377,10 +378,12 @@ pub(super) async fn handle_cron_create(
 }
 
 /// Create a job from a definition or the cron shape. `origin.from_host`: the
-/// operator's decision, relayed by the host (`handle_host_jobs`): the only way
-/// to create a job that starts workers, to raise a cap, or to confirm a job
-/// on a provider that reports no cost.
-fn create_job(state: &AppState, caller: Option<&Caller>, body: Value, origin: Origin) -> (StatusCode, Json<Value>) {
+/// operator's decision, from the host route (`handle_host_jobs`) or the
+/// app's own proven window (`jobs.save`): the only way to create a job that
+/// starts workers, to raise a cap, or to confirm a job on a provider that
+/// reports no cost. A definition that names a template is made from it
+/// (`jobs::from_template`).
+pub(crate) fn create_job(state: &AppState, caller: Option<&Caller>, body: Value, origin: Origin) -> (StatusCode, Json<Value>) {
     let from_host = origin.from_host;
     let check = Check { fresh: true, now_ms: agentmux_common::time::now_ms() };
     let who = if from_host { Who::Operator } else { who(state, caller) };
@@ -398,7 +401,10 @@ fn create_job(state: &AppState, caller: Option<&Caller>, body: Value, origin: Or
             super::actor::check_actor(state, caller, super::actor::ActorSite::CronCreate, Some(&req.created_by));
             legacy_definition(req, check)
         }
-        None => JobDefinition::parse(&body, check),
+        None => {
+            let mut body = body.clone();
+            jobs::from_template::apply(&mut body, None).and_then(|()| JobDefinition::parse(&body, check))
+        }
     };
     let mut def = match parsed {
         Ok(def) => def,
@@ -842,9 +848,9 @@ pub(super) async fn handle_cron_patch(
 }
 
 /// [`handle_cron_patch`]'s work. `origin.from_host`: the operator's edit,
-/// relayed by the host, which may raise caps, confirm a job on a provider
-/// that reports no cost, and change a spawn job.
-fn patch_job(state: &AppState, caller: Option<&Caller>, id: &str, body: Value, origin: Origin) -> (StatusCode, Json<Value>) {
+/// from the host route or the app's own proven window, which may raise caps,
+/// confirm a job on a provider that reports no cost, and change a spawn job.
+pub(crate) fn patch_job(state: &AppState, caller: Option<&Caller>, id: &str, body: Value, origin: Origin) -> (StatusCode, Json<Value>) {
     let (store, job) = match job_for_change(state, caller, id) {
         Ok(found) => found,
         Err(refused) => return refused,
@@ -869,6 +875,11 @@ fn patch_job(state: &AppState, caller: Option<&Caller>, id: &str, body: Value, o
             continue;
         }
         merged[key.as_str()] = value.clone();
+    }
+    if jobs::from_template::edit_needs_render(fields, &before) {
+        if let Err(e) = jobs::from_template::apply(&mut merged, before.template.as_ref()) {
+            return bad_request(e);
+        }
     }
     let fresh = fields.contains_key("trigger") || fields.contains_key("action");
     let mut def = match JobDefinition::parse(&merged, Check { fresh, now_ms: agentmux_common::time::now_ms() }) {

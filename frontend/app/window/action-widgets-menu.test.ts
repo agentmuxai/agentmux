@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it, vi } from "vitest";
+import { MENU_ICON } from "@/app/util/menu-icons";
 import { buildWidgetOpenActions } from "./action-widgets-menu";
 
 const openNewWindowWithView = vi.fn();
@@ -54,6 +55,11 @@ describe("buildWidgetOpenActions", () => {
             "Open in New Window",
             "Open in Floating Pane",
             "Open in New Tab",
+        ]);
+        expect(actions.map((a) => a.icon)).toEqual([
+            MENU_ICON.open,
+            MENU_ICON.floatingPane,
+            MENU_ICON.open,
         ]);
     });
 

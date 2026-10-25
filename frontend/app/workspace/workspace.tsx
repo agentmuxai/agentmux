@@ -10,7 +10,7 @@ import { StatusBar } from "@/app/statusbar/StatusBar";
 import { WindowHeader } from "@/app/window/window-header";
 import { TabContent } from "@/app/tab/tabcontent";
 import { shouldReduceMotion } from "@/app/motion/motion";
-import { atoms } from "@/store/global";
+import { atoms, getApi } from "@/store/global";
 import {
     WindowTabDisplayedProvider,
     WindowTabIdProvider,
@@ -27,9 +27,11 @@ import {
     tabSwitching,
     tabWasShown,
 } from "@/store/tab-reveal";
-import { switchIntentTabId } from "@/store/tab-actions";
+import { creatingTabId, switchIntentTabId } from "@/store/tab-actions";
 import { markLoadedTabsShownWhenSettled } from "@/app/tab/tab-content-settled";
 import { drainWhenIdle, installWindowResizeTracking, windowResizing } from "@/app/platform/window-resize";
+import { Button } from "@/app/element/ui/Button";
+import { createDisplayWatchdog } from "./display-watchdog";
 import { For, Show, createEffect, createMemo, createSignal, on, onCleanup, untrack } from "solid-js";
 import type { JSX } from "solid-js";
 
@@ -187,6 +189,43 @@ function WorkspaceElem(): JSX.Element {
         if (id && keepInactiveTabsLaidOut() && !gateHides(id)) markTabShown(id);
     });
 
+    // A window whose tab content stopped following the active tab (Solid abandons
+    // the bindings queued in a flush that throws) is shown the right tab again;
+    // if that doesn't take, the person is offered a reload, never given one
+    // (display-watchdog.ts).
+    const [tabDisplayStuck, setTabDisplayStuck] = createSignal(false);
+    const watchdog = createDisplayWatchdog({
+        expected: () => untrack(targetTabId),
+        shownInDom: () => {
+            let found: string | null = null;
+            let count = 0;
+            for (const [id, el] of tabEls) {
+                if (el.style.zIndex === "1" && el.style.pointerEvents === "auto") {
+                    found = id;
+                    count++;
+                }
+            }
+            return count === 1 ? found : null;
+        },
+        inFlight: () =>
+            untrack(
+                () =>
+                    tabSwitching() ||
+                    switchIntentTabId() != null ||
+                    gateTargetTabId() != null ||
+                    creatingTabId() != null ||
+                    !tabEls.has(targetTabId())
+            ),
+        repair: (id) => setDisplayTabId(id),
+        offerReload: () => setTabDisplayStuck(true),
+        withdrawOffer: () => setTabDisplayStuck(false),
+        log: (message) => console.warn(message),
+    });
+    const watchdogTimer = setInterval(() => {
+        if (!document.hidden) watchdog.check();
+    }, 1000);
+    onCleanup(() => clearInterval(watchdogTimer));
+
     // All tab IDs (pinned + regular). Keep every tab mounted so terminals
     // preserve their xterm.js instance and scrollback across tab switches.
     // Inactive tabs are hidden via content-visibility:hidden — no
@@ -267,6 +306,30 @@ function WorkspaceElem(): JSX.Element {
                     "view-transition-name": "workspace-tab-content",
                 }}
             >
+                <Show when={tabDisplayStuck()}>
+                    <div
+                        role="alert"
+                        class="flex flex-row items-center gap-3"
+                        style={{
+                            position: "absolute",
+                            bottom: "16px",
+                            left: "50%",
+                            "white-space": "nowrap",
+                            transform: "translateX(-50%)",
+                            "z-index": 20,
+                            padding: "6px 10px",
+                            "border-radius": "6px",
+                            border: "1px solid var(--warning-color)",
+                            background: "var(--modal-bg-color)",
+                            "box-shadow": "0 4px 16px rgba(0, 0, 0, 0.4)",
+                        }}
+                    >
+                        <span>This window stopped switching tabs.</span>
+                        <Button tone="accent" density="compact" icon="rotate-right" onClick={() => getApi().reloadWindow()}>
+                            Reload
+                        </Button>
+                    </div>
+                </Show>
                 <ErrorBoundary>
                     <Show when={allTabIds().length > 0} fallback={<CenteredDiv>No Active Tab</CenteredDiv>}>
                         <For each={allTabIds()}>

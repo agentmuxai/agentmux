@@ -51,6 +51,7 @@ import { openRemotesInPane } from "@/app/view/remotes/open-remotes";
 import { isGlobalKey, paneCommandFor, registerPaneCommandRunner, shortcutFor } from "@/app/keybindings";
 import { isEditableTarget } from "@/util/focusutil";
 import { Button, IconButton } from "@/app/element/ui";
+import { MENU_ICON } from "@/app/util/menu-icons";
 
 const ROW_HEIGHT = 24;
 /** A grid tile's box (thumbnail and a two-line name). */
@@ -591,43 +592,41 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
         const many = list.length > 1;
         const path = model.pathOf(entry.name);
         const fail = (err: unknown) => model.setStatus({ text: errorText(err), tone: "error" });
-        const items: ContextMenuItem[] = [{ type: "action", label: "Open", shortcut: "Enter", onSelect: () => openEntry(entry) }];
+        const items: ContextMenuItem[] = [{ type: "action", label: "Open", icon: entry.is_dir ? MENU_ICON.openFolder : MENU_ICON.open, shortcut: "Enter", onSelect: () => openEntry(entry) }];
         if (entry.is_dir) {
-            items.push({ type: "action", label: "Open in new tab", shortcut: shortcutFor("files:openInNewTab"), onSelect: () => openInNewTab(path) });
+            items.push({ type: "action", label: "Open in new tab", icon: MENU_ICON.open, shortcut: shortcutFor("files:openInNewTab"), onSelect: () => openInNewTab(path) });
         }
         if (!entry.is_dir) {
             items.push(
-                { type: "action", label: "Open in Editor", onSelect: () => void openInPane("editor", path, model.blockId, model.connection() || undefined).catch(fail) },
-                { type: "action", label: "Open with default app", onSelect: () => void openWithOs(path).catch(fail) }
+                { type: "action", label: "Open in Editor", icon: MENU_ICON.openInEditor, onSelect: () => void openInPane("editor", path, model.blockId, model.connection() || undefined).catch(fail) },
+                { type: "action", label: "Open with default app", icon: MENU_ICON.open, onSelect: () => void openWithOs(path).catch(fail) }
             );
         } else {
-            items.push({ type: "action", label: "Open terminal here", onSelect: () => void openTerminalHere(path, model.blockId, model.connection() || undefined).catch(fail) });
+            items.push({ type: "action", label: "Open terminal here", icon: MENU_ICON.openTerminal, onSelect: () => void openTerminalHere(path, model.blockId, model.connection() || undefined).catch(fail) });
         }
         items.push(
-            { type: "action", label: isMacOS() ? "Reveal in Finder" : "Reveal in file manager", onSelect: () => void revealInOs(path).catch(fail) },
+            { type: "action", label: isMacOS() ? "Reveal in Finder" : "Reveal in file manager", icon: MENU_ICON.reveal, onSelect: () => void revealInOs(path).catch(fail) },
             // One item per agent pane on screen (the DOM menu has no submenus).
             {
                 type: "action",
-                label: "Mention in agent",
+                label: "Mention in agent", icon: MENU_ICON.mention,
                 shortcut: shortcutFor("files:mention"),
                 disabled: agentTargets().length === 0,
                 onSelect: () => mentionIn(many ? list : [entry]),
             },
             ...agentTargets().map((t): ContextMenuItem => ({
-                type: "action",
-                label: `Attach to ${t.name}`,
-                onSelect: () => attachTo(t, many ? list : [entry]),
+                type: "action", label: `Attach to ${t.name}`, icon: MENU_ICON.attach, onSelect: () => attachTo(t, many ? list : [entry]),
             })),
             { type: "separator" },
-            { type: "action", label: "Cut", shortcut: shortcutFor("files:cut"), onSelect: () => model.copyToClipboard("cut", many ? list : [entry]) },
-            { type: "action", label: "Copy", shortcut: shortcutFor("files:copy"), onSelect: () => model.copyToClipboard("copy", many ? list : [entry]) },
-            { type: "action", label: many ? `Copy ${list.length} paths` : "Copy path", onSelect: () => copyPaths(many ? list : [entry]) },
+            { type: "action", label: "Cut", icon: MENU_ICON.cut, shortcut: shortcutFor("files:cut"), onSelect: () => model.copyToClipboard("cut", many ? list : [entry]) },
+            { type: "action", label: "Copy", icon: MENU_ICON.copy, shortcut: shortcutFor("files:copy"), onSelect: () => model.copyToClipboard("copy", many ? list : [entry]) },
+            { type: "action", label: many ? `Copy ${list.length} paths` : "Copy path", icon: MENU_ICON.copy, onSelect: () => copyPaths(many ? list : [entry]) },
             { type: "separator" },
-            { type: "action", label: "Rename", shortcut: shortcutFor("files:rename"), disabled: many, onSelect: () => model.setRenaming(entry.name) },
-            { type: "action", label: many ? `Move ${list.length} items to Trash` : "Move to Trash", shortcut: shortcutFor("files:trash"), onSelect: () => void model.trash(many ? list : [entry]) },
+            { type: "action", label: "Rename", icon: MENU_ICON.rename, shortcut: shortcutFor("files:rename"), disabled: many, onSelect: () => model.setRenaming(entry.name) },
+            { type: "action", label: many ? `Move ${list.length} items to Trash` : "Move to Trash", icon: MENU_ICON.delete, shortcut: shortcutFor("files:trash"), onSelect: () => void model.trash(many ? list : [entry]) },
             {
                 type: "action",
-                label: "Delete permanently…",
+                label: "Delete permanently…", icon: MENU_ICON.deletePermanently,
                 shortcut: shortcutFor("files:deletePermanently"),
                 danger: true,
                 onSelect: () => askDeletePermanently(many ? list : [entry]),
@@ -712,24 +711,24 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
     const folderMenu = (): ContextMenuItem[] => {
         const fail = (err: unknown) => model.setStatus({ text: errorText(err), tone: "error" });
         return forHost([
-            { type: "action", label: "New folder", shortcut: shortcutFor("files:newFolder"), onSelect: () => void model.createNew("dir") },
-            { type: "action", label: "New file", onSelect: () => void model.createNew("file") },
-            { type: "action", label: "New tab here", shortcut: shortcutFor("files:newTabHere"), onSelect: () => openInNewTab(model.path()) },
+            { type: "action", label: "New folder", icon: MENU_ICON.newFolder, shortcut: shortcutFor("files:newFolder"), onSelect: () => void model.createNew("dir") },
+            { type: "action", label: "New file", icon: MENU_ICON.newFile, onSelect: () => void model.createNew("file") },
+            { type: "action", label: "New tab here", icon: MENU_ICON.add, shortcut: shortcutFor("files:newTabHere"), onSelect: () => openInNewTab(model.path()) },
             {
                 type: "action",
                 label: clipboard()?.kind === "cut" ? `Paste (move ${clipboard()!.paths.length})` : clipboard() ? `Paste (copy ${clipboard()!.paths.length})` : "Paste",
-                shortcut: shortcutFor("files:paste"),
+                icon: MENU_ICON.paste, shortcut: shortcutFor("files:paste"),
                 disabled: !clipboard(),
                 onSelect: () => void model.paste(),
             },
             { type: "separator" },
-            { type: "action", label: "Open terminal here", onSelect: () => void openTerminalHere(model.path(), model.blockId, model.connection() || undefined).catch(fail) },
-            { type: "action", label: isMacOS() ? "Reveal in Finder" : "Reveal in file manager", onSelect: () => void revealInOs(model.path()).catch(fail) },
-            { type: "action", label: "Copy folder path", onSelect: () => void navigator.clipboard?.writeText(model.path()) },
+            { type: "action", label: "Open terminal here", icon: MENU_ICON.openTerminal, onSelect: () => void openTerminalHere(model.path(), model.blockId, model.connection() || undefined).catch(fail) },
+            { type: "action", label: isMacOS() ? "Reveal in Finder" : "Reveal in file manager", icon: MENU_ICON.reveal, onSelect: () => void revealInOs(model.path()).catch(fail) },
+            { type: "action", label: "Copy folder path", icon: MENU_ICON.copy, onSelect: () => void navigator.clipboard?.writeText(model.path()) },
             { type: "separator" },
-            { type: "action", label: model.showHidden() ? "Hide hidden files" : "Show hidden files", onSelect: () => model.toggleHidden() },
-            { type: "action", label: "Refresh", shortcut: shortcutFor("files:refresh"), onSelect: () => model.refresh() },
-            { type: "action", label: "Undo", shortcut: shortcutFor("files:undo"), onSelect: () => void model.undo() },
+            { type: "action", label: model.showHidden() ? "Hide hidden files" : "Show hidden files", icon: model.showHidden() ? MENU_ICON.hide : MENU_ICON.show, onSelect: () => model.toggleHidden() },
+            { type: "action", label: "Refresh", icon: MENU_ICON.refresh, shortcut: shortcutFor("files:refresh"), onSelect: () => model.refresh() },
+            { type: "action", label: "Undo", icon: MENU_ICON.undo, shortcut: shortcutFor("files:undo"), onSelect: () => void model.undo() },
         ]);
     };
 

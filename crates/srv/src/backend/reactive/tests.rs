@@ -1741,6 +1741,34 @@ async fn test_wan_signature_active_failure_is_forced_sensitive() {
 }
 
 #[tokio::test]
+async fn test_wan_instance_pin_mismatch_is_forced_sensitive_and_says_which_installs() {
+    let sent = Arc::new(Mutex::new(Vec::<Vec<u8>>::new()));
+    let sink = sent.clone();
+    let mut handler = Handler::new();
+    handler.set_input_sender(Arc::new(move |_: &str, data: &[u8]| {
+        sink.lock().unwrap().push(data.to_vec());
+        Ok(())
+    }));
+    handler.register_agent("agent2", "block1", None).unwrap();
+    let resp = handler.inject_message(InjectionRequest {
+        target_agent: "agent2".into(),
+        message: "build is green".into(),
+        source_agent: Some("camper".into()),
+        request_id: Some("inj-w-pin".into()),
+        delivery_tier: Some("wan".into()),
+        wan_verified: Some(false),
+        wan_reason: Some("wan_instance_pin_mismatch".into()),
+        wan_detail: Some("pinned to narko~aaaaaaaa, this came from area54~bbbbbbbb".into()),
+        ..Default::default()
+    });
+    assert_eq!(resp.effective_tier.as_deref(), Some("sensitive"));
+    assert_eq!(resp.requires_stop, Some(true));
+    let text: String = sent.lock().unwrap().iter().map(|d| String::from_utf8_lossy(d).to_string()).collect();
+    assert!(text.contains("TRUST=network-claimed"), "{text}");
+    assert!(text.contains("pinned to one install") && text.contains("narko~aaaaaaaa") && text.contains("area54~bbbbbbbb"), "{text}");
+}
+
+#[tokio::test]
 async fn test_wan_unchecked_signature_is_todays_behaviour() {
     let (resp, tag) = deliver_wan("build is green", None, None);
     assert_eq!(resp.effective_tier.as_deref(), Some("coord"));

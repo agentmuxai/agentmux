@@ -73,6 +73,7 @@ vi.mock("@/app/store/window-opacity-store", () => ({ liveWindowOpacity: () => nu
 vi.mock("@/app/store/window-appearance", () => ({ opacityFor: () => 1, openNewWindowFromHere: vi.fn() }));
 vi.mock("@/app/store/config-signals", () => ({ settingsAtom: () => ({}) }));
 
+import { MENU_ICON } from "@/app/util/menu-icons";
 import { InstancePanel } from "./InstancePanel";
 
 const heading = () => screen.getByTitle(/The open workspace/);
@@ -201,6 +202,7 @@ describe("InstancePanel closed windows", () => {
         fireEvent.contextMenu(screen.getByText("Scratch"));
         const items = showContextMenu.mock.calls[0][0] as { label: string; click: () => void }[];
         expect(items.map((i) => i.label)).toEqual(["Remove from workspace"]);
+        expect((items[0] as { icon?: string }).icon).toBe(MENU_ICON.close);
         items[0].click();
         expect(removeClosed).toHaveBeenCalledWith("ws-2");
         expect(reopen).not.toHaveBeenCalled();
