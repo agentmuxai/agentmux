@@ -721,12 +721,12 @@ pub(crate) async fn deliver(
     if let Err(error) = super::jekt_files::check(&req) {
         return super::jekt_files::refused(&req, error);
     }
-    // An agent here out of quota (`holding_unavailable`) would lose it in a turn that
-    // fails at once: hold it, or refuse it where it can't be held (spec
-    // SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §5). Before `prepare`, which
-    // charges inline attachments to the session: the replay prepares again.
-    if let Some(unavailable) = local_target_unavailable(state, &req.target_agent).await {
-        return hold_for_unavailable(state, auth_via, &req, &unavailable, &mut replay).await;
+    // An agent here out of quota would lose it in a turn that fails at once, and a Claude
+    // session gone cold should not be woken by a routine one: hold it, or refuse it where it
+    // can't be held (SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §5, SPEC_JEKT_HOLD_FOR_COLD_SESSIONS_
+    // 2026_10_25.md). Before `prepare`, which charges inline attachments to the session.
+    if let Some(held) = hold_before_delivery(state, auth_via, &req, &mut replay).await {
+        return held;
     }
 
     super::jekt_files::prepare(&mut req).await;
@@ -1157,7 +1157,7 @@ fn absent_route_for(answer: &crate::muxbus::wan_lease::Holder) -> AbsentRoute {
 /// Why a jekt is held (`server::hold_reason`).
 pub(crate) use super::hold_reason::HoldReason;
 pub(in crate::server) use super::jekt_hold::hold_for_absent_target;
-use super::jekt_hold::{hold_applies, hold_for_unavailable, local_target_unavailable};
+use super::jekt_hold::{hold_applies, hold_before_delivery};
 
 /// Tier 4. `Some(body)` when the cloud accepted the injection (and the sender
 /// echo has been emitted); `None` when tier 4 doesn't apply or didn't take,

@@ -424,3 +424,53 @@ fn a_blocked_task_can_be_taken_back_too() {
     assert_eq!(s.work_queue_get("t").unwrap().unwrap().state, work_state::BLOCKED);
     assert!(s.work_take_back("t", None, "r", 2000).unwrap().is_some());
 }
+
+#[test]
+fn a_task_number_waits_on_an_agent_when_it_is_targeted_or_held_and_not_finished() {
+    let (s, _d) = store();
+    s.work_queue_enqueue(&for_agent("a", 1000, "loap", "uid-l")).unwrap();
+    let a = s.work_card_create("a", &NewCard::default(), 1000).unwrap();
+    s.work_queue_enqueue(&for_agent("b", 1000, "other", "uid-o")).unwrap();
+    let b = s.work_card_create("b", &NewCard::default(), 1000).unwrap();
+    s.work_queue_enqueue(&item("c", 1000)).unwrap();
+    let c = s.work_card_create("c", &NewCard::default(), 1000).unwrap();
+
+    assert!(s.work_numbers_waiting_on(&[a], "uid-l", "loap").unwrap(), "targeted at it, by uid");
+    assert!(s.work_numbers_waiting_on(&[999, a], "uid-l", "loap").unwrap(), "any of the numbers");
+    assert!(!s.work_numbers_waiting_on(&[b], "uid-l", "loap").unwrap(), "another agent's");
+    assert!(!s.work_numbers_waiting_on(&[c], "uid-l", "loap").unwrap(), "for anyone: not handed to it");
+    assert!(!s.work_numbers_waiting_on(&[], "uid-l", "loap").unwrap());
+    assert!(!s.work_numbers_waiting_on(&[999], "uid-l", "loap").unwrap(), "no such task");
+
+    // By name when the task carries no uid.
+    s.work_queue_enqueue(&for_agent("d", 1000, "loap", "")).unwrap();
+    let d = s.work_card_create("d", &NewCard::default(), 1000).unwrap();
+    assert!(s.work_numbers_waiting_on(&[d], "uid-l", "loap").unwrap());
+    assert!(!s.work_numbers_waiting_on(&[d], "uid-x", "someone").unwrap());
+
+    // Claimed by it: still its. Finished: no longer.
+    let claimed = claim(&s, "other", "uid-o").unwrap();
+    let claimed_num = s.work_board_get(&claimed.id).unwrap().unwrap().card.num;
+    assert!(s.work_numbers_waiting_on(&[claimed_num], "uid-o", "other").unwrap());
+    s.work_queue_cancel(&claimed.id, "no longer needed", 6000).unwrap();
+    assert!(!s.work_numbers_waiting_on(&[claimed_num], "uid-o", "other").unwrap(), "cancelled");
+}
+
+#[test]
+fn a_task_filed_for_an_agent_shortly_before_counts_for_its_filer_only() {
+    let (s, _d) = store();
+    let filed = WorkItem { created_by: "agenty".into(), created_by_uid: "uid-y".into(), ..for_agent("a", 10_000, "loap", "uid-l") };
+    s.work_queue_enqueue(&filed).unwrap();
+    s.work_card_create("a", &NewCard::default(), 10_000).unwrap();
+
+    assert!(s.work_filed_for_since("uid-y", "agenty", "uid-l", "loap", 9_000).unwrap());
+    assert!(!s.work_filed_for_since("uid-y", "agenty", "uid-l", "loap", 11_000).unwrap(), "filed before the window");
+    assert!(!s.work_filed_for_since("uid-z", "someone", "uid-l", "loap", 0).unwrap(), "another sender");
+    assert!(!s.work_filed_for_since("uid-y", "agenty", "uid-o", "other", 0).unwrap(), "for another agent");
+
+    // A task filed before uids existed is matched by the filer's name.
+    let old = WorkItem { created_by: "agentx".into(), created_by_uid: String::new(), ..for_agent("b", 10_000, "", "uid-o") };
+    s.work_queue_enqueue(&old).unwrap();
+    assert!(s.work_filed_for_since("", "agentx", "uid-o", "other", 0).unwrap());
+    assert!(!s.work_filed_for_since("", "", "uid-o", "other", 0).unwrap(), "an unnamed sender matches nothing");
+}

@@ -18,6 +18,10 @@ pub(crate) enum HoldReason {
     /// (`AgentState::Limited`). Held from step 2c of
     /// `docs/specs/SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md` §5.
     Limited,
+    /// The agent is here and signed in, but its session has been quiet past the
+    /// prompt cache's lifetime and the message is routine
+    /// (`backend::cold_hold`).
+    Idle,
 }
 
 impl HoldReason {
@@ -26,6 +30,7 @@ impl HoldReason {
             HoldReason::NotRunning => "not_running",
             HoldReason::NeedsLogin => "needs_login",
             HoldReason::Limited => "usage_limit",
+            HoldReason::Idle => crate::backend::cold_hold::REASON_IDLE,
         }
     }
 
