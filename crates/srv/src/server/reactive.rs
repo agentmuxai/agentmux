@@ -1668,24 +1668,19 @@ pub(super) async fn handle_reactive_ensure_signing_key(
 
 #[derive(serde::Deserialize)]
 pub(super) struct UnregisterRequest {
-    agent_id: String,
+    pub(super) agent_id: String,
     /// Identity M2 (spec §4.4.4 Q7): optional, but both frontend callers
     /// send it. With it, teardown is by block. Without it, a name held by
     /// several live blocks is refused with HTTP 409 and the candidates —
     /// never a `success: true` that tore down nothing (§10 constraint 3).
     #[serde(default)]
-    block_id: String,
+    pub(super) block_id: String,
 }
 
-pub(super) async fn handle_reactive_unregister(
-    State(state): State<AppState>,
-    caller: Option<axum::Extension<super::caller::Caller>>,
-    Json(req): Json<UnregisterRequest>,
-) -> Response {
+/// Tear down a pane's registration. Reached only from the window's own socket (`agent.pane.unregister`)
+/// and, for an agent's own pane, from `pane_binding::handle_unregister`.
+pub(super) async fn unregister_pane(state: &AppState, req: UnregisterRequest) -> Response {
     use crate::backend::reactive::handler::UnregisterOutcome;
-    if let Some(refusal) = super::pane_binding::unregister_refusal(&state, caller.as_deref(), &req.block_id, &req.agent_id).await {
-        return refusal;
-    }
 
     let (block_id, names): (Option<String>, Vec<String>) = if !req.block_id.trim().is_empty() {
         let names = state.reactive_handler.unregister_block(req.block_id.trim());

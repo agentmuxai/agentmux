@@ -112,8 +112,16 @@
             "method": "AgentSessionWriteStateCommand"
         },
         {
+            "command": "agent.pane.unregister",
+            "method": "AgentPaneUnregisterCommand"
+        },
+        {
             "command": "agent.setSeat",
             "method": "AgentSetSeatCommand"
+        },
+        {
+            "command": "agent.takeover",
+            "method": "AgentTakeoverCommand"
         },
         {
             "command": "agentshutdownkeep",
