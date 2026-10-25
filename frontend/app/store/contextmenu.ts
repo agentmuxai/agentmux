@@ -38,6 +38,7 @@ class ContextMenuModelType {
                 type: item.type,
                 label: item.label,
                 sublabel: item.sublabel,
+                icon: item.icon,
                 id: crypto.randomUUID(),
                 checked: item.checked,
                 swatchColor: item.swatchColor,

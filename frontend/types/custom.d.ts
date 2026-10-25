@@ -683,6 +683,8 @@ declare global {
         sublabel?: string;
         /** CSS color for an inline swatch square rendered before the label. */
         swatchColor?: string;
+        /** A Font Awesome name (`"copy"`, `"regular@window-maximize"`) drawn in the row's leading slot; decoration only. See app/util/menu-icons.ts. */
+        icon?: string;
     };
 
     type ContextMenuItem = {
@@ -697,6 +699,8 @@ declare global {
         sublabel?: string;
         /** CSS color for an inline swatch square rendered before the label. */
         swatchColor?: string;
+        /** A Font Awesome name (`"copy"`, `"regular@window-maximize"`) drawn in the row's leading slot; decoration only. See app/util/menu-icons.ts. */
+        icon?: string;
     };
 
     type KeyPressDecl = {
