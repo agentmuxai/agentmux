@@ -44,9 +44,33 @@ pub struct Builtin {
     pub files: &'static [(&'static str, &'static [u8])],
 }
 
+/// A built-in template: its id, and its two files from `templates/jobs/<id>/`.
+macro_rules! builtin {
+    ($name:literal) => {
+        Builtin {
+            id: concat!("agentmux.", $name),
+            files: &[
+                ("template.json", include_bytes!(concat!("../../../../../templates/jobs/agentmux.", $name, "/template.json"))),
+                ("brief.md", include_bytes!(concat!("../../../../../templates/jobs/agentmux.", $name, "/brief.md"))),
+            ],
+        }
+    };
+}
+
 /// The templates AgentMux ships (§5.5, §5.6). Each still needs the
 /// operator's approval once, so they see its outputs.
-pub static BUILTINS: &[Builtin] = &[];
+pub static BUILTINS: &[Builtin] = &[
+    builtin!("weekly-report"),
+    builtin!("pr-review"),
+    builtin!("nightly-build"),
+    builtin!("daily-digest"),
+    builtin!("dependency-scan"),
+    builtin!("docs-drift"),
+    builtin!("stale-sweep"),
+    builtin!("backup-verify"),
+    builtin!("on-event"),
+    builtin!("weekly-status"),
+];
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
@@ -421,5 +445,7 @@ impl JobTemplates {
     }
 }
 
+#[cfg(test)]
+mod starters_tests;
 #[cfg(test)]
 mod tests;

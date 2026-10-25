@@ -35,6 +35,13 @@ COPY . .
 # agentmux-mcp and agentmux-bashwrap: agents srv starts launch them by bare
 # name from PATH (.mcp.json from agent_config.rs's build_mcp_config, and the
 # PreToolUse hook), exactly as in the container agent image.
+#
+# Optional cap on cargo's parallel jobs: `--build-arg CARGO_BUILD_JOBS=N`. Docker
+# exports a build-arg to the RUN below and cargo reads it as CARGO_BUILD_JOBS.
+# Unset by default, so every other builder behaves as before. Release builds use
+# fat LTO in one codegen unit, so the last step of each binary is memory-hungry;
+# a runner with little memory can lower the number of those running side by side.
+ARG CARGO_BUILD_JOBS
 RUN cargo build --release -p agentmux-srv -p agentmux-mcp -p agentmux-bashwrap
 
 # ── Stage 2: runtime ─────────────────────────────────────────────────────────
