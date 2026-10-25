@@ -17,6 +17,7 @@ import { getOpenDefinitionMap } from "@/app/store/agent-pane-state-store";
 import { getProvider, resolveProviderAlias } from "@/app/view/agent/providers";
 import { resolveEffectiveLaunchProvider } from "@/app/view/agent/agent-launch-env";
 import { Logger } from "@/util/logger";
+import { notifyLinksChanged } from "./account-agents";
 import { accountLabel, type Account } from "./identity-model";
 import type { AgentDefinition, AgentDefinitionIdentity } from "@/app/store/rpc-api";
 import { mergeBlockEnv } from "@/app/store/block-meta";
@@ -177,6 +178,7 @@ export async function bindAccountToAgent(account: Account, candidate: BindCandid
             account_id: account.id,
             provider,
         });
+        notifyLinksChanged();
     } catch (e: any) {
         Logger.error(
             "identity",

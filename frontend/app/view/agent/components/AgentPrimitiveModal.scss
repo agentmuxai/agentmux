@@ -126,6 +126,24 @@
     }
 }
 
+.agent-primitive-modal-bound {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-0-5);
+    margin: 0 0 var(--space-2);
+    padding: 0;
+    list-style: none;
+}
+
+.agent-primitive-modal-bound-agent {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-1-5);
+    font-size: var(--text-xs);
+    color: var(--main-text-color);
+}
+
 .agent-primitive-modal-bind-row {
     display: flex;
     gap: var(--space-1-5);

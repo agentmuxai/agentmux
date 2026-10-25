@@ -8,8 +8,8 @@
  * (crates/srv/src/server/app_api/mcp.rs) — no `agent_id`/`check_s1`
  * context, since Connectors' connection is never agent-authenticated.
  * Every row here is global by construction — the catalog only ever
- * lists/creates/edits is_global rows. Per-agent private servers, and
- * unbinding, live in the Agent-setup modal (AgentMcpModel), not here.
+ * lists/creates/edits is_global rows. Binding a server to an agent and
+ * unbinding it are both here; per-agent private servers are not built.
  */
 
 import { createMemo, createSignal, type Accessor } from "solid-js";
@@ -116,6 +116,13 @@ export class McpCatalogModel {
     bindAgentIdAtom: Accessor<string> = this._bindAgentId[0];
     setBindAgentId = this._bindAgentId[1];
 
+    // Bumped on every successful refresh, so a view derived from the catalog
+    // (who a server is bound to) reloads when a bind or unbind lands, even
+    // one that leaves the count unchanged.
+    private _revision = createSignal(0);
+    revisionAtom: Accessor<number> = this._revision[0];
+    private setRevision = this._revision[1];
+
     selectedAtom: Accessor<McpServerCatalogItem | null>;
 
     constructor() {
@@ -133,6 +140,7 @@ export class McpCatalogModel {
         try {
             const list = await RpcApi.McpCatalogListCommand(TabRpcClient, {});
             this.setServers(list);
+            this.setRevision((n) => n + 1);
             this.setError(null);
         } catch (e) {
             this.setError(`Failed to load MCP servers: ${(e as Error).message ?? e}`);
@@ -161,6 +169,16 @@ export class McpCatalogModel {
             await this.refresh();
         } catch (e) {
             this.setError(`Bind failed: ${(e as Error).message ?? e}`);
+        }
+    }
+
+    async unbindFromAgent(serverId: string, agentId: string): Promise<void> {
+        this.setError(null);
+        try {
+            await RpcApi.McpCatalogUnbindCommand(TabRpcClient, { agent_id: agentId, mcp_id: serverId });
+            await this.refresh();
+        } catch (e) {
+            this.setError(`Unbind failed: ${(e as Error).message ?? e}`);
         }
     }
 
@@ -246,22 +264,28 @@ export class McpCatalogModel {
         }
     }
 
-    /** The agents a server is bound to, by name, for the delete
-     *  confirmation. The catalog only counts them, so each agent is asked;
-     *  one that can't be asked is left out. */
-    async boundAgentNames(server: McpServerCatalogItem): Promise<string[]> {
+    /** The agents a server is bound to. The catalog only counts them, so
+     *  each agent is asked; one that can't be asked is left out. */
+    async boundAgents(server: McpServerCatalogItem): Promise<{ id: string; name: string }[]> {
         if (server.bound_count === 0) return [];
-        const names = await Promise.all(
+        const bound = await Promise.all(
             this.agentsAtom().map(async (agent) => {
                 try {
                     const list = await RpcApi.McpCatalogListForAgentCommand(TabRpcClient, { agent_id: agent.id });
-                    return list.some((s) => s.id === server.id && s.bound_to_agent) ? agent.name : null;
+                    return list.some((s) => s.id === server.id && s.bound_to_agent)
+                        ? { id: agent.id, name: agent.name }
+                        : null;
                 } catch {
                     return null;
                 }
             }),
         );
-        return names.filter((n): n is string => n !== null).sort((a, b) => a.localeCompare(b));
+        return bound.filter((a) => a !== null).sort((a, b) => a.name.localeCompare(b.name));
+    }
+
+    /** The same, by name, for the delete confirmation. */
+    async boundAgentNames(server: McpServerCatalogItem): Promise<string[]> {
+        return (await this.boundAgents(server)).map((a) => a.name);
     }
 
     async deleteServer(id: string): Promise<void> {

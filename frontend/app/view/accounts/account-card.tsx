@@ -7,7 +7,7 @@
 // card also shows its client, a partial grant, and Reconnect
 // (docs/specs/SPEC_GOOGLE_CONNECTORS_GMAIL_CALENDAR_DRIVE_2026_10_14.md §7).
 
-import { createSignal, onCleanup, Show, type Accessor, type JSX } from "solid-js";
+import { createEffect, createSignal, on, onCleanup, Show, type Accessor, type JSX } from "solid-js";
 
 import { Button, Card, Pill, type StatusTone } from "@/app/element/ui";
 import { onMuxEvent } from "@/app/store/mps";
@@ -15,6 +15,7 @@ import { WpsEvent } from "@/app/store/mps-events";
 import { RpcApi } from "@/app/store/rpc-api";
 import type { AgentDefinition } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { linksRevision } from "@/app/view/identity/account-agents";
 import {
     accountLabel,
     parseAgentAccounts,
@@ -97,6 +98,8 @@ export function useAccountUseCounts(agents: Accessor<AgentDefinition[]>): Access
     };
     load();
     onCleanup(onMuxEvent(WpsEvent.IdentityAccountsChanged, () => load()));
+    // An unbind announces itself per agent only, so it asks for a reload here.
+    createEffect(on(linksRevision, () => load(), { defer: true }));
     return () => {
         const byAccount = new Map<string, Set<string>>();
         const add = (account: string, agent: string) => {

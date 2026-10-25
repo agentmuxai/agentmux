@@ -114,20 +114,6 @@ export function serializeAgentAccounts(accounts: AgentAccounts): string {
 }
 
 /**
- * Return the IDs of agents that reference this account (reverse index).
- * Used by the global Identity panel to show "assigned agents" without
- * reading the deprecated Account.assigned_agents field.
- */
-export function agentsAssignedToAccount(accountId: string, agents: AgentDefinition[]): string[] {
-    return agents
-        .filter((a) => {
-            const accs = parseAgentAccounts(a);
-            return Object.values(accs).includes(accountId);
-        })
-        .map((a) => a.name);
-}
-
-/**
  * Layer-4 delete truthfulness (SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4
  * §4): the delete-time notice text, derived from the RPC response's
  * `affectedAgents` (the agent ids whose links were cascaded by the
@@ -341,7 +327,7 @@ function secretRefToBackend(s: SecretRef): IdentityAccount["secret_ref"] {
  * through `secretRefFromBackend` to bridge the field-name mismatch
  * (`plaintext_dev` ↔ `value`). `assigned_agents` is synthesized empty —
  * it's deprecated and consumers should use the agent-side reverse index
- * via `agentsAssignedToAccount`.
+ * via `agentsUsingAccount` (account-agents.ts).
  */
 function backendToAccount(a: IdentityAccount): Account {
     const ts = (n: number) => new Date(n).toISOString();

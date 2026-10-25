@@ -20,6 +20,7 @@ const rpc = vi.hoisted(() => ({
     McpCatalogListForAgentCommand: vi.fn(),
     McpCatalogSetReachCommand: vi.fn(),
     McpCatalogBindCommand: vi.fn(),
+    McpCatalogUnbindCommand: vi.fn(),
     McpCatalogUpsertCommand: vi.fn(),
 }));
 const probe = vi.hoisted(() => ({ watch: vi.fn(), stop: vi.fn() }));
@@ -249,6 +250,35 @@ describe("McpManager", () => {
 
         fireEvent.click(within(dialog).getByRole("button", { name: "Delete server" }));
         await waitFor(() => expect(rpc.McpCatalogDeleteCommand).toHaveBeenCalledWith({}, { id: "s1" }));
+    });
+
+    it("lists the agents a server is bound to, and Unbind removes one", async () => {
+        await renderManager();
+        fireEvent.click(card("Ableton Live"));
+        const list = await screen.findByRole("list", { name: "Agents it is bound to" });
+        expect(within(list).getAllByRole("listitem").map((li) => li.textContent?.replace("Unbind", ""))).toEqual(["Korp"]);
+
+        // Once unbound, the catalog and the per-agent lists no longer show the bind.
+        rpc.McpCatalogUnbindCommand.mockResolvedValue({ unbound: true });
+        rpc.McpCatalogListCommand.mockResolvedValue([{ ...SERVERS[0], bound_count: 0 }, ...SERVERS.slice(1)]);
+        rpc.McpCatalogListForAgentCommand.mockResolvedValue([]);
+        fireEvent.click(within(list).getByRole("button", { name: "Unbind Korp" }));
+
+        await waitFor(() =>
+            expect(rpc.McpCatalogUnbindCommand).toHaveBeenCalledWith({}, { agent_id: "a1", mcp_id: "s1" }),
+        );
+        await waitFor(() => expect(screen.queryByRole("list", { name: "Agents it is bound to" })).toBeNull());
+        expect(card("Ableton Live").textContent).toContain("0 agents");
+    });
+
+    it("shows a failed unbind and keeps the agent listed", async () => {
+        await renderManager();
+        fireEvent.click(card("Ableton Live"));
+        const unbind = await screen.findByRole("button", { name: "Unbind Korp" });
+        rpc.McpCatalogUnbindCommand.mockRejectedValue(new Error("nope"));
+        fireEvent.click(unbind);
+        expect((await screen.findByRole("alert")).textContent).toContain("Unbind failed: nope");
+        expect(screen.getByRole("button", { name: "Unbind Korp" })).toBeTruthy();
     });
 
     it("offers Edit, Bind to agent and Delete on right-click", async () => {

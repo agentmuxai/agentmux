@@ -5,7 +5,6 @@ import { createEffect, createSignal, For, on, Show, type Accessor, type JSX } fr
 import type { Account, IdentityViewModel } from "./identity-model";
 import {
     accountLabel,
-    agentsAssignedToAccount,
     KIND_LABELS,
     PROVIDER_LABELS,
     revokeFailureText,
@@ -14,9 +13,11 @@ import {
 import { useAgentDefinitions } from "@/app/view/agent/components/AgentPicker";
 import { ProviderLogo } from "@/element/ProviderLogo";
 import { RpcApi } from "@/app/store/rpc-api";
+import type { AgentIdentityLink } from "@/types/rpc/AgentIdentityLink";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { brandForProvider, isCliOAuthProvider } from "@/app/view/accounts/provider-brand";
 import { ContextMenuModel } from "@/app/store/contextmenu";
+import { agentsUsingAccount, linksRevision, unbindAccountFromAgent, type AccountAgent } from "./account-agents";
 import { buildAccountRowMenu } from "./bind-to-agent-menu";
 import { ConfirmModal } from "@/app/element/confirm-modal";
 import "./identity-view.scss";
@@ -246,35 +247,44 @@ function AccountRow(props: {
 }
 
 /**
- * Names of the agents that use `account`: its link rows
- * (db_agent_identity_links, what the launch flow writes and what the
- * backend's affected-agents disclosure reads) plus the legacy
- * `agent.accounts` index for agents that predate direct links (#2161).
- * Best-effort: a failed link lookup leaves the legacy
+ * The agents that use `account`: its link rows (db_agent_identity_links, what
+ * the launch flow writes and what the backend's affected-agents disclosure
+ * reads) plus the legacy `agent.accounts` index for agents that predate
+ * direct links (#2161). Best-effort: a failed link lookup leaves the legacy
  * part, and the post-delete disclosure (backend-sourced) stays accurate.
  */
-function useAccountAgentNames(account: Account): Accessor<string[]> {
+function useAccountAgents(account: Account): Accessor<AccountAgent[]> {
     const [agents] = useAgentDefinitions();
-    const [linkedAgentIds, setLinkedAgentIds] = createSignal<string[]>([]);
-    RpcApi.ListAllAgentIdentitiesCommand(TabRpcClient)
-        .then((links) => {
-            setLinkedAgentIds([...new Set(links.filter((l) => l.account_id === account.id).map((l) => l.agent_id))]);
-        })
-        .catch(() => {});
-    return () => {
-        const byId = new Map(agents().map((a) => [a.id, a.name] as const));
-        const names = new Set(agentsAssignedToAccount(account.id, agents()));
-        for (const id of linkedAgentIds()) {
-            names.add(byId.get(id) ?? id);
-        }
-        return [...names];
-    };
+    const [links, setLinks] = createSignal<AgentIdentityLink[]>([]);
+    let seq = 0;
+    createEffect(
+        on(linksRevision, () => {
+            const mine = ++seq;
+            RpcApi.ListAllAgentIdentitiesCommand(TabRpcClient)
+                .then((rows) => {
+                    if (mine === seq) setLinks(rows);
+                })
+                .catch(() => {});
+        }),
+    );
+    return () => agentsUsingAccount(account.id, agents(), links());
 }
 
 // ── Account detail panel (opens under its row) ───────────────────────────────
 
 export function AccountDetailPanel({ model, account }: { model: IdentityViewModel; account: Account }): JSX.Element {
-    const usedBy = useAccountAgentNames(account);
+    const usedBy = useAccountAgents(account);
+    const [unbinding, setUnbinding] = createSignal<string | null>(null);
+    const unbind = async (agent: AccountAgent) => {
+        setUnbinding(agent.id);
+        try {
+            await unbindAccountFromAgent(account.id, agent);
+        } catch (e) {
+            model.showNotice(`Couldn't unbind ${agent.name} from "${accountLabel(account)}": ${(e as Error)?.message ?? e}`);
+        } finally {
+            setUnbinding(null);
+        }
+    };
     let panelRef: HTMLDivElement | undefined;
 
     // Bring the whole panel into view without jumping its row to the top.
@@ -404,9 +414,26 @@ export function AccountDetailPanel({ model, account }: { model: IdentityViewMode
                 when={usedBy().length > 0}
                 fallback={<span class="identity-detail-empty">No agents</span>}
             >
-                <div class="identity-agent-chips">
-                    <For each={usedBy()}>{(name) => <span class="identity-agent-chip">{name}</span>}</For>
-                </div>
+                <ul class="identity-agent-chips" aria-label="Agents using this account">
+                    <For each={usedBy()}>
+                        {(agent) => (
+                            <li class="identity-agent-use">
+                                <span class="identity-agent-chip">{agent.name}</span>
+                                <Show when={agent.providers.length > 0}>
+                                    <Button
+                                        density="compact"
+                                        aria-label={`Unbind ${agent.name}`}
+                                        busy={unbinding() === agent.id}
+                                        disabled={unbinding() !== null}
+                                        onClick={() => void unbind(agent)}
+                                    >
+                                        Unbind
+                                    </Button>
+                                </Show>
+                            </li>
+                        )}
+                    </For>
+                </ul>
             </Show>
 
             <DetailField label="Created" value={new Date(account.created_at).toLocaleString()} />
@@ -446,7 +473,8 @@ function findScrollParent(el: HTMLElement | undefined): HTMLElement | null {
 // ── Delete confirmation (spec §3.3) ──────────────────────────────────────────
 
 export function DeleteAccountConfirm({ model, account }: { model: IdentityViewModel; account: Account }): JSX.Element {
-    const usedBy = useAccountAgentNames(account);
+    const usingAgents = useAccountAgents(account);
+    const usedBy = () => usingAgents().map((a) => a.name);
     const backend = account.secret_ref?.backend;
     const keepsHistory = backend === "oauth_config_dir" && PROVIDERS_WITH_KEPT_HISTORY.has(account.provider);
     // srv signs a Google OAuth account out at Google before deleting it.
