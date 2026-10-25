@@ -1,3 +1,5 @@
 {
-  "keys": []
+  "keys": [
+    { "id": "k1", "public_key": "m9HRZ4UOiBU2vyrjlHXj1D0CjfhAazI2DGdII9JSJLE=" }
+  ]
 }
