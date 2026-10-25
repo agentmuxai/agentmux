@@ -102,7 +102,7 @@ mod blockstats;
 mod history_agents;
 mod history_usage;
 mod shells;
-mod kanban;
+pub(crate) mod kanban;
 mod jobs;
 mod connectivity;
 pub(crate) mod layout_intent;
