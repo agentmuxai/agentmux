@@ -12,11 +12,11 @@ You are running a scheduled job with nobody watching. Everything under Parameter
 ## Steps
 1. In your workspace, update a clone of repo to the tip of branch (fetch and fast-forward; never force, never push).
 2. Run command once with the Terminal tool (action run) on this machine. If platforms names others, say in the summary which ones you did not cover; don't try to reach them.
-3. Exit code 0: write `status.json` (result, date, head commit, `reds_in_a_row: 0`) to `jobs/nightly-build/` in your workspace and stop. Do not read the logs.
+3. Exit code 0: write `status.json` (result, date, head commit, `reds_in_a_row: 0`) to the status folder below and stop. Do not read the logs.
 4. Failure: find the first real error in the output (not the cascade after it), name the failing step and test, and find the likely commit among those since the last green status. Add one to `reds_in_a_row` in `status.json`.
 
 ## Outputs
-- Status: `jobs/nightly-build/status.json` in your workspace.
+- Status: `status.json` in `jobs/nightly-build/<repo>/<branch>/` in your workspace, with `/` in the repository and branch names written as `-`. Every nightly-build job keeps its own folder, so two jobs on one agent never share a streak or a head commit; read and write only this file.
 - First red (the streak was 0): one short message to the owner (Message tool, action send) with the error, the commit and its author.
 - When `reds_in_a_row` reaches red_limit: enqueue one task (Tasks tool, action enqueue) titled "Nightly build red: <repo>@<branch>"; skip it if one is open.
 
