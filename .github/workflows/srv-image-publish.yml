@@ -1,0 +1,149 @@
+name: Publish headless srv image
+
+# Publishes docker/Dockerfile.srv, built for linux/arm64, to
+# ghcr.io/agentmuxai/agentmux-srv, tagged with the full commit sha. A hosted
+# deployment that runs the headless srv on ARM pulls the image for a commit it
+# pins, instead of compiling the srv on a small runner (the release build needs
+# more memory than a 2-CPU / 8 GB runner has).
+#
+# The image is built from the public Dockerfile and this repository's own
+# checkout, and carries nothing else. Each image is smoke-tested (srv answers
+# /health) before it is pushed. A tag is never overwritten: a sha that is already
+# published is skipped.
+#
+# Run it by hand for a commit that predates this workflow (the commit must
+# have the arm64 cross path in docker/Dockerfile.srv):
+#   gh workflow run srv-image-publish.yml -f ref=<full 40-character sha>
+#
+# AgentMux's published images are pulled without credentials, so the package
+# must be public. A new GHCR package is private by default and only an
+# organization owner can change that, in the GitHub UI. The last step fails,
+# naming the page, until it is done.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docker/Dockerfile.srv'
+      - '.dockerignore'
+      - '.github/workflows/srv-image-publish.yml'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.cargo/**'
+      - '*/Cargo.toml'
+      - 'crates/srv/**'
+      - 'crates/common/**'
+      - 'crates/mcp/**'
+      - 'crates/bashwrap/**'
+      - 'schema/**'
+      - 'settings-template.jsonc'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Full commit sha to publish (default: the commit this workflow runs on)'
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+env:
+  IMAGE: ghcr.io/agentmuxai/agentmux-srv
+  PLATFORM: linux/arm64
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    # One run per commit; a second publish of the same sha waits, then skips.
+    concurrency:
+      group: srv-image-publish-${{ inputs.ref || github.sha }}
+      cancel-in-progress: false
+    steps:
+      - name: Resolve the commit to publish
+        id: sha
+        env:
+          REF: ${{ inputs.ref || github.sha }}
+        run: |
+          case "$REF" in
+            *[!0-9a-f]*|"") echo "ref must be a full lowercase 40-character commit sha, got: $REF"; exit 1;;
+          esac
+          [ "${#REF}" = 40 ] || { echo "ref must be a full 40-character commit sha, got: $REF"; exit 1; }
+          echo "sha=$REF" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.sha.outputs.sha }}
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Already published?
+        id: exists
+        run: |
+          if docker manifest inspect "$IMAGE:${{ steps.sha.outputs.sha }}" >/dev/null 2>&1; then
+            echo "$IMAGE:${{ steps.sha.outputs.sha }} is already published; nothing to do"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up QEMU (runs the arm64 image for the smoke test)
+        if: steps.exists.outputs.skip != 'true'
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        if: steps.exists.outputs.skip != 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build (${{ env.PLATFORM }})
+        if: steps.exists.outputs.skip != 'true'
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/Dockerfile.srv
+          platforms: ${{ env.PLATFORM }}
+          load: true
+          push: false
+          provenance: false
+          tags: ${{ env.IMAGE }}:${{ steps.sha.outputs.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ steps.sha.outputs.sha }}
+            org.opencontainers.image.title=agentmux-srv (headless)
+          cache-from: type=gha,scope=srv-${{ env.PLATFORM }}
+          cache-to: type=gha,mode=max,scope=srv-${{ env.PLATFORM }}
+
+      # Two seconds a try: 120 s, the arm64 image runs under QEMU here.
+      - name: Smoke test (srv answers /health)
+        if: steps.exists.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          docker run -d --name srv --platform "$PLATFORM" "$IMAGE:${{ steps.sha.outputs.sha }}"
+          trap 'docker logs srv 2>&1 | tail -40; docker rm -f srv >/dev/null' EXIT
+          for i in $(seq 1 60); do
+            docker exec srv curl -fsS -o /dev/null http://127.0.0.1:8190/health && { echo "healthy after ~$((i * 2))s"; exit 0; }
+            [ "$(docker inspect -f '{{.State.Running}}' srv)" = true ] || { echo "srv exited"; exit 1; }
+            sleep 2
+          done
+          echo "srv did not answer /health"; exit 1
+
+      - name: Push
+        if: steps.exists.outputs.skip != 'true'
+        run: docker push "$IMAGE:${{ steps.sha.outputs.sha }}"
+
+      # Anonymous, like a deployment's pull: no login in this step. Fails with the
+      # exact UI step when the package is still private.
+      - name: Anonymous pull must work (the package must be public)
+        run: |
+          docker logout ghcr.io >/dev/null 2>&1 || true
+          bash scripts/check-anonymous-pull.sh "$IMAGE:${{ steps.sha.outputs.sha }}" \
+            "https://github.com/orgs/agentmuxai/packages/container/package/agentmux-srv"
