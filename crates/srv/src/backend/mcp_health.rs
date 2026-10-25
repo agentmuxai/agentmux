@@ -44,6 +44,17 @@ const MAX_PENDING_CHECKS: u8 = 2;
 const STALE_STEP_MS: u64 = 120_000;
 /// The longest error text kept, shown or put in a note.
 const MAX_ERROR_CHARS: usize = 300;
+/// The MCP process beats every 15 s (`agentmux-mcp`'s heartbeat.rs). Silent for
+/// this long, with the CLI process still running, it is wedged (#2614).
+const SILENT_AFTER_MS: u64 = 90_000;
+/// A beat that says the MCP's async runtime last ran this long ago: starved or
+/// stuck, though the process still beats from its own thread.
+const RUNTIME_STUCK_MS: u64 = 60_000;
+/// A beat that says a call is unanswered for longer than any deadline (the
+/// longest is 29 minutes): the loop's deadlines aren't working.
+const CALL_STUCK_S: u64 = 1_800;
+/// How often the watcher looks ([`spawn_watch`]).
+const WATCH_EVERY: Duration = Duration::from_secs(15);
 
 /// A server's status, as the CLI names it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -148,6 +159,60 @@ pub fn reconnect_request_line() -> String {
 /// Ask the CLI for its servers' status.
 pub fn status_request_line() -> String {
     control_request(STATUS_PREFIX, json!({ "subtype": "mcp_status" }))
+}
+
+/// What the MCP process says about itself in a heartbeat.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Deserialize)]
+pub struct Beat {
+    pub pid: u32,
+    /// Calls received and not yet answered.
+    #[serde(default)]
+    pub inflight: u64,
+    #[serde(default)]
+    pub oldest_tool: Option<String>,
+    /// The age of the oldest of them, in seconds.
+    #[serde(default)]
+    pub oldest_s: Option<u64>,
+    /// How long ago its async runtime last ran.
+    #[serde(default)]
+    pub runtime_lag_ms: u64,
+}
+
+/// Why a server that the CLI calls connected is not working.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Wedge {
+    /// No heartbeat for [`SILENT_AFTER_MS`].
+    Silent { for_s: u64 },
+    /// Its runtime has stopped turning.
+    RuntimeStuck { lag_s: u64 },
+    /// A call has been unanswered past every deadline.
+    CallStuck { tool: String, for_s: u64 },
+}
+
+impl Wedge {
+    pub fn describe(&self) -> String {
+        match self {
+            Self::Silent { for_s } => format!(
+                "the agentmux MCP server stopped responding ({for_s} s without a heartbeat)"
+            ),
+            Self::RuntimeStuck { lag_s } => {
+                format!("the agentmux MCP server's runtime has been stuck for {lag_s} s")
+            }
+            Self::CallStuck { tool, for_s } => {
+                format!("an agentmux MCP call ({tool}) has gone unanswered for {for_s} s")
+            }
+        }
+    }
+}
+
+/// The latest heartbeat of a pane's MCP process.
+#[derive(Debug, Clone)]
+struct Beating {
+    /// The CLI process it belongs to (`process_key`).
+    process: String,
+    at_ms: u64,
+    /// Already reported wedged: not again until it beats again.
+    flagged: bool,
 }
 
 /// Where a pane is in the ladder.
@@ -309,9 +374,78 @@ struct Heal {
     /// Block → when it entered the safe profile. Kept for this srv's life:
     /// a new AgentMux version starts without it.
     safe: HashMap<String, u64>,
+    /// Block -> its MCP process's latest heartbeat. A pane with none (a build
+    /// of `agentmux-mcp` from before heartbeats) is never called wedged.
+    beats: HashMap<String, Beating>,
 }
 
 impl Heal {
+    /// A heartbeat from `process`. `Some` when it says the server is wedged.
+    fn on_beat(&mut self, block_id: &str, process: &str, beat: &Beat, now: u64) -> Option<Wedge> {
+        self.beats.insert(
+            block_id.to_string(),
+            Beating {
+                process: process.to_string(),
+                at_ms: now,
+                flagged: false,
+            },
+        );
+        if beat.runtime_lag_ms >= RUNTIME_STUCK_MS {
+            return Some(Wedge::RuntimeStuck {
+                lag_s: beat.runtime_lag_ms / 1000,
+            });
+        }
+        match (&beat.oldest_tool, beat.oldest_s) {
+            (Some(tool), Some(s)) if s >= CALL_STUCK_S => Some(Wedge::CallStuck {
+                tool: tool.clone(),
+                for_s: s,
+            }),
+            _ => None,
+        }
+    }
+
+    /// Panes whose MCP process has beaten before and has gone quiet, each
+    /// reported once until it beats again.
+    fn silent(&mut self, now: u64) -> Vec<(String, String, Wedge)> {
+        let mut out = Vec::new();
+        for (block_id, b) in self.beats.iter_mut() {
+            let quiet = now.saturating_sub(b.at_ms);
+            if !b.flagged && quiet >= SILENT_AFTER_MS {
+                b.flagged = true;
+                out.push((
+                    block_id.clone(),
+                    b.process.clone(),
+                    Wedge::Silent {
+                        for_s: quiet / 1000,
+                    },
+                ));
+            }
+        }
+        out
+    }
+
+    /// The server is connected as far as the CLI knows but isn't working:
+    /// start the ladder (reconnect, which makes the CLI start the process
+    /// again; then the safe profile; then give up). Nothing while a repair is
+    /// already under way.
+    fn on_wedged(&mut self, block_id: &str, process: &str, wedge: &Wedge, now: u64) -> Decision {
+        let safe = self.safe.contains_key(block_id);
+        // Whatever happens next, the process that wedged is not the one to wait on.
+        self.beats.remove(block_id);
+        let pane = self.pane(block_id, process, now);
+        match pane.phase {
+            Phase::Ok | Phase::Checking => {
+                pane.last_error = Some(truncate(&wedge.describe()));
+                pane.start_healing(block_id, now, safe)
+            }
+            Phase::Healing | Phase::Restarting if pane.stale(now) => {
+                pane.last_error = Some(truncate(&wedge.describe()));
+                pane.start_healing(block_id, now, safe)
+            }
+            _ => Decision::none(),
+        }
+    }
+
     /// The pane's state for `process`. A new process starts over, except the
     /// one a safe-profile restart brought up, which carries the episode on.
     fn pane(&mut self, block_id: &str, process: &str, now: u64) -> &mut Pane {
@@ -506,6 +640,77 @@ pub fn on_reconnect(block_id: &str, process: &str, result: Result<(), String>, n
 /// `already_healing`, or `no_status_yet` (the CLI hasn't reported the server).
 pub fn heal_now(block_id: &str, process: &str, now_ms: u64) -> Result<Decision, &'static str> {
     heal().heal_now(block_id, process, now_ms)
+}
+
+/// The watcher's own round came late: the machine slept, or the watcher was starved.
+fn slept_between(elapsed: Duration, last_wall_ms: u64, now_ms: u64) -> bool {
+    let limit = WATCH_EVERY * 3;
+    elapsed > limit || now_ms.saturating_sub(last_wall_ms) > limit.as_millis() as u64
+}
+
+/// A heartbeat from the MCP process of CLI process `process`; `Some` when it
+/// says the server is wedged, and the step that follows.
+pub fn on_beat(
+    block_id: &str,
+    process: &str,
+    beat: &Beat,
+    now_ms: u64,
+) -> Option<(Wedge, Decision)> {
+    let mut h = heal();
+    let wedge = h.on_beat(block_id, process, beat, now_ms)?;
+    let decision = h.on_wedged(block_id, process, &wedge, now_ms);
+    Some((wedge, decision))
+}
+
+/// Panes whose MCP process has gone quiet: `(block, process, why)`. Each is
+/// reported once; the caller then asks [`on_wedged`] what to do.
+pub fn silent(now_ms: u64) -> Vec<(String, String, Wedge)> {
+    heal().silent(now_ms)
+}
+
+/// The server of `process` is wedged: the step that follows.
+pub fn on_wedged(block_id: &str, process: &str, wedge: &Wedge, now_ms: u64) -> Decision {
+    heal().on_wedged(block_id, process, wedge, now_ms)
+}
+
+/// Forget a pane's heartbeat (its CLI process ended).
+pub fn forget_beats(block_id: &str) {
+    heal().beats.remove(block_id);
+}
+
+/// Look for quiet MCP processes every [`WATCH_EVERY`], and hand each to
+/// `repair(block, process, why)`. A watcher that finds the machine was asleep
+/// (its own tick came late) skips the round and gives every pane a fresh
+/// start: the MCP's beats are late for the same reason.
+pub fn spawn_watch(
+    token: tokio_util::sync::CancellationToken,
+    repair: impl Fn(&str, &str, &Wedge) + Send + Sync + 'static,
+) {
+    tokio::spawn(async move {
+        let mut last = std::time::Instant::now();
+        let mut last_wall = agentmux_common::time::now_ms_u64();
+        loop {
+            tokio::select! {
+                _ = tokio::time::sleep(WATCH_EVERY) => {}
+                _ = token.cancelled() => break,
+            }
+            // Both clocks: `Instant` stops while a machine is suspended on Linux
+            // and macOS, and the beats are stamped with the wall clock.
+            let now = agentmux_common::time::now_ms_u64();
+            let slept = slept_between(last.elapsed(), last_wall, now);
+            last = std::time::Instant::now();
+            last_wall = now;
+            if slept {
+                for b in heal().beats.values_mut() {
+                    b.at_ms = now;
+                }
+                continue;
+            }
+            for (block_id, process, wedge) in silent(agentmux_common::time::now_ms_u64()) {
+                repair(&block_id, &process, &wedge);
+            }
+        }
+    });
 }
 
 /// What srv knows about the pane's `agentmux` server, for `doctor`.
@@ -807,8 +1012,177 @@ mod tests {
     }
 
     #[test]
+    fn a_late_watcher_round_is_a_sleep_by_either_clock() {
+        let every = WATCH_EVERY;
+        assert!(!slept_between(every, 1_000, 1_000 + every.as_millis() as u64));
+        assert!(slept_between(every * 4, 1_000, 1_000 + every.as_millis() as u64));
+        // Suspended on Linux or macOS: the monotonic clock barely moved, the wall clock did.
+        assert!(slept_between(every, 1_000, 1_000 + 600_000));
+    }
+
+    #[test]
     fn long_errors_are_cut() {
         let long = "x".repeat(1000);
         assert_eq!(truncate(&long).chars().count(), MAX_ERROR_CHARS + 1);
+    }
+
+    fn beat() -> Beat {
+        Beat {
+            pid: 7,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_healthy_beat_changes_nothing() {
+        let mut h = Heal::default();
+        h.on_status("b", "p1", Status::Connected, None, true, 0);
+        assert_eq!(
+            h.on_beat(
+                "b",
+                "p1",
+                &Beat {
+                    inflight: 1,
+                    oldest_tool: Some("UI".into()),
+                    oldest_s: Some(60),
+                    ..beat()
+                },
+                1_000
+            ),
+            None
+        );
+        assert!(h.silent(1_000 + SILENT_AFTER_MS - 1).is_empty());
+    }
+
+    #[test]
+    fn a_server_that_beats_then_goes_quiet_is_wedged_once_and_repaired_by_reconnecting() {
+        let mut h = Heal::default();
+        h.on_status("b", "p1", Status::Connected, None, true, 0);
+        h.on_beat("b", "p1", &beat(), 1_000);
+        let quiet = h.silent(1_000 + SILENT_AFTER_MS);
+        assert_eq!(quiet.len(), 1);
+        let (block, process, wedge) = &quiet[0];
+        assert_eq!((block.as_str(), process.as_str()), ("b", "p1"));
+        assert!(matches!(wedge, Wedge::Silent { for_s } if *for_s >= 90));
+        // Reported once.
+        assert!(h.silent(1_000 + 2 * SILENT_AFTER_MS).is_empty());
+        let d = h.on_wedged("b", "p1", wedge, 1_000 + SILENT_AFTER_MS);
+        assert_eq!(
+            d.action,
+            Action::Reconnect {
+                after: Duration::ZERO
+            }
+        );
+        let notice = d.notice.unwrap();
+        assert_eq!((notice.state, notice.step), ("healing", 1));
+        assert!(notice.error.unwrap().contains("stopped responding"));
+        // The reconnect brings it back: the ladder ends as for any other repair.
+        h.on_reconnect("b", "p1", Ok(()), 1_000 + SILENT_AFTER_MS + 1);
+        let d = h.on_status(
+            "b",
+            "p1",
+            Status::Connected,
+            None,
+            true,
+            1_000 + SILENT_AFTER_MS + 3_000,
+        );
+        assert_eq!(d.notice.unwrap().state, "ok");
+    }
+
+    #[test]
+    fn a_pane_that_never_beat_is_never_wedged() {
+        // An agentmux-mcp from before heartbeats.
+        let mut h = Heal::default();
+        h.on_status("b", "p1", Status::Connected, None, true, 0);
+        assert!(h.silent(10 * SILENT_AFTER_MS).is_empty());
+    }
+
+    #[test]
+    fn a_new_beat_arms_it_again() {
+        let mut h = Heal::default();
+        h.on_beat("b", "p1", &beat(), 0);
+        assert_eq!(h.silent(SILENT_AFTER_MS).len(), 1);
+        h.on_beat("b", "p1", &beat(), SILENT_AFTER_MS + 10);
+        assert!(h.silent(SILENT_AFTER_MS + 20).is_empty());
+        assert_eq!(h.silent(2 * SILENT_AFTER_MS + 10).len(), 1);
+    }
+
+    #[test]
+    fn a_beat_that_says_the_runtime_is_stuck_or_a_call_is_past_every_deadline_is_wedged() {
+        let mut h = Heal::default();
+        let stuck = Beat {
+            runtime_lag_ms: RUNTIME_STUCK_MS,
+            ..beat()
+        };
+        assert_eq!(
+            h.on_beat("b", "p1", &stuck, 0),
+            Some(Wedge::RuntimeStuck { lag_s: 60 })
+        );
+        let late = Beat {
+            oldest_tool: Some("Terminal".into()),
+            oldest_s: Some(CALL_STUCK_S),
+            ..beat()
+        };
+        assert_eq!(
+            h.on_beat("b", "p1", &late, 0),
+            Some(Wedge::CallStuck {
+                tool: "Terminal".into(),
+                for_s: CALL_STUCK_S
+            })
+        );
+        let fine = Beat {
+            oldest_tool: Some("Terminal".into()),
+            oldest_s: Some(CALL_STUCK_S - 1),
+            runtime_lag_ms: RUNTIME_STUCK_MS - 1,
+            ..beat()
+        };
+        assert_eq!(h.on_beat("b", "p1", &fine, 0), None);
+    }
+
+    #[test]
+    fn a_wedge_during_a_repair_waits_for_it_unless_the_step_went_stale() {
+        let mut h = Heal::default();
+        h.on_status("b", "p1", Status::Failed, None, true, 0);
+        let wedge = Wedge::Silent { for_s: 100 };
+        assert_eq!(
+            h.on_wedged("b", "p1", &wedge, 10).action,
+            Action::None,
+            "already healing"
+        );
+        let d = h.on_wedged("b", "p1", &wedge, STALE_STEP_MS + 1);
+        assert_eq!(
+            d.action,
+            Action::Reconnect {
+                after: Duration::ZERO
+            }
+        );
+    }
+
+    #[test]
+    fn a_wedge_after_giving_up_is_left_alone() {
+        let mut h = Heal::default();
+        h.on_status("b", "p1", Status::Failed, None, false, 0);
+        assert_eq!(h.panes["b"].phase, Phase::GaveUp);
+        assert_eq!(
+            h.on_wedged("b", "p1", &Wedge::Silent { for_s: 100 }, 10)
+                .action,
+            Action::None
+        );
+    }
+
+    #[test]
+    fn a_wedge_names_what_stopped() {
+        assert!(Wedge::Silent { for_s: 95 }
+            .describe()
+            .contains("95 s without a heartbeat"));
+        assert!(Wedge::RuntimeStuck { lag_s: 61 }
+            .describe()
+            .contains("runtime"));
+        assert!(Wedge::CallStuck {
+            tool: "UI".into(),
+            for_s: 1900
+        }
+        .describe()
+        .contains("(UI)"));
     }
 }
