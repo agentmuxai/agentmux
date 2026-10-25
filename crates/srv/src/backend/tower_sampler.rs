@@ -1033,6 +1033,26 @@ mod tests {
         assert_eq!(exited.kind, Some(K::Builds));
     }
 
+    /// A dev build beside this instance: its programs are AgentMux's, but not
+    /// this one's, so they are counted apart from the total
+    /// (SPEC_TOWER_MEMORY_FIRST_AND_AGENTMUX_BREAKDOWN_2026_10_25.md §5.5).
+    #[test]
+    fn another_agentmux_instance_is_counted_beside_this_ones_tasks() {
+        let inputs = Inputs { blocks: vec![], roots: vec![], own_pid: 110 };
+        let mut procs = machine();
+        let alone = build(&mut state(), &procs, &inputs, Instant::now(), false, "h", &|_| None);
+        assert_eq!(alone.machine.as_ref().unwrap().agentmux_elsewhere, None);
+
+        procs.push(p(700, 1, "agentmux-launcher.exe"));
+        procs.push(p(701, 700, "agentmux-cef.exe"));
+        let snap = build(&mut state(), &procs, &inputs, Instant::now(), false, "h", &|_| None);
+        assert_eq!(snap.machine.as_ref().unwrap().agentmux_elsewhere, Some(2000));
+        assert!(
+            snap.tasks.iter().all(|t| t.processes.iter().all(|p| p.pid != 700 && p.pid != 701)),
+            "the other instance is not a task of this one"
+        );
+    }
+
     #[test]
     fn a_tracker_covers_a_block_its_tree_would_have() {
         // The terminal has a Job Object too (Windows): its members win.
