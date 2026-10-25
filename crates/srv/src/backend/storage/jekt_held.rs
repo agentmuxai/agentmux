@@ -129,7 +129,7 @@ impl Store {
                  sig_verified, reagent_verified, lan_verified, channel_verified,
                  is_transcript_request, transcript_request_escalate_forced, files_json,
                  sent_at_ms, expires_at_ms, attempts, last_error, hold_reason)
-             SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?18, ?19, ?20, ?14, ?15, 0, '', ?21''
+             SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?18, ?19, ?20, ?14, ?15, 0, '', ?21
               WHERE (SELECT COUNT(*) FROM db_jekt_held WHERE target_uid = ?2) < ?16
                 AND (SELECT COUNT(*) FROM db_jekt_held) < ?17",
             params![
