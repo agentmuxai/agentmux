@@ -122,3 +122,24 @@ fn the_shortest_gap_between_slots() {
     assert_eq!(JobSchedule::cron("0 6 * * *", "UTC").unwrap().min_gap_secs(from, 50), Some(86_400));
     assert_eq!(JobSchedule::Once { at_ms: from + 1 }.min_gap_secs(from, 50), None);
 }
+
+/// A stored job's trigger, by kind.
+#[test]
+fn a_stored_job_reads_its_trigger_by_kind() {
+    let mut job = crate::backend::cron::test_job("j", "p", "t", "", "");
+    job.created_at = 1_000;
+    assert!(matches!(JobSchedule::of(&job).unwrap(), JobSchedule::Cron { .. }), "a job from before kinds is cron");
+
+    (job.trigger_kind, job.every_secs) = ("every".into(), Some(3600));
+    let every = JobSchedule::of(&job).unwrap();
+    assert_eq!(every.next_after(1_000_000), Some(1_000_000 + 3_600_000), "from its creation, one period at a time");
+    job.every_secs = None;
+    assert!(JobSchedule::of(&job).is_err(), "an interval needs its seconds");
+
+    (job.trigger_kind, job.once_at_ms) = ("once".into(), Some(9_000));
+    assert_eq!(JobSchedule::of(&job).unwrap().next_after(0), Some(9_000));
+    job.trigger_kind = "manual".into();
+    assert_eq!(JobSchedule::of(&job).unwrap().next_after(0), None);
+    job.trigger_kind = "event".into();
+    assert!(JobSchedule::of(&job).unwrap_err().contains("can't be scheduled"));
+}

@@ -48,6 +48,16 @@ export function deviceOrigin(rawEvent: unknown): string | undefined {
 }
 
 /**
+ * Whether a stored user record says no pane typed it: srv adds
+ * `"amx":{"via":"inject"}` to a message that came from elsewhere (a jekt, a
+ * broadcast, a schedule) for a CLI that doesn't echo its prompt, and publishes
+ * it as a plain record (`persist_injected_user_line`).
+ */
+export function isInjected(rawEvent: unknown): boolean {
+    return (rawEvent as { amx?: { via?: unknown } } | null)?.amx?.via === "inject";
+}
+
+/**
  * The user's message as the backend writes it into the transcript for CLIs
  * that don't echo their prompt (Claude's stdin line; for Codex and Kimi, the
  * per-turn subprocess controller's `UserRecordSink`): a
@@ -55,14 +65,24 @@ export function deviceOrigin(rawEvent: unknown): string | undefined {
  * user_message node. Live, the pane already shows the message optimistically
  * and the transcript cursor hands the record to its echo ledger, so a live
  * translator must not render it again — hence replay-only, as Gemini's echo.
- * A message sent from a paired device is the exception: no pane typed it, so
- * it renders live too. Returns null when the record isn't one.
+ * A message no pane typed is the exception, so it renders live too: one sent
+ * from a paired device, and one injected by a jekt, broadcast or schedule
+ * (`isInjected`). Returns null when the record isn't one.
  */
 export function replayedUserMessage(rawEvent: unknown, replay: boolean | undefined): StreamEvent[] | null {
     const rec = rawEvent as { type?: unknown; message?: { content?: unknown } } | null;
     if (rec?.type !== "user") return null;
     const content = rec.message?.content;
     const fromDevice = deviceOrigin(rawEvent);
-    if ((!replay && !fromDevice) || typeof content !== "string" || !content) return [];
-    return [{ type: "user_message", message: content, ...(fromDevice ? { fromDevice } : {}) }];
+    const injectedLive = !replay && !fromDevice && isInjected(rawEvent);
+    if ((!replay && !fromDevice && !injectedLive) || typeof content !== "string" || !content) return [];
+    return [
+        {
+            type: "user_message",
+            message: content,
+            // Live, "just now" as the Claude translator stamps a user message.
+            ...(injectedLive ? { timestamp: Date.now() } : {}),
+            ...(fromDevice ? { fromDevice } : {}),
+        },
+    ];
 }

@@ -320,6 +320,22 @@ fn a_persisted_user_line_is_announced_as_an_echo_with_its_position() {
 }
 
 #[test]
+fn a_message_no_pane_typed_is_announced_as_a_plain_record_the_pane_shows() {
+    // A jekt to a Codex agent: no composer made a node for it, so it is not an
+    // echo. It still fills its line, so the stream has no gap.
+    let block = "blk-injected";
+    let (broker, rec, fs, _gfs) = setup(block);
+    append_transcript(at(&broker), block, b"{\"type\":\"assistant\"}\n", Some(&fs), None, true, None);
+    crate::backend::transcript::append::persist_injected_user_line(Some(&broker), block, b"{\"type\":\"user\"}\n", Some(&fs), None);
+
+    let seen = rec.seen.lock().unwrap();
+    assert_eq!(seen.len(), 2);
+    assert_eq!(seen[1].0.echo, None);
+    let b = pos_of(&seen[1].0, "b:");
+    assert_eq!((b.line, b.lines), (1, 2));
+}
+
+#[test]
 fn an_echo_is_mirrored_with_positions_in_both_streams() {
     // `persist_user_line` resolves the process-wide global store; drive the
     // same echo append against a test global store to check the mirror side.

@@ -28,7 +28,7 @@ pub fn run_failed(run: &JobRun) -> bool {
 /// The store's `job_run_last_decisive` picks the newest such run in SQL.
 #[cfg(test)]
 fn decisive(run: &JobRun) -> bool {
-    run.state == state::FINISHED || run_failed(run)
+    (run.state == state::FINISHED || run_failed(run)) && run.links.get("retried_by").is_none()
 }
 
 /// Whether a job is failing, from its newest decisive run
