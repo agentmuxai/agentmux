@@ -101,8 +101,8 @@ export function diskTooltip(volumes: DiskVolume[]): string {
 export function diskFreeColor(freeGb: number, totalGb: number): string {
     if (totalGb <= 0) return "var(--secondary-text-color)";
     const freePct = (freeGb / totalGb) * 100;
-    if (freePct < 8) return "var(--error-color)";
-    if (freePct < 15) return "var(--warning-color)";
+    if (freePct < 8) return "var(--error-text-color)";
+    if (freePct < 15) return "var(--warning-text-color)";
     return "var(--secondary-text-color)";
 }
 
@@ -137,7 +137,7 @@ export function diskFreeColor(freeGb: number, totalGb: number): string {
 export function watchVolumeColor(freePct: number | null, systemManaged: boolean | null): string {
     if (freePct == null) return "var(--secondary-text-color)";
     if (systemManaged === false) return "var(--secondary-text-color)";
-    if (freePct < 8) return "var(--error-color)";
-    if (freePct < 15) return "var(--warning-color)";
+    if (freePct < 8) return "var(--error-text-color)";
+    if (freePct < 15) return "var(--warning-text-color)";
     return "var(--secondary-text-color)";
 }

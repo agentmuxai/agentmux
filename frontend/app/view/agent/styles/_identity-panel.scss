@@ -176,7 +176,7 @@
 .agent-identity-unassign-btn {
     padding: var(--space-0-5) var(--space-1-5);
     border-color: var(--error-line-heavy);
-    color: color-mix(in srgb, var(--error-color) 70%, transparent);
+    color: color-mix(in srgb, var(--error-text-color) 70%, transparent);
 
     &:hover:not(:disabled) {
         background: var(--error-bg-strong);

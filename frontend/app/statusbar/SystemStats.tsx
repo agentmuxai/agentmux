@@ -42,15 +42,15 @@ function formatRate(mbps: number): string {
 
 function memColor(used: number, total: number): string {
     if (total <= 0) return "var(--secondary-text-color)";
-    if (used / total > 0.9) return "var(--warning-color)";
+    if (used / total > 0.9) return "var(--warning-text-color)";
     return "var(--secondary-text-color)";
 }
 
 function commitColor(used: number, total: number): string {
     if (total <= 0) return "var(--secondary-text-color)";
     const ratio = used / total;
-    if (ratio > 0.95) return "var(--error-color)";
-    if (ratio > 0.85) return "var(--warning-color)";
+    if (ratio > 0.95) return "var(--error-text-color)";
+    if (ratio > 0.85) return "var(--warning-text-color)";
     return "var(--secondary-text-color)";
 }
 

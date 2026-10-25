@@ -13,8 +13,8 @@
  * status bar and the panel header. Muted until busy, warning >80, error >95.
  */
 export function cpuColor(pct: number): string {
-    if (pct > 95) return "var(--error-color)";
-    if (pct > 80) return "var(--warning-color)";
+    if (pct > 95) return "var(--error-text-color)";
+    if (pct > 80) return "var(--warning-text-color)";
     return "var(--secondary-text-color)";
 }
 

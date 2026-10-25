@@ -120,8 +120,8 @@ describe("diskTooltip", () => {
 
 describe("diskFreeColor", () => {
     it("brackets match the pill's own thresholds: <8% error, <15% warning", () => {
-        expect(diskFreeColor(7, 100)).toBe("var(--error-color)");
-        expect(diskFreeColor(14, 100)).toBe("var(--warning-color)");
+        expect(diskFreeColor(7, 100)).toBe("var(--error-text-color)");
+        expect(diskFreeColor(14, 100)).toBe("var(--warning-text-color)");
         expect(diskFreeColor(50, 100)).toBe("var(--secondary-text-color)");
         expect(diskFreeColor(1, 0)).toBe("var(--secondary-text-color)"); // no capacity → no judgment
     });
@@ -129,8 +129,8 @@ describe("diskFreeColor", () => {
 
 describe("watchVolumeColor", () => {
     const MUTED = "var(--secondary-text-color)";
-    const WARN = "var(--warning-color)";
-    const ERROR = "var(--error-color)";
+    const WARN = "var(--warning-text-color)";
+    const ERROR = "var(--error-text-color)";
 
     it("has no reading until the backend sends one", () => {
         expect(watchVolumeColor(null, null)).toBe(MUTED);
