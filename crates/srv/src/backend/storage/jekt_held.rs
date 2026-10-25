@@ -48,6 +48,17 @@ pub struct HeldJekt {
     pub expires_at_ms: i64,
     pub attempts: i64,
     pub last_error: String,
+    /// `idle` for a routine message held because the target's session went
+    /// cold (`backend::cold_hold`); '' for the others, which wait for the
+    /// agent to be there at all.
+    pub hold_reason: String,
+}
+
+impl HeldJekt {
+    /// Held because the session was cold, and delivered once it is warm.
+    pub fn is_idle(&self) -> bool {
+        self.hold_reason == crate::backend::cold_hold::REASON_IDLE
+    }
 }
 
 /// What [`Store::jekt_held_insert`] did.
@@ -91,6 +102,7 @@ fn row_to_held(row: &Row) -> rusqlite::Result<HeldJekt> {
         expires_at_ms: row.get("expires_at_ms")?,
         attempts: row.get("attempts")?,
         last_error: row.get("last_error")?,
+        hold_reason: row.get("hold_reason")?,
     })
 }
 
@@ -116,8 +128,8 @@ impl Store {
                  message, priority, jekt_tier, delivery_tier,
                  sig_verified, reagent_verified, lan_verified, channel_verified,
                  is_transcript_request, transcript_request_escalate_forced, files_json,
-                 sent_at_ms, expires_at_ms, attempts, last_error)
-             SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?18, ?19, ?20, ?14, ?15, 0, ''
+                 sent_at_ms, expires_at_ms, attempts, last_error, hold_reason)
+             SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?18, ?19, ?20, ?14, ?15, 0, '', ?21
               WHERE (SELECT COUNT(*) FROM db_jekt_held WHERE target_uid = ?2) < ?16
                 AND (SELECT COUNT(*) FROM db_jekt_held) < ?17",
             params![
@@ -141,17 +153,22 @@ impl Store {
                 i64::from(held.is_transcript_request),
                 i64::from(held.transcript_request_escalate_forced),
                 held.files_json,
+                held.hold_reason,
             ],
         )?;
         Ok(if n > 0 { HoldOutcome::Held } else { HoldOutcome::Full })
     }
 
-    /// Delete held messages past their expiry; returns how many.
+    /// Delete held messages past their expiry; returns how many. A message
+    /// held for a cold session is not dropped at its expiry: the replay
+    /// delivers it then, so a quiet agent still gets it. It is dropped a
+    /// whole TTL later, if its agent never came back to receive it.
     pub fn jekt_held_delete_expired(&self, now_ms: i64) -> Result<usize, StoreError> {
         let conn = self.conn().lock().unwrap();
         Ok(conn.execute(
-            "DELETE FROM db_jekt_held WHERE expires_at_ms <= ?1",
-            params![now_ms],
+            "DELETE FROM db_jekt_held
+              WHERE (hold_reason != ?2 AND expires_at_ms <= ?1) OR expires_at_ms + ?3 <= ?1",
+            params![now_ms, crate::backend::cold_hold::REASON_IDLE, HELD_TTL_MS],
         )?)
     }
 
@@ -167,13 +184,37 @@ impl Store {
 
     /// One target's held messages, oldest first, at most `limit`.
     pub fn jekt_held_for_target(&self, target_uid: &str, limit: usize) -> Result<Vec<HeldJekt>, StoreError> {
+        self.jekt_held_ready(target_uid, limit, true, 0)
+    }
+
+    /// One target's held messages that are ready to go, oldest first, at most
+    /// `limit`: all of them when `warm`, otherwise (its session is still
+    /// cold) only those not held for the cold session, and those that have
+    /// waited out their expiry at `now_ms`.
+    pub fn jekt_held_ready(&self, target_uid: &str, limit: usize, warm: bool, now_ms: i64) -> Result<Vec<HeldJekt>, StoreError> {
         let conn = self.conn().lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT * FROM db_jekt_held WHERE target_uid = ?1
+            "SELECT * FROM db_jekt_held
+              WHERE target_uid = ?1 AND (?3 OR hold_reason != ?5 OR expires_at_ms <= ?4)
               ORDER BY sent_at_ms ASC, request_id ASC LIMIT ?2",
         )?;
-        let rows = stmt.query_map(params![target_uid, limit as i64], row_to_held)?;
+        let rows = stmt.query_map(
+            params![target_uid, limit as i64, warm, now_ms, crate::backend::cold_hold::REASON_IDLE],
+            row_to_held,
+        )?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    /// Drop the held-for-cold copies of a message the sender has now sent
+    /// again to wake the agent (`urgent`), so it isn't delivered twice.
+    /// Returns how many.
+    pub fn jekt_held_delete_idle_copies(&self, target_uid: &str, source_agent: &str, message: &str) -> Result<usize, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        Ok(conn.execute(
+            "DELETE FROM db_jekt_held
+              WHERE target_uid = ?1 AND source_agent = ?2 AND message = ?3 AND hold_reason = ?4",
+            params![target_uid, source_agent, message, crate::backend::cold_hold::REASON_IDLE],
+        )?)
     }
 
     /// Remove one held message (delivered, or dropped).
@@ -227,6 +268,7 @@ mod tests {
             expires_at_ms: sent_at_ms + HELD_TTL_MS,
             attempts: 0,
             last_error: String::new(),
+            hold_reason: String::new(),
         }
     }
 
@@ -290,5 +332,52 @@ mod tests {
         assert_eq!(s.jekt_held_for_target("uid-y", 10).unwrap()[0].last_error, "boom");
         s.jekt_held_delete("new").unwrap();
         assert!(s.jekt_held_targets().unwrap().is_empty());
+    }
+}
+
+#[cfg(test)]
+mod idle_tests {
+    use super::tests::held;
+    use super::*;
+    use crate::backend::cold_hold::REASON_IDLE;
+
+    fn idle(id: &str, target: &str, sent_at_ms: i64) -> HeldJekt {
+        HeldJekt { hold_reason: REASON_IDLE.into(), ..held(id, target, sent_at_ms) }
+    }
+
+    #[test]
+    fn a_cold_hold_waits_for_a_warm_session_but_the_others_do_not() {
+        let s = Store::open_in_memory().unwrap();
+        s.jekt_held_insert(&idle("i1", "uid-y", 100)).unwrap();
+        s.jekt_held_insert(&held("a1", "uid-y", 200)).unwrap();
+        let ids = |warm: bool, now: i64| {
+            s.jekt_held_ready("uid-y", 10, warm, now).unwrap().into_iter().map(|r| r.request_id).collect::<Vec<_>>()
+        };
+        assert_eq!(ids(true, 1000), ["i1", "a1"], "warm: everything, oldest first");
+        assert_eq!(ids(false, 1000), ["a1"], "cold: only what was not held for the cold session");
+        assert_eq!(ids(false, HELD_TTL_MS + 100), ["i1", "a1"], "waited out its 24 h: delivered anyway");
+        let round_trip = s.jekt_held_for_target("uid-y", 10).unwrap();
+        assert!(round_trip[0].is_idle() && !round_trip[1].is_idle());
+    }
+
+    #[test]
+    fn a_cold_hold_is_delivered_at_its_expiry_not_dropped_until_a_ttl_later() {
+        let s = Store::open_in_memory().unwrap();
+        s.jekt_held_insert(&idle("i1", "uid-y", 0)).unwrap();
+        s.jekt_held_insert(&held("a1", "uid-y", 0)).unwrap();
+        assert_eq!(s.jekt_held_delete_expired(HELD_TTL_MS).unwrap(), 1, "only the other kind");
+        assert_eq!(s.jekt_held_for_target("uid-y", 10).unwrap()[0].request_id, "i1");
+        assert_eq!(s.jekt_held_delete_expired(2 * HELD_TTL_MS).unwrap(), 1, "dropped a whole TTL later");
+        assert!(s.jekt_held_targets().unwrap().is_empty());
+    }
+
+    #[test]
+    fn identical_cold_copies_from_one_sender_are_removed_by_a_resend() {
+        let s = Store::open_in_memory().unwrap();
+        s.jekt_held_insert(&idle("i1", "uid-y", 100)).unwrap();
+        s.jekt_held_insert(&held("a1", "uid-y", 200)).unwrap();
+        assert_eq!(s.jekt_held_delete_idle_copies("uid-y", "sender", "hello").unwrap(), 1);
+        assert_eq!(s.jekt_held_delete_idle_copies("uid-y", "sender", "hello").unwrap(), 0);
+        assert_eq!(s.jekt_held_for_target("uid-y", 10).unwrap()[0].request_id, "a1", "a not-running hold is left alone");
     }
 }
