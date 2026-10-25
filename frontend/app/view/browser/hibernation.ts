@@ -167,6 +167,10 @@ export const PRESSURE_AFTER_MIN = { warn: 5, critical: 1 } as const;
 export const PER_TICK: Record<Pressure, number> = { normal: 1, warn: 3, critical: Number.POSITIVE_INFINITY };
 /** How often the window looks for panes due to sleep. */
 export const POLICY_TICK_MS = 30_000;
+/** Minutes hidden before an awake pane is frozen (no script, no timers) until shown. */
+export const FREEZE_AFTER_MIN = 5;
+/** How many panes are frozen per policy tick: cheap, but each takes a page check. */
+export const FREEZE_PER_TICK = 4;
 /** An agent's Browser call this recent keeps its pane awake (spec §5.3). */
 export const AGENT_RECENT_MS = 10 * 60_000;
 /** A pane that mounts hidden this soon after the window's first load starts asleep (spec §5.4). */
@@ -217,6 +221,25 @@ export function siteKeptAwake(url: string, sites: unknown): boolean {
     });
 }
 
+/** A typed keep-awake site as `siteKeptAwake` matches it: an origin
+ *  (`https://app.example.com:8443`) when a scheme was given, else a host
+ *  (`example.com`, which covers its subdomains). A pasted address is cut to
+ *  its host. Null when it names no site. */
+export function normalizeKeepAwakeSite(input: string): string | null {
+    const s = input.trim().toLowerCase();
+    if (!s) return null;
+    try {
+        if (s.includes("://")) {
+            const origin = new URL(s).origin;
+            return origin === "null" ? null : origin;
+        }
+        const host = new URL(`https://${s}`).hostname;
+        return host.includes(".") || host === "localhost" ? host : null;
+    } catch {
+        return null;
+    }
+}
+
 /** What the window knows about a pane that can keep it awake (spec §5.3). */
 export interface PaneFacts {
     url: string;
@@ -250,6 +273,77 @@ export function awakeReason(f: PaneFacts, now: number, keepAwakeSites?: unknown)
     if (f.lastAgentActionAt != null && now - f.lastAgentActionAt < AGENT_RECENT_MS) return "an agent used it recently";
     if (f.capturing) return "capturing media";
     if (f.activeWhileHidden) return "active while hidden";
+    return null;
+}
+
+/** Whether this browser engine can freeze a page and show it again. CDP's
+ *  freeze marks the page hidden and its thaw doesn't mark it shown, so only an
+ *  engine with the AgentMux CEF fork's windowed WasHidden, which the pane's
+ *  show calls, brings a thawed page back to full speed. That fork build is the
+ *  one with the Discard API, so its presence answers. A yes is kept for the window.
+ *  A no is not final: the host also answers "unsupported" when the probed pane has no
+ *  live page or the UI thread was slow, so it is asked again after a while. */
+export const ENGINE_NO_RECHECK_MS = 5 * 60_000;
+let engineCanFreeze: Promise<boolean> | undefined;
+let engineNoAt = 0;
+export function resetEngineSupportsFreeze(): void {
+    engineCanFreeze = undefined;
+    engineNoAt = 0;
+}
+export function engineSupportsFreeze(
+    ask: () => Promise<{ supported: boolean } | null | undefined>,
+    now: number = Date.now(),
+): Promise<boolean> {
+    if (engineCanFreeze && engineNoAt > 0 && now - engineNoAt >= ENGINE_NO_RECHECK_MS) resetEngineSupportsFreeze();
+    engineCanFreeze ??= ask()
+        .then((r) => {
+            if (r?.supported === true) return true;
+            engineNoAt = now;
+            return false;
+        })
+        .catch(() => {
+            resetEngineSupportsFreeze(); // ask again next time
+            return false;
+        });
+    return engineCanFreeze;
+}
+
+/** Whether the window believes the host has this pane's page frozen. The host
+ *  thaws a page only when told to or on a CDP call, so the flag clears only once
+ *  the host's thaw has been answered; a thaw that failed leaves it set, and the
+ *  next one tries again. Callers that are about to look at the page `await thaw()`. */
+export function createFreezeState(setHostFrozen: (frozen: boolean) => Promise<unknown>) {
+    let frozen = false;
+    let thawing: Promise<void> | null = null;
+    return {
+        isFrozen: () => frozen,
+        markFrozen: () => {
+            frozen = true;
+        },
+        thaw(): Promise<void> {
+            if (!frozen) return thawing ?? Promise.resolve();
+            thawing ??= setHostFrozen(false).then(
+                () => {
+                    frozen = false;
+                    thawing = null;
+                },
+                () => {
+                    thawing = null;
+                },
+            );
+            return thawing;
+        },
+    };
+}
+
+/** What in the page keeps a hidden pane from being frozen: only what a frozen
+ *  page would break while it waits (media playing, DevTools attached). A typed
+ *  form or a leave-page prompt is fine: freezing keeps the page as it is. */
+export function freezeAwakeReason(c: BrowserHibernationCheck | null | undefined): string | null {
+    if (!c) return "page not checked";
+    if (!c.live) return "no live page";
+    if (c.media) return "playing media";
+    if (c.devtools) return "DevTools open";
     return null;
 }
 
@@ -318,6 +412,10 @@ export interface HibernatablePane {
     /** Put it to sleep unless something keeps it awake; resolves to that reason, or null when it slept. */
     tryHibernate(reason: SleepReason): Promise<string | null>;
     wake(why: string): void;
+    /** Frozen: awake, but its page runs nothing until it is shown again. */
+    isFrozen?(): boolean;
+    /** Freeze it unless something keeps it running; resolves to that reason, or null when frozen. */
+    tryFreeze?(): Promise<string | null>;
 }
 
 const panes = new Set<HibernatablePane>();
@@ -367,6 +465,16 @@ export async function policyTick(
         if (slept.length >= PER_TICK[pressure]) break;
         const declined = await p.tryHibernate(pressure === "normal" ? "hidden" : "pressure");
         if (declined == null) slept.push(p.blockId);
+    }
+    // Hidden long enough to freeze, not yet due to sleep (or kept awake): freeze.
+    const freezable = candidates
+        .filter((p) => !slept.includes(p.blockId) && p.tryFreeze && !p.isFrozen?.() && !p.isAsleep())
+        .filter((p) => now - (p.hiddenSince() ?? now) >= FREEZE_AFTER_MIN * 60_000)
+        .sort((a, b) => (a.hiddenSince() ?? 0) - (b.hiddenSince() ?? 0));
+    let frozen = 0;
+    for (const p of freezable) {
+        if (frozen >= FREEZE_PER_TICK) break;
+        if ((await p.tryFreeze!()) == null) frozen++;
     }
     return slept;
 }
