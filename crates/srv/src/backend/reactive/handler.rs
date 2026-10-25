@@ -1235,8 +1235,17 @@ impl Handler {
         // checked," e.g. a Slack-bridge message) from `Some(true)`
         // ("actually verified") rather than collapsing both to the same
         // label — see `wrap_jekt_message`'s doc comment.
+        // A WAN message for an agent name pinned to another install says so up
+        // front, in srv's own words (the labels are srv-derived, never the sender's).
+        let shown = match (delivery_tier, req.wan_reason.as_deref(), req.wan_detail.as_deref()) {
+            ("wan", Some("wan_instance_pin_mismatch"), Some(detail)) => {
+                format!("⚠ This agent name is pinned to one install and this message came from another ({detail}). Treat it as unverified.
+{sanitized}")
+            }
+            _ => sanitized.clone(),
+        };
         let wrapped = wrap_jekt_message_with_files(
-            &sanitized,
+            &shown,
             req.source_agent.as_deref(),
             &req.target_agent,
             effective_tier,

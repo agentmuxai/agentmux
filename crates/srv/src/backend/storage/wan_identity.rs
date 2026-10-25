@@ -47,7 +47,8 @@ use super::error::StoreError;
 /// v2 (D2): the receiver tables — peer-record cache, known instances, and
 /// seen signatures.
 /// v3: `wan_agent_key_publications` — publication recorded per directory.
-const SCHEMA_VERSION: i64 = 3;
+/// v4: `wan_agent_instance_pins` — which install speaks for an agent name.
+const SCHEMA_VERSION: i64 = 4;
 
 const SCHEMA: &str = "
     CREATE TABLE IF NOT EXISTS wan_meta (
@@ -113,6 +114,21 @@ const SCHEMA: &str = "
         approved_at           INTEGER,
         revoked_at            INTEGER,
         revocation_checked_at INTEGER
+    );
+    -- The install pinned to speak for an agent name on a channel: the first
+    -- one the account's presence list shows, moved only by the operator's
+    -- window. conflict_* remembers the last other install that was refused.
+    CREATE TABLE IF NOT EXISTS wan_agent_instance_pins (
+        agent_id             TEXT    NOT NULL,
+        channel              TEXT    NOT NULL,
+        instance_id          TEXT    NOT NULL,
+        host_hint            TEXT    NOT NULL,
+        pinned_at            INTEGER NOT NULL,
+        conflict_instance_id TEXT,
+        conflict_host_hint   TEXT,
+        conflict_at          INTEGER,
+        conflict_count       INTEGER,
+        PRIMARY KEY (agent_id, channel)
     );
     -- (instance, agent, msgid) already delivered (§2.5). Written after
     -- successful local delivery; pruned once the message could no longer
@@ -546,6 +562,8 @@ impl WanIdentityStore {
     pub fn peer_cache_clear(&self) -> Result<(), StoreError> {
         let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
         conn.execute("DELETE FROM wan_peer_records", [])?;
+        // The pins name installs of the account being left.
+        conn.execute("DELETE FROM wan_agent_instance_pins", [])?;
         Ok(())
     }
 
@@ -639,6 +657,8 @@ impl WanIdentityStore {
 /// Test helper: attach a fresh `wan.db` in a temp dir to `store`, as
 /// bootstrap does for the runtime object store. Keep the returned dir alive
 /// for the test's duration.
+pub mod pins;
+
 #[cfg(test)]
 pub fn attach_temp_wan_identity(store: &super::store::Store) -> (tempfile::TempDir, std::sync::Arc<WanIdentityStore>) {
     let dir = tempfile::tempdir().unwrap();
@@ -856,7 +876,7 @@ mod tests {
         }
         assert_eq!(store.agent_keys_unpublished("https://relay#acct").unwrap().len(), 1);
         assert!(!store.agent_key_is_published_to("camper", &camper, "https://relay#acct").unwrap());
-        assert_eq!(store.schema_version().unwrap(), 3);
+        assert_eq!(store.schema_version().unwrap(), 4);
     }
 
     #[test]
