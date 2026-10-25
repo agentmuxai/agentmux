@@ -101,7 +101,7 @@ mod tests {
     // fork, so the test process itself stays dumpable (the test harness reads its own /proc).
     #[cfg(target_os = "linux")]
     #[test]
-    fn the_process_is_not_dumpable_afterwards_and_its_environ_is_closed_to_others() {
+    fn apply_marks_the_process_not_dumpable() {
         // SAFETY: the child only calls async-signal-safe functions before _exit.
         unsafe {
             let pid = libc::fork();
@@ -115,6 +115,43 @@ mod tests {
             let mut status = 0;
             libc::waitpid(pid, &mut status, 0);
             assert!(libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0, "child status {status}");
+        }
+    }
+
+    // What the control is for: after `apply()` another process of the user (here the parent)
+    // can read the child's `/proc/<pid>/stat` but not its `environ`.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn after_apply_another_process_cannot_read_environ_but_can_read_stat() {
+        // SAFETY: the child calls only async-signal-safe functions (write, read, _exit) after fork.
+        unsafe {
+            let mut ready = [0 as libc::c_int; 2];
+            let mut done = [0 as libc::c_int; 2];
+            assert_eq!(libc::pipe(ready.as_mut_ptr()), 0);
+            assert_eq!(libc::pipe(done.as_mut_ptr()), 0);
+            let pid = libc::fork();
+            assert!(pid >= 0);
+            if pid == 0 {
+                let ok = apply();
+                let byte = [ok as u8];
+                libc::write(ready[1], byte.as_ptr().cast(), 1);
+                let mut sink = [0u8; 1];
+                libc::read(done[0], sink.as_mut_ptr().cast(), 1);
+                libc::_exit(0);
+            }
+            let mut got = [0u8; 1];
+            assert_eq!(libc::read(ready[0], got.as_mut_ptr().cast(), 1), 1);
+            let environ = std::fs::read(format!("/proc/{pid}/environ"));
+            let stat = std::fs::read_to_string(format!("/proc/{pid}/stat"));
+            libc::write(done[1], got.as_ptr().cast(), 1);
+            let mut status = 0;
+            libc::waitpid(pid, &mut status, 0);
+            assert_eq!(got[0], 1, "apply() failed in the child");
+            assert!(stat.is_ok(), "stat should stay readable: {stat:?}");
+            // Root (a test run as uid 0) can read it whatever the flag says.
+            if libc::geteuid() != 0 {
+                assert!(environ.is_err(), "environ was readable by another process after apply()");
+            }
         }
     }
 

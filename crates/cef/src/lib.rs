@@ -1247,8 +1247,8 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
         "ok",
         None,
     );
-    tracing::info!("CEF initialized, entering message loop; memory access denied to other processes: {}", agentmux_common::process_hardening::deny_memory_access(false));
-
+    let denied = agentmux_common::process_hardening::deny_memory_access(false);
+    tracing::info!("CEF initialized, entering message loop; memory access denied to other processes: {denied}");
     // Claim a Dock tile, THEN paint the icon onto it. A bare Mach-O launched
     // outside an `.app` bundle (both `task dev` direct-invoke and the launcher
     // flat layout) defaults to a background/accessory activation policy — no
