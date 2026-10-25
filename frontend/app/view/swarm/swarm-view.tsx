@@ -100,7 +100,12 @@ export function SwarmView(props: { model: SwarmViewModel; ctx: PaneTabHostContex
 
     let rootRef: HTMLDivElement | undefined;
 
-    const tree = createMemo(() => {
+    // A Swarm pane nobody can see (another window tab, or a pane tab behind its
+    // siblings) keeps its last list and rebuilds once when it is shown: every
+    // agent event rebuilt every Swarm pane in the window, hidden ones included
+    // (150 to 380 rebuilds a minute across four panes in one busy window).
+    const tree = createMemo<AgentTreeNode[]>((prev) => {
+        if (ctx.visibility() !== "active") return prev ?? [];
         const rows = model.buildTree();
         selectTrace.rebuilt();
         return rows;
