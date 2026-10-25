@@ -366,3 +366,22 @@ async fn an_edit_changes_the_definition_and_keeps_old_jobs_editable() {
     let (status, v) = send(&state, Method::PATCH, Some(&owner), uri, Some(json!({ "id": "other-id" }))).await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{v}");
 }
+
+/// A job with no recorded creator is the operator's (the UI is unattributed,
+/// and so are jobs from before creators were recorded): any caller may pause
+/// it, but only the operator rewrites what it sends.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_job_without_a_creator_is_rewritten_only_by_the_operator() {
+    let (state, owner, _other) = state();
+    let mut job = crate::backend::cron::test_job("jobs-nobody", "tick", "jobs-other", "uid-jobs-other", "");
+    job.created_at = agentmux_common::time::now_ms() / 1000;
+    state.mstore.cron_create(&job).unwrap();
+    let uri = "/agentmux/jobs/jobs-nobody";
+    let (status, _) = send(&state, Method::PATCH, Some(&owner), uri, Some(json!({ "name": "mine now" }))).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "an agent may not rewrite an operator's job");
+    let (status, _) = send(&state, Method::PATCH, Some(&owner), uri, Some(json!({ "action": "pause" }))).await;
+    assert_eq!(status, StatusCode::OK, "any caller may pause it");
+    let (status, v) = send(&state, Method::PATCH, None, uri, Some(json!({ "name": "renamed" }))).await;
+    assert_eq!(status, StatusCode::OK, "the operator may rewrite it: {v}");
+    state.cron_scheduler.cancel_job("jobs-nobody");
+}

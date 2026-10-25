@@ -751,17 +751,18 @@ fn may_change_job(caller: Option<&super::caller::Caller>, job: &CronJob) -> bool
     let Some(uid) = caller.and_then(super::caller::Caller::uid) else {
         return true;
     };
-    may_edit_job(caller, job) || job.target_uid == uid
+    job.created_by_uid.is_empty() || may_edit_job(caller, job) || job.target_uid == uid
 }
 
 /// Whether `caller` may edit `job`'s definition: the operator, or the agent
 /// that created or owns it (§7). The agent a job messages may pause it, not
-/// rewrite it.
+/// rewrite it. A job with no creator (the operator's, or one from before
+/// creators were recorded) is the operator's to edit.
 fn may_edit_job(caller: Option<&super::caller::Caller>, job: &CronJob) -> bool {
     let Some(uid) = caller.and_then(super::caller::Caller::uid) else {
         return true;
     };
-    job.created_by_uid.is_empty() || job.created_by_uid == uid || job.owner_uid() == uid
+    !uid.is_empty() && (job.created_by_uid == uid || job.owner_uid() == uid)
 }
 
 /// The store and the job, or the response refusing the change: no store, a
