@@ -630,13 +630,24 @@ async fn a_pending_fire_expires_at_the_next_fire_time() {
 /// Start a scheduler over one hourly job whose missed slots are counted from
 /// `last_fired`, or from `created_at` when it never fired; returns its runs
 /// and how many fires were delivered.
+///
+/// One instant, read once, decides the job's history and what the scheduler
+/// counts as missed, so an hour turning over mid-test can't add a slot. The
+/// result is read once the run has reached its end state (the skip row, and for
+/// `latest` the catch-up row with its delivery), however long that takes under
+/// load, not after a fixed number of polls.
 async fn startup_case(policy: &str, never_fired: bool, fires: usize) -> (Vec<JobRun>, usize) {
     let rig = rig();
-    let mut job = test_job(&format!("j-start-{policy}-{never_fired}"), "p", "AgentY", "uid-y", "c");
+    let id = format!("j-start-{policy}-{never_fired}");
+    // The job's own loop runs on the real clock and fires its next slot at the
+    // top of the next hour plus this offset: keep it beyond the wait below.
+    assert!(crate::backend::cron::schedule::jitter_ms(&id) > 30_000, "{id}");
+    let mut job = test_job(&id, "p", "AgentY", "uid-y", "c");
     job.expression = "0 * * * *".into();
     job.catch_up = policy.into();
     // 3 h 10 min ago: three hourly slots missed since.
-    let now = chrono::Utc::now().timestamp();
+    let now_dt = chrono::Utc::now();
+    let now = now_dt.timestamp();
     let boundary = now - now % 3600 - 3 * 3600 + 60;
     if never_fired {
         job.created_at = boundary;
@@ -645,17 +656,20 @@ async fn startup_case(policy: &str, never_fired: bool, fires: usize) -> (Vec<Job
         job.created_at = boundary - 86_400;
     }
     rig.store.cron_create(&job).unwrap();
-    rig.sched.start().await;
+    rig.sched.start_at(now_dt).await;
     let mut runs = Vec::new();
-    for _ in 0..100 {
+    let mut delivered = 0;
+    for _ in 0..1_000 {
         runs = rig.runs(&job.id);
-        if runs.iter().any(|r| r.state == state::SKIPPED) && (fires == 0 || runs.len() >= 2) {
+        delivered = rig.seen.lock().unwrap().len();
+        let skipped = runs.iter().any(|r| r.state == state::SKIPPED);
+        let caught_up = runs.iter().filter(|r| r.trigger == TRIGGER_CATCH_UP && r.state != state::SCHEDULED).count();
+        if skipped && caught_up == fires && delivered == fires {
             break;
         }
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
     rig.sched.cancel_job(&job.id);
-    let delivered = rig.seen.lock().unwrap().len();
     (runs, delivered)
 }
 
