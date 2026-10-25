@@ -15,6 +15,7 @@
 import { formatAgoPrecise } from "@/util/format-time";
 import type { UnavailableReason } from "@/app/store/agent-status";
 import type { AgentDisplayStatus } from "./swarm-view";
+import type { SeatSummary } from "@/types/rpc/SeatSummary";
 
 /** An agent's state as its own instance reports it (srv `agent_state::AgentState`). */
 export type RemoteAgentState = "working" | "waiting" | "idle" | "stopped" | "error" | "limited" | "signed_out";
@@ -30,6 +31,11 @@ export interface RemoteAgent {
     /** Its provider id (`claude`, `codex`, ...), a known one only; absent from
      *  an older build (docs/specs/SPEC_SWARM_REFINEMENTS_2026_10_17.md §3). */
     provider?: string;
+    /** Its seat as its instance reports it (a LAN peer's `agent_seats`; srv
+     *  bounds it). Absent when it has none, or its instance shares none
+     *  (docs/specs/SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md §5). Self-reported:
+     *  read it through `readSeatMeta`, which drops an unknown role. */
+    seat?: SeatSummary;
 }
 
 export interface RemoteChannel {

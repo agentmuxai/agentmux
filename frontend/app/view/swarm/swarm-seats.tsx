@@ -13,10 +13,13 @@ import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
 import { Pill, SegmentedControl } from "@/app/element/ui";
 import { MOS } from "@/app/store/global";
 import { readSeatMeta, seatBadgeText, seatTooltipLine } from "@/app/view/agent/seat-format";
+import type { SeatSummary } from "@/types/rpc/SeatSummary";
+import type { RemoteRow } from "./swarm-remote";
 import {
     GROUP_BY_META_KEY,
     groupRowsByLead,
     readGroupBy,
+    remoteSeatInfo,
     type SeatListEntry,
     type SeatRowInfo,
     type SwarmGroupBy,
@@ -26,9 +29,13 @@ import "./swarm-seats.scss";
 
 /** The role badge, from the pane's `agent:seat`; nothing for an agent with no seat. */
 export function SwarmSeatBadge(props: { meta: Record<string, unknown> | undefined }): JSX.Element {
-    const seat = createMemo(() => readSeatMeta(props.meta));
+    return <SwarmSeatPill seat={readSeatMeta(props.meta)} />;
+}
+
+/** The role badge for a seat in hand: an other instance's agent shows the seat it reports. */
+export function SwarmSeatPill(props: { seat: SeatSummary | null | undefined }): JSX.Element {
     return (
-        <Show when={seat()}>
+        <Show when={props.seat}>
             {(s) => (
                 <Pill class="swarm-seat-badge" title={seatTooltipLine(s())}>
                     {seatBadgeText(s())}
@@ -133,23 +140,23 @@ export interface SwarmSeats {
     info: Accessor<ReadonlyMap<string, SeatRowInfo>>;
 }
 
-/** `rows` are this instance's rows by key; `remote` the other instances', whose seats the Swarm isn't sent. */
+/** `rows` are this instance's rows by key; `remote` the other instances', with the seats they report. */
 export function useSwarmSeats(
     ctx: Pick<PaneTabHostContext, "meta" | "setMeta">,
     rows: Accessor<readonly (readonly [string, { blockId: string | null }])[]>,
-    remote: Accessor<ReadonlyMap<string, unknown>>
+    remote: Accessor<ReadonlyMap<string, RemoteRow>>
 ): SwarmSeats {
     return {
         groupBy: createMemo(() => readGroupBy(ctx.meta())),
         setGroupBy: (v) => void ctx.setMeta({ [GROUP_BY_META_KEY]: v === "lead" ? "lead" : null }),
-        info: createMemo(() => seatRowInfo(rows(), [...remote().keys()])),
+        info: createMemo(() => seatRowInfo(rows(), remote())),
     };
 }
 
 /** This instance's rows from their panes' meta, the others' as remote. */
 function seatRowInfo(
     rows: readonly (readonly [string, { blockId: string | null }])[],
-    remoteKeys: readonly string[]
+    remote: ReadonlyMap<string, RemoteRow>
 ): Map<string, SeatRowInfo> {
     const info = new Map<string, SeatRowInfo>();
     for (const [key, node] of rows) {
@@ -159,6 +166,6 @@ function seatRowInfo(
         const agentId = typeof meta?.["agentId"] === "string" && meta["agentId"] ? (meta["agentId"] as string) : null;
         info.set(key, { agentId, seat: readSeatMeta(meta), remote: false });
     }
-    for (const key of remoteKeys) info.set(key, { agentId: null, seat: null, remote: true });
+    for (const [key, row] of remote) info.set(key, remoteSeatInfo(row));
     return info;
 }

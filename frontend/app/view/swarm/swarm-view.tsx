@@ -40,8 +40,9 @@ import { isAwaitingUser, swarmLineTooltip } from "@/app/store/swarm-line";
 import { setSupervisorMode, SupervisorBucket, SupervisorChip, supervisorRows } from "./swarm-supervisor";
 import { subagentStatus } from "@/app/store/agent-status";
 import { remoteAgentKey } from "./swarm-fleet-targets";
+import { remoteSeatInfo } from "./swarm-seat-groups";
 import { remoteChip, remoteLine, remoteRows, remoteSections, seenAgo, type RemoteRow } from "./swarm-remote";
-import { SwarmGroupByControl, SwarmSeatBadge, SwarmSeatList, useSwarmSeats } from "./swarm-seats";
+import { SwarmGroupByControl, SwarmSeatBadge, SwarmSeatList, SwarmSeatPill, useSwarmSeats } from "./swarm-seats";
 import { FleetToolbar, FleetResultPanel } from "./swarm-fleet-toolbar";
 import "./swarm-view.scss";
 import { readZoom } from "@/app/store/zoom-factor";
@@ -302,6 +303,7 @@ export function RemoteAgentRow(props: { model: SwarmViewModel; row: RemoteRow })
                 />
                 <SwarmProviderIcon provider={props.row.agent.provider} unknownTitle={REMOTE_PROVIDER_UNKNOWN} />
                 <span class="swarm-remote-agent-name">{props.row.agent.name}</span>
+                <SwarmSeatPill seat={remoteSeatInfo(props.row).seat} />
                 <span class="swarm-remote-where">
                     <span class="swarm-remote-title">{section().title}</span>
                     <span class="swarm-remote-badge">{section().badge}</span>
