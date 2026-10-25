@@ -217,6 +217,11 @@ pub(crate) fn jobs_store(state: &AppState) -> Option<Arc<Store>> {
 
 /// Where the run ledger is (`db_job_runs`): the identity store, or the work store of
 /// a `task dev` build, which keeps its own (`agentmux_common::work_store`).
+///
+/// A known limit: a dev build's job that delivers to an agent in a shared build has
+/// its run in the dev ledger only, so the receiver's `follow_forwarded` finds no row
+/// and the run closes by the no-turn timeout with an unknown cost. The message is
+/// still delivered. Reading a missing cost on such a test job as a bug would be wrong.
 pub(crate) fn ledger_store(state: &AppState) -> Arc<Store> {
     state.work_store.clone()
 }
