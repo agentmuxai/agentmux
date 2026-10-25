@@ -1,6 +1,6 @@
 # Signed checksums for update downloads
 
-Status: approved by the operator on 2026-10-25 (decisions of §11 included). Task #99.
+**Status:** active. Approved by the operator on 2026-10-25 (decisions of §11 included). Task #99.
 Build step 1 (§8) is in progress: the manifest script, the release workflow's signing
 job (off until the key exists) and the app's verification module, which nothing calls
 yet.
