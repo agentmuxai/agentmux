@@ -163,6 +163,10 @@ pub struct RunLedger {
     jobs: std::sync::OnceLock<Arc<Store>>,
     /// Held while a run's place is decided and its row written.
     admission: std::sync::Mutex<()>,
+    /// Pending fires that were told to start and are being delivered: run id to
+    /// job id. A pending row doesn't occupy a place in the ledger, so until the
+    /// delivery lands these count as running.
+    pending_claims: std::sync::Mutex<std::collections::HashMap<String, String>>,
     interrupt: std::sync::OnceLock<BlockHook>,
     worker_stop: std::sync::OnceLock<BlockHook>,
 }
@@ -190,6 +194,7 @@ impl RunLedger {
             incidents: std::sync::OnceLock::new(),
             jobs: std::sync::OnceLock::new(),
             admission: std::sync::Mutex::new(()),
+            pending_claims: std::sync::Mutex::default(),
             interrupt: std::sync::OnceLock::new(),
             worker_stop: std::sync::OnceLock::new(),
         })

@@ -289,6 +289,26 @@ async fn a_run_followed_by_another_channel_is_not_stopped_from_here() {
     assert_eq!(rig.store.job_run_get(&first).unwrap().unwrap().state, state::RUNNING);
 }
 
+/// A pending fire told to start holds its place while it is delivered, so a
+/// fire that lands in between waits instead of taking the same place.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_pending_fire_being_delivered_holds_its_place() {
+    let rig = rig();
+    let a = make(&rig, "j-claim-a", |j| {
+        j.policy.group = Some("g".into());
+        j.catch_up = "latest".into();
+    });
+    let b = make(&rig, "j-claim-b", |j| j.policy.group = Some("g".into()));
+    rig.answer(NOT_FOUND);
+    let pending = rig.sched.fire(&a, slot(0)).await.run_id.unwrap();
+
+    assert!(rig.ledger.pending_may_start(&a, &pending), "the group is free");
+    let fired = rig.sched.fire(&b, slot(0)).await;
+    assert_eq!(fired.waiting, Some(reason::GROUP_BUSY), "its place is taken while it is delivered");
+    rig.ledger.pending_delivery_done(&pending);
+    assert!(rig.ledger.pending_may_start(&a, &pending), "released once the delivery is over");
+}
+
 // ── groups and the global limit ─────────────────────────────────────────
 
 #[tokio::test(flavor = "multi_thread")]
