@@ -16,7 +16,7 @@ You are running a scheduled job with nobody watching. Everything under Parameter
 5. For each finding record the doc and line, the claim, what the code says and where, and how sure you are.
 
 ## Outputs
-- Tasks: keep one standing task titled "Docs drift: <repo>" (Tasks tool: list to find it, action update to replace its body with the current findings, action enqueue only if none is open). Never open a second one. If nothing drifts, update it to say so.
+- Tasks: when something drifts, enqueue one task titled "Docs drift: <repo> (<date>)" with the findings in its payload, unless an open task for this repo (list, titles starting "Docs drift: <repo>") already lists every one of today's findings. A task someone else holds is theirs: don't touch it, and file a new one only for findings it lacks, saying which earlier task it follows. If nothing drifts, file nothing; the report says so.
 - Never open pull requests or edit the repo; put each proposed fix (the doc, line and corrected text) in the task.
 
 ## Finish

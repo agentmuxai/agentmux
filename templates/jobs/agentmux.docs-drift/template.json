@@ -4,7 +4,7 @@
   "name": "Docs drift",
   "version": "1.0.0",
   "kind": "job",
-  "description": "Finds docs whose claims no longer match the code, and dead links. Keeps one standing task up to date instead of filing a new one each week. Pull requests and deletions need an approval step that arrives in a later version; until then this only reports and files tasks.",
+  "description": "Finds docs whose claims no longer match the code, and dead links. Files one task when something drifts, and none when an open task already lists the same findings. Pull requests and deletions need an approval step that arrives in a later version; until then this only reports and files tasks.",
   "readsUntrusted": true,
   "params": {
     "type": "object",
