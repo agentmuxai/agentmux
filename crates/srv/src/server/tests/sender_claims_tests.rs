@@ -181,6 +181,8 @@ async fn the_bus_inbox_routes_need_the_token_of_the_agent_they_name() {
             let (_, v) = post(&state, token, uri, body).await;
             assert_eq!(!refused(&v), allowed, "{uri} for {agent} (token: {}): {v}", token.is_some());
         }
+    }
+}
 
 async fn get(state: &AppState, token: Option<&str>, uri: &str) -> (StatusCode, Value) {
     let mut req = Request::builder().method(Method::GET).uri(uri).header("X-AuthKey", "test-secret-key");
