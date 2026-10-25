@@ -25,7 +25,8 @@
 
     --main-text-color: #0d0f11;
     --secondary-text-color: #4b535c;
-    --grey-text-color: #6e7781;
+    // 4.7:1 on --main-bg-color (was 4.2), so text set in it passes AA like the other tokens.
+    --grey-text-color: #666f79;
 
     --accent-color: #2563eb;
     --accent-color-rgb: 37, 99, 235;

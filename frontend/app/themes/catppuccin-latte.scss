@@ -26,7 +26,9 @@
     // reading in-app; still the same hue family, just more ink.
     --main-text-color: #37394b;
     --secondary-text-color: #5c5f77;
-    --grey-text-color: #8c8fa1;
+    // Darkened from Catppuccin's "Overlay 1" (#8c8fa1, 2.8:1 on --main-bg-color) to 4.7:1: text set in
+    // this token has to pass AA on a light theme.
+    --grey-text-color: #676a80;
 
     --accent-color: #1e66f5;
     --accent-color-rgb: 30, 102, 245;

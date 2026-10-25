@@ -62,10 +62,6 @@ const lightBlock = base.slice(base.indexOf('[data-theme-polarity="light"]'));
 // ones), which is why the pill text is the main text colour and the semantic
 // colour is the wash, the line and the icon.
 const AA = 4.5;
-// solarized-light's secondary text colour is about 2.6:1 on its own surface,
-// everywhere it is used (a theme-level choice, not this pane's), so the plain
-// pill, which uses it, is pinned there rather than measured against AA.
-const SECONDARY_TEXT_BELOW_AA = new Set(["solarized-light"]);
 
 describe("the shared pills", () => {
     const themes = readdirSync(new URL("../../themes/", import.meta.url))
@@ -120,8 +116,7 @@ describe("the shared pills", () => {
             const secondary = pick("secondary-text-color");
             expect(secondary, "the secondary text colour resolves").toBeTruthy();
             const plain = contrast(secondary!, washOf("tint-3", surface!));
-            if (SECONDARY_TEXT_BELOW_AA.has(id)) expect(plain).toBeLessThan(AA); // leaves the list when the theme is fixed
-            else expect(plain, `plain pill text in ${id}`).toBeGreaterThanOrEqual(AA);
+            expect(plain, `plain pill text in ${id}`).toBeGreaterThanOrEqual(AA);
             for (const kind of ["success", "warning", "error", "accent"] as const) {
                 const wash = washOf(`${kind}-bg`, surface!);
                 expect(contrast(text!, wash), `pill text on the ${kind} wash in ${id}`).toBeGreaterThanOrEqual(AA);
