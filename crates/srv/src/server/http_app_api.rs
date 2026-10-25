@@ -128,9 +128,10 @@ pub(super) async fn handle_agent_memory_write(
 ///
 /// Every running agent waits for its user's override (§6.5 of
 /// SPEC_AGENT_SELF_QUIT_2026_09_24.md): 202 with a request per target, or 200
-/// when nothing had to wait (everything refused or already gone). `auth`
-/// (optional, signed by agentmux-mcp) names the caller on the banner and in the
-/// audit log, and is how the caller's own block is refused.
+/// when nothing had to wait (everything refused or already gone). The request
+/// must carry the asking agent's token, which names that agent on the banner
+/// and in the audit log; the optional signed `auth` only identifies the
+/// caller's own block, so that it is refused.
 pub(super) async fn handle_fleet_bulk_stop(
     State(state): State<AppState>,
     caller: Option<axum::Extension<crate::server::caller::Caller>>,
