@@ -1,6 +1,6 @@
 # SPEC: Tower puts memory first, and shows what AgentMux's memory is made of
 
-**Status:** active — approved by the operator 2026-10-25 (all nine ◆ decisions in §10 as recommended); phase 1 (memory first, frontend only) built in #5445; remaining: phase 2 (the total and the breakdown, srv and the Memory view) and phase 3 (trends and the growth warning), §9
+**Status:** active — approved by the operator 2026-10-25 (all nine ◆ decisions in §10 as recommended); phase 1 (memory first, frontend only) built in #5445 and #5447; phase 2 (the Memory view and the total in four parts) built in #5451; remaining: phase 3 (trends and the growth warning, §7) and the later options in §9
 **Date:** 2026-10-25
 **Author:** Loap@narko
 **Requested by:** the operator, 2026-10-25, through AgentY (Kanban #2858):

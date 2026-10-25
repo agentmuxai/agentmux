@@ -214,6 +214,11 @@ pub struct TowerMachine {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional, type = "number")]
     pub mem_total: Option<u64>,
+    /// Private memory of AgentMux programs outside this instance's tree
+    /// (another instance on this computer), bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub agentmux_elsewhere: Option<u64>,
 }
 
 /// One pane in the Panes view (SPEC_TOWER_PANES_VIEW_2026_10_21.md §4): what
@@ -277,6 +282,89 @@ pub struct TowerPaneWindow {
     pub tabs: Vec<TowerPaneTab>,
 }
 
+/// Where a process's memory is counted in AgentMux's total
+/// (`backend::tower_memory`; SPEC_TOWER_MEMORY_FIRST_AND_AGENTMUX_BREAKDOWN_2026_10_25.md §2.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub enum TowerMemoryPartId {
+    /// AgentMux's own programs: the launcher, srv, the browser host and its
+    /// GPU and service processes.
+    Core,
+    /// What draws and hosts the panes: the window renderers, and the
+    /// terminals with what runs in them.
+    Panes,
+    /// Each agent: its CLI, what runs for it, and what it started.
+    Agents,
+    /// Under AgentMux's launcher, claimed by no pane.
+    NotPlaced,
+}
+
+/// A part of a row (an agent's CLI, its helpers, its tools).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct TowerMemoryChild {
+    pub key: String,
+    pub label: String,
+    #[ts(type = "number")]
+    pub mem: u64,
+    pub processes: u32,
+}
+
+/// One line under a part: an agent, a terminal, a kind of AgentMux process.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct TowerMemoryRow {
+    /// Stable across samples: `core:gpu`, `agent:<block>`, `np:claude.exe`.
+    pub key: String,
+    pub label: String,
+    #[ts(type = "number")]
+    pub mem: u64,
+    pub processes: u32,
+    /// For its icon and colour.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub kind: Option<TowerProcessKind>,
+    /// The task whose processes it is (`TowerTask::id`), to open them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub task: Option<String>,
+    #[serde(default)]
+    pub children: Vec<TowerMemoryChild>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct TowerMemoryPart {
+    pub part: TowerMemoryPartId,
+    #[ts(type = "number")]
+    pub mem: u64,
+    pub processes: u32,
+    /// Biggest first.
+    pub rows: Vec<TowerMemoryRow>,
+}
+
+/// AgentMux's memory and what it is made of (`TowerSampleReq::memory`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct TowerMemory {
+    /// Everything AgentMux started: the four parts added up, bytes.
+    #[ts(type = "number")]
+    pub total: u64,
+    pub processes: u32,
+    /// Processes in it whose memory the OS wouldn't give: not in `total`.
+    pub unreadable: u32,
+    /// Always four, in order: core, panes, agents, not placed.
+    pub parts: Vec<TowerMemoryPart>,
+    /// Other AgentMux instances on this computer (a dev build beside the
+    /// stable install): not in `total`, bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub other_instances: Option<u64>,
+    /// What each figure measures here (`TowerSnapshot::memory_metric`).
+    pub metric: String,
+}
+
 /// The Panes view: windows, tabs and panes (`TowerSampleReq::panes`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
@@ -320,6 +408,10 @@ pub struct TowerSnapshot {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub panes: Option<TowerPanes>,
+    /// AgentMux's total memory and its parts, when the request asked for them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub memory: Option<TowerMemory>,
 }
 
 /// `tower.sample`'s request.
@@ -335,6 +427,11 @@ pub struct TowerSampleReq {
     #[serde(default)]
     #[ts(optional)]
     pub panes: Option<bool>,
+    /// Also total AgentMux's memory and split it into parts (the Memory view,
+    /// SPEC_TOWER_MEMORY_FIRST_AND_AGENTMUX_BREAKDOWN_2026_10_25.md).
+    #[serde(default)]
+    #[ts(optional)]
+    pub memory: Option<bool>,
     /// Another machine: an SSH connection or `wsl://<distro>`, as a pane's
     /// `connection` meta names it, or a paired AgentMux computer
     /// (`peer:<id>`). Absent or `local`: this computer.
