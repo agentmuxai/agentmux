@@ -142,6 +142,26 @@
     padding: var(--space-3);
 }
 
+.native-memory-create {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    margin-bottom: var(--space-3);
+}
+
+.native-memory-create-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+}
+
+.native-memory-create-error {
+    @include line.notice(danger);
+
+    padding: var(--space-1-5) var(--space-2);
+    font-size: var(--text-sm);
+}
+
 .native-memory-manager-file-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));

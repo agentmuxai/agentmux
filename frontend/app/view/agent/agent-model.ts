@@ -26,7 +26,9 @@ import { refreshAccountCache } from "@/app/view/identity/identity-model";
 import { dimAgentColor, isValidAgentColor, pickAgentColor } from "./agent-color";
 import { parseSeedZoom } from "./agent-zoom-seed";
 import { resolveForkSessionArgs } from "./fork-session-args";
-import { HISTORY_TAB_FOR_META_KEY, historyTabLabel, openOrFocusHistoryTab } from "./open-history-tab";
+import { HISTORY_TAB_FOR_META_KEY, historyTabLabel } from "./open-history-tab";
+import { agentBodyMenuItems } from "./agent-body-menu";
+import type { ModalLayerRequest } from "@/app/element/modal-layer";
 import { quickForkAgent } from "./quick-fork";
 import { cancelComposerFocusRequest, focusComposer, requestComposerFocus } from "./composer-focus";
 import { isPersistentLaunch, launchController, PROVIDER_FLAGS_META_KEY, TERMINAL_PANE_META } from "./launch-args";
@@ -35,7 +37,6 @@ import { buildPaneArgs } from "./buildRuntimeArgs";
 import type { AgentContent, AgentDefinition, AgentSkill } from "@/app/store/rpc-api";
 import { markAgentOpen } from "./open-trace";
 import { launchResumesConversation, requestCatchUp } from "./catch-up-request";
-import { MENU_ICON } from "@/app/util/menu-icons";
 
 /** The agent's state behind its native pane tab (`agentPaneTabManifest`,
  *  agent-manifest.tsx). */
@@ -94,6 +95,9 @@ export class AgentViewModel {
     _openAgentStashModal: (() => void) | null = null;
     _closeAgentStashModal: (() => void) | null = null;
     _isAgentStashOpen: (() => boolean) | null = null;
+    // Opens a modal in the pane's own layer, for the right-click menu's Seat…
+    // and Bundles…; wired like the Stash callbacks above.
+    _openModal: ((req: ModalLayerRequest) => void) | null = null;
 
     // Voice-input target ref. AgentFooter populates this on mount with a
     // textarea-backed handle (and clears it on unmount). The exposed
@@ -975,27 +979,18 @@ export class AgentViewModel {
      * THIS pane's own conversation, landing their result as a sibling tab
      * in this SAME pane (see `quick-fork.ts`'s doc comment for why this
      * replaced an earlier, wrong attempt that opened a new top-level
-     * window tab instead).
+     * window tab instead). The items themselves are in agent-body-menu.ts.
      */
     getBodyContextMenuItems(): ContextMenuItem[] {
         const meta = this.blockAtom()?.meta;
         const agentId = meta?.["agentId"] as string | undefined;
-        // No entry on the history tab itself (nothing to open — it'd just
-        // re-focus this same tab) and none before an agent is loaded.
-        if (!agentId || meta?.[HISTORY_TAB_FOR_META_KEY]) return [];
-        return [
-            {
-                label: "Agent History",
-                icon: MENU_ICON.history,
-                click: () => void openOrFocusHistoryTab({ currentBlockId: this.blockId, agentId }),
-            },
-            {
-                label: "Quick Fork",
-                icon: MENU_ICON.fork,
-                click: () => void quickForkAgent(this),
-            },
-            { type: "separator" },
-        ];
+        return agentBodyMenuItems({
+            blockId: this.blockId,
+            meta,
+            hasDefinition: agentId != null && this.agentDefinitions().some((a) => a.id === agentId),
+            openModal: this._openModal,
+            quickFork: () => void quickForkAgent(this),
+        });
     }
 
     // Returns false (caller falls back to the block's dummy input) while no

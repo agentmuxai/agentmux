@@ -65,6 +65,9 @@ export const MENU_ICON = {
     endSession: "circle-stop",
     remote: "network-wired",
     plotType: "chart-line",
+    seat: "chair",
+    bundles: "layer-group",
+    memory: "brain",
 } as const;
 
 export type MenuIconName = (typeof MENU_ICON)[keyof typeof MENU_ICON];

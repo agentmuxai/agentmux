@@ -609,6 +609,14 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
             agentName: row.instance_name || row.definition_name,
         });
     };
+    const handleBundlesOpen = (row: RecentSessionRow): void => {
+        closeMenu(row.definition_id);
+        modalLayer?.open({
+            kind: "agent-bundles",
+            agentId: row.definition_id,
+            agentName: row.instance_name || row.definition_name,
+        });
+    };
     const handleEnvOpen = (row: RecentSessionRow): void => {
         closeMenu(row.definition_id);
         modalLayer?.open({
@@ -1263,6 +1271,15 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                                             data-testid="agent-my-agents-seat"
                                                         >
                                                             Seat…
+                                                        </Button>
+                                                        <Button
+                                                            tone="quiet"
+                                                            icon="layer-group"
+                                                            class="agent-row-menu-item"
+                                                            onClick={() => handleBundlesOpen(row)}
+                                                            data-testid="agent-my-agents-bundles"
+                                                        >
+                                                            Bundles…
                                                         </Button>
                                                         <Button
                                                             tone="quiet"

@@ -22,6 +22,7 @@ export type ModalLayerRequest =
     | AgentMemoryRequest
     | AgentSeatRequest
     | AgentEnvRequest
+    | AgentBundlesRequest
     | BundleImportSelectRequest
     | BundleImportPreviewRequest
     | BundleImportConfirmRequest;
@@ -108,6 +109,17 @@ export interface AgentSeatRequest {
  */
 export interface AgentEnvRequest {
     kind: "agent-env";
+    agentId: string;
+    agentName: string;
+}
+
+/**
+ * An existing agent's ordered bundle list, opened by "Bundles…" in My Agents'
+ * row menu and the agent pane's right-click menu. Same editor as the Stash
+ * drawer's Bundles tab (AgentBundlesTab).
+ */
+export interface AgentBundlesRequest {
+    kind: "agent-bundles";
     agentId: string;
     agentName: string;
 }

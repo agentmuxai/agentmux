@@ -122,6 +122,22 @@ describe("AgentBundlesTab", () => {
         await waitFor(() => expect(names()).toEqual(["Deleted bundle"]));
     });
 
+    it("closes the modal it is hosted in, and before opening Memory → Bundles", async () => {
+        const onClose = vi.fn();
+        render(() => <AgentBundlesTab agentId="agent-1" onClose={onClose} />);
+        fireEvent.click(await screen.findByText("Memory → Bundles"));
+        expect(onClose).toHaveBeenCalledTimes(1);
+        expect(openMemory).toHaveBeenCalledWith("bundles");
+        fireEvent.click(screen.getByRole("button", { name: "Close" }));
+        expect(onClose).toHaveBeenCalledTimes(2);
+    });
+
+    it("has no Close button outside a modal", async () => {
+        render(() => <AgentBundlesTab agentId="agent-1" />);
+        await screen.findByText("Memory → Bundles");
+        expect(screen.queryByRole("button", { name: "Close" })).toBeNull();
+    });
+
     it("links to Memory → Bundles for editing", async () => {
         render(() => <AgentBundlesTab agentId="agent-1" />);
         fireEvent.click(await screen.findByText("Memory → Bundles"));

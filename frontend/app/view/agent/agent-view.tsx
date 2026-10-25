@@ -38,6 +38,7 @@ import {
     accountLabel,
     loadAccounts,
 } from "@/app/view/identity/identity-model";
+import { ModalLayerContext } from "@/app/element/modal-layer";
 import { openConnectors } from "@/app/view/section-pane/panes";
 import { handleAgentIdChange } from "@/app/view/term/termagent";
 import { makeWindowFocusSignal } from "@/app/window/window-focus";
@@ -51,6 +52,7 @@ import {
     onCleanup,
     onMount,
     Show,
+    useContext,
     type Accessor,
     type JSX,
 } from "solid-js";
@@ -177,18 +179,13 @@ export const AgentPresentationView = ({
     // tab with no agentId yet — see that component's comment for the full
     // rationale.
 
-    // Wire the Stash drawer's open/close/read callbacks into the model so
-    // the single title-bar "Stash" (backpack) icon can drive it without the
-    // model holding a SolidJS context.
-    //
-    // These used to open a MODAL (`modalLayer.open({kind:"agent-stash"})`);
-    // the drawer replaced it in
-    // SPEC_AGENT_STASH_PANE_MIGRATION_2026_09_22.md §3.3, which is why all
-    // three collapse to one-liners now — no layer to open, no backdrop to
-    // dismiss, just a reducer field. The callback NAMES keep their
-    // `...StashModal` spelling only to avoid churning agent-model.ts's
-    // already-shipped toggle wiring (PR #3516) in the same change; they are
-    // drawer callbacks now.
+    // Wire the Stash drawer's open/close/read callbacks into the model so the
+    // header toggle can drive it without the model holding a SolidJS context.
+    // The drawer replaced a modal (SPEC_AGENT_STASH_PANE_MIGRATION_2026_09_22.md
+    // §3.3), so each callback is a one-liner on the reducer; the names keep
+    // their `...StashModal` spelling to avoid churn. `_openModal` gives the
+    // right-click menu this pane's own modal layer (agent-body-menu.ts).
+    const modalLayer = useContext(ModalLayerContext);
     onMount(() => {
         model._openAgentStashModal = () => paneModel.dispatchPane({ type: "StashExpand" }, "user");
         model._closeAgentStashModal = () => paneModel.dispatchPane({ type: "StashCollapse" }, "user");
@@ -199,11 +196,13 @@ export const AgentPresentationView = ({
         // tracks `stashOpen` reactively, including closes that don't come
         // from the button itself.
         model._isAgentStashOpen = () => paneModel.state.stashOpen;
+        model._openModal = (req) => modalLayer?.open(req);
     });
     onCleanup(() => {
         model._openAgentStashModal = null;
         model._closeAgentStashModal = null;
         model._isAgentStashOpen = null;
+        model._openModal = null;
     });
 
     const agentAtoms = createMemo(() => createAgentAtoms());
