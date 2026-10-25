@@ -228,9 +228,10 @@ pub(crate) fn use_test_store_for_jobs(state: &mut AppState) {
     state.cron_store = Some(state.mstore.clone());
 }
 
-/// Where tasks are filed (the work queue and its cards): the identity store.
+/// Where tasks are filed (the work queue and its cards): the identity store, or
+/// the work store of a `task dev` build, which keeps its own.
 pub(crate) fn work_store(state: &AppState) -> Arc<Store> {
-    state.identity_store.clone()
+    state.work_store.clone()
 }
 
 /// [`jobs_store`], or the answer when there is none.
