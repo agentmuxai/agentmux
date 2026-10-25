@@ -136,7 +136,7 @@ pub fn prepare_env() -> Result<Option<PathBuf>, String> {
     }
 
     let mut generated = None;
-    if std::env::var("AGENTMUX_AUTH_KEY").map(|k| k.is_empty()).unwrap_or(true) {
+    if !agentmux_common::secret_env::is_set("AGENTMUX_AUTH_KEY") {
         let key_file = cli.auth_key_file.clone().or_else(|| std::env::var_os("AGENTMUX_AUTH_KEY_FILE").map(PathBuf::from));
         let key = match key_file {
             Some(file) => read_key_file(&file)?,

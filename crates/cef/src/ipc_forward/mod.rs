@@ -14,6 +14,8 @@
 //! An older launcher sends whatever the file holds as its bearer token, and an
 //! older host's file holds the full token, so both pairings keep working.
 
+mod owner_only_file;
+
 use std::sync::OnceLock;
 
 use agentmux_common::secret_eq::secret_eq;
@@ -44,7 +46,7 @@ pub(crate) fn forward_token() -> &'static str {
 /// Publishes `<port>:<forwarding token>` for the launcher, owner-only. The
 /// operator's token is never written to disk.
 pub(crate) fn publish_port_file(path: &std::path::Path, port: u16) {
-    crate::owner_only_file::publish(path, format!("{port}:{}", forward_token()).as_bytes());
+    owner_only_file::publish(path, format!("{port}:{}", forward_token()).as_bytes());
 }
 
 /// What a bearer token opens.

@@ -6,7 +6,7 @@
 //! `std::fs::write` leaves the mode to the umask (0644 or 0664 on most Linux
 //! setups, so any local user reads it) and, on Windows, to the folder's
 //! inherited ACL. The host's `ipc-port-<hash>` file holds a token (the
-//! forwarding token, `ipc_forward.rs`) that lets whoever reads it open or raise
+//! forwarding token, `ipc_forward/mod.rs`) that lets whoever reads it open or raise
 //! a window and quit the app, so it is written to a sibling file that is owner-only before it has any content, then renamed
 //! over the real name: a reader never sees a wider mode, or half a file.
 

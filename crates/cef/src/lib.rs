@@ -21,7 +21,6 @@ mod client;
 mod commands;
 mod dev_authfile;
 mod ipc_forward;
-mod owner_only_file;
 mod drag_stash;
 mod events;
 mod health_signals;
@@ -200,6 +199,7 @@ mod launcher_parent_tests {
 /// `bootstrap.exe` before loading this DLL (Windows + sandbox feature), or
 /// `null_mut()` on all other platforms / sandbox-off builds.
 pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
+    agentmux_common::secret_env::stash_startup_secrets(); // first: no child inherits them
     // Internal self-probe mode (Linux userns-sandbox detection) — must be
     // the very first check in this function, before anything else: a
     // probe-mode process does nothing but this one syscall and exits, so
@@ -319,7 +319,7 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
                                     .unwrap_or_else(|_| std::path::PathBuf::from("agentmux-cef"));
                                 let args: Vec<String> = std::env::args().skip(1).collect();
                                 use std::os::unix::process::CommandExt;
-                                let err = std::process::Command::new(&exe).args(&args).exec();
+                                let err = std::process::Command::new(&exe).args(&args).envs(agentmux_common::secret_env::stashed()).exec();
                                 // exec() replaces the process image and
                                 // never returns on success — reaching here
                                 // means it failed.
