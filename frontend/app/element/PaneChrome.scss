@@ -186,3 +186,10 @@
     // as a gap.
     z-index: var(--z-pane-progress);
 }
+
+.pane-stack-collapsed .pane-progress-bar-slot {
+    // The busy ring is for a pane whose transcript is in view. A collapsed one has none, and its
+    // pills carry the progress lines (SPEC_PANE_TAB_PROGRESS_LINE_2026_10_24.md §3.4); hiding the
+    // slot also stops the animation, so a collapsed busy pane costs nothing for it.
+    display: none;
+}

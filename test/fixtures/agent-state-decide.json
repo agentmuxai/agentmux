@@ -1,0 +1,305 @@
+{
+  "comment": "Rows for agent_state::decide, read by crates/srv/src/backend/agent_state.rs and frontend/app/store/pane-tab-progress.test.ts. `expected` is the agent state, or `none`.",
+  "rows": [
+    {
+      "name": "a turn runs",
+      "controller_type": "persistent",
+      "turn_active": true,
+      "process_status": "running",
+      "exit_code": 0,
+      "awaiting_user": false,
+      "failure": null,
+      "now_ms": 1800000000000,
+      "expected": "working"
+    },
+    {
+      "name": "a turn runs on a per-turn process",
+      "controller_type": "subprocess",
+      "turn_active": true,
+      "process_status": "running",
+      "exit_code": 0,
+      "awaiting_user": false,
+      "failure": null,
+      "now_ms": 1800000000000,
+      "expected": "working"
+    },
+    {
+      "name": "a turn runs with a question waiting",
+      "controller_type": "persistent",
+      "turn_active": true,
+      "process_status": "running",
+      "exit_code": 0,
+      "awaiting_user": true,
+      "failure": null,
+      "now_ms": 1800000000000,
+      "expected": "waiting"
+    },
+    {
+      "name": "a stale question flag on an idle agent is ignored",
+      "controller_type": "persistent",
+      "turn_active": false,
+      "process_status": "running",
+      "exit_code": 0,
+      "awaiting_user": true,
+      "failure": null,
+      "now_ms": 1800000000000,
+      "expected": "idle"
+    },
+    {
+      "name": "idle between turns",
+      "controller_type": "persistent",
+      "turn_active": false,
+      "process_status": "running",
+      "exit_code": 0,
+      "awaiting_user": false,
+      "failure": null,
+      "now_ms": 1800000000000,
+      "expected": "idle"
+    },
+    {
+      "name": "starting up",
+      "controller_type": "persistent",
+      "turn_active": false,
+      "process_status": "init",
+      "exit_code": 0,
+      "awaiting_user": false,
+      "failure": null,
+      "now_ms": 1800000000000,
+      "expected": "idle"
+    },
+    {
+      "name": "process exited cleanly",
+      "controller_type": "persistent",
+      "turn_active": false,
+      "process_status": "done",
+      "exit_code": 0,
+      "awaiting_user": false,
+      "failure": null,
+      "now_ms": 1800000000000,
+      "expected": "stopped"
+    },
+    {
+      "name": "per-turn process exited cleanly between turns",
+      "controller_type": "subprocess",
+      "turn_active": false,
+      "process_status": "done",
+      "exit_code": 0,
+      "awaiting_user": false,
+      "failure": null,
+      "now_ms": 1800000000000,
+      "expected": "idle"
+    },
+    {
+      "name": "process exited with an error",
+      "controller_type": "persistent",
+      "turn_active": false,
+      "process_status": "done",
+      "exit_code": 1,
+      "awaiting_user": false,
+      "failure": null,
+      "now_ms": 1800000000000,
+      "expected": "error"
+    },
+    {
+      "name": "usage limit not yet reset",
+      "controller_type": "persistent",
+      "turn_active": false,
+      "process_status": "running",
+      "exit_code": 0,
+      "awaiting_user": false,
+      "failure": {
+        "code": "usage_limit",
+        "resets_at_ms": 1800003600000
+      },
+      "now_ms": 1800000000000,
+      "expected": "limited"
+    },
+    {
+      "name": "usage limit with no reset known",
+      "controller_type": "persistent",
+      "turn_active": false,
+      "process_status": "running",
+      "exit_code": 0,
+      "awaiting_user": false,
+      "failure": {
+        "code": "usage_limit",
+        "resets_at_ms": null
+      },
+      "now_ms": 1800000000000,
+      "expected": "limited"
+    },
+    {
+      "name": "usage limit at the reset moment is over",
+      "controller_type": "persistent",
+      "turn_active": false,
+      "process_status": "running",
+      "exit_code": 0,
+      "awaiting_user": false,
+      "failure": {
+        "code": "usage_limit",
+        "resets_at_ms": 1800000000000
+      },
+      "now_ms": 1800000000000,
+      "expected": "idle"
+    },
+    {
+      "name": "usage limit a millisecond after the reset",
+      "controller_type": "persistent",
+      "turn_active": false,
+      "process_status": "running",
+      "exit_code": 0,
+      "awaiting_user": false,
+      "failure": {
+        "code": "usage_limit",
+        "resets_at_ms": 1799999999999
+      },
+      "now_ms": 1800000000000,
+      "expected": "idle"
+    },
+    {
+      "name": "usage limit on an exited process",
+      "controller_type": "persistent",
+      "turn_active": false,
+      "process_status": "done",
+      "exit_code": 1,
+      "awaiting_user": false,
+      "failure": {
+        "code": "usage_limit",
+        "resets_at_ms": 1800000001000
+      },
+      "now_ms": 1800000000000,
+      "expected": "limited"
+    },
+    {
+      "name": "refused sign-in",
+      "controller_type": "persistent",
+      "turn_active": false,
+      "process_status": "running",
+      "exit_code": 0,
+      "awaiting_user": false,
+      "failure": {
+        "code": "auth",
+        "resets_at_ms": null
+      },
+      "now_ms": 1800000000000,
+      "expected": "signed_out"
+    },
+    {
+      "name": "refused sign-in on an exited process",
+      "controller_type": "persistent",
+      "turn_active": false,
+      "process_status": "done",
+      "exit_code": 1,
+      "awaiting_user": false,
+      "failure": {
+        "code": "auth",
+        "resets_at_ms": null
+      },
+      "now_ms": 1800000000000,
+      "expected": "signed_out"
+    },
+    {
+      "name": "a turn beats a usage limit",
+      "controller_type": "persistent",
+      "turn_active": true,
+      "process_status": "running",
+      "exit_code": 0,
+      "awaiting_user": false,
+      "failure": {
+        "code": "usage_limit",
+        "resets_at_ms": 1800000001000
+      },
+      "now_ms": 1800000000000,
+      "expected": "working"
+    },
+    {
+      "name": "a turn beats a refused sign-in",
+      "controller_type": "persistent",
+      "turn_active": true,
+      "process_status": "running",
+      "exit_code": 0,
+      "awaiting_user": false,
+      "failure": {
+        "code": "auth",
+        "resets_at_ms": null
+      },
+      "now_ms": 1800000000000,
+      "expected": "working"
+    },
+    {
+      "name": "a waiting turn beats a refused sign-in",
+      "controller_type": "persistent",
+      "turn_active": true,
+      "process_status": "running",
+      "exit_code": 0,
+      "awaiting_user": true,
+      "failure": {
+        "code": "auth",
+        "resets_at_ms": null
+      },
+      "now_ms": 1800000000000,
+      "expected": "waiting"
+    },
+    {
+      "name": "a transient failure changes nothing",
+      "controller_type": "persistent",
+      "turn_active": false,
+      "process_status": "running",
+      "exit_code": 0,
+      "awaiting_user": false,
+      "failure": {
+        "code": "rate_limited",
+        "resets_at_ms": null
+      },
+      "now_ms": 1800000000000,
+      "expected": "idle"
+    },
+    {
+      "name": "an overloaded failure changes nothing",
+      "controller_type": "persistent",
+      "turn_active": false,
+      "process_status": "running",
+      "exit_code": 0,
+      "awaiting_user": false,
+      "failure": {
+        "code": "overloaded",
+        "resets_at_ms": null
+      },
+      "now_ms": 1800000000000,
+      "expected": "idle"
+    },
+    {
+      "name": "a shell pane has no agent state",
+      "controller_type": "shell",
+      "turn_active": true,
+      "process_status": "running",
+      "exit_code": 0,
+      "awaiting_user": false,
+      "failure": null,
+      "now_ms": 1800000000000,
+      "expected": "none"
+    },
+    {
+      "name": "a command pane has no agent state",
+      "controller_type": "cmd",
+      "turn_active": false,
+      "process_status": "running",
+      "exit_code": 0,
+      "awaiting_user": false,
+      "failure": null,
+      "now_ms": 1800000000000,
+      "expected": "none"
+    },
+    {
+      "name": "an unknown process state says nothing",
+      "controller_type": "persistent",
+      "turn_active": false,
+      "process_status": "weird",
+      "exit_code": 0,
+      "awaiting_user": false,
+      "failure": null,
+      "now_ms": 1800000000000,
+      "expected": "none"
+    }
+  ]
+}

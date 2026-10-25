@@ -48,6 +48,7 @@ import { PaneHeaderTabStrip } from "./PaneHeaderTabStrip";
 import { installPaneInteractionReveal, revealPaneStrips } from "./pane-strip-registry";
 import { createPaneTabMemory, describePaneTab, PaneTabIconView, prunePaneTabMemory, type PaneTabInfo } from "./pane-tab-model";
 import { PaneTabRenameInput } from "./PaneTabRenameInput";
+import { usePaneTabProgress } from "@/app/store/pane-tab-progress";
 import type { PaneTabColors } from "./PaneTabStrip";
 import { DropIndicator } from "@/app/drag/DropIndicator";
 import {
@@ -537,6 +538,8 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
             getTooltipSeat={seatOf}
             getIcon={(id) => <PaneTabIconView icon={() => tabInfos().get(id)?.icon} />}
             getColor={(id) => tabColors().get(id)}
+            useProgress={usePaneTabProgress}
+            collapsed={() => nodeModel.isMinimized?.() ?? false}
             headerBgOverride={headerTailBg()}
             onActivate={handleActivate}
             onSelect={handleSelect}
@@ -596,6 +599,9 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
                 "pane-stack-focused": isFocused() && !isAlone(),
                 "pane-stack-focused-alone": isFocused() && isAlone(),
                 "pane-stack-remote-color": !!remoteColor(),
+                // A collapsed pane shows no border animation, whichever tab is selected: its
+                // pills' progress lines say who works (PaneChrome.scss, SPEC_PANE_TAB_PROGRESS_LINE §3.4).
+                "pane-stack-collapsed": nodeModel.isMinimized?.() ?? false,
                 ...(model()?.rootClass ? { [model()!.rootClass]: true } : {}),
             }}
             style={{ "--pane-ring-color": ringBorderColor(), "--pane-remote-color": remoteColor() }}
