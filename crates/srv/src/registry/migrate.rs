@@ -79,8 +79,8 @@ const MIGRATION_VERSION: u32 = 2;
 /// source's own agents dir — the per-channel **fallback** anchor `row_to_record`
 /// uses when a row's (normally global) `working_directory` isn't under the
 /// primary `<home>/agents` root.
-struct SqliteSource {
-    db_path: PathBuf,
+pub(super) struct SqliteSource {
+    pub(super) db_path: PathBuf,
     agents_root: PathBuf,
 }
 
@@ -372,14 +372,6 @@ pub fn enumerate_objects_dbs(home: &Path) -> Vec<PathBuf> {
     sources.into_iter().map(|s| s.db_path).collect()
 }
 
-/// [`enumerate_objects_dbs`], or `None` when a directory that should have been
-/// listed could not be read: a caller that must see EVERY channel's store (to
-/// know nothing elsewhere still uses a thing) can't trust a partial list.
-pub fn enumerate_objects_dbs_complete(home: &Path) -> Option<Vec<PathBuf>> {
-    let (sources, incomplete) = enumerate_sources(home);
-    (!incomplete).then(|| sources.into_iter().map(|s| s.db_path).collect())
-}
-
 /// Enumerate every per-(channel,version) and per-dev-branch `objects.db` under
 /// `home`, pairing each with its own agents dir (the per-source fallback anchor;
 /// the primary anchor in `row_to_record` is the global `<home>/agents`).
@@ -391,7 +383,7 @@ pub fn enumerate_objects_dbs_complete(home: &Path) -> Option<Vec<PathBuf>> {
 /// marker so a future launch retries — otherwise a transiently-unreadable
 /// `versions/` (or `dev/`) would silently finalize the migration and omit that
 /// tree's named agents forever (codex P2 on #1389).
-fn enumerate_sources(home: &Path) -> (Vec<SqliteSource>, bool) {
+pub(super) fn enumerate_sources(home: &Path) -> (Vec<SqliteSource>, bool) {
     let mut out = Vec::new();
     let mut incomplete = false;
 
