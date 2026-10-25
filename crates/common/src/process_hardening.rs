@@ -12,6 +12,11 @@
 //! flag resets by itself in anything the process `exec`s, so the agents srv
 //! starts are unaffected); on macOS `PT_DENY_ATTACH` refuses debugger attach.
 //!
+//! The host calls it once CEF is initialized, not at startup: Chromium's user-namespace
+//! sandbox launches the zygotes from the browser process during `CefInitialize`, and a
+//! non-dumpable browser process cannot (`No usable sandbox!`). Every helper is started
+//! from those zygotes or by `exec`, so none of them inherits the flag.
+//!
 //! Left alone, on purpose: a headless srv (it runs without a launcher, and the
 //! launcher's check for an orphaned one reads its environment), a dev build
 //! (people attach debuggers to those), and any process started with
@@ -57,23 +62,6 @@ pub fn deny_memory_access(headless: bool) -> bool {
     apply()
 }
 
-/// First thing in the host's `run()`: the launcher's secrets leave the environment
-/// ([`crate::secret_env`]), then the browser process is closed to other processes'
-/// reads. Not a CEF helper (`--type=`, which brings its own sandbox), and not one of
-/// the host's own short-lived probes (`--internal-probe-*`): the user-namespace probe
-/// has to write its own `uid_map`, which a non-dumpable process cannot.
-pub fn stash_and_harden_host() {
-    crate::secret_env::stash_startup_secrets();
-    if is_browser_process(std::env::args()) {
-        deny_memory_access(false);
-    }
-}
-
-/// Whether a host started with these arguments is the browser process proper.
-fn is_browser_process<S: AsRef<str>>(args: impl IntoIterator<Item = S>) -> bool {
-    !args.into_iter().any(|a| a.as_ref().starts_with("--type=") || a.as_ref().starts_with("--internal-probe-"))
-}
-
 /// Applies the control, whatever the policy says (`deny_memory_access` decides first).
 #[cfg(target_os = "linux")]
 pub fn apply() -> bool {
@@ -110,15 +98,6 @@ mod tests {
         assert_eq!(decide(false, false, true), Err(Skipped::Headless));
     }
 
-    #[test]
-    fn only_the_browser_process_proper_is_hardened() {
-        assert!(is_browser_process(["agentmux-cef"]));
-        assert!(is_browser_process(["agentmux-cef", "--url=http://127.0.0.1:1/"]));
-        assert!(!is_browser_process(["agentmux-cef", "--type=renderer"]));
-        assert!(!is_browser_process(["agentmux-cef", "--internal-probe-userns"]));
-        assert!(!is_browser_process(["agentmux-cef", "--internal-probe-gl-renderer"]));
-    }
-
     // fork, so the test process itself stays dumpable (the test harness reads its own /proc).
     #[cfg(target_os = "linux")]
     #[test]
@@ -135,6 +114,39 @@ mod tests {
             }
             let mut status = 0;
             libc::waitpid(pid, &mut status, 0);
+            assert!(libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0, "child status {status}");
+        }
+    }
+
+    // The claim agents depend on: a process this one starts is dumpable again. `execvp` in
+    // the forked child (not `Command`), and python3 asks the kernel with PR_GET_DUMPABLE (3).
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_program_the_process_starts_is_dumpable_again() {
+        use std::ffi::CString;
+        let prog = CString::new("python3").unwrap();
+        let args = [
+            prog.clone(),
+            CString::new("-c").unwrap(),
+            CString::new("import ctypes, sys; sys.exit(0 if ctypes.CDLL(None).prctl(3, 0, 0, 0, 0) == 1 else 7)").unwrap(),
+        ];
+        let argv: Vec<*const libc::c_char> = args.iter().map(|a| a.as_ptr()).chain(std::iter::once(std::ptr::null())).collect();
+        // SAFETY: the child only calls prctl, execvp and _exit before leaving the forked image.
+        unsafe {
+            let pid = libc::fork();
+            assert!(pid >= 0);
+            if pid == 0 {
+                if !apply() {
+                    libc::_exit(9);
+                }
+                libc::execvp(prog.as_ptr(), argv.as_ptr());
+                libc::_exit(127);
+            }
+            let mut status = 0;
+            libc::waitpid(pid, &mut status, 0);
+            if libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 127 {
+                return; // no python3 here: nothing to ask the kernel with
+            }
             assert!(libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0, "child status {status}");
         }
     }
