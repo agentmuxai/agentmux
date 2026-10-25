@@ -261,11 +261,8 @@ pub(crate) struct PersistedAgentIdentity {
     /// on first spawn. `None` only if minting failed — logged, and the
     /// spawn proceeds without it, because M1 has no reader for it yet.
     pub token: Option<String>,
-    /// The display names the agent had before its renames
-    /// (`db_agent_former_names`), as stored. Empty if none, or if the read failed.
-    pub former_names: Vec<String>,
-    /// The slugs it answered to before its renames (`db_agent_former_slugs`).
-    pub former_slugs: Vec<String>,
+    /// The names it had before its renames (`former_names_env`).
+    pub former: super::former_names_env::FormerNames,
 }
 
 /// The `db_agents` row for the agent shown on `block_id`, if it has one,
@@ -323,26 +320,8 @@ pub(crate) fn persisted_agent_identity(
             tracing::warn!(block_id, uid = %instance.id, error = %e, "spawn env: UID key ensure failed");
         }
     }
-    // Rename history, for `carry_former_names_env`. A read error is logged
-    // and reads as no history, like the token: the agent still has an identity.
-    let former_names = mstore.agent_former_names(&instance.id).unwrap_or_else(|e| {
-        tracing::warn!(block_id, uid = %instance.id, error = %e, "spawn env: former-name lookup failed — no AGENTMUX_AGENT_FORMER_NAMES");
-        Vec::new()
-    });
-    let former_slugs = mstore
-        .agent_former_slugs_local(&instance.id)
-        .map(|fs| fs.into_iter().map(|f| f.slug).collect())
-        .unwrap_or_else(|e| {
-            tracing::warn!(block_id, uid = %instance.id, error = %e, "spawn env: former-slug lookup failed — no AGENTMUX_AGENT_FORMER_SLUGS");
-            Vec::new()
-        });
-    Some(PersistedAgentIdentity {
-        uid: instance.id,
-        slug,
-        token,
-        former_names,
-        former_slugs,
-    })
+    let former = super::former_names_env::read(mstore, block_id, &instance.id);
+    Some(PersistedAgentIdentity { uid: instance.id, slug, token, former })
 }
 
 /// Identity M1 — spec §9.1: carry the UID and the token into the process.
@@ -375,6 +354,7 @@ pub(crate) fn carry_agent_uid_env(
 ) {
     const UID: &str = "AGENTMUX_AGENT_UID";
     const TOKEN: &str = "AGENTMUX_AGENT_TOKEN";
+    super::former_names_env::carry(env_vars, identity.map(|i| &i.former));
     match identity {
         Some(id) => {
             env_vars.insert(UID.to_string(), id.uid.clone());
@@ -392,58 +372,6 @@ pub(crate) fn carry_agent_uid_env(
             env_vars.remove(TOKEN);
         }
     }
-}
-
-/// `AGENTMUX_AGENT_FORMER_NAMES` and `AGENTMUX_AGENT_FORMER_SLUGS`: the names
-/// the agent had before its renames, for `gh-agent` (0.10+), which signs a
-/// PR as the agent but leaves a title, an `Agent:` line or a PR-body tag that
-/// already names the agent as it is. Without them a renamed agent's old name
-/// (still on a PR it opened, or in a file it reads) would read as another
-/// agent's and be rewritten.
-///
-/// Comma-separated, so each name is written in route form
-/// ([`former_names_env_value`]). Reserved like `AGENTMUX_AGENT_UID`: the
-/// server's rename history or nothing, never a `cmd:env` copy, which would
-/// be a launch-time snapshot (or, for a worker, its leader's list). Names are
-/// addresses only, never credentials: `gh-agent` takes a former slug as the
-/// agent's own in a PR-body tag because the consumer still routes it.
-pub(crate) fn carry_former_names_env(
-    env_vars: &mut std::collections::HashMap<String, String>,
-    identity: Option<&PersistedAgentIdentity>,
-) {
-    for (key, names) in [
-        ("AGENTMUX_AGENT_FORMER_NAMES", identity.map(|i| i.former_names.as_slice())),
-        ("AGENTMUX_AGENT_FORMER_SLUGS", identity.map(|i| i.former_slugs.as_slice())),
-    ] {
-        match names.and_then(former_names_env_value) {
-            Some(value) => {
-                env_vars.insert(key.to_string(), value);
-            }
-            None => {
-                env_vars.remove(key);
-            }
-        }
-    }
-}
-
-/// `names` as one comma-separated value: each in route form
-/// (`agent_route_name`, so `Loap #3` is `Loap-3`), blank ones and ones with an
-/// `@` (an address, not a name) left out, de-duplicated without regard to case
-/// and sorted. `None` for an empty result.
-fn former_names_env_value(names: &[String]) -> Option<String> {
-    let mut routes: Vec<String> = Vec::new();
-    for name in names {
-        let name = name.trim();
-        if name.is_empty() || name.contains('@') {
-            continue;
-        }
-        let route = agentmux_common::slug::agent_route_name(name);
-        if !routes.iter().any(|r| r.eq_ignore_ascii_case(&route)) {
-            routes.push(route);
-        }
-    }
-    routes.sort_by_key(|r| r.to_lowercase());
-    (!routes.is_empty()).then(|| routes.join(","))
 }
 
 /// #3577: the id of the deleted agent `block_id` names, when the block
@@ -483,7 +411,6 @@ pub(crate) fn carry_block_identity_env(
         _ => lookup(),
     };
     carry_agent_uid_env(env_vars, identity.as_ref());
-    carry_former_names_env(env_vars, identity.as_ref());
     // And the row slug's identity over `cmd:env`'s, as on that builder.
     if let Some(slug) = identity.as_ref().and_then(|i| i.slug.as_deref()) {
         super::identity_env::carry_slug_identity_env(env_vars, slug);
@@ -704,7 +631,6 @@ pub(crate) async fn build_persistent_spawn_env(
             identity.as_ref().and_then(|i| i.slug.as_deref()),
         );
         carry_agent_uid_env(&mut env_vars, identity.as_ref());
-        carry_former_names_env(&mut env_vars, identity.as_ref());
         // The id, its MuxBus mirror and the git identity: from the row's slug
         // when it has one, over `cmd:env` (see `identity_env`).
         super::identity_env::carry_agent_identity_env(&mut env_vars, &display_name, identity.as_ref().and_then(|i| i.slug.as_deref()));
@@ -1876,13 +1802,7 @@ mod tests {
     use super::{carry_agent_uid_env, PersistedAgentIdentity};
 
     fn identity(uid: &str, token: Option<&str>) -> PersistedAgentIdentity {
-        PersistedAgentIdentity {
-            uid: uid.to_string(),
-            slug: Some("agenty-3".to_string()),
-            token: token.map(str::to_string),
-            former_names: Vec::new(),
-            former_slugs: Vec::new(),
-        }
+        PersistedAgentIdentity { uid: uid.to_string(), slug: Some("agenty-3".to_string()), token: token.map(str::to_string), former: Default::default() }
     }
 
     /// Positive case first: a known row carries both values into the env.
@@ -2047,76 +1967,6 @@ mod tests {
         // for the agent's lifetime (spec §6.3), not re-minted per spawn.
         let a_again = persisted_agent_identity(&store, "block-first").unwrap();
         assert_eq!(a_again.token.as_deref(), Some(tok_a.as_str()));
-    }
-
-    /// The names an agent had before its renames reach the environment, so
-    /// `gh-agent` doesn't take them for another agent's: display names in
-    /// route form, slugs as they were, nothing before a rename.
-    #[test]
-    fn persisted_identity_carries_the_rename_history_into_the_env() {
-        let store = Store::open_in_memory().unwrap();
-        let mut def = agent_def("uid-loap", "Loap");
-        store.agent_def_insert(&mut def).unwrap();
-        block_with_agent_id(&store, "block-loap", "uid-loap");
-
-        let before = persisted_agent_identity(&store, "block-loap").unwrap();
-        let mut e = env(&[]);
-        super::carry_former_names_env(&mut e, Some(&before));
-        assert!(!e.contains_key("AGENTMUX_AGENT_FORMER_NAMES"), "never renamed");
-        assert!(!e.contains_key("AGENTMUX_AGENT_FORMER_SLUGS"), "never renamed");
-
-        for name in ["Loap #3", "Loap Prime"] {
-            let mut d = store.agent_def_get("uid-loap").unwrap().unwrap();
-            d.name = name.to_string();
-            assert!(store.agent_def_update(&mut d).unwrap());
-        }
-        store.test_rename_slug("uid-loap", "loap-prime", 7);
-
-        let after = persisted_agent_identity(&store, "block-loap").unwrap();
-        assert_eq!(after.slug.as_deref(), Some("loap-prime"));
-        let mut e = env(&[]);
-        super::carry_former_names_env(&mut e, Some(&after));
-        assert_eq!(e["AGENTMUX_AGENT_FORMER_NAMES"], "Loap,Loap-3", "old display names, route form");
-        assert_eq!(e["AGENTMUX_AGENT_FORMER_SLUGS"], "loap", "the slug it had");
-    }
-
-    #[test]
-    fn former_names_are_route_form_unique_sorted_and_free_of_commas() {
-        let value = |names: &[&str]| {
-            super::former_names_env_value(&names.iter().map(|n| n.to_string()).collect::<Vec<_>>())
-        };
-        assert_eq!(value(&["Zed", "Loap #3", "loap-3", " ", "agent2@narko"]).as_deref(), Some("Loap-3,Zed"));
-        assert_eq!(value(&["Smith, Jr"]).as_deref(), Some("Smith-Jr"), "no comma survives");
-        assert_eq!(value(&[]), None);
-        assert_eq!(value(&["", "a@b"]), None);
-    }
-
-    /// Reserved like the UID: the server's history replaces a `cmd:env` copy
-    /// (a launch-time snapshot, or a leader's list a worker copied), and no
-    /// history, or no row, removes it.
-    #[test]
-    fn former_names_env_is_server_set_and_removed_when_unknown() {
-        let stale = || {
-            env(&[
-                ("AGENTMUX_AGENT_FORMER_NAMES", "Camper"),
-                ("AGENTMUX_AGENT_FORMER_SLUGS", "camper"),
-                ("AGENTMUX_AGENT_ID", "qtimer"),
-            ])
-        };
-        let mut known = identity("uid", None);
-        known.former_names = vec!["Qt Old".to_string()];
-        let mut e = stale();
-        super::carry_former_names_env(&mut e, Some(&known));
-        assert_eq!(e["AGENTMUX_AGENT_FORMER_NAMES"], "Qt-Old");
-        assert!(!e.contains_key("AGENTMUX_AGENT_FORMER_SLUGS"), "no former slugs: the stale one goes");
-
-        for none in [None, Some(&identity("uid", None))] {
-            let mut e = stale();
-            super::carry_former_names_env(&mut e, none);
-            assert!(!e.contains_key("AGENTMUX_AGENT_FORMER_NAMES"));
-            assert!(!e.contains_key("AGENTMUX_AGENT_FORMER_SLUGS"));
-            assert_eq!(e["AGENTMUX_AGENT_ID"], "qtimer", "other identity untouched");
-        }
     }
 
     /// Identity M4b-2: the helper App Server and ACP use carries the
