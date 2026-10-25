@@ -669,6 +669,31 @@
             "method": "JobsRunsCommand"
         },
         {
+            "command": "jobs.templates.catalog",
+            "method": "JobsTemplatesCatalogCommand"
+        },
+        {
+            "command": "jobs.templates.catalog.install",
+            "method": "JobsTemplatesCatalogInstallCommand"
+        },
+        {
+            "command": "jobs.templates.get",
+            "method": "JobsTemplatesGetCommand"
+        },
+        {
+            "command": "jobs.templates.install",
+            "method": "JobsTemplatesInstallCommand"
+        },
+        {
+            "command": "jobs.templates.list",
+            "method": "JobsTemplatesListCommand",
+            "send": "{}"
+        },
+        {
+            "command": "jobs.templates.uninstall",
+            "method": "JobsTemplatesUninstallCommand"
+        },
+        {
             "command": "kanban.act",
             "method": "KanbanActCommand",
             "dataType": "import(\"@/app/view/warden-kanban/kanban-types\").KanbanActRequest",

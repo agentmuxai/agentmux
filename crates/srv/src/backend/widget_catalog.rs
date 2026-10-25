@@ -83,6 +83,20 @@ pub struct WidgetCatalogItem {
     pub current: bool,
 }
 
+/// Whether `signature` over `raw` verifies with one of `keys` (base64
+/// Ed25519 public keys). Job template catalogs use it too.
+pub(crate) fn signed_by_any(raw: &[u8], signature: &[u8; 64], keys: &[&str]) -> bool {
+    let b64 = base64::engine::general_purpose::STANDARD;
+    let signature = Signature::from_bytes(signature);
+    keys.iter().any(|k| {
+        b64.decode(k)
+            .ok()
+            .and_then(|k| <[u8; 32]>::try_from(k).ok())
+            .and_then(|k| VerifyingKey::from_bytes(&k).ok())
+            .is_some_and(|k| k.verify(raw, &signature).is_ok())
+    })
+}
+
 /// Checks the index `raw` against its signature `sig_b64` with `keys`, and
 /// each entry against the catalog's rules.
 pub fn verify_index(raw: &[u8], sig_b64: &str, keys: &[&str], index_url: &str) -> Result<Vec<CatalogEntry>, String> {
@@ -92,15 +106,7 @@ pub fn verify_index(raw: &[u8], sig_b64: &str, keys: &[&str], index_url: &str) -
         .ok()
         .and_then(|s| s.try_into().ok())
         .ok_or("the catalog's signature isn't 64 bytes of base64")?;
-    let signature = Signature::from_bytes(&signature);
-    let signed = keys.iter().any(|k| {
-        b64.decode(k)
-            .ok()
-            .and_then(|k| <[u8; 32]>::try_from(k).ok())
-            .and_then(|k| VerifyingKey::from_bytes(&k).ok())
-            .is_some_and(|k| k.verify(raw, &signature).is_ok())
-    });
-    if !signed {
+    if !signed_by_any(raw, &signature, keys) {
         return Err("the catalog's signature doesn't verify: it isn't the AgentMux catalog, or it was changed".to_string());
     }
     let index: CatalogIndex = serde_json::from_slice(raw).map_err(|e| format!("the catalog index: {e}"))?;
@@ -120,7 +126,7 @@ pub fn verify_index(raw: &[u8], sig_b64: &str, keys: &[&str], index_url: &str) -
 }
 
 /// `https://host[:port]` of an https URL.
-fn origin_of(url: &str) -> Option<String> {
+pub(crate) fn origin_of(url: &str) -> Option<String> {
     let rest = url.strip_prefix("https://")?;
     let host = rest.split(['/', '?', '#']).next()?;
     (!host.is_empty() && !host.contains('@')).then(|| format!("https://{host}"))
@@ -136,7 +142,7 @@ fn client() -> Result<reqwest::Client, String> {
 
 /// `url`'s body, at most `max` bytes: refused as soon as it declares or
 /// reaches more, never held in memory whole first.
-async fn get(url: &str, max: usize) -> Result<Vec<u8>, String> {
+pub(crate) async fn get(url: &str, max: usize) -> Result<Vec<u8>, String> {
     let too_big = || format!("{url} is over the {} KB it may be", max / 1024);
     let mut resp = client()?.get(url).send().await.map_err(|e| format!("can't reach the catalog: {e}"))?;
     if !resp.status().is_success() {
@@ -191,7 +197,7 @@ pub fn check_download(zip: &[u8], entry: &CatalogEntry) -> Result<(tempfile::Tem
     std::fs::write(&zip_path, zip).map_err(|e| e.to_string())?;
     let stage = tmp.path().join("pkg");
     wp::unzip(&zip_path, &stage)?;
-    let root = package_root(&stage)?;
+    let root = wp::package_root(&stage, wp::MANIFEST_FILE)?;
     let hash = wp::package_hash(&wp::hash_files(&root)?);
     if hash != entry.hash {
         return Err(format!("{}'s files don't match the catalog", entry.id));
@@ -204,25 +210,13 @@ pub fn check_download(zip: &[u8], entry: &CatalogEntry) -> Result<(tempfile::Tem
     if manifest.kind() != wp::WidgetKind::Sandboxed {
         return Err("the catalog lists sandboxed widgets only".to_string());
     }
-    match sig::check(&root, &entry.id, &entry.version, &hash) {
+    match sig::check(&sig::WIDGET, &root, &entry.id, &entry.version, &hash) {
         Some(Ok(key)) if key == entry.publisher_key => {}
         Some(Ok(_)) | None => return Err(format!("{} isn't signed by the publisher the catalog lists", entry.id)),
         Some(Err(e)) => return Err(e),
     }
     std::fs::remove_file(&zip_path).ok();
     Ok((tmp, root))
-}
-
-/// The package folder in an unpacked zip: its root, or its one top folder.
-fn package_root(stage: &Path) -> Result<PathBuf, String> {
-    if stage.join(wp::MANIFEST_FILE).exists() {
-        return Ok(stage.to_path_buf());
-    }
-    let mut dirs = std::fs::read_dir(stage).map_err(|e| e.to_string())?.flatten().filter(|e| e.path().is_dir());
-    match (dirs.next(), dirs.next()) {
-        (Some(d), None) if d.path().join(wp::MANIFEST_FILE).exists() => Ok(d.path()),
-        _ => Err("no widget.json at the package's top level".to_string()),
-    }
 }
 
 /// Downloads `entry` from the catalog, checks it, and copies it into

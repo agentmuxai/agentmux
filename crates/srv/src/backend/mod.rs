@@ -27,6 +27,7 @@ pub mod widget_catalog;
 pub mod widget_packages;
 pub mod widget_signature;
 pub mod widget_requests;
+pub mod job_templates;
 pub mod vault;
 pub mod bundle_export;
 pub mod bundle_import;

@@ -84,3 +84,5 @@ npx -p @agentmuxai/widget-sdk agentmux-widget verify ./acme.notes
 ```
 
 `sign` writes `widget.sig` next to `widget.json`; it covers every other file, so sign last: an edit afterwards makes AgentMux refuse the package until it is signed again. Publish your key's fingerprint (`K7Q2-MZ4D-PX3A-9TWE`) where users can check it. A signature names a key, not what the widget does: the permissions in the prompt are still all a sandboxed widget can do.
+
+The same commands sign a job template: a folder with a `template.json` (and its `brief.md`) gets a `template.sig` instead, signed under the templates' own prefix, so a widget's signature never passes as a template's or the other way round. AgentMux pins a template publisher's key on the operator's first approval, as it does for widgets.

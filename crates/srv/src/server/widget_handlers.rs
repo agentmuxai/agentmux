@@ -139,6 +139,8 @@ pub fn register_widget_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // A sandboxed widget's sessions and calls (W3), agents' install requests (W4).
     super::widget_access_handlers::register(engine, state);
     super::widget_agent_handlers::register(engine);
+    // Job templates share the widgets' signing and approval (jobs.templates.*).
+    super::job_template_handlers::register(engine);
 
     // widgets.list: every package and its state.
     engine.register_typed("widgets.list", |_req: serde_json::Value, _ctx| async move {

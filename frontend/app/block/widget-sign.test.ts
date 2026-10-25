@@ -10,13 +10,15 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { cpSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { createPublicKey, verify } from "node:crypto";
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { fingerprint, keyFromSeed, packageHash, signPackage, verifyPackage } from "../../../sdk/widget-sdk/cli/widget-sign.mjs";
+import { fingerprint, keyFromSeed, packageHash, signedMessage, signPackage, verifyPackage } from "../../../sdk/widget-sdk/cli/widget-sign.mjs";
 
 const FIXTURE = join(__dirname, "../../../sdk/widget-sdk/fixtures/acme.fixture");
+const TEMPLATE_FIXTURE = join(__dirname, "../../../sdk/widget-sdk/fixtures/acme.template-fixture");
 const BIN = join(__dirname, "../../../sdk/widget-sdk/cli/agentmux-widget.mjs");
 const SEED = Buffer.alloc(32, 7).toString("base64");
 
@@ -47,5 +49,35 @@ describe("agentmux-widget", () => {
         expect(run("sign", dir, "--key", key)).toMatch(/^Signed acme\.fixture 1\.0\.0/);
         const fp = fingerprint(JSON.parse(readFileSync(key, "utf8")).publicKey);
         expect(run("verify", dir).trim()).toBe(`acme.fixture: signed by ${fp}`);
+    });
+
+    // Job templates (docs/specs/SPEC_JOBS_AND_TEMPLATES_2026_10_24.md §5.4), checked
+    // in srv by `the_sdk_signed_template_fixture_verifies_here`.
+    it("signs a folder with a template.json into template.sig, under the template prefix", () => {
+        expect(packageHash(TEMPLATE_FIXTURE)).toBe("9c78ceeea2cf6db5e70cde3521bc24c971a7ef39fd73afb9e1050b7a7c89b761");
+        expect(signPackage(TEMPLATE_FIXTURE, SEED)).toBe(readFileSync(join(TEMPLATE_FIXTURE, "template.sig"), "utf8"));
+        expect(verifyPackage(TEMPLATE_FIXTURE)).toBe("72AS-YEXT-VNGO-NLC5");
+    });
+
+    it("keeps a template's signature from passing as a widget's", () => {
+        const sig = JSON.parse(readFileSync(join(TEMPLATE_FIXTURE, "template.sig"), "utf8"));
+        const key = createPublicKey(keyFromSeed(SEED).privateKey);
+        const signature = Buffer.from(sig.signature, "base64");
+        const hash = packageHash(TEMPLATE_FIXTURE);
+        const asTemplate = signedMessage("acme.template-fixture", "1.0.0", hash, "agentmux-job-template-sig-v1\0");
+        expect(verify(null, asTemplate, key, signature)).toBe(true);
+        expect(verify(null, signedMessage("acme.template-fixture", "1.0.0", hash), key, signature)).toBe(false);
+    });
+
+    it("signs a template from the command line", () => {
+        const dir = join(mkdtempSync(join(tmpdir(), "template-sign-")), "acme.template-fixture");
+        cpSync(TEMPLATE_FIXTURE, dir, { recursive: true });
+        rmSync(join(dir, "template.sig"));
+        const key = join(dir, "..", "key.json");
+        writeFileSync(key, JSON.stringify({ algorithm: "ed25519", seed: SEED, publicKey: keyFromSeed(SEED).publicKey }));
+        const out = execFileSync(process.execPath, [BIN, "sign", dir, "--key", key], { encoding: "utf8" });
+        expect(out).toMatch(/^Signed acme\.template-fixture 1\.0\.0/);
+        expect(readFileSync(join(dir, "template.sig"), "utf8")).toBe(readFileSync(join(TEMPLATE_FIXTURE, "template.sig"), "utf8"));
+        expect(existsSync(join(dir, "widget.sig"))).toBe(false);
     });
 });
