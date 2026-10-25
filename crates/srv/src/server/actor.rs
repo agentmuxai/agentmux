@@ -355,6 +355,17 @@ pub(crate) fn require_token(state: &AppState, caller: Option<&Caller>, site: Act
     }
 }
 
+/// An agent acts on its own panes only: a request that carries an agent's token
+/// is refused when the pane (or agent) it acts on belongs to another. A request
+/// with no token (the window, a peer srv) is not compared, nor is a target that
+/// has no agent.
+pub(crate) fn own_agent_only(caller: Option<&Caller>, target_uid: Option<&str>) -> Result<(), String> {
+    match (caller.and_then(Caller::uid), target_uid) {
+        (Some(me), Some(target)) if me != target => Err("FORBIDDEN: an agent acts on its own panes only".to_string()),
+        _ => Ok(()),
+    }
+}
+
 /// Whether `actor` is a name the agent behind `uid` answers to: its slug,
 /// display or instance name, or one it was renamed from (a running agent keeps
 /// sending under the name its environment held at launch). A name that also

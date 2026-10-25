@@ -1405,9 +1405,11 @@ pub(super) struct RegisterRequest {
 
 pub(super) async fn handle_reactive_register(
     State(state): State<AppState>,
+    caller: Option<axum::Extension<super::caller::Caller>>,
     Json(mut req): Json<RegisterRequest>,
 ) -> Response {
-    req.agent_id = crate::backend::reactive::sanitize::route_name(&req.agent_id).unwrap_or_default();
+    let sent_name = req.agent_id.clone();
+    req.agent_id = crate::backend::reactive::sanitize::route_name(&sent_name).unwrap_or_default();
     tracing::info!(agent_id = %req.agent_id, block_id = %req.block_id, "reactive register request");
     // Identity M2 (spec §4.4.1 row 3): this is a presence signal keyed by
     // block. The name the frontend sends, as its route name (above), becomes
@@ -1426,6 +1428,9 @@ pub(super) async fn handle_reactive_register(
                 None
             })
     };
+    if let Some(refusal) = super::pane_binding::register_refusal(&state, caller.as_deref(), uid.as_deref(), &sent_name, &req.agent_id).await {
+        return refusal;
+    }
     // One live instance per agent (SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24
     // Phase 1, I9): a pane whose agent runs in another AgentMux instance on
     // this host must not register it — the cross-instance registries written
@@ -1674,9 +1679,13 @@ pub(super) struct UnregisterRequest {
 
 pub(super) async fn handle_reactive_unregister(
     State(state): State<AppState>,
+    caller: Option<axum::Extension<super::caller::Caller>>,
     Json(req): Json<UnregisterRequest>,
 ) -> Response {
     use crate::backend::reactive::handler::UnregisterOutcome;
+    if let Some(refusal) = super::pane_binding::unregister_refusal(&state, caller.as_deref(), &req.block_id, &req.agent_id).await {
+        return refusal;
+    }
 
     let (block_id, names): (Option<String>, Vec<String>) = if !req.block_id.trim().is_empty() {
         let names = state.reactive_handler.unregister_block(req.block_id.trim());
