@@ -192,22 +192,28 @@ fn a_store_busy_for_longer_than_the_timeout_ends_the_pass_quietly() {
     let other = FileStore::open_global_transcripts(&path).unwrap();
     fs.lock_conn().busy_timeout(std::time::Duration::from_millis(20)).unwrap();
     let now = agentmux_common::time::now_ms();
-    // The other srv holds the write lock past the timeout.
+    // The other srv holds the write lock for as long as the test says: it signals
+    // once it has the lock and keeps it until released, so no timing is assumed.
+    let (locked_tx, locked_rx) = std::sync::mpsc::channel::<()>();
+    let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
     let holder = std::thread::spawn({
         let path = path.clone();
         move || {
             let mut conn = rusqlite::Connection::open(&path).unwrap();
             let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).unwrap();
-            std::thread::sleep(std::time::Duration::from_millis(300));
+            locked_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
             tx.commit().unwrap();
         }
     });
-    std::thread::sleep(std::time::Duration::from_millis(50));
-    let report = pass_with(&fs, &nobody_blocks, 100, &mut HashSet::new(), now).unwrap();
+    locked_rx.recv().unwrap();
+    let report = pass_with(&fs, &nobody_blocks, 100, &mut HashSet::new(), now);
+    release_tx.send(()).unwrap();
+    holder.join().unwrap();
+    let report = report.unwrap();
     assert!(report.busy, "{report:?}");
     assert!(!report.done);
     assert_eq!(report.frames, 0);
-    holder.join().unwrap();
     // Later passes finish the work, once, whoever runs them.
     assert_eq!(drain(&fs, now) + drain(&other, now), 17);
     assert_eq!(fs.frame_starts("agent:a:current", "output").unwrap().len(), 17);
