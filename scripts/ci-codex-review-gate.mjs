@@ -144,6 +144,10 @@ export function reviewedCommit(body) {
  *   - with several outstanding it is ambiguous (Codex P1 on #3589: crediting
  *     the latest would pass an unreviewed head). It credits no head, closes
  *     them all, and the next request is then answered alone.
+ * Requests are counted per head: a second request for a head that already has
+ * one outstanding (a manual re-review after an automatic ask) is the same
+ * request. Counted twice, the notice that answered both credited neither and
+ * the head stayed pending for good.
  */
 function quotaAttribution({ comments, reviews }) {
     const events = [];
@@ -168,7 +172,9 @@ function quotaAttribution({ comments, reviews }) {
     const attributed = new Map();
     let outstanding = [];
     for (const e of events) {
-        if (e.request) outstanding.push(e.request);
+        if (e.request) {
+            if (!outstanding.some((head) => head.startsWith(e.request) || e.request.startsWith(head))) outstanding.push(e.request);
+        }
         else if (e.names) outstanding = outstanding.filter((head) => !namesCommit(head, e.names));
         else if (e.quota) {
             if (outstanding.length === 1) attributed.set(e.quota, outstanding[0]);
