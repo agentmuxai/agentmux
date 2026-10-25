@@ -511,6 +511,11 @@ fn env_to_strip(vars: impl IntoIterator<Item = std::ffi::OsString>) -> Vec<std::
 
 /// Restart into `staged`, detached, without this AgentMux's own environment
 /// except where it keeps its data ([`KEPT_ENV`]).
+///
+/// Not on macOS: its swap script starts the new app with `open`, which gives it
+/// LaunchServices' environment, not the script's, so an isolated instance still
+/// comes back on the machine's real channel there. (Not tried on a Mac; `open
+/// --env` would carry them.)
 pub fn relaunch(staged: &Staged) -> std::io::Result<()> {
     relaunch_with_env(staged, std::env::vars_os())
 }
