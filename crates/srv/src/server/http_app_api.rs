@@ -58,12 +58,9 @@ pub(super) async fn handle_agent_memory_list(
     caller: Option<Extension<caller::Caller>>,
     Query(q): Query<AgentMemoryListQuery>,
 ) -> impl IntoResponse {
-    actor::check_actor(
-        &state,
-        caller.as_deref(),
-        actor::ActorSite::MemoryList,
-        Some(&q.agent_id),
-    );
+    if let Err(e) = actor::require_token(&state, caller.as_deref(), actor::ActorSite::MemoryList, &q.agent_id) {
+        return app_api_response::<()>(Err(e));
+    }
     app_api_response(app_api::memory_list_impl(&state, app_api::SelfOwner::of(caller.as_deref(), &q.agent_id, "m4c.memory_owner_by_name")))
 }
 
@@ -80,12 +77,9 @@ pub(super) async fn handle_agent_memory_read(
     caller: Option<Extension<caller::Caller>>,
     Query(q): Query<AgentMemoryReadQuery>,
 ) -> impl IntoResponse {
-    actor::check_actor(
-        &state,
-        caller.as_deref(),
-        actor::ActorSite::MemoryRead,
-        Some(&q.agent_id),
-    );
+    if let Err(e) = actor::require_token(&state, caller.as_deref(), actor::ActorSite::MemoryRead, &q.agent_id) {
+        return app_api_response::<()>(Err(e));
+    }
     app_api_response(app_api::memory_read_impl(&state, app_api::SelfOwner::of(caller.as_deref(), &q.agent_id, "m4c.memory_owner_by_name"), &q.filename))
 }
 
@@ -111,12 +105,9 @@ pub(super) async fn handle_agent_memory_write(
     caller: Option<Extension<caller::Caller>>,
     Json(req): Json<AgentMemoryWriteRequest>,
 ) -> impl IntoResponse {
-    actor::check_actor(
-        &state,
-        caller.as_deref(),
-        actor::ActorSite::MemoryWrite,
-        Some(&req.agent_id),
-    );
+    if let Err(e) = actor::require_token(&state, caller.as_deref(), actor::ActorSite::MemoryWrite, &req.agent_id) {
+        return app_api_response::<()>(Err(e));
+    }
     let detail_str;
     let provenance = if let Some(p) = req.provenance.as_ref() {
         detail_str = p.detail.to_string();
@@ -316,12 +307,9 @@ pub(super) async fn handle_agent_memory_history(
     caller: Option<Extension<caller::Caller>>,
     Query(q): Query<AgentMemoryHistoryQuery>,
 ) -> impl IntoResponse {
-    actor::check_actor(
-        &state,
-        caller.as_deref(),
-        actor::ActorSite::MemoryHistory,
-        Some(&q.agent_id),
-    );
+    if let Err(e) = actor::require_token(&state, caller.as_deref(), actor::ActorSite::MemoryHistory, &q.agent_id) {
+        return app_api_response::<()>(Err(e));
+    }
     app_api_response(app_api::memory_history_impl(&state, app_api::SelfOwner::of(caller.as_deref(), &q.agent_id, "m4c.memory_owner_by_name"), &q.filename))
 }
 
@@ -341,12 +329,9 @@ pub(super) async fn handle_agent_memory_diff(
     caller: Option<Extension<caller::Caller>>,
     Query(q): Query<AgentMemoryDiffQuery>,
 ) -> impl IntoResponse {
-    actor::check_actor(
-        &state,
-        caller.as_deref(),
-        actor::ActorSite::MemoryDiff,
-        Some(&q.agent_id),
-    );
+    if let Err(e) = actor::require_token(&state, caller.as_deref(), actor::ActorSite::MemoryDiff, &q.agent_id) {
+        return app_api_response::<()>(Err(e));
+    }
     app_api_response(app_api::memory_diff_impl(&state, app_api::SelfOwner::of(caller.as_deref(), &q.agent_id, "m4c.memory_owner_by_name"), &q.from_version_id, &q.to_version_id))
 }
 
@@ -366,12 +351,9 @@ pub(super) async fn handle_agent_memory_revert(
     caller: Option<Extension<caller::Caller>>,
     Json(req): Json<AgentMemoryRevertRequest>,
 ) -> impl IntoResponse {
-    actor::check_actor(
-        &state,
-        caller.as_deref(),
-        actor::ActorSite::MemoryRevert,
-        Some(&req.agent_id),
-    );
+    if let Err(e) = actor::require_token(&state, caller.as_deref(), actor::ActorSite::MemoryRevert, &req.agent_id) {
+        return app_api_response::<()>(Err(e));
+    }
     app_api_response(app_api::memory_revert_impl(&state, app_api::SelfOwner::of(caller.as_deref(), &req.agent_id, "m4c.memory_owner_by_name"), &req.filename, &req.target_version_id))
 }
 
