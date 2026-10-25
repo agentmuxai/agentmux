@@ -14,7 +14,7 @@
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 
-/** srv waits up to 30 s for the other instance to accept the release and 25 s for the agent to be free, then takes the relay lease. */
+/** srv waits up to 60 s for the other instance's user to let the release run out and 25 s for the agent to be free, then takes the relay lease. */
 const TAKEOVER_TIMEOUT_MS = 120_000;
 
 export interface TakeoverResult {
