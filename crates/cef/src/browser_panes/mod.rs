@@ -238,6 +238,8 @@ impl BrowserPaneManager {
                             // form input, a playing video) instead of reloading
                             // it (SPEC_RENDERER_RECYCLE_WHEN_IDLE_2026_10_13.md §2).
                             crate::browser_pane::callbacks::emit_current_nav_state(state, block_id, &browser);
+                            // A discarded page keeps its address but has no renderer: load it.
+                            discard::load_if_discarded(&browser);
                         } else {
                             frame.load_url(Some(&CefString::from(url)));
                         }

@@ -81,6 +81,10 @@ export function usePaneRectSync(params: {
     /** The pane is hibernated: it has no native page until this turns false
      *  (SPEC_BROWSER_PANE_HIBERNATION_2026_10_20.md §4). */
     asleep?: Accessor<boolean>;
+    /** A wake that needs no load: the page was alive (woken during the discard park, or
+     *  its discard didn't happen), so no load will end the sleep. The view applies the
+     *  same policy as for a loaded wake. Without it the sleep ends at once. */
+    onWakeWithoutLoad?: () => void;
 }): PaneRectSync {
     const { model, placeholderRef, windowLabel, diag } = params;
     // A memo, so the sleep effect below runs when the pane goes to sleep or
@@ -323,6 +327,10 @@ export function usePaneRectSync(params: {
     // One sleep at a time: a wake and a sleep again during the park below
     // must not start a second discard (it would be refused and close the page).
     let sleepInFlight = false;
+    const wakeWithoutLoad = () => {
+        if (params.onWakeWithoutLoad) params.onWakeWithoutLoad();
+        else void model.endSleep(undefined).catch(() => {});
+    };
     const sleepNative = async () => {
         if (!paneCreated() || discarded || sleepInFlight) return;
         sleepInFlight = true;
@@ -357,7 +365,7 @@ export function usePaneRectSync(params: {
                 // will not load again, and the sleep record would never end (the card
                 // waits for a load that does not come). The wake is done: end the sleep.
                 syncPosition();
-                void model.endSleep(undefined).catch(() => {});
+                wakeWithoutLoad();
                 return;
             }
         }
@@ -382,7 +390,7 @@ export function usePaneRectSync(params: {
             case "nothing":
                 // Woken while the discard was out, and the discard didn't happen: the page is
                 // alive and won't load again, so nothing else would end the sleep.
-                void model.endSleep(undefined).catch(() => {});
+                wakeWithoutLoad();
                 return;
         }
     };

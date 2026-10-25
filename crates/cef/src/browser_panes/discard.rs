@@ -94,6 +94,17 @@ wrap_task! {
     }
 }
 
+/// UI thread. A window reload re-mounts a pane whose browser was discarded in place
+/// and survived: the same-page create keeps it, which would leave it unloaded, so
+/// load it again here. Does nothing for a page that is not discarded.
+pub(crate) fn load_if_discarded(browser: &Browser) {
+    let Some(host) = browser.host() else { return };
+    if run(&host, DiscardOp::IsDiscarded) == Some(true) {
+        tracing::info!("[discard] a re-mounted pane adopted a discarded page: loading it");
+        let _ = run(&host, DiscardOp::Load);
+    }
+}
+
 /// UI thread. `None` when this libcef has no Discard API.
 fn run(host: &BrowserHost, op: DiscardOp) -> Option<bool> {
     let raw: *mut _cef_browser_host_t = ImplBrowserHost::get_raw(host);

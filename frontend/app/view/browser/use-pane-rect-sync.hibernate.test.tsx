@@ -57,9 +57,18 @@ const model = {
 
 const [asleep, setAsleep] = createSignal(false);
 
-function Mount(props: { asleep?: () => boolean }) {
+const onWakeWithoutLoad = vi.fn();
+
+function Mount(props: { asleep?: () => boolean; policy?: boolean }) {
     let ph: HTMLDivElement | undefined;
-    usePaneRectSync({ model, placeholderRef: () => ph, windowLabel: "main", diag: () => {}, asleep: props.asleep ?? asleep });
+    usePaneRectSync({
+        model,
+        placeholderRef: () => ph,
+        windowLabel: "main",
+        diag: () => {},
+        asleep: props.asleep ?? asleep,
+        onWakeWithoutLoad: props.policy === false ? undefined : onWakeWithoutLoad,
+    });
     return <div ref={ph} />;
 }
 
@@ -72,6 +81,7 @@ afterEach(() => {
     vi.restoreAllMocks();
     calls.length = 0;
     model.endSleep.mockClear();
+    onWakeWithoutLoad.mockClear();
     model.markSleepKept.mockClear();
     model.clearSleepKept.mockClear();
     setAsleep(false);
@@ -81,9 +91,9 @@ afterEach(() => {
 });
 
 /** A mounted, created pane whose tab is then hidden, the way a hibernating pane is. */
-async function hiddenPane() {
+async function hiddenPane(policy = true) {
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({ x: 10, y: 20, width: 300, height: 200 } as DOMRect);
-    render(() => <Mount />);
+    render(() => <Mount policy={policy} />);
     await tick(10);
     setVisibility("dormant");
     await tick(10);
@@ -101,13 +111,24 @@ describe("usePaneRectSync — sleep and wake around the discard park", { timeout
         expect(model.endSleep).not.toHaveBeenCalled();
     });
 
-    it("a wake during the park ends the sleep and discards nothing", async () => {
+    it("a wake during the park discards nothing and is a wake that needs no load, for the view to settle", async () => {
         await hiddenPane();
         setAsleep(true);
         await tick(100);
         setAsleep(false);
         await tick(1900);
         expect(discards()).toHaveLength(0);
+        expect(onWakeWithoutLoad).toHaveBeenCalledTimes(1);
+        // The view decides whether that ends the sleep (a hover's wake waits to be shown).
+        expect(model.endSleep).not.toHaveBeenCalled();
+    });
+
+    it("without a view's policy, that wake ends the sleep at once", async () => {
+        await hiddenPane(false);
+        setAsleep(true);
+        await tick(100);
+        setAsleep(false);
+        await tick(1900);
         expect(model.endSleep).toHaveBeenCalledTimes(1);
         expect(model.endSleep).toHaveBeenCalledWith(undefined);
     });
@@ -122,7 +143,7 @@ describe("usePaneRectSync — sleep and wake around the discard park", { timeout
         expect(discards()).toHaveLength(0);
     });
 
-    it("a wake while a refused discard is out ends the sleep too", async () => {
+    it("a wake while a refused discard is out is a wake that needs no load too", async () => {
         discardPlan.ok = false;
         discardPlan.delayMs = 400;
         await hiddenPane();
@@ -131,8 +152,8 @@ describe("usePaneRectSync — sleep and wake around the discard park", { timeout
         expect(discards().map((c) => c.args.op)).toEqual(["discard"]);
         setAsleep(false);
         await tick(700); // the discard is answered, refused
-        expect(model.endSleep).toHaveBeenCalledTimes(1);
-        expect(model.endSleep).toHaveBeenCalledWith(undefined);
+        expect(onWakeWithoutLoad).toHaveBeenCalledTimes(1);
+        expect(model.endSleep).not.toHaveBeenCalled();
         expect(discards().map((c) => c.args.op)).toEqual(["discard"]);
     });
 });

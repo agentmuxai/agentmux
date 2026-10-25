@@ -104,6 +104,14 @@ export function afterDiscard(
     return answer?.supported && answer.ok ? "kept" : "close";
 }
 
+/** Whether a wake that has finished (its page loaded, or needed no load) ends the sleep now:
+ *  the pane is shown, or the wake was asked for (a command, an agent's call). A hover's
+ *  speculative wake that finished while the pane is still hidden is held instead, and goes
+ *  back to sleep if no switch follows. */
+export function wakeEndsNow(visible: boolean, why: string): boolean {
+    return visible || why === "command" || why === "agent";
+}
+
 /** The name the card gives the page: its saved title, else its address. */
 export function sleepName(s: BrowserSleep): string {
     const title = s.title.trim();

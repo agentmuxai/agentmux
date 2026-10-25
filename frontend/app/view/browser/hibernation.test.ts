@@ -8,6 +8,7 @@ vi.mock("@/app/store/app-api", () => ({ getApi: () => undefined }));
 
 import {
     afterDiscard,
+    wakeEndsNow,
     awakeReason,
     etaLabel,
     hibernateAfterMs,
@@ -244,6 +245,19 @@ describe("when a hidden pane sleeps", () => {
         settings["browser:hibernate"] = false;
         expect(await policyTick(now, async () => "critical")).toEqual([]);
         offs.forEach((off) => off());
+    });
+});
+
+describe("wakeEndsNow", () => {
+    it("ends at once when the pane is shown or the wake was asked for", () => {
+        expect(wakeEndsNow(true, "intent")).toBe(true);
+        expect(wakeEndsNow(true, "show")).toBe(true);
+        expect(wakeEndsNow(false, "command")).toBe(true);
+        expect(wakeEndsNow(false, "agent")).toBe(true);
+    });
+    it("holds a hover's wake that finished while the pane is still hidden", () => {
+        expect(wakeEndsNow(false, "intent")).toBe(false);
+        expect(wakeEndsNow(false, "show")).toBe(false);
     });
 });
 
