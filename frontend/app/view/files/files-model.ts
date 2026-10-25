@@ -151,8 +151,6 @@ function saveSafeRoot(root: string): void {
     }
 }
 
-/** An agent's identity color: its stored `ui:color` (what seeds the pane
- *  border), else the deterministic pick the pane would get on first open. */
 /**
  * An agent's colour as text in the current theme: its hue, at the lightness made for text on that theme's
  * surface (the Kanban's name colour, pane-color-scheme.ts), not the raw colour, which is 1.7:1 on a light theme
@@ -162,6 +160,8 @@ export function readableAgentColor(hex: string): string {
     return blockRoleColor({ "frame:activebordercolor": hex } as Block["meta"], isLightThemeActive(), "identity", { widget: false }) ?? hex;
 }
 
+/** An agent's identity color: its stored `ui:color` (what seeds the pane
+ *  border), else the deterministic pick the pane would get on first open. */
 async function loadAgentColor(definitionId: string): Promise<string | undefined> {
     if (!definitionId) return undefined;
     try {
