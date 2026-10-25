@@ -30,6 +30,7 @@ pub mod agent_roots;
 pub mod allowed_origins;
 pub mod popup_rules;
 pub mod process;
+pub mod process_hardening;
 pub mod pii_mask;
 pub mod redact;
 pub mod runtime_mode;
