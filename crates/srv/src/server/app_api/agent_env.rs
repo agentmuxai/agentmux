@@ -92,6 +92,9 @@ fn target_of(state: &AppState, actor: &Actor, agent: Option<&str>) -> Result<Age
         .agent_def_get(&id)
         .map_err(|e| refuse(StatusCode::INTERNAL_SERVER_ERROR, format!("agent env: {e}")))?
         .ok_or_else(|| refuse(StatusCode::NOT_FOUND, format!("no agent '{id}' on this machine")))?;
+    if def.agent_type == "container" {
+        return Err(refuse(StatusCode::FORBIDDEN, "CONTAINER_AGENT: a container agent's environment can't be changed from here"));
+    }
     if def.is_seeded != 0 {
         return Err(refuse(StatusCode::BAD_REQUEST, format!("{} is a template; only an agent has an environment", def.name)));
     }
@@ -114,8 +117,7 @@ fn proposed(current: &str, req: &AgentEnvRequest) -> Result<String, Refusal> {
             return Err(bad("give lines (the whole new text) or set and unset, not both".to_string()))
         }
         (Some(lines), None, None) => {
-            agent_env::validate_lines(lines).map_err(&bad)?;
-            lines.clone()
+            agent_env::resolve_lines(current, lines).map_err(&bad)?
         }
         (None, set, unset) => {
             if set.is_none() && unset.is_none() {
@@ -145,9 +147,15 @@ fn audit(state: &AppState, actor: &Actor, target: &AgentDefinition, ok: bool, er
     request_id
 }
 
+/// Held from reading an environment to writing it, so two agents changing the
+/// same definition at once don't lose one change. (A save from My Agents goes
+/// through `setagentcontent` and isn't serialized with this.)
+static ENV_WRITE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 fn run(state: &AppState, caller: Option<&Caller>, req: AgentEnvRequest) -> Result<Value, Refusal> {
     let actor = actor_of(state, caller)?;
     let target = target_of(state, &actor, req.agent.as_deref())?;
+    let _writing = (req.action == "set").then(|| ENV_WRITE.lock().unwrap_or_else(|poisoned| poisoned.into_inner()));
     let current = current_text(state, &target.id)?;
     let agent = json!({ "id": target.id, "slug": target.slug, "name": target.name });
     match req.action.as_str() {

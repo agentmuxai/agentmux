@@ -171,6 +171,22 @@ async fn a_container_agent_is_refused() {
 }
 
 #[tokio::test]
+async fn a_container_agents_environment_is_refused_as_a_target() {
+    let state = test_state();
+    let (container, host) = (agent(&state, "container", false), agent(&state, "host", false));
+    for body in [
+        json!({ "action": "get", "agent": container.id }),
+        json!({ "action": "set", "agent": container.id, "set": { "A": "1" } }),
+        json!({ "action": "set", "agent": container.slug, "lines": "A=1\n" }),
+    ] {
+        let (status, out) = call(&state, Some(&host), body).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{out}");
+        assert!(out["error"].as_str().unwrap().starts_with("CONTAINER_AGENT"), "{out}");
+    }
+    assert_eq!(stored(&state, &container), None);
+}
+
+#[tokio::test]
 async fn a_request_without_an_agent_token_is_refused_and_never_the_operator() {
     let state = test_state();
     let target = agent(&state, "host", false);
@@ -214,13 +230,23 @@ async fn the_operators_credential_values_are_hidden_from_an_agent_and_survive_it
         .unwrap();
     let (_, body) = call(&state, Some(&me), json!({ "action": "get" })).await;
     assert_eq!(body["lines"], "SERVICE_TOKEN=[hidden]\nEDITOR=vim\n");
-    // Writing the shown text back would clobber the secret, so it is refused.
+    // Writing the shown text back leaves the secret as it was.
     let (status, _) = call(&state, Some(&me), json!({ "action": "set", "lines": "SERVICE_TOKEN=[hidden]\nEDITOR=vim\n" })).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(stored(&state, &me).as_deref(), Some("SERVICE_TOKEN=operator-value-123\nEDITOR=vim\n"));
+    // So does a whole text that leaves the line out, or tries a value of its own.
+    let (status, _) = call(&state, Some(&me), json!({ "action": "set", "lines": "EDITOR=emacs\n" })).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(stored(&state, &me).as_deref(), Some("EDITOR=emacs\nSERVICE_TOKEN=operator-value-123\n"));
+    let (status, _) = call(&state, Some(&me), json!({ "action": "set", "lines": "SERVICE_TOKEN=mine\n" })).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(stored(&state, &me).as_deref(), Some("EDITOR=emacs\nSERVICE_TOKEN=operator-value-123\n"));
+    let (status, _) = call(&state, Some(&me), json!({ "action": "set", "set": { "EDITOR": "vim" } })).await;
+    assert_eq!(status, StatusCode::OK);
     // An edit of another variable leaves it as the operator wrote it.
     let (status, body) = call(&state, Some(&me), json!({ "action": "set", "set": { "EDITOR": "nano" } })).await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(stored(&state, &me).as_deref(), Some("SERVICE_TOKEN=operator-value-123\nEDITOR=nano\n"));
+    assert_eq!(stored(&state, &me).as_deref(), Some("EDITOR=nano\nSERVICE_TOKEN=operator-value-123\n"));
     assert!(!body.to_string().contains("operator-value-123"), "{body}");
 }
 

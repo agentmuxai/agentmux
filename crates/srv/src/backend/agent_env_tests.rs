@@ -45,6 +45,25 @@ fn names_agentmux_owns_or_that_hold_credentials_are_refused() {
         "AWS_SECRET_ACCESS_KEY_ID_KEY",
         "HTTPS_PROXY",
         "NODE_OPTIONS",
+        "BASH_ENV",
+        "ENV",
+        "LD_AUDIT",
+        "PYTHONPATH",
+        "PYTHONSTARTUP",
+        "NODE_PATH",
+        "NODE_EXTRA_CA_CERTS",
+        "GIT_SSH_COMMAND",
+        "GIT_ASKPASS",
+        "SSH_ASKPASS",
+        "GIT_CONFIG_GLOBAL",
+        "GIT_CONFIG_COUNT",
+        "XDG_CONFIG_HOME",
+        "SSL_CERT_FILE",
+        "REQUESTS_CA_BUNDLE",
+        "MY_SERVICE_BASE_URL",
+        "MY_SERVICE_ENDPOINT",
+        "SOME_API_URL",
+        "PROMPT_COMMAND",
         "1BAD",
         "has space",
     ] {
@@ -83,11 +102,42 @@ fn the_size_is_bounded_in_lines_and_bytes() {
 #[test]
 fn whole_text_keeps_comments_and_blanks_and_refuses_what_would_be_skipped() {
     let text = "# editor\n\nEDITOR=vim\n\n# more\nRUST_LOG=debug\n";
-    assert_eq!(validate_lines(text), Ok(()));
-    assert!(validate_lines("EDITOR=vim\nnot a setting\n").unwrap_err().starts_with("line 2:"));
-    assert!(validate_lines("# ok\nPATH=/x\n").unwrap_err().starts_with("line 2:"));
-    assert!(validate_lines("A=ghp_abcdefghijklmnopqrstuvwxyz0123456789\n").is_err());
-    assert!(validate_lines(&format!("A={HIDDEN}\n")).is_err());
+    assert_eq!(resolve_lines("", text), Ok(text.to_string()));
+    assert!(resolve_lines("", "EDITOR=vim\nnot a setting\n").unwrap_err().starts_with("line 2:"));
+    assert!(resolve_lines("", "# ok\nPATH=/x\n").unwrap_err().starts_with("line 2:"));
+    assert!(resolve_lines("", "A=ghp_abcdefghijklmnopqrstuvwxyz0123456789\n").is_err());
+    assert!(resolve_lines("", &format!("A={HIDDEN}\n")).is_err());
+}
+
+#[test]
+fn a_whole_text_edit_keeps_the_lines_an_agent_cannot_write() {
+    let current = "SERVICE_TOKEN=operator-value-123\nEDITOR=vim\nPATH=/operator/bin\nAGENTMUX_NOTE=1\n";
+    // Written back as shown: each goes back where it was.
+    let shown = redacted(current);
+    assert_eq!(resolve_lines(current, &shown), Ok(current.to_string()));
+    // Moved and edited around: the operator's lines come back in the new place.
+    let edited = "EDITOR=nano\nSERVICE_TOKEN=[hidden]\nPATH=/operator/bin\nAGENTMUX_NOTE=1\n";
+    assert_eq!(
+        resolve_lines(current, edited),
+        Ok("EDITOR=nano\nSERVICE_TOKEN=operator-value-123\nPATH=/operator/bin\nAGENTMUX_NOTE=1\n".to_string())
+    );
+    // Left out: still there, at the end.
+    assert_eq!(
+        resolve_lines(current, "EDITOR=nano\n"),
+        Ok("EDITOR=nano\nSERVICE_TOKEN=operator-value-123\nPATH=/operator/bin\nAGENTMUX_NOTE=1\n".to_string())
+    );
+    // A new value for one is still refused, and [hidden] for a name the operator never set is too.
+    assert!(resolve_lines(current, "SERVICE_TOKEN=mine\n").is_err());
+    assert!(resolve_lines(current, "PATH=/other\n").is_err());
+    assert!(resolve_lines(current, "OTHER_TOKEN=[hidden]\n").is_err());
+    assert!(resolve_lines(current, "EDITOR=[hidden]\n").is_err());
+}
+
+#[test]
+fn a_secret_looking_value_on_an_ordinary_name_is_kept_too() {
+    let current = "NOTES=ghp_abcdefghijklmnopqrstuvwxyz0123456789\nEDITOR=vim\n";
+    assert_eq!(redacted(current), "NOTES=[hidden]\nEDITOR=vim\n");
+    assert_eq!(resolve_lines(current, "NOTES=[hidden]\nEDITOR=nano\n"), Ok("NOTES=ghp_abcdefghijklmnopqrstuvwxyz0123456789\nEDITOR=nano\n".to_string()));
 }
 
 #[test]

@@ -61,6 +61,22 @@ const RESERVED_NAMES: &[&str] = &[
     "GH_TOKEN",
 ];
 
+/// Names that run a program or load code in a tool the agent starts, or that
+/// point one at another config home, certificate store or server.
+const RESERVED_PREFIXES: &[&str] = &[
+    "LD_", "DYLD_", "PYTHON", "NODE_EXTRA", "NODE_TLS", "NODE_PATH", "NODE_REPL", "NPM_CONFIG_", "RUBY", "PERL", "BASH_", "SSH_", "SSL_",
+    "XDG_", "CARGO_", "RUSTUP_", "RUSTC", "GIT_CONFIG", "GIT_SSH", "GIT_ASKPASS", "GIT_EXEC", "GIT_PROXY", "GIT_EXTERNAL", "GIT_TEMPLATE",
+    "GIT_DIR", "GIT_WORK", "_JAVA", "JAVA_TOOL", "JDK_JAVA",
+];
+
+/// Names a shell reads and runs, whatever their prefix.
+const RESERVED_SHELL_NAMES: &[&str] = &["ENV", "BASH_ENV", "PROMPT_COMMAND", "IFS", "ZDOTDIR", "CDPATH", "PS4"];
+
+/// Name endings that point a tool at a server, proxy, certificate store or
+/// home of its own.
+const RESERVED_SUFFIXES: &[&str] =
+    &["_BASE_URL", "_URL", "_ENDPOINT", "_HOST", "_PROXY", "_CA_BUNDLE", "_CA_CERTS", "_CERT_FILE", "_CONFIG_DIR", "_HOME"];
+
 /// Name endings that mark a credential. An ending, not a substring: a
 /// setting such as `CLAUDE_CODE_MAX_OUTPUT_TOKENS` is not one.
 const CREDENTIAL_SUFFIXES: &[&str] = &["_KEY", "_TOKEN", "_SECRET", "_PASSWORD", "_PASSWD", "_CREDENTIAL", "_CREDENTIALS"];
@@ -125,7 +141,9 @@ fn provider_names() -> impl Iterator<Item = String> {
     })
 }
 
-/// Why an agent may not set or remove `name`, if it may not.
+/// Why an agent may not set or remove `name`, if it may not. A pattern, not
+/// a list of names: a variable that runs code or redirects traffic in the
+/// tools another agent launches is refused whatever it is called.
 pub fn name_problem(name: &str) -> Option<String> {
     if !is_valid_name(name) {
         return Some(format!("{name}: a name is letters, digits and underscores, not starting with a digit"));
@@ -134,7 +152,11 @@ pub fn name_problem(name: &str) -> Option<String> {
     if upper.starts_with("AGENTMUX_") {
         return Some(format!("{name}: names starting AGENTMUX_ are reserved for AgentMux"));
     }
-    if RESERVED_NAMES.contains(&upper.as_str()) || provider_names().any(|n| n.eq_ignore_ascii_case(name)) {
+    let reserved = RESERVED_NAMES.contains(&upper.as_str())
+        || RESERVED_SHELL_NAMES.contains(&upper.as_str())
+        || RESERVED_PREFIXES.iter().any(|p| upper.starts_with(p))
+        || RESERVED_SUFFIXES.iter().any(|x| upper.ends_with(x));
+    if reserved || provider_names().any(|n| n.eq_ignore_ascii_case(name)) {
         return Some(format!("{name}: AgentMux sets this one itself, or it decides where an agent's tools, credentials or traffic go"));
     }
     if is_credential_name(name) {
@@ -175,23 +197,50 @@ pub fn check_size(text: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// The whole text an agent proposes (`lines`): within the size, and every
-/// line either a comment, blank, or a `KEY=VALUE` an agent may write. A line
-/// that would be skipped at launch is refused rather than kept silently.
-pub fn validate_lines(text: &str) -> Result<(), String> {
+/// The name of a line an agent can neither read nor write: its name is one an
+/// agent may not set, or its value is shown to an agent as `[hidden]`.
+fn is_kept_line(raw: &str) -> Option<&str> {
+    match classify(raw) {
+        Line::Pair { key, value } if name_problem(key).is_some() || shown(key, value) == HIDDEN => Some(key),
+        _ => None,
+    }
+}
+
+/// The text an agent proposes as the whole environment (`lines`), with the
+/// lines it can't write kept. It is within the size, and every line is a
+/// comment, a blank or a `KEY=VALUE` it may write; a line that would be
+/// skipped at launch is refused rather than kept silently. A name in
+/// `current` that the agent may not write (a credential, a reserved name, a
+/// hidden value) stays as the operator wrote it: where the agent kept
+/// the line as `env_get` showed it (`NAME=[hidden]`, or unchanged), the
+/// operator's line goes back in that place, and one the agent left out goes at the end.
+pub fn resolve_lines(current: &str, text: &str) -> Result<String, String> {
     check_size(text)?;
+    let mut kept: Vec<(&str, &str, bool)> = current.lines().filter_map(|raw| is_kept_line(raw).map(|key| (key, raw, false))).collect();
+    let mut out: Vec<&str> = Vec::new();
     for (i, raw) in text.lines().enumerate() {
         match classify(raw) {
-            Line::Blank | Line::Comment => {}
+            Line::Blank | Line::Comment => out.push(raw),
             Line::Ignored => return Err(format!("line {}: not a comment and not KEY=VALUE, so it would be ignored", i + 1)),
             Line::Pair { key, value } => {
-                if let Some(why) = name_problem(key).or_else(|| value_problem(key, value)) {
+                let operators = kept.iter_mut().find(|(k, original, used)| *k == key && !*used && (value == HIDDEN || original.trim() == raw.trim()));
+                if let Some((_, original, used)) = operators {
+                    *used = true;
+                    out.push(original);
+                } else if let Some(why) = name_problem(key).or_else(|| value_problem(key, value)) {
                     return Err(format!("line {}: {why}", i + 1));
+                } else {
+                    out.push(raw);
                 }
             }
         }
     }
-    Ok(())
+    out.extend(kept.iter().filter(|(_, _, used)| !used).map(|(_, raw, _)| *raw));
+    let mut joined = out.join("\n");
+    if !joined.is_empty() && text.ends_with('\n') {
+        joined.push('\n');
+    }
+    Ok(joined)
 }
 
 /// `current` with `set` applied and `unset` removed, every other line (and
