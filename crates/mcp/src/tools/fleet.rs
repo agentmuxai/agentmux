@@ -177,6 +177,20 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 .ok()
                 .filter(|s| !s.is_empty());
 
+            // Files go into this agent's attachment store once; each target's
+            // jekt names them, signed for that target, exactly as `send` does
+            // (SPEC_JEKT_FILE_TRANSFER_2026_10_05.md §3.1). srv then applies
+            // the per-tier rules to each one: a verified sender, the LAN size
+            // limits.
+            let files = match super::send_files::files_arg(arguments)? {
+                Some(paths) => {
+                    let local = super::send_files::check(&paths)?;
+                    Some(super::send_files::upload(local, cx).await?)
+                }
+                None => None,
+            };
+            let sent_names: Vec<String> = files.iter().flatten().map(|f| f.name.clone()).collect();
+
             // `/agentmux/reactive/inject`'s `target_agent` resolves by
             // agent UID or registered AGENT NAME only (`resolve_target`,
             // crates/srv/src/backend/reactive/handler.rs) — never by
@@ -250,6 +264,8 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let mut succeeded: Vec<String> = Vec::new();
             let mut held: Vec<serde_json::Value> = Vec::new();
             let mut failed: Vec<serde_json::Value> = Vec::new();
+            // Delivered targets that got fewer files than were sent.
+            let mut files_short: Vec<serde_json::Value> = Vec::new();
             for (chunk_idx, chunk) in targets.chunks(BROADCAST_CHUNK_SIZE).enumerate() {
                 if chunk_idx > 0 {
                     tokio::time::sleep(BROADCAST_CHUNK_PAUSE).await;
@@ -265,7 +281,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                     // fails, just via the inject endpoint's own "agent not
                     // found" rather than this pre-check.
                     let target_agent = block_to_agent.get(&target).cloned().unwrap_or_else(|| target.clone());
-                    let mut req = signed_jekt(source_agent.clone(), &target_agent, message);
+                    let mut req = signed_jekt_with_files(source_agent.clone(), &target_agent, message, files.clone());
                     req.priority = priority.clone();
                     let outcome = async {
                         let resp = client
@@ -285,10 +301,10 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                             .await
                             .map_err(|e| format!("response parse failed: {e}"))?;
                         if result.get("success").and_then(|v| v.as_bool()) == Some(true) {
-                            Ok(None)
+                            Ok(Sent::Delivered(result.get("files_delivered").and_then(Value::as_u64)))
                         } else if result.get("held_reason").and_then(|v| v.as_str()) == Some(crate::tool_helpers::HELD_IDLE) {
                             // Kept for an idle session, not lost: say so apart from the failures.
-                            Ok(Some(()))
+                            Ok(Sent::HeldIdle)
                         } else {
                             Err(result
                                 .get("error")
@@ -299,8 +315,15 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                     }
                     .await;
                     match outcome {
-                        Ok(None) => succeeded.push(target),
-                        Ok(Some(())) => held.push(json!({ "id": target, "held": "idle" })),
+                        Ok(Sent::Delivered(arrived)) => {
+                            // Fewer arrive when a file fails its hash on the
+                            // way or the receiver withholds them, as in `send`.
+                            if let Some(n) = arrived.filter(|n| (*n as usize) < sent_names.len()) {
+                                files_short.push(json!({ "id": target, "arrived": n }));
+                            }
+                            succeeded.push(target);
+                        }
+                        Ok(Sent::HeldIdle) => held.push(json!({ "id": target, "held": "idle" })),
                         Err(error) => failed.push(json!({ "id": target, "error": error })),
                     }
                 }
@@ -312,6 +335,10 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 result["held_note"] = json!(
                     "held: their session has been idle, so the message waits until it is next active; send it again with urgent: true to wake them now"
                 );
+            }
+            if !sent_names.is_empty() {
+                result["files"] = json!(sent_names);
+                result["files_short"] = json!(files_short);
             }
             Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))
         }
@@ -388,6 +415,159 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
     }
 }
 
+/// How one broadcast target took its jekt.
+enum Sent {
+    /// Delivered; carries how many of its files arrived, when srv said.
+    Delivered(Option<u64>),
+    /// Kept for an idle session, not lost.
+    HeldIdle,
+}
+
+#[cfg(test)]
+mod broadcast_files_tests {
+    use super::*;
+    use std::io::{Read, Write};
+    use std::sync::{Arc, Mutex};
+
+    /// A stand-in for srv: discovery knows no one, the attachment store keeps
+    /// whatever it is given, and inject records each request and says
+    /// `delivered` files arrived.
+    struct StubSrv {
+        url: String,
+        injected: Arc<Mutex<Vec<Value>>>,
+    }
+
+    fn read_request(conn: &mut std::net::TcpStream) -> (String, Vec<u8>) {
+        let mut raw = Vec::new();
+        let mut buf = [0u8; 4096];
+        let head_end = loop {
+            if let Some(i) = raw.windows(4).position(|w| w == b"\r\n\r\n") {
+                break i + 4;
+            }
+            let n = conn.read(&mut buf).unwrap();
+            assert!(n > 0, "connection closed before the headers ended");
+            raw.extend_from_slice(&buf[..n]);
+        };
+        let head = String::from_utf8_lossy(&raw[..head_end]).to_ascii_lowercase();
+        let request_line = head.lines().next().unwrap_or_default().to_string();
+        let length = head
+            .lines()
+            .find_map(|l| l.strip_prefix("content-length:"))
+            .and_then(|v| v.trim().parse::<usize>().ok());
+        let chunked = head.contains("transfer-encoding: chunked");
+        // An upload is streamed, so it arrives chunked.
+        while match length {
+            Some(n) => raw.len() < head_end + n,
+            None => chunked && !raw.ends_with(b"0\r\n\r\n"),
+        } {
+            let n = conn.read(&mut buf).unwrap();
+            assert!(n > 0, "connection closed before the body ended");
+            raw.extend_from_slice(&buf[..n]);
+        }
+        (request_line, raw[head_end..].to_vec())
+    }
+
+    fn stub_srv(delivered: u64) -> StubSrv {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let injected = Arc::new(Mutex::new(Vec::new()));
+        let seen = injected.clone();
+        std::thread::spawn(move || {
+            for conn in listener.incoming() {
+                let mut conn = conn.unwrap();
+                let seen = seen.clone();
+                std::thread::spawn(move || {
+                    let (line, body) = read_request(&mut conn);
+                    let answer = if line.contains("/agentmux/discovery") {
+                        json!({ "host": { "addressable": [] } })
+                    } else if line.contains("/attachments/upload") {
+                        json!({ "id": "ab".repeat(32), "bytes": 5 })
+                    } else {
+                        seen.lock().unwrap().push(serde_json::from_slice(&body).unwrap());
+                        json!({ "success": true, "files_delivered": delivered })
+                    }
+                    .to_string();
+                    let _ = write!(
+                        conn,
+                        "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{answer}",
+                        answer.len()
+                    );
+                });
+            }
+        });
+        StubSrv { url, injected }
+    }
+
+    async fn broadcast(srv: &StubSrv, args: Value) -> Result<Value> {
+        let client = reqwest::Client::new();
+        let loops = LoopRegistry::default();
+        let counter = std::sync::atomic::AtomicU64::new(0);
+        let cx = ToolCtx { local_url: &srv.url, auth_key: "key", block_id: "", client: &client, loops: &loops, loop_counter: &counter };
+        let out = call("FleetBroadcast", &args, &cx).await?;
+        Ok(serde_json::from_str(&out)?)
+    }
+
+    fn file_in(dir: &tempfile::TempDir) -> String {
+        let path = dir.path().join("report.txt");
+        std::fs::write(&path, b"hello").unwrap();
+        path.to_string_lossy().into_owned()
+    }
+
+    /// Every target's jekt names the files, under a msgid that binds them, so
+    /// a LAN recipient gets what a direct send gives it.
+    #[tokio::test]
+    async fn each_target_gets_the_files_signed_into_its_jekt() {
+        use agentmux_common::jekt_files::{msgid_binds, JektFile};
+        let (srv, dir) = (stub_srv(1), tempfile::tempdir().unwrap());
+        let out = broadcast(&srv, json!({ "targets": ["lan-a", "lan-b"], "message": "look", "files": [file_in(&dir)] })).await.unwrap();
+
+        assert_eq!(out["succeeded"], json!(["lan-a", "lan-b"]));
+        assert_eq!(out["failed"], json!([]));
+        assert_eq!(out["files"], json!(["report.txt"]));
+        assert_eq!(out["files_short"], json!([]));
+        let sent = srv.injected.lock().unwrap();
+        assert_eq!(sent.len(), 2);
+        for (req, target) in sent.iter().zip(["lan-a", "lan-b"]) {
+            assert_eq!(req["target_agent"], target);
+            let files: Vec<JektFile> = serde_json::from_value(req["files"].clone()).expect("the jekt carries its files");
+            assert_eq!(files.len(), 1);
+            assert_eq!(files[0].name, "report.txt");
+            assert!(msgid_binds(req["request_id"].as_str().unwrap(), &files));
+        }
+        assert_ne!(sent[0]["request_id"], sent[1]["request_id"], "each target is signed on its own");
+    }
+
+    /// A target that took the message but not every file is named, not
+    /// counted as a plain success.
+    #[tokio::test]
+    async fn a_target_that_got_fewer_files_is_named() {
+        let (srv, dir) = (stub_srv(0), tempfile::tempdir().unwrap());
+        let out = broadcast(&srv, json!({ "targets": ["lan-a"], "message": "look", "files": [file_in(&dir)] })).await.unwrap();
+        assert_eq!(out["succeeded"], json!(["lan-a"]));
+        assert_eq!(out["files_short"], json!([{ "id": "lan-a", "arrived": 0 }]));
+    }
+
+    /// A file that can't be sent stops the broadcast before any target is
+    /// messaged.
+    #[tokio::test]
+    async fn a_missing_file_sends_nothing() {
+        let (srv, dir) = (stub_srv(1), tempfile::tempdir().unwrap());
+        let missing = dir.path().join("nope.txt").to_string_lossy().into_owned();
+        let err = broadcast(&srv, json!({ "targets": ["lan-a"], "message": "look", "files": [missing] })).await.unwrap_err().to_string();
+        assert!(err.contains("nope.txt"), "{err}");
+        assert!(srv.injected.lock().unwrap().is_empty());
+    }
+
+    /// Without files a broadcast is what it was.
+    #[tokio::test]
+    async fn a_broadcast_without_files_carries_none() {
+        let srv = stub_srv(0);
+        let out = broadcast(&srv, json!({ "targets": ["lan-a"], "message": "hi" })).await.unwrap();
+        assert_eq!(out, json!({ "succeeded": ["lan-a"], "failed": [] }));
+        let sent = srv.injected.lock().unwrap();
+        assert!(sent[0].get("files").is_none_or(Value::is_null));
+    }
+}
 
 #[cfg(test)]
 mod urgent_tests {
