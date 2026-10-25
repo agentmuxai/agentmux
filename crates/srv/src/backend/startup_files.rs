@@ -64,6 +64,15 @@ pub struct StartupFile {
 /// `.claude/CLAUDE.md`, `CLAUDE.local.md`), each file followed by what it
 /// imports; then the skill listing and the MCP servers of `cwd`.
 pub fn claude_startup_files(cwd: &Path, config_dir: Option<&Path>, home: Option<&Path>) -> Vec<StartupFile> {
+    claude_startup_files_with_ancestors(cwd, config_dir, home, cwd.ancestors())
+}
+
+pub(crate) fn claude_startup_files_with_ancestors<'a>(
+    cwd: &Path,
+    config_dir: Option<&Path>,
+    home: Option<&Path>,
+    ancestors: impl Iterator<Item = &'a Path>,
+) -> Vec<StartupFile> {
     let mut out = Vec::new();
     let mut seen = HashSet::new();
     let user_md = config_dir
@@ -73,7 +82,7 @@ pub fn claude_startup_files(cwd: &Path, config_dir: Option<&Path>, home: Option<
     if let Some(p) = user_md {
         add_instructions(&p, "user_instructions", cwd, home, 0, &mut seen, &mut out);
     }
-    let mut dirs: Vec<&Path> = cwd.ancestors().collect();
+    let mut dirs: Vec<&Path> = ancestors.collect();
     // "Up to, but not including, the root directory."
     dirs.retain(|d| d.parent().is_some());
     dirs.reverse();
@@ -285,8 +294,10 @@ mod tests {
 
     #[test]
     fn lists_what_claude_loads_in_order_with_owners() {
-        let (_t, home, cwd, config) = agent_tree();
-        let files = claude_startup_files(&cwd, Some(&config), Some(&home));
+        let (tree, home, cwd, config) = agent_tree();
+        let files = claude_startup_files_with_ancestors(
+            &cwd, Some(&config), Some(&home), cwd.ancestors().take_while(|path| path.starts_with(tree.path())),
+        );
         let got: Vec<(&str, &str, &str)> = files.iter().map(|f| (f.role, f.name.as_str(), f.owner.as_str())).collect();
         assert_eq!(
             got,
@@ -306,8 +317,10 @@ mod tests {
 
     #[test]
     fn the_mcp_item_never_carries_the_file() {
-        let (_t, home, cwd, config) = agent_tree();
-        let files = claude_startup_files(&cwd, Some(&config), Some(&home));
+        let (tree, home, cwd, config) = agent_tree();
+        let files = claude_startup_files_with_ancestors(
+            &cwd, Some(&config), Some(&home), cwd.ancestors().take_while(|path| path.starts_with(tree.path())),
+        );
         let mcp = files.iter().find(|f| f.role == "mcp_servers").unwrap();
         assert!(mcp.text.is_empty());
         assert_eq!(mcp.count, Some(1));
@@ -327,7 +340,9 @@ mod tests {
         write(&cwd.join("docs/in-code.md"), "x");
         write(&cwd.join("docs/fenced.md"), "x");
         write(&home.join("notes.md"), "notes");
-        let files = claude_startup_files(&cwd, None, Some(&home));
+        let files = claude_startup_files_with_ancestors(
+            &cwd, None, Some(&home), cwd.ancestors().take_while(|path| path.starts_with(t.path())),
+        );
         let names: Vec<&str> = files.iter().map(|f| f.name.as_str()).collect();
         let a = cwd.join("docs/a.md").display().to_string().replace('\\', "/");
         let root_md = cwd.join("CLAUDE.md").display().to_string().replace('\\', "/");
@@ -337,7 +352,31 @@ mod tests {
 
     #[test]
     fn nothing_there_lists_nothing() {
-        let t = tempfile::tempdir().unwrap();
-        assert!(claude_startup_files(&t.path().join("ws"), None, Some(&t.path().join("home"))).is_empty());
+        let tree = tempfile::tempdir().unwrap();
+        write(&tree.path().join("CLAUDE.md"), "Parent instructions outside the fixture");
+        write(&tree.path().join(".claude/CLAUDE.md"), "Parent home instructions outside the fixture");
+        let root = tree.path().join("fixture");
+        let cwd = root.join("ws");
+        let home = root.join("home");
+        assert!(claude_startup_files_with_ancestors(
+            &cwd, None, Some(&home), cwd.ancestors().take_while(|path| path.starts_with(&root)),
+        ).is_empty());
+    }
+
+    #[test]
+    fn home_instructions_and_imports_use_the_fixture_home() {
+        let tree = tempfile::tempdir().unwrap();
+        let home = tree.path().join("home");
+        let cwd = home.join("ws");
+        write(&home.join(".claude/CLAUDE.md"), "@~/notes.md");
+        write(&home.join("notes.md"), "Fixture home notes");
+        let files = claude_startup_files_with_ancestors(
+            &cwd, None, Some(&home), cwd.ancestors().take_while(|path| path.starts_with(tree.path())),
+        );
+        assert_eq!(files.iter().map(|file| (file.role, file.name.as_str())).collect::<Vec<_>>(), [
+            ("user_instructions", "~/.claude/CLAUDE.md"),
+            ("instructions_import", "~/notes.md"),
+        ]);
+        assert!(files.iter().all(|file| file.path.starts_with(&home)));
     }
 }
