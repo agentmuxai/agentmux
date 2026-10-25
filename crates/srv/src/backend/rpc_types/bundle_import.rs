@@ -43,6 +43,18 @@ pub struct BundleImportSkillPreview {
     /// declaration carried, so the override keeps it.
     #[ts(type = "\"none\" | \"name_conflict\" | \"duplicate_in_bundle\"")]
     pub collision: String,
+    /// The skill's text as it would be imported (what an agent bound to it is
+    /// told to follow), so the reader sees it before committing. Whole unless
+    /// `content_truncated`.
+    #[serde(default)]
+    pub content: String,
+    /// `content` is not the whole text (a size cap cut it): the rest has not
+    /// been seen, and the UI offers the skill unchecked.
+    #[serde(default)]
+    pub content_truncated: bool,
+    #[serde(default)]
+    #[ts(type = "number")]
+    pub content_total_chars: usize,
 }
 
 /// The deliberately-narrow view of an MCP server config shown in the preview.

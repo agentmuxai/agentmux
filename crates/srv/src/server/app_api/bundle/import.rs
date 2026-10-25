@@ -500,13 +500,17 @@ pub(super) async fn bundle_import_preview_impl(
     let skills_json: Vec<BundleImportSkillPreview> = parsed
         .skills
         .iter()
-        .map(|skill| {
+        .zip(crate::backend::bundle_import_skill_text::bounded_skill_previews(&parsed.skills))
+        .map(|(skill, text)| {
             let collision = bi::classify_skill_collision(&skill.slug, &global_slugs, &in_bundle_dupes);
             BundleImportSkillPreview {
                 source_dir: skill.source_dir.clone(),
                 slug: bounded_display(&skill.slug),
                 description: bounded_display(&skill.description),
                 collision: collision.to_string(),
+                content: text.text,
+                content_truncated: text.truncated,
+                content_total_chars: text.total_chars,
             }
         })
         .collect();

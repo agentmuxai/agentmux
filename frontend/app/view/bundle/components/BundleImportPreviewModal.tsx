@@ -44,8 +44,14 @@ export const BundleImportPreviewModalPanel = (
         Object.fromEntries(preview.context_files.map((cf) => [cf.id, true])),
     );
     const [skills, setSkills] = createSignal<BundleImportSkillSelectionState[]>(
-        preview.skills.map((s) => ({ sourceDir: s.source_dir, checked: true, renameValue: "" })),
+        // A skill whose text the preview could not show in full starts unchecked:
+        // it is imported only once the person has chosen to take what they could
+        // not read.
+        preview.skills.map((s) => ({ sourceDir: s.source_dir, checked: !s.content_truncated, renameValue: "" })),
     );
+    // A skill's text is shown by default (it is what an agent will be told to
+    // follow); this holds the ones the person folded away.
+    const [skillTextHidden, setSkillTextHidden] = createSignal<Record<string, boolean>>({});
     const [warningsDismissed, setWarningsDismissed] = createSignal(false);
     // Widgets the bundle carries (SPEC_WIDGET_SHARING_2026_10_10.md §3.3): on
     // by default, except one that can't be imported or is installed already.
@@ -239,6 +245,30 @@ export const BundleImportPreviewModalPanel = (
                                         </label>
                                         <Show when={skill.description}>
                                             <p class="bundle-import-item-description">{skill.description}</p>
+                                        </Show>
+                                        <Show when={skill.content_total_chars > 0}>
+                                            <div class="bundle-import-skill-text-block">
+                                                <Button
+                                                    className="ghost"
+                                                    onClick={() =>
+                                                        setSkillTextHidden((prev) => ({
+                                                            ...prev,
+                                                            [skill.source_dir]: !prev[skill.source_dir],
+                                                        }))
+                                                    }
+                                                >
+                                                    {skillTextHidden()[skill.source_dir] ? "Show" : "Hide"} skill text
+                                                </Button>
+                                                <Show when={!skillTextHidden()[skill.source_dir]}>
+                                                    <pre class="bundle-import-skill-text">{skill.content}</pre>
+                                                </Show>
+                                                <Show when={skill.content_truncated}>
+                                                    <div class="bundle-import-hint bundle-import-hint-warn">
+                                                        Not fully shown — {Array.from(skill.content).length} of {skill.content_total_chars}{" "}
+                                                        characters. The whole skill is imported if you tick it.
+                                                    </div>
+                                                </Show>
+                                            </div>
                                         </Show>
                                         <Show when={renameConflict()}>
                                             <div class="bundle-import-hint bundle-import-hint-warn">

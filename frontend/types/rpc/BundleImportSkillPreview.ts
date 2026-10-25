@@ -14,4 +14,15 @@ source_dir: string, slug: string, description: string,
  * Rust `String`, which would silently drop the union the hand-written
  * declaration carried, so the override keeps it.
  */
-collision: "none" | "name_conflict" | "duplicate_in_bundle", };
+collision: "none" | "name_conflict" | "duplicate_in_bundle", 
+/**
+ * The skill's text as it would be imported (what an agent bound to it is
+ * told to follow), so the reader sees it before committing. Whole unless
+ * `content_truncated`.
+ */
+content: string, 
+/**
+ * `content` is not the whole text (a size cap cut it): the rest has not
+ * been seen, and the UI offers the skill unchecked.
+ */
+content_truncated: boolean, content_total_chars: number, };
