@@ -228,6 +228,7 @@ pub fn spawn_action_loop(
         .spawn(move || {
             while let Ok(action) = rx.recv() {
                 match action.host_cmd() {
+                    Some("quit_app") => crate::host_quit::quit_host(&data_dir, &dir_hash),
                     Some(cmd) => forward_tray_cmd(&data_dir, &dir_hash, cmd),
                     None => crate::start_at_login::toggle(),
                 }
