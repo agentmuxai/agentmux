@@ -123,7 +123,7 @@ impl CronScheduler {
         };
         let n = started.len();
         for (run, job) in started {
-            let scheduled = run.trigger != jobs::TRIGGER_MANUAL;
+            let scheduled = run.trigger != jobs::TRIGGER_MANUAL && run.trigger != jobs::TRIGGER_RETRY;
             let fired = self.start_run(&job, Some(run.id.clone()), scheduled, run.scheduled_for_ms).await;
             if matches!(fired.outcome, Some(FireOutcome::Delivered { .. })) {
                 self.stop_at_max_fires(&job.id);

@@ -105,7 +105,26 @@ impl RunLedger {
             let other = known.entry(r.job_id.clone()).or_insert_with(|| self.job(&r.job_id)).clone();
             if r.job_id == job.id {
                 occ.job_running += 1;
-                occ.job_started += usize::from(r.state == state::RUNNING);
+                occ.job_started += usize::from(r.state == state::RUNNING && !self.run_followed_elsewhere(&r));
+            }
+            if group.is_some() && other.as_ref().and_then(policy::group_of) == group {
+                occ.group_running += 1;
+            }
+            if other.as_ref().is_none_or(policy::starts_an_agent) {
+                occ.agents_running += 1;
+            }
+        }
+        // A pending fire being delivered holds its place until the delivery's
+        // row says so.
+        let occupying: std::collections::HashSet<String> =
+            self.store.job_runs_occupying().unwrap_or_default().into_iter().map(|r| r.id).collect();
+        for (run_id, job_id) in self.pending_claims.lock().unwrap_or_else(|e| e.into_inner()).iter() {
+            if occupying.contains(run_id) {
+                continue;
+            }
+            let other = known.entry(job_id.clone()).or_insert_with(|| self.job(job_id)).clone();
+            if *job_id == job.id {
+                occ.job_running += 1;
             }
             if group.is_some() && other.as_ref().and_then(policy::group_of) == group {
                 occ.group_running += 1;
@@ -187,6 +206,9 @@ impl RunLedger {
     /// Close a running run that was stopped on purpose, and interrupt its
     /// turn. `false` when it had ended already.
     pub(crate) fn stop_run(&self, run: &JobRun, infra_status: &str, why: &str, summary: &str) -> bool {
+        if self.run_followed_elsewhere(run) {
+            return false;
+        }
         match self.store.job_run_stop(&run.id, infra_status, why, summary, now_ms()) {
             Ok(true) => {
                 self.interrupt_block(&run.block_id);
@@ -222,6 +244,14 @@ impl RunLedger {
         stopped
     }
 
+    /// Whether another channel's instance follows `run`: its agent is there,
+    /// so this process can't interrupt it. Closing the row from here would free
+    /// its place while the agent goes on working, so such a run is left to end
+    /// with its own turn, and counts as one `cancel_other` can't replace.
+    fn run_followed_elsewhere(&self, run: &JobRun) -> bool {
+        super::remote::followed_by(run).is_some_and(|f| f.channel != self.channel)
+    }
+
     fn recorded_here(&self, run: &JobRun) -> bool {
         run.recorded_by == self.recorded_by || run.recorded_by.starts_with(&format!("{}@", self.channel))
     }
@@ -238,6 +268,11 @@ impl RunLedger {
         let now = now_ms();
         let mut out = Vec::new();
         for run in self.store.job_runs_waiting().unwrap_or_default() {
+            // The ledger is shared by every instance, the jobs store is not: a
+            // run another instance recorded is its to start or end.
+            if !self.recorded_here(&run) {
+                continue;
+            }
             let Some(job) = self.job(&run.job_id) else {
                 let _ = self.store.job_run_skip(&run.id, reason::TARGET_MISSING, 1, now);
                 self.run_changed(&run.id);
@@ -271,6 +306,32 @@ impl RunLedger {
             }
         }
         out
+    }
+
+    /// Whether a pending catch-up delivery of `job` may start now: the same
+    /// answer a waiting run gets (overlap, group, the global limit). A job that
+    /// would cancel its own running run does so here, as a new slot would.
+    pub fn pending_may_start(&self, job: &CronJob, run_id: &str) -> bool {
+        let _one_at_a_time = self.admission.lock().unwrap_or_else(|e| e.into_inner());
+        let start = match policy::decide(job, &self.occupancy(job), true) {
+            Decision::Start => true,
+            Decision::CancelThenStart => {
+                self.cancel_started(job);
+                true
+            }
+            Decision::Wait(_) | Decision::SkipOverlap => false,
+        };
+        if start {
+            // Hold its place while the delivery runs: the row is still pending.
+            self.pending_claims.lock().unwrap_or_else(|e| e.into_inner()).insert(run_id.to_string(), job.id.clone());
+        }
+        start
+    }
+
+    /// The delivery of a pending fire ended (it started, or stays pending to
+    /// be retried): its place is the ledger's again.
+    pub fn pending_delivery_done(&self, run_id: &str) {
+        self.pending_claims.lock().unwrap_or_else(|e| e.into_inner()).remove(run_id);
     }
 
     /// A run ended: if it failed in the infrastructure and its job has

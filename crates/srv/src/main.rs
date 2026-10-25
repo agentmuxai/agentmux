@@ -218,11 +218,18 @@ async fn app_main() {
         Some(state.mstore.clone()),
         state.broker.clone(),
     );
-    // A `spawn` job's worker stops when its run ends.
-    run_ledger.install_worker_stop(std::sync::Arc::new(|block_id: &str| {
-        if let Err(e) = sagas::agent_teardown::stop_now(block_id, true) {
-            tracing::warn!(block_id, error = %e, "jobs: couldn't stop a job's worker");
-        }
+    // A `spawn` job's worker is closed when its run ends: its tab goes, so it
+    // doesn't count against the leader's worker limit for the next run.
+    let worker_state = state.clone();
+    run_ledger.install_worker_stop(std::sync::Arc::new(move |block_id: &str| {
+        sagas::pending_shutdown::request(
+            &worker_state,
+            block_id,
+            "jobs",
+            "JobWorker",
+            "its run ended",
+            sagas::pending_shutdown::Action::CloseTab { detail: "a job's worker, its run ended".to_string() },
+        );
     }));
     // Runs are weighed against Settings' spending caps before they start, and
     // stopped when they reach their own (jobs spec §5.3).

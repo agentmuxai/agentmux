@@ -707,9 +707,23 @@ impl CronScheduler {
             if runs.pending_refused_by_cap(&job, &run.id) {
                 continue;
             }
+            // It waits for its place like any other run: policy decides, and a
+            // pending fire that can't start yet stays pending.
+            let may_start = {
+                let (runs, job) = (runs.clone(), job.clone());
+                let run_id = run.id.clone();
+                tokio::task::spawn_blocking(move || runs.pending_may_start(&job, &run_id)).await.unwrap_or(false)
+            };
+            if !may_start {
+                continue;
+            }
             let delivery_started = agentmux_common::time::now_ms();
-            let Some(outcome) = self.deliver(&job, Some(&run.id), run.scheduled_for_ms).await else { continue };
+            let Some(outcome) = self.deliver(&job, Some(&run.id), run.scheduled_for_ms).await else {
+                runs.pending_delivery_done(&run.id);
+                continue;
+            };
             runs.record_pending_delivery(&run, &outcome, delivery_started);
+            runs.pending_delivery_done(&run.id);
             // Only a delivery is recorded here: the slot already counted as one
             // miss when it first went undelivered, and a pending fire that
             // misses again stays pending (it is retried, not a new miss).

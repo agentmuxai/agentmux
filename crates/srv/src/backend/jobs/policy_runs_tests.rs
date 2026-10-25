@@ -229,6 +229,101 @@ async fn cancel_other_works_inside_a_concurrency_group() {
     assert_eq!(rig.store.job_run_get(&second).unwrap().unwrap().state, state::RUNNING);
 }
 
+/// Pending catch-up deliveries wait for their place like any other run: two
+/// jobs of one group don't both start when their agents come back.
+#[tokio::test(flavor = "multi_thread")]
+async fn pending_deliveries_respect_the_concurrency_group() {
+    let rig = rig();
+    let a = make(&rig, "j-pend-a", |j| {
+        j.policy.group = Some("g".into());
+        j.catch_up = "latest".into();
+    });
+    let b = make(&rig, "j-pend-b", |j| {
+        j.policy.group = Some("g".into());
+        j.catch_up = "latest".into();
+    });
+    rig.answer(NOT_FOUND);
+    rig.sched.fire(&a, slot(0)).await;
+    rig.sched.fire(&b, slot(0)).await;
+
+    *rig.present.lock().unwrap() = true;
+    rig.answer(DELIVERED);
+    assert_eq!(rig.sched.deliver_pending().await, 1, "one of the two starts");
+    assert_eq!(rig.sched.deliver_pending().await, 0, "the other waits for the group");
+}
+
+/// The ledger is shared by every instance, the jobs store is not: a waiting
+/// run another instance recorded is left alone, not closed as a deleted job.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_waiting_run_another_instance_recorded_is_left_alone() {
+    let rig = rig();
+    let a = make(&rig, "j-foreign-a", |j| j.policy.group = Some("g".into()));
+    let b = make(&rig, "j-foreign-b", |j| j.policy.group = Some("g".into()));
+    rig.sched.fire(&a, slot(0)).await;
+    let waits = rig.sched.fire(&b, slot(0)).await.run_id.unwrap();
+    rig.store.conn().lock().unwrap().execute("UPDATE db_job_runs SET recorded_by = 'other@elsewhere' WHERE id = ?1", [&waits]).unwrap();
+    rig.store.cron_delete("j-foreign-b").unwrap();
+    rig.sched.run_policy_pass().await;
+    let run = rig.store.job_run_get(&waits).unwrap().unwrap();
+    assert_eq!((run.state.as_str(), run.reason.as_str()), (state::SCHEDULED, reason::GROUP_BUSY));
+}
+
+/// A run another channel's instance follows can't be interrupted from here, so
+/// a timeout or a replacement doesn't close its row and free its place.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_run_followed_by_another_channel_is_not_stopped_from_here() {
+    let rig = rig();
+    let stopped = interrupts(&rig);
+    let job = make(&rig, "j-remote", |j| {
+        j.policy.overlap = Overlap::CancelOther;
+        j.policy.timeout_minutes = Some(1);
+    });
+    let first = rig.sched.fire(&job, slot(0)).await.run_id.unwrap();
+    rig.store.job_run_add_links(&first, &json!({ "followed_by_channel": "elsewhere", "followed_by_pid": 1 })).unwrap();
+    rig.store.conn().lock().unwrap().execute("UPDATE db_job_runs SET started_at_ms = 1 WHERE id = ?1", [&first]).unwrap();
+
+    assert_eq!(rig.ledger.enforce_timeouts(), 0, "past its timeout, but not ours to stop");
+    let second = rig.sched.fire(&job, slot(1)).await;
+    assert_eq!(second.run_id, None, "cancel_other can't replace it: the slot is skipped");
+    assert!(stopped.lock().unwrap().is_empty());
+    assert_eq!(rig.store.job_run_get(&first).unwrap().unwrap().state, state::RUNNING);
+}
+
+/// A pending fire told to start holds its place while it is delivered, so a
+/// fire that lands in between waits instead of taking the same place.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_pending_fire_being_delivered_holds_its_place() {
+    let rig = rig();
+    let a = make(&rig, "j-claim-a", |j| {
+        j.policy.group = Some("g".into());
+        j.catch_up = "latest".into();
+    });
+    let b = make(&rig, "j-claim-b", |j| j.policy.group = Some("g".into()));
+    rig.answer(NOT_FOUND);
+    let pending = rig.sched.fire(&a, slot(0)).await.run_id.unwrap();
+
+    assert!(rig.ledger.pending_may_start(&a, &pending), "the group is free");
+    let fired = rig.sched.fire(&b, slot(0)).await;
+    assert_eq!(fired.waiting, Some(reason::GROUP_BUSY), "its place is taken while it is delivered");
+    rig.ledger.pending_delivery_done(&pending);
+    assert!(rig.ledger.pending_may_start(&a, &pending), "released once the delivery is over");
+}
+
+/// A retry re-delivers a fire that was already counted: it doesn't count again,
+/// so a job with `max_fires` and retries isn't stopped early.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_retry_does_not_count_as_another_fire() {
+    let rig = rig();
+    let job = make(&rig, "j-retry-count", |j| j.policy.retries = 1);
+    let first = rig.sched.fire(&job, slot(0)).await.run_id.unwrap();
+    assert_eq!(rig.fire_count("j-retry-count"), 1);
+    rig.ledger.turn_finished(&first, infra::INTERRUPTED, None, "process exited");
+    let retry = rig.runs("j-retry-count").into_iter().find(|r| r.trigger == TRIGGER_RETRY).expect("a retry was filed");
+    make_due(&rig, &retry.id);
+    assert_eq!(rig.sched.run_policy_pass().await, 1);
+    assert_eq!(rig.fire_count("j-retry-count"), 1, "the retry is not a second fire");
+}
+
 // ── groups and the global limit ─────────────────────────────────────────
 
 #[tokio::test(flavor = "multi_thread")]
