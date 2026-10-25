@@ -30,15 +30,16 @@ pub(super) fn frame_allowed(
     (agent_id, token, from): (Option<&str>, Option<&str>, Option<&str>),
 ) -> Result<(), String> {
     match (msg_type, agent_id) {
-        ("bus:register", Some(agent_id)) => register_allowed(store, token, agent_id),
+        ("bus:register", Some(agent_id)) => proven_slug(store, token, agent_id).map(drop),
         ("bus:send" | "bus:inject" | "bus:broadcast", _) => sender_allowed(store, registered, from),
         _ => Ok(()),
     }
 }
 
-/// Whether a `bus:register` frame carrying `token` may register `agent_id`: the
-/// token has to be one this srv minted, for the agent that name selects.
-pub(super) fn register_allowed(store: &Store, token: Option<&str>, agent_id: &str) -> Result<(), String> {
+/// The slug a `bus:register` frame carrying `token` may register as: the
+/// token has to be one this srv minted, and `agent_id` a name only that
+/// token's agent answers to.
+pub(super) fn proven_slug(store: &Store, token: Option<&str>, agent_id: &str) -> Result<String, String> {
     let uid = token
         .map(str::trim)
         .filter(|t| !t.is_empty())
@@ -46,11 +47,8 @@ pub(super) fn register_allowed(store: &Store, token: Option<&str>, agent_id: &st
     let Some(uid) = uid else {
         return Err("FORBIDDEN: bus:register needs the agent's token (AGENTMUX_AGENT_TOKEN)".to_string());
     };
-    if super::actor::names_the_caller(store, &uid, agent_id) {
-        Ok(())
-    } else {
-        Err("FORBIDDEN: bus:register may register only the agent its token names".to_string())
-    }
+    super::actor::proven_slug(store, &uid, agent_id.trim())
+        .ok_or_else(|| "FORBIDDEN: bus:register may register only the agent its token names, by a name only that agent answers to".to_string())
 }
 
 /// Whether a frame from a connection registered as `registered` (empty: it
@@ -116,14 +114,30 @@ mod tests {
         with_store(|store| {
             store.attach_token_index().unwrap();
             let token = store.agent_token_ensure("uid-bf-a").unwrap();
-            assert!(register_allowed(store, Some(&token), "alpha").is_ok());
-            assert!(register_allowed(store, Some(&token), "Alpha").is_ok(), "by display name");
-            let other = register_allowed(store, Some(&token), "beta").unwrap_err();
+            assert_eq!(proven_slug(store, Some(&token), "alpha").unwrap(), "alpha");
+            assert_eq!(proven_slug(store, Some(&token), "Alpha").unwrap(), "alpha", "by display name, registered by slug");
+            let other = proven_slug(store, Some(&token), "beta").unwrap_err();
             assert!(other.starts_with("FORBIDDEN"), "{other}");
             for missing in [None, Some(""), Some("  "), Some("not-a-token")] {
-                let e = register_allowed(store, missing, "alpha").unwrap_err();
+                let e = proven_slug(store, missing, "alpha").unwrap_err();
                 assert!(e.contains("needs the agent's token"), "{missing:?}: {e}");
             }
+        });
+    }
+
+    /// A display name that is another agent's slug is not a way to register as that agent.
+    #[test]
+    fn a_name_another_agent_also_answers_to_proves_nothing() {
+        with_store(|store| {
+            let mut def = test_agent_def("uid-bf-c", "beta", "claude", "agent", 1, "");
+            def.slug = "gamma".to_string();
+            store.agent_def_insert(&mut def).unwrap();
+            store.attach_token_index().unwrap();
+            let token = store.agent_token_ensure("uid-bf-c").unwrap();
+            assert_eq!(proven_slug(store, Some(&token), "gamma").unwrap(), "gamma");
+            assert!(proven_slug(store, Some(&token), "beta").is_err());
+            let beta = store.agent_token_ensure("uid-bf-b").unwrap();
+            assert_eq!(proven_slug(store, Some(&beta), "beta").unwrap(), "beta");
         });
     }
 

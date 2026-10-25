@@ -549,19 +549,19 @@ async fn handle_incoming_text(
                 return Ok(None);
             }
             "bus:register" => {
-                if let Some(ref agent_id) = incoming.agent_id {
-                    let rx = state.messagebus.register(agent_id, "websocket");
+                if let Some(ref claimed) = incoming.agent_id {
+                    let Ok(agent_id) = super::bus_frames::proven_slug(&state.mstore, incoming.token.as_deref(), claimed) else { return Ok(None) }; // proven above; registered by slug
+                    let rx = state.messagebus.register(&agent_id, "websocket");
                     // Stamp agent_id on the RPC context so MuxAPI S1 checks work.
                     engine.set_rpc_context(crate::backend::rpc_types::RpcContext {
                         agent_id: agent_id.clone(),
                         ..Default::default()
                     });
-                    let ack = json!({ "type": "bus:registered", "agent_id": agent_id });
-                    let msg = serde_json::to_string(&ack).unwrap_or_default();
+                    let msg = serde_json::to_string(&json!({ "type": "bus:registered", "agent_id": agent_id })).unwrap_or_default();
                     if socket.send(Message::Text(msg.into())).await.is_err() {
                         return Err(true);
                     }
-                    return Ok(Some((rx, agent_id.clone())));
+                    return Ok(Some((rx, agent_id)));
                 }
                 return Ok(None);
             }
