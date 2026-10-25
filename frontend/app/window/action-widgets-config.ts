@@ -291,7 +291,7 @@ export function buildPaneWidgetMenuItems(
     const toLeafItem = (widget: WidgetConfigType): ContextMenuItem | null => {
         const view = widget.blockdef?.meta?.["view"] as string | undefined;
         if (!view || NON_PANE_WIDGET_VIEWS.has(view)) return null;
-        return { label: widget.label ?? "Unnamed", click: () => onSelect(widget.blockdef) };
+        return { label: widget.label ?? "Unnamed", icon: widget.icon, click: () => onSelect(widget.blockdef) };
     };
 
     const grouped = getEffectiveGroupedChildKeys(wmap, settings);
@@ -312,7 +312,7 @@ export function buildPaneWidgetMenuItems(
                 .map(toLeafItem)
                 .filter((item): item is ContextMenuItem => item != null);
             if (submenu.length > 0) {
-                items.push({ label: widget.label ?? "Unnamed", type: "submenu", submenu });
+                items.push({ label: widget.label ?? "Unnamed", icon: widget.icon, type: "submenu", submenu });
             }
             continue;
         }
