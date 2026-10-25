@@ -219,15 +219,27 @@ pub fn orphans_in(root: &Path, keep: usize, idle: Duration, now: SystemTime) -> 
 /// folders and the folders cargo writes to on every build.
 pub fn last_build(target: &Path) -> SystemTime {
     let mut newest = mtime(target).unwrap_or(SystemTime::UNIX_EPOCH);
-    for profile in std::fs::read_dir(target).into_iter().flatten().flatten() {
-        if !profile.file_type().is_ok_and(|t| t.is_dir()) {
-            continue;
-        }
-        let p = profile.path();
-        for p in [p.clone(), p.join(".fingerprint"), p.join("deps"), p.join("incremental")] {
+    let subdirs = |p: &Path| -> Vec<PathBuf> {
+        std::fs::read_dir(p)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+            .map(|e| e.path())
+            .collect()
+    };
+    let mut look = |p: &Path| {
+        for p in [p.to_path_buf(), p.join(".fingerprint"), p.join("deps"), p.join("incremental")] {
             if let Some(t) = mtime(&p) {
                 newest = newest.max(t);
             }
+        }
+    };
+    // `target/<profile>` and, for a cross build, `target/<triple>/<profile>`.
+    for a in subdirs(target) {
+        look(&a);
+        for b in subdirs(&a) {
+            look(&b);
         }
     }
     newest
@@ -363,22 +375,31 @@ pub fn run_pass(workspace: &Path, why: Why, policy: &Policy, is_busy: &dyn Fn(&P
         }
         let target = clone.join("target");
         let stale_applies = matches!(why, Why::TaskDone | Why::LowDisk);
+        // What to remove from this clone, decided now and checked again before each removal: a
+        // removal takes long, and the agent may start a build here in the meantime (the answer
+        // to its finished task names its next one).
+        let mut todo: Vec<(PathBuf, &'static str)> = Vec::new();
         if stale_applies && !policy.stale.is_zero() && now.duration_since(last_build(&target)).unwrap_or_default() >= policy.stale {
-            remove(log, why, workspace, target, "stale target", &mut report);
-            continue;
-        }
-        for root in incremental_roots(&target) {
-            if why == Why::TaskDone {
-                for e in std::fs::read_dir(&root).into_iter().flatten().flatten() {
-                    if e.file_type().is_ok_and(|t| t.is_dir()) {
-                        remove(log, why, workspace, e.path(), "incremental", &mut report);
+            todo.push((target, "stale target"));
+        } else {
+            for root in incremental_roots(&target) {
+                if why == Why::TaskDone {
+                    for e in std::fs::read_dir(&root).into_iter().flatten().flatten() {
+                        if e.file_type().is_ok_and(|t| t.is_dir()) {
+                            todo.push((e.path(), "incremental"));
+                        }
                     }
-                }
-            } else if policy.orphans {
-                for dir in orphans_in(&root, policy.orphan_keep, policy.orphan_idle, now) {
-                    remove(log, why, workspace, dir, "orphan incremental", &mut report);
+                } else if policy.orphans {
+                    todo.extend(orphans_in(&root, policy.orphan_keep, policy.orphan_idle, now).into_iter().map(|d| (d, "orphan incremental")));
                 }
             }
+        }
+        for (path, what) in todo {
+            if is_busy(&clone) {
+                report.busy.push(clone);
+                break;
+            }
+            remove(log, why, workspace, path, what, &mut report);
         }
     }
     report

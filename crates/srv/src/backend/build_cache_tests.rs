@@ -231,3 +231,35 @@ fn real_world_orphans_dry_run() {
         println!("  {}", d.display());
     }
 }
+
+#[test]
+fn a_build_starting_mid_pass_stops_the_removals() {
+    let t = tempfile::tempdir().unwrap();
+    let ws = t.path().join("agent");
+    let clone = clone_with_incremental(&ws, "agentmux", "agentmux_srv", &["h1", "h2", "h3", "h4"]);
+    // Free at the clone check and at the first removal, busy from then on.
+    let calls = std::cell::Cell::new(0);
+    let is_busy = |_: &Path| {
+        calls.set(calls.get() + 1);
+        calls.get() > 2
+    };
+    let report = run_pass(&ws, Why::TaskDone, &Policy::default(), &is_busy, SystemTime::now(), None);
+    assert_eq!(report.removed.len(), 1, "the first removal ran, the rest were held back: {report:?}");
+    assert_eq!(report.busy, vec![clone.clone()]);
+    assert_eq!(std::fs::read_dir(clone.join("target/debug/incremental")).unwrap().count(), 3);
+}
+
+#[test]
+fn a_cross_build_counts_as_built_when_its_inner_folders_changed() {
+    let t = tempfile::tempdir().unwrap();
+    let target = t.path().join("target");
+    // Only target/<triple>/debug/deps is written to.
+    mk(&target.join("x86_64-unknown-linux-musl").join("debug").join("deps"));
+    let at = last_build(&target);
+    std::thread::sleep(Duration::from_millis(50));
+    std::fs::write(target.join("x86_64-unknown-linux-musl/debug/deps/a.rlib"), b"x").unwrap();
+    assert!(last_build(&target) > at, "a new artifact two levels down is a build");
+    // With only the triple's own folder old, the clone still isn't stale a day later by the clock
+    // of its inner folder: the newest of them wins.
+    assert!(last_build(&target) >= mtime(&target.join("x86_64-unknown-linux-musl/debug/deps")).unwrap());
+}

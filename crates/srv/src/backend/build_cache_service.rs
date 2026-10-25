@@ -171,6 +171,12 @@ fn mark_warned(marker: &Path, now: SystemTime) -> bool {
     std::fs::write(marker, now.duration_since(SystemTime::UNIX_EPOCH).map_or(0, |d| d.as_secs()).to_string()).is_ok()
 }
 
+/// Whether a build runs in `clone`, looking at the machine's processes afresh each time: a pass
+/// removes tens of GB, and a build may start in the clone while it does.
+fn fresh_busy_check(clone: &Path) -> bool {
+    bc::build_running_in(clone, &bc::snapshot_processes())
+}
+
 fn policy(config: &ConfigState) -> Policy {
     Policy::from_extra(&config.get_settings().extra)
 }
@@ -178,9 +184,8 @@ fn policy(config: &ConfigState) -> Policy {
 fn all_workspaces_pass(why: Why, policy: &Policy) -> bc::Report {
     let mut total = bc::Report::default();
     let Some(root) = agents_root() else { return total };
-    let procs = bc::snapshot_processes();
     let log = bc::log_path();
-    let busy = |clone: &Path| bc::build_running_in(clone, &procs);
+    let busy = fresh_busy_check;
     for ws in workspaces(&root) {
         let r = bc::run_pass(&ws, why, policy, &busy, SystemTime::now(), log.as_deref());
         total.removed.extend(r.removed);
@@ -263,9 +268,8 @@ pub fn agent_task_done(mstore: Arc<Store>, config: Arc<ConfigState>, agent: Stri
         if mine.is_empty() {
             return;
         }
-        let procs = bc::snapshot_processes();
         let log = bc::log_path();
-        let busy = |clone: &Path| bc::build_running_in(clone, &procs);
+        let busy = fresh_busy_check;
         let mut seen: Vec<PathBuf> = Vec::new();
         for a in mine {
             if seen.iter().any(|s| same_path(s, &a.workspace)) {
