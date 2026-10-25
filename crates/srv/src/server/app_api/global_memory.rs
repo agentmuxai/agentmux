@@ -130,16 +130,7 @@ pub(crate) fn global_memory_write_impl(
     // interleaved with any other 0-sort_order row instead of visibly
     // appended at the end of the order the operator/agent expects.
     if is_new {
-        let ordinary_ids: Vec<String> = state.id_store.bundle_list_global()
-            .map_err(|e| format!("globalmemory.write: {e}"))?
-            .into_iter()
-            .filter(|b| !b.is_system && b.id != bundle.id)
-            .map(|b| b.id)
-            .chain(std::iter::once(bundle.id.clone()))
-            .collect();
-        if let Err(e) = state.id_store.bundle_reorder(&ordinary_ids) {
-            tracing::warn!(agent_id, bundle_id = %bundle.id, error = %e, "globalmemory.write: append-to-order failed (non-fatal)");
-        }
+        append_to_order(state, agent_id, &bundle.id, "globalmemory.write")?;
     }
 
     state.broker.publish_event::<crate::backend::mps_events::MemoriesChanged>(&(), vec![], 0);
@@ -147,13 +138,32 @@ pub(crate) fn global_memory_write_impl(
     Ok(json!({ "id": bundle.id, "name": bundle.name }))
 }
 
+/// Puts `bundle_id` last in the Global Memory order, as Memory → Global's own
+/// "+ New section" does for a new entry and a restored one. A failed reorder
+/// is logged, not fatal: the entry is saved either way.
+fn append_to_order(state: &AppState, agent_id: &str, bundle_id: &str, verb: &str) -> Result<(), String> {
+    let ordinary_ids: Vec<String> = state.id_store.bundle_list_global()
+        .map_err(|e| format!("{verb}: {e}"))?
+        .into_iter()
+        .filter(|b| !b.is_system && b.id != bundle_id)
+        .map(|b| b.id)
+        .chain(std::iter::once(bundle_id.to_string()))
+        .collect();
+    if let Err(e) = state.id_store.bundle_reorder(&ordinary_ids) {
+        tracing::warn!(agent_id, bundle_id, error = %e, "{verb}: append-to-order failed (non-fatal)");
+    }
+    Ok(())
+}
+
 /// Every Global Memory entry Memory → Global shows — id/name/updated_at/system,
 /// no content (mirrors `memory_list_impl`'s summary shape), system rows first
 /// as `bundle_list_global` orders them. System-tier rows are listed so an empty
 /// result means "nothing" and not "nothing you may touch" (the pane lists them
 /// too, and their content is already injected into every agent's context); what
-/// stays structural is that read, write and remove refuse a system id. Backs
-/// the `GlobalMemoryList` MCP tool.
+/// stays structural is that read, write and remove refuse a system id. `removed`
+/// lists the entries taken out of Global Memory and not restored, most recent
+/// first, with when and by whom: each one's id works with `history`, `diff` and
+/// `revert`. Backs the `GlobalMemoryList` MCP tool.
 /// docs/specs/SPEC_GLOBAL_MEMORY_LIST_SYSTEM_ROWS_2026_10_02.md
 pub(crate) fn global_memory_list_impl(state: &AppState) -> Result<serde_json::Value, String> {
     let entries: Vec<_> = state.id_store.bundle_list_global()
@@ -161,7 +171,15 @@ pub(crate) fn global_memory_list_impl(state: &AppState) -> Result<serde_json::Va
         .into_iter()
         .map(|b| json!({ "id": b.id, "name": b.name, "updated_at": b.updated_at, "system": b.is_system }))
         .collect();
-    Ok(json!({ "entries": entries }))
+    let removed: Vec<_> = state.id_store.bundle_list_removed_global()
+        .map_err(|e| format!("globalmemory.list: {e}"))?
+        .into_iter()
+        .map(|b| {
+            let by = state.id_store.bundle_version_latest(&b.id).ok().flatten().map(|v| v.written_by).unwrap_or_default();
+            json!({ "id": b.id, "name": b.name, "removed_at": b.updated_at, "removed_by": by })
+        })
+        .collect();
+    Ok(json!({ "entries": entries, "removed": removed }))
 }
 
 /// Full content of one ordinary Global Memory entry by id. Refuses a
@@ -186,9 +204,19 @@ pub(crate) fn global_memory_read_impl(state: &AppState, id: &str) -> Result<serd
 /// cleared. Refuses a system-tier id, the blank singleton, or any id that
 /// wasn't ALREADY a Global Memory entry before this call — same ownership
 /// guards as `global_memory_write_impl`, for the identical reason: bundle
-/// ids are enumerable via `PresetList` regardless of `is_global`. Backs the
-/// `GlobalMemoryRemove` MCP tool.
-pub(crate) fn global_memory_remove_impl(state: &AppState, id: &str) -> Result<serde_json::Value, String> {
+/// ids are enumerable via `PresetList` regardless of `is_global`.
+///
+/// The removal is a version too: the store records a `remove` version holding
+/// the content the entry had, written by `agent_id` (the agent its token names,
+/// proven by the handler) with `written_by_uid`, in the same transaction as the
+/// flag. `history`, `diff` and `revert` still reach the entry afterwards, and a
+/// revert restores it. Backs the `GlobalMemoryRemove` MCP tool.
+pub(crate) fn global_memory_remove_impl(
+    state: &AppState,
+    agent_id: &str,
+    written_by_uid: &str,
+    id: &str,
+) -> Result<serde_json::Value, String> {
     let mut bundle = state.id_store.bundle_get(id)
         .map_err(|e| format!("globalmemory.remove: {e}"))?
         .ok_or_else(|| format!("globalmemory.remove: not found id={id}"))?;
@@ -212,9 +240,18 @@ pub(crate) fn global_memory_remove_impl(state: &AppState, id: &str) -> Result<se
     }
     bundle.is_global = false;
     bundle.updated_at = agentmux_common::time::now_ms();
-    state.id_store.bundle_upsert(&bundle).map_err(|e| format!("globalmemory.remove: {e}"))?;
+    let tombstone = state.id_store
+        .bundle_upsert_with_version(&bundle, agent_id, written_by_uid, crate::backend::storage::bundles::REMOVE_SOURCE, "{}")
+        .map_err(|e| format!("globalmemory.remove: {e}"))?
+        // Only `None` when the entry stopped being Global Memory between the
+        // read above and the write (another remove got there first).
+        .ok_or_else(|| format!("globalmemory.remove: id={id} is not a Global Memory entry"))?;
     state.broker.publish_event::<crate::backend::mps_events::MemoriesChanged>(&(), vec![], 0);
-    Ok(json!({ "ok": true }))
+    tracing::info!(agent_id, bundle_id = %id, "globalmemory.remove");
+    Ok(json!({
+        "ok": true,
+        "version": version_meta_json(crate::server::agent_handlers::bundle::version_meta(tombstone)),
+    }))
 }
 
 /// A version's metadata as JSON: `GlobalMemoryVersionMeta`, the same shape
@@ -224,10 +261,11 @@ fn version_meta_json(meta: crate::backend::rpc_types::GlobalMemoryVersionMeta) -
 }
 
 /// Loads `id`'s bundle and refuses it unless it is (a) not the blank
-/// singleton, (b) not a system-tier entry, and (c) currently a Global Memory
-/// entry (`is_global`) — the exact guard `global_memory_write_impl`/
-/// `global_memory_remove_impl` already apply, reused here rather than
-/// re-derived so `history`/`diff`/`revert` can never diverge from it. Bundle
+/// singleton, (b) not a system-tier entry, and (c) a Global Memory entry
+/// (`is_global`) or one removed from Global Memory and not restored since (its
+/// newest version is a `remove` one, which only a removal writes) — the guard
+/// `global_memory_write_impl`/`global_memory_remove_impl` apply, plus the
+/// removed case so a removal can be inspected and undone. Bundle
 /// ids for EVERY bundle in the system (not just global ones) are enumerable
 /// via `PresetList` (reagent P0/P1, PR #3237) — without this, an agent could
 /// point any of these three new routes at another agent's private preset, or
@@ -245,7 +283,9 @@ fn load_ordinary_global_bundle(state: &AppState, id: &str, verb: &str) -> Result
     if bundle.is_blank || bundle.id == "blank" {
         return Err(format!("globalmemory.{verb}: cannot {verb} the blank Bundle singleton"));
     }
-    if !bundle.is_global {
+    if !bundle.is_global
+        && !state.id_store.bundle_is_removed_global(id).map_err(|e| format!("globalmemory.{verb}: store: {e}"))?
+    {
         return Err(format!("globalmemory.{verb}: id={id} is not a Global Memory entry"));
     }
     Ok(bundle)
@@ -345,6 +385,9 @@ pub(crate) fn global_memory_revert_impl(
         return Err(format!("globalmemory.revert: version {version_id} does not belong to {id}"));
     }
 
+    // A removed entry comes back as Global Memory, last in the order.
+    let restoring = !bundle.is_global;
+    bundle.is_global = true;
     bundle.name = target.name.clone();
     bundle.instructions = target.instructions.clone();
     bundle.updated_at = agentmux_common::time::now_ms();
@@ -353,11 +396,14 @@ pub(crate) fn global_memory_revert_impl(
     let new_version = state.id_store
         .bundle_upsert_with_version(&bundle, agent_id, written_by_uid, "revert", &detail)
         .map_err(|e| format!("globalmemory.revert: {e}"))?
-        // `bundle.is_global` is guaranteed true by `load_ordinary_global_bundle`
-        // above, and `bundle_upsert_with_version` only ever returns `None` when
-        // `is_global` is false — so this branch is unreachable in practice, but
+        // `bundle.is_global` is set true above, and `bundle_upsert_with_version`
+        // returns `None` only for a row that stays non-global — so this branch is
+        // unreachable in practice, but
         // failing loudly beats silently reporting success with no new version.
         .ok_or_else(|| "globalmemory.revert: no version was recorded (unexpected: entry is not global)".to_string())?;
+    if restoring {
+        append_to_order(state, agent_id, id, "globalmemory.revert")?;
+    }
 
     state.broker.publish_event::<crate::backend::mps_events::MemoriesChanged>(&(), vec![], 0);
     tracing::info!(agent_id, bundle_id = %id, version_id, "globalmemory.revert");
