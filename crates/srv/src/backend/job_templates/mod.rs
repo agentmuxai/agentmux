@@ -44,8 +44,6 @@ pub struct Builtin {
     pub files: &'static [(&'static str, &'static [u8])],
 }
 
-/// The templates AgentMux ships (§5.5, §5.6). Each still needs the
-/// operator's approval once, so they see its outputs.
 /// A built-in template: its id, and its two files from `templates/jobs/<id>/`.
 macro_rules! builtin {
     ($name:literal) => {
@@ -59,6 +57,8 @@ macro_rules! builtin {
     };
 }
 
+/// The templates AgentMux ships (§5.5, §5.6). Each still needs the
+/// operator's approval once, so they see its outputs.
 pub static BUILTINS: &[Builtin] = &[
     builtin!("weekly-report"),
     builtin!("pr-review"),
