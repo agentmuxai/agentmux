@@ -19,15 +19,31 @@
 # The root .dockerignore keeps the context small.
 
 # ── Stage 1: build srv and the two helpers agents need ──────────────────────
-FROM rust:1-bookworm AS builder
+# The builder always runs on the machine doing the build. When the image is for another
+# architecture (`docker buildx build --platform linux/arm64` on an x86 machine) it
+# cross-compiles with Debian's multiarch cross toolchain instead of compiling under
+# emulation, which would take hours for a crate this size. Building for the machine's own
+# architecture is unchanged. Only linux/arm64 is set up as a cross target.
+FROM --platform=$BUILDPLATFORM rust:1-bookworm AS builder
+ARG BUILDARCH
+ARG TARGETARCH
 
 # agentmux-mcp's `xcap` dependency needs dbus-1.pc and -lxcb to link (same
-# packages as Dockerfile.agent-agentmux and ci-pr.yml).
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    pkg-config \
-    libdbus-1-dev \
-    libxcb1-dev \
-    && rm -rf /var/lib/apt/lists/*
+# packages as Dockerfile.agent-agentmux and ci-pr.yml). Cross-compiling needs the target
+# architecture's copies of them, plus the cross C compiler for the bundled SQLite, zstd and ring.
+RUN set -eux; \
+    if [ "$TARGETARCH" = "$BUILDARCH" ]; then \
+      apt-get update; \
+      apt-get install -y --no-install-recommends pkg-config libdbus-1-dev libxcb1-dev; \
+    else \
+      [ "$TARGETARCH" = arm64 ] || { echo "no cross-compile setup for target $TARGETARCH"; exit 1; }; \
+      dpkg --add-architecture arm64; \
+      apt-get update; \
+      apt-get install -y --no-install-recommends pkg-config gcc-aarch64-linux-gnu libc6-dev-arm64-cross \
+        libdbus-1-dev:arm64 libxcb1-dev:arm64; \
+      rustup target add aarch64-unknown-linux-gnu; \
+    fi; \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
 COPY . .
@@ -42,7 +58,21 @@ COPY . .
 # fat LTO in one codegen unit, so the last step of each binary is memory-hungry;
 # a runner with little memory can lower the number of those running side by side.
 ARG CARGO_BUILD_JOBS
-RUN cargo build --release -p agentmux-srv -p agentmux-mcp -p agentmux-bashwrap
+# The three binaries end up in /out whichever way they were built.
+RUN set -eux; \
+    if [ "$TARGETARCH" = "$BUILDARCH" ]; then \
+      cargo build --release -p agentmux-srv -p agentmux-mcp -p agentmux-bashwrap; \
+      out=target/release; \
+    else \
+      export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc \
+             CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc \
+             PKG_CONFIG_ALLOW_CROSS=1 \
+             PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig; \
+      cargo build --release --target aarch64-unknown-linux-gnu -p agentmux-srv -p agentmux-mcp -p agentmux-bashwrap; \
+      out=target/aarch64-unknown-linux-gnu/release; \
+    fi; \
+    mkdir -p /out; \
+    cp "$out/agentmux-srv" "$out/agentmux-mcp" "$out/agentmux-bashwrap" /out/
 
 # ── Stage 2: runtime ─────────────────────────────────────────────────────────
 # node:24-slim (Debian, glibc): agent CLIs are npm packages that srv installs
@@ -68,9 +98,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN usermod -l agentmux -d /home/agentmux -m node \
     && groupmod -n agentmux node
 
-COPY --from=builder --chmod=755 /build/target/release/agentmux-srv /usr/local/bin/agentmux-srv
-COPY --from=builder --chmod=755 /build/target/release/agentmux-mcp /usr/local/bin/agentmux-mcp
-COPY --from=builder --chmod=755 /build/target/release/agentmux-bashwrap /usr/local/bin/agentmux-bashwrap
+COPY --from=builder --chmod=755 /out/agentmux-srv /usr/local/bin/agentmux-srv
+COPY --from=builder --chmod=755 /out/agentmux-mcp /usr/local/bin/agentmux-mcp
+COPY --from=builder --chmod=755 /out/agentmux-bashwrap /usr/local/bin/agentmux-bashwrap
 
 ENV HOME=/home/agentmux
 ENV TERM=xterm-256color
