@@ -25,7 +25,7 @@ fn turn(turn_id: i64, started: i64, ended: Option<i64>, end: Option<&str>, cost:
 }
 
 fn armed(at: i64) -> Armed {
-    Armed { run_id: "r1".into(), armed_at_ms: at, turn_id: None, last: None }
+    Armed { run_id: "r1".into(), armed_at_ms: at, turn_id: None, last: None, cap_usd: None }
 }
 
 // ── the follower's rules ────────────────────────────────────────────────
@@ -773,3 +773,6 @@ async fn a_drone_run_is_written_to_the_ledger_with_its_cost() {
 
 #[path = "policy_runs_tests.rs"]
 mod policy_runs;
+
+#[path = "caps_runs_tests.rs"]
+mod caps_runs;

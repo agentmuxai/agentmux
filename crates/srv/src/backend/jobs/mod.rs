@@ -14,12 +14,15 @@
 //! §5.2), which the scheduler delivers when the agent is back.
 
 pub mod admission;
+mod cap_alert;
+pub mod caps;
 pub mod definition;
 pub mod follower;
 pub mod incidents;
 pub mod paused;
 pub mod policy;
 pub mod remote;
+pub mod reservation;
 pub mod verdict;
 
 use std::sync::Arc;
@@ -165,6 +168,15 @@ pub struct RunLedger {
     admission: std::sync::Mutex<()>,
     interrupt: std::sync::OnceLock<BlockHook>,
     worker_stop: std::sync::OnceLock<BlockHook>,
+    /// Spending caps: Settings' figures and where a run would go
+    /// (`reservation.rs`).
+    caps: std::sync::OnceLock<reservation::CapSources>,
+    /// Tests: the start of the day, as a fixed clock gives it.
+    #[cfg(test)]
+    day_start: std::sync::Mutex<Option<Arc<dyn Fn(i64) -> i64 + Send + Sync>>>,
+    /// Tests: the cap alerts raised, as `(job id, reason)`.
+    #[cfg(test)]
+    cap_alerts: std::sync::Mutex<Vec<(String, String)>>,
 }
 
 impl RunLedger {
@@ -192,6 +204,11 @@ impl RunLedger {
             admission: std::sync::Mutex::new(()),
             interrupt: std::sync::OnceLock::new(),
             worker_stop: std::sync::OnceLock::new(),
+            caps: std::sync::OnceLock::new(),
+            #[cfg(test)]
+            day_start: std::sync::Mutex::new(None),
+            #[cfg(test)]
+            cap_alerts: std::sync::Mutex::new(Vec::new()),
         })
     }
 
@@ -431,7 +448,7 @@ impl RunLedger {
             return;
         }
         let _ = self.store.job_run_add_links(run_id, &json!({ "transcript": { "block_id": block_id } }));
-        self.follower.arm(block_id, run_id, now);
+        self.follower.arm(block_id, run_id, now, self.stop_at_usd(run_id, &provider));
     }
 
     /// Who a pane belongs to (its `agentId`, the agent's UID), the account

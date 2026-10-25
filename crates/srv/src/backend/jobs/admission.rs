@@ -18,6 +18,7 @@ use std::sync::Arc;
 use agentmux_common::time::now_ms;
 use serde_json::json;
 
+use super::caps::Refusal;
 use super::policy::{self, Decision, Occupancy};
 use super::{Begin, RunLedger, BY_SCHEDULER, SOURCE_CRON, TRIGGER_RETRY};
 use crate::backend::storage::cron::CronJob;
@@ -35,6 +36,8 @@ pub enum Admission {
     Skipped,
     /// Run now, refused: the previous run is still going (policy `overlap`).
     Refused,
+    /// Run now, refused: a spending cap leaves no room (§5.3).
+    Capped(Refusal),
     /// Another scheduler has the slot.
     Taken,
     /// The row couldn't be written; fire anyway, unrecorded.
@@ -67,7 +70,7 @@ impl RunLedger {
         self.jobs.get()?.cron_get(id).ok().flatten()
     }
 
-    fn interrupt_block(&self, block_id: &str) {
+    pub(super) fn interrupt_block(&self, block_id: &str) {
         if block_id.is_empty() {
             return;
         }
@@ -127,11 +130,28 @@ impl RunLedger {
                 None => Admission::Refused,
             };
         }
+        // A run that would start now weighs on the caps first (§5.3): a slot
+        // they refuse is a collapsed skip, Run now is refused.
+        let mut account = String::new();
+        if matches!(decision, Decision::Start | Decision::CancelThenStart) {
+            let gate = self.cap_gate(job);
+            if let Some(refusal) = gate.refusal {
+                return match scheduled_for_ms {
+                    Some(slot) => {
+                        self.skip_slot_for_cap(job, slot, refusal);
+                        Admission::Skipped
+                    }
+                    None => Admission::Capped(refusal),
+                };
+            }
+            account = gate.account;
+        }
         let id = match self.begin_cron(job, trigger, scheduled_for_ms, triggered_by) {
             Begin::Run(id) => id,
             Begin::SlotTaken => return Admission::Taken,
             Begin::Unrecorded => return Admission::Unrecorded,
         };
+        self.note_account(&id, &account);
         match decision {
             Decision::Wait(why) => {
                 if let Err(e) = self.store.job_run_set_wait(&id, why) {
@@ -226,7 +246,11 @@ impl RunLedger {
             }
             match policy::decide(&job, &self.occupancy(&job), true) {
                 Decision::Start | Decision::CancelThenStart => {
-                    if self.store.job_run_admit(&run.id, &run.reason, now).unwrap_or(false) {
+                    let gate = self.cap_gate(&job);
+                    if let Some(refusal) = gate.refusal {
+                        self.skip_run_for_cap(&run.id, &job, refusal);
+                    } else if self.store.job_run_admit(&run.id, &run.reason, now).unwrap_or(false) {
+                        self.note_account(&run.id, &gate.account);
                         self.cancel_started(&job);
                         out.push((run, job));
                     }
@@ -284,10 +308,25 @@ impl RunLedger {
 
     /// A `spawn` run ended: stop its worker, unless the job keeps it.
     pub(crate) fn reap_worker(&self, run_id: &str) {
+        self.stop_worker(run_id, false);
+    }
+
+    /// Note the account a run will use, before it is delivered.
+    fn note_account(&self, run_id: &str, account: &str) {
+        if !account.is_empty() {
+            if let Err(e) = self.store.job_run_set_account(run_id, account) {
+                tracing::warn!(run_id, error = %e, "jobs: couldn't note a run's account");
+            }
+        }
+    }
+
+    /// Stop the worker a `spawn` run started. A job that keeps its worker
+    /// keeps it, unless `force` (the run was stopped at its spending cap).
+    pub(super) fn stop_worker(&self, run_id: &str, force: bool) {
         let Some(run) = self.store.job_run_get(run_id).ok().flatten() else { return };
         let worker = &run.links["worker"];
         let block_id = worker["block_id"].as_str().unwrap_or("");
-        if block_id.is_empty() || worker["keep"].as_bool().unwrap_or(false) {
+        if block_id.is_empty() || (worker["keep"].as_bool().unwrap_or(false) && !force) {
             return;
         }
         if let Some(stop) = self.worker_stop.get() {

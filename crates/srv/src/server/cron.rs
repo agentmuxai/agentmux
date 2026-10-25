@@ -32,6 +32,7 @@ use crate::backend::cron::schedule::JobSchedule;
 use crate::backend::cron::FireOutcome;
 use crate::backend::jobs;
 use crate::backend::jobs::definition::{Action, Check, JobDefinition, LATER};
+use super::job_caps::{self, Origin};
 use crate::backend::storage::cron::CronJob;
 use crate::backend::storage::job_runs::{JobRun, OUTCOMES};
 use crate::backend::storage::store::Store;
@@ -113,6 +114,10 @@ pub struct CronJobView {
     pub missed_count: i64,
     pub last_missed_at: Option<i64>,
     pub last_miss_reason: String,
+    /// The cap its runs are over today (`job_cap`, `account_cap` or
+    /// `message_cap`), if any; they resume at the operator's next midnight.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub over_cap: Option<String>,
     /// The whole job definition (§5.1).
     pub definition: JobDefinition,
 }
@@ -145,6 +150,7 @@ fn to_view(job: &CronJob) -> CronJobView {
         missed_count: job.missed_count,
         last_missed_at: job.last_missed_at,
         last_miss_reason: job.last_miss_reason.clone(),
+        over_cap: None,
         definition,
     }
 }
@@ -303,12 +309,11 @@ pub(crate) fn may_define(who: &Who, def: &JobDefinition, current_owner: Option<&
 }
 
 /// What this build can't run yet, though the definition is valid. Refused
-/// rather than stored and silently ignored.
+/// rather than stored and silently ignored: `max_turns` is a flag at the CLI's
+/// launch, which a message to a running agent can't set.
 pub(crate) fn runnable_yet(def: &JobDefinition) -> Result<(), String> {
-    let p = &def.policy;
-    let unapplied = [(p.max_turns.is_some(), "max_turns"), (p.caps.is_some(), "caps")];
-    match unapplied.iter().find(|(set, _)| *set) {
-        Some((_, field)) => Err(format!("policy.{field} is {LATER}")),
+    match def.policy.max_turns {
+        Some(_) => Err(format!("policy.max_turns is {LATER}")),
         None => Ok(()),
     }
 }
@@ -368,13 +373,15 @@ pub(super) async fn handle_cron_create(
     caller: Option<axum::Extension<super::caller::Caller>>,
     Json(body): Json<Value>,
 ) -> (StatusCode, Json<Value>) {
-    create_job(&state, caller.as_deref(), body, false)
+    create_job(&state, caller.as_deref(), body, Origin::default())
 }
 
-/// Create a job from a definition or the cron shape. `from_host`: the
+/// Create a job from a definition or the cron shape. `origin.from_host`: the
 /// operator's decision, relayed by the host (`handle_host_jobs`): the only way
-/// to create a job that starts workers.
-fn create_job(state: &AppState, caller: Option<&Caller>, body: Value, from_host: bool) -> (StatusCode, Json<Value>) {
+/// to create a job that starts workers, to raise a cap, or to confirm a job
+/// on a provider that reports no cost.
+fn create_job(state: &AppState, caller: Option<&Caller>, body: Value, origin: Origin) -> (StatusCode, Json<Value>) {
+    let from_host = origin.from_host;
     let check = Check { fresh: true, now_ms: agentmux_common::time::now_ms() };
     let who = if from_host { Who::Operator } else { who(state, caller) };
     // The cron shape (no `jobVersion`) carries its target, creator and limits
@@ -393,7 +400,7 @@ fn create_job(state: &AppState, caller: Option<&Caller>, body: Value, from_host:
         }
         None => JobDefinition::parse(&body, check),
     };
-    let def = match parsed {
+    let mut def = match parsed {
         Ok(def) => def,
         Err(e) => return bad_request(e),
     };
@@ -406,6 +413,10 @@ fn create_job(state: &AppState, caller: Option<&Caller>, body: Value, from_host:
     if let Err(e) = runnable_yet(&def) {
         return bad_request(e);
     }
+    let notes = match job_caps::apply_rules(state, &mut def, None, origin) {
+        Ok(notes) => notes,
+        Err(refused) => return refused,
+    };
 
     let (created_by, owner) = match &who {
         Who::Operator => (jobs::BY_OPERATOR.to_string(), def.owner.trim().to_string()),
@@ -453,7 +464,7 @@ fn create_job(state: &AppState, caller: Option<&Caller>, body: Value, from_host:
     }
     publish_cron_changed(state);
 
-    (StatusCode::CREATED, Json(json!({"job": to_view(&job)})))
+    (StatusCode::CREATED, Json(json!({"job": to_view(&job), "notes": notes})))
 }
 
 pub(super) async fn handle_cron_list(
@@ -472,6 +483,7 @@ pub(super) async fn handle_cron_list(
                     .map(|job| {
                         let mut view = to_view(job);
                         view.last_run = ledger.as_ref().and_then(|l| l.store().job_run_last(&job.id).ok().flatten());
+                        view.over_cap = ledger.as_ref().and_then(|l| l.over_cap_today(job)).map(str::to_string);
                         view
                     })
                     .collect::<Vec<_>>();
@@ -613,8 +625,10 @@ async fn run_job_now(state: &AppState, job: &CronJob, triggered_by: &str) -> Ans
 
 /// `POST /api/v1/host/jobs`: what the operator decides in the Jobs tab that
 /// starts agents, relayed by the host with its own token. `action` is
-/// `create` (`definition`: a job definition, a `spawn` job included) or
-/// `run_now` (`id`).
+/// `create` (`definition`: a job definition, a `spawn` job included),
+/// `update` (`id`, `fields`: an edit, which may raise the job's caps) or
+/// `run_now` (`id`). `confirm_no_cost: true` confirms a job whose agent's
+/// provider reports no cost (§5.3).
 pub(crate) async fn handle_host_jobs(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -622,10 +636,15 @@ pub(crate) async fn handle_host_jobs(
 ) -> axum::response::Response {
     use axum::response::IntoResponse;
     if !super::ui_handlers::from_host(&state, &headers).await {
-        return forbidden("only the AgentMux host can create or run a job that starts workers").into_response();
+        return forbidden("only the AgentMux host can create, change or run a job that starts workers, or raise a spending cap").into_response();
     }
+    let origin = Origin { from_host: true, confirm_no_cost: body.get("confirm_no_cost").and_then(Value::as_bool) == Some(true) };
     match body.get("action").and_then(Value::as_str).unwrap_or("") {
-        "create" => create_job(&state, None, body.get("definition").cloned().unwrap_or(Value::Null), true).into_response(),
+        "create" => create_job(&state, None, body.get("definition").cloned().unwrap_or(Value::Null), origin).into_response(),
+        "update" => {
+            let id = body.get("id").and_then(Value::as_str).unwrap_or("");
+            patch_job(&state, None, id, body.get("fields").cloned().unwrap_or(Value::Null), origin).into_response()
+        }
         "run_now" => {
             let id = body.get("id").and_then(Value::as_str).unwrap_or("");
             let store = match jobs_store_or_503(&state) {
@@ -638,7 +657,7 @@ pub(crate) async fn handle_host_jobs(
                 Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
             }
         }
-        other => bad_request(format!("unknown action {other:?} (use create or run_now)")).into_response(),
+        other => bad_request(format!("unknown action {other:?} (use create, update or run_now)")).into_response(),
     }
 }
 
@@ -819,21 +838,29 @@ pub(super) async fn handle_cron_patch(
     Path(id): Path<String>,
     Json(body): Json<Value>,
 ) -> (StatusCode, Json<Value>) {
-    let (store, job) = match job_for_change(&state, caller.as_deref(), &id) {
+    patch_job(&state, caller.as_deref(), &id, body, Origin::default())
+}
+
+/// [`handle_cron_patch`]'s work. `origin.from_host`: the operator's edit,
+/// relayed by the host, which may raise caps, confirm a job on a provider
+/// that reports no cost, and change a spawn job.
+fn patch_job(state: &AppState, caller: Option<&Caller>, id: &str, body: Value, origin: Origin) -> (StatusCode, Json<Value>) {
+    let (store, job) = match job_for_change(state, caller, id) {
         Ok(found) => found,
         Err(refused) => return refused,
     };
     if let Some(action) = body.get("action").and_then(Value::as_str) {
-        return set_enabled(&state, &store, &id, action);
+        return set_enabled(state, &store, id, action);
     }
     let Some(fields) = body.as_object() else { return bad_request("an edit is a JSON object of job fields") };
-    if job.action_kind == "spawn" {
+    if job.action_kind == "spawn" && !origin.from_host {
         return forbidden("a spawn job can be paused, resumed or deleted here; to change it, delete it and create it again from the Jobs tab");
     }
-    if !may_edit_job(caller.as_deref(), &job) {
+    if !may_edit_job(caller, &job) {
         return forbidden("an agent can edit only a job it created or owns");
     }
-    let mut merged = serde_json::to_value(JobDefinition::from_job(&job)).unwrap_or_default();
+    let before = JobDefinition::from_job(&job);
+    let mut merged = serde_json::to_value(&before).unwrap_or_default();
     for (key, value) in fields {
         if FIXED_FIELDS.contains(&key.as_str()) {
             if merged.get(key) != Some(value) {
@@ -844,22 +871,27 @@ pub(super) async fn handle_cron_patch(
         merged[key.as_str()] = value.clone();
     }
     let fresh = fields.contains_key("trigger") || fields.contains_key("action");
-    let def = match JobDefinition::parse(&merged, Check { fresh, now_ms: agentmux_common::time::now_ms() }) {
+    let mut def = match JobDefinition::parse(&merged, Check { fresh, now_ms: agentmux_common::time::now_ms() }) {
         Ok(def) => def,
         Err(e) => return bad_request(e),
     };
-    if let Err(e) = may_define(&who(&state, caller.as_deref()), &def, Some(job.owner_uid())) {
+    let editor = if origin.from_host { Who::Operator } else { who(state, caller) };
+    if let Err(e) = may_define(&editor, &def, Some(job.owner_uid())) {
         return forbidden(e);
     }
-    if matches!(def.action, Action::Spawn { .. }) {
+    if matches!(def.action, Action::Spawn { .. }) && !(origin.from_host && job.action_kind == "spawn") {
         return forbidden(SPAWN_FROM_THE_APP);
     }
     if let Err(e) = runnable_yet(&def) {
         return bad_request(e);
     }
+    let notes = match job_caps::apply_rules(state, &mut def, Some(&before), origin) {
+        Ok(notes) => notes,
+        Err(refused) => return refused,
+    };
     let mut edited = job.clone();
     if fields.contains_key("action") {
-        def.apply_to(&mut edited, &|to| target_of(&state, to));
+        def.apply_to(&mut edited, &|to| target_of(state, to));
     } else {
         // The target as it was: a job by name keeps firing by name.
         def.apply_to(&mut edited, &|_| (job.target.clone(), job.target_uid.clone()));
@@ -872,10 +904,10 @@ pub(super) async fn handle_cron_patch(
     if edited.enabled {
         state.cron_scheduler.schedule_job(&edited);
     } else {
-        state.cron_scheduler.cancel_job(&id);
+        state.cron_scheduler.cancel_job(id);
     }
-    publish_cron_changed(&state);
-    (StatusCode::OK, Json(json!({"ok": true, "enabled": edited.enabled, "job": to_view(&edited)})))
+    publish_cron_changed(state);
+    (StatusCode::OK, Json(json!({"ok": true, "enabled": edited.enabled, "job": to_view(&edited), "notes": notes})))
 }
 
 /// Pause or resume job `id`.

@@ -502,6 +502,10 @@ impl CronScheduler {
                 let error = jobs::OVERLAP_REFUSAL.to_string();
                 return Fired { run_id: None, outcome: Some(FireOutcome::Failed { error }), waiting: None };
             }
+            Admission::Capped(refusal) => {
+                let error = format!("Run now is refused: {}", refusal.words());
+                return Fired { run_id: None, outcome: Some(FireOutcome::Failed { error }), waiting: None };
+            }
             Admission::Waiting(run_id, why) => {
                 self.publish_changed();
                 return Fired { run_id: Some(run_id), outcome: None, waiting: Some(why) };
@@ -697,6 +701,10 @@ impl CronScheduler {
                 _ => true,
             };
             if !back {
+                continue;
+            }
+            // A cap that now leaves no room skips the pending fire (§5.3).
+            if runs.pending_refused_by_cap(&job, &run.id) {
                 continue;
             }
             let delivery_started = agentmux_common::time::now_ms();

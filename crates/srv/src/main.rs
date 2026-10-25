@@ -224,6 +224,9 @@ async fn app_main() {
             tracing::warn!(block_id, error = %e, "jobs: couldn't stop a job's worker");
         }
     }));
+    // Runs are weighed against Settings' spending caps before they start, and
+    // stopped when they reach their own (jobs spec §5.3).
+    server::job_caps::install(&state, &run_ledger);
     // A failing job opens one incident for its owner (jobs spec §3.4).
     run_ledger.install_incidents(server::cron::jobs_store(&state));
     {

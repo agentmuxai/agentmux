@@ -31,9 +31,9 @@
 //! an incident: the owner is resolved from the job, and the notification is
 //! on that instance. Another channel that followed a run (#1988) only says
 //! the job changed. Skips (paused, Pause all) are never decisive, so they
-//! neither fail nor recover a job. Caps (§5.3) don't exist yet; their
-//! once-a-day alert for a cap skip belongs beside [`Incidents::assess`] when
-//! they do. Cron jobs only: a Drone graph is run by hand, from a pane that
+//! neither fail nor recover a job; a cap skip has its own once-a-day alert
+//! (`cap_alert.rs`), and a run stopped at its cap (`over_budget`) is a failure
+//! like any other. Cron jobs only: a Drone graph is run by hand, from a pane that
 //! shows its failure already.
 
 use std::collections::BTreeSet;
@@ -386,16 +386,7 @@ impl Incidents {
     /// creator), that owner's lead when it has a seat with one or is a
     /// spawned worker, else the owner itself.
     fn leader(&self, job: &CronJob) -> Option<Leader> {
-        let owner = job.owner_uid();
-        if owner.is_empty() {
-            return None;
-        }
-        let mstore = self.mstore.as_ref()?;
-        let name_of = |uid: &str| mstore.agent_def_get(uid).ok().flatten().map(|d| d.name);
-        let lead = crate::backend::agent_seat::effective_seat_by_id(mstore, owner).and_then(|s| s.lead);
-        let uid = lead.filter(|l| name_of(l).is_some()).unwrap_or_else(|| owner.to_string());
-        let name = name_of(&uid)?;
-        Some(Leader { uid, name })
+        owning_leader(self.mstore.as_ref(), job)
     }
 
     /// File the incident's task, as `kanban.act` `create` does: the queue
@@ -539,6 +530,22 @@ impl Incidents {
         self.broker.publish_event::<crate::backend::mps_events::JobsChanged>(&event, vec![], 0);
         self.broker.publish_event::<crate::backend::mps_events::WorkQueueChanged>(&(), vec![], 0);
     }
+}
+
+/// The owning leader of `job` (§3.4): its owner (the cron job's creator),
+/// that owner's lead when it has a seat with one or is a spawned worker, else
+/// the owner itself. `None` when the job has no owner, or none resolves.
+pub fn owning_leader(mstore: Option<&Arc<Store>>, job: &CronJob) -> Option<Leader> {
+    let owner = job.owner_uid();
+    if owner.is_empty() {
+        return None;
+    }
+    let mstore = mstore?;
+    let name_of = |uid: &str| mstore.agent_def_get(uid).ok().flatten().map(|d| d.name);
+    let lead = crate::backend::agent_seat::effective_seat_by_id(mstore, owner).and_then(|s| s.lead);
+    let uid = lead.filter(|l| name_of(l).is_some()).unwrap_or_else(|| owner.to_string());
+    let name = name_of(&uid)?;
+    Some(Leader { uid, name })
 }
 
 /// Whether the `count`th failure in a row gets a line in the task's history:

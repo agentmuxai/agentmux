@@ -71,6 +71,10 @@ export function mkJob(over: Partial<JobView> = {}): JobView {
         cost_week_usd: 0,
         cost_known: false,
         actions: true,
+        over_cap: null,
+        run_cap_usd: 5,
+        day_cap_usd: 20,
+        cost_not_reported: false,
         ...over,
     };
 }
