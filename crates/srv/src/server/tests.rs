@@ -6973,6 +6973,87 @@ async fn a_message_to_an_agent_out_of_quota_is_held_until_it_can_work() {
     crate::backend::blockcontroller::delete_controller(&block.oid);
 }
 
+/// SPEC_JEKT_HOLD_FOR_COLD_SESSIONS_2026_10_25.md: a routine message from a proven sender to a
+/// Claude session that has been quiet past the cache's lifetime is held with `held_reason:
+/// idle`; the replay leaves it while the session is cold and delivers it once the session
+/// writes again; an `urgent` resend goes straight in and drops the held copy.
+#[tokio::test]
+async fn a_routine_message_to_a_cold_claude_session_waits_until_it_is_next_active() {
+    use crate::backend::agent_state::test_support::register_quiet;
+    use crate::backend::storage::agents::test_agent_def;
+    let state = test_state();
+    let slug = format!("cold-{}", &uuid::Uuid::new_v4().to_string()[..8]);
+    let uid = format!("uid-{slug}");
+    let mut def = test_agent_def(&uid, "Cold Y", "claude", "agent", 1, "");
+    def.slug = slug.clone();
+    state.mstore.agent_def_insert(&mut def).unwrap();
+    let mut block = crate::backend::obj::Block { oid: uuid::Uuid::new_v4().to_string(), ..Default::default() };
+    block.meta.insert("agentProvider".into(), serde_json::json!("claude"));
+    state.mstore.insert(&mut block).unwrap();
+    register_quiet(&block.oid, 2 * 60 * 60 * 1000);
+    state.reactive_handler.register_agent_full(&slug, &block.oid, None, 0, None, Some(&uid), "test").unwrap();
+    let sender = format!("{slug}-sender");
+    let key = state.mstore.agent_jekt_key_ensure(&sender).unwrap();
+
+    let send = |id: String, message: &str, priority: Option<&str>| {
+        let ts = agentmux_common::time::now_secs();
+        let sig = agentmux_common::jekt_sign::sign_jekt(&key, &id, &sender, &slug, ts, message);
+        let mut body = serde_json::json!({
+            "target_agent": slug, "message": message, "source_agent": sender,
+            "request_id": id, "ts_secs": ts, "jekt_sig": sig,
+        });
+        if let Some(p) = priority {
+            body["priority"] = serde_json::json!(p);
+        }
+        let state = state.clone();
+        async move {
+            let mut v = serde_json::Value::Null;
+            for _ in 0..25 {
+                v = m4c1_send(&state, None, "/agentmux/reactive/inject", body.clone()).await.1;
+                if v["error"] != "rate limit exceeded" {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            }
+            v
+        }
+    };
+
+    // Routine and cold: held, with the proof it arrived with.
+    let v = send("req-cold-1".into(), "thanks, noted", None).await;
+    assert_eq!(v["held"], true, "{v}");
+    assert_eq!(v["held_reason"], "idle", "{v}");
+    assert!(v["error"].as_str().unwrap().contains("urgent: true"), "{v}");
+    let rows = state.mstore.jekt_held_for_target(&uid, 10).unwrap();
+    assert_eq!((rows.len(), rows[0].is_idle(), rows[0].sig_verified), (1, true, Some(true)));
+
+    // The replay leaves it alone while the session is cold, and counts nothing.
+    let outcomes = crate::server::jekt_held::replay_pass(&state).await;
+    assert!(outcomes.iter().all(|(r, _)| r != "req-cold-1"), "{outcomes:?}");
+    assert_eq!(state.mstore.jekt_held_for_target(&uid, 10).unwrap()[0].attempts, 0);
+
+    // A sender who meant it resends with urgent: not held, and the held copy is dropped.
+    let v = send("req-cold-2".into(), "thanks, noted", Some("urgent")).await;
+    assert!(v.get("held").is_none(), "urgent is delivered, not held: {v}");
+    assert!(state.mstore.jekt_held_for_target(&uid, 10).unwrap().is_empty(), "the held copy is gone");
+
+    // A message that is not routine (sensitive words) is not held either.
+    let v = send("req-cold-3".into(), "here is the password: hunter2", None).await;
+    assert!(v.get("held").is_none(), "{v}");
+
+    // Held again; then the session writes (the operator typed): the replay delivers it.
+    let v = send("req-cold-4".into(), "fyi the build is green", None).await;
+    assert_eq!(v["held_reason"], "idle", "{v}");
+    register_quiet(&block.oid, 1000);
+    let outcomes = crate::server::jekt_held::replay_pass(&state).await;
+    assert!(outcomes.iter().any(|(r, _)| r == "req-cold-4"), "delivered once warm: {outcomes:?}");
+
+    // A warm session gets a routine message straight away.
+    let v = send("req-cold-5".into(), "and one more", None).await;
+    assert!(v.get("held").is_none(), "{v}");
+    crate::backend::blockcontroller::delete_controller(&block.oid);
+}
+
 /// A peer that has the agent and refuses it (out of quota, or its files)
 /// answers for itself: the forward returns that answer instead of evicting the
 /// route and trying the relay.

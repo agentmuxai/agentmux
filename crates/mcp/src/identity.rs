@@ -284,6 +284,7 @@ impl OutgoingJektSignatures {
             channel_sig_v2: self.channel_sig_v2,
             lan_sig_v2: self.lan_sig_v2,
             files: None,
+            priority: None,
         }
     }
 }
