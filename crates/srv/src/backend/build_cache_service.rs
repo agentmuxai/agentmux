@@ -145,14 +145,18 @@ fn warn_marker() -> Option<PathBuf> {
     Some(dirs::home_dir()?.join(".agentmux").join("shared").join("locks").join("build-cache-warn"))
 }
 
-/// Whether a warning may go out now, and if so, records that one did. The marker file is shared
+/// Whether a warning may go out now: none went out in the last hour. The marker file is shared
 /// by every AgentMux on the host.
-fn claim_warning(marker: &Path, now: SystemTime) -> bool {
-    if let Ok(last) = std::fs::metadata(marker).and_then(|m| m.modified()) {
-        if now.duration_since(last).unwrap_or_default() < WARN_EVERY {
-            return false;
-        }
+fn warning_due(marker: &Path, now: SystemTime) -> bool {
+    match std::fs::metadata(marker).and_then(|m| m.modified()) {
+        Ok(last) => now.duration_since(last).unwrap_or_default() >= WARN_EVERY,
+        Err(_) => true,
     }
+}
+
+/// Records that a warning went out, so none follows for an hour. Only called once a note was
+/// delivered: a warning nobody received must not use up the hour.
+fn mark_warned(marker: &Path, now: SystemTime) -> bool {
     if let Some(dir) = marker.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
@@ -196,7 +200,7 @@ fn disk_check(mstore: &Store, policy: &Policy) {
         return;
     }
     let Some(marker) = warn_marker() else { return };
-    if !claim_warning(&marker, SystemTime::now()) {
+    if !warning_due(&marker, SystemTime::now()) {
         return;
     }
     let mut per_clone: Vec<bc::TargetSize> = Vec::new();
@@ -213,11 +217,20 @@ fn disk_check(mstore: &Store, policy: &Policy) {
     per_clone.sort_by(|a, b| b.target_bytes.cmp(&a.target_bytes));
     let text = warning_text(free, total, &per_clone, policy);
     let handler = crate::backend::reactive::get_global_handler();
+    let mut delivered = 0;
     for r in recipients(&per_workspace, &local_agents(mstore)) {
         match handler.deliver_system_note(&r.target, &text) {
-            Ok(()) => tracing::info!(agent = %r.name, "build cache: low-disk note sent"),
+            Ok(()) => {
+                delivered += 1;
+                tracing::info!(agent = %r.name, "build cache: low-disk note sent");
+            }
             Err(e) => tracing::warn!(agent = %r.name, error = %e, "build cache: low-disk note not delivered"),
         }
+    }
+    if delivered > 0 {
+        mark_warned(&marker, SystemTime::now());
+    } else {
+        tracing::warn!("build cache: the disk is low and no agent could be told; trying again at the next check");
     }
 }
 
@@ -333,9 +346,11 @@ mod tests {
         let t = tempfile::tempdir().unwrap();
         let marker = t.path().join("locks").join("build-cache-warn");
         let now = SystemTime::now();
-        assert!(claim_warning(&marker, now), "the first one");
-        assert!(!claim_warning(&marker, now + Duration::from_secs(1800)), "half an hour later: no");
-        assert!(claim_warning(&marker, now + Duration::from_secs(2 * 3600)), "two hours later: yes");
+        assert!(warning_due(&marker, now), "none yet");
+        assert!(warning_due(&marker, now), "asking does not use the hour up: a warning nobody received must not");
+        assert!(mark_warned(&marker, now));
+        assert!(!warning_due(&marker, now + Duration::from_secs(1800)), "half an hour later: no");
+        assert!(warning_due(&marker, now + Duration::from_secs(2 * 3600)), "two hours later: yes");
     }
 
     #[test]

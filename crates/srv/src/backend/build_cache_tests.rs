@@ -47,6 +47,13 @@ fn the_policy_defaults_and_what_the_settings_change() {
     assert!(!p.enabled);
     assert_eq!((p.orphan_keep, p.orphan_idle, p.stale), (1, Duration::from_secs(6 * 3600), Duration::ZERO));
     assert_eq!((p.warn_free_bytes, p.warn_free_pct), (50 << 30, 10.0));
+
+    // A value too large to be a duration keeps the default instead of panicking.
+    let mut huge = HashMap::new();
+    huge.insert(KEY_ORPHAN_IDLE_HOURS.into(), json!(1e300));
+    huge.insert(KEY_STALE_DAYS.into(), json!(1e300));
+    let p = Policy::from_extra(&huge);
+    assert_eq!((p.orphan_idle, p.stale), (d.orphan_idle, d.stale));
 }
 
 #[test]

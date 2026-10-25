@@ -78,8 +78,8 @@ impl Policy {
             orphans: extra.get(KEY_ORPHANS).and_then(|v| v.as_bool()).unwrap_or(d.orphans),
             // Never fewer than one: the newest directory is the live one.
             orphan_keep: num(KEY_ORPHAN_KEEP).map_or(d.orphan_keep, |n| (n as usize).max(1)),
-            orphan_idle: num(KEY_ORPHAN_IDLE_HOURS).map_or(d.orphan_idle, |h| Duration::from_secs_f64(h * 3600.0)),
-            stale: num(KEY_STALE_DAYS).map_or(d.stale, |days| Duration::from_secs_f64(days * 86_400.0)),
+            orphan_idle: num(KEY_ORPHAN_IDLE_HOURS).and_then(|h| Duration::try_from_secs_f64(h * 3600.0).ok()).unwrap_or(d.orphan_idle),
+            stale: num(KEY_STALE_DAYS).and_then(|days| Duration::try_from_secs_f64(days * 86_400.0).ok()).unwrap_or(d.stale),
             warn_free_bytes: num(KEY_WARN_FREE_GB).map_or(d.warn_free_bytes, |g| (g * (1u64 << 30) as f64) as u64),
             warn_free_pct: num(KEY_WARN_FREE_PCT).unwrap_or(d.warn_free_pct),
         }
