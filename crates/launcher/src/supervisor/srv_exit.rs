@@ -69,6 +69,9 @@ pub(super) fn classify_srv_exit(
 pub(super) enum SrvAction {
     /// End the launcher with this exit code (already logged, and recorded when it is a give-up).
     Stop(i32),
+    /// End the launcher with this exit code because srv keeps crashing past its restart budget:
+    /// as [`SrvAction::Stop`], and the version is one the user may want to go back from.
+    GiveUp(i32),
     /// Start srv again; `wait_for_memory` first when the computer is out of memory.
     Restart { why: crate::incidents::SrvStop, wait_for_memory: bool },
 }
@@ -119,7 +122,7 @@ pub(super) fn srv_exit_action(
                 super::SRV_RESTART_BUDGET,
                 super::SRV_RESTART_WINDOW.as_secs(),
             ));
-            SrvAction::Stop(1)
+            SrvAction::GiveUp(1)
         }
         SrvExit::WaitForMemory => {
             log(&format!(
@@ -251,6 +254,17 @@ mod tests {
         }
         let now = t0 + Duration::from_secs(40);
         assert_eq!(classify(None, Some(libc::SIGKILL), PLENTY, now, &mut b), SrvExit::GiveUp);
+    }
+
+    #[test]
+    fn a_spent_budget_is_a_give_up_the_supervisor_can_tell_from_a_shutdown() {
+        use std::os::unix::process::ExitStatusExt;
+        let killed = || Ok(std::process::ExitStatus::from_raw(libc::SIGKILL));
+        let mut b: Vec<Instant> = (0..super::super::SRV_RESTART_BUDGET).map(|_| Instant::now()).collect();
+        assert!(matches!(srv_exit_action(killed(), &mut b, &mut Vec::new()), SrvAction::GiveUp(1)));
+        // A clean exit is a shutdown, not a give-up.
+        let clean = Ok(std::process::ExitStatus::from_raw(0));
+        assert!(matches!(srv_exit_action(clean, &mut Vec::new(), &mut Vec::new()), SrvAction::Stop(0)));
     }
 
     #[test]

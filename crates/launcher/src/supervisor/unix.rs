@@ -708,6 +708,10 @@ pub(crate) async fn run_unix(
                             srv_status = srv.child.wait() => {
                                 match srv_exit_action(srv_status, &mut srv_restarts, &mut srv_oom_restarts) {
                                     SrvAction::Stop(c) => break c,
+                                    SrvAction::GiveUp(c) => {
+                                        gave_up = Some("couldn't keep its backend running");
+                                        break c;
+                                    }
                                     SrvAction::Restart { why, .. } => srv_stopped_during_wait = Some(why),
                                 }
                                 tokio::select! {
@@ -807,6 +811,10 @@ pub(crate) async fn run_unix(
                 // spent budget, or a srv that cannot start, ends the app.
                 let (why, wait_for_memory) = match srv_exit_action(srv_status, &mut srv_restarts, &mut srv_oom_restarts) {
                     SrvAction::Stop(c) => break c,
+                    SrvAction::GiveUp(c) => {
+                        gave_up = Some("couldn't keep its backend running");
+                        break c;
+                    }
                     SrvAction::Restart { why, wait_for_memory } => (why, wait_for_memory),
                 };
                 if wait_for_memory {
