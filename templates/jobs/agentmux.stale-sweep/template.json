@@ -1,0 +1,31 @@
+{
+  "templateVersion": 1,
+  "id": "agentmux.stale-sweep",
+  "name": "Stale sweep",
+  "version": "1.0.0",
+  "kind": "job",
+  "description": "Lists stale branches and pull requests, skips protected ones and ones another agent has claimed, and messages each owner once. It proposes deletions and closes in a summary and never carries them out.",
+  "readsUntrusted": true,
+  "params": {
+    "type": "object",
+    "properties": {
+      "repos": { "type": "array", "items": { "type": "string" }, "title": "Repositories", "description": "Repositories to sweep, such as owner/repo." },
+      "stale_days": { "type": "number", "title": "Days without activity", "default": 30 },
+      "protected_patterns": { "type": "array", "items": { "type": "string" }, "title": "Protected branches", "description": "Shell-style globs that are never listed.", "default": ["main", "master", "develop", "release/*"] }
+    },
+    "required": ["repos"]
+  },
+  "trigger": { "kind": "cron", "cron": "0 9 * * 1" },
+  "action": { "kind": "message" },
+  "policy": {
+    "overlap": "skip",
+    "catch_up": "latest",
+    "timeout_minutes": 30,
+    "retries": 1,
+    "caps": { "run_usd": 0.5 },
+    "approval": "required",
+    "results": ["ledger", "task_on_failure"]
+  },
+  "outputs": ["report_file", "message:others"],
+  "secrets": []
+}

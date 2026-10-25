@@ -1,0 +1,33 @@
+{
+  "templateVersion": 1,
+  "id": "agentmux.nightly-build",
+  "name": "Nightly build",
+  "version": "1.0.0",
+  "kind": "job",
+  "description": "Builds and tests a branch every night. On a failure it finds the first real error and the likely commit, messages the owner on the first red, and files one task after several reds in a row.",
+  "readsUntrusted": true,
+  "params": {
+    "type": "object",
+    "properties": {
+      "repo": { "type": "string", "title": "Repository", "description": "owner/repo." },
+      "branch": { "type": "string", "title": "Branch", "default": "main" },
+      "command": { "type": "string", "title": "Build and test command", "description": "Run once, exactly as written." },
+      "platforms": { "type": "array", "items": { "type": "string" }, "title": "Other platforms", "description": "Platforms to name in the summary as not covered by this machine.", "default": [] },
+      "red_limit": { "type": "number", "title": "Reds in a row before a task", "default": 3 }
+    },
+    "required": ["repo", "command"]
+  },
+  "trigger": { "kind": "cron", "cron": "0 2 * * *" },
+  "action": { "kind": "message" },
+  "policy": {
+    "overlap": "skip",
+    "catch_up": "latest",
+    "timeout_minutes": 90,
+    "retries": 1,
+    "caps": { "run_usd": 0.5 },
+    "approval": "none",
+    "results": ["ledger", "task_on_failure"]
+  },
+  "outputs": ["report_file", "message:owner", "kanban_task"],
+  "secrets": []
+}

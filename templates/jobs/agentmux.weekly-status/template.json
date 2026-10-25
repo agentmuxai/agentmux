@@ -1,0 +1,30 @@
+{
+  "templateVersion": 1,
+  "id": "agentmux.weekly-status",
+  "name": "Weekly status",
+  "version": "1.0.0",
+  "kind": "job",
+  "description": "Collects each agent's merged pull requests, open tasks and blocked items from the task board and GitHub, and writes one page for you, blocked items first. Messages the owner the headline.",
+  "readsUntrusted": true,
+  "params": {
+    "type": "object",
+    "properties": {
+      "agents": { "type": "array", "items": { "type": "string" }, "title": "Agents", "description": "Agents to cover; empty uses the lead's, or all.", "default": [] },
+      "lead": { "type": "string", "title": "Lead", "description": "An agent whose reports to cover when agents is empty.", "default": "" },
+      "since": { "type": "string", "title": "Since", "description": "A date; empty means the last 7 days.", "default": "" }
+    }
+  },
+  "trigger": { "kind": "cron", "cron": "0 16 * * 5" },
+  "action": { "kind": "message" },
+  "policy": {
+    "overlap": "skip",
+    "catch_up": "latest",
+    "timeout_minutes": 20,
+    "retries": 0,
+    "caps": { "run_usd": 0.5 },
+    "approval": "none",
+    "results": ["ledger", "task_on_failure"]
+  },
+  "outputs": ["report_file", "message:owner"],
+  "secrets": []
+}

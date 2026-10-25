@@ -1,0 +1,32 @@
+{
+  "templateVersion": 1,
+  "id": "agentmux.on-event",
+  "name": "On event",
+  "version": "1.0.0",
+  "kind": "job",
+  "description": "A skeleton for reacting to an event: read its fields as untrusted data and write only the outputs you allow. In this version it runs on Run now; the event trigger and the hourly fire cap come with events in a later version. A cap on each run is set.",
+  "readsUntrusted": true,
+  "params": {
+    "type": "object",
+    "properties": {
+      "event_filter": { "type": "string", "title": "Event filter", "description": "Which events this job is for, in words.", "default": "" },
+      "target": { "type": "string", "title": "Target agent", "description": "The agent to message when message:others is allowed.", "default": "" },
+      "brief_template": { "type": "string", "title": "What to do with the event", "description": "The task, in your words. It can't widen the allowed outputs." },
+      "allowed_outputs": { "type": "array", "items": { "type": "string" }, "title": "Allowed outputs", "description": "Any of report_file, kanban_task, message:owner, message:others.", "default": ["report_file"] }
+    },
+    "required": ["brief_template"]
+  },
+  "trigger": { "kind": "manual" },
+  "action": { "kind": "message" },
+  "policy": {
+    "overlap": "skip",
+    "catch_up": "latest",
+    "timeout_minutes": 15,
+    "retries": 0,
+    "caps": { "run_usd": 1, "messages_per_day": 12 },
+    "approval": "required",
+    "results": ["ledger", "task_on_failure"]
+  },
+  "outputs": ["report_file", "kanban_task", "message:owner", "message:others"],
+  "secrets": []
+}

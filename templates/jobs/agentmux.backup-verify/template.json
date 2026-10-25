@@ -1,0 +1,31 @@
+{
+  "templateVersion": 1,
+  "id": "agentmux.backup-verify",
+  "name": "Backup and verify",
+  "version": "1.0.0",
+  "kind": "job",
+  "description": "Backs up the paths you choose into a dated folder, restores it into a temporary folder and checks counts and hashes. The agent only reports anomalies, and proposes pruning beyond the number to keep; it deletes nothing.",
+  "params": {
+    "type": "object",
+    "properties": {
+      "what": { "type": "array", "items": { "type": "string" }, "title": "What to back up", "description": "Folders or files to copy." },
+      "destination": { "type": "string", "title": "Destination folder", "description": "Where the dated backup folders go." },
+      "keep": { "type": "number", "title": "Backups to keep", "default": 7 },
+      "verify": { "type": "boolean", "title": "Restore and check", "default": true }
+    },
+    "required": ["what", "destination"]
+  },
+  "trigger": { "kind": "cron", "cron": "30 3 * * *" },
+  "action": { "kind": "message" },
+  "policy": {
+    "overlap": "skip",
+    "catch_up": "latest",
+    "timeout_minutes": 60,
+    "retries": 2,
+    "caps": { "run_usd": 0.1 },
+    "approval": "required",
+    "results": ["ledger", "task_on_failure"]
+  },
+  "outputs": ["report_file", "message:owner"],
+  "secrets": []
+}
