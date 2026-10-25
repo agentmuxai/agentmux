@@ -47,6 +47,7 @@ pub mod toolchain_path;
 pub mod transcript_request;
 pub mod update_manifest;
 pub mod win32;
+pub mod work_store;
 #[cfg(target_os = "linux")]
 pub mod xauthority;
 
@@ -59,6 +60,7 @@ pub use data_paths::{
 };
 pub use errors::{AgentMuxError, AmxCode};
 pub use settings_path::{settings_dir_for, SETTINGS_FILE};
+pub use work_store::{isolated_work_enabled, isolated_work_reason, IsolatedWorkReason, ISOLATED_WORK_ENV};
 pub use layout_intent::{LayoutIntent, LayoutResizeOp, LayoutViewState};
 pub use layout_types::{
     FlexDirection, LayoutClientSlices, LayoutNode, LayoutNodeData, SplitPosition,

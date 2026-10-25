@@ -165,7 +165,7 @@ pub(crate) async fn handle_claim_work(
         created_at: now,
         expires_at: now + claims::ttl_ms(p.ttl_minutes),
     };
-    let store = state.identity_store.clone();
+    let store = state.work_store.clone();
     let identified = caller.as_ref().is_some_and(|c| c.0.uid().is_some());
     let stored = tokio::task::spawn_blocking(move || {
         let stored = store.work_claim_put(&claim, now)?;
@@ -220,7 +220,7 @@ pub(crate) async fn handle_release_work(
         return bad_request("who is releasing is unknown: this needs an agent started by AgentMux");
     };
     let id = nonempty(&p.id).map(str::to_string);
-    let store = state.identity_store.clone();
+    let store = state.work_store.clone();
     let now = agentmux_common::time::now_ms();
     let identified = caller.as_ref().is_some_and(|c| c.0.uid().is_some());
     let released = tokio::task::spawn_blocking(move || {

@@ -143,6 +143,7 @@ async fn app_main() {
         &stores.filestore,
         &stores.id_store,
         &stores.identity_store,
+        &stores.work_store,
     );
 
     // Widget packages: scan ~/.agentmux/widgets, apply this instance's
@@ -344,7 +345,7 @@ async fn app_main() {
     // is told who): the progress watcher's edits are checked from here on.
     backend::work_facts::overlap_notes::install(
         Arc::clone(&state.mstore),
-        Arc::clone(&state.identity_store),
+        Arc::clone(&state.work_store),
         Arc::clone(&state.config_watcher),
         state.http_client.clone(),
         state.local_web_url.clone(),
@@ -353,14 +354,14 @@ async fn app_main() {
     // and a PR opened on a task is linked to it (SPEC_WARDEN_KANBAN_2026_10_20.md).
     backend::kanban::install(
         Arc::clone(&state.mstore),
-        Arc::clone(&state.identity_store),
+        Arc::clone(&state.work_store),
         Arc::clone(&state.config_watcher),
         state.broker.clone(),
         state.http_client.clone(),
     );
     tokio::spawn(backend::kanban::run_reminder_loop());
     // An agent out of quota is woken at its reset (SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §7).
-    backend::limit_wake::install(Arc::clone(&state.mstore), Arc::clone(&state.identity_store), Arc::clone(&state.event_bus));
+    backend::limit_wake::install(Arc::clone(&state.mstore), Arc::clone(&state.work_store), Arc::clone(&state.event_bus));
     tokio::spawn(backend::kanban::prs::run_merge_loop());
     // An agent's AgentMux MCP server that didn't connect is noticed and
     // repaired (`agent:mcpselfheal`).
