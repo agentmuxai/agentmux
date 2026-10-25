@@ -18,6 +18,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import type { SettingsIndexEntry } from "../settings-model";
 import { SectionHeader, set, SettingRow, ToggleControl } from "../settings-controls";
 import { CLOUD_PRESENCE_SETTING, CloudPresence } from "./cloud-presence";
+import { HIDDEN_AGENTS_SETTING, HiddenAgents } from "./hidden-agents";
 import { MUXBUS_SIGN_IN_SETTING, MuxBusSignIn } from "./muxbus-sign-in";
 import { PINNED_SENDERS_SETTING, PinnedSenders } from "./pinned-senders";
 
@@ -40,6 +41,7 @@ export const DEVICES_SETTINGS = {
         section: "devices",
         keywords: ["terminal", "shell", "mobile", "device", "share", "watch", "viewer", "viewer:shareterminals"],
     },
+    hiddenAgents: HIDDEN_AGENTS_SETTING,
     muxbus: MUXBUS_SIGN_IN_SETTING,
     cloudPresence: CLOUD_PRESENCE_SETTING,
     pinnedSenders: PINNED_SENDERS_SETTING,
@@ -216,6 +218,8 @@ export function DevicesSection(): JSX.Element {
                     />
                 }
             />
+            <SectionHeader label={DEVICES_SETTINGS.hiddenAgents.label} />
+            <HiddenAgents />
             <SectionHeader label={DEVICES_SETTINGS.muxbus.label} />
             <MuxBusSignIn />
             <SectionHeader label={DEVICES_SETTINGS.cloudPresence.label} />
