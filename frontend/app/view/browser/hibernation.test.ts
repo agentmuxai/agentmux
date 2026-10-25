@@ -10,13 +10,19 @@ import {
     afterDiscard,
     wakeEndsNow,
     awakeReason,
+    ENGINE_NO_RECHECK_MS,
+    engineSupportsFreeze,
+    resetEngineSupportsFreeze,
     etaLabel,
+    FREEZE_PER_TICK,
+    freezeAwakeReason,
     hibernateAfterMs,
     hibernateHiddenBrowserPanes,
     hoverTabPill,
     isLocalAddress,
     isOverdue,
     leaveTabPill,
+    normalizeKeepAwakeSite,
     pageAwakeReason,
     policyTick,
     pressTabPill,
@@ -29,6 +35,7 @@ import {
     wakeAllBrowserPanes,
     type HibernatablePane,
     type PaneFacts,
+    createFreezeState,
 } from "./hibernation";
 
 describe("readSleep", () => {
@@ -248,6 +255,43 @@ describe("when a hidden pane sleeps", () => {
     });
 });
 
+describe("createFreezeState", () => {
+    it("clears the flag only once the host has answered the thaw", async () => {
+        let answer!: (v: boolean) => void;
+        const host = vi.fn(() => new Promise<boolean>((r) => (answer = r)));
+        const f = createFreezeState(host);
+        f.markFrozen();
+        const done = f.thaw();
+        expect(host).toHaveBeenCalledWith(false);
+        expect(f.isFrozen()).toBe(true); // the host has not thawed it yet
+        answer(true);
+        await done;
+        expect(f.isFrozen()).toBe(false);
+    });
+    it("asks the host once for thaws that overlap", async () => {
+        const host = vi.fn(() => Promise.resolve(true));
+        const f = createFreezeState(host);
+        f.markFrozen();
+        await Promise.all([f.thaw(), f.thaw()]);
+        expect(host).toHaveBeenCalledTimes(1);
+    });
+    it("leaves a page frozen when the host's thaw failed, and tries again", async () => {
+        const host = vi.fn().mockRejectedValueOnce(new Error("no")).mockResolvedValue(true);
+        const f = createFreezeState(host);
+        f.markFrozen();
+        await f.thaw();
+        expect(f.isFrozen()).toBe(true);
+        await f.thaw();
+        expect(f.isFrozen()).toBe(false);
+        expect(host).toHaveBeenCalledTimes(2);
+    });
+    it("does not call the host for a page that is not frozen", async () => {
+        const host = vi.fn(() => Promise.resolve(true));
+        await createFreezeState(host).thaw();
+        expect(host).not.toHaveBeenCalled();
+    });
+});
+
 describe("wakeEndsNow", () => {
     it("ends at once when the pane is shown or the wake was asked for", () => {
         expect(wakeEndsNow(true, "intent")).toBe(true);
@@ -272,5 +316,104 @@ describe("afterDiscard", () => {
         expect(afterDiscard({ supported: true, ok: true }, false)).toBe("load");
         expect(afterDiscard({ supported: true, ok: false }, false)).toBe("nothing");
         expect(afterDiscard(undefined, false)).toBe("nothing");
+    });
+});
+
+describe("normalizeKeepAwakeSite", () => {
+    it("keeps a host, which covers its subdomains", () => {
+        expect(normalizeKeepAwakeSite("  Example.COM ")).toBe("example.com");
+        expect(siteKeptAwake("https://mail.example.com/inbox", [normalizeKeepAwakeSite("example.com")])).toBe(true);
+    });
+    it("cuts a pasted address to its host, and keeps an origin when a scheme is given", () => {
+        expect(normalizeKeepAwakeSite("example.com/path?q=1")).toBe("example.com");
+        expect(normalizeKeepAwakeSite("https://App.example.com:8443/x")).toBe("https://app.example.com:8443");
+        expect(siteKeptAwake("https://app.example.com:8443/y", [normalizeKeepAwakeSite("https://app.example.com:8443/x")])).toBe(true);
+        expect(siteKeptAwake("https://other.example.com/", [normalizeKeepAwakeSite("https://app.example.com:8443/x")])).toBe(false);
+    });
+    it("refuses what names no site", () => {
+        expect(normalizeKeepAwakeSite("")).toBeNull();
+        expect(normalizeKeepAwakeSite("hello")).toBeNull();
+        expect(normalizeKeepAwakeSite("data:text/html,hi")).toBeNull();
+        expect(normalizeKeepAwakeSite("localhost")).toBe("localhost");
+    });
+});
+
+describe("freezing hidden panes", () => {
+    it("freezes panes hidden 5 minutes that aren't asleep or frozen, those that declined to sleep too", async () => {
+        settings["browser:hibernate"] = true;
+        const now = 10 * 60 * 60_000;
+        const frozeCalls: string[] = [];
+        const pane = (id: string, minutesAgo: number, opts: { frozen?: boolean; declineSleep?: boolean } = {}) => ({
+            blockId: id,
+            isVisible: () => false,
+            isAsleep: () => false,
+            hiddenSince: () => now - minutesAgo * 60_000,
+            tryHibernate: async () => (opts.declineSleep ? "an agent is driving it" : null),
+            wake: () => {},
+            isFrozen: () => !!opts.frozen,
+            tryFreeze: async () => {
+                frozeCalls.push(id);
+                return null;
+            },
+        });
+        const offs = [
+            pane("short", 3),
+            pane("due-freeze", 6),
+            pane("already", 8, { frozen: true }),
+            pane("kept-awake", 45, { declineSleep: true }),
+        ].map(registerHibernatablePane);
+        const slept = await policyTick(now, async () => "normal");
+        expect(slept).toEqual([]);
+        expect(frozeCalls).toEqual(["kept-awake", "due-freeze"]);
+        offs.forEach((off) => off());
+    });
+
+    it("freezes at most FREEZE_PER_TICK panes a tick, and only for what a frozen page would break", async () => {
+        settings["browser:hibernate"] = true;
+        const now = 10 * 60 * 60_000;
+        let n = 0;
+        const offs = Array.from({ length: FREEZE_PER_TICK + 2 }, (_, i) => ({
+            blockId: `p${i}`,
+            isVisible: () => false,
+            isAsleep: () => false,
+            hiddenSince: () => now - 10 * 60_000,
+            tryHibernate: async () => "kept",
+            wake: () => {},
+            isFrozen: () => false,
+            tryFreeze: async () => {
+                n++;
+                return null;
+            },
+        })).map(registerHibernatablePane);
+        await policyTick(now, async () => "normal");
+        expect(n).toBe(FREEZE_PER_TICK);
+        offs.forEach((off) => off());
+        expect(freezeAwakeReason({ live: true, edited: true, beforeunload: true })).toBeNull();
+        expect(freezeAwakeReason({ live: true, media: true })).toBe("playing media");
+        expect(freezeAwakeReason({ live: true, devtools: true })).toBe("DevTools open");
+    });
+});
+
+describe("engineSupportsFreeze", () => {
+    afterEach(() => resetEngineSupportsFreeze());
+    it("asks again after a while when the answer was no, and keeps a yes", async () => {
+        const answers = [{ supported: false }, { supported: true }];
+        const ask = vi.fn(async () => answers.shift()!);
+        expect(await engineSupportsFreeze(ask, 1000)).toBe(false);
+        expect(await engineSupportsFreeze(ask, 1000 + ENGINE_NO_RECHECK_MS - 1)).toBe(false);
+        expect(ask).toHaveBeenCalledTimes(1);
+        expect(await engineSupportsFreeze(ask, 1000 + ENGINE_NO_RECHECK_MS)).toBe(true);
+        expect(await engineSupportsFreeze(ask, 1000 + 10 * ENGINE_NO_RECHECK_MS)).toBe(true);
+        expect(ask).toHaveBeenCalledTimes(2);
+    });
+    it("asks once, and says yes only for an engine with the Discard API", async () => {
+        let asked = 0;
+        const ask = async () => {
+            asked++;
+            return { supported: true, ok: false };
+        };
+        expect(await engineSupportsFreeze(ask)).toBe(true);
+        expect(await engineSupportsFreeze(ask)).toBe(true);
+        expect(asked).toBe(1);
     });
 });

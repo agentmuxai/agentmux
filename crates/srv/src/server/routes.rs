@@ -502,6 +502,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // `agentmux-mcp doctor`, from the agent's shell: its own pane by token.
         .route("/api/v1/agent/self/mcp-health", post(app_api::mcp_health::handle_mcp_health))
         .route("/api/v1/agent/self/mcp-heal", post(app_api::mcp_health::handle_mcp_heal))
+        .route("/api/v1/agent/self/mcp-beat", post(app_api::mcp_health::handle_mcp_beat))
         // An agent's own context, and compacting itself (SPEC_AGENT_SELF_COMPACTION §3.3).
         .route("/api/v1/agent/self/context", post(app_api::agent_context::handle_context_self))
         .route("/api/v1/agent/self/compact", post(app_api::agent_context::handle_compact_self))

@@ -46,7 +46,7 @@ use agentmux_common::api_types::{
 use agentmux_common::AUTH_KEY_HEADER;
 use anyhow::Result;
 use serde_json::{json, Value};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::BufReader;
 use tokio::task::JoinHandle;
 
 /// Metadata kept alongside each running loop's task handle.
@@ -67,14 +67,31 @@ type LoopRegistry = Mutex<HashMap<String, LoopEntry>>;
 
 mod desktop_input;
 mod doctor;
+mod heartbeat;
 mod self_keys;
+mod serve;
 mod tool_schemas;
 use tool_schemas::*;
 mod window_capture;
 use window_capture::*;
 
-#[tokio::main]
-async fn main() {
+fn main() {
+    // More workers than cores: a tool call stuck in blocking code (a window
+    // call into an app that stopped answering) holds a worker until it
+    // returns, and a few of those must not starve the rest (#2614).
+    let workers = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4)
+        .max(8);
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(workers)
+        .enable_all()
+        .build()
+        .expect("tokio runtime")
+        .block_on(run());
+}
+
+async fn run() {
     // `agentmux-mcp doctor [--heal]`, from the agent's shell: why its AgentMux
     // tools aren't connected, with no MCP session (doctor.rs).
     if std::env::args().nth(1).as_deref() == Some("doctor") {
@@ -131,86 +148,57 @@ async fn main() {
 
     // Running loops, keyed by loop_id. Lives for this MCP process's lifetime
     // (== the agent session), so loops are reaped when the agent pane closes.
-    let loops: LoopRegistry = Mutex::new(HashMap::new());
-    let loop_counter = AtomicU64::new(0);
+    let loops: Arc<LoopRegistry> = Arc::new(Mutex::new(HashMap::new()));
+    let loop_counter = Arc::new(AtomicU64::new(0));
 
-    let stdin = tokio::io::stdin();
-    let mut stdout = tokio::io::stdout();
-    let mut reader = BufReader::new(stdin);
-    let mut line = String::new();
-
-    loop {
-        line.clear();
-        match reader.read_line(&mut line).await {
-            Ok(0) => break,
-            Ok(_) => {}
-            Err(_) => break,
-        }
-
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-
-        let msg: Value = match serde_json::from_str(trimmed) {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
-
-        let method = msg.get("method").and_then(|v| v.as_str()).unwrap_or("");
-        let id = msg.get("id").cloned().unwrap_or(Value::Null);
-        let params = msg.get("params").cloned().unwrap_or(Value::Null);
-
-        // Notifications have no id — no response expected.
-        if id.is_null() {
-            continue;
-        }
-
-        let response = match method {
-            "initialize" => {
-                json!({
-                    "jsonrpc": "2.0",
-                    "id": id,
-                    "result": {
-                        "protocolVersion": "2024-11-05",
-                        "capabilities": { "tools": {} },
-                        "serverInfo": { "name": "agentmux-mcp", "version": env!("CARGO_PKG_VERSION") }
-                    }
-                })
+    let health = serve::Health::new();
+    {
+        // The runtime's pulse, and the heartbeat to srv from a thread of its
+        // own, so a starved runtime is seen from outside (heartbeat.rs).
+        let h = Arc::clone(&health);
+        tokio::spawn(async move {
+            let mut every = tokio::time::interval(Duration::from_secs(1));
+            loop {
+                every.tick().await;
+                h.tick();
             }
-            "tools/list" => {
-                json!({
-                    "jsonrpc": "2.0",
-                    "id": id,
-                    "result": { "tools": advertised_tools() }
-                })
-            }
-            "tools/call" => {
-                match call_tool(&params, &local_url, &auth_key, &block_id, &client, &loops, &loop_counter).await {
-                    Ok(content) => json!({
-                        "jsonrpc": "2.0",
-                        "id": id,
-                        "result": { "content": [{"type": "text", "text": content}], "isError": false }
-                    }),
-                    Err(e) => json!({
-                        "jsonrpc": "2.0",
-                        "id": id,
-                        "result": { "content": [{"type": "text", "text": e.to_string()}], "isError": true }
-                    }),
-                }
-            }
-            _ => json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "error": { "code": -32601, "message": "method not found" }
-            }),
-        };
-
-        let resp_str = serde_json::to_string(&response).unwrap_or_default();
-        let _ = stdout.write_all(resp_str.as_bytes()).await;
-        let _ = stdout.write_all(b"\n").await;
-        let _ = stdout.flush().await;
+        });
+        heartbeat::start(Arc::clone(&health), local_url.clone(), auth_key.clone());
     }
+
+    let runner_client = client.clone();
+    let (runner_url, runner_key, runner_block) =
+        (local_url.clone(), auth_key.clone(), block_id.clone());
+    let runner: Arc<dyn serve::ToolRunner> = Arc::new(move |params: Value| -> serve::CallFuture {
+        let (client, local_url, auth_key, block_id) = (
+            runner_client.clone(),
+            runner_url.clone(),
+            runner_key.clone(),
+            runner_block.clone(),
+        );
+        let (loops, loop_counter) = (Arc::clone(&loops), Arc::clone(&loop_counter));
+        Box::pin(async move {
+            call_tool(
+                &params,
+                &local_url,
+                &auth_key,
+                &block_id,
+                &client,
+                &loops,
+                &loop_counter,
+            )
+            .await
+        })
+    });
+    serve::serve(
+        BufReader::new(tokio::io::stdin()),
+        tokio::io::stdout(),
+        runner,
+        Arc::new(|| json!(advertised_tools())),
+        health,
+        serve::call_deadline,
+    )
+    .await;
 }
 
 mod srv_http;
