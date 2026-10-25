@@ -20,6 +20,22 @@ pub(super) fn priority(requested: Option<&str>) -> Priority {
     }
 }
 
+/// Whether a `bus:*` frame may be acted on: a `bus:register` is proven by its
+/// token, a send, inject or broadcast by the registration; other frames
+/// claim nothing.
+pub(super) fn frame_allowed(
+    store: &Store,
+    msg_type: &str,
+    registered: &str,
+    (agent_id, token, from): (Option<&str>, Option<&str>, Option<&str>),
+) -> Result<(), String> {
+    match (msg_type, agent_id) {
+        ("bus:register", Some(agent_id)) => register_allowed(store, token, agent_id),
+        ("bus:send" | "bus:inject" | "bus:broadcast", _) => sender_allowed(store, registered, from),
+        _ => Ok(()),
+    }
+}
+
 /// Whether a `bus:register` frame carrying `token` may register `agent_id`: the
 /// token has to be one this srv minted, for the agent that name selects.
 pub(super) fn register_allowed(store: &Store, token: Option<&str>, agent_id: &str) -> Result<(), String> {
