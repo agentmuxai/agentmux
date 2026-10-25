@@ -47,6 +47,7 @@ import {
     type PaneFacts,
     type SleepReason,
 } from "./hibernation";
+import { estimatedLoadMs } from "./load-history";
 import "./browser-view.scss";
 
 // Matches BrainSpinner.scss's `.is-fading` transition duration — the DOM
@@ -161,10 +162,12 @@ function BrowserSleepCard(props: { sleep: BrowserSleep; startedAt: () => number;
     const [now, setNow] = createSignal(performance.now());
     const tick = setInterval(() => setNow(performance.now()), 250);
     onCleanup(() => clearInterval(tick));
+    // The pane's own last load, else what its site usually takes (spec §7.2).
+    const expectedMs = () => props.sleep.loadMs ?? estimatedLoadMs(props.sleep.url);
     const eta = () =>
-        props.startedAt() > 0 && isOverdue(props.sleep.loadMs, now() - props.startedAt())
+        props.startedAt() > 0 && isOverdue(expectedMs(), now() - props.startedAt())
             ? "Still loading…"
-            : etaLabel(props.sleep.loadMs);
+            : etaLabel(expectedMs());
     return (
         <div class="browser-sleep-card" role="status" data-pane-overlay>
             <div class="browser-sleep-card-body">
