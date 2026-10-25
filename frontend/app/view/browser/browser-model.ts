@@ -39,6 +39,7 @@ import {
     type BrowserSleep,
     type SleepReason,
 } from "./hibernation";
+import { recordLoad } from "./load-history";
 
 /** Close `blockId` the way its × would: just its tab when the pane holds
  *  others, else the pane. Looks in the window tab on screen, then in the
@@ -1075,6 +1076,7 @@ export class BrowserViewModel {
 
     /** The page has loaded again after a wake: the pane is awake. */
     endSleep(loadMs: number | undefined): Promise<void> {
+        if (loadMs != null && loadMs > 0) recordLoad(this.sleepAtom()?.url || this.urlAtom(), loadMs);
         return this.ctx.setMeta({
             [SLEEP_META_KEY]: null,
             [WAKE_META_KEY]: null,
@@ -1084,6 +1086,7 @@ export class BrowserViewModel {
 
     /** How long the page took to load, for the next wake's estimate. */
     recordLoadMs(loadMs: number): Promise<void> {
+        recordLoad(this.urlAtom(), loadMs);
         return this.ctx.setMeta({ [LOADMS_META_KEY]: Math.round(loadMs) });
     }
 
