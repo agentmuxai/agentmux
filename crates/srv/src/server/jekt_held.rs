@@ -123,7 +123,7 @@ async fn target_cold(state: &AppState, uid: &str) -> bool {
     };
     let mstore = state.mstore.clone();
     tokio::task::spawn_blocking(move || {
-        let last = super::jekt_cold::session_last_output(&mstore, &block_id);
+        let last = crate::backend::cold_hold::session_last_output(&mstore, &block_id);
         crate::backend::cold_hold::is_cold(last, agentmux_common::time::now_ms(), after_ms)
     })
     .await

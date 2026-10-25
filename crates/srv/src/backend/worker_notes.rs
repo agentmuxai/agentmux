@@ -101,6 +101,7 @@ pub fn install(
     mut reducer_events: tokio::sync::broadcast::Receiver<agentmux_common::ipc::Event>,
     mstore: Arc<Store>,
     filestore: Arc<FileStore>,
+    config: Arc<crate::backend::wconfig::ConfigState>,
 ) {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<WorkerEvent>();
     let observer_tx = tx.clone();
@@ -147,10 +148,10 @@ pub fn install(
             if !seen.first(&ev) {
                 continue;
             }
-            let (mstore, filestore) = (mstore.clone(), filestore.clone());
-            let note = tokio::task::spawn_blocking(move || note_for(&mstore, &filestore, &ev)).await;
-            if let Ok(Some((leader_block, text))) = note {
-                deliver(&leader_block, &text);
+            let (store, filestore) = (mstore.clone(), filestore.clone());
+            let note = tokio::task::spawn_blocking(move || note_for(&store, &filestore, &ev)).await;
+            if let Ok(Some((leader_block, text, wait_key))) = note {
+                deliver(&mstore, &config, &leader_block, &text, wait_key.as_deref());
             }
         }
     });
@@ -197,7 +198,10 @@ fn live_panes_of(mstore: &Store, def_id: &str) -> Vec<String> {
 
 /// The note for `ev` and the leader pane it goes to, if `ev` is a worker's
 /// and its leader is open; `None` otherwise, or while the worker's gap runs.
-fn note_for(mstore: &Store, filestore: &FileStore, ev: &WorkerEvent) -> Option<(String, String)> {
+/// The note for `ev`: the leader's pane and the text, and a key when the note may wait for a
+/// cold leader's next turn (a worker that ended a turn silent), none when the leader must hear
+/// at once (it failed or stopped, or it is waiting for an answer).
+fn note_for(mstore: &Store, filestore: &FileStore, ev: &WorkerEvent) -> Option<(String, String, Option<String>)> {
     let block_id = match ev {
         WorkerEvent::TurnEnded { block_id, .. }
         | WorkerEvent::Exited { block_id, .. }
@@ -213,13 +217,18 @@ fn note_for(mstore: &Store, filestore: &FileStore, ev: &WorkerEvent) -> Option<(
     let worker = worker_of_block(mstore, block_id)?;
     let leader_panes = live_panes_of(mstore, &worker.leader_def_id);
     let leader_block = leader_panes.first()?.clone();
+    let mut wait_key = None;
     let body = match ev {
         WorkerEvent::TurnEnded { started_at_ms, .. } => {
             absorb(&crate::backend::reactive::get_global_handler().get_audit_log(usize::MAX));
             if last_report(&worker.slug, &leader_panes).is_some_and(|at| at + 1_000 >= *started_at_ms) {
                 return None;
             }
-            turn_end_body(&worker.name, last_words(mstore, filestore, block_id))
+            let words = last_words(mstore, filestore, block_id);
+            if !words.asked {
+                wait_key = Some(format!("worker:{}", worker.def_id));
+            }
+            turn_end_body(&worker.name, words)
         }
         WorkerEvent::Exited { .. } => format!("Your worker {} stopped: its process exited.", worker.name),
         WorkerEvent::Failed { title, .. } => format!("Your worker {} stopped with an error: {title}.", worker.name),
@@ -229,7 +238,7 @@ fn note_for(mstore: &Store, filestore: &FileStore, ev: &WorkerEvent) -> Option<(
         ),
     };
     let body = GAPS.lock().admit(&worker.def_id, body, agentmux_common::time::now_ms_u64())?;
-    Some((leader_block, format!("[AgentMux] {}", crate::backend::reactive::sanitize::quote_in_system_note(&body))))
+    Some((leader_block, format!("[AgentMux] {}", crate::backend::reactive::sanitize::quote_in_system_note(&body)), wait_key))
 }
 
 /// Reports, kept past the delivery log's ring: (sender, target pane) → the
@@ -362,7 +371,7 @@ impl Gaps {
 
 static GAPS: LazyLock<parking_lot::Mutex<Gaps>> = LazyLock::new(Default::default);
 
-fn deliver(leader_block: &str, text: &str) {
+fn deliver(mstore: &Store, config: &crate::backend::wconfig::ConfigState, leader_block: &str, text: &str, wait_key: Option<&str>) {
     let handler = crate::backend::reactive::get_global_handler();
     let target = handler
         .list_agents()
@@ -373,7 +382,11 @@ fn deliver(leader_block: &str, text: &str) {
         tracing::debug!(leader_block, "worker note: the leader's pane isn't registered");
         return;
     };
-    if let Err(e) = handler.deliver_system_note(&target, text) {
+    let sent = match wait_key {
+        Some(key) => crate::backend::cold_hold::note_or_wait_if_cold(mstore, &config.get_settings().extra, leader_block, &target, key, text),
+        None => handler.deliver_system_note(&target, text),
+    };
+    if let Err(e) = sent {
         tracing::warn!(leader_block, error = %e, "worker note not delivered");
     }
 }
