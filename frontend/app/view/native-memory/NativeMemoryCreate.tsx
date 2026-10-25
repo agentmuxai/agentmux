@@ -23,7 +23,7 @@ interface NativeMemoryCreateProps {
      *  what is there, and a write replaces a file of the same name. */
     listUnknown: boolean;
     /** The file is written: the caller refreshes its list and opens it. */
-    onCreated: (filename: string) => void;
+    onCreated: (filename: string, agentId: string) => void;
 }
 
 const LIST_UNKNOWN_TITLE = "Wait until this agent's files have loaded.";
@@ -52,13 +52,14 @@ export function NativeMemoryCreate(props: NativeMemoryCreateProps): JSX.Element 
         }
         setBusy(true);
         setError(null);
-        const created = await createMemoryFile(props.agentId, rawFilename, content, props.filenames);
+        const agentId = props.agentId;
+        const created = await createMemoryFile(agentId, rawFilename, content, props.filenames);
         setBusy(false);
         if ("error" in created) {
             setError(created.error);
             return false;
         }
-        props.onCreated(created.filename);
+        props.onCreated(created.filename, agentId);
         return true;
     };
 

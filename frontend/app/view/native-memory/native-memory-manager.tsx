@@ -729,7 +729,10 @@ export function NativeMemoryManager(props: { pane?: NativeMemoryPane }): JSX.Ele
                                         hasIndex={filesLoading() || filesError() !== null || files().some((f) => f.is_index)}
                                         readOnly={unverified()}
                                         listUnknown={filesLoading() || filesError() !== null}
-                                        onCreated={(filename) => {
+                                        onCreated={(filename, createdFor) => {
+                                            // The write may finish after the person moved to
+                                            // another agent: its file isn't theirs to open.
+                                            if (selectedAgent()?.id !== createdFor) return;
                                             refetchSelectedAgentFiles(agent());
                                             setSelectedFilename(filename);
                                         }}
