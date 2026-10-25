@@ -475,6 +475,8 @@ declare global {
         getUpdaterVersion: () => string | null;
         getUpdaterChannel: () => string;
         installAppUpdate: () => void;
+        /** A Microsoft Store install: ask the Store to install the update; `fallback` means open the Store page instead. */
+        storeUpdate?: () => Promise<{ outcome: "installed" | "canceled" | "none" | "fallback"; message: string }>;
         updateWindowControlsOverlay: (rect: Dimensions) => void;
         openNewWindow: () => Promise<string>;
         openNewWindowWithView: (view: string, meta?: Record<string, unknown>) => Promise<string>;
