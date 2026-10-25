@@ -27,6 +27,7 @@ import type { FsPlace } from "@/types/rpc/FsPlace";
 import { isMacOS, isWindows } from "@/util/platformutil";
 import { isSshConnection } from "@/app/view/term/ssh-connection";
 import { isValidAgentColor, pickAgentColor } from "@/app/view/agent/agent-color";
+import { blockRoleColor, isLightThemeActive } from "@/app/block/pane-identity";
 import type { RemoteRecord } from "@/app/store/rpc-api/remotes";
 import { displayName, groupRemotes, remoteColor } from "@/app/view/remotes/remotes-sections";
 import { batch, createMemo, createSignal } from "solid-js";
@@ -152,6 +153,15 @@ function saveSafeRoot(root: string): void {
 
 /** An agent's identity color: its stored `ui:color` (what seeds the pane
  *  border), else the deterministic pick the pane would get on first open. */
+/**
+ * An agent's colour as text in the current theme: its hue, at the lightness made for text on that theme's
+ * surface (the Kanban's name colour, pane-color-scheme.ts), not the raw colour, which is 1.7:1 on a light theme
+ * for a yellow. Falls back to the raw colour when it isn't a hue it can map.
+ */
+export function readableAgentColor(hex: string): string {
+    return blockRoleColor({ "frame:activebordercolor": hex } as Block["meta"], isLightThemeActive(), "identity", { widget: false }) ?? hex;
+}
+
 async function loadAgentColor(definitionId: string): Promise<string | undefined> {
     if (!definitionId) return undefined;
     try {

@@ -24,7 +24,7 @@ import type { FsGitStatus } from "@/types/rpc/FsGitStatus";
 import { childKey, touched, touchesUnder, type Touch } from "@/app/store/touched-files";
 import { isMacOS } from "@/util/platformutil";
 import { createEffect, createMemo, createSignal, For, Match, on, onCleanup, onMount, Show, Switch, type JSX } from "solid-js";
-import { errorText, type FilesModel, windowsNames } from "./files-model";
+import { errorText, type FilesModel, readableAgentColor, windowsNames } from "./files-model";
 import { closeOwnTab, openFolderInNewTab, openInPane, openTargetOf, openTerminalHere, openWithOs, revealInOs } from "./files-open";
 import { FilesPreview } from "./files-preview";
 import { paneWorkdir } from "@/app/drag/file-drop-actions";
@@ -947,7 +947,7 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                                 {(a) => (
                                     <button type="button" class="files-place" title={a.path} onClick={() => void model.openOn("", a.path)}>
                                         <i class="fa fa-robot" />
-                                        <span style={a.color ? { color: a.color } : undefined}>{a.name}</span>
+                                        <span style={a.color ? { color: readableAgentColor(a.color) } : undefined}>{a.name}</span>
                                     </button>
                                 )}
                             </For>
