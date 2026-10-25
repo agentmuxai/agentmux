@@ -95,11 +95,18 @@ WORK=$(mktemp -d "$CACHE_DIR/install.XXXXXX") || die "can't make a work folder"
 cleanup() { rm -rf "$WORK"; }
 trap cleanup EXIT
 
+# fetch <url> [seconds] [follow]: the page, over HTTPS only. `follow` is for the release
+# download, which GitHub answers with a redirect to its asset storage (the listing is
+# not redirected); a redirect may only go to another HTTPS address.
 fetch() {
     if command -v curl >/dev/null 2>&1; then
-        curl -fsS --proto '=https' --tlsv1.2 --max-time "${2:-30}" "$1"
+        if [ "${3:-}" = follow ]; then
+            curl -fsS -L --proto '=https' --proto-redir '=https' --tlsv1.2 --max-time "${2:-30}" "$1"
+        else
+            curl -fsS --proto '=https' --tlsv1.2 --max-time "${2:-30}" "$1"
+        fi
     elif command -v wget >/dev/null 2>&1; then
-        wget -q -O - --secure-protocol=TLSv1_2 --timeout="${2:-30}" "$1"
+        wget -q -O - --https-only --secure-protocol=TLSv1_2 --timeout="${2:-30}" "$1"
     else
         return 127
     fi
@@ -121,7 +128,7 @@ if [ "$GO_BACK" = 1 ]; then
     if [ "$OWNER" = deb ]; then NAME="AgentMux_${VERSION}_amd64.deb"; else NAME="AgentMux-${VERSION}-1.x86_64.rpm"; fi
     KIND=$OWNER
     COPY="$WORK/$NAME"
-    fetch "$DOWNLOAD_BASE/v$VERSION/$NAME" 900 >"$COPY" || die "can't download AgentMux $VERSION to go back to it"
+    fetch "$DOWNLOAD_BASE/v$VERSION/$NAME" 900 follow >"$COPY" || die "can't download AgentMux $VERSION to go back to it"
     chmod 600 "$COPY"
 else
     case "$FILE" in

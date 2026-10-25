@@ -15,7 +15,7 @@ bad() { fail=$((fail+1)); printf '  FAIL  %s\n     -> %s\n' "$1" "${2:-}"; }
 BIN="$TMP/bin"; mkdir -p "$BIN"
 fake() { printf '#!/bin/sh\n%s\n' "$2" > "$BIN/$1"; chmod +x "$BIN/$1"; }
 fake uname 'echo x86_64'
-fake curl 'case "$*" in */download/*) cat "$FAKE_DOWNLOAD";; *) cat "$FAKE_LISTING";; esac'
+fake curl 'case "$*" in */download/*) case "$*" in *" -L "*" --proto-redir =https "*) cat "$FAKE_DOWNLOAD";; esac;; *) cat "$FAKE_LISTING";; esac'
 fake dpkg-query 'case "$1" in -S) [ "$FAKE_OWNER" = deb ];; -W) printf %s "$FAKE_INSTALLED";; esac'
 fake dpkg-deb 'case "$3" in Package) echo "$FAKE_NAME";; Version) echo "$FAKE_VERSION";; Architecture) echo "${FAKE_ARCH:-amd64}";; esac'
 fake dpkg '[ "$1" = --compare-versions ] && [ "$3" = gt ] && [ "$(printf "%s\n%s\n" "$2" "$4" | sort -V | tail -1)" = "$2" ] && [ "$2" != "$4" ]'
