@@ -99,7 +99,7 @@ export const MaintenanceSection = (): JSX.Element => {
         setStoreNote(null);
         setStoreBusy(true);
         try {
-            const result = await getApi().storeUpdate?.().catch(() => undefined);
+            const result = await getApi()?.approvals?.storeUpdate?.().catch(() => undefined);
             if (!result || result.outcome === "fallback") {
                 if (result?.message) setStoreNote(result.message);
                 void openLink(MS_STORE_PAGE_URL);
