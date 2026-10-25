@@ -39,7 +39,7 @@ The `[profile.dev] debug = "line-tables-only"` change (#5500) also makes new inc
 5. **A log** of every removal, one line each (time, reason, workspace, kind, bytes, path), in `~/.agentmux/logs/build-cache-cleanup.log`, and in srv's own log.
 6. **The disk check**, every 5 minutes, on the disk that holds `~/.agentmux/agents`. When the free space is below `warn_free_gb` (20 GB) or `warn_free_pct` (10%) of the disk, a cleanup pass runs at once. If it is still low, the owners of the three largest workspaces and their leaders (the seat's `lead`) get an `[AgentMux]` note naming the largest build folders, with sizes and the part that is incremental. At most one warning an hour per host: a file in `~/.agentmux/shared/locks/` keeps the time, so two AgentMux channels do not both warn. A warning nobody received does not use the hour up, but the walk over every build folder that prepares it waits 30 minutes before the next try.
 
-An isolated instance (`AGENTMUX_HOME_OVERRIDE`: a test or capture run) schedules nothing and cleans nothing.
+Only the installed release cleans (Kanban #4534). `~/.agentmux/agents` is shared by every AgentMux on the host, so a `task dev` build, a headless srv, a local package (channel `local-*`) or an isolated instance (`AGENTMUX_HOME_OVERRIDE`) would otherwise prune the real folder too: on one host a headless srv removed a stale target that way. srv decides from how it was started, not from a setting: it cleans only when its channel is `stable`, it was started by its launcher, its binary is not in a source-tree output folder, the runtime mode is not `dev`, it is not headless and has no home of its own. Anything else schedules nothing, cleans nothing and sends no warning.
 
 ## 4. Settings
 

@@ -43,6 +43,43 @@ pub fn agents_root() -> Option<PathBuf> {
     Some(dirs::home_dir()?.join(".agentmux").join("agents"))
 }
 
+/// How this srv was started, as far as the cleanup cares.
+#[derive(Default)]
+struct Start<'a> {
+    /// `AGENTMUX_HOME_OVERRIDE` is set: a test or capture instance with a home of its own.
+    own_home: bool,
+    /// `--headless` / `AGENTMUX_HEADLESS`: srv started directly, with no launcher.
+    headless: bool,
+    /// The binary sits in a source-tree output folder (`target/debug`, `target/release`, `dist/cef-dev*`),
+    /// whatever the environment it inherited says.
+    built_in_tree: bool,
+    /// The launcher's `AGENTMUX_RUNTIME_MODE` is `dev:<branch>`.
+    dev_mode: bool,
+    /// The data channel (`AGENTMUX_CHANNEL`): `stable` for a release, `local-<branch>` for a local
+    /// package, `dev-<branch>` for `task dev`.
+    channel: Option<&'a str>,
+}
+
+/// Whether this srv may clean the real agents' folder: only the installed release (channel
+/// `stable`, started by its launcher). A `task dev` build, a headless srv, a local package, or an
+/// instance with a home of its own shares `~/.agentmux/agents` with the real instance but is not
+/// the one that should prune it (Kanban #4534). Decided from how srv was started, not from a setting.
+fn may_clean(s: &Start) -> bool {
+    !s.own_home && !s.headless && !s.built_in_tree && !s.dev_mode && s.channel == Some("stable")
+}
+
+/// [`may_clean`] for this process.
+fn this_srv_may_clean() -> bool {
+    let channel = agentmux_common::DataPaths::from_env().map(|p| p.channel);
+    may_clean(&Start {
+        own_home: std::env::var_os("AGENTMUX_HOME_OVERRIDE").is_some_and(|v| !v.is_empty()),
+        headless: crate::headless::active() || crate::headless::requested(),
+        built_in_tree: agentmux_common::is_dev_self(),
+        dev_mode: matches!(agentmux_common::RuntimeMode::from_env(), Some(agentmux_common::RuntimeMode::Dev { .. })),
+        channel: channel.as_deref(),
+    })
+}
+
 /// Every folder directly in the agents' root.
 fn workspaces(root: &Path) -> Vec<PathBuf> {
     let mut out: Vec<PathBuf> = std::fs::read_dir(root)
@@ -263,7 +300,7 @@ fn disk_check(mstore: &Store, policy: &Policy) {
 /// An agent completed a task: clear its own clones' incremental folders. `agent` is the id the
 /// task was completed under. Runs in the background; never fails the completion.
 pub fn agent_task_done(mstore: Arc<Store>, config: Arc<ConfigState>, agent: String) {
-    if std::env::var_os("AGENTMUX_HOME_OVERRIDE").is_some_and(|v| !v.is_empty()) {
+    if !this_srv_may_clean() {
         return;
     }
     tokio::task::spawn_blocking(move || {
@@ -299,8 +336,10 @@ pub fn agent_task_done(mstore: Arc<Store>, config: Arc<ConfigState>, agent: Stri
 
 /// Starts the schedule. Safe to call once at boot.
 pub fn install(mstore: Arc<Store>, config: Arc<ConfigState>) {
-    // A test or capture instance (its own home) must not clean the real workspaces.
-    if std::env::var_os("AGENTMUX_HOME_OVERRIDE").is_some_and(|v| !v.is_empty()) {
+    // Only the installed release cleans the real workspaces: not a dev, headless, local-package or
+    // test instance (see `may_clean`).
+    if !this_srv_may_clean() {
+        tracing::debug!("build cache: not the installed release; no cleanup or disk warning from this srv");
         return;
     }
     tokio::spawn(async move {
@@ -395,5 +434,26 @@ mod tests {
     fn paths_compare_without_regard_to_case_slashes_or_a_trailing_one() {
         assert!(same_path(Path::new("C:\\Users\\a\\x\\"), Path::new("c:/users/a/x")));
         assert!(!same_path(Path::new("/a/x"), Path::new("/a/xy")));
+    }
+
+    #[test]
+    fn only_the_installed_release_may_clean_the_real_agents_folder() {
+        let installed = || Start { channel: Some("stable"), ..Default::default() };
+        assert!(may_clean(&installed()), "the installed release cleans");
+        // Each way of not being it, alone:
+        assert!(!may_clean(&Start { own_home: true, ..installed() }), "an instance with a home of its own");
+        assert!(!may_clean(&Start { headless: true, ..installed() }), "a headless srv");
+        assert!(!may_clean(&Start { built_in_tree: true, ..installed() }), "a binary from target/debug or target/release");
+        assert!(!may_clean(&Start { dev_mode: true, ..installed() }), "a task dev build");
+        assert!(!may_clean(&Start { channel: Some("local-loap-3-x"), ..installed() }), "a local package");
+        assert!(!may_clean(&Start { channel: Some("dev-main-0123456789abcdef"), ..installed() }), "a dev channel");
+        assert!(!may_clean(&Start { channel: None, ..installed() }), "no channel at all: not started by a launcher");
+        assert!(!may_clean(&Start::default()));
+    }
+
+    #[test]
+    fn this_test_binary_is_not_the_installed_release() {
+        // It runs from target/debug (or release), with no launcher: the real check refuses it.
+        assert!(!this_srv_may_clean());
     }
 }
