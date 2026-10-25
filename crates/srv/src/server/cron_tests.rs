@@ -425,7 +425,7 @@ async fn a_spawn_job_is_created_and_run_only_through_the_host() {
 
     let (status, v) = send(&state, Method::POST, None, "/agentmux/jobs", Some(spawn_definition("uid-jobs-owner"))).await;
     assert_eq!(status, StatusCode::FORBIDDEN, "even the instance key without a token: {v}");
-    assert!(v["error"].as_str().unwrap().contains("Jobs tab"), "{v}");
+    assert!(v["error"].as_str().unwrap().contains("operator's own host"), "{v}");
     let (status, _) = send(&state, Method::POST, Some(&owner), "/agentmux/jobs", Some(spawn_definition("uid-jobs-owner"))).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
     assert!(state.mstore.cron_list().unwrap().is_empty());
