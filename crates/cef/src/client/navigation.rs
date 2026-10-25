@@ -800,11 +800,7 @@ impl AgentMuxHandler {
         // back to the origin alone, as before; a pane is registered when it is created.
         let registered_as_pane = browser
             .as_deref()
-            .cloned()
-            .as_mut()
-            .and_then(|b| self.window_label_for(b))
-            .and_then(|label| self.state.browser_kind_for_label(&label))
-            .is_some_and(|kind| matches!(kind, crate::state::BrowserKind::Pane { .. } | crate::state::BrowserKind::Popup));
+            .is_some_and(|b| super::pane_frontend_guard::shows_web_pages(self.registered_kind(b).as_ref()));
         let should_inject =
             super::app_navigation::injects_ipc_credentials(&frame_url, &self.frontend_origins(), registered_as_pane);
         if registered_as_pane && super::app_navigation::is_frontend_address(&frame_url, &self.frontend_origins()) {

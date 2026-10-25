@@ -1145,27 +1145,6 @@ impl AgentMuxHandler {
             return 1; // cancel — do not let CEF hand this to the OS shell
         }
 
-        // A browser pane shows other sites, never AgentMux's own frontend: that page boots the
-        // whole app, and the host's credentials belong to the app's windows only.
-        if frame.as_ref().is_some_and(|f| f.is_main() == 1)
-            && !super::app_navigation::pane_may_load(&url, &self.frontend_origins())
-        {
-            tracing::warn!("on_before_browse: refused a browser-pane navigation to the app's own address");
-            if let Some(block_id) = browser
-                .as_deref()
-                .and_then(|b| crate::browser_pane::callbacks::resolve_pane_block_id(&self.state, b))
-            {
-                let payload = serde_json::json!({
-                    "block_id": block_id,
-                    "url": super::app_navigation::redact_ipc_token(&url),
-                    "sites": [],
-                    "why": "A browser pane can't open AgentMux's own pages.",
-                });
-                crate::events::emit_browser_pane_event(&self.state, &block_id, "browser-pane-notice", &payload);
-            }
-            return 1;
-        }
-
         // Track the pane-load watchdog HERE, not from `on_loading_state_change`
         // — `request.url()` is this navigation's own target, independent of
         // whatever the frame's last COMMITTED document was. Using
@@ -1186,7 +1165,7 @@ impl AgentMuxHandler {
         let is_main_frame = frame.as_ref().map(|f| f.is_main() == 1).unwrap_or(false);
         // Off an agent's site list: cancelled before anything below marks the
         // pane as loading (client/allowed_origins.rs).
-        if is_main_frame && browser.as_deref().is_some_and(|b| self.stop_off_list_navigation(b, &url)) {
+        if is_main_frame && browser.as_deref().is_some_and(|b| self.stop_frontend_navigation(b, &url) || self.stop_off_list_navigation(b, &url)) {
             return 1;
         }
         if is_main_frame {
