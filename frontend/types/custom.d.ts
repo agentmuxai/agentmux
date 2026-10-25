@@ -166,6 +166,8 @@ declare global {
          *  and Cancel. Relayed by the host, which srv trusts and agents can't
          *  impersonate; answers srv's update status after the action. */
         appUpdate?(action: "download" | "restart" | "cancel", now?: boolean): Promise<unknown>;
+        /** A Microsoft Store install: ask the Store to install the update; `fallback` means open the Store page instead. */
+        storeUpdate?(): Promise<{ outcome: "installed" | "canceled" | "none" | "fallback"; message: string }>;
         /** Forget the key a widget publisher is pinned to (Settings → Widgets),
          *  relayed by the host like an approval: forgetting lets another key pin
          *  that publisher. SPEC_WIDGET_SHARING_2026_10_10.md §2.3. */

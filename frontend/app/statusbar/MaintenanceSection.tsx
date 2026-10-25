@@ -42,6 +42,9 @@ export const MaintenanceSection = (): JSX.Element => {
         return d && d.total > 0 ? Math.floor((d.received * 100) / d.total) : 0;
     };
     const [startError, setStartError] = createSignal<string | null>(null);
+    // What the Store said about an update asked of it, and whether it is working on one.
+    const [storeNote, setStoreNote] = createSignal<string | null>(null);
+    const [storeBusy, setStoreBusy] = createSignal(false);
     const [checking, setChecking] = createSignal(false);
     const [checkError, setCheckError] = createSignal<string | null>(null);
     const handleCheck = () => {
@@ -86,6 +89,27 @@ export const MaintenanceSection = (): JSX.Element => {
     // the latest (which can't migrate this data), and a standalone build from the
     // page would sit beside the Store copy, not upgrade it.
     const storeBelowFloor = () => viaStore() && !!installFirst();
+    // Ask the Store to install the update (the host calls its API, which only a
+    // packaged install can use); when it can't, or the host has no such call,
+    // open the Store page as before. A refusal says why, a cancel or "not there
+    // yet" is just told.
+    const updateInStore = async () => {
+        if (storeBusy()) return;
+        setStartError(null);
+        setStoreNote(null);
+        setStoreBusy(true);
+        try {
+            const result = await getApi().storeUpdate?.().catch(() => undefined);
+            if (!result || result.outcome === "fallback") {
+                if (result?.message) setStoreNote(result.message);
+                void openLink(MS_STORE_PAGE_URL);
+            } else {
+                setStoreNote(result.message);
+            }
+        } finally {
+            setStoreBusy(false);
+        }
+    };
     const handleInstallUpdate = () => {
         const r = release();
         const first = installFirst();
@@ -96,7 +120,7 @@ export const MaintenanceSection = (): JSX.Element => {
         }
         if (r) {
             if (viaStore()) {
-                void openLink(MS_STORE_PAGE_URL);
+                void updateInStore();
                 return;
             }
             // srv downloads, verifies and unpacks what it can (a Windows
@@ -289,6 +313,12 @@ export const MaintenanceSection = (): JSX.Element => {
             </Show>
             <Show when={startError()}>
                 <div class="maintenance-row-text maintenance-row-text--error">{startError()}</div>
+            </Show>
+            <Show when={storeBusy()}>
+                <div class="maintenance-row-text maintenance-row-text--dim">Asking the Microsoft Store to install the update…</div>
+            </Show>
+            <Show when={storeNote()}>
+                <div class="maintenance-row-text maintenance-row-text--dim">{storeNote()}</div>
             </Show>
             <Show when={showNotes() && release() && appUpdate()?.notes}>
                 <pre class="maintenance-release-notes">{appUpdate()?.notes}</pre>

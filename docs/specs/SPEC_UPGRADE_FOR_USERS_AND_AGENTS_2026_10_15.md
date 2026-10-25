@@ -506,7 +506,14 @@ Each phase is small and useful on its own.
      the Store gets each release after GitHub does (the `.msix` is uploaded
      by hand). A Store install below the release's upgrade floor is offered nothing
      and told why: the Store installs only the latest, and a standalone build
-     would sit beside it. Installing through the Store API is not built.
+     would sit beside it. Installing through the Store API is built (2026-10-25,
+     `commands/store_update.rs`, task #88): the button asks the host to have the Store
+     download and install the update, and opens the Store page when the API refuses
+     (not a packaged install, an error); a cancel, a battery or Wi-Fi condition, or
+     "the Store doesn't have it yet" is told, not worked around. Not run against a
+     packaged install: the decision is unit-tested, the WinRT calls are type-checked.
+     Automated submission to Partner Center is not built (it needs credentials; the
+     operator's decision).
    - **3c** macOS, **3e** AppImage and Linux portable, **3g** `.deb`/`.rpm`.
 4. **Agents.**
    - **4a**: the `App` tool's `version` and `upgrade`, with the gate, the

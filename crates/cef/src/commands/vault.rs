@@ -83,7 +83,7 @@ fn verify_person_here(message: &str) -> Result<(), String> {
 
 /// The AgentMux window the person is using, else any of ours.
 #[cfg(target_os = "windows")]
-fn foreground_own_window() -> Option<isize> {
+pub(super) fn foreground_own_window() -> Option<isize> {
     use windows_sys::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
     unsafe {
         let fg = GetForegroundWindow();
