@@ -96,7 +96,7 @@ fetch() {
         return 127
     fi
 }
-LISTING=$(fetch "$REPO_API/v$VERSION") || die "can't read GitHub's listing of AgentMux $VERSION to check the file"
+LISTING=$(fetch "$REPO_API/v$VERSION") || die "can't read GitHub's listing of AgentMux $VERSION to check the file (no network, or GitHub is limiting requests); try again later"
 # The release listing is pretty-printed JSON: an asset's "name" line is followed by
 # its "digest" line ("sha256:<hex>").
 EXPECTED=$(printf '%s\n' "$LISTING" | awk -v n="\"name\": \"$NAME\"" '
