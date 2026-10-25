@@ -170,3 +170,20 @@ async fn an_agent_sends_back_with_a_reason() {
     assert_eq!((e.actor.as_str(), e.actor_kind.as_str()), (w.leader_slug.as_str(), "delegate"));
     assert!(e.body.contains("it misses the tests") && !e.body.contains("operator"), "{}", e.body);
 }
+
+#[tokio::test]
+async fn an_agent_cancels_through_the_route_as_itself() {
+    let w = world(None);
+    let (_, made) = w.post("/agentmux/work", json!({"title": "Drop me", "payload": "p", "target_agent": unique("someone")})).await;
+    let num = made["num"].as_i64().unwrap();
+    let (status, body) = w
+        .post("/agentmux/work/act", json!({"agent_id": w.leader_slug, "action": "cancel", "id": num.to_string(), "text": "not needed"}))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(w.state_of(num), work_state::CANCELLED);
+    let e = w.events(num).into_iter().find(|e| e.kind == "cancelled").expect("a cancelled line");
+    assert_eq!((e.actor.as_str(), e.actor_kind.as_str()), (w.leader_slug.as_str(), "agent"), "never the operator");
+    // Filing is `Tasks enqueue`, not the Kanban window's create.
+    let (_, body) = w.post("/agentmux/work/act", json!({"agent_id": w.leader_slug, "action": "create", "title": "x"})).await;
+    assert!(body["error"].as_str().unwrap_or_default().contains("Tasks enqueue"), "{body}");
+}

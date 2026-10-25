@@ -350,7 +350,7 @@ export function KanbanDrawer(props: {
                                 density="compact"
                                 icon="rotate-left"
                                 disabled={busy()}
-                                title={`${a().name} accepted it on your word. This puts it back in Review.`}
+                                title={`${a().name} accepted it. This puts it back in Review.`}
                                 onClick={() => void act({ action: "reopen", text: text() })}
                             >
                                 Reopen

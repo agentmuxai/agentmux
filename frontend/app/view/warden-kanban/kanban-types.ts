@@ -107,14 +107,14 @@ export interface KanbanTask {
     holder: KanbanAgent | null;
     /** Why that agent can't work, when it can't. */
     holder_unavailable?: KanbanUnavailable | null;
-    /** Set on a Done task a leader accepted on the operator's word, in the last 7 days (the operator can reopen it). */
+    /** Set on a Done task an agent accepted, in the last 7 days (the operator can reopen it). */
     accepted_by?: KanbanAcceptedBy | null;
 }
 
-/** A leader's acceptance, on the operator's word. */
+/** An agent's acceptance. */
 export interface KanbanAcceptedBy {
     name: string;
-    /** The history line's body: the operator's quoted words. */
+    /** The history line's body: the agent's note, and that it was its own work when it was. */
     said: string;
     at: number;
 }
