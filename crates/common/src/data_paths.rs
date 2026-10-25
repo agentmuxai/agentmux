@@ -867,7 +867,9 @@ pub use crate::muxbus_reconnect::{
 /// the wild and silently dropping either would move where a live install
 /// finds its data:
 ///
-/// - `AGENTMUX_HOME_OVERRIDE` — this module's own, used by tests.
+/// - `AGENTMUX_HOME_OVERRIDE` — this module's own, used by tests and by an
+///   isolated instance. It wins over `AGENTMUX_DATA_HOME`, except that a data
+///   home *inside* it (the version folder srv was started on) is the answer.
 /// - `AGENTMUX_DATA_HOME` — srv's own, read at startup and relied on by the
 ///   MSIX packaging path (`blockcontroller/shell/lifecycle.rs`). It is
 ///   deliberately **stripped** from pane environments, not exported into them:
@@ -880,6 +882,19 @@ pub use crate::muxbus_reconnect::{
 /// (`<root>/channels/<channel>/data`), not the root. The similar names are
 /// exactly why srv ended up with a second resolver.
 pub fn agentmux_root() -> Result<PathBuf, String> {
+    // An isolated instance (a root override) keeps the normal versioned layout:
+    // the launcher puts each version's data under `<override>/channels/<c>/versions/<v>/data`
+    // and srv, once started, names that folder in `AGENTMUX_DATA_HOME`. A data
+    // folder inside the override root is that one, so it is the answer, as it is
+    // without an override; otherwise two versions would share `<override>/db`
+    // and the carry-forward step would never run (task #3569). A data home
+    // outside the override root is an ambient leftover and still loses to it.
+    if let (Some(root), Some(data)) = (std::env::var_os("AGENTMUX_HOME_OVERRIDE"), std::env::var_os("AGENTMUX_DATA_HOME")) {
+        let (root, data) = (PathBuf::from(root), PathBuf::from(data));
+        if !root.as_os_str().is_empty() && !data.as_os_str().is_empty() && data != root && data.starts_with(&root) {
+            return Ok(data);
+        }
+    }
     // `var_os`: a root that isn't valid UTF-8 must not read as unset.
     for var in ["AGENTMUX_HOME_OVERRIDE", "AGENTMUX_DATA_HOME"] {
         if let Some(s) = std::env::var_os(var) {
@@ -1100,6 +1115,32 @@ mod tests {
         let got = agentmux_root().expect("root resolves");
         let want = dirs::home_dir().expect("home").join(".agentmux");
         assert_eq!(got, want);
+    }
+
+    /// An isolated instance keeps the versioned layout (task #3569): the data
+    /// folder srv was started on, inside the override root, is the answer.
+    /// One outside the root, or the root itself, is not.
+    #[test]
+    fn agentmux_root_follows_a_data_home_inside_the_override() {
+        let _lock = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let root = TempDir::new().expect("tempdir");
+        let outside = TempDir::new().expect("tempdir");
+        let version_dir = root.path().join("channels").join("x").join("versions").join("1.0.0").join("data");
+        std::env::set_var("AGENTMUX_HOME_OVERRIDE", root.path());
+        std::env::set_var("AGENTMUX_DATA_HOME", &version_dir);
+        let inside = agentmux_root().expect("root resolves");
+        std::env::set_var("AGENTMUX_DATA_HOME", outside.path());
+        let elsewhere = agentmux_root().expect("root resolves");
+        std::env::set_var("AGENTMUX_DATA_HOME", root.path());
+        let same = agentmux_root().expect("root resolves");
+        std::env::set_var("AGENTMUX_DATA_HOME", "");
+        let empty = agentmux_root().expect("root resolves");
+        std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
+        std::env::remove_var("AGENTMUX_DATA_HOME");
+        assert_eq!(inside, version_dir);
+        assert_eq!(elsewhere, root.path(), "an ambient data home outside the root loses");
+        assert_eq!(same, root.path());
+        assert_eq!(empty, root.path());
     }
 
     /// Precedence is documented, not accidental: HOME_OVERRIDE is this
