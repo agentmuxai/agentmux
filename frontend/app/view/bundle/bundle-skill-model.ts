@@ -6,13 +6,11 @@
  * Bundle editor, bundle-manager.tsx). Same shape as AgentSkillModel
  * (agent-skill-model.ts), keyed by bundle_id instead of agent_id.
  *
- * Binding an existing GLOBAL skill here has no effect on a spawned agent:
- * globals already reach every agent, bundle-bound or not (composable model
- * v2, docs/specs/SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md). The
- * functional path is `addPrivate`, which creates a brand-new private skill
- * scoped to this bundle, so every agent with the bundle gets it.
- * Bind/unbind of globals is still offered for parity with the agent-scoped
- * modal, and because it's harmless.
+ * Binding an existing GLOBAL skill here gives it to every agent with this
+ * bundle; a global skill nothing binds reaches no agent (composable model
+ * v2, docs/specs/SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md). `addPrivate`
+ * creates a brand-new private skill scoped to this bundle, which every agent
+ * with the bundle also gets.
  */
 
 import { createMemo, createSignal, type Accessor } from "solid-js";

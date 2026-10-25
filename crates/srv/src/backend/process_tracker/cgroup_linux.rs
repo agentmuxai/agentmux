@@ -385,6 +385,11 @@ system_usec 234567
         true
     }
 
+    /// The command lines of the tracker's members, as `list_members` reports them.
+    fn commands(tracker: &CgroupTracker) -> Vec<String> {
+        tracker.list_members().into_iter().map(|p| p.command).collect()
+    }
+
     /// The launcher's cleanup after srv died (`agent_roots::kill_orphans`):
     /// `cgroup.kill` ends an agent's CLI and whatever detached from it, and
     /// leaves the rest of srv's scope alone.
@@ -433,11 +438,16 @@ system_usec 234567
             "setsid sleep 3001 & (sleep 3002 &); sleep 3003 & echo started; wait",
             tracker.spawn_target(),
         );
-        assert!(wait_for(|| tracker.member_count() >= 4).await, "members: {:?}", tracker.pids());
-        let listed: Vec<String> = tracker.list_members().into_iter().map(|p| p.command).collect();
-        for s in ["sleep 3001", "sleep 3002", "sleep 3003"] {
-            assert!(listed.iter().any(|c| c == s), "{s} not listed in {listed:?}");
-        }
+        // Wait for the commands themselves, not for a member count: four members
+        // are reached while `setsid` has not yet exec'd into `sleep` (it then
+        // reads `setsid sleep 3001`).
+        let expected = ["sleep 3001", "sleep 3002", "sleep 3003"];
+        let all_listed = || {
+            let listed = commands(&tracker);
+            expected.iter().all(|s| listed.iter().any(|c| c == s))
+        };
+        assert!(wait_for(all_listed).await, "listed: {:?}", commands(&tracker));
+        assert!(tracker.member_count() >= 4, "members: {:?}", tracker.pids());
         tracker.kill_tree();
         assert!(wait_for(|| !populated(&tracker.dir)).await, "left: {:?}", tracker.pids());
         let _ = child.wait().await;
@@ -470,7 +480,14 @@ system_usec 234567
         let Some(root) = test_root().await else { return };
         let tracker = CgroupTracker::new(root, "test-terminate").unwrap();
         let _child = sh("setsid sleep 3011 & sleep 3012", tracker.spawn_target());
-        assert!(wait_for(|| tracker.member_count() >= 2).await);
+        // Wait for both sleeps, not for two members: `terminate` signals the
+        // members of the moment, and a `sleep` the shell forks just after it
+        // would outlive it.
+        let both_listed = || {
+            let listed = commands(&tracker);
+            ["sleep 3011", "sleep 3012"].iter().all(|s| listed.iter().any(|c| c == s))
+        };
+        assert!(wait_for(both_listed).await, "listed: {:?}", commands(&tracker));
         tracker.terminate();
         assert!(wait_for(|| tracker.member_count() == 0).await, "left: {:?}", tracker.pids());
     }
@@ -500,9 +517,12 @@ system_usec 234567
         let argv: Vec<String> = b.get_argv().iter().map(|a| a.to_string_lossy().into_owned()).collect();
         let mut child = tokio::process::Command::new(&argv[0]).args(&argv[1..]).kill_on_drop(true).spawn().unwrap();
         let pid = child.id().unwrap();
-        assert!(wait_for(|| tracker.pids() == vec![pid]).await, "members: {:?}", tracker.pids());
-        let listed = tracker.list_members();
-        assert_eq!(listed.first().map(|p| p.command.as_str()), Some("sleep 3041"), "exec'd in place");
+        // The wrapper joins the cgroup before it execs, so the member is first
+        // `/bin/sh -c echo 0 > ...` and only then `sleep 3041`: wait for the
+        // exec, in the same pid.
+        let exec_done = || tracker.list_members().first().is_some_and(|p| p.pid == pid && p.command == "sleep 3041");
+        assert!(wait_for(exec_done).await, "members: {:?}", commands(&tracker));
+        assert_eq!(tracker.pids(), vec![pid], "exec'd in place: no child process");
         tracker.kill_tree();
         let _ = child.wait().await;
     }
@@ -513,7 +533,9 @@ system_usec 234567
     async fn assign_after_spawn_and_kill_pid_only_members() {
         let Some(root) = test_root().await else { return };
         let tracker = CgroupTracker::new(root, "test-assign").unwrap();
-        let mut child = sh("sleep 3031", None);
+        // `exec`, so the shell is the sleep: dash forks a plain `sleep` either
+        // before or after the move below, and the member list would depend on which.
+        let mut child = sh("exec sleep 3031", None);
         let pid = child.id().unwrap();
         tracker.assign_process(pid).unwrap();
         assert_eq!(tracker.pids(), vec![pid]);

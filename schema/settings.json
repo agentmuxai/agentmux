@@ -661,6 +661,16 @@
           "default": 600000,
           "description": "The context size, in tokens, at which Claude agents compact automatically. AgentMux writes Claude Code's autoCompactWindow (this plus 33,000, between 100,000 and 1,000,000) into each Claude config dir it prepares, unless a person set their own value there; it takes effect when each agent next starts. 0 leaves Claude Code's own point, about 967,000 on a 1M window. See docs/specs/SPEC_AGENT_SELF_COMPACTION_2026_10_23.md §3.1."
         },
+        "agent:subagentmodel": {
+          "type": "string",
+          "default": "sonnet",
+          "description": "The model Claude agents' general-purpose sub-agents run on: sonnet, haiku, opus, a model ID, or inherit to leave Claude Code's own (the agent's model). AgentMux sets CLAUDE_CODE_SUBAGENT_MODEL when an agent starts, so a sub-agent that names its own model, or a model the agent passes per call, still wins. A pane's block meta agent:subagentmodel overrides it for that agent. See docs/specs/SPEC_SUBAGENT_MODELS_2026_10_25.md."
+        },
+        "agent:exploremodel": {
+          "type": "string",
+          "default": "haiku",
+          "description": "The model Claude agents' Explore sub-agents run on: haiku, sonnet, opus, a model ID, or inherit to remove AgentMux's Explore definition and leave Claude Code's built-in (the agent's model). AgentMux writes a user-level Explore agent into each Claude config dir it prepares, unless a person wrote one there. It takes effect when each agent next starts. See docs/specs/SPEC_SUBAGENT_MODELS_2026_10_25.md."
+        },
         "agent:compacthints": {
           "type": "boolean",
           "default": true,

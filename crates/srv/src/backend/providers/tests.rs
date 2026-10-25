@@ -632,6 +632,16 @@ mod prepare_provider_auth_dir_tests {
         prepare_provider_auth_dir(codex, &dir.to_string_lossy()).unwrap();
         assert!(dir.is_dir(), "auth dir must still be created");
         assert!(!dir.join("CLAUDE.md").exists(), "must not seed a foreign provider's dir");
+        assert!(!dir.join("agents").exists(), "nor give it a Claude sub-agent definition");
+    }
+
+    #[test]
+    fn a_claude_auth_dir_gets_the_managed_explore_agent() {
+        let base = tempfile::tempdir().unwrap();
+        let dir = base.path().join("claudehome");
+        prepare_provider_auth_dir(get_provider("claude").unwrap(), &dir.to_string_lossy()).unwrap();
+        let text = std::fs::read_to_string(dir.join("agents").join("Explore.md")).expect("Explore.md written");
+        assert!(text.contains("name: Explore") && text.contains("model: haiku"), "{text}");
     }
 
     #[test]

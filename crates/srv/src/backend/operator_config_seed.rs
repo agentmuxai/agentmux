@@ -6,7 +6,7 @@
 //! SYSTEM_TIER_2026_08_24.md for the isolation, docs/specs/SPEC_SYSTEM_
 //! TIER_GLOBAL_MEMORY_SEEDING_2026_09_15.md for this module's own design)
 //! in sync with a compiled-in manifest, every startup — not a one-time
-//! seed like `skill_seed.rs`/`mcp_seed.rs`, because stale Operator Config
+//! seed like `mcp_seed.rs`, because stale Operator Config
 //! (describing a since-changed MuxAPI) would actively mislead an agent
 //! rather than merely being absent.
 //!
