@@ -5,11 +5,13 @@ name: PR title names the agent
 # say which agent opened it, so its title must start with "<Agent>@<host>: ",
 # e.g. "Korp@narko: fix the toolbar". PRs from any other author pass.
 # That agent must also be the one the notices about the PR go to: the body's
-# last agent_id tag, which gh-agent writes. The
-# title's name matches the tag's id when they are the same name, or when the id
-# ends in "-<name>" (a fork: title "Loap-3", id "loap-loap-2-loap-3"). A renamed
-# agent whose title name is no longer part of its id starts the title with the
-# id, which gh-agent accepts as the agent's own. A body with no tag only warns.
+# last agent_id tag, which gh-agent writes, and without which they are dropped,
+# so a body with no tag fails. The title's name matches the tag's id when they
+# are the same name, or when the id ends in "-<name>" (a fork: title "Loap-3",
+# id "loap-loap-2-loap-3"). A renamed agent whose new name is no longer part of
+# its id also matches when the title's name is the name on the body's last
+# "Agent: <name>@<host>" line, which gh-agent writes from the same name; the
+# tag's id is still where the notices go.
 # Keep this file identical across agentmux, agentmux-docs, agentmux-landing and
 # agentmux-mobile. That includes the merge_group trigger and step: in a
 # repository without a merge queue the event never fires, so they're harmless
@@ -56,9 +58,8 @@ jobs:
             | sed -E 's/.*agent_id=([^[:space:]>]+)[[:space:]]*-->.*/\1/' \
             | grep -E '^[A-Za-z0-9_-]{1,64}$' | tail -n 1)
           if [ -z "$tag" ]; then
-            echo "::warning title=PR body has no agent tag::No agent_id tag in the body, so notices about this PR have no agent to reach. gh-agent adds it when it opens the PR."
-            echo "Title names the agent."
-            exit 0
+            echo "::error title=PR body has no agent tag::The body has no agent_id tag, so notices about this PR have no agent to reach. gh-agent adds it when it opens the PR. To add it by hand, end the body with a line of its own: an HTML comment holding agentmux:agent_id= and your agent id (the AGENTMUX_AGENT_ID of your environment), for example agentmux:agent_id=korp. This check re-runs on every edit."
+            exit 1
           fi
           name=$(printf '%s' "${TITLE%%@*}" | tr 'A-Z' 'a-z')
           id=$(printf '%s' "$tag" | tr 'A-Z' 'a-z')
@@ -66,5 +67,15 @@ jobs:
             echo "Title names the agent, and the body's last agent tag is the same agent ($tag)."
             exit 0
           fi
-          echo "::error title=PR title and agent tag name different agents::The title is signed by '${TITLE%%@*}' but the last agent_id tag in the body is '$tag', which is where notices about this PR go. Make them the same agent: fix the title, or put the right tag last in the body (a tag quoted in prose or in a code block counts too, so write it in words). A renamed agent whose name is no longer part of its id starts the title with the id. This check re-runs on every edit."
+          # A renamed agent: the title's name is the one on the body's last Agent line.
+          line=$(printf '%s\n' "$BODY" | tr -d '\r' \
+            | grep -E '^Agent: [A-Za-z0-9._-]+@[A-Za-z0-9._-]+[[:space:]]*$' | tail -n 1)
+          line=${line#Agent: }
+          lname=$(printf '%s' "${line%%@*}" | tr 'A-Z' 'a-z')
+          if [ -n "$lname" ] && [ "$name" = "$lname" ]; then
+            echo "::notice title=Title matches the Agent line::The title and the 'Agent:' line name ${TITLE%%@*}; notices go to the agent_id tag's agent ($tag)."
+            echo "Title names the agent, as the body's Agent line does."
+            exit 0
+          fi
+          echo "::error title=PR title and agent tag name different agents::The title is signed by '${TITLE%%@*}' but the last agent_id tag in the body is '$tag', which is where notices about this PR go. Make them the same agent: fix the title, or put the right tag last in the body (a tag quoted in prose or in a code block counts too, so write it in words). A renamed agent whose name is no longer part of its id keeps its new name in the title when the body's last 'Agent: <name>@<host>' line has the same name. This check re-runs on every edit."
           exit 1
