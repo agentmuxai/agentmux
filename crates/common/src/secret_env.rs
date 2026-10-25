@@ -11,10 +11,9 @@
 //! `ps eww` / `KERN_PROCARGS2` (macOS) read exactly that block, for any process
 //! of the same user. Wiping overwrites the value in place before removing it.
 //!
-//! On Windows `SetEnvironmentVariable` rewrites the live environment block, which
-//! is what another process reads, so removing it is enough there (the freed old
-//! block is not zeroed; keeping other processes out of this one's memory is the
-//! process's access control, not this module).
+//! On Windows `SetEnvironmentVariable` rewrites the process's live environment
+//! block, which is what another process reads, so removing the variable there
+//! is enough.
 //!
 //! The two startup secrets are moved out of the environment as the first thing
 //! srv and the host do ([`stash_startup_secrets`]), before they start anything,
