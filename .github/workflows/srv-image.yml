@@ -22,6 +22,8 @@ on:
       - '*/Cargo.toml'
       - 'crates/srv/**'
       - 'crates/common/**'
+      - 'crates/remote/**'
+      - 'crates/procstats/**'
       - 'crates/mcp/**'
       - 'crates/bashwrap/**'
       - 'schema/**'
