@@ -99,6 +99,7 @@ describe("WardenAuditManager — fleet-action reason display", () => {
                 message_length: 0,
             }),
             entry({ event_kind: "unregister", target_agent: "agent5", block_id: "12345678-0000", message_length: 0 }),
+            entry({ event_kind: "swept", target_agent: "agent6", block_id: "55667788-0000", message_length: 0 }),
         ]);
         render(() => <WardenAuditManager />);
 
@@ -109,5 +110,8 @@ describe("WardenAuditManager — fleet-action reason display", () => {
         const unregistered = screen.getByText("agent5").closest("li")!;
         expect(unregistered).toHaveTextContent("agent5 unregistered");
         expect(unregistered).toHaveTextContent("block 12345678");
+        const swept = screen.getByText("agent6").closest("li")!;
+        expect(swept).toHaveTextContent("agent6 swept");
+        expect(swept).not.toHaveTextContent("0b");
     });
 });

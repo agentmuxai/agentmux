@@ -16,7 +16,14 @@ import { fetchWardenAudit, WARDEN_AUDIT_LIMIT, type AuditEntry } from "./warden-
 import "@/app/view/warden-shared/warden-manager-chrome.scss";
 import "./warden-audit-manager.scss";
 
-const isRegistration = (entry: AuditEntry) => entry.event_kind === "register" || entry.event_kind === "unregister";
+/** What each non-delivery event reads as after the agent's name. */
+const REGISTRATION_VERBS: Record<string, string> = {
+    register: " registered",
+    unregister: " unregistered",
+    swept: " swept (its pane was gone)",
+};
+
+const isRegistration = (entry: AuditEntry) => entry.event_kind != null && entry.event_kind in REGISTRATION_VERBS;
 
 /** Which block it was, and whom a registration displaced: a same-host id collision shows here. */
 function registrationNote(entry: AuditEntry): string {
@@ -82,7 +89,7 @@ export const WardenAuditManager = (props: { visible?: boolean }): JSX.Element =>
                                             fallback={
                                                 <>
                                                     <span class="warden-manager-mono">{entry.target_agent}</span>
-                                                    {entry.event_kind === "register" ? " registered" : " unregistered"}
+                                                    {REGISTRATION_VERBS[entry.event_kind ?? ""]}
                                                 </>
                                             }
                                         >

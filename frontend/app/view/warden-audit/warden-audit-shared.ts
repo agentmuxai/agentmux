@@ -27,7 +27,7 @@ export interface AuditEntry {
     /** A caller's free-text note on a fleet or pane action (e.g. ClosePane's
      *  `reason`). */
     reason?: string;
-    /** "delivery" (default) | "register" | "unregister". The latter two are
+    /** "delivery" (default) | "register" | "unregister" | "swept". The latter two are
      *  agent registration and eviction bookkeeping (issue #2694): no message
      *  moved, so the feed words them as a registration, not a delivery. */
     event_kind?: string;
