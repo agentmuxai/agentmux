@@ -135,7 +135,7 @@ async fn handle_ipc(
     Json(req): Json<IpcRequest>,
 ) -> (StatusCode, Json<IpcResponse>) {
     // The operator's token opens every command; the forwarding token only the
-    // launcher's (ipc_forward.rs).
+    // launcher's (ipc_forward/mod.rs).
     let presented = headers.get("authorization").and_then(|v| v.to_str().ok()).and_then(|v| v.strip_prefix("Bearer "));
     let access = crate::ipc_forward::access_for(presented, &state.ipc_token, crate::ipc_forward::forward_token());
     if !crate::ipc_forward::allows(access, &req.cmd) {
