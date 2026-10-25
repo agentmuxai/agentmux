@@ -105,6 +105,12 @@ pub enum Staged {
     /// A macOS `.app`: replace it from the release's `.dmg` once this
     /// launcher has exited (`upgrade_macos`).
     MacDmg(crate::upgrade_macos::MacUpgrade),
+    /// A Linux `.deb` or `.rpm` install: the password was asked for and the
+    /// install helper is waiting for this launcher to quit
+    /// ([`crate::upgrade_package`]). Nothing is started after this exits: the
+    /// helper installs and its waiter starts AgentMux.
+    #[cfg(target_os = "linux")]
+    Package(crate::upgrade_package::PackageUpgrade),
 }
 
 impl std::fmt::Display for Staged {
@@ -114,6 +120,8 @@ impl std::fmt::Display for Staged {
             Staged::Launcher(launcher) => write!(f, "{}", launcher.display()),
             Staged::Installer { installer, .. } => write!(f, "{}", installer.display()),
             Staged::MacDmg(up) => write!(f, "{}", up.dmg.display()),
+            #[cfg(target_os = "linux")]
+            Staged::Package(up) => write!(f, "{}", up.installer.display()),
         }
     }
 }
@@ -145,6 +153,10 @@ pub fn staged(req: &UpgradeRequest, own_dir: &Path, data_dir: &Path, channel_dir
         // macOS: the release's `.dmg`, which replaces this `.app` (`upgrade_macos`).
         UpgradeTarget::Installer { installer, sha256 } if cfg!(target_os = "macos") => {
             crate::upgrade_macos::check_dmg(installer, sha256, &req.version, own_dir, data_dir, channel_dir).map(Staged::MacDmg)
+        }
+        // Linux `.deb`/`.rpm`: the package, installed by its helper (`upgrade_package`).
+        UpgradeTarget::Installer { installer, sha256 } if cfg!(target_os = "linux") => {
+            check_package(installer, sha256, &req.version, own_dir, data_dir)
         }
         UpgradeTarget::Launcher(launcher) if cfg!(target_os = "macos") => {
             Err(format!("{} isn't how a macOS install upgrades (it takes the release's .dmg)", launcher.display()))
@@ -194,6 +206,17 @@ pub fn staged(req: &UpgradeRequest, own_dir: &Path, data_dir: &Path, channel_dir
             Ok(Staged::Installer { installer: installer.clone(), sha256: sha256.clone(), own_dir: own_dir.to_path_buf() })
         }
     }
+}
+
+#[cfg(target_os = "linux")]
+fn check_package(installer: &Path, sha256: &str, version: &str, own_dir: &Path, data_dir: &Path) -> Result<Staged, String> {
+    crate::upgrade_package::check(installer, sha256, version, own_dir, data_dir, Path::new(crate::upgrade_package::INSTALL_BIN))
+        .map(Staged::Package)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn check_package(_: &Path, _: &str, _: &str, _: &Path, _: &Path) -> Result<Staged, String> {
+    Err("this AgentMux doesn't install .deb or .rpm packages".into())
 }
 
 /// Ask the user on a thread of its own, and call `on_yes` only for an
@@ -308,6 +331,7 @@ fn dismiss(thread: u32) {
 fn dismiss(thread: u32) {
     if thread != 0 {
         crate::upgrade_linux::dismiss();
+        crate::upgrade_package::dismiss();
     }
 }
 
@@ -400,13 +424,26 @@ fn confirm(version: &str, staged: &Staged, stopping: &[String]) -> bool {
 }
 
 /// Linux: zenity or kdialog (`upgrade_linux::confirm`). Shows the AppImage,
-/// or the portable's folder.
+/// or the portable's folder. For a `.deb` or `.rpm`, a Yes is followed by the
+/// desktop's password prompt (`upgrade_package::authorize`), and counts only
+/// once the install helper has accepted the file and is waiting for this
+/// launcher to quit.
 #[cfg(target_os = "linux")]
 fn confirm(version: &str, staged: &Staged, stopping: &[String]) -> bool {
+    let asked = Instant::now();
     let shown = match staged {
         Staged::Launcher(p) if p.file_name().is_some_and(|n| n == "agentmux.sh") => p.parent().unwrap_or(p),
         Staged::Launcher(p) | Staged::Installer { installer: p, .. } => p.as_path(),
         Staged::MacDmg(up) => up.dmg.as_path(),
+        Staged::Package(up) => {
+            let question = crate::upgrade_package::question(up, &stopping_paragraph(stopping));
+            if !crate::upgrade_linux::confirm(DIALOG_TITLE, &question) {
+                return false;
+            }
+            // The answer counts for ANSWER_WITHIN from the question: leave the password prompt the rest.
+            let within = ANSWER_WITHIN.saturating_sub(asked.elapsed() + Duration::from_secs(5));
+            return crate::upgrade_package::authorize(up, std::process::id(), within);
+        }
     };
     crate::upgrade_linux::confirm(DIALOG_TITLE, &restart_question(version, shown, stopping))
 }
@@ -509,6 +546,28 @@ fn env_to_strip(vars: impl IntoIterator<Item = std::ffi::OsString>) -> Vec<std::
         .collect()
 }
 
+/// What a process started to bring AgentMux back up gets for an environment:
+/// `vars` (this process's), less what the next version must not inherit
+/// ([`env_to_strip`], [`crate::upgrade_linux::NOT_INHERITED`]), and on Unix
+/// AppImageLauncher off.
+pub(crate) fn restart_env(cmd: &mut std::process::Command, vars: impl IntoIterator<Item = (std::ffi::OsString, std::ffi::OsString)>) {
+    let inherited: Vec<_> = vars.into_iter().collect();
+    // What the child starts with is this process's environment, less the
+    // stripped; setting the given variables first makes that explicit.
+    cmd.envs(inherited.iter().map(|(k, v)| (k, v)));
+    for key in env_to_strip(inherited.iter().map(|(k, _)| k.clone())) {
+        cmd.env_remove(key);
+    }
+    #[cfg(unix)]
+    {
+        for key in crate::upgrade_linux::NOT_INHERITED {
+            cmd.env_remove(key);
+        }
+        let (key, value) = crate::upgrade_linux::APPIMAGELAUNCHER_OFF;
+        cmd.env(key, value);
+    }
+}
+
 /// Restart into `staged`, detached, without this AgentMux's own environment
 /// except where it keeps its data ([`KEPT_ENV`]).
 ///
@@ -524,7 +583,6 @@ pub fn relaunch(staged: &Staged) -> std::io::Result<()> {
 /// what the old launcher had without changing this process's.
 fn relaunch_with_env(staged: &Staged, inherited: impl IntoIterator<Item = (std::ffi::OsString, std::ffi::OsString)>) -> std::io::Result<()> {
     use agentmux_common::win32::NoWindow;
-    let inherited: Vec<_> = inherited.into_iter().collect();
     let mut cmd = match staged {
         Staged::Launcher(launcher) => {
             let mut c = std::process::Command::new(launcher);
@@ -541,21 +599,14 @@ fn relaunch_with_env(staged: &Staged, inherited: impl IntoIterator<Item = (std::
                 .arg(encoded_command(&installer_script(installer, sha256, own_dir)));
             c
         }
+        // Already running: the install helper's waiter, started when the user agreed, starts AgentMux.
+        #[cfg(target_os = "linux")]
+        Staged::Package(_) => return Ok(()),
     };
-    // What the child starts with is this process's environment, less the
-    // stripped; setting the given variables first makes that explicit.
-    cmd.envs(inherited.iter().map(|(k, v)| (k, v)));
-    for key in env_to_strip(inherited.iter().map(|(k, _)| k.clone())) {
-        cmd.env_remove(key);
-    }
+    restart_env(&mut cmd, inherited);
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
-        for key in crate::upgrade_linux::NOT_INHERITED {
-            cmd.env_remove(key);
-        }
-        let (key, value) = crate::upgrade_linux::APPIMAGELAUNCHER_OFF;
-        cmd.env(key, value);
         // Its own process group: it outlives this launcher, and a signal to
         // this one's group never reaches it.
         cmd.process_group(0);
@@ -572,7 +623,7 @@ fn relaunch_with_env(staged: &Staged, inherited: impl IntoIterator<Item = (std::
 mod tests {
     use super::*;
 
-    #[cfg_attr(target_os = "macos", allow(dead_code))]
+    #[cfg_attr(not(windows), allow(dead_code))]
     fn portable(dir: &Path, version: &str) -> PathBuf {
         std::fs::create_dir_all(dir.join("runtime")).unwrap();
         std::fs::write(dir.join("runtime/agentmux-portable.marker"), b"").unwrap();
@@ -702,8 +753,9 @@ echo \"PROBE=$AGENTMUX_QTEST_PROBE\" >> '{0}'
         assert!(staged(&req("0.59.27", &new), &installed, &data, &data, "0.59.26").is_err());
     }
 
-    // On macOS an installer is the release's .dmg (upgrade_macos's tests).
-    #[cfg(not(target_os = "macos"))]
+    // On macOS an installer is the release's .dmg (upgrade_macos's tests), on
+    // Linux the .deb or .rpm (upgrade_package's).
+    #[cfg(windows)]
     #[test]
     fn only_that_versions_installer_in_this_versions_updates_runs_on_a_setup_install() {
         let root = tempfile::tempdir().unwrap();
@@ -743,6 +795,22 @@ echo \"PROBE=$AGENTMUX_QTEST_PROBE\" >> '{0}'
         let portable_dir = root.path().join("agentmux-0.59.26-x64-portable");
         portable(&portable_dir, "0.59.26");
         assert!(staged(&setup_req("0.59.27", &installer), &portable_dir, &data, &data, "0.59.26").is_err());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_package_is_only_installed_over_the_package_install() {
+        let root = tempfile::tempdir().unwrap();
+        let data = root.path().join("data");
+        let updates = data.join("updates/0.59.27");
+        std::fs::create_dir_all(&updates).unwrap();
+        let installer = updates.join("AgentMux_0.59.27_amd64.deb");
+        std::fs::write(&installer, b"").unwrap();
+        // This launcher isn't in /opt/agentmux/bin (a portable, an AppImage, a dev build).
+        let err = staged(&setup_req("0.59.27", &installer), root.path(), &data, &data, "0.59.26").unwrap_err();
+        assert!(err.contains("isn't a .deb or .rpm install"), "{err}");
+        // Not newer: refused before anything else.
+        assert!(staged(&setup_req("0.59.27", &installer), root.path(), &data, &data, "0.59.27").is_err());
     }
 
     #[test]

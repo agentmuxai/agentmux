@@ -115,7 +115,7 @@ fn set(version: &str, state: &str, received: u64, total: u64, error: Option<Stri
 enum Job {
     /// A new portable folder beside `root`'s.
     Portable(PathBuf),
-    /// A `setup.exe` installer (or a macOS `.dmg`) in `updates/<version>/`.
+    /// A `setup.exe` installer (a macOS `.dmg`, a Linux `.deb` or `.rpm`) in `updates/<version>/`.
     Installer,
     /// The next AppImage beside this one.
     AppImage(PathBuf),
@@ -138,7 +138,9 @@ pub fn start() -> Result<AppUpdateStatus, String> {
         InstallKind::WindowsPortable { root } | InstallKind::LinuxPortable { root } => Job::Portable(root),
         // A macOS app's .dmg is staged like a setup.exe installer; the
         // launcher mounts it and swaps the app after the quit.
-        InstallKind::WindowsSetup | InstallKind::MacApp { blocked: None, .. } => Job::Installer,
+        // A `.deb`/`.rpm` is staged like a setup.exe installer too; the launcher asks
+        // for permission with polkit, and its helper installs it.
+        InstallKind::WindowsSetup | InstallKind::MacApp { blocked: None, .. } | InstallKind::LinuxPackage { .. } => Job::Installer,
         InstallKind::LinuxAppImage => match std::env::current_exe()
             .ok()
             .and_then(|exe| agentmux_common::runtime_mode::running_appimage(&exe))
@@ -189,7 +191,7 @@ pub fn start() -> Result<AppUpdateStatus, String> {
 /// `updates/` in this version's data folder: `AGENTMUX_DATA_DIR`, the very
 /// folder the launcher checks a staged installer against
 /// (`crates/launcher/src/upgrade_restart.rs`), not a root of srv's own.
-fn updates_root() -> PathBuf {
+pub(crate) fn updates_root() -> PathBuf {
     agentmux_common::DataPaths::from_env()
         .map(|p| p.data_dir)
         .unwrap_or_else(crate::backend::base::get_mux_data_dir)

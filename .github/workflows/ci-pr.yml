@@ -693,6 +693,13 @@ jobs:
       - name: macOS srv signing identity check self-test
         run: bash scripts/verify-srv-identity-darwin.test.sh
 
+      # The root helper behind a .deb/.rpm's in-app upgrade runs as root on a file a
+      # user process names: these are the ways it could install the wrong one.
+      # Fake dpkg/rpm/apt and a fake GitHub listing; needs no root.
+      # docs/specs/SPEC_LINUX_PACKAGE_UPGRADE_AND_REPOSITORY_2026_10_24.md
+      - name: Linux package install helper self-test
+        run: bash scripts/agentmux-install-update.test.sh
+
       # Hash files from stdin, never by name: given a path containing `\` (every
       # Windows path), coreutils prefixes the hash with `\` and a pin check
       # refuses the right file -- the guard above did, for the correct r2 runtime.

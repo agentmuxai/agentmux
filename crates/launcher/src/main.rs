@@ -58,6 +58,9 @@ mod upgrade;
 mod upgrade_restart;
 // Linux's "Upgrade & restart": its targets, its dialog (upgrade_restart.rs).
 mod upgrade_linux;
+// Linux's .deb/.rpm upgrade: the password prompt and the install helper (upgrade_restart.rs).
+#[cfg(target_os = "linux")]
+mod upgrade_package;
 // macOS's "Upgrade & restart": the .dmg, its dialog and the swap
 // (upgrade_restart.rs); the pure parts build and are tested everywhere.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]

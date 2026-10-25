@@ -23,7 +23,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
 
-use agentmux_common::srv_stderr::{UpgradeTarget, UPGRADE_DECLINED_FILE};
+use agentmux_common::srv_stderr::{UpgradeTarget, INSTALL_RESULT_FILE, UPGRADE_DECLINED_FILE};
 
 use crate::backend::update_check::{self, AppUpdateStatus, DownloadStatus};
 
@@ -159,6 +159,26 @@ fn declined_file() -> Option<PathBuf> {
         .map(|d| PathBuf::from(d).join("updates").join(UPGRADE_DECLINED_FILE))
 }
 
+/// Why a `.deb`/`.rpm` upgrade to `version` didn't happen, as the launcher
+/// left it in `updates/<version>/` ([`INSTALL_RESULT_FILE`]): the password was
+/// refused or couldn't be asked for, the file failed its checks, or the install
+/// failed. Taken out as it is read, and ignored when it is for another version
+/// or a day old, so an old attempt can't speak for a new one.
+pub(crate) fn take_install_failure(updates: &Path, version: &str) -> Option<String> {
+    let file = updates.join(version).join(INSTALL_RESULT_FILE);
+    let fresh = std::fs::metadata(&file)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.elapsed().ok())
+        .is_some_and(|age| age < Duration::from_secs(24 * 60 * 60));
+    let text = std::fs::read_to_string(&file).ok()?;
+    let _ = std::fs::remove_file(&file);
+    let json: serde_json::Value = serde_json::from_str(&text).ok()?;
+    // The file is the user's to write: one line, so a stray process can't put a paragraph in the panel.
+    let error: String = json.get("error")?.as_str()?.lines().next().unwrap_or("").trim().chars().take(300).collect();
+    (fresh && json.get("version")?.as_str()? == version && !error.is_empty()).then(|| format!("The install didn't finish: {error}"))
+}
+
 /// Whether the launcher answered No (or the question lapsed) for `version`:
 /// `file` names it. Each request clears the file before it asks and each answer
 /// is taken out as it is read, so one left by an earlier attempt can't answer a
@@ -216,6 +236,12 @@ async fn run(run_id: u64, d: DownloadStatus, target: UpgradeTarget, now: bool) {
         if !if_current(run_id, || {}) {
             return;
         }
+        // A `.deb`/`.rpm` upgrade the launcher couldn't start: it says why.
+        if let Some(why) = take_install_failure(&crate::backend::update_download::updates_root(), &d.version) {
+            tracing::info!(version = %d.version, %why, "upgrade: the package install didn't start");
+            if_current(run_id, || set(&d, "ready", 0, Some(why), Vec::new()));
+            return;
+        }
         if declined.as_deref().is_some_and(|f| take_declined(f, &d.version)) {
             tracing::info!(version = %d.version, "upgrade: the restart was declined");
             if_current(run_id, || set(&d, "ready", 0, None, Vec::new()));
@@ -266,6 +292,34 @@ mod tests {
             waiting_for: 0,
             stopping: Vec::new(),
         }
+    }
+
+    #[test]
+    fn an_install_failure_is_read_once_for_its_version_and_says_why() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("0.60.2");
+        std::fs::create_dir_all(&folder).unwrap();
+        let file = folder.join(INSTALL_RESULT_FILE);
+        assert_eq!(take_install_failure(dir.path(), "0.60.2"), None, "nothing left");
+        std::fs::write(&file, r#"{"version": "0.60.2", "error": "dnf couldn't install the package"}"#).unwrap();
+        assert_eq!(take_install_failure(dir.path(), "0.60.1"), None, "another version has no folder");
+        assert_eq!(
+            take_install_failure(dir.path(), "0.60.2").as_deref(),
+            Some("The install didn't finish: dnf couldn't install the package")
+        );
+        assert!(!file.exists(), "taken out as it is read");
+        // For another version than its folder's, or without a reason: nothing to say.
+        std::fs::write(&file, r#"{"version": "0.60.9", "error": "x"}"#).unwrap();
+        assert_eq!(take_install_failure(dir.path(), "0.60.2"), None);
+        std::fs::write(&file, r#"{"version": "0.60.2", "error": " "}"#).unwrap();
+        assert_eq!(take_install_failure(dir.path(), "0.60.2"), None);
+        std::fs::write(&file, "not json").unwrap();
+        assert_eq!(take_install_failure(dir.path(), "0.60.2"), None);
+        // The file is the user's to write: the panel gets one short line of it.
+        let long = format!("{}\nsecond line", "x".repeat(500));
+        std::fs::write(&file, serde_json::json!({ "version": "0.60.2", "error": long }).to_string()).unwrap();
+        let said = take_install_failure(dir.path(), "0.60.2").unwrap();
+        assert_eq!(said, format!("The install didn't finish: {}", "x".repeat(300)));
     }
 
     #[test]

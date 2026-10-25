@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<!-- The one thing AgentMux asks the system's administrator for: installing its own
+     update, from the app's "Upgrade & restart" (agentmux-install-update, which
+     checks the file itself). Asked every time: no cached authorisation
+     (auth_admin, not auth_admin_keep), and never without a person at the desktop.
+     docs/specs/SPEC_LINUX_PACKAGE_UPGRADE_AND_REPOSITORY_2026_10_24.md §3.3 -->
+<policyconfig>
+  <vendor>AgentMux</vendor>
+  <vendor_url>https://agentmux.ai</vendor_url>
+  <action id="ai.agentmux.install-update">
+    <description>Install an AgentMux update</description>
+    <message>Authentication is required to install an AgentMux update</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/opt/agentmux/bin/agentmux-install-update</annotate>
+  </action>
+</policyconfig>

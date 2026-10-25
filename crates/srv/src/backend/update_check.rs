@@ -586,6 +586,25 @@ fn pinned_by_upgrade(cur: &AppUpdateStatus, next: &AppUpdateStatus) -> Option<St
 /// pins the release on offer ([`pinned_by_upgrade`]). A new check keeps a
 /// download of the release it still reports.
 fn publish_check(event_bus: &crate::backend::eventbus::EventBus, next: AppUpdateStatus) {
+    // Read (and removed) once, here: the closure below may run more than once.
+    let install_failure = match (&next.latest, matches!(install_kind(), InstallKind::LinuxPackage { .. })) {
+        (Some(version), true) if next.state == "available" && next.download.is_none() => {
+            crate::backend::update_restart::take_install_failure(&crate::backend::update_download::updates_root(), version).map(|error| {
+                DownloadStatus {
+                    version: version.clone(),
+                    state: "failed".into(),
+                    received: 0,
+                    total: 0,
+                    error: Some(error),
+                    folder: None,
+                    installer: None,
+                    waiting_for: 0,
+                    stopping: Vec::new(),
+                }
+            })
+        }
+        _ => None,
+    };
     update(event_bus, |cur| {
         if let Some(version) = pinned_by_upgrade(cur, &next) {
             tracing::info!(latest = ?next.latest, version, "update check: a newer release is out; the upgrade under way finishes first");
@@ -594,6 +613,11 @@ fn publish_check(event_bus: &crate::backend::eventbus::EventBus, next: AppUpdate
         let mut next = next.clone();
         if next.download.is_none() && next.latest.is_some() && next.latest == cur.latest {
             next.download = cur.download.clone();
+        }
+        // A `.deb`/`.rpm` upgrade that didn't finish left its reason (the old version
+        // runs again): the panel says why, rather than offering it as if untried.
+        if next.download.is_none() {
+            next.download = install_failure.clone();
         }
         Some(next)
     });
