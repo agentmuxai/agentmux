@@ -21,7 +21,7 @@ mod build_slot;
 mod identity;
 mod instance;
 mod session;
-mod seat;
+pub(crate) mod seat;
 #[cfg(test)]
 mod transcript_write_tests;
 pub(crate) mod bundle;
