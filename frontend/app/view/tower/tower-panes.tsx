@@ -80,8 +80,8 @@ export function PanesView(props: { model: TowerViewModel; cpu: Cpu }): JSX.Eleme
                             <tr>
                                 <th>Pane</th>
                                 <th>State</th>
-                                <th class="tower-num">CPU</th>
                                 <th class="tower-num">Memory</th>
+                                <th class="tower-num">CPU</th>
                             </tr>
                         </thead>
                         <tbody>
