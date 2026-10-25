@@ -14,8 +14,11 @@
 //! Calls to the same tool still run in the order they arrived (a `type` and a
 //! `read` of the same shell mean something in order); calls to different tools
 //! don't wait for each other. A call that outlives its deadline is answered
-//! with an error and given up on; if it was stuck in blocking code its thread
-//! stays stuck, but the loop doesn't.
+//! with an error and given up on (and so is a call that is cancelled): its
+//! future is dropped, which stops async work at its next await. A call stuck in
+//! blocking code can't be stopped, so its thread stays stuck, but the loop
+//! doesn't, and its tool's queue moves on without it: the order holds among
+//! the calls still being waited for.
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -115,7 +118,7 @@ impl Health {
         self.threads.load(Ordering::Relaxed)
     }
 
-    fn begin(&self, key: String, tool: String) {
+    pub(crate) fn begin(&self, key: String, tool: String) {
         self.inflight
             .lock()
             .unwrap()
@@ -159,6 +162,22 @@ fn error_result(id: &Value, text: String) -> Value {
 
 fn text_result(id: &Value, text: String) -> Value {
     json!({ "jsonrpc": "2.0", "id": id, "result": { "content": [{"type": "text", "text": text}], "isError": false } })
+}
+
+/// One call thread in [`Health`]'s count, until it ends.
+struct ThreadCount(Arc<Health>);
+
+impl ThreadCount {
+    fn start(health: Arc<Health>) -> Self {
+        health.threads_start();
+        Self(health)
+    }
+}
+
+impl Drop for ThreadCount {
+    fn drop(&mut self) {
+        self.0.threads_end();
+    }
 }
 
 /// The per-tool queues: calls to one tool run in arrival order.
@@ -269,25 +288,34 @@ pub(crate) async fn serve<R, W>(
                     let work = async {
                         let _turn = queue.lock().await;
                         let (done_tx, done_rx) = tokio::sync::oneshot::channel();
+                        // Dropped with `work` (the deadline, a cancel): the thread
+                        // then drops the call's future instead of running it on.
+                        let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
+                        let _cancel = cancel_tx;
                         let (runner, params) = (Arc::clone(&runner), params);
-                        let threads = Arc::clone(&health);
-                        threads.threads_start();
+                        // Counts the thread until it ends, a panic included (or
+                        // until the spawn fails and drops this with the closure).
+                        let counted = ThreadCount::start(Arc::clone(&health));
                         let spawned = std::thread::Builder::new()
                             .name(format!("mcp-call-{tool}"))
                             .stack_size(4 << 20)
                             .spawn(move || {
-                                let result = handle.block_on(runner.run(params));
-                                threads.threads_end();
-                                let _ = done_tx.send(result);
+                                let _counted = counted;
+                                let result = handle.block_on(async {
+                                    tokio::select! {
+                                        result = runner.run(params) => Some(result),
+                                        _ = cancel_rx => None,
+                                    }
+                                });
+                                if let Some(result) = result {
+                                    let _ = done_tx.send(result);
+                                }
                             });
                         match spawned {
                             Ok(_) => done_rx
                                 .await
                                 .map_err(|_| "the call stopped without an answer".to_string()),
-                            Err(e) => {
-                                health.threads_end();
-                                Err(format!("couldn't start a thread for the call: {e}"))
-                            }
+                            Err(e) => Err(format!("couldn't start a thread for the call: {e}")),
                         }
                     };
                     let answer = match tokio::time::timeout(deadline, work).await {
@@ -302,7 +330,7 @@ pub(crate) async fn serve<R, W>(
                             error_result(
                                 &id,
                                 format!(
-                                    "{tool} didn't finish within {} s, so it was given up on and your other tools keep working.                                      The work may still be running: check before you repeat it.",
+                                    "{tool} didn't finish within {} s, so it was given up on and your other tools keep working. The work may still be running: check before you repeat it.",
                                     deadline.as_secs()
                                 ),
                             )

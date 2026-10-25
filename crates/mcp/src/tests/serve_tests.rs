@@ -16,6 +16,16 @@ struct Rig {
     to_server: tokio::io::DuplexStream,
     from_server: BufReader<tokio::io::DuplexStream>,
     health: Arc<Health>,
+    /// Set when a "Track" call's future is dropped.
+    dropped: Arc<std::sync::atomic::AtomicBool>,
+}
+
+struct SetOnDrop(Arc<std::sync::atomic::AtomicBool>);
+
+impl Drop for SetOnDrop {
+    fn drop(&mut self) {
+        self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
 }
 
 fn rig() -> Rig {
@@ -23,11 +33,19 @@ fn rig() -> Rig {
     let (server_out, from_server) = duplex(64 * 1024);
     let health = Health::new();
     let started = Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let dropped = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let dropped_by_runner = Arc::clone(&dropped);
     let runner: Arc<dyn ToolRunner> = Arc::new(move |params: Value| -> CallFuture {
         let name = params["name"].as_str().unwrap_or("").to_string();
         let started = Arc::clone(&started);
+        let dropped = Arc::clone(&dropped_by_runner);
         Box::pin(async move {
             match name.as_str() {
+                // Async work that never ends, and says when it is dropped.
+                "Track" => {
+                    let _flag = SetOnDrop(dropped);
+                    std::future::pending::<CallResult>().await
+                }
                 "Hang" => std::future::pending::<CallResult>().await,
                 "Slow" => {
                     let n = started.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -61,6 +79,7 @@ fn rig() -> Rig {
         to_server,
         from_server: BufReader::new(from_server),
         health,
+        dropped,
     }
 }
 
@@ -271,4 +290,68 @@ fn the_runtime_lag_grows_when_the_tick_stops() {
     assert!(h.runtime_lag_ms() >= 100);
     h.tick();
     assert!(h.runtime_lag_ms() < 100);
+}
+
+async fn until(what: &str, mut ok: impl FnMut() -> bool) {
+    for _ in 0..100 {
+        if ok() {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    panic!("{what}");
+}
+
+#[tokio::test]
+async fn a_call_that_hit_its_deadline_is_dropped_not_left_running() {
+    let mut r = rig();
+    r.call(1, "Track", "").await;
+    let answer = r.next().await;
+    assert_eq!(answer["result"]["isError"], true);
+    let text = Rig::text(&answer);
+    assert!(
+        !text.contains("  "),
+        "a run of spaces in the error: {text:?}"
+    );
+    let dropped = Arc::clone(&r.dropped);
+    until("the call's future was never dropped", || {
+        dropped.load(std::sync::atomic::Ordering::SeqCst)
+    })
+    .await;
+    let health = Arc::clone(&r.health);
+    until("the call's thread never ended", || {
+        health.call_threads() == 0
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn a_cancelled_call_is_dropped_not_left_running() {
+    let mut r = rig();
+    r.call(1, "Track", "").await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    r.send(json!({ "jsonrpc": "2.0", "method": "notifications/cancelled", "params": { "requestId": 1 } }))
+        .await;
+    let dropped = Arc::clone(&r.dropped);
+    until("the cancelled call's future was never dropped", || {
+        dropped.load(std::sync::atomic::Ordering::SeqCst)
+    })
+    .await;
+    let health = Arc::clone(&r.health);
+    until("the cancelled call's thread never ended", || {
+        health.call_threads() == 0
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn a_panicking_call_is_no_longer_counted_as_a_thread() {
+    let mut r = rig();
+    r.call(1, "Boom", "").await;
+    assert_eq!(r.next().await["result"]["isError"], true);
+    let health = Arc::clone(&r.health);
+    until("the panicked call's thread is still counted", || {
+        health.call_threads() == 0
+    })
+    .await;
 }
