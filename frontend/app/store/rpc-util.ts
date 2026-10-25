@@ -10,6 +10,8 @@ import { addWSReconnectHandler, globalWS, initGlobalWS, WSControl } from "./ws";
 import { DefaultRouter, setDefaultRouter } from "./rpc-util-base";
 import { getApi } from "./global";
 import { noteSrvConnectionOpened, noteSrvInfoMessage } from "./srv-info";
+import { expectOperatorProof, proveOperatorConnection } from "./operator-proof";
+import { RpcApi } from "./rpc-api";
 
 let TabRpcClient: TabClient;
 
@@ -31,6 +33,16 @@ function initWshrpc(tabId: string): WSControl {
     initGlobalWS(getWSServerEndpoint(), tabId, handleFn, authOpts);
     // Each connection reports its own srvinfo (a reconnect can reach another srv).
     addWSReconnectHandler(noteSrvConnectionOpened);
+    // Each connection proves, through the host, that it is the operator's
+    // window: operator-only RPCs are refused until it has.
+    if (getApi().approvals?.attestOperator) expectOperatorProof();
+    addWSReconnectHandler(() => {
+        const attest = getApi().approvals?.attestOperator;
+        void proveOperatorConnection({
+            challenge: () => RpcApi.OperatorChallengeCommand(TabRpcClient),
+            attest: attest ? (nonce) => attest.call(getApi().approvals, nonce) : undefined,
+        });
+    });
     globalWS.connectNow("connectWshrpc");
     TabRpcClient = new TabClient(makeTabRouteId(tabId));
     DefaultRouter.registerRoute(TabRpcClient.routeId, TabRpcClient);

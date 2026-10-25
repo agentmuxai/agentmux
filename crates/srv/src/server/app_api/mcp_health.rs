@@ -80,3 +80,33 @@ pub(crate) async fn handle_mcp_heal(
         Err(why) => Json(json!({ "status": why })).into_response(),
     }
 }
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct BeatRequest {
+    agent: String,
+    #[serde(flatten)]
+    beat: crate::backend::mcp_health::Beat,
+}
+
+/// `POST /api/v1/agent/self/mcp-beat`: the MCP process says it is alive and
+/// how it is doing (`agentmux-mcp`'s heartbeat.rs). 204 always for a known
+/// pane: a beat is never worth an error in the MCP process.
+pub(crate) async fn handle_mcp_beat(
+    State(state): State<AppState>,
+    caller: Option<Extension<Caller>>,
+    Json(req): Json<BeatRequest>,
+) -> Response {
+    use crate::backend::blockcontroller::persistent::PersistentSubprocessController;
+    let Some(block_id) = own_pane(&state, caller.as_deref(), &req.agent) else {
+        return no_pane();
+    };
+    if let Some(ctrl) = crate::backend::blockcontroller::get_controller(&block_id) {
+        if let Some(ctrl) = ctrl
+            .as_any()
+            .downcast_ref::<PersistentSubprocessController>()
+        {
+            ctrl.mcp_beat(&req.beat);
+        }
+    }
+    StatusCode::NO_CONTENT.into_response()
+}

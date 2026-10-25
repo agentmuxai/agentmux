@@ -65,7 +65,7 @@ Nothing lists every job in one place. A run that didn't happen leaves no trace. 
 **Decision: one table, `db_job_runs`, in the global identity store** (`~/.agentmux/shared/identity-store.db`, `state.identity_store`).
 - That is where the Kanban's work queue, cards and claims live, so a run and the task it filed are in one database. It is global, so every channel and version on the machine sees one ledger, and one lease (below) stops two instances from both firing a job.
 - It is added as a module-level `SCHEMA` run on every open, as `work_claims` and `work_board` are (`backend/storage/store.rs:251-254`), so older builds aren't locked out by a schema version bump (`work_claims.rs:44-48`).
-- Moving `db_cron_jobs` itself from the shared store to the identity store, which `server/state.rs:51-59` already calls "a known unmigrated case", happens in P3, when cron jobs become `db_jobs` rows (§5.1).
+- `db_cron_jobs` stays in the shared store. In P3 cron jobs become `db_jobs` rows (§5.1), which live beside it in the shared store (not the identity store): a run's job is found in the store the scheduler reads, and a dev build that opens its own work store gets an empty `db_jobs` rather than a copy.
 
 **Fields:**
 
@@ -237,7 +237,7 @@ A late event turns a `missed` row into a late run. Several misses of one job are
 
 ### 5.1 The job definition
 
-A `db_jobs` table in the identity store replaces `db_cron_jobs`. A one-time data migration (`crates/srv/src/migrations/`, `MigrationScope::Global`) copies every cron job into it as a job with a `cron` trigger in UTC and a `message` action, keeping its id, so Swarm, Schedule and the ledger don't notice. `POST/GET/DELETE/PATCH /agentmux/cron` stay as aliases of the new `/agentmux/jobs` routes for one release.
+A `db_jobs` table replaces `db_cron_jobs`, in the same store: the shared store (`store.db`), with its DDL and additive columns in both schema runners next to `db_cron_jobs`, and no schema version bump. `db_cron_jobs` itself is left as it was for older builds. A one-time data migration (`crates/srv/src/migrations/`, `MigrationScope::Global`, run against the shared store only) copies every cron job into it as a job with a `cron` trigger in UTC and a `message` action, keeping its id, so Swarm, Schedule and the ledger don't notice. `POST/GET/DELETE/PATCH /agentmux/cron` stay as aliases of the new `/agentmux/jobs` routes for one release.
 
 Published as `schema/agentmux-job.v1.schema.json`:
 

@@ -147,7 +147,7 @@ The same four parts appear everywhere; AgentMux has one (fencing) and parts of t
   - Temporal lets an error be non-retryable, or set its own next-retry delay. [Temporal: retry policies](https://docs.temporal.io/encyclopedia/retry-policies)
   - Anthropic's API distinguishes 429 (with `retry-after`), a spend cap (no `retry-after`), 529 and 401. [Anthropic: errors](https://platform.claude.com/docs/en/api/errors), [rate limits](https://platform.claude.com/docs/en/api/rate-limits)
   - Devin reports a suspended session's reason, including `out_of_quota` and `usage_limit_exceeded`, rather than "idle". [Devin API: sessions](https://docs.devin.ai/api-reference/v3/sessions/post-organizations-sessions)
-  - Claude Code prints usage limits with a reset time and documents an auto-continue that waits for the reset in an open interactive session. Whether that applies to AgentMux's stream-json sessions is *unverified*. [Claude Code: errors](https://code.claude.com/docs/en/errors), [usage limits](https://support.claude.com/en/articles/11647753-how-do-usage-and-length-limits-work)
+  - Claude Code prints usage limits with a reset time and documents an auto-continue that waits for the reset in an open interactive session. That does not happen in AgentMux's stream-json sessions: no stored transcript shows a turn resuming after a limit error on its own (checked in the step-3 build, spec §7). [Claude Code: errors](https://code.claude.com/docs/en/errors), [usage limits](https://support.claude.com/en/articles/11647753-how-do-usage-and-length-limits-work)
 - **Bounded restarts, then escalate.**
   - Erlang/OTP supervisors give up after `intensity` restarts in `period` and pass the failure to their parent. [Erlang: supervisor principles](https://www.erlang.org/doc/system/sup_princ.html)
   - Kubernetes backs off crash loops up to 5 minutes. [Kubernetes: pod lifecycle](https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/)
@@ -206,7 +206,7 @@ Costs: S = under a day, M = a few days, L = a week or more.
 
 **R6. Wake at the reset (S, after R2–R3).**
 - At `resets_at` plus jitter, if the agent is still on that account: clear the block, replay held messages, and give it a system note to continue its claimed task. This uses `jekt_held` replay timing, or a one-shot `Schedule`.
-- *Unverified:* whether Claude Code's own auto-continue already does this inside AgentMux's sessions. Check in a task dev build before building it.
+- *Verified in the step-3 build (spec §7):* Claude Code's own auto-continue does not resume AgentMux's sessions, so the wake is built.
 
 **R7. Fix the watchdog's silent kill (S).**
 - When `term:agent*` limits trip, release the agent's claims (or say why not), raise one notification, and correct the stale table comment at `sagas/agent_teardown.rs:16`.
@@ -233,5 +233,5 @@ Costs: S = under a day, M = a few days, L = a week or more.
 
 - How many of the four toasts at 16:52 were shown, and whether the operator was away (the presenter's decisions aren't logged at this level).
 - Whether senders were literally told "Delivered" (inferred from the delivery path: their turns ran).
-- Codex account moves, and Claude Code auto-continue inside AgentMux sessions.
+- Codex account moves.
 - The counts in §2 come from string matches over logs and transcripts. Builds before 0.59.35 filed session limits as `UnknownNonZero`, so the older counts are approximate.

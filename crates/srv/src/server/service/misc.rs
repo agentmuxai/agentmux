@@ -109,10 +109,7 @@ pub(super) async fn handle_misc_service(state: &AppState, call: &WebCallType) ->
         // via a raw HTTP call with no matching reactive registration) is
         // silently omitted — nothing to attach it to in a per-agent tree. ----
         ("cron", "ListActive") => {
-            let jobs = match &state.shared_store {
-                Some(s) => s.cron_list().unwrap_or_default(),
-                None => Vec::new(),
-            };
+            let jobs = super::super::cron::jobs_store(state).and_then(|s| s.cron_list().ok()).unwrap_or_default();
             let summaries: Vec<_> = jobs
                 .iter()
                 .filter_map(|job| {

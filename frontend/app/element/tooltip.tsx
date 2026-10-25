@@ -193,7 +193,7 @@ function TooltipInner(props: TooltipProps): JSX.Element {
                         ref={registerFloating}
                         style={`${floatingStyle()};opacity:${isVisible() && (!immediate() || isPositioned()) ? 1 : 0};transition:${immediate() ? "none" : "opacity 200ms ease"}`}
                         class={cn(
-                            "bg-modalbg border border-border rounded-md px-2 py-1 text-xs text-foreground shadow-xl z-50"
+                            "bg-modalbg border border-border rounded-md px-2 py-1 text-xs text-foreground shadow-xl z-[var(--z-tooltip)]"
                         )}
                         data-pane-overlay
                         data-window-tab-hidden={hiddenTab()}

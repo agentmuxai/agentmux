@@ -120,8 +120,9 @@ pub fn build_app_state(
     net: &NetworkBundle,
     reducer: &ReducerPlumbing,
 ) -> AppState {
-    // Clone before move into AppState for cron_scheduler construction.
-    let shared_store_for_cron = stores.shared_store.clone();
+    // Clone before move into AppState for cron_scheduler construction: jobs
+    // (`db_jobs`) live in the shared store (`server::cron::jobs_store`).
+    let jobs_store = stores.shared_store.clone();
     // Live settings for the agent CPU-priority policy (process_tracker).
     net.process_tracker.set_config(bg.config_watcher.clone());
     let broker = bg.broker;
@@ -241,7 +242,7 @@ pub fn build_app_state(
         dev_proxy,
         shell_sessions: crate::backend::shell_node::ShellSessionRegistry::new(),
         cron_scheduler: crate::backend::cron::CronScheduler::new(
-            shared_store_for_cron,
+            jobs_store,
             reqwest::Client::new(),
             net.local_web_url.clone(),
             config.auth_key.clone(),

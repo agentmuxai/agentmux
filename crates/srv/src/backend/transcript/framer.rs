@@ -4,8 +4,9 @@
 //! The framer: compresses finished parts of the shared transcript store into
 //! frames (SPEC_HISTORY_STORE_COMPRESSION_AND_COMPACTION_2026_10_21.md §5).
 //!
-//! Off unless `agent:transcriptframes` is `true`. Every srv whose own setting
-//! is on runs it (settings are per channel, so no one srv's speaks for the
+//! On unless `agent:transcriptframes` is `false` (the operator's call,
+//! 2026-10-25: on by default, the setting stays as the way out). Every srv whose
+//! own setting is on runs it (settings are per channel, so no one srv's speaks for the
 //! machine); each frame is one transaction that checks its parts first, so
 //! two srvs framing at once never conflict. Before each pass it checks that **every** running `agentmux-srv` has said
 //! it reads frames, in a file under `readers/` beside the store (written by
@@ -27,7 +28,7 @@ use std::sync::{Arc, OnceLock};
 use crate::backend::storage::error::StoreError;
 use crate::backend::storage::filestore::{FileStore, FrameOutcome, CODEC_DELTAS, CODEC_ZSTD, FRAME_PARTS};
 
-/// `agent:transcriptframes`: compress the shared transcript store. Off unless `true`.
+/// `agent:transcriptframes`: compress the shared transcript store. On unless `false`.
 pub const SETTING_FRAMES: &str = "agent:transcriptframes";
 /// `agent:transcriptdeltas`: with frames on, also store the streaming deltas as
 /// uuid and length (codec 2). On unless `false`.
@@ -51,9 +52,14 @@ pub fn install_config(config: Arc<crate::backend::wconfig::ConfigState>) {
     let _ = CONFIG.set(config);
 }
 
-/// Whether the framer runs (`agent:transcriptframes`).
+/// Whether the framer runs (`agent:transcriptframes`): unset means on, only an
+/// explicit `false` turns it off.
 pub fn enabled() -> bool {
-    CONFIG.get().and_then(|c| c.extra_bool(SETTING_FRAMES)).unwrap_or(false)
+    on_unless_false(CONFIG.get().and_then(|c| c.extra_bool(SETTING_FRAMES)))
+}
+
+fn on_unless_false(setting: Option<bool>) -> bool {
+    setting.unwrap_or(true)
 }
 
 fn deltas_enabled() -> bool {

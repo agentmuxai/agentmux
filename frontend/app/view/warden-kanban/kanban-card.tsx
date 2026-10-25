@@ -76,7 +76,7 @@ export function agentStateWords(state: KanbanAgentState | undefined): string {
     return state ? (STATE_WORDS[state] ?? state) : "not here";
 }
 
-/** An agent's name with its live state, and a swatch of its colour when it has one. */
+/** An agent's name with its live state, the name in its colour when it has one. */
 export function AgentChip(props: {
     name: string;
     agent?: KanbanAgent | null;
@@ -85,25 +85,19 @@ export function AgentChip(props: {
     /** Its seat as the tooltip: a card's owner (SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md §4). */
     showSeat?: boolean;
 }): JSX.Element {
-    const swatch = () => agentColor(props.agent, props.uid, props.colors, "identity");
+    // The theme's readable variant of its hue, the one made for text and icons.
+    const nameColor = () => agentColor(props.agent, props.uid, props.colors, "identity");
     const seats = useSeatIndex();
     const seat = () => (props.showSeat ? seatOf(seats(), props.uid || props.agent?.uid, props.name) : null);
     return (
         <span class="kanban-agent-chip" title={seat() ? `${props.name}: ${seatTooltipLine(seat()!)}` : undefined}>
-            <Show when={swatch()}>
-                {(c) => (
-                    <span
-                        class="kanban-agent-chip__swatch"
-                        style={{ "--kanban-agent-color": c() }}
-                        aria-hidden="true"
-                    />
-                )}
-            </Show>
             <StatusDot
                 tone={agentTone(props.agent?.state)}
                 label={`${props.name}: ${agentStateWords(props.agent?.state)}`}
             />
-            <span class="kanban-agent-chip__name">{props.name}</span>
+            <span class="kanban-agent-chip__name" style={nameColor() ? { "--kanban-agent-text": nameColor() } : undefined}>
+                {props.name}
+            </span>
         </span>
     );
 }
@@ -245,6 +239,13 @@ export function KanbanCard(props: {
                 </Show>
                 <Show when={t().state === "cancelled"}>
                     <Pill icon="ban">cancelled</Pill>
+                </Show>
+                <Show when={t().accepted_by}>
+                    {(a) => (
+                        <Pill icon="user-check" title={`Accepted by ${a().name} on your word. ${a().said}`}>
+                            {`accepted by ${a().name}`}
+                        </Pill>
+                    )}
                 </Show>
                 <Show when={checklistProgress(t())}>{(p) => <Pill icon="list-check">{p()}</Pill>}</Show>
                 <Show when={t().card.pr_url}>

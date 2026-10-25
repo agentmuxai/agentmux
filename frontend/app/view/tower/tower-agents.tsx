@@ -178,36 +178,48 @@ function RailRow(props: { model: TowerViewModel; entry: RailEntry; cpu: Cpu; sel
                 `tower-rail-row--${props.entry.kind}`
             )}
             data-testid={`tower-rail-${props.entry.id}`}
-            title={`${props.entry.label}: ${count(props.entry.processes, "process")}`}
+            title={`${props.entry.label}: ${formatMem(props.entry.mem)} · CPU ${props.cpu(props.entry.cpu)} · ${count(props.entry.processes, "process")}`}
             onClick={() => m.select(props.entry.id)}
         >
             <Swatch entry={props.entry} remote={remote()} />
             <span class="tower-rail-name">{props.entry.label}</span>
             <span
                 class={clsx(
-                    "tower-rail-cpu tower-num",
+                    "tower-rail-mem tower-num",
+                    loadLevel("mem", "item", m.memShare(props.entry.mem)) &&
+                        `tower-level--${loadLevel("mem", "item", m.memShare(props.entry.mem))}`
+                )}
+            >
+                {formatMem(props.entry.mem)}
+            </span>
+            <span
+                class={clsx(
+                    "tower-rail-cpu tower-num tower-muted",
                     loadLevel("cpu", "item", m.cpuShare(props.entry.cpu)) &&
                         `tower-level--${loadLevel("cpu", "item", m.cpuShare(props.entry.cpu))}`
                 )}
             >
-                {props.cpu(props.entry.cpu)}
+                CPU <span class="tower-rail-cpu-value">{props.cpu(props.entry.cpu)}</span>
             </span>
-            <span class="tower-rail-mem tower-num tower-muted">{formatMem(props.entry.mem)}</span>
-            <Sparkline points={m.recentCpu(props.entry.id)} color={entryColor(props.entry, remote())} />
+            <Sparkline points={m.recentMem(props.entry.id)} color={entryColor(props.entry, remote())} />
         </div>
     );
 }
 
-/** The last minute of CPU, scaled to the entry's own peak (at least half a
- *  core, so an idle agent stays flat instead of magnifying noise). */
+/** The last minute of memory, scaled between the entry's own lowest and
+ *  highest (a span of at least a tenth of its size and 8 MB, so a steady
+ *  agent stays flat instead of magnifying noise, and growth shows). */
 function Sparkline(props: { points: readonly number[]; color?: string }) {
     const path = () => {
         const pts = props.points;
         if (pts.length < 2) return "";
-        const peak = Math.max(0.5, ...pts);
+        const lo = Math.min(...pts);
+        const hi = Math.max(...pts);
+        const span = Math.max(hi - lo, hi / 10, 8 * 1024 * 1024);
+        const mid = (hi + lo) / 2;
         const step = 60 / (HISTORY_POINTS - 1);
         const x0 = 60 - step * (pts.length - 1);
-        return pts.map((v, i) => `${(x0 + i * step).toFixed(1)},${(15 - (v / peak) * 14).toFixed(1)}`).join(" ");
+        return pts.map((v, i) => `${(x0 + i * step).toFixed(1)},${(8 - ((v - mid) / span) * 14).toFixed(1)}`).join(" ");
     };
     return (
         <svg class="tower-spark" viewBox="0 0 60 16" preserveAspectRatio="none" aria-hidden="true">
@@ -244,13 +256,13 @@ function Detail(props: { model: TowerViewModel; entry: RailEntry; cpu: Cpu }) {
                 </Show>
                 <span class="tower-toolbar-spacer" />
                 <span class="tower-detail-totals">
-                    CPU{" "}
-                    <span class={clsx("tower-total tower-total--cpu", level("cpu", m.cpuShare(props.entry.cpu)))}>
-                        {props.cpu(props.entry.cpu)}
-                    </span>{" "}
-                    · Memory{" "}
+                    Memory{" "}
                     <span class={clsx("tower-total tower-total--mem", level("mem", m.memShare(props.entry.mem)))}>
                         {formatMem(props.entry.mem)}
+                    </span>{" "}
+                    · CPU{" "}
+                    <span class={clsx("tower-total tower-total--cpu", level("cpu", m.cpuShare(props.entry.cpu)))}>
+                        {props.cpu(props.entry.cpu)}
                     </span>{" "}
                     · {count(props.entry.processes, "process")}
                 </span>
@@ -299,8 +311,8 @@ function Detail(props: { model: TowerViewModel; entry: RailEntry; cpu: Cpu }) {
                     <thead>
                         <tr>
                             <SortHeader model={m} key="name" label="Process" />
-                            <SortHeader model={m} key="cpu" label="CPU" numeric />
                             <SortHeader model={m} key="mem" label="Memory" numeric />
+                            <SortHeader model={m} key="cpu" label="CPU" numeric />
                             <Show when={m.moreColumns()}>
                                 <th class="tower-num" title="CPU time used, with everything it started">
                                     <span class="tower-th-label ui-density-compact">CPU time</span>

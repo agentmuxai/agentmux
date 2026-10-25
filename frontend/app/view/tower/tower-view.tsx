@@ -24,6 +24,7 @@ import { createEffect, createMemo, createSignal, For, type JSX, Match, Show, Swi
 import { agentColor, AgentsView } from "./tower-agents";
 import { KindBreakdown, KindIcon, LoadCells } from "./tower-kind-ui";
 import { type KindGroup, kindGroups, kindOf, KINDS, sortKindGroups } from "./tower-kinds";
+import { MemoryView } from "./tower-memory";
 import type { TowerViewModel } from "./tower-model";
 import { PanesView } from "./tower-panes";
 import { ProcessName } from "./tower-process-name";
@@ -123,6 +124,17 @@ export function TowerView(props: { model: TowerViewModel }): JSX.Element {
                                   },
                               ]
                             : [
+                                  // This computer's AgentMux only, like Panes.
+                                  ...(m.remote()
+                                      ? []
+                                      : [
+                                            {
+                                                id: "memory" as const,
+                                                label: "Memory",
+                                                icon: "memory",
+                                                tooltip: "AgentMux's memory, and what it is made of",
+                                            },
+                                        ]),
                                   {
                                       id: "agents",
                                       label: "Agents",
@@ -190,10 +202,14 @@ export function TowerView(props: { model: TowerViewModel }): JSX.Element {
                     </div>
                 )}
             </Show>
+            <Headline model={m} />
             <div id={tabPanelId(idPrefix)} role="tabpanel" class="tower-body">
                 <Show when={m.snapshot()} fallback={<div class="tower-empty">Measuring…</div>}>
                     {(snap) => (
                         <Switch>
+                            <Match when={m.effectiveView() === "memory"}>
+                                <MemoryView model={m} />
+                            </Match>
                             <Match when={m.effectiveView() === "agents"}>
                                 <AgentsView model={m} cpu={cpu} />
                             </Match>
@@ -210,6 +226,47 @@ export function TowerView(props: { model: TowerViewModel }): JSX.Element {
                 </Show>
             </div>
         </div>
+    );
+}
+
+/** AgentMux's memory, one line under the toolbar in every view and at every
+ *  width: everything AgentMux started, added up (its own programs, the
+ *  terminals, and each agent with what it runs). Private memory, so a shared
+ *  library or a shared page is not counted twice
+ *  (SPEC_TOWER_MEMORY_FIRST_AND_AGENTMUX_BREAKDOWN_2026_10_25.md §3.1, §6). */
+function Headline(props: { model: TowerViewModel }) {
+    const m = props.model;
+    const total = createMemo(() => {
+        const snap = m.snapshot();
+        // This computer's own tasks only: another machine's are a capped list.
+        if (!snap || snap.remote || snap.tasks.length === 0) return undefined;
+        let mem = 0;
+        let processes = 0;
+        for (const t of snap.tasks) {
+            mem += t.mem;
+            processes += t.processes.length;
+        }
+        return { mem, processes, metric: snap.memory_metric };
+    });
+    return (
+        <Show when={total()}>
+            {(t) => {
+                const lvl = () => loadLevel("mem", "machine", m.memShare(t().mem));
+                return (
+                    <div
+                        class="tower-headline"
+                        data-testid="tower-headline"
+                        title={`Memory that only AgentMux's processes use (${t().metric}), added up over everything AgentMux started: its own programs, the terminals, and each agent with its tools. Shared memory is not counted twice.`}
+                    >
+                        <span class="tower-headline-label">AgentMux</span>
+                        <span class={clsx("tower-headline-mem tower-num", lvl() && `tower-level--${lvl()}`)}>
+                            {formatMem(t().mem)}
+                        </span>
+                        <span class="tower-headline-note tower-muted">{count(t().processes, "process")}</span>
+                    </div>
+                );
+            }}
+        </Show>
     );
 }
 
@@ -606,13 +663,13 @@ function HostTable(props: { model: TowerViewModel; cpu: (f: number | undefined) 
     return (
         <>
             <div class="tower-summary">
-                {count(host()?.total ?? 0, "process")} · CPU{" "}
-                <span class={clsx("tower-total tower-total--cpu", cpuLevel() && `tower-level--${cpuLevel()}`)}>
-                    {props.cpu(host()?.cpu)}
-                </span>{" "}
-                · Memory{" "}
+                {count(host()?.total ?? 0, "process")} · Memory{" "}
                 <span class={clsx("tower-total tower-total--mem", memLevel() && `tower-level--${memLevel()}`)}>
                     {formatMem(host()?.mem)}
+                </span>{" "}
+                · CPU{" "}
+                <span class={clsx("tower-total tower-total--cpu", cpuLevel() && `tower-level--${cpuLevel()}`)}>
+                    {props.cpu(host()?.cpu)}
                 </span>
                 <Show when={partial()}>
                     <span class="tower-muted">
@@ -691,8 +748,8 @@ function HostTable(props: { model: TowerViewModel; cpu: (f: number | undefined) 
                 <thead>
                     <tr>
                         <SortHeader model={m} key="name" label="Process" />
-                        <SortHeader model={m} key="cpu" label="CPU" numeric />
                         <SortHeader model={m} key="mem" label="Memory" numeric />
+                        <SortHeader model={m} key="cpu" label="CPU" numeric />
                         <SortHeader
                             model={m}
                             key="count"

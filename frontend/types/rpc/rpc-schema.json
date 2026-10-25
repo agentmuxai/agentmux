@@ -3750,6 +3750,120 @@
     }
   },
   {
+    "command": "jobs.templates.catalog",
+    "request": "agentmux_srv::server::job_template_handlers::JobTemplateCatalogReq",
+    "requestName": "JobTemplateCatalogReq",
+    "requestTs": {
+      "imports": [
+        "JobTemplateCatalogReq"
+      ],
+      "name": "JobTemplateCatalogReq"
+    },
+    "response": "agentmux_srv::server::job_template_handlers::JobTemplateCatalogResult",
+    "responseName": "JobTemplateCatalogResult",
+    "responseTs": {
+      "imports": [
+        "JobTemplateCatalogResult"
+      ],
+      "name": "JobTemplateCatalogResult"
+    }
+  },
+  {
+    "command": "jobs.templates.catalog.install",
+    "request": "agentmux_srv::server::job_template_handlers::JobTemplateCatalogInstallReq",
+    "requestName": "JobTemplateCatalogInstallReq",
+    "requestTs": {
+      "imports": [
+        "JobTemplateCatalogInstallReq"
+      ],
+      "name": "JobTemplateCatalogInstallReq"
+    },
+    "response": "agentmux_srv::server::job_template_handlers::JobTemplateInstallResult",
+    "responseName": "JobTemplateInstallResult",
+    "responseTs": {
+      "imports": [
+        "JobTemplateInstallResult"
+      ],
+      "name": "JobTemplateInstallResult"
+    }
+  },
+  {
+    "command": "jobs.templates.get",
+    "request": "agentmux_srv::server::job_template_handlers::JobTemplateGetReq",
+    "requestName": "JobTemplateGetReq",
+    "requestTs": {
+      "imports": [
+        "JobTemplateGetReq"
+      ],
+      "name": "JobTemplateGetReq"
+    },
+    "response": "agentmux_srv::server::job_template_handlers::JobTemplateDetail",
+    "responseName": "JobTemplateDetail",
+    "responseTs": {
+      "imports": [
+        "JobTemplateDetail"
+      ],
+      "name": "JobTemplateDetail"
+    }
+  },
+  {
+    "command": "jobs.templates.install",
+    "request": "agentmux_srv::server::job_template_handlers::JobTemplateInstallReq",
+    "requestName": "JobTemplateInstallReq",
+    "requestTs": {
+      "imports": [
+        "JobTemplateInstallReq"
+      ],
+      "name": "JobTemplateInstallReq"
+    },
+    "response": "agentmux_srv::server::job_template_handlers::JobTemplateInstallResult",
+    "responseName": "JobTemplateInstallResult",
+    "responseTs": {
+      "imports": [
+        "JobTemplateInstallResult"
+      ],
+      "name": "JobTemplateInstallResult"
+    }
+  },
+  {
+    "command": "jobs.templates.list",
+    "request": "serde_json::value::Value",
+    "requestName": "Value",
+    "requestTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    },
+    "response": "agentmux_srv::server::job_template_handlers::JobTemplatesResult",
+    "responseName": "JobTemplatesResult",
+    "responseTs": {
+      "imports": [
+        "JobTemplatesResult"
+      ],
+      "name": "JobTemplatesResult"
+    }
+  },
+  {
+    "command": "jobs.templates.uninstall",
+    "request": "agentmux_srv::server::job_template_handlers::JobTemplateIdReq",
+    "requestName": "JobTemplateIdReq",
+    "requestTs": {
+      "imports": [
+        "JobTemplateIdReq"
+      ],
+      "name": "JobTemplateIdReq"
+    },
+    "response": "agentmux_srv::server::job_template_handlers::JobTemplatesResult",
+    "responseName": "JobTemplatesResult",
+    "responseTs": {
+      "imports": [
+        "JobTemplatesResult"
+      ],
+      "name": "JobTemplatesResult"
+    }
+  },
+  {
     "command": "kanban.act",
     "request": "serde_json::value::Value",
     "requestName": "Value",
@@ -4915,6 +5029,25 @@
     "responseTs": {
       "imports": [],
       "name": "null"
+    }
+  },
+  {
+    "command": "operator.challenge",
+    "request": "core::option::Option<agentmux_srv::backend::rpc_types::websocket::NoArgsReq>",
+    "requestName": "core::option::Option<agentmux_srv::backend::rpc_types::websocket::NoArgsReq>",
+    "requestTs": {
+      "imports": [
+        "NoArgsReq"
+      ],
+      "name": "NoArgsReq | null"
+    },
+    "response": "agentmux_srv::server::operator_proof::OperatorChallengeResult",
+    "responseName": "OperatorChallengeResult",
+    "responseTs": {
+      "imports": [
+        "OperatorChallengeResult"
+      ],
+      "name": "OperatorChallengeResult"
     }
   },
   {

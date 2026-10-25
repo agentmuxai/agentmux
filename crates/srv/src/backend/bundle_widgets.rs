@@ -210,7 +210,7 @@ pub fn preview(
             Some(h) if *h != hash => return Err("its files don't match the hash bundle.json lists for it".to_string()),
             _ => {}
         }
-        let signer = match sig::check(&root, &m.id, &m.version, &hash) {
+        let signer = match sig::check(&sig::WIDGET, &root, &m.id, &m.version, &hash) {
             None => None,
             Some(Ok(k)) => Some(k),
             Some(Err(e)) => return Err(e),

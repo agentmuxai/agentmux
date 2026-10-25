@@ -75,6 +75,11 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     let layout = crate::backend::tower_panes::read_layout(&mstore);
                     snap.panes = Some(crate::backend::tower_panes::build(&layout, &snap, &renderers, &own_view_pid));
                 }
+                // The Memory view: AgentMux's total and its parts
+                // (SPEC_TOWER_MEMORY_FIRST_AND_AGENTMUX_BREAKDOWN_2026_10_25.md).
+                if req.memory.unwrap_or(false) {
+                    snap.memory = Some(crate::backend::tower_memory::build(&snap));
+                }
                 Ok(snap)
             })
             .await
@@ -111,14 +116,10 @@ fn register_peers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     });
 }
 
-/// Refuse a connection registered as an agent: Tower's RPCs aren't offered to
-/// agents.
+/// Tower's RPCs are the AgentMux window's, not an agent API: only a
+/// connection the host proved is the window's gets them.
 pub(super) fn not_an_agent_api(ctx: &RpcContext) -> Result<(), String> {
-    if ctx.agent_id.is_empty() {
-        Ok(())
-    } else {
-        Err("FORBIDDEN: Tower is the AgentMux window's, not an agent API".to_string())
-    }
+    ctx.operator_only("Tower is the AgentMux window's, not an agent API")
 }
 
 pub(crate) fn inputs(tracker: &AgentProcessRegistry) -> Inputs {
@@ -177,8 +178,10 @@ mod tests {
         let (engine, mut rx) = WshRpcEngine::new();
         register(&engine, &state);
         // An agent's connection carries its id (`bus:register`); the window's
-        // carries none.
-        if !agent_id.is_empty() {
+        // carries none and has the host's proof.
+        if agent_id.is_empty() {
+            engine.set_rpc_context(RpcContext::operator_for_tests());
+        } else {
             engine.set_rpc_context(RpcContext { agent_id: agent_id.to_string(), ..Default::default() });
         }
         engine.handle_message(RpcMessage {
@@ -206,5 +209,12 @@ mod tests {
     async fn a_registered_agent_is_refused() {
         let (_, err) = call(COMMAND_TOWER_SAMPLE, json!({}), "AgentX").await;
         assert!(err.contains("FORBIDDEN"), "{err}");
+    }
+
+    #[test]
+    fn a_connection_the_host_never_proved_is_refused() {
+        let err = not_an_agent_api(&RpcContext::default()).unwrap_err();
+        assert!(err.starts_with("FORBIDDEN") && err.contains("isn't the AgentMux window"), "{err}");
+        assert!(not_an_agent_api(&RpcContext::operator_for_tests()).is_ok());
     }
 }

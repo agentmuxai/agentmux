@@ -27,6 +27,7 @@ pub mod widget_catalog;
 pub mod widget_packages;
 pub mod widget_signature;
 pub mod widget_requests;
+pub mod job_templates;
 pub mod vault;
 pub mod bundle_export;
 pub mod bundle_import;
@@ -140,6 +141,7 @@ pub mod blockstats_detail;
 pub mod tower_agentmux;
 pub mod tower_panes;
 pub mod tower_kind;
+pub mod tower_memory;
 pub mod tower_peers;
 pub mod tower_remote;
 pub mod tool_calls;
@@ -179,6 +181,12 @@ pub mod shell_node;
 pub mod work_facts;
 /// The Kanban's reminders and PR links (SPEC_WARDEN_KANBAN_2026_10_20.md).
 pub mod kanban;
+/// The wake at an out-of-quota agent's reset (SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §7).
+pub mod limit_wake;
+/// A leader accepting or sending back a task on the operator's word.
+pub mod kanban_delegate;
+/// Holding a routine message for an agent whose session has gone cold (SPEC_JEKT_HOLD_FOR_COLD_SESSIONS_2026_10_25.md).
+pub mod cold_hold;
 /// A leader hears when its workers end a turn without reporting, fail or stop.
 pub mod worker_notes;
 

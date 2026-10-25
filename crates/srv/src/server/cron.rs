@@ -1,19 +1,23 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! HTTP handlers for the persistent cron scheduler.
+//! HTTP handlers for jobs (docs/specs/SPEC_JOBS_AND_TEMPLATES_2026_10_24.md
+//! §5.1) and the persistent cron scheduler under them.
 //!
-//! Routes (all auth-gated via `X-AuthKey`):
-//!   POST   /agentmux/cron          — create a job
-//!   DELETE /agentmux/cron/:id      — delete a job
-//!   GET    /agentmux/cron          — list all jobs, each with its last run
-//!   PATCH  /agentmux/cron/:id      — pause / resume
-//!   GET    /agentmux/cron/:id/runs — a job's runs, newest first
-//!   POST   /agentmux/cron/:id/run  — run it now (a `manual` run)
-//!   POST   /agentmux/cron/runs/:run_id/report — a run's own verdict
+//! Routes (all auth-gated via `X-AuthKey`), under `/agentmux/jobs`, and the
+//! same under `/agentmux/cron`, kept as aliases for one release:
+//!   POST   /agentmux/jobs          — create a job: a job definition
+//!                                    (`jobVersion` 1), or the cron shape
+//!                                    the Schedule tool sends
+//!   DELETE /agentmux/jobs/:id      — delete a job
+//!   GET    /agentmux/jobs          — list all jobs, each with its last run
+//!   PATCH  /agentmux/jobs/:id      — pause / resume, or edit its definition
+//!   GET    /agentmux/jobs/:id/runs — a job's runs, newest first
+//!   POST   /agentmux/jobs/:id/run  — run it now (a `manual` run)
+//!   POST   /agentmux/jobs/runs/:run_id/report — a run's own verdict
 //!
-//! The run routes are the run ledger's (SPEC_JOBS_AND_TEMPLATES_2026_10_24.md
-//! §3.2, §3.3 MuxAPI).
+//! The run routes are the run ledger's (§3.2, §3.3 MuxAPI). Who may do what
+//! is §7: [`Who`].
 
 
 use axum::extract::{Path, Query, State};
@@ -21,27 +25,31 @@ use axum::http::StatusCode;
 use axum::response::Json;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 use uuid::Uuid;
 
+use crate::backend::cron::schedule::JobSchedule;
 use crate::backend::cron::FireOutcome;
 use crate::backend::jobs;
+use crate::backend::jobs::definition::{Action, Check, JobDefinition, Overlap, LATER};
 use crate::backend::storage::cron::CronJob;
 use crate::backend::storage::job_runs::{JobRun, OUTCOMES};
+use crate::backend::storage::store::Store;
+use std::sync::Arc;
 use super::caller::Caller;
 use super::AppState;
 
 #[derive(Debug, Deserialize)]
 pub struct CronCreateRequest {
     pub name: String,
-    /// 5-field UTC cron expression: "min hour dom mon dow"
+    /// 5-field cron expression: "min hour dom mon dow", read in `tz`.
     pub expression: String,
     pub prompt: String,
     /// Target agent id. Required — no implicit self-targeting from HTTP.
     pub target: String,
     /// Identity M3: the target's UID, resolved at the MCP boundary (spec
     /// §5.4 — resolution at authoring time) and CARRIED here. Absent → the
-    /// server resolves `target` itself as a counted fallback.
+    /// job fires by `target`, counted.
     #[serde(default)]
     pub target_uid: String,
     #[serde(default)]
@@ -54,15 +62,20 @@ pub struct CronCreateRequest {
     #[serde(default)]
     pub max_age_secs: Option<i64>,
     /// What an undelivered fire leaves (jobs spec §5.2): `skip` (default) or
-    /// `latest`.
+    /// `latest`. The same as `policy.catch_up`; this one wins.
     #[serde(default)]
     pub catch_up: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct CronPatchRequest {
-    /// "pause" or "resume"
-    pub action: String,
+    /// The expression's IANA time zone; UTC when absent.
+    #[serde(default)]
+    pub tz: Option<String>,
+    /// The definition's `policy` (§5.1).
+    #[serde(default)]
+    pub policy: Option<Value>,
+    /// A template to create the job from: refused until templates land.
+    #[serde(default)]
+    pub template: Option<Value>,
+    #[serde(default)]
+    pub params: Option<Value>,
 }
 
 #[derive(Debug, Serialize)]
@@ -70,6 +83,10 @@ pub struct CronJobView {
     pub id: String,
     pub name: String,
     pub expression: String,
+    /// The cron expression's time zone (`UTC` unless it says otherwise).
+    pub tz: String,
+    pub trigger_kind: String,
+    pub action_kind: String,
     pub prompt: String,
     pub target: String,
     pub enabled: bool,
@@ -85,7 +102,8 @@ pub struct CronJobView {
     /// field: the MCP CLI was printing the raw `max_age_secs` bound under an
     /// "expires_in" label, which is only correct at the instant of creation.
     pub expires_in_secs: Option<i64>,
-    /// ISO-8601 string of the next scheduled fire (UTC), or null if disabled.
+    /// ISO-8601 string of the next scheduled fire (UTC), or null if disabled
+    /// or there is none.
     pub next_fire: Option<String>,
     pub catch_up: String,
     /// The job's newest run in the ledger, if it has one.
@@ -95,22 +113,23 @@ pub struct CronJobView {
     pub missed_count: i64,
     pub last_missed_at: Option<i64>,
     pub last_miss_reason: String,
+    /// The whole job definition (§5.1).
+    pub definition: JobDefinition,
 }
 
 fn to_view(job: &CronJob) -> CronJobView {
-    let next_fire = if job.enabled {
-        next_fire_utc(&job.expression)
-    } else {
-        None
-    };
     let expires_in_secs = job.max_age_secs.map(|max_age| {
         let elapsed = Utc::now().timestamp() - job.created_at;
         (max_age - elapsed).max(0)
     });
+    let definition = JobDefinition::from_job(job);
     CronJobView {
         id: job.id.clone(),
         name: job.name.clone(),
         expression: job.expression.clone(),
+        tz: if job.tz.is_empty() { "UTC".to_string() } else { job.tz.clone() },
+        trigger_kind: definition.trigger.kind().to_string(),
+        action_kind: definition.action.kind().to_string(),
         prompt: job.prompt.clone(),
         target: job.target.clone(),
         enabled: job.enabled,
@@ -120,22 +139,25 @@ fn to_view(job: &CronJob) -> CronJobView {
         created_at: job.created_at,
         expires_in_secs,
         max_age_secs: job.max_age_secs,
-        next_fire,
+        next_fire: next_fire(job),
         catch_up: job.catch_up.clone(),
         last_run: None,
         missed_count: job.missed_count,
         last_missed_at: job.last_missed_at,
         last_miss_reason: job.last_miss_reason.clone(),
+        definition,
     }
 }
 
-/// Compute the next UTC fire time for a standard 5-field cron expression
-/// (`backend::cron::expr`), returned as an ISO-8601 string. Returns `None`
-/// on parse error.
-fn next_fire_utc(expression: &str) -> Option<String> {
-    let schedule = crate::backend::cron::expr::parse(expression).ok()?;
-    let next = schedule.upcoming(chrono::Utc).next()?;
-    Some(next.to_rfc3339())
+/// The job's next fire (its trigger's next slot, in its time zone) as an
+/// ISO-8601 UTC string; `None` when disabled, when its trigger has no next
+/// slot, or when it doesn't read.
+fn next_fire(job: &CronJob) -> Option<String> {
+    if !job.enabled {
+        return None;
+    }
+    let next = JobSchedule::of(job).ok()?.next_after(agentmux_common::time::now_ms())?;
+    Some(chrono::DateTime::from_timestamp_millis(next)?.to_rfc3339())
 }
 
 /// Swarm-pane row shape for one cron job (SPEC_SWARM_LONG_RUNNING_PROCESS_
@@ -162,11 +184,6 @@ pub struct CronSummary {
 }
 
 pub(crate) fn to_summary(job: &CronJob, block_id: String) -> CronSummary {
-    let next_fire = if job.enabled {
-        next_fire_utc(&job.expression)
-    } else {
-        None
-    };
     CronSummary {
         id: job.id.clone(),
         block_id,
@@ -178,88 +195,253 @@ pub(crate) fn to_summary(job: &CronJob, block_id: String) -> CronSummary {
         last_fired: job.last_fired,
         fire_count: job.fire_count,
         max_fires: job.max_fires,
-        next_fire,
+        next_fire: next_fire(job),
         missed_count: job.missed_count,
         last_miss_reason: job.last_miss_reason.clone(),
     }
+}
+
+/// Where jobs are (`db_jobs`): the shared store, beside the `db_cron_jobs`
+/// it replaced. Every job read and write goes through here, so the store can
+/// move in one place.
+pub(crate) fn jobs_store(state: &AppState) -> Option<Arc<Store>> {
+    state.shared_store.clone()
+}
+
+/// Where the run ledger is (`db_job_runs`): the identity store.
+pub(crate) fn ledger_store(state: &AppState) -> Arc<Store> {
+    state.identity_store.clone()
+}
+
+/// Tests: keep jobs in the test state's own store (which carries every
+/// schema), as [`jobs_store`] and [`ledger_store`] would find them.
+#[cfg(test)]
+pub(crate) fn use_test_store_for_jobs(state: &mut AppState) {
+    state.shared_store = Some(state.mstore.clone());
+}
+
+/// [`jobs_store`], or the answer when there is none.
+fn jobs_store_or_503(state: &AppState) -> Result<Arc<Store>, Answer> {
+    jobs_store(state).ok_or_else(|| (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": "shared store unavailable"}))))
 }
 
 fn publish_cron_changed(state: &AppState) {
     state.broker.publish_event::<crate::backend::mps_events::CronChanged>(&(), vec![], 0);
 }
 
+/// Who is asking, for the rules of §7. The operator is the app's own
+/// client, which carries no agent token (`Caller::Unattributed`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Who {
+    Operator,
+    Agent { uid: String, slug: String, container: bool },
+}
+
+fn who(state: &AppState, caller: Option<&Caller>) -> Who {
+    match caller.and_then(Caller::uid) {
+        None => Who::Operator,
+        Some(uid) => {
+            let def = state.mstore.agent_def_get(uid).ok().flatten();
+            Who::Agent {
+                uid: uid.to_string(),
+                slug: def.as_ref().map(|d| d.slug.clone()).unwrap_or_default(),
+                container: def.is_some_and(|d| d.agent_type == "container"),
+            }
+        }
+    }
+}
+
+/// What a container agent gets for anything but reading (§7).
+const CONTAINER_READ_ONLY: &str = "a container agent can list jobs and read their history, not create, change or run them";
+
+fn forbidden(why: impl Into<String>) -> Answer {
+    (StatusCode::FORBIDDEN, Json(json!({"error": why.into()})))
+}
+
+fn bad_request(why: impl Into<String>) -> Answer {
+    (StatusCode::BAD_REQUEST, Json(json!({"error": why.into()})))
+}
+
+/// Refuse a container agent's change.
+fn refuse_container(state: &AppState, caller: Option<&Caller>) -> Result<(), Answer> {
+    match who(state, caller) {
+        Who::Agent { container: true, .. } => Err(forbidden(CONTAINER_READ_ONLY)),
+        _ => Ok(()),
+    }
+}
+
+/// Whether `who` may define a job like `def` (§7): the operator any job; an
+/// agent a `message` or `task` job it owns. A `spawn` job needs the
+/// operator's approval once (the spawn consent rule, made at creation since
+/// its runs are unattended), which has no flow yet, so an agent can't create
+/// one. `current_owner` is the job's owner on an edit.
+pub(crate) fn may_define(who: &Who, def: &JobDefinition, current_owner: Option<&str>) -> Result<(), String> {
+    let Who::Agent { uid, container, .. } = who else { return Ok(()) };
+    if *container {
+        return Err(CONTAINER_READ_ONLY.to_string());
+    }
+    if let Action::Spawn { leader, .. } = &def.action {
+        if leader != uid {
+            return Err("an agent can create a spawn job only with itself as the leader".to_string());
+        }
+        return Err(
+            "a spawn job an agent creates needs the operator's approval once, which isn't available yet: ask the operator to create it"
+                .to_string(),
+        );
+    }
+    let owner = def.owner.trim();
+    let allowed = owner.is_empty() || owner == uid || current_owner == Some(owner);
+    if !allowed {
+        return Err("an agent's job is owned by that agent: leave owner out, or name yourself".to_string());
+    }
+    Ok(())
+}
+
+/// What this build can't run yet, though the definition is valid: the
+/// `task` and `spawn` actions, and the policies the scheduler doesn't apply
+/// yet. Refused rather than stored and silently ignored.
+pub(crate) fn runnable_yet(def: &JobDefinition) -> Result<(), String> {
+    if matches!(def.action, Action::Task { .. } | Action::Spawn { .. }) {
+        return Err(format!("action kind {} is {LATER}", def.action.kind()));
+    }
+    let p = &def.policy;
+    let unapplied = [
+        (p.overlap != Overlap::Skip, "overlap"),
+        (p.timeout_minutes.is_some(), "timeout_minutes"),
+        (p.retries > 0, "retries"),
+        (p.max_turns.is_some(), "max_turns"),
+        (p.group.is_some(), "group"),
+        (p.caps.is_some(), "caps"),
+    ];
+    match unapplied.iter().find(|(set, _)| *set) {
+        Some((_, field)) => Err(format!("policy.{field} is {LATER}")),
+        None => Ok(()),
+    }
+}
+
+/// A message's `to` as the job's target `(name, uid)`: a UID names that
+/// agent; anything else is kept as a name, never resolved here (identity
+/// spec §5.4: the job then fires by name, counted).
+fn target_of(state: &AppState, to: &str) -> (String, String) {
+    match state.mstore.agent_def_get(to) {
+        Ok(Some(def)) if !to.is_empty() => (def.slug, to.to_string()),
+        _ => {
+            if !to.is_empty() {
+                crate::backend::agent_resolve::record_uid_fallback("jobs_create.uid_not_carried");
+            }
+            (to.to_string(), String::new())
+        }
+    }
+}
+
+/// The definition the cron shape describes: a `cron` trigger in `tz` and a
+/// `message` action to the target.
+fn legacy_definition(req: &CronCreateRequest, check: Check) -> Result<JobDefinition, String> {
+    let mut policy = match &req.policy {
+        None | Some(Value::Null) => Map::new(),
+        Some(Value::Object(p)) => p.clone(),
+        Some(_) => return Err("policy is an object".to_string()),
+    };
+    if let Some(catch_up) = &req.catch_up {
+        if catch_up != jobs::CATCH_UP_SKIP && catch_up != jobs::CATCH_UP_LATEST {
+            return Err(format!("invalid catch_up '{catch_up}' (use 'skip' or 'latest')"));
+        }
+        policy.insert("catch_up".into(), json!(catch_up));
+    }
+    let to = if req.target_uid.trim().is_empty() { req.target.trim() } else { req.target_uid.trim() };
+    let mut def = json!({
+        "jobVersion": jobs::definition::JOB_VERSION,
+        "name": req.name,
+        "trigger": { "kind": "cron", "cron": req.expression, "tz": req.tz.as_deref().unwrap_or("UTC") },
+        "action": { "kind": "message", "to": to, "brief": req.prompt },
+        "policy": policy,
+    });
+    for (key, value) in [("template", &req.template), ("params", &req.params)] {
+        if let Some(v) = value.as_ref().filter(|v| !v.is_null()) {
+            def[key] = v.clone();
+        }
+    }
+    JobDefinition::parse(&def, check)
+}
+
 pub(super) async fn handle_cron_create(
     State(state): State<AppState>,
     caller: Option<axum::Extension<super::caller::Caller>>,
-    Json(req): Json<CronCreateRequest>,
+    Json(body): Json<Value>,
 ) -> (StatusCode, Json<Value>) {
-    super::actor::check_actor(
-        &state,
-        caller.as_deref(),
-        super::actor::ActorSite::CronCreate,
-        Some(&req.created_by),
-    );
-    // Validate expression: standard 5-field cron (0 and 7 are Sunday).
-    if let Err(why) = crate::backend::cron::expr::parse(&req.expression) {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": format!("invalid cron expression: '{}': {why}", req.expression)})),
-        );
-    }
-
-    let catch_up = req.catch_up.clone().unwrap_or_else(|| jobs::CATCH_UP_SKIP.to_string());
-    if catch_up != jobs::CATCH_UP_SKIP && catch_up != jobs::CATCH_UP_LATEST {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": format!("invalid catch_up '{catch_up}' (use 'skip' or 'latest')")})),
-        );
-    }
-
-    let store = match &state.shared_store {
-        Some(s) => s.clone(),
-        None => return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": "shared store unavailable"}))),
+    let check = Check { fresh: true, now_ms: agentmux_common::time::now_ms() };
+    let who = who(&state, caller.as_deref());
+    // The cron shape (no `jobVersion`) carries its target, creator and limits
+    // beside the definition.
+    let legacy = match body.get("jobVersion") {
+        Some(_) => None,
+        None => match serde_json::from_value::<CronCreateRequest>(body.clone()) {
+            Ok(req) => Some(req),
+            Err(e) => return bad_request(format!("invalid job: {e}")),
+        },
     };
-
-    // Identity M3: the target's UID is stored only if the caller CARRIED
-    // one, resolved at the boundary where the name was typed (spec §5.4).
-    // This handler never turns a name into an identity (§2 rule 1): the job
-    // fires by `target_uid` when set, so a server-side guess would deliver
-    // to whichever agent it found, in any channel (review on #3563). A named
-    // target with no carried UID keeps firing by name until M5, counted.
-    let target_uid = req.target_uid.trim().to_string();
-    if target_uid.is_empty() && !req.target.trim().is_empty() {
-        crate::backend::agent_resolve::record_uid_fallback("cron_create.uid_not_carried");
+    let parsed = match &legacy {
+        Some(req) => {
+            super::actor::check_actor(&state, caller.as_deref(), super::actor::ActorSite::CronCreate, Some(&req.created_by));
+            legacy_definition(req, check)
+        }
+        None => JobDefinition::parse(&body, check),
+    };
+    let def = match parsed {
+        Ok(def) => def,
+        Err(e) => return bad_request(e),
+    };
+    if let Err(e) = may_define(&who, &def, None) {
+        return forbidden(e);
+    }
+    if let Err(e) = runnable_yet(&def) {
+        return bad_request(e);
     }
 
-    let job = CronJob {
+    let (created_by, owner) = match &who {
+        Who::Operator => (jobs::BY_OPERATOR.to_string(), def.owner.trim().to_string()),
+        Who::Agent { uid, slug, .. } => (if slug.is_empty() { uid.clone() } else { slug.clone() }, uid.clone()),
+    };
+    let mut job = CronJob {
         id: Uuid::new_v4().to_string(),
-        name: req.name.clone(),
-        expression: req.expression.clone(),
-        prompt: req.prompt.clone(),
-        target: req.target.clone(),
-        target_uid,
-        created_by: req.created_by.clone(),
+        created_by,
         // Identity M4c-1 (§6.5.9): the creator's UID is the request's
         // `Caller` — its token — never a body field; `""` when Unattributed.
         created_by_uid: super::caller::attributed_uid(caller.as_deref()),
-        enabled: true,
-        last_fired: None,
-        fire_count: 0,
-        max_fires: req.max_fires,
         created_at: Utc::now().timestamp(),
-        max_age_secs: req.max_age_secs,
-        catch_up,
-        missed_count: 0,
-        last_missed_at: None,
-        last_miss_reason: String::new(),
+        ..Default::default()
     };
+    match &legacy {
+        Some(req) => {
+            // Identity M3: the target's UID is stored only if the caller
+            // CARRIED one, resolved at the boundary where the name was typed
+            // (spec §5.4). A named target with no carried UID keeps firing by
+            // name until M5, counted.
+            let target_uid = req.target_uid.trim().to_string();
+            if target_uid.is_empty() && !req.target.trim().is_empty() {
+                crate::backend::agent_resolve::record_uid_fallback("cron_create.uid_not_carried");
+            }
+            def.apply_to(&mut job, &|_| (req.target.clone(), target_uid.clone()));
+            job.created_by = req.created_by.clone();
+            (job.max_fires, job.max_age_secs) = (req.max_fires, req.max_age_secs);
+        }
+        None => def.apply_to(&mut job, &|to| target_of(&state, to)),
+    }
+    // An agent's job is its own (§7); the operator's has the owner it names.
+    job.owner = owner;
 
+    let store = match jobs_store_or_503(&state) {
+        Ok(store) => store,
+        Err(e) => return e,
+    };
     if let Err(e) = store.cron_create(&job) {
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()})));
     }
 
     // Register the new job with the live scheduler.
-    state.cron_scheduler.schedule_job(&job);
+    if job.enabled {
+        state.cron_scheduler.schedule_job(&job);
+    }
     publish_cron_changed(&state);
 
     (StatusCode::CREATED, Json(json!({"job": to_view(&job)})))
@@ -268,11 +450,10 @@ pub(super) async fn handle_cron_create(
 pub(super) async fn handle_cron_list(
     State(state): State<AppState>,
 ) -> (StatusCode, Json<Value>) {
-    let store = match &state.shared_store {
-        Some(s) => s.clone(),
-        None => return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": "shared store unavailable"}))),
+    let store = match jobs_store_or_503(&state) {
+        Ok(store) => store,
+        Err(e) => return e,
     };
-
     match store.cron_list() {
         Ok(jobs) => {
             let ledger = state.cron_scheduler.runs().cloned();
@@ -297,13 +478,16 @@ pub(super) async fn handle_cron_list(
 }
 
 /// Whether `caller` may act on `job` (Run now): the operator (the app's own
-/// client, which carries no agent token) or the agent that created it
-/// (jobs spec §7). By UID when the job recorded one, else by the creator's
-/// name against the caller's agent slug.
+/// client, which carries no agent token) or the agent that created or owns
+/// it (jobs spec §7). By UID when the job recorded one, else by the
+/// creator's name against the caller's agent slug.
 fn may_act_on(state: &AppState, caller: Option<&Caller>, job: &CronJob) -> bool {
     let Some(uid) = caller.and_then(Caller::uid) else {
         return true;
     };
+    if job.owner_uid() == uid {
+        return true;
+    }
     if !job.created_by_uid.is_empty() {
         return job.created_by_uid == uid;
     }
@@ -376,9 +560,12 @@ pub(super) async fn handle_cron_run_now(
     caller: Option<axum::Extension<Caller>>,
     Path(id): Path<String>,
 ) -> Answer {
-    let store = match &state.shared_store {
-        Some(s) => s.clone(),
-        None => return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": "shared store unavailable"}))),
+    if let Err(refused) = refuse_container(&state, caller.as_deref()) {
+        return refused;
+    }
+    let store = match jobs_store_or_503(&state) {
+        Ok(store) => store,
+        Err(e) => return e,
     };
     let job = match store.cron_get(&id) {
         Ok(Some(job)) => job,
@@ -479,9 +666,7 @@ pub(super) async fn handle_cron_report(
                 run.target_agent_uid == uid
             };
             ran_it
-                || state
-                    .shared_store
-                    .as_ref()
+                || jobs_store(&state)
                     .and_then(|s| s.cron_get(&run.job_id).ok().flatten())
                     .is_some_and(|job| may_act_on(&state, caller.as_deref(), &job))
         }
@@ -503,36 +688,43 @@ pub(super) async fn handle_cron_report(
 }
 
 /// Whether `caller` may pause, resume or delete `job`. An agent (a request
-/// carrying its token) may change only a job it created or one aimed at it;
-/// everyone else, the UI included, may change any job. Unattributed requests
-/// can't be refused: at the same-user boundary one that omits its token looks
-/// like the UI (caller.rs). This stops an agent changing another agent's job
-/// by mistake, not a determined one. A job with no recorded creator UID
-/// (created before identity M4c-1, or unattributed) is open to any caller.
+/// carrying its token) may change only a job it created or owns, or one
+/// aimed at it; everyone else, the UI included, may change any job.
+/// Unattributed requests can't be refused: at the same-user boundary one
+/// that omits its token looks like the UI (caller.rs). This stops an agent
+/// changing another agent's job by mistake, not a determined one. A job with
+/// no recorded creator UID (created before identity M4c-1, or unattributed)
+/// is open to any caller. Editing the definition is narrower: [`may_edit_job`].
 fn may_change_job(caller: Option<&super::caller::Caller>, job: &CronJob) -> bool {
     let Some(uid) = caller.and_then(super::caller::Caller::uid) else {
         return true;
     };
-    job.created_by_uid.is_empty() || job.created_by_uid == uid || job.target_uid == uid
+    job.created_by_uid.is_empty() || may_edit_job(caller, job) || job.target_uid == uid
 }
 
-/// The store, or the response refusing the change: the store unavailable,
-/// no such job, or a caller [`may_change_job`] refuses.
-fn store_for_change(
+/// Whether `caller` may edit `job`'s definition: the operator, or the agent
+/// that created or owns it (§7). The agent a job messages may pause it, not
+/// rewrite it. A job with no creator (the operator's, or one from before
+/// creators were recorded) is the operator's to edit.
+fn may_edit_job(caller: Option<&super::caller::Caller>, job: &CronJob) -> bool {
+    let Some(uid) = caller.and_then(super::caller::Caller::uid) else {
+        return true;
+    };
+    !uid.is_empty() && (job.created_by_uid == uid || job.owner_uid() == uid)
+}
+
+/// The store and the job, or the response refusing the change: no store, a
+/// container agent, no such job, or a caller [`may_change_job`] refuses.
+fn job_for_change(
     state: &AppState,
     caller: Option<&super::caller::Caller>,
     id: &str,
-) -> Result<std::sync::Arc<crate::backend::storage::store::Store>, (StatusCode, Json<Value>)> {
-    let store = match &state.shared_store {
-        Some(s) => s.clone(),
-        None => return Err((StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": "shared store unavailable"})))),
-    };
+) -> Result<(Arc<Store>, CronJob), Answer> {
+    let store = jobs_store_or_503(state)?;
+    refuse_container(state, caller)?;
     match store.cron_get(id) {
-        Ok(Some(job)) if may_change_job(caller, &job) => Ok(store),
-        Ok(Some(_)) => Err((
-            StatusCode::FORBIDDEN,
-            Json(json!({"error": "an agent can change only a scheduled job it created or one aimed at it"})),
-        )),
+        Ok(Some(job)) if may_change_job(caller, &job) => Ok((store, job)),
+        Ok(Some(_)) => Err(forbidden("an agent can change only a scheduled job it created or one aimed at it")),
         Ok(None) => Err((StatusCode::NOT_FOUND, Json(json!({"error": "job not found"})))),
         Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()})))),
     }
@@ -543,8 +735,8 @@ pub(super) async fn handle_cron_delete(
     caller: Option<axum::Extension<super::caller::Caller>>,
     Path(id): Path<String>,
 ) -> (StatusCode, Json<Value>) {
-    let store = match store_for_change(&state, caller.as_deref(), &id) {
-        Ok(store) => store,
+    let store = match job_for_change(&state, caller.as_deref(), &id) {
+        Ok((store, _)) => store,
         Err(refused) => return refused,
     };
 
@@ -561,37 +753,94 @@ pub(super) async fn handle_cron_delete(
     }
 }
 
+/// A job's fields an edit can't change: srv sets them.
+const FIXED_FIELDS: [&str; 3] = ["id", "jobVersion", "created_by"];
+
+/// `PATCH`: `{"action": "pause" | "resume"}`, or an edit: definition fields
+/// (§5.1) laid over the job's definition, which is then read as a create's
+/// is. The 15-minute minimum applies only when the edit sets the trigger or
+/// the action, so a job kept as it was isn't refused for a rule newer than
+/// it.
 pub(super) async fn handle_cron_patch(
     State(state): State<AppState>,
     caller: Option<axum::Extension<super::caller::Caller>>,
     Path(id): Path<String>,
-    Json(req): Json<CronPatchRequest>,
+    Json(body): Json<Value>,
 ) -> (StatusCode, Json<Value>) {
-    let store = match store_for_change(&state, caller.as_deref(), &id) {
-        Ok(store) => store,
+    let (store, job) = match job_for_change(&state, caller.as_deref(), &id) {
+        Ok(found) => found,
         Err(refused) => return refused,
     };
+    if let Some(action) = body.get("action").and_then(Value::as_str) {
+        return set_enabled(&state, &store, &id, action);
+    }
+    let Some(fields) = body.as_object() else { return bad_request("an edit is a JSON object of job fields") };
+    if !may_edit_job(caller.as_deref(), &job) {
+        return forbidden("an agent can edit only a job it created or owns");
+    }
+    let mut merged = serde_json::to_value(JobDefinition::from_job(&job)).unwrap_or_default();
+    for (key, value) in fields {
+        if FIXED_FIELDS.contains(&key.as_str()) {
+            if merged.get(key) != Some(value) {
+                return bad_request(format!("{key} can't be changed"));
+            }
+            continue;
+        }
+        merged[key.as_str()] = value.clone();
+    }
+    let fresh = fields.contains_key("trigger") || fields.contains_key("action");
+    let def = match JobDefinition::parse(&merged, Check { fresh, now_ms: agentmux_common::time::now_ms() }) {
+        Ok(def) => def,
+        Err(e) => return bad_request(e),
+    };
+    if let Err(e) = may_define(&who(&state, caller.as_deref()), &def, Some(job.owner_uid())) {
+        return forbidden(e);
+    }
+    if let Err(e) = runnable_yet(&def) {
+        return bad_request(e);
+    }
+    let mut edited = job.clone();
+    if fields.contains_key("action") {
+        def.apply_to(&mut edited, &|to| target_of(&state, to));
+    } else {
+        // The target as it was: a job by name keeps firing by name.
+        def.apply_to(&mut edited, &|_| (job.target.clone(), job.target_uid.clone()));
+    }
+    match store.cron_update_definition(&edited) {
+        Ok(true) => {}
+        Ok(false) => return (StatusCode::NOT_FOUND, Json(json!({"error": "job not found"}))),
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
+    }
+    if edited.enabled {
+        state.cron_scheduler.schedule_job(&edited);
+    } else {
+        state.cron_scheduler.cancel_job(&id);
+    }
+    publish_cron_changed(&state);
+    (StatusCode::OK, Json(json!({"ok": true, "enabled": edited.enabled, "job": to_view(&edited)})))
+}
 
-    let enabled = match req.action.as_str() {
+/// Pause or resume job `id`.
+fn set_enabled(state: &AppState, store: &Store, id: &str, action: &str) -> Answer {
+    let enabled = match action {
         "resume" => true,
         "pause" => false,
-        other => return (StatusCode::BAD_REQUEST, Json(json!({"error": format!("unknown action '{}' (use 'pause' or 'resume')", other)}))),
+        other => return bad_request(format!("unknown action '{other}' (use 'pause' or 'resume')")),
     };
-
-    match store.cron_set_enabled(&id, enabled) {
+    match store.cron_set_enabled(id, enabled) {
         Ok(true) => {}
         Ok(false) => return (StatusCode::NOT_FOUND, Json(json!({"error": "job not found"}))),
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
     }
 
     if enabled {
-        if let Ok(Some(job)) = store.cron_get(&id) {
+        if let Ok(Some(job)) = store.cron_get(id) {
             state.cron_scheduler.schedule_job(&job);
         }
     } else {
-        state.cron_scheduler.cancel_job(&id);
+        state.cron_scheduler.cancel_job(id);
     }
-    publish_cron_changed(&state);
+    publish_cron_changed(state);
 
     (StatusCode::OK, Json(json!({"ok": true, "enabled": enabled})))
 }
@@ -617,9 +866,7 @@ mod tests {
             created_at: 1_699_000_000,
             max_age_secs: None,
             catch_up: "skip".to_string(),
-            missed_count: 0,
-            last_missed_at: None,
-            last_miss_reason: String::new(),
+            ..Default::default()
         }
     }
 

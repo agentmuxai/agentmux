@@ -87,6 +87,7 @@ mod m0036_drop_bundle_mcp;
 mod m0037_retire_old_pane_names;
 mod m0038_drop_drone_runs_definition_fk;
 mod m0039_vault_into_warden;
+mod m0040_cron_jobs_to_db_jobs;
 mod backup;
 mod gate;
 mod prepare;
@@ -266,4 +267,5 @@ static REGISTRY: &[&(dyn Migration + Sync)] = &[
     &m0037_retire_old_pane_names::M0037RetireOldPaneNames,
     &m0038_drop_drone_runs_definition_fk::M0038DropDroneRunsDefinitionFk,
     &m0039_vault_into_warden::M0039VaultIntoWarden,
+    &m0040_cron_jobs_to_db_jobs::M0040CronJobsToDbJobs,
 ];

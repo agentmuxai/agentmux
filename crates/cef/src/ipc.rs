@@ -574,6 +574,16 @@ async fn route_command(
             state.browser_panes.resize(block_id, cef::Rect { x, y, width: w, height: h }, state);
             Ok(serde_json::json!(true))
         }
+        "browser_pane_discard" => {
+            // Discard the pane's page in place, ask whether it is, or load it
+            // again (browser_panes::discard). `supported: false`: this libcef
+            // has no Discard API, so the caller closes and recreates instead.
+            let block_id = args.get("block_id").and_then(|v| v.as_str()).unwrap_or("");
+            let op = args.get("op").and_then(|v| v.as_str()).unwrap_or("");
+            let op = crate::browser_panes::discard::DiscardOp::parse(op).ok_or_else(|| format!("unknown op {op:?}"))?;
+            let answer = state.browser_panes.discard_op(state, block_id, op).await;
+            Ok(serde_json::json!({ "supported": answer.is_some(), "ok": answer.unwrap_or(false) }))
+        }
         "browser_panes_set_rects" => {
             // One batch per window per frame from the page's pane-rect-batcher;
             // answers once the panes have moved (browser_panes::bounds).
@@ -587,6 +597,12 @@ async fn route_command(
             // (SPEC_BROWSER_PANE_HIBERNATION_2026_10_20.md §5.3).
             let block_id = args.get("block_id").and_then(|v| v.as_str()).unwrap_or("");
             crate::browser_api::hibernation::check(state, block_id).await
+        }
+        "browser_pane_set_frozen" => {
+            // Freeze a hidden pane's page or let it run again (browser_api::hibernation).
+            let block_id = args.get("block_id").and_then(|v| v.as_str()).unwrap_or("");
+            let frozen = args.get("frozen").and_then(|v| v.as_bool()).unwrap_or(false);
+            crate::browser_api::hibernation::set_frozen(state, block_id, frozen).await
         }
         "memory_pressure_level" => Ok(serde_json::json!(crate::memory_pressure::current_level().as_str())),
         "browser_pane_close" => {
@@ -886,6 +902,27 @@ async fn route_command(
             })
             .await
             .map_err(|e| format!("desktop_stop: {e}"))?;
+            relayed?;
+            Ok(serde_json::json!(true))
+        }
+        "operator_attest" => {
+            // The window proves its own websocket connection is the
+            // operator's: srv issued it `nonce` over that connection, and only
+            // this host's token makes srv accept it. Operator-only actions need
+            // that proof; the instance key every agent holds isn't enough.
+            let nonce = args.get("nonce").and_then(|v| v.as_str()).unwrap_or("");
+            if nonce.is_empty() {
+                return Err("operator_attest: nonce is required".to_string());
+            }
+            let body = serde_json::json!({ "nonce": nonce });
+            let web_endpoint = state.backend_endpoints.lock().web_endpoint.clone();
+            let auth_key = state.auth_key.lock().clone();
+            let ipc_token = state.ipc_token.clone();
+            let relayed: Result<(), String> = tokio::task::spawn_blocking(move || {
+                crate::client::backend_operator_attest(&web_endpoint, &auth_key, &ipc_token, &body)
+            })
+            .await
+            .map_err(|e| format!("operator_attest: {e}"))?;
             relayed?;
             Ok(serde_json::json!(true))
         }

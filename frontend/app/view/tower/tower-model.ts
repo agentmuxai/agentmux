@@ -102,6 +102,8 @@ export class TowerViewModel {
     kindFilter: Accessor<TowerProcessKind | "">;
     /** The list grouped by type has opened its busiest kinds once. */
     kindsOpened = false;
+    /** The Memory view has opened its busiest part once. */
+    memoryOpened = false;
     /** The Agents view's tree shows CPU time and peak memory too. */
     moreColumns: Accessor<boolean>;
     viewName: Accessor<string>;
@@ -120,7 +122,7 @@ export class TowerViewModel {
     private inFlight: Promise<void> = Promise.resolve();
     /** The machine `inFlight` asks (`""` for this computer). */
     private inFlightFor = "";
-    private lastStart: [boolean, string, string, boolean] | undefined;
+    private lastStart: [boolean, string, string, boolean, boolean] | undefined;
     /** The machine that failed and waits for Retry. */
     private stalledFor: string | null = null;
     private setStalled: Setter<boolean>;
@@ -136,7 +138,14 @@ export class TowerViewModel {
         // "host" is what the Processes view was called until 2026-10-10.
         this.view = createMemo<TowerView>(() => {
             const v = ctx.meta()?.["tower:view"];
-            return v === "processes" || v === "host" ? "processes" : v === "panes" ? "panes" : "agents";
+            // Memory is the default (SPEC_TOWER_MEMORY_FIRST_AND_AGENTMUX_BREAKDOWN_2026_10_25.md §4).
+            return v === "processes" || v === "host"
+                ? "processes"
+                : v === "panes"
+                  ? "panes"
+                  : v === "agents"
+                    ? "agents"
+                    : "memory";
         });
         this.connection = createMemo(() => {
             const c = ctx.meta()?.["tower:connection"];
@@ -146,9 +155,14 @@ export class TowerViewModel {
         // Another AgentMux computer has panes, so it has tasks too; an SSH host
         // or WSL distribution has only processes.
         this.hasTasks = () => !this.remote() || this.connection().startsWith("peer:");
-        // The Panes view is this computer's AgentMux only (SPEC_TOWER_PANES_VIEW_2026_10_21.md §6.4).
+        // The Panes and Memory views are this computer's AgentMux only
+        // (SPEC_TOWER_PANES_VIEW_2026_10_21.md §6.4, the memory spec §4).
         this.effectiveView = createMemo<TowerView>(() =>
-            !this.hasTasks() ? "processes" : this.remote() && this.view() === "panes" ? "agents" : this.view()
+            !this.hasTasks()
+                ? "processes"
+                : this.remote() && (this.view() === "panes" || this.view() === "memory")
+                  ? "agents"
+                  : this.view()
         );
         this.selected = createMemo(() => {
             const v = ctx.meta()?.["tower:agent"];
@@ -203,7 +217,7 @@ export class TowerViewModel {
         });
         [this.error, this.setError] = createSignal<string | null>(null);
         [this.stalled, this.setStalled] = createSignal(false);
-        [this.sort, this.setSort] = createSignal<Sort>({ key: "cpu", desc: true });
+        [this.sort, this.setSort] = createSignal<Sort>({ key: "mem", desc: true });
         [this.expanded, this.setExpanded] = createSignal<ReadonlySet<string>>(new Set<string>());
         [this.filter, this.setFilter] = createSignal("");
         this.kindFilter = createMemo(() => {
@@ -234,7 +248,7 @@ export class TowerViewModel {
                     // ssh and ask about installing again.
                     if (connection && this.stalledFor === connection) return;
                     this.stalledFor = null;
-                    if (visible) this.start(view === "processes", connection, filter, view === "panes");
+                    if (visible) this.start(view === "processes", connection, filter, view === "panes", view === "memory");
                 }
             )
         );
@@ -256,7 +270,7 @@ export class TowerViewModel {
                   ? ""
                   : undefined;
         this.setMeta({
-            "tower:view": view === "agents" ? null : view,
+            "tower:view": view === "memory" ? null : view,
             ...(carried !== undefined ? { "tower:only": carried || null } : {}),
         });
     }
@@ -282,8 +296,15 @@ export class TowerViewModel {
         return recent.reduce((a, b) => a + b, 0) / recent.length;
     };
 
-    /** A rail entry's last minute of known CPU rates, oldest first: its
+    /** A rail entry's last minute of known memory, oldest first: its
      *  sparkline. */
+    recentMem = (id: string): number[] =>
+        (this.history().get(id) ?? [])
+            .slice(-HISTORY_POINTS)
+            .map((p) => p.mem)
+            .filter((c): c is number => c != null);
+
+    /** A rail entry's last minute of known CPU rates, oldest first. */
     recentCpu = (id: string): number[] =>
         (this.history().get(id) ?? [])
             .slice(-HISTORY_POINTS)
@@ -418,9 +439,9 @@ export class TowerViewModel {
         this.start(...last);
     }
 
-    private start(host: boolean, connection: string, filter: string, panes = false): void {
+    private start(host: boolean, connection: string, filter: string, panes = false, memory = false): void {
         const gen = ++this.generation;
-        this.lastStart = [host, connection, filter, panes];
+        this.lastStart = [host, connection, filter, panes, memory];
         this.setStalled(false);
         // At most one request in flight: a new one (another filter, say)
         // waits for the last to answer. Another machine's helper measures CPU
@@ -429,7 +450,7 @@ export class TowerViewModel {
         // waiting on a password) mustn't hold up this one.
         const wait = this.inFlightFor === connection ? this.inFlight : Promise.resolve();
         void wait.then(() => {
-            if (gen === this.generation) this.poll(gen, host, connection, filter, panes);
+            if (gen === this.generation) this.poll(gen, host, connection, filter, panes, memory);
         });
     }
 
@@ -439,14 +460,25 @@ export class TowerViewModel {
         this.timer = undefined;
     }
 
-    private poll(gen: number, host: boolean, connection: string, filter: string, panes = false): void {
+    private poll(
+        gen: number,
+        host: boolean,
+        connection: string,
+        filter: string,
+        panes = false,
+        memory = false
+    ): void {
         const request = connection
             ? RpcApi.TowerSampleCommand(
                   TabRpcClient,
                   { host: host || !connection.startsWith("peer:"), connection, filter, block_id: this.blockId },
                   { timeout: REMOTE_TIMEOUT_MS }
               )
-            : RpcApi.TowerSampleCommand(TabRpcClient, { host, ...(panes ? { panes } : {}) });
+            : RpcApi.TowerSampleCommand(TabRpcClient, {
+                  host,
+                  ...(panes ? { panes } : {}),
+                  ...(memory ? { memory } : {}),
+              });
         this.inFlightFor = connection;
         this.inFlight = request.then(
             () => undefined,
@@ -454,7 +486,7 @@ export class TowerViewModel {
         );
         const again = (delay: number) => {
             if (gen === this.generation) {
-                this.timer = setTimeout(() => this.poll(gen, host, connection, filter, panes), delay);
+                this.timer = setTimeout(() => this.poll(gen, host, connection, filter, panes, memory), delay);
             }
         };
         request.then(

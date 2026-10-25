@@ -163,3 +163,10 @@ fn two_srvs_framing_at_once_never_conflict() {
     assert_eq!(fs.read_file("agent:a:current", "output").unwrap().unwrap(), data);
     assert_eq!(other.read_file("agent:a:current", "output").unwrap().unwrap(), data);
 }
+
+#[test]
+fn an_unset_setting_runs_the_framer_and_only_false_turns_it_off() {
+    assert!(on_unless_false(None), "on by default (operator, 2026-10-25)");
+    assert!(on_unless_false(Some(true)));
+    assert!(!on_unless_false(Some(false)), "the opt-out");
+}

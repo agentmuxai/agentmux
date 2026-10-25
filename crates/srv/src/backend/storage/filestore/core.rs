@@ -159,20 +159,35 @@ pub struct FileStore {
 impl FileStore {
     /// Open a FileStore backed by a file on disk.
     pub fn open(path: &Path) -> Result<Self, StoreError> {
-        Self::open_at(path, FILESTORE_SCHEMA_VERSION, FILESTORE_SCHEMA_VERSION)
+        Self::open_at(path, FILESTORE_SCHEMA_VERSION, FILESTORE_SCHEMA_VERSION, false)
     }
 
     /// Open the machine-wide transcript store (`shared/agents/transcripts/filestore.db`),
     /// which every srv shares. It is stamped [`GLOBAL_TRANSCRIPT_STORE_VERSION`], so
     /// builds that predate it (and bundle the SQLite with the WAL-reset bug) refuse it.
     pub fn open_global_transcripts(path: &Path) -> Result<Self, StoreError> {
-        Self::open_at(path, GLOBAL_TRANSCRIPT_STORE_FRAMES_VERSION, GLOBAL_TRANSCRIPT_STORE_VERSION)
+        Self::open_at(path, GLOBAL_TRANSCRIPT_STORE_FRAMES_VERSION, GLOBAL_TRANSCRIPT_STORE_VERSION, true)
     }
 
     /// Accept a `user_version` up to `accept`; stamp at least `stamp`, never
-    /// lowering a higher stamp already there.
-    fn open_at(path: &Path, accept: i64, stamp: i64) -> Result<Self, StoreError> {
+    /// lowering a higher stamp already there. With `incremental_if_new`, a file
+    /// that holds nothing yet is made `auto_vacuum=INCREMENTAL` before its first
+    /// page is written (it can't be changed afterwards without a rewrite), so the
+    /// pages compression frees go back to the disk by themselves
+    /// (`reclaim_free_pages`) and the one-time reclaim is never needed.
+    fn open_at(path: &Path, accept: i64, stamp: i64, incremental_if_new: bool) -> Result<Self, StoreError> {
         let conn = Connection::open(path)?;
+        if incremental_if_new {
+            // Other srvs open this store at the same moment: wait for a lock instead
+            // of failing, and treat a check that still fails as "not new" (the store
+            // then just isn't incremental; the open goes on).
+            conn.execute_batch("PRAGMA busy_timeout=5000;")?;
+            if matches!(conn.query_row("PRAGMA page_count", [], |r| r.get::<_, i64>(0)), Ok(0)) {
+                if let Err(e) = conn.execute_batch("PRAGMA auto_vacuum=INCREMENTAL;") {
+                    tracing::warn!(error = %e, "a new shared transcript store couldn't be made incremental");
+                }
+            }
+        }
         let mut store = Self::configure_and_migrate(conn, accept, stamp)?;
         // Checkpoints off the write path: a thread with its own connection
         // runs them, and this connection stops running them inside whichever

@@ -1033,7 +1033,8 @@ export class BrowserViewModel {
     }
 
     /** Put the pane to sleep: record what it needs to come back; the view
-     *  then closes its page (SPEC_BROWSER_PANE_HIBERNATION_2026_10_20.md §4). */
+     *  then discards its page in place, or closes it on an engine without the
+     *  Discard API (SPEC_BROWSER_PANE_HIBERNATION_2026_10_20.md §4, §10). */
     hibernate(reason: SleepReason): Promise<void> {
         const sleep: BrowserSleep = {
             since: Date.now(),
@@ -1045,6 +1046,21 @@ export class BrowserViewModel {
         };
         this.diag(`hibernate reason=${reason} url=${JSON.stringify(sleep.url)}`);
         return this.ctx.setMeta({ [SLEEP_META_KEY]: sleep });
+    }
+
+    /** The page was discarded in place, so it keeps its history and state. */
+    markSleepKept(): Promise<void> {
+        const sleep = this.sleepAtom();
+        if (!sleep || sleep.kept) return Promise.resolve();
+        return this.ctx.setMeta({ [SLEEP_META_KEY]: { ...sleep, kept: true } });
+    }
+
+    /** The page behind a "kept" sleep record is gone: closed after all, or
+     *  from before an app restart or window reload. Nothing is kept. */
+    clearSleepKept(): Promise<void> {
+        const sleep = this.sleepAtom();
+        if (!sleep?.kept) return Promise.resolve();
+        return this.ctx.setMeta({ [SLEEP_META_KEY]: { ...sleep, kept: false } });
     }
 
     /** The page has loaded again after a wake: the pane is awake. */

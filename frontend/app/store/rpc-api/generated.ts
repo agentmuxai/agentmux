@@ -317,6 +317,15 @@ import type { InstallStartReq } from "@/types/rpc/InstallStartReq";
 import type { InstallStartResult } from "@/types/rpc/InstallStartResult";
 import type { InstallSystemToolResult } from "@/types/rpc/InstallSystemToolResult";
 import type { InstallToolResult } from "@/types/rpc/InstallToolResult";
+import type { JobTemplateCatalogInstallReq } from "@/types/rpc/JobTemplateCatalogInstallReq";
+import type { JobTemplateCatalogReq } from "@/types/rpc/JobTemplateCatalogReq";
+import type { JobTemplateCatalogResult } from "@/types/rpc/JobTemplateCatalogResult";
+import type { JobTemplateDetail } from "@/types/rpc/JobTemplateDetail";
+import type { JobTemplateGetReq } from "@/types/rpc/JobTemplateGetReq";
+import type { JobTemplateIdReq } from "@/types/rpc/JobTemplateIdReq";
+import type { JobTemplateInstallReq } from "@/types/rpc/JobTemplateInstallReq";
+import type { JobTemplateInstallResult } from "@/types/rpc/JobTemplateInstallResult";
+import type { JobTemplatesResult } from "@/types/rpc/JobTemplatesResult";
 import type { JobsActRequest } from "@/types/rpc/JobsActRequest";
 import type { JobsActResult } from "@/types/rpc/JobsActResult";
 import type { JobsListResult } from "@/types/rpc/JobsListResult";
@@ -381,6 +390,7 @@ import type { NotifyTakeActivationResult } from "@/types/rpc/NotifyTakeActivatio
 import type { OAuthClientReq } from "@/types/rpc/OAuthClientReq";
 import type { OAuthSessionReq } from "@/types/rpc/OAuthSessionReq";
 import type { OpenInShellReq } from "@/types/rpc/OpenInShellReq";
+import type { OperatorChallengeResult } from "@/types/rpc/OperatorChallengeResult";
 import type { OtherBuildLayoutsResult } from "@/types/rpc/OtherBuildLayoutsResult";
 import type { PaneOpenResult } from "@/types/rpc/PaneOpenResult";
 import type { PaneTabEditResult } from "@/types/rpc/PaneTabEditResult";
@@ -1435,6 +1445,46 @@ export const GeneratedApi = {
   JobsRunsCommand(client: RpcClient, data: JobsRunsRequest, opts?: RpcOpts): Promise<JobsRunsResult> {
     return client.rpcCall("jobs.runs", data, opts);
   },
+  // command "jobs.templates.catalog"
+  JobsTemplatesCatalogCommand(
+    client: RpcClient,
+    data: JobTemplateCatalogReq,
+    opts?: RpcOpts
+  ): Promise<JobTemplateCatalogResult> {
+    return client.rpcCall("jobs.templates.catalog", data, opts);
+  },
+  // command "jobs.templates.catalog.install"
+  JobsTemplatesCatalogInstallCommand(
+    client: RpcClient,
+    data: JobTemplateCatalogInstallReq,
+    opts?: RpcOpts
+  ): Promise<JobTemplateInstallResult> {
+    return client.rpcCall("jobs.templates.catalog.install", data, opts);
+  },
+  // command "jobs.templates.get"
+  JobsTemplatesGetCommand(client: RpcClient, data: JobTemplateGetReq, opts?: RpcOpts): Promise<JobTemplateDetail> {
+    return client.rpcCall("jobs.templates.get", data, opts);
+  },
+  // command "jobs.templates.install"
+  JobsTemplatesInstallCommand(
+    client: RpcClient,
+    data: JobTemplateInstallReq,
+    opts?: RpcOpts
+  ): Promise<JobTemplateInstallResult> {
+    return client.rpcCall("jobs.templates.install", data, opts);
+  },
+  // command "jobs.templates.list"
+  JobsTemplatesListCommand(client: RpcClient, opts?: RpcOpts): Promise<JobTemplatesResult> {
+    return client.rpcCall("jobs.templates.list", {}, opts);
+  },
+  // command "jobs.templates.uninstall"
+  JobsTemplatesUninstallCommand(
+    client: RpcClient,
+    data: JobTemplateIdReq,
+    opts?: RpcOpts
+  ): Promise<JobTemplatesResult> {
+    return client.rpcCall("jobs.templates.uninstall", data, opts);
+  },
   // command "kanban.act"
   KanbanActCommand(
     client: RpcClient,
@@ -1804,6 +1854,10 @@ export const GeneratedApi = {
   // command "openinshell"
   OpenInShellCommand(client: RpcClient, data: OpenInShellReq, opts?: RpcOpts): Promise<void> {
     return client.rpcCall("openinshell", data, opts);
+  },
+  // command "operator.challenge"
+  OperatorChallengeCommand(client: RpcClient, opts?: RpcOpts): Promise<OperatorChallengeResult> {
+    return client.rpcCall("operator.challenge", {}, opts);
   },
   // command "pane.open"
   PaneOpenCommand(client: RpcClient, data: CommandPaneOpenData, opts?: RpcOpts): Promise<PaneOpenResult> {

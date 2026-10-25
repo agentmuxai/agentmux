@@ -1,0 +1,12 @@
+{
+  "templateVersion": 1,
+  "id": "acme.template-fixture",
+  "name": "Signing fixture",
+  "version": "1.0.0",
+  "kind": "job",
+  "description": "A job template the SDK and srv both check.",
+  "params": { "properties": { "repo": { "type": "string" } }, "required": ["repo"] },
+  "trigger": { "kind": "manual" },
+  "action": { "kind": "message" },
+  "outputs": ["report_file"]
+}

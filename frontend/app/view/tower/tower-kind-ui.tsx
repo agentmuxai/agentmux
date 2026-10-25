@@ -71,7 +71,9 @@ export function LoadCell(props: {
     );
 }
 
-/** A row's CPU and Memory cells, each with its bar and level. `fill` colours
+/** A row's Memory and CPU cells, in that order (memory first,
+ *  SPEC_TOWER_MEMORY_FIRST_AND_AGENTMUX_BREAKDOWN_2026_10_25.md §3.1), each
+ *  with its bar and level. `fill` colours
  *  the bars where the row has no kind of its own (an agent's group: its
  *  colour). */
 export function LoadCells(props: {
@@ -89,16 +91,16 @@ export function LoadCells(props: {
     return (
         <>
             <LoadCell
-                text={props.cpu(props.cpuValue)}
-                share={cpuShare()}
-                level={loadLevel("cpu", scope(), cpuShare())}
+                text={formatMem(props.mem)}
+                share={memShare()}
+                level={loadLevel("mem", scope(), memShare())}
                 fill={props.fill}
                 title={props.title}
             />
             <LoadCell
-                text={formatMem(props.mem)}
-                share={memShare()}
-                level={loadLevel("mem", scope(), memShare())}
+                text={props.cpu(props.cpuValue)}
+                share={cpuShare()}
+                level={loadLevel("cpu", scope(), cpuShare())}
                 fill={props.fill}
                 title={props.title}
             />
@@ -165,15 +167,6 @@ export function KindBreakdown(props: { model: TowerViewModel; cpu: (f: number | 
         <Show when={processes().some((p) => p.kind)}>
             <div class="tower-kinds" data-testid="tower-kinds">
                 <KindBar
-                    label="CPU"
-                    groups={groups()}
-                    value={(g) => g.cpu}
-                    whole={cpuCount()}
-                    describe={describe}
-                    unlisted={partial() ? Math.max(0, (host()?.cpu ?? 0) - listedCpu()) : undefined}
-                    total={props.cpu(host()?.cpu)}
-                />
-                <KindBar
                     label="Memory"
                     groups={groups()}
                     value={(g) => g.mem}
@@ -185,6 +178,15 @@ export function KindBreakdown(props: { model: TowerViewModel; cpu: (f: number | 
                     total={
                         memTotal() ? `${formatMem(host()?.mem)} of ${formatMem(memTotal())}` : formatMem(host()?.mem)
                     }
+                />
+                <KindBar
+                    label="CPU"
+                    groups={groups()}
+                    value={(g) => g.cpu}
+                    whole={cpuCount()}
+                    describe={describe}
+                    unlisted={partial() ? Math.max(0, (host()?.cpu ?? 0) - listedCpu()) : undefined}
+                    total={props.cpu(host()?.cpu)}
                 />
                 <div class="tower-kind-chips" role="group" aria-label="Show one kind of process">
                     <For each={groups()}>

@@ -18,17 +18,23 @@ struct Harness {
 }
 
 /// srv with a shared definition store (where seats live), `agent.setSeat`
-/// and the definition RPCs; `as_agent` registers the connection as an agent.
+/// and the definition RPCs; `as_agent` registers the connection as an agent,
+/// and `None` is the operator's window, proven by the host.
 fn harness(as_agent: Option<&str>) -> Harness {
+    harness_with(match as_agent {
+        Some(agent) => RpcContext { agent_id: agent.to_string(), ..Default::default() },
+        None => RpcContext::operator_for_tests(),
+    })
+}
+
+fn harness_with(ctx: RpcContext) -> Harness {
     let state = test_state();
     let defs = tempfile::tempdir().unwrap();
     state.mstore.set_def_registry(Arc::new(DefinitionStore::open(defs.path().join("definitions")).unwrap()));
     let (engine, rx) = WshRpcEngine::new();
     register(&engine, &state);
     super::super::core::register(&engine, &state);
-    if let Some(agent) = as_agent {
-        engine.set_rpc_context(RpcContext { agent_id: agent.to_string(), ..Default::default() });
-    }
+    engine.set_rpc_context(ctx);
     Harness { state, engine, rx, _defs: defs }
 }
 
@@ -69,6 +75,15 @@ async fn an_agent_connection_is_refused() {
     h.agent("a-1", "Loap");
     let err = h.call(COMMAND_AGENT_SET_SEAT, serde_json::json!({ "agent_id": "a-1", "seat": seat_json("leader") })).await.unwrap_err();
     assert!(err.contains("FORBIDDEN"), "{err}");
+    assert!(h.state.mstore.agent_seat_get("a-1").is_none(), "nothing written");
+}
+
+#[tokio::test]
+async fn a_connection_the_host_never_proved_is_refused() {
+    let mut h = harness_with(RpcContext::default());
+    h.agent("a-1", "Loap");
+    let err = h.call(COMMAND_AGENT_SET_SEAT, serde_json::json!({ "agent_id": "a-1", "seat": seat_json("leader") })).await.unwrap_err();
+    assert!(err.contains("FORBIDDEN") && err.contains("isn't the AgentMux window"), "{err}");
     assert!(h.state.mstore.agent_seat_get("a-1").is_none(), "nothing written");
 }
 

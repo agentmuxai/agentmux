@@ -262,6 +262,7 @@ dependencies = [
  "cbc 0.1.2",
  "chardetng",
  "chrono",
+ "chrono-tz",
  "clap",
  "crash-handler",
  "cron",
@@ -1247,7 +1248,7 @@ dependencies = [
 [[package]]
 name = "cef-dll-sys"
 version = "154.2.0+154.0.28"
-source = "git+https://github.com/agentmuxai/cef-rs?rev=87ed0accb0b3cf50f5bc8fe04a43ba47151dcd30#87ed0accb0b3cf50f5bc8fe04a43ba47151dcd30"
+source = "git+https://github.com/agentmuxai/cef-rs?rev=c296f3e96cf8f56b277c2957a40e153ff4947853#c296f3e96cf8f56b277c2957a40e153ff4947853"
 dependencies = [
  "anyhow",
  "cc",
@@ -1333,6 +1334,16 @@ dependencies = [
  "serde",
  "wasm-bindgen",
  "windows-link 0.2.1",
+]
+
+[[package]]
+name = "chrono-tz"
+version = "0.10.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a6139a8597ed92cf816dfb33f5dd6cf0bb93a6adc938f11039f371bc5bcd26c3"
+dependencies = [
+ "chrono",
+ "phf",
 ]
 
 [[package]]
@@ -1931,7 +1942,7 @@ checksum = "75b325c5dbd37f80359721ad39aca5a29fb04c89279657cffdda8736d0c0b9d2"
 [[package]]
 name = "download-cef"
 version = "3.0.0"
-source = "git+https://github.com/agentmuxai/cef-rs?rev=87ed0accb0b3cf50f5bc8fe04a43ba47151dcd30#87ed0accb0b3cf50f5bc8fe04a43ba47151dcd30"
+source = "git+https://github.com/agentmuxai/cef-rs?rev=c296f3e96cf8f56b277c2957a40e153ff4947853#c296f3e96cf8f56b277c2957a40e153ff4947853"
 dependencies = [
  "bzip2",
  "clap",
@@ -4355,6 +4366,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
+name = "phf"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "913273894cec178f401a31ec4b656318d95473527be05c0752cc41cdc32be8b7"
+dependencies = [
+ "phf_shared",
+]
+
+[[package]]
+name = "phf_shared"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "06005508882fb681fd97892ecff4b7fd0fee13ef1aa569f8695dae7ab9099981"
+dependencies = [
+ "siphasher",
+]
+
+[[package]]
 name = "pin-project"
 version = "1.1.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5651,6 +5680,12 @@ name = "simd-adler32"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "703d5c7ef118737c72f1af64ad2f6f8c5e1921f818cdcb97b8fe6fc69bf66214"
+
+[[package]]
+name = "siphasher"
+version = "1.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "33f4fe9184a62d842c9ef383018f3306d8ba224fd9d836f56d7288308847c256"
 
 [[package]]
 name = "slab"

@@ -6,7 +6,7 @@ import type { HistoryReclaim } from "./HistoryReclaim";
  */
 export type HistoryCompression = { 
 /**
- * `agent:transcriptframes` is on.
+ * `agent:transcriptframes` is on (the default; `false` turns it off).
  */
 enabled: boolean, 
 /**

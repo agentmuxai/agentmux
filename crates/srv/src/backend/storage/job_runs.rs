@@ -71,7 +71,7 @@ pub(crate) const SCHEMA: &str = "
     );";
 
 /// Columns added to `db_job_runs` after its first shape, run on every open
-/// (`apply_schema`) as `cron::CRON_JOBS_COLUMNS` is: a table an earlier
+/// (`apply_schema`) as `cron::JOB_TABLES` is: a table an earlier
 /// build created gains them, and a new column with a default needs no
 /// schema version bump.
 const JOB_RUNS_COLUMNS: [&str; 1] = ["ALTER TABLE db_job_runs ADD COLUMN collapsed_into TEXT NOT NULL DEFAULT ''"];

@@ -31,6 +31,7 @@ import {
     LayoutTreeActionType,
     LayoutTreeComputeMoveNodeAction,
 } from "./types";
+import { chipOverChipDirection } from "./chipPlaceholder";
 import { determineDropDirection } from "./utils";
 import {
     clampCrossTabDirection,
@@ -296,7 +297,16 @@ export const OverlayNodeWrapper = (props: OverlayNodeWrapperProps) => {
         };
 
         const crossTab = isCrossTabDrag(props.layoutModel);
-        const rawDirection = determineDropDirection(bestRect, clampedOffset);
+        const rawDirection =
+            (crossTab
+                ? undefined
+                : chipOverChipDirection(
+                      props.layoutModel.treeState.rootNode,
+                      bestLeafId,
+                      dragNodeId,
+                      bestRect,
+                      clampedOffset
+                  )) ?? determineDropDirection(bestRect, clampedOffset);
         // Cross-tab Outer* clamp — see clampCrossTabDirection.
         const direction = crossTab ? clampCrossTabDirection(rawDirection) : rawDirection;
         const compute = {
@@ -404,7 +414,16 @@ const OverlayNode = (props: OverlayNodeProps) => {
         if (props.layoutModel.displayContainerRef?.current && additionalProps()?.rect) {
             const containerRect = props.layoutModel.displayContainerRef.current.getBoundingClientRect();
             const offset = { x: clientX - containerRect.x, y: clientY - containerRect.y };
-            const rawDirection = determineDropDirection(additionalProps().rect, offset);
+            const rawDirection =
+                (crossTab
+                    ? undefined
+                    : chipOverChipDirection(
+                          props.layoutModel.treeState.rootNode,
+                          props.node.id,
+                          dragNodeId,
+                          additionalProps().rect,
+                          offset
+                      )) ?? determineDropDirection(additionalProps().rect, offset);
             // Cross-tab: Outer* directions are clamped to their inner
             // equivalents so the ghost matches the committed split — see
             // clampCrossTabDirection in crossTabDrag.ts.

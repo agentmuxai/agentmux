@@ -157,6 +157,11 @@ declare global {
         decideDesktop?(id: string, choice: "timed" | "session" | "deny"): Promise<void>;
         /** The user's Stop for the agent in this pane: its desktop grants end. */
         stopDesktop?(blockId: string): Promise<void>;
+        /** Prove this window's websocket connection is the operator's: hand the
+         *  host the `nonce` srv issued over it (`operator.challenge`), and the
+         *  host vouches for it with its own token, which agents never see.
+         *  Operator-only RPCs are refused until then. */
+        attestOperator?(nonce: string): Promise<void>;
         /** The version panel's Download, Upgrade & restart (`now`: Restart now)
          *  and Cancel. Relayed by the host, which srv trusts and agents can't
          *  impersonate; answers srv's update status after the action. */
@@ -261,6 +266,13 @@ declare global {
         /** What the pane's page is doing that a hibernation would lose
          *  (browser_api/hibernation.rs). Absent on hosts without it. */
         hibernationCheck?(blockId: string): Promise<BrowserHibernationCheck>;
+        /** Discard the pane's page in place, ask whether it is, or load it
+         *  again (browser_panes/discard.rs). `supported: false` on a libcef
+         *  without the Discard API: the caller closes and recreates instead. */
+        discard?(blockId: string, op: "discard" | "is_discarded" | "load"): Promise<{ supported: boolean; ok: boolean }>;
+        /** Freeze the pane's page (no script, no timers) or let it run again
+         *  (browser_api/hibernation.rs). False when it has no page. */
+        setFrozen?(blockId: string, frozen: boolean): Promise<boolean>;
         /** The host's memory pressure level (memory_pressure.rs). */
         memoryPressure?(): Promise<"normal" | "warn" | "critical">;
         /** Bring a popup window a pane's page opened (`popup-…`) to the front. */

@@ -19,20 +19,20 @@ use super::act::isolated_context;
 use super::cdp::CdpSession;
 use crate::state::AppState;
 
-/// Media playing, and form fields changed from their defaults, in the main
-/// frame. A focused, non-empty rich-text editor counts as edited: its default
+/// Media playing, and text typed into the main frame's fields: a text field or
+/// textarea whose value differs from its default. Checkboxes, radio buttons
+/// and selects don't count: pages set them from script (Wikipedia ticks its
+/// theme and width radios on load), and losing one is a click, not lost
+/// writing. A focused, non-empty rich-text editor counts as edited: its default
 /// isn't recorded anywhere a check can read.
 const PAGE_CHECK: &str = r#"(() => {
   const media = [...document.querySelectorAll("video, audio")].some(
     (m) => !m.paused && !m.ended && m.readyState > 2
   );
-  const changed = (el) => {
-    if (el.disabled || el.type === "hidden") return false;
-    if (el.tagName === "SELECT") return [...el.options].some((o) => o.selected !== o.defaultSelected);
-    if (el.type === "checkbox" || el.type === "radio") return el.checked !== el.defaultChecked;
-    return typeof el.value === "string" && el.value !== el.defaultValue;
-  };
-  let edited = [...document.querySelectorAll("input, textarea, select")].some(changed);
+  const notText = new Set(["hidden", "checkbox", "radio", "button", "submit", "reset", "image", "file", "range", "color"]);
+  const typed = (el) =>
+    !el.disabled && !el.readOnly && !notText.has(el.type) && typeof el.value === "string" && el.value !== el.defaultValue;
+  let edited = [...document.querySelectorAll("input, textarea")].some(typed);
   const active = document.activeElement;
   if (!edited && active && active.isContentEditable && (active.textContent || "").trim()) edited = true;
   return { media, edited };
@@ -63,6 +63,25 @@ pub async fn check(state: &Arc<AppState>, block_id: &str) -> Result<Value, Strin
         "beforeunload": beforeunload,
         "devtools": devtools,
     }))
+}
+
+/// Freeze the pane's page (`Page.setWebLifecycleState` frozen: no script, no
+/// timers, its state kept) or let it run again. The window freezes a pane hidden
+/// for a while and thaws it when shown; any other CDP call thaws it too
+/// (`cdp::CdpSession::call`), so an agent's action never waits on it. False
+/// when the pane has no page.
+pub async fn set_frozen(state: &Arc<AppState>, block_id: &str, frozen: bool) -> Result<Value, String> {
+    let Some(label) = state.live_browser_pane_label(block_id) else {
+        return Ok(json!(false));
+    };
+    let Some(browser_id) = state.get_browser(&label).map(|b| b.identifier()) else {
+        return Ok(json!(false));
+    };
+    let mut cdp = CdpSession::attach(state, &label);
+    let state_name = if frozen { "frozen" } else { "active" };
+    cdp.call(super::cdp::LIFECYCLE_METHOD, json!({ "state": state_name })).await?;
+    super::cdp::note_frozen(browser_id, frozen);
+    Ok(json!(true))
 }
 
 /// Whether the page's `window` has a `beforeunload` listener (added with

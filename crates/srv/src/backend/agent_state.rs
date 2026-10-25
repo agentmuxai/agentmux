@@ -308,6 +308,10 @@ pub(crate) mod test_support {
         pub block_id: String,
         pub controller_type: String,
         pub status: BlockControllerRuntimeStatus,
+        /// What started the turn in flight, for a test of something gated on it.
+        pub provenance: Option<crate::backend::blockcontroller::health::TurnProvenance>,
+        /// Its turn tracker, for a test of something that reads when it last wrote output.
+        pub tracker: Option<Arc<crate::backend::blockcontroller::health::TurnActivityTracker>>,
     }
 
     impl Controller for StubController {
@@ -329,6 +333,12 @@ pub(crate) mod test_support {
         fn block_id(&self) -> &str {
             &self.block_id
         }
+        fn turn_provenance(&self) -> Option<crate::backend::blockcontroller::health::TurnProvenance> {
+            self.provenance.clone()
+        }
+        fn turn_tracker(&self) -> Option<Arc<crate::backend::blockcontroller::health::TurnActivityTracker>> {
+            self.tracker.clone()
+        }
         fn as_any(&self) -> &dyn Any {
             self
         }
@@ -348,6 +358,54 @@ pub(crate) mod test_support {
                     turn_active,
                     ..Default::default()
                 },
+                provenance: None,
+                tracker: None,
+            }),
+        );
+    }
+
+    /// [`register_stub`] on a running persistent agent between turns, whose last
+    /// output was `quiet_ms` ago.
+    pub fn register_quiet(block_id: &str, quiet_ms: u64) {
+        use crate::backend::blockcontroller::health::TurnActivityTracker;
+        use crate::backend::blockcontroller::{BLOCK_CONTROLLER_PERSISTENT, STATUS_RUNNING};
+        let then = agentmux_common::time::now_ms_u64().saturating_sub(quiet_ms);
+        let tracker = TurnActivityTracker::with_clock(block_id.to_string(), Box::new(move || then));
+        tracker.note_output();
+        crate::backend::blockcontroller::register_controller(
+            block_id,
+            Arc::new(StubController {
+                block_id: block_id.to_string(),
+                controller_type: BLOCK_CONTROLLER_PERSISTENT.to_string(),
+                status: BlockControllerRuntimeStatus {
+                    blockid: block_id.to_string(),
+                    shellprocstatus: STATUS_RUNNING.to_string(),
+                    turn_active: false,
+                    ..Default::default()
+                },
+                provenance: None,
+                tracker: Some(Arc::new(tracker)),
+            }),
+        );
+    }
+
+    /// [`register_stub`] on a running persistent agent whose turn in flight
+    /// has `provenance`.
+    pub fn register_turn(block_id: &str, provenance: crate::backend::blockcontroller::health::TurnProvenance) {
+        use crate::backend::blockcontroller::{BLOCK_CONTROLLER_PERSISTENT, STATUS_RUNNING};
+        crate::backend::blockcontroller::register_controller(
+            block_id,
+            Arc::new(StubController {
+                block_id: block_id.to_string(),
+                controller_type: BLOCK_CONTROLLER_PERSISTENT.to_string(),
+                status: BlockControllerRuntimeStatus {
+                    blockid: block_id.to_string(),
+                    shellprocstatus: STATUS_RUNNING.to_string(),
+                    turn_active: true,
+                    ..Default::default()
+                },
+                provenance: Some(provenance),
+                tracker: None,
             }),
         );
     }

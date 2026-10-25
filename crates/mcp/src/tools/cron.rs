@@ -21,17 +21,22 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let max_fires = arguments.get("max_fires").and_then(|v| v.as_i64()).filter(|&n| n > 0);
             let max_age_secs = arguments.get("max_age_secs").and_then(|v| v.as_i64()).filter(|&n| n > 0);
             let catch_up = arguments.get("catch_up").and_then(|v| v.as_str()).filter(|s| !s.is_empty());
+            let tz = arguments.get("tz").and_then(|v| v.as_str()).filter(|s| !s.is_empty());
+            let policy = arguments.get("policy").filter(|v| v.is_object());
+            let template = arguments.get("template").filter(|v| !v.is_null());
+            let params = arguments.get("params").filter(|v| v.is_object());
             let self_id = std::env::var("AGENTMUX_AGENT_ID").ok().filter(|s| !s.is_empty()).unwrap_or_default();
             // Identity M3 (spec §5.4): resolve the target while the author is
             // present; the job then fires by uid, never by resolving a name.
             let target_uid = resolve_agent_name_at_boundary(&client, local_url, auth_key, target).await?;
 
-            let url = format!("{}/agentmux/cron", local_url.trim_end_matches('/'));
+            let url = format!("{}/agentmux/jobs", local_url.trim_end_matches('/'));
             let body = serde_json::json!({
                 "name": name, "expression": expression, "prompt": prompt,
                 "target": target, "target_uid": target_uid.unwrap_or_default(),
                 "created_by": self_id, "max_fires": max_fires,
                 "max_age_secs": max_age_secs, "catch_up": catch_up,
+                "tz": tz, "policy": policy, "template": template, "params": params,
             });
             let resp = client.post(&url).header(AUTH_KEY_HEADER, auth_key).json(&body).send().await
                 .map_err(|e| anyhow::anyhow!("cron create request failed: {e}"))?;
@@ -43,10 +48,11 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let v: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
             let job = &v["job"];
             Ok(format!(
-                "Created cron job '{}' (id={})\nExpression: {} UTC\nNext fire: {}\nTarget: {}",
+                "Created cron job '{}' (id={})\nExpression: {} {}\nNext fire: {}\nTarget: {}",
                 job["name"].as_str().unwrap_or(name),
                 job["id"].as_str().unwrap_or("?"),
                 expression,
+                job["tz"].as_str().unwrap_or("UTC"),
                 job["next_fire"].as_str().unwrap_or("unknown"),
                 target,
             ))
@@ -55,7 +61,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             require_agent_env(local_url, auth_key, block_id)?;
             let id = arguments.get("id").and_then(|v| v.as_str()).filter(|s| !s.is_empty())
                 .ok_or_else(|| anyhow::anyhow!("missing required parameter: id"))?;
-            let url = format!("{}/agentmux/cron/{}", local_url.trim_end_matches('/'), id);
+            let url = format!("{}/agentmux/jobs/{}", local_url.trim_end_matches('/'), id);
             let resp = client.delete(&url).header(AUTH_KEY_HEADER, auth_key).send().await
                 .map_err(|e| anyhow::anyhow!("cron delete request failed: {e}"))?;
             let status = resp.status();
@@ -70,7 +76,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
         }
         "CronList" => {
             require_agent_env(local_url, auth_key, block_id)?;
-            let url = format!("{}/agentmux/cron", local_url.trim_end_matches('/'));
+            let url = format!("{}/agentmux/jobs", local_url.trim_end_matches('/'));
             let resp = client.get(&url).header(AUTH_KEY_HEADER, auth_key).send().await
                 .map_err(|e| anyhow::anyhow!("cron list request failed: {e}"))?;
             let status = resp.status();
@@ -133,7 +139,7 @@ No cron jobs configured.")).unwrap_or_else(|| "No cron jobs configured.".to_stri
             let id = arguments.get("id").and_then(|v| v.as_str()).filter(|s| !s.is_empty())
                 .ok_or_else(|| anyhow::anyhow!("missing required parameter: id"))?;
             let limit = arguments.get("limit").and_then(|v| v.as_i64()).filter(|&n| n > 0).unwrap_or(20);
-            let url = format!("{}/agentmux/cron/{}/runs?limit={limit}", local_url.trim_end_matches('/'), id);
+            let url = format!("{}/agentmux/jobs/{}/runs?limit={limit}", local_url.trim_end_matches('/'), id);
             let resp = client.get(&url).header(AUTH_KEY_HEADER, auth_key).send().await
                 .map_err(|e| anyhow::anyhow!("cron history request failed: {e}"))?;
             let status = resp.status();
@@ -154,7 +160,7 @@ No cron jobs configured.")).unwrap_or_else(|| "No cron jobs configured.".to_stri
             require_agent_env(local_url, auth_key, block_id)?;
             let id = arguments.get("id").and_then(|v| v.as_str()).filter(|s| !s.is_empty())
                 .ok_or_else(|| anyhow::anyhow!("missing required parameter: id"))?;
-            let url = format!("{}/agentmux/cron/{}/run", local_url.trim_end_matches('/'), id);
+            let url = format!("{}/agentmux/jobs/{}/run", local_url.trim_end_matches('/'), id);
             let resp = client.post(&url).header(AUTH_KEY_HEADER, auth_key).json(&serde_json::json!({})).send().await
                 .map_err(|e| anyhow::anyhow!("cron run_now request failed: {e}"))?;
             let status = resp.status();
@@ -183,7 +189,7 @@ No cron jobs configured.")).unwrap_or_else(|| "No cron jobs configured.".to_stri
                 .ok_or_else(|| anyhow::anyhow!("missing required parameter: outcome (ok, findings or failed)"))?;
             let summary = arguments.get("summary").and_then(|v| v.as_str()).unwrap_or("");
             let links = arguments.get("links").cloned().unwrap_or(serde_json::Value::Null);
-            let url = format!("{}/agentmux/cron/runs/{}/report", local_url.trim_end_matches('/'), run_id);
+            let url = format!("{}/agentmux/jobs/runs/{}/report", local_url.trim_end_matches('/'), run_id);
             let body = serde_json::json!({ "outcome": outcome, "summary": summary, "links": links });
             let resp = client.post(&url).header(AUTH_KEY_HEADER, auth_key).json(&body).send().await
                 .map_err(|e| anyhow::anyhow!("cron report request failed: {e}"))?;

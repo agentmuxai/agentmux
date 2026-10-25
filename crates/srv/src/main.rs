@@ -153,6 +153,9 @@ async fn app_main() {
         bg.event_bus.clone(),
         bg.broker.clone(),
     );
+    // Job templates: this instance's approvals and pinned publishers, beside
+    // the widgets' (SPEC_JOBS_AND_TEMPLATES_2026_10_24.md §5.4).
+    backend::job_templates::start(&config.data_home);
 
     // 5. Bind TCP listeners, bring up LAN discovery / LSP supervisor / process tracker.
     let net = boot_timing::time_async(
@@ -210,19 +213,19 @@ async fn app_main() {
     // The run ledger (SPEC_JOBS_AND_TEMPLATES_2026_10_24.md §3): close the
     // runs a restart interrupted, then record every fire from here on.
     let run_ledger = backend::jobs::RunLedger::new(
-        state.identity_store.clone(),
+        server::cron::ledger_store(&state),
         Some(state.mstore.clone()),
         state.broker.clone(),
     );
     // A failing job opens one incident for its owner (jobs spec §3.4).
-    run_ledger.install_incidents(state.shared_store.clone());
+    run_ledger.install_incidents(server::cron::jobs_store(&state));
     {
         let ledger = run_ledger.clone();
         let _ = tokio::task::spawn_blocking(move || ledger.recover_after_restart()).await;
     }
     // A paused job's slots are counted as skips (jobs spec §3.3).
-    if let Some(shared) = state.shared_store.clone() {
-        backend::jobs::paused::spawn(shared, run_ledger.clone());
+    if let Some(jobs_store) = server::cron::jobs_store(&state) {
+        backend::jobs::paused::spawn(jobs_store, run_ledger.clone());
     }
     state.cron_scheduler.install_runs(run_ledger);
 
@@ -335,10 +338,28 @@ async fn app_main() {
         state.http_client.clone(),
     );
     tokio::spawn(backend::kanban::run_reminder_loop());
+    // An agent out of quota is woken at its reset (SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §7).
+    backend::limit_wake::install(Arc::clone(&state.mstore), Arc::clone(&state.identity_store), Arc::clone(&state.event_bus));
     tokio::spawn(backend::kanban::prs::run_merge_loop());
     // An agent's AgentMux MCP server that didn't connect is noticed and
     // repaired (`agent:mcpselfheal`).
     backend::mcp_health::install(Arc::clone(&state.config_watcher));
+    // And one whose process is alive but has stopped answering, noticed by its
+    // heartbeat going quiet (#2614).
+    backend::mcp_health::spawn_watch(
+        tokio_util::sync::CancellationToken::new(),
+        |block_id, process, wedge| {
+            use backend::blockcontroller::persistent::PersistentSubprocessController;
+            if let Some(ctrl) = backend::blockcontroller::get_controller(block_id) {
+                if let Some(ctrl) = ctrl
+                    .as_any()
+                    .downcast_ref::<PersistentSubprocessController>()
+                {
+                    ctrl.mcp_wedged(process, wedge);
+                }
+            }
+        },
+    );
     backend::transcript::append::install_config(Arc::clone(&state.config_watcher));
     // Claude config dirs get the auto-compact window `agent:compactat` asks for.
     backend::providers::install_config(Arc::clone(&state.config_watcher));

@@ -311,6 +311,62 @@ impl PersistentSubprocessController {
         self.carry_out_mcp_step(decision, generation);
     }
 
+    /// A heartbeat from this pane's MCP process (`POST /api/v1/agent/self/mcp-beat`):
+    /// it says whether the server is wedged, which is repaired like one that
+    /// didn't connect (#2614).
+    pub(crate) fn mcp_beat(&self, beat: &crate::backend::mcp_health::Beat) {
+        use crate::backend::mcp_health as heal;
+        let generation = self.inner.lock().unwrap().spawn_generation;
+        let now = agentmux_common::time::now_ms_u64();
+        let Some((wedge, decision)) =
+            heal::on_beat(&self.block_id, &self.mcp_process_key(generation), beat, now)
+        else {
+            return;
+        };
+        self.repair_wedged_mcp(&wedge, decision, generation);
+    }
+
+    /// The watcher found `process`'s MCP server silent. Nothing if that
+    /// process is no longer this pane's.
+    pub(crate) fn mcp_wedged(&self, process: &str, wedge: &crate::backend::mcp_health::Wedge) {
+        use crate::backend::mcp_health as heal;
+        let (generation, running) = {
+            let inner = self.inner.lock().unwrap();
+            (
+                inner.spawn_generation,
+                inner.stdin_tx.is_some() && !inner.stop_pending,
+            )
+        };
+        if !running || self.mcp_process_key(generation) != process {
+            heal::forget_beats(&self.block_id);
+            return;
+        }
+        let decision = heal::on_wedged(
+            &self.block_id,
+            process,
+            wedge,
+            agentmux_common::time::now_ms_u64(),
+        );
+        self.repair_wedged_mcp(wedge, decision, generation);
+    }
+
+    fn repair_wedged_mcp(
+        &self,
+        wedge: &crate::backend::mcp_health::Wedge,
+        decision: crate::backend::mcp_health::Decision,
+        generation: u64,
+    ) {
+        use crate::backend::mcp_health::{self as heal, Action};
+        if matches!(decision.action, Action::None) {
+            return;
+        }
+        tracing::warn!(block_id = %self.block_id, why = %wedge.describe(), "MCP self-heal: the agentmux MCP server is wedged");
+        if !heal::auto_enabled() {
+            return;
+        }
+        self.carry_out_mcp_step(decision, generation);
+    }
+
     /// `agentmux-mcp doctor --heal`: start the repair over now. `Err` says why
     /// nothing started (`mcp_health::heal_now`).
     pub(crate) fn mcp_heal_now(&self) -> Result<(), &'static str> {

@@ -42,7 +42,7 @@ pub struct HistoryUsageAgent {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct HistoryCompression {
-    /// `agent:transcriptframes` is on.
+    /// `agent:transcriptframes` is on (the default; `false` turns it off).
     pub enabled: bool,
     /// Compressed frames in the store.
     #[ts(type = "number")]

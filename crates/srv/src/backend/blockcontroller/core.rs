@@ -240,6 +240,10 @@ pub(crate) fn persist_last_failure(
     // (`agents::limit_reset`), here too so every path stores it.
     let enriched = failure.map(|f| crate::agents::limit_reset::with_reset(block_id, f));
     let failure = enriched.as_ref();
+    // A usage limit with a known reset gets its wake (`limit_wake`).
+    if let Some(f) = failure {
+        crate::backend::limit_wake::on_failure(block_id, f);
+    }
     // Logged only for `Some` — this is also called with `None` after every
     // clean turn, and that is not an event worth a line.
     if let Some(f) = failure {

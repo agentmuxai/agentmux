@@ -61,6 +61,36 @@
     font-size: 0.92em;
 }
 
+// AgentMux's memory, one line under the toolbar in every view and at every
+// width, so memory never has to be found (SPEC_TOWER_MEMORY_FIRST_AND_AGENTMUX_BREAKDOWN_2026_10_25.md §3.1).
+.tower-headline {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-2);
+    padding: var(--space-1) var(--space-3);
+    border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
+    white-space: nowrap;
+    overflow: hidden;
+}
+
+.tower-headline-label {
+    font-weight: 600;
+}
+
+.tower-headline-mem {
+    font-size: var(--text-lg);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+// The count gives way first when there isn't room: the number stays.
+.tower-headline-note {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
 .tower-muted {
     color: var(--secondary-text-color);
 }
@@ -302,14 +332,15 @@ th[aria-sort="descending"] .tower-sort {
     }
 }
 
-// Two lines, so the name has the row's width: swatch, name and CPU, then
-// memory and the last minute's CPU under the name.
+// Two lines, so the name has the row's width: swatch, name and memory, then
+// CPU and the last minute's memory under the name. Memory comes first and
+// stays when the rail narrows (SPEC_TOWER_MEMORY_FIRST_AND_AGENTMUX_BREAKDOWN_2026_10_25.md §3.1).
 .tower-rail-row {
     display: grid;
     grid-template-columns: 12px minmax(0, 1fr) auto;
     grid-template-areas:
-        "swatch name cpu"
-        ". mem spark";
+        "swatch name mem"
+        ". cpu spark";
     align-items: center;
     column-gap: var(--space-2);
     row-gap: 2px;
@@ -326,9 +357,9 @@ th[aria-sort="descending"] .tower-sort {
     }
 
     @container (max-width: 680px) {
-        grid-template-areas: "swatch name cpu";
+        grid-template-areas: "swatch name mem";
 
-        .tower-rail-mem,
+        .tower-rail-cpu,
         .tower-spark {
             display: none;
         }
@@ -400,13 +431,22 @@ th[aria-sort="descending"] .tower-sort {
 }
 
 // Beside the rail in a half-width pane the numbers' columns left the Process
-// column so little that tree rows lost their names entirely. Everything after
-// CPU and Memory goes: the PID (it is in every row's hover text) and "More
-// columns" (CPU time, Peak), with its button, so the names keep their room.
+// column so little that tree rows lost their names entirely. Memory and CPU
+// are the 2nd and 3rd columns; what is after them goes first: the PID (it is
+// in every row's hover text) and "More columns" (CPU time, Peak), with its
+// button, so the names keep their room. Narrower still, CPU goes too, and
+// Memory is the last column left (SPEC_TOWER_MEMORY_FIRST_AND_AGENTMUX_BREAKDOWN_2026_10_25.md §3.1).
 @container tower-detail (max-width: 460px) {
     .tower-table th:nth-child(n + 4),
     .tower-table td:nth-child(n + 4),
     .tower-more-columns {
+        display: none;
+    }
+}
+
+@container tower-detail (max-width: 300px) {
+    .tower-table th:nth-child(n + 3),
+    .tower-table td:nth-child(n + 3) {
         display: none;
     }
 }
@@ -573,22 +613,59 @@ th[aria-sort="descending"] .tower-sort {
 
 // A narrow pane: the number columns give the names room. A memory figure
 // ("259.6 MB") needs about 70 px with the cell's padding; at 64 it was cut
-// and the table overflowed its pane.
+// and the table overflowed its pane. Memory is the 2nd column (the Panes
+// table's 3rd, after its State) and CPU the one after it, so Memory keeps the
+// wider cell.
 .tower-view .tower-table th {
     @container (max-width: 640px) {
-        &:nth-child(2) {
-            width: 64px;
-        }
-
-        &:nth-child(3),
+        &:nth-child(2),
         &:nth-child(5) {
             width: 76px;
+        }
+
+        &:nth-child(3) {
+            width: 64px;
         }
 
         &:nth-child(4),
         &:nth-child(6) {
             width: 56px;
         }
+    }
+}
+
+.tower-view .tower-panes th {
+    @container (max-width: 640px) {
+        &:nth-child(2) {
+            width: 64px;
+        }
+
+        &:nth-child(3) {
+            width: 76px;
+        }
+
+        &:nth-child(4) {
+            width: 64px;
+        }
+    }
+}
+
+// Narrow panes drop columns in this order: the PID or count, then CPU. Memory
+// is never dropped. (The Agents view's detail table has its own, by the width
+// of its own container, above.) The Panes table's 4th column is CPU.
+@container (max-width: 420px) {
+    .tower-table:not(.tower-panes) th:nth-child(4),
+    .tower-table:not(.tower-panes) td:nth-child(4),
+    .tower-panes th:nth-child(4),
+    .tower-panes td:nth-child(4) {
+        display: none;
+    }
+}
+
+@container (max-width: 300px) {
+    .tower-table:not(.tower-panes) th:nth-child(3),
+    .tower-table:not(.tower-panes) td:nth-child(3) {
+        display: none;
     }
 }
 
@@ -853,4 +930,124 @@ th[aria-sort="descending"] .tower-sort {
 
 .tower-panes-note {
     padding: var(--space-2) var(--space-3);
+}
+
+// ── The Memory view (SPEC_TOWER_MEMORY_FIRST_AND_AGENTMUX_BREAKDOWN_2026_10_25.md §4): one bar
+// split into the four parts, a legend, and a table that opens each. The
+// parts use the theme's own process-kind colours, which the colour test
+// already measures in every theme. ──
+
+.tower-memory-part--core {
+    --tower-memory-color: var(--process-kind-agentmux);
+}
+
+.tower-memory-part--panes {
+    --tower-memory-color: var(--process-kind-shells);
+}
+
+.tower-memory-part--agents {
+    --tower-memory-color: var(--process-kind-agents);
+}
+
+// What nothing claims is drawn in the text colour, faint, as the System kind is.
+.tower-memory-part--not_placed {
+    --tower-memory-color: color-mix(in srgb, var(--secondary-text-color) 60%, transparent);
+}
+
+.tower-memory {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+}
+
+.tower-memory-bar-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
+.tower-memory-bar {
+    display: flex;
+    height: 14px;
+    overflow: hidden;
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--secondary-text-color) 12%, transparent);
+}
+
+.tower-memory-segment {
+    flex: 0 0 auto;
+    min-width: 2px;
+    height: 100%;
+    padding: 0;
+    border: 0;
+    background: var(--tower-memory-color);
+    cursor: pointer;
+
+    &:hover {
+        filter: brightness(1.15);
+    }
+
+    &:focus-visible {
+        @include mixins.focus-ring;
+    }
+}
+
+.tower-memory-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1) var(--space-3);
+    font-size: var(--text-sm);
+}
+
+.tower-memory-key {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    white-space: nowrap;
+}
+
+.tower-memory-swatch {
+    display: inline-block;
+    flex-shrink: 0;
+    width: 10px;
+    height: 10px;
+    border-radius: var(--radius-sm);
+    background: var(--tower-memory-color);
+}
+
+// Where a row has no arrow, keep its name aligned with those that do.
+.tower-memory-spacer {
+    display: inline-block;
+    flex-shrink: 0;
+    width: 18px;
+}
+
+.tower-memory-part td {
+    font-weight: 500;
+}
+
+.tower-memory-row .tower-name {
+    padding-left: 28px;
+}
+
+.tower-memory-child .tower-name {
+    padding-left: 60px;
+}
+
+.tower-memory-hint td {
+    padding-left: 28px;
+}
+
+.tower-memory-note {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    font-size: 0.9em;
+}
+
+// Narrowest: the bar and its legend say it, and nothing opens.
+@container (max-width: 240px) {
+    .tower-memory-table {
+        display: none;
+    }
 }

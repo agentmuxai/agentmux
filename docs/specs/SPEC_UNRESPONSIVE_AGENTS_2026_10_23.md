@@ -1,7 +1,7 @@
 # SPEC: unresponsive agents — out-of-quota and signed-out states, the reset time, held messages, the per-account notice
 
 **Date:** 2026-10-23
-**Status:** active — approved by the operator on 2026-10-23. Step 1 (§3, §4.1, §4.2, §4.5) shipped in #5389; step 2b (§4.4 and the R8 display) is in #5398; step 2d (§6) in #5402; step 2a (§4.3 and R5) in #5410; step 2c (§5) in the PR that adds this line; step 2e (§4.6) and step 3 (§7, §8) remain. Implements R1–R4, R6 and R7 of `docs/reports/REPORT_UNRESPONSIVE_AGENTS_2026_10_23.md` (Kanban #1255, operator: "yes proceed with all"); R5 and R8 are scoped here only as far as they read this spec's state. Ships with the first build PR (§9, step 1).
+**Status:** active — approved by the operator on 2026-10-23. Step 1 (§3, §4.1, §4.2, §4.5) shipped in #5389; step 2b (§4.4 and the R8 display) is in #5398; step 2d (§6) in #5402; step 2a (§4.3 and R5) in #5410; step 2c (§5) in #5419; step 3a (§7, the wake) in #5433; step 3b (§8, the watchdog) in #5444; step 2e (§4.6) and R9 remain. Implements R1–R4, R6 and R7 of `docs/reports/REPORT_UNRESPONSIVE_AGENTS_2026_10_23.md` (Kanban #1255, operator: "yes proceed with all"); R5 and R8 are scoped here only as far as they read this spec's state. Ships with the first build PR (§9, step 1).
 **Author:** Loap-3 (loap-loap-2-loap-3). Build order and owners agreed with AgentX and AgentY.
 **Task:** Kanban #1787.
 
@@ -243,7 +243,8 @@ The action is **Move these agents to another signed-in account**, done by a new 
   2. notify `held_jekt_wake()`;
   3. if no held message is waiting for it and it holds a claimed Kanban task, give it one `[AgentMux]` note: "Your account's usage limit has reset. Continue with #163."
 - **Limits.** One wake per `resets_at_ms` value. A limit hit again records a new failure and a new reset.
-- **First, verify** in the step-3 PR whether Claude Code's own auto-continue already resumes inside AgentMux's stream-json session (report §5). If it does, keep only steps 1 and 2.
+- **Verified: it doesn't.** In 2,563 usage-limit errors in stored Claude Code transcripts, none was followed by the agent carrying on without a new message from a person or AgentMux. So the wake is needed, all three steps stay.
+- **Where.** `backend/limit_wake.rs`. `persist_last_failure` schedules the wake when it stores a usage limit with a reset; `install` rebuilds the schedule from block meta at start. The held-message check reads the held-jekt table by the agent's uid; the claimed tasks are the agent's claimed Kanban tasks (up to 3 named, titles quoted).
 
 ## 8. The watchdog (R7, step 3, Manoz)
 
@@ -251,6 +252,8 @@ When `backend/blockcontroller/watchdog.rs` trips and calls `stop_now`:
 - release the block's claimed tasks with the reason "stopped by the watchdog after <limit>" (the attempt counts);
 - raise one `AgentCrashed` notification: "Stopped by the watchdog after 4 h";
 - fix the table comment at `sagas/agent_teardown.rs:16`.
+
+Built: `watchdog::after_stop` runs after `stop_now` succeeds on an agent pane (not a shell pane). `stop_now` is `Policy::stop_cli_only`, which keeps the claims on purpose (a pane's `AgentStop` may be restarted), so the watchdog releases them itself through `agent_teardown::release_claims`, the same function `Policy::stop` uses. The limit is named in the unit it was set in ("4 h", "30 min without output"). The table comment had the watchdog under `Policy::stop(..)`, which releases claims; it now sits with `stop_cli_only`.
 
 ## 9. Build order and owners
 
