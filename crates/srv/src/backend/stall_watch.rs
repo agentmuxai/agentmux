@@ -315,7 +315,8 @@ mod tests {
         for now in (5_250..=12_000).step_by(250) {
             seen.extend(t.look(now, now - 20, 1, Snapshot::default));
         }
-        assert_eq!(seen, vec![Event::End { lasted_ms: 3_750, worst_late_ms: 3_750, stalls: 1 }]);
+        // It ended at the first beat seen on time, a look after the pause.
+        assert_eq!(seen, vec![Event::End { lasted_ms: 3_980, worst_late_ms: 3_750, stalls: 1 }]);
     }
 
     #[test]
