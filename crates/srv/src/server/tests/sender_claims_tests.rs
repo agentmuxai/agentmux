@@ -158,7 +158,7 @@ async fn only_the_operators_window_may_broadcast_as_the_user() {
         RpcContext::default(),
     ] {
         let e = rpc(&state, ctx, "fleet.broadcast", data.clone()).await.unwrap_err();
-        assert!(e.starts_with("FORBIDDEN: only the operator broadcasts as the user"), "{e}");
+        assert!(e.starts_with("FORBIDDEN: a Swarm broadcast arrives as the operator's own words"), "{e}");
     }
     let sent = rpc(&state, RpcContext::operator_for_tests(), "fleet.broadcast", data).await.unwrap();
     assert_eq!(sent["failed"].as_array().map(Vec::len), Some(1), "the operator's broadcast ran, and its one target was unknown: {sent}");
@@ -230,5 +230,45 @@ async fn memory_and_identity_routes_refuse_a_request_with_no_token() {
         assert_eq!(status, StatusCode::FORBIDDEN, "{uri}: {v}");
         let (_, v) = post(&state, Some(&token), uri, body).await;
         assert!(!no_token_refusal(&v), "{uri} with a token: {v}");
+
+/// A Global Memory write over HTTP is recorded under the agent whose token made it; a request can't write as another.
+#[tokio::test]
+async fn a_token_cannot_write_or_revert_global_memory_as_another_agent() {
+    let _counters = M4_ACTOR_COUNTERS.lock().await;
+    let (state, token) = state_with_alpha();
+    let (_, v) = post(&state, Some(&token), "/api/v1/agent/globalmemory/write", json!({ "agent_id": "sc-beta", "name": "Rules", "content": "x" })).await;
+    assert!(refused(&v), "{v}");
+    let (_, v) = post(&state, Some(&token), "/api/v1/agent/globalmemory/revert", json!({ "agent_id": "sc-beta", "id": "g", "version_id": "v" })).await;
+    assert!(refused(&v), "{v}");
+    let (_, v) = post(&state, Some(&token), "/api/v1/agent/globalmemory/write", json!({ "agent_id": "sc-alpha", "name": "Rules", "content": "x" })).await;
+    assert!(!refused(&v), "an agent writes Global Memory as itself: {v}");
+}
+
+async fn rpc_bundle(state: &AppState, ctx: RpcContext, command: &str, data: Value) -> Result<Value, String> {
+    let (engine, mut rx) = WshRpcEngine::new();
+    crate::server::agent_handlers::bundle::register(&engine, state);
+    engine.set_rpc_context(ctx);
+    engine.handle_message(RpcMessage { command: command.to_string(), reqid: "req-1".to_string(), data: Some(data), ..Default::default() });
+    let resp = tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv()).await.unwrap().unwrap();
+    if resp.error.is_empty() {
+        Ok(resp.data.unwrap_or_default())
+    } else {
+        Err(resp.error)
+    }
+}
+
+/// An agent that saves Global Memory over the socket is recorded as that agent; the window is recorded as the window.
+#[tokio::test]
+async fn a_global_memory_save_over_the_socket_is_recorded_as_whoever_made_it() {
+    let state = test_state();
+    for (id, ctx, writer, source) in [
+        ("sc-g-agent", RpcContext { agent_id: "sc-alpha".to_string(), ..Default::default() }, "sc-alpha", "agent"),
+        ("sc-g-window", RpcContext::operator_for_tests(), "armory-ui", "human"),
+    ] {
+        let bundle = json!({ "id": id, "name": id, "instructions": "be kind", "is_global": true });
+        rpc_bundle(&state, ctx, "upsertmemory", bundle).await.unwrap();
+        let versions = state.id_store.bundle_version_list(id).unwrap();
+        assert_eq!(versions.len(), 1, "{id}");
+        assert_eq!((versions[0].written_by.as_str(), versions[0].source.as_str()), (writer, source), "{id}");
     }
 }

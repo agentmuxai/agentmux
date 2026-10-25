@@ -207,7 +207,7 @@ pub(super) async fn handle_agent_broadcast_forward(
 ) -> impl IntoResponse {
     // The forwarding instance is a server, not an agent: a request that carries an agent's token is that agent asking.
     if caller.as_deref().and_then(super::caller::Caller::uid).is_some() {
-        return (StatusCode::FORBIDDEN, Json(serde_json::json!({ "success": false, "error": "FORBIDDEN: a broadcast comes from the operator's window" }))).into_response();
+        return (StatusCode::FORBIDDEN, Json(serde_json::json!({ "success": false, "error": "FORBIDDEN: a Swarm broadcast arrives as the operator's own words and comes from the AgentMux window; an agent broadcasts as itself with the Message tool" }))).into_response();
     }
     match app_api::fleet::deliver_forwarded_broadcast(&state, &req.block_id, &req.body, &req.msg_id, req.recipients).await {
         Ok(()) => (StatusCode::OK, Json(serde_json::json!({ "success": true }))).into_response(),
@@ -390,12 +390,9 @@ pub(super) async fn handle_agent_globalmemory_write(
     caller: Option<Extension<caller::Caller>>,
     Json(req): Json<AgentGlobalMemoryWriteRequest>,
 ) -> impl IntoResponse {
-    actor::check_actor(
-        &state,
-        caller.as_deref(),
-        actor::ActorSite::GlobalMemoryWrite,
-        Some(&req.agent_id),
-    );
+    if let Err(e) = actor::require_actor(&state, caller.as_deref(), actor::ActorSite::GlobalMemoryWrite, Some(&req.agent_id)).await {
+        return app_api_response::<()>(Err(e));
+    }
     let detail_str;
     let provenance = if let Some(p) = req.provenance.as_ref() {
         detail_str = p.detail.to_string();
@@ -509,12 +506,9 @@ pub(super) async fn handle_agent_globalmemory_revert(
     caller: Option<Extension<caller::Caller>>,
     Json(req): Json<AgentGlobalMemoryRevertRequest>,
 ) -> impl IntoResponse {
-    actor::check_actor(
-        &state,
-        caller.as_deref(),
-        actor::ActorSite::GlobalMemoryRevert,
-        Some(&req.agent_id),
-    );
+    if let Err(e) = actor::require_actor(&state, caller.as_deref(), actor::ActorSite::GlobalMemoryRevert, Some(&req.agent_id)).await {
+        return app_api_response::<()>(Err(e));
+    }
     // Identity M4c-1: as for write, the writer's UID is the `Caller`'s.
     let written_by_uid = caller::attributed_uid(caller.as_deref());
     app_api_response(app_api::global_memory_revert_impl(
