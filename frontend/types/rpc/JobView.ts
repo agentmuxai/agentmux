@@ -62,4 +62,18 @@ cost_known: boolean,
  * It takes Run now, Pause, Resume and Delete here: a cron job does; a
  * Drone graph, run from its own pane, doesn't.
  */
-actions: boolean, };
+actions: boolean, 
+/**
+ * The cap it is over today (`job_cap`, `account_cap` or `message_cap`):
+ * the tab's "Over cap (today)". Its runs resume at the next local midnight.
+ */
+over_cap: string | null, 
+/**
+ * The most one run may spend, and one day of its runs (§5.3), in dollars.
+ */
+run_cap_usd: number | null, day_cap_usd: number | null, 
+/**
+ * Its agent's provider reports no cost, so the caps can't stop it and only
+ * its timeout limits it: the tab says so.
+ */
+cost_not_reported: boolean, };

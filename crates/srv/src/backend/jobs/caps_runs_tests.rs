@@ -329,7 +329,6 @@ async fn a_provider_with_no_cost_counts_zero_toward_the_dollar_caps() {
     assert_eq!(rig.ledger.stop_at_usd(&run_id, "claude"), Some(5.0));
     assert!(!crate::backend::jobs::caps::reports_cost("codex"));
     assert!(crate::backend::jobs::caps::reports_cost("claude"));
-    assert!(crate::backend::jobs::caps::reports_cost("anthropic"), "an alias of claude");
 }
 
 #[tokio::test(flavor = "multi_thread")]

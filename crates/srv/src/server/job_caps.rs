@@ -50,7 +50,7 @@ pub(crate) struct Origin {
 
 /// Settings' caps (`jobs:cap:*`).
 pub(crate) fn limits(state: &AppState) -> Limits {
-    Limits::from_settings(&state.config_watcher.get_settings())
+    Limits::from_settings(&state.config_watcher.get_full_config().settings)
 }
 
 /// Weigh job runs against Settings' caps, finding where each would go.
