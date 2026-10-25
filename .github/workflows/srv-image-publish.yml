@@ -39,6 +39,9 @@ on:
       - 'crates/bashwrap/**'
       - 'schema/**'
       - 'settings-template.jsonc'
+      - 'templates/jobs/**'
+      - 'sdk/widget-sdk/**'
+      - 'scripts/build-slot/**'
   workflow_dispatch:
     inputs:
       ref:
