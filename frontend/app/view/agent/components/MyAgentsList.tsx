@@ -609,6 +609,14 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
             agentName: row.instance_name || row.definition_name,
         });
     };
+    const handleEnvOpen = (row: RecentSessionRow): void => {
+        closeMenu(row.definition_id);
+        modalLayer?.open({
+            kind: "agent-env",
+            agentId: row.definition_id,
+            agentName: row.instance_name || row.definition_name,
+        });
+    };
 
     // Duplicate — reuses the EXISTING fork-and-launch flow unchanged
     // (handleOpenNewSession/handleForkStart above, already wired to
@@ -1255,6 +1263,15 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                                             data-testid="agent-my-agents-seat"
                                                         >
                                                             Seat…
+                                                        </Button>
+                                                        <Button
+                                                            tone="quiet"
+                                                            icon="terminal"
+                                                            class="agent-row-menu-item"
+                                                            onClick={() => handleEnvOpen(row)}
+                                                            data-testid="agent-my-agents-env"
+                                                        >
+                                                            Environment…
                                                         </Button>
                                                     </Show>
                                                     <button

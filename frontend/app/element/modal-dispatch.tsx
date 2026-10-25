@@ -8,6 +8,7 @@
 
 import type { JSX } from "solid-js";
 import { BrowserAuthModalPanel } from "@/app/view/browser/components/BrowserAuthModal";
+import { AgentEnvPanel } from "@/app/view/agent/components/AgentEnvPanel";
 import { AgentIdentityModalPanel } from "@/app/view/agent/components/AgentIdentityModal";
 import { AgentNativeMemoryModal } from "@/app/view/agent/components/AgentNativeMemoryModal";
 import { AgentSeatPanel } from "@/app/view/agent/components/AgentSeatPanel";
@@ -31,6 +32,8 @@ export function requestLabel(req: ModalLayerRequest): string {
             return `Memory — ${req.agentName}`;
         case "agent-seat":
             return `Seat — ${req.agentName}`;
+        case "agent-env":
+            return `Environment — ${req.agentName}`;
         case "bundle-import-select":
             return "Import Bundle";
         case "bundle-import-preview":
@@ -92,6 +95,11 @@ export function renderRequest(
             return {
                 label: requestLabel(req),
                 panel: <AgentSeatPanel agentId={req.agentId} agentName={req.agentName} onClose={api.close} />,
+            };
+        case "agent-env":
+            return {
+                label: requestLabel(req),
+                panel: <AgentEnvPanel agentId={req.agentId} agentName={req.agentName} onClose={api.close} />,
             };
         case "bundle-import-select":
             return {

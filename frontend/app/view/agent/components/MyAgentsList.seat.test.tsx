@@ -115,6 +115,21 @@ describe("MyAgentsList — seats", () => {
         await waitFor(() => expect(screen.queryByTestId("agent-row-menu")).toBeNull());
     });
 
+    it("opens the Environment editor from the row menu", async () => {
+        listRecent.mockResolvedValue({ rows: [row()], degraded: [] });
+        const layer = fakeLayer();
+        render(() => (
+            <ModalLayerContext.Provider value={layer}>
+                <MyAgentsList onReattach={() => {}} />
+            </ModalLayerContext.Provider>
+        ));
+        const user = userEvent.setup();
+        await user.click(await screen.findByTestId("agent-my-agents-menu-toggle"));
+        await user.click(await screen.findByTestId("agent-my-agents-env"));
+        expect(layer.open).toHaveBeenCalledWith({ kind: "agent-env", agentId: "uid-x", agentName: "AgentX" });
+        await waitFor(() => expect(screen.queryByTestId("agent-row-menu")).toBeNull());
+    });
+
     it("has no Seat item where there is no modal layer to open it in", async () => {
         listRecent.mockResolvedValue({ rows: [row()], degraded: [] });
         render(() => <MyAgentsList onReattach={() => {}} />);

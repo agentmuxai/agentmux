@@ -13,7 +13,7 @@ import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Button, IconButton } from "./Button";
 import { Field } from "./Field";
-import { NumberInput, Select, Switch, TextInput } from "./inputs";
+import { NumberInput, Select, Switch, TextArea, TextInput } from "./inputs";
 import { SegmentedControl } from "./SegmentedControl";
 import { rovingTarget } from "./shared";
 import { TabbedPane, tabbedPaneLayout, Tabs } from "./Tabs";
@@ -356,5 +356,25 @@ describe("TextInput autofocus", () => {
         render(() => <TextInput aria-label="Name" />);
         await Promise.resolve();
         expect(document.activeElement).not.toBe(screen.getByLabelText("Name"));
+    });
+});
+
+describe("TextArea", () => {
+    it("is labelled and described by its Field, in the input's line style", () => {
+        render(() => (
+            <Field label="Notes" hint="One per line" error="Too long">
+                <TextArea mono />
+            </Field>
+        ));
+        const box = screen.getByLabelText("Notes");
+        expect(box.tagName).toBe("TEXTAREA");
+        expect(box.classList.contains("ui-input")).toBe(true);
+        expect(box.classList.contains("ui-textarea--mono")).toBe(true);
+        expect(box.getAttribute("aria-invalid")).toBe("true");
+        const texts = box
+            .getAttribute("aria-describedby")!
+            .split(" ")
+            .map((id) => document.getElementById(id)!.textContent);
+        expect(texts).toEqual(["One per line", "Too long"]);
     });
 });

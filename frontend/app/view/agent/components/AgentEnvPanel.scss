@@ -1,0 +1,23 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// The Environment tab (AgentEnvPanel). The rest comes from
+// AgentPrimitiveModal.scss and element/ui.
+
+@use "../../../element/ui/line";
+
+.agent-env-panel-notice {
+    margin: var(--space-2) 0;
+    padding: var(--space-1) var(--space-2);
+    font-size: var(--text-xs);
+    @include line.notice(warning, $text: var(--main-text-color));
+}
+
+.agent-env-panel-list {
+    margin: 0;
+    padding-left: var(--space-4);
+
+    code {
+        font-family: var(--font-mono);
+    }
+}

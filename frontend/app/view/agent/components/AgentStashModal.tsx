@@ -14,6 +14,8 @@
  *                   is not a create/edit surface.
  *   - Seat        — the agent's role, lead and area, set by the operator
  *                   (AgentSeatPanel, SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md §3).
+ *   - Environment — the extra environment variables the agent launches with
+ *                   (AgentEnvPanel).
  *   - Personal Memory — the native-memory browser (AgentNativeMemoryModal),
  *                   same feature/RPCs as Memory → Personal
  *                   (native-memory-manager.tsx) — this is the
@@ -45,6 +47,7 @@ import { createSignal, createUniqueId, Show, type JSX } from "solid-js";
 import { densityClass, tabId, tabPanelId, Tabs, type TabItem, type UiDensity } from "@/app/element/ui";
 import { AgentIdentityLinksPanel } from "@/app/view/identity/agent-identity-links-panel";
 import { AgentDevicesPanel } from "./AgentDevicesPanel";
+import { AgentEnvPanel } from "./AgentEnvPanel";
 import { AgentMcpModal } from "./AgentMcpModal";
 import { AgentNativeMemoryModal } from "./AgentNativeMemoryModal";
 import { AgentRegistrationPanel } from "./AgentRegistrationPanel";
@@ -53,7 +56,7 @@ import { AgentSkillsModal } from "./AgentSkillsModal";
 import { AgentBundlesTab } from "./AgentBundlesTab";
 import "./AgentStashModal.scss";
 
-export type StashTabId = "accounts" | "seat" | "memory" | "mcp" | "skills" | "bundles" | "registration" | "devices";
+export type StashTabId = "accounts" | "seat" | "env" | "memory" | "mcp" | "skills" | "bundles" | "registration" | "devices";
 
 interface AgentStashModalProps {
     agentId: string;
@@ -86,6 +89,7 @@ export const AgentStashModal = (props: AgentStashModalProps): JSX.Element => {
     const tabs: StashTabDef[] = [
         { id: "accounts", label: "Accounts", icon: "key" },
         { id: "seat", label: "Seat", icon: "chair" },
+        { id: "env", label: "Environment", icon: "terminal" },
         { id: "memory", label: "Personal Memory", icon: "brain" },
         { id: "mcp", label: "MCP Servers", icon: "plug" },
         { id: "skills", label: "Skills", icon: "wand-magic-sparkles" },
@@ -133,6 +137,10 @@ export const AgentStashModal = (props: AgentStashModalProps): JSX.Element => {
 
                 <Show when={activeTab() === "seat"}>
                     <AgentSeatPanel agentId={props.agentId} agentName={props.agentName} />
+                </Show>
+
+                <Show when={activeTab() === "env"}>
+                    <AgentEnvPanel agentId={props.agentId} agentName={props.agentName} />
                 </Show>
 
                 <Show when={activeTab() === "memory"}>

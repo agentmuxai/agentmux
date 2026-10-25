@@ -39,6 +39,7 @@ pub(crate) mod agent_spawn;
 // already uses for a LOCAL target, reused rather than duplicated for a
 // forwarded one.
 pub(crate) mod agent_context;
+pub(crate) mod agent_env;
 pub(crate) mod agent_io;
 mod agent_define;
 /// Re-exported so the human-facing creation/edit RPC handlers
