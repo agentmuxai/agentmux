@@ -700,9 +700,8 @@ impl Store {
     /// bound directly to a bundle, enforcing bundle-scoped name uniqueness
     /// — the bundle-level analog of `skill_upsert_unique`. Binding can only
     /// reference global skills (binding another entity's private one would
-    /// hand this bundle read access to it), and a global skill already
-    /// reaches every agent, so this is how a bundle gets a skill of its own
-    /// (PR #2639).
+    /// hand this bundle read access to it); a bundle can bind a global skill,
+    /// or hold a private skill of its own (PR #2639).
     pub fn bundle_skill_upsert_unique(
         &self,
         catalog: &Store,
