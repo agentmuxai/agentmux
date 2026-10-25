@@ -1,5 +1,55 @@
 # AgentMux Version History
 
+## 0.60.2 — 2026-10-25
+
+- Vault: import from Dashlane, Keeper, NordPass, RoboForm and Zoho Vault CSV exports
+- fix(messages): hold messages for signed-out agents until sign-in
+- fix(srv): a task dev build keeps its own Kanban queue, Presence claims, coordination posts, Jobs ledger and scheduled jobs
+- Tower: at very narrow widths the memory figure stays whole instead of being cut off
+- The UI tool no longer reaches approval prompts or presses what is drawn over its target, commands and key presses act on your own pane unless you name a browser pane you opened, and only the AgentMux window is handed an agent's signing keys when it launches
+- My Agents has an Environment editor for an agent's extra environment variables, and agents can read and set a definition's environment with Agents env_get and env_set
+- The Swarm list no longer rebuilds once a minute for every row you have already dismissed or that lingered out
+- A pane registers only as the agent it belongs to, and a request carrying an agent's token can unregister, release or take over its own agent's panes only
+- On Windows and Linux, an upgrade's restart now keeps the variables that choose where an instance's data lives (its root, config folder and channel), so an instance started on a root of its own comes back on that root instead of the machine's real one.
+- fix(security): the two secrets the launcher hands srv and the host are wiped from their environment at startup, so /proc/<pid>/environ and ps no longer show them and no child process inherits them
+- Forgetting typed history is recoverable: a forgotten entry or cleared history waits 7 days in Warden > History > Typed with who forgot it, and Restore brings it back
+- fix(security): the host's IPC token is no longer put in a window's address (it could reach browser history and caches); the host hands it to the page as the page starts loading
+- The release pipeline can now sign a manifest of each release's files (off until its key exists); AgentMux does not check it yet.
+- AgentMux now clears agents' cargo build caches by itself (an agent's incremental cache when it completes a task, old incremental folders every hour, abandoned clones' targets) and warns the biggest users and their leaders when a computer's disk runs low
+- Rows you had open in an agent pane now stay open through a restart or an upgrade (until you have seen them and scrolled past), and a slow return to a busy pane no longer closes them early
+- fix(security): srv and the host's main process refuse reads of their memory by other processes of the same user (Linux: marked not dumpable; macOS: debugger attach refused); dev builds, a headless srv and AGENTMUX_ALLOW_PTRACE=1 are left alone
+- A Codex agent that hits its usage limit is now recognised and given its reset time, so held messages wait for it and wake at the reset
+- An isolated AgentMux (started with a root override) now keeps each version's data in its own versions folder and carries it forward on upgrade, so upgrades can be tested without touching a real install
+- On Linux and macOS, if AgentMux's background service stops unexpectedly it is started again and the windows reopen, instead of the whole app closing; it still ends after four stops within two minutes
+- A Microsoft Store install can now ask the Store to download and install an AgentMux update from the version panel, and falls back to opening the Store page when it can't
+- fix(presence): Presence who shows which agent holds the build slot (the field was dropped from the answer)
+- Codex agents can start a fresh session with Agents fresh, as Claude agents can
+- New setting window:prewarmagenttabs (off by default): while the window is idle it draws the agent transcripts of tabs you haven't opened yet, one pane at a time, so a tab's first visit shows everything at once
+- Stop agents over HTTP now needs the asking agent's token and is shown as that agent; an agent's token can't use the instant cross-instance stop, and a stop forwarded from another instance is shown as that instance's claim
+- An agent's pane tab pill shows what it is doing: a moving line along its top while it works, a still solid, dotted or dashed line while it waits for you, is out of quota or is signed out. A collapsed pane no longer shows the border animation, only its pills' lines
+- The window unregisters an agent pane and takes an agent over through its own proven socket; over HTTP those two need an agent's token and act on that agent's own panes only
+- The light themes' secondary and faint text colours now pass the 4.5:1 contrast bar (Solarized Light's was 2.9:1), so labels and hints are readable on all four.
+- Secondary text in the Toolchain cards, Warden panes, Kanban cards and the Drone canvas hint is no longer faded with opacity, so it stays readable on the light themes.
+- Accent-toned buttons (Add, New task, Run and the like) are now readable on the light themes: their label uses a darker accent that passes the 4.5:1 contrast bar.
+- fix(install): installing an agent CLI takes only its id; the package and version come from AgentMux's own list of agents
+- Fixed several low-contrast texts on the themes: the Connectors tile counts, chart titles in System Info, the editor's current-line number and the alpha-software note in Help.
+- Settings can hide agents from paired devices, and Warden > Host shows an agent's registration claims and mismatches
+- Memory > Personal can create files, and My Agents and the agent pane menu can edit an agent's bundles, seat and personal memory
+- A system-tier memory save by a registered agent is recorded as that agent, not as the person
+- Connectors and Memory can now unbind an account, MCP server or skill from an agent
+- Error, warning and success text now passes the 4.5:1 contrast bar on every theme: each theme has its own text variant of the three status colours (same hue, lightness moved), and about 250 rules use it instead of the raw colour.
+- Agent names in the Hangar (Files) sidebar are now readable on the light themes: each keeps its hue at the lightness made for text on the theme's surface.
+- A stop or release another AgentMux asks for now shows this AgentMux's own 15 s keep-running banner, naming the asker as a claim, and goes ahead unless the user keeps the agent running
+- Swarm: an agent on another LAN machine shows the seat it reports (role badge) and is grouped by its lead under Group by lead
+- The app now carries the public key that release manifests are signed with (nothing checks it yet), and the release job refuses to sign a commit that is not on main
+- test(jobs): the startup catch-up test counts missed slots from one fixed instant and waits for the run's end state
+- The app now checks each release's signed manifest when you start a download and records the result in its log (nothing is blocked or changed by it yet)
+- A release skill for agents: how to cut a release PR and what the operator's patch override means
+- Agents' MuxAPI instructions are about a third of the size: the per-tool descriptions the tools already carry are no longer repeated
+- Fix: the Kanban task drawer is no longer cut across by the section heads in the narrow list
+- A .deb or .rpm install now upgrades itself from the version panel: AgentMux downloads the release, asks for your password through the desktop's own prompt, installs it and opens again, and says why if the install didn't finish
+- After a .deb or .rpm upgrade from the app, if the new version can't be kept running, AgentMux offers to go back to the version before it (it asks for your password, then installs the previous release)
+
 ## 0.60.1 — 2026-10-25
 
 - A browser pane that went to sleep comes back with its back and forward history, scroll position and anything typed into it, once AgentMux runs on a browser engine with in-place discard; until then it reloads fresh as before

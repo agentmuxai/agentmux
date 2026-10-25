@@ -7,7 +7,7 @@ members = ["crates/srv", "crates/cef", "crates/launcher", "crates/common", "crat
 # RFC #857 Phase 1.
 [workspace.package]
 
-version = "0.60.1"
+version = "0.60.2"
 
 # Dev and test builds keep file and line tables, not full debug info: panic backtraces name the
 # same frames and the same file:line, and a build is about 14% faster with a ~7% lower peak (a
