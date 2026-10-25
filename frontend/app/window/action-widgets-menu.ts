@@ -4,8 +4,8 @@
 /**
  * Shared "Open in ..." actions for a leaf widget's right-click menu.
  *
- * Consumed by BOTH of action-widgets.tsx's menu-rendering paths — the native
- * OS context menu (pinned-bar icon right-click, via ContextMenuModel) and the
+ * Consumed by BOTH of action-widgets.tsx's menu-rendering paths — the JS overlay
+ * context menu (pinned-bar icon right-click, via ContextMenuModel) and the
  * DOM PopoverMenu (More-dropdown / pinned-parent-flyout item right-click) —
  * so the two menus read from one source of truth instead of each hand-building
  * the same three items and silently drifting apart. See

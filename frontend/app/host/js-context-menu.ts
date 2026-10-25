@@ -12,6 +12,7 @@ import {
     computeMenuPosition,
     type MenuPositionResult,
 } from "@/app/util/menu-position";
+import { menuIconClass } from "@/app/util/menu-icons";
 import { createSubmenuHover, type SubmenuHoverController } from "@/app/util/submenu-hover";
 import { Z_JS_MENU } from "@/app/zindex";
 
@@ -177,6 +178,7 @@ export function showJsContextMenu(
         // per renderItems call — each call is exactly one menu level, so
         // nested submenus never reach across levels to close an ancestor.
         const peers: SubmenuHoverController[] = [];
+        const reserveIconSlot = itemList.some((i) => i.type !== "separator" && i.visible !== false && !i.swatchColor && !!menuIconClass(i.icon));
         for (const item of itemList) {
             if (item.type === "separator") {
                 const sep = document.createElement("div");
@@ -205,6 +207,23 @@ export function showJsContextMenu(
                     ? "fa-solid fa-fw fa-check menu-item-icon menu-item-check"
                     : "fa-solid fa-fw menu-item-icon menu-item-check";
                 row.appendChild(icon);
+            } else {
+                // The same leading slot holds the row's icon (SPEC_CONTEXT_MENU_ICONS_2026_10_25.md
+                // §3). A menu level where any row has one reserves the slot on every row, so the
+                // labels line up; a level with none is drawn as before. Decoration only: the label
+                // is the row's name.
+                const iconClass = item.swatchColor ? null : menuIconClass(item.icon);
+                if (iconClass) {
+                    const icon = document.createElement("i");
+                    icon.className = iconClass;
+                    icon.setAttribute("aria-hidden", "true");
+                    row.appendChild(icon);
+                } else if (reserveIconSlot && !item.swatchColor) {
+                    const spacer = document.createElement("span");
+                    spacer.className = "menu-item-icon";
+                    spacer.setAttribute("aria-hidden", "true");
+                    row.appendChild(spacer);
+                }
             }
 
             // Inline color swatch (exact hue) rendered before the label — used

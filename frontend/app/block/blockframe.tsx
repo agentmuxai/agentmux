@@ -601,10 +601,9 @@ function BlockFrame_Header(
     });
 
     const onContextMenu = (e: MouseEvent) => {
-        // Native context menu. Pane color is a native "Pane Color" submenu inside
-        // it (see handleHeaderContextMenu / buildPaneColorSubmenu). Fully native:
-        // expands on hover, clickable, no DOM overlay to conflict with the modal
-        // menu.
+        // JS overlay context menu (app/host/js-context-menu.ts; no right-click menu is an OS
+        // menu). Pane color is a "Pane Color" submenu inside it (see handleHeaderContextMenu /
+        // buildPaneColorSubmenu): it expands on hover and is clickable.
         handleHeaderContextMenu(
             e,
             blockData(),
