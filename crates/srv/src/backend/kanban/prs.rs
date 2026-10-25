@@ -23,8 +23,13 @@
 //! one: they work for public repositories, and a private one stays as it was
 //! (the agent links its PR with `Tasks`, the operator accepts by hand). The
 //! unauthenticated API allows 60 calls an hour per address, shared with
-//! everything else on the computer, so this spends at most [`HOURLY_BUDGET`]
-//! and stops until GitHub's reset when told it is over.
+//! everything else on the computer (several AgentMux instances run on a busy
+//! one, the update check among them), so this spends at most [`HOURLY_BUDGET`]
+//! and stops until GitHub's reset when told it is over. (Measured: an
+//! unauthenticated 304 answer counts against the limit like a 200, so asking
+//! with an ETag would save nothing.) A `task dev` build doesn't ask at all,
+//! unless `AGENTMUX_KANBAN_PR_POLL` is set: it shares the computer's limit and
+//! its Kanban with the instance the person uses.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -50,7 +55,7 @@ const CLOSED_CHECK_EVERY_MS: i64 = 60 * 60 * 1000;
 /// for this long.
 const PRIVATE_FOR_MS: i64 = 6 * 60 * 60 * 1000;
 /// The most calls this srv makes in an hour.
-pub const HOURLY_BUDGET: usize = 30;
+pub const HOURLY_BUDGET: usize = 20;
 /// When to look for a just-opened PR, in seconds after the command was seen.
 const FIND_AFTER_S: [u64; 4] = [20, 60, 180, 600];
 /// How often one repository's releases are asked about, while a merged task
@@ -203,6 +208,21 @@ struct Budget {
 
 static BUDGET: Budget = Budget { calls: Mutex::new(Vec::new()), wait_until: AtomicI64::new(0) };
 
+/// Whether this srv may ask GitHub at all: a `task dev` build doesn't unless
+/// `AGENTMUX_KANBAN_PR_POLL` is set.
+fn polling_allowed() -> bool {
+    static ALLOWED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ALLOWED.get_or_init(|| {
+        let dev = matches!(agentmux_common::RuntimeMode::from_env(), Some(agentmux_common::RuntimeMode::Dev { .. }));
+        let asked = std::env::var_os("AGENTMUX_KANBAN_PR_POLL").is_some_and(|v| !v.is_empty());
+        let allowed = !dev || asked;
+        if !allowed {
+            tracing::info!("kanban: a dev build doesn't ask GitHub about PRs (AGENTMUX_KANBAN_PR_POLL=1 turns it on)");
+        }
+        allowed
+    })
+}
+
 impl Budget {
     /// Take one call, if the hour's budget and GitHub allow it.
     fn take(&self, now_ms: i64) -> bool {
@@ -220,7 +240,7 @@ impl Budget {
 }
 
 async fn get(client: &reqwest::Client, path: &str, now_ms: i64) -> Result<Value, Miss> {
-    if !BUDGET.take(now_ms) {
+    if !polling_allowed() || !BUDGET.take(now_ms) {
         return Err(Miss::Limited);
     }
     let resp = client
@@ -375,6 +395,9 @@ fn watch_list(identity: &Store, now_ms: i64) -> Result<Vec<BoardTask>, crate::ba
 /// that are due a look; record merges and releases, and accept a task in
 /// Review whose PR merged. Started once, after [`super::install`].
 pub async fn run_merge_loop() {
+    if !polling_allowed() {
+        return;
+    }
     let mut checked = Checked::default();
     loop {
         tokio::time::sleep(std::time::Duration::from_millis(TICK_MS)).await;
