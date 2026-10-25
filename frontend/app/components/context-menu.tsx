@@ -7,6 +7,7 @@
 
 import { createEffect, createSignal, onCleanup, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
+import { menuIconClass } from "@/app/util/menu-icons";
 import { Z_TRANSIENT } from "@/app/zindex";
 import "./context-menu.scss";
 
@@ -16,6 +17,8 @@ export interface ContextMenuItem {
     shortcut?: string;
     disabled?: boolean;
     danger?: boolean;
+    /** A Font Awesome name drawn before the label; decoration only. See app/util/menu-icons.ts. */
+    icon?: string;
     onSelect?: () => void;
 }
 
@@ -29,6 +32,8 @@ interface Props {
 export function ContextMenu(props: Props): JSX.Element {
     let menuRef: HTMLDivElement | undefined;
     const [focusedIdx, setFocusedIdx] = createSignal(-1);
+    // Any row with an icon reserves the slot on every row, so the labels line up.
+    const hasIcons = () => props.items.some((i) => i.type === "action" && !!menuIconClass(i.icon));
 
     // Indices of selectable (non-separator, non-disabled) items.
     const selectableIndices = (): number[] =>
@@ -112,7 +117,15 @@ export function ContextMenu(props: Props): JSX.Element {
                             }}
                             onPointerEnter={() => { if (!item.disabled) setFocusedIdx(i); }}
                         >
-                            <span class="ctx-menu-label">{item.label}</span>
+                            <span class="ctx-menu-main">
+                                {hasIcons() &&
+                                    (menuIconClass(item.icon) ? (
+                                        <i class={menuIconClass(item.icon)!} aria-hidden="true" />
+                                    ) : (
+                                        <span class="menu-item-icon" aria-hidden="true" />
+                                    ))}
+                                <span class="ctx-menu-label">{item.label}</span>
+                            </span>
                             {item.shortcut && (
                                 <span class="ctx-menu-shortcut">{item.shortcut}</span>
                             )}
