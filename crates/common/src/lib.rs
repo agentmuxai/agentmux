@@ -44,6 +44,7 @@ pub mod time;
 pub mod tokens;
 pub mod toolchain_path;
 pub mod transcript_request;
+pub mod update_manifest;
 pub mod win32;
 #[cfg(target_os = "linux")]
 pub mod xauthority;
