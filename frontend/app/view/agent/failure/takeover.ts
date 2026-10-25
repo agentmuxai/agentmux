@@ -14,6 +14,9 @@
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 
+/** srv waits up to 30 s for the other instance to accept the release and 25 s for the agent to be free, then takes the relay lease. */
+const TAKEOVER_TIMEOUT_MS = 120_000;
+
 export interface TakeoverResult {
     /** False when no other instance was running the agent any more. */
     released: boolean;
@@ -31,7 +34,7 @@ export async function requestAgentTakeover(
     blockId: string,
     deps: { call?: (blockId: string) => Promise<{ released?: boolean; from_channel?: string | null }> } = {},
 ): Promise<TakeoverResult> {
-    const call = deps.call ?? ((id: string) => RpcApi.AgentTakeoverCommand(TabRpcClient, { block_id: id }));
+    const call = deps.call ?? ((id: string) => RpcApi.AgentTakeoverCommand(TabRpcClient, { block_id: id }, { timeout: TAKEOVER_TIMEOUT_MS }));
     const data = await call(blockId);
     return { released: !!data?.released, fromChannel: data?.from_channel ?? undefined };
 }

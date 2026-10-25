@@ -3,7 +3,8 @@
 
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("@/app/store/rpc-api", () => ({ RpcApi: {} }));
+const AgentTakeoverCommand = vi.fn(async (_client: unknown, _data: unknown, _opts?: { timeout?: number }) => ({ released: true }));
+vi.mock("@/app/store/rpc-api", () => ({ RpcApi: { AgentTakeoverCommand: (...args: any[]) => (AgentTakeoverCommand as any)(...args) } }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 
 import { requestAgentTakeover } from "./takeover";
@@ -14,6 +15,13 @@ describe("requestAgentTakeover", () => {
         const r = await requestAgentTakeover("block-1", { call });
         expect(r).toEqual({ released: true, fromChannel: "stable" });
         expect(call).toHaveBeenCalledWith("block-1");
+    });
+
+    it("gives srv long enough for the other instance to let go", async () => {
+        await requestAgentTakeover("block-9");
+        const [, data, opts] = AgentTakeoverCommand.mock.calls[0];
+        expect(data).toEqual({ block_id: "block-9" });
+        expect(opts?.timeout).toBeGreaterThanOrEqual(60_000);
     });
 
     it("reports nothing to take over as released: false", async () => {
