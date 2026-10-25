@@ -16,6 +16,23 @@ import { fetchWardenAudit, WARDEN_AUDIT_LIMIT, type AuditEntry } from "./warden-
 import "@/app/view/warden-shared/warden-manager-chrome.scss";
 import "./warden-audit-manager.scss";
 
+/** What each non-delivery event reads as after the agent's name. */
+const REGISTRATION_VERBS: Record<string, string> = {
+    register: " registered",
+    unregister: " unregistered",
+    swept: " swept (its pane was gone)",
+};
+
+const isRegistration = (entry: AuditEntry) => entry.event_kind != null && entry.event_kind in REGISTRATION_VERBS;
+
+/** Which block it was, and whom a registration displaced: a same-host id collision shows here. */
+function registrationNote(entry: AuditEntry): string {
+    const parts = [`block ${entry.block_id.slice(0, 8)}`];
+    if (entry.evicted_block) parts.push(`replaced block ${entry.evicted_block.slice(0, 8)}`);
+    if (entry.evicted_agent) parts.push(`block was ${entry.evicted_agent}`);
+    return parts.join(", ");
+}
+
 export const WardenAuditManager = (props: { visible?: boolean }): JSX.Element => {
     const [audit, setAudit] = createSignal<AuditEntry[]>([]);
     const [error, setError] = createSignal<string | null>(null);
@@ -40,7 +57,9 @@ export const WardenAuditManager = (props: { visible?: boolean }): JSX.Element =>
 
     return (
         <div class="warden-manager-body">
-            <p class="warden-manager-summary">Every jekt delivery and fleet action, most recent first</p>
+            <p class="warden-manager-summary">
+                Every jekt delivery, fleet action and agent registration, most recent first
+            </p>
             <Show when={error()}>
                 <div class="warden-manager-error">⚠ {error()}</div>
             </Show>
@@ -65,16 +84,28 @@ export const WardenAuditManager = (props: { visible?: boolean }): JSX.Element =>
                                         {formatAge(ageMs(entry.timestamp, now()))} ago
                                     </span>
                                     <span class="warden-audit-flow">
-                                        <Show when={entry.source_agent} fallback={<span class="warden-manager-dim">—</span>}>
-                                            <span class="warden-manager-mono">{entry.source_agent}</span>
+                                        <Show
+                                            when={!isRegistration(entry)}
+                                            fallback={
+                                                <>
+                                                    <span class="warden-manager-mono">{entry.target_agent}</span>
+                                                    {REGISTRATION_VERBS[entry.event_kind ?? ""]}
+                                                </>
+                                            }
+                                        >
+                                            <Show when={entry.source_agent} fallback={<span class="warden-manager-dim">—</span>}>
+                                                <span class="warden-manager-mono">{entry.source_agent}</span>
+                                            </Show>
+                                            {" → "}
+                                            <span class="warden-manager-mono">{entry.target_agent}</span>
                                         </Show>
-                                        {" → "}
-                                        <span class="warden-manager-mono">{entry.target_agent}</span>
                                     </span>
                                     <span class={`warden-audit-status warden-audit-status--${status()}`}>
                                         {status()}
                                     </span>
-                                    <span class="warden-audit-bytes">{entry.message_length}b</span>
+                                    <span class="warden-audit-bytes">
+                                        <Show when={!isRegistration(entry)}>{entry.message_length}b</Show>
+                                    </span>
                                     {/* A caller-supplied `reason` (e.g. ClosePane's) shows on
                                         its own: outcome is unset for fleet actions (#3196). */}
                                     <Show when={entry.reason} fallback={
@@ -83,6 +114,9 @@ export const WardenAuditManager = (props: { visible?: boolean }): JSX.Element =>
                                         </Show>
                                     }>
                                         <span class="warden-audit-reason">{entry.reason}</span>
+                                    </Show>
+                                    <Show when={isRegistration(entry)}>
+                                        <span class="warden-audit-reason">{registrationNote(entry)}</span>
                                     </Show>
                                 </li>
                             );

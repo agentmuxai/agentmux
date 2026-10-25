@@ -87,4 +87,31 @@ describe("WardenAuditManager — fleet-action reason display", () => {
             expect(screen.getByText("ok")).toBeInTheDocument();
         });
     });
+
+    it("shows a registration as a registration, not a blank delivery", async () => {
+        mockFetchWardenAudit.mockResolvedValue([
+            entry({
+                event_kind: "register",
+                target_agent: "loap2",
+                block_id: "abcdef12-0000",
+                evicted_block: "99887766-1111",
+                evicted_agent: "someone",
+                message_length: 0,
+            }),
+            entry({ event_kind: "unregister", target_agent: "agent5", block_id: "12345678-0000", message_length: 0 }),
+            entry({ event_kind: "swept", target_agent: "agent6", block_id: "55667788-0000", message_length: 0 }),
+        ]);
+        render(() => <WardenAuditManager />);
+
+        const registered = (await screen.findByText("loap2")).closest("li")!;
+        expect(registered).toHaveTextContent("loap2 registered");
+        expect(registered).toHaveTextContent("block abcdef12, replaced block 99887766, block was someone");
+        expect(registered).not.toHaveTextContent("0b");
+        const unregistered = screen.getByText("agent5").closest("li")!;
+        expect(unregistered).toHaveTextContent("agent5 unregistered");
+        expect(unregistered).toHaveTextContent("block 12345678");
+        const swept = screen.getByText("agent6").closest("li")!;
+        expect(swept).toHaveTextContent("agent6 swept");
+        expect(swept).not.toHaveTextContent("0b");
+    });
 });

@@ -14,6 +14,7 @@ vi.mock("@/app/store/rpc-api", () => ({
         ViewerDevicesCommand: (...args: unknown[]) => listDevices(...args),
         ViewerRevokeCommand: (...args: unknown[]) => revoke(...args),
         ViewerCanSendCommand: (...args: unknown[]) => canSend(...args),
+        ListAgentDefinitionsCommand: () => Promise.resolve([]),
         SetConfigCommand: (...args: unknown[]) => setConfig(...args),
         PresenceStatusCommand: () => Promise.resolve({ state: "signed_out", since_ms: 0, record_version: 2 }),
         PinsListCommand: () => Promise.resolve({ lan: [], wan: [] }),

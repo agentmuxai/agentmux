@@ -18,6 +18,8 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { getWebServerEndpoint } from "@/util/endpoints";
 import { ageMs, formatAge, pollWhileVisible, WARDEN_REFRESH_MS } from "@/app/view/warden-shared/warden-shared";
 
+import { HostRegistrationDetail, readHostRegistration, type HostRegistration } from "./warden-host-registration";
+
 import "@/app/view/warden-shared/warden-manager-chrome.scss";
 import "./warden-host-manager.scss";
 
@@ -71,19 +73,39 @@ export const WardenHostManager = (props: { visible?: boolean }): JSX.Element => 
     const [agents, setAgents] = createSignal<HostAgent[]>([]);
     const [error, setError] = createSignal<string | null>(null);
     const [loading, setLoading] = createSignal(true);
+    // Rows opened to show their registration claims, by block: a name can be held by several panes.
+    const [open, setOpen] = createSignal<ReadonlySet<string>>(new Set());
+    const [registrations, setRegistrations] = createSignal<Record<string, HostRegistration>>({});
     const tick = useTick(1000);
     const now = createMemo(() => (tick(), Date.now()));
+
+    const loadRegistration = async (a: HostAgent) => {
+        const registration = await readHostRegistration(a.agent_id);
+        setRegistrations((current) => ({ ...current, [a.block_id]: registration }));
+    };
 
     const refresh = async () => {
         try {
             const agentList = await fetchHostAgents();
             setAgents(agentList);
             setError(null);
+            await Promise.all(agentList.filter((a) => open().has(a.block_id)).map(loadRegistration));
         } catch (e) {
             setError(String(e));
         } finally {
             setLoading(false);
         }
+    };
+
+    const toggleOpen = (a: HostAgent) => {
+        const opening = !open().has(a.block_id);
+        setOpen((current) => {
+            const next = new Set(current);
+            if (opening) next.add(a.block_id);
+            else next.delete(a.block_id);
+            return next;
+        });
+        if (opening) void loadRegistration(a);
     };
 
     const handleDeregister = async (agentId: string, blockId: string) => {
@@ -119,6 +141,7 @@ export const WardenHostManager = (props: { visible?: boolean }): JSX.Element => 
                 <table class="warden-manager-table">
                     <thead>
                         <tr>
+                            <th></th>
                             <th>agent</th>
                             <th>block</th>
                             <th>last seen</th>
@@ -130,27 +153,49 @@ export const WardenHostManager = (props: { visible?: boolean }): JSX.Element => 
                         <For each={agents()}>
                             {(a) => {
                                 const state = () => agentState(a, now());
+                                const isOpen = () => open().has(a.block_id);
                                 return (
-                                    <tr data-state={state()}>
-                                        <td class="warden-manager-mono">{a.agent_id}</td>
-                                        <td class="warden-manager-mono warden-manager-dim">
-                                            {a.block_id.slice(0, 8)}
-                                        </td>
-                                        <td>{formatAge(ageMs(a.last_seen, now()))} ago</td>
-                                        <td>
-                                            <span class={`warden-host-state warden-host-state--${state()}`}>
-                                                {state()}
-                                            </span>
-                                        </td>
-                                        <td class="warden-host-actions">
-                                            <IconButton
-                                                icon="xmark"
-                                                label="Deregister (soft kill — removes from jekt routing, leaves process running)"
-                                                density="compact"
-                                                onClick={() => void handleDeregister(a.agent_id, a.block_id)}
-                                            />
-                                        </td>
-                                    </tr>
+                                    <>
+                                        <tr data-state={state()}>
+                                            <td class="warden-host-actions">
+                                                <IconButton
+                                                    icon={isOpen() ? "chevron-down" : "chevron-right"}
+                                                    label={`${isOpen() ? "Hide" : "Show"} registration details for ${a.agent_id}`}
+                                                    density="compact"
+                                                    aria-expanded={isOpen()}
+                                                    onClick={() => toggleOpen(a)}
+                                                />
+                                            </td>
+                                            <td class="warden-manager-mono">{a.agent_id}</td>
+                                            <td class="warden-manager-mono warden-manager-dim">
+                                                {a.block_id.slice(0, 8)}
+                                            </td>
+                                            <td>{formatAge(ageMs(a.last_seen, now()))} ago</td>
+                                            <td>
+                                                <span class={`warden-host-state warden-host-state--${state()}`}>
+                                                    {state()}
+                                                </span>
+                                            </td>
+                                            <td class="warden-host-actions">
+                                                <IconButton
+                                                    icon="xmark"
+                                                    label="Deregister (soft kill — removes from jekt routing, leaves process running)"
+                                                    density="compact"
+                                                    onClick={() => void handleDeregister(a.agent_id, a.block_id)}
+                                                />
+                                            </td>
+                                        </tr>
+                                        <Show when={isOpen()}>
+                                            <tr>
+                                                <td colspan={6}>
+                                                    <HostRegistrationDetail
+                                                        registration={registrations()[a.block_id]}
+                                                        now={now()}
+                                                    />
+                                                </td>
+                                            </tr>
+                                        </Show>
+                                    </>
                                 );
                             }}
                         </For>
