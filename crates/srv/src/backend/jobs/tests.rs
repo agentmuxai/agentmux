@@ -75,17 +75,29 @@ fn a_newer_turn_closes_a_bound_run_whose_end_never_arrived() {
 
 // ── helpers ─────────────────────────────────────────────────────────────
 
+/// A cron trigger read in UTC.
+fn utc(expression: &str) -> crate::backend::cron::schedule::JobSchedule {
+    crate::backend::cron::schedule::JobSchedule::cron(expression, "UTC").unwrap()
+}
+
+/// A job on `expression`.
+fn cron_job(expression: &str) -> crate::backend::storage::cron::CronJob {
+    let mut job = crate::backend::cron::test_job("j", "p", "t", "", "");
+    job.expression = expression.to_string();
+    job
+}
+
 #[test]
 fn missed_slots_counts_the_newest_and_the_earlier_ones() {
     let base = chrono::DateTime::parse_from_rfc3339("2026-10-23T06:00:30Z").unwrap().timestamp_millis();
     // Hourly: 07:00 … 11:00 missed by 11:30.
-    let (newest, earlier) = missed_slots("0 * * * *", base, base + 5 * 60 * MIN, 1_000).unwrap();
+    let (newest, earlier) = missed_slots(&utc("0 * * * *"), base, base + 5 * 60 * MIN, 1_000).unwrap();
     assert_eq!(newest, base - 30_000 + 5 * 60 * MIN);
     assert_eq!(earlier, Some((base - 30_000 + 60 * MIN, 4)));
-    let (_, one) = missed_slots("0 * * * *", base, base + 61 * MIN, 1_000).unwrap();
+    let (_, one) = missed_slots(&utc("0 * * * *"), base, base + 61 * MIN, 1_000).unwrap();
     assert_eq!(one, None, "a single missed slot has no earlier ones");
-    assert!(missed_slots("0 * * * *", base, base + MIN, 1_000).is_none());
-    assert_eq!(next_slot_after("0 * * * *", base - 30_000), Some(base - 30_000 + 60 * MIN));
+    assert!(missed_slots(&utc("0 * * * *"), base, base + MIN, 1_000).is_none());
+    assert_eq!(next_slot_after(&cron_job("0 * * * *"), base - 30_000), Some(base - 30_000 + 60 * MIN));
 }
 
 /// After long downtime the newest missed slot is still the last one before
@@ -94,12 +106,12 @@ fn missed_slots_counts_the_newest_and_the_earlier_ones() {
 fn the_newest_missed_slot_survives_long_downtime() {
     let now = chrono::DateTime::parse_from_rfc3339("2026-10-24T08:00:30Z").unwrap().timestamp_millis();
     let base = now - 70 * 24 * 60 * MIN;
-    let (newest, earlier) = missed_slots("* * * * *", base, now, 100_000).unwrap();
+    let (newest, earlier) = missed_slots(&utc("* * * * *"), base, now, 100_000).unwrap();
     assert_eq!(newest, now - 30_000, "08:00, the last minute before now");
     let (first, count) = earlier.unwrap();
     assert_eq!(count, 100_000, "capped");
     assert!(first > base && first < base + MIN + 1, "counting starts at the first slot after base");
-    assert_eq!(next_slot_after("* * * * *", newest), Some(newest + MIN), "a pending fire for it expires at 08:01");
+    assert_eq!(next_slot_after(&cron_job("* * * * *"), newest), Some(newest + MIN), "a pending fire for it expires at 08:01");
 }
 
 #[test]

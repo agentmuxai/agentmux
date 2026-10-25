@@ -17,7 +17,7 @@ fn is_loop_id(id: &str) -> bool {
 }
 
 /// `create` parameters only a cron job takes, and only a loop takes.
-const CRON_ONLY: &[&str] = &["name", "max_fires", "max_age_secs", "catch_up"];
+const CRON_ONLY: &[&str] = &["name", "max_fires", "max_age_secs", "catch_up", "tz", "policy", "template", "params"];
 const LOOP_ONLY: &[&str] = &["max_iterations", "immediate"];
 
 /// A parameter of the other kind is an error, not dropped: `max_fires` on a
@@ -62,7 +62,7 @@ pub(super) fn route(arguments: &Value) -> Result<(&'static str, Value)> {
                 "Loop"
             }
             _ => anyhow::bail!(
-                "Schedule create needs exactly one of cron (a persistent job on a UTC cron schedule) or every \
+                "Schedule create needs exactly one of cron (a persistent job on a cron schedule, UTC unless tz says otherwise) or every \
                  (a loop for as long as this session lasts)"
             ),
         },

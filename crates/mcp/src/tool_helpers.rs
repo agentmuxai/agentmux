@@ -13,7 +13,7 @@ pub(crate) async fn cron_set_enabled(
     id: &str,
     action: &str,
 ) -> Result<String> {
-    let url = format!("{}/agentmux/cron/{}", local_url.trim_end_matches('/'), id);
+    let url = format!("{}/agentmux/jobs/{}", local_url.trim_end_matches('/'), id);
     let body = serde_json::json!({"action": action});
     let resp = client.patch(&url).header(AUTH_KEY_HEADER, auth_key).json(&body).send().await
         .map_err(|e| anyhow::anyhow!("cron {action} request failed: {e}"))?;

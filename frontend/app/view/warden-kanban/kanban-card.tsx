@@ -240,6 +240,13 @@ export function KanbanCard(props: {
                 <Show when={t().state === "cancelled"}>
                     <Pill icon="ban">cancelled</Pill>
                 </Show>
+                <Show when={t().accepted_by}>
+                    {(a) => (
+                        <Pill icon="user-check" title={`Accepted by ${a().name} on your word. ${a().said}`}>
+                            {`accepted by ${a().name}`}
+                        </Pill>
+                    )}
+                </Show>
                 <Show when={checklistProgress(t())}>{(p) => <Pill icon="list-check">{p()}</Pill>}</Show>
                 <Show when={t().card.pr_url}>
                     <Pill icon="code-pull-request" tone="accent" title={t().card.pr_url}>

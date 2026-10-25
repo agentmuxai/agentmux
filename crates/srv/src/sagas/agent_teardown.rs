@@ -686,11 +686,11 @@ pub(crate) fn release_claims(work_store: &crate::backend::storage::store::Store,
 /// it (kept: a cron is a deliberate schedule that resumes when the agent is
 /// reopened). SQLite reads and writes, off the async workers.
 async fn release_claims_and_list_crons(state: &AppState, who: &AgentIdentity, reason: &'static str) -> (usize, Vec<String>) {
-    let (identity_store, shared_store) = (state.identity_store.clone(), state.shared_store.clone());
+    let (identity_store, jobs_store) = (state.identity_store.clone(), crate::server::cron::jobs_store(state));
     let (a, u) = (who.agent_id.clone(), who.uid.clone());
     let result = tokio::task::spawn_blocking(move || {
         let released = release_claims(&identity_store, &a, u.as_deref(), reason, agentmux_common::time::now_ms());
-        let crons = shared_store
+        let crons = jobs_store
             .and_then(|s| s.cron_list().ok())
             .map(|jobs| agent_resources::crons_targeting(&jobs, &a, u.as_deref()))
             .unwrap_or_default();

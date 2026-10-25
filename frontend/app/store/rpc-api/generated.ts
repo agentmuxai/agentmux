@@ -390,6 +390,7 @@ import type { NotifyTakeActivationResult } from "@/types/rpc/NotifyTakeActivatio
 import type { OAuthClientReq } from "@/types/rpc/OAuthClientReq";
 import type { OAuthSessionReq } from "@/types/rpc/OAuthSessionReq";
 import type { OpenInShellReq } from "@/types/rpc/OpenInShellReq";
+import type { OperatorChallengeResult } from "@/types/rpc/OperatorChallengeResult";
 import type { OtherBuildLayoutsResult } from "@/types/rpc/OtherBuildLayoutsResult";
 import type { PaneOpenResult } from "@/types/rpc/PaneOpenResult";
 import type { PaneTabEditResult } from "@/types/rpc/PaneTabEditResult";
@@ -1853,6 +1854,10 @@ export const GeneratedApi = {
   // command "openinshell"
   OpenInShellCommand(client: RpcClient, data: OpenInShellReq, opts?: RpcOpts): Promise<void> {
     return client.rpcCall("openinshell", data, opts);
+  },
+  // command "operator.challenge"
+  OperatorChallengeCommand(client: RpcClient, opts?: RpcOpts): Promise<OperatorChallengeResult> {
+    return client.rpcCall("operator.challenge", {}, opts);
   },
   // command "pane.open"
   PaneOpenCommand(client: RpcClient, data: CommandPaneOpenData, opts?: RpcOpts): Promise<PaneOpenResult> {

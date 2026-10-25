@@ -466,6 +466,8 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // their Stop (SPEC_DESKTOP_DRIVING_2026_10_20.md §5.4, §5.6).
         .route("/api/v1/host/desktop_request", post(app_api::desktop::handle_host_request))
         .route("/api/v1/host/desktop_stop", post(app_api::desktop::handle_host_stop))
+        // The host vouches for the AgentMux window's websocket connection.
+        .route("/api/v1/host/operator_attest", post(super::operator_proof::handle_host_attest))
         .route("/api/v1/host/browser_navigation", post(crate::server::browser_allowlist::handle_host_browser_navigation))
         .route("/api/v1/host/browser_dialog", post(crate::server::browser_dialog::handle_host_browser_dialog))
         .route("/api/v1/ui/browser/dialogs", post(crate::server::browser_dialog::handle_ui_browser_dialogs))
@@ -551,8 +553,16 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/api/messaging/telegram/send", post(messaging_handlers::handle_telegram_send))
         .route("/api/messaging/slack/send", post(messaging_handlers::handle_slack_send))
         .route("/api/messaging/whatsapp/send", post(messaging_handlers::handle_whatsapp_send))
-        // Persistent cron scheduler (SPEC_CRON_LOOP_ROBUSTNESS_2026_06_25.md §3.2.4).
-        // Auth-gated like reactive routes.
+        // Jobs (SPEC_JOBS_AND_TEMPLATES_2026_10_24.md §5.1) and the cron
+        // scheduler under them; `/agentmux/cron` is kept as an alias for one
+        // release. Auth-gated like reactive routes.
+        .route("/agentmux/jobs", post(cron::handle_cron_create))
+        .route("/agentmux/jobs", get(cron::handle_cron_list))
+        .route("/agentmux/jobs/:id", delete(cron::handle_cron_delete))
+        .route("/agentmux/jobs/:id", patch(cron::handle_cron_patch))
+        .route("/agentmux/jobs/:id/runs", get(cron::handle_cron_runs))
+        .route("/agentmux/jobs/:id/run", post(cron::handle_cron_run_now))
+        .route("/agentmux/jobs/runs/:run_id/report", post(cron::handle_cron_report))
         .route("/agentmux/cron", post(cron::handle_cron_create))
         .route("/agentmux/cron", get(cron::handle_cron_list))
         .route("/agentmux/cron/:id", delete(cron::handle_cron_delete))
@@ -582,6 +592,8 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/agentmux/work/:id/update", post(work_tasks::handle_work_update))
         .route("/agentmux/work/:id/ask", post(work_tasks::handle_work_ask))
         .route("/agentmux/work/:id/submit", post(work_tasks::handle_work_submit))
+        .route("/agentmux/work/:id/accept", post(work_delegate::handle_work_accept))
+        .route("/agentmux/work/:id/send_back", post(work_delegate::handle_work_send_back))
         .route("/agentmux/work/:id/hold", post(work_tasks::handle_work_hold))
         .route("/agentmux/work/:id/unhold", post(work_tasks::handle_work_unhold))
         .route("/agentmux/work/:id", delete(work_queue::handle_work_cancel))

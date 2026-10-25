@@ -1,0 +1,177 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentmux.ai/schema/agentmux-job.v1.schema.json",
+  "title": "AgentMux job definition (jobVersion 1)",
+  "description": "Something that runs by itself: a trigger, an action, a policy and an owner. Unknown fields are refused. The kinds reserved for later versions (trigger event, action drone, approval other than none) are part of the shape and refused when sent. See docs/specs/SPEC_JOBS_AND_TEMPLATES_2026_10_24.md section 5.1.",
+  "type": "object",
+  "required": ["jobVersion", "name", "trigger", "action"],
+  "additionalProperties": false,
+  "properties": {
+    "jobVersion": { "const": 1 },
+    "id": { "type": "string", "description": "Set by AgentMux when the job is created." },
+    "name": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "owner": { "type": "string", "description": "The owning agent's UID; its leader gets the job's failure alerts." },
+    "created_by": { "type": "string", "description": "An agent UID or \"operator\". Set by AgentMux from the caller, never taken from the request." },
+    "template": { "$ref": "#/$defs/template" },
+    "params": { "type": "object", "description": "Values for the template's parameters. At most 16 KB." },
+    "trigger": { "$ref": "#/$defs/trigger" },
+    "action": { "$ref": "#/$defs/action" },
+    "policy": { "$ref": "#/$defs/policy" },
+    "outputs": {
+      "type": "array",
+      "maxItems": 20,
+      "items": { "type": "string", "pattern": "^[a-z_]+(:[A-Za-z0-9_.-]+)?$" },
+      "description": "What the job's runs may produce, e.g. report_file, kanban_task, message:owner, pull_request. Declared; enforced in a later version."
+    },
+    "secrets": {
+      "type": "array",
+      "maxItems": 20,
+      "items": { "$ref": "#/$defs/secret" },
+      "description": "Secrets the runs use, by Vault entry. Never a value."
+    },
+    "enabled": { "type": "boolean", "default": true }
+  },
+  "$defs": {
+    "template": {
+      "type": "object",
+      "required": ["id", "version"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "version": { "type": "string" },
+        "hash": { "type": "string" }
+      }
+    },
+    "trigger": {
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": { "enum": ["cron", "every", "once", "manual", "event"] }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "kind": { "const": "cron" },
+            "cron": { "type": "string", "description": "Standard 5-field cron: min hour dom month dow (0 and 7 are Sunday)." },
+            "tz": { "type": "string", "default": "UTC", "description": "IANA time zone. A time a daylight-saving change skips fires once at the next valid time; a time it repeats fires once." }
+          },
+          "required": ["kind", "cron"],
+          "additionalProperties": false
+        },
+        {
+          "properties": {
+            "kind": { "const": "every" },
+            "seconds": { "type": "integer", "minimum": 60 }
+          },
+          "required": ["kind", "seconds"],
+          "additionalProperties": false
+        },
+        {
+          "properties": {
+            "kind": { "const": "once" },
+            "at": { "type": "integer", "description": "ms since the Unix epoch." }
+          },
+          "required": ["kind", "at"],
+          "additionalProperties": false
+        },
+        {
+          "properties": { "kind": { "const": "manual" } },
+          "required": ["kind"],
+          "additionalProperties": false
+        },
+        {
+          "description": "Reserved for a later version; refused.",
+          "properties": { "kind": { "const": "event" } },
+          "required": ["kind"]
+        }
+      ],
+      "description": "A job whose action starts an agent (message, spawn) runs at most every 15 minutes."
+    },
+    "action": {
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": { "enum": ["message", "task", "spawn", "drone"] }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "kind": { "const": "message" },
+            "to": { "type": "string", "minLength": 1, "description": "The agent's UID." },
+            "brief": { "type": "string", "minLength": 1 }
+          },
+          "required": ["kind", "to", "brief"],
+          "additionalProperties": false
+        },
+        {
+          "properties": {
+            "kind": { "const": "task" },
+            "title": { "type": "string", "minLength": 1 },
+            "payload": { "type": "string" },
+            "target": { "type": "string", "description": "The agent's UID; empty for the backlog." }
+          },
+          "required": ["kind", "title"],
+          "additionalProperties": false
+        },
+        {
+          "properties": {
+            "kind": { "const": "spawn" },
+            "leader": { "type": "string", "minLength": 1 },
+            "brief": { "type": "string", "minLength": 1 },
+            "model": { "type": "string" },
+            "account": { "type": "string" },
+            "keep_worker": { "type": "boolean" }
+          },
+          "required": ["kind", "leader", "brief"],
+          "additionalProperties": false
+        },
+        {
+          "description": "Reserved for a later version; refused.",
+          "properties": {
+            "kind": { "const": "drone" },
+            "drone_id": { "type": "string" }
+          },
+          "required": ["kind"],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "overlap": { "enum": ["skip", "buffer_one", "cancel_other"], "default": "skip" },
+        "catch_up": { "enum": ["skip", "latest"], "default": "skip" },
+        "timeout_minutes": { "type": "integer", "minimum": 1, "maximum": 1440 },
+        "retries": { "type": "integer", "minimum": 0, "maximum": 3, "default": 0, "description": "For infrastructure failures only." },
+        "max_turns": { "type": "integer", "minimum": 1, "maximum": 10000 },
+        "group": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,39}$", "description": "A concurrency group: one running run per group. deploy is built in." },
+        "caps": { "$ref": "#/$defs/caps" },
+        "approval": { "enum": ["none"], "default": "none", "description": "Other values are reserved for a later version." },
+        "results": {
+          "type": "array",
+          "items": { "enum": ["ledger", "task_on_failure"] },
+          "default": ["ledger", "task_on_failure"]
+        }
+      }
+    },
+    "caps": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "run_usd": { "type": "number", "minimum": 0 },
+        "day_usd": { "type": "number", "minimum": 0 },
+        "messages_per_day": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "secret": {
+      "type": "object",
+      "required": ["name", "vault"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,63}$", "not": { "pattern": "^AGENTMUX_" } },
+        "vault": { "type": "string", "minLength": 1, "description": "The Vault entry's id." }
+      }
+    }
+  }
+}

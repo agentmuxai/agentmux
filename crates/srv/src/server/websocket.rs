@@ -1663,14 +1663,12 @@ pub(super) fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, con
     // The fs watcher's subsequent reload is a no-op (settings already up to date).
     let config_watcher_setconfig = state.config_watcher.clone();
     let event_bus_setconfig = state.event_bus.clone();
-
     let lan_listeners_setconfig = state.lan_listeners.clone();
     // `Value` request, parsed into its struct below (a partial settings object); the stub keeps its
     // hand-written request type (generated-manifest.json `dataType`).
     engine.register_typed(COMMAND_SET_CONFIG, move |data: serde_json::Value, _ctx| {
             let cw = config_watcher_setconfig.clone();
             let eb = event_bus_setconfig.clone();
-
             let lan_listeners = lan_listeners_setconfig.clone();
         async move {
                 let new_keys: serde_json::Map<String, serde_json::Value> =
@@ -1746,8 +1744,10 @@ pub(super) fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, con
     // OS notification Router (notify.emit / focus / ack / test / takeactivation
     // — docs/specs/SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.md §3.3).
     super::notify_handlers::register_notify_handlers(engine, &state, conn_id.clone());
-}
 
+    // operator.challenge: this connection's first step in proving it is the AgentMux window.
+    super::operator_proof::register_challenge(engine);
+}
 
 /// Route a decoded `blockinput` payload — the actual human-keystroke path
 /// (`termViewModel.ts`'s `blockinput` WS command, used by both the

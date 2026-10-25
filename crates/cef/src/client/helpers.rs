@@ -303,6 +303,21 @@ pub(crate) fn backend_desktop_stop(
         .map_err(|e| format!("srv refused the stop: {e}"))
 }
 
+/// Vouch to srv, as the host, for the window connection a challenge was
+/// issued to (`{nonce}`): operator-only actions need this proof, which an
+/// agent holding the instance key can't give. Blocking: run it off the UI
+/// thread.
+pub(crate) fn backend_operator_attest(
+    web_endpoint: &str,
+    auth_key: &str,
+    ipc_token: &str,
+    body: &serde_json::Value,
+) -> Result<(), String> {
+    post_as_host(web_endpoint, auth_key, ipc_token, "/api/v1/host/operator_attest", body)
+        .map(|_| ())
+        .map_err(|e| format!("srv refused the proof: {}", srv_error(&e)))
+}
+
 /// Relay a click in the version panel (`download`, `restart`, `cancel`), as
 /// the host, and return srv's status after it. Blocking: run it off the UI
 /// thread.
