@@ -278,7 +278,7 @@ async fn rename_when_free(from: &Path, to: &Path) -> std::io::Result<()> {
 const RENAME_PATIENCE: Duration = Duration::from_secs(10);
 
 /// The installer's name in `updates/<version>/` once verified: the release's.
-fn installer_path(dir: &Path, asset: &ReleaseAsset) -> PathBuf {
+pub(crate) fn installer_path(dir: &Path, asset: &ReleaseAsset) -> PathBuf {
     dir.join(&asset.name)
 }
 
@@ -293,7 +293,7 @@ fn release_file_variant(name: &str, n: u32) -> String {
 }
 
 /// Whether `path` is that release's installer (or AppImage), whole.
-fn is_staged_installer(path: &Path, asset: &ReleaseAsset) -> bool {
+pub(crate) fn is_staged_installer(path: &Path, asset: &ReleaseAsset) -> bool {
     path.file_name().is_some_and(|n| (1..100).any(|i| n.to_string_lossy() == release_file_variant(&asset.name, i)))
         && std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.len() == asset.size)
 }

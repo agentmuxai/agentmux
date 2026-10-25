@@ -23,7 +23,7 @@ Phase 3g of the upgrade spec: a `.deb` or `.rpm` install should upgrade itself f
 
 The same flow as `setup.exe` (phase 3d): srv downloads and verifies the release file into this version's `updates/<v>/`, the user clicks **Upgrade & restart**, agents finish their turns, and srv hands the launcher an `Installer { installer, sha256 }` target. The Linux launcher (`crates/launcher/src/upgrade_linux.rs`) then:
 
-1. **Asks for permission first, while AgentMux is still open.** It starts `pkexec /opt/agentmux/bin/agentmux-install-update <file> <version> <launcher pid>`. The desktop shows its password prompt for the policy in §3.3. If the user cancels it, nothing quits and the panel says "Install cancelled". This replaces the launcher's own zenity question for this kind, so the user answers once.
+1. **Asks for permission first, while AgentMux is still open.** It starts `pkexec /opt/agentmux/bin/agentmux-install-update <file> <version> <launcher pid>`. The desktop shows its password prompt for the policy in §3.3. If the user cancels it, nothing quits and nothing is installed; the panel shows no error (a cancel is an answer, not a failure). This replaces the launcher's own zenity question for this kind, so the user answers once.
 2. **The helper waits** (as root) for the launcher's process tree to exit, up to 120 s, then quits AgentMux's own way: the launcher, once pkexec has started, exits like any other upgrade restart.
 3. **The helper installs** (§3.2), writes nothing into the user's folders, and exits with a status.
 4. **A small user-side waiter** (a `sh -c` the launcher started before exiting, holding pkexec's exit status and stderr) writes the result into `updates/<v>/install-result.json` and starts `/usr/bin/agentmux` again **whether or not the install worked**, so the old version runs rather than none. srv reads the result on start: a version that is still the old one shows "The install didn't finish: <reason>" in the panel.
@@ -51,7 +51,7 @@ Both packages install `/usr/share/polkit-1/actions/ai.agentmux.install-update.po
 - `org.freedesktop.policykit.exec.path` = `/opt/agentmux/bin/agentmux-install-update`, so `pkexec` shows this action's own message ("Authentication is required to install an AgentMux update") instead of a generic one.
 - Defaults: `allow_active` = `auth_admin` (every time; not `auth_admin_keep`, so a cached authorization can't be reused by something else in the next five minutes), `allow_inactive` and `allow_any` = `no`.
 
-Never a password field of our own, never `sudo -S`, and nothing stored. Without a polkit agent (an SSH session, a headless box) `pkexec` fails at once. The panel then shows the command to run by hand (`sudo apt install ./AgentMux_<v>_amd64.deb` or `sudo dnf install ./AgentMux-<v>-1.x86_64.rpm`, with the staged file's path) and a **Show file** button.
+Never a password field of our own, never `sudo -S`, and nothing stored. Without a polkit agent (an SSH session, a headless box) `pkexec` fails at once. The panel then shows the command to run by hand (`sudo apt install ./AgentMux_<v>_amd64.deb` or `sudo dnf install ./AgentMux-<v>-1.x86_64.rpm`, with the staged file's path). The **Show file** button is not built (3g-1 puts the command in the panel text only).
 
 An agent's `App upgrade` goes through the same prompt, so a person always types the password. That's stricter than the other kinds, where the user's own turn or the window prompt is enough (upgrade spec §5.1).
 
@@ -59,11 +59,11 @@ An agent's `App upgrade` goes through the same prompt, so a person always types 
 
 - **A failed install leaves the old version.** dpkg undoes a failed unpack, and an rpm transaction installs all or nothing. The packages have no maintainer scripts, so there's no half-configured state. The waiter restarts whatever is installed, and the panel says why the install failed.
 - **A new version that won't start.** If the launcher gives up on srv after an upgrade, it offers "Go back to <old version>". That downloads the old version's release file (verified the same way), and the helper installs it with an explicit downgrade (`apt-get install --allow-downgrades`, `dnf downgrade`, `rpm -U --oldpackage`). The helper accepts a downgrade only to the version its own record (§3.2) says it replaced, and only once. The old version starts with its own data folder (`versions/<old>/data`, still there), so whatever happened in the new version since is not carried back.
-- **Installs from before 3g** have no helper. Their panel offers the release file and the §3.3 command; once installed, they can use the helper from then on.
+- **Installs from before 3g** have no helper. Their panel offers the release page (3g-1 shows no manual command for them); once installed, they can use the helper from then on.
 
 ### 3.5 Code
 
-- `update_install.rs`: `LinuxPackage { debian }` decided by ownership (`dpkg-query -S` / `rpm -qf` on srv's own path, cached), and `can_download()` true for it once the helper exists at `/opt/agentmux/bin/agentmux-install-update`.
+- `update_install.rs`: `LinuxPackage { debian }` decided by ownership (dpkg's own file list for the package, `/var/lib/dpkg/info/agentmux.list`, naming srv's own path; the helper itself uses `dpkg-query -S` / `rpm -qf`), and `can_download()` true for it once the helper exists at `/opt/agentmux/bin/agentmux-install-update`.
 - `upgrade_package.rs` (new, Linux only), used from `upgrade_restart.rs`: the `Staged::Package` kind (only `updates/<v>/` of this version, only that version's file name, the digest srv names), the question, the pkexec start and its waiter, the result file. The launcher's own yes/no question is asked first and the password prompt follows it; nothing quits until the helper has said `READY`.
 - The two build scripts: the helper, the policy file, `/var/cache/agentmux` and `/var/lib/agentmux` created by the helper on first use.
 - Shared code (`update_download.rs`, `update_restart.rs`, `upgrade_restart.rs`, the panel and the `App` tool) belongs to the updater. Changes there are agreed with QTest first.

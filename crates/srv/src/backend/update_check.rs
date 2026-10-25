@@ -587,17 +587,22 @@ fn pinned_by_upgrade(cur: &AppUpdateStatus, next: &AppUpdateStatus) -> Option<St
 /// download of the release it still reports.
 fn publish_check(event_bus: &crate::backend::eventbus::EventBus, next: AppUpdateStatus) {
     // Read (and removed) once, here: the closure below may run more than once.
-    let install_failure = match (&next.latest, matches!(install_kind(), InstallKind::LinuxPackage { .. })) {
-        (Some(version), true) if next.state == "available" && next.download.is_none() => {
-            crate::backend::update_restart::take_install_failure(&crate::backend::update_download::updates_root(), version).map(|error| {
+    let install_failure = match (&next.latest, &next.asset, matches!(install_kind(), InstallKind::LinuxPackage { .. })) {
+        (Some(version), Some(asset), true) if next.state == "available" && next.download.is_none() => {
+            let updates = crate::backend::update_download::updates_root();
+            crate::backend::update_restart::take_install_failure(&updates, version).map(|error| {
+                // The release file is still there: the panel offers the restart again, with the
+                // reason above it (a "failed" download would say "Download failed" and fetch it again).
+                let staged = crate::backend::update_download::installer_path(&updates.join(version), asset);
+                let kept = crate::backend::update_download::is_staged_installer(&staged, asset);
                 DownloadStatus {
                     version: version.clone(),
-                    state: "failed".into(),
-                    received: 0,
-                    total: 0,
+                    state: if kept { "ready" } else { "failed" }.into(),
+                    received: if kept { asset.size } else { 0 },
+                    total: asset.size,
                     error: Some(error),
                     folder: None,
-                    installer: None,
+                    installer: kept.then(|| staged.display().to_string()),
                     waiting_for: 0,
                     stopping: Vec::new(),
                 }
