@@ -24,6 +24,7 @@ import { createEffect, createMemo, createSignal, For, type JSX, Match, Show, Swi
 import { agentColor, AgentsView } from "./tower-agents";
 import { KindBreakdown, KindIcon, LoadCells } from "./tower-kind-ui";
 import { type KindGroup, kindGroups, kindOf, KINDS, sortKindGroups } from "./tower-kinds";
+import { MemoryView } from "./tower-memory";
 import type { TowerViewModel } from "./tower-model";
 import { PanesView } from "./tower-panes";
 import { ProcessName } from "./tower-process-name";
@@ -123,6 +124,17 @@ export function TowerView(props: { model: TowerViewModel }): JSX.Element {
                                   },
                               ]
                             : [
+                                  // This computer's AgentMux only, like Panes.
+                                  ...(m.remote()
+                                      ? []
+                                      : [
+                                            {
+                                                id: "memory" as const,
+                                                label: "Memory",
+                                                icon: "memory",
+                                                tooltip: "AgentMux's memory, and what it is made of",
+                                            },
+                                        ]),
                                   {
                                       id: "agents",
                                       label: "Agents",
@@ -195,6 +207,9 @@ export function TowerView(props: { model: TowerViewModel }): JSX.Element {
                 <Show when={m.snapshot()} fallback={<div class="tower-empty">Measuring…</div>}>
                     {(snap) => (
                         <Switch>
+                            <Match when={m.effectiveView() === "memory"}>
+                                <MemoryView model={m} />
+                            </Match>
                             <Match when={m.effectiveView() === "agents"}>
                                 <AgentsView model={m} cpu={cpu} />
                             </Match>

@@ -75,6 +75,11 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     let layout = crate::backend::tower_panes::read_layout(&mstore);
                     snap.panes = Some(crate::backend::tower_panes::build(&layout, &snap, &renderers, &own_view_pid));
                 }
+                // The Memory view: AgentMux's total and its parts
+                // (SPEC_TOWER_MEMORY_FIRST_AND_AGENTMUX_BREAKDOWN_2026_10_25.md).
+                if req.memory.unwrap_or(false) {
+                    snap.memory = Some(crate::backend::tower_memory::build(&snap));
+                }
                 Ok(snap)
             })
             .await

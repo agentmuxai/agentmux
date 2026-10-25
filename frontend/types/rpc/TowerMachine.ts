@@ -17,4 +17,9 @@ mem: number, processes: number,
 /**
  * The machine's installed memory, bytes: what a memory share is of.
  */
-mem_total?: number, };
+mem_total?: number, 
+/**
+ * Private memory of AgentMux programs outside this instance's tree
+ * (another instance on this computer), bytes.
+ */
+agentmux_elsewhere?: number, };

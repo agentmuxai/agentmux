@@ -801,6 +801,7 @@ fn render(
         memory_metric: agentmux_procstats::MEMORY_METRIC.to_string(),
         interval_ms: INTERVAL.as_millis() as u32,
         remote: false,
+        memory: None,
         tasks,
         // Already measured for every process each round (`advance`), so the
         // totals cost nothing even when the full list isn't asked for.
@@ -809,6 +810,16 @@ fn render(
             mem: procs.iter().filter_map(|p| p.mem_private).sum(),
             processes: procs.len() as u32,
             mem_total: installed_memory(),
+            // AgentMux programs no task or group of ours holds: another
+            // instance's (a dev build beside the stable install).
+            agentmux_elsewhere: {
+                let ours: HashSet<usize> = sits.keys().copied().chain(agentmux_members.iter().copied()).collect();
+                let elsewhere: Vec<u64> = (0..procs.len())
+                    .filter(|i| !ours.contains(i) && is_agentmux_process(&procs[*i].name))
+                    .filter_map(|i| procs[i].mem_private)
+                    .collect();
+                (!elsewhere.is_empty()).then(|| elsewhere.iter().sum())
+            },
         }),
         host,
     }
