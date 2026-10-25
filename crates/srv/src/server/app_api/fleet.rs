@@ -87,9 +87,11 @@ fn register_fleet_broadcast(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let state = state.clone();
     engine.register_typed(
         COMMAND_FLEET_BROADCAST,
-        move |cmd: CommandFleetBroadcastData, _ctx| {
+        move |cmd: CommandFleetBroadcastData, ctx| {
             let state = state.clone();
             async move {
+                // A broadcast arrives as the user's own turn, so only the operator's window sends one.
+                ctx.operator_only("only the operator broadcasts as the user")?;
                 let result = fleet_broadcast_impl(&state, cmd.targets, cmd.message).await;
                 Ok(result)
             }

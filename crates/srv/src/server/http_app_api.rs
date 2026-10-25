@@ -211,8 +211,13 @@ pub(super) struct AgentBroadcastForwardRequest {
 /// header is built here; the caller supplies only the body.
 pub(super) async fn handle_agent_broadcast_forward(
     State(state): State<AppState>,
+    caller: Option<axum::Extension<super::caller::Caller>>,
     Json(req): Json<AgentBroadcastForwardRequest>,
 ) -> impl IntoResponse {
+    // The forwarding instance is a server, not an agent: a request that carries an agent's token is that agent asking.
+    if caller.as_deref().and_then(super::caller::Caller::uid).is_some() {
+        return (StatusCode::FORBIDDEN, Json(serde_json::json!({ "success": false, "error": "FORBIDDEN: a broadcast comes from the operator's window" }))).into_response();
+    }
     match app_api::fleet::deliver_forwarded_broadcast(&state, &req.block_id, &req.body, &req.msg_id, req.recipients).await {
         Ok(()) => (StatusCode::OK, Json(serde_json::json!({ "success": true }))).into_response(),
         Err(e) => (StatusCode::OK, Json(serde_json::json!({ "success": false, "error": e }))).into_response(),

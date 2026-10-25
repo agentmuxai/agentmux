@@ -529,6 +529,12 @@ async fn handle_incoming_text(
 
     // Handle ping/pong by type field
     if let Some(ref msg_type) = incoming.msg_type {
+        if matches!(msg_type.as_str(), "bus:send" | "bus:inject" | "bus:broadcast") {
+            if let Err(error) = super::bus_frames::sender_allowed(&state.mstore, &engine.rpc_context().agent_id, incoming.from.as_deref()) {
+                let msg = serde_json::to_string(&json!({ "type": "bus:error", "error": error })).unwrap_or_default();
+                return if socket.send(Message::Text(msg.into())).await.is_err() { Err(true) } else { Ok(None) };
+            }
+        }
         match msg_type.as_str() {
             "ping" => {
                 let now = agentmux_common::time::now_ms();
@@ -563,11 +569,7 @@ async fn handle_incoming_text(
                 if let (Some(ref from), Some(ref to), Some(ref payload)) =
                     (&incoming.from, &incoming.to, &incoming.payload)
                 {
-                    let priority = match incoming.priority.as_deref() {
-                        Some("high") => crate::backend::messagebus::Priority::High,
-                        Some("urgent") => crate::backend::messagebus::Priority::Urgent,
-                        _ => crate::backend::messagebus::Priority::Normal,
-                    };
+                    let priority = super::bus_frames::priority(incoming.priority.as_deref());
                     let bus_msg = crate::backend::messagebus::BusMessage::new(
                         from, to, crate::backend::messagebus::MessageType::Send, payload, priority,
                     );
@@ -616,11 +618,7 @@ async fn handle_incoming_text(
                     }
 
                     // Fall back to MessageBus WebSocket push
-                    let priority = match incoming.priority.as_deref() {
-                        Some("high") => crate::backend::messagebus::Priority::High,
-                        Some("urgent") => crate::backend::messagebus::Priority::Urgent,
-                        _ => crate::backend::messagebus::Priority::Normal,
-                    };
+                    let priority = super::bus_frames::priority(incoming.priority.as_deref());
                     match state.messagebus.inject(from, "", target, message, priority) {
                         Ok(msg_id) => {
                             // Sender-side echo for the messagebus fallback path.
@@ -663,11 +661,7 @@ async fn handle_incoming_text(
             "bus:broadcast" => {
                 let from = incoming.from.as_deref().unwrap_or("unknown");
                 if let Some(ref payload) = incoming.payload {
-                    let priority = match incoming.priority.as_deref() {
-                        Some("high") => crate::backend::messagebus::Priority::High,
-                        Some("urgent") => crate::backend::messagebus::Priority::Urgent,
-                        _ => crate::backend::messagebus::Priority::Normal,
-                    };
+                    let priority = super::bus_frames::priority(incoming.priority.as_deref());
                     let _ = state.messagebus.broadcast(from, "", payload, priority);
                 }
                 return Ok(None);
