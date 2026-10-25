@@ -225,6 +225,10 @@ pub(crate) fn deferred_delivery_text(to: &str) -> String {
     )
 }
 
+/// `held_reason` of a message kept for a session gone cold (srv's
+/// `cold_hold::REASON_IDLE`).
+pub(crate) const HELD_IDLE: &str = "idle";
+
 /// What `SendMessage` tells the sender, from srv's `/agentmux/reactive/inject`
 /// body. Each answer keeps its first word (`Delivered`, `QUEUED`, `HELD`) so
 /// existing prompts keep working, and adds the message id and the receiver's
@@ -300,6 +304,15 @@ pub(crate) fn send_message_outcome(to: &str, result: &Value) -> Result<String> {
                  quota; this AgentMux instance (channel) keeps the message and delivers it when \
                  {to} can work again (an account move or the reset), for up to 24 hours. Do not \
                  resend it.{id}"
+            ));
+        }
+        if result.get("held_reason").and_then(|v| v.as_str()) == Some(HELD_IDLE) {
+            return Ok(format!(
+                "HELD for {to} (idle) — not delivered yet. {to}'s session has been idle for about an \
+                 hour, so waking it costs a full restart of its context; this AgentMux instance \
+                 (channel) keeps the message and delivers it when {to} is next active, for up to 24 \
+                 hours. If it is work for {to} or cannot wait, pass urgent: true (send it again) \
+                 to wake it now; the held copy is dropped. Otherwise do not resend it.{id}"
             ));
         }
         if result.get("held_reason").and_then(|v| v.as_str()) == Some("needs_login") {

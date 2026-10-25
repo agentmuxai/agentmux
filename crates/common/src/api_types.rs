@@ -409,6 +409,11 @@ pub struct InjectRequest {
     /// signature (`agentmux_common::jekt_files`). Absent on a text-only jekt.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub files: Option<Vec<crate::jekt_files::JektFile>>,
+    /// `urgent` when the sender wants it delivered now even to a session that
+    /// has been idle (`Message` `urgent: true`); absent otherwise. Not part of
+    /// any signature: it only skips a wait.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub priority: Option<String>,
 }
 
 // ── Pane ──────────────────────────────────────────────────────────────────────
