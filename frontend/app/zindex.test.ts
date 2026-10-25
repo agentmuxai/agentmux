@@ -41,6 +41,16 @@ describe("z-index layers match theme.scss", () => {
         expect(z.Z_DEV_HUD).toBeGreaterThan(z.Z_DEV_DIAGNOSTICS);
     });
 
+    it("a tooltip stacks over every dialog, popover and menu, and under the layers set above them", () => {
+        const tooltip = declared("tooltip")!;
+        for (const under of ["popover", "modal", "flyout-menu", "top"]) {
+            expect(tooltip, `--z-${under}`).toBeGreaterThan(declared(under)!);
+        }
+        expect(tooltip).toBeGreaterThan(z.Z_TRANSIENT);
+        expect(tooltip).toBeGreaterThan(z.Z_CAPTURE_INDICATOR);
+        expect(tooltip).toBeLessThan(z.Z_JS_MENU);
+    });
+
     it("index.html's splash, set before any stylesheet, uses --z-splash's number", () => {
         const rule = indexHtml.match(/#startup-loading\s*\{([^}]*)\}/)?.[1] ?? "";
         expect(rule.match(/z-index:\s*(\d+)/)?.[1]).toBe(String(z.Z_SPLASH));

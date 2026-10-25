@@ -58,6 +58,9 @@ pub enum GateRefusal {
     Tainted,
     /// The quoted instruction isn't in the message that started the turn.
     InstructionMismatch,
+    /// A Swarm broadcast started the turn. It is the user's word to quit, not
+    /// to upgrade AgentMux, which is once per machine (`gate_upgrade`).
+    BroadcastTurn,
 }
 
 impl GateRefusal {
@@ -67,6 +70,7 @@ impl GateRefusal {
             GateRefusal::NotUserTurn => "not_user_turn",
             GateRefusal::Tainted => "turn_tainted",
             GateRefusal::InstructionMismatch => "user_instruction_mismatch",
+            GateRefusal::BroadcastTurn => "broadcast_turn",
         }
     }
 }
@@ -98,6 +102,21 @@ pub fn gate(
     match p.user_text.as_deref() {
         Some(text) if quote_matches(text, user_instruction) => Ok(()),
         _ => Err(GateRefusal::InstructionMismatch),
+    }
+}
+
+/// The gate for `App` `upgrade`: `gate`, except a Swarm broadcast doesn't count
+/// as the user's word. An upgrade restarts AgentMux once for the whole machine,
+/// so a broadcast to ten agents would have all ten try it; the user is asked
+/// instead. A broadcast still authorizes an agent quitting itself.
+pub fn gate_upgrade(
+    provenance: Option<&crate::backend::blockcontroller::health::TurnProvenance>,
+    user_instruction: &str,
+) -> Result<(), GateRefusal> {
+    gate(provenance, user_instruction)?;
+    match provenance {
+        Some(p) if p.is_broadcast() => Err(GateRefusal::BroadcastTurn),
+        _ => Ok(()),
     }
 }
 
@@ -367,6 +386,27 @@ mod tests {
         assert_eq!(gate(Some(&p(TurnOrigin::System, false, None)), "quit"), Err(GateRefusal::NotUserTurn));
         assert_eq!(gate(Some(&p(TurnOrigin::User, true, Some("quit"))), "quit"), Err(GateRefusal::Tainted));
         assert_eq!(gate(Some(&ok), "you may now exit"), Err(GateRefusal::InstructionMismatch));
+    }
+
+    #[test]
+    fn a_broadcast_turn_may_quit_an_agent_but_not_upgrade_agentmux() {
+        use crate::backend::blockcontroller::health::{TurnOrigin, TurnProvenance};
+        let broadcast = TurnProvenance {
+            origin: TurnOrigin::User,
+            tainted: false,
+            user_text: Some(
+                "[BROADCAST:FROM=user VIA=swarm TO=a RECIPIENTS=3 MSGID=m TS=1]
+upgrade now, then quit".into(),
+            ),
+        };
+        assert!(broadcast.is_broadcast());
+        assert_eq!(gate(Some(&broadcast), "then quit"), Ok(()), "quitting itself still works");
+        assert_eq!(gate_upgrade(Some(&broadcast), "upgrade now"), Err(GateRefusal::BroadcastTurn));
+        let typed = TurnProvenance { origin: TurnOrigin::User, tainted: false, user_text: Some("upgrade now".into()) };
+        assert!(!typed.is_broadcast());
+        assert_eq!(gate_upgrade(Some(&typed), "upgrade now"), Ok(()), "the user's own pane message upgrades");
+        assert_eq!(gate_upgrade(Some(&typed), "something else"), Err(GateRefusal::InstructionMismatch));
+        assert_eq!(gate_upgrade(None, "upgrade now"), Err(GateRefusal::Unknown));
     }
 
     #[tokio::test]
