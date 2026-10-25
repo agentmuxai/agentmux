@@ -110,11 +110,18 @@ mod tests {
                 let before = libc::prctl(libc::PR_GET_DUMPABLE, 0, 0, 0, 0);
                 let applied = apply();
                 let after = libc::prctl(libc::PR_GET_DUMPABLE, 0, 0, 0, 0);
-                libc::_exit(if before == 1 && applied && after == 0 { 0 } else { 1 });
+                libc::_exit(if before == 1 && applied && after == 0 {
+                    0
+                } else {
+                    1
+                });
             }
             let mut status = 0;
             libc::waitpid(pid, &mut status, 0);
-            assert!(libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0, "child status {status}");
+            assert!(
+                libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0,
+                "child status {status}"
+            );
         }
     }
 
@@ -150,7 +157,10 @@ mod tests {
             assert!(stat.is_ok(), "stat should stay readable: {stat:?}");
             // Root (a test run as uid 0) can read it whatever the flag says.
             if libc::geteuid() != 0 {
-                assert!(environ.is_err(), "environ was readable by another process after apply()");
+                assert!(
+                    environ.is_err(),
+                    "environ was readable by another process after apply()"
+                );
             }
         }
     }
@@ -167,7 +177,11 @@ mod tests {
             CString::new("-c").unwrap(),
             CString::new("import ctypes, sys; sys.exit(0 if ctypes.CDLL(None).prctl(3, 0, 0, 0, 0) == 1 else 7)").unwrap(),
         ];
-        let argv: Vec<*const libc::c_char> = args.iter().map(|a| a.as_ptr()).chain(std::iter::once(std::ptr::null())).collect();
+        let argv: Vec<*const libc::c_char> = args
+            .iter()
+            .map(|a| a.as_ptr())
+            .chain(std::iter::once(std::ptr::null()))
+            .collect();
         // SAFETY: the child only calls prctl, execvp and _exit before leaving the forked image.
         unsafe {
             let pid = libc::fork();
@@ -184,7 +198,10 @@ mod tests {
             if libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 127 {
                 return; // no python3 here: nothing to ask the kernel with
             }
-            assert!(libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0, "child status {status}");
+            assert!(
+                libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0,
+                "child status {status}"
+            );
         }
     }
 }
