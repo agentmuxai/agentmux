@@ -906,13 +906,6 @@ fn global_memory_in_latest_startup_files(agent_uid: &str, global: &[Entry]) -> b
     global_memory_in_startup_files(&startup_files(&launch), global)
 }
 
-/// The files the CLI read by itself at session start, as card items. Only
-/// for a new session: on `/clear` and compaction they are still in context.
-#[cfg(test)]
-fn startup_items(launch: &LaunchDirs) -> Vec<EntrySize> {
-    startup_items_of(startup_files(launch))
-}
-
 fn startup_items_of(files: Vec<crate::backend::startup_files::StartupFile>) -> Vec<EntrySize> {
     files
         .into_iter()
@@ -940,7 +933,7 @@ fn startup_items_of(files: Vec<crate::backend::startup_files::StartupFile>) -> V
 
 /// Reads the memory and composes the delivery. `None` when there is nothing
 /// to deliver. A new session's delivery also lists the startup files the CLI
-/// loaded from `launch` (`startup_items`), ahead of the memory items.
+/// loaded from `launch` (`startup_items_of`), ahead of the memory items.
 fn compose_delivery(
     state: &AppState,
     block_id: &str,

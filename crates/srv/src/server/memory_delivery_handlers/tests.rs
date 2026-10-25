@@ -326,10 +326,14 @@ fn startup_items_carry_role_owner_and_what_the_file_contains() {
     std::fs::write(cwd.join("CLAUDE.md"), "@.claude/AGENTMUX_MEMORY.md\n").unwrap();
     std::fs::write(cwd.join(".claude/AGENTMUX_MEMORY.md"), "# [AgentMux System] App API\n").unwrap();
     std::fs::write(cwd.join(".mcp.json"), r#"{"mcpServers":{"agentmux":{}}}"#).unwrap();
-    let launch = LaunchDirs { cwd: cwd.clone(), config_dir: None };
+    let home = dir.path().join("home");
+    let files = crate::backend::startup_files::claude_startup_files_with_ancestors(
+        &cwd, None, Some(&home), cwd.ancestors().take_while(|path| path.starts_with(dir.path())),
+    );
 
     let items: Vec<serde_json::Value> =
-        startup_items(&launch).iter().map(|i| serde_json::to_value(i).unwrap()).collect();
+        startup_items_of(files).iter().map(|i| serde_json::to_value(i).unwrap()).collect();
+    assert_eq!(items.len(), 3);
     let memory = items.iter().find(|i| i["role"] == "instructions_import").expect("the import");
     assert_eq!(memory["kind"], "startup_file");
     assert_eq!(memory["owner"], "agentmux");
