@@ -137,7 +137,7 @@ async fn call(st: &AppState, packages: &[WidgetPackageInfo], req: WidgetCallReq)
         }
         "tasks.list" => {
             widget_access::require(&pkg, "tasks:read")?;
-            let identity = st.identity_store.clone();
+            let identity = st.work_store.clone();
             let tasks = tokio::task::spawn_blocking(move || {
                 let now = agentmux_common::time::now_ms();
                 identity.work_board_list(now - TASKS_FINISHED_WINDOW_MS, TASKS_LIMIT, now)

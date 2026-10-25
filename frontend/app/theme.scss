@@ -197,6 +197,9 @@
     // unchanged, but the token is now real: a future per-theme override
     // (e.g. a light theme) will actually take effect instead of being
     // silently ignored by every call site's own hardcoded fallback.
+    // The accent colour as text on a surface (an accent-toned control's label, a link-like action).
+    // The light themes darken it where --accent-color itself is under 4.5:1 on their surfaces.
+    --accent-fg-color: var(--accent-color);
     --accent-text-color: #fff;  // text/icon color on an --accent-color-filled surface (e.g. active pill states)
     --button-color: #fff;       // text color on an --accent-color-filled primary button — distinct from --button-text-color below, which is for the brighter green/yellow buttons
     --error-text-color: #ff8080;

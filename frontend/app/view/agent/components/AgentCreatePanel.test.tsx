@@ -385,16 +385,11 @@ describe("AgentCreatePanel — Install step, a CLI AgentMux installs (npm)", () 
         ]);
     });
 
-    it("Install now starts the install with the provider's package and pin", async () => {
+    it("Install now asks srv to install the provider by id and sends no package", async () => {
         renderPanel({ installed: false });
         fireEvent.click(await screen.findByTestId("agent-create-install-start"));
         await waitFor(() => expect(RpcApi.InstallStartCommand).toHaveBeenCalledTimes(1));
-        expect(vi.mocked(RpcApi.InstallStartCommand).mock.calls[0][1]).toEqual({
-            providerId: "codex",
-            cliCommand: "codex",
-            npmPackage: "@openai/codex",
-            pinnedVersion: "0.116.0",
-        });
+        expect(vi.mocked(RpcApi.InstallStartCommand).mock.calls[0][1]).toEqual({ providerId: "codex" });
     });
 
     // The provider decides which CLI package gets installed, so it must be
@@ -405,7 +400,7 @@ describe("AgentCreatePanel — Install step, a CLI AgentMux installs (npm)", () 
         renderPanel({ template: baseTemplate({ provider: "", memory_id: "mem-1" }), installed: false });
         fireEvent.click(await screen.findByTestId("agent-create-install-start"));
         await waitFor(() => expect(RpcApi.InstallStartCommand).toHaveBeenCalled());
-        expect(vi.mocked(RpcApi.InstallStartCommand).mock.calls[0][1]).toMatchObject({ providerId: "codex", npmPackage: "@openai/codex" });
+        expect(vi.mocked(RpcApi.InstallStartCommand).mock.calls[0][1]).toEqual({ providerId: "codex" });
         expect(screen.getByText(/Codex isn't installed yet/)).toBeInTheDocument();
     });
 

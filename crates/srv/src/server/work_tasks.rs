@@ -45,7 +45,7 @@ pub(super) fn resolve_id(state: &AppState, id: &str) -> String {
     let trimmed = id.trim();
     let looks_numeric = trimmed.trim_start_matches('#').chars().all(|c| c.is_ascii_digit()) && !trimmed.is_empty();
     if looks_numeric {
-        if let Ok(Some(t)) = state.identity_store.work_board_get(trimmed) {
+        if let Ok(Some(t)) = state.work_store.work_board_get(trimmed) {
             return t.item.id;
         }
     }
@@ -93,7 +93,7 @@ pub(super) fn record(state: &AppState, work_id: &str, actor: &str, actor_kind: &
         to_state: to.to_string(),
         body: clean(body),
     };
-    if let Err(e) = state.identity_store.work_event_add(&ev) {
+    if let Err(e) = state.work_store.work_event_add(&ev) {
         tracing::warn!(target: "workqueue", error = %e, work_id, kind, "history line not written");
     }
 }
@@ -200,7 +200,7 @@ pub(super) async fn prepare_card(state: &AppState, caller: Option<&Caller>, crea
 pub(super) fn file_card(state: &AppState, item: &WorkItem, card: &NewCard) -> Option<i64> {
     let now = now_ms();
     let filer = card.filed_by.clone();
-    let num = match state.identity_store.work_card_create(&item.id, card, now) {
+    let num = match state.work_store.work_card_create(&item.id, card, now) {
         Ok(n) => Some(n),
         Err(e) => {
             tracing::warn!(target: "workqueue", error = %e, "card not created");
@@ -216,7 +216,7 @@ pub(super) fn file_card(state: &AppState, item: &WorkItem, card: &NewCard) -> Op
 /// The next task waiting for this agent, as the answer to finishing one
 /// carries it (§6.5: it proceeds through its backlog).
 pub(super) fn next_for(state: &AppState, agent_id: &str, uid: &str) -> Value {
-    let waiting = state.identity_store.work_board_waiting_for(agent_id, uid, 50, now_ms()).unwrap_or_default();
+    let waiting = state.work_store.work_board_waiting_for(agent_id, uid, 50, now_ms()).unwrap_or_default();
     match waiting.first() {
         Some(t) => json!({
             "next": task_brief(t),
@@ -268,7 +268,7 @@ fn renews_lease(item: &WorkItem, unavailable: Option<&crate::backend::agent_stat
 /// quota or signed out is alive but may let go of a task nobody in particular
 /// owns (`renews_lease`). Run before the reap.
 pub(super) fn extend_live_leases(state: &AppState, now: i64) {
-    let Ok(claimed) = state.identity_store.work_claimed_all() else { return };
+    let Ok(claimed) = state.work_store.work_claimed_all() else { return };
     if claimed.is_empty() {
         return;
     }
@@ -287,7 +287,7 @@ pub(super) fn extend_live_leases(state: &AppState, now: i64) {
                 crate::backend::agent_state::unavailable_of_block(&state.mstore, Some(&state.identity_store), &r.block_id, now as u64)
             });
             if renews_lease(&item, unavailable.as_ref(), now) {
-                let _ = state.identity_store.work_extend_lease(&item.id, item.attempts, now, LEASE_MS);
+                let _ = state.work_store.work_extend_lease(&item.id, item.attempts, now, LEASE_MS);
             }
         }
     }
@@ -296,7 +296,7 @@ pub(super) fn extend_live_leases(state: &AppState, now: i64) {
 /// The claims about to be reaped: record them as expired after the reap.
 pub(super) fn expiring(state: &AppState, now: i64) -> Vec<WorkItem> {
     state
-        .identity_store
+        .work_store
         .work_claimed_all()
         .unwrap_or_default()
         .into_iter()
@@ -393,7 +393,7 @@ pub(super) async fn handle_work_update(
 ) -> (StatusCode, Json<Value>) {
     let caller = caller.as_deref();
     let id = resolve_id(&state, &id);
-    let Ok(Some(item)) = state.identity_store.work_queue_get(&id) else { return conflict() };
+    let Ok(Some(item)) = state.work_store.work_queue_get(&id) else { return conflict() };
     if !holds(&item, &req.agent_id, holder_uid(caller), req.attempt) {
         return conflict();
     }
@@ -401,12 +401,12 @@ pub(super) async fn handle_work_update(
         return (StatusCode::BAD_REQUEST, Json(json!({ "error": why })));
     }
     let now = now_ms();
-    let _ = state.identity_store.work_card_ensure(&id, now);
+    let _ = state.work_store.work_card_ensure(&id, now);
     let u = card_update(&req);
-    if let Err(e) = state.identity_store.work_card_update(&id, &u, now) {
+    if let Err(e) = state.work_store.work_card_update(&id, &u, now) {
         return failed(e);
     }
-    let _ = state.identity_store.work_extend_lease(&id, item.attempts, now, LEASE_MS);
+    let _ = state.work_store.work_extend_lease(&id, item.attempts, now, LEASE_MS);
     let mut body = u.note.clone().unwrap_or_default();
     if let Some(c) = &u.checklist {
         let done = c.iter().filter(|i| i.status == "completed").count();
@@ -440,10 +440,10 @@ pub(super) async fn handle_work_ask(
     }
     let id = resolve_id(&state, &id);
     let now = now_ms();
-    match state.identity_store.work_ask(&id, &req.agent_id, holder_uid(caller), req.attempt, now) {
+    match state.work_store.work_ask(&id, &req.agent_id, holder_uid(caller), req.attempt, now) {
         Ok(Some(_)) => {
-            let _ = state.identity_store.work_card_ensure(&id, now);
-            let _ = state.identity_store.work_card_set_question(&id, &question, now);
+            let _ = state.work_store.work_card_ensure(&id, now);
+            let _ = state.work_store.work_card_set_question(&id, &question, now);
             record(&state, &id, &req.agent_id, "agent", "asked", work_state::CLAIMED, work_state::BLOCKED, &question);
             super::work_queue::publish_changed(&state);
             (StatusCode::OK, Json(json!({ "ok": true, "state": work_state::BLOCKED })))
@@ -486,7 +486,7 @@ pub(super) struct HoldRequest {
 
 /// A task as an agent's answer names it: `#12`, else its id.
 fn name_of(state: &AppState, id: &str) -> String {
-    match state.identity_store.work_card_ensure(id, now_ms()) {
+    match state.work_store.work_card_ensure(id, now_ms()) {
         Ok(n) => format!("#{n}"),
         Err(_) => id.to_string(),
     }
@@ -519,7 +519,7 @@ fn refused(text: String) -> (StatusCode, Json<Value>) {
 }
 
 fn moved(state: &AppState, id: &str, to: &str, changed: bool) -> (StatusCode, Json<Value>) {
-    let item = state.identity_store.work_queue_get(id).ok().flatten();
+    let item = state.work_store.work_queue_get(id).ok().flatten();
     (
         StatusCode::OK,
         Json(json!({
@@ -547,7 +547,7 @@ pub(super) async fn handle_work_hold(
         return (StatusCode::BAD_REQUEST, Json(json!({ "error": "agent_id is required" })));
     }
     let id = resolve_id(&state, &id);
-    let Ok(Some(item)) = state.identity_store.work_queue_get(&id) else {
+    let Ok(Some(item)) = state.work_store.work_queue_get(&id) else {
         return (StatusCode::NOT_FOUND, Json(json!({ "error": format!("no task {id}") })));
     };
     let reason = clean(&req.reason);
@@ -558,7 +558,7 @@ pub(super) async fn handle_work_hold(
     let name = name_of(&state, &id);
     match item.state.as_str() {
         work_state::HELD => moved(&state, &id, work_state::HELD, false),
-        work_state::OPEN => match state.identity_store.work_hold(&id, now) {
+        work_state::OPEN => match state.work_store.work_hold(&id, now) {
             Ok(Some(m)) => {
                 record(&state, &id, &req.agent_id, "agent", "held", &m.from, &m.to, &reason);
                 super::work_queue::publish_changed(&state);
@@ -575,7 +575,7 @@ pub(super) async fn handle_work_hold(
                     "{name} is being worked on by {who}: only its holder can put it on hold (with its attempt); message them"
                 ));
             };
-            match state.identity_store.work_hold_own(&id, &req.agent_id, uid, attempt, now) {
+            match state.work_store.work_hold_own(&id, &req.agent_id, uid, attempt, now) {
                 Ok(Some(_)) => {
                     record(&state, &id, &req.agent_id, "agent", "held", work_state::CLAIMED, work_state::HELD, &reason);
                     super::work_queue::publish_changed(&state);
@@ -605,7 +605,7 @@ pub(super) async fn handle_work_unhold(
         return (StatusCode::BAD_REQUEST, Json(json!({ "error": "agent_id is required" })));
     }
     let id = resolve_id(&state, &id);
-    let Ok(Some(item)) = state.identity_store.work_queue_get(&id) else {
+    let Ok(Some(item)) = state.work_store.work_queue_get(&id) else {
         return (StatusCode::NOT_FOUND, Json(json!({ "error": format!("no task {id}") })));
     };
     let reason = clean(&req.reason);
@@ -615,7 +615,7 @@ pub(super) async fn handle_work_unhold(
     let name = name_of(&state, &id);
     match item.state.as_str() {
         work_state::OPEN => moved(&state, &id, work_state::OPEN, false),
-        work_state::HELD => match state.identity_store.work_unhold(&id, now_ms()) {
+        work_state::HELD => match state.work_store.work_unhold(&id, now_ms()) {
             Ok(Some(m)) => {
                 record(&state, &id, &req.agent_id, "agent", "unheld", &m.from, &m.to, &reason);
                 super::work_queue::publish_changed(&state);
@@ -632,7 +632,7 @@ pub(super) async fn handle_work_unhold(
 /// fails, in words the agent can act on.
 pub(super) fn why_not_claimed(state: &AppState, id: &str, filter: &ClaimFilter, now: i64) -> String {
     let (agent_id, agent_uid, groups) = (filter.agent_id.as_str(), filter.agent_uid.as_str(), &filter.groups);
-    let Ok(Some(item)) = state.identity_store.work_queue_get(id) else {
+    let Ok(Some(item)) = state.work_store.work_queue_get(id) else {
         return format!("there is no task {id}");
     };
     let name = name_of(state, id);
@@ -654,7 +654,7 @@ pub(super) fn why_not_claimed(state: &AppState, id: &str, filter: &ClaimFilter, 
     if let Some(kind) = filter.kind.as_deref().filter(|k| !k.is_empty() && *k != item.kind) {
         return format!("{name} is not of kind {kind}");
     }
-    if let Some(after) = state.identity_store.work_deps_of(id).unwrap_or_default().into_iter().find(|a| !a.finished()) {
+    if let Some(after) = state.work_store.work_deps_of(id).unwrap_or_default().into_iter().find(|a| !a.finished()) {
         return format!("{name} starts after #{} \"{}\", which is {}", after.num, after.title, after.state);
     }
     if item.attempts >= item.max_attempts {
@@ -701,41 +701,41 @@ async fn finish_task(
     let now = now_ms();
     let uid = holder_uid(caller);
     let review = state
-        .identity_store
+        .work_store
         .work_board_get(id)
         .ok()
         .flatten()
         .is_some_and(|t| t.card.review_required);
-    let before = state.identity_store.work_queue_get(id).ok().flatten().map(|i| i.state).unwrap_or_default();
+    let before = state.work_store.work_queue_get(id).ok().flatten().map(|i| i.state).unwrap_or_default();
     let matched = if review {
-        state.identity_store.work_submit(id, agent_id, uid, attempt, result, now)
+        state.work_store.work_submit(id, agent_id, uid, attempt, result, now)
     } else {
-        state.identity_store.work_queue_complete(id, agent_id, uid, attempt, result, now)
+        state.work_store.work_queue_complete(id, agent_id, uid, attempt, result, now)
     };
     match matched {
         Ok(Some(_)) => {
             if let Some(u) = update {
-                let _ = state.identity_store.work_card_ensure(id, now);
-                let _ = state.identity_store.work_card_update(id, &u, now);
+                let _ = state.work_store.work_card_ensure(id, now);
+                let _ = state.work_store.work_card_update(id, &u, now);
             }
             // A result naming one PR links it, so the card shows it and its
             // merge can close the task, once GitHub says it is from the
             // branch the agent is on (kanban::prs).
-            if let Ok(Some(t)) = state.identity_store.work_board_get(id) {
+            if let Ok(Some(t)) = state.work_store.work_board_get(id) {
                 if let Some(pr) = t.card.pr_url.is_empty().then(|| pr_in_text(result, &t.card.repo)).flatten() {
                     let (repo, branch) = repo_of(state, caller_reg(state, caller).as_ref()).await;
                     link_if_from(id.to_string(), pr, repo, branch);
                 }
             }
-            let _ = state.identity_store.work_card_set_question(id, "", now);
+            let _ = state.work_store.work_card_set_question(id, "", now);
             let to = if review { work_state::REVIEW } else { work_state::DONE };
             record(state, id, agent_id, "agent", if review { "submitted" } else { "completed" }, &before, to, result);
             if to == work_state::DONE {
                 // A spec done: its build's agent hears it can start.
-                crate::backend::kanban::notify_unlocked(&state.identity_store, &state.mstore, id);
+                crate::backend::kanban::notify_unlocked(&state.work_store, &state.mstore, id);
             }
             super::work_queue::publish_changed(state);
-            let holder_uid = state.identity_store.work_queue_get(id).ok().flatten().map(|i| i.claimed_by_uid).unwrap_or_default();
+            let holder_uid = state.work_store.work_queue_get(id).ok().flatten().map(|i| i.claimed_by_uid).unwrap_or_default();
             let next_uid = if uid.is_empty() { holder_uid } else { uid.to_string() };
             let mut body = json!({ "ok": true, "state": to });
             // An agent the operator switched off going on (`kanban:continue`)

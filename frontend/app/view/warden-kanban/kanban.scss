@@ -324,8 +324,10 @@ $kanban-narrow: 760px;
     }
 }
 
-.kanban-card--held {
-    opacity: 0.6;
+// A held or cancelled card is quieter, not faded: its text takes the secondary colour (AA on every
+// theme) where `opacity` took the whole card, text and pills, under 3:1 on the light themes.
+.kanban-card--held .kanban-card__text {
+    color: var(--secondary-text-color);
 }
 
 .kanban-card--needs {
@@ -333,8 +335,9 @@ $kanban-narrow: 760px;
     border-left-color: var(--kanban-agent-color, var(--kanban-stage-needs));
 }
 
-.kanban-card--cancelled {
-    opacity: 0.6;
+.kanban-card--cancelled .kanban-card__text {
+    color: var(--secondary-text-color);
+    text-decoration: line-through;
 }
 
 .kanban-card--untracked {

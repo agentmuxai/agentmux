@@ -63,6 +63,7 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     instance::register(engine, state);
     session::register(engine, state);
     seat::register(engine, state);
+    crate::server::pane_commands::register(engine, state);
     bundle::register(engine, state);
 }
 
@@ -347,6 +348,8 @@ mod recent_sessions_tests {
             shared_store: None,
             id_store: mstore.clone(),
             identity_store: mstore.clone(),
+            work_store: mstore.clone(),
+            cron_store: None,
             filestore: filestore.clone(),
             global_transcript_store: None,
             event_bus: event_bus.clone(),
@@ -708,6 +711,8 @@ mod recent_sessions_tests {
             shared_store: None,
             id_store: mstore.clone(),
             identity_store: mstore.clone(),
+            work_store: mstore.clone(),
+            cron_store: None,
             filestore: filestore.clone(),
             global_transcript_store: None,
             event_bus: event_bus.clone(),

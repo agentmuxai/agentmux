@@ -19,8 +19,8 @@
 @mixin tone($tone) {
     @if $tone == accent {
         --ui-tone: var(--accent-color);
-        --ui-fg: var(--accent-color);
-        --ui-fg-hover: var(--accent-color);
+        --ui-fg: var(--accent-fg-color);
+        --ui-fg-hover: var(--accent-fg-color);
         --ui-line: var(--ui-line-accent);
         --ui-line-hover: var(--accent-color);
         --ui-bg: color-mix(in srgb, var(--accent-color) var(--ui-tint-rest), transparent);

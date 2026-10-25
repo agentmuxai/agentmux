@@ -163,7 +163,7 @@ pub(crate) async fn handle_post_to_channel(
         created_at: now,
         expires_at: now + RETENTION_MS,
     };
-    let store = state.identity_store.clone();
+    let store = state.work_store.clone();
     let stored = post.clone();
     match tokio::task::spawn_blocking(move || store.coord_post_put(&stored, now)).await {
         Ok(Ok(())) => {}
@@ -208,7 +208,7 @@ pub(crate) async fn handle_read_channel(
     let now = agentmux_common::time::now_ms();
     let since_ms = p.since_minutes.map(|m| m.max(0).saturating_mul(60_000)).unwrap_or(DEFAULT_SINCE_MS).min(RETENTION_MS);
     let limit = p.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
-    let store = state.identity_store.clone();
+    let store = state.work_store.clone();
     let repo = channel.clone();
     let posts = match tokio::task::spawn_blocking(move || store.coord_posts_in(&repo, now - since_ms, now)).await {
         Ok(Ok(v)) => v,

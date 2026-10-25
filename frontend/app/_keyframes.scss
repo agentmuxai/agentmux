@@ -47,3 +47,12 @@
     0%   { opacity: 1; color: var(--accent-color); }
     100% { opacity: 1; }
 }
+
+// A bar crossing its track, left to right, for a status with no real
+// percentage: the compaction bar and a working pane tab's progress line.
+// The bar is about a third of the track wide, so -100% to 300% of its own
+// width is off the track at both ends.
+@keyframes am-sweep {
+    0%   { transform: translateX(-100%); }
+    100% { transform: translateX(300%); }
+}

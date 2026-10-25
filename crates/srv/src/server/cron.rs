@@ -208,27 +208,35 @@ pub(crate) fn to_summary(job: &CronJob, block_id: String) -> CronSummary {
 }
 
 /// Where jobs are (`db_jobs`): the shared store, beside the `db_cron_jobs`
-/// it replaced. Every job read and write goes through here, so the store can
-/// move in one place.
+/// it replaced, or the work store of a `task dev` build, which keeps its own
+/// (`agentmux_common::work_store`). Every job read and write goes through here,
+/// so the store can move in one place.
 pub(crate) fn jobs_store(state: &AppState) -> Option<Arc<Store>> {
-    state.shared_store.clone()
+    state.cron_store.clone()
 }
 
-/// Where the run ledger is (`db_job_runs`): the identity store.
+/// Where the run ledger is (`db_job_runs`): the identity store, or the work store of
+/// a `task dev` build, which keeps its own (`agentmux_common::work_store`).
+///
+/// A known limit: a dev build's job that delivers to an agent in a shared build has
+/// its run in the dev ledger only, so the receiver's `follow_forwarded` finds no row
+/// and the run closes by the no-turn timeout with an unknown cost. The message is
+/// still delivered. Reading a missing cost on such a test job as a bug would be wrong.
 pub(crate) fn ledger_store(state: &AppState) -> Arc<Store> {
-    state.identity_store.clone()
+    state.work_store.clone()
 }
 
 /// Tests: keep jobs in the test state's own store (which carries every
 /// schema), as [`jobs_store`] and [`ledger_store`] would find them.
 #[cfg(test)]
 pub(crate) fn use_test_store_for_jobs(state: &mut AppState) {
-    state.shared_store = Some(state.mstore.clone());
+    state.cron_store = Some(state.mstore.clone());
 }
 
-/// Where tasks are filed (the work queue and its cards): the identity store.
+/// Where tasks are filed (the work queue and its cards): the identity store, or
+/// the work store of a `task dev` build, which keeps its own.
 pub(crate) fn work_store(state: &AppState) -> Arc<Store> {
-    state.identity_store.clone()
+    state.work_store.clone()
 }
 
 /// [`jobs_store`], or the answer when there is none.

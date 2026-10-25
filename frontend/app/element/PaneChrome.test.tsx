@@ -1336,3 +1336,33 @@ describe("renderPaneChromeShell — locate flash", () => {
         expect(showLocateFlash).not.toHaveBeenCalled();
     });
 });
+
+// SPEC_PANE_TAB_PROGRESS_LINE_2026_10_24.md §3.4: a collapsed pane shows no border animation,
+// and its pills carry the progress lines.
+describe("renderPaneChromeShell — progress lines and the collapsed pane", () => {
+    it("tells the strip whether the pane is collapsed, and where each pill's progress comes from", () => {
+        const [minimized, setMinimized] = createSignal(false);
+        mockLayoutModel = fakeLayoutModel(["b1", "b2"]);
+        render(() =>
+            renderPaneChromeShell(fakeNodeModel({ activeBlockId: () => "b1", isMinimized: minimized }), (<div />) as any)
+        );
+        const props = headerCalls[headerCalls.length - 1];
+        expect(typeof props.useProgress).toBe("function");
+        expect(props.collapsed()).toBe(false);
+        setMinimized(true);
+        expect(props.collapsed()).toBe(true);
+    });
+
+    it("marks a collapsed pane, whose stylesheet hides the border animation, and not an expanded one", () => {
+        mockLayoutModel = fakeLayoutModel(["b1"]);
+        const [minimized, setMinimized] = createSignal(true);
+        const { container } = render(() =>
+            renderPaneChromeShell(fakeNodeModel({ activeBlockId: () => "b1", isMinimized: minimized }), (<div />) as any)
+        );
+        const pane = container.querySelector(".pane-stack")!;
+        expect(pane.classList.contains("pane-stack-collapsed")).toBe(true);
+        expect(pane.querySelector(".pane-progress-bar-slot")).not.toBeNull(); // hidden by CSS, so the handoff still has a slot
+        setMinimized(false);
+        expect(pane.classList.contains("pane-stack-collapsed")).toBe(false);
+    });
+});

@@ -547,6 +547,89 @@
     }
 }
 
+// The progress line along the top of a pill: what its agent is doing
+// (docs/specs/SPEC_PANE_TAB_PROGRESS_LINE_2026_10_24.md §3). Every state has its
+// own shape, so none depends on colour alone: a bar moving along a track
+// (working), a solid line (waiting for you), a dotted one (out of quota), a
+// dashed one (signed out). It sits inside the pill (`overflow: hidden`), below
+// the pane's ring, which overlays the top `--pane-ring-width` of the pane.
+.pane-tab-progress {
+    --progress-line-color: var(--pane-tab-underline, var(--accent-color));
+    position: absolute;
+    top: var(--pane-ring-width, 0px);
+    left: 0;
+    right: 0;
+    box-sizing: border-box;
+    height: 2px;
+    overflow: hidden;
+    pointer-events: none;
+    opacity: 0;
+    // The end of a line fades in its last look rather than cutting.
+    transition: opacity var(--duration-moderate) var(--ease-standard);
+
+    &--on {
+        opacity: 1;
+    }
+
+    &[data-state="working"] {
+        background: color-mix(in srgb, var(--progress-line-color) 25%, transparent);
+    }
+
+    // A line, not a fill: the border is the whole of it.
+    &[data-state="waiting"] {
+        border-top: 2px solid var(--accent-color);
+    }
+
+    &[data-state="limited"] {
+        background: repeating-linear-gradient(90deg, var(--warning-color) 0 2px, transparent 2px 5px);
+    }
+
+    &[data-state="signed_out"] {
+        background: repeating-linear-gradient(90deg, var(--warning-color) 0 6px, transparent 6px 10px);
+    }
+}
+
+// The bar of a working pill. At rest (a hidden window tab, or a reduced-motion
+// setting) it is parked at the centre of the track, a 40% segment, so a working
+// pill still differs in shape from a solid, dotted or dashed line.
+.pane-tab-progress-bar {
+    display: none;
+    width: 40%;
+    height: 100%;
+    transform: translateX(75%);
+    background: linear-gradient(
+        90deg,
+        transparent,
+        oklch(from var(--progress-line-color) min(0.85, calc(l + 0.06)) c h),
+        transparent
+    );
+
+    .pane-tab-progress[data-state="working"] & {
+        display: block;
+    }
+
+    // Only `transform` moves: composited, no layout and no paint after the first.
+    .pane-tab-progress--sweeping & {
+        // One pass is 1.6 s (the compaction bar's), written from the duration scale.
+        animation: am-sweep calc(var(--duration-slow) * 5.71) var(--ease-in-out) infinite;
+        will-change: transform;
+
+        @include mixins.when-motion-reduced(status) {
+            animation: none;
+        }
+    }
+}
+
+// The state in words, for assistive tech: a tooltip is not reliably read.
+.pane-tab-state-text {
+    @include mixins.sr-only;
+}
+
+// The tooltip's state line (the Swarm chip's words).
+.pane-tab-tip-state {
+    font-weight: 500;
+}
+
 // The pill tooltip for an agent: its name, then its summary (the same line the Swarm
 // row shows). The Tooltip box itself has no width limit, so a long summary would
 // stretch it across the screen; cap it and let the summary wrap.

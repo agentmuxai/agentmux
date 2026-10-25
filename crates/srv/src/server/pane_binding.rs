@@ -6,6 +6,7 @@
 //! a registration must name the agent the pane belongs to, and a request that
 //! does carry an agent's token acts on that agent's own panes only.
 
+use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
@@ -16,6 +17,35 @@ use super::AppState;
 
 fn forbidden(error: &str) -> Response {
     (StatusCode::FORBIDDEN, Json(serde_json::json!({ "success": false, "error": error }))).into_response()
+}
+
+const WINDOW_ONLY: &str = "FORBIDDEN: the window does this over its own socket; an agent does it for its own panes, with its token (AGENTMUX_AGENT_TOKEN)";
+
+/// `POST /agentmux/reactive/unregister`: an agent, for its own pane. The window unregisters over its socket.
+pub(super) async fn handle_unregister(
+    State(state): State<AppState>,
+    caller: Option<axum::Extension<Caller>>,
+    Json(req): Json<super::reactive::UnregisterRequest>,
+) -> Response {
+    if caller.as_deref().and_then(Caller::uid).is_none() {
+        return forbidden(WINDOW_ONLY);
+    }
+    if let Some(refusal) = unregister_refusal(&state, caller.as_deref(), &req.block_id, &req.agent_id).await {
+        return refusal;
+    }
+    super::reactive::unregister_pane(&state, req).await
+}
+
+/// `POST /api/v1/agent/takeover`: an agent, for its own pane. The window takes an agent over through its socket.
+pub(super) async fn handle_takeover(
+    State(state): State<AppState>,
+    caller: Option<axum::Extension<Caller>>,
+    Json(req): Json<super::agent_takeover::TakeoverRequest>,
+) -> Response {
+    if caller.as_deref().and_then(Caller::uid).is_none() {
+        return forbidden(WINDOW_ONLY);
+    }
+    super::agent_takeover::take_over(&state, caller.as_deref(), req).await
 }
 
 /// Why a `register` request is refused, if it is: `pane_uid` is the agent the pane belongs to (`None`
@@ -135,7 +165,9 @@ mod tests {
         let _ = state.reactive_handler.unregister_block("pb-block-b");
         let _ = state.reactive_handler.unregister_block("pb-block-a");
         let (status, v) = post(&state, None, "/agentmux/reactive/unregister", json!({ "agent_id": "", "block_id": "pb-block-b" })).await;
-        assert_ne!(status, StatusCode::FORBIDDEN, "the window closes any pane: {v}");
+        assert_eq!(status, StatusCode::FORBIDDEN, "the window unregisters over its socket, not here: {v}");
+        let (status, v) = post(&state, None, "/api/v1/agent/takeover", json!({ "block_id": "pb-block-b" })).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{v}");
         let (status, v) = post(&state, Some(&token), "/agentmux/agent/release", json!({ "uid": "uid-pb-beta" })).await;
         assert_eq!(status, StatusCode::FORBIDDEN, "{v}");
         let (status, v) = post(&state, Some(&token), "/api/v1/agent/takeover", json!({ "block_id": "pb-block-b" })).await;
