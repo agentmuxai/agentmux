@@ -417,7 +417,7 @@ async fn receive<R: tokio::io::AsyncRead + Unpin>(
     if !state.reactive_handler.has_live_name(&target) && !state.reactive_handler.has_uid_registration(&target) {
         return serde_json::json!({ "success": false, "error": format!("agent not found: {target}") });
     }
-    // Out of quota until a known reset: refused before a byte is read, as
+    // Signed out or out of quota until a known reset: refused before reading, as
     // `reactive::deliver` refuses it (SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §5).
     if let Some(unavailable) = super::jekt_hold::local_target_unavailable(state, &target).await {
         return super::jekt_hold::hold_for_unavailable(state, auth_via, &req, &unavailable, &mut replay).await;

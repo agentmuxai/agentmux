@@ -48,6 +48,7 @@ function InstallRequestPrompt(props: { request: WidgetInstallRequest } & ModalCl
             open={true}
             title={`${r.agent} wants to install ${r.name}`}
             attention
+            operatorOnly
             // Not signed by the publisher's usual key: the risky choice isn't
             // the bright one, and focus starts on "Don't install".
             destructive={r.signature?.state === "key_changed"}

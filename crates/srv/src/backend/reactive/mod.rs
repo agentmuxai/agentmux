@@ -52,13 +52,13 @@ pub fn is_spawn_gate_refusal(error: &str) -> bool {
 }
 
 /// How a refusal to deliver to an agent that can't work now begins: its
-/// account is out of quota (`SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md` §5;
-/// signed out joins with Kanban #2237). Only where the message can't be
+/// account is out of quota or signed out (`SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md` §5).
+/// Only where the message can't be
 /// held: a LAN or cross-channel hop, a cron fire, a Swarm broadcast.
 pub const UNAVAILABLE_PREFIX: &str = "agent unavailable: ";
 
 /// Whether a delivery error is [`UNAVAILABLE_PREFIX`]'s refusal: recoverable
-/// at the reset or an account move.
+/// at the reset, confirmed sign-in or an account move.
 pub fn is_unavailable_refusal(error: &str) -> bool {
     error.starts_with(UNAVAILABLE_PREFIX)
 }

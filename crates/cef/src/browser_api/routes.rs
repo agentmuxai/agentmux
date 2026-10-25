@@ -545,6 +545,15 @@ pub async fn click_element(
         )));
     }
 
+    if cent.get("covered").and_then(|v| v.as_bool()) == Some(true) {
+        let _ = cdp.close().await;
+        return ok_body(ApiResponse::err(format!(
+            "selector {:?} is covered by something else at that point (a dialog or a prompt \
+             for the user); the click was not sent",
+            req.selector
+        )));
+    }
+
     let x = cent.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
     let y = cent.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
 

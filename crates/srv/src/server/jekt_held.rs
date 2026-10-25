@@ -94,10 +94,10 @@ async fn still_needs_login(state: &AppState, uid: &str) -> bool {
     true
 }
 
-/// Whether the agent of `uid` is out of quota (`jekt_hold::holding_unavailable`):
+/// Whether the agent of `uid` is unavailable (`jekt_hold::holding_unavailable`):
 /// a delivery now would start a turn that fails at once and loses the
-/// message. A read of its block, no gate check; it ends at the reset or an
-/// account move, which wakes the replay (SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §5).
+/// message. A read of its block, no gate check; it ends at the reset, confirmed
+/// sign-in or account move (SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §5).
 async fn target_unavailable(state: &AppState, uid: &str) -> bool {
     let Some(block_id) = state.reactive_handler.block_for_uid(uid) else {
         return false;

@@ -35,23 +35,19 @@ pub(in crate::server) async fn hold_for_absent_target(
     hold_with_reason(state, auth_via, req, resp, reason, None, replay).await
 }
 
-/// Why messages to the agent on `block_id` wait now: its account is out of
-/// quota (`limited`) until a known reset. BLOCKING.
-///
-/// Not a limit with no reset time: that state, like `signed_out`, lasts until
-/// a clean turn or an account move, so a held message would wait out the
-/// 24 h for an agent that may already work again; it is delivered as before.
-///
-/// Not `signed_out` yet: that state lasts until a clean turn, and a sign-in
-/// to the same account doesn't clear it, so holding every message would
-/// keep the turn that clears it from ever running (#5419).
-/// It joins once a confirmed sign-in clears the failure (Kanban #2237).
+/// Why messages to the agent on `block_id` wait now: it is signed out, or
+/// out of quota until a known reset. A confirmed sign-in clears auth failures.
+/// Limits without a reset still allow turns to discover recovery. BLOCKING.
 pub(in crate::server) fn holding_unavailable(
     mstore: &crate::backend::storage::store::Store,
     block_id: &str,
 ) -> Option<crate::backend::agent_state::Unavailable> {
     crate::backend::agent_state::unavailable_of_block(mstore, None, block_id, agentmux_common::time::now_ms_u64())
-        .filter(|u| u.state == crate::backend::agent_state::AgentState::Limited && u.resets_at_ms.is_some())
+        .filter(|unavailable| {
+            use crate::backend::agent_state::AgentState;
+            unavailable.state == AgentState::SignedOut
+                || (unavailable.state == AgentState::Limited && unavailable.resets_at_ms.is_some())
+        })
 }
 
 /// Whether a peer's answer to a forwarded jekt is a refusal by an instance
@@ -76,7 +72,7 @@ pub(super) async fn local_target_unavailable(state: &AppState, target: &str) -> 
     tokio::task::spawn_blocking(move || holding_unavailable(&mstore, &reg.block_id)).await.ok().flatten()
 }
 
-/// What delivery checks before a message reaches a running agent: out of quota (held, or
+/// What delivery checks before a message reaches a running agent: unavailable (held, or
 /// refused where it can't be held), or a session gone cold (`jekt_cold`). `None` delivers.
 pub(super) async fn hold_before_delivery(
     state: &AppState,
@@ -94,8 +90,7 @@ pub(super) async fn hold_before_delivery(
 /// where the hold doesn't apply (a LAN or cross-channel hop, a cron fire),
 /// refuse it with the reason: either way it is not injected into a turn
 /// that would fail and lose it. The refusal begins with
-/// [`crate::backend::reactive::UNAVAILABLE_PREFIX`]. Its `SignedOut` arm is
-/// for when `holding_unavailable` takes signed-out agents (Kanban #2237).
+/// [`crate::backend::reactive::UNAVAILABLE_PREFIX`].
 pub(super) async fn hold_for_unavailable(
     state: &AppState,
     auth_via: super::ReactiveAuthVia,
@@ -197,9 +192,9 @@ async fn hold_with_reason(
                     "agent {target} is not running — held for delivery on this AgentMux instance for up to 24 h"
                 ),
                 HoldReason::NeedsLogin => {
-                    // The send itself was refused just now: the replay waits
-                    // for sign-in rather than retrying at once.
-                    super::jekt_held::mark_needs_login(&target_uid);
+                    if resp.error.as_deref().is_some_and(super::jekt_held::is_spawn_gate_refusal) {
+                        super::jekt_held::mark_needs_login(&target_uid);
+                    }
                     format!(
                         "agent {target} is not signed in — held for delivery on this AgentMux instance for up to 24 h, delivered when it signs in"
                     )

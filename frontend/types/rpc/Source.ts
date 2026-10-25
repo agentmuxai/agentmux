@@ -3,4 +3,4 @@
 /**
  * Where an import came from, for the preview.
  */
-export type Source = "vault" | "last-pass" | "one-password" | "bitwarden" | "chrome" | "firefox" | "safari" | "kee-pass" | "env" | "csv";
+export type Source = "vault" | "last-pass" | "one-password" | "bitwarden" | "chrome" | "firefox" | "safari" | "kee-pass" | "env" | "csv" | "dashlane" | "keeper" | "nord-pass" | "robo-form" | "zoho-vault";

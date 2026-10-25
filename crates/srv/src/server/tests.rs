@@ -6906,7 +6906,14 @@ async fn a_message_to_an_agent_out_of_quota_is_held_until_it_can_work() {
     use crate::backend::blockcontroller::{core::META_LAST_FAILURE, BLOCK_CONTROLLER_PERSISTENT, STATUS_RUNNING};
     use crate::backend::reactive::types::InjectionRequest;
     use crate::backend::storage::agents::test_agent_def;
-    let state = test_state();
+    let mut state = test_state();
+    state.reactive_handler = Box::leak(Box::new(crate::backend::reactive::handler::ReactiveHandler::new()));
+    let deliveries = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let received = deliveries.clone();
+    state.reactive_handler.set_message_sender(Arc::new(move |_, message, _| {
+        received.lock().unwrap().push(message.to_string());
+        Ok(crate::backend::reactive::types::SenderDelivery::Delivered)
+    }));
     let slug = format!("quota-{}", &uuid::Uuid::new_v4().to_string()[..8]);
     let uid = format!("uid-{slug}");
     let mut def = test_agent_def(&uid, "Quota Y", "claude", "agent", 1, "");
@@ -6962,16 +6969,42 @@ async fn a_message_to_an_agent_out_of_quota_is_held_until_it_can_work() {
     state.mstore.update(&mut block).unwrap();
     let outcomes = crate::server::jekt_held::replay_pass(&state).await;
     assert!(outcomes.iter().any(|(r, _)| r == "req-quota"), "{outcomes:?}");
+    assert_eq!(deliveries.lock().unwrap().len(), 1);
 
-    // Signed out is not held yet: its state lasts until a clean turn, which
-    // holding every message would never let run (#5419).
     block.meta.insert(
         META_LAST_FAILURE.to_string(),
         serde_json::json!({"code": "auth", "title": "Sign-in refused", "detail": "", "retryable": false}),
     );
     state.mstore.update(&mut block).unwrap();
-    assert!(super::jekt_hold::local_target_unavailable(&state, &slug).await.is_none());
-    // Nor a usage limit with no known reset: nothing would end it but a turn.
+    let signed_out = super::jekt_hold::local_target_unavailable(&state, &slug).await.unwrap();
+    assert_eq!(signed_out.state, crate::backend::agent_state::AgentState::SignedOut);
+    let held = super::reactive::deliver(&state, super::ReactiveAuthVia::FullAuthKey, "", req("req-signed-out")).await;
+    assert_eq!(held["held"], true, "{held}");
+    assert_eq!(held["held_reason"], "needs_login", "{held}");
+    assert!(held.get("held_until_ms").is_none(), "{held}");
+    assert!(held["error"].as_str().unwrap().contains("not signed in"), "{held}");
+    let outcomes = crate::server::jekt_held::replay_pass(&state).await;
+    assert!(outcomes.iter().all(|(request_id, _)| request_id != "req-signed-out"), "{outcomes:?}");
+    let rows = state.mstore.jekt_held_for_target(&uid, 10).unwrap();
+    assert_eq!(rows.iter().find(|row| row.request_id == "req-signed-out").unwrap().attempts, 0);
+    assert_eq!(deliveries.lock().unwrap().len(), 1);
+
+    let refused = super::reactive::deliver(&state, super::ReactiveAuthVia::LanKey, "", req("req-signed-out-lan")).await;
+    assert_eq!(refused["success"], false, "{refused}");
+    assert!(refused.get("held").is_none(), "{refused}");
+    assert!(crate::backend::reactive::is_unavailable_refusal(refused["error"].as_str().unwrap()), "{refused}");
+    assert!(refused["error"].as_str().unwrap().contains("needs to sign in again"), "{refused}");
+
+    block.meta.remove(META_LAST_FAILURE);
+    state.mstore.update(&mut block).unwrap();
+    let outcomes = crate::server::jekt_held::replay_pass(&state).await;
+    assert!(outcomes.iter().any(|(request_id, outcome)| {
+        request_id == "req-signed-out" && *outcome == crate::server::jekt_held::ReplayOutcome::Delivered
+    }), "{outcomes:?}");
+    assert!(state.mstore.jekt_held_for_target(&uid, 10).unwrap().iter().all(|row| row.request_id != "req-signed-out"));
+    assert_eq!(deliveries.lock().unwrap().len(), 2);
+    assert!(deliveries.lock().unwrap()[1].contains("MSGID=req-signed-out"));
+
     block.meta.insert(
         META_LAST_FAILURE.to_string(),
         serde_json::json!({"code": "usage_limit", "title": "Usage limit reached", "detail": "", "retryable": false}),
