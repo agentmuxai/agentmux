@@ -51,6 +51,9 @@ function makePreview(): BundleImportPreviewResponse {
                 slug: "deploy",
                 description: "d",
                 collision: "duplicate_in_bundle",
+                content: "Deploy to staging first.",
+                content_truncated: false,
+                content_total_chars: 24,
             },
         ],
         mcp_servers: [],
@@ -93,6 +96,62 @@ describe("BundleImportPreviewModalPanel — rename conflict check", () => {
         await userEvent.type(renameInput, "genuinely-free-name");
 
         expect(screen.queryByText("This name is also taken — pick another.")).not.toBeInTheDocument();
+    });
+});
+
+// A skill is text an agent will be told to follow, so the preview shows it before
+// anything is imported; one it could not show whole is not ticked for the person.
+describe("BundleImportPreviewModalPanel — skill text", () => {
+    type SkillPreview = BundleImportPreviewResponse["skills"][number];
+    const skill = (over: Partial<SkillPreview>): SkillPreview => ({
+        source_dir: "skills/a",
+        slug: "a",
+        description: "",
+        collision: "none",
+        content: "",
+        content_truncated: false,
+        content_total_chars: 0,
+        ...over,
+    });
+
+    it("shows each skill's text, and folds it away on request", async () => {
+        vi.mocked(RpcApi.SkillCatalogListCommand).mockResolvedValue([]);
+        const preview = makePreview();
+        preview.skills = [
+            skill({ source_dir: "skills/a", slug: "a", content: "Always run the linter.", content_total_chars: 22 }),
+            skill({ source_dir: "skills/b", slug: "b", content: "Never push to main.", content_total_chars: 19 }),
+        ];
+        render(() => <BundleImportPreviewModalPanel preview={preview} onNext={() => {}} onCancel={() => {}} />);
+
+        expect(screen.getByText("Always run the linter.")).toBeInTheDocument();
+        expect(screen.getByText("Never push to main.")).toBeInTheDocument();
+
+        await userEvent.click(screen.getAllByText("Hide skill text")[0]);
+        expect(screen.queryByText("Always run the linter.")).not.toBeInTheDocument();
+        expect(screen.getByText("Never push to main.")).toBeInTheDocument();
+    });
+
+    it("starts a skill it could not show in full unchecked, says so, and imports it only once ticked", async () => {
+        vi.mocked(RpcApi.SkillCatalogListCommand).mockResolvedValue([]);
+        const preview = makePreview();
+        preview.skills = [
+            skill({ source_dir: "skills/whole", slug: "whole", content: "short", content_total_chars: 5 }),
+            skill({ source_dir: "skills/long", slug: "long", content: "x".repeat(10), content_truncated: true, content_total_chars: 60000 }),
+        ];
+        const onNext = vi.fn();
+        render(() => <BundleImportPreviewModalPanel preview={preview} onNext={onNext} onCancel={() => {}} />);
+
+        expect(screen.getByText(/Not fully shown — 10 of 60000/)).toBeInTheDocument();
+        const checked = () => {
+            onNext.mockClear();
+            return userEvent.click(screen.getByText("Next")).then(() =>
+                Object.fromEntries(onNext.mock.calls[0][0].skills.map((s: { sourceDir: string; checked: boolean }) => [s.sourceDir, s.checked])),
+            );
+        };
+        expect(await checked()).toEqual({ "skills/whole": true, "skills/long": false });
+
+        await userEvent.click(screen.getByText("long").closest("label")!.querySelector("input")!);
+        expect(await checked()).toEqual({ "skills/whole": true, "skills/long": true });
     });
 });
 

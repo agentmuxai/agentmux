@@ -151,6 +151,24 @@
     background: var(--tint-4);
 }
 
+.bundle-import-skill-text-block {
+    margin-left: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.bundle-import-skill-text {
+    margin: 0;
+    max-height: 200px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    font-size: 0.85em;
+    padding: 8px;
+    border-radius: 4px;
+    background: var(--tint-4);
+}
+
 .bundle-import-requirements-summary {
     font-size: 0.9em;
     opacity: 0.85;
