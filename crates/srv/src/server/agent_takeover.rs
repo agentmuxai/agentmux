@@ -291,11 +291,26 @@ fn can_release(block_id: &str) -> bool {
 /// killed at `RELEASE_GRACE`) and say so in the pane. `Err` when this pane holds nothing.
 pub(crate) fn release_block(state: &AppState, block_id: &str, to: &str) -> Result<(), String> {
     let ctrl = blockcontroller::get_controller(block_id).ok_or_else(|| format!("NOT_RUNNING: no controller for block {block_id}"))?;
+    // The hold goes up before the process is signalled: once it exits, a message reaching this instance must not
+    // start the agent here again.
+    let uid = state
+        .mstore
+        .get::<Block>(block_id)
+        .ok()
+        .flatten()
+        .map(|b| obj::meta_get_string(&b.meta, "agentId", ""))
+        .unwrap_or_default();
+    if !uid.is_empty() {
+        agent_admission::hold_after_handover(&uid, to);
+    }
     let released = ctrl
         .as_any()
         .downcast_ref::<blockcontroller::persistent::PersistentSubprocessController>()
         .is_some_and(|p| p.release_to_other_instance(std::time::Instant::now() + RELEASE_GRACE));
     if !released {
+        if !uid.is_empty() {
+            agent_admission::clear_handover_hold(&uid);
+        }
         return Err(format!("NOT_RUNNING: block {block_id} holds nothing to release"));
     }
     let name = state
