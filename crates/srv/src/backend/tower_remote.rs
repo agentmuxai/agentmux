@@ -111,6 +111,7 @@ pub fn to_snapshot(conn: &str, os: &str, f: ProcFrame) -> TowerSnapshot {
         ts_ms: agentmux_common::time::now_ms() as u64,
         hostname: conn.to_string(),
         panes: None,
+        memory: None,
         os: os.to_string(),
         cpu_count: f.cpu_count,
         memory_metric: f.memory_metric,
