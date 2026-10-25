@@ -13,10 +13,12 @@
 //! `missed`, or, under catch-up `latest`, the job's one `pending` fire (§3.2,
 //! §5.2), which the scheduler delivers when the agent is back.
 
+pub mod admission;
 pub mod definition;
 pub mod follower;
 pub mod incidents;
 pub mod paused;
+pub mod policy;
 pub mod remote;
 pub mod verdict;
 
@@ -39,6 +41,7 @@ pub const SOURCE_DRONE: &str = "drone";
 pub const TRIGGER_SCHEDULE: &str = "schedule";
 pub const TRIGGER_CATCH_UP: &str = "catch_up";
 pub const TRIGGER_MANUAL: &str = "manual";
+pub const TRIGGER_RETRY: &str = "retry";
 
 /// `triggered_by` for runs the scheduler starts, and for the operator.
 pub const BY_SCHEDULER: &str = "scheduler";
@@ -52,6 +55,10 @@ pub const CATCH_UP_LATEST: &str = "latest";
 /// scheduled fire is a collapsed `skipped (paused_all)` row and Run now is
 /// refused. Only the operator turns it on or off.
 pub const FLAG_PAUSED_ALL: &str = "jobs:paused_all";
+
+/// What a Run now gets while the job's previous run is still going and its
+/// policy `overlap` is `skip`.
+pub const OVERLAP_REFUSAL: &str = "this job's previous run is still running (policy overlap: skip)";
 
 /// What a Run now gets while Pause all is on.
 pub const PAUSED_ALL_REFUSAL: &str =
@@ -90,6 +97,9 @@ pub fn brief_line(run_id: &str, late_for_ms: Option<i64>, now_ms: i64) -> String
          \"{run_id}\", outcome ok, findings or failed, and a one-line summary.)"
     )
 }
+
+/// Something done to a pane, by its block id: interrupting its turn, stopping a worker.
+pub type BlockHook = Arc<dyn Fn(&str) + Send + Sync>;
 
 /// What [`RunLedger::pane`] reads from a pane's meta.
 #[derive(Debug, Default)]
@@ -149,6 +159,16 @@ pub struct RunLedger {
     broker: Arc<Broker>,
     /// Failure incidents (§3.4), once [`Self::install_incidents`] ran.
     incidents: std::sync::OnceLock<Arc<incidents::Incidents>>,
+    /// Where jobs are, for policy (`admission.rs`).
+    jobs: std::sync::OnceLock<Arc<Store>>,
+    /// Held while a run's place is decided and its row written.
+    admission: std::sync::Mutex<()>,
+    /// Pending fires that were told to start and are being delivered: run id to
+    /// job id. A pending row doesn't occupy a place in the ledger, so until the
+    /// delivery lands these count as running.
+    pending_claims: std::sync::Mutex<std::collections::HashMap<String, String>>,
+    interrupt: std::sync::OnceLock<BlockHook>,
+    worker_stop: std::sync::OnceLock<BlockHook>,
 }
 
 impl RunLedger {
@@ -172,6 +192,11 @@ impl RunLedger {
             follower: follower::Follower::start(weak.clone(), broker.clone()),
             broker,
             incidents: std::sync::OnceLock::new(),
+            jobs: std::sync::OnceLock::new(),
+            admission: std::sync::Mutex::new(()),
+            pending_claims: std::sync::Mutex::default(),
+            interrupt: std::sync::OnceLock::new(),
+            worker_stop: std::sync::OnceLock::new(),
         })
     }
 
@@ -182,6 +207,9 @@ impl RunLedger {
     /// Open an incident when a job fails, from now on (§3.4). `jobs` is
     /// where cron jobs are, for a job's owner.
     pub fn install_incidents(&self, jobs: Option<Arc<Store>>) {
+        if let Some(jobs) = &jobs {
+            self.install_jobs(jobs.clone());
+        }
         let keeper = incidents::Incidents::new(self.store.clone(), self.mstore.clone(), jobs, self.broker.clone());
         if self.incidents.set(keeper.clone()).is_ok() {
             keeper.start();
@@ -202,7 +230,7 @@ impl RunLedger {
     }
 
     /// [`Self::changed`] for the job run `run_id` belongs to.
-    fn run_changed(&self, run_id: &str) {
+    pub(crate) fn run_changed(&self, run_id: &str) {
         let job_id = self.store.job_run_get(run_id).ok().flatten().map(|r| r.job_id).unwrap_or_default();
         self.changed(&job_id);
     }
@@ -248,7 +276,7 @@ impl RunLedger {
         }
     }
 
-    fn row(&self, job_id: &str, job_source: &str, job_name: &str, trigger: &str, now: i64) -> JobRun {
+    pub(crate) fn row(&self, job_id: &str, job_source: &str, job_name: &str, trigger: &str, now: i64) -> JobRun {
         let mut run =
             JobRun::new(&uuid::Uuid::new_v4().to_string(), job_id, job_source, job_name, trigger, state::SCHEDULED, now);
         run.recorded_by = self.recorded_by.clone();
@@ -307,7 +335,12 @@ impl RunLedger {
             FireOutcome::Missed { reason: MissReason::TargetMissing } => {
                 self.store.job_run_skip(run_id, reason::TARGET_MISSING, 1, now).map(drop)
             }
-            FireOutcome::Failed { error } => self.store.job_run_finish(run_id, infra::ERROR, None, error, now).map(drop),
+            FireOutcome::Failed { error } => {
+                let finished = self.store.job_run_finish(run_id, infra::ERROR, None, error, now);
+                self.maybe_retry(run_id);
+                self.reap_worker(run_id);
+                finished.map(drop)
+            }
         };
         if let Err(e) = result {
             tracing::warn!(run_id, error = %e, "jobs: couldn't record a fire's delivery");
@@ -372,7 +405,7 @@ impl RunLedger {
     /// events to that instance's broker, so that instance follows the run
     /// ([`Self::follow_forwarded`], #1988). This one only watches the row:
     /// a receiver too old to follow is closed after the no-turn timeout.
-    fn mark_running(&self, run_id: &str, target_uid: &str, block_id: &str, now: i64) {
+    pub(crate) fn mark_running(&self, run_id: &str, target_uid: &str, block_id: &str, now: i64) {
         let pane = self.pane(block_id);
         let remote = !block_id.is_empty() && self.mstore.is_some() && !pane.found && !registered_here(block_id);
         if remote && self.followed_elsewhere(run_id) {
@@ -446,10 +479,19 @@ impl RunLedger {
 
     /// The followed turn ended (or never showed up).
     pub(crate) fn turn_finished(&self, run_id: &str, infra_status: &str, cost: Option<RunCost>, summary: &str) {
-        if let Err(e) = self.store.job_run_finish(run_id, infra_status, cost, summary, now_ms()) {
-            tracing::warn!(run_id, error = %e, "jobs: couldn't close a run");
+        // Only the call that closes the row retries and reaps: a run stopped on
+        // purpose (overlap, timeout) is already closed, and its turn ending later
+        // must not file a retry of a run nobody wants again.
+        match self.store.job_run_finish(run_id, infra_status, cost, summary, now_ms()) {
+            Ok(true) => {
+                self.maybe_retry(run_id);
+                self.reap_worker(run_id);
+            }
+            Ok(false) => {}
+            Err(e) => tracing::warn!(run_id, error = %e, "jobs: couldn't close a run"),
         }
         self.run_changed(run_id);
+        pending_wake().notify_one();
     }
 
     pub(crate) fn turn_bound(&self, run_id: &str, turn_id: i64, partial: bool) {
@@ -513,8 +555,11 @@ impl RunLedger {
             tracing::warn!(error = %e, "jobs: couldn't read followed runs");
             Vec::new()
         });
+        // A run waiting for a place (overlap, group, the global limit, a retry's
+        // backoff) never started: it stays open for the scheduler to start.
         let (ours, followed_elsewhere): (Vec<JobRun>, Vec<JobRun>) = open(SOURCE_CRON, &[state::SCHEDULED, state::RUNNING])
             .into_iter()
+            .filter(|r| !(r.state == state::SCHEDULED && reason::WAITING.contains(&r.reason.as_str())))
             .partition(|r| remote::followed_by(r).is_none_or(|f| f.channel == self.channel));
         for run in &followed_elsewhere {
             self.follower.watch(&run.id, now);

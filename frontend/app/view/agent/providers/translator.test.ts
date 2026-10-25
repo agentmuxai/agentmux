@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { deviceOrigin, replayedUserMessage } from "./translator";
+import { deviceOrigin, isInjected, replayedUserMessage } from "./translator";
 
 describe("replayedUserMessage", () => {
     const record = { type: "user", message: { role: "user", content: "Run the tests again" } };
@@ -18,6 +18,17 @@ describe("replayedUserMessage", () => {
         const sent = [{ type: "user_message", message: "Run the tests again", fromDevice: "Pixel 9" }];
         expect(replayedUserMessage(fromPhone, false)).toEqual(sent);
         expect(replayedUserMessage(fromPhone, true)).toEqual(sent);
+    });
+
+    it("renders a message no pane typed (a jekt, a broadcast) live, and on replay", () => {
+        const jekt = { ...record, amx: { via: "inject" } };
+        expect(isInjected(jekt)).toBe(true);
+        expect(isInjected(record)).toBe(false);
+        expect(isInjected(fromPhone)).toBe(false);
+        expect(isInjected(null)).toBe(false);
+        const live = replayedUserMessage(jekt, false);
+        expect(live).toEqual([{ type: "user_message", message: "Run the tests again", timestamp: expect.any(Number) }]);
+        expect(replayedUserMessage(jekt, true)).toEqual([{ type: "user_message", message: "Run the tests again" }]);
     });
 
     it("reads the device only from a viewer amx", () => {

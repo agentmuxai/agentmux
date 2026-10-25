@@ -225,6 +225,44 @@ pub(crate) fn check_actor(
     run();
 }
 
+/// [`check_actor`] that refuses: a request whose token names an agent may
+/// claim only that agent as its sender. `Ok` for an Unattributed caller (no
+/// token to compare with: the UI, `muxsh`, a peer srv), for a request that
+/// names no actor, and when the caller's row can't be read. The error is the
+/// handler's answer.
+pub(crate) async fn require_actor(
+    state: &AppState,
+    caller: Option<&Caller>,
+    site: ActorSite,
+    actor: Option<&str>,
+) -> Result<(), String> {
+    check_actor(state, caller, site, actor);
+    let (Some(uid), Some(actor)) = (caller.and_then(Caller::uid), actor.map(str::trim).filter(|a| !a.is_empty())) else {
+        return Ok(());
+    };
+    let (mstore, uid, name) = (state.mstore.clone(), uid.to_string(), actor.to_string());
+    let own = tokio::task::spawn_blocking(move || names_the_caller(&mstore, &uid, &name)).await.unwrap_or(true);
+    if own {
+        Ok(())
+    } else {
+        Err("FORBIDDEN: the sender must be the agent this request's token names".to_string())
+    }
+}
+
+/// Whether `actor` is a name the agent behind `uid` answers to: its slug,
+/// display or instance name, or one it was renamed from (a running agent keeps
+/// sending under the name its environment held at launch). A name that also
+/// selects another row, or a row that can't be read, is not held against it.
+pub(crate) fn names_the_caller(store: &Store, uid: &str, actor: &str) -> bool {
+    let Ok(Some(row)) = store.agent_names_by_id(uid) else {
+        return true;
+    };
+    match classify(&row, actor, |name| store.rows_answering_to(name)) {
+        Some(Outcome::Mismatch) => store.former_name_owner(actor).ok().flatten().is_some_and(|owner| owner.uid == uid),
+        _ => true,
+    }
+}
+
 fn count_against_row(store: &Store, uid: &str, site: ActorSite, actor: &str) {
     let outcome = match store.agent_names_by_id(uid) {
         Ok(Some(row)) => classify(&row, actor, |name| store.rows_answering_to(name)),

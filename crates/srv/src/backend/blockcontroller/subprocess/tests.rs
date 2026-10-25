@@ -440,6 +440,17 @@ fn user_record_matches_the_persistent_controllers_stdin_line() {
     assert!(!rec.to_string().contains('\n'));
 }
 
+#[test]
+fn an_injected_user_record_is_the_stdin_line_marked_as_not_typed_in_a_pane() {
+    let text = "[JEKT:FROM=a TO=b]\nhi\n[/JEKT]";
+    let rec = injected_user_record(text);
+    assert_eq!(rec["type"], "user");
+    assert_eq!(rec["message"]["content"], text);
+    assert_eq!(rec["amx"], serde_json::json!({ "via": "inject" }));
+    assert!(!rec.to_string().contains('\n'));
+    assert!(user_record("hi").get("amx").is_none(), "a message the pane typed carries no origin");
+}
+
 /// The watchdog's inputs for a one-shot agent: each turn's process stamps its
 /// spawn time (the max-runtime limit) and its stdout stamps the last output
 /// (the idle limit).

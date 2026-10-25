@@ -1,0 +1,33 @@
+{
+  "templateVersion": 1,
+  "id": "agentmux.pr-review",
+  "name": "Pull request review",
+  "version": "1.0.0",
+  "kind": "job",
+  "description": "Reviews a pull request's diff against the repo's standards and posts one review per head commit, updated rather than repeated. The pull request's text is treated as untrusted data. Run it now with a PR number; the event trigger comes in a later version.",
+  "readsUntrusted": true,
+  "params": {
+    "type": "object",
+    "properties": {
+      "repo": { "type": "string", "title": "Repository", "description": "owner/repo." },
+      "pr": { "type": "number", "title": "Pull request number" },
+      "rules": { "type": "string", "title": "Review rules", "description": "Extra standards to check; empty uses the repo's own.", "default": "" },
+      "reviewer_provider": { "type": "string", "title": "Reviewer provider", "description": "The provider you want for the review; empty means the agent's own.", "default": "" },
+      "max_rounds": { "type": "number", "title": "Most review rounds", "default": 2 }
+    },
+    "required": ["repo", "pr"]
+  },
+  "trigger": { "kind": "manual" },
+  "action": { "kind": "message" },
+  "policy": {
+    "overlap": "skip",
+    "catch_up": "latest",
+    "timeout_minutes": 15,
+    "retries": 0,
+    "caps": { "run_usd": 1 },
+    "approval": "none",
+    "results": ["ledger", "task_on_failure"]
+  },
+  "outputs": ["comment"],
+  "secrets": []
+}
