@@ -169,6 +169,14 @@ fn a_commented_out_or_mistyped_credential_is_hidden_and_kept() {
 }
 
 #[test]
+fn a_value_of_its_own_for_a_hidden_allowed_name_replaces_the_operators() {
+    let current = "LC_ALL=ghp_abcdefghijklmnopqrstuvwxyz0123456789\nTZ=UTC\n";
+    assert_eq!(redacted(current), "LC_ALL=[hidden]\nTZ=UTC\n");
+    assert_eq!(resolve_lines(current, "LC_ALL=C\nTZ=UTC\n"), Ok("LC_ALL=C\nTZ=UTC\n".to_string()));
+    assert_eq!(effective(&resolve_lines(current, "TZ=UTC\nLC_ALL=C\n").unwrap())["LC_ALL"], "C");
+}
+
+#[test]
 fn a_secret_looking_value_on_an_ordinary_name_is_kept_too() {
     let current = "LC_ALL=ghp_abcdefghijklmnopqrstuvwxyz0123456789\nRUST_BACKTRACE=vim\n";
     assert_eq!(redacted(current), "LC_ALL=[hidden]\nRUST_BACKTRACE=vim\n");

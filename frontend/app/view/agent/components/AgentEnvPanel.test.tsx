@@ -117,6 +117,12 @@ describe("AgentEnvPanel", () => {
         getContent.mockRejectedValue(new Error("getagentcontent: no such agent"));
         render(() => <AgentEnvPanel agentId="uid-x" agentName="AgentX" />);
         expect(await screen.findByRole("alert")).toHaveTextContent("no such agent");
+        expect(box().disabled).toBe(true);
+        getContent.mockResolvedValue(stored("TZ=UTC\n"));
+        fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+        await waitFor(() => expect(box().value).toBe("TZ=UTC\n"));
+        expect(box().disabled).toBe(false);
+        expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
     });
 
     it("follows a change made elsewhere, unless there are unsaved edits", async () => {

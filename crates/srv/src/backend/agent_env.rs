@@ -291,6 +291,12 @@ pub fn resolve_lines(current: &str, text: &str) -> Result<String, String> {
                 } else if let Some(why) = name_problem(key).or_else(|| value_problem(key, value)) {
                     return Err(format!("line {}: {why}", i + 1));
                 } else {
+                    // A value of its own for a name the operator's line also holds (one shown
+                    // as `[hidden]` because it looks like a secret): the agent's value
+                    // replaces it, so it is the last and not shadowed by a line kept at the end.
+                    if let Some((_, _, used)) = kept.iter_mut().find(|(k, _, used)| *k == key && !*used) {
+                        *used = true;
+                    }
                     out.push(raw);
                 }
             }

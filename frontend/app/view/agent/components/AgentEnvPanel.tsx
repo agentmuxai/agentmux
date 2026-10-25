@@ -132,6 +132,11 @@ export const AgentEnvPanel = (props: AgentEnvPanelProps): JSX.Element => {
                         {error()}
                     </div>
                 </Show>
+                <Show when={!loaded() && error()}>
+                    <div class="agent-primitive-modal-actions">
+                        <Button onClick={() => void load()}>Retry</Button>
+                    </div>
+                </Show>
                 <Show when={saved()}>
                     <p class="agent-primitive-modal-global-note" role="status">
                         Saved. It applies at the agent's next launch.
