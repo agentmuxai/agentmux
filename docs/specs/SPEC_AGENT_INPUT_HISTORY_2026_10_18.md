@@ -142,11 +142,13 @@ Typed RPC commands with generated stubs (`server/app_api/input_history.rs`):
 | `agent.input-history-append {agent_id, text, kind, source?, attachments?}` | Record one send; a repeat of the newest entry counts `sends` instead; trims. Nothing for an unknown agent |
 | `agent.input-history {agent_id, before_id?, limit?}` | Newest first, paged (200 by default, at most 500) |
 | `agent.input-history-search {agent_id?, query, limit?}` | Case-insensitive (ASCII) substring match; `%` and `_` are literal; one agent, or all |
-| `agent.input-history-delete {id}` / `agent.input-history-clear {agent_id}` | Remove one entry, or an agent's whole history |
+| `agent.input-history-delete {id}` / `agent.input-history-clear {agent_id}` | Forget one entry, or an agent's whole history, into a trash batch (answers its `batch_id`), recorded with who forgot it: the agent's slug, or `armory-ui` for the window |
+| `agent.input-history-trash {agent_id?}` | What can still be restored, most recently forgotten first, with who and when; entries older than 7 days are gone |
+| `agent.input-history-restore {batch_id}` | Bring a batch back: each entry under its own id when free, else at the newest end; publishes `restored` |
 | `agent.input-draft {agent_id, text?}` | The unsent draft; with `text`, keep that one (empty removes it) |
 
-Each change publishes `agent:inputhistory {agent_id, what}` (`history` or
-`draft`), so two panes showing the same agent stay in step.
+Each change publishes `agent:inputhistory {agent_id, what}` (`history`,
+`draft`, `backfill` or `restored`), so two panes showing the same agent stay in step.
 
 The writes come from the frontend, which knows what the user typed. srv does
 not infer history from what it forwards to the provider, so jekts and system
@@ -192,9 +194,13 @@ notes can't leak into it.
   **Show older** pages back 200 at a time; **Forget** an entry and **Clear…**
   an agent's history each ask a second time (the clear names the agent). Only
   agents that still exist are listed: what was typed to an agent goes when the
-  agent is deleted. srv logs each forget and clear (agent and count, never the
-  text). Not built: search across agents, send again, copy, and a durable
-  audit record of deletions (the Warden History spec's phase 3).
+  agent is deleted. A forgotten entry or cleared history waits 7 days in a
+  trash (`db_agent_input_history_trash`) with who forgot it, listed under
+  "Recently forgotten" with a **Restore** button; after 7 days it is gone for
+  good, and it goes with the agent. srv logs each forget, clear and restore
+  (agent, count and who, never the text). Not built: search across agents, send
+  again, copy, and a durable audit record of deletions (the Warden History
+  spec's phase 3).
 - **Command palette:** "Search input history". Not planned: Ctrl+R in the
   composer and Warden → History → Typed cover it.
 

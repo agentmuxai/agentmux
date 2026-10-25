@@ -144,7 +144,9 @@ import type { CommandInputHistoryAppendData } from "@/types/rpc/CommandInputHist
 import type { CommandInputHistoryClearData } from "@/types/rpc/CommandInputHistoryClearData";
 import type { CommandInputHistoryData } from "@/types/rpc/CommandInputHistoryData";
 import type { CommandInputHistoryDeleteData } from "@/types/rpc/CommandInputHistoryDeleteData";
+import type { CommandInputHistoryRestoreData } from "@/types/rpc/CommandInputHistoryRestoreData";
 import type { CommandInputHistorySearchData } from "@/types/rpc/CommandInputHistorySearchData";
+import type { CommandInputHistoryTrashData } from "@/types/rpc/CommandInputHistoryTrashData";
 import type { CommandInstallToolData } from "@/types/rpc/CommandInstallToolData";
 import type { CommandLayoutIntentData } from "@/types/rpc/CommandLayoutIntentData";
 import type { CommandLayoutOpenData } from "@/types/rpc/CommandLayoutOpenData";
@@ -311,7 +313,9 @@ import type { ImportAgentDefinitionsResult } from "@/types/rpc/ImportAgentDefini
 import type { InputDraftResult } from "@/types/rpc/InputDraftResult";
 import type { InputHistoryAppendResult } from "@/types/rpc/InputHistoryAppendResult";
 import type { InputHistoryRemovedResult } from "@/types/rpc/InputHistoryRemovedResult";
+import type { InputHistoryRestoredResult } from "@/types/rpc/InputHistoryRestoredResult";
 import type { InputHistoryResult } from "@/types/rpc/InputHistoryResult";
+import type { InputHistoryTrashResult } from "@/types/rpc/InputHistoryTrashResult";
 import type { InstallCancelReq } from "@/types/rpc/InstallCancelReq";
 import type { InstallCancelResult } from "@/types/rpc/InstallCancelResult";
 import type { InstallCheckReq } from "@/types/rpc/InstallCheckReq";
@@ -2621,6 +2625,22 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<InputHistoryRemovedResult> {
     return client.rpcCall("agent.input-history-clear", data, opts);
+  },
+  // command "agent.input-history-trash"
+  AgentInputHistoryTrashCommand(
+    client: RpcClient,
+    data: CommandInputHistoryTrashData,
+    opts?: RpcOpts
+  ): Promise<InputHistoryTrashResult> {
+    return client.rpcCall("agent.input-history-trash", data, opts);
+  },
+  // command "agent.input-history-restore"
+  AgentInputHistoryRestoreCommand(
+    client: RpcClient,
+    data: CommandInputHistoryRestoreData,
+    opts?: RpcOpts
+  ): Promise<InputHistoryRestoredResult> {
+    return client.rpcCall("agent.input-history-restore", data, opts);
   },
   // command "agent.input-draft"
   AgentInputDraftCommand(client: RpcClient, data: CommandInputDraftData, opts?: RpcOpts): Promise<InputDraftResult> {

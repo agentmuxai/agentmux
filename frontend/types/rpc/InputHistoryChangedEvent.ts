@@ -6,7 +6,8 @@
  */
 export type InputHistoryChangedEvent = { agent_id: string, 
 /**
- * `history`, `draft`, or `backfill` (older entries came in, from the
- * agent's past conversations).
+ * `history`, `draft`, `backfill` (older entries came in, from the
+ * agent's past conversations) or `restored` (forgotten entries came back,
+ * so a pane reloads rather than reading only the newer ones).
  */
 what: string, };

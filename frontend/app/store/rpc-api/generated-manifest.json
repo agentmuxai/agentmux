@@ -1522,6 +1522,14 @@
             "method": "AgentInputHistoryClearCommand"
         },
         {
+            "command": "agent.input-history-trash",
+            "method": "AgentInputHistoryTrashCommand"
+        },
+        {
+            "command": "agent.input-history-restore",
+            "method": "AgentInputHistoryRestoreCommand"
+        },
+        {
             "command": "agent.input-draft",
             "method": "AgentInputDraftCommand"
         },
