@@ -636,6 +636,7 @@ pub(crate) async fn build_persistent_spawn_env(
         super::identity_env::carry_agent_identity_env(&mut env_vars, &display_name, identity.as_ref().and_then(|i| i.slug.as_deref()));
     }
     carry_agent_workdir_env(&mut env_vars, block_meta);
+    crate::backend::subagent_model::carry(&mut env_vars, block_meta);
     crate::server::browser_uploads::record_launch_workspace(block_id, &env_vars);
     // PATH gets the bundled tools dir (portable builds, runtime/tools/bin/)
     // and the user tools dir (~/.agentmux/tools/bin/), both ahead of the

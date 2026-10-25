@@ -317,10 +317,12 @@ impl RunLedger {
             Decision::Start | Decision::CancelThenStart => {
                 // Caps weigh the runs still going, so they are asked once policy
                 // says it may start, as for a waiting run (§5.3).
-                if let Some(refusal) = self.cap_gate(job).refusal {
+                let gate = self.cap_gate(job);
+                if let Some(refusal) = gate.refusal {
                     self.skip_run_for_cap(run_id, job, refusal);
                     return false;
                 }
+                self.note_account(run_id, &gate.account);
                 self.cancel_started(job);
                 true
             }

@@ -604,10 +604,8 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
         recorder.sync_all();
     }
 
-    // The starter Skills catalog is seeded by migrations::m0015_seed_starter_skills
-    // (run once ever per channel, tracked in db_migrations) — not here. See
-    // that migration's doc comment for why catalog-emptiness was dropped as
-    // the gate.
+    // No starter Skills are seeded: migrations::m0015_seed_starter_skills is
+    // retired, and 0041 removed the ones it had left in existing catalogs.
 
     // Gap-repair (backfilling a db_agent_definitions row missing its
     // db_agents mirror) is gone as of the definition flip: every

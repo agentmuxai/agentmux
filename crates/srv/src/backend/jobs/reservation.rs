@@ -118,7 +118,15 @@ impl RunLedger {
         let limits = self.limits();
         let (mut job_usd, _) = self.store.job_runs_cost_since(&job.id, day_start).unwrap_or_default();
         let mut account_usd = (!account.is_empty()).then(|| self.store.account_runs_cost_since(account, day_start).unwrap_or(0.0));
-        for r in self.store.job_runs_occupying().unwrap_or_default() {
+        // A pending fire being delivered holds its place before its row says so.
+        let occupying = self.store.job_runs_occupying().unwrap_or_default();
+        let claimed: Vec<String> = {
+            let claims = self.pending_claims.lock().unwrap_or_else(|e| e.into_inner());
+            claims.keys().filter(|id| !occupying.iter().any(|r| &r.id == *id)).cloned().collect()
+        };
+        let claimed_rows: Vec<_> = claimed.iter().filter_map(|id| self.store.job_run_get(id).ok().flatten()).collect();
+        let claimed_here = claimed_rows.iter().filter(|r| r.job_id == job.id).count();
+        for r in occupying.into_iter().chain(claimed_rows) {
             let Some(other) = self.job(&r.job_id).filter(policy::starts_an_agent) else { continue };
             if !caps::reports_cost(&r.provider) {
                 continue;
@@ -132,7 +140,8 @@ impl RunLedger {
             }
         }
         let messages = if caps::sends_to_another(job) {
-            self.store.job_runs_delivered_since(&job.id, day_start).unwrap_or(0)
+            // A pending fire being delivered is a message the day already owes.
+            self.store.job_runs_delivered_since(&job.id, day_start).unwrap_or(0) + claimed_here as i64
         } else {
             0
         };

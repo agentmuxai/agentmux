@@ -11,6 +11,15 @@
 //! no request the user didn't ask for. Offline, a rate limit or any error
 //! keeps what the last check found.
 //!
+//! Which release is latest comes from the `releases/latest` web page's
+//! redirect, which GitHub's 60-an-hour anonymous API limit (shared by
+//! everything on the computer) doesn't touch. The API is asked only for the
+//! release's files and notes, when the page names a release this srv hasn't
+//! got yet (and, once held, with its ETag, which saves the download; an
+//! unauthenticated 304 still counts against the limit, as measured). When
+//! GitHub still refuses, the check says so and when it lifts, and a newer release is
+//! still reported, without a download until the API answers.
+//!
 //! The answer is kept here, sent to every window as the `app:updatestatus`
 //! event when it changes, and read on demand with `app.update-status`. It
 //! names the release file for this install (`update_install`) with the
@@ -25,6 +34,7 @@
 //! a release. Only a `task dev` build (`dev-…` channel), which runs from source,
 //! never upgrades; it reports which release is latest.
 
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -37,8 +47,14 @@ use crate::backend::update_install::InstallKind;
 pub const EVENT_APP_UPDATE_STATUS: &str = "app:updatestatus";
 
 /// GitHub's latest-release endpoint for the public repo. Unauthenticated:
-/// 60 requests an hour per address.
+/// 60 requests an hour per address, shared with everything else on the
+/// computer; see the module doc for how little this asks of it.
 const LATEST_RELEASE_URL: &str = "https://api.github.com/repos/agentmuxai/agentmux/releases/latest";
+/// The page GitHub redirects to the latest release's own page: the tag is in
+/// the redirect, and it isn't part of the API's anonymous quota.
+const LATEST_PAGE_URL: &str = "https://github.com/agentmuxai/agentmux/releases/latest";
+/// A release's page; the latest page redirects to one of these.
+const RELEASE_PAGE_PREFIX: &str = "https://github.com/agentmuxai/agentmux/releases/tag/";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 /// The shortest gap between two checks the user or an agent asks for: GitHub
 /// allows 60 unauthenticated requests an hour per address.
@@ -299,6 +315,9 @@ static EVENT_BUS: OnceLock<Arc<crate::backend::eventbus::EventBus>> = OnceLock::
 static INSTALL_KIND: OnceLock<InstallKind> = OnceLock::new();
 /// The client every check uses, made by [`init`].
 static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+/// The same, but it doesn't follow redirects: the latest release page's
+/// redirect is the answer.
+static WEB_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 /// When [`check_now`] last asked GitHub, and why it failed if it did; held
 /// while it asks, so clicks that arrive meanwhile wait for its answer.
 static LAST_CHECK_NOW: tokio::sync::Mutex<Option<(std::time::Instant, Option<String>)>> = tokio::sync::Mutex::const_new(None);
@@ -335,17 +354,169 @@ pub fn current_status() -> AppUpdateStatus {
         .unwrap_or_else(|| AppUpdateStatus::initial(env!("CARGO_PKG_VERSION")))
 }
 
-async fn fetch_latest(client: &reqwest::Client) -> Result<Release, String> {
-    let resp = client
-        .get(LATEST_RELEASE_URL)
-        .header(reqwest::header::ACCEPT, "application/vnd.github+json")
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-    if !resp.status().is_success() {
-        return Err(format!("GitHub answered {}", resp.status()));
+/// The latest release's tag, from where `releases/latest` redirects to. Not
+/// the API, so not its limit.
+async fn latest_tag(web: &reqwest::Client) -> Result<String, String> {
+    let resp = web.head(LATEST_PAGE_URL).send().await.map_err(|e| e.to_string())?;
+    let location = resp
+        .headers()
+        .get(reqwest::header::LOCATION)
+        .and_then(|v| v.to_str().ok())
+        .ok_or_else(|| format!("GitHub answered {} without a redirect", resp.status()))?;
+    tag_from_location(location).ok_or_else(|| "GitHub's latest release page didn't name a release".to_string())
+}
+
+/// The release tag a redirect to `location` names: only AgentMux's own
+/// releases page, and only a tag that is a version.
+fn tag_from_location(location: &str) -> Option<String> {
+    let rest = location
+        .strip_prefix(RELEASE_PAGE_PREFIX)
+        .or_else(|| location.strip_prefix("/agentmuxai/agentmux/releases/tag/"))?;
+    let tag = rest.split(['?', '#']).next()?.trim_end_matches('/');
+    version_core(tag).map(|_| tag.to_string())
+}
+
+/// When GitHub's API said to stop (unix ms), 0 when it hasn't.
+static API_LIMITED_UNTIL_MS: AtomicI64 = AtomicI64::new(0);
+/// The release the API last gave, with its ETag.
+static RELEASE_CACHE: parking_lot::Mutex<Option<(Option<String>, Release)>> = parking_lot::Mutex::new(None);
+
+/// How a check gets the release's files and notes.
+#[derive(Debug, PartialEq, Eq)]
+enum Plan {
+    /// The release already held is the latest: ask nothing.
+    UseCache,
+    /// Ask the API, with this ETag when one is held.
+    Api(Option<String>),
+    /// The API is off limits until later: report the release by its tag.
+    Degraded,
+    /// Nothing to go on: the page didn't answer and the API is off limits.
+    Limited,
+}
+
+fn plan(tag: Option<&str>, cached: Option<&(Option<String>, Release)>, limited_until_ms: i64, now_ms: i64) -> Plan {
+    if let (Some(tag), Some((_, release))) = (tag, cached) {
+        if release.tag_name == tag {
+            return Plan::UseCache;
+        }
     }
-    resp.json::<Release>().await.map_err(|e| e.to_string())
+    if now_ms < limited_until_ms {
+        return if tag.is_some() { Plan::Degraded } else { Plan::Limited };
+    }
+    Plan::Api(cached.and_then(|(etag, _)| etag.clone()))
+}
+
+/// When a refusal says the limit lifts (unix ms): `Retry-After`, else the
+/// rate-limit reset, else a guess; never sooner than a minute from now.
+/// `None` when the refusal isn't about a limit at all.
+fn limited_until(status: u16, headers: &reqwest::header::HeaderMap, now_ms: i64) -> Option<i64> {
+    let header = |name: &str| headers.get(name).and_then(|v| v.to_str().ok()).map(str::trim);
+    let retry_after_s = header("retry-after").and_then(|v| v.parse::<i64>().ok());
+    let out_of_calls = header("x-ratelimit-remaining") == Some("0");
+    if status != 429 && retry_after_s.is_none() && !out_of_calls {
+        return None;
+    }
+    let until = retry_after_s
+        .map(|s| now_ms + s * 1000)
+        .or_else(|| header("x-ratelimit-reset").and_then(|v| v.parse::<i64>().ok()).map(|s| s * 1000))
+        .unwrap_or(now_ms + 15 * 60_000);
+    Some(until.max(now_ms + 60_000))
+}
+
+/// What the person is told while GitHub limits the check.
+fn limited_message(until_ms: i64) -> String {
+    let at = chrono::DateTime::from_timestamp_millis(until_ms)
+        .map(|t| t.with_timezone(&chrono::Local).format("%H:%M").to_string())
+        .unwrap_or_else(|| "later".to_string());
+    format!("GitHub is limiting update checks from this computer; try again after {at}")
+}
+
+/// A release known only by its tag.
+fn release_from_tag(tag: &str, note: Option<String>) -> Release {
+    Release {
+        tag_name: tag.to_string(),
+        html_url: format!("{RELEASE_PAGE_PREFIX}{tag}"),
+        body: note,
+        published_at: None,
+        draft: false,
+        prerelease: false,
+        assets: Vec::new(),
+    }
+}
+
+/// The note a release known only by its tag carries.
+fn degraded_note(until_ms: i64) -> String {
+    format!("{}. The download is offered once GitHub answers.", limited_message(until_ms))
+}
+
+enum ApiAnswer {
+    Fresh(Box<Release>, Option<String>),
+    NotModified,
+}
+
+enum ApiMiss {
+    /// Refused for a limit, until this time (unix ms).
+    Limited(i64),
+    Other(String),
+}
+
+async fn api_get(client: &reqwest::Client, etag: Option<&str>, now_ms: i64) -> Result<ApiAnswer, ApiMiss> {
+    let mut req = client.get(LATEST_RELEASE_URL).header(reqwest::header::ACCEPT, "application/vnd.github+json");
+    if let Some(etag) = etag {
+        req = req.header(reqwest::header::IF_NONE_MATCH, etag);
+    }
+    let resp = req.send().await.map_err(|e| ApiMiss::Other(e.to_string()))?;
+    let status = resp.status();
+    if status == reqwest::StatusCode::NOT_MODIFIED {
+        return Ok(ApiAnswer::NotModified);
+    }
+    if !status.is_success() {
+        if matches!(status.as_u16(), 403 | 429) {
+            if let Some(until) = limited_until(status.as_u16(), resp.headers(), now_ms) {
+                return Err(ApiMiss::Limited(until));
+            }
+        }
+        return Err(ApiMiss::Other(format!("GitHub answered {status}")));
+    }
+    let etag = resp.headers().get(reqwest::header::ETAG).and_then(|v| v.to_str().ok()).map(str::to_string);
+    let release = resp.json::<Release>().await.map_err(|e| ApiMiss::Other(e.to_string()))?;
+    Ok(ApiAnswer::Fresh(Box::new(release), etag))
+}
+
+/// The latest release, with as few calls to GitHub's API as possible (see the
+/// module doc). The error is what the person is told.
+async fn fetch_latest(client: &reqwest::Client, web: &reqwest::Client) -> Result<Release, String> {
+    let now_ms = agentmux_common::time::now_ms();
+    let tag = match latest_tag(web).await {
+        Ok(t) => Some(t),
+        Err(e) => {
+            tracing::debug!(error = %e, "update check: the latest page didn't name a release; asking the API");
+            None
+        }
+    };
+    let cached = RELEASE_CACHE.lock().clone();
+    let limited = API_LIMITED_UNTIL_MS.load(Ordering::Relaxed);
+    match plan(tag.as_deref(), cached.as_ref(), limited, now_ms) {
+        Plan::UseCache => cached.map(|(_, r)| r).ok_or_else(|| "no release held".to_string()),
+        Plan::Degraded => Ok(release_from_tag(tag.as_deref().unwrap_or_default(), Some(degraded_note(limited)))),
+        Plan::Limited => Err(limited_message(limited)),
+        Plan::Api(etag) => match api_get(client, etag.as_deref(), now_ms).await {
+            Ok(ApiAnswer::Fresh(release, etag)) => {
+                *RELEASE_CACHE.lock() = Some((etag, (*release).clone()));
+                Ok(*release)
+            }
+            Ok(ApiAnswer::NotModified) => cached.map(|(_, r)| r).ok_or_else(|| "GitHub said nothing changed".to_string()),
+            Err(ApiMiss::Limited(until)) => {
+                API_LIMITED_UNTIL_MS.store(until, Ordering::Relaxed);
+                tracing::info!(until_ms = until, "update check: GitHub's API is limiting this computer");
+                match tag {
+                    Some(tag) => Ok(release_from_tag(&tag, Some(degraded_note(until)))),
+                    None => Err(limited_message(until)),
+                }
+            }
+            Err(ApiMiss::Other(e)) => Err(format!("couldn't reach GitHub: {e}")),
+        },
+    }
 }
 
 /// Get ready to check when asked (`bootstrap::background`). Asks nothing.
@@ -363,6 +534,14 @@ pub fn init(event_bus: Arc<crate::backend::eventbus::EventBus>) {
         }
         Err(e) => tracing::warn!(error = %e, "update check: no HTTP client, can't check"),
     }
+    if let Ok(c) = reqwest::Client::builder()
+        .user_agent(format!("AgentMux/{current}"))
+        .timeout(REQUEST_TIMEOUT)
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+    {
+        let _ = WEB_CLIENT.set(c);
+    }
 }
 
 /// Ask GitHub now, for the user's **Check for update** or an agent's `App`
@@ -370,7 +549,7 @@ pub fn init(event_bus: Arc<crate::backend::eventbus::EventBus>) {
 /// [`CHECK_NOW_EVERY`], it answers what the last check found, its failure
 /// included; concurrent callers share one request.
 pub async fn check_now() -> Result<AppUpdateStatus, String> {
-    let (Some(client), Some(bus)) = (CLIENT.get(), EVENT_BUS.get()) else {
+    let (Some(client), Some(web), Some(bus)) = (CLIENT.get(), WEB_CLIENT.get(), EVENT_BUS.get()) else {
         return Err("AgentMux isn't checking for updates yet; try again in a moment".into());
     };
     let mut last = LAST_CHECK_NOW.lock().await;
@@ -379,7 +558,7 @@ pub async fn check_now() -> Result<AppUpdateStatus, String> {
     }
     let current = env!("CARGO_PKG_VERSION");
     let channel = crate::backend::reactive::registry::local_channel_id();
-    let outcome = match fetch_latest(client).await {
+    let outcome = match fetch_latest(client, web).await {
         Ok(release) => {
             let next = status_for(current, &channel, &release, agentmux_common::time::now_ms(), &install_kind());
             publish_check(bus, next);
@@ -387,7 +566,7 @@ pub async fn check_now() -> Result<AppUpdateStatus, String> {
         }
         Err(e) => {
             tracing::info!(error = %e, "update check: asked now, no answer");
-            Err(format!("couldn't reach GitHub: {e}"))
+            Err(e)
         }
     };
     *last = Some((std::time::Instant::now(), outcome.as_ref().err().cloned()));
@@ -469,6 +648,75 @@ mod tests {
             prerelease: false,
             assets: Vec::new(),
         }
+    }
+
+    #[test]
+    fn only_a_version_tag_on_agentmuxs_own_releases_page_is_a_release() {
+        let ok = "https://github.com/agentmuxai/agentmux/releases/tag/v0.60.1";
+        assert_eq!(tag_from_location(ok).as_deref(), Some("v0.60.1"));
+        assert_eq!(tag_from_location("/agentmuxai/agentmux/releases/tag/v0.60.1").as_deref(), Some("v0.60.1"));
+        assert_eq!(tag_from_location(&format!("{ok}?x=1")).as_deref(), Some("v0.60.1"));
+        assert_eq!(tag_from_location("https://evil.example/agentmuxai/agentmux/releases/tag/v0.60.1"), None);
+        assert_eq!(tag_from_location("https://github.com/other/repo/releases/tag/v0.60.1"), None);
+        assert_eq!(tag_from_location("https://github.com/agentmuxai/agentmux/releases/tag/nightly"), None);
+        assert_eq!(tag_from_location("https://github.com/agentmuxai/agentmux/releases"), None);
+    }
+
+    #[test]
+    fn the_release_already_held_asks_nothing_and_a_new_tag_asks_the_api_with_the_etag() {
+        let held = (Some("\"abc\"".to_string()), release("v0.60.0"));
+        assert_eq!(plan(Some("v0.60.0"), Some(&held), 0, 1_000), Plan::UseCache);
+        assert_eq!(plan(Some("v0.60.1"), Some(&held), 0, 1_000), Plan::Api(Some("\"abc\"".into())));
+        assert_eq!(plan(None, Some(&held), 0, 1_000), Plan::Api(Some("\"abc\"".into())));
+        assert_eq!(plan(Some("v0.60.0"), None, 0, 1_000), Plan::Api(None));
+    }
+
+    #[test]
+    fn while_the_api_is_limited_a_known_tag_is_reported_and_nothing_is_asked() {
+        let held = (None, release("v0.60.0"));
+        assert_eq!(plan(Some("v0.60.1"), Some(&held), 5_000, 1_000), Plan::Degraded);
+        assert_eq!(plan(Some("v0.60.0"), Some(&held), 5_000, 1_000), Plan::UseCache, "held and current: no call at all");
+        assert_eq!(plan(None, None, 5_000, 1_000), Plan::Limited);
+        assert_eq!(plan(Some("v0.60.1"), None, 5_000, 6_000), Plan::Api(None), "the limit lifted");
+    }
+
+    #[test]
+    fn a_refusal_names_when_the_limit_lifts_and_a_plain_403_is_not_a_limit() {
+        use reqwest::header::{HeaderMap, HeaderValue};
+        let h = |pairs: &[(&'static str, String)]| {
+            let mut m = HeaderMap::new();
+            for (k, v) in pairs {
+                m.insert(*k, HeaderValue::from_str(v).unwrap());
+            }
+            m
+        };
+        let now = 1_000_000_000_000_i64;
+        let reset = (now / 1000 + 1800).to_string();
+        let out = h(&[("x-ratelimit-remaining", "0".into()), ("x-ratelimit-reset", reset)]);
+        assert_eq!(limited_until(403, &out, now), Some(now + 1_800_000));
+        assert_eq!(limited_until(429, &h(&[("retry-after", "120".into())]), now), Some(now + 120_000));
+        assert_eq!(limited_until(429, &h(&[]), now), Some(now + 15 * 60_000), "no header: a guess");
+        assert_eq!(limited_until(429, &h(&[("retry-after", "1".into())]), now), Some(now + 60_000), "never sooner than a minute");
+        assert_eq!(limited_until(403, &h(&[("x-ratelimit-remaining", "12".into())]), now), None, "403 with calls left is a refusal, not a limit");
+        assert_eq!(limited_until(403, &h(&[]), now), None);
+    }
+
+    #[test]
+    fn the_message_for_a_limit_says_what_is_happening_not_403() {
+        let m = limited_message(1_000_000_000_000);
+        assert!(m.starts_with("GitHub is limiting update checks from this computer; try again after "), "{m}");
+        assert!(!m.contains("403"), "{m}");
+    }
+
+    #[test]
+    fn a_release_known_only_by_its_tag_is_still_news_but_not_a_download() {
+        let r = release_from_tag("v99.0.0", Some(degraded_note(1_000_000_000_000)));
+        let st = status_for("0.59.41", "stable", &r, 1, &InstallKind::Unknown);
+        assert_eq!(st.state, "available");
+        assert_eq!(st.latest.as_deref(), Some("99.0.0"));
+        assert_eq!(st.url.as_deref(), Some("https://github.com/agentmuxai/agentmux/releases/tag/v99.0.0"));
+        assert!(!st.can_download && st.asset.is_none(), "nothing to download without the API's checksum");
+        assert!(st.notes.as_deref().is_some_and(|n| n.contains("limiting update checks")));
     }
 
     #[test]

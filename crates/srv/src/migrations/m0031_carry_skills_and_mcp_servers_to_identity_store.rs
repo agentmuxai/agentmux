@@ -766,18 +766,8 @@ mod tests {
         // allowed to diverge once either one changes), it's a sanity check
         // that the freeze was performed correctly at the moment it was
         // taken. See the module doc's "Frozen starter recognition" section.
-        for (name, trigger) in FROZEN_STARTER_SKILLS {
-            assert_eq!(
-                frozen_starter_skill_id(trigger),
-                crate::backend::skill_seed::starter_skill_id(trigger),
-                "frozen and live derivation disagree for trigger {trigger:?}"
-            );
-            assert_eq!(
-                crate::backend::skill_seed::starter_skill_trigger_for_name(name).as_deref(),
-                Some(*trigger),
-                "frozen manifest disagrees with the live one for {name:?}"
-            );
-        }
+        // The starter-skills seed is retired, so there is no live derivation left to compare
+        // `FROZEN_STARTER_SKILLS` with; `0041_retire_untouched_starter_skills` pins the six ids.
         for name in FROZEN_STARTER_MCP_SERVER_NAMES {
             assert_eq!(
                 frozen_starter_mcp_server_id(name),

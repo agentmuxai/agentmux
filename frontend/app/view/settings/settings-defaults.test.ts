@@ -395,6 +395,8 @@ const BACKEND_CONSTANTS: Record<string, [string, RegExp]> = {
     "voice:whisperModel": ["crates/srv/src/server/voice.rs", /const DEFAULT_WHISPER_MODEL: &str = ("[^"]*");/],
     "agent:compacthintat": ["crates/srv/src/backend/context_reading.rs", /const DEFAULT_HINT_AT: u64 = (\d+);/],
     "agent:freshhintat": ["crates/srv/src/backend/context_reading.rs", /const DEFAULT_FRESH_HINT_AT: u64 = (\d+);/],
+    "agent:subagentmodel": ["crates/srv/src/backend/subagent_model.rs", /const DEFAULT_SUBAGENT_MODEL: &str = ("[^"]*");/],
+    "agent:exploremodel": ["crates/srv/src/backend/subagent_model.rs", /const DEFAULT_EXPLORE_MODEL: &str = ("[^"]*");/],
     "app:showtray": ["crates/launcher/src/background_config.rs", /\bshow_tray: (true|false),/],
     "app:runinbackground": ["crates/launcher/src/background_config.rs", /\brun_in_background: (true|false),/],
     "app:startatlogin": ["crates/launcher/src/start_at_login.rs", /\.map\(\|v\| v\.unwrap_or\((true|false)\)\)/],
