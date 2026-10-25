@@ -14,6 +14,9 @@ $kanban-narrow: 760px;
 .kanban {
     position: relative;
     overflow: hidden;
+    // Its own stacking context: the sticky section heads and the drawer are ordered against each other
+    // here, not against the rest of the pane.
+    isolation: isolate;
 }
 
 .kanban-toolbar {
@@ -427,6 +430,8 @@ $kanban-narrow: 760px;
 
 .kanban-drawer {
     position: absolute;
+    // Over the narrow list's sticky section heads (--z-tab-name).
+    z-index: var(--z-pane-overlay);
     top: 0;
     right: 0;
     bottom: 0;
