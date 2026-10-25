@@ -1,5 +1,6 @@
 #!/bin/sh
 # agentmux-install-update <file> <version> <launcher pid>
+# agentmux-install-update --go-back <version> <launcher pid>
 #
 # Installs an AgentMux .deb or .rpm that AgentMux downloaded for its own upgrade.
 # Shipped by both packages as /opt/agentmux/bin/agentmux-install-update and run as
@@ -16,6 +17,12 @@
 #     newer than the installed one;
 #   - nothing may run from /opt/agentmux (any user's AgentMux) once the launcher has
 #     quit, since replacing libcef.so under a running CEF can crash it.
+#
+# --go-back installs the version the last upgrade replaced (the record
+# /var/lib/agentmux/last-upgrade, written by this script), once, and only while the
+# version that upgrade installed is still the installed one. There is no file from the
+# user then: the script downloads the release's package itself, from GitHub over
+# HTTPS, and checks it against GitHub's listing the same way.
 #
 # On stdout it prints READY once everything is checked and it is waiting for the
 # launcher to quit; the launcher reads that to know the password was accepted and
@@ -36,6 +43,7 @@ CACHE_DIR="${AGENTMUX_CACHE_DIR:-/var/cache/agentmux}"
 STATE_DIR="${AGENTMUX_STATE_DIR:-/var/lib/agentmux}"
 PROC_DIR="${AGENTMUX_PROC_DIR:-/proc}"
 QUIT_WAIT="${AGENTMUX_QUIT_WAIT:-120}"
+DOWNLOAD_BASE="${AGENTMUX_DOWNLOAD_BASE:-https://github.com/agentmuxai/agentmux/releases/download}"
 
 die() {
     echo "agentmux-install-update: $*" >&2
@@ -47,10 +55,20 @@ die() {
 if [ -z "${AGENTMUX_HELPER_TEST:-}" ] && [ "$(id -u)" != 0 ]; then
     die "must run as root (through pkexec)"
 fi
-[ "$#" -eq 3 ] || die "usage: agentmux-install-update <file> <version> <launcher pid>"
-FILE=$1
-VERSION=$2
-LAUNCHER_PID=$3
+GO_BACK=0
+if [ "${1:-}" = "--go-back" ]; then
+    GO_BACK=1
+    shift
+    [ "$#" -eq 2 ] || die "usage: agentmux-install-update --go-back <version> <launcher pid>"
+    FILE=
+    VERSION=$1
+    LAUNCHER_PID=$2
+else
+    [ "$#" -eq 3 ] || die "usage: agentmux-install-update <file> <version> <launcher pid>"
+    FILE=$1
+    VERSION=$2
+    LAUNCHER_PID=$3
+fi
 
 case "$VERSION" in
 '' | *[!0-9A-Za-z.+~-]*) die "not a version: $VERSION" ;;
@@ -58,44 +76,82 @@ esac
 case "$LAUNCHER_PID" in
 '' | *[!0-9]*) die "not a process id: $LAUNCHER_PID" ;;
 esac
-case "$FILE" in
-/*) ;;
-*) die "the file must be an absolute path" ;;
-esac
+
+# --- which package manager owns this install ---
+LAUNCHER="$INSTALL_ROOT/bin/agentmux-launcher"
+if dpkg-query -S "$LAUNCHER" >/dev/null 2>&1; then
+    OWNER=deb
+elif rpm -qf "$LAUNCHER" >/dev/null 2>&1; then
+    OWNER=rpm
+else
+    die "AgentMux isn't installed by dpkg or rpm"
+fi
 
 # --- the file: a regular file of the invoking user, copied into a directory only
-# root can enter, without following a symlink ---
-[ ! -L "$FILE" ] || die "$FILE is a symlink"
-[ -f "$FILE" ] || die "$FILE isn't a file"
-if [ -n "${PKEXEC_UID:-}" ]; then
-    [ "$(stat -c %u -- "$FILE" 2>/dev/null)" = "$PKEXEC_UID" ] || die "$FILE isn't the invoking user's file"
-fi
-NAME=$(basename -- "$FILE")
-case "$NAME" in
-"AgentMux_${VERSION}_amd64.deb") KIND=deb ;;
-"AgentMux-${VERSION}-1.x86_64.rpm") KIND=rpm ;;
-*) die "$NAME isn't the AgentMux $VERSION package" ;;
-esac
-
+# root can enter, without following a symlink; or, going back, none ---
 mkdir -p "$CACHE_DIR" || die "can't create $CACHE_DIR"
 chmod 700 "$CACHE_DIR" || die "can't secure $CACHE_DIR"
 WORK=$(mktemp -d "$CACHE_DIR/install.XXXXXX") || die "can't make a work folder"
 cleanup() { rm -rf "$WORK"; }
 trap cleanup EXIT
-COPY="$WORK/$NAME"
-dd if="$FILE" of="$COPY" iflag=nofollow bs=1M status=none 2>/dev/null || die "can't read $FILE"
-chmod 600 "$COPY"
 
-# --- the checksum, from GitHub itself ---
+# fetch <url> [seconds] [follow]: the page, over HTTPS only. `follow` is for the release
+# download, which GitHub answers with a redirect to its asset storage (the listing is
+# not redirected); a redirect may only go to another HTTPS address.
 fetch() {
     if command -v curl >/dev/null 2>&1; then
-        curl -fsS --proto '=https' --tlsv1.2 --max-time 30 "$1"
+        if [ "${3:-}" = follow ]; then
+            curl -fsS -L --proto '=https' --proto-redir '=https' --tlsv1.2 --max-time "${2:-30}" "$1"
+        else
+            curl -fsS --proto '=https' --tlsv1.2 --max-time "${2:-30}" "$1"
+        fi
     elif command -v wget >/dev/null 2>&1; then
-        wget -q -O - --secure-protocol=TLSv1_2 --timeout=30 "$1"
+        wget -q -O - --https-only --secure-protocol=TLSv1_2 --timeout="${2:-30}" "$1"
     else
         return 127
     fi
 }
+
+if [ "$GO_BACK" = 1 ]; then
+    # Only to the version the last upgrade replaced, and only while the version it
+    # installed is still the installed one.
+    RECORD_FROM=$(sed -n 's/^from=//p' "$STATE_DIR/last-upgrade" 2>/dev/null | head -n 1)
+    RECORD_TO=$(sed -n 's/^to=//p' "$STATE_DIR/last-upgrade" 2>/dev/null | head -n 1)
+    [ -n "$RECORD_FROM" ] && [ -n "$RECORD_TO" ] || die "there is no upgrade to go back from"
+    [ "$VERSION" = "$RECORD_FROM" ] || die "the last upgrade replaced $RECORD_FROM, not $VERSION"
+    if [ "$OWNER" = deb ]; then
+        NOW=$(dpkg-query -W -f='${Version}' agentmux 2>/dev/null)
+    else
+        NOW=$(rpm -q --queryformat '%{VERSION}' agentmux 2>/dev/null)
+    fi
+    [ "$NOW" = "$RECORD_TO" ] || die "AgentMux $NOW is installed, not $RECORD_TO, so there is nothing to go back from"
+    if [ "$OWNER" = deb ]; then NAME="AgentMux_${VERSION}_amd64.deb"; else NAME="AgentMux-${VERSION}-1.x86_64.rpm"; fi
+    KIND=$OWNER
+    COPY="$WORK/$NAME"
+    fetch "$DOWNLOAD_BASE/v$VERSION/$NAME" 900 follow >"$COPY" || die "can't download AgentMux $VERSION to go back to it"
+    chmod 600 "$COPY"
+else
+    case "$FILE" in
+    /*) ;;
+    *) die "the file must be an absolute path" ;;
+    esac
+    [ ! -L "$FILE" ] || die "$FILE is a symlink"
+    [ -f "$FILE" ] || die "$FILE isn't a file"
+    if [ -n "${PKEXEC_UID:-}" ]; then
+        [ "$(stat -c %u -- "$FILE" 2>/dev/null)" = "$PKEXEC_UID" ] || die "$FILE isn't the invoking user's file"
+    fi
+    NAME=$(basename -- "$FILE")
+    case "$NAME" in
+    "AgentMux_${VERSION}_amd64.deb") KIND=deb ;;
+    "AgentMux-${VERSION}-1.x86_64.rpm") KIND=rpm ;;
+    *) die "$NAME isn't the AgentMux $VERSION package" ;;
+    esac
+    COPY="$WORK/$NAME"
+    dd if="$FILE" of="$COPY" iflag=nofollow bs=1M status=none 2>/dev/null || die "can't read $FILE"
+    chmod 600 "$COPY"
+fi
+
+# --- the checksum, from GitHub itself ---
 LISTING=$(fetch "$REPO_API/v$VERSION") || die "can't read GitHub's listing of AgentMux $VERSION to check the file (no network, or GitHub is limiting requests); try again later"
 # The release listing is pretty-printed JSON: an asset's "name" line is followed by
 # its "digest" line ("sha256:<hex>").
@@ -110,15 +166,6 @@ esac
 ACTUAL=$(sha256sum <"$COPY" | awk '{print $1}')
 [ "$ACTUAL" = "$EXPECTED" ] || die "$NAME doesn't match the checksum GitHub lists for it"
 
-# --- which package manager owns this install ---
-LAUNCHER="$INSTALL_ROOT/bin/agentmux-launcher"
-if dpkg-query -S "$LAUNCHER" >/dev/null 2>&1; then
-    OWNER=deb
-elif rpm -qf "$LAUNCHER" >/dev/null 2>&1; then
-    OWNER=rpm
-else
-    die "AgentMux isn't installed by dpkg or rpm"
-fi
 [ "$OWNER" = "$KIND" ] || die "AgentMux was installed from a .$OWNER, not a .$KIND"
 
 # --- the package itself ---
@@ -146,7 +193,11 @@ newer() {
         [ "$(rpm --eval "%{lua: print(rpm.vercmp('$1', '$2'))}" 2>/dev/null)" = 1 ]
     fi
 }
-newer "$VERSION" "$INSTALLED" || die "$VERSION isn't newer than the installed $INSTALLED"
+if [ "$GO_BACK" = 1 ]; then
+    newer "$INSTALLED" "$VERSION" || die "$VERSION isn't older than the installed $INSTALLED"
+else
+    newer "$VERSION" "$INSTALLED" || die "$VERSION isn't newer than the installed $INSTALLED"
+fi
 
 # --- everything checked: tell the launcher, then wait for AgentMux to quit ---
 echo READY
@@ -176,14 +227,25 @@ done
 
 # --- the install ---
 if [ "$KIND" = deb ]; then
+    DOWN=
+    [ "$GO_BACK" = 1 ] && DOWN=--allow-downgrades
     if command -v apt-get >/dev/null 2>&1; then
-        DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends -o Dpkg::Options::=--force-confold "$COPY" >&2 \
+        # shellcheck disable=SC2086
+        DEBIAN_FRONTEND=noninteractive apt-get install -y $DOWN --no-install-recommends -o Dpkg::Options::=--force-confold "$COPY" >&2 \
             || die "apt-get couldn't install $NAME"
     else
         dpkg --install "$COPY" >&2 || die "dpkg couldn't install $NAME"
     fi
 else
-    if command -v dnf >/dev/null 2>&1; then
+    if [ "$GO_BACK" = 1 ]; then
+        if command -v dnf >/dev/null 2>&1; then
+            dnf downgrade -y "$COPY" >&2 || die "dnf couldn't install $NAME"
+        elif command -v zypper >/dev/null 2>&1; then
+            zypper --non-interactive install --oldpackage --allow-unsigned-rpm "$COPY" >&2 || die "zypper couldn't install $NAME"
+        else
+            rpm -U --oldpackage "$COPY" >&2 || die "rpm couldn't install $NAME"
+        fi
+    elif command -v dnf >/dev/null 2>&1; then
         dnf install -y "$COPY" >&2 || die "dnf couldn't install $NAME"
     elif command -v zypper >/dev/null 2>&1; then
         zypper --non-interactive install --allow-unsigned-rpm "$COPY" >&2 || die "zypper couldn't install $NAME"
@@ -192,6 +254,14 @@ else
     fi
 fi
 
-# Its record, for a later "go back": what it replaced and what it installed.
-mkdir -p "$STATE_DIR" && printf 'from=%s\nto=%s\n' "$INSTALLED" "$VERSION" >"$STATE_DIR/last-upgrade" 2>/dev/null
+# Its record, for a later "go back": what it replaced and what it installed. The
+# record is public (the launcher reads it to offer going back), so the folder and the
+# file can be read by anyone; only this script writes them. Going back uses it up.
+if [ "$GO_BACK" = 1 ]; then
+    rm -f "$STATE_DIR/last-upgrade"
+else
+    mkdir -p "$STATE_DIR" && chmod 755 "$STATE_DIR" \
+        && printf 'from=%s\nto=%s\n' "$INSTALLED" "$VERSION" >"$STATE_DIR/last-upgrade" \
+        && chmod 644 "$STATE_DIR/last-upgrade" 2>/dev/null
+fi
 exit 0

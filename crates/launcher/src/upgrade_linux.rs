@@ -121,16 +121,20 @@ static DIALOG_PID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::
 /// start it.
 #[cfg(target_os = "linux")]
 pub fn confirm(title: &str, body: &str) -> bool {
+    confirm_labelled(title, body, "Upgrade & restart")
+}
+
+/// [`confirm`] with its own name for the Yes button (the other is "Not now").
+#[cfg(target_os = "linux")]
+pub fn confirm_labelled(title: &str, body: &str, yes: &str) -> bool {
     use std::sync::atomic::Ordering;
     let markup = pango_escape(body);
     let zenity_title = format!("--title={title}");
     let zenity_text = format!("--text={markup}");
+    let zenity_ok = format!("--ok-label={yes}");
     let dialogs: [(&str, Vec<&str>); 2] = [
-        (
-            "zenity",
-            vec!["--question", &zenity_title, &zenity_text, "--ok-label=Upgrade & restart", "--cancel-label=Not now", "--width=460"],
-        ),
-        ("kdialog", vec!["--title", title, "--yes-label", "Upgrade & restart", "--no-label", "Not now", "--yesno", body]),
+        ("zenity", vec!["--question", &zenity_title, &zenity_text, &zenity_ok, "--cancel-label=Not now", "--width=460"]),
+        ("kdialog", vec!["--title", title, "--yes-label", yes, "--no-label", "Not now", "--yesno", body]),
     ];
     for (program, args) in dialogs {
         let mut cmd = std::process::Command::new(program);
@@ -158,6 +162,31 @@ pub fn confirm(title: &str, body: &str) -> bool {
     }
     crate::log("upgrade: neither zenity nor kdialog is installed to ask with; the new version is staged, start it yourself");
     false
+}
+
+/// Tell the user `body` in a native dialog (`zenity` or `kdialog`), and wait for
+/// the OK; with neither installed, it only goes to the log.
+#[cfg(target_os = "linux")]
+pub fn notify(title: &str, body: &str) {
+    crate::log(&format!("{title}: {body}"));
+    let zenity_title = format!("--title={title}");
+    let zenity_text = format!("--text={}", pango_escape(body));
+    let dialogs: [(&str, Vec<&str>); 2] = [
+        ("zenity", vec!["--info", &zenity_title, &zenity_text, "--width=460"]),
+        ("kdialog", vec!["--title", title, "--msgbox", body]),
+    ];
+    for (program, args) in dialogs {
+        let mut cmd = std::process::Command::new(program);
+        cmd.args(&args).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null());
+        for key in NOT_INHERITED {
+            cmd.env_remove(key);
+        }
+        match cmd.status() {
+            Ok(_) => return,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(_) => return,
+        }
+    }
 }
 
 /// Close the open dialog (as "Not now").
