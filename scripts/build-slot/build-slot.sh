@@ -192,8 +192,9 @@ first_in_line() {
 }
 
 # Take the first free slot, up to the limit. Only the run at the head of the queue tries.
-# Returns 0 with SLOT set when it got one, 1 when all are held, 2 when the lock folder turned
-# out to be unusable.
+# Returns 0 with SLOT set when it got one, 1 when all are held, 3 when a mkdir failed and left no
+# slot behind (a holder that released in that instant, or a folder that can't be used: the
+# caller tells the two apart by whether it keeps happening).
 try_slots() {
   local lim i d
   lim=$(slot_limit)
@@ -202,20 +203,27 @@ try_slots() {
     SLOT="$d"
     if [ -d "$d" ] && slot_is_stale; then rm -rf "$d"; fi
     if mkdir "$d" 2>/dev/null; then return 0; fi
-    # Neither made nor already there: the folder went read-only or away since the check above.
-    [ -d "$d" ] || return 2
+    # Neither made nor there any more: a holder released between the two steps, or the folder
+    # can't be written. Try once more before calling it unusable.
+    if [ ! -d "$d" ]; then
+      mkdir "$d" 2>/dev/null && return 0
+      [ -d "$d" ] || return 3
+    fi
   done
   SLOT="$ROOT/slot"
   return 1
 }
 
-waited=0; said=0
+waited=0; said=0; unusable=0
 while :; do
   touch "$TICKET" 2>/dev/null
   if first_in_line; then
     try_slots; got=$?
     if [ "$got" -eq 0 ]; then HOLDING=1; ACQUIRED_AT=$(now); break; fi
-    if [ "$got" -eq 2 ]; then
+    # A slot that can't be created three polls running means the folder is unusable (a single
+    # failure is a holder releasing at that instant): run without the slot instead of waiting.
+    if [ "$got" -eq 3 ]; then unusable=$((unusable + 1)); else unusable=0; fi
+    if [ "$unusable" -ge 3 ] || [ ! -w "$ROOT" ]; then
       rm -f "$TICKET"
       echo "build-slot: can't create a slot under $ROOT; running without the build slot" >&2
       exec "$@"

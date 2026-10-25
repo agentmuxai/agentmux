@@ -23,6 +23,7 @@ mod tests {
     /// reaches a bash started afterwards as a function (the mechanism `export` relies on).
     #[test]
     fn an_exported_function_variable_reaches_a_child_bash() {
+        let _guard = crate::test_env_lock::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let Ok(bash) = crate::bash_wrap::locate_bash() else { return };
         std::env::set_var("BASH_FUNC_agentmux_probe%%", "() {  echo from-function \"$@\"\n}");
         let out = std::process::Command::new(bash).args(["-c", "agentmux_probe a b"]).output().unwrap();
