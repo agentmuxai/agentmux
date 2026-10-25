@@ -398,19 +398,19 @@ describe("Tower", () => {
         await vi.advanceTimersByTimeAsync(2000);
         const charts = screen.getAllByRole("img", { name: /over the last 10 minutes/ });
         expect(charts.map((c) => c.getAttribute("aria-label"))).toEqual([
-            "CPU over the last 10 minutes: now 50%, peak 50%",
             "Memory over the last 10 minutes: now 1.0 GB, peak 1.0 GB",
+            "CPU over the last 10 minutes: now 50%, peak 50%",
         ]);
         // A share of one core when the pane shows that.
         fireEvent.click(screen.getByRole("radio", { name: "% of a core" }));
         expect(
-            screen.getAllByRole("img", { name: /over the last 10 minutes/ })[0].getAttribute("aria-label")
+            screen.getAllByRole("img", { name: /over the last 10 minutes/ })[1].getAttribute("aria-label")
         ).toContain("now 200%");
 
         // Under the pointer: when, and how much.
-        fireEvent.pointerMove(charts[0], { clientX: 10_000 });
+        fireEvent.pointerMove(charts[1], { clientX: 10_000 });
         expect(screen.getByTestId("tower-chart-tip")).toHaveTextContent("0 s ago · 200%");
-        fireEvent.pointerLeave(charts[0]);
+        fireEvent.pointerLeave(charts[1]);
         expect(screen.queryByTestId("tower-chart-tip")).toBeNull();
     });
 
@@ -1045,12 +1045,12 @@ describe("Tower: kinds of process", () => {
         setMeta({ "tower:view": "processes", "tower:group": "none" });
         renderTower();
         await screen.findByText("node.exe");
-        const [nodeCpu, nodeMem] = within(row("node.exe")).getAllByRole("cell").slice(1, 3);
+        const [nodeMem, nodeCpu] = within(row("node.exe")).getAllByRole("cell").slice(1, 3);
         expect(nodeCpu).toHaveClass("tower-level--warn");
         expect(nodeMem).not.toHaveClass("tower-level--warn");
         // Half a GB of 16: about 3% of the machine's memory.
         expect((nodeMem.querySelector(".tower-load-bar") as HTMLElement).style.width).toBe("3.125%");
-        const claudeCpu = within(row("claude.exe")).getAllByRole("cell")[1];
+        const claudeCpu = within(row("claude.exe")).getAllByRole("cell")[2];
         expect(claudeCpu.className).not.toMatch(/tower-level--/);
     });
 
@@ -1058,7 +1058,9 @@ describe("Tower: kinds of process", () => {
         setMeta({ "tower:view": "processes", "tower:group": "none" });
         renderTower();
         const kinds = await screen.findByTestId("tower-kinds");
-        const builds = kinds.querySelector(".tower-kind-segment.tower-kind--builds") as HTMLElement;
+        // The memory bar comes first; CPU's is the one labelled CPU.
+        const cpuBar = within(kinds).getByText("CPU").closest(".tower-kind-bar-row") as HTMLElement;
+        const builds = cpuBar.querySelector(".tower-kind-segment.tower-kind--builds") as HTMLElement;
         expect(builds.title).toContain("Builds & tools · 1 process");
         // 1.5 cores of 4.
         expect(builds.style.width).toBe("37.5%");
@@ -1077,7 +1079,7 @@ describe("Tower: kinds of process", () => {
         renderTower();
         await vi.advanceTimersByTimeAsync(0);
         await vi.advanceTimersByTimeAsync(2000);
-        const [cpu, mem] = screen.getAllByRole("img", { name: /over the last 10 minutes/ });
+        const [mem, cpu] = screen.getAllByRole("img", { name: /over the last 10 minutes/ });
         expect((cpu.querySelector(".tower-chart-line") as SVGElement).style.stroke).toBe("rgb(255, 136, 0)");
         expect((mem.querySelector(".tower-chart-line") as SVGElement).style.stroke).toBe("var(--sysinfo-mem-color)");
     });
@@ -1163,9 +1165,7 @@ describe("Tower's Panes view", () => {
         await screen.findByTestId("tower-pane-window-w1");
         expect(sample).toHaveBeenCalledWith(expect.anything(), { host: false, panes: true });
         expect(screen.getByText("Window My Bizzy")).toBeInTheDocument();
-        const order = screen
-            .getAllByTestId(/^tower-pane-(tab|block|gh|sw|news|slept)/)
-            .map((r) => r.dataset.testid);
+        const order = screen.getAllByTestId(/^tower-pane-(tab|block|gh|sw|news|slept)/).map((r) => r.dataset.testid);
         expect(order).toEqual([
             "tower-pane-tab-t1",
             "tower-pane-block-a",
@@ -1204,6 +1204,28 @@ describe("Tower's Panes view", () => {
         expect(screen.getByText(/80.0 MB in renderers several browser panes share, counted once/)).toBeInTheDocument();
     });
 
+    it("keeps each figure under its own header: the shared renderer's memory under Memory, a missing page's note too", async () => {
+        renderTower();
+        await screen.findByTestId("tower-pane-news");
+        const headerIndex = (name: string) =>
+            within(screen.getByRole("table", { name: "Panes" }))
+                .getAllByRole("columnheader")
+                .findIndex((h) => h.textContent?.trim() === name);
+        const memory = headerIndex("Memory");
+        const cpu = headerIndex("CPU");
+        // The label spans Pane and State, so the figure that follows is Memory's and CPU's cell is empty.
+        const shared = document.querySelector(".tower-panes-shared") as HTMLElement;
+        const cells = [...shared.children] as HTMLElement[];
+        expect(cells[0].getAttribute("colspan")).toBe("2");
+        expect(cells.length).toBe(1 + (cpu - 1));
+        expect(cells[memory - 1]).toHaveTextContent("MB");
+        expect(cells[cpu - 1]).toBeEmptyDOMElement();
+        // An asleep pane's "no page" is Memory's cell, the dash CPU's.
+        const slept = [...screen.getByTestId("tower-pane-slept").children] as HTMLElement[];
+        expect(slept[memory]).toHaveTextContent("no page");
+        expect(slept[cpu]).toHaveTextContent("—");
+    });
+
     it("goes to a pane from its row", async () => {
         renderTower();
         const gh = await screen.findByTestId("tower-pane-gh");
@@ -1222,5 +1244,146 @@ describe("Tower's Panes view", () => {
         setMeta({ "term:zoom": 1.5 });
         renderTower();
         expect(screen.getByTestId("tower-view").style.zoom).toBe("1.5");
+    });
+});
+
+/** SPEC_TOWER_MEMORY_FIRST_AND_AGENTMUX_BREAKDOWN_2026_10_25.md §3: memory is
+ *  the first number, the default sort, and always on screen. */
+describe("Tower: memory first", () => {
+    beforeEach(() => {
+        peersCmd.mockResolvedValue({ peers: [studio] });
+        sample.mockImplementation((_client: unknown, req: { host: boolean; panes?: boolean }) =>
+            Promise.resolve(req.panes ? withPanes(snapshot(req.host)) : snapshot(req.host))
+        );
+    });
+    afterEach(() => {
+        cleanup();
+        vi.clearAllMocks();
+        setMeta({});
+    });
+
+    const headers = (table: HTMLElement) =>
+        within(table)
+            .getAllByRole("columnheader")
+            .map((h) => h.textContent?.trim());
+
+    it("says AgentMux's total memory under the toolbar, whatever the view", async () => {
+        renderTower();
+        const headline = await screen.findByTestId("tower-headline");
+        expect(headline).toHaveTextContent("AgentMux");
+        // The agent's 1 GB and AgentMux's own 2 GB, over 3 processes.
+        expect(within(headline).getByText("3.0 GB")).toBeInTheDocument();
+        expect(headline).toHaveTextContent("3 processes");
+        expect(headline.title).toContain("private working set");
+        setMeta({ "tower:view": "processes" });
+        expect(await screen.findByTestId("tower-headline")).toHaveTextContent("3.0 GB");
+        setMeta({ "tower:view": "panes" });
+        expect(await screen.findByTestId("tower-headline")).toHaveTextContent("3.0 GB");
+    });
+
+    it("doesn't total another computer's tasks, which are a capped list", async () => {
+        sample.mockImplementation(() => Promise.resolve({ ...snapshot(), remote: true }));
+        renderTower();
+        await screen.findByTestId("tower-rail-block-a");
+        expect(screen.queryByTestId("tower-headline")).toBeNull();
+    });
+
+    it("puts Memory before CPU in every table", async () => {
+        setMeta({ "tower:view": "processes" });
+        renderTower();
+        await screen.findByRole("table", { name: "Processes" });
+        // Grouped by agent, the last column counts a group's processes.
+        expect(headers(screen.getByRole("table", { name: "Processes" }))).toEqual([
+            "Process",
+            "Memory",
+            "CPU",
+            "Count",
+        ]);
+
+        setMeta({ "tower:view": "agents" });
+        const agentTable = await screen.findByRole("table", { name: "AgentX's processes" });
+        expect(headers(agentTable)).toEqual(["Process", "Memory", "CPU", "PID"]);
+
+        setMeta({ "tower:view": "panes" });
+        const panes = await screen.findByRole("table", { name: "Panes" });
+        expect(headers(panes)).toEqual(["Pane", "State", "Memory", "CPU"]);
+    });
+
+    it("sorts by memory, biggest first, until another sort is chosen", async () => {
+        sample.mockImplementation(() => {
+            const snap = snapshot(true);
+            snap.host = {
+                processes: [
+                    { id: "1:1", pid: 1, name: "busy.exe", cpu: 2, mem: 10 * 1024 * 1024 },
+                    { id: "2:1", pid: 2, name: "big.exe", cpu: 0.01, mem: 2 * GB },
+                    { id: "3:1", pid: 3, name: "mid.exe", cpu: 0.5, mem: GB / 4 },
+                ],
+                unmeasured: 0,
+                cpu: 2.51,
+                mem: 2 * GB + GB / 4 + 10 * 1024 * 1024,
+                total: 3,
+                matched: 3,
+            };
+            return Promise.resolve(snap);
+        });
+        setMeta({ "tower:view": "processes", "tower:group": "none" });
+        renderTower();
+        await screen.findByText("big.exe");
+        const order = () =>
+            within(screen.getByRole("table", { name: "Processes" }))
+                .getAllByRole("row")
+                .slice(1)
+                .map((r) => r.textContent ?? "");
+        expect(order().map((t) => /(busy|big|mid)\.exe/.exec(t)?.[0])).toEqual(["big.exe", "mid.exe", "busy.exe"]);
+        fireEvent.click(screen.getByRole("button", { name: /CPU/ }));
+        await waitFor(() =>
+            expect(order().map((t) => /(busy|big|mid)\.exe/.exec(t)?.[0])).toEqual(["busy.exe", "mid.exe", "big.exe"])
+        );
+    });
+
+    it("shows memory first in the rail, then CPU, and keeps both in the row's text", async () => {
+        renderTower();
+        const row = await screen.findByTestId("tower-rail-block-a");
+        const mem = row.querySelector(".tower-rail-mem") as HTMLElement;
+        const cpu = row.querySelector(".tower-rail-cpu") as HTMLElement;
+        expect(mem).toHaveTextContent("1.0 GB");
+        expect(cpu).toHaveTextContent("CPU");
+        // Memory is on the row's first line, ahead of CPU in the document.
+        expect(mem.compareDocumentPosition(cpu) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        // Narrow panes hide CPU in the rail; the row's hover text still has both.
+        expect(row.title).toBe("AgentX: 1.0 GB · CPU 50% · 2 processes");
+    });
+
+    it("heads the agent's detail with its memory, then its CPU", async () => {
+        renderTower();
+        await screen.findByTestId("tower-rail-block-a");
+        const totals = document.querySelector(".tower-detail-totals") as HTMLElement;
+        expect(totals.textContent?.replace(/\s+/g, " ").trim()).toMatch(/^Memory 1\.0 GB · CPU .* · 2 processes$/);
+    });
+
+    it("keeps a memory history for the rail, apart from CPU", async () => {
+        vi.useFakeTimers();
+        let ts = 1_000_000;
+        let mem = GB / 4;
+        sample.mockImplementation(() => {
+            const snap = snapshot();
+            snap.ts_ms = ts;
+            ts += 2000;
+            snap.tasks[0].mem = mem;
+            mem += GB / 16;
+            return Promise.resolve(snap);
+        });
+        const model = new TowerViewModel({
+            blockId: "tower-hist",
+            meta: meta as unknown as PaneTabHostContext["meta"],
+            setMeta: setMetaMock,
+            isFocused: () => true,
+            visibility,
+        });
+        render(() => <TowerView model={model} />);
+        await vi.advanceTimersByTimeAsync(2000 * 6);
+        const points = model.recentMem("block-a");
+        expect(points.length).toBeGreaterThan(3);
+        expect(points[points.length - 1]).toBeGreaterThan(points[0]);
     });
 });
