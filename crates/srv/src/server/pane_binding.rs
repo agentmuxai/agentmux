@@ -140,7 +140,11 @@ mod tests {
         assert_eq!(status, StatusCode::FORBIDDEN, "{v}");
         let (status, v) = post(&state, Some(&token), "/api/v1/agent/takeover", json!({ "block_id": "pb-block-b" })).await;
         assert_eq!(status, StatusCode::FORBIDDEN, "{v}");
-        let (status, v) = post(&state, Some(&token), "/agentmux/agent/release", json!({ "uid": "uid-pb-alpha" })).await;
+        let (status, v) = post(&state, Some(&token), "/agentmux/agent/release", json!({ "uid": "uid-pb-alpha", "agent": "pb-beta" })).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "its uid but another agent's relay name: {v}");
+        let (status, v) = post(&state, Some(&token), "/agentmux/agent/release", json!({ "uid": "uid-pb-alpha", "agent": "pb-alpha" })).await;
         assert_ne!(status, StatusCode::FORBIDDEN, "an agent's own: {v}");
+        let (status, v) = post(&state, None, "/agentmux/agent/release", json!({ "uid": "uid-pb-alpha", "agent": "pb-alpha" })).await;
+        assert_ne!(status, StatusCode::FORBIDDEN, "a peer instance asks by uid and name: {v}");
     }
 }

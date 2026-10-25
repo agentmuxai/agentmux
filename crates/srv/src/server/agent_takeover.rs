@@ -187,6 +187,14 @@ pub(super) async fn handle_agent_release(
     if let Err(error) = super::actor::own_agent_only(caller.as_deref(), Some(&uid)) {
         return (StatusCode::FORBIDDEN, Json(json!({ "error": error }))).into_response();
     }
+    // The relay subscription released below is found by name: an agent's token releases its own name only.
+    if caller.as_deref().and_then(super::caller::Caller::uid).is_some() && !req.agent.trim().is_empty() {
+        let (mstore, uid, name) = (state.mstore.clone(), uid.clone(), req.agent.trim().to_string());
+        let own = tokio::task::spawn_blocking(move || super::actor::proven_slug(&mstore, &uid, &name).is_some()).await;
+        if !own.unwrap_or(false) {
+            return (StatusCode::FORBIDDEN, Json(json!({ "error": "FORBIDDEN: an agent releases its own name only" }))).into_response();
+        }
+    }
     let blocks = {
         let mstore = state.mstore.clone();
         let uid = uid.clone();
