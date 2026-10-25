@@ -4,7 +4,7 @@
   "name": "Weekly report",
   "version": "1.0.0",
   "kind": "job",
-  "description": "Reads repositories and logs since the last run, ranks findings by severity with evidence, and compares them with the previous report (new, unchanged, resolved). Files a task per high finding. Pull requests need your approval first.",
+  "description": "Reads repositories and logs since the last run, ranks findings by severity with evidence, and compares them with the previous report (new, unchanged, resolved). Files a task per high finding and messages the owner. Pull requests and deletions need an approval step that arrives in a later version; until then this only reports and files tasks.",
   "readsUntrusted": true,
   "params": {
     "type": "object",
@@ -12,9 +12,7 @@
       "repos": { "type": "array", "items": { "type": "string" }, "title": "Repositories", "description": "Repositories to read, such as owner/repo." },
       "focus": { "type": "string", "title": "Focus", "description": "security, architecture, docs, website, disclosure, or free text.", "default": "security" },
       "since": { "type": "string", "title": "Since", "description": "A date, or \"last run\".", "default": "last run" },
-      "report_dir": { "type": "string", "title": "Report folder", "description": "Where reports are kept, in the agent's workspace.", "default": "jobs/weekly-report" },
-      "notify": { "type": "string", "title": "Notify", "description": "An agent to message with the result; empty messages the owner.", "default": "" },
-      "pr_repos": { "type": "array", "items": { "type": "string" }, "title": "Repositories that may get fix pull requests", "description": "Empty means none.", "default": [] }
+      "report_dir": { "type": "string", "title": "Report folder", "description": "Where reports are kept, in the agent's workspace.", "default": "jobs/weekly-report" }
     },
     "required": ["repos"]
   },
@@ -27,9 +25,9 @@
     "retries": 2,
     "max_turns": 200,
     "caps": { "run_usd": 3 },
-    "approval": "required",
+    "approval": "none",
     "results": ["ledger", "task_on_failure"]
   },
-  "outputs": ["report_file", "kanban_task", "message:owner", "message:others", "pull_request"],
+  "outputs": ["report_file", "kanban_task", "message:owner"],
   "secrets": []
 }

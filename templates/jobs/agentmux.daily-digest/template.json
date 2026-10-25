@@ -9,8 +9,7 @@
     "type": "object",
     "properties": {
       "sources": { "type": "array", "items": { "type": "string" }, "title": "Sources", "description": "Files, folders or URLs that report cost or usage." },
-      "thresholds": { "type": "string", "title": "Thresholds", "description": "Budgets and jump size, such as: day=20 month=400 jump=50%.", "default": "" },
-      "recipients": { "type": "array", "items": { "type": "string" }, "title": "Recipients", "description": "Agents to message; empty messages the owner.", "default": [] }
+      "thresholds": { "type": "string", "title": "Thresholds", "description": "Budgets and jump size, such as: day=20 month=400 jump=50%.", "default": "" }
     },
     "required": ["sources"]
   },
@@ -25,6 +24,6 @@
     "approval": "none",
     "results": ["ledger", "task_on_failure"]
   },
-  "outputs": ["report_file", "message:others", "message:owner", "kanban_task"],
+  "outputs": ["report_file", "message:owner", "kanban_task"],
   "secrets": []
 }

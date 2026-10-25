@@ -4,7 +4,7 @@
   "name": "Backup and verify",
   "version": "1.0.0",
   "kind": "job",
-  "description": "Backs up the paths you choose into a dated folder, restores it into a temporary folder and checks counts and hashes. The agent only reports anomalies, and proposes pruning beyond the number to keep; it deletes nothing.",
+  "description": "Backs up the paths you choose into a dated folder, restores it into a temporary folder and checks counts and hashes. The agent only reports anomalies, and proposes pruning beyond the number to keep; it deletes nothing. Pull requests and deletions need an approval step that arrives in a later version; until then this only reports and files tasks.",
   "params": {
     "type": "object",
     "properties": {
@@ -23,7 +23,7 @@
     "timeout_minutes": 60,
     "retries": 2,
     "caps": { "run_usd": 0.1 },
-    "approval": "required",
+    "approval": "none",
     "results": ["ledger", "task_on_failure"]
   },
   "outputs": ["report_file", "message:owner"],

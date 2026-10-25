@@ -4,7 +4,7 @@
   "name": "Stale sweep",
   "version": "1.0.0",
   "kind": "job",
-  "description": "Lists stale branches and pull requests, skips protected ones and ones another agent has claimed, and messages each owner once. It proposes deletions and closes in a summary and never carries them out.",
+  "description": "Lists stale branches and pull requests, skips protected ones and ones another agent has claimed, and messages each owner once with proposals. It proposes deletions and closes in a summary and never carries them out. Pull requests and deletions need an approval step that arrives in a later version; until then this only reports and files tasks.",
   "readsUntrusted": true,
   "params": {
     "type": "object",
@@ -23,7 +23,7 @@
     "timeout_minutes": 30,
     "retries": 1,
     "caps": { "run_usd": 0.5 },
-    "approval": "required",
+    "approval": "none",
     "results": ["ledger", "task_on_failure"]
   },
   "outputs": ["report_file", "message:others"],

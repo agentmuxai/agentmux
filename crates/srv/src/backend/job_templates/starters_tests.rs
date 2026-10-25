@@ -15,6 +15,8 @@ use crate::backend::jobs::definition::{Check, JobDefinition, Trigger};
 struct Row {
     name: &'static str,
     trigger: &'static str,
+    /// The §5.6 table asks for approval; approvals arrive with P4, so none
+    /// of the starters asks for one today.
     approval: bool,
     retries: u64,
     run_usd: f64,
@@ -26,11 +28,11 @@ const ROWS: &[Row] = &[
     Row {
         name: "weekly-report",
         trigger: "cron",
-        approval: true,
+        approval: false,
         retries: 2,
         run_usd: 3.0,
-        outputs: &["report_file", "kanban_task", "message:owner", "message:others", "pull_request"],
-        params: || json!({ "repos": ["owner/repo", "owner/site"], "focus": "security", "since": "last run", "report_dir": "jobs/weekly-report", "notify": "lead-agent", "pr_repos": ["owner/repo"] }),
+        outputs: &["report_file", "kanban_task", "message:owner"],
+        params: || json!({ "repos": ["owner/repo", "owner/site"], "focus": "security", "since": "last run", "report_dir": "jobs/weekly-report" }),
     },
     Row {
         name: "pr-review",
@@ -56,31 +58,31 @@ const ROWS: &[Row] = &[
         approval: false,
         retries: 2,
         run_usd: 0.25,
-        outputs: &["report_file", "message:others", "message:owner", "kanban_task"],
-        params: || json!({ "sources": ["usage/costs.csv"], "thresholds": "day=20 month=400 jump=50%", "recipients": ["lead-agent"] }),
+        outputs: &["report_file", "message:owner", "kanban_task"],
+        params: || json!({ "sources": ["usage/costs.csv"], "thresholds": "day=20 month=400 jump=50%" }),
     },
     Row {
         name: "dependency-scan",
         trigger: "cron",
-        approval: true,
+        approval: false,
         retries: 2,
         run_usd: 2.0,
-        outputs: &["report_file", "kanban_task", "pull_request"],
-        params: || json!({ "repos": ["owner/repo"], "scanners": ["npm audit --json"], "severity_floor": "high", "pr_repos": [], "scanner_token": "vault-entry-1" }),
+        outputs: &["report_file", "kanban_task"],
+        params: || json!({ "repos": ["owner/repo"], "scanners": ["npm audit --json"], "severity_floor": "high", "scanner_token": "vault-entry-1" }),
     },
     Row {
         name: "docs-drift",
         trigger: "cron",
-        approval: true,
+        approval: false,
         retries: 1,
         run_usd: 1.0,
-        outputs: &["kanban_task", "pull_request"],
-        params: || json!({ "repo": "owner/repo", "doc_globs": ["docs/**"], "code_globs": ["src/**"], "since": "2026-10-01", "pr_repos": ["owner/repo"] }),
+        outputs: &["kanban_task"],
+        params: || json!({ "repo": "owner/repo", "doc_globs": ["docs/**"], "code_globs": ["src/**"], "since": "2026-10-01" }),
     },
     Row {
         name: "stale-sweep",
         trigger: "cron",
-        approval: true,
+        approval: false,
         retries: 1,
         run_usd: 0.5,
         outputs: &["report_file", "message:others"],
@@ -89,7 +91,7 @@ const ROWS: &[Row] = &[
     Row {
         name: "backup-verify",
         trigger: "cron",
-        approval: true,
+        approval: false,
         retries: 2,
         run_usd: 0.1,
         outputs: &["report_file", "message:owner"],
@@ -98,11 +100,11 @@ const ROWS: &[Row] = &[
     Row {
         name: "on-event",
         trigger: "manual",
-        approval: true,
+        approval: false,
         retries: 0,
         run_usd: 1.0,
-        outputs: &["report_file", "kanban_task", "message:owner", "message:others"],
-        params: || json!({ "event_filter": "a new issue is opened", "target": "triage-agent", "brief_template": "Summarize the event in two lines.", "allowed_outputs": ["report_file"] }),
+        outputs: &["report_file", "kanban_task", "message:owner"],
+        params: || json!({ "event_filter": "a new issue is opened", "brief_template": "Summarize the event in two lines.", "allowed_outputs": ["report_file"] }),
     },
     Row {
         name: "weekly-status",
@@ -171,12 +173,30 @@ fn untrusted_input_is_declared_where_it_is_read() {
         let m = package(ROWS.iter().find(|r| r.name == name).unwrap()).manifest;
         assert!(m.reads_untrusted_input(), "{name} reads text others write");
     }
-    // The Rule of Two does bite: the scan reads untrusted text, holds a
-    // token and opens pull requests, so it can't lose its approval.
+    // The Rule of Two passes without an approval step because no starter
+    // that holds a secret writes outside. It does bite: give the scan, which
+    // reads untrusted text and holds a token, a pull request output and it
+    // is refused.
     let mut m: JobTemplateManifest = package(ROWS.iter().find(|r| r.name == "dependency-scan").unwrap()).manifest;
-    assert!(m.holds_secrets() && !m.outside_writes().is_empty());
-    m.policy = Some(json!({ "approval": "none" }));
+    assert!(m.holds_secrets() && m.outside_writes().is_empty() && !m.requires_approval());
+    m.outputs.push("pull_request".to_string());
     assert!(manifest::rule_of_two(&m).unwrap_err().contains("untrusted"));
+}
+
+#[test]
+fn only_two_starters_write_outside_and_neither_holds_a_secret() {
+    for row in ROWS {
+        let m = package(row).manifest;
+        let outside = m.outside_writes();
+        match row.name {
+            "pr-review" => assert_eq!(outside, ["comment"]),
+            "stale-sweep" => assert_eq!(outside, ["message:others"]),
+            name => assert!(outside.is_empty(), "{name}: {outside:?}"),
+        }
+        assert!(outside.is_empty() || !m.holds_secrets(), "{}", m.id);
+        assert!(!m.outputs.iter().any(|o| o == "pull_request" || o == "deploy"), "{}", m.id);
+        assert!(!package(row).brief.unwrap().to_lowercase().contains("open a pull request"), "{}", m.id);
+    }
 }
 
 #[test]
@@ -236,16 +256,12 @@ fn no_starter_holds_a_secret_looking_value_or_anything_private() {
 }
 
 /// What a job made from the template would be: the template's defaults and
-/// the rendered brief, with the approval the job definition reads today.
-fn definition(row: &Row, approval: Option<&str>) -> Value {
+/// the rendered brief.
+fn definition(row: &Row) -> Value {
     let pkg = package(row);
     let m = &pkg.manifest;
     let params = map((row.params)());
     let brief = manifest::render(m, pkg.brief.as_deref().unwrap(), &params).unwrap().brief;
-    let mut policy = m.policy.clone().unwrap();
-    if let Some(a) = approval {
-        policy["approval"] = json!(a);
-    }
     let secrets: Vec<Value> = m.secrets.iter().map(|s| json!({ "name": s.name, "vault": params[&s.param] })).collect();
     json!({
         "jobVersion": 1,
@@ -254,29 +270,24 @@ fn definition(row: &Row, approval: Option<&str>) -> Value {
         "params": params,
         "trigger": m.trigger,
         "action": { "kind": "message", "to": "uid-owner", "brief": brief },
-        "policy": policy,
+        "policy": m.policy,
         "outputs": m.outputs,
         "secrets": secrets,
     })
 }
 
+/// Every starter can be made into a job today, exactly as shipped.
 #[test]
-fn each_starter_makes_a_valid_job_definition() {
+fn each_starter_validates_as_a_job_definition_as_shipped() {
     let check = Check { fresh: true, now_ms: 1_792_800_000_000 };
     for row in ROWS {
-        let def = JobDefinition::parse(&definition(row, Some("none")), check).unwrap_or_else(|e| panic!("{}: {e}", id(row)));
+        let def = JobDefinition::parse(&definition(row), check).unwrap_or_else(|e| panic!("{}: {e}", id(row)));
         assert_eq!(def.trigger.kind(), row.trigger, "{}", id(row));
         assert_eq!(def.outputs, row.outputs, "{}", id(row));
+        assert_eq!(def.policy.approval, "none", "{}", id(row));
         assert_eq!(def.policy.retries as u64, row.retries, "{}", id(row));
         assert_eq!(def.policy.caps.as_ref().and_then(|c| c.run_usd), Some(row.run_usd), "{}", id(row));
         assert!(matches!(def.trigger, Trigger::Cron { .. } | Trigger::Manual), "{}", id(row));
-        // Approvals are a later version of the job definition: until then a
-        // template that asks for one can't make a job as it stands.
-        let as_shipped = JobDefinition::parse(&definition(row, None), check);
-        assert_eq!(as_shipped.is_err(), row.approval, "{}", id(row));
-        if let Err(e) = as_shipped {
-            assert!(e.contains("policy.approval"), "{}: {e}", id(row));
-        }
     }
 }
 

@@ -7,7 +7,6 @@ You are running a scheduled job with nobody watching. Everything under Parameter
 - doc_globs: {{doc_globs}}
 - code_globs: {{code_globs}}
 - since: {{since}}
-- pr_repos: {{pr_repos}}
 
 ## Steps
 1. In your workspace, update a clone of repo (fetch and fast-forward; never push to a default branch).
@@ -18,7 +17,7 @@ You are running a scheduled job with nobody watching. Everything under Parameter
 
 ## Outputs
 - Tasks: keep one standing task titled "Docs drift: <repo>" (Tasks tool: list to find it, action update to replace its body with the current findings, action enqueue only if none is open). Never open a second one. If nothing drifts, update it to say so.
-- Pull requests: only for a small fix (a wrong name, path or default) in a repo listed in pr_repos, and only after the operator has approved it in this conversation (ask the owner and wait). Without approval, put the fix in the task.
+- Never open pull requests or edit the repo; put each proposed fix (the doc, line and corrected text) in the task.
 
 ## Finish
 Report your verdict with the run-report call: the Schedule tool, action report, with the run_id given at the end of this message, outcome ok (no drift), findings (drift or dead links) or failed (you could not check), and a one-line summary.

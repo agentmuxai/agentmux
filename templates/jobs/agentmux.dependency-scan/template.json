@@ -4,7 +4,7 @@
   "name": "Dependency scan",
   "version": "1.0.0",
   "kind": "job",
-  "description": "Runs the scanners you name, removes duplicates, ranks findings by reachability and proposes upgrades. The report stays private; a task per actionable finding. Every pull request needs your approval, and an unfixed weakness is never published.",
+  "description": "Runs the scanners you name, removes duplicates, ranks findings by reachability and proposes upgrades. The report stays private; a task per actionable finding. Pull requests and deletions need an approval step that arrives in a later version; until then this only reports and files tasks.",
   "readsUntrusted": true,
   "params": {
     "type": "object",
@@ -12,7 +12,6 @@
       "repos": { "type": "array", "items": { "type": "string" }, "title": "Repositories", "description": "Repositories to scan, such as owner/repo." },
       "scanners": { "type": "array", "items": { "type": "string" }, "title": "Scanner commands", "description": "Commands run in each clone, such as: npm audit --json." },
       "severity_floor": { "type": "string", "enum": ["low", "medium", "high", "critical"], "title": "Lowest severity to report", "default": "medium" },
-      "pr_repos": { "type": "array", "items": { "type": "string" }, "title": "Repositories that may get upgrade pull requests", "description": "Empty means none.", "default": [] },
       "scanner_token": { "type": "string", "format": "credential", "title": "Scanner token", "description": "A Vault entry, for scanners that need a token." }
     },
     "required": ["repos", "scanners"]
@@ -25,10 +24,10 @@
     "timeout_minutes": 55,
     "retries": 2,
     "caps": { "run_usd": 2 },
-    "approval": "required",
+    "approval": "none",
     "results": ["ledger", "task_on_failure"]
   },
-  "outputs": ["report_file", "kanban_task", "pull_request"],
+  "outputs": ["report_file", "kanban_task"],
   "secrets": [
     { "name": "SCANNER_TOKEN", "param": "scanner_token", "description": "Passed to the scanner commands through the Terminal tool's secrets, never printed." }
   ]

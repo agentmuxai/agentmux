@@ -7,8 +7,6 @@ You are running a scheduled job with nobody watching. Everything under Parameter
 - focus: {{focus}}
 - since: {{since}}
 - report_dir: {{report_dir}}
-- notify: {{notify}}
-- pr_repos: {{pr_repos}}
 
 ## Steps
 1. Find the previous report in report_dir (the newest `report-*.json`). If since is empty or "last run", use that report's date; with no previous report, use the last 7 days.
@@ -20,8 +18,8 @@ You are running a scheduled job with nobody watching. Everything under Parameter
 ## Outputs
 - Report: write `report-<date>.md` (findings by severity, then the new, unchanged and resolved comparison) and `report-<date>.json` into report_dir.
 - Tasks: for each high finding not already filed, enqueue one task with the Tasks tool (action enqueue), with the hash in its title; skip any hash that already has an open task.
-- Notify: if notify names an agent, send it one short message with the counts and the report path (Message tool, action send); if it is empty, message the owner.
-- Pull requests: only for a fix in a repo listed in pr_repos, and only after the operator has approved it in this conversation (ask the owner and wait). Never open one in a public repo that would reveal an unfixed weakness; describe that in the report instead. Without approval, propose the change in the report.
+- Notify: send the owner one short message with the counts and the report path (Message tool, action send).
+- Never open pull requests, push, comment or delete anything; propose a fix in the report instead. Never put an unfixed weakness anywhere but the private report.
 
 ## Finish
 Report your verdict with the run-report call: the Schedule tool, action report, with the run_id given at the end of this message, outcome ok (no new high findings), findings (new high or medium findings) or failed (you could not finish), and a one-line summary.
