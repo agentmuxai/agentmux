@@ -58,9 +58,7 @@ Split the currently focused pane. Uses `createBlockSplitHorizontally` / `createB
 | ID | Label | What It Does |
 |----|-------|-------------|
 | `split:right` | Split Right | Splits focused pane horizontally, new pane after |
-| `split:left` | Split Left | Splits focused pane horizontally, new pane before |
 | `split:down` | Split Down | Splits focused pane vertically, new pane after |
-| `split:up` | Split Up | Splits focused pane vertically, new pane before |
 
 ### Category: window
 
