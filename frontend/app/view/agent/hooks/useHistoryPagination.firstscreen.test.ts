@@ -35,7 +35,7 @@ import { sleep } from "@/util/util";
 import { createTranscriptSettleLatch, TranscriptCursor } from "../transcript-cursor";
 import { beginAgentOpen, finishAgentOpen, openTraceEnv, resetAgentOpenTracesForTests } from "../open-trace";
 import { __resetOpenTailForTests, type OpenTailResult } from "./open-tail";
-import { OLDER_PAGE_LINES, RESTORE_WINDOW_LINES, useHistoryPagination } from "./useHistoryPagination";
+import { MAX_SAVED_HELD, OLDER_PAGE_LINES, RESTORE_WINDOW_LINES, useHistoryPagination } from "./useHistoryPagination";
 
 let RpcApi: typeof import("@/app/store/rpc-api").RpcApi;
 let dispose: (() => void) | null = null;
@@ -164,6 +164,29 @@ describe("first screen", () => {
         expect([...overlay.documentState.collapsedNodes]).toEqual(["x"]);
         expect([...overlay.documentState.pinnedNodes]).toEqual(["y"]);
         expect(overlay.detailsOpen).toBe(true);
+        // A snapshot without held ids brings none back.
+        expect(overlay.documentState.heldOpenNodes.size).toBe(0);
+        expect(overlay.documentState.restoredHeldNodes).toBeUndefined();
+    });
+
+    it("held ids in the snapshot come back as held and as restored (the newest few, strings only)", async () => {
+        const onSnapshotOverlay = vi.fn();
+        const many = Array.from({ length: MAX_SAVED_HELD + 5 }, (_, i) => `h${i}`);
+        openTail.mockResolvedValue(
+            tailOf(3, 100, {
+                snapshot: JSON.stringify({
+                    schemaVersion: 2,
+                    highWaterMark: 100,
+                    sourceBlockId: "blk-1",
+                    documentState: { collapsedNodeIds: [], pinnedNodeIds: [], heldOpenNodeIds: [7, ...many, null] },
+                }),
+            }),
+        );
+        mount({ onSnapshotOverlay });
+        await flush();
+        const ds = onSnapshotOverlay.mock.calls[0][0].documentState;
+        expect([...ds.heldOpenNodes]).toEqual(many.slice(-MAX_SAVED_HELD));
+        expect([...ds.restoredHeldNodes]).toEqual(many.slice(-MAX_SAVED_HELD));
     });
 });
 

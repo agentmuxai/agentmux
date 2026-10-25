@@ -1042,6 +1042,13 @@ export interface DocumentState {
      * See docs/specs/PLAN_TOOL_BLOCK_SCROLL_DRIVEN_COLLAPSE_2026_06_16.md.
      */
     heldOpenNodes: Set<string>;
+    /**
+     * The held rows a snapshot restored (they were open when the pane was
+     * last hidden or closed): in `heldOpenNodes` too, and judged as carried
+     * rows are after a return, so they are released only once seen and
+     * scrolled off (virtualization/held-release.ts). Set once per restore.
+     */
+    restoredHeldNodes?: ReadonlySet<string>;
     scrollPosition: number;
     selectedNode: string | null; // For keyboard navigation
     filter: FilterState;

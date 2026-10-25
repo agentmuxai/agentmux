@@ -1,7 +1,7 @@
 # Report: the agent pane's auto-collapse, leaving the pane, and what arrives while you are away
 
 **Date:** 2026-10-21
-**Status:** analysis; §5.2 (E3-E5) is built in the PR that adds this report, §9. The rest of §5.4 is not. Read from source on `main` @ `f54e04a31`; nothing here was reproduced in a running build (§8).
+**Status:** analysis; §5.2 (E3-E5) is built (§9), and E7, E9 and E12 are built (§10). E10 and E17 are not. Read from source on `main` @ `f54e04a31`; nothing here was reproduced in a running build (§8).
 **Author:** QTest (qtest)
 **Trigger (repo owner, 2026-10-21):** the auto-collapse "needs to be more intelligent". Last time it was fixed so that leaving the pane does not collapse the previews. "I think we need an additional check so if there is new input while away, it also doesn't collapse. We need to explore all edge cases."
 **Builds on:** `docs/reports/REPORT_AGENT_PANE_HELD_TOOLS_COLLAPSE_ON_RETURN_RCA_2026_10_17.md` (Naki #2, fixed in #5059). Read its §1–§3 first; this report does not repeat them.
@@ -142,3 +142,11 @@ Option B (§5.2), agreed with Naki #2 and Loap-3 before the change. Both asked f
 - Tests: `held-release.test.ts` (the cap with 300 rows; 300 tools finishing while away hold only the 40 in view), `AgentDocumentVirtualList.collapse.test.tsx` (held when on screen after the settle; not when above; a gone row ignored; ids kept if hidden again).
 - `scripts/check-file-sizes.baseline`: `AgentDocumentVirtualList.tsx` 1806 → 1810 (the prop and the two hook options; the logic is in `held-release.ts`).
 - **Not built:** the rest of §5.4 (E7 settle signal, E9 loose ends, E12 holds across an upgrade, E10, E17), which need owner decisions or their own change. **Not reproduced** in a running build (§8): the unit and component tests cover the logic, not the feel of a row opening at the moment you return.
+
+## 10. What was built next (2026-10-25)
+
+- **E7, the settle signal.** `virtualization/show-settle.ts`: after a show, "settled" is the cover lifted and the scroller's `scrollHeight` unchanged for two samples (50 ms apart), at least 400 ms after the show, and at most 3 s whatever the layout does. It replaces the fixed 400 ms (`RETURN_SETTLE_MS`) and the separate 3 s poll (`AWAY_APPLY_MAX_MS`); both the carried-seen test and the away rows' hold use it. A hide before it settles cancels the wait.
+- **E9, the unload timer.** Already done by #5172: the pane passes `renderDormant` (tab hidden or window hidden) as `hidden` to `useLiveFeedRollOff`, so a minimized window's held text unloads after `HIDDEN_HELD_UNLOAD_MS`. No change. A window that is only covered, or a locked screen, is still unverified.
+- **E12, holds across a restart or an upgrade.** The snapshot now carries `documentState.heldOpenNodeIds`: the newest 40 held ids (`MAX_SAVED_HELD`), ids only, additive to schema 2 (an older build ignores the field). They are written when the pane goes hidden and on `pagehide`, not as the reader scrolls (the churn #5059 argued against). On restore they are held again and also marked `restoredHeldNodes`, so `useScrolledOffRelease` treats them as carried: open until seen on screen in this visit and then scrolled off, or released after `CARRY_MAX_MS`.
+- **Not built:** E10 (roll-off after the next send) and E17 (the 60 s cut-off, kept). Still not reproduced in a running build.
+- Tests: `show-settle.test.ts`; the collapse test (slow return waits, cap judges, restored rows carried, baseline unchanged); `useSnapshotPersistence.test.ts` (written on hide and on `pagehide`, capped, nothing when none are held); `useHistoryPagination.firstscreen.test.ts` (restored ids, newest kept, non-strings dropped).

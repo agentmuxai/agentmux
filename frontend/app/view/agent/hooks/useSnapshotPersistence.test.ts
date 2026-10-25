@@ -16,6 +16,7 @@ vi.mock("@/app/store/rpc-api", () => ({
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 
+import { MAX_SAVED_HELD } from "./useHistoryPagination";
 import { flushPaneSnapshots, useSnapshotPersistence } from "./useSnapshotPersistence";
 import type { AgentAtoms } from "../state";
 import type { DocumentNode, DocumentState } from "../types";
@@ -33,6 +34,7 @@ function mountPane() {
             filter: FILTER,
         } as DocumentState);
         const [detailsOpen, setDetailsOpen] = createSignal(false);
+        const [hidden, setHidden] = createSignal(false);
         useSnapshotPersistence({
             blockId: "b1",
             definitionId: "def1",
@@ -40,10 +42,11 @@ function mountPane() {
             getDocument: doc,
             getDetailsOpen: detailsOpen,
             snapshotIsForeignBlock: () => false,
+            hidden,
             log: () => {},
         });
         const setDocState = docStateAtom[1];
-        return { dispose, setDocState, setDetailsOpen };
+        return { dispose, setDocState, setDetailsOpen, setHidden };
     });
 }
 
@@ -74,6 +77,52 @@ describe("useSnapshotPersistence: the overlay is saved, and can be flushed", () 
         await vi.advanceTimersByTimeAsync(30_000);
         expect(rpc.writeState).not.toHaveBeenCalled();
         pane.dispose();
+    });
+
+    it("rows held open are written when the pane goes hidden (ids only), not as they change", async () => {
+        const pane = mountPane();
+        pane.setDocState((prev) => ({ ...prev, heldOpenNodes: new Set(["h1", "h2"]) }));
+        await vi.advanceTimersByTimeAsync(30_000);
+        expect(rpc.writeState).not.toHaveBeenCalled(); // visible: a scroll-driven set isn't written
+        pane.setHidden(true);
+        await vi.advanceTimersByTimeAsync(30_000);
+        expect(written()).toHaveLength(1);
+        expect(written()[0].documentState.heldOpenNodeIds).toEqual(["h1", "h2"]);
+        pane.dispose();
+    });
+
+    it("hiding a pane with nothing held open writes nothing", async () => {
+        const pane = mountPane();
+        pane.setHidden(true);
+        await vi.advanceTimersByTimeAsync(30_000);
+        expect(rpc.writeState).not.toHaveBeenCalled();
+        pane.dispose();
+    });
+
+    it("keeps only the newest MAX_SAVED_HELD held ids", async () => {
+        const pane = mountPane();
+        const ids = Array.from({ length: MAX_SAVED_HELD + 15 }, (_, i) => `h${i}`);
+        pane.setDocState((prev) => ({ ...prev, heldOpenNodes: new Set(ids) }));
+        pane.setHidden(true);
+        await vi.advanceTimersByTimeAsync(30_000);
+        const saved = written()[0].documentState.heldOpenNodeIds as string[];
+        expect(saved).toHaveLength(MAX_SAVED_HELD);
+        expect(saved.at(-1)).toBe(ids.at(-1));
+        expect(saved[0]).toBe(ids[15]);
+        pane.dispose();
+    });
+
+    it("the page going away writes the held rows at once", async () => {
+        const win = new EventTarget();
+        vi.stubGlobal("window", win);
+        const pane = mountPane();
+        pane.setDocState((prev) => ({ ...prev, heldOpenNodes: new Set(["h1"]) }));
+        win.dispatchEvent(new Event("pagehide"));
+        await vi.advanceTimersByTimeAsync(0);
+        expect(written()).toHaveLength(1);
+        expect(written()[0].documentState.heldOpenNodeIds).toEqual(["h1"]);
+        pane.dispose();
+        vi.unstubAllGlobals();
     });
 
     it("opening details is written too", async () => {
