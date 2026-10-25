@@ -716,7 +716,7 @@ pub(crate) async fn deliver(
     if let Err(error) = super::jekt_files::check(&req) {
         return super::jekt_files::refused(&req, error);
     }
-    // An agent here out of quota would lose it in a turn that fails at once, and a Claude
+    // An agent here out of quota or signed out would lose it in a failed turn, and a Claude
     // session gone cold should not be woken by a routine one: hold it, or refuse it where it
     // can't be held (SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §5, SPEC_JEKT_HOLD_FOR_COLD_SESSIONS_
     // 2026_10_25.md). Before `prepare`, which charges inline attachments to the session.

@@ -72,7 +72,7 @@ pub(super) async fn local_target_unavailable(state: &AppState, target: &str) -> 
     tokio::task::spawn_blocking(move || holding_unavailable(&mstore, &reg.block_id)).await.ok().flatten()
 }
 
-/// What delivery checks before a message reaches a running agent: out of quota (held, or
+/// What delivery checks before a message reaches a running agent: unavailable (held, or
 /// refused where it can't be held), or a session gone cold (`jekt_cold`). `None` delivers.
 pub(super) async fn hold_before_delivery(
     state: &AppState,
