@@ -52,7 +52,8 @@ const editorChromeTheme = (dark: boolean) =>
                 backgroundColor: "color-mix(in srgb, var(--accent-color) 10%, transparent)",
                 // Full-strength accent — the distinct, brighter shade for the
                 // current line's number.
-                color: "var(--accent-color)",
+                // The accent as text: darker than the accent itself on the light themes (AA).
+                color: "var(--accent-fg-color, var(--accent-color))",
             },
             ".cm-foldPlaceholder": {
                 backgroundColor: "transparent",
