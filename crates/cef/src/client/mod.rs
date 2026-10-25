@@ -83,7 +83,7 @@ pub(crate) use wndproc::install_main_window_floater_cascade_hook;
 // `on_before_close`'s backend cleanup (which never fires for parked
 // pool-window browsers).
 pub(crate) use helpers::{
-    backend_browser_attention, backend_browser_bypass, backend_browser_pause, backend_vault, backend_widget_approval, backend_upgrade_request, backend_desktop_request, backend_desktop_stop, backend_app_update, backend_browser_navigation, backend_browser_popup, backend_browser_popup_window,
+    backend_browser_attention, backend_browser_bypass, backend_browser_pause, backend_vault, backend_widget_approval, backend_upgrade_request, backend_desktop_request, backend_desktop_stop, backend_operator_attest, backend_app_update, backend_browser_navigation, backend_browser_popup, backend_browser_popup_window,
     backend_browser_dialog,
 };
 pub(crate) use helpers::backend_close_window;

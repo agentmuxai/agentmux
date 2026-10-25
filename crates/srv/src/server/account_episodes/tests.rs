@@ -332,14 +332,27 @@ async fn an_episode_speaks_for_a_panes_quota_or_sign_in_failure_on_an_account() 
 }
 
 /// One call on an engine with this module's RPCs; `as_agent` registers the
-/// connection as an agent, as `bus:register` does.
+/// connection as an agent, as `bus:register` does, and `None` is the
+/// operator's window, proven by the host.
 async fn call(state: &AppState, as_agent: Option<&str>, command: &str, data: serde_json::Value) -> Result<serde_json::Value, String> {
-    use crate::backend::rpc_types::{RpcContext, RpcMessage};
+    use crate::backend::rpc_types::RpcContext;
+    let ctx = match as_agent {
+        Some(agent) => RpcContext { agent_id: agent.to_string(), ..Default::default() },
+        None => RpcContext::operator_for_tests(),
+    };
+    call_with(state, ctx, command, data).await
+}
+
+async fn call_with(
+    state: &AppState,
+    ctx: crate::backend::rpc_types::RpcContext,
+    command: &str,
+    data: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    use crate::backend::rpc_types::RpcMessage;
     let (engine, mut rx) = WshRpcEngine::new();
     register(&engine, state);
-    if let Some(agent) = as_agent {
-        engine.set_rpc_context(RpcContext { agent_id: agent.to_string(), ..Default::default() });
-    }
+    engine.set_rpc_context(ctx);
     engine.handle_message(RpcMessage { command: command.to_string(), reqid: "req-1".to_string(), data: Some(data), ..Default::default() });
     let resp = tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv()).await.unwrap().unwrap();
     if resp.error.is_empty() {
@@ -369,6 +382,18 @@ async fn only_the_operators_client_may_list_episodes_or_move_agents() {
     assert!(e.starts_with("FORBIDDEN"), "{e}");
     assert_eq!(state.identity_store.agent_identity_list_for_agent("idle").unwrap()[0].account_id, "old", "nothing moved");
     assert!(stored_failure(&state, &idle).is_some());
+
+    // Nor can a connection the host never proved is the AgentMux window's.
+    for (command, data) in [
+        (COMMAND_IDENTITY_ACCOUNT_AVAILABILITY, json!({})),
+        (COMMAND_IDENTITY_ACCOUNT_MOVE_AGENTS, move_req.clone()),
+        (COMMAND_IDENTITY_ACCOUNT_SIGNED_IN, json!({ "account_id": "old" })),
+    ] {
+        let e = call_with(&state, Default::default(), command, data).await.unwrap_err();
+        assert!(e.starts_with("FORBIDDEN") && e.contains("isn't the AgentMux window"), "{command}: {e}");
+    }
+    assert_eq!(state.identity_store.agent_identity_list_for_agent("idle").unwrap()[0].account_id, "old", "nothing moved");
+    assert!(stored_failure(&state, &idle).is_some(), "nothing cleared");
 
     let listed = call(&state, None, COMMAND_IDENTITY_ACCOUNT_AVAILABILITY, json!({})).await.unwrap();
     assert!(listed["episodes"].is_array());

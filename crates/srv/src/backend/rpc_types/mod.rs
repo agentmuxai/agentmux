@@ -320,11 +320,18 @@ mod tests {
             tabid: "tab-1".to_string(),
             conn: "local".to_string(),
             agent_id: String::new(),
+            operator_proven: true,
         };
         let json = serde_json::to_string(&ctx).unwrap();
         assert!(json.contains(r#""ctype":"connserver""#));
         let parsed: RpcContext = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.client_type, "connserver");
+        // The operator's proof never travels on the wire, in either direction.
+        assert!(!json.contains("operator_proven"), "{json}");
+        assert!(!parsed.operator_proven);
+        let claimed: RpcContext = serde_json::from_str(r#"{"operator_proven":true}"#).unwrap();
+        assert!(!claimed.operator_proven);
+        assert!(claimed.operator_only("x").is_err());
     }
 
     #[test]

@@ -466,6 +466,8 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // their Stop (SPEC_DESKTOP_DRIVING_2026_10_20.md §5.4, §5.6).
         .route("/api/v1/host/desktop_request", post(app_api::desktop::handle_host_request))
         .route("/api/v1/host/desktop_stop", post(app_api::desktop::handle_host_stop))
+        // The host vouches for the AgentMux window's websocket connection.
+        .route("/api/v1/host/operator_attest", post(super::operator_proof::handle_host_attest))
         .route("/api/v1/host/browser_navigation", post(crate::server::browser_allowlist::handle_host_browser_navigation))
         .route("/api/v1/host/browser_dialog", post(crate::server::browser_dialog::handle_host_browser_dialog))
         .route("/api/v1/ui/browser/dialogs", post(crate::server::browser_dialog::handle_ui_browser_dialogs))

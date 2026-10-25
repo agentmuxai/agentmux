@@ -333,11 +333,13 @@ async fn runs(state: &AppState, req: JobsRunsRequest) -> Result<JobsRunsResult, 
     .map_err(|e| e.to_string())?
 }
 
-/// Who is asking: the operator's own client (`None`), or the agent this
-/// connection registered as, by UID. An agent connection whose UID can't be
-/// found is refused: it can't be told apart from another agent.
+/// Who is asking: the operator's own window (`None`), which needs the host's
+/// proof, or the agent this connection registered as, by UID. An agent
+/// connection whose UID can't be found is refused: it can't be told apart
+/// from another agent.
 fn caller_of(state: &AppState, ctx: &RpcContext) -> Result<Option<Caller>, String> {
-    if ctx.operator_only("").is_ok() {
+    if ctx.agent_id.is_empty() {
+        ctx.operator_only("a job is acted on by the operator or by an agent")?;
         return Ok(None);
     }
     state

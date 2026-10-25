@@ -243,6 +243,7 @@ const KNOWN_REGISTERED_UNDECLARED = [
     // tests, same category as echo/failme/checkctx above: real
     // register_* calls in test code, never a frontend-facing command.
     "stays-recorded",
+    "test.operator_probe",
     "typed-then-stream",
     "typed-then-untyped",
 ];

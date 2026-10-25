@@ -36,7 +36,7 @@ fn job(state: &AppState, id: &str, creator_uid: &str) -> CronJob {
 }
 
 fn operator() -> RpcContext {
-    RpcContext::default()
+    RpcContext::operator_for_tests()
 }
 
 fn agent(slug: &str) -> RpcContext {
@@ -175,6 +175,13 @@ async fn an_agent_connection_acts_only_on_its_own_jobs_and_never_pauses_all() {
     // An agent connection with no identity here can't act at all.
     let err = act(&state, act_req("pause", Some("jobs-mine")), &agent("nobody-registered-here")).await.unwrap_err();
     assert!(err.starts_with("FORBIDDEN"), "{err}");
+    // Nor can a connection the host never proved is the AgentMux window's.
+    for action in ["pause", "pause_all"] {
+        let err = act(&state, act_req(action, Some("jobs-theirs")), &RpcContext::default()).await.unwrap_err();
+        assert!(err.starts_with("FORBIDDEN") && err.contains("isn't the AgentMux window"), "{action}: {err}");
+    }
+    assert!(state.mstore.cron_get("jobs-theirs").unwrap().unwrap().enabled);
+    assert!(ledger_of(&state).paused_all().is_none());
 }
 
 #[tokio::test(flavor = "multi_thread")]
