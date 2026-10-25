@@ -19,8 +19,8 @@ import { WpsEvent } from "@/app/store/mps-events";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { ENV_CONTENT_TYPE, parseEnvText } from "../agent-env";
-import "./AgentPrimitiveModal.scss";
 import "./AgentEnvPanel.scss";
+import "./AgentPrimitiveModal.scss";
 
 const errorText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
