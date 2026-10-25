@@ -18,6 +18,7 @@ import { catchError, onMount, Show, createMemo, untrack, type Accessor, type JSX
 import type { AgentDispatch } from "../../swarm/swarm-model";
 import { AgentMessageBlock } from "../components/AgentMessageBlock";
 import { JektBubble } from "../components/JektBubble";
+import { SystemNoteBlock } from "../components/SystemNoteBlock";
 import { AmbientNarrationBlock } from "../components/AmbientNarrationBlock";
 import { MarkdownBlock } from "../components/MarkdownBlock";
 import { PeekOverlay } from "../components/PeekOverlay";
@@ -306,6 +307,9 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                     onToggle={onExpand}
                     onHoldOpen={() => props.onHoldNodeOpen?.(props.node().id)}
                 />
+            </Show>
+            <Show when={props.node() && props.node().type === "system_note"}>
+                <SystemNoteBlock node={props.node() as Extract<DocumentNode, { type: "system_note" }>} />
             </Show>
             <Show when={props.node() && props.node().type === "context_delivery"}>
                 <ContextDeliveryCard

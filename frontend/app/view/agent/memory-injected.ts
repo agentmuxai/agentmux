@@ -106,6 +106,7 @@ function startupFields(x: RawFrame): Partial<ContextItem> {
 const NOT_AGENT_WORK: ReadonlySet<DocumentNode["type"]> = new Set<DocumentNode["type"]>([
     "user_message",
     "jekt_message",
+    "system_note",
     "session_outcome",
     "agent_error",
     "cli_notice",

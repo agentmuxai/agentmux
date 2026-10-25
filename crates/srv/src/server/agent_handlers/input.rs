@@ -1387,9 +1387,11 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
     let deps_ai = AgentTurnDeps::from_state(state);
     engine.register_typed(
         COMMAND_AGENT_INPUT,
-        move |cmd: CommandAgentInputData, _ctx| {
+        move |cmd: CommandAgentInputData, ctx| {
             let deps = deps_ai.clone();
             async move {
+                // From the connection, before anything else runs (composer_origin.rs).
+                let origin = super::composer_origin::composer_origin(&ctx, cmd.hidden.unwrap_or(false))?;
                 tracing::info!(block_id = %cmd.blockid, "AgentInput");
                 // Authoritative hidden-window gate for ambient digest reads
                 // (next_prompt_suggestion / activity_summary / activity_watcher)
@@ -1415,13 +1417,6 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                     crate::backend::continuity_state::with_state_after_compaction(&deps.mstore, &cmd.blockid, cmd.message)
                 } else {
                     cmd.message
-                };
-                // The pane's composer: the user — except a hidden memory
-                // reinjection, which the frontend sends on its own behalf.
-                let origin = if cmd.hidden.unwrap_or(false) {
-                    crate::backend::blockcontroller::health::TurnOrigin::System
-                } else {
-                    crate::backend::blockcontroller::health::TurnOrigin::User
                 };
                 let block_id = cmd.blockid.clone();
                 run_agent_turn_joining(

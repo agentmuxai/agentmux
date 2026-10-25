@@ -34,6 +34,7 @@ import {
 } from "./types";
 import { buildMemoryReinjectionNodeFromReplay, isCatchUpMessage } from "./memory-reinjection";
 import { splitAttachedImages } from "./attachments/attached-images";
+import { splitSystemNotes } from "./system-notes";
 import { toolDetailOf, toolIcon } from "./tool-meta/tool-descriptors";
 import { parseSupervisorHeader } from "@/app/store/supervisor";
 
@@ -533,7 +534,8 @@ export class ClaudeCodeStreamParser {
                     this.currentThinkingNode = null;
                     return null;
                 }
-                const node = this.userMessageToNode(event as UserMessageEvent);
+                const group = this.userMessageToNodes(event as UserMessageEvent);
+                const node = group[0];
                 const echoOfCard = this.fallbackCardShown && node.type === "memory_reinjection";
                 this.fallbackCardShown = false;
                 if (echoOfCard) {
@@ -544,14 +546,20 @@ export class ClaudeCodeStreamParser {
                 }
                 // A jekt mid-block waits for the block to end (see heldJekts).
                 // Anything else — the human typing — ends the block as before.
-                if (node.type === "jekt_message" && (this.currentTextNode || this.currentThinkingNode)) {
-                    this.heldJekts.push(node);
+                // The same for a note of AgentMux's, which arrives just as unasked.
+                if (
+                    (node.type === "jekt_message" || node.type === "system_note") &&
+                    (this.currentTextNode || this.currentThinkingNode)
+                ) {
+                    this.heldJekts.push(...group);
                     return null;
                 }
                 this.releaseHeldJekts();
                 this.currentTextNode = null;
                 this.currentThinkingNode = null;
-                return node;
+                // The rest of the group follows the first, in order: released nodes go before the returned one.
+                this.releasedJekts.push(...group.slice(0, -1));
+                return group[group.length - 1];
             }
 
             case "error_result":
@@ -857,7 +865,7 @@ export class ClaudeCodeStreamParser {
      * Spec:
      * `docs/specs/SPEC_USER_INPUT_VISIBILITY_AND_STARTUP_COLLAPSE_2026_05_24.md`.
      */
-    private userMessageToNode(event: UserMessageEvent): DocumentNode {
+    private userMessageToNodes(event: UserMessageEvent): DocumentNode[] {
         // Checked FIRST, ahead of tryParseJekt — a reinjection message can
         // never also be a jekt block (composeReinjectionMessage's own fixed
         // <system-reminder> wrapper doesn't match JEKT_BLOCK_RE), so order
@@ -867,13 +875,35 @@ export class ClaudeCodeStreamParser {
         const reinjection = this.tryParseMemoryReinjection(event);
         if (reinjection) {
             this.hidingUntilNextUserMessage = true;
-            return reinjection;
+            return [reinjection];
         }
         // A genuine user turn ends whatever hidden window was open — even
         // one this same event.type check just confirmed isn't itself
         // another reinjection.
         this.hidingUntilNextUserMessage = false;
 
+        // srv's own notes ride after the message (or arrive alone): they get
+        // their own nodes, so neither the note nor the jekt it follows can take
+        // the human's style (system-notes.ts, INTERIM text parsing).
+        const { head, notes, delay } = splitSystemNotes(event.message);
+        if (notes.length === 0 && head === event.message) return [this.messageToNode(event)];
+        const base: UserMessageEvent = { ...event, message: head };
+        const stamp = event.timestamp || (this.isReplay ? undefined : Date.now());
+        const nodes: DocumentNode[] = head.trim() ? [this.messageToNode(base)] : [];
+        notes.forEach((text, i) =>
+            nodes.push({
+                type: "system_note",
+                id: this.nextIdOf("note"),
+                text,
+                ...(delay && nodes.length === 0 && i === 0 ? { delay } : {}),
+                ...(stamp ? { timestamp: stamp } : {}),
+            })
+        );
+        return nodes;
+    }
+
+    /** One user turn's message (a jekt block, a broadcast, the human's own words), with no notes in it. */
+    private messageToNode(event: UserMessageEvent): DocumentNode {
         const jekt = this.tryParseJekt(event);
         if (jekt) return jekt;
 
