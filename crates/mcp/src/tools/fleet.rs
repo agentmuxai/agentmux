@@ -7,6 +7,13 @@
 
 use super::*;
 
+/// `urgent: true` on a send or broadcast: deliver now, even to a session that
+/// has been idle for about an hour (srv holds a routine message for such a
+/// session until it is next active).
+fn urgent_priority(arguments: &Value) -> Option<String> {
+    arguments.get("urgent").and_then(|v| v.as_bool()).unwrap_or(false).then(|| "urgent".to_string())
+}
+
 pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     let ToolCtx { local_url, auth_key, client, .. } = *cx;
     match name {
@@ -47,7 +54,8 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 None => None,
             };
             let sent_names: Vec<String> = files.iter().flatten().map(|f| f.name.clone()).collect();
-            let req = signed_jekt_with_files(source_agent, to, message, files);
+            let mut req = signed_jekt_with_files(source_agent, to, message, files);
+            req.priority = urgent_priority(arguments);
 
             let resp = client
                 .post(&url)
@@ -238,7 +246,9 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             const BROADCAST_CHUNK_PAUSE: std::time::Duration = std::time::Duration::from_millis(1100);
 
             let url = format!("{}/agentmux/reactive/inject", local_url.trim_end_matches('/'));
+            let priority = urgent_priority(arguments);
             let mut succeeded: Vec<String> = Vec::new();
+            let mut held: Vec<serde_json::Value> = Vec::new();
             let mut failed: Vec<serde_json::Value> = Vec::new();
             for (chunk_idx, chunk) in targets.chunks(BROADCAST_CHUNK_SIZE).enumerate() {
                 if chunk_idx > 0 {
@@ -255,7 +265,8 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                     // fails, just via the inject endpoint's own "agent not
                     // found" rather than this pre-check.
                     let target_agent = block_to_agent.get(&target).cloned().unwrap_or_else(|| target.clone());
-                    let req = signed_jekt(source_agent.clone(), &target_agent, message);
+                    let mut req = signed_jekt(source_agent.clone(), &target_agent, message);
+                    req.priority = priority.clone();
                     let outcome = async {
                         let resp = client
                             .post(&url)
@@ -274,7 +285,10 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                             .await
                             .map_err(|e| format!("response parse failed: {e}"))?;
                         if result.get("success").and_then(|v| v.as_bool()) == Some(true) {
-                            Ok(())
+                            Ok(None)
+                        } else if result.get("held_reason").and_then(|v| v.as_str()) == Some(crate::tool_helpers::HELD_IDLE) {
+                            // Kept for an idle session, not lost: say so apart from the failures.
+                            Ok(Some(()))
                         } else {
                             Err(result
                                 .get("error")
@@ -285,13 +299,20 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                     }
                     .await;
                     match outcome {
-                        Ok(()) => succeeded.push(target),
+                        Ok(None) => succeeded.push(target),
+                        Ok(Some(())) => held.push(json!({ "id": target, "held": "idle" })),
                         Err(error) => failed.push(json!({ "id": target, "error": error })),
                     }
                 }
             }
 
-            let result = json!({ "succeeded": succeeded, "failed": failed });
+            let mut result = json!({ "succeeded": succeeded, "failed": failed });
+            if !held.is_empty() {
+                result["held"] = json!(held);
+                result["held_note"] = json!(
+                    "held: their session has been idle, so the message waits until it is next active; send it again with urgent: true to wake them now"
+                );
+            }
             Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))
         }
         "FleetBulkStop" => {
@@ -364,5 +385,20 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))
         }
         _ => Err(not_in_family()),
+    }
+}
+
+
+#[cfg(test)]
+mod urgent_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn urgent_true_is_the_only_thing_that_sets_a_priority() {
+        assert_eq!(urgent_priority(&json!({ "urgent": true })), Some("urgent".to_string()));
+        assert_eq!(urgent_priority(&json!({ "urgent": false })), None);
+        assert_eq!(urgent_priority(&json!({})), None);
+        assert_eq!(urgent_priority(&json!({ "urgent": "yes" })), None, "not a boolean");
     }
 }

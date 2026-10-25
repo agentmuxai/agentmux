@@ -76,6 +76,20 @@ pub(super) async fn local_target_unavailable(state: &AppState, target: &str) -> 
     tokio::task::spawn_blocking(move || holding_unavailable(&mstore, &reg.block_id)).await.ok().flatten()
 }
 
+/// What delivery checks before a message reaches a running agent: out of quota (held, or
+/// refused where it can't be held), or a session gone cold (`jekt_cold`). `None` delivers.
+pub(super) async fn hold_before_delivery(
+    state: &AppState,
+    auth_via: super::ReactiveAuthVia,
+    req: &InjectionRequest,
+    replay: &mut replay::Reservation,
+) -> Option<serde_json::Value> {
+    if let Some(unavailable) = local_target_unavailable(state, &req.target_agent).await {
+        return Some(hold_for_unavailable(state, auth_via, req, &unavailable, replay).await);
+    }
+    super::jekt_cold::hold_if_cold(state, auth_via, req, replay).await
+}
+
 /// Hold a message for an agent that can't work now (`unavailable`), or,
 /// where the hold doesn't apply (a LAN or cross-channel hop, a cron fire),
 /// refuse it with the reason: either way it is not injected into a turn
@@ -133,44 +147,11 @@ async fn hold_with_reason(
     until_ms: Option<u64>,
     replay: &mut replay::Reservation,
 ) -> Option<serde_json::Value> {
-    use crate::backend::storage::jekt_held::{HeldJekt, HoldOutcome, HELD_TTL_MS};
+    use crate::backend::storage::jekt_held::HoldOutcome;
     if !hold_applies(auth_via, req, resp) {
         return None;
     }
-    let now = agentmux_common::time::now_ms();
-    let mut held = HeldJekt {
-        request_id: resp.request_id.clone(),
-        target_uid: String::new(),
-        target_agent: req.target_agent.clone(),
-        source_agent: req.source_agent.clone().unwrap_or_default(),
-        audit_source_uid: req.audit_source_uid.clone(),
-        // What the recipient would receive — sanitized and truncated to the
-        // delivery limit — never the unbounded body (Codex P2 on #3632).
-        message: crate::backend::reactive::sanitize::sanitize_message(&req.message),
-        priority: req.priority.clone().unwrap_or_default(),
-        jekt_tier: req
-            .jekt_tier
-            .as_ref()
-            .and_then(|t| serde_json::to_value(t).ok())
-            .and_then(|v| v.as_str().map(str::to_string))
-            .unwrap_or_default(),
-        delivery_tier: "host".to_string(),
-        sig_verified: req.sig_verified,
-        reagent_verified: req.reagent_verified,
-        lan_verified: req.lan_verified,
-        channel_verified: req.channel_verified,
-        is_transcript_request: req.is_transcript_request,
-        transcript_request_escalate_forced: req.transcript_request_escalate_forced,
-        files_json: req
-            .files
-            .as_ref()
-            .and_then(|f| serde_json::to_string(f).ok())
-            .unwrap_or_default(),
-        sent_at_ms: now,
-        expires_at_ms: now + HELD_TTL_MS,
-        attempts: 0,
-        last_error: String::new(),
-    };
+    let mut held = held_row(req, resp.request_id.clone(), agentmux_common::time::now_ms());
     let mstore = state.mstore.clone();
     let outcome = tokio::task::spawn_blocking(move || {
         let (uid, _slug) = defined_here(&mstore, &held.target_agent)?;
@@ -226,6 +207,8 @@ async fn hold_with_reason(
                 HoldReason::Limited => format!(
                     "agent {target}'s account is out of quota — held for delivery on this AgentMux instance for up to 24 h, delivered when it can work again (an account move or the reset)"
                 ),
+                // Held by `jekt_cold`, which has its own answer; never through here.
+                HoldReason::Idle => format!("agent {target}'s session is idle — held until it is next active"),
             };
             let mut answer = json!({
                 "success": false,
@@ -254,6 +237,46 @@ async fn hold_with_reason(
             tracing::warn!(error = %e, target = %target, "durable jekt: hold failed");
             None
         }
+    }
+}
+
+/// The row to keep for `req`: what the recipient would be given, with the
+/// verdicts it was accepted with. `target_uid` is filled in by the caller.
+pub(super) fn held_row(req: &InjectionRequest, request_id: String, now: i64) -> crate::backend::storage::jekt_held::HeldJekt {
+    use crate::backend::storage::jekt_held::{HeldJekt, HELD_TTL_MS};
+    HeldJekt {
+        request_id,
+        target_uid: String::new(),
+        target_agent: req.target_agent.clone(),
+        source_agent: req.source_agent.clone().unwrap_or_default(),
+        audit_source_uid: req.audit_source_uid.clone(),
+        // What the recipient would receive — sanitized and truncated to the
+        // delivery limit — never the unbounded body (Codex P2 on #3632).
+        message: crate::backend::reactive::sanitize::sanitize_message(&req.message),
+        priority: req.priority.clone().unwrap_or_default(),
+        jekt_tier: req
+            .jekt_tier
+            .as_ref()
+            .and_then(|t| serde_json::to_value(t).ok())
+            .and_then(|v| v.as_str().map(str::to_string))
+            .unwrap_or_default(),
+        delivery_tier: "host".to_string(),
+        sig_verified: req.sig_verified,
+        reagent_verified: req.reagent_verified,
+        lan_verified: req.lan_verified,
+        channel_verified: req.channel_verified,
+        is_transcript_request: req.is_transcript_request,
+        transcript_request_escalate_forced: req.transcript_request_escalate_forced,
+        files_json: req
+            .files
+            .as_ref()
+            .and_then(|f| serde_json::to_string(f).ok())
+            .unwrap_or_default(),
+        sent_at_ms: now,
+        expires_at_ms: now + HELD_TTL_MS,
+        attempts: 0,
+        last_error: String::new(),
+        hold_reason: String::new(),
     }
 }
 

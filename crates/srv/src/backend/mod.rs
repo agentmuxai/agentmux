@@ -184,6 +184,8 @@ pub mod kanban;
 pub mod limit_wake;
 /// A leader accepting or sending back a task on the operator's word.
 pub mod kanban_delegate;
+/// Holding a routine message for an agent whose session has gone cold (SPEC_JEKT_HOLD_FOR_COLD_SESSIONS_2026_10_25.md).
+pub mod cold_hold;
 /// A leader hears when its workers end a turn without reporting, fail or stop.
 pub mod worker_notes;
 

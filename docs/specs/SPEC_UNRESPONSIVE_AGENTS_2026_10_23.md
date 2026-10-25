@@ -1,7 +1,7 @@
 # SPEC: unresponsive agents — out-of-quota and signed-out states, the reset time, held messages, the per-account notice
 
 **Date:** 2026-10-23
-**Status:** active — approved by the operator on 2026-10-23. Step 1 (§3, §4.1, §4.2, §4.5) shipped in #5389; step 2b (§4.4 and the R8 display) is in #5398; step 2d (§6) in #5402; step 2a (§4.3 and R5) in #5410; step 2c (§5) in #5419; step 3a (§7, the wake) in #5433; step 2e (§4.6) and step 3b (§8, the watchdog) remain. Implements R1–R4, R6 and R7 of `docs/reports/REPORT_UNRESPONSIVE_AGENTS_2026_10_23.md` (Kanban #1255, operator: "yes proceed with all"); R5 and R8 are scoped here only as far as they read this spec's state. Ships with the first build PR (§9, step 1).
+**Status:** active — approved by the operator on 2026-10-23. Step 1 (§3, §4.1, §4.2, §4.5) shipped in #5389; step 2b (§4.4 and the R8 display) is in #5398; step 2d (§6) in #5402; step 2a (§4.3 and R5) in #5410; step 2c (§5) in #5419; step 3a (§7, the wake) in #5433; step 3b (§8, the watchdog) in #5444; step 2e (§4.6) and R9 remain. Implements R1–R4, R6 and R7 of `docs/reports/REPORT_UNRESPONSIVE_AGENTS_2026_10_23.md` (Kanban #1255, operator: "yes proceed with all"); R5 and R8 are scoped here only as far as they read this spec's state. Ships with the first build PR (§9, step 1).
 **Author:** Loap-3 (loap-loap-2-loap-3). Build order and owners agreed with AgentX and AgentY.
 **Task:** Kanban #1787.
 
@@ -252,6 +252,8 @@ When `backend/blockcontroller/watchdog.rs` trips and calls `stop_now`:
 - release the block's claimed tasks with the reason "stopped by the watchdog after <limit>" (the attempt counts);
 - raise one `AgentCrashed` notification: "Stopped by the watchdog after 4 h";
 - fix the table comment at `sagas/agent_teardown.rs:16`.
+
+Built: `watchdog::after_stop` runs after `stop_now` succeeds on an agent pane (not a shell pane). `stop_now` is `Policy::stop_cli_only`, which keeps the claims on purpose (a pane's `AgentStop` may be restarted), so the watchdog releases them itself through `agent_teardown::release_claims`, the same function `Policy::stop` uses. The limit is named in the unit it was set in ("4 h", "30 min without output"). The table comment had the watchdog under `Policy::stop(..)`, which releases claims; it now sits with `stop_cli_only`.
 
 ## 9. Build order and owners
 
