@@ -121,7 +121,7 @@ pub(crate) fn limit_text(reason: StopReason, limits: Limits) -> String {
 /// release its claimed Kanban tasks with the reason, the attempt counting,
 /// and raise one `AgentCrashed` notification
 /// (`SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md` §8). Blocking.
-fn after_stop(identity: &Store, broker: &Arc<Broker>, block_id: &str, limit: &str, is_shell: bool) {
+fn after_stop(work_store: &Store, broker: &Arc<Broker>, block_id: &str, limit: &str, is_shell: bool) {
     if is_shell {
         return;
     }
@@ -129,7 +129,7 @@ fn after_stop(identity: &Store, broker: &Arc<Broker>, block_id: &str, limit: &st
     let agent = crate::backend::reactive::get_global_handler().list_agents().into_iter().find(|r| r.block_id == block_id);
     if let Some(agent) = agent {
         let released = crate::sagas::agent_teardown::release_claims(
-            identity,
+            work_store,
             &agent.agent_id,
             agent.uid.as_deref(),
             &reason,
@@ -146,7 +146,7 @@ fn after_stop(identity: &Store, broker: &Arc<Broker>, block_id: &str, limit: &st
 }
 
 /// Run the agent watchdog loop. Never returns.
-pub async fn run_watchdog_loop(config: Arc<ConfigState>, store: Arc<Store>, identity: Arc<Store>, broker: Arc<Broker>) {
+pub async fn run_watchdog_loop(config: Arc<ConfigState>, store: Arc<Store>, work_store: Arc<Store>, broker: Arc<Broker>) {
     let mut ticker = interval(Duration::from_secs(WATCHDOG_INTERVAL_SECS));
     // block_id → when a scan last saw the agent waiting for the user. Covers a
     // wait that ends without srv delivering an answer (an App Server request
@@ -227,9 +227,9 @@ pub async fn run_watchdog_loop(config: Arc<ConfigState>, store: Arc<Store>, iden
             }
             if crate::sagas::agent_teardown::stop_now(&block_id, true).is_ok() {
                 if let Some(reason) = verdict {
-                    let (identity, broker, block_id) = (identity.clone(), broker.clone(), block_id.clone());
+                    let (work_store, broker, block_id) = (work_store.clone(), broker.clone(), block_id.clone());
                     let (limit, is_shell) = (limit_text(reason, limits), agent.is_shell);
-                    let _ = tokio::task::spawn_blocking(move || after_stop(&identity, &broker, &block_id, &limit, is_shell)).await;
+                    let _ = tokio::task::spawn_blocking(move || after_stop(&work_store, &broker, &block_id, &limit, is_shell)).await;
                 }
             }
         }

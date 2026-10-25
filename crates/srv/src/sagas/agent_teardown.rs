@@ -673,11 +673,11 @@ async fn wait_gone(mut procs: Vec<agent_resources::ProcessEntry>) -> Vec<agent_r
 /// Release the agent's claimed work items with `reason` (each counts as an
 /// attempt), so they go back to the pool now rather than when the 120 s lease
 /// expires. How many went. Blocking.
-pub(crate) fn release_claims(identity_store: &crate::backend::storage::store::Store, a: &str, u: Option<&str>, reason: &str, now: i64) -> usize {
-    let items = identity_store.work_queue_claimed_by(a, u.unwrap_or("")).unwrap_or_default();
+pub(crate) fn release_claims(work_store: &crate::backend::storage::store::Store, a: &str, u: Option<&str>, reason: &str, now: i64) -> usize {
+    let items = work_store.work_queue_claimed_by(a, u.unwrap_or("")).unwrap_or_default();
     agent_resources::claims_held_by(&items, a, u)
         .into_iter()
-        .filter(|w| matches!(identity_store.work_queue_release(&w.id, &w.claimed_by, &w.claimed_by_uid, w.attempts, reason, now), Ok(Some(_))))
+        .filter(|w| matches!(work_store.work_queue_release(&w.id, &w.claimed_by, &w.claimed_by_uid, w.attempts, reason, now), Ok(Some(_))))
         .count()
 }
 
