@@ -192,6 +192,26 @@ async fn a_run_now_waiting_for_a_place_on_a_paused_job_still_starts() {
     assert_eq!(rig.store.job_run_get(&waits).unwrap().unwrap().state, state::RUNNING, "{:?}", states(&rig, "j-rn-b"));
 }
 
+/// A restart ends the runs that were running, not the ones still waiting for
+/// a place or out their retry's backoff: those start afterwards.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_restart_leaves_waiting_runs_waiting() {
+    let rig = rig();
+    let busy = make(&rig, "j-rs-a", |j| j.policy.group = Some("g".into()));
+    let waiter = make(&rig, "j-rs-b", |j| j.policy.group = Some("g".into()));
+    let running = rig.sched.fire(&busy, slot(0)).await.run_id.unwrap();
+    let waits = rig.sched.fire(&waiter, slot(0)).await.run_id.unwrap();
+
+    rig.ledger.recover_after_restart();
+    let ended = rig.store.job_run_get(&running).unwrap().unwrap();
+    assert_eq!((ended.state.as_str(), ended.infra.as_str()), (state::FINISHED, infra::INTERRUPTED));
+    let still = rig.store.job_run_get(&waits).unwrap().unwrap();
+    assert_eq!((still.state.as_str(), still.reason.as_str()), (state::SCHEDULED, reason::GROUP_BUSY));
+
+    rig.sched.run_policy_pass().await;
+    assert_eq!(rig.store.job_run_get(&waits).unwrap().unwrap().state, state::RUNNING, "it starts once the group is free");
+}
+
 // ── groups and the global limit ─────────────────────────────────────────
 
 #[tokio::test(flavor = "multi_thread")]

@@ -550,8 +550,11 @@ impl RunLedger {
             tracing::warn!(error = %e, "jobs: couldn't read followed runs");
             Vec::new()
         });
+        // A run waiting for a place (overlap, group, the global limit, a retry's
+        // backoff) never started: it stays open for the scheduler to start.
         let (ours, followed_elsewhere): (Vec<JobRun>, Vec<JobRun>) = open(SOURCE_CRON, &[state::SCHEDULED, state::RUNNING])
             .into_iter()
+            .filter(|r| !(r.state == state::SCHEDULED && reason::WAITING.contains(&r.reason.as_str())))
             .partition(|r| remote::followed_by(r).is_none_or(|f| f.channel == self.channel));
         for run in &followed_elsewhere {
             self.follower.watch(&run.id, now);
