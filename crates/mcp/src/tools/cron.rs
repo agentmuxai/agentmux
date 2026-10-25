@@ -114,9 +114,9 @@ No cron jobs configured.")).unwrap_or_else(|| "No cron jobs configured.".to_stri
                 let max = j["max_fires"].as_i64().map(|n| format!("/{n}")).unwrap_or_default();
                 let age_bound = j["expires_in_secs"].as_i64().map(|n| format!("  expires_in={n}s")).unwrap_or_default();
                 let last = j.get("last_run").filter(|r| r.is_object()).map(run_brief).unwrap_or_else(|| "none".to_string());
-                // Scheduled fires that reached no one (not counted in fires=), and why the last did
                 // A cap skips its runs today; they resume at the operator's midnight.
                 let over_cap = j["over_cap"].as_str().map(|c| format!("  OVER CAP TODAY ({c})")).unwrap_or_default();
+                // Scheduled fires that reached no one (not counted in fires=), and why the last did
                 let missed = match j["missed_count"].as_i64().unwrap_or(0) {
                     0 => String::new(),
                     n => format!("  missed={n} ({})", j["last_miss_reason"].as_str().unwrap_or("")),
