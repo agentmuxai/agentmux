@@ -52,27 +52,62 @@ export function slipStack(parent: LayoutNode, nodeId: string): LayoutNode[] | un
 }
 
 /**
- * The drop placeholder for a dragged chip inserted at `index` in `parent`, placed against `target`
- * (the pane before the seam, or the first pane at index 0) whose rect is `targetRect`. A chip in a
- * stack over an expanded pane is placed along the vertical axis, since that is where the seam shows.
+ * The row's chips as they stack once `dragged` is inserted at `index` (the index `moveNode` takes:
+ * counted before the dragged pane leaves its old place): the stack it would join, over the expanded
+ * pane it docks onto, and its place in it. Undefined when `parent` is not a Row or the chip would
+ * not dock onto anything.
+ */
+function stackAfterDrop(parent: LayoutNode, dragged: LayoutNode, index: number) {
+    if (parent.flexDirection !== FlexDirection.Row || !parent.children?.length) return undefined;
+    const children = parent.children;
+    const old = children.findIndex((c) => c.id === dragged.id);
+    const rest = children.filter((c) => c.id !== dragged.id);
+    const at = old !== -1 && old < index ? index - 1 : index;
+    const after = [...rest.slice(0, at), dragged, ...rest.slice(at)];
+    const targets = resolveRowSlipTargets(after);
+    const dock = targets.get(dragged.id);
+    if (!dock) return undefined;
+    const others = after.filter((c) => c.id !== dragged.id && targets.get(c.id)?.id === dock.id);
+    return { dock, others, place: after.slice(0, after.indexOf(dragged)).filter((c) => others.includes(c)).length };
+}
+
+/**
+ * The drop placeholder for a dragged chip inserted at `index` in `parent`. Along the parent's
+ * axis it is placed against `target` (the pane before the seam, or the first pane at index 0)
+ * whose rect is `targetRect`. In a Row with an expanded sibling the chips stack vertically over it,
+ * so the placeholder goes at the chip's place in that stack, wherever the pane before the seam is:
+ * on the seam between its neighbours in the stack, or flush inside the stack's top or bottom edge.
  */
 export function chipDropRect(
     parent: LayoutNode,
+    dragged: LayoutNode,
     target: LayoutNode,
     targetIndex: number,
     index: number,
-    targetRect: Dimensions,
+    rectOf: (node: LayoutNode) => Dimensions | undefined,
     chip: { width: number; height: number }
 ): Dimensions {
-    const after = index > targetIndex;
-    let outerEdge = !after || index >= (parent.children?.length ?? 1);
-    let direction = parent.flexDirection;
-    const stack = slipStack(parent, target.id);
+    const stack = stackAfterDrop(parent, dragged, index);
     if (stack) {
-        direction = FlexDirection.Column;
-        outerEdge = after ? stack[stack.length - 1].id === target.id : stack[0].id === target.id;
+        const { others, place, dock } = stack;
+        const first = rectOf(others[0] ?? dock);
+        const last = rectOf(others[others.length - 1] ?? dock);
+        const before = place > 0 ? rectOf(others[place - 1]) : undefined;
+        if (first && last && (place === 0 || before)) {
+            if (place === 0) return chipPlaceholderRect(first, chip, FlexDirection.Column, false, true);
+            if (place === others.length) return chipPlaceholderRect(last, chip, FlexDirection.Column, true, true);
+            return chipPlaceholderRect(before!, chip, FlexDirection.Column, true, false);
+        }
     }
-    return chipPlaceholderRect(targetRect, chip, direction, after, outerEdge);
+    const after = index > targetIndex;
+    const outerEdge = !after || index >= (parent.children?.length ?? 1);
+    return chipPlaceholderRect(
+        rectOf(target) ?? { top: 0, left: 0, width: 0, height: 0 },
+        chip,
+        parent.flexDirection,
+        after,
+        outerEdge
+    );
 }
 
 /**

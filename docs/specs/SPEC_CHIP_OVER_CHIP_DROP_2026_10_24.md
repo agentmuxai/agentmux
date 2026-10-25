@@ -22,7 +22,7 @@ When the pane being dragged is a chip and the pane under the cursor is a chip in
 
 - in a column (a strip of chips), the upper half is **Top** and the lower half **Bottom**;
 - in a row of chips (every sibling minimized), the left half is **Left** and the right half **Right**;
-- in a Row that has an expanded sibling, the geometry docks its chips in a vertical stack over that sibling (`resolveRowSlipTargets`), whatever the Row's direction. The seam shows between stacked chips, so the upper half is **Left** (before) and the lower half **Right** (after), and the placeholder is placed along the vertical axis (`chipDropRect`, with `slipStack`). Found by the Codex review of #5426.
+- in a Row that has an expanded sibling, the geometry docks its chips in a vertical stack over that sibling (`resolveRowSlipTargets`), whatever the Row's direction. The seam shows between stacked chips, so the upper half is **Left** (before) and the lower half **Right** (after), and the placeholder goes at the chip's place in the stack it would join (`chipDropRect`: the row order after the drop, `resolveRowSlipTargets`, then the seam between its neighbours in the stack, or flush inside the stack's top or bottom edge), also when the pane before the seam is the expanded one. Found by the Codex reviews of #5426.
 
 That is a plain insert between two panes, so the existing placeholder rule applies: centred on the seam, flush inside the edge at the first or last place. Nothing else changes:
 
@@ -40,7 +40,7 @@ That is a plain insert between two panes, so the existing placeholder rule appli
 2. The lower half gives Bottom and the seam below.
 3. At the strip's first and last place it is flush inside the edge.
 4. In a row, the left and right halves pick the nearer vertical seam.
-5. A stack over an expanded pane in a Row: the halves pick the seam above or below, at one x, and the placeholder straddles it; flush at the stack's top.
+5. A stack over an expanded pane in a Row: the halves pick the seam above or below, at one x, and the placeholder straddles it; flush at the stack's top. With an expanded pane before the seam (`[A, m1, m2, B, d]`) it is still at the chip's place in the stack, not horizontal against A.
 6. It applies only to chip over chip, inside the chip, in the same tree.
 
 ## 4. Manual check

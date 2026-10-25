@@ -813,10 +813,11 @@ export class LayoutModel {
                                 return setTransform(
                                     chipDropRect(
                                         parentNode,
+                                        findNode(this.treeState.rootNode, action.node.id) ?? action.node,
                                         targetNode,
                                         targetIndex,
                                         action.index,
-                                        targetBoundingRect,
+                                        (n) => this.getNodeRect(n),
                                         chip
                                     )
                                 );

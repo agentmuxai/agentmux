@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from "vitest";
 import { chipDropRect, chipOverChipDirection, chipPlaceholderRect } from "../lib/chipPlaceholder";
-import { newLayoutNode } from "../lib/layoutNode";
+import { findNode, newLayoutNode } from "../lib/layoutNode";
 import { computeMoveNode } from "../lib/layoutTree";
 import {
     DropDirection,
@@ -102,12 +102,14 @@ describe("a chip dropped on another chip", () => {
         if (!move) return { direction, move };
         const targetIndex = Math.max(0, Math.min(move.index - 1, strip.children!.length - 1));
         const chip = { width: dir === FlexDirection.Column ? 600 : 200, height: 36 };
+        const rectOf = (n: LayoutNode) => rects(strip.children!.findIndex((c) => c.id === n.id));
         const rect = chipDropRect(
             strip,
+            findNode(root, "d")!,
             strip.children![targetIndex],
             targetIndex,
             move.index,
-            rects(targetIndex),
+            rectOf,
             chip
         );
         return { direction, move, rect };
@@ -171,24 +173,23 @@ describe("a chip dropped on another chip", () => {
 });
 
 // In a Row with an expanded sibling the chips stack vertically over it (the slip geometry), so the
-// nearer seam is chosen by the vertical half and the placeholder lies along the vertical axis.
+// nearer seam is chosen by the vertical half and the placeholder goes at the chip's place in the stack.
 describe("a chip dropped on a chip stacked over an expanded pane in a Row", () => {
-    const build = () => {
-        const chips = ["m1", "m2", "m3"].map((id) => node(id, true, FlexDirection.Column));
-        const root = branch("r", FlexDirection.Row, [
-            ...chips,
-            node("e", false, FlexDirection.Column),
-            node("d", true, FlexDirection.Column),
-        ]);
-        return root;
-    };
-    // The stack, 36 px each over the expanded pane, x 100..600.
-    const stackRect = (i: number): Dimensions => ({ top: 100 + i * 36, left: 100, width: 500, height: 36 });
+    const chips = (ids: string[]) => ids.map((id) => node(id, true, FlexDirection.Column));
+    // The stack, 36 px each over an expanded pane, x 100..600; the chips stack in row order.
+    const rectsFor =
+        (stack: string[]) =>
+        (n: LayoutNode): Dimensions | undefined => {
+            const i = stack.indexOf(n.id);
+            return i === -1
+                ? { top: 100 + stack.length * 36, left: 100, width: 500, height: 300 }
+                : { top: 100 + i * 36, left: 100, width: 500, height: 36 };
+        };
     const chip = { width: 500, height: 36 };
-    const drop = (targetId: string, at: { x: number; y: number }) => {
-        const root = build();
-        const idx = root.children!.findIndex((c) => c.id === targetId);
-        const direction = chipOverChipDirection(root, targetId, "d", stackRect(idx), at);
+    const drop = (row: LayoutNode[], stack: string[], targetId: string, at: { x: number; y: number }) => {
+        const root = branch("r", FlexDirection.Row, row);
+        const rectOf = rectsFor(stack);
+        const direction = chipOverChipDirection(root, targetId, "d", rectOf(findNode(root, targetId)!), at);
         const move = computeMoveNode(newLayoutTreeState(root), {
             type: LayoutTreeActionType.ComputeMove,
             nodeId: targetId,
@@ -198,27 +199,64 @@ describe("a chip dropped on a chip stacked over an expanded pane in a Row", () =
         const targetIndex = Math.max(0, Math.min(move.index - 1, root.children!.length - 1));
         const rect = chipDropRect(
             root,
+            findNode(root, "d")!,
             root.children![targetIndex],
             targetIndex,
             move.index,
-            stackRect(targetIndex),
+            rectOf,
             chip
         );
         return { direction, move, rect };
     };
+    const row = () => [...chips(["m1", "m2", "m3"]), node("e", false, FlexDirection.Column), ...chips(["d"])];
 
     it("the upper half of the middle chip is the seam above it, the lower half the seam below, at one x", () => {
-        const up = drop("m2", { x: 300, y: 140 });
+        const stack = ["m1", "m2", "m3", "d"];
+        const up = drop(row(), stack, "m2", { x: 300, y: 140 });
         expect(up.direction).toBe(DropDirection.Left);
         expect(up.move).toMatchObject({ parentId: "r", index: 1 });
         expect(up.rect).toEqual({ top: 118, left: 100, width: 500, height: 36 });
-        const down = drop("m2", { x: 300, y: 160 });
+        const down = drop(row(), stack, "m2", { x: 300, y: 160 });
         expect(down.direction).toBe(DropDirection.Right);
         expect(down.move).toMatchObject({ parentId: "r", index: 2 });
         expect(down.rect).toEqual({ top: 154, left: 100, width: 500, height: 36 });
     });
 
     it("at the top of the stack it is flush inside the stack's top edge", () => {
-        expect(drop("m1", { x: 300, y: 110 }).rect).toEqual({ top: 100, left: 100, width: 500, height: 36 });
+        expect(drop(row(), ["m1", "m2", "m3", "d"], "m1", { x: 300, y: 110 }).rect).toEqual({
+            top: 100,
+            left: 100,
+            width: 500,
+            height: 36,
+        });
+    });
+
+    it("when the pane before the seam is expanded, the ghost is still at the chip's place in the stack below it", () => {
+        // [A, m1, m2, B, d]: m1 and m2 stack over B. The seam before m1 has the expanded A before it.
+        const rowA = () => [
+            node("a", false, FlexDirection.Column),
+            ...chips(["m1", "m2"]),
+            node("b", false, FlexDirection.Column),
+            ...chips(["d"]),
+        ];
+        const stack = ["m1", "m2", "d"];
+        const top = drop(rowA(), stack, "m1", { x: 300, y: 110 });
+        expect(top.move).toMatchObject({ parentId: "r", index: 1 });
+        expect(top.rect, "flush inside the top of the stack, not horizontal against A").toEqual({
+            top: 100,
+            left: 100,
+            width: 500,
+            height: 36,
+        });
+        const mid = drop(rowA(), stack, "m1", { x: 300, y: 125 });
+        expect(mid.rect).toEqual({ top: 118, left: 100, width: 500, height: 36 });
+        const bottom = drop(rowA(), stack, "m2", { x: 300, y: 160 });
+        expect(bottom.move).toMatchObject({ parentId: "r", index: 3 });
+        expect(bottom.rect, "after the last chip of the stack").toEqual({
+            top: 136,
+            left: 100,
+            width: 500,
+            height: 36,
+        });
     });
 });
