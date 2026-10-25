@@ -187,6 +187,23 @@ describe("the per-block subscription", () => {
         dispose();
     });
 
+    it("keeps the controller event when the seed arrives after it", async () => {
+        h.status = { is_agent_pane: true, turn_active: false };
+        let resolveSeed!: (v: unknown) => void;
+        h.getStatus.mockImplementation(() => new Promise((r) => (resolveSeed = r)));
+        let dispose!: () => void;
+        let progress!: ReturnType<typeof usePaneTabProgress>;
+        createRoot((d) => {
+            dispose = d;
+            progress = usePaneTabProgress("blk-5");
+        });
+        h.listeners[0].cb({ is_agent_pane: true, turn_active: true }); // the turn starts while the seed is in flight
+        resolveSeed({ is_agent_pane: true }); // the older snapshot: idle
+        await vi.advanceTimersByTimeAsync(0);
+        expect(progress()?.state).toBe("working");
+        dispose();
+    });
+
     it("clears the signed-out line when the failure is cleared", async () => {
         h.status = { is_agent_pane: true, turn_active: false };
         h.metaSignal![1]({ "agent:last_failure": { code: "auth" } });

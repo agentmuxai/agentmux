@@ -87,14 +87,23 @@ function open(blockId: string): Entry {
         const [clock, setClock] = createSignal(0);
         const block = MOS.getMuxObjectAtom<Block>(`block:${blockId}`);
 
+        // Events only fire on a state flip, so a seed that arrives after one is older than it and
+        // must not replace it: the pill would stay blank for the whole turn.
+        let eventLanded = false;
         void BlockService.GetControllerStatus(blockId)
-            .then((rts) => setController({ isAgentPane: rts?.is_agent_pane === true, turnActive: rts?.turn_active === true }))
+            .then((rts) => {
+                if (eventLanded) return;
+                setController({ isAgentPane: rts?.is_agent_pane === true, turnActive: rts?.turn_active === true });
+            })
             .catch(() => {
                 /* no controller yet: not an agent pane */
             });
         const unsub = onMuxEvent(
             WpsEvent.ControllerStatus,
-            (data) => setController({ isAgentPane: data.is_agent_pane === true, turnActive: data.turn_active === true }),
+            (data) => {
+                eventLanded = true;
+                setController({ isAgentPane: data.is_agent_pane === true, turnActive: data.turn_active === true });
+            },
             MOS.makeORef("block", blockId)
         );
 
