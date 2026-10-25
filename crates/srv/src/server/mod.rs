@@ -83,6 +83,7 @@ pub(crate) mod vault_handlers;
 pub(crate) mod browser_vault_fill;
 pub(crate) mod shell_secrets;
 pub(crate) mod widget_handlers;
+pub(crate) mod job_template_handlers;
 
 #[cfg(test)]
 pub(crate) mod tests;

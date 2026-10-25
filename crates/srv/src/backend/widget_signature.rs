@@ -9,6 +9,11 @@
 //! each publisher (the part of the id before the dot) to the first key the
 //! user approved for it, and reports any later package of that publisher
 //! signed by another key, or not signed, as `key_changed`.
+//!
+//! Job templates share the file format and the verifier under their own
+//! signing domain (docs/specs/SPEC_JOBS_AND_TEMPLATES_2026_10_24.md §5.4): the
+//! domain's prefix is part of the signed bytes, so a widget's signature never
+//! passes as a template's, or a template's as a widget's.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -18,9 +23,20 @@ use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-pub const SIG_FILE: &str = "widget.sig";
 const SIG_VERSION: u32 = 1;
-const CONTEXT: &[u8] = b"agentmux-widget-sig-v1\0";
+
+/// What a signature is for: the prefix of the bytes it signs, and the file
+/// at the package's root it lives in (left out of the package's hash).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Domain {
+    pub prefix: &'static [u8],
+    pub sig_file: &'static str,
+}
+
+pub const WIDGET: Domain = Domain { prefix: b"agentmux-widget-sig-v1\0", sig_file: "widget.sig" };
+pub const JOB_TEMPLATE: Domain = Domain { prefix: b"agentmux-job-template-sig-v1\0", sig_file: "template.sig" };
+
+pub const SIG_FILE: &str = WIDGET.sig_file;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -31,9 +47,9 @@ struct SigFile {
     signature: String,
 }
 
-/// The bytes a publisher signs.
-pub fn signed_message(id: &str, version: &str, hash: &str) -> Vec<u8> {
-    let mut m = CONTEXT.to_vec();
+/// The bytes a publisher signs for a package of `domain`.
+pub fn signed_message(domain: &Domain, id: &str, version: &str, hash: &str) -> Vec<u8> {
+    let mut m = domain.prefix.to_vec();
     m.extend_from_slice(id.as_bytes());
     m.push(0);
     m.extend_from_slice(version.as_bytes());
@@ -42,24 +58,26 @@ pub fn signed_message(id: &str, version: &str, hash: &str) -> Vec<u8> {
     m
 }
 
-/// `widget.sig` in `dir`: `None` when there is none, the publisher's public
-/// key (base64) when it verifies, or why it doesn't.
-pub fn check(dir: &Path, id: &str, version: &str, hash: &str) -> Option<Result<String, String>> {
-    let text = match std::fs::read_to_string(dir.join(SIG_FILE)) {
+/// The `domain`'s signature file in `dir`: `None` when there is none, the
+/// publisher's public key (base64) when it verifies, or why it doesn't.
+pub fn check(domain: &Domain, dir: &Path, id: &str, version: &str, hash: &str) -> Option<Result<String, String>> {
+    let file = domain.sig_file;
+    let text = match std::fs::read_to_string(dir.join(file)) {
         Ok(t) => t,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
-        Err(e) => return Some(Err(format!("can't read {SIG_FILE}: {e}"))),
+        Err(e) => return Some(Err(format!("can't read {file}: {e}"))),
     };
-    Some(verify(&text, id, version, hash))
+    Some(verify(domain, &text, id, version, hash))
 }
 
-fn verify(text: &str, id: &str, version: &str, hash: &str) -> Result<String, String> {
-    let sig: SigFile = serde_json::from_str(text).map_err(|e| format!("{SIG_FILE}: {e}"))?;
+fn verify(domain: &Domain, text: &str, id: &str, version: &str, hash: &str) -> Result<String, String> {
+    let file = domain.sig_file;
+    let sig: SigFile = serde_json::from_str(text).map_err(|e| format!("{file}: {e}"))?;
     if sig.sig_version != SIG_VERSION {
-        return Err(format!("{SIG_FILE} is version {}, this AgentMux reads {SIG_VERSION}", sig.sig_version));
+        return Err(format!("{file} is version {}, this AgentMux reads {SIG_VERSION}", sig.sig_version));
     }
     if sig.algorithm != "ed25519" {
-        return Err(format!("{SIG_FILE} uses {:?}, this AgentMux reads ed25519", sig.algorithm));
+        return Err(format!("{file} uses {:?}, this AgentMux reads ed25519", sig.algorithm));
     }
     let b64 = base64::engine::general_purpose::STANDARD;
     let key: [u8; 32] = b64
@@ -73,7 +91,7 @@ fn verify(text: &str, id: &str, version: &str, hash: &str) -> Result<String, Str
         .and_then(|s| s.try_into().ok())
         .ok_or("signature isn't 64 bytes of base64")?;
     let key = VerifyingKey::from_bytes(&key).map_err(|_| "publicKey isn't a valid Ed25519 key")?;
-    key.verify(&signed_message(id, version, hash), &Signature::from_bytes(&signature))
+    key.verify(&signed_message(domain, id, version, hash), &Signature::from_bytes(&signature))
         .map_err(|_| "its signature doesn't match its files".to_string())?;
     Ok(b64.encode(key.as_bytes()))
 }
@@ -183,9 +201,14 @@ pub mod test_keys {
 
     /// A `widget.sig` for `id`/`version`/`hash`, signed by the key from `seed`.
     pub fn sig_file(seed: u8, id: &str, version: &str, hash: &str) -> String {
+        sig_file_in(&super::WIDGET, seed, id, version, hash)
+    }
+
+    /// The same, for a package of `domain`.
+    pub fn sig_file_in(domain: &super::Domain, seed: u8, id: &str, version: &str, hash: &str) -> String {
         let key = SigningKey::from_bytes(&[seed; 32]);
         let b64 = base64::engine::general_purpose::STANDARD;
-        let sig = key.sign(&super::signed_message(id, version, hash));
+        let sig = key.sign(&super::signed_message(domain, id, version, hash));
         serde_json::json!({
             "sigVersion": 1,
             "algorithm": "ed25519",
@@ -207,11 +230,31 @@ mod tests {
     #[test]
     fn a_signature_verifies_only_for_its_own_id_version_and_hash() {
         let sig = test_keys::sig_file(7, "acme.x", "1.0.0", "abc");
-        assert_eq!(verify(&sig, "acme.x", "1.0.0", "abc").unwrap(), test_keys::public_key(7));
-        assert!(verify(&sig, "acme.x", "1.0.1", "abc").is_err());
-        assert!(verify(&sig, "acme.x", "1.0.0", "abd").is_err());
-        assert!(verify(&sig, "evil.x", "1.0.0", "abc").is_err());
-        assert!(verify("{}", "acme.x", "1.0.0", "abc").is_err());
+        assert_eq!(verify(&WIDGET, &sig, "acme.x", "1.0.0", "abc").unwrap(), test_keys::public_key(7));
+        assert!(verify(&WIDGET, &sig, "acme.x", "1.0.1", "abc").is_err());
+        assert!(verify(&WIDGET, &sig, "acme.x", "1.0.0", "abd").is_err());
+        assert!(verify(&WIDGET, &sig, "evil.x", "1.0.0", "abc").is_err());
+        assert!(verify(&WIDGET, "{}", "acme.x", "1.0.0", "abc").is_err());
+    }
+
+    /// Widgets sign the very bytes they signed before domains existed, so
+    /// every widget signature already out there still verifies.
+    #[test]
+    fn a_widget_signs_the_same_bytes_as_before() {
+        assert_eq!(signed_message(&WIDGET, "acme.x", "1.0.0", "abc"), b"agentmux-widget-sig-v1\0acme.x\x001.0.0\0abc".to_vec());
+        assert_eq!(
+            signed_message(&JOB_TEMPLATE, "acme.x", "1.0.0", "abc"),
+            b"agentmux-job-template-sig-v1\0acme.x\x001.0.0\0abc".to_vec()
+        );
+    }
+
+    #[test]
+    fn a_signature_verifies_only_in_its_own_domain() {
+        let widget = test_keys::sig_file(7, "acme.x", "1.0.0", "abc");
+        let template = test_keys::sig_file_in(&JOB_TEMPLATE, 7, "acme.x", "1.0.0", "abc");
+        assert_eq!(verify(&JOB_TEMPLATE, &template, "acme.x", "1.0.0", "abc").unwrap(), test_keys::public_key(7));
+        assert!(verify(&WIDGET, &template, "acme.x", "1.0.0", "abc").is_err(), "a template's signature isn't a widget's");
+        assert!(verify(&JOB_TEMPLATE, &widget, "acme.x", "1.0.0", "abc").is_err(), "a widget's signature isn't a template's");
     }
 
     /// The fixture the SDK's `agentmux-widget sign` signed with the same test
@@ -224,7 +267,7 @@ mod tests {
         assert!(!files.contains_key(SIG_FILE));
         let hash = crate::backend::widget_packages::package_hash(&files);
         assert_eq!(hash, "2f480223aad83d3e220179f1e67c8bd660d5bec197cd334b71f514661018b202");
-        assert_eq!(check(&dir, "acme.fixture", "1.0.0", &hash).unwrap().unwrap(), test_keys::public_key(7));
+        assert_eq!(check(&WIDGET, &dir, "acme.fixture", "1.0.0", &hash).unwrap().unwrap(), test_keys::public_key(7));
         assert_eq!(fingerprint(&test_keys::public_key(7)), "72AS-YEXT-VNGO-NLC5");
     }
 

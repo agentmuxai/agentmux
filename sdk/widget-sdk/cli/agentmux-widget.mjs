@@ -3,11 +3,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Sign AgentMux widget packages (docs/specs/SPEC_WIDGET_SHARING_2026_10_10.md §2).
+ * Sign AgentMux widget packages (docs/specs/SPEC_WIDGET_SHARING_2026_10_10.md §2)
+ * and job templates (docs/specs/SPEC_JOBS_AND_TEMPLATES_2026_10_24.md §5.4).
  *
  *   agentmux-widget keygen <key-file>          a new Ed25519 key; keep it private
- *   agentmux-widget sign <folder> --key <file> writes <folder>/widget.sig
- *   agentmux-widget verify <folder>            checks widget.sig, prints the fingerprint
+ *   agentmux-widget sign <folder> --key <file> writes <folder>/widget.sig, or
+ *                                              template.sig for a job template
+ *   agentmux-widget verify <folder>            checks it, prints the fingerprint
  *
  * Only the command line: the signing itself is widget-sign.mjs. This file
  * always runs main, so it works however it's started (a bin link, npx).
@@ -15,7 +17,7 @@
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { fingerprint, manifestOf, newKey, SIG_FILE, signPackage, verifyPackage } from "./widget-sign.mjs";
+import { fingerprint, manifestOf, newKey, sigFileOf, signPackage, verifyPackage } from "./widget-sign.mjs";
 
 function main(argv) {
     const [cmd, target, ...rest] = argv;
@@ -33,7 +35,7 @@ function main(argv) {
     if (cmd === "sign" && target && opt("--key")) {
         const dir = resolve(target);
         const key = JSON.parse(readFileSync(opt("--key"), "utf8"));
-        writeFileSync(join(dir, SIG_FILE), signPackage(dir, key.seed));
+        writeFileSync(join(dir, sigFileOf(dir)), signPackage(dir, key.seed));
         const m = manifestOf(dir);
         console.log(`Signed ${m.id} ${m.version} · ${fingerprint(key.publicKey)}`);
         return;
