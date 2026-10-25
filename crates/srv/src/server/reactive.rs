@@ -965,7 +965,7 @@ pub(crate) async fn deliver(
             match forward_inject_to_peer(
                 &state,
                 &req,
-                &forwarded_req,
+                &lan_v2::sign_at_origin(&state.mstore, caller_uid, forwarded_req.clone()),
                 ForwardPeer {
                     url: &peer_url,
                     auth_key: &peer_auth_key,
