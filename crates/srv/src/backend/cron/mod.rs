@@ -247,6 +247,12 @@ impl CronScheduler {
 
     /// Load all enabled jobs from the DB and schedule them. Call once at startup.
     pub async fn start(self: &Arc<Self>) {
+        self.start_at(Utc::now()).await;
+    }
+
+    /// [`Self::start`] counting the slots missed while off up to `now_dt`, so a
+    /// test fixes the instant its expected counts are computed from.
+    pub(crate) async fn start_at(self: &Arc<Self>, now_dt: DateTime<Utc>) {
         let store = match &self.jobs_store {
             Some(s) => s.clone(),
             None => {
@@ -263,7 +269,6 @@ impl CronScheduler {
             }
         };
 
-        let now_dt = Utc::now();
         let count = jobs.len();
 
         for job in jobs {
