@@ -111,7 +111,7 @@ async fn an_agents_lower_caps_are_kept() {
 }
 
 /// The ordinary routes serve agents, never the app's window, so a request on
-/// them (or one without the hosts's token) raises no cap.
+/// them (or one without the host's token) raises no cap.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_request_without_the_hosts_token_cannot_raise_a_cap() {
     let (state, owner) = state();

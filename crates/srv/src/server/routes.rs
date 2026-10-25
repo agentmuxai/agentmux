@@ -205,7 +205,6 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/agentmux/work/:id/submit", post(work_tasks::handle_work_submit))
         .route("/agentmux/work/:id/hold", post(work_tasks::handle_work_hold))
         .route("/agentmux/work/:id/unhold", post(work_tasks::handle_work_unhold))
-        .route("/agentmux/work/:id", delete(work_queue::handle_work_cancel))
         .route_layer(middleware::from_fn_with_state(state.clone(), agent_only::require_agent_token));
 
     let bus_routes = Router::new()

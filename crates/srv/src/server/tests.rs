@@ -3544,21 +3544,6 @@ fn agent_memory_write_provenance_req_defaults_a_missing_detail_to_an_empty_objec
 // ── Muxqueue HTTP surface ───────────────────────────────────────────────────
 // docs/reports/REPORT_UNIVERSAL_AGENT_WORK_QUEUE_2026_09_01.md, slice 2.
 
-/// Cancelling a task is the operator's, and the operator does it in the app, not over HTTP: an agent hands a
-/// task back with release, and a request with no token is nobody's, so it is not taken for the operator.
-#[tokio::test]
-async fn work_cancel_over_http_is_refused_with_or_without_a_token() {
-    let (app, tok) = agent_router("a1");
-    for token in [None, Some(&tok)] {
-        let mut req = Request::builder().uri("/agentmux/work/does-not-exist").method("DELETE").header("X-AuthKey", "test-secret-key");
-        if let Some(t) = token {
-            req = req.header("X-Agent-Token", t);
-        }
-        let resp = app.clone().oneshot(req.body(Body::empty()).unwrap()).await.unwrap();
-        assert_eq!(resp.status(), StatusCode::FORBIDDEN, "token: {}", token.is_some());
-    }
-}
-
 /// `GET /api/v1/agent/shutdown/{id}` must reach its handler through the real
 /// router: the MCP tools poll it for the user's answer (SPEC_AGENT_SELF_QUIT
 /// §6.5). It was registered with axum 0.8's `{request_id}` syntax, a literal

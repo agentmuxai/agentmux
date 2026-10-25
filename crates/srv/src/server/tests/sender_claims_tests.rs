@@ -292,7 +292,6 @@ async fn the_work_and_jobs_routes_refuse_a_request_with_no_token() {
         ("POST", "/agentmux/work/w1/submit"),
         ("POST", "/agentmux/work/w1/hold"),
         ("POST", "/agentmux/work/w1/unhold"),
-        ("DELETE", "/agentmux/work/w1"),
         ("POST", "/agentmux/jobs"),
         ("DELETE", "/agentmux/jobs/j1"),
         ("PATCH", "/agentmux/jobs/j1"),
