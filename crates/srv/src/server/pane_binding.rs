@@ -10,6 +10,8 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 
+use crate::backend::reactive::handler::LookupOutcome;
+
 use super::actor;
 use super::caller::Caller;
 use super::AppState;
@@ -42,16 +44,27 @@ pub(super) async fn register_refusal(
 }
 
 /// Why an `unregister` request is refused, if it is: a caller with a token may unregister its own panes only.
+/// The panes a name stands for are the ones the registry itself would tear down for it (`unregister_agent`).
 pub(super) async fn unregister_refusal(state: &AppState, caller: Option<&Caller>, block_id: &str, agent: &str) -> Option<Response> {
     caller?.uid()?;
-    let (block_id, agent) = (block_id.trim().to_string(), agent.trim().to_string());
-    let target = if block_id.is_empty() {
-        state.reactive_handler.list_agents().into_iter().find(|r| r.agent_id.eq_ignore_ascii_case(&agent)).and_then(|r| r.uid)
+    let blocks: Vec<String> = if block_id.trim().is_empty() {
+        // The registry's own key for a name: its route name, lowercased (`unregister_agent`).
+        let key = crate::backend::reactive::sanitize::route_name(agent).unwrap_or_default().to_lowercase();
+        match state.reactive_handler.lookup_by_name(&key) {
+            LookupOutcome::One(reg) => vec![reg.block_id],
+            LookupOutcome::Ambiguous(regs) => regs.into_iter().map(|reg| reg.block_id).collect(),
+            LookupOutcome::NotFound => Vec::new(),
+        }
     } else {
-        let mstore = state.mstore.clone();
-        tokio::task::spawn_blocking(move || crate::backend::agent_resolve::uid_for_block(&mstore, &block_id)).await.unwrap_or(None)
+        vec![block_id.trim().to_string()]
     };
-    actor::own_agent_only(caller, target.as_deref()).err().map(|e| forbidden(&e))
+    let mstore = state.mstore.clone();
+    let owners = tokio::task::spawn_blocking(move || {
+        blocks.iter().map(|block| crate::backend::agent_resolve::uid_for_block(&mstore, block)).collect::<Vec<_>>()
+    })
+    .await
+    .unwrap_or_default();
+    owners.iter().find_map(|owner| actor::own_agent_only(caller, owner.as_deref()).err()).map(|e| forbidden(&e))
 }
 
 #[cfg(test)]
@@ -113,6 +126,14 @@ mod tests {
         let (state, token) = world();
         let (status, v) = post(&state, Some(&token), "/agentmux/reactive/unregister", json!({ "agent_id": "", "block_id": "pb-block-b" })).await;
         assert_eq!(status, StatusCode::FORBIDDEN, "{v}");
+        // By name: the pane is registered under a stable name other than its display name.
+        state.reactive_handler.register_agent_full("PB Beta Display", "pb-block-b", None, 0, Some("pb-beta"), Some("uid-pb-beta"), "test").unwrap();
+        for name in ["pb-beta", "PB Beta Display", "Pb-Beta"] {
+            let (status, v) = post(&state, Some(&token), "/agentmux/reactive/unregister", json!({ "agent_id": name })).await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "by name {name}: {v}");
+        }
+        assert!(state.reactive_handler.get_agent_by_block("pb-block-b").is_some(), "nothing was torn down");
+        let _ = state.reactive_handler.unregister_block("pb-block-b");
         let (status, v) = post(&state, None, "/agentmux/reactive/unregister", json!({ "agent_id": "", "block_id": "pb-block-b" })).await;
         assert_ne!(status, StatusCode::FORBIDDEN, "the window closes any pane: {v}");
         let (status, v) = post(&state, Some(&token), "/agentmux/agent/release", json!({ "uid": "uid-pb-beta" })).await;
