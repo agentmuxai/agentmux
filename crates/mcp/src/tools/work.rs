@@ -356,6 +356,47 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             }
             Ok(hold_text(id, segment, &v))
         }
+        // A leader accepts or sends back a task in Review on the operator's word
+        // (SPEC_KANBAN_ACCEPT_ON_THE_OPERATORS_WORD_2026_10_23.md). srv checks all of
+        // it; the caller is the agent whose signed identity it verifies.
+        "WorkAccept" | "WorkSendBack" => {
+            require_agent_env(local_url, auth_key, block_id)?;
+            let id = task_id(arguments)?;
+            let accept = name == "WorkAccept";
+            let segment = if accept { "accept" } else { "send_back" };
+            let url = format!("{}/agentmux/work/{}/{}", local_url.trim_end_matches('/'), id, segment);
+            let said = arguments.get("user_instruction").and_then(|v| v.as_str()).unwrap_or("").trim();
+            if said.is_empty() {
+                anyhow::bail!("Tasks {segment}: user_instruction is required: the operator's own words, quoted from the message that started this turn.");
+            }
+            let key = if accept { "note" } else { "reason" };
+            let text = arguments.get(key).and_then(|v| v.as_str()).unwrap_or("");
+            if !accept && text.trim().is_empty() {
+                anyhow::bail!("Tasks send_back: reason is required: it goes to the task's holder.");
+            }
+            let auth = crate::identity::sign_ui_automation_auth()?;
+            let body = serde_json::json!({
+                "agent_id": auth.agent_id,
+                "ts_secs": auth.ts_secs,
+                "sig": auth.sig,
+                "user_instruction": said,
+                "text": text,
+            });
+            let resp = client.post(&url).header(AUTH_KEY_HEADER, auth_key).json(&body).send().await
+                .map_err(|e| anyhow::anyhow!("work {segment} request failed: {e}"))?;
+            let status = resp.status();
+            let reply = resp.text().await.unwrap_or_default();
+            let v: Value = serde_json::from_str(&reply).unwrap_or(serde_json::json!({}));
+            if status == reqwest::StatusCode::NOT_FOUND && v.get("error").is_none() {
+                anyhow::bail!("This AgentMux can't {segment} tasks on the operator's word yet; ask the operator to do it in the Kanban.");
+            }
+            if !status.is_success() {
+                // srv's own words say what to do instead; they are the answer.
+                let why = v.get("error").and_then(|e| e.as_str()).map(str::to_string).unwrap_or(reply);
+                anyhow::bail!("Tasks {segment}: {why}");
+            }
+            Ok(decision_text(id, accept, &v))
+        }
         "WorkList" => {
             require_agent_env(local_url, auth_key, block_id)?;
             let url = format!("{}/agentmux/work", local_url.trim_end_matches('/'));
@@ -455,6 +496,17 @@ fn starts_after_text(after: Option<&Value>) -> String {
     format!("\n\nThis task starts after:\n{}\nThe document is what to build; read it first.", lines.join("\n"))
 }
 
+/// The answer to `accept` or `send_back`: what was done, and what it set off.
+fn decision_text(id: &str, accept: bool, v: &Value) -> String {
+    if !accept {
+        return format!("Task #{id} was sent back, on the operator's word. Its holder has the reason.");
+    }
+    match v.get("unlocked").and_then(|n| n.as_u64()).unwrap_or(0) {
+        0 => format!("Task #{id} is accepted, on the operator's word."),
+        n => format!("Task #{id} is accepted, on the operator's word. {n} waiting build{} told it can start.", if n == 1 { " was" } else { "s were" }),
+    }
+}
+
 /// The answer to `hold` or `unhold`: where the task is now.
 fn hold_text(id: &str, segment: &str, v: &Value) -> String {
     let name = v.get("name").and_then(|n| n.as_str()).filter(|n| !n.is_empty()).unwrap_or(id);
@@ -524,6 +576,17 @@ mod tests {
         assert_eq!(task_id(&serde_json::json!({"id": "7f3a-b2"})).unwrap(), "7f3a-b2");
         assert!(task_id(&serde_json::json!({"id": "12/../x"})).is_err());
         assert!(task_id(&serde_json::json!({"id": "#"})).is_err());
+    }
+
+    #[test]
+    fn a_decision_is_worded_with_what_it_unlocked() {
+        let done = serde_json::json!({ "ok": true, "unlocked": 0 });
+        assert_eq!(decision_text("12", true, &done), "Task #12 is accepted, on the operator's word.");
+        let unlocked = serde_json::json!({ "ok": true, "unlocked": 2 });
+        assert!(decision_text("12", true, &unlocked).ends_with("2 waiting builds were told it can start."));
+        let one = serde_json::json!({ "unlocked": 1 });
+        assert!(decision_text("12", true, &one).ends_with("1 waiting build was told it can start."));
+        assert!(decision_text("12", false, &done).contains("sent back, on the operator's word"));
     }
 
     #[test]

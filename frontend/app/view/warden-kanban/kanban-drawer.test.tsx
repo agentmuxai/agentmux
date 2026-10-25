@@ -134,3 +134,23 @@ describe("KanbanDrawer: taking a task back", () => {
         expect(screen.queryByText("Take it back")).toBeNull();
     });
 });
+
+describe("KanbanDrawer: a leader's acceptance", () => {
+    beforeEach(() => vi.clearAllMocks());
+    afterEach(cleanup);
+
+    const accepted = (over: Partial<KanbanTask> = {}) =>
+        claimed({ state: "done", holder: null, holder_unavailable: null, accepted_by: { name: "AgentY", said: "accept them", at: 5 }, ...over });
+
+    it("lets the operator reopen what a leader accepted on their word", async () => {
+        const act = mount(accepted(), [{ ok: true }]);
+        fireEvent.click(screen.getByText("Reopen"));
+        await waitFor(() => expect(act).toHaveBeenCalledTimes(1));
+        expect(act.mock.calls[0][0]).toEqual({ id: "w1", action: "reopen", text: "" });
+    });
+
+    it("offers no Reopen for a task the operator accepted themselves", () => {
+        mount(accepted({ accepted_by: null }), []);
+        expect(screen.queryByText("Reopen")).toBeNull();
+    });
+});

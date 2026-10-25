@@ -184,8 +184,8 @@ Each card in Needs you says why, in its first line: "asks: …", "question waiti
 | Needs you → In progress | operator | **Answer**: the text goes to the holder as the operator's message; the task returns to `claimed` |
 | In progress → Review | agent | `submit` (new): result and links |
 | In progress → Done | agent | `complete` (as today), only for a task that needs no review; otherwise srv puts it in Review and says so in the answer. Like `submit`, its answer names the agent's next waiting task (§6.5) |
-| Review → Done | **operator only** | **Accept** |
-| Review → In progress | operator | **Send back** with a comment, to the same agent; if it is gone, back to Backlog with the comment in the history |
+| Review → Done | **operator**, or a leader seat on the operator's word | **Accept**; `Tasks` `accept` with the operator's quoted words (`SPEC_KANBAN_ACCEPT_ON_THE_OPERATORS_WORD_2026_10_23.md`). The operator can **Reopen** it for 7 days |
+| Review → In progress | operator, or a leader seat on the operator's word | **Send back** with a comment (`Tasks` `send_back` for a leader), to the same agent; if it is gone, back to Backlog with the comment in the history |
 | In progress → Backlog | agent or srv | `release`, lease expiry or the holder closing (as today; uses an attempt). A task the holder filed for itself stays its own; one it took from Anyone goes back to Anyone. |
 | any open state → Done (cancelled) | **operator only** | **Cancel** |
 | failed → Backlog | operator | **Retry** (attempts reset) |
@@ -289,7 +289,7 @@ The operator-config guidance (`crates/srv/operator-config-seed.json`) gets a sho
 
 ### 6.13 Trust
 
-- **Operator-only moves** (Accept, Cancel, Send back, Answer, Start, Retry, reordering and moving tasks between agents) are websocket RPCs from the UI. Hold and unhold are not operator-only: any agent can do them (`SPEC_KANBAN_AGENTS_HOLD_AND_UNHOLD_2026_10_22.md`). No HTTP route an agent's MCP can reach performs them. `DELETE /agentmux/work/:id`, which cancelled without checking who asked, now refuses a call carrying an agent's token.
+- **Operator-only moves** (Cancel, Answer, Start, Retry, reordering and moving tasks between agents) are websocket RPCs from the UI. Hold and unhold are not operator-only: any agent can do them (`SPEC_KANBAN_AGENTS_HOLD_AND_UNHOLD_2026_10_22.md`). Accept and Send back are the operator's in the window; a leader seat does them through `Tasks` `accept` / `send_back` only when the operator's own words, quoted from that leader's current turn, cover the task (`SPEC_KANBAN_ACCEPT_ON_THE_OPERATORS_WORD_2026_10_23.md`). No HTTP route an agent's MCP can reach performs them. `DELETE /agentmux/work/:id`, which cancelled without checking who asked, now refuses a call carrying an agent's token.
 - **An agent can't accept its own work**: `submit` stops at Review for a task that needs review.
 - **A task's prompt is a prompt.** Agent-created tasks are marked with their creator on the card and in the drawer. When the operator starts an agent-created task, the prompt is delivered quoted, with its creator named (§6.8), so the operator's click endorses "do this task", not the raw text as the operator's own words. The claimer's own confirmation rules still apply to what the prompt asks (as the `Tasks` tool's description says today).
 - **Card text is text**: titles, notes and questions render as plain text (or the app's sanitised markdown), never HTML.
