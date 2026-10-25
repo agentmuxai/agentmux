@@ -67,13 +67,9 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 /// can't overwrite another.
 static WRITING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
-/// Refuse a connection registered as an agent.
+/// Only the operator's window, proven by the host, changes profiles.
 fn not_for_agents(ctx: &RpcContext) -> Result<(), String> {
-    if ctx.agent_id.is_empty() {
-        Ok(())
-    } else {
-        Err("FORBIDDEN: only the user creates, changes or deletes browser profiles".to_string())
-    }
+    ctx.operator_only("only the user creates, changes or deletes browser profiles")
 }
 
 fn path() -> Result<std::path::PathBuf, String> {
@@ -111,10 +107,14 @@ mod tests {
     /// An agent's connection carries its id (`bus:register`). Only refusals are
     /// exercised: they return before the profiles file is read or written.
     async fn call_as_agent(command: &str, data: serde_json::Value) -> String {
+        call_with(command, data, RpcContext { agent_id: "AgentX".to_string(), ..Default::default() }).await
+    }
+
+    async fn call_with(command: &str, data: serde_json::Value, ctx: RpcContext) -> String {
         let state = crate::server::tests::test_state();
         let (engine, mut rx) = WshRpcEngine::new();
         register(&engine, &state);
-        engine.set_rpc_context(RpcContext { agent_id: "AgentX".to_string(), ..Default::default() });
+        engine.set_rpc_context(ctx);
         engine.handle_message(RpcMessage {
             command: command.to_string(),
             reqid: "req-1".to_string(),
@@ -132,8 +132,11 @@ mod tests {
             (COMMAND_BROWSER_PROFILES_UPDATE, json!({ "id": "p-0123456789ab", "name": "Mine" })),
             (COMMAND_BROWSER_PROFILES_DELETE, json!({ "id": "p-0123456789ab" })),
         ] {
-            let err = call_as_agent(command, data).await;
+            let err = call_as_agent(command, data.clone()).await;
             assert!(err.contains("FORBIDDEN"), "{command}: {err}");
+            // Nor may a connection the host never proved is the window's.
+            let err = call_with(command, data, RpcContext::default()).await;
+            assert!(err.contains("FORBIDDEN") && err.contains("isn't the AgentMux window"), "{command}: {err}");
         }
     }
 }

@@ -111,7 +111,9 @@ mod tests {
         let state = crate::server::tests::test_state();
         let (engine, mut rx) = WshRpcEngine::new();
         register(&engine, &state);
-        if !agent_id.is_empty() {
+        if agent_id.is_empty() {
+            engine.set_rpc_context(RpcContext::operator_for_tests());
+        } else {
             engine.set_rpc_context(RpcContext { agent_id: agent_id.to_string(), ..Default::default() });
         }
         engine.handle_message(RpcMessage {

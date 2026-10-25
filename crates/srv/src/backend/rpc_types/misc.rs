@@ -226,18 +226,33 @@ pub struct RpcContext {
     /// enforcement — reject if empty (unauthenticated), reject if ≠ request agent_id.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub agent_id: String,
+    /// The CEF host vouched that this connection is the AgentMux window's
+    /// (`server::operator_proof`). Set only by srv, never read from the wire,
+    /// and dropped when the connection registers as an agent.
+    #[serde(skip)]
+    pub operator_proven: bool,
 }
 
 impl RpcContext {
-    /// Refuse a connection registered as an agent (`bus:register`): only the
-    /// operator's own client may call an RPC that acts for the operator. `why`
+    /// Operator-only actions need the host's proof: the connection must be
+    /// the AgentMux window's, proven through the CEF host, and not registered
+    /// as an agent. Holding the instance auth key is not enough. `why`
     /// completes "FORBIDDEN: …".
     pub fn operator_only(&self, why: &str) -> Result<(), String> {
-        if self.agent_id.is_empty() {
-            Ok(())
-        } else {
+        if !self.agent_id.is_empty() {
             Err(format!("FORBIDDEN: {why}"))
+        } else if !self.operator_proven {
+            Err(format!("FORBIDDEN: {why} (this connection isn't the AgentMux window)"))
+        } else {
+            Ok(())
         }
+    }
+
+    /// The operator's window, proven: what tests hand an operator-only
+    /// handler that should let the operator through.
+    #[cfg(test)]
+    pub fn operator_for_tests() -> Self {
+        Self { operator_proven: true, ..Default::default() }
     }
 }
 

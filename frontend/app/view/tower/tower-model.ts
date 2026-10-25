@@ -203,7 +203,7 @@ export class TowerViewModel {
         });
         [this.error, this.setError] = createSignal<string | null>(null);
         [this.stalled, this.setStalled] = createSignal(false);
-        [this.sort, this.setSort] = createSignal<Sort>({ key: "cpu", desc: true });
+        [this.sort, this.setSort] = createSignal<Sort>({ key: "mem", desc: true });
         [this.expanded, this.setExpanded] = createSignal<ReadonlySet<string>>(new Set<string>());
         [this.filter, this.setFilter] = createSignal("");
         this.kindFilter = createMemo(() => {
@@ -282,8 +282,15 @@ export class TowerViewModel {
         return recent.reduce((a, b) => a + b, 0) / recent.length;
     };
 
-    /** A rail entry's last minute of known CPU rates, oldest first: its
+    /** A rail entry's last minute of known memory, oldest first: its
      *  sparkline. */
+    recentMem = (id: string): number[] =>
+        (this.history().get(id) ?? [])
+            .slice(-HISTORY_POINTS)
+            .map((p) => p.mem)
+            .filter((c): c is number => c != null);
+
+    /** A rail entry's last minute of known CPU rates, oldest first. */
     recentCpu = (id: string): number[] =>
         (this.history().get(id) ?? [])
             .slice(-HISTORY_POINTS)

@@ -39,19 +39,19 @@ export function HistoryCharts(props: {
 }): JSX.Element {
     const series = (): Series[] => [
         {
+            label: "Memory",
+            value: (p) => p.mem,
+            format: (v) => formatMem(v),
+            floor: 64 * 1024 * 1024,
+            color: "var(--sysinfo-mem-color)",
+        },
+        {
             label: "CPU",
             value: (p) => (p.cpu == null ? undefined : props.cpuPercent(p.cpu)),
             // Back from percent to the pane's own CPU format.
             format: (v) => (v == null ? "—" : props.formatCpu(v / props.cpuPercent(1))),
             floor: 5,
             color: props.color ?? "var(--sysinfo-cpu-color)",
-        },
-        {
-            label: "Memory",
-            value: (p) => p.mem,
-            format: (v) => formatMem(v),
-            floor: 64 * 1024 * 1024,
-            color: "var(--sysinfo-mem-color)",
         },
     ];
     return (
