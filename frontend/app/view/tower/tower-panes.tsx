@@ -240,10 +240,10 @@ function PaneRows(props: { model: TowerViewModel; pane: TowerPane; cpu: Cpu }) {
                     fallback={
                         <>
                             <td class="tower-num tower-muted" title={asleep() ? undefined : IN_WINDOW_TITLE}>
-                                —
+                                {asleep() ? "no page" : "—"}
                             </td>
                             <td class="tower-num tower-muted" title={asleep() ? undefined : IN_WINDOW_TITLE}>
-                                {asleep() ? "no page" : "—"}
+                                —
                             </td>
                         </>
                     }
@@ -253,12 +253,13 @@ function PaneRows(props: { model: TowerViewModel; pane: TowerPane; cpu: Cpu }) {
             </tr>
             <Show when={props.pane.shared.length > 0}>
                 <tr class="tower-panes-shared">
-                    <td class="tower-name tower-muted" colspan={3}>
+                    <td class="tower-name tower-muted" colspan={2}>
                         Shares a renderer with another browser pane: counted once, not in this pane's total
                     </td>
                     <td class="tower-num tower-muted">
                         {formatMem(props.pane.shared.reduce((a, p) => a + (p.mem ?? 0), 0))}
                     </td>
+                    <td />
                 </tr>
             </Show>
             <Show when={open()}>

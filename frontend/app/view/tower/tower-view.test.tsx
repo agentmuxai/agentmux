@@ -1204,6 +1204,28 @@ describe("Tower's Panes view", () => {
         expect(screen.getByText(/80.0 MB in renderers several browser panes share, counted once/)).toBeInTheDocument();
     });
 
+    it("keeps each figure under its own header: the shared renderer's memory under Memory, a missing page's note too", async () => {
+        renderTower();
+        await screen.findByTestId("tower-pane-news");
+        const headerIndex = (name: string) =>
+            within(screen.getByRole("table", { name: "Panes" }))
+                .getAllByRole("columnheader")
+                .findIndex((h) => h.textContent?.trim() === name);
+        const memory = headerIndex("Memory");
+        const cpu = headerIndex("CPU");
+        // The label spans Pane and State, so the figure that follows is Memory's and CPU's cell is empty.
+        const shared = document.querySelector(".tower-panes-shared") as HTMLElement;
+        const cells = [...shared.children] as HTMLElement[];
+        expect(cells[0].getAttribute("colspan")).toBe("2");
+        expect(cells.length).toBe(1 + (cpu - 1));
+        expect(cells[memory - 1]).toHaveTextContent("MB");
+        expect(cells[cpu - 1]).toBeEmptyDOMElement();
+        // An asleep pane's "no page" is Memory's cell, the dash CPU's.
+        const slept = [...screen.getByTestId("tower-pane-slept").children] as HTMLElement[];
+        expect(slept[memory]).toHaveTextContent("no page");
+        expect(slept[cpu]).toHaveTextContent("—");
+    });
+
     it("goes to a pane from its row", async () => {
         renderTower();
         const gh = await screen.findByTestId("tower-pane-gh");
@@ -1328,6 +1350,8 @@ describe("Tower: memory first", () => {
         expect(cpu).toHaveTextContent("CPU");
         // Memory is on the row's first line, ahead of CPU in the document.
         expect(mem.compareDocumentPosition(cpu) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        // Narrow panes hide CPU in the rail; the row's hover text still has both.
+        expect(row.title).toBe("AgentX: 1.0 GB · CPU 50% · 2 processes");
     });
 
     it("heads the agent's detail with its memory, then its CPU", async () => {

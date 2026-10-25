@@ -178,7 +178,7 @@ function RailRow(props: { model: TowerViewModel; entry: RailEntry; cpu: Cpu; sel
                 `tower-rail-row--${props.entry.kind}`
             )}
             data-testid={`tower-rail-${props.entry.id}`}
-            title={`${props.entry.label}: ${count(props.entry.processes, "process")}`}
+            title={`${props.entry.label}: ${formatMem(props.entry.mem)} · CPU ${props.cpu(props.entry.cpu)} · ${count(props.entry.processes, "process")}`}
             onClick={() => m.select(props.entry.id)}
         >
             <Swatch entry={props.entry} remote={remote()} />
