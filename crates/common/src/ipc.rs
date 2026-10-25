@@ -91,6 +91,8 @@ pub enum Command {
         level: String,
         avg_ms: u64,
     },
+    /// Launcher → host: quit gracefully, as the host's `quit_app` command does (tray Quit, agreed upgrade restart).
+    QuitApp,
     /// Graceful disconnect. Server logs and closes the connection.
     /// In B.3+ this becomes `Quit { reason }` with shutdown semantics;
     /// for B.2 it's just a polite goodbye.
