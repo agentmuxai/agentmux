@@ -9,7 +9,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { atomWithThrottle, boundNumber, createSignalAtom, SignalAtom } from "@/util/util";
 import type { Properties as CSSProperties } from "csstype";
 import { createEffect, createMemo, createRoot, getOwner, on, runWithOwner, Owner } from "solid-js";
-import { chipPlaceholderRect } from "./chipPlaceholder";
+import { chipDropRect } from "./chipPlaceholder";
 import { getLayoutStateAtomFromTab } from "./layoutAtom";
 import { findNode, withDerivedNodeIds } from "./layoutNode";
 import { computeMoveNode } from "./layoutTree";
@@ -810,15 +810,15 @@ export class LayoutModel {
                             // half-pane slot (SPEC_CHIP_DROP_PLACEHOLDER_ON_THE_SEAM_2026_10_21.md).
                             const chip = this.draggedChipSize(action.node?.id);
                             if (chip) {
-                                const after = action.index > targetIndex;
-                                const outerEdge = !after || action.index >= (parentNode.children?.length ?? 1);
                                 return setTransform(
-                                    chipPlaceholderRect(
-                                        targetBoundingRect,
-                                        chip,
-                                        parentNode.flexDirection,
-                                        after,
-                                        outerEdge
+                                    chipDropRect(
+                                        parentNode,
+                                        findNode(this.treeState.rootNode, action.node.id) ?? action.node,
+                                        targetNode,
+                                        targetIndex,
+                                        action.index,
+                                        (n) => this.getNodeRect(n),
+                                        chip
                                     )
                                 );
                             }
