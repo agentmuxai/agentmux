@@ -28,7 +28,7 @@ const CompressionLine = (props: { c: HistoryCompression }): JSX.Element => {
                 when={props.c.frames > 0}
                 fallback={
                     <span class="warden-manager-dim">
-                        {props.c.enabled ? "Pane history compression is on; nothing is compressed yet." : "Pane history isn't compressed (setting agent:transcriptframes)."}
+                        {props.c.enabled ? "Pane history compression is on; nothing is compressed yet." : "Pane history compression is turned off (agent:transcriptframes is false)."}
                     </span>
                 }
             >
