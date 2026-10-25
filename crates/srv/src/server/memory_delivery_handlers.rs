@@ -737,12 +737,19 @@ fn compose_fallback_delivery(
     reason: memory_delivery::FallbackReason,
     now: i64,
 ) -> Option<FallbackDelivery> {
-    let mut entries = global_entries(state, block_id);
-    if let Some(uid) = crate::server::agent_handlers::input::persisted_agent_identity(&state.mstore, block_id).map(|i| i.uid) {
-        entries.extend(personal_entries(&uid));
+    let global = global_entries(state, block_id);
+    let uid = crate::server::agent_handlers::input::persisted_agent_identity(&state.mstore, block_id).map(|i| i.uid);
+    // A new session whose startup file carries every current Global section
+    // doesn't get them a second time, as the hook doesn't send them (LC3).
+    let global_in_file = reason == memory_delivery::FallbackReason::FreshSession
+        && uid.as_deref().is_some_and(|uid| global_memory_in_latest_startup_files(uid, &global));
+    let mut entries = if global_in_file { Vec::new() } else { global.clone() };
+    if let Some(uid) = &uid {
+        entries.extend(personal_entries(uid));
     }
-    let composed = memory_delivery::compose_fallback(&entries, reason)?;
-    let mut items = delivery_items(&entries, &composed, composed.text.chars().count());
+    let composed = memory_delivery::compose_fallback_with(&entries, reason, global_in_file)?;
+    let mut items = if global_in_file { global.iter().map(in_startup_file_item).collect() } else { Vec::new() };
+    items.extend(delivery_items(&entries, &composed, composed.text.chars().count()));
     // A compaction's running summary rides along: srv's input handler appends
     // it to this same message (`continuity_state::with_state_after_compaction`).
     let summary = (reason == memory_delivery::FallbackReason::Compaction)
@@ -881,6 +888,22 @@ fn global_memory_in_startup_files(files: &[crate::backend::startup_files::Startu
         && files.iter().any(|f| {
             f.owner == crate::backend::startup_files::Owner::Agentmux && global.iter().all(|e| f.text.contains(&e.text))
         })
+}
+
+/// [`global_memory_in_startup_files`] for the agent's latest Claude spawn, from
+/// where its continuity segment says the CLI started: the fallback has no
+/// hook request to read them from.
+fn global_memory_in_latest_startup_files(agent_uid: &str, global: &[Entry]) -> bool {
+    let Some(fs) = crate::backend::agent_session::global_transcript_store() else { return false };
+    let Some(latest) = crate::backend::continuity_segments::segments(fs.as_ref(), agent_uid)
+        .into_iter()
+        .filter(|s| s.start.provider == "claude" && !s.start.cwd.is_empty())
+        .max_by_key(|s| s.start.started_at_ms)
+    else {
+        return false;
+    };
+    let launch = LaunchDirs { cwd: latest.start.cwd.into(), config_dir: latest.start.config_dir.filter(|c| !c.is_empty()).map(Into::into) };
+    global_memory_in_startup_files(&startup_files(&launch), global)
 }
 
 /// The files the CLI read by itself at session start, as card items. Only

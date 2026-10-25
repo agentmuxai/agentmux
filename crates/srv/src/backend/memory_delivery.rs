@@ -284,18 +284,35 @@ impl FallbackReason {
 /// A compaction's running summary is not here: srv's input handler appends
 /// it (`continuity_state::with_state_after_compaction`).
 pub fn compose_fallback(entries: &[Entry], reason: FallbackReason) -> Option<Composed> {
+    compose_fallback_with(entries, reason, false)
+}
+
+/// [`compose_fallback`], saying so when the Global Memory is left out because
+/// the new session's startup file already carries it (`entries` then holds
+/// the Personal Memory only), as the hook's delivery does
+/// ([`compose_items_with`]).
+pub fn compose_fallback_with(entries: &[Entry], reason: FallbackReason, global_in_startup_file: bool) -> Option<Composed> {
     let global: Vec<usize> = (0..entries.len()).filter(|&i| entries[i].tier == Tier::Global).collect();
     let personal: Vec<usize> = (0..entries.len()).filter(|&i| entries[i].tier == Tier::Personal).collect();
     if global.is_empty() && personal.is_empty() {
         return None;
     }
     let mut b = Tracked { out: String::new(), chars: 0 };
-    b.push(&format!(
-        "<system-reminder>\n{REINJECTION_SIGNATURE} {} Below is your\n\
-         complete Global Memory and Personal Memory content — read all of it now,\n\
-         not just the index.\n\n",
-        reason.clause()
-    ));
+    if global_in_startup_file {
+        b.push(&format!(
+            "<system-reminder>\n{REINJECTION_SIGNATURE} {} Your Global Memory is already in your startup\n\
+             instructions, so it isn't repeated here. Below is your complete Personal Memory,\n\
+             read all of it now, not just the index.\n\n",
+            reason.clause()
+        ));
+    } else {
+        b.push(&format!(
+            "<system-reminder>\n{REINJECTION_SIGNATURE} {} Below is your\n\
+             complete Global Memory and Personal Memory content — read all of it now,\n\
+             not just the index.\n\n",
+            reason.clause()
+        ));
+    }
     let mut spans = Vec::new();
     push_sections(&mut b, entries, &global, &personal, &mut spans);
     b.push("</system-reminder>\n");
@@ -707,6 +724,26 @@ mod tests {
         ));
         assert!(!fresh.text.contains("# Global Memory"), "an empty section is left out");
         assert_eq!(compose_fallback(&[], FallbackReason::Compaction), None);
+    }
+
+    #[test]
+    fn a_fresh_session_fallback_without_the_global_memory_says_where_it_is() {
+        let personal = vec![Entry {
+            label: "notes.md".into(),
+            tier: Tier::Personal,
+            text: "P1".into(),
+            name: "notes.md".into(),
+            system: false,
+            bundle_id: None,
+            path: None,
+        }];
+        let c = compose_fallback_with(&personal, FallbackReason::FreshSession, true).unwrap();
+        assert!(c.text.contains("Your Global Memory is already in your startup"), "{}", c.text);
+        assert!(!c.text.contains("# Global Memory"), "{}", c.text);
+        assert!(c.text.contains("# Personal Memory (1 entry)\nP1\n"));
+        assert!(crate::ambient::digest::is_hidden_reinjection_text(&c.text), "still a hidden reinjection");
+        assert_eq!(compose_fallback_with(&[], FallbackReason::FreshSession, true), None, "nothing left to say");
+        assert_eq!(compose_fallback_with(&personal, FallbackReason::FreshSession, false), compose_fallback(&personal, FallbackReason::FreshSession));
     }
 
     #[test]
