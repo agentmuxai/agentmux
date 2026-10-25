@@ -596,8 +596,9 @@ pub(crate) async fn fleet_bulk_stop_impl(
         let batch: Vec<String> = (&mut iter).take(batch_size).collect();
         let batch_len = batch.len();
         let mut batch_failures = 0usize;
-        for block_id in batch {
-            let request_id = uuid::Uuid::new_v4().to_string();
+        // All of the batch at once: a target on another instance waits for that instance's user, and the
+        // windows must run side by side rather than one after another.
+        let stops = batch.into_iter().map(|block_id| async move {
             // Local (this instance's own in-process controller registry)
             // first — unchanged, fast path. Only reach for the shared
             // cross-channel registry when nothing local matches
@@ -610,6 +611,10 @@ pub(crate) async fn fleet_bulk_stop_impl(
                     None => (block_id.clone(), stop_one_agent_block(state, &block_id, signal, None).await.map(|_| ())),
                 },
             };
+            (block_id, target_agent, outcome)
+        });
+        for (block_id, target_agent, outcome) in futures_util::future::join_all(stops).await {
+            let request_id = uuid::Uuid::new_v4().to_string();
             match outcome {
                 Ok(()) => {
                     state.reactive_handler.log_fleet_action_audit(
