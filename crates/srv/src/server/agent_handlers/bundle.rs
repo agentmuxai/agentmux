@@ -196,23 +196,23 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 }
                 memory.updated_at = now;
                 // bundle_upsert_system_if_changed atomically compares against
-                // the current row and skips recording an "armory-ui" version
+                // the current row and skips recording a version
                 // for a byte-identical save (operator opens a seeded entry
                 // and hits Save without changing anything — the UI does not
                 // suppress this request) — recording one would permanently
                 // mark the row as human-owned even though nothing actually
                 // changed, so a future Operator Config manifest update would
                 // be skipped forever instead of just once. A REAL edit is
-                // still stamped written_by="armory-ui" as before, so the
-                // next startup's reseed correctly leaves it alone. The
+                // stamped with its writer ("armory-ui" for the window, the
+                // agent's id for a registered agent), so the next startup's
+                // reseed correctly leaves it alone. The
                 // read-decide-write happens in one transaction, not as a
                 // separate bundle_get + conditional call here — an earlier
                 // revision raced a concurrent writer (e.g. another AgentMux
                 // instance's own reseed) between the read and the write.
                 // Codex P1/P2, ReAgent P2, PR #3244.
                 // Same optional base check as `upsertmemory` above.
-                // A registered agent's save is recorded as that agent: like the window's it is not the
-                // seeder's, so a reseed leaves the entry alone, and it never reads as the person's.
+                // A registered agent's save is recorded as that agent, never as the person's.
                 let (written_by, source) = writer_of(&ctx, "human");
                 mstore
                     .bundle_upsert_system_if_changed_based(&memory, written_by, source, "{}", base_sha256.as_deref())
