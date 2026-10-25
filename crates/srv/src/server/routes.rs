@@ -455,6 +455,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/api/v1/ui/browser/actions", post(crate::server::browser_actions::handle_ui_browser_actions))
         .route("/api/v1/host/browser_pause", post(crate::server::browser_actions::handle_host_browser_pause))
         .route("/api/v1/host/widget_approval", post(super::widget_handlers::handle_host_widget_approval))
+        .route("/api/v1/host/job_templates", post(super::job_template_handlers::handle_host_job_templates))
         // Everything the Vault pane does, relayed by the host.
         .route("/api/v1/host/vault", post(super::vault_handlers::handle_host_vault))
         // The user's clicks in the version panel (Download, Upgrade & restart,

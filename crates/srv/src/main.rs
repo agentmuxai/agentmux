@@ -153,6 +153,9 @@ async fn app_main() {
         bg.event_bus.clone(),
         bg.broker.clone(),
     );
+    // Job templates: this instance's approvals and pinned publishers, beside
+    // the widgets' (SPEC_JOBS_AND_TEMPLATES_2026_10_24.md §5.4).
+    backend::job_templates::start(&config.data_home);
 
     // 5. Bind TCP listeners, bring up LAN discovery / LSP supervisor / process tracker.
     let net = boot_timing::time_async(
