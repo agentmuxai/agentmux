@@ -176,7 +176,9 @@ pub trait TrackerHandle: Send + Sync {
 
     /// Run every process in this tree at below-normal CPU priority (`on`), or
     /// back at normal. Descendants inherit it and cannot raise it themselves.
-    /// Windows only (a Job Object priority-class limit); a no-op elsewhere.
+    /// Windows only (a Job Object priority-class limit); a no-op elsewhere: on
+    /// Linux and macOS the priority is set at spawn instead
+    /// (`registry::place_spawn`, nice `AGENT_NICE_LEVEL`), where it is inherited too.
     /// See `docs/analysis/ANALYSIS_SRV_HTTP_STALL_IO_DRIVER_STARVATION_2026_09_26.md` §8.3.
     fn set_below_normal_priority(&self, _on: bool) -> Result<(), String> {
         Ok(())
