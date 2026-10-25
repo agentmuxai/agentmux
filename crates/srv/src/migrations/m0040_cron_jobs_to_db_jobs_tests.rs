@@ -118,3 +118,25 @@ fn a_store_without_cron_jobs_copies_nothing() {
     assert_eq!(missing(&path).unwrap(), 0);
     assert_eq!(copy_cron_jobs(&path).unwrap(), 0);
 }
+
+/// `db_cron_jobs` is no longer written: deleting a migrated job leaves its old
+/// row behind, which is a healthy store. Only a migration that wrote nothing
+/// fails the check.
+#[test]
+fn verify_tolerates_a_deleted_job_and_flags_a_copy_that_wrote_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = shared_store(dir.path());
+    let ctx = MigrationContext {
+        home: dir.path().to_path_buf(),
+        data_dir: dir.path().to_path_buf(),
+        shared_store_path: path.clone(),
+        channel_store_path: dir.path().join("unused-channel.db"),
+    };
+    assert!(matches!(M0040CronJobsToDbJobs.verify(&ctx), VerifyOutcome::Mismatch(_)), "recorded, nothing copied");
+
+    copy_cron_jobs(&path).unwrap();
+    assert!(matches!(M0040CronJobsToDbJobs.verify(&ctx), VerifyOutcome::Ok(_)));
+
+    Store::open_shared(&path).unwrap().cron_delete("cron-old").unwrap();
+    assert!(matches!(M0040CronJobsToDbJobs.verify(&ctx), VerifyOutcome::Ok(_)), "a deleted job is not a failure");
+}

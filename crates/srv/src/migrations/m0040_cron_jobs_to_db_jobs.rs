@@ -59,9 +59,16 @@ impl Migration for M0040CronJobsToDbJobs {
         if !ctx.shared_store_path.exists() {
             return VerifyOutcome::Ok("no shared store".into());
         }
+        // `db_cron_jobs` is no longer written, so a job deleted since leaves its
+        // old row behind: a gap alone is not a failure. The migration wrote
+        // nothing only when `db_jobs` is missing or empty while cron jobs exist.
         match missing(&ctx.shared_store_path) {
             Ok(0) => VerifyOutcome::Ok("every cron job is in db_jobs".into()),
-            Ok(n) => VerifyOutcome::Mismatch(format!("{n} cron job(s) not in db_jobs")),
+            Ok(n) => match jobs_rows(&ctx.shared_store_path) {
+                Ok(0) => VerifyOutcome::Mismatch(format!("{n} cron job(s), none in db_jobs")),
+                Ok(rows) => VerifyOutcome::Ok(format!("db_jobs has {rows} job(s); {n} cron row(s) were deleted since")),
+                Err(e) => VerifyOutcome::Error(e),
+            },
             Err(e) => VerifyOutcome::Error(e),
         }
     }
@@ -104,6 +111,18 @@ fn missing(shared: &Path) -> Result<usize, String> {
         "SELECT COUNT(*) FROM db_cron_jobs WHERE id <> ''"
     };
     conn.query_row(sql, [], |r| r.get::<_, i64>(0)).map(|n| n as usize).map_err(|e| format!("count: {e}"))
+}
+
+/// How many jobs `db_jobs` holds (0 when the table is missing). Read-only.
+fn jobs_rows(shared: &Path) -> Result<usize, String> {
+    let conn = Connection::open_with_flags(shared, OpenFlags::SQLITE_OPEN_READ_ONLY).map_err(|e| format!("open: {e}"))?;
+    let has: bool = conn
+        .query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'db_jobs')", [], |r| r.get(0))
+        .map_err(|e| format!("probe db_jobs: {e}"))?;
+    if !has {
+        return Ok(0);
+    }
+    conn.query_row("SELECT COUNT(*) FROM db_jobs", [], |r| r.get::<_, i64>(0)).map(|n| n as usize).map_err(|e| format!("count: {e}"))
 }
 
 #[cfg(test)]
