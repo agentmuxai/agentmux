@@ -113,8 +113,9 @@ pub(crate) async fn handle_update_status(
 }
 
 /// `POST /api/v1/agent/self/upgrade`: the `App` tool's `upgrade`. Starts the
-/// upgrade when the user's own turn asked for it (`self_quit::gate`, as for
-/// `QuitSelf`), otherwise asks the user in every window.
+/// upgrade when the user's own turn asked for it (`self_quit::gate_upgrade`: as
+/// for `QuitSelf`, but not a Swarm broadcast), otherwise asks the user in every
+/// window.
 pub(crate) async fn handle_request_upgrade(
     axum::extract::State(state): axum::extract::State<AppState>,
     caller: Option<axum::Extension<crate::server::caller::Caller>>,
@@ -143,7 +144,7 @@ pub(crate) async fn handle_request_upgrade(
     };
     let agent = req.auth.agent_id.as_str();
     let provenance = crate::backend::blockcontroller::get_controller(&block_id).and_then(|c| c.turn_provenance());
-    let outcome = match crate::sagas::self_quit::gate(provenance.as_ref(), &req.user_instruction) {
+    let outcome = match crate::sagas::self_quit::gate_upgrade(provenance.as_ref(), &req.user_instruction) {
         Ok(()) => {
             tracing::info!(agent, version = %version, reason, "upgrade: the user's own turn asked; starting");
             // Prompts other agents raised for this release are answered by it;

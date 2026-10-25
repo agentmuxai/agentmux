@@ -225,7 +225,9 @@ App({ action: "upgrade", reason: "…", user_instruction?: "…", version?: "0.5
   `backend/upgrade_request.rs`) **never restarts on the agent's word
   alone.** A restart stops every agent, interrupts the user's own work, and
   an agent can be prompt-injected. Same trust model as `QuitSelf`
-  (`self_quit::gate`):
+  (`self_quit::gate`), except that a Swarm broadcast never counts
+  (`self_quit::gate_upgrade`, owner decision 2026-10-23: an upgrade is once
+  per machine, while a broadcast may still tell an agent to quit):
   - the user's own turn asked for it (the turn was started by the user,
     nothing else was delivered since, and `user_instruction` quotes them)
     → `started`: the §4.1 flow begins (download if needed, then "when agents
