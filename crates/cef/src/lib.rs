@@ -199,7 +199,7 @@ mod launcher_parent_tests {
 /// `bootstrap.exe` before loading this DLL (Windows + sandbox feature), or
 /// `null_mut()` on all other platforms / sandbox-off builds.
 pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
-    agentmux_common::secret_env::stash_startup_secrets(); // first: no child inherits them
+    agentmux_common::process_hardening::stash_and_harden_host(); // first: no child inherits the secrets
     // Internal self-probe mode (Linux userns-sandbox detection) — must be
     // the very first check in this function, before anything else: a
     // probe-mode process does nothing but this one syscall and exits, so

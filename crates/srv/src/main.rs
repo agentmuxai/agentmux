@@ -90,6 +90,7 @@ async fn app_main() {
     //    the parent process watcher BEFORE tokio runtime does real work
     //    (Linux/macOS only). docs/specs/SPEC_SRV_HEADLESS_MODE_2026_09_26.md.
     let headless = headless::requested();
+    agentmux_common::process_hardening::deny_memory_access(headless);
     if headless {
         match headless::prepare_env() {
             Ok(Some(key_file)) => eprintln!("agentmux-srv --headless: auth key written to {}", key_file.display()),
