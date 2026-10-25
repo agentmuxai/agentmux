@@ -25,12 +25,12 @@
     }
 
     &.is-copied {
-        color: var(--success-color);
+        color: var(--success-text-color);
         border-color: var(--success-color);
     }
 
     &.is-failed {
-        color: var(--error-color);
+        color: var(--error-text-color);
         border-color: var(--error-color);
     }
 }
@@ -53,11 +53,11 @@
     }
 
     &.is-copied i {
-        color: var(--success-color);
+        color: var(--success-text-color);
     }
 
     &.is-failed i {
-        color: var(--error-color);
+        color: var(--error-text-color);
     }
 }
 
@@ -84,6 +84,6 @@
 
 .copy-error-button-fallback-hint {
     font-size: var(--text-xs);
-    color: var(--error-color);
+    color: var(--error-text-color);
     white-space: nowrap;
 }

@@ -142,7 +142,7 @@
                     }
 
                     > i {
-                        color: var(--warning-color);
+                        color: var(--warning-text-color);
                         font-size: 16px;
                     }
 
@@ -337,14 +337,14 @@
     }
 
     .block-error-fallback-icon {
-        color: var(--error-color);
+        color: var(--error-text-color);
         font-size: var(--text-lg);
     }
 
     .block-error-fallback-title {
         font-size: var(--text-md);
         font-weight: var(--font-weight-bold);
-        color: var(--error-color);
+        color: var(--error-text-color);
     }
 
     .block-error-fallback-body {

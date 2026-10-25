@@ -13,7 +13,7 @@
     margin-left: var(--space-1-5);
     font-size: var(--text-2xs);
     font-weight: 500;
-    color: var(--warning-color);
+    color: var(--warning-text-color);
     letter-spacing: 0;
     text-transform: none;
 }
@@ -37,7 +37,7 @@
     font-size: var(--text-xs);
     line-height: 1;
 
-    &--error   { color: var(--error-color); }
+    &--error   { color: var(--error-text-color); }
     &--update  { color: var(--accent-color); }
     &--working { color: var(--accent-color); }
 }
@@ -52,8 +52,8 @@
     // must read in full in a narrow panel: wrap it instead of an ellipsis.
     &--wrap  { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
     &--dim   { color: var(--secondary-text-color); }
-    &--warn  { color: var(--warning-color); }
-    &--error { color: var(--error-color); }
+    &--warn  { color: var(--warning-text-color); }
+    &--error { color: var(--error-text-color); }
 }
 
 // ── Buttons ──────────────────────────────────────────────────────────────────

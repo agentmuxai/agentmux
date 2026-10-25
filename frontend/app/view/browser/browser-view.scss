@@ -140,7 +140,7 @@ $browser-nav-stack-below: 388px;
 }
 
 .browser-bookmark-btn-error {
-    color: var(--error-color);
+    color: var(--error-text-color);
 }
 
 // The Profile button and its menu (SPEC_BROWSER_PANE_PROFILES_MENU_2026_10_09.md §3–§4).
@@ -269,7 +269,7 @@ $browser-nav-stack-below: 388px;
 .browser-error {
     padding: var(--space-3) var(--space-4);
     background: var(--error-bg);
-    color: var(--error-color);
+    color: var(--error-text-color);
     font-size: var(--text-base);
     border-bottom: 1px solid var(--error-line);
     flex-shrink: 0;
@@ -410,7 +410,7 @@ $browser-nav-stack-below: 388px;
     }
 
     .browser-bypass-strip-error {
-        color: var(--error-color);
+        color: var(--error-text-color);
     }
 
     // Bypass on: the whole strip turns red, so it can't be missed
@@ -421,7 +421,7 @@ $browser-nav-stack-below: 388px;
         border-bottom-color: var(--error-line);
 
         > i {
-            color: var(--error-color);
+            color: var(--error-text-color);
         }
     }
 
@@ -500,7 +500,7 @@ $browser-nav-stack-below: 388px;
         }
 
         &--failed .browser-action-log-how {
-            color: var(--error-color);
+            color: var(--error-text-color);
         }
     }
 
@@ -535,7 +535,7 @@ $browser-nav-stack-below: 388px;
         font-size: var(--text-md);
 
         > i {
-            color: var(--error-color);
+            color: var(--error-text-color);
         }
     }
 
@@ -547,7 +547,7 @@ $browser-nav-stack-below: 388px;
     }
 
     .browser-bypass-confirm-error {
-        color: var(--error-color);
+        color: var(--error-text-color);
     }
 }
 

@@ -6,13 +6,13 @@
     &.copied {
         opacity: 1;
         i {
-            color: var(--success-color);
+            color: var(--success-text-color);
         }
     }
     &.error {
         opacity: 1;
         i {
-            color: var(--error-color);
+            color: var(--error-text-color);
         }
     }
 }

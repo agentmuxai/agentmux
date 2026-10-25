@@ -88,7 +88,7 @@
     background: var(--error-bg);
     border: 1px solid var(--error-line);
     border-radius: 0;
-    color: var(--error-color);
+    color: var(--error-text-color);
 }
 
 .identity-form-error-text {
@@ -121,7 +121,7 @@
     background: var(--warning-bg);
     border: 1px solid var(--warning-line);
     border-radius: 0;
-    color: var(--warning-color);
+    color: var(--warning-text-color);
 }
 
 .identity-form-footer {

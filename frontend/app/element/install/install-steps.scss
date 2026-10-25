@@ -43,12 +43,12 @@
     }
 
     [data-status="done"] > & {
-        color: var(--success-color);
+        color: var(--success-text-color);
         font-weight: 700;
     }
 
     [data-status="failed"] > & {
-        color: var(--error-color);
+        color: var(--error-text-color);
         font-weight: 700;
     }
 }
@@ -72,7 +72,7 @@
     color: var(--secondary-text-color);
 
     [data-status="failed"] > & {
-        color: var(--error-color);
+        color: var(--error-text-color);
         white-space: normal;
     }
 }

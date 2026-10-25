@@ -323,7 +323,7 @@
 }
 
 .files-entry-error {
-    color: var(--warning-color, var(--error-color));
+    color: var(--warning-text-color, var(--error-color));
     font-size: var(--text-2xs);
 }
 
@@ -393,7 +393,7 @@
     @include mixins.truncate;
 
     .files-status-error {
-        color: var(--error-color);
+        color: var(--error-text-color);
     }
 }
 
@@ -593,7 +593,7 @@
 
 .files-button-danger {
     border-color: var(--error-color);
-    color: var(--error-color);
+    color: var(--error-text-color);
 }
 
 // ── Git markers (spec §12, Phase 2) ─────────────────────────────────────────
@@ -609,17 +609,17 @@
 
 .files-git-modified,
 .files-git-renamed {
-    color: var(--warning-color);
+    color: var(--warning-text-color);
 }
 
 .files-git-untracked,
 .files-git-added {
-    color: var(--success-color);
+    color: var(--success-text-color);
 }
 
 .files-git-deleted,
 .files-git-conflicted {
-    color: var(--error-color);
+    color: var(--error-text-color);
 }
 
 .files-rows .files-row.files-row-ignored .files-name {

@@ -16,9 +16,9 @@ const GpuStatus = (): JSX.Element => {
             case "hardware":
                 return "var(--secondary-text-color)";
             case "software":
-                return "var(--warning-color)";
+                return "var(--warning-text-color)";
             default:
-                return "var(--error-color)";
+                return "var(--error-text-color)";
         }
     };
 

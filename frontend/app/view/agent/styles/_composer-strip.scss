@@ -206,7 +206,7 @@
     // will be once the current turn ends.
     &--differs {
         border-color: var(--warning-color);
-        color: var(--warning-color);
+        color: var(--warning-text-color);
     }
     &--pending {
         border-style: dashed;
@@ -215,11 +215,11 @@
     // The last change did not apply: what the label shows is only what was asked for.
     &--error {
         border-color: var(--error-color);
-        color: var(--error-color);
+        color: var(--error-text-color);
 
         &:hover {
             border-color: var(--error-color);
-            color: var(--error-color);
+            color: var(--error-text-color);
         }
     }
 
@@ -460,9 +460,9 @@
     // Color bands — text color only, no background.
     &--low     { color: var(--secondary-text-color); }
     &--mid     { color: var(--main-text-color); }
-    &--high    { color: var(--warning-color); }
+    &--high    { color: var(--warning-text-color); }
     &--critical {
-        color: var(--error-color);
+        color: var(--error-text-color);
         --pulse-max: 0.8;
         animation: am-pulse 1.2s var(--ease-in-out) infinite;
     }
@@ -505,8 +505,8 @@
     font-size: var(--text-2xs);
     white-space: nowrap;
 
-    &--ok { color: var(--success-color); }
-    &--bad { color: var(--error-color); }
+    &--ok { color: var(--success-text-color); }
+    &--bad { color: var(--error-text-color); }
 }
 
 // The chip as a "switch account" link (only while signed in, idle, and
@@ -666,7 +666,7 @@
 
 .agent-shell-subblock-error {
     padding: var(--space-2);
-    color: var(--error-color);
+    color: var(--error-text-color);
     font-size: var(--text-xs);
     font-family: var(--font-mono);
 }
@@ -722,7 +722,7 @@
     margin-bottom: var(--space-1);
     border-bottom: 1px solid var(--border-color);
     font-size: var(--text-2xs);
-    color: var(--warning-color);
+    color: var(--warning-text-color);
 
     &[data-kind="pending"],
     &[data-kind="agrees"] {

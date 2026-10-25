@@ -82,7 +82,7 @@
 
     .running &    { color: var(--term-bright-green); }
     .exited-ok &  { color: var(--accent-color); }
-    .exited-err & { color: var(--error-color); }
+    .exited-err & { color: var(--error-text-color); }
     .stopped &    { color: var(--secondary-text-color); }
 }
 
@@ -158,7 +158,7 @@
 
     &:hover {
         opacity: 1;
-        color: var(--error-color);
+        color: var(--error-text-color);
         background: var(--hover-bg-color);
     }
 
@@ -264,7 +264,7 @@
 
     .running &  { color: var(--term-bright-green); }
     .done &     { color: var(--accent-color); }
-    .error &    { color: var(--error-color); }
+    .error &    { color: var(--error-text-color); }
     .stopped &  { color: var(--secondary-text-color); }
 }
 
@@ -337,7 +337,7 @@
 
     &:hover {
         opacity: 1;
-        color: var(--error-color);
+        color: var(--error-text-color);
         background: var(--hover-bg-color);
         border-color: var(--ui-line-danger);
     }

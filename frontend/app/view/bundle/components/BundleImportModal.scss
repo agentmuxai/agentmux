@@ -23,7 +23,7 @@
 
 .bundle-import-select-error,
 .bundle-import-error {
-    color: var(--error-color);
+    color: var(--error-text-color);
     white-space: pre-wrap;
 }
 
@@ -51,7 +51,7 @@
 }
 
 .bundle-import-hint-warn {
-    color: var(--warning-color);
+    color: var(--warning-text-color);
     opacity: 1;
 }
 
@@ -122,7 +122,7 @@
     padding: 2px 6px;
     border-radius: 3px;
     background: var(--warning-bg);
-    color: var(--warning-color);
+    color: var(--warning-text-color);
 }
 
 .bundle-import-rename-input {

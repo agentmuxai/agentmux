@@ -47,7 +47,7 @@
     }
 
     &.ctx-menu-item--danger {
-        color: var(--error-color);
+        color: var(--error-text-color);
 
         &:hover:not(.ctx-menu-item--disabled),
         &.ctx-menu-item--focused:not(.ctx-menu-item--disabled) {

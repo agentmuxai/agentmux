@@ -117,15 +117,15 @@
         }
 
         &.tone-success {
-            color: var(--success-color);
+            color: var(--success-text-color);
         }
 
         &.tone-warning {
-            color: var(--warning-color);
+            color: var(--warning-text-color);
         }
 
         &.tone-error {
-            color: var(--error-color);
+            color: var(--error-text-color);
         }
     }
 
@@ -394,7 +394,7 @@
 
 .status-bar-pair-note--warn {
     opacity: 1;
-    color: var(--warning-color);
+    color: var(--warning-text-color);
 }
 
 // The restart button is an element/ui Button (danger, compact) spanning
@@ -429,7 +429,7 @@
     // "Sign in" / expired states — red, matching the status bar's muxbus dot
     // so the cause of that dot is unmistakable once the panel is open.
     &.muxbus-login-chip-signin {
-        color: var(--error-color);
+        color: var(--error-text-color);
         background: var(--error-bg);
         border-radius: 4px;
         cursor: pointer;
@@ -454,7 +454,7 @@
 
     &:hover:not(:disabled) {
         background: var(--hover-bg-color);
-        color: var(--error-color);
+        color: var(--error-text-color);
         border-color: var(--error-color);
     }
 
@@ -495,7 +495,7 @@
     }
 
     &--off {
-        color: var(--warning-color);
+        color: var(--warning-text-color);
     }
 
     // Enabled, but the mDNS daemon could not start (Windows firewall "Block"
@@ -503,27 +503,27 @@
     // user otherwise: same hollow glyph, no peers, but nothing wrong. Ranked
     // below --peers, since reaching a peer proves discovery works [codex P2].
     &--error {
-        color: var(--error-color);
+        color: var(--error-text-color);
     }
 
     // We may see peers, but nobody can see us (no IPv4 mDNS socket). Warning,
     // not error: this machine works, it just cannot be found. Ranked above
     // --peers on purpose: hearing peers does not prove we are heard.
     &--undiscoverable {
-        color: var(--warning-color);
+        color: var(--warning-text-color);
     }
 
     // The OS firewall keeps peers out. `blocked` is a fact (a Block rule matches
     // us) so it is an error; the others are inferred from a missing rule or a
     // Public network, so they are warnings.
     &--blocked {
-        color: var(--error-color);
+        color: var(--error-text-color);
     }
 
     &--needs-setup,
     &--public-network,
     &--managed {
-        color: var(--warning-color);
+        color: var(--warning-text-color);
     }
 }
 
@@ -550,11 +550,11 @@
 // when some of its requests keep failing.
 .status-connectivity {
     &--warn {
-        color: var(--warning-color);
+        color: var(--warning-text-color);
     }
 
     &--error {
-        color: var(--error-color);
+        color: var(--error-text-color);
     }
 }
 
@@ -563,10 +563,10 @@
 // be reached, red when the sign-in stopped working (click to sign in).
 .status-muxbus {
     &--warn {
-        color: var(--warning-color);
+        color: var(--warning-text-color);
     }
 
     &--error {
-        color: var(--error-color);
+        color: var(--error-text-color);
     }
 }

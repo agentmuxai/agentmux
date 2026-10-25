@@ -25,8 +25,8 @@ const MultiInputStatus = (): JSX.Element => {
                 aria-label={tip()}
                 role="button"
             >
-                <i class="fa-solid fa-keyboard status-icon" style={{ color: "var(--warning-color)" }} />
-                <span style={{ color: "var(--warning-color)" }}>Multi Input</span>
+                <i class="fa-solid fa-keyboard status-icon" style={{ color: "var(--warning-text-color)" }} />
+                <span style={{ color: "var(--warning-text-color)" }}>Multi Input</span>
             </div>
         </Show>
     );

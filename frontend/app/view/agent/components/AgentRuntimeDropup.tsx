@@ -55,6 +55,15 @@ import {
 } from "../runtime-capabilities";
 import type { AgentRuntimeConfig, EffortLevel, PermissionMode } from "../types";
 
+// The same colours as text (the mode's name): the status colours' text variants, which pass AA on every theme.
+const PERMISSION_TEXT_COLORS: Record<PermissionMode, string> = {
+    bypass: "var(--error-text-color)",
+    auto: "var(--accent-fg-color, var(--accent-color))",
+    acceptEdits: "var(--warning-text-color)",
+    plan: "var(--success-text-color)",
+    default: "var(--main-text-color)",
+};
+
 const PERMISSION_COLORS: Record<PermissionMode, string> = {
     bypass: "var(--error-color, #ef4444)",
     auto: "var(--accent-color, #3b82f6)",
@@ -297,7 +306,7 @@ export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element 
                     description: o.description,
                     detail: o.detail,
                     current: currentValue === o.value,
-                    color: withColor ? PERMISSION_COLORS[o.value as PermissionMode] : undefined,
+                    color: withColor ? PERMISSION_TEXT_COLORS[o.value as PermissionMode] : undefined,
                     disabled: notApplied !== undefined,
                 };
                 rows.push({ kind: "option", ...row });

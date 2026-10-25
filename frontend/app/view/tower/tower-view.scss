@@ -161,12 +161,12 @@
 }
 
 .tower-error-inline {
-    color: var(--error-color);
+    color: var(--error-text-color);
 }
 
 .tower-error {
     padding: var(--space-1) var(--space-3);
-    color: var(--error-color);
+    color: var(--error-text-color);
     border-bottom: 1px solid var(--border-color);
 }
 
@@ -859,12 +859,12 @@ th[aria-sort="descending"] .tower-sort {
 // A figure heavy for its scope: the warning, then the error colour, and bold,
 // so it reads without colour too.
 .tower-level--warn {
-    color: var(--warning-color);
+    color: var(--warning-text-color);
     font-weight: 600;
 }
 
 .tower-level--high {
-    color: var(--error-color);
+    color: var(--error-text-color);
     font-weight: 600;
 }
 
@@ -1137,7 +1137,7 @@ th[aria-sort="descending"] .tower-sort {
     padding: 0 var(--space-1);
     border-radius: var(--radius-sm);
     background: var(--warning-bg);
-    color: var(--warning-color);
+    color: var(--warning-text-color);
     font-size: 0.85em;
     font-weight: 600;
 }

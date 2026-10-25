@@ -18,10 +18,10 @@ const VersionSkewStatus = (): JSX.Element => (
                 data-tip={`This window is version ${UI_VERSION}; the backend is ${srv()}. Click to reload; if this stays, restart AgentMux.`}
                 aria-label={`Backend is version ${srv()}: reload`}
             >
-                <span class="status-icon" style={{ color: "var(--warning-color)" }}>
+                <span class="status-icon" style={{ color: "var(--warning-text-color)" }}>
                     ⟳
                 </span>
-                <span style={{ color: "var(--warning-color)" }}>Reload for {srv()}</span>
+                <span style={{ color: "var(--warning-text-color)" }}>Reload for {srv()}</span>
             </div>
         )}
     </Show>

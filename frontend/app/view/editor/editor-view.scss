@@ -246,7 +246,7 @@
 
 .file-tree-error {
     padding: 2px var(--space-1);
-    color: var(--error-color);
+    color: var(--error-text-color);
     font-size: var(--text-xs);
 }
 
@@ -406,7 +406,7 @@
 .editor-error {
     padding: var(--space-2) var(--space-3);
     background: var(--error-bg);
-    color: var(--error-color);
+    color: var(--error-text-color);
     font-size: var(--text-sm);
     border-bottom: 1px solid var(--error-line);
 }
@@ -426,7 +426,7 @@
 
 .editor-error-panel-icon {
     font-size: 32px;
-    color: var(--error-color);
+    color: var(--error-text-color);
     line-height: 1;
 }
 
@@ -598,7 +598,7 @@
 }
 
 .editor-lsp-banner-icon {
-    color: var(--warning-color);
+    color: var(--warning-text-color);
     font-size: var(--text-md);
 }
 
