@@ -642,6 +642,12 @@ pub fn heal_now(block_id: &str, process: &str, now_ms: u64) -> Result<Decision, 
     heal().heal_now(block_id, process, now_ms)
 }
 
+/// The watcher's own round came late: the machine slept, or the watcher was starved.
+fn slept_between(elapsed: Duration, last_wall_ms: u64, now_ms: u64) -> bool {
+    let limit = WATCH_EVERY * 3;
+    elapsed > limit || now_ms.saturating_sub(last_wall_ms) > limit.as_millis() as u64
+}
+
 /// A heartbeat from the MCP process of CLI process `process`; `Some` when it
 /// says the server is wedged, and the step that follows.
 pub fn on_beat(
@@ -682,15 +688,19 @@ pub fn spawn_watch(
 ) {
     tokio::spawn(async move {
         let mut last = std::time::Instant::now();
+        let mut last_wall = agentmux_common::time::now_ms_u64();
         loop {
             tokio::select! {
                 _ = tokio::time::sleep(WATCH_EVERY) => {}
                 _ = token.cancelled() => break,
             }
-            let slept = last.elapsed() > WATCH_EVERY * 3;
+            // Both clocks: `Instant` stops while a machine is suspended on Linux
+            // and macOS, and the beats are stamped with the wall clock.
+            let now = agentmux_common::time::now_ms_u64();
+            let slept = slept_between(last.elapsed(), last_wall, now);
             last = std::time::Instant::now();
+            last_wall = now;
             if slept {
-                let now = agentmux_common::time::now_ms_u64();
                 for b in heal().beats.values_mut() {
                     b.at_ms = now;
                 }
@@ -999,6 +1009,15 @@ mod tests {
         assert_eq!(note.matches("[AgentMux]").count(), 1, "{note}");
         assert!(!note.contains("[JEKT:"), "{note}");
         assert!(give_up_note(None).contains("did not start, and"));
+    }
+
+    #[test]
+    fn a_late_watcher_round_is_a_sleep_by_either_clock() {
+        let every = WATCH_EVERY;
+        assert!(!slept_between(every, 1_000, 1_000 + every.as_millis() as u64));
+        assert!(slept_between(every * 4, 1_000, 1_000 + every.as_millis() as u64));
+        // Suspended on Linux or macOS: the monotonic clock barely moved, the wall clock did.
+        assert!(slept_between(every, 1_000, 1_000 + 600_000));
     }
 
     #[test]

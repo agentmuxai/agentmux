@@ -283,6 +283,9 @@ pub(crate) async fn serve<R, W>(
                 );
                 let key_for_task = key.clone();
                 let handle = tokio::runtime::Handle::current();
+                // Held until the handle is in the map: the task removes its own
+                // entry when it ends, and a fast call must not do that first.
+                let mut running_now = running.lock().unwrap();
                 let task = tokio::spawn(async move {
                     // The deadline covers the wait for the tool's earlier calls too.
                     let work = async {
@@ -340,7 +343,8 @@ pub(crate) async fn serve<R, W>(
                     running_map.lock().unwrap().remove(&key_for_task);
                     let _ = out_tx.send(answer);
                 });
-                running.lock().unwrap().insert(key, task.abort_handle());
+                running_now.insert(key, task.abort_handle());
+                drop(running_now);
             }
             _ => {
                 let _ = out_tx.send(json!({ "jsonrpc": "2.0", "id": id, "error": { "code": -32601, "message": "method not found" } }));

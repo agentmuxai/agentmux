@@ -25,6 +25,12 @@ const FIRST: Duration = Duration::from_secs(5);
 /// so that beat doesn't speak to either.
 const LATE_AFTER: Duration = Duration::from_secs(45);
 
+/// Whether this beat came late, by either clock: `Instant` stops while a machine
+/// is suspended on Linux and macOS, the wall clock doesn't.
+fn is_late(monotonic: Duration, wall: Duration) -> bool {
+    monotonic.max(wall) > LATE_AFTER
+}
+
 /// The beat's body. After a sleep (`late`) the runtime lag and the age of the
 /// oldest call are left out for this one beat: the tick task hasn't had a
 /// chance to run yet, and srv would take the gap for a stuck runtime.
@@ -48,6 +54,17 @@ pub(crate) fn beat_body(health: &Health, slug: &str, late: bool) -> serde_json::
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_beat_is_late_by_either_clock() {
+        let ok = Duration::from_secs(15);
+        assert!(!is_late(ok, ok));
+        assert!(is_late(Duration::from_secs(60), ok));
+        assert!(
+            is_late(ok, Duration::from_secs(3600)),
+            "a suspend the monotonic clock didn't count"
+        );
+    }
 
     #[test]
     fn a_beat_after_a_sleep_reports_no_lag_and_no_call_age() {
@@ -98,9 +115,11 @@ pub(crate) fn start(health: Arc<Health>, local_url: String, auth_key: String) {
                 );
                 tokio::time::sleep(FIRST).await;
                 let mut last = std::time::Instant::now();
+                let mut last_wall = std::time::SystemTime::now();
                 loop {
-                    let late = last.elapsed() > LATE_AFTER;
+                    let late = is_late(last.elapsed(), last_wall.elapsed().unwrap_or_default());
                     last = std::time::Instant::now();
+                    last_wall = std::time::SystemTime::now();
                     let body = beat_body(&health, &slug, late);
                     // A failure is not news: srv may be restarting, and the next beat tries again.
                     let _ = client
