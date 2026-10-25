@@ -34,6 +34,7 @@ import { buildPaneArgs } from "./buildRuntimeArgs";
 import type { AgentContent, AgentDefinition, AgentSkill } from "@/app/store/rpc-api";
 import { markAgentOpen } from "./open-trace";
 import { launchResumesConversation, requestCatchUp } from "./catch-up-request";
+import { MENU_ICON } from "@/app/util/menu-icons";
 
 /** The agent's state behind its native pane tab (`agentPaneTabManifest`,
  *  agent-manifest.tsx). */
@@ -993,10 +994,12 @@ export class AgentViewModel {
         return [
             {
                 label: "Agent History",
+                icon: MENU_ICON.history,
                 click: () => void openOrFocusHistoryTab({ currentBlockId: this.blockId, agentId }),
             },
             {
                 label: "Quick Fork",
+                icon: MENU_ICON.fork,
                 click: () => void quickForkAgent(this),
             },
             { type: "separator" },
