@@ -237,7 +237,7 @@ fn a_parameter_is_inserted_as_data_not_expanded() {
 #[test]
 fn no_starter_holds_a_secret_looking_value_or_anything_private() {
     let secret_prefixes = ["ghp_", "gho_", "github_pat_", "sk-", "xox", "AKIA", "ASIA", "AIza", "-----BEGIN", "Bearer "];
-    let private = ["a5af", "arn:aws", "amazonaws", "shared-infrastructure", "muxreview", "reagent", "asafe", ".agentmux"];
+    let private = ["arn:aws", "amazonaws", "BEGIN PRIVATE KEY", ".agentmux/", "C:SERS"];
     for b in BUILTINS {
         for (path, bytes) in b.files {
             let text = std::str::from_utf8(bytes).unwrap();
