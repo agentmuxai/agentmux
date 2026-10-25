@@ -97,7 +97,7 @@ pub(super) async fn hold_if_cold(
         return None;
     };
     let target_uid = reg.uid.clone()?;
-    let (mstore, identity, request) = (state.mstore.clone(), state.identity_store.clone(), req.clone());
+    let (mstore, identity, request) = (state.mstore.clone(), state.work_store.clone(), req.clone());
     let now = agentmux_common::time::now_ms();
     let held = tokio::task::spawn_blocking(move || {
         // Urgent or not routine: the sender's own words decide, so a message

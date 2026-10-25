@@ -221,13 +221,14 @@ fn task_json(t: &BoardTask, holder: Option<Value>, unavailable: Option<Value>, a
 
 async fn list(state: &AppState) -> Result<Value, String> {
     let regs = state.reactive_handler.list_agents();
-    let identity = state.identity_store.clone();
+    // The board is in the work store; an agent's accounts (below) are in the identity store.
+    let (work, identity) = (state.work_store.clone(), state.identity_store.clone());
     let mstore = state.mstore.clone();
     tokio::task::spawn_blocking(move || {
         let now = now_ms();
-        let tasks = identity.work_board_list(now - FINISHED_WINDOW_MS, LIST_LIMIT, now).map_err(|e| e.to_string())?;
-        let accepts = identity.work_delegate_accepts(now - crate::backend::kanban_delegate::REOPEN_WINDOW_MS).unwrap_or_default();
-        let stamp = identity.work_board_stamp().unwrap_or(0);
+        let tasks = work.work_board_list(now - FINISHED_WINDOW_MS, LIST_LIMIT, now).map_err(|e| e.to_string())?;
+        let accepts = work.work_delegate_accepts(now - crate::backend::kanban_delegate::REOPEN_WINDOW_MS).unwrap_or_default();
+        let stamp = work.work_board_stamp().unwrap_or(0);
         let states: Vec<Option<AgentState>> = regs.iter().map(|r| agent_state::current_state(&mstore, &r.block_id)).collect();
         // Only a holder's matters, and only when it is limited or signed out.
         let unavailable: Vec<Option<Value>> = regs
@@ -1181,5 +1182,25 @@ mod tests {
         assert!(call(Some(agent), COMMAND_KANBAN_ACT, create.clone()).await.starts_with("FORBIDDEN"));
         assert_eq!(call(Some(RpcContext::operator_for_tests()), COMMAND_KANBAN_ACT, create).await, "");
         assert_eq!(call(None, COMMAND_KANBAN_LIST, json!({})).await, "");
+    }
+
+    /// A build with a work store of its own lists that store's board, never the
+    /// identity store's, where the operator's real queue is.
+    #[tokio::test]
+    async fn the_board_is_the_work_stores_not_the_identity_stores() {
+        use crate::backend::storage::store::Store;
+        let mut state = crate::server::tests::test_state();
+        // The test state aliases both stores, so this one is "the host's".
+        let real = act(&state, json!({"action": "create", "title": "A real one", "payload": "p"})).await.unwrap();
+        let own = Store::open_in_memory().unwrap();
+        own.apply_identity_schema_for_tests().unwrap();
+        state.work_store = std::sync::Arc::new(own);
+        let mine = act(&state, json!({"action": "create", "title": "A dev one", "payload": "p"})).await.unwrap();
+
+        let board = list(&state).await.unwrap();
+        let ids: Vec<&str> = board["tasks"].as_array().unwrap().iter().filter_map(|t| t["id"].as_str()).collect();
+        assert_eq!(ids, vec![mine["id"].as_str().unwrap()], "the host's task {real} is not on this board");
+        let seen = task(&state, &json!({"id": real["id"]})).await;
+        assert!(seen.is_err(), "nor can this build open it: {seen:?}");
     }
 }
