@@ -119,6 +119,7 @@ import type { DocumentNode } from "./types";
 import { ShutdownOverlay } from "./shutdown/ShutdownOverlay";
 import { useAgentStream } from "./useAgentStream";
 import { setBlockMeta } from "@/app/store/block-meta";
+import { MENU_ICON } from "@/app/util/menu-icons";
 
 // Launch flow lives in `flows/launch-flow.ts` — Step 2 of
 // docs/specs/SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13.md.
@@ -1208,7 +1209,7 @@ export const AgentPresentationView = ({
         const sel = window.getSelection()?.toString();
         if (!sel) return; // no selection, let default behavior
         e.preventDefault();
-        ContextMenuModel.showContextMenu([{ label: "Copy", click: () => clipboardWriteText(sel) }], e);
+        ContextMenuModel.showContextMenu([{ label: "Copy", icon: MENU_ICON.copy, click: () => clipboardWriteText(sel) }], e);
     };
 
     return (

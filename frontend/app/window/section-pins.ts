@@ -18,6 +18,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { atoms } from "@/store/global";
 import { fireAndForget } from "@/util/util";
 import { getPinnedKeys, pinIdOf, setWidgetBarState } from "./action-widgets-config";
+import { MENU_ICON } from "@/app/util/menu-icons";
 
 /** A section a pane shows, as a widget-bar entry would name it. */
 export interface ShownSection {
@@ -86,8 +87,8 @@ export function sectionPinMenuItems(meta: Record<string, unknown> | null | undef
     return shownSections(meta).map((section) => {
         const key = sectionEntryKey(section, widgets);
         if (key && pinned.has(pinIdOf(key))) {
-            return { label: `Unpin “${section.label}” from bar`, click: () => fireAndForget(() => setWidgetBarState(key, "more", settings, widgets)) };
+            return { label: `Unpin “${section.label}” from bar`, icon: MENU_ICON.unpin, click: () => fireAndForget(() => setWidgetBarState(key, "more", settings, widgets)) };
         }
-        return { label: `Pin “${section.label}” to bar`, click: () => fireAndForget(() => pinSection(section)) };
+        return { label: `Pin “${section.label}” to bar`, icon: MENU_ICON.pin, click: () => fireAndForget(() => pinSection(section)) };
     });
 }
