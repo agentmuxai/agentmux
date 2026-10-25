@@ -78,6 +78,7 @@ const REASON_TEXT: Record<string, string> = {
     group_busy: "waiting for its group",
     job_cap: "job's daily cap reached",
     account_cap: "account's daily cap reached",
+    message_cap: "daily message limit reached",
     run_cap: "run cap reached",
     timeout: "timed out",
     no_report: "never reported",

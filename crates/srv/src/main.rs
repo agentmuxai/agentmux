@@ -231,6 +231,9 @@ async fn app_main() {
             sagas::pending_shutdown::Action::CloseTab { detail: "a job's worker, its run ended".to_string() },
         );
     }));
+    // Runs are weighed against Settings' spending caps before they start, and
+    // stopped when they reach their own (jobs spec §5.3).
+    server::job_caps::install(&state, &run_ledger);
     // A failing job opens one incident for its owner (jobs spec §3.4).
     run_ledger.install_incidents(server::cron::jobs_store(&state));
     {

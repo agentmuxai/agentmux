@@ -25,7 +25,7 @@ fn turn(turn_id: i64, started: i64, ended: Option<i64>, end: Option<&str>, cost:
 }
 
 fn armed(at: i64) -> Armed {
-    Armed { run_id: "r1".into(), armed_at_ms: at, turn_id: None, last: None }
+    Armed { run_id: "r1".into(), armed_at_ms: at, turn_id: None, last: None, cap_usd: None, partial: false }
 }
 
 // ── the follower's rules ────────────────────────────────────────────────
@@ -51,6 +51,18 @@ fn a_fire_that_joined_a_running_turn_is_partial_and_an_old_turn_is_not_its() {
     let mut a = armed(5_000);
     assert!(on_turn(&mut a, &turn(1_000, 1_000, Some(4_000), Some("completed"), 0.2)).is_empty(), "over before the fire");
     assert_eq!(on_turn(&mut a, &turn(4_500, 4_500, None, None, 0.0)), vec![Effect::Bind { turn_id: 4_500, partial: true }]);
+}
+
+#[test]
+fn a_turn_the_fire_joined_is_not_stopped_by_the_runs_cap() {
+    let mut a = armed(5_000);
+    a.cap_usd = Some(1.0);
+    on_turn(&mut a, &turn(4_500, 4_500, None, None, 0.0));
+    assert!(on_turn(&mut a, &turn(4_500, 4_500, None, None, 3.0)).is_empty(), "its cost isn't all the run's");
+    let mut whole = armed(1_000);
+    whole.cap_usd = Some(1.0);
+    on_turn(&mut whole, &turn(1_001, 1_001, None, None, 0.0));
+    assert!(matches!(on_turn(&mut whole, &turn(1_001, 1_001, None, None, 3.0)).as_slice(), [Effect::OverBudget { .. }]));
 }
 
 #[test]
@@ -773,3 +785,6 @@ async fn a_drone_run_is_written_to_the_ledger_with_its_cost() {
 
 #[path = "policy_runs_tests.rs"]
 mod policy_runs;
+
+#[path = "caps_runs_tests.rs"]
+mod caps_runs;

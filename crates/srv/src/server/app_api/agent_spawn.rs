@@ -319,6 +319,18 @@ pub(crate) async fn spawn_for_job(
     spawn_with(state, leader, &req, true).await.map_err(|e| e.message)
 }
 
+/// The account and provider the next worker of a `spawn` job led by
+/// `leader_uid` would run on (`choose_account`), without opening it: what the
+/// spending caps weigh before the run starts (jobs spec §5.3). `None` when
+/// the leader isn't running or no account can take a worker.
+pub(crate) fn account_for_job(state: &AppState, leader_uid: &str, requested: Option<&str>) -> Option<(String, String)> {
+    let block_id = state.reactive_handler.block_for_uid(leader_uid)?;
+    let leader = leader_at(state, block_id).ok()?;
+    let provider = state.id_store.resolve_effective_provider_id(&leader.def);
+    let account = choose_account(state, &leader, &provider, requested).ok()?;
+    Some((account.id, account.provider))
+}
+
 /// The worker's remembered runtime (`agentlastruntime`): the leader's, with
 /// the requested model and effort over it.
 #[derive(Debug, Default, PartialEq, Eq)]

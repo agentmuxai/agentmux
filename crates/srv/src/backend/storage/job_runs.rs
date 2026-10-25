@@ -63,6 +63,7 @@ pub(crate) const SCHEMA: &str = "
     CREATE UNIQUE INDEX IF NOT EXISTS idx_ids_job_runs_slot ON db_job_runs(job_id, scheduled_for_ms)
         WHERE scheduled_for_ms IS NOT NULL;
     CREATE INDEX IF NOT EXISTS idx_ids_job_runs_state ON db_job_runs(state);
+    CREATE INDEX IF NOT EXISTS idx_ids_job_runs_account_started ON db_job_runs(account_id, started_at_ms);
     CREATE TABLE IF NOT EXISTS db_job_flags (
         key        TEXT PRIMARY KEY,
         value      TEXT NOT NULL DEFAULT '',
@@ -136,6 +137,17 @@ pub mod reason {
     pub const RETRY_WAIT: &str = "retry_wait";
     /// The run was stopped at the job's `timeout_minutes`.
     pub const TIMEOUT: &str = "timeout";
+    /// The job's spend today, with the run's own cap, would pass its daily
+    /// cap (§5.3): the slot is skipped.
+    pub const JOB_CAP: &str = "job_cap";
+    /// The same for the account the run would use.
+    pub const ACCOUNT_CAP: &str = "account_cap";
+    /// A `message` job reached its messages a day to another agent.
+    pub const MESSAGE_CAP: &str = "message_cap";
+    /// The run was stopped at its per-run cap.
+    pub const RUN_CAP: &str = "run_cap";
+    /// The skips a cap makes: the once-a-day alert and "over cap today".
+    pub const CAPS: [&str; 3] = [JOB_CAP, ACCOUNT_CAP, MESSAGE_CAP];
     /// The reasons a `scheduled` run waits to start with.
     pub const WAITING: [&str; 4] = [OVERLAP, GROUP_BUSY, GLOBAL_LIMIT, RETRY_WAIT];
 }
@@ -146,6 +158,8 @@ pub mod infra {
     pub const ERROR: &str = "error";
     pub const TIMEOUT: &str = "timeout";
     pub const INTERRUPTED: &str = "interrupted";
+    /// The run reached its per-run cap and was stopped (§5.3).
+    pub const OVER_BUDGET: &str = "over_budget";
 }
 
 /// What a run concluded, separate from whether it ran (§2).
@@ -498,7 +512,8 @@ impl Store {
         let n = conn.execute(
             &format!(
                 "UPDATE db_job_runs
-                    SET state = ?2, reason = '', block_id = ?3, account_id = ?4, provider = ?5,
+                    SET state = ?2, reason = '', block_id = ?3,
+                        account_id = CASE WHEN ?4 <> '' THEN ?4 ELSE account_id END, provider = ?5,
                         target_agent_uid = CASE WHEN ?6 <> '' THEN ?6 ELSE target_agent_uid END,
                         started_at_ms = ?7, ended_at_ms = NULL
                   WHERE id = ?1 AND {OPEN_NOT_ENDED}"

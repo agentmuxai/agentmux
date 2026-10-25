@@ -267,7 +267,6 @@ async fn refused_definitions_say_why() {
         (definition(json!({ "policy": { "approval": "operator" } })), "policy.approval"),
         (definition(json!({ "trigger": { "kind": "cron", "cron": "*/5 * * * *" } })), "at most every 15 minutes"),
         (definition(json!({ "template": { "id": "agentmux.weekly-report", "version": "1.0.0" } })), "templates are not available yet"),
-        (definition(json!({ "policy": { "caps": { "run_usd": 1 } } })), "policy.caps is available in a later version"),
         (definition(json!({ "policy": { "max_turns": 50 } })), "policy.max_turns is available in a later version"),
         (definition(json!({ "policy": { "retries": 4 } })), "policy.retries: at most 3"),
     ];

@@ -141,7 +141,7 @@ impl RunLedger {
         if let Err(e) = self.store.job_run_add_links(run_id, &links) {
             tracing::warn!(run_id, error = %e, "jobs: couldn't note who follows a forwarded run");
         }
-        self.follower.arm(block_id, run_id, now);
+        self.follower.arm(block_id, run_id, now, self.stop_at_usd(run_id, &pane.provider));
         // This instance's Jobs tab sees the run start; its close publishes
         // again (`turn_finished`, also behind `check_remote`).
         self.changed(&run.job_id);
