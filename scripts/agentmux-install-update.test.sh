@@ -72,7 +72,7 @@ dead_pid=999999
 
 listing "AgentMux_0.60.2_amd64.deb" "$(sha "$deb")"
 FAKE_OWNER=deb run "$deb" 0.60.2 $dead_pid; st=$?
-if [ $st = 0 ] && grep -q '^READY$' "$TMP/out" && grep -q 'apt-get install -y --no-install-recommends' "$TMP/log" && grep -q 'to=0.60.2' "$TMP/state/last-upgrade" && [ "$(stat -c %a "$TMP/state/last-upgrade")" = 644 ]; then ok "a good .deb: checked, READY, installed through apt-get, recorded where the launcher can read it"; else bad "a good .deb" "status $st: $(cat "$TMP/out" "$TMP/err" "$TMP/log")"; fi
+if [ $st = 0 ] && grep -q '^READY$' "$TMP/out" && grep -q 'apt-get install -y --no-install-recommends' "$TMP/log" && grep -q 'to=0.60.2' "$TMP/state/last-upgrade" && [ "$(stat -c %a "$TMP/state/last-upgrade")" = 644 ] && [ "$(stat -c %a "$TMP/state")" = 755 ]; then ok "a good .deb: checked, READY, installed through apt-get, recorded where the launcher can read it, not where anyone can write"; else bad "a good .deb" "status $st: $(cat "$TMP/out" "$TMP/err" "$TMP/log")"; fi
 
 refused() { # name; expects a non-zero status, no READY and no install
     if [ "$st" != 0 ] && ! grep -q READY "$TMP/out" && [ ! -s "$TMP/log" ]; then ok "$1 ($(tail -1 "$TMP/err" | sed 's/agentmux-install-update: //'))"; else bad "$1" "status $st out=$(cat "$TMP/out") err=$(cat "$TMP/err") log=$(cat "$TMP/log")"; fi
