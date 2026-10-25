@@ -182,8 +182,13 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
             get(reactive::handle_reactive_history_search),
         );
 
-    // MessageBus routes (authed, localhost-only)
     // Routes that act for an agent: each needs the agent's token (`agent_only`).
+    // Jobs (SPEC_JOBS_AND_TEMPLATES_2026_10_24.md §5.1) and the cron scheduler
+    // under them (`/agentmux/cron` is kept as an alias for one release), and
+    // Muxqueue, the universal agent work queue
+    // (docs/reports/REPORT_UNIVERSAL_AGENT_WORK_QUEUE_2026_09_01.md), with the
+    // Kanban's holder routes (SPEC_WARDEN_KANBAN_2026_10_20.md) and an agent's
+    // hold and unhold (SPEC_KANBAN_AGENTS_HOLD_AND_UNHOLD_2026_10_22.md).
     let agent_routes = Router::new()
         .route("/agentmux/jobs", post(cron::handle_cron_create))
         .route("/agentmux/jobs/:id", delete(cron::handle_cron_delete))
@@ -207,6 +212,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/agentmux/work/:id/unhold", post(work_tasks::handle_work_unhold))
         .route_layer(middleware::from_fn_with_state(state.clone(), agent_only::require_agent_token));
 
+    // MessageBus routes (authed, localhost-only)
     let bus_routes = Router::new()
         .route("/api/bus/register", post(messagebus::handle_register))
         .route("/api/bus/send", post(messagebus::handle_send))
@@ -579,16 +585,11 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/api/messaging/telegram/send", post(messaging_handlers::handle_telegram_send))
         .route("/api/messaging/slack/send", post(messaging_handlers::handle_slack_send))
         .route("/api/messaging/whatsapp/send", post(messaging_handlers::handle_whatsapp_send))
-        // Jobs (SPEC_JOBS_AND_TEMPLATES_2026_10_24.md §5.1) and the cron
-        // scheduler under them; `/agentmux/cron` is kept as an alias for one
-        // release. Auth-gated like reactive routes.
+        // Reading jobs; changing them is in `agent_routes`. Auth-gated like reactive routes.
         .route("/agentmux/jobs", get(cron::handle_cron_list))
         .route("/agentmux/jobs/:id/runs", get(cron::handle_cron_runs))
         .route("/agentmux/cron", get(cron::handle_cron_list))
         .route("/agentmux/cron/:id/runs", get(cron::handle_cron_runs))
-        // Muxqueue — the universal agent work queue, cron's readiness-triggered
-        // sibling (docs/reports/REPORT_UNIVERSAL_AGENT_WORK_QUEUE_2026_09_01.md).
-        // Same auth gate as the cron routes above.
         .route(
             "/agentmux/identity/fallbacks",
             get(caller::handle_identity_fallbacks),
@@ -598,8 +599,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
             get(agent_self_keys::handle_agent_self_keys),
         )
         .route("/agentmux/work", get(work_queue::handle_work_list))
-        // Kanban (SPEC_WARDEN_KANBAN_2026_10_20.md): a holder's progress, question and hand-in;
-        // any agent's hold and unhold (SPEC_KANBAN_AGENTS_HOLD_AND_UNHOLD_2026_10_22.md).
+        // Kanban: a leader's decision on a task in review (signed, not a token).
         .route("/agentmux/work/:id/accept", post(work_delegate::handle_work_accept))
         .route("/agentmux/work/:id/send_back", post(work_delegate::handle_work_send_back))
         .merge(bus_routes)
