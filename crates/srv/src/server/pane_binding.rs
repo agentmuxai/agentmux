@@ -10,8 +10,6 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 
-use crate::backend::reactive::handler::LookupOutcome;
-
 use super::actor;
 use super::caller::Caller;
 use super::AppState;
@@ -48,13 +46,7 @@ pub(super) async fn register_refusal(
 pub(super) async fn unregister_refusal(state: &AppState, caller: Option<&Caller>, block_id: &str, agent: &str) -> Option<Response> {
     caller?.uid()?;
     let blocks: Vec<String> = if block_id.trim().is_empty() {
-        // The registry's own key for a name: its route name, lowercased (`unregister_agent`).
-        let key = crate::backend::reactive::sanitize::route_name(agent).unwrap_or_default().to_lowercase();
-        match state.reactive_handler.lookup_by_name(&key) {
-            LookupOutcome::One(reg) => vec![reg.block_id],
-            LookupOutcome::Ambiguous(regs) => regs.into_iter().map(|reg| reg.block_id).collect(),
-            LookupOutcome::NotFound => Vec::new(),
-        }
+        state.reactive_handler.blocks_named(agent)
     } else {
         vec![block_id.trim().to_string()]
     };
@@ -134,6 +126,14 @@ mod tests {
         }
         assert!(state.reactive_handler.get_agent_by_block("pb-block-b").is_some(), "nothing was torn down");
         let _ = state.reactive_handler.unregister_block("pb-block-b");
+        // A name that is also another agent's UID still means the pane registered under it.
+        state.reactive_handler.register_agent_full("uid-pb-alpha", "pb-block-b", None, 0, Some("pb-beta"), Some("uid-pb-beta"), "test").unwrap();
+        state.reactive_handler.register_agent_full("pb-alpha", "pb-block-a", None, 0, Some("pb-alpha"), Some("uid-pb-alpha"), "test").unwrap();
+        let (status, v) = post(&state, Some(&token), "/agentmux/reactive/unregister", json!({ "agent_id": "uid-pb-alpha" })).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{v}");
+        assert!(state.reactive_handler.get_agent_by_block("pb-block-b").is_some(), "nothing was torn down");
+        let _ = state.reactive_handler.unregister_block("pb-block-b");
+        let _ = state.reactive_handler.unregister_block("pb-block-a");
         let (status, v) = post(&state, None, "/agentmux/reactive/unregister", json!({ "agent_id": "", "block_id": "pb-block-b" })).await;
         assert_ne!(status, StatusCode::FORBIDDEN, "the window closes any pane: {v}");
         let (status, v) = post(&state, Some(&token), "/agentmux/agent/release", json!({ "uid": "uid-pb-beta" })).await;

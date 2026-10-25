@@ -1877,6 +1877,12 @@ impl ReactiveHandler {
         self.inner.lock().unwrap().unregister_agent(agent_id)
     }
 
+    /// The live blocks `unregister_agent` would remove for `name`.
+    pub fn blocks_named(&self, name: &str) -> Vec<String> {
+        let key = super::sanitize::route_name(name).unwrap_or_default().to_lowercase();
+        self.inner.lock().unwrap().live_blocks_for_key(&key)
+    }
+
     /// See the inner [`Handler::unregister_block`]. Returns the names the
     /// block was bound under.
     pub fn unregister_block(&self, block_id: &str) -> Vec<String> {
