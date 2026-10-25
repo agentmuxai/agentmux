@@ -23,8 +23,13 @@
 //! one: they work for public repositories, and a private one stays as it was
 //! (the agent links its PR with `Tasks`, the operator accepts by hand). The
 //! unauthenticated API allows 60 calls an hour per address, shared with
-//! everything else on the computer, so this spends at most [`HOURLY_BUDGET`]
-//! and stops until GitHub's reset when told it is over.
+//! everything else on the computer (several AgentMux instances run on a busy
+//! one, the update check among them), so this spends at most [`HOURLY_BUDGET`]
+//! and stops until GitHub's reset when told it is over. It asks with the
+//! ETag it was last given, and a 304 ("nothing changed") costs GitHub's limit
+//! nothing and the budget nothing. A `task dev` build doesn't ask at all,
+//! unless `AGENTMUX_KANBAN_PR_POLL` is set: it shares the computer's limit and
+//! its Kanban with the instance the person uses.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -50,7 +55,7 @@ const CLOSED_CHECK_EVERY_MS: i64 = 60 * 60 * 1000;
 /// for this long.
 const PRIVATE_FOR_MS: i64 = 6 * 60 * 60 * 1000;
 /// The most calls this srv makes in an hour.
-pub const HOURLY_BUDGET: usize = 30;
+pub const HOURLY_BUDGET: usize = 20;
 /// When to look for a just-opened PR, in seconds after the command was seen.
 const FIND_AFTER_S: [u64; 4] = [20, 60, 180, 600];
 /// How often one repository's releases are asked about, while a merged task
@@ -203,7 +208,33 @@ struct Budget {
 
 static BUDGET: Budget = Budget { calls: Mutex::new(Vec::new()), wait_until: AtomicI64::new(0) };
 
+/// The last answer to each path, with its ETag.
+static ETAGS: Mutex<Option<HashMap<String, (String, Value)>>> = Mutex::new(None);
+
+/// Whether this srv may ask GitHub at all: a `task dev` build doesn't unless
+/// `AGENTMUX_KANBAN_PR_POLL` is set.
+fn polling_allowed() -> bool {
+    static ALLOWED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ALLOWED.get_or_init(|| {
+        let dev = matches!(agentmux_common::RuntimeMode::from_env(), Some(agentmux_common::RuntimeMode::Dev { .. }));
+        let asked = std::env::var_os("AGENTMUX_KANBAN_PR_POLL").is_some_and(|v| !v.is_empty());
+        let allowed = !dev || asked;
+        if !allowed {
+            tracing::info!("kanban: a dev build doesn't ask GitHub about PRs (AGENTMUX_KANBAN_PR_POLL=1 turns it on)");
+        }
+        allowed
+    })
+}
+
 impl Budget {
+    /// Give back a call GitHub answered with a 304: it cost nothing.
+    fn refund(&self, at: i64) {
+        let mut calls = self.calls.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(i) = calls.iter().rposition(|t| *t == at) {
+            calls.remove(i);
+        }
+    }
+
     /// Take one call, if the hour's budget and GitHub allow it.
     fn take(&self, now_ms: i64) -> bool {
         if now_ms < self.wait_until.load(Ordering::Relaxed) {
@@ -220,18 +251,26 @@ impl Budget {
 }
 
 async fn get(client: &reqwest::Client, path: &str, now_ms: i64) -> Result<Value, Miss> {
-    if !BUDGET.take(now_ms) {
+    if !polling_allowed() || !BUDGET.take(now_ms) {
         return Err(Miss::Limited);
     }
-    let resp = client
+    let held = ETAGS.lock().unwrap_or_else(|e| e.into_inner()).as_ref().and_then(|m| m.get(path).cloned());
+    let mut req = client
         .get(format!("{API}{path}"))
         .header("User-Agent", concat!("AgentMux/", env!("CARGO_PKG_VERSION")))
         .header("Accept", "application/vnd.github+json")
-        .timeout(std::time::Duration::from_secs(15))
-        .send()
-        .await
-        .map_err(|e| Miss::Other(e.to_string()))?;
+        .timeout(std::time::Duration::from_secs(15));
+    if let Some((etag, _)) = &held {
+        req = req.header("If-None-Match", etag.as_str());
+    }
+    let resp = req.send().await.map_err(|e| Miss::Other(e.to_string()))?;
     let status = resp.status().as_u16();
+    if status == 304 {
+        if let Some((_, body)) = held {
+            BUDGET.refund(now_ms);
+            return Ok(body);
+        }
+    }
     if status == 403 || status == 429 {
         let reset_s = resp
             .headers()
@@ -248,7 +287,19 @@ async fn get(client: &reqwest::Client, path: &str, now_ms: i64) -> Result<Value,
     if !resp.status().is_success() {
         return Err(Miss::Other(format!("GitHub answered {status}")));
     }
-    resp.json().await.map_err(|e| Miss::Other(e.to_string()))
+    let etag = resp.headers().get("etag").and_then(|v| v.to_str().ok()).map(str::to_string);
+    let body: Value = resp.json().await.map_err(|e| Miss::Other(e.to_string()))?;
+    if let Some(etag) = etag {
+        let mut held = ETAGS.lock().unwrap_or_else(|e| e.into_inner());
+        let map = held.get_or_insert_with(HashMap::new);
+        // The paths are few (a PR a task, a repository's releases); a flood of
+        // one-off lookups (finding a just-opened PR) mustn't grow it for good.
+        if map.len() >= 200 {
+            map.clear();
+        }
+        map.insert(path.to_string(), (etag, body.clone()));
+    }
+    Ok(body)
 }
 
 fn history(identity: &Store, work_id: &str, kind: &str, from: &str, to: &str, body: &str, now_ms: i64) {
@@ -375,6 +426,9 @@ fn watch_list(identity: &Store, now_ms: i64) -> Result<Vec<BoardTask>, crate::ba
 /// that are due a look; record merges and releases, and accept a task in
 /// Review whose PR merged. Started once, after [`super::install`].
 pub async fn run_merge_loop() {
+    if !polling_allowed() {
+        return;
+    }
     let mut checked = Checked::default();
     loop {
         tokio::time::sleep(std::time::Duration::from_millis(TICK_MS)).await;
