@@ -33,6 +33,10 @@ pub enum TurnOrigin {
     System,
 }
 
+/// The start of the header srv puts on a Swarm broadcast turn
+/// (`reactive::broadcast_turn_message`).
+pub const BROADCAST_MARKER: &str = "[BROADCAST:FROM=user VIA=swarm";
+
 /// One input, as told to the tracker by the path that delivers it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TurnInput {
@@ -125,7 +129,7 @@ impl TurnTrigger {
         match origin {
             // srv rewrites a broadcast marker found inside any jekt, so only a
             // user-origin input can carry a real one.
-            TurnOrigin::User if text.contains("[BROADCAST:FROM=user VIA=swarm") => Self::of(TriggerKind::Broadcast, None),
+            TurnOrigin::User if text.contains(BROADCAST_MARKER) => Self::of(TriggerKind::Broadcast, None),
             TurnOrigin::User => Self::of(TriggerKind::User, None),
             TurnOrigin::System => Self::of(TriggerKind::System, None),
             // srv quotes this header inside every delivered body, so only the
@@ -432,6 +436,11 @@ impl TurnProvenance {
     fn from_input(input: TurnInput) -> Self {
         let user_text = (input.origin == TurnOrigin::User).then_some(input.text);
         TurnProvenance { origin: input.origin, tainted: false, user_text }
+    }
+    /// The turn was started by a Swarm broadcast: the user's own message, sent
+    /// to many panes at once.
+    pub fn is_broadcast(&self) -> bool {
+        self.user_text.as_deref().is_some_and(|t| t.contains(BROADCAST_MARKER))
     }
     fn absorb(&mut self, origin: TurnOrigin) {
         if origin != TurnOrigin::User {
