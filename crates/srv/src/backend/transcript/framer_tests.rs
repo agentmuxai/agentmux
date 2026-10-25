@@ -153,14 +153,87 @@ fn two_srvs_framing_at_once_never_conflict() {
     let other = FileStore::open_global_transcripts(&path).unwrap();
     let now = agentmux_common::time::now_ms();
     let reports = std::thread::scope(|s| {
-        let a = s.spawn(|| pass_with(&fs, &nobody_blocks, 100, &mut HashSet::new(), now).unwrap());
-        let b = s.spawn(|| pass_with(&other, &nobody_blocks, 100, &mut HashSet::new(), now).unwrap());
+        let a = s.spawn(|| pass_with(&fs, &nobody_blocks, 100, &mut HashSet::new(), now).unwrap_or_else(|e| panic!("framer a: {e:?}")));
+        let b = s.spawn(|| pass_with(&other, &nobody_blocks, 100, &mut HashSet::new(), now).unwrap_or_else(|e| panic!("framer b: {e:?}")));
         [a.join().unwrap(), b.join().unwrap()]
     });
     // 400 parts, 128 within the margin: 272 parts before it, 17 frames, each written once.
     assert_eq!(reports[0].frames + reports[1].frames, 17, "{reports:?}");
     assert_eq!(fs.frame_starts("agent:a:current", "output").unwrap().len(), 17);
     assert_eq!(fs.read_file("agent:a:current", "output").unwrap().unwrap(), data);
+    assert_eq!(other.read_file("agent:a:current", "output").unwrap().unwrap(), data);
+}
+
+/// Passes until one finishes, as the loop in `bootstrap/shutdown.rs` runs them
+/// (a pass cut short by a busy store is run again a few seconds later).
+fn drain(store: &FileStore, now: i64) -> usize {
+    let mut skip = HashSet::new();
+    let mut frames = 0;
+    for _ in 0..2000 {
+        let report = pass_with(store, &nobody_blocks, 100, &mut skip, now).unwrap_or_else(|e| panic!("a pass failed: {e:?}"));
+        frames += report.frames;
+        if report.done {
+            return frames;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    panic!("the framer never finished");
+}
+
+/// What two srvs on a loaded machine do: the other srv holds the store's write lock
+/// for longer than this one's busy timeout (5 s in production; shortened here so the
+/// test doesn't wait). Framing must end its pass quietly and finish on a later one,
+/// not fail (the failure AgentA saw in `two_srvs_framing_at_once_never_conflict`).
+#[test]
+fn a_store_busy_for_longer_than_the_timeout_ends_the_pass_quietly() {
+    let (dir, fs) = open();
+    let data = transcript(&fs, "agent:a:current", 400 * P);
+    let path = dir.path().join("filestore.db");
+    let other = FileStore::open_global_transcripts(&path).unwrap();
+    fs.lock_conn().busy_timeout(std::time::Duration::from_millis(20)).unwrap();
+    let now = agentmux_common::time::now_ms();
+    // The other srv holds the write lock past the timeout.
+    let holder = std::thread::spawn({
+        let path = path.clone();
+        move || {
+            let mut conn = rusqlite::Connection::open(&path).unwrap();
+            let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            tx.commit().unwrap();
+        }
+    });
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    let report = pass_with(&fs, &nobody_blocks, 100, &mut HashSet::new(), now).unwrap();
+    assert!(report.busy, "{report:?}");
+    assert!(!report.done);
+    assert_eq!(report.frames, 0);
+    holder.join().unwrap();
+    // Later passes finish the work, once, whoever runs them.
+    assert_eq!(drain(&fs, now) + drain(&other, now), 17);
+    assert_eq!(fs.frame_starts("agent:a:current", "output").unwrap().len(), 17);
+    assert_eq!(fs.read_file("agent:a:current", "output").unwrap().unwrap(), data);
+}
+
+/// Two srvs framing at once, each waiting for the write lock only briefly (the
+/// timeout is 5 s in production, and a frame's transaction takes long enough on a
+/// loaded machine, in a debug build, for one srv to keep the lock that long).
+#[test]
+fn two_srvs_with_short_busy_timeouts_frame_each_part_once() {
+    let (dir, fs) = open();
+    let data = transcript(&fs, "agent:a:current", 400 * P);
+    let path = dir.path().join("filestore.db");
+    let other = FileStore::open_global_transcripts(&path).unwrap();
+    for store in [&fs, &other] {
+        store.lock_conn().busy_timeout(std::time::Duration::from_millis(1)).unwrap();
+    }
+    let now = agentmux_common::time::now_ms();
+    let frames = std::thread::scope(|s| {
+        let a = s.spawn(|| drain(&fs, now));
+        let b = s.spawn(|| drain(&other, now));
+        a.join().unwrap() + b.join().unwrap()
+    });
+    assert_eq!(frames, 17);
+    assert_eq!(fs.frame_starts("agent:a:current", "output").unwrap().len(), 17);
     assert_eq!(other.read_file("agent:a:current", "output").unwrap().unwrap(), data);
 }
 
