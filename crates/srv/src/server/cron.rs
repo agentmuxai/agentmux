@@ -31,7 +31,7 @@ use uuid::Uuid;
 use crate::backend::cron::schedule::JobSchedule;
 use crate::backend::cron::FireOutcome;
 use crate::backend::jobs;
-use crate::backend::jobs::definition::{Action, Check, JobDefinition, Overlap, LATER};
+use crate::backend::jobs::definition::{Action, Check, JobDefinition, LATER};
 use crate::backend::storage::cron::CronJob;
 use crate::backend::storage::job_runs::{JobRun, OUTCOMES};
 use crate::backend::storage::store::Store;
@@ -220,6 +220,11 @@ pub(crate) fn use_test_store_for_jobs(state: &mut AppState) {
     state.shared_store = Some(state.mstore.clone());
 }
 
+/// Where tasks are filed (the work queue and its cards): the identity store.
+pub(crate) fn work_store(state: &AppState) -> Arc<Store> {
+    state.identity_store.clone()
+}
+
 /// [`jobs_store`], or the answer when there is none.
 fn jobs_store_or_503(state: &AppState) -> Result<Arc<Store>, Answer> {
     jobs_store(state).ok_or_else(|| (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": "shared store unavailable"}))))
@@ -297,27 +302,21 @@ pub(crate) fn may_define(who: &Who, def: &JobDefinition, current_owner: Option<&
     Ok(())
 }
 
-/// What this build can't run yet, though the definition is valid: the
-/// `task` and `spawn` actions, and the policies the scheduler doesn't apply
-/// yet. Refused rather than stored and silently ignored.
+/// What this build can't run yet, though the definition is valid. Refused
+/// rather than stored and silently ignored.
 pub(crate) fn runnable_yet(def: &JobDefinition) -> Result<(), String> {
-    if matches!(def.action, Action::Task { .. } | Action::Spawn { .. }) {
-        return Err(format!("action kind {} is {LATER}", def.action.kind()));
-    }
     let p = &def.policy;
-    let unapplied = [
-        (p.overlap != Overlap::Skip, "overlap"),
-        (p.timeout_minutes.is_some(), "timeout_minutes"),
-        (p.retries > 0, "retries"),
-        (p.max_turns.is_some(), "max_turns"),
-        (p.group.is_some(), "group"),
-        (p.caps.is_some(), "caps"),
-    ];
+    let unapplied = [(p.max_turns.is_some(), "max_turns"), (p.caps.is_some(), "caps")];
     match unapplied.iter().find(|(set, _)| *set) {
         Some((_, field)) => Err(format!("policy.{field} is {LATER}")),
         None => Ok(()),
     }
 }
+
+/// What a spawn job asks of anyone who isn't the app's own controls: it
+/// starts agents that spend until someone stops them.
+const SPAWN_FROM_THE_APP: &str =
+    "a spawn job starts workers that spend until stopped: only the operator's own host creates and runs it, not this route";
 
 /// A message's `to` as the job's target `(name, uid)`: a UID names that
 /// agent; anything else is kept as a name, never resolved here (identity
@@ -369,8 +368,15 @@ pub(super) async fn handle_cron_create(
     caller: Option<axum::Extension<super::caller::Caller>>,
     Json(body): Json<Value>,
 ) -> (StatusCode, Json<Value>) {
+    create_job(&state, caller.as_deref(), body, false)
+}
+
+/// Create a job from a definition or the cron shape. `from_host`: the
+/// operator's decision, relayed by the host (`handle_host_jobs`): the only way
+/// to create a job that starts workers.
+fn create_job(state: &AppState, caller: Option<&Caller>, body: Value, from_host: bool) -> (StatusCode, Json<Value>) {
     let check = Check { fresh: true, now_ms: agentmux_common::time::now_ms() };
-    let who = who(&state, caller.as_deref());
+    let who = if from_host { Who::Operator } else { who(state, caller) };
     // The cron shape (no `jobVersion`) carries its target, creator and limits
     // beside the definition.
     let legacy = match body.get("jobVersion") {
@@ -382,7 +388,7 @@ pub(super) async fn handle_cron_create(
     };
     let parsed = match &legacy {
         Some(req) => {
-            super::actor::check_actor(&state, caller.as_deref(), super::actor::ActorSite::CronCreate, Some(&req.created_by));
+            super::actor::check_actor(state, caller, super::actor::ActorSite::CronCreate, Some(&req.created_by));
             legacy_definition(req, check)
         }
         None => JobDefinition::parse(&body, check),
@@ -393,6 +399,9 @@ pub(super) async fn handle_cron_create(
     };
     if let Err(e) = may_define(&who, &def, None) {
         return forbidden(e);
+    }
+    if matches!(def.action, Action::Spawn { .. }) && !from_host {
+        return forbidden(SPAWN_FROM_THE_APP);
     }
     if let Err(e) = runnable_yet(&def) {
         return bad_request(e);
@@ -407,7 +416,7 @@ pub(super) async fn handle_cron_create(
         created_by,
         // Identity M4c-1 (§6.5.9): the creator's UID is the request's
         // `Caller` — its token — never a body field; `""` when Unattributed.
-        created_by_uid: super::caller::attributed_uid(caller.as_deref()),
+        created_by_uid: super::caller::attributed_uid(caller),
         created_at: Utc::now().timestamp(),
         ..Default::default()
     };
@@ -425,12 +434,12 @@ pub(super) async fn handle_cron_create(
             job.created_by = req.created_by.clone();
             (job.max_fires, job.max_age_secs) = (req.max_fires, req.max_age_secs);
         }
-        None => def.apply_to(&mut job, &|to| target_of(&state, to)),
+        None => def.apply_to(&mut job, &|to| target_of(state, to)),
     }
     // An agent's job is its own (§7); the operator's has the owner it names.
     job.owner = owner;
 
-    let store = match jobs_store_or_503(&state) {
+    let store = match jobs_store_or_503(state) {
         Ok(store) => store,
         Err(e) => return e,
     };
@@ -442,7 +451,7 @@ pub(super) async fn handle_cron_create(
     if job.enabled {
         state.cron_scheduler.schedule_job(&job);
     }
-    publish_cron_changed(&state);
+    publish_cron_changed(state);
 
     (StatusCode::CREATED, Json(json!({"job": to_view(&job)})))
 }
@@ -578,9 +587,21 @@ pub(super) async fn handle_cron_run_now(
             Json(json!({"error": "only the agent that created this job, or the operator, can run it now"})),
         );
     }
+    if job.action_kind == "spawn" {
+        return forbidden(SPAWN_FROM_THE_APP);
+    }
     let triggered_by =
         caller.as_deref().and_then(Caller::uid).map(str::to_string).unwrap_or_else(|| jobs::BY_OPERATOR.to_string());
-    let fired = state.cron_scheduler.run_now(&job, &triggered_by).await;
+    run_job_now(&state, &job, &triggered_by).await
+}
+
+/// Run `job` now and say how it went.
+async fn run_job_now(state: &AppState, job: &CronJob, triggered_by: &str) -> Answer {
+    let fired = state.cron_scheduler.run_now(job, triggered_by).await;
+    if let Some(why) = fired.waiting {
+        let body = json!({"run_id": fired.run_id, "outcome": "queued", "error": null, "waiting_for": why});
+        return (StatusCode::OK, Json(body));
+    }
     let (outcome, error) = match &fired.outcome {
         Some(FireOutcome::Delivered { .. }) => ("delivered", None),
         Some(FireOutcome::Missed { .. }) => ("missed", Some(format!("agent {} is not running", job.target))),
@@ -588,6 +609,37 @@ pub(super) async fn handle_cron_run_now(
         None => ("failed", Some("no way to deliver".to_string())),
     };
     (StatusCode::OK, Json(json!({"run_id": fired.run_id, "outcome": outcome, "error": error})))
+}
+
+/// `POST /api/v1/host/jobs`: what the operator decides in the Jobs tab that
+/// starts agents, relayed by the host with its own token. `action` is
+/// `create` (`definition`: a job definition, a `spawn` job included) or
+/// `run_now` (`id`).
+pub(crate) async fn handle_host_jobs(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    Json(body): Json<Value>,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    if !super::ui_handlers::from_host(&state, &headers).await {
+        return forbidden("only the AgentMux host can create or run a job that starts workers").into_response();
+    }
+    match body.get("action").and_then(Value::as_str).unwrap_or("") {
+        "create" => create_job(&state, None, body.get("definition").cloned().unwrap_or(Value::Null), true).into_response(),
+        "run_now" => {
+            let id = body.get("id").and_then(Value::as_str).unwrap_or("");
+            let store = match jobs_store_or_503(&state) {
+                Ok(store) => store,
+                Err(e) => return e.into_response(),
+            };
+            match store.cron_get(id) {
+                Ok(Some(job)) => run_job_now(&state, &job, jobs::BY_OPERATOR).await.into_response(),
+                Ok(None) => (StatusCode::NOT_FOUND, Json(json!({"error": "job not found"}))).into_response(),
+                Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
+            }
+        }
+        other => bad_request(format!("unknown action {other:?} (use create or run_now)")).into_response(),
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -775,6 +827,9 @@ pub(super) async fn handle_cron_patch(
         return set_enabled(&state, &store, &id, action);
     }
     let Some(fields) = body.as_object() else { return bad_request("an edit is a JSON object of job fields") };
+    if job.action_kind == "spawn" {
+        return forbidden("a spawn job can be paused, resumed or deleted here; to change it, delete it and create it again from the Jobs tab");
+    }
     if !may_edit_job(caller.as_deref(), &job) {
         return forbidden("an agent can edit only a job it created or owns");
     }
@@ -795,6 +850,9 @@ pub(super) async fn handle_cron_patch(
     };
     if let Err(e) = may_define(&who(&state, caller.as_deref()), &def, Some(job.owner_uid())) {
         return forbidden(e);
+    }
+    if matches!(def.action, Action::Spawn { .. }) {
+        return forbidden(SPAWN_FROM_THE_APP);
     }
     if let Err(e) = runnable_yet(&def) {
         return bad_request(e);

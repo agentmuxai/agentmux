@@ -38,6 +38,22 @@ export const ADVANCED_SETTINGS = {
         section: "advanced",
         keywords: ["compaction", "context", "tokens", "autoCompactWindow", "agent:compactat"],
     },
+    subagentModel: {
+        id: "advanced.subagent_model",
+        label: "Sub-agent model",
+        description:
+            "The model Claude agents' general-purpose sub-agents run on: sonnet, haiku, opus, a model ID, or inherit to use the agent's own. A sub-agent that names its own model, or one the agent passes per call, still wins. Takes effect when each agent next starts",
+        section: "advanced",
+        keywords: ["sub-agent", "subagent", "model", "tokens", "agent:subagentmodel", "sonnet"],
+    },
+    exploreModel: {
+        id: "advanced.explore_model",
+        label: "Explore sub-agent model",
+        description:
+            "The model Claude agents' Explore sub-agents run on: haiku, sonnet, opus, a model ID, or inherit to leave Claude Code's built-in. Takes effect when each agent next starts",
+        section: "advanced",
+        keywords: ["explore", "sub-agent", "subagent", "model", "tokens", "agent:exploremodel", "haiku"],
+    },
     compactHints: {
         id: "advanced.compact_hints",
         label: "Suggest compacting",
@@ -156,6 +172,38 @@ export function AdvancedSection(): JSX.Element {
                         min={0} step={50}
                         value={((s()["agent:compactat"] as number) ?? 600000) / 1000}
                         onChange={(v) => set("agent:compactat", Math.max(0, Math.round(v)) * 1000)}
+                    />
+                }
+            />
+            <SettingRow
+                id={ADVANCED_SETTINGS.subagentModel.id}
+                label={ADVANCED_SETTINGS.subagentModel.label}
+                description={ADVANCED_SETTINGS.subagentModel.description}
+                control={
+                    <TextInput
+                        class="setting-number setting-number--wide"
+                        placeholder="sonnet"
+                        value={(s()["agent:subagentmodel"] as string) ?? "sonnet"}
+                        onBlur={(e) => {
+                            const raw = e.currentTarget.value.trim();
+                            set("agent:subagentmodel", raw === "" ? null : raw);
+                        }}
+                    />
+                }
+            />
+            <SettingRow
+                id={ADVANCED_SETTINGS.exploreModel.id}
+                label={ADVANCED_SETTINGS.exploreModel.label}
+                description={ADVANCED_SETTINGS.exploreModel.description}
+                control={
+                    <TextInput
+                        class="setting-number setting-number--wide"
+                        placeholder="haiku"
+                        value={(s()["agent:exploremodel"] as string) ?? "haiku"}
+                        onBlur={(e) => {
+                            const raw = e.currentTarget.value.trim();
+                            set("agent:exploremodel", raw === "" ? null : raw);
+                        }}
                     />
                 }
             />

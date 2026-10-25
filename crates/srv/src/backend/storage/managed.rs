@@ -743,11 +743,13 @@ impl Store {
         visible: &mut Vec<R>,
     ) {
         for bundle_id in self.agent_bundle_chain(agent_id) {
-            for (row, _) in self
+            // Only the rows the bundle holds a ref to: `managed_list` also
+            // returns every global row, which the bundle never named.
+            for (row, bound) in self
                 .managed_list::<R>(catalog, Owner::Bundle, &bundle_id)
                 .unwrap_or_default()
             {
-                if !visible.iter().any(|s| s.id() == row.id()) {
+                if bound && !visible.iter().any(|s| s.id() == row.id()) {
                     visible.push(row);
                 }
             }

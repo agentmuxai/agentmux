@@ -96,9 +96,7 @@ function registerGlobalKeys() {
     // ── Panes ──
     on("pane:new", run(() => handleCmdN()));
     on("split:right", run(() => handleSplitHorizontal("after")));
-    on("split:left", run(() => handleSplitHorizontal("before")));
     on("split:down", run(() => handleSplitVertical("after")));
-    on("split:up", run(() => handleSplitVertical("before")));
     on("pane:close", run(() => genericClose()));
     on("pane:magnify", () => {
         const layoutModel = getLayoutModelForStaticTab();

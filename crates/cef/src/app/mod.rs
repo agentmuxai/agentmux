@@ -128,6 +128,13 @@ wrap_window_delegate! {
             } else if let Some((x, y, w, h)) = get_monitor_centered_70pct(window) {
                 window.set_bounds(Some(&Rect { x, y, width: w, height: h }));
             }
+            // The main window was maximized when it last ran: its rect above is where
+            // it goes when restored.
+            if self.window_registration.as_ref().is_some_and(|(_, label)| label == "main")
+                && crate::commands::window::main_window_state::take_start_maximized()
+            {
+                window.maximize();
+            }
 
             // Windows: bind (label, HWND) into the HWND registry right here,
             // at Views window-creation time — CefWindow::GetWindowHandle() is
@@ -1262,7 +1269,8 @@ wrap_browser_process_handler! {
 
                 let mut window_delegate = AgentMuxWindowDelegate::new(
                     RefCell::new(browser_view),
-                    None,
+                    // Where the main window was last time, else 70% centred (Windows).
+                    crate::commands::window::main_window_state::initial_bounds(),
                     true, // frameless — main window uses custom title bar
                     RuntimeStyle::ALLOY,
                     Some((self.state.clone(), "main".to_string())),

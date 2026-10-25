@@ -60,6 +60,8 @@ Non-goals (v1):
 
 The MCP server reads each file (it runs as the agent, so it reads exactly what the agent can, which answers the first version's open question 1) and streams it to its own srv's `POST /api/v1/attachments/upload`, which puts it in the sender's attachment store and returns its SHA-256, size, kind and MIME. An agent forwards a file it received by passing the path it was given in its file list; the store keeps one copy per content hash, so nothing is stored twice.
 
+`Message` with action `broadcast` takes the same `files`. It uploads them once, then sends each target its own jekt, signed for that target and carrying the manifest, so every target goes through the same tier checks as a direct send. The answer lists the names sent and, in `files_short`, each delivered target that got fewer files than were sent.
+
 Refusals happen before anything is sent: a missing or unreadable file, a directory, more than 10 files, a file over the per-file limit of the most permissive tier (§5), or a target that can't receive files (§3.4). The tool's answer names the file and the reason. The tier limit is checked again in srv once the tier is known.
 
 ### 3.2 The manifest

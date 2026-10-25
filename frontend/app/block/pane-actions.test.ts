@@ -49,9 +49,7 @@ describe("buildPaneContextMenu — baseline (no omit)", () => {
             "Copy",
             "Paste",
             "-",
-            "Split Up",
             "Split Down",
-            "Split Left",
             "Split Right",
             "-",
             "Magnify Pane",
@@ -66,9 +64,7 @@ describe("buildPaneContextMenu — baseline (no omit)", () => {
         expect(shape(menu)).toEqual([
             "Copy",
             "-",
-            "Split Up",
             "Split Down",
-            "Split Left",
             "Split Right",
             "-",
             "Un-Magnify Pane",
@@ -163,12 +159,10 @@ describe("split — a view's splitBlockDef replaces copying its meta", () => {
         expect(blockDef).toEqual({ meta: PICKER_META });
     });
 
-    it("every direction splits into the declared block", async () => {
+    it("both directions split into the declared block", async () => {
         const g = (await import("@/app/store/global")) as any;
         const expected: Record<string, [any, string]> = {
-            "Split Up": [g.createBlockSplitVertically, "before"],
             "Split Down": [g.createBlockSplitVertically, "after"],
-            "Split Left": [g.createBlockSplitHorizontally, "before"],
             "Split Right": [g.createBlockSplitHorizontally, "after"],
         };
         for (const [label, [fn, position]] of Object.entries(expected)) {

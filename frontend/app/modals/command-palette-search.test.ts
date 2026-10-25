@@ -25,7 +25,6 @@ const COMMANDS: CommandEntry[] = [
     cmd("open:agent", "Open Agent", "Open"),
     cmd("open:terminal", "Open Terminal", "Open"),
     cmd("split:down", "Split Down", "Split"),
-    cmd("split:left", "Split Left", "Split"),
     cmd("split:right", "Split Right", "Split"),
     cmd("window:close", "Close Window", "Window"),
     cmd("window:new", "New Window", "Window"),
