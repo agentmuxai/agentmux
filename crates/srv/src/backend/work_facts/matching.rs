@@ -11,7 +11,7 @@ use std::collections::HashSet;
 use serde::{Deserialize, Serialize};
 
 use super::paths::{clean_relative, is_absolute, normalize_path, normalize_repo, path_matches, relative_to};
-use super::WorkFacts;
+use super::{BuildSlotHold, WorkFacts};
 
 /// What the caller asked about. Every field is optional; with none, the
 /// caller's own repository is the question.
@@ -75,6 +75,10 @@ pub struct WhoResult {
     /// When this agent's git facts were taken (Unix ms), so a reader can
     /// tell how fresh `dirty` and `branch` matches are.
     pub git_checked_ms: Option<u64>,
+    /// Set while this agent holds the host's build slot, so a reader knows why its builds and
+    /// tests are slow to start for everyone else.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub build_slot: Option<BuildSlotHold>,
     pub matches: Vec<WhoMatch>,
 }
 
@@ -265,6 +269,7 @@ pub fn who_is_working_on(t: &Target, others: &[WorkFacts]) -> Vec<WhoResult> {
                 repo: f.repo.clone(),
                 branch: f.branch.clone(),
                 git_checked_ms: f.git_checked_ms,
+                build_slot: f.build_slot.clone(),
                 matches,
             })
         })
@@ -348,6 +353,24 @@ mod tests {
         // A different repository with the same relative path is not a match.
         let stranger = WorkFacts { dirty_files: vec!["crates/srv/lib.rs".into()], ..agent("S", "o/other", "C:/s", "main") };
         assert!(ask(q(Some("crates/srv/lib.rs"), None, None, None), &me, &[stranger]).is_empty());
+    }
+
+    /// The holder of the build slot says so in the answer, and nobody else carries the field.
+    #[test]
+    fn the_build_slot_holder_is_marked_in_the_answer() {
+        let me = agent("Me", "o/r", "/me", "main");
+        let mut holder = agent("Holder", "o/r", "/holder", "feat");
+        holder.dirty_files = vec!["a.rs".into()];
+        holder.build_slot = Some(BuildSlotHold { since_ms: 7, reason: "cargo test".into(), command: "cargo test -p x".into() });
+        let mut other = agent("Other", "o/r", "/other", "feat");
+        other.dirty_files = vec!["a.rs".into()];
+
+        let r = ask(q(Some("a.rs"), None, None, None), &me, &[holder, other]);
+        let json: Vec<serde_json::Value> = r.iter().map(|x| serde_json::to_value(x).unwrap()).collect();
+        let by = |name: &str| json.iter().find(|j| j["agent"] == name).unwrap();
+        assert_eq!(by("Holder")["build_slot"]["reason"], "cargo test");
+        assert_eq!(by("Holder")["build_slot"]["command"], "cargo test -p x");
+        assert!(by("Other").get("build_slot").is_none(), "only the holder carries it");
     }
 
     #[test]

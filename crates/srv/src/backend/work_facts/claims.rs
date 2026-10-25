@@ -154,6 +154,7 @@ pub fn add_claim_matches(
                     repo: f.and_then(|f| f.repo.clone()).or_else(|| c.repo.clone()),
                     branch: f.and_then(|f| f.branch.clone()),
                     git_checked_ms: f.and_then(|f| f.git_checked_ms),
+                    build_slot: f.and_then(|f| f.build_slot.clone()),
                     matches: Vec::new(),
                 });
                 results.len() - 1
@@ -282,6 +283,7 @@ mod tests {
             channel: "stable".into(),
             status: "idle".into(),
             branch: Some("agent4/web".into()),
+            build_slot: Some(crate::backend::work_facts::BuildSlotHold { since_ms: 3, reason: "cargo test".into(), command: "cargo test".into() }),
             ..Default::default()
         }];
         let mut results = vec![WhoResult {
@@ -292,6 +294,7 @@ mod tests {
             repo: Some("o/r".into()),
             branch: None,
             git_checked_ms: None,
+            build_slot: None,
             matches: vec![WhoMatch { kind: MatchKind::Edited, detail: "recently edited".into(), since_ms: None }],
         }];
         let t = target(Some("o/r"), Some("crates/srv/src/muxbus/a.rs"), None, None);
@@ -308,6 +311,8 @@ mod tests {
         assert_eq!(five.matches.iter().map(|m| m.kind).collect::<Vec<_>>(), vec![MatchKind::Claim, MatchKind::Edited]);
         let four = results.iter().find(|r| r.agent == "Agent4").unwrap();
         assert_eq!((four.status.as_str(), four.branch.as_deref()), ("idle", Some("agent4/web")));
+        assert_eq!(four.build_slot.as_ref().map(|b| b.reason.as_str()), Some("cargo test"), "a claim-only entry keeps the holder note");
+        assert!(five.build_slot.is_none());
         assert_eq!(results.iter().find(|r| r.agent == "Gone").unwrap().status, "not running");
     }
 
