@@ -78,33 +78,47 @@ jobs:
     if: ${{ !cancelled() && needs.changes.outputs.version_only != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        # linux/arm64 is cross-compiled on this x86 runner (see Dockerfile.srv) and
+        # smoke-tested under QEMU, so a change that breaks the arm64 image is seen here.
+        platform: [linux/amd64, linux/arm64]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set up QEMU (runs the arm64 image)
+        if: matrix.platform == 'linux/arm64'
+        uses: docker/setup-qemu-action@v3
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build (linux/amd64)
+      - name: Build (${{ matrix.platform }})
         uses: docker/build-push-action@v5
         with:
           context: .
           file: docker/Dockerfile.srv
-          platforms: linux/amd64
+          platforms: ${{ matrix.platform }}
           load: true
           push: false
           tags: agentmux-srv:ci
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=srv-${{ matrix.platform }}
+          cache-to: type=gha,mode=max,scope=srv-${{ matrix.platform }}
 
       - name: Smoke test
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          # Two seconds a try: 90 s natively, 120 s under QEMU.
+          TRIES: ${{ matrix.platform == 'linux/arm64' && 60 || 45 }}
         run: |
           set -euo pipefail
-          docker run -d --name srv agentmux-srv:ci
+          docker run -d --name srv --platform "$PLATFORM" agentmux-srv:ci
           trap 'docker logs srv 2>&1 | tail -40; docker rm -f srv >/dev/null' EXIT
 
           # Healthy = the image's own HEALTHCHECK (GET /health on loopback) passed.
-          for i in $(seq 1 45); do
+          for i in $(seq 1 "$TRIES"); do
             status=$(docker inspect -f '{{.State.Health.Status}}' srv)
             [ "$status" = healthy ] && break
             [ "$(docker inspect -f '{{.State.Running}}' srv)" = true ] || { echo "srv exited"; exit 1; }
