@@ -130,6 +130,7 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Reduced {
         Command::ProbeUiThread { .. } => Vec::new(),
         // Launcher → host only, like ProbeUiThread; a client sending it is a no-op.
         Command::NotifySrvLatency { .. } => Vec::new(),
+        Command::QuitApp => Vec::new(),
         Command::Goodbye => connection::handle_goodbye(state, ctx.registered_pid.unwrap_or(0)),
         Command::ReportWindowOpened {
             label,

@@ -275,10 +275,10 @@ async fn a_global_memory_save_over_the_socket_is_recorded_as_whoever_made_it() {
     }
 }
 
-/// The work queue and jobs act for an agent: each route refuses a request with no token, and a token is
+/// The work queue, jobs, claims and channel posts act for an agent: each route refuses a request with no token, and a token is
 /// enough to get past the guard (what the handler then says is its own business).
 #[tokio::test]
-async fn the_work_and_jobs_routes_refuse_a_request_with_no_token() {
+async fn the_agent_acting_routes_refuse_a_request_with_no_token() {
     let _counters = M4_ACTOR_COUNTERS.lock().await;
     let (state, token) = state_with_alpha();
     let routes = [
@@ -302,6 +302,9 @@ async fn the_work_and_jobs_routes_refuse_a_request_with_no_token() {
         ("PATCH", "/agentmux/cron/j1"),
         ("POST", "/agentmux/cron/j1/run"),
         ("POST", "/agentmux/cron/runs/r1/report"),
+        ("POST", "/api/v1/work-claims"),
+        ("POST", "/api/v1/work-claims/release"),
+        ("POST", "/api/v1/coord/posts"),
     ];
     for (method, uri) in routes {
         for (token, guarded) in [(None, true), (Some(token.as_str()), false)] {
@@ -336,4 +339,40 @@ async fn the_work_and_jobs_routes_refuse_a_body_that_names_another_agent() {
         let (_, v) = post(&state, Some(&token), uri, json!({ key: "sc-alpha", "title": "t", "attempt": 1 })).await;
         assert!(!names_another(&v), "{uri} as itself: {v}");
     }
+}
+
+/// A claim made with a token is that token's agent's, under its slug whichever of its names the request used;
+/// a request naming another agent is refused.
+#[tokio::test]
+async fn a_claim_with_a_token_is_recorded_as_the_tokens_agent() {
+    let _counters = M4_ACTOR_COUNTERS.lock().await;
+    let (state, token) = state_with_alpha();
+    let (status, v) = post(&state, Some(&token), "/api/v1/work-claims", json!({ "agent": "Alpha Agent", "topic": "sc-claim-topic" })).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!((v["claim"]["agent"].as_str(), v["claim"]["agent_uid"].as_str()), (Some("sc-alpha"), Some("uid-sc-alpha")), "{v}");
+    let (status, v) = post(&state, Some(&token), "/api/v1/work-claims", json!({ "agent": "sc-beta", "topic": "sc-claim-topic" })).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{v}");
+}
+
+/// A token with no live registration can't borrow another agent's by sending its block.
+#[tokio::test]
+async fn a_claim_cannot_borrow_another_agents_registration_through_block() {
+    let _counters = M4_ACTOR_COUNTERS.lock().await;
+    let (state, token) = state_with_alpha();
+    state.reactive_handler.register_agent_full("sc-beta", "sc-beta-block", None, 0, Some("sc-beta"), Some("uid-sc-beta"), "test").unwrap();
+    let (status, v) = post(&state, Some(&token), "/api/v1/work-claims", json!({ "block": "sc-beta-block", "topic": "sc-claim-block" })).await;
+    let _ = state.reactive_handler.unregister_block("sc-beta-block");
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!((v["claim"]["agent"].as_str(), v["claim"]["agent_uid"].as_str()), (Some("sc-alpha"), Some("uid-sc-alpha")), "{v}");
+}
+
+/// Reading the channel and who is working on what stays open to a request with no token.
+#[tokio::test]
+async fn reading_the_channel_needs_no_token() {
+    let _counters = M4_ACTOR_COUNTERS.lock().await;
+    let (state, _token) = state_with_alpha();
+    let (status, v) = get(&state, None, "/api/v1/coord/posts?repo=none").await;
+    assert!(!no_token_refusal(&v), "{status}: {v}");
+    let (status, v) = get(&state, None, "/api/v1/work-facts/who?query=x").await;
+    assert!(!no_token_refusal(&v), "{status}: {v}");
 }

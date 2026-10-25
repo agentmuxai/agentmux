@@ -20,7 +20,20 @@ use agentmux_common::secret_eq::secret_eq;
 
 /// The commands the forwarding token opens. Nothing else, ever: adding one
 /// here gives it to every process that can read the port file.
-pub(crate) const FORWARD_COMMANDS: &[&str] = &["open_new_window", "focus_window", "quit_app"];
+pub(crate) const FORWARD_COMMANDS: &[&str] = &["open_new_window", "focus_window"];
+
+/// Set by a launcher that quits the app over its own pipe (`Command::QuitApp`),
+/// in the environment it starts the host with.
+pub(crate) const QUIT_OVER_PIPE_ENV: &str = "AGENTMUX_LAUNCHER_QUIT_PIPE";
+
+/// Whether the forwarding token may also quit the app. Only for a host an
+/// older launcher started (its tray and restart quit through the port file) or
+/// one with no launcher at all; a launcher that quits over the pipe says so
+/// in the host's environment, which no other process can change afterwards.
+fn forward_may_quit() -> bool {
+    static MAY: OnceLock<bool> = OnceLock::new();
+    *MAY.get_or_init(|| std::env::var_os(QUIT_OVER_PIPE_ENV).is_none_or(|v| v.is_empty()))
+}
 
 /// This run's forwarding token, made on first use.
 pub(crate) fn forward_token() -> &'static str {
@@ -60,7 +73,7 @@ pub(crate) fn access_for(presented: Option<&str>, ipc_token: &str, forward: &str
 pub(crate) fn allows(access: IpcAccess, cmd: &str) -> bool {
     match access {
         IpcAccess::Full => true,
-        IpcAccess::Forward => FORWARD_COMMANDS.contains(&cmd),
+        IpcAccess::Forward => FORWARD_COMMANDS.contains(&cmd) || (cmd == "quit_app" && forward_may_quit()),
         IpcAccess::None => false,
     }
 }
@@ -89,8 +102,8 @@ mod tests {
     }
 
     #[test]
-    fn the_forwarding_token_runs_the_launchers_three_commands_and_nothing_more() {
-        for cmd in ["open_new_window", "focus_window", "quit_app"] {
+    fn the_forwarding_token_opens_and_raises_windows_and_nothing_more() {
+        for cmd in ["open_new_window", "focus_window"] {
             assert!(allows(IpcAccess::Forward, cmd), "{cmd}");
         }
         for cmd in [
@@ -111,6 +124,13 @@ mod tests {
             assert!(!allows(IpcAccess::Forward, cmd), "{cmd:?}");
         }
         assert!(!allows(IpcAccess::None, "open_new_window"));
+    }
+
+    // The test process has no launcher, so it is the "older launcher or none" case.
+    #[test]
+    fn the_forwarding_token_may_quit_only_for_a_host_no_pipe_launcher_started() {
+        assert!(!FORWARD_COMMANDS.contains(&"quit_app"));
+        assert_eq!(allows(IpcAccess::Forward, "quit_app"), std::env::var_os(QUIT_OVER_PIPE_ENV).is_none());
     }
 
     #[test]
