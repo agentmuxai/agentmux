@@ -75,7 +75,16 @@ const RESERVED_SHELL_NAMES: &[&str] = &["ENV", "BASH_ENV", "PROMPT_COMMAND", "IF
 /// Name endings that point a tool at a server, proxy, certificate store or
 /// home of its own.
 const RESERVED_SUFFIXES: &[&str] =
-    &["_BASE_URL", "_URL", "_ENDPOINT", "_HOST", "_PROXY", "_CA_BUNDLE", "_CA_CERTS", "_CERT_FILE", "_CONFIG_DIR", "_HOME"];
+    &["_BASE_URL", "_API_BASE", "_URL", "_ENDPOINT", "_HOST", "_PROXY", "_CA_BUNDLE", "_CA_CERTS", "_CERT_FILE", "_CONFIG_DIR", "_HOME", "_COMMAND", "_HELPER", "_PREFIX", "_EDITOR", "_PAGER"];
+
+/// What an agent may set: the settings that tune a provider CLI, and a few
+/// ordinary ones. Anything else (an editor, a pager, a browser, a library path,
+/// a variable some tool runs a command from) is the operator's to set in My
+/// Agents, because an agent's variables apply to another agent's launches and
+/// a list of what is dangerous is never complete. The reserved rules above
+/// still apply inside these.
+const ALLOWED_PREFIXES: &[&str] = &["CLAUDE_CODE_", "DISABLE_", "ANTHROPIC_MODEL", "ANTHROPIC_SMALL_FAST_MODEL", "MAX_"];
+const ALLOWED_NAMES: &[&str] = &["RUST_LOG", "RUST_BACKTRACE", "NO_COLOR", "FORCE_COLOR", "TZ", "LANG", "LC_ALL", "MCP_TIMEOUT", "MCP_TOOL_TIMEOUT"];
 
 /// Name endings that mark a credential. An ending, not a substring: a
 /// setting such as `CLAUDE_CODE_MAX_OUTPUT_TOKENS` is not one.
@@ -161,6 +170,11 @@ pub fn name_problem(name: &str) -> Option<String> {
     }
     if is_credential_name(name) {
         return Some(format!("{name}: looks like a credential; the operator sets those in My Agents"));
+    }
+    if !ALLOWED_NAMES.contains(&upper.as_str()) && !ALLOWED_PREFIXES.iter().any(|p| upper.starts_with(p)) {
+        return Some(format!(
+            "{name}: an agent may set CLAUDE_CODE_*, DISABLE_*, MAX_*, ANTHROPIC_MODEL, RUST_LOG, TZ and a few more; the operator sets any other in My Agents"
+        ));
     }
     None
 }
