@@ -183,3 +183,52 @@ async fn the_bus_inbox_routes_need_the_token_of_the_agent_they_name() {
         }
     }
 }
+
+async fn get(state: &AppState, token: Option<&str>, uri: &str) -> (StatusCode, Value) {
+    let mut req = Request::builder().method(Method::GET).uri(uri).header("X-AuthKey", "test-secret-key");
+    if let Some(t) = token {
+        req = req.header("X-Agent-Token", t);
+    }
+    let resp = build_router(state.clone()).oneshot(req.body(Body::empty()).unwrap()).await.unwrap();
+    let status = resp.status();
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+}
+
+fn no_token_refusal(v: &Value) -> bool {
+    v["error"].as_str().is_some_and(|e| e.contains("must carry that agent's token"))
+}
+
+/// Memory, accounts and presets belong to the agent whose token the request carries; one that carries none
+/// has no owner, and its `agent_id` is only a claim.
+#[tokio::test]
+async fn memory_and_identity_routes_refuse_a_request_with_no_token() {
+    let _counters = M4_ACTOR_COUNTERS.lock().await;
+    let (state, token) = state_with_alpha();
+    let q = "agent_id=sc-beta";
+    let gets = [
+        format!("/api/v1/agent/memory/list?{q}"),
+        format!("/api/v1/agent/memory/read?{q}&filename=MEMORY.md"),
+        format!("/api/v1/agent/memory/history?{q}&filename=MEMORY.md"),
+        format!("/api/v1/agent/memory/diff?{q}&filename=MEMORY.md&from_version_id=a&to_version_id=b"),
+        format!("/api/v1/agent/identity/accounts?{q}"),
+        format!("/api/v1/agent/preset/get?{q}"),
+    ];
+    for uri in &gets {
+        let (status, v) = get(&state, None, uri).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{uri}: {v}");
+        let (_, v) = get(&state, Some(&token), uri).await;
+        assert!(!no_token_refusal(&v), "{uri} with a token: {v}");
+    }
+    let posts = [
+        ("/api/v1/agent/memory/write", json!({ "agent_id": "sc-beta", "filename": "MEMORY.md", "content": "x" })),
+        ("/api/v1/agent/memory/revert", json!({ "agent_id": "sc-beta", "filename": "MEMORY.md", "target_version_id": "v" })),
+        ("/api/v1/agent/identity/validate", json!({ "agent_id": "sc-beta", "account_id": "a" })),
+    ];
+    for (uri, body) in posts {
+        let (status, v) = post(&state, None, uri, body.clone()).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{uri}: {v}");
+        let (_, v) = post(&state, Some(&token), uri, body).await;
+        assert!(!no_token_refusal(&v), "{uri} with a token: {v}");
+    }
+}

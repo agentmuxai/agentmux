@@ -289,6 +289,18 @@ pub(crate) fn proven_slug(store: &Store, uid: &str, actor: &str) -> Option<Strin
     }
 }
 
+/// For a route that acts for the agent its token names (its memory, accounts,
+/// presets): the request must carry a token this srv minted. Without one the
+/// route has no one to act for, and a body's `agent_id` is only a claim, so it
+/// is refused instead of being taken at its word.
+pub(crate) fn require_token(state: &AppState, caller: Option<&Caller>, site: ActorSite, actor: &str) -> Result<(), String> {
+    check_actor(state, caller, site, Some(actor));
+    match caller.and_then(Caller::uid) {
+        Some(_) => Ok(()),
+        None => Err("FORBIDDEN: this acts for an agent, so the request must carry that agent's token (AGENTMUX_AGENT_TOKEN)".to_string()),
+    }
+}
+
 /// Whether `actor` is a name the agent behind `uid` answers to: its slug,
 /// display or instance name, or one it was renamed from (a running agent keeps
 /// sending under the name its environment held at launch). A name that also

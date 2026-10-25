@@ -48,19 +48,44 @@ async fn a_valid_v2_from_the_answering_peers_uid_is_recorded_as_claimed_only() {
 }
 
 #[tokio::test]
-async fn a_uid_the_answering_peer_did_not_give_is_not_claimed() {
+async fn a_uid_the_answering_peer_did_not_give_is_not_claimed_and_fails_the_jekt() {
     let state = test_state();
     let (name_public, name_private) = generate_lan_keypair([1u8; 32]);
     let (uid_public, uid_private) = generate_lan_keypair([2u8; 32]);
     state.lan_discovery.seed_lan_pubkey_for_test("korp", name_public.to_vec(), Some(("uid-k".into(), uid_public.to_vec())));
     let mut req = signed(&name_private, Some(("uid-other", &uid_private)));
     verify_lan_signature(&state, &mut req).await;
-    assert_eq!(req.lan_verified, Some(true), "v1 stands on its own");
+    assert_eq!(req.lan_verified, Some(false), "a UID claim the peer contradicts is a failed signature");
     assert_eq!(req.lan_claimed_uid, "");
 }
 
 #[tokio::test]
-async fn a_changed_uid_key_under_the_same_name_is_not_claimed() {
+async fn no_uid_key_to_check_against_leaves_v1_standing() {
+    // The peer gave no UID key (an older peer): there is nothing to contradict.
+    let state = test_state();
+    let (name_public, name_private) = generate_lan_keypair([1u8; 32]);
+    let (_, uid_private) = generate_lan_keypair([2u8; 32]);
+    state.lan_discovery.seed_lan_pubkey_for_test("korp", name_public.to_vec(), None);
+    let mut req = signed(&name_private, Some(("uid-k", &uid_private)));
+    verify_lan_signature(&state, &mut req).await;
+    assert_eq!(req.lan_verified, Some(true));
+    assert_eq!(req.lan_claimed_uid, "");
+}
+
+#[tokio::test]
+async fn a_jekt_with_no_v2_at_all_stays_verified_on_v1() {
+    let state = test_state();
+    let (name_public, name_private) = generate_lan_keypair([1u8; 32]);
+    let (uid_public, _) = generate_lan_keypair([2u8; 32]);
+    state.lan_discovery.seed_lan_pubkey_for_test("korp", name_public.to_vec(), Some(("uid-k".into(), uid_public.to_vec())));
+    let mut req = signed(&name_private, None);
+    verify_lan_signature(&state, &mut req).await;
+    assert_eq!(req.lan_verified, Some(true));
+    assert_eq!(req.lan_claimed_uid, "");
+}
+
+#[tokio::test]
+async fn a_changed_uid_key_under_the_same_name_is_not_claimed_and_fails_the_jekt() {
     let state = test_state();
     let (name_public, name_private) = generate_lan_keypair([1u8; 32]);
     let (first_public, _) = generate_lan_keypair([2u8; 32]);
@@ -74,10 +99,11 @@ async fn a_changed_uid_key_under_the_same_name_is_not_claimed() {
     let mut req = signed(&name_private, Some(("uid-k", &second_private)));
     verify_lan_signature(&state, &mut req).await;
     assert_eq!(req.lan_claimed_uid, "", "the pin holds the first key");
+    assert_eq!(req.lan_verified, Some(false), "a key other than the pinned one is a failed signature");
 }
 
 #[tokio::test]
-async fn a_bad_v2_or_a_failed_v1_claims_nothing() {
+async fn a_bad_v2_fails_the_jekt_and_a_failed_v1_claims_nothing() {
     let state = test_state();
     let (name_public, name_private) = generate_lan_keypair([1u8; 32]);
     let (uid_public, _) = generate_lan_keypair([2u8; 32]);
@@ -85,7 +111,7 @@ async fn a_bad_v2_or_a_failed_v1_claims_nothing() {
     state.lan_discovery.seed_lan_pubkey_for_test("korp", name_public.to_vec(), Some(("uid-k".into(), uid_public.to_vec())));
     let mut bad_v2 = signed(&name_private, Some(("uid-k", &wrong_private)));
     verify_lan_signature(&state, &mut bad_v2).await;
-    assert_eq!(bad_v2.lan_verified, Some(true));
+    assert_eq!(bad_v2.lan_verified, Some(false), "v1 held, but the UID claim is forged");
     assert_eq!(bad_v2.lan_claimed_uid, "");
 
     let (_, uid_private) = generate_lan_keypair([2u8; 32]);

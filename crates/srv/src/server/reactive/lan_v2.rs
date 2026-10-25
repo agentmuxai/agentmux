@@ -2,6 +2,9 @@
 //! §6.5.10): the LAN v2 signature, checked once the v1 LAN signature verified.
 //! LAN peers are unauthenticated, so a UID it proves is recorded only as
 //! claimed by that LAN path: never verified, never matched to a local row.
+//! A sender that presents a UID and a v2 signature has made a claim, though: a
+//! claim that does not hold up counts as a failed signature, like a name key
+//! that does not match its pin.
 //!
 //! [`sign_at_origin`] is the sending half for an agent whose own process
 //! signed nothing (`SPEC_LAN_JEKT_SIGNED_BY_SRV_2026_10_25.md`).
@@ -12,6 +15,13 @@ use super::{AppState, InjectionRequest};
 /// gave that UID's key for `claimed`, the `(name, uid)` pin matches, and the
 /// v2 signature verifies under it. Only once the v1 check passed, so the
 /// name pin already matched: the UID pin is set only beside it.
+///
+/// A request that carries both a UID and a v2 signature but fails any of those
+/// checks (the peer gave another UID for the name, the pin holds a different
+/// key, the signature does not verify, the pin store cannot be read) is no
+/// longer verified: `lan_verified` becomes `Some(false)`. A request with no v2
+/// at all, or whose peer gave no UID key to check against, is left as v1
+/// decided it: there is nothing to contradict.
 pub(super) fn claim_uid(state: &AppState, req: &mut InjectionRequest, claimed: &str) {
     if req.lan_verified != Some(true) {
         return;
@@ -25,6 +35,7 @@ pub(super) fn claim_uid(state: &AppState, req: &mut InjectionRequest, claimed: &
     let record = crate::backend::agent_resolve::record_uid_fallback;
     if answered_uid != uid {
         record("m4d.lan_v2_other_uid");
+        req.lan_verified = Some(false);
         return;
     }
     use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
@@ -33,9 +44,13 @@ pub(super) fn claim_uid(state: &AppState, req: &mut InjectionRequest, claimed: &
         Ok(pinned) if pinned == key_b64 => {}
         Ok(_) => {
             record("m4d.lan_v2_pin_mismatch");
+            req.lan_verified = Some(false);
             return;
         }
-        Err(_) => return,
+        Err(_) => {
+            req.lan_verified = Some(false); // fail closed, as for the name pin
+            return;
+        }
     }
     let verified = agentmux_common::jekt_sign::verify_lan_jekt_v2(
         &key,
@@ -51,6 +66,7 @@ pub(super) fn claim_uid(state: &AppState, req: &mut InjectionRequest, claimed: &
         req.lan_claimed_uid = uid;
     } else {
         record("m4d.lan_v2_bad_sig");
+        req.lan_verified = Some(false);
     }
 }
 
