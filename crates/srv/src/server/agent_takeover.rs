@@ -47,6 +47,7 @@ pub(super) struct TakeoverRequest {
 
 pub(super) async fn handle_agent_takeover(
     State(state): State<AppState>,
+    caller: Option<axum::Extension<super::caller::Caller>>,
     Json(req): Json<TakeoverRequest>,
 ) -> Response {
     let block = {
@@ -62,6 +63,9 @@ pub(super) async fn handle_agent_takeover(
         return (StatusCode::BAD_REQUEST, Json(json!({ "error": "this pane has no agent" }))).into_response();
     }
     let name = obj::meta_get_string(&block.meta, "agentName", "");
+    if let Err(error) = super::actor::own_agent_only(caller.as_deref(), Some(&uid)) {
+        return (StatusCode::FORBIDDEN, Json(json!({ "error": error }))).into_response();
+    }
 
     // The user is deliberately taking the agent (back) here.
     agent_admission::clear_handover_hold(&uid);
@@ -171,10 +175,17 @@ pub(super) struct ReleaseRequest {
     requested_by_version: String,
 }
 
-pub(super) async fn handle_agent_release(State(state): State<AppState>, Json(req): Json<ReleaseRequest>) -> Response {
+pub(super) async fn handle_agent_release(
+    State(state): State<AppState>,
+    caller: Option<axum::Extension<super::caller::Caller>>,
+    Json(req): Json<ReleaseRequest>,
+) -> Response {
     let uid = req.uid.trim().to_string();
     if uid.is_empty() {
         return (StatusCode::BAD_REQUEST, Json(json!({ "error": "uid required" }))).into_response();
+    }
+    if let Err(error) = super::actor::own_agent_only(caller.as_deref(), Some(&uid)) {
+        return (StatusCode::FORBIDDEN, Json(json!({ "error": error }))).into_response();
     }
     let blocks = {
         let mstore = state.mstore.clone();
