@@ -7,7 +7,8 @@
 
 import { createSignal, For, onMount, Show, type JSX } from "solid-js";
 import clsx from "clsx";
-import { Button, Switch, TextInput } from "@/app/element/ui";
+import { Button, IconButton, Switch, TextInput } from "@/app/element/ui";
+import { normalizeKeepAwakeSite } from "@/app/view/browser/hibernation";
 import type { BrowserProfile } from "@/types/rpc/BrowserProfile";
 import {
     browserProfiles,
@@ -54,7 +55,71 @@ export const BROWSER_SETTINGS = {
         section: "browser",
         keywords: ["hibernate", "sleep", "minutes", "delay", "browser:hibernateafter"],
     },
+    keepAwakeSites: {
+        id: "browser.keep_awake_sites",
+        label: "Sites that never sleep",
+        description:
+            "Browser panes on these sites stay awake however long they are hidden. A site covers its subdomains (example.com covers mail.example.com); write an address with https:// to keep just that one.",
+        section: "browser",
+        keywords: ["hibernate", "sleep", "keep awake", "never", "sites", "exceptions", "browser:keepawakesites"],
+    },
 } satisfies Record<string, SettingsIndexEntry>;
+
+/** The keep-awake sites list: each site with a remove button, and a field to add one. */
+function KeepAwakeSites(props: { sites: string[] }): JSX.Element {
+    const [draft, setDraft] = createSignal("");
+    const [error, setError] = createSignal<string | null>(null);
+    const add = () => {
+        const site = normalizeKeepAwakeSite(draft());
+        if (!site) {
+            setError(`"${draft().trim()}" isn't a site: write a host like example.com, or an address.`);
+            return;
+        }
+        setError(null);
+        setDraft("");
+        if (!props.sites.includes(site)) set("browser:keepawakesites", [...props.sites, site]);
+    };
+    const remove = (site: string) => {
+        const rest = props.sites.filter((s) => s !== site);
+        set("browser:keepawakesites", rest.length ? rest : null);
+    };
+    return (
+        <div class="browser-keepawake">
+            <Show when={props.sites.length > 0}>
+                <ul class="browser-keepawake-list" aria-label="Sites that never sleep">
+                    <For each={props.sites}>
+                        {(site) => (
+                            <li class="browser-keepawake-site">
+                                <span>{site}</span>
+                                <IconButton icon="xmark" label={`Let ${site} sleep again`} density="compact" onClick={() => remove(site)} />
+                            </li>
+                        )}
+                    </For>
+                </ul>
+            </Show>
+            <div class="browser-profile-add">
+                <TextInput
+                    detached
+                    aria-label="Site to keep awake"
+                    placeholder="example.com"
+                    value={draft()}
+                    onInput={(e) => setDraft(e.currentTarget.value)}
+                    onKeyDown={(e) => {
+                        if (e.key === "Enter") add();
+                    }}
+                />
+                <Button icon="plus" disabled={!draft().trim()} onClick={add}>
+                    Add site
+                </Button>
+            </div>
+            <Show when={error()}>
+                <div class="settings-config-error" role="alert">
+                    {error()}
+                </div>
+            </Show>
+        </div>
+    );
+}
 
 function ProfileRow(props: { profile: BrowserProfile }): JSX.Element {
     const [name, setName] = createSignal(props.profile.name);
@@ -195,6 +260,13 @@ export function BrowserSection(): JSX.Element {
                             onChange={(v) => set("browser:hibernateafter", v)}
                         />
                     }
+                />
+                <SettingRow
+                    indent
+                    id={BROWSER_SETTINGS.keepAwakeSites.id}
+                    label={BROWSER_SETTINGS.keepAwakeSites.label}
+                    description={BROWSER_SETTINGS.keepAwakeSites.description}
+                    control={<KeepAwakeSites sites={(Array.isArray(s()["browser:keepawakesites"]) ? s()["browser:keepawakesites"] : []).filter((x: unknown) => typeof x === "string")} />}
                 />
             </Show>
             <SectionHeader label={BROWSER_SETTINGS.profiles.label} />
