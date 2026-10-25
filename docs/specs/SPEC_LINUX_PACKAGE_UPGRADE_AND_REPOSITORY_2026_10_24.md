@@ -1,6 +1,6 @@
 # Spec: upgrading a .deb or .rpm install from the app, and an apt/dnf repository
 
-**Status:** active. The operator approved all five decisions of §7 as recommended (2026-10-25). Phase 3g-1 (§3.1–3.3, §3.5, the "Installs from before 3g" note of §3.4) is built; 3g-2 (go back), Repo-1 and Repo-2 are not.
+**Status:** active (#5528). The operator approved all five decisions of §7 as recommended (2026-10-25). Phase 3g-1 (§3.1–3.3, §3.5, the "Installs from before 3g" note of §3.4) is built; 3g-2 (go back), Repo-1 and Repo-2 are not.
 **Date:** 2026-10-24
 **Author:** Maricon
 **Verified against:** `agentmux` `main` @ `0d73be7a0` (2026-10-24); Ubuntu 26.04 (GNOME 50.1) for what a desktop has installed.
