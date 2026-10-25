@@ -35,6 +35,12 @@ pub const STATE_DIR: &str = "/var/lib/agentmux";
 /// version did to its data is too much to leave behind.
 const GO_BACK_WITHIN: std::time::Duration = std::time::Duration::from_secs(7 * 24 * 60 * 60);
 
+/// How long going back waits for the helper's `READY`: it prints that only once it has downloaded
+/// the old release (its download may take up to 900 s) and checked it, and the user's password
+/// prompt comes before all of that. Stopping the wait early would leave the helper without the waiter
+/// that starts AgentMux again.
+const GO_BACK_AUTHORIZE_WITHIN: std::time::Duration = std::time::Duration::from_secs(900 + 300);
+
 /// What to hand the helper in place of a file when it is to install the version
 /// the last upgrade replaced.
 const GO_BACK_ARG: &str = "--go-back";
@@ -220,7 +226,7 @@ pub fn offer_go_back(own_version: &str, own_dir: &Path, data_dir: &Path, why: &s
         return false;
     }
     let up = PackageUpgrade::go_back(&from, data_dir);
-    if authorize(&up, std::process::id(), std::time::Duration::from_secs(120)) {
+    if authorize(&up, std::process::id(), GO_BACK_AUTHORIZE_WITHIN) {
         return true;
     }
     // Nothing was installed: the reason is the result file's, if there is one (a cancelled prompt has none).
