@@ -31,6 +31,8 @@ const reorderMock = vi.fn();
 const historyMock = vi.fn();
 const diffMock = vi.fn();
 const revertMock = vi.fn();
+/** `globalmemory:removed`: nothing removed unless a test says so. */
+const removedMock = vi.fn();
 // "Bring Global Memory from…": nothing to offer unless a test says so.
 const importSourcesMock = vi.fn((..._args: unknown[]) => Promise.resolve({ list_id: "l", scope: "shared", sources: [] }));
 const importMock = vi.fn((..._args: unknown[]) => Promise.resolve({ added: 0, renamed: 0 }));
@@ -44,6 +46,7 @@ vi.mock("@/app/store/rpc-api", () => ({
         GlobalMemoryHistoryCommand: (...args: unknown[]) => historyMock(...args),
         GlobalMemoryDiffCommand: (...args: unknown[]) => diffMock(...args),
         GlobalMemoryRevertCommand: (...args: unknown[]) => revertMock(...args),
+        GlobalMemoryRemovedCommand: (...args: unknown[]) => removedMock(...args),
         GlobalMemoryImportSourcesCommand: (...args: unknown[]) => importSourcesMock(...args),
         GlobalMemoryImportCommand: (...args: unknown[]) => importMock(...args),
         GlobalMemorySectionsCommand: (...args: unknown[]) => sectionsMock(...args),
@@ -122,9 +125,10 @@ afterEach(() => {
 });
 
 beforeEach(() => {
-    for (const m of [listMemoriesMock, sectionsMock, getClaudeGlobalConfigMock, upsertMock, upsertSystemMock, reorderMock, historyMock, diffMock, revertMock]) {
+    for (const m of [listMemoriesMock, sectionsMock, getClaudeGlobalConfigMock, upsertMock, upsertSystemMock, reorderMock, historyMock, diffMock, revertMock, removedMock]) {
         m.mockReset();
     }
+    removedMock.mockResolvedValue({ entries: [] });
     mpsHub.handlers.clear();
     localStorage.clear();
     listMemoriesMock.mockResolvedValue([]);
@@ -133,6 +137,66 @@ beforeEach(() => {
     historyMock.mockResolvedValue({ versions: [] });
     upsertMock.mockImplementation((_c: unknown, b: Bundle) => Promise.resolve({ ...b, id: b.id || "new-id" }));
     reorderMock.mockResolvedValue({ updated: 1 });
+});
+
+// What was taken out of Global Memory is listed with who removed it and when,
+// and Restore reverts the entry to the version that recorded the removal.
+describe("GlobalBundleManager — removed entries", () => {
+    const removedEntry = (over: Record<string, unknown> = {}) => ({
+        id: "gone-1",
+        name: "Old rules",
+        version_id: "v-remove",
+        removed_at: Date.now() - 3 * 3_600_000,
+        removed_by: "agent2",
+        ...over,
+    });
+
+    test("lists each removed entry with who removed it and when; shows nothing when none are", async () => {
+        listMemoriesMock.mockResolvedValue([bundle("a", "Alpha", "x")]);
+        removedMock.mockResolvedValue({ entries: [removedEntry(), removedEntry({ id: "gone-2", name: "Older", removed_by: "armory-ui" })] });
+        render(() => <GlobalBundleManager />);
+
+        const rows = await waitFor(() => {
+            const r = Array.from(document.querySelectorAll('[data-testid="global-memory-removed"] .global-bundle-removed-row'));
+            if (r.length !== 2) throw new Error("not listed yet");
+            return r;
+        });
+        expect(rows[0].textContent).toContain("Old rules");
+        expect(rows[0].textContent).toContain("Removed by agent2 · 3h ago");
+        expect(rows[1].textContent).toContain("Removed by you");
+    });
+
+    test("no Removed section when nothing was removed", async () => {
+        listMemoriesMock.mockResolvedValue([bundle("a", "Alpha", "x")]);
+        render(() => <GlobalBundleManager />);
+        await waitFor(() => expect(tileTitles()).toContain("Alpha"));
+        expect(document.querySelector('[data-testid="global-memory-removed"]')).toBeNull();
+    });
+
+    test("Restore reverts to the removal's version, then reloads", async () => {
+        listMemoriesMock.mockResolvedValue([]);
+        removedMock.mockResolvedValue({ entries: [removedEntry()] });
+        revertMock.mockResolvedValue({ version: null });
+        render(() => <GlobalBundleManager />);
+        const restore = await screen.findByText("Restore");
+
+        removedMock.mockResolvedValue({ entries: [] });
+        fireEvent.click(restore);
+
+        await waitFor(() => expect(revertMock).toHaveBeenCalledTimes(1));
+        expect(revertMock.mock.calls[0][1]).toEqual({ id: "gone-1", target_version_id: "v-remove" });
+        await waitFor(() => expect(document.querySelector('[data-testid="global-memory-removed"]')).toBeNull());
+    });
+
+    test("a failed restore says so and leaves the entry listed", async () => {
+        removedMock.mockResolvedValue({ entries: [removedEntry()] });
+        revertMock.mockRejectedValue(new Error("no such version"));
+        render(() => <GlobalBundleManager />);
+        fireEvent.click(await screen.findByText("Restore"));
+
+        expect(await screen.findByText(/Restore failed: no such version/)).toBeInTheDocument();
+        expect(document.querySelectorAll(".global-bundle-removed-row")).toHaveLength(1);
+    });
 });
 
 describe("GlobalBundleManager — tiles first", () => {

@@ -286,6 +286,7 @@ import type { GlobalMemoryDiffResult } from "@/types/rpc/GlobalMemoryDiffResult"
 import type { GlobalMemoryHistoryResult } from "@/types/rpc/GlobalMemoryHistoryResult";
 import type { GlobalMemoryImportReport } from "@/types/rpc/GlobalMemoryImportReport";
 import type { GlobalMemoryImportSources } from "@/types/rpc/GlobalMemoryImportSources";
+import type { GlobalMemoryRemovedResult } from "@/types/rpc/GlobalMemoryRemovedResult";
 import type { GlobalMemoryRevertResult } from "@/types/rpc/GlobalMemoryRevertResult";
 import type { GlobalMemorySection } from "@/types/rpc/GlobalMemorySection";
 import type { HideNamedAgentResult } from "@/types/rpc/HideNamedAgentResult";
@@ -1388,6 +1389,10 @@ export const GeneratedApi = {
   // command "globalmemory:import_sources"
   GlobalMemoryImportSourcesCommand(client: RpcClient, opts?: RpcOpts): Promise<GlobalMemoryImportSources> {
     return client.rpcCall("globalmemory:import_sources", {}, opts);
+  },
+  // command "globalmemory:removed"
+  GlobalMemoryRemovedCommand(client: RpcClient, opts?: RpcOpts): Promise<GlobalMemoryRemovedResult> {
+    return client.rpcCall("globalmemory:removed", {}, opts);
   },
   // command "globalmemory:revert"
   GlobalMemoryRevertCommand(

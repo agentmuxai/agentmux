@@ -304,6 +304,10 @@ pub const COMMAND_GET_CLAUDE_GLOBAL_CONFIG: &str = "getclaudeglobalconfig";
 pub const COMMAND_GLOBAL_MEMORY_HISTORY: &str = "globalmemory:history";
 pub const COMMAND_GLOBAL_MEMORY_DIFF: &str = "globalmemory:diff";
 pub const COMMAND_GLOBAL_MEMORY_REVERT: &str = "globalmemory:revert";
+/// The Global Memory entries taken out of Global Memory and not restored, with
+/// who removed each and when; `globalmemory:revert` to a removed entry's
+/// version restores it.
+pub const COMMAND_GLOBAL_MEMORY_REMOVED: &str = "globalmemory:removed";
 /// SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.6 (phase M4): bring
 /// Global Memory into an isolated channel from another scope's record.
 pub const COMMAND_GLOBAL_MEMORY_IMPORT_SOURCES: &str = "globalmemory:import_sources";

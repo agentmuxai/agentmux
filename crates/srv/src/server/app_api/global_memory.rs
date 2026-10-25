@@ -142,17 +142,43 @@ pub(crate) fn global_memory_write_impl(
 /// "+ New section" does for a new entry and a restored one. A failed reorder
 /// is logged, not fatal: the entry is saved either way.
 fn append_to_order(state: &AppState, agent_id: &str, bundle_id: &str, verb: &str) -> Result<(), String> {
-    let ordinary_ids: Vec<String> = state.id_store.bundle_list_global()
+    append_to_global_order(&state.id_store, agent_id, bundle_id, verb)
+}
+
+/// [`append_to_order`] on a store, for the window-side restore too.
+pub(crate) fn append_to_global_order(store: &Store, agent_id: &str, bundle_id: &str, verb: &str) -> Result<(), String> {
+    let ordinary_ids: Vec<String> = store.bundle_list_global()
         .map_err(|e| format!("{verb}: {e}"))?
         .into_iter()
         .filter(|b| !b.is_system && b.id != bundle_id)
         .map(|b| b.id)
         .chain(std::iter::once(bundle_id.to_string()))
         .collect();
-    if let Err(e) = state.id_store.bundle_reorder(&ordinary_ids) {
+    if let Err(e) = store.bundle_reorder(&ordinary_ids) {
         tracing::warn!(agent_id, bundle_id, error = %e, "{verb}: append-to-order failed (non-fatal)");
     }
     Ok(())
+}
+
+/// The entries taken out of Global Memory and not restored, most recently
+/// removed first, each with the `remove` version that records it: who removed
+/// it and when. Shared by `list`'s `removed` and the window's
+/// `globalmemory:removed`.
+pub(crate) fn removed_global_entries(store: &Store) -> Result<Vec<crate::backend::rpc_types::GlobalMemoryRemovedEntry>, String> {
+    let bundles = store.bundle_list_removed_global().map_err(|e| format!("removed Global Memory entries: {e}"))?;
+    let mut out = Vec::with_capacity(bundles.len());
+    for b in bundles {
+        // The query selected on the newest version being a removal, so there is one.
+        let Some(v) = store.bundle_version_latest(&b.id).map_err(|e| format!("removed Global Memory entries: {e}"))? else { continue };
+        out.push(crate::backend::rpc_types::GlobalMemoryRemovedEntry {
+            id: b.id,
+            name: b.name,
+            version_id: v.id,
+            removed_at: v.created_at,
+            removed_by: v.written_by,
+        });
+    }
+    Ok(out)
 }
 
 /// Every Global Memory entry Memory → Global shows — id/name/updated_at/system,
@@ -171,13 +197,10 @@ pub(crate) fn global_memory_list_impl(state: &AppState) -> Result<serde_json::Va
         .into_iter()
         .map(|b| json!({ "id": b.id, "name": b.name, "updated_at": b.updated_at, "system": b.is_system }))
         .collect();
-    let removed: Vec<_> = state.id_store.bundle_list_removed_global()
+    let removed: Vec<_> = removed_global_entries(&state.id_store)
         .map_err(|e| format!("globalmemory.list: {e}"))?
         .into_iter()
-        .map(|b| {
-            let by = state.id_store.bundle_version_latest(&b.id).ok().flatten().map(|v| v.written_by).unwrap_or_default();
-            json!({ "id": b.id, "name": b.name, "removed_at": b.updated_at, "removed_by": by })
-        })
+        .map(|r| json!({ "id": r.id, "name": r.name, "removed_at": r.removed_at, "removed_by": r.removed_by }))
         .collect();
     Ok(json!({ "entries": entries, "removed": removed }))
 }

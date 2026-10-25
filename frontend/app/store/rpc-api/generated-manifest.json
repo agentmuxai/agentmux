@@ -619,6 +619,11 @@
             "send": "{}"
         },
         {
+            "command": "globalmemory:removed",
+            "method": "GlobalMemoryRemovedCommand",
+            "send": "{}"
+        },
+        {
             "command": "globalmemory:revert",
             "method": "GlobalMemoryRevertCommand"
         },
