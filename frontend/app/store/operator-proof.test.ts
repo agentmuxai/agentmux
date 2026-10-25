@@ -28,6 +28,7 @@ import {
     proveOperatorConnection,
     resetOperatorProofForTests,
     sendAsOperator,
+    sendRetryingUnproven,
 } from "./operator-proof";
 import { RpcClient } from "./rpc-client";
 
@@ -127,8 +128,35 @@ describe("operator proof", () => {
         expect(send).toHaveBeenCalledTimes(1);
     });
 
+    it("resends an unlisted command once srv says the connection is unproven and it is then proven", async () => {
+        await proveOperatorConnection({ challenge: async () => ({ nonce: "a" }), attest: async () => {} });
+        let calls = 0;
+        const send = vi.fn(async () => {
+            calls++;
+            if (calls === 1) throw new Error(UNPROVEN);
+            return "ok";
+        });
+        await expect(sendRetryingUnproven(send)).resolves.toBe("ok");
+        expect(send).toHaveBeenCalledTimes(2);
+        const other = vi.fn(async () => {
+            throw new Error("FORBIDDEN: something else");
+        });
+        await expect(sendRetryingUnproven(other)).rejects.toThrow("something else");
+        expect(other).toHaveBeenCalledTimes(1);
+    });
+
     it("names the commands srv keeps for the operator, and only those", () => {
-        for (const c of ["kanban.act", "jobs.act", "agent.setSeat", "identity.account.move_agents", "tower.sample"]) {
+        for (const c of [
+            "kanban.act",
+            "jobs.act",
+            "agent.setSeat",
+            "identity.account.move_agents",
+            "tower.sample",
+            "jobs.templates.install",
+            "jobs.templates.uninstall",
+            "jobs.templates.catalog",
+            "jobs.templates.catalog.install",
+        ]) {
             expect(isOperatorCommand(c)).toBe(true);
         }
         for (const c of ["kanban.list", "kanban.task", "operator.challenge", "jobs.list"]) {

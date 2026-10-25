@@ -2,7 +2,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { isOperatorCommand, sendAsOperator } from "@/app/store/operator-proof";
+import { isOperatorCommand, sendAsOperator, sendRetryingUnproven } from "@/app/store/operator-proof";
 import { sendRpcCommand, sendRpcResponse } from "@/app/store/rpc-util-base";
 import * as util from "@/util/util";
 
@@ -54,7 +54,7 @@ class RpcClient {
         if (isOperatorCommand(command)) {
             return sendAsOperator(() => this.sendRpcCall(command, data, opts));
         }
-        return this.sendRpcCall(command, data, opts);
+        return sendRetryingUnproven(() => this.sendRpcCall(command, data, opts));
     }
 
     private sendRpcCall(command: string, data: any, opts: RpcOpts): Promise<any> {

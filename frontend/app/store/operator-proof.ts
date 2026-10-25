@@ -23,6 +23,10 @@ const OPERATOR_COMMANDS: ReadonlySet<string> = new Set([
     "identity.account.move_agents",
     "identity.account.signed_in",
     "jobs.act",
+    "jobs.templates.catalog",
+    "jobs.templates.catalog.install",
+    "jobs.templates.install",
+    "jobs.templates.uninstall",
     "kanban.act",
     "tower.forget",
     "tower.pair",
@@ -106,6 +110,20 @@ export async function sendAsOperator<T>(send: () => Promise<T>): Promise<T> {
     } catch (e) {
         if (!isUnproven(e) || generation === sentAt) throw e;
         await operatorProofReady();
+        return await send();
+    }
+}
+
+/** Any other RPC: if srv refuses it as unproven (an operator-only command
+ *  missing from OPERATOR_COMMANDS), wait for this connection's proof and, once
+ *  it is proven, send it once more. srv refuses before acting, so the second
+ *  send can't repeat an action; the list only saves that first round trip. */
+export async function sendRetryingUnproven<T>(send: () => Promise<T>): Promise<T> {
+    try {
+        return await send();
+    } catch (e) {
+        if (!isUnproven(e)) throw e;
+        if (!(await operatorProofReady())) throw e;
         return await send();
     }
 }

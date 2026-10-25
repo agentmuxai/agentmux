@@ -19,8 +19,10 @@ const PROBE: &str = "test.operator_probe";
 fn engine() -> (Arc<WshRpcEngine>, tokio::sync::mpsc::UnboundedReceiver<RpcMessage>) {
     let (engine, rx) = WshRpcEngine::new();
     register_challenge(&engine);
+    // A literal, not PROBE: the RPC contract test resolves registrations by
+    // name, and a test file's private const isn't in its map.
     engine.register_handler(
-        PROBE,
+        "test.operator_probe",
         Box::new(|_data, ctx| Box::pin(async move { ctx.operator_only("probe").map(|()| Some(json!(true))) })),
     );
     (engine, rx)
