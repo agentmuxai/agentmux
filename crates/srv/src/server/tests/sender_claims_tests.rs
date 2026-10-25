@@ -272,6 +272,8 @@ async fn a_global_memory_save_over_the_socket_is_recorded_as_whoever_made_it() {
         let versions = state.id_store.bundle_version_list(id).unwrap();
         assert_eq!(versions.len(), 1, "{id}");
         assert_eq!((versions[0].written_by.as_str(), versions[0].source.as_str()), (writer, source), "{id}");
+    }
+}
 
 /// The work queue and jobs act for an agent: each route refuses a request with no token, and a token is
 /// enough to get past the guard (what the handler then says is its own business).
