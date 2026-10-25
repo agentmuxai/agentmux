@@ -1,7 +1,7 @@
 # SPEC: Agent MCP self-heal — notice when an agent's AgentMux tools are down, and repair it without the operator
 
 **Date:** 2026-10-10
-**Status:** proposed. Phase 0 (the bashwrap fix) shipped with this spec in PR #4671; most of Phases 1–3 follow in the next PR (§12). Phase 4 and the deferred parts are next.
+**Status:** proposed. §13 (a wedged server, #2614) is built. Phase 0 (the bashwrap fix) shipped with this spec in PR #4671; most of Phases 1–3 follow in the next PR (§12). Phase 4 and the deferred parts are next.
 **Author:** AgentY@narko
 **Trigger:** repo owner, 2026-10-11, after an agent came up on v0.59.19 with its `agentmux` MCP server dead: "this gives us an opportunity to add a feature. In case such a situation happens again, agents need a way to self-heal."
 **Grounded in:** `main` at `75fdca23b`, plus the Claude Code MCP logs of the affected agents. File references are as of that commit.
@@ -223,3 +223,23 @@ First cut: Claude Code (the only provider with a control protocol for MCP). The 
 - **Signal B (the hello stamp) and the shared record.** QTest's Connectors work needs every server's observed status, so QTest builds one per-pane "observed MCP servers" record (all servers from `system/init`, tool counts, the hello stamp, an event and a list RPC), hooked where `observe_mcp_frame` is. `mcp_health` then reads the `agentmux` entry from it, so there is one parser.
 - **Signal C (launch self-test)** and **rungs 3–4** (rewrite `.mcp.json`, absolute path): after QTest's Phase 0 has srv build `.mcp.json` on both launch paths, so srv can rewrite it without the frontend.
 - **Phase 4** (dock and Swarm chip, other providers).
+
+## 13. A server that is connected but wedged (2026-10-24, #2614)
+
+**What happened.** On 2026-10-24 one agent's `agentmux-mcp` stopped answering tool calls: from a `UI` call at 01:15 UTC (its log shows the tool, not the action) until an upgrade restart replaced the process, each call (`UI`, then `Terminal` and `Message` calls) was silent for the CLI's full 1800 s and aborted with `sent no response or progress for 1800s`. Meanwhile `curl` to srv answered and the CLI listed the server as connected, so §3's detection (init frames, `mcp_status`) had nothing to see.
+
+**Cause.** `agentmux-mcp` read one request, ran it to the end, and only then read the next. The first call to hang held everything behind it. The `UI` tool's window actions (`window`, `windows`) and the `Desktop` tool call the OS directly, and an OS call into a window that has stopped answering waits for it; none of them has a deadline of its own. The agent had just started an Android emulator that hung, which fits, though the log doesn't say which action it was. The later `Terminal` and `Message` calls never ran: they queued behind it, each for its 1800 s.
+
+**Fix, in two parts.**
+1. **One stuck call can't block the rest** (`crates/mcp/src/serve.rs`). Each `tools/call` runs on a thread of its own under its own deadline, answered with an error when it runs out: 90 s for `UI`, the call's own `timeout_ms` plus a minute for `Terminal` (at least 150 s), 400 s for `Agents`, 360 s for `Message`, 180 s for `Desktop`, 29 minutes for the tools that wait on a person (`Browser`, `Vault`, `Widget`), five minutes for the rest; none reaches the CLI's 1800 s. Calls to one tool still run in the order they came (a `type` and a `read` of one shell mean something in order); different tools don't wait for each other; the deadline counts the wait for earlier calls too. `initialize` and `tools/list` are answered at once. A `notifications/cancelled` stops its call. A call stuck in blocking code keeps its thread (it can't be killed) but nothing else.
+2. **A wedged server is noticed and restarted** (§13.1).
+
+### 13.1 The heartbeat
+
+`agentmux-mcp` posts `POST /api/v1/agent/self/mcp-beat` every 15 s, from a thread and a runtime of its own: its pid, the calls in flight, the oldest unanswered call's tool and age, how long ago its main runtime last ran, and how many call threads are alive. srv (`backend/mcp_health.rs`) treats the server as wedged, and starts §4's ladder (reconnect, which makes the CLI start the process again; reconnect after 5 s; the safe profile; give up), when:
+- its beats stop for 90 s while the CLI process runs (the process is frozen);
+- a beat says the main runtime last ran 60 s ago (starved or stuck);
+- a beat says a call has been unanswered for 1800 s (the deadlines above failed).
+A pane whose server never beat (an older `agentmux-mcp`) is never judged wedged. A watcher whose own tick comes late (the machine slept) skips the round and gives every pane a fresh start. With `agent:mcpselfheal` off, a wedge is logged and not repaired. The pane row and the give-up note are those of §6.
+
+**Not verified:** that `mcp_reconnect` replaces a process which has stopped answering (it does for one that failed to start); run `agentmux-mcp doctor --heal` against a frozen server to see.
