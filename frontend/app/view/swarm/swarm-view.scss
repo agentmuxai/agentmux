@@ -235,13 +235,13 @@
         color: var(--accent-color);
     }
     &--workflow .swarm-bucket-label {
-        color: var(--warning-color);
+        color: var(--warning-text-color);
     }
     // Shell (SPEC_SWARM_LONG_RUNNING_PROCESS_ROWS_2026_07_20 Phase 1) — a
     // third, distinct hue from the two above so all three read apart at a
     // glance; --success-color is otherwise unused elsewhere in this file.
     &--shell .swarm-bucket-label {
-        color: var(--success-color);
+        color: var(--success-text-color);
     }
     // Cron (Phase 2 of the same spec) — a fourth, distinct hue; --info-color
     // was added to theme.scss specifically for this (no existing semantic
@@ -332,7 +332,7 @@
     color: var(--secondary-text-color);
 
     .swarm-todo-row--completed & {
-        color: var(--success-color);
+        color: var(--success-text-color);
     }
     .swarm-todo-row--in_progress & {
         color: var(--accent-color);
@@ -354,7 +354,7 @@
     padding: 1px 6px 1px 38px;
     font-size: var(--text-2xs);
     font-style: italic;
-    color: var(--warning-color);
+    color: var(--warning-text-color);
     opacity: 0.85;
 }
 
@@ -460,7 +460,7 @@
     flex-shrink: 0;
 
     &--active {
-        color: var(--warning-color);
+        color: var(--warning-text-color);
         background: var(--warning-bg-strong);
     }
     &--retired {
@@ -639,7 +639,7 @@
     opacity: 1;
     // --error-color is unconditionally defined in theme.scss, so it needs
     // no hex fallback.
-    color: var(--error-color);
+    color: var(--error-text-color);
     background: var(--hover-bg-color);
 }
 
@@ -685,7 +685,7 @@
 .swarm-cron-missed {
     flex-shrink: 0;
     font-size: var(--text-2xs);
-    color: var(--warning-color);
+    color: var(--warning-text-color);
     white-space: nowrap;
     font-variant-numeric: tabular-nums;
 }
@@ -721,7 +721,7 @@
     font-family: var(--font-mono);
 
     &--error {
-        color: var(--error-color);
+        color: var(--error-text-color);
     }
 }
 
@@ -743,7 +743,7 @@
     }
 
     &--error {
-        color: var(--error-color);
+        color: var(--error-text-color);
     }
 }
 
@@ -807,9 +807,9 @@
     flex-shrink: 0;
     white-space: nowrap;
 
-    &--working { color: var(--error-color); }
+    &--working { color: var(--error-text-color); }
     &--question { color: var(--accent-color); }
-    &--idle { color: var(--success-color); }
+    &--idle { color: var(--success-text-color); }
 }
 
 // An agent that can't start a turn: out of quota until a reset, or signed out. It takes the
@@ -821,7 +821,7 @@
     font-size: var(--text-xs);
     flex-shrink: 0;
     white-space: nowrap;
-    color: var(--warning-color);
+    color: var(--warning-text-color);
 
     .swarm-unavailable-icon {
         font-size: var(--text-2xs);
@@ -845,8 +845,8 @@
 .swarm-status-countdown {
     font-variant-numeric: tabular-nums;
 
-    &--warning { color: var(--warning-color); }
-    &--critical { color: var(--error-color); }
+    &--warning { color: var(--warning-text-color); }
+    &--critical { color: var(--error-text-color); }
 }
 
 .swarm-status-dot {
@@ -898,8 +898,8 @@
     line-height: 1.4;
     min-width: 0;
 
-    &--paused .swarm-supervisor-action { color: var(--warning-color); }
-    &--done .swarm-supervisor-action { color: var(--success-color); }
+    &--paused .swarm-supervisor-action { color: var(--warning-text-color); }
+    &--done .swarm-supervisor-action { color: var(--success-text-color); }
     &--continued .swarm-supervisor-action { color: var(--accent-color); }
 }
 
@@ -1025,7 +1025,7 @@
 }
 
 .swarm-fleet-target-reason {
-    color: var(--warning-color);
+    color: var(--warning-text-color);
 }
 
 .swarm-fleet-staging-toggle {
@@ -1092,11 +1092,11 @@
     padding: 2px 0;
 
     &--ok {
-        color: var(--success-color);
+        color: var(--success-text-color);
     }
 
     &--fail {
-        color: var(--error-color);
+        color: var(--error-text-color);
     }
 }
 

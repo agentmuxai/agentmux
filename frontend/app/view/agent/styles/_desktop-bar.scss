@@ -24,11 +24,11 @@
     }
 
     .agent-desktop-bar-app.is-active strong {
-        color: var(--warning-color);
+        color: var(--warning-text-color);
     }
 
     .agent-desktop-bar-error {
-        color: var(--error-color);
+        color: var(--error-text-color);
         font-size: var(--text-xs);
     }
 }

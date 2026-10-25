@@ -19,7 +19,7 @@
 .mcp-cards-error {
     padding: var(--space-1-5) var(--space-2);
     border: 1px solid var(--ui-line-danger);
-    color: var(--error-color);
+    color: var(--error-text-color);
     font-size: var(--text-xs);
 }
 
@@ -94,7 +94,7 @@
 // started before it was bound or switched on.
 .mcp-not-loaded {
     margin: 0;
-    color: var(--warning-color);
+    color: var(--warning-text-color);
 }
 
 // ── The live probe ────────────────────────────────────────────────────────────
@@ -124,7 +124,7 @@
 // connection status, unlike the remediation note.
 .mcp-probe-risk {
     border-left-color: var(--warning-color);
-    color: var(--warning-color);
+    color: var(--warning-text-color);
 }
 
 // ── Agents that report a server ───────────────────────────────────────────────

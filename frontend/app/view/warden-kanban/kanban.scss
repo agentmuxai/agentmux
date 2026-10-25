@@ -256,7 +256,7 @@ $kanban-narrow: 760px;
 }
 
 .kanban-column__count--over {
-    color: var(--warning-color);
+    color: var(--warning-text-color);
     font-weight: 600;
 }
 
@@ -465,7 +465,7 @@ $kanban-narrow: 760px;
 
 .kanban-drawer__reason {
     margin: 0;
-    color: var(--warning-color);
+    color: var(--warning-text-color);
 }
 
 .kanban-drawer__section {

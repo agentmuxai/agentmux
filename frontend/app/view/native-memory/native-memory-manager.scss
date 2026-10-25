@@ -126,7 +126,7 @@
     // agent:memory:list is a hard error (see MemoryAgentCard.tsx), not an
     // agent that simply hasn't remembered anything.
     &--error {
-        color: var(--error-color);
+        color: var(--error-text-color);
     }
 }
 
@@ -386,7 +386,7 @@
     &:hover {
         background: var(--error-bg-strong);
         border-color: var(--error-line-strong);
-        color: var(--error-color);
+        color: var(--error-text-color);
     }
 }
 
@@ -542,7 +542,7 @@
 
 .memory-file-card-badge--warning {
     border-color: color-mix(in srgb, var(--warning-color) 50%, var(--border-color));
-    color: var(--warning-color);
+    color: var(--warning-text-color);
 }
 
 // Drag-to-reorder feedback (Global Memory entries).
@@ -646,7 +646,7 @@
 
 .memory-adoption-panel-error,
 .memory-adoption-panel-outcome.is-failed {
-    color: var(--error-color);
+    color: var(--error-text-color);
 }
 
 // A folder found by a guess, not the agent's own launch: read-only.
@@ -655,7 +655,7 @@
     padding: 1px var(--space-1-5);
     border: 1px solid var(--warning-line-vivid);
     border-radius: 999px;
-    color: var(--warning-color);
+    color: var(--warning-text-color);
     font-size: var(--text-xs);
     white-space: nowrap;
 }
@@ -823,7 +823,7 @@
 // An agent whose launch doesn't deliver its Personal Memory (spec §5.3).
 .memory-agent-card-undelivered {
     font-size: var(--text-xs);
-    color: var(--warning-color);
+    color: var(--warning-text-color);
 }
 
 // The fleet line above the agent grid, and an agent's per-file distribution
@@ -837,5 +837,5 @@
 }
 
 .memory-fleet-summary-outliers {
-    color: var(--warning-color);
+    color: var(--warning-text-color);
 }

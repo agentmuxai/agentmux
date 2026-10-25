@@ -94,7 +94,7 @@
         &:hover {
             background: var(--error-bg-strong);
             border-color: var(--error-line-strong);
-            color: var(--error-color);
+            color: var(--error-text-color);
         }
     }
 
@@ -353,7 +353,7 @@
             font-size: var(--text-3xs);
             font-weight: 600;
             letter-spacing: 0.03em;
-            color: var(--warning-color);
+            color: var(--warning-text-color);
             background: var(--warning-bg);
             border: 1px solid color-mix(in srgb, var(--warning-color) 35%, transparent);
             border-radius: 3px;
@@ -475,7 +475,7 @@
 
         .nodejs-notice-icon {
             font-size: 18px;
-            color: var(--warning-color);
+            color: var(--warning-text-color);
             flex-shrink: 0;
             padding-top: var(--space-0-5);
         }

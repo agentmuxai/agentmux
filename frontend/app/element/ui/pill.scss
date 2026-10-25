@@ -23,7 +23,7 @@
         border-color: var(--success-line);
         color: var(--main-text-color);
         i {
-            color: var(--success-color);
+            color: var(--success-text-color);
         }
     }
 
@@ -32,7 +32,7 @@
         border-color: var(--warning-line);
         color: var(--main-text-color);
         i {
-            color: var(--warning-color);
+            color: var(--warning-text-color);
         }
     }
 
@@ -41,7 +41,7 @@
         border-color: var(--error-line);
         color: var(--main-text-color);
         i {
-            color: var(--error-color);
+            color: var(--error-text-color);
         }
     }
 

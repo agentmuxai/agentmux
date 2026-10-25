@@ -180,7 +180,7 @@
 
     &:hover:not(:disabled) {
         background: var(--error-bg-strong);
-        color: var(--error-color);
+        color: var(--error-text-color);
     }
 }
 
@@ -189,7 +189,7 @@
     align-items: flex-start;
     gap: var(--space-1);
     font-size: var(--text-xs);
-    color: var(--error-color);
+    color: var(--error-text-color);
     padding: var(--space-1) var(--space-1-5);
     background: var(--error-bg);
     border-radius: 0;

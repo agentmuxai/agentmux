@@ -25,7 +25,7 @@
     grid-area: icon;
     font-size: 16px;
     line-height: 1;
-    color: var(--error-color);
+    color: var(--error-text-color);
     margin-top: 1px;
 }
 
@@ -39,7 +39,7 @@
 
 .amx-error-banner-title {
     font-weight: 600;
-    color: var(--error-color);
+    color: var(--error-text-color);
 }
 
 .amx-error-banner-message {

@@ -67,7 +67,7 @@
     display: flex;
     align-items: baseline;
     gap: var(--space-1-5);
-    color: var(--error-color);
+    color: var(--error-text-color);
 
     .mono {
         font-family: var(--font-mono);
@@ -123,7 +123,7 @@
     color: var(--secondary-text-color);
 
     &--warn {
-        color: var(--warning-color);
+        color: var(--warning-text-color);
     }
 }
 
@@ -266,11 +266,11 @@
     color: var(--secondary-text-color);
 
     &--found {
-        color: var(--success-color);
+        color: var(--success-text-color);
     }
 
     &--not-found {
-        color: var(--error-color);
+        color: var(--error-text-color);
     }
 }
 
@@ -304,7 +304,7 @@
     font-size: var(--text-sm);
 
     &--error {
-        color: var(--error-color);
+        color: var(--error-text-color);
         border-color: var(--ui-line-danger);
     }
 }
@@ -472,7 +472,7 @@
 }
 
 .setting-fork-slugs-blockers {
-    color: var(--error-color);
+    color: var(--error-text-color);
 }
 
 .setting-fork-slugs-report {
@@ -553,14 +553,14 @@
     white-space: nowrap;
 
     &.state-approved {
-        color: var(--success-color);
+        color: var(--success-text-color);
     }
     &.state-needs_approval,
     &.state-changed {
-        color: var(--warning-color);
+        color: var(--warning-text-color);
     }
     &.state-invalid {
-        color: var(--error-color);
+        color: var(--error-text-color);
     }
 }
 
@@ -575,7 +575,7 @@
     margin-bottom: var(--space-2);
 
     &.warning {
-        color: var(--warning-color);
+        color: var(--warning-text-color);
         font-weight: 600;
     }
 }

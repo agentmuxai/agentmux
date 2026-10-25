@@ -302,7 +302,7 @@ body:not(.nohover) .tab.tab-colored.active.dragging {
 
     &.tab-context-btn-close:hover {
         border-color: var(--error-color);
-        color: var(--error-color);
+        color: var(--error-text-color);
     }
 }
 

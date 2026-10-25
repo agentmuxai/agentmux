@@ -30,11 +30,11 @@
     }
 
     &.cpu-medium .stats-cpu {
-        color: var(--warning-color);
+        color: var(--warning-text-color);
     }
 
     &.cpu-high .stats-cpu {
-        color: var(--error-color);
+        color: var(--error-text-color);
     }
 
     // A remote pane whose own processes can't be told apart: the whole

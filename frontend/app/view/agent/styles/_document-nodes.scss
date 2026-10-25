@@ -523,11 +523,11 @@ $transcript-preview-max-height: calc(50vh / 3);
         }
 
         // Status icon color variants for the collapsed row
-        &.success          .agent-tool-status-icon { color: var(--success-color); }
-        &.failed           .agent-tool-status-icon { color: var(--error-color); }
-        &.running          .agent-tool-status-icon { color: var(--warning-color); }
+        &.success          .agent-tool-status-icon { color: var(--success-text-color); }
+        &.failed           .agent-tool-status-icon { color: var(--error-text-color); }
+        &.running          .agent-tool-status-icon { color: var(--warning-text-color); }
         &.canceled         .agent-tool-status-icon { color: var(--secondary-text-color); }
-        &.pending_approval .agent-tool-status-icon { color: var(--warning-color); }
+        &.pending_approval .agent-tool-status-icon { color: var(--warning-text-color); }
         &.denied           .agent-tool-status-icon { color: var(--secondary-text-color); }
 
         // Phase A of SPEC_TOOL_AUTO_EXPAND_PANEL_2026_05_16.md replaced
@@ -719,11 +719,11 @@ $transcript-preview-max-height: calc(50vh / 3);
             }
 
             &.agent-dispatch-card-running .agent-dispatch-card-status-icon {
-                color: var(--warning-color);
+                color: var(--warning-text-color);
             }
 
             &.agent-dispatch-card-done .agent-dispatch-card-status-icon {
-                color: var(--success-color);
+                color: var(--success-text-color);
             }
         }
     }
@@ -795,15 +795,15 @@ $transcript-preview-max-height: calc(50vh / 3);
         // see `fadeInOnMount` in `ToolBlock.tsx`), so resizing never
         // replays it (reagent P2 on PR #1975).
 
-        &.pill-exit-ok  { color: var(--success-color); background: var(--success-bg); }
-        &.pill-exit-err { color: var(--error-color);   background: var(--error-bg); }
+        &.pill-exit-ok  { color: var(--success-text-color); background: var(--success-bg); }
+        &.pill-exit-err { color: var(--error-text-color);   background: var(--error-bg); }
         &.pill-files    { color: var(--term-bright-cyan);    background: color-mix(in srgb, var(--term-bright-cyan)    12%, transparent); }
         &.pill-matches  { color: var(--term-bright-cyan);    background: color-mix(in srgb, var(--term-bright-cyan)    12%, transparent); }
         &.pill-sources  { color: var(--term-bright-cyan);    background: color-mix(in srgb, var(--term-bright-cyan)    12%, transparent); }
-        &.pill-written  { color: var(--success-color);       background: var(--success-bg); }
-        &.pill-edited   { color: var(--warning-color);       background: var(--warning-bg); }
+        &.pill-written  { color: var(--success-text-color);       background: var(--success-bg); }
+        &.pill-edited   { color: var(--warning-text-color);       background: var(--warning-bg); }
         &.pill-agent    { color: var(--term-bright-magenta); background: color-mix(in srgb, var(--term-bright-magenta) 12%, transparent); }
-        &.pill-agent-running { color: var(--warning-color); background: var(--warning-bg); }
+        &.pill-agent-running { color: var(--warning-text-color); background: var(--warning-bg); }
     }
 
     // Glob file list — shown when CompactResult is expanded for a Glob result.
@@ -959,11 +959,11 @@ $transcript-preview-max-height: calc(50vh / 3);
             background: var(--tint-1);
 
             &.exit-success {
-                color: var(--success-color);
+                color: var(--success-text-color);
             }
 
             &.exit-error {
-                color: var(--error-color);
+                color: var(--error-text-color);
             }
         }
     }
@@ -1084,7 +1084,7 @@ $transcript-preview-max-height: calc(50vh / 3);
         }
 
         &.tier-sensitive .agent-jekt-tier-badge {
-            color: var(--error-color);
+            color: var(--error-text-color);
             border-color: var(--error-color);
         }
 
@@ -1212,7 +1212,7 @@ $transcript-preview-max-height: calc(50vh / 3);
         // An item the part cap cut: say so, and dim what never went out.
         .agent-context-delivery-item-cut {
             font-size: var(--text-xs);
-            color: var(--warning-color);
+            color: var(--warning-text-color);
             white-space: nowrap;
         }
 
@@ -1225,7 +1225,7 @@ $transcript-preview-max-height: calc(50vh / 3);
             flex-basis: 100%;
             padding: var(--space-1) 0 0 var(--space-4);
             font-size: var(--text-sm);
-            color: var(--warning-color);
+            color: var(--warning-text-color);
         }
 
         .agent-context-delivery-content {
@@ -1964,7 +1964,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     }
 
     .agent-search-card-domain {
-        color: var(--success-color);
+        color: var(--success-text-color);
         font-size: var(--text-2xs);
         opacity: 0.85;
         @include mixins.truncate;
@@ -2036,7 +2036,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     }
 
     .agent-fetch-domain {
-        color: var(--success-color);
+        color: var(--success-text-color);
         font-size: var(--text-xs);
         @include mixins.truncate;
     }
@@ -2049,17 +2049,17 @@ $transcript-preview-max-height: calc(50vh / 3);
         font-weight: 600;
 
         &.agent-fetch-status-ok {
-            color: var(--success-color);
+            color: var(--success-text-color);
             background: var(--success-bg-strong);
         }
 
         &.agent-fetch-status-redirect {
-            color: var(--warning-color);
+            color: var(--warning-text-color);
             background: var(--warning-bg-strong);
         }
 
         &.agent-fetch-status-error {
-            color: var(--error-color);
+            color: var(--error-text-color);
             background: var(--error-bg-strong);
         }
     }
@@ -2188,7 +2188,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     line-height: 1.4;
 
     .agent-error-code {
-        color: var(--error-color);
+        color: var(--error-text-color);
         font-family: var(--font-mono);
         font-size: var(--text-xs);
         font-weight: 600;
@@ -2211,7 +2211,7 @@ $transcript-preview-max-height: calc(50vh / 3);
         border: 1px solid var(--error-color);
         border-radius: 3px;
         background: transparent;
-        color: var(--error-color);
+        color: var(--error-text-color);
         font-size: var(--text-xs);
         font-weight: 600;
         white-space: nowrap;
@@ -2314,7 +2314,7 @@ $transcript-preview-max-height: calc(50vh / 3);
         font-weight: 600;
         @include mixins.label-caps;
         letter-spacing: 0.06em;
-        color: var(--warning-color);
+        color: var(--warning-text-color);
         padding: 2px 10px;
         border: 1px solid var(--warning-line-strong);
         border-radius: 10px;
@@ -2353,13 +2353,13 @@ $transcript-preview-max-height: calc(50vh / 3);
 
     &--low  .agent-memory-reinjection-label { color: var(--secondary-text-color); }
     &--mid  .agent-memory-reinjection-label { color: var(--main-text-color); }
-    &--high .agent-memory-reinjection-label { color: var(--warning-color); }
+    &--high .agent-memory-reinjection-label { color: var(--warning-text-color); }
     // Bold + a leading warning glyph, same escalation treatment Tier 3's
     // countdown text uses (.agent-composer-strip-ctx-countdown--critical) —
     // reused rather than re-decided, per that spec's own "strengthen the
     // inline label, don't add new chrome" precedent.
     &--critical .agent-memory-reinjection-label {
-        color: var(--error-color);
+        color: var(--error-text-color);
         font-weight: 600;
 
         &::before {
@@ -2467,7 +2467,7 @@ $transcript-preview-max-height: calc(50vh / 3);
         }
 
         .agent-session-outcome-label {
-            color: var(--warning-color);
+            color: var(--warning-text-color);
             border-color: var(--warning-line-strong);
         }
     }
@@ -2806,7 +2806,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     border-color: color-mix(in srgb, var(--warning-color) 45%, transparent);
 
     .agent-resume-preflight-sigil {
-        color: var(--warning-color);
+        color: var(--warning-text-color);
     }
 }
 

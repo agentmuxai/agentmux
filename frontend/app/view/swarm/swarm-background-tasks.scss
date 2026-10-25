@@ -57,10 +57,10 @@
         color: var(--accent-color);
     }
     .swarm-background-row--done & {
-        color: var(--success-color);
+        color: var(--success-text-color);
     }
     .swarm-background-row--error & {
-        color: var(--error-color);
+        color: var(--error-text-color);
     }
 }
 

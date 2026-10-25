@@ -32,15 +32,15 @@
         padding-right: 44px;
 
         &.green {
-            color: var(--success-color);
+            color: var(--success-text-color);
         }
 
         &.red {
-            color: var(--error-color);
+            color: var(--error-text-color);
         }
 
         &.yellow {
-            color: var(--warning-color);
+            color: var(--warning-text-color);
         }
     }
 
@@ -103,15 +103,15 @@
             }
 
             i.green {
-                color: var(--success-color);
+                color: var(--success-text-color);
             }
 
             i.red {
-                color: var(--error-color);
+                color: var(--error-text-color);
             }
 
             i.yellow {
-                color: var(--warning-color);
+                color: var(--warning-text-color);
             }
         }
 

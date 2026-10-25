@@ -43,11 +43,11 @@
     font-size: 0.8em;
 
     &--ok {
-        color: var(--success-color);
+        color: var(--success-text-color);
     }
 
     &--err {
-        color: var(--error-color);
+        color: var(--error-text-color);
     }
 }
 
@@ -59,7 +59,7 @@
 
 .warden-audit-error {
     opacity: 0.8;
-    color: var(--error-color);
+    color: var(--error-text-color);
     font-size: 0.95em;
     @include mixins.truncate;
 }
