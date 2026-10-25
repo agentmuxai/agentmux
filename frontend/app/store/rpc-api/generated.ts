@@ -317,6 +317,7 @@ import type { InstallStartReq } from "@/types/rpc/InstallStartReq";
 import type { InstallStartResult } from "@/types/rpc/InstallStartResult";
 import type { InstallSystemToolResult } from "@/types/rpc/InstallSystemToolResult";
 import type { InstallToolResult } from "@/types/rpc/InstallToolResult";
+import type { JobTemplateApproveReq } from "@/types/rpc/JobTemplateApproveReq";
 import type { JobTemplateCatalogInstallReq } from "@/types/rpc/JobTemplateCatalogInstallReq";
 import type { JobTemplateCatalogReq } from "@/types/rpc/JobTemplateCatalogReq";
 import type { JobTemplateCatalogResult } from "@/types/rpc/JobTemplateCatalogResult";
@@ -328,9 +329,16 @@ import type { JobTemplateInstallResult } from "@/types/rpc/JobTemplateInstallRes
 import type { JobTemplatesResult } from "@/types/rpc/JobTemplatesResult";
 import type { JobsActRequest } from "@/types/rpc/JobsActRequest";
 import type { JobsActResult } from "@/types/rpc/JobsActResult";
+import type { JobsDryRunRequest } from "@/types/rpc/JobsDryRunRequest";
+import type { JobsDryRunResult } from "@/types/rpc/JobsDryRunResult";
+import type { JobsGetRequest } from "@/types/rpc/JobsGetRequest";
+import type { JobsGetResult } from "@/types/rpc/JobsGetResult";
 import type { JobsListResult } from "@/types/rpc/JobsListResult";
 import type { JobsRunsRequest } from "@/types/rpc/JobsRunsRequest";
 import type { JobsRunsResult } from "@/types/rpc/JobsRunsResult";
+import type { JobsSaveRequest } from "@/types/rpc/JobsSaveRequest";
+import type { JobsSaveResult } from "@/types/rpc/JobsSaveResult";
+import type { JobsUpdateDiffRequest } from "@/types/rpc/JobsUpdateDiffRequest";
 import type { LaunchCost } from "@/types/rpc/LaunchCost";
 import type { LayoutIntentResult } from "@/types/rpc/LayoutIntentResult";
 import type { LayoutOpenResult } from "@/types/rpc/LayoutOpenResult";
@@ -446,6 +454,7 @@ import type { StartProviderAuthReq } from "@/types/rpc/StartProviderAuthReq";
 import type { StartSessionResult } from "@/types/rpc/StartSessionResult";
 import type { SubmitAuthCallbackReq } from "@/types/rpc/SubmitAuthCallbackReq";
 import type { SubscriptionRequest } from "@/types/rpc/SubscriptionRequest";
+import type { TemplateUpdateDiff } from "@/types/rpc/TemplateUpdateDiff";
 import type { ToolIdReq } from "@/types/rpc/ToolIdReq";
 import type { ToolchainEnvResult } from "@/types/rpc/ToolchainEnvResult";
 import type { ToolchainPruneReq } from "@/types/rpc/ToolchainPruneReq";
@@ -1437,6 +1446,14 @@ export const GeneratedApi = {
   JobsActCommand(client: RpcClient, data: JobsActRequest, opts?: RpcOpts): Promise<JobsActResult> {
     return client.rpcCall("jobs.act", data, opts);
   },
+  // command "jobs.dryrun"
+  JobsDryrunCommand(client: RpcClient, data: JobsDryRunRequest, opts?: RpcOpts): Promise<JobsDryRunResult> {
+    return client.rpcCall("jobs.dryrun", data, opts);
+  },
+  // command "jobs.get"
+  JobsGetCommand(client: RpcClient, data: JobsGetRequest, opts?: RpcOpts): Promise<JobsGetResult> {
+    return client.rpcCall("jobs.get", data, opts);
+  },
   // command "jobs.list"
   JobsListCommand(client: RpcClient, data: Record<string, never>, opts?: RpcOpts): Promise<JobsListResult> {
     return client.rpcCall("jobs.list", data, opts);
@@ -1444,6 +1461,18 @@ export const GeneratedApi = {
   // command "jobs.runs"
   JobsRunsCommand(client: RpcClient, data: JobsRunsRequest, opts?: RpcOpts): Promise<JobsRunsResult> {
     return client.rpcCall("jobs.runs", data, opts);
+  },
+  // command "jobs.save"
+  JobsSaveCommand(client: RpcClient, data: JobsSaveRequest, opts?: RpcOpts): Promise<JobsSaveResult> {
+    return client.rpcCall("jobs.save", data, opts);
+  },
+  // command "jobs.templates.approve"
+  JobsTemplatesApproveCommand(
+    client: RpcClient,
+    data: JobTemplateApproveReq,
+    opts?: RpcOpts
+  ): Promise<JobTemplatesResult> {
+    return client.rpcCall("jobs.templates.approve", data, opts);
   },
   // command "jobs.templates.catalog"
   JobsTemplatesCatalogCommand(
@@ -1484,6 +1513,14 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<JobTemplatesResult> {
     return client.rpcCall("jobs.templates.uninstall", data, opts);
+  },
+  // command "jobs.templates.update_diff"
+  JobsTemplatesUpdateDiffCommand(
+    client: RpcClient,
+    data: JobsUpdateDiffRequest,
+    opts?: RpcOpts
+  ): Promise<TemplateUpdateDiff> {
+    return client.rpcCall("jobs.templates.update_diff", data, opts);
   },
   // command "kanban.act"
   KanbanActCommand(

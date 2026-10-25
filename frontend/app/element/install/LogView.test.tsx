@@ -14,6 +14,7 @@ vi.mock("@/app/view/agent/scroll/follow-setting", () => ({ followControllerOn: (
 import { ContextMenuModel } from "@/app/store/contextmenu";
 
 import type { LogLine } from "./install-session";
+import { MENU_ICON } from "@/app/util/menu-icons";
 import { LOG_ROW_PX, LogView, type LogViewApi } from "./LogView";
 
 afterEach(() => {
@@ -80,6 +81,7 @@ describe("LogView", () => {
             ["Copy", false],
             ["Copy All", true],
         ]);
+        expect(items.map((i) => (i as { icon?: string }).icon)).toEqual([MENU_ICON.copy, MENU_ICON.copy]);
     });
 
     it("re-measures its viewport when resized without a scroll (muxreview P2 on #3684)", () => {

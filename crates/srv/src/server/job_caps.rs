@@ -8,8 +8,9 @@
 //! **Who raises a cap.** Only the operator. A request that carries no agent
 //! token looks like the app's own window at the same-user boundary, so it
 //! proves nothing; the operator's decision arrives only through the host
-//! route (`POST /api/v1/host/jobs`, which needs the host's own token). Every
-//! other path holds a job's `policy.caps` to the defaults and says so.
+//! route (`POST /api/v1/host/jobs`, which needs the host's own token) or the
+//! app's own proven window (`jobs.save`, an operator-only RPC). Every other
+//! path holds a job's `policy.caps` to the defaults and says so.
 //!
 //! **A provider that reports no cost.** Its runs count $0 toward the dollar
 //! caps and only the timeout bounds them, so the operator confirms such a job
@@ -42,7 +43,8 @@ pub(crate) const NO_COST_TIMEOUT_MINUTES: u32 = 60;
 /// Who asks, as far as the caps are concerned.
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct Origin {
-    /// The operator's decision, relayed by the host (`handle_host_jobs`).
+    /// The operator's decision: relayed by the host (`handle_host_jobs`), or
+    /// made in the app's own proven window (`jobs.save`).
     pub from_host: bool,
     /// The operator confirmed a job on a provider that reports no cost.
     pub confirm_no_cost: bool,

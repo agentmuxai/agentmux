@@ -4,11 +4,11 @@
 //! Job templates' RPCs and the operator's host route
 //! (docs/specs/SPEC_JOBS_AND_TEMPLATES_2026_10_24.md §5.4, §5.5, §7).
 //!
-//! Anyone may list the templates and preview a brief. Installing one and
-//! browsing a catalog are the operator's own client's (`operator_only`).
-//! Approving a template, forgetting a publisher's key and pinning a
-//! catalog's key are carried only by the host, as a widget's approval is:
-//! the instance auth key, which every agent has, isn't enough.
+//! Anyone may list the templates and preview a brief. Installing one,
+//! approving one and browsing a catalog are the operator's own client's
+//! (`operator_only`). Approving a template, forgetting a publisher's key and
+//! pinning a catalog's key can also be carried by the host, as a widget's
+//! approval is: the instance auth key, which every agent has, isn't enough.
 
 use std::sync::Arc;
 
@@ -87,6 +87,19 @@ pub struct JobTemplateIdReq {
     pub id: String,
 }
 
+/// The operator's approval of exactly what their prompt showed.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct JobTemplateApproveReq {
+    pub id: String,
+    /// The content hash the prompt showed (`JobTemplateInfo.hash`).
+    pub hash: String,
+    /// The fingerprint of the key that signed it, as shown; empty if unsigned.
+    #[serde(default)]
+    #[ts(optional)]
+    pub signer: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct JobTemplateCatalogReq {
@@ -152,6 +165,17 @@ async fn install(req: JobTemplateInstallReq, ctx: &RpcContext) -> Result<JobTemp
     .await
 }
 
+async fn approve(req: JobTemplateApproveReq, ctx: &RpcContext) -> Result<JobTemplatesResult, String> {
+    ctx.operator_only("only the operator approves a job template")?;
+    let signer = req.signer.unwrap_or_default();
+    blocking(move |s| {
+        s.approve(&req.id, &req.hash, &signer)?;
+        tracing::info!(id = %req.id, "job template approved by the operator");
+        Ok(result(s))
+    })
+    .await
+}
+
 fn pinned_catalog(url: &str) -> Result<Catalog, String> {
     svc()?.catalogs().into_iter().find(|c| c.url == url).ok_or_else(|| format!("{url} isn't one of your catalogs"))
 }
@@ -162,6 +186,10 @@ pub fn register(engine: &Arc<WshRpcEngine>) {
     engine.register_typed("jobs.templates.get", |req: JobTemplateGetReq, _ctx| async move { blocking(move |s| detail(s, req)).await });
 
     engine.register_typed("jobs.templates.install", |req: JobTemplateInstallReq, ctx| async move { install(req, &ctx).await });
+
+    // jobs.templates.approve: the operator's decision, from the app's own
+    // proven window; the host route below carries the same decision.
+    engine.register_typed("jobs.templates.approve", |req: JobTemplateApproveReq, ctx: RpcContext| async move { approve(req, &ctx).await });
 
     engine.register_typed("jobs.templates.uninstall", |req: JobTemplateIdReq, ctx: RpcContext| async move {
         ctx.operator_only("only the operator uninstalls a job template")?;
@@ -276,6 +304,35 @@ mod tests {
         assert_eq!(status(&app, host_post(None, add.clone())).await, StatusCode::FORBIDDEN);
         assert_eq!(status(&app, host_post(Some("host-ipc-token"), add)).await, StatusCode::OK);
         assert!(svc.catalogs().iter().any(|c| c.public_key == key));
+    }
+
+    #[tokio::test]
+    async fn only_the_operators_proven_window_approves_a_template() {
+        let svc = JobTemplates::for_tests();
+        let dir = svc.templates_dir.join("acme.rpcapprove");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("template.json"),
+            json!({ "templateVersion": 1, "id": "acme.rpcapprove", "name": "Rpc approve", "version": "1.0.0", "kind": "job",
+                    "description": "A test.", "action": { "kind": "message" } })
+            .to_string(),
+        )
+        .unwrap();
+        std::fs::write(dir.join("brief.md"), "Report in.").unwrap();
+        let hash = svc.get("acme.rpcapprove").unwrap().0.hash;
+        let req = || JobTemplateApproveReq { id: "acme.rpcapprove".into(), hash: hash.clone(), signer: None };
+
+        let agent = RpcContext { agent_id: "agent7".into(), ..Default::default() };
+        assert!(approve(req(), &agent).await.unwrap_err().starts_with("FORBIDDEN"));
+        let unproven = RpcContext::default();
+        assert!(approve(req(), &unproven).await.unwrap_err().contains("isn't the AgentMux window"));
+        assert!(svc.resolve_approved("acme.rpcapprove", "1.0.0").is_err());
+
+        let stale = JobTemplateApproveReq { hash: "0000".into(), ..req() };
+        assert!(approve(stale, &RpcContext::operator_for_tests()).await.unwrap_err().contains("changed since you were asked"));
+        let done = approve(req(), &RpcContext::operator_for_tests()).await.unwrap();
+        assert!(done.templates.iter().any(|t| t.id == "acme.rpcapprove" && t.state == jt::JobTemplateState::Approved));
+        assert!(svc.resolve_approved("acme.rpcapprove", "1.0.0").is_ok());
     }
 
     #[tokio::test]

@@ -20,6 +20,7 @@ mod cdp_port;
 mod client;
 mod commands;
 mod dev_authfile;
+mod ipc_forward;
 mod owner_only_file;
 mod drag_stash;
 mod events;
@@ -1303,8 +1304,7 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
     // actually ready to handle it. Single-instance enforcement is
     // the launcher's named-pipe bind — this file is purely a
     // forwarding hint.
-    // Owner-only: the token is the proof a request comes from the operator's window.
-    owner_only_file::publish(&port_file, format!("{}:{}", ipc_port, app_state.ipc_token).as_bytes());
+    ipc_forward::publish_port_file(&port_file, ipc_port);
 
     // Phase B.9.1 (WRR) — install Win32 event hooks. Must come
     // AFTER `connect_to_launcher` so the report_hwnd_* sync APIs

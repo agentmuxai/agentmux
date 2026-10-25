@@ -4,6 +4,7 @@
 
 import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
 import { atoms } from "@/store/global";
+import { MENU_ICON } from "@/app/util/menu-icons";
 import type { SignalAtom } from "@/util/util";
 import * as util from "@/util/util";
 import { createSignalAtom } from "@/util/util";
@@ -514,7 +515,7 @@ class SysinfoViewModel {
     }
 
     getSettingsMenuItems(): ContextMenuItem[] {
-        return [{ label: "Plot Type", submenu: this.areaMenuItems() }, { type: "separator" }];
+        return [{ label: "Plot Type", icon: MENU_ICON.plotType, submenu: this.areaMenuItems() }, { type: "separator" }];
     }
 
     getBodyContextMenuItems(): ContextMenuItem[] {
