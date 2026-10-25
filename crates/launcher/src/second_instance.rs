@@ -8,7 +8,9 @@ use crate::logging::log;
 /// the already-running host and let this launcher exit 0.
 ///
 /// The host writes `<data-dir>/ipc-port` after CEF init as
-/// `port:token`. We open a TCP connection to 127.0.0.1:port, send a
+/// `port:token`, where the token is a forwarding token that opens only the
+/// commands the launcher sends (an older host writes its full token; both
+/// work as the bearer). We open a TCP connection to 127.0.0.1:port, send a
 /// minimal HTTP/1.1 POST to /ipc with the bearer token and a JSON
 /// body, and bail. We deliberately do NOT pull in reqwest: the
 /// launcher binary should stay tiny (~325 KB) and the protocol is
