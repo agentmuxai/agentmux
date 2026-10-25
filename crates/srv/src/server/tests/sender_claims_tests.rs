@@ -376,3 +376,21 @@ async fn reading_the_channel_needs_no_token() {
     let (status, v) = get(&state, None, "/api/v1/work-facts/who?query=x").await;
     assert!(!no_token_refusal(&v), "{status}: {v}");
 }
+
+/// An agent stops agents with the Stop tool, which asks the user first and names the agent; the instant stop
+/// forward is for another instance's window, so it refuses a request that carries an agent's token.
+#[tokio::test]
+async fn stopping_is_attributed_to_the_agent_that_asks() {
+    let _counters = M4_ACTOR_COUNTERS.lock().await;
+    let (state, token) = state_with_alpha();
+    let stop = json!({ "block_id": "sc-no-such-block" });
+    let (status, v) = post(&state, Some(&token), "/agentmux/agent/stop", stop.clone()).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{v}");
+    let (status, v) = post(&state, None, "/agentmux/agent/stop", stop).await;
+    assert_eq!(status, StatusCode::OK, "another instance's forward is served as before: {v}");
+    let bulk = json!({ "targets": ["sc-no-such-block"] });
+    let (status, v) = post(&state, None, "/api/v1/fleet/bulk-stop", bulk.clone()).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{v}");
+    let (status, v) = post(&state, Some(&token), "/api/v1/fleet/bulk-stop", bulk).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+}
