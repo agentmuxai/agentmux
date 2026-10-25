@@ -133,6 +133,8 @@ mod tests {
         assert!(!is_set("AM_SECRET_ENV_TEST_C"));
     }
 
+    // Unix only: it runs the system `env`, which a Windows runner need not have.
+    #[cfg(unix)]
     #[test]
     fn a_child_process_started_after_the_stash_does_not_see_the_secret() {
         std::env::set_var("AM_SECRET_ENV_TEST_D", "do-not-inherit");
