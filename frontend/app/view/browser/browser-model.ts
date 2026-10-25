@@ -1045,7 +1045,7 @@ export class BrowserViewModel {
     /** Put the pane to sleep: record what it needs to come back; the view
      *  then discards its page in place, or closes it on an engine without the
      *  Discard API (SPEC_BROWSER_PANE_HIBERNATION_2026_10_20.md §4, §10). */
-    hibernate(reason: SleepReason): Promise<void> {
+    hibernate(reason: SleepReason, memoryBytes?: number): Promise<void> {
         const sleep: BrowserSleep = {
             since: Date.now(),
             reason,
@@ -1053,6 +1053,7 @@ export class BrowserViewModel {
             title: this._titleIsReal[0]() ? this.titleAtom() : "",
             favicon: this.faviconUrlAtom(),
             loadMs: this.loadMsAtom(),
+            ...(memoryBytes != null && memoryBytes > 0 ? { memoryBytes: Math.round(memoryBytes) } : {}),
         };
         this.diag(`hibernate reason=${reason} url=${JSON.stringify(sleep.url)}`);
         return this.ctx.setMeta({ [SLEEP_META_KEY]: sleep });
