@@ -18,6 +18,7 @@
  */
 
 import { createSignal, type Accessor } from "solid-js";
+import { usePrewarm } from "./hooks/usePrewarm";
 
 const [windowHidden, setWindowHidden] = createSignal(typeof document !== "undefined" && document.hidden);
 let listening = false;
@@ -35,8 +36,13 @@ export function useWindowHidden(): Accessor<boolean> {
     return windowHidden;
 }
 
-/** The pane's dormancy for rendering: its tab hidden, or its window. */
-export function useRenderDormant(paneHidden: Accessor<boolean>): Accessor<boolean> {
+/**
+ * The pane's dormancy for rendering: its tab hidden, or its window. With
+ * `blockId`, a pane in a window tab nobody has opened yet draws ahead of the
+ * visit while it holds the prewarm lease (store/agent-prewarm.ts).
+ */
+export function useRenderDormant(paneHidden: Accessor<boolean>, blockId?: string): Accessor<boolean> {
     const hiddenWindow = useWindowHidden();
-    return () => paneHidden() || hiddenWindow();
+    const prewarming = blockId ? usePrewarm(blockId) : () => false;
+    return () => (paneHidden() && !prewarming()) || hiddenWindow();
 }

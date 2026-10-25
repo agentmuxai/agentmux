@@ -4,6 +4,7 @@
 import { cleanup, render } from "@solidjs/testing-library";
 import { createRoot, createSignal } from "solid-js";
 import { afterEach, describe, expect, it } from "vitest";
+import { setPrewarmLease } from "@/app/store/agent-prewarm";
 import { AgentDormancyProvider } from "./agent-dormancy";
 import { ToolBlock } from "./components/ToolBlock";
 import { useRenderDormant, useWindowHidden } from "./render-dormant";
@@ -29,6 +30,23 @@ describe("useRenderDormant", () => {
             expect(hidden()).toBe(true);
             setDocumentHidden(false);
             expect(hidden()).toBe(false);
+            dispose();
+        });
+    });
+
+    it("lets a hidden pane draw while it holds the prewarm lease, and only that pane", () => {
+        createRoot((dispose) => {
+            const mine = useRenderDormant(() => true, "blk-1");
+            const other = useRenderDormant(() => true, "blk-2");
+            expect(mine()).toBe(true);
+            setPrewarmLease("blk-1");
+            expect(mine()).toBe(false);
+            expect(other()).toBe(true);
+            setDocumentHidden(true); // a hidden window stays dormant whatever the lease says
+            expect(mine()).toBe(true);
+            setDocumentHidden(false);
+            setPrewarmLease(null);
+            expect(mine()).toBe(true);
             dispose();
         });
     });

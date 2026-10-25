@@ -312,6 +312,13 @@ pub struct SettingsType {
     #[serde(rename = "window:keepinactivetabslaidout", default, skip_serializing_if = "Option::is_none")]
     pub window_keep_inactive_tabs_laid_out: Option<bool>,
 
+    /// Draw the agent transcripts of window tabs that were never shown while
+    /// the window is idle, one pane at a time, so the first visit shows the
+    /// whole tab at once. Off unless `true`; see
+    /// docs/analysis/ANALYSIS_WINDOW_TAB_PREWARM_2026_10_25.md.
+    #[serde(rename = "window:prewarmagenttabs", default, skip_serializing_if = "Option::is_none")]
+    pub window_prewarm_agent_tabs: Option<bool>,
+
     #[serde(rename = "window:dimensions", default, skip_serializing_if = "String::is_empty")]
     pub window_dimensions: String,
 

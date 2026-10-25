@@ -154,7 +154,7 @@ export const AgentPresentationView = ({
     // (docs/analysis/REPORT_TIMERS_DEADLINES_AND_CLOCKS_AUDIT_2026_10_17.md §6.4).
     const visibility = usePaneTabVisibility(model.blockId);
     const hidden = (): boolean => visibility() !== "active";
-    const renderDormant = useRenderDormant(hidden); // `hidden`, or the window itself (minimized)
+    const renderDormant = useRenderDormant(hidden, model.blockId); // `hidden`, or the window itself (minimized)
     const providerKey = (): string => block()?.meta?.["agentProvider"] ?? agentId;
     const provider = () => getProvider(providerKey());
     const outputFormat = (): string => block()?.meta?.["agentOutputFormat"] ?? "claude-stream-json";
@@ -414,7 +414,7 @@ export const AgentPresentationView = ({
         restoreTurns: () =>
             liveFeed.liveFeedOn() && outputFormat() === "claude-stream-json" && Number.isFinite(liveFeed.liveFeedTurns) ? liveFeed.liveFeedTurns + 1 : undefined,
         restoreBytes: () => (liveFeed.liveFeedOn() ? LIVE_FEED_RESTORE_BYTES : undefined), // what the feed keeps, by size
-        fillPaused: () => hidden() || !liveFeed.followingBottom(), // see the option
+        fillPaused: () => renderDormant() || !liveFeed.followingBottom(), // see the option; a prewarming pane fills
         onHistoryReady: () => {
             historyReadyFn?.();
             // A pane opens with K turns, not the load window's worth (§6.9).

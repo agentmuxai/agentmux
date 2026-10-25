@@ -1098,6 +1098,7 @@ declare global {
         "window:confirmcloseworking"?: boolean;
         "window:savelastwindow"?: boolean;
         "window:keepinactivetabslaidout"?: boolean;
+        "window:prewarmagenttabs"?: boolean;
         "window:dimensions"?: string;
         "window:zoom"?: number;
         "window:theme"?: string;

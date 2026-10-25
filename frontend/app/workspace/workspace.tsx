@@ -31,6 +31,7 @@ import { creatingTabId, switchIntentTabId } from "@/store/tab-actions";
 import { markLoadedTabsShownWhenSettled } from "@/app/tab/tab-content-settled";
 import { drainWhenIdle, installWindowResizeTracking, windowResizing } from "@/app/platform/window-resize";
 import { Button } from "@/app/element/ui/Button";
+import { startAgentPrewarm } from "./agent-prewarm-driver";
 import { createDisplayWatchdog } from "./display-watchdog";
 import { For, Show, createEffect, createMemo, createSignal, on, onCleanup, untrack } from "solid-js";
 import type { JSX } from "solid-js";
@@ -225,6 +226,9 @@ function WorkspaceElem(): JSX.Element {
         if (!document.hidden) watchdog.check();
     }, 1000);
     onCleanup(() => clearInterval(watchdogTimer));
+    // Draws never-shown tabs' agent panes while the window is idle, when the
+    // setting is on (agent-prewarm-driver.ts).
+    onCleanup(startAgentPrewarm());
 
     // All tab IDs (pinned + regular). Keep every tab mounted so terminals
     // preserve their xterm.js instance and scrollback across tab switches.

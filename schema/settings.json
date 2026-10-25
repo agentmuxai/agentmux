@@ -292,6 +292,11 @@
         "window:keepinactivetabslaidout": {
           "type": "boolean"
         },
+        "window:prewarmagenttabs": {
+          "type": "boolean",
+          "default": false,
+          "description": "Draw the agent transcripts of window tabs you have not opened yet while the window is idle, one pane at a time, so the first visit shows the whole tab at once. Uses more memory; pauses under memory pressure."
+        },
         "window:dimensions": {
           "type": "string"
         },
