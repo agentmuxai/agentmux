@@ -40,6 +40,10 @@ pub enum Action {
     /// Stop the controller and keep the block, as `agent.stop` does. Internal
     /// only (the fork slug migration): no tool an agent can call opens one.
     Stop { signal: Option<String> },
+    /// Another AgentMux asked this instance to let go of the agent (Take over):
+    /// stop it gracefully and leave its lease to the other instance. `to` names
+    /// the asking instance, for the pane's "taken over" row.
+    Release { to: String },
 }
 
 impl Action {
@@ -47,7 +51,7 @@ impl Action {
     /// and its siblings, a self-quit stops it and closes its tab.
     fn rank(&self) -> u8 {
         match self {
-            Action::Stop { .. } => 0,
+            Action::Stop { .. } | Action::Release { .. } => 0,
             Action::SelfQuit { .. } | Action::CloseTab { .. } => 1,
             Action::ClosePane { .. } => 2,
         }
@@ -56,7 +60,7 @@ impl Action {
     /// What the user is told will happen: `PendingView::effect`.
     fn effect(&self) -> &'static str {
         match self {
-            Action::Stop { .. } => "stop",
+            Action::Stop { .. } | Action::Release { .. } => "stop",
             Action::SelfQuit { .. } | Action::CloseTab { .. } => "close_tab",
             Action::ClosePane { .. } => "close_pane",
         }
@@ -82,6 +86,8 @@ impl Action {
                     *signal = theirs;
                 }
             }
+            // A release does all a stop does, and hands the lease over too.
+            (this, Action::Release { to }) if matches!(this, Action::Stop { .. }) => *this = Action::Release { to },
             (Action::ClosePane { block_ids }, Action::ClosePane { block_ids: theirs }) => {
                 for b in theirs {
                     if !block_ids.contains(&b) {
@@ -567,6 +573,7 @@ async fn run_action(state: &AppState, block_id: &str, action: Action) -> Result<
                 .await
                 .map(|_| ())
         }
+        Action::Release { to } => crate::server::agent_takeover::release_block(state, block_id, &to),
     }
 }
 

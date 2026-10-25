@@ -1633,7 +1633,7 @@ export class SwarmViewModel {
      *  longer a meaningful target set to keep checked. */
     async bulkStopSelection(opts?: { signal?: string; staged?: FleetStagePlan }): Promise<FleetActionResult> {
         try {
-            return await this.runFleetAction("bulk-stop", "stop", (targets) => RpcApi.FleetBulkStopCommand(TabRpcClient, { targets, ...opts }));
+            return await this.runFleetAction("bulk-stop", "stop", (targets) => RpcApi.FleetBulkStopCommand(TabRpcClient, { targets, ...opts }, { timeout: 600_000 }));
         } finally {
             this.clearSelection();
         }

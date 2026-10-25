@@ -896,8 +896,9 @@ pub async fn endpoint_for_channel(channel: &str) -> Option<HolderEndpoint> {
 }
 
 /// How long a release request may take to be answered (see
-/// [`request_release`]).
-const RELEASE_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+/// [`request_release`]): the holder's user has 15 s to keep the agent running
+/// before it lets go.
+const RELEASE_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// Ask the holder's srv to stop running `uid` so this instance can take it
 /// (`POST /agentmux/agent/release`). `Err` is user-facing.
@@ -905,8 +906,8 @@ pub async fn request_release(holder: &HolderEndpoint, uid: &str, agent: &str) ->
     let me = claimant_info();
     let mut req = PROBE_CLIENT
         .post(format!("{}/agentmux/agent/release", holder.local_url))
-        // Not the probe's 1.5 s: the holder answers only after stopping its
-        // panes (up to its 10 s grace) and letting go of the relay lease (a
+        // Not the probe's 1.5 s: the holder answers only after its user's override
+        // window ran out, then stopping its panes (up to its 10 s grace) and letting go of the relay lease (a
         // token refresh plus a relay call with its own 10 s timeout) —
         // ReAgent P1 on #3899.
         .timeout(RELEASE_REQUEST_TIMEOUT)

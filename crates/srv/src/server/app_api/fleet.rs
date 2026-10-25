@@ -511,6 +511,7 @@ pub(crate) async fn forward_stop_to_shared_channel(
     state: &AppState,
     block_id: &str,
     signal: Option<&str>,
+    by: &str,
 ) -> Option<(String, Result<(), String>)> {
     let entry = shared_channel_for(state, block_id)?;
 
@@ -518,6 +519,7 @@ pub(crate) async fn forward_stop_to_shared_channel(
     let mut req = state.http_client.post(&url).json(&serde_json::json!({
         "block_id": block_id,
         "signal": signal,
+        "by": by,
     }));
     if !entry.auth_key.is_empty() {
         req = req.header(AUTH_KEY_HEADER, &entry.auth_key);
@@ -535,7 +537,11 @@ pub(crate) async fn forward_stop_to_shared_channel(
             .await
             .map_err(|e| format!("cross-channel forward: response parse failed: {e}"))?;
         if body.get("success").and_then(|v| v.as_bool()) == Some(true) {
-            Ok(())
+            // An instance with the keep-running window opened one: the stop is done when its user lets it run out.
+            match body["pending"]["request_id"].as_str() {
+                Some(request_id) => wait_for_remote_window(state, &entry.local_url, &entry.auth_key, request_id).await,
+                None => Ok(()),
+            }
         } else {
             Err(body
                 .get("error")
@@ -547,6 +553,32 @@ pub(crate) async fn forward_stop_to_shared_channel(
     .await;
 
     Some((entry.agent_id, outcome))
+}
+
+/// Wait for the other instance's user to let its keep-running window run out (or keep the agent running).
+pub(crate) async fn wait_for_remote_window(state: &AppState, local_url: &str, auth_key: &str, request_id: &str) -> Result<(), String> {
+    let url = format!("{}/api/v1/agent/shutdown/{request_id}", local_url.trim_end_matches('/'));
+    let give_up = std::time::Instant::now() + crate::sagas::pending_shutdown::OVERRIDE_WINDOW + std::time::Duration::from_secs(15);
+    loop {
+        let mut req = state.http_client.get(&url);
+        if !auth_key.is_empty() {
+            req = req.header(AUTH_KEY_HEADER, auth_key);
+        }
+        let body: serde_json::Value = match req.send().await {
+            Ok(r) => r.json().await.unwrap_or_default(),
+            Err(e) => return Err(format!("cross-channel forward: lost the other AgentMux while it waited for its user: {e}")),
+        };
+        match body["status"].as_str() {
+            Some("shut_down") | Some("superseded") => return Ok(()),
+            Some("kept_by_user") => return Err("kept running by the user of the AgentMux running it".to_string()),
+            Some("failed") => return Err(body["error"].as_str().unwrap_or("the stop failed there").to_string()),
+            _ => {}
+        }
+        if std::time::Instant::now() >= give_up {
+            return Err("cross-channel forward: the other AgentMux's user did not answer in time".to_string());
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    }
 }
 
 pub(crate) async fn fleet_bulk_stop_impl(
@@ -564,8 +596,9 @@ pub(crate) async fn fleet_bulk_stop_impl(
         let batch: Vec<String> = (&mut iter).take(batch_size).collect();
         let batch_len = batch.len();
         let mut batch_failures = 0usize;
-        for block_id in batch {
-            let request_id = uuid::Uuid::new_v4().to_string();
+        // All of the batch at once: a target on another instance waits for that instance's user, and the
+        // windows must run side by side rather than one after another.
+        let stops = batch.into_iter().map(|block_id| async move {
             // Local (this instance's own in-process controller registry)
             // first — unchanged, fast path. Only reach for the shared
             // cross-channel registry when nothing local matches
@@ -573,11 +606,15 @@ pub(crate) async fn fleet_bulk_stop_impl(
             // §3.2 — this was host-tier-only before).
             let (target_agent, outcome) = match state.reactive_handler.get_agent_by_block(&block_id) {
                 Some(agent) => (agent.agent_id, stop_one_agent_block(state, &block_id, signal, None).await.map(|_| ())),
-                None => match forward_stop_to_shared_channel(state, &block_id, signal).await {
+                None => match forward_stop_to_shared_channel(state, &block_id, signal, "").await {
                     Some((agent_name, outcome)) => (agent_name, outcome),
                     None => (block_id.clone(), stop_one_agent_block(state, &block_id, signal, None).await.map(|_| ())),
                 },
             };
+            (block_id, target_agent, outcome)
+        });
+        for (block_id, target_agent, outcome) in futures_util::future::join_all(stops).await {
+            let request_id = uuid::Uuid::new_v4().to_string();
             match outcome {
                 Ok(()) => {
                     state.reactive_handler.log_fleet_action_audit(
@@ -676,7 +713,7 @@ async fn forward_stop_pending(
         Err(e) => return Forwarded::Refused(format!("cross-channel forward failed: {e}")),
     };
     if resp.status() == reqwest::StatusCode::NOT_FOUND {
-        let outcome = forward_stop_to_shared_channel(state, block_id, signal)
+        let outcome = forward_stop_to_shared_channel(state, block_id, signal, by)
             .await
             .map(|(_, o)| o)
             .unwrap_or_else(|| Err("cross-channel forward: target vanished".to_string()));

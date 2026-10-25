@@ -10,7 +10,7 @@ pub(crate) mod account_episodes;
 pub mod agent_resources;
 pub mod agent_handlers;
 mod agent_only;
-mod agent_takeover;
+pub(crate) mod agent_takeover;
 mod pane_binding;
 mod pane_commands;
 mod editor_handlers;
@@ -99,6 +99,9 @@ pub(crate) mod tests;
 #[cfg(test)]
 #[path = "tests/sender_claims_tests.rs"]
 mod sender_claims_tests;
+#[cfg(test)]
+#[path = "tests/peer_veto_tests.rs"]
+mod peer_veto_tests;
 #[cfg(test)]
 mod rpc_schema_export;
 

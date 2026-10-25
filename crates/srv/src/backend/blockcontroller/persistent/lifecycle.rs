@@ -117,6 +117,12 @@ impl PersistentSubprocessController {
         Ok(old)
     }
 
+    /// Whether `release_to_other_instance` would do anything: this pane holds a lease and has a process to stop.
+    pub fn can_release(&self) -> bool {
+        let inner = self.inner.lock().unwrap();
+        inner.agent_lease.is_some() && inner.kill_tx.is_some()
+    }
+
     /// A kill for teardown: drains the deferred queue in the SAME `inner`
     /// acquisition that issues the kill, and returns what it drained for the
     /// caller to report. Draining in a second acquisition left a window

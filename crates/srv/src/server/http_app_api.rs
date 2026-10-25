@@ -195,6 +195,9 @@ pub(super) async fn handle_fleet_bulk_stop(
 pub(super) struct AgentStopForwardRequest {
     pub(super) block_id: String,
     pub(super) signal: Option<String>,
+    /// The asker's name, when the forwarding instance sends one; shown on the banner as a claim.
+    #[serde(default)]
+    pub(super) by: String,
 }
 
 #[derive(serde::Deserialize)]
@@ -249,25 +252,8 @@ pub(super) async fn handle_agent_stop_pending_forward(
     Json(req): Json<AgentStopPendingForwardRequest>,
 ) -> impl IntoResponse {
     let close = req.mode == "close";
-    // A request that carries an agent's token is that agent asking; one from another instance
-    // names its asker itself, and is shown as a claim.
-    let token_agent = match caller.as_deref().and_then(super::caller::Caller::uid).map(str::to_string) {
-        Some(uid) => {
-            let mstore = state.mstore.clone();
-            tokio::task::spawn_blocking(move || mstore.agent_names_by_id(&uid).ok().flatten().map(|row| row.slug))
-                .await
-                .ok()
-                .flatten()
-                .filter(|slug| !slug.is_empty())
-        }
-        None => None,
-    };
-    let claimed = format!("{} (as claimed by another AgentMux)", req.by.trim());
-    let by = match (&token_agent, req.by.trim().is_empty()) {
-        (Some(slug), _) => slug.as_str(),
-        (None, true) => "an agent on another AgentMux",
-        (None, false) => claimed.as_str(),
-    };
+    let by = forwarded_asker(&state, caller.as_deref(), &req.by).await;
+    let by = by.as_str();
     if close {
         // A close needs the block and an agent in it, not a running controller:
         // a stopped agent's pane is closed too.
@@ -284,16 +270,42 @@ pub(super) async fn handle_agent_stop_pending_forward(
         let error = format!("NOT_RUNNING: no controller for block {}", req.block_id);
         return (StatusCode::OK, Json(json!({ "success": false, "error": error }))).into_response();
     }
+    open_forwarded_window(&state, &req.block_id, req.signal, close, by)
+}
+
+/// Who a request from another instance says is asking: the token's agent when it carries one, else the name the
+/// forwarding instance sent, shown as a claim.
+async fn forwarded_asker(state: &AppState, caller: Option<&super::caller::Caller>, claimed_by: &str) -> String {
+    let token_agent = match caller.and_then(super::caller::Caller::uid).map(str::to_string) {
+        Some(uid) => {
+            let mstore = state.mstore.clone();
+            tokio::task::spawn_blocking(move || mstore.agent_names_by_id(&uid).ok().flatten().map(|row| row.slug))
+                .await
+                .ok()
+                .flatten()
+                .filter(|slug| !slug.is_empty())
+        }
+        None => None,
+    };
+    match (token_agent, claimed_by.trim().is_empty()) {
+        (Some(slug), _) => slug,
+        (None, true) => "an agent on another AgentMux".to_string(),
+        (None, false) => format!("{} (as claimed by another AgentMux)", claimed_by.trim()),
+    }
+}
+
+/// Opens this instance's own override window for a stop or close another instance asked for, and answers with it.
+fn open_forwarded_window(state: &AppState, block_id: &str, signal: Option<String>, close: bool, by: &str) -> axum::response::Response {
     let action = if close {
         crate::sagas::pending_shutdown::Action::CloseTab { detail: format!("asked by {by} (Stop agents, from another AgentMux)") }
     } else {
-        crate::sagas::pending_shutdown::Action::Stop { signal: req.signal }
+        crate::sagas::pending_shutdown::Action::Stop { signal }
     };
-    let v = crate::sagas::pending_shutdown::request(&state, &req.block_id, by, "FleetBulkStop", "", action);
+    let v = crate::sagas::pending_shutdown::request(state, block_id, by, "FleetBulkStop", "", action);
     state.reactive_handler.log_fleet_action_audit(
         Some(by),
         &v.target,
-        &req.block_id,
+        block_id,
         "fleet.bulk-stop",
         true,
         None,
@@ -306,11 +318,11 @@ pub(super) async fn handle_agent_stop_pending_forward(
 }
 
 /// `POST /agentmux/agent/stop` — the cross-channel bulk-stop forward
-/// target. See `fleet_bulk_stop_impl`'s doc comment for the caller side;
-/// this is just `stop_one_agent_block` run against THIS instance's own
-/// (in-process) controller registry, for a target the CALLING channel
-/// couldn't find in its own — same one-hop-forward shape as
-/// `/agentmux/reactive/inject`'s cross-channel tier, no further forwarding.
+/// target. See `fleet_bulk_stop_impl`'s doc comment for the caller side. The
+/// request names its asker itself and cannot be checked, so it goes through this
+/// instance's own override window (banner, chime, Keep running) like
+/// `/agentmux/agent/stop-pending`: the stop happens after 15 s unless the user
+/// keeps the agent running.
 pub(super) async fn handle_agent_stop_forward(
     State(state): State<AppState>,
     caller: Option<axum::Extension<super::caller::Caller>>,
@@ -321,10 +333,12 @@ pub(super) async fn handle_agent_stop_forward(
         let error = "FORBIDDEN: an agent stops agents with the Stop tool, which asks the user first";
         return (StatusCode::FORBIDDEN, Json(serde_json::json!({ "success": false, "error": error }))).into_response();
     }
-    match app_api::agent_io::stop_one_agent_block(&state, &req.block_id, req.signal.as_deref(), None).await {
-        Ok(result) => (StatusCode::OK, Json(serde_json::json!({ "success": true, "result": result }))).into_response(),
-        Err(e) => (StatusCode::OK, Json(serde_json::json!({ "success": false, "error": e }))).into_response(),
+    if crate::backend::blockcontroller::get_controller(&req.block_id).is_none() {
+        let error = format!("NOT_RUNNING: no controller for block {}", req.block_id);
+        return (StatusCode::OK, Json(json!({ "success": false, "error": error }))).into_response();
     }
+    let by = forwarded_asker(&state, None, &req.by).await;
+    open_forwarded_window(&state, &req.block_id, req.signal, false, &by)
 }
 
 #[derive(serde::Deserialize)]
