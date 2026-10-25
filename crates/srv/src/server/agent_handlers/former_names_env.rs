@@ -126,9 +126,9 @@ mod tests {
         assert_eq!(carried(&former(&["", "a@b"], &[])), (None, None));
     }
 
-    /// muxreview on #5441: a name with no ASCII letter or digit routes as the
-    /// placeholder `agent`, which is nobody's name, so it is left out; and a
-    /// slug is carried as it was stored, never route-formed.
+    /// A name with no ASCII letter or digit routes as the placeholder `agent`,
+    /// which is nobody's name, so it is left out; and a slug is carried as it
+    /// was stored, never route-formed (#5441).
     #[test]
     fn a_non_ascii_name_is_left_out_and_a_slug_is_carried_as_it_was() {
         assert_eq!(carried(&former(&["名前", "Real"], &[])).0.as_deref(), Some("Real"));
