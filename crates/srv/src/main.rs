@@ -335,6 +335,8 @@ async fn app_main() {
         state.http_client.clone(),
     );
     tokio::spawn(backend::kanban::run_reminder_loop());
+    // An agent out of quota is woken at its reset (SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §7).
+    backend::limit_wake::install(Arc::clone(&state.mstore), Arc::clone(&state.identity_store), Arc::clone(&state.event_bus));
     tokio::spawn(backend::kanban::prs::run_merge_loop());
     // An agent's AgentMux MCP server that didn't connect is noticed and
     // repaired (`agent:mcpselfheal`).
