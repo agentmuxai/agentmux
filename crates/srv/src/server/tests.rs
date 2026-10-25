@@ -3424,8 +3424,19 @@ mod fleet_tests {
         let (peer_url, hits) = spawn_recording_peer(false).await;
         write_raw_shared_entry(&shared_dir, "peer-agent-closeold", &peer_url, &block_id, "k");
         let state = test_state();
+        let mut def = crate::backend::storage::agents::test_agent_def("uid-stopper", "Stopper", "claude", "agent", 1, "");
+        def.slug = "stopper".to_string();
+        state.mstore.agent_def_insert(&mut def).unwrap();
+        let caller = crate::server::caller::Caller::Agent { uid: "uid-stopper".to_string() };
 
         let resp = super::super::http_app_api::handle_fleet_bulk_stop(
+            axum::extract::State(state.clone()),
+            Some(axum::Extension(caller)),
+            axum::Json(serde_json::json!({ "targets": [block_id.clone()] })),
+        )
+        .await
+        .into_response();
+        let tokenless = super::super::http_app_api::handle_fleet_bulk_stop(
             axum::extract::State(state),
             None,
             axum::Json(serde_json::json!({ "targets": [block_id.clone()] })),
@@ -3433,6 +3444,8 @@ mod fleet_tests {
         .await
         .into_response();
         std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
+
+        assert_eq!(tokenless.status(), StatusCode::FORBIDDEN, "Stop agents is an agent's tool: it needs the agent's token");
 
         assert_eq!(resp.status(), StatusCode::OK, "nothing waits: the old instance stopped it at once");
         let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
@@ -3478,6 +3491,7 @@ mod fleet_tests {
 
         let resp = super::super::handle_agent_stop_pending_forward(
             axum::extract::State(state.clone()),
+            None,
             axum::Json(super::super::AgentStopPendingForwardRequest { block_id: block_id.clone(), signal: None, by: "Korp".into(), mode: String::new() }),
         )
         .await
@@ -3487,7 +3501,7 @@ mod fleet_tests {
         assert_eq!(v["success"], true);
         let request_id = v["pending"]["request_id"].as_str().unwrap().to_string();
         let here = crate::sagas::pending_shutdown::status(&request_id).unwrap();
-        assert_eq!((here.status, here.by.as_str(), here.via.as_str()), ("pending", "Korp", "FleetBulkStop"));
+        assert_eq!((here.status, here.by.as_str(), here.via.as_str()), ("pending", "Korp (as claimed by another AgentMux)", "FleetBulkStop"));
         assert!(!stopped.load(std::sync::atomic::Ordering::SeqCst), "not stopped during the window");
         assert_eq!(crate::sagas::pending_shutdown::keep(&state, &block_id, &request_id), "kept_by_user");
         crate::backend::blockcontroller::delete_controller(&block_id);
@@ -3495,6 +3509,7 @@ mod fleet_tests {
         // Not running here: refused, nothing opened.
         let resp = super::super::handle_agent_stop_pending_forward(
             axum::extract::State(state.clone()),
+            None,
             axum::Json(super::super::AgentStopPendingForwardRequest { block_id: "nowhere".into(), signal: None, by: "Korp".into(), mode: String::new() }),
         )
         .await

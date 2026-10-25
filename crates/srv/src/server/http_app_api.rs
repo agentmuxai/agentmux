@@ -128,9 +128,10 @@ pub(super) async fn handle_agent_memory_write(
 ///
 /// Every running agent waits for its user's override (§6.5 of
 /// SPEC_AGENT_SELF_QUIT_2026_09_24.md): 202 with a request per target, or 200
-/// when nothing had to wait (everything refused or already gone). `auth`
-/// (optional, signed by agentmux-mcp) names the caller on the banner and in the
-/// audit log, and is how the caller's own block is refused.
+/// when nothing had to wait (everything refused or already gone). The request
+/// must carry the asking agent's token, which names that agent on the banner
+/// and in the audit log; the optional signed `auth` only identifies the
+/// caller's own block, so that it is refused.
 pub(super) async fn handle_fleet_bulk_stop(
     State(state): State<AppState>,
     caller: Option<axum::Extension<crate::server::caller::Caller>>,
@@ -140,14 +141,22 @@ pub(super) async fn handle_fleet_bulk_stop(
         Ok(r) => r,
         Err(e) => return (StatusCode::UNPROCESSABLE_ENTITY, Json(json!({ "error": e.to_string() }))).into_response(),
     };
-    let verified = body
+    // An agent stops agents, and is named as the one who did: the window stops them over its own socket.
+    let Some(uid) = caller.as_deref().and_then(crate::server::caller::Caller::uid).map(str::to_string) else {
+        let error = "FORBIDDEN: Stop agents is an agent's tool, so the request must carry that agent's token (AGENTMUX_AGENT_TOKEN)";
+        return (StatusCode::FORBIDDEN, Json(json!({ "error": error }))).into_response();
+    };
+    let by = {
+        let mstore = state.mstore.clone();
+        tokio::task::spawn_blocking(move || mstore.agent_names_by_id(&uid).ok().flatten().map(|row| row.slug)).await.ok().flatten()
+    };
+    let Some(by) = by.filter(|slug| !slug.is_empty()) else {
+        return (StatusCode::FORBIDDEN, Json(json!({ "error": "FORBIDDEN: the token's agent is unknown" }))).into_response();
+    };
+    let caller_block = body
         .get("auth")
         .and_then(|a| serde_json::from_value::<agentmux_common::api_types::UiAutomationAuth>(a.clone()).ok())
-        .and_then(|a| ui_handlers::verified_block_id(&state, caller.as_deref(), &a).ok().map(|block| (a.agent_id, block)));
-    let (by, caller_block) = match verified {
-        Some((agent, block)) => (agent, Some(block)),
-        None => ("an agent".to_string(), None),
-    };
+        .and_then(|a| ui_handlers::verified_block_id(&state, caller.as_deref(), &a).ok());
     // `signal` and `staged` no longer mean anything: a close ends the agent
     // gracefully and force-kills at its own deadline.
     let mut notes: Vec<String> = Vec::new();
@@ -236,10 +245,29 @@ pub(super) struct AgentStopPendingForwardRequest {
 /// here. Same trust model and gate as `/agentmux/agent/stop`.
 pub(super) async fn handle_agent_stop_pending_forward(
     State(state): State<AppState>,
+    caller: Option<axum::Extension<super::caller::Caller>>,
     Json(req): Json<AgentStopPendingForwardRequest>,
 ) -> impl IntoResponse {
     let close = req.mode == "close";
-    let by = if req.by.trim().is_empty() { "an agent on another AgentMux" } else { req.by.trim() };
+    // A request that carries an agent's token is that agent asking; one from another instance
+    // names its asker itself, and is shown as a claim.
+    let token_agent = match caller.as_deref().and_then(super::caller::Caller::uid).map(str::to_string) {
+        Some(uid) => {
+            let mstore = state.mstore.clone();
+            tokio::task::spawn_blocking(move || mstore.agent_names_by_id(&uid).ok().flatten().map(|row| row.slug))
+                .await
+                .ok()
+                .flatten()
+                .filter(|slug| !slug.is_empty())
+        }
+        None => None,
+    };
+    let claimed = format!("{} (as claimed by another AgentMux)", req.by.trim());
+    let by = match (&token_agent, req.by.trim().is_empty()) {
+        (Some(slug), _) => slug.as_str(),
+        (None, true) => "an agent on another AgentMux",
+        (None, false) => claimed.as_str(),
+    };
     if close {
         // A close needs the block and an agent in it, not a running controller:
         // a stopped agent's pane is closed too.
@@ -285,8 +313,14 @@ pub(super) async fn handle_agent_stop_pending_forward(
 /// `/agentmux/reactive/inject`'s cross-channel tier, no further forwarding.
 pub(super) async fn handle_agent_stop_forward(
     State(state): State<AppState>,
+    caller: Option<axum::Extension<super::caller::Caller>>,
     Json(req): Json<AgentStopForwardRequest>,
 ) -> impl IntoResponse {
+    // The forwarding instance is a server acting for its window: an agent that stops another goes through the override window.
+    if caller.as_deref().and_then(super::caller::Caller::uid).is_some() {
+        let error = "FORBIDDEN: an agent stops agents with the Stop tool, which asks the user first";
+        return (StatusCode::FORBIDDEN, Json(serde_json::json!({ "success": false, "error": error }))).into_response();
+    }
     match app_api::agent_io::stop_one_agent_block(&state, &req.block_id, req.signal.as_deref(), None).await {
         Ok(result) => (StatusCode::OK, Json(serde_json::json!({ "success": true, "result": result }))).into_response(),
         Err(e) => (StatusCode::OK, Json(serde_json::json!({ "success": false, "error": e }))).into_response(),
