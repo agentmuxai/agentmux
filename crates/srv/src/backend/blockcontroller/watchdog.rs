@@ -120,21 +120,12 @@ pub(crate) fn limit_text(reason: StopReason, limits: Limits) -> String {
 /// After the watchdog stopped an agent pane (`stop_now` keeps the claims):
 /// release its claimed Kanban tasks with the reason, the attempt counting,
 /// and raise one `AgentCrashed` notification
-/// (`SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md` §8). Blocking.
-fn after_stop(work_store: &Store, broker: &Arc<Broker>, block_id: &str, limit: &str, is_shell: bool) {
-    if is_shell {
-        return;
-    }
+/// (`SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md` §8). `agent` is the pane's agent
+/// id and uid, read before the stop: the exit path unregisters the block. Blocking.
+fn after_stop(work_store: &Store, broker: &Arc<Broker>, block_id: &str, limit: &str, agent: Option<(String, Option<String>)>) {
     let reason = format!("stopped by the watchdog after {limit}");
-    let agent = crate::backend::reactive::get_global_handler().list_agents().into_iter().find(|r| r.block_id == block_id);
-    if let Some(agent) = agent {
-        let released = crate::sagas::agent_teardown::release_claims(
-            work_store,
-            &agent.agent_id,
-            agent.uid.as_deref(),
-            &reason,
-            agentmux_common::time::now_ms(),
-        );
+    if let Some((agent_id, uid)) = agent {
+        let released = crate::sagas::agent_teardown::release_claims(work_store, &agent_id, uid.as_deref(), &reason, agentmux_common::time::now_ms());
         if released > 0 {
             tracing::info!(block_id = %block_id, released, "watchdog: released the stopped agent's claimed tasks");
             broker.publish_event::<crate::backend::mps_events::WorkQueueChanged>(&(), vec![], 0);
@@ -225,11 +216,17 @@ pub async fn run_watchdog_loop(config: Arc<ConfigState>, store: Arc<Store>, work
                 }
                 None => continue,
             }
-            if crate::sagas::agent_teardown::stop_now(&block_id, true).is_ok() {
+            // Before the stop: the pane's exit unregisters it from the handler.
+            let who = crate::backend::reactive::get_global_handler()
+                .list_agents()
+                .into_iter()
+                .find(|r| r.block_id == block_id)
+                .map(|r| (r.agent_id, r.uid));
+            if crate::sagas::agent_teardown::stop_now(&block_id, true).is_ok() && !agent.is_shell {
                 if let Some(reason) = verdict {
                     let (work_store, broker, block_id) = (work_store.clone(), broker.clone(), block_id.clone());
-                    let (limit, is_shell) = (limit_text(reason, limits), agent.is_shell);
-                    let _ = tokio::task::spawn_blocking(move || after_stop(&work_store, &broker, &block_id, &limit, is_shell)).await;
+                    let limit = limit_text(reason, limits);
+                    let _ = tokio::task::spawn_blocking(move || after_stop(&work_store, &broker, &block_id, &limit, who)).await;
                 }
             }
         }
