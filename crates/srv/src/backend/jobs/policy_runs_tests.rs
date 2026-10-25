@@ -192,6 +192,43 @@ async fn a_run_now_waiting_for_a_place_on_a_paused_job_still_starts() {
     assert_eq!(rig.store.job_run_get(&waits).unwrap().unwrap().state, state::RUNNING, "{:?}", states(&rig, "j-rn-b"));
 }
 
+/// A restart ends the runs that were running, not the ones still waiting for
+/// a place or out their retry's backoff: those start afterwards.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_restart_leaves_waiting_runs_waiting() {
+    let rig = rig();
+    let busy = make(&rig, "j-rs-a", |j| j.policy.group = Some("g".into()));
+    let waiter = make(&rig, "j-rs-b", |j| j.policy.group = Some("g".into()));
+    let running = rig.sched.fire(&busy, slot(0)).await.run_id.unwrap();
+    let waits = rig.sched.fire(&waiter, slot(0)).await.run_id.unwrap();
+
+    rig.ledger.recover_after_restart();
+    let ended = rig.store.job_run_get(&running).unwrap().unwrap();
+    assert_eq!((ended.state.as_str(), ended.infra.as_str()), (state::FINISHED, infra::INTERRUPTED));
+    let still = rig.store.job_run_get(&waits).unwrap().unwrap();
+    assert_eq!((still.state.as_str(), still.reason.as_str()), (state::SCHEDULED, reason::GROUP_BUSY));
+
+    rig.sched.run_policy_pass().await;
+    assert_eq!(rig.store.job_run_get(&waits).unwrap().unwrap().state, state::RUNNING, "it starts once the group is free");
+}
+
+/// A run the job cancels doesn't hold the job's group against its replacement.
+#[tokio::test(flavor = "multi_thread")]
+async fn cancel_other_works_inside_a_concurrency_group() {
+    let rig = rig();
+    let stopped = interrupts(&rig);
+    let job = make(&rig, "j-cancel-g", |j| {
+        j.policy.overlap = Overlap::CancelOther;
+        j.policy.group = Some("g".into());
+    });
+    let first = rig.sched.fire(&job, slot(0)).await.run_id.unwrap();
+    let second = rig.sched.fire(&job, slot(1)).await.run_id.unwrap();
+    let old = rig.store.job_run_get(&first).unwrap().unwrap();
+    assert_eq!((old.state.as_str(), old.infra.as_str()), (state::FINISHED, infra::INTERRUPTED));
+    assert_eq!(stopped.lock().unwrap().len(), 1);
+    assert_eq!(rig.store.job_run_get(&second).unwrap().unwrap().state, state::RUNNING);
+}
+
 // ── groups and the global limit ─────────────────────────────────────────
 
 #[tokio::test(flavor = "multi_thread")]

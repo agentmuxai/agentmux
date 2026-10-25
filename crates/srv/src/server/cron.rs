@@ -321,7 +321,7 @@ pub(crate) fn runnable_yet(def: &JobDefinition) -> Result<(), String> {
 /// What a spawn job asks of anyone who isn't the app's own controls: it
 /// starts agents that spend until someone stops them.
 const SPAWN_FROM_THE_APP: &str =
-    "a spawn job starts workers that spend until stopped: the operator creates and runs it from the Jobs tab, not through this route";
+    "a spawn job starts workers that spend until stopped: only the operator's own host creates and runs it, not this route";
 
 /// A message's `to` as the job's target `(name, uid)`: a UID names that
 /// agent; anything else is kept as a name, never resolved here (identity
