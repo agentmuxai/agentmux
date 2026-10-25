@@ -202,7 +202,7 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
      "not-windows: macOS-only (osascript upgrade dialog)"),
     ("crates/launcher/src/upgrade_package.rs", "\"/bin/sh\"", 2,
      "not-windows: Linux-only (the .deb/.rpm install waiter, and its test)"),
-    ("crates/launcher/src/upgrade_package.rs", "\"sleep\"", 1,
+    ("crates/launcher/src/upgrade_package.rs", "\"sleep\"", 2,
      "test: unit-test or fixture code, never on a user machine"),
     ("crates/launcher/src/upgrade_restart.rs", "launcher", 1,
      "no-window: calls no_window()/creation_flags in this file"),
