@@ -13,12 +13,11 @@ import { buildCefApi, initCefApi, isCef } from "@/util/cef-api";
  * Poll the window globals until the host has injected the IPC port + token, or
  * the bound elapses.
  *
- * On first load the creds arrive via URL query params and are already set when
- * this runs, so it returns immediately. On a *reload* the URL no longer carries
- * them (we strip them on first load, and a reload starts a fresh JS context
- * with empty globals); the host re-injects them into the globals via its
- * `on_load_end` hook (agentmux-cef client/mod.rs), which can land a beat after
- * setupCefApi() begins. Waiting here — once, upfront — keeps initCefApi()'s
+ * The host injects the port and token into the globals as the page starts
+ * loading (`on_load_start`, again at `on_load_end`; agentmux-cef
+ * client/ipc_credentials.rs); the address carries no token. Injection normally
+ * lands before this runs, but it can land a beat after setupCefApi() begins.
+ * Waiting here — once, upfront — keeps initCefApi()'s
  * first IPC call (`get_backend_endpoints`) from racing ahead of the creds,
  * failing, and falling into the 30s backend-ready wait that never resolves
  * (which left window.api unset → initApp's 5s guard fired → recovery card
@@ -46,23 +45,21 @@ export async function setupCefApi(): Promise<void> {
         return; // Not running in CEF
     }
 
-    // Set IPC globals from URL query params so invokeCommand() can find them.
+    // The port rides in the address as a hint; the token never does (the host
+    // injects it). A token an older host still put in the address is taken and
+    // stripped like the port.
     const params = new URLSearchParams(window.location.search);
     const port = params.get("ipc_port");
     const token = params.get("ipc_token");
-    if (port) {
+    if (port && window.__AGENTMUX_IPC_PORT__ == null) {
         window.__AGENTMUX_IPC_PORT__ = parseInt(port, 10);
     }
     if (token) {
         window.__AGENTMUX_IPC_TOKEN__ = token;
     }
 
-    // Security: strip the IPC port/token from the visible URL immediately after
-    // capturing them into window globals. Leaving them in window.location.href
-    // exposes the bearer token for the whole page lifetime (referrer leakage to
-    // remote browser-pane origins, devtools, crash dumps). Subsequent reads use
-    // the window globals above, not the URL. Other params (e.g. windowLabel) are
-    // preserved. See reports security sweep 2026-06-12 (ipc-token-in-url).
+    // Keep the address clean: strip the IPC params once read. Other params (e.g.
+    // windowLabel) are preserved.
     if (port || token) {
         const url = new URL(window.location.href);
         url.searchParams.delete("ipc_token");
@@ -70,11 +67,11 @@ export async function setupCefApi(): Promise<void> {
         window.history.replaceState(window.history.state, "", url.toString());
     }
 
-    // On a reload the creds come from the host's on_load_end re-injection, not
-    // the (now-stripped) URL, and can land just after this point. Wait for them
-    // here so initCefApi()'s first IPC call doesn't race ahead and wedge startup
-    // (see waitForIpcCreds). No-op on first load (creds already set from URL).
-    await waitForIpcCreds(2500);
+    // The creds come from the host's injection and can land just after this
+    // point. Wait for them here so initCefApi()'s first IPC call doesn't race
+    // ahead and wedge startup (see waitForIpcCreds); bounded under the 5 s
+    // window.api guard.
+    await waitForIpcCreds(4000);
 
     // Pre-fetch all cached values from Rust host via IPC
     await initCefApi();

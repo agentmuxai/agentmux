@@ -110,22 +110,19 @@ pub(crate) fn url_on_origin(url: &str, base_url: &str) -> bool {
 }
 
 /// Build the navigation URL a crash-recovery / low-memory page sends the user
-/// back to. Carries `ipc_port` + `ipc_token` and — critically — the window's
-/// `windowLabel` when known, so a recovered secondary window doesn't
+/// back to. Carries `ipc_port` (the host injects the token when the page loads,
+/// ipc_credentials.rs) and — critically — the window's `windowLabel` when known, so a recovered secondary window doesn't
 /// reinitialize as `main` (creation.rs adds the same `windowLabel` param on
 /// first load; the frontend defaults a missing label to `main`). codex P2 #1229.
 pub(crate) fn recovery_navigation_url(
     base_url: &str,
     ipc_port: u16,
-    ipc_token: &str,
     window_label: Option<&str>,
 ) -> String {
     let sep = if base_url.contains('?') { "&" } else { "?" };
     match window_label {
-        Some(lbl) => format!(
-            "{base_url}{sep}ipc_port={ipc_port}&ipc_token={ipc_token}&windowLabel={lbl}"
-        ),
-        None => format!("{base_url}{sep}ipc_port={ipc_port}&ipc_token={ipc_token}"),
+        Some(lbl) => format!("{base_url}{sep}ipc_port={ipc_port}&windowLabel={lbl}"),
+        None => format!("{base_url}{sep}ipc_port={ipc_port}"),
     }
 }
 
@@ -227,7 +224,7 @@ mod gated_recovery_tests {
         // in a double-quoted onclick="..." attribute terminated the attribute
         // early, so Resume did nothing and the window wedged. The handler must be
         // wired in a <script> block instead.
-        let url = "http://127.0.0.1:63627/?ipc_port=63627&ipc_token=abc";
+        let url = "http://127.0.0.1:63627/?ipc_port=63627&windowLabel=abc";
         let html = memory_paused_page("out of memory", -1, 100, url);
 
         // The broken antipattern must be gone.
@@ -242,10 +239,20 @@ mod gated_recovery_tests {
         // (js_string_literal escapes & -> \\u0026 and wraps in double quotes).
         assert!(
             html.contains(
-                "location.href = \"http://127.0.0.1:63627/?ipc_port=63627\\u0026ipc_token=abc\""
+                "location.href = \"http://127.0.0.1:63627/?ipc_port=63627\\u0026windowLabel=abc\""
             ),
             "Resume must navigate to the app URL as a valid JS string literal"
         );
+    }
+
+    // The address carries the port and the window, never the token: the host injects that.
+    #[test]
+    fn the_recovery_url_has_no_token() {
+        let with_label = super::recovery_navigation_url("http://127.0.0.1:63627", 63627, Some("window-1"));
+        assert_eq!(with_label, "http://127.0.0.1:63627?ipc_port=63627&windowLabel=window-1");
+        let bare = super::recovery_navigation_url("http://127.0.0.1:63627", 63627, None);
+        assert_eq!(bare, "http://127.0.0.1:63627?ipc_port=63627");
+        assert!(!with_label.contains("token") && !bare.contains("token"));
     }
 
     #[test]

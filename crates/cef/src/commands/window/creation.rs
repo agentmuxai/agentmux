@@ -464,7 +464,6 @@ pub(crate) fn open_window_with_kind(
     let label = format!("window-{}", window_id.simple());
 
     let ipc_port = *state.ipc_port.lock();
-    let ipc_token = &state.ipc_token;
     let url = match resolve_frontend_base_url(ipc_port) {
         Ok(base_url) => {
             let separator = if base_url.contains('?') { "&" } else { "?" };
@@ -483,8 +482,8 @@ pub(crate) fn open_window_with_kind(
             // spec's §2.4 in-window-phase design.
             let restoring_param = if is_reproject { "&restoring=1" } else { "" };
             format!(
-                "{}{}ipc_port={}&ipc_token={}&windowLabel={}{}{}{}",
-                base_url, separator, ipc_port, ipc_token, label, view_param, meta_param, restoring_param
+                "{}{}ipc_port={}&windowLabel={}{}{}{}",
+                base_url, separator, ipc_port, label, view_param, meta_param, restoring_param
             )
         }
         Err(e) => {

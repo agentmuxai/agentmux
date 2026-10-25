@@ -165,7 +165,7 @@ describe("reloadKeepingHostCredentials", () => {
 
     // A navigation that adds a history entry leaves the old page in the
     // back/forward cache, so the reload would free nothing.
-    it("replaces the history entry with the credentialed URL", () => {
+    it("replaces the history entry with the app URL, which carries the port and never the token", () => {
         window.__AGENTMUX_IPC_PORT__ = 1234;
         window.__AGENTMUX_IPC_TOKEN__ = "t";
         reloadKeepingHostCredentials();
@@ -173,7 +173,8 @@ describe("reloadKeepingHostCredentials", () => {
         expect(nav.replace).toHaveBeenCalledTimes(1);
         const url = new URL(nav.replace.mock.calls[0][0]);
         expect(url.searchParams.get("ipc_port")).toBe("1234");
-        expect(url.searchParams.get("ipc_token")).toBe("t");
+        expect(url.searchParams.has("ipc_token")).toBe(false);
+        expect(nav.replace.mock.calls[0][0]).not.toContain("ipc_token");
         expect(url.searchParams.get("windowLabel")).toBe("main");
     });
 
