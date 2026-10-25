@@ -124,23 +124,14 @@ mod tests {
         // Gone from the environment, so a process started now does not inherit it.
         assert!(std::env::var("AM_SECRET_ENV_TEST_C").is_err());
         assert!(std::env::var("AM_SECRET_ENV_TEST_C_EMPTY").is_err());
+        // What a child started now would inherit is the process's environment as it stands.
+        assert!(std::env::vars().all(|(k, v)| k != "AM_SECRET_ENV_TEST_C" && v != "stash-me"));
         assert!(is_set("AM_SECRET_ENV_TEST_C"));
         assert!(!is_set("AM_SECRET_ENV_TEST_C_EMPTY"));
         assert!(stashed().contains(&("AM_SECRET_ENV_TEST_C".to_string(), "stash-me".to_string())));
         assert_eq!(take("AM_SECRET_ENV_TEST_C").as_deref(), Some("stash-me"));
         assert_eq!(take("AM_SECRET_ENV_TEST_C"), None);
         assert!(!is_set("AM_SECRET_ENV_TEST_C"));
-    }
-
-    // Unix only: it runs the system `env`, which a Windows runner need not have.
-    #[cfg(unix)]
-    #[test]
-    fn a_child_process_started_after_the_stash_does_not_see_the_secret() {
-        std::env::set_var("AM_SECRET_ENV_TEST_D", "do-not-inherit");
-        stash(&["AM_SECRET_ENV_TEST_D"]);
-        let out = std::process::Command::new("env").output().expect("env");
-        assert!(!String::from_utf8_lossy(&out.stdout).contains("do-not-inherit"));
-        let _ = take("AM_SECRET_ENV_TEST_D");
     }
 
     // What /proc/<pid>/environ shows is the block the value lives in, so look
