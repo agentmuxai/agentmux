@@ -352,6 +352,10 @@ th[aria-sort="descending"] .tower-sort {
     overflow-y: auto;
     outline: none;
 
+    @container (max-width: 100px) {
+        scrollbar-width: none;
+    }
+
     &:focus-visible {
         @include mixins.focus-ring;
     }
@@ -438,6 +442,12 @@ th[aria-sort="descending"] .tower-sort {
     grid-area: mem;
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
+
+    // Under about 100 px the figure is a size smaller, and the list's scrollbar
+    // (see .tower-rail-list) is gone, so "121.5 MB" is still whole.
+    @container (max-width: 100px) {
+        font-size: var(--text-xs);
+    }
 }
 
 .tower-swatch {
