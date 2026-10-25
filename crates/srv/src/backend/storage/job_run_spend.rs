@@ -95,7 +95,7 @@ impl Store {
         let conn = self.conn().lock().unwrap();
         let n = conn.execute(
             "UPDATE db_job_runs SET account_id = ?2
-              WHERE id = ?1 AND state IN ('scheduled','running') AND ended_at_ms IS NULL",
+              WHERE id = ?1 AND state IN ('scheduled','running','pending') AND ended_at_ms IS NULL",
             params![id, account_id],
         )?;
         Ok(n > 0)

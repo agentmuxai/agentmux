@@ -346,6 +346,21 @@ async fn a_pending_fire_being_delivered_holds_its_cap() {
     rig.ledger.pending_delivery_done(&pending);
 }
 
+/// The delivery window holds the account's cap and the day's messages too.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_pending_fire_being_delivered_holds_its_account_cap() {
+    let rig = rig();
+    weigh(&rig, Limits { run_usd: 5.0, job_day_usd: 20.0, account_day_usd: 6.0, messages_per_day: 24 }, "acct-p", "claude");
+    let a = make(&rig, "j-pacct-a", 5.0, 20.0, |j| j.catch_up = "latest".into());
+    let b = make(&rig, "j-pacct-b", 5.0, 20.0, |_| {});
+    rig.answer(NOT_FOUND);
+    let pending = rig.sched.fire(&a, slot(0)).await.run_id.unwrap();
+    assert!(rig.ledger.pending_may_start(&a, &pending), "it fits");
+    rig.answer(DELIVERED);
+    assert_eq!(rig.sched.fire(&b, slot(0)).await.run_id, None, "the account's $6 has $5 held for the pending fire");
+    rig.ledger.pending_delivery_done(&pending);
+}
+
 /// The Jobs tab's "over cap today" weighs the job the way the gate does.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_job_on_a_provider_with_no_cost_is_not_reported_over_cap() {
