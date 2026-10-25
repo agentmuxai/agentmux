@@ -39,6 +39,7 @@
     // "mouse:sidebuttons":        true,
     // "window:savelastwindow":    true,
     // "window:keepinactivetabslaidout": true,
+    // "window:prewarmagenttabs":  false,
     // "window:dimensions":        "",
     // "window:magnifiedblockopacity": 1.0,
     // "window:magnifiedblocksize":    0.9,
