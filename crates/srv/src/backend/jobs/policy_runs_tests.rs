@@ -268,6 +268,27 @@ async fn a_waiting_run_another_instance_recorded_is_left_alone() {
     assert_eq!((run.state.as_str(), run.reason.as_str()), (state::SCHEDULED, reason::GROUP_BUSY));
 }
 
+/// A run another channel's instance follows can't be interrupted from here, so
+/// a timeout or a replacement doesn't close its row and free its place.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_run_followed_by_another_channel_is_not_stopped_from_here() {
+    let rig = rig();
+    let stopped = interrupts(&rig);
+    let job = make(&rig, "j-remote", |j| {
+        j.policy.overlap = Overlap::CancelOther;
+        j.policy.timeout_minutes = Some(1);
+    });
+    let first = rig.sched.fire(&job, slot(0)).await.run_id.unwrap();
+    rig.store.job_run_add_links(&first, &json!({ "followed_by_channel": "elsewhere", "followed_by_pid": 1 })).unwrap();
+    rig.store.conn().lock().unwrap().execute("UPDATE db_job_runs SET started_at_ms = 1 WHERE id = ?1", [&first]).unwrap();
+
+    assert_eq!(rig.ledger.enforce_timeouts(), 0, "past its timeout, but not ours to stop");
+    let second = rig.sched.fire(&job, slot(1)).await;
+    assert_eq!(second.run_id, None, "cancel_other can't replace it: the slot is skipped");
+    assert!(stopped.lock().unwrap().is_empty());
+    assert_eq!(rig.store.job_run_get(&first).unwrap().unwrap().state, state::RUNNING);
+}
+
 // ── groups and the global limit ─────────────────────────────────────────
 
 #[tokio::test(flavor = "multi_thread")]

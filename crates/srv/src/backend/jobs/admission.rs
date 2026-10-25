@@ -102,7 +102,7 @@ impl RunLedger {
             let other = known.entry(r.job_id.clone()).or_insert_with(|| self.job(&r.job_id)).clone();
             if r.job_id == job.id {
                 occ.job_running += 1;
-                occ.job_started += usize::from(r.state == state::RUNNING);
+                occ.job_started += usize::from(r.state == state::RUNNING && !self.followed_elsewhere(&r));
             }
             if group.is_some() && other.as_ref().and_then(policy::group_of) == group {
                 occ.group_running += 1;
@@ -167,6 +167,9 @@ impl RunLedger {
     /// Close a running run that was stopped on purpose, and interrupt its
     /// turn. `false` when it had ended already.
     pub(crate) fn stop_run(&self, run: &JobRun, infra_status: &str, why: &str, summary: &str) -> bool {
+        if self.followed_elsewhere(run) {
+            return false;
+        }
         match self.store.job_run_stop(&run.id, infra_status, why, summary, now_ms()) {
             Ok(true) => {
                 self.interrupt_block(&run.block_id);
@@ -200,6 +203,14 @@ impl RunLedger {
             }
         }
         stopped
+    }
+
+    /// Whether another channel's instance follows `run`: its agent is there,
+    /// so this process can't interrupt it. Closing the row from here would free
+    /// its place while the agent goes on working, so such a run is left to end
+    /// with its own turn, and counts as one `cancel_other` can't replace.
+    fn followed_elsewhere(&self, run: &JobRun) -> bool {
+        super::remote::followed_by(run).is_some_and(|f| f.channel != self.channel)
     }
 
     fn recorded_here(&self, run: &JobRun) -> bool {
