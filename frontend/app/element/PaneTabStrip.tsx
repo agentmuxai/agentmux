@@ -22,7 +22,7 @@
  * Spec: docs/specs/SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md §3.1.
  */
 
-import { batch, createEffect, createSignal, For, on, onCleanup, onMount, Show, type Accessor, type JSX } from "solid-js";
+import { batch, createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show, type Accessor, type JSX } from "solid-js";
 import { draggable, dropTargetForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import { preventUnhandled } from "@atlaskit/pragmatic-drag-and-drop/prevent-unhandled";
 import { setCurrentDragPayload } from "@/app/drag/CrossWindowDragMonitor";
@@ -53,6 +53,7 @@ import { useWindowTabDisplayed } from "@/app/workspace/window-tab-visibility";
 import { beginHover, type Hover, type HoverFlash } from "./drop-blink-clock";
 import type { PaneTabSelectionApi } from "./pane-tab-selection";
 import { createStripReveal, registerStripWithPane } from "./strip-reveal-controller";
+import type { PaneTabProgress } from "@/app/store/pane-tab-progress";
 
 // Matches the other reveal-gate/cross-fade durations added alongside this
 // one in SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md §2.4.
@@ -267,6 +268,13 @@ export interface PaneTabStripProps<T> {
      *  meaningful where `getId` returns a blockId, i.e. a Pane's own header;
      *  editor file tabs and the agent History strip omit it. */
     flashOnActivity?: boolean;
+    /** What a pill shows about its tab's work: a line along its top (SPEC_PANE_TAB_PROGRESS_LINE_2026_10_24.md).
+     *  Called once per pill, in its component scope, so it may subscribe and clean up
+     *  there. Omitted by strips whose tabs are not agents. */
+    useProgress?: (tab: T) => Accessor<PaneTabProgress | null>;
+    /** The pane is collapsed. The selected pill of an expanded pane shows no line (its
+     *  pane's border and transcript already say it); in a collapsed pane it does. */
+    collapsed?: Accessor<boolean>;
 
     onActivate: (id: string) => void;
     /** A plain left-click on a pill, active or not, before `onActivate` (which a
@@ -676,6 +684,8 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
                             getTabClass={props.getTabClass}
                             getColor={props.getColor}
                             flashOnActivity={props.flashOnActivity}
+                            useProgress={props.useProgress}
+                            collapsed={props.collapsed}
                             onActivate={props.onActivate}
                             onSelect={props.onSelect}
                             selection={props.selection}
@@ -731,6 +741,8 @@ interface PaneTabStripItemProps<T> {
     getTabClass?: (tab: T) => Record<string, boolean>;
     getColor?: (tab: T) => PaneTabColors | undefined;
     flashOnActivity?: boolean;
+    useProgress?: (tab: T) => Accessor<PaneTabProgress | null>;
+    collapsed?: Accessor<boolean>;
     onActivate: (id: string) => void;
     onSelect?: (id: string) => void;
     selection?: PaneTabSelectionApi;
@@ -771,6 +783,20 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
     // pill's own `--pane-tab-underline` in the stylesheet, so no base
     // color is passed here.
     const windowDisplayed = useWindowTabDisplayed();
+
+    // The progress line (SPEC_PANE_TAB_PROGRESS_LINE_2026_10_24.md §3). The state is read for
+    // the words and `aria-busy` whatever the pane shows; the line itself is not drawn on the
+    // selected pill of an expanded pane, whose border and transcript already say it. A line
+    // that ends fades out in its last look rather than cutting.
+    const progress = props.useProgress?.(props.tab);
+    const progressInfo = (): PaneTabProgress | null => progress?.() ?? null;
+    const lineState = (): PaneTabProgress["state"] | null => {
+        const info = progressInfo();
+        if (!info) return null;
+        return props.active && !(props.collapsed?.() ?? false) ? null : info.state;
+    };
+    const lineLook = createMemo<PaneTabProgress["state"] | null>((prev) => lineState() ?? prev ?? null);
+    const descriptionId = () => `pane-tab-state-${id()}`;
     onMount(() => {
         if (!props.flashOnActivity) return;
         const unsubscribe = onActivityFlash((target) => {
@@ -1021,11 +1047,14 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
         <Tooltip
             placement="bottom"
             divClassName="pane-tab-tip"
-            immediate={!!(props.getTooltipDetail?.(props.tab) || props.getTooltipSeat?.(props.tab))}
+            immediate={!!(props.getTooltipDetail?.(props.tab) || props.getTooltipSeat?.(props.tab) || progressInfo())}
             content={
-                props.getTooltipDetail?.(props.tab) || props.getTooltipSeat?.(props.tab) ? (
+                props.getTooltipDetail?.(props.tab) || props.getTooltipSeat?.(props.tab) || progressInfo() ? (
                     <div class="pane-tab-tip-body" data-testid="pane-tab-tip-body">
                         <div class="pane-tab-tip-label">{props.getTooltip?.(props.tab) ?? props.getLabel(props.tab)}</div>
+                        <Show when={progressInfo()}>
+                            {(info) => <div class="pane-tab-tip-state">{info().text}</div>}
+                        </Show>
                         <Show when={props.getTooltipSeat?.(props.tab)}>
                             {(seat) => <div class="pane-tab-tip-seat">{seat()}</div>}
                         </Show>
@@ -1056,11 +1085,33 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
                 }}
                 style={colorStyle()}
                 data-tab-id={id()}
+                aria-busy={progressInfo()?.state === "working" ? "true" : undefined}
+                aria-describedby={progressInfo() ? descriptionId() : undefined}
                 ref={(el) => { pillRef = el; }}
                 onMouseDown={onMouseDown}
                 onClick={onClick}
                 onDblClick={onDblClick}
             >
+                <Show when={props.useProgress}>
+                    <span
+                        class="pane-tab-progress"
+                        classList={{
+                            "pane-tab-progress--on": lineState() != null,
+                            "pane-tab-progress--sweeping": lineState() === "working" && windowDisplayed(),
+                        }}
+                        data-state={lineLook() ?? undefined}
+                        aria-hidden="true"
+                    >
+                        <span class="pane-tab-progress-bar" />
+                    </span>
+                    <Show when={progressInfo()}>
+                        {(info) => (
+                            <span id={descriptionId()} class="pane-tab-state-text">
+                                {info().text}
+                            </span>
+                        )}
+                    </Show>
+                </Show>
                 <Show when={props.selection?.isSelected(id())}>
                     {/* The non-colour cue for "selected"; the label is what a screen reader reads. */}
                     <span class="pane-tab-selected-mark" role="img" aria-label="Selected">

@@ -346,7 +346,8 @@ A persistent dot that stays while an agent is working answers "which tabs
 are busy?", which is related but different. This feature answers "what just
 made that sound?", and that needs something tied to the moment of the sound.
 The steady glow in §3.2 already gives a rough busy signal for free. A real
-busy dot, driven by `turnPhase` rather than tool calls, deserves its own spec.
+busy dot, driven by `turnPhase` rather than tool calls, deserves its own spec: [SPEC_PANE_TAB_PROGRESS_LINE_2026_10_24.md](SPEC_PANE_TAB_PROGRESS_LINE_2026_10_24.md)
+(a progress line along the top of each working agent's pill).
 
 ### 7.2 Why not flash the whole pane body
 
