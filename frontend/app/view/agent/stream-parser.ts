@@ -885,12 +885,11 @@ export class ClaudeCodeStreamParser {
         // srv's own notes ride after the message (or arrive alone): they get
         // their own nodes, so neither the note nor the jekt it follows can take
         // the human's style (system-notes.ts, INTERIM text parsing).
-        const { head, notes } = splitSystemNotes(event.message);
+        const { head, notes, delay } = splitSystemNotes(event.message);
         if (notes.length === 0 && head === event.message) return [this.messageToNode(event)];
         const base: UserMessageEvent = { ...event, message: head };
         const stamp = event.timestamp || (this.isReplay ? undefined : Date.now());
         const nodes: DocumentNode[] = head.trim() ? [this.messageToNode(base)] : [];
-        const { delay } = splitSystemNotes(event.message);
         notes.forEach((text, i) =>
             nodes.push({
                 type: "system_note",
