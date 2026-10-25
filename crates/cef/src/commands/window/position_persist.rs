@@ -54,6 +54,11 @@ pub(crate) fn report_position_for_srv_writethrough(state: &Arc<AppState>, hwnd: 
     let Some(label) = state.label_for_hwnd(hwnd) else {
         return;
     };
+    if label == "main" {
+        // The main window's own record, for the next start (`main_window_state`).
+        let maximized = unsafe { windows_sys::Win32::UI::WindowsAndMessaging::IsZoomed(hwnd) != 0 };
+        super::main_window_state::note_position(maximized, rect);
+    }
     let Some(window_id) = state.backend_window_id(&label) else {
         return;
     };
