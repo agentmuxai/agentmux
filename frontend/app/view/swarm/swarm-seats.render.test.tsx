@@ -132,7 +132,7 @@ function setup(groupBy: "lead" | null) {
         toggleAgentCollapsed: () => {},
         countdownStateAtom: () => new Map(),
     } as unknown as SwarmViewModel;
-    const ctx = { meta, setMeta } as unknown as PaneTabHostContext;
+    const ctx = { meta, setMeta, visibility: () => "active" } as unknown as PaneTabHostContext;
     const view = render(() => <SwarmView model={model} ctx={ctx} />);
     const tree = () => view.container.querySelector(".swarm-tree")!;
     /** The list's direct children, in order: "# heading" or the row's key. */

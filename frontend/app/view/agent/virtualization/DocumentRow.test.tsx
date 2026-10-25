@@ -13,7 +13,7 @@
 
 import { cleanup, fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
-import { createSignal } from "solid-js";
+import { batch, createEffect, createMemo, createRoot, createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -107,6 +107,61 @@ describe("DocumentRow — finished tool results survive dispatchMatches identity
         expect(md).not.toBeNull();
         expect(md!.querySelector(".content.non-scrollable")).not.toBeNull();
         expect(md!.querySelector("[data-overlayscrollbars-initialize]")).toBeNull();
+    });
+});
+
+/**
+ * A row that throws while the document store updates (Solid's "Stale read from
+ * <Show>." string is the real one) must stay inside its row: an error nothing
+ * handles aborts the whole reactive flush and strands every effect queued in it,
+ * across the window (the 2026-10-25 frozen window tab, #3491). Solid really does
+ * strand them: the first test shows the unguarded behaviour, the second the row.
+ */
+describe("DocumentRow — a throwing row does not abort the update", () => {
+    const toolNode = { type: "tool", id: "t-1", tool: "Read", params: {}, status: "success", timestamp: 1 } as ToolNode;
+    const run = (guard: boolean) => {
+        const [boom, setBoom] = createSignal(false);
+        const [other, setOther] = createSignal(0);
+        const seen: number[] = [];
+        let thrown = 0;
+        const node = (): DocumentNode => {
+            // Throws on the update, not on the handler's own look at the row.
+            if (boom() && thrown++ < 1) throw "Stale read from <Show>.";
+            return toolNode;
+        };
+        const [state] = createSignal<DocumentState>(emptyState());
+        const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+        createRoot((dispose) => {
+            createEffect(() => seen.push(other()));
+            if (guard) {
+                render(() => <DocumentRow node={node} documentState={state} onToggleCollapse={() => {}} onTogglePin={() => {}} />);
+            } else {
+                createMemo(() => node());
+            }
+            return dispose;
+        });
+        try {
+            batch(() => {
+                setOther(1);
+                setBoom(true);
+            });
+        } catch {
+            /* an unhandled error is rethrown from the write */
+        }
+        setOther(2);
+        const logged = errors.mock.calls.map((c) => String(c[0]));
+        errors.mockRestore();
+        return { seen, logged };
+    };
+
+    it("unguarded: the effect queued in the same flush never runs again", () => {
+        expect(run(false).seen.at(-1)).toBe(0);
+    });
+
+    it("inside a DocumentRow: the effect keeps running, and the log names the row", () => {
+        const { seen, logged } = run(true);
+        expect(seen.at(-1)).toBe(2);
+        expect(logged.some((l) => l.includes("[agent-row] render error in a tool row (t-1): Stale read from <Show>."))).toBe(true);
     });
 });
 
