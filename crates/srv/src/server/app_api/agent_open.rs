@@ -631,12 +631,11 @@ pub(super) async fn open_agent_inner(
                 // Provider/auth entries inserted above take precedence; definition-level vars
                 // are merged after so they can extend (but not override) the auth env.
                 if let Ok(Some(env_blob)) = mstore.agent_content_get(&agent.id, "env") {
-                    for line in env_blob.content.lines() {
-                        if let Some((k, v)) = line.split_once('=') {
-                            let k = k.trim();
-                            if !k.is_empty() && !env_vars.contains_key(k) {
-                                env_vars.insert(k.to_string(), json!(v));
-                            }
+                    // Read the way the My Agents editor shows it (`backend::agent_env`): comments
+                    // and lines without a valid `NAME=` are skipped, and a repeated name takes its last value.
+                    for (k, v) in crate::backend::agent_env::effective(&env_blob.content) {
+                        if !env_vars.contains_key(&k) {
+                            env_vars.insert(k, json!(v));
                         }
                     }
                 }
