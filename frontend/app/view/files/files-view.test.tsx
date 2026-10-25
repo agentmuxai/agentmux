@@ -352,15 +352,16 @@ describe("the Files pane: navigation", () => {
         expect(h.rpc.FsOpenCommand).toHaveBeenCalledWith(expect.anything(), { path: `${HOME}\\setup.exe` });
     });
 
-    it("shows each agent's name in the color its pane border uses", async () => {
+    it("shows each agent's name in its pane colour, at the theme's text lightness", async () => {
         const v = mount();
         await waitFor(() => expect(v.getByText("korp")).toBeTruthy());
         // A stored ui:color wins; an agent with none gets the deterministic
-        // pick its pane would be seeded with.
-        expect((v.getByText("korp") as HTMLElement).style.color).toBe("rgb(34, 197, 94)");
+        // pick its pane would be seeded with. The name takes that hue at the lightness made for
+        // text on the theme's surface (readableAgentColor), not the raw colour (#22c55e).
+        expect((v.getByText("korp") as HTMLElement).style.color).toBe("rgb(95, 200, 121)");
         const loap = (v.getByText("loap") as HTMLElement).style.color;
         expect(loap).not.toBe("");
-        expect(loap).not.toBe("rgb(34, 197, 94)");
+        expect(loap).not.toBe("rgb(95, 200, 121)");
     });
 
     it("opens only Hangar's menu on blank space, not the pane frame's as well", async () => {
