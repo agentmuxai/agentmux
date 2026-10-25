@@ -114,6 +114,20 @@ pub(crate) fn subframe_may_navigate(frame_url: &str, target: &str) -> bool {
     widget_package_root(target).as_deref() == Some(root.as_str())
 }
 
+/// The `on_before_browse` side of [`subframe_may_navigate`]: true to cancel
+/// the navigation of a subframe of an app window.
+pub(crate) fn refuse_subframe_navigation(frame: Option<&mut cef::Frame>, request: Option<&mut cef::Request>) -> bool {
+    use cef::{CefString, ImplFrame, ImplRequest};
+    let Some(frame) = frame else { return false };
+    let from = CefString::from(&frame.url()).to_string();
+    let to = request.map(|r| CefString::from(&r.url()).to_string()).unwrap_or_default();
+    if subframe_may_navigate(&from, &to) {
+        return false;
+    }
+    tracing::warn!(from = %from, to = %to, "app window: refused a sandboxed widget's frame navigating outside its package");
+    true
+}
+
 /// Whether a link an app window asked to open in a new tab (a middle-click)
 /// becomes an AgentMux browser pane: any web page other than the frontend
 /// itself. Anything else is just cancelled.
