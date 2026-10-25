@@ -118,9 +118,8 @@ export const AgentSkillsModal = (props: AgentSkillsModalProps): JSX.Element => {
                             </div>
                         </Show>
                         <p class="agent-primitive-modal-caveat">
-                            Note: every global skill is currently applied to every agent
-                            regardless of bind state — unbinding here updates what shows as
-                            "in use" but does not yet remove it from this agent's live config.
+                            A global skill reaches this agent only while it is bound here.
+                            Unbinding takes it out of the agent's files at its next launch.
                         </p>
                         <div class="agent-primitive-modal-actions">
                             <Show

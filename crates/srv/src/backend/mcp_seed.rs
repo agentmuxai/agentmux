@@ -5,15 +5,13 @@
 //! credential-free MCP servers (`db_mcp_servers`, the v1 standalone catalog)
 //! on fresh install.
 //!
-//! Mirrors `skill_seed.rs` exactly, for the same reasons documented there:
-//! the actual "run exactly once, ever" gating lives in
+//! The actual "run exactly once, ever" gating lives in
 //! `migrations::m0016_seed_starter_mcp_servers`, tracked in the channel's
 //! `db_migrations` table — NOT in this module, and NOT gated on "is the
 //! catalog currently empty" (that gate can't distinguish "never seeded" from
 //! "seeded then the user deleted every starter server on purpose", which
 //! would silently resurrect the defaults on the next restart after a full
-//! deletion — see `m0015_seed_starter_skills.rs`'s history, reagent P2 on
-//! PR #2141 round 2, for why this shape was chosen over a simpler one). This
+//! deletion (#2141), as the starter-skills seed this was modelled on showed). This
 //! module exposes only the pure insert logic; the migration owns invocation.
 //!
 //! Only credential-free, fully local servers belong in this manifest — see
@@ -29,7 +27,7 @@
 //! in via the existing catalog-picker mechanism instead.
 //!
 //! **Ids are deterministic, not randomly minted** — same reasoning as
-//! `skill_seed.rs::starter_skill_id`, mirrored here for MCP servers via
+//! the retired starter-skills seed's ids (keyed on `trigger`), mirrored here for MCP servers via
 //! `entry.name` (there is no separate slug field for a server the way a
 //! skill has `trigger`; `name` already plays that role — it's the catalog
 //! key `mcp_server_upsert_unique_global` enforces uniqueness on). See Phase 1
@@ -60,7 +58,7 @@ struct StarterMcpServer {
 const STARTER_MCP_SERVERS_JSON: &str = include_str!("../config/starter-mcp-servers.json");
 
 /// Deterministic row id for a starter MCP server, derived from its `name`.
-/// See `skill_seed::starter_skill_id`'s doc comment for the full reasoning —
+/// The retired starter-skills seed derived its ids the same way —
 /// this is the identical derivation keyed on the server's catalog name
 /// instead of a skill's trigger, in its own, distinct namespace so a skill
 /// and an MCP server that happened to share a stable-key string could never
@@ -71,8 +69,8 @@ pub(crate) fn starter_mcp_server_id(name: &str) -> Uuid {
 }
 
 /// True if `name` matches a starter MCP server's `name` in the embedded
-/// manifest. Mirrors `skill_seed::starter_skill_trigger_for_name` — see its
-/// doc comment for why the durable-bindings carry-across migration needs
+/// manifest. Mirrors the retired starter-skills seed's lookup by name — the
+/// durable-bindings carry-across migration needs
 /// this distinction (recognized starters converge on
 /// [`starter_mcp_server_id`]; everything else keeps first-wins dedup).
 #[cfg(test)]
@@ -84,8 +82,7 @@ pub(crate) fn is_starter_mcp_server_name(name: &str) -> bool {
 }
 
 /// Guard against a manifest-authoring mistake: two entries sharing a `name`.
-/// Mirrors `skill_seed::reject_duplicate_triggers` exactly — see its doc
-/// comment for the full failure mode this closes (reagent P2, PR #3175).
+/// Mirrors the retired starter-skills seed's duplicate-trigger guard (#3175).
 /// `name` here plays the role `trigger` plays for skills: it is both the
 /// stable key `starter_mcp_server_id` derives from AND the field
 /// `mcp_server_upsert_unique_global`'s own duplicate check is keyed on,
@@ -113,13 +110,12 @@ fn reject_duplicate_names(manifest: &[StarterMcpServer]) -> Result<(), StoreErro
 /// entirely rather than attempting an insert that would collide on
 /// `mcp_server_upsert_unique_global`'s name-uniqueness check and permanently
 /// fail the migration on every subsequent boot — same self-heal
-/// `skill_seed.rs::any_starter_skill_name_exists` provides (reagent P1, PR
-/// #2144).
+/// the retired starter-skills seed had (#2144).
 pub(crate) fn any_starter_mcp_server_name_exists(mstore: &Arc<Store>) -> Result<bool, StoreError> {
     let manifest: Vec<StarterMcpServer> = serde_json::from_str(STARTER_MCP_SERVERS_JSON)
         .map_err(|e| StoreError::Other(format!("mcp server seed: parse manifest: {e}")))?;
     // Pre-dates Phase 2 of SPEC_DURABLE_BINDINGS_2026_09_10.md's catalog
-    // redirect — see skill_seed.rs's identical note.
+    // redirect.
     let existing = mstore.mcp_server_list_global(mstore)?;
     Ok(manifest
         .iter()
@@ -140,8 +136,8 @@ pub(crate) fn any_starter_mcp_server_name_exists(mstore: &Arc<Store>) -> Result<
 /// otherwise a retry (the migration framework re-runs `up()` on the next
 /// boot when a migration returns `Err`, since it's never marked applied)
 /// would hit the name-uniqueness rejection on the servers already stranded
-/// from the failed attempt. Mirrors `skill_seed::seed_starter_skills`
-/// exactly (reagent P2, PR #2141 round 1).
+/// from the failed attempt. Modelled on the retired starter-skills
+/// seed (#2141).
 pub(crate) fn seed_starter_mcp_servers(mstore: &Arc<Store>) -> Result<usize, StoreError> {
     let manifest: Vec<StarterMcpServer> = serde_json::from_str(STARTER_MCP_SERVERS_JSON)
         .map_err(|e| StoreError::Other(format!("mcp server seed: parse manifest: {e}")))?;
@@ -192,7 +188,7 @@ mod tests {
 
     #[test]
     fn reject_duplicate_names_fails_loudly_on_a_colliding_manifest() {
-        // reagent P2, PR #3175 — mirrors skill_seed's equivalent test. See
+        // (#3175) Mirrors the retired starter-skills seed's test. See
         // reject_duplicate_names's own doc comment for the mechanism.
         let manifest = vec![starter("dup"), starter("dup")];
         let err = reject_duplicate_names(&manifest).unwrap_err();
@@ -207,7 +203,7 @@ mod tests {
 
     #[test]
     fn starter_mcp_server_ids_are_identical_across_two_independently_seeded_stores() {
-        // Mirrors skill_seed.rs's equivalent test — the property Phase 1 of
+        // Mirrors the retired starter-skills seed's test — the property Phase 1 of
         // SPEC_DURABLE_BINDINGS_2026_09_10.md exists for.
         let store_a = Arc::new(Store::open_in_memory().unwrap());
         let store_b = Arc::new(Store::open_in_memory().unwrap());
@@ -232,18 +228,6 @@ mod tests {
 
         assert_eq!(ids_a.len(), 6);
         assert_eq!(ids_a, ids_b, "the same starter server must get the same id in every store");
-    }
-
-    #[test]
-    fn a_skill_and_an_mcp_server_sharing_a_stable_key_do_not_collide() {
-        // Different namespaces for the two catalogs — if a skill's trigger
-        // and a server's name were ever the same literal string, they must
-        // still land on different ids, since they're different resources in
-        // different tables.
-        assert_ne!(
-            crate::backend::skill_seed::starter_skill_id("git"),
-            starter_mcp_server_id("git"),
-        );
     }
 
     #[test]
@@ -280,8 +264,8 @@ mod tests {
 
     #[test]
     fn a_failed_insert_rolls_back_the_ones_already_seeded_this_call() {
-        // Same failure mode as skill_seed.rs's equivalent test (reagent P2,
-        // PR #2141 round 1): mcp_server_upsert_unique_global commits each
+        // Same failure mode as the retired starter-skills seed's test (#2141):
+        // mcp_server_upsert_unique_global commits each
         // insert in its own transaction, so a mid-loop failure can't be
         // rolled back by the database. Simulate it by pre-inserting a global
         // server whose NAME collides with one of the starter entries — this
