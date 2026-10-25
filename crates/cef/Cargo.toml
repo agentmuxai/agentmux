@@ -123,9 +123,12 @@ windows-sys = { version = "0.59", features = [
 windows-future = "0.2"
 windows = { version = "0.61", features = [
     "Foundation",
+    "Foundation_Collections",
     "Security_Credentials_UI",
+    "Services_Store",
     "Win32_Foundation",
     "Win32_System_WinRT",
+    "Win32_UI_Shell",
 ] }
 
 [target.'cfg(target_os = "windows")'.build-dependencies]

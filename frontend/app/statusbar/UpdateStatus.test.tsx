@@ -29,6 +29,7 @@ vi.mock("@/app/store/app-api", () => ({
 }));
 const openLink = vi.fn();
 const installAppUpdate = vi.fn();
+const storeUpdate = vi.fn();
 const revealInFileExplorer = vi.fn();
 vi.mock("@/store/global", async (importOriginal) => {
     const { createSignal } = await import("solid-js");
@@ -36,7 +37,7 @@ vi.mock("@/store/global", async (importOriginal) => {
     const [version] = createSignal<string | null>(null);
     return {
         atoms: { updaterStatusAtom: status, updaterVersionAtom: version },
-        getApi: () => ({ installAppUpdate, revealInFileExplorer, listen: () => Promise.resolve(() => {}) }),
+        getApi: () => ({ installAppUpdate, revealInFileExplorer, approvals: { storeUpdate }, listen: () => Promise.resolve(() => {}) }),
         openLink: (u: string) => openLink(u),
     };
 });
@@ -70,6 +71,7 @@ beforeEach(() => {
     upgradeCancel.mockReset();
     openLink.mockReset();
     installAppUpdate.mockReset();
+    storeUpdate.mockReset().mockResolvedValue({ outcome: "fallback", message: "" });
     revealInFileExplorer.mockReset().mockResolvedValue(undefined);
     acceptAppUpdate({ state: "unknown", current: "0.59.26", checked_ms: 0, install: "unknown", can_download: false });
 });
@@ -316,12 +318,45 @@ describe("Maintenance on a Microsoft Store install", () => {
         updateStatus.mockResolvedValue(STORE);
         render(() => <MaintenanceSection />);
         fireEvent.click(await screen.findByRole("button", { name: "Update in the Store" }));
-        expect(openLink).toHaveBeenCalledTimes(1);
+        // The Store is asked first (the default mock says it can't), then its page opens.
+        await vi.waitFor(() => expect(openLink).toHaveBeenCalledTimes(1));
         expect(openLink).toHaveBeenCalledWith("ms-windows-store://pdp/?productid=9P9QCXNNCRK3");
         expect(updateDownload).not.toHaveBeenCalled();
         expect(installAppUpdate).not.toHaveBeenCalled();
         expect(screen.queryByRole("button", { name: "Download" })).toBeNull();
         expect(screen.getByText(/Microsoft Store updates this install.*v0\.59\.27 may not be there yet/)).toBeTruthy();
+    });
+
+    it("asks the Store to install it first, and opens the Store page only when the Store can't", async () => {
+        updateStatus.mockResolvedValue(STORE);
+        storeUpdate.mockResolvedValue({ outcome: "installed", message: "The Store installed the update. AgentMux restarts to finish it." });
+        render(() => <MaintenanceSection />);
+        fireEvent.click(await screen.findByRole("button", { name: "Update in the Store" }));
+        expect(await screen.findByText(/The Store installed the update/)).toBeTruthy();
+        expect(storeUpdate).toHaveBeenCalledTimes(1);
+        expect(openLink).not.toHaveBeenCalled();
+    });
+
+    it("tells a cancel or an update the Store doesn't have yet, without opening the page", async () => {
+        updateStatus.mockResolvedValue(STORE);
+        storeUpdate.mockResolvedValue({ outcome: "none", message: "The Microsoft Store doesn't have this update yet." });
+        render(() => <MaintenanceSection />);
+        fireEvent.click(await screen.findByRole("button", { name: "Update in the Store" }));
+        expect(await screen.findByText(/doesn't have this update yet/)).toBeTruthy();
+        expect(openLink).not.toHaveBeenCalled();
+    });
+
+    it("falls back to the Store page, saying why, when the API refuses or throws", async () => {
+        updateStatus.mockResolvedValue(STORE);
+        storeUpdate.mockResolvedValue({ outcome: "fallback", message: "Couldn't ask the Store to install it (no Store context); opening the Store page instead." });
+        render(() => <MaintenanceSection />);
+        fireEvent.click(await screen.findByRole("button", { name: "Update in the Store" }));
+        expect(await screen.findByText(/opening the Store page instead/)).toBeTruthy();
+        expect(openLink).toHaveBeenCalledWith("ms-windows-store://pdp/?productid=9P9QCXNNCRK3");
+        openLink.mockReset();
+        storeUpdate.mockRejectedValue(new Error("host went away"));
+        fireEvent.click(screen.getByRole("button", { name: "Update in the Store" }));
+        await vi.waitFor(() => expect(openLink).toHaveBeenCalledWith("ms-windows-store://pdp/?productid=9P9QCXNNCRK3"));
     });
 
     it("a Store install below the upgrade floor is not sent anywhere: the Store can't make the intermediate step", async () => {

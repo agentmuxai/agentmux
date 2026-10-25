@@ -842,6 +842,16 @@ async fn route_command(
             .await
             .map_err(|e| format!("app_update_action: {e}"))?
         }
+        "store_update_install" => {
+            // "Update in the Store" for a Store install: the Store downloads and
+            // installs the update itself; the page opens the Store page when it
+            // says `fallback` (commands/store_update.rs, task #88).
+            tracing::info!("[ipc] store_update_install");
+            let outcome = tokio::task::spawn_blocking(crate::commands::store_update::install_update)
+                .await
+                .map_err(|e| format!("store_update_install: {e}"))?;
+            serde_json::to_value(outcome).map_err(|e| e.to_string())
+        }
         "upgrade_request_decide" => {
             // The user's Upgrade now / Later on an agent's request to upgrade
             // AgentMux, relayed to srv as the host: no agent can approve its
