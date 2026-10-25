@@ -11,13 +11,13 @@
 
 .warden-manager-summary {
     margin: 0 0 var(--space-2);
-    opacity: 0.7;
+    color: var(--secondary-text-color);
     font-size: 0.9em;
 }
 
 .warden-section-stub {
     font-size: 0.9em;
-    opacity: 0.6;
+    color: var(--secondary-text-color);
     line-height: 1.5;
 
     code {
@@ -74,11 +74,11 @@
 }
 
 .warden-manager-dim {
-    opacity: 0.55;
+    color: var(--secondary-text-color);
 }
 
 .warden-manager-footnote {
     font-size: 0.8em;
-    opacity: 0.5;
+    color: var(--secondary-text-color);
     line-height: 1.5;
 }

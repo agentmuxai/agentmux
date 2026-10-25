@@ -104,9 +104,14 @@
         border-color: var(--ui-line-danger);
     }
 
-    &.is-muted .ui-card-icon,
-    &.is-muted .ui-card-text {
+    // A muted card (an optional tool that isn't installed) is quieter, not faded: text keeps the
+    // secondary colour, which passes AA on every theme, where `opacity` took it to 2:1 on light ones.
+    &.is-muted .ui-card-icon {
         opacity: 0.6;
+    }
+
+    &.is-muted .ui-card-title {
+        color: var(--secondary-text-color);
     }
 
     &.has-edge {
