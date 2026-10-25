@@ -74,21 +74,57 @@
     overflow: hidden;
 }
 
+// In a very narrow pane the count gives way first, then the word, and the
+// number never does (a 110 px pane showed "AgentMux 1.4", a 70 px one
+// "AgentMu").
 .tower-headline-label {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
     font-weight: 600;
 }
 
 .tower-headline-mem {
+    flex: 0 0 auto;
     font-size: var(--text-lg);
     font-weight: 600;
     font-variant-numeric: tabular-nums;
 }
 
-// The count gives way first when there isn't room: the number stays.
 .tower-headline-note {
+    flex: 0 4 auto;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+// Under about 160 px the figure is set smaller and the rail row gives up its
+// swatch, so "752.9 MB" still fits whole.
+@container (max-width: 160px) {
+    .tower-headline {
+        padding-inline: var(--space-1);
+        gap: var(--space-1);
+    }
+
+    .tower-headline-mem {
+        font-size: var(--text-base);
+    }
+
+    .tower-body {
+        padding-inline: var(--space-1);
+    }
+
+    .tower-rail-row {
+        column-gap: 0;
+        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-areas: "name mem";
+        padding-inline: var(--space-1);
+
+        > .tower-swatch {
+            display: none;
+        }
+    }
 }
 
 .tower-muted {
@@ -391,12 +427,14 @@ th[aria-sort="descending"] .tower-sort {
 .tower-rail-cpu {
     grid-area: cpu;
     font-variant-numeric: tabular-nums;
+    white-space: nowrap;
 }
 
+// The figure never wraps ("150.0 / MB" at 110 px): the name gives way.
 .tower-rail-mem {
     grid-area: mem;
-    font-size: 0.9em;
     font-variant-numeric: tabular-nums;
+    white-space: nowrap;
 }
 
 .tower-swatch {
