@@ -49,11 +49,12 @@ await am.meta.set({ filter: "open" }); // this pane's own state
 
 | Permission | Lets it |
 |---|---|
-| (none) | Use its pane: title, header actions, menu, toasts, theme, its own meta; open its own panes and links |
+| (none) | Use its pane: title, header actions, menu, toasts, theme, its own meta; open its own panes |
 | `storage` | Keep its own data on this computer |
 | `net:<origin>` | Connect to that origin (e.g. `net:https://api.github.com`) |
 | `files` | Open files you pick, save files where you choose |
 | `clipboard:write` | Copy text to your clipboard |
+| `links:open` | Open web pages in a browser pane next to it (`am.ui.openUrl`) |
 | `panes` | Open other kinds of panes |
 | `agents:read` | See your agents' names and whether they're working |
 | `tasks:read` | See the Kanban's tasks: their titles, who is on them and where they stand |
@@ -65,5 +66,5 @@ A **trusted** widget (`"kind": "trusted"`) is a Solid ES module that runs as par
 
 - A widget runs only after you approve it, and asks again whenever any of its files change.
 - A sandboxed widget loads code only from its own package (its scripts, styles and images), and reaches the network only through `am.net.fetch`, to origins it declared.
-- If it navigates its frame to another page, AgentMux stops it.
+- A widget's frame can't go to another page: AgentMux refuses a navigation to anything outside the package (and stops a widget whose page was replaced). It can't show `alert`, `confirm` or `prompt` either.
 - Packages are at most 50 MB and 2,000 files, with no symlinks.

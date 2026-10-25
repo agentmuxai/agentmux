@@ -171,6 +171,17 @@ fn attribution(store: &Store, id: &str, sha: &str) -> (String, String, String, S
     }
 }
 
+/// Who took entry `id` out of Global Memory: the newest version row, when it
+/// is the `remove` one a removal records (its writer and detail), else the
+/// record's own marker for a removal nothing attributed (an older build, or a
+/// change made outside the versioned writes).
+fn removal_attribution(store: &Store, id: &str) -> (String, String, String, String) {
+    match store.bundle_version_latest(id).ok().flatten() {
+        Some(v) if v.source == crate::backend::storage::bundles::REMOVE_SOURCE => (v.source, v.source_detail, v.written_by, v.written_by_uid),
+        _ => ("agentmux".into(), "removed from Global Memory".into(), String::new(), String::new()),
+    }
+}
+
 /// Record entry `id` as the store now has it, if the record differs: a new
 /// version while it is Global Memory, a tombstone once it isn't. `source`
 /// overrides the attribution (the startup comparison). Returns whether
@@ -181,7 +192,7 @@ pub(crate) fn sync_entry(fs: &FileStore, store: &Store, scope: &str, id: &str, s
     let (src, detail, by, by_uid) = match (&wanted, source) {
         (_, Some(s)) => (s.to_string(), String::new(), String::new(), String::new()),
         (Some((sha, _)), None) => attribution(store, id, sha),
-        (None, None) => ("agentmux".into(), "removed from Global Memory".into(), String::new(), String::new()),
+        (None, None) => removal_attribution(store, id),
     };
     fs.zone_txn(&zone(scope), |z| {
         let mut heads = read_heads(z.read(HEADS_FILE)?)?;

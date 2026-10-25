@@ -91,7 +91,7 @@ fn register_fleet_broadcast(engine: &Arc<WshRpcEngine>, state: &AppState) {
             let state = state.clone();
             async move {
                 // A broadcast arrives as the user's own turn, so only the operator's window sends one.
-                ctx.operator_only("only the operator broadcasts as the user")?;
+                ctx.operator_only("a Swarm broadcast arrives as the operator's own words, so only the AgentMux window sends one; an agent broadcasts as itself with the Message tool")?;
                 let result = fleet_broadcast_impl(&state, cmd.targets, cmd.message).await;
                 Ok(result)
             }
