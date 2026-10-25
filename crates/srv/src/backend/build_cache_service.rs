@@ -56,6 +56,14 @@ fn same_path(a: &Path, b: &Path) -> bool {
     n(a) == n(b)
 }
 
+/// Whether `path` is a folder under `root`, ignoring case and slash style. The cleanup touches
+/// nothing outside the agents' root: an agent may work in a project folder of the user's.
+fn inside(root: &Path, path: &Path) -> bool {
+    let n = |p: &Path| p.to_string_lossy().replace('\\', "/").trim_end_matches('/').to_ascii_lowercase();
+    let (root, path) = (n(root), n(path));
+    path.len() > root.len() && path.starts_with(&root) && path.as_bytes()[root.len()] == b'/'
+}
+
 /// An agent running here, as the cleanup needs to know it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LocalAgent {
@@ -245,9 +253,12 @@ pub fn agent_task_done(mstore: Arc<Store>, config: Arc<ConfigState>, agent: Stri
         if !policy.enabled {
             return;
         }
+        let Some(root) = agents_root() else { return };
         let mine: Vec<LocalAgent> = local_agents(&mstore)
             .into_iter()
             .filter(|a| a.agent_id == agent || a.target == agent || a.name.eq_ignore_ascii_case(&agent))
+            // Only workspaces under the agents' root: a project folder is not ours to clean.
+            .filter(|a| inside(&root, &a.workspace))
             .collect();
         if mine.is_empty() {
             return;
@@ -351,6 +362,16 @@ mod tests {
         assert!(mark_warned(&marker, now));
         assert!(!warning_due(&marker, now + Duration::from_secs(1800)), "half an hour later: no");
         assert!(warning_due(&marker, now + Duration::from_secs(2 * 3600)), "two hours later: yes");
+    }
+
+    #[test]
+    fn only_a_folder_under_the_agents_root_is_inside_it() {
+        let root = Path::new("C:\\Users\\a\\.agentmux\\agents");
+        assert!(inside(root, Path::new("c:/users/a/.agentmux/agents/loap-3-0822g")));
+        assert!(inside(root, Path::new("C:\\Users\\a\\.agentmux\\agents\\x\\agentmux\\")));
+        assert!(!inside(root, Path::new("C:\\Users\\a\\.agentmux\\agents")), "the root itself is not a workspace");
+        assert!(!inside(root, Path::new("C:\\Users\\a\\.agentmux\\agents-old\\x")), "a sibling that shares the prefix");
+        assert!(!inside(root, Path::new("C:\\Users\\a\\projects\\site")));
     }
 
     #[test]
