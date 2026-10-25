@@ -72,6 +72,8 @@ export const cefBrowserPanes: BrowserPaneHostApi = {
     },
     hibernationCheck: (blockId) =>
         invokeCommand<BrowserHibernationCheck>("browser_pane_hibernation_check", { block_id: blockId }),
+    discard: (blockId, op) =>
+        invokeCommand<{ supported: boolean; ok: boolean }>("browser_pane_discard", { block_id: blockId, op }),
     memoryPressure: () => invokeCommand<"normal" | "warn" | "critical">("memory_pressure_level", {}),
     focus: async (blockId) => {
         await selectInput(ownWindowLabel(), blockId);
