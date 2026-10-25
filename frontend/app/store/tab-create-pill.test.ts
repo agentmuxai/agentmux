@@ -5,7 +5,7 @@
 // before CreateTab replies — instead of ~150 ms later when the built tab is
 // activated. `creatingTabId` is what it shows.
 
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const state = vi.hoisted(() => ({
     setActive: (() => {}) as (tabId: string) => void,
@@ -53,11 +53,13 @@ import { cancelTabCreation, createTab, creatingTabId, switchIntentTabId } from "
 const settle = () => new Promise((r) => setTimeout(r, 0));
 
 describe("new tab pill selection", () => {
-    // createTab imports these lazily; load them up front so two overlapping
-    // creations don't race vitest's resolution of the same mocked module.
-    beforeAll(async () => {
-        await import("@/app/tab/tab-presets");
-        await import("@/app/tab/tab-content-settled");
+    // node has no animation frames; setActiveTab waits two of them before
+    // it finishes, and a missing one made every activation end in an error.
+    beforeAll(() => {
+        vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => setTimeout(() => cb(0), 0));
+    });
+    afterAll(() => {
+        vi.unstubAllGlobals();
     });
 
     beforeEach(async () => {
@@ -218,5 +220,28 @@ describe("new tab pill selection", () => {
         await vi.waitFor(() => expect(switchIntentTabId()).toBe("tab-2"));
         state.setActive("tab-2");
         await settle();
+    });
+
+    // Two New Tabs started together both load the lazily imported modules at
+    // once. Each creation must get the mocked module and carry on to its own
+    // settle step; one used to fail on the real module's `window`, and which
+    // one depended on timing.
+    it("builds both tabs when two are created together", async () => {
+        const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+        try {
+            createTab();
+            createTab();
+            state.setTabIds(["tab-a", "tab-1", "tab-2"]);
+            state.create[0].resolve("tab-1");
+            state.create[1].resolve("tab-2");
+            await vi.waitFor(() => expect(state.settled).toHaveLength(2));
+            state.settled.forEach((f) => f());
+            await settle();
+            state.setActive("tab-2");
+            await settle();
+            expect(errors).not.toHaveBeenCalled();
+        } finally {
+            errors.mockRestore();
+        }
     });
 });

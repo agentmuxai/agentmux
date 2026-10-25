@@ -174,6 +174,28 @@ createRoot(() =>
 /** How long a new tab may wait, hidden, for its panes' first data. */
 const NEW_TAB_SETTLE_CAP_MS = 800;
 
+/**
+ * createTab loads these two modules lazily (they pull in the whole layout
+ * stack). Each is imported once and the promise shared: two New Tabs started
+ * together would otherwise run two `import()`s of the same module at once,
+ * and under vitest the second of two overlapping imports of a mocked module
+ * loads the real one instead. That killed one of the two creations, and
+ * which one depended on timing (tab-create-pill.test.ts). A failed import is
+ * dropped so the next New Tab tries again.
+ */
+function loadOnce<T>(load: () => Promise<T>): () => Promise<T> {
+    let loading: Promise<T> | null = null;
+    return () => {
+        loading ??= load().catch((e) => {
+            loading = null;
+            throw e;
+        });
+        return loading;
+    };
+}
+const loadTabPresets = loadOnce(() => import("@/app/tab/tab-presets"));
+const loadTabContentSettled = loadOnce(() => import("@/app/tab/tab-content-settled"));
+
 export function createTab() {
     const ws = workspace();
     if (ws == null) return;
@@ -224,7 +246,7 @@ export function createTab() {
             // (duplicate, tear-off destination, startup-tab backfill)
             // can reuse the same panes layout. See
             // frontend/app/tab/tab-presets.ts.
-            const { applyTabPreset, DEFAULT_TAB_PRESET } = await import("@/app/tab/tab-presets");
+            const { applyTabPreset, DEFAULT_TAB_PRESET } = await loadTabPresets();
             await applyTabPreset(tabId, DEFAULT_TAB_PRESET);
             // Activate now that the tab's content actually exists — via
             // the ordinary, unmodified setActiveTab() path below, whose
@@ -249,7 +271,7 @@ export function createTab() {
             // "Loading…", then content popping in. Wait until it has settled,
             // hidden, then show it in one frame — bounded, so a slow pane
             // can't hold the new tab back for long.
-            const { whenTabContentSettled } = await import("@/app/tab/tab-content-settled");
+            const { whenTabContentSettled } = await loadTabContentSettled();
             await whenTabContentSettled(tabId, NEW_TAB_SETTLE_CAP_MS);
             if (!creation.cancelled && creation.from.has(activeTabId())) {
                 // Built while hidden, and kept laid out: the same state as a
