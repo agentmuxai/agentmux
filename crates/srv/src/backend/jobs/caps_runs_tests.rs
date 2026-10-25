@@ -331,6 +331,21 @@ async fn a_provider_with_no_cost_counts_zero_toward_the_dollar_caps() {
     assert!(crate::backend::jobs::caps::reports_cost("claude"));
 }
 
+/// A pending fire told to start holds its per-run cap while it is delivered,
+/// so a fire that lands in between can't overshoot the daily cap.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_pending_fire_being_delivered_holds_its_cap() {
+    let rig = rig();
+    // A $5 run cap and a $6 daily cap: one run fits, two don't.
+    let job = make(&rig, "j-pend-hold", 5.0, 6.0, |j| j.catch_up = "latest".into());
+    rig.answer(NOT_FOUND);
+    let pending = rig.sched.fire(&job, slot(0)).await.run_id.unwrap();
+    assert!(rig.ledger.pending_may_start(&job, &pending), "it fits");
+    rig.answer(DELIVERED);
+    assert_eq!(rig.sched.fire(&job, slot(1)).await.run_id, None, "its $5 is held: a second run doesn't fit");
+    rig.ledger.pending_delivery_done(&pending);
+}
+
 /// The Jobs tab's "over cap today" weighs the job the way the gate does.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_job_on_a_provider_with_no_cost_is_not_reported_over_cap() {
