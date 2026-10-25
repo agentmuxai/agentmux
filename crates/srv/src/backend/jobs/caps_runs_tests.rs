@@ -331,6 +331,15 @@ async fn a_provider_with_no_cost_counts_zero_toward_the_dollar_caps() {
     assert!(crate::backend::jobs::caps::reports_cost("claude"));
 }
 
+/// The Jobs tab's "over cap today" weighs the job the way the gate does.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_job_on_a_provider_with_no_cost_is_not_reported_over_cap() {
+    let rig = rig();
+    weigh(&rig, Limits::default(), "acct-x", "codex");
+    let job = make(&rig, "j-nocost-view", 5.0, 1.0, |_| {});
+    assert_eq!(rig.ledger.over_cap_today(&job), None, "it would start, so it isn't over its cap");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn the_same_job_on_a_provider_that_reports_cost_is_held_back() {
     let rig = rig();
@@ -361,7 +370,7 @@ async fn a_pending_fire_a_cap_refuses_is_skipped_not_left_to_expire_as_a_miss() 
     pending.scheduled_for_ms = Some(SLOT0 + 600_000);
     pending.recorded_by = rig.ledger.recorded_by.clone();
     rig.store.job_run_insert(&pending).unwrap();
-    assert!(rig.ledger.pending_refused_by_cap(&job, "p1"));
+    assert!(!rig.ledger.pending_may_start(&job, "p1"), "a cap with no room skips it");
     let row = rig.store.job_run_get("p1").unwrap().unwrap();
     assert_eq!((row.state.as_str(), row.reason.as_str()), (state::SKIPPED, reason::JOB_CAP));
     assert!(!crate::backend::jobs::verdict::run_failed(&row), "a cap skip is not a failure");

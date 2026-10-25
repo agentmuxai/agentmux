@@ -703,10 +703,6 @@ impl CronScheduler {
             if !back {
                 continue;
             }
-            // A cap that now leaves no room skips the pending fire (§5.3).
-            if runs.pending_refused_by_cap(&job, &run.id) {
-                continue;
-            }
             // It waits for its place like any other run: policy decides, and a
             // pending fire that can't start yet stays pending.
             let may_start = {

@@ -314,8 +314,13 @@ impl RunLedger {
     pub fn pending_may_start(&self, job: &CronJob, run_id: &str) -> bool {
         let _one_at_a_time = self.admission.lock().unwrap_or_else(|e| e.into_inner());
         let start = match policy::decide(job, &self.occupancy(job), true) {
-            Decision::Start => true,
-            Decision::CancelThenStart => {
+            Decision::Start | Decision::CancelThenStart => {
+                // Caps weigh the runs still going, so they are asked once policy
+                // says it may start, as for a waiting run (§5.3).
+                if let Some(refusal) = self.cap_gate(job).refusal {
+                    self.skip_run_for_cap(run_id, job, refusal);
+                    return false;
+                }
                 self.cancel_started(job);
                 true
             }

@@ -78,6 +78,9 @@ pub struct Armed {
     /// The spend at which the run is stopped (its per-run cap, §5.3); none
     /// for a provider that reports no cost.
     pub cap_usd: Option<f64>,
+    /// The bound turn began before the run was armed: its cost isn't all the
+    /// run's, so the cap doesn't stop it.
+    pub partial: bool,
 }
 
 /// What a turn event means for one armed run.
@@ -98,7 +101,8 @@ pub fn on_turn(a: &mut Armed, t: &TurnSeen) -> Vec<Effect> {
                 return out;
             }
             a.turn_id = Some(t.turn_id);
-            out.push(Effect::Bind { turn_id: t.turn_id, partial: t.started_at_ms < a.armed_at_ms });
+            a.partial = t.started_at_ms < a.armed_at_ms;
+            out.push(Effect::Bind { turn_id: t.turn_id, partial: a.partial });
         }
         // An older turn's late publish.
         Some(bound) if t.turn_id < bound => return out,
@@ -115,7 +119,7 @@ pub fn on_turn(a: &mut Armed, t: &TurnSeen) -> Vec<Effect> {
         Some(_) => {}
     }
     a.last = Some(t.clone());
-    if let Some(cap) = a.cap_usd.filter(|cap| t.end.is_none() && caps::reached(t.cost_usd, *cap)) {
+    if let Some(cap) = a.cap_usd.filter(|cap| !a.partial && t.end.is_none() && caps::reached(t.cost_usd, *cap)) {
         out.push(Effect::OverBudget { cost: t.cost(), cap });
         return out;
     }
@@ -189,7 +193,7 @@ async fn run(ledger: Weak<RunLedger>, broker: Arc<Broker>, mut rx: tokio::sync::
                 watched.insert(run_id, armed_at_ms);
             }
             Msg::Arm { block_id, run_id, armed_at_ms, cap_usd } => {
-                armed.entry(block_id.clone()).or_default().push(Armed { run_id, armed_at_ms, turn_id: None, last: None, cap_usd });
+                armed.entry(block_id.clone()).or_default().push(Armed { run_id, armed_at_ms, turn_id: None, last: None, cap_usd, partial: false });
                 let latest = broker
                     .read_event_history(EVENT_AGENT_TURN, &format!("block:{block_id}"), 1)
                     .pop()

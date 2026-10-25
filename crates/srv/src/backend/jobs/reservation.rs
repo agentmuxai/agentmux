@@ -162,7 +162,10 @@ impl RunLedger {
             return None;
         }
         let limits = self.limits();
-        let eff = caps::effective(job.policy.caps.as_ref(), &limits);
+        let mut eff = caps::effective(job.policy.caps.as_ref(), &limits);
+        if !caps::reports_cost(&self.target(job).provider) {
+            eff.run_usd = 0.0;
+        }
         let day_start = self.day_start(now_ms());
         let spend = self.spend(job, "", day_start);
         if let Some(over) = caps::check(&eff, &limits, &spend, caps::sends_to_another(job)) {
@@ -197,19 +200,6 @@ impl RunLedger {
         self.changed(&job.id);
         if first {
             self.alert_cap(job, refusal);
-        }
-    }
-
-    /// A pending fire (catch-up `latest`) about to be delivered: skipped here,
-    /// with the alert, when a cap refuses it. `true` when it was.
-    pub fn pending_refused_by_cap(&self, job: &CronJob, run_id: &str) -> bool {
-        let _one_at_a_time = self.admission.lock().unwrap_or_else(|e| e.into_inner());
-        match self.cap_gate(job).refusal {
-            Some(refusal) => {
-                self.skip_run_for_cap(run_id, job, refusal);
-                true
-            }
-            None => false,
         }
     }
 
