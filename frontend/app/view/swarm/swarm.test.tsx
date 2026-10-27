@@ -16,7 +16,7 @@ vi.mock("./swarm-view", () => ({ SwarmView: () => null }));
 
 import { swarmPaneTab } from "./swarm";
 import { create } from "./swarm-instance";
-import { createRoot } from "solid-js";
+import { createRoot, createSignal } from "solid-js";
 import { memberMismatch, type PaneTabMember } from "@/app/block/lazy-pane-tab";
 import type { PaneTabHostContext, PaneTabInstance, PaneTabManifest } from "@/app/block/pane-tab-registry";
 
@@ -37,8 +37,26 @@ describe("swarmPaneTab", () => {
         expect(swarmPaneTab.capabilities).toEqual({ paneZoom: {}, noPadding: true });
     });
 
+    it("declares the Supervisor and Broadcast sections, opening on the Supervisor", () => {
+        expect(swarmPaneTab.sections?.default).toBe("supervisor");
+        expect(swarmPaneTab.sections?.items.map((s) => s.id)).toEqual(["supervisor", "broadcast"]);
+    });
+
+    it("is named by the selected section", () => {
+        const [meta, setMeta] = createSignal<Record<string, unknown>>({});
+        createRoot((dispose) => {
+            const inst = create({ blockId: "w1", meta } as any);
+            expect(inst.liveTitle!().text).toBe("Swarm · Supervisor");
+            setMeta({ "swarm:section": "broadcast" });
+            expect(inst.liveTitle!().text).toBe("Swarm · Broadcast");
+            setMeta({ "swarm:section": "nope" });
+            expect(inst.liveTitle!().text).toBe("Swarm · Supervisor");
+            dispose();
+        });
+    });
+
     it("disposes its model — subscriptions and timers — with the instance", () => {
-        const ctx = { blockId: "w1" } as any;
+        const ctx = { blockId: "w1", meta: () => ({}) } as any;
         const inst = create(ctx);
         expect(membersMatch(swarmPaneTab, inst, ctx)).toEqual([]);
         expect(dispose).not.toHaveBeenCalled();
