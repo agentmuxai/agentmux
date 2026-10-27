@@ -73,6 +73,37 @@ async fn no_uid_key_to_check_against_leaves_v1_standing() {
 }
 
 #[tokio::test]
+async fn a_peer_that_pinned_a_uid_key_and_now_gives_none_fails_the_jekt() {
+    let state = test_state();
+    let (name_public, name_private) = generate_lan_keypair([1u8; 32]);
+    let (uid_public, uid_private) = generate_lan_keypair([2u8; 32]);
+    state.lan_discovery.seed_lan_pubkey_for_test("korp", name_public.to_vec(), Some(("uid-k".into(), uid_public.to_vec())));
+    let mut first = signed(&name_private, Some(("uid-k", &uid_private)));
+    verify_lan_signature(&state, &mut first).await; // pins uid-k's key under korp
+    assert_eq!(first.lan_verified, Some(true));
+
+    // The next answer carries no UID key, and the peers have none to give on a fresh ask.
+    state.lan_discovery.seed_lan_pubkey_for_test("korp", name_public.to_vec(), None);
+    let mut req = signed(&name_private, Some(("uid-k", &uid_private)));
+    verify_lan_signature(&state, &mut req).await;
+    assert_eq!(req.lan_verified, Some(false), "a pinned name owes its UID key");
+    assert_eq!(req.lan_claimed_uid, "");
+}
+
+#[tokio::test]
+async fn a_pinned_name_without_a_uid_key_still_passes_a_jekt_that_claims_no_uid() {
+    let state = test_state();
+    let (name_public, name_private) = generate_lan_keypair([1u8; 32]);
+    let (uid_public, uid_private) = generate_lan_keypair([2u8; 32]);
+    state.lan_discovery.seed_lan_pubkey_for_test("korp", name_public.to_vec(), Some(("uid-k".into(), uid_public.to_vec())));
+    verify_lan_signature(&state, &mut signed(&name_private, Some(("uid-k", &uid_private)))).await;
+    state.lan_discovery.seed_lan_pubkey_for_test("korp", name_public.to_vec(), None);
+    let mut req = signed(&name_private, None);
+    verify_lan_signature(&state, &mut req).await;
+    assert_eq!(req.lan_verified, Some(true), "no v2 at all is judged on v1");
+}
+
+#[tokio::test]
 async fn a_jekt_with_no_v2_at_all_stays_verified_on_v1() {
     let state = test_state();
     let (name_public, name_private) = generate_lan_keypair([1u8; 32]);

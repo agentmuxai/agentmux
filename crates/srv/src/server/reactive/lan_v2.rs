@@ -20,19 +20,26 @@ use super::{AppState, InjectionRequest};
 /// checks (the peer gave another UID for the name, the pin holds a different
 /// key, the signature does not verify, the pin store cannot be read) is no
 /// longer verified: `lan_verified` becomes `Some(false)`. A request with no v2
-/// at all, or whose peer gave no UID key to check against, is left as v1
-/// decided it: there is nothing to contradict.
-pub(super) fn claim_uid(state: &AppState, req: &mut InjectionRequest, claimed: &str) {
+/// at all is left as v1 decided it, and so is one whose peer gave no UID key
+/// for a name that never gave one: there is nothing to contradict. Once a UID
+/// is pinned under the name, the peer owes its key again: a cache that no
+/// longer holds it is asked afresh (`name_key` must come back unchanged), and
+/// an answer without it fails the jekt rather than fall back to v1.
+pub(super) async fn claim_uid(state: &AppState, req: &mut InjectionRequest, claimed: &str, name_key: &[u8]) {
     if req.lan_verified != Some(true) {
         return;
     }
     let (Some(sig), Some(uid)) = (req.lan_sig_v2.clone(), req.source_uid.clone().filter(|u| !u.is_empty())) else {
         return;
     };
-    let Some((answered_uid, key)) = state.lan_discovery.cached_lan_uid_key(claimed) else {
+    let record = crate::backend::agent_resolve::record_uid_fallback;
+    let Some((answered_uid, key)) = uid_key_owed(state, claimed, name_key).await else {
+        if state.mstore.lan_peer_uid_pin_exists(claimed).unwrap_or(true) {
+            record("m4d.lan_v2_pinned_peer_gave_no_uid_key");
+            req.lan_verified = Some(false);
+        }
         return;
     };
-    let record = crate::backend::agent_resolve::record_uid_fallback;
     if answered_uid != uid {
         record("m4d.lan_v2_other_uid");
         req.lan_verified = Some(false);
@@ -68,6 +75,19 @@ pub(super) fn claim_uid(state: &AppState, req: &mut InjectionRequest, claimed: &
         record("m4d.lan_v2_bad_sig");
         req.lan_verified = Some(false);
     }
+}
+
+/// The UID key the peer gave beside `claimed`'s name key: the cached answer,
+/// or, when a UID is already pinned under the name and the cache has none, one
+/// fresh ask.
+async fn uid_key_owed(state: &AppState, claimed: &str, name_key: &[u8]) -> Option<(String, Vec<u8>)> {
+    if let Some(answer) = state.lan_discovery.cached_lan_uid_key(claimed) {
+        return Some(answer);
+    }
+    if !state.mstore.lan_peer_uid_pin_exists(claimed).unwrap_or(true) {
+        return None;
+    }
+    state.lan_discovery.refetch_lan_uid_key(claimed, name_key, &state.http_client).await
 }
 
 /// The LAN forward of a jekt from an agent that signed nothing itself. A Codex

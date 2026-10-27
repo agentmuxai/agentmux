@@ -412,7 +412,7 @@ pub(super) async fn verify_lan_signature(state: &AppState, req: &mut InjectionRe
         );
     if !verified { tracing::warn!(agent_id = %claimed, fresh = within_freshness_window, "LAN jekt signature did not verify"); }
     req.lan_verified = Some(verified);
-    lan_v2::claim_uid(state, req, &claimed);
+    lan_v2::claim_uid(state, req, &claimed, &observed_key).await;
 }
 
 mod channel_v2;
