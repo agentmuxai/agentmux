@@ -156,7 +156,7 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
      "not-windows: macOS/Linux/unix-only code path"),
     ("crates/common/src/win32.rs", "\"agentmux-no-such-program\"", 2,
      "test: unit-test or fixture code, never on a user machine"),
-    ("crates/common/src/process_hardening.rs", "std::env::current_exe(", 1,
+    ("crates/common/src/process_hardening.rs", "std::env::current_exe(", 2,
      "test: unit-test or fixture code, never on a user machine"),
     ("crates/launcher/src/host_hang_dump.rs", "std::env::current_exe(", 1,
      "test: unit-test or fixture code, never on a user machine"),

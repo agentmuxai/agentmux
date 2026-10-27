@@ -538,6 +538,135 @@ mod tests {
         assert!(child.wait().unwrap().success());
     }
 
+    /// For the timing measurement below: a child that starts threads in batches, hardened or, as the
+    /// control, not.
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "runs as the child of thread_timing_measurement"]
+    fn thread_timing_child() {
+        use std::io::Write;
+        if std::env::var_os("AGENTMUX_PH_CHILD").is_none() {
+            return;
+        }
+        if std::env::var_os("AGENTMUX_PH_CONTROL").is_some() {
+            println!("HARDENED false");
+        } else {
+            println!("HARDENED {}", apply());
+        }
+        std::io::stdout().flush().unwrap();
+        let n: usize = std::env::var("AGENTMUX_PH_STORM").ok().and_then(|v| v.parse().ok()).unwrap_or(4000);
+        // Batches of threads that stay alive until the batch is released, so that a thread which
+        // can be opened at all can be opened for as long as it lives.
+        let batch: usize = std::env::var("AGENTMUX_PH_BATCH").ok().and_then(|v| v.parse().ok()).unwrap_or(500);
+        for _ in 0..n / batch {
+            let handles: Vec<_> =
+                (0..batch).map(|_| std::thread::Builder::new().stack_size(64 * 1024).spawn(std::thread::park).unwrap()).collect();
+            std::thread::sleep(std::time::Duration::from_millis(2));
+            for h in handles {
+                h.thread().unpark();
+                h.join().unwrap();
+            }
+        }
+        println!("STORM done");
+        std::io::stdout().flush().unwrap();
+    }
+
+    /// How many threads of a hardened child, and of an unhardened control, another process can open
+    /// with the set-registers right while the child starts threads. Prints the counts; asserts nothing,
+    /// so it can be rerun whenever the thread access lists change.
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "measurement, asserts nothing: cargo test -p agentmux-common thread_timing_measurement -- --ignored --nocapture"]
+    fn thread_timing_measurement() {
+        for control in [true, false] {
+            measure(control);
+        }
+    }
+
+    /// The lowest and highest thread id the process has right now.
+    #[cfg(windows)]
+    fn child_thread_id_range(pid: u32) -> (u32, u32) {
+        use windows_sys::Win32::Foundation::CloseHandle;
+        use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+            CreateToolhelp32Snapshot, Thread32First, Thread32Next, TH32CS_SNAPTHREAD, THREADENTRY32,
+        };
+        let (mut lo, mut hi) = (u32::MAX, 0);
+        // SAFETY: a toolhelp snapshot walked with correctly sized entries and closed.
+        unsafe {
+            let snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+            let mut e: THREADENTRY32 = std::mem::zeroed();
+            e.dwSize = std::mem::size_of::<THREADENTRY32>() as u32;
+            let mut more = Thread32First(snap, &mut e) != 0;
+            while more {
+                if e.th32OwnerProcessID == pid {
+                    lo = lo.min(e.th32ThreadID);
+                    hi = hi.max(e.th32ThreadID);
+                }
+                e.dwSize = std::mem::size_of::<THREADENTRY32>() as u32;
+                more = Thread32Next(snap, &mut e) != 0;
+            }
+            CloseHandle(snap);
+        }
+        (lo, hi.max(lo))
+    }
+
+    #[cfg(windows)]
+    fn measure(control: bool) {
+        use std::io::{BufRead, BufReader};
+        use std::process::{Command, Stdio};
+        use windows_sys::Win32::Foundation::CloseHandle;
+        use windows_sys::Win32::System::Threading::{GetProcessIdOfThread, OpenThread};
+        // Set-registers plus query-limited, which is what recognising the owner of a handle needs.
+        const SET_CONTEXT: u32 = 0x10 | 0x800;
+        let mut child = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "process_hardening::tests::thread_timing_child", "--ignored", "--nocapture"])
+            .env("AGENTMUX_PH_CHILD", "1")
+            .envs(control.then_some(("AGENTMUX_PH_CONTROL", "1")))
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+        let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
+        let hardened = lines.by_ref().map(|l| l.unwrap()).find(|l| l.starts_with("HARDENED "));
+        assert_eq!(hardened.as_deref(), Some(if control { "HARDENED false" } else { "HARDENED true" }));
+        let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let d2 = done.clone();
+        let waiter = std::thread::spawn(move || {
+            for l in lines {
+                if l.unwrap() == "STORM done" {
+                    break;
+                }
+            }
+            d2.store(true, std::sync::atomic::Ordering::SeqCst);
+        });
+        let (mut sweeps, mut tries, mut hits) = (0u64, 0u64, 0u64);
+        let start = std::time::Instant::now();
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        let (lo, hi) = child_thread_id_range(pid);
+        println!("RANGE {lo}..{hi}");
+        while !done.load(std::sync::atomic::Ordering::SeqCst) {
+            sweeps += 1;
+            let mut tid = lo.saturating_sub(64) & !3;
+            while tid < hi + 64 {
+                tries += 1;
+                // SAFETY: OpenThread on a thread id; the handle is closed.
+                unsafe {
+                    let h = OpenThread(SET_CONTEXT, 0, tid);
+                    if !h.is_null() {
+                        if GetProcessIdOfThread(h) == pid {
+                            hits += 1;
+                        }
+                        CloseHandle(h);
+                    }
+                }
+                tid += 4;
+            }
+        }
+        waiter.join().unwrap();
+        let _ = child.wait();
+        println!("TIMING control={control} sweeps={sweeps} opens_tried={tries} secs={:.1} opened={hits}", start.elapsed().as_secs_f64());
+    }
+
     #[test]
     fn an_opt_out_a_dev_build_and_a_headless_srv_are_left_alone() {
         assert_eq!(decide(true, false, false), Err(Skipped::OptedOut));
