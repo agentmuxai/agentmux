@@ -49,10 +49,10 @@ impl ContainerMountSpec {
 }
 
 impl ContainerManager {
-    /// Hands the folders above the memory mount to the agent user. Docker creates them as
-    /// root inside the per-agent volume, and Claude, running as `agent`, could not then
-    /// write its session files into `projects/<workspace>/`. Best-effort: a failure is
-    /// logged and the container carries on.
+    /// Hands the folders above the memory mount to the user the container runs turns as.
+    /// Docker creates them as root inside the per-agent volume, and Claude could not then
+    /// write its session files into `projects/<workspace>/`. Best-effort: a failure, or a
+    /// non-zero exit, is logged and the container carries on.
     pub(super) async fn own_memory_parents(&self, container_name: &str, spec: &ContainerMountSpec) {
         if spec.memory_host_dir.as_deref().is_none_or(str::is_empty) {
             return;
@@ -60,29 +60,41 @@ impl ContainerManager {
         let memory = container_memory_dir();
         let Some(project) = memory.strip_suffix("/memory") else { return };
         let Some(projects) = project.rsplit_once('/').map(|(p, _)| p) else { return };
-        let script = format!("chown agent:agent '{projects}' '{project}'");
-        let exec = self
-            .inner
-            .docker
-            .create_exec(
-                container_name,
-                CreateExecOptions {
-                    user: Some("root"),
-                    cmd: Some(vec!["sh", "-c", &script]),
-                    attach_stdout: Some(true),
-                    attach_stderr: Some(true),
-                    ..Default::default()
-                },
-            )
-            .await;
-        let started = match exec {
-            Ok(exec) => self.inner.docker.start_exec(&exec.id, Some(StartExecOptions { detach: false, ..Default::default() })).await,
-            Err(e) => Err(e),
+        let Some((uid, gid)) = self.exec_identity(container_name).await else {
+            tracing::warn!(container = container_name, "container agent: can't tell which user runs turns; the memory folder's parents stay root-owned");
+            return;
         };
-        match started {
-            Ok(StartExecResults::Attached { mut output, .. }) => while output.next().await.is_some() {},
-            Ok(StartExecResults::Detached) => {}
-            Err(e) => tracing::warn!(container = container_name, error = %e, "container agent: couldn't hand the memory folder's parents to the agent user"),
+        let script = format!("chown {uid}:{gid} '{projects}' '{project}'");
+        let outcome = async {
+            let exec = self
+                .inner
+                .docker
+                .create_exec(
+                    container_name,
+                    CreateExecOptions {
+                        user: Some("root"),
+                        cmd: Some(vec!["sh", "-c", &script]),
+                        attach_stdout: Some(true),
+                        attach_stderr: Some(true),
+                        ..Default::default()
+                    },
+                )
+                .await?;
+            if let StartExecResults::Attached { mut output, .. } = self
+                .inner
+                .docker
+                .start_exec(&exec.id, Some(StartExecOptions { detach: false, ..Default::default() }))
+                .await?
+            {
+                while output.next().await.is_some() {}
+            }
+            self.inspect_exec(&exec.id).await
+        }
+        .await;
+        match outcome {
+            Ok(Some(0)) => {}
+            Ok(code) => tracing::warn!(container = container_name, ?code, "container agent: handing the memory folder's parents to the turn user failed"),
+            Err(e) => tracing::warn!(container = container_name, error = %e, "container agent: couldn't hand the memory folder's parents to the turn user"),
         }
     }
 }
@@ -164,7 +176,6 @@ pub(super) fn agent_home_mounts(container_name: &str, spec: &ContainerMountSpec)
     }
     mounts
 }
-
 
 #[cfg(test)]
 mod itest;

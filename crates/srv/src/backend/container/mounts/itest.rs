@@ -43,7 +43,7 @@ async fn itest_personal_memory_is_the_same_files_natively_and_in_the_container()
     let seen = run(&cm, name, &format!("cat {dir}/MEMORY.md {dir}/native.md")).await;
     let wrote = run(&cm, name, &format!("printf 'written in the container\\n' > {dir}/from-container.md && echo ok")).await;
     let session = run(&cm, name, &format!("touch {dir}/../session.jsonl && echo ok")).await;
-    let only = run(&cm, name, "ls /home/agent/.claude /home/agent/.claude/projects").await;
+    let only = run(&cm, name, "ls -A /home/agent/.claude/projects; echo --; ls -A /home/agent/.claude/projects/-workspace; echo --; ls -A /home/agent/.claude").await;
     println!("{seen}\n{wrote}\n{session}\n{only}");
     let on_host = std::fs::read_to_string(std::path::Path::new(&host_memory).join("from-container.md")).unwrap_or_default();
 
@@ -54,5 +54,9 @@ async fn itest_personal_memory_is_the_same_files_natively_and_in_the_container()
     assert!(seen.contains("native note") && seen.contains("written on the host"), "the native note is read in the container: {seen}");
     assert!(wrote.contains("ok") && on_host == "written in the container\n", "the container's note is on the host: {wrote} / {on_host:?}");
     assert!(session.contains("ok"), "the agent can write session files beside the memory folder: {session}");
-    assert!(!only.contains("credentials") || !only.contains("identities"), "only the one folder is shared: {only}");
+    assert_eq!(
+        only.trim(),
+        "-workspace\n--\nmemory\nsession.jsonl\n--\nprojects",
+        "the volume holds only the memory folder and what the agent wrote itself: {only}"
+    );
 }
