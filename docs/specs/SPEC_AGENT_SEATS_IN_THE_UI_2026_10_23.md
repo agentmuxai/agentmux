@@ -9,7 +9,7 @@
 
 - A **seat** is three facts about an agent: its **role** (leader, worker, specialist, platform tester, analyst, with an optional qualifier such as "product"), its **lead** (the agent it reports to, by uid, or "the operator"), and its **area** (one line: what it owns). An optional **lane** is kept for the organization spec's later phases.
 - The seat lives on the agent's **shared definition** (`DefinitionRecordV1`), so every channel and version on the machine sees the same seat. It's an additive field: no schema bump, no `db_agents` column.
-- **Only the operator sets a seat:** in the agent's Stash drawer (a new Seat tab) or with an import of the approved roster. An agent can read seats but never write one, its own or another's.
+- **The operator sets a seat** in the agent's Stash drawer (a new Seat tab) or with an import of the approved roster. Since #4477 an agent can also set or clear seats on its machine with `Agents set_seat`, recorded under its own name (the operator's decision, 2026-10-25: agents are first class).
 - **Where you see it:**
   - the My Agents tile (a role badge, plus "reports to … · area");
   - the agent pane header's tooltip;
@@ -56,12 +56,12 @@ seat: {
 
 ## 3. Who writes it
 
-- **The operator only.**
-  - **Writes go through a new RPC, `agent.setSeat {agent_id, seat | null}`.** It's allowed only for the operator's own client (the app's renderer), refused for any `Caller::Agent` (MuxAPI, MCP, jekt), and audited.
+- **The operator, and (since #4477) agents.**
+  - **Writes from the window go through the RPC `agent.setSeat {agent_id, seat | null}`.** It's allowed only for the operator's own client (the app's renderer), refused for any `Caller::Agent` (MuxAPI, MCP, jekt), and audited. An agent uses `Agents set_seat` (`POST /api/v1/agent/seats`) instead, with the same validation, audited under the calling agent.
   - **`agent.define` and `updateagent` don't touch `seat`.** A caller that omits it keeps the stored value, using the "None = keep" pattern `model_vendor_base_url` uses, so an identity or rename save never wipes a seat.
 - **The editor:** a **Seat** tab in the agent's Stash drawer (`AgentStashModal.tsx`, data-driven tabs). It has the role, a qualifier, the lead (a picker of agents, plus "the operator"), the area, Save and Clear. My Agents' row menu also gets a **Seat…** item that opens it. As built in PR 2, that item opens the same panel in a dialog over the picker, because the Stash drawer lives in the agent's own pane, which may not be open.
 - **The initial roster:** the approved roster arrives as a small JSON (agent name or uid → role, qualifier, lead, area). The operator imports it from the Seat tab's "Import roster…". It's resolved by uid or exact name, previewed, then applied. Unresolved names are listed, not guessed.
-- **Agents read seats** (`Agents list`, §4) and may propose a change to the operator in words. They never write a seat.
+- **Agents read seats** (`Agents list`, §4). Since #4477 they may also write them with `Agents set_seat`.
 
 ## 4. Where it shows
 

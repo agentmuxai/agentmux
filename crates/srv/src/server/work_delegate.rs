@@ -85,7 +85,8 @@ fn refused(r: &Refusal) -> Response {
 }
 
 /// Whether the caller is a leader: a seat whose role is leader, stored for its
-/// definition (`agent.setSeat`, the operator's). Never a name.
+/// definition (`agent.setSeat` from the operator's window, or an agent's
+/// `Agents set_seat`). Never a name.
 fn is_leader(state: &AppState, uid: &str) -> bool {
     state.mstore.agent_seat_get(uid).is_some_and(|s| s.role == "leader")
 }

@@ -154,8 +154,19 @@ pub(crate) fn plan_seats(
 /// Write planned seats and log each as an identity change by `actor`. The
 /// caller holds the seat lock from the check to here.
 pub(crate) fn write_seats(mstore: &Store, planned: &[PlannedSeat], actor: &SeatActor<'_>) -> Result<(), String> {
+    // Each seat as it was, so a store error part-way puts the earlier ones back.
+    let mut before: Vec<(&str, Option<crate::registry::AgentSeat>)> = Vec::new();
     for p in planned {
-        mstore.agent_seat_set(&p.agent_id, p.seat.as_ref()).map_err(|e| format!("agent.setSeat: {e}"))?;
+        let was = mstore.agent_seat_get(&p.agent_id);
+        if let Err(e) = mstore.agent_seat_set(&p.agent_id, p.seat.as_ref()) {
+            for (id, seat) in before.iter().rev() {
+                if let Err(undo) = mstore.agent_seat_set(id, seat.as_ref()) {
+                    tracing::warn!(target: "identity", agent_id = %id, "agent.setSeat: could not put the seat back: {undo}");
+                }
+            }
+            return Err(format!("agent.setSeat: {e}"));
+        }
+        before.push((&p.agent_id, was));
         let (by, by_uid) = match actor {
             SeatActor::Operator => ("the operator", ""),
             SeatActor::Agent { uid, name } => (*name, *uid),
