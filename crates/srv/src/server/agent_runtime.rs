@@ -162,10 +162,10 @@ pub(crate) fn list(state: &AppState, now_ms: u64) -> Vec<AgentRuntime> {
         .collect()
 }
 
-/// The colour the agent's pane shows (`ui:color`, seeded when it opens).
+/// The colour the agent's pane shows (its border colour, `frame:activebordercolor`, set when it opens).
 fn color_of_block(mstore: &Store, block_id: &str) -> Option<String> {
     let block = mstore.get::<Block>(block_id).ok()??;
-    let color = crate::backend::obj::meta_get_string(&block.meta, "ui:color", "");
+    let color = crate::backend::obj::meta_get_string(&block.meta, "frame:activebordercolor", "");
     (!color.is_empty()).then_some(color)
 }
 
