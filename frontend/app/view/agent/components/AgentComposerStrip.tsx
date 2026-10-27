@@ -845,13 +845,13 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                     const hasOthers = () => !!props.canSwitchAccount && !!props.onSwitchAccount;
                     // srv holds a switch asked for in a turn until it ends (agent.account.switch).
                     const busy = () => !!props.loading || props.compacting != null;
-                    const canSwitch = () => authed() && hasOthers();
+                    const canSwitch = () => hasOthers();
                     const label = () => {
                         const base = !authed() ? "Not logged in" : props.authEmail ? shortenEmail(props.authEmail) : "Logged in";
                         return props.pendingAccountLabel ? `${base} → ${shortenEmail(props.pendingAccountLabel)}` : base;
                     };
                     const title = () => {
-                        if (!authed()) return "Not signed in — click Log in to continue";
+                        if (!authed()) return hasOthers() ? "Not signed in — click to log in or switch account" : "Not signed in — click Log in to continue";
                         const base = props.authEmail
                             ? `Signed in as ${props.authEmail}`
                             : "Signed in to this agent's provider";

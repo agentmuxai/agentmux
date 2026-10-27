@@ -71,13 +71,13 @@ export function sortAccounts(accounts: readonly Account[]): Account[] {
     const rank = new Map(SERVICE_CATALOG.map((t, i) => [t.id as string, i]));
     const rankOf = (a: Account) => rank.get(brandForProvider(a.provider)) ?? rank.size;
     return [...accounts].sort(
-        (a, b) => rankOf(a) - rankOf(b) || accountLabel(a).localeCompare(accountLabel(b)),
+        (a, b) => rankOf(a) - rankOf(b) || accountLabel(a, accounts).localeCompare(accountLabel(b, accounts)),
     );
 }
 
-/** What a card's title and subtitle say, for the filter. */
-export function accountSearchText(a: Account): string[] {
-    return [accountLabel(a), a.display_name ?? "", PROVIDER_LABELS[brandForProvider(a.provider)] ?? a.provider];
+/** What a card's title and subtitle say, for the filter. `all`: the numbered label (`email ·2`) needs the others. */
+export function accountSearchText(a: Account, all?: readonly Account[]): string[] {
+    return [accountLabel(a, all), a.display_name ?? "", PROVIDER_LABELS[brandForProvider(a.provider)] ?? a.provider];
 }
 
 /**
@@ -119,6 +119,8 @@ export function useAccountUseCounts(agents: Accessor<AgentDefinition[]>): Access
 
 export function AccountCard(props: {
     account: Account;
+    /** Every account, so two with one email show `email ·2` (SPEC_ACCOUNT_SWITCH_FROM_THE_COMPOSER_NO_BIND_2026_10_26.md §3.3). */
+    all?: readonly Account[];
     usedBy: number;
     selected: boolean;
     onSelect: () => void;
@@ -154,9 +156,9 @@ export function AccountCard(props: {
         <Card
             id={`identity-account-row-${a().id}`}
             class="account-card"
-            aria-label={`${accountLabel(a())}, ${brand()}, ${status().label}`}
+            aria-label={`${accountLabel(a(), props.all)}, ${brand()}, ${status().label}`}
             aria-controls={`identity-account-panel-${a().id}`}
-            title={accountLabel(a())}
+            title={accountLabel(a(), props.all)}
             subtitle={
                 <Show when={note()} fallback={subtitle()}>
                     {(text) => <span class="account-card-note">{text()}</span>}
