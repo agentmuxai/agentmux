@@ -84,15 +84,24 @@ export function SwarmView(props: {
         const id = ctx.meta()?.["kanban:open"];
         return typeof id === "string" && id ? id : null;
     });
-    // A card's agent: switch to the Supervisor and select that agent's row, scrolled into view.
-    const openAgent = (blockId: string) => {
-        model.selectAll([blockId]);
-        void ctx.setMeta({ "swarm:section": "supervisor" });
+    // A card's agent: switch to the Supervisor and select that agent's row, scrolled into view. The
+    // meta write is asynchronous and the list is `display: none` until the section has changed, so the
+    // scroll waits for the section rather than for a frame.
+    const [scrollTo, setScrollTo] = createSignal<string | null>(null);
+    createEffect(() => {
+        const blockId = scrollTo();
+        if (!blockId || section() === "kanban") return;
+        setScrollTo(null);
         requestAnimationFrame(() =>
             [...(rootRef?.querySelectorAll<HTMLElement>(".swarm-agent-card") ?? [])]
                 .find((card) => card.dataset.blockId === blockId)
                 ?.scrollIntoView?.({ block: "nearest" })
         );
+    });
+    const openAgent = (blockId: string) => {
+        model.selectAll([blockId]);
+        setScrollTo(blockId);
+        void ctx.setMeta({ "swarm:section": "supervisor" });
     };
     // Trace presses on agent rows whose click never arrives (select-trace.ts).
     // Capture listeners on the root, which a rebuild of the rows never replaces.

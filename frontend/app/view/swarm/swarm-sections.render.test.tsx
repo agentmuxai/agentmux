@@ -84,7 +84,7 @@ const localNode = {
     backgroundTasks: NO_BACKGROUND_TASKS,
 } as unknown as AgentTreeNode;
 
-function setup(initial: Record<string, unknown> = {}, local = false, onKanbanNeeds?: (n: number) => void) {
+function setup(initial: Record<string, unknown> = {}, local = false, onKanbanNeeds?: (n: number) => void, metaDelayMs = 0) {
     const [meta, setMeta] = createSignal<Record<string, unknown>>(initial);
     const [selected, setSelected] = createSignal<Set<string>>(new Set());
     const model = {
@@ -119,6 +119,7 @@ function setup(initial: Record<string, unknown> = {}, local = false, onKanbanNee
         // Like the host: the patch lands in the pane's meta.
         setMeta: async (patch: Record<string, unknown>) => {
             written.push(patch);
+            if (metaDelayMs) await new Promise((r) => setTimeout(r, metaDelayMs));
             setMeta((prev) => ({ ...prev, ...patch }));
         },
         visibility: () => "active",
@@ -239,6 +240,34 @@ describe("the Swarm's sections", () => {
             kanban.last!.onOpenAgent("b1");
             expect(written).toContainEqual({ "swarm:section": "supervisor" });
             expect(tab("Supervisor").getAttribute("aria-selected")).toBe("true");
+        });
+
+        it("scrolls to the agent's row once the Supervisor section is shown, not before", async () => {
+            const scrolled: string[] = [];
+            // Let a scroll an earlier test scheduled run before this one is watching.
+            await new Promise((r) => requestAnimationFrame(() => r(null)));
+            await new Promise((r) => requestAnimationFrame(() => r(null)));
+            const proto = HTMLElement.prototype as unknown as { scrollIntoView?: () => void };
+            const original = proto.scrollIntoView;
+            proto.scrollIntoView = function (this: HTMLElement) {
+                scrolled.push(`${this.dataset.blockId}:${this.closest(".swarm-agents-pane")!.classList.contains("is-hidden") ? "hidden" : "shown"}`);
+            };
+            const frame = () => new Promise((r) => requestAnimationFrame(() => r(null)));
+            try {
+                // The host's meta write lands later than a frame, as the real one does.
+                const view = setup({ "swarm:section": "kanban" }, true, undefined, 50);
+                kanban.last!.onOpenAgent("b1");
+                await frame();
+                await frame();
+                expect(scrolled).toEqual([]);
+                await new Promise((r) => setTimeout(r, 80));
+                await frame();
+                await frame();
+                expect(scrolled).toEqual(["b1:shown"]);
+                expect(view.tab("Supervisor").getAttribute("aria-selected")).toBe("true");
+            } finally {
+                proto.scrollIntoView = original;
+            }
         });
 
         it("hands the Needs-you count up for the pane's title", () => {
