@@ -11,7 +11,9 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 
 use super::home::{fold, has_agent_slugs, has_column, open_ro, place, table_exists, Home, Install};
-use crate::backend::rpc_types::{ForkSlugBlocker, ForkSlugBlockerKind, ForkSlugCandidate, ForkSlugDuplicate, ForkSlugPlan, ForkSlugSkipped};
+use crate::backend::rpc_types::{
+    ForkSlugBlocker, ForkSlugBlockerKind, ForkSlugCandidate, ForkSlugChoice, ForkSlugDuplicate, ForkSlugPlan, ForkSlugSkipped,
+};
 use agentmux_common::slug::{agent_route_name, definition_slug, fork_slug, is_agent_id};
 use rusqlite::OptionalExtension;
 
@@ -299,14 +301,43 @@ pub(super) fn holder_of(
 /// it runs; the forks left alone; and what would block an apply now.
 /// `quick` stops after finding the candidates.
 pub fn plan(home: &Home, quick: bool) -> Result<ForkSlugPlan, String> {
-    plan_with(home, quick, true)
+    plan_with(home, quick, true, &[])
+}
+
+/// [`plan`] with ids the user picked for some agents.
+pub fn plan_choosing(home: &Home, quick: bool, choices: &[ForkSlugChoice]) -> Result<ForkSlugPlan, String> {
+    plan_with(home, quick, true, choices)
+}
+
+/// Give each chosen agent the id the user picked in place of the computed one. The pick goes
+/// through the same collision check as any other new id (an agent whose pick is taken is
+/// refused again, with the new reason), so a choice can't claim an id something holds.
+/// An error for a pick that can't be an id for that agent at all.
+fn apply_choices(found: &mut [Found], choices: &[ForkSlugChoice]) -> Result<(), String> {
+    for choice in choices {
+        let slug = choice.new_slug.trim();
+        let Some(f) = found.iter_mut().find(|f| f.def.uid == choice.uid) else {
+            return Err(format!("{} isn't an agent with an outdated id", choice.uid));
+        };
+        if !is_agent_id(slug) {
+            return Err(format!("{slug:?} isn't a valid agent id"));
+        }
+        if fold(slug) == fold(&f.def.slug) {
+            return Err(format!("{} already has the id {slug}", f.def.name));
+        }
+        f.new_slug = slug.to_string();
+    }
+    Ok(())
 }
 
 /// [`plan`]; a run that holds the migration lock itself passes `false`
-/// for `check_lock`.
-pub(super) fn plan_with(home: &Home, quick: bool, check_lock: bool) -> Result<ForkSlugPlan, String> {
+/// for `check_lock`. `choices` give agents an id of the user's picking.
+pub(super) fn plan_with(home: &Home, quick: bool, check_lock: bool, choices: &[ForkSlugChoice]) -> Result<ForkSlugPlan, String> {
     let (defs, unreadable) = load_defs(home)?;
-    let (found, skipped) = find_candidates(&defs);
+    let (mut found, skipped) = find_candidates(&defs);
+    if !quick {
+        apply_choices(&mut found, choices)?;
+    }
     if quick {
         let candidates = found.into_iter().map(|f| bare(&f)).collect::<Vec<_>>();
         let summary = summary(&candidates, &skipped, &[], &[]);

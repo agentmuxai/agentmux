@@ -13,7 +13,7 @@ use super::journal::{journals, Journal, Record, Step, STEPS};
 use super::preconditions;
 use super::steps::{self, Agent, Ctx};
 use super::{steps_files, verify};
-use crate::backend::rpc_types::{ForkSlugCandidate, ForkSlugMigrated, ForkSlugReport};
+use crate::backend::rpc_types::{ForkSlugCandidate, ForkSlugChoice, ForkSlugMigrated, ForkSlugReport};
 
 /// Where a test stops a run, as a crash would.
 #[cfg(test)]
@@ -89,9 +89,18 @@ fn new_run_dir(home: &Home) -> PathBuf {
 /// Migrate every candidate the plan doesn't refuse, or resume the run that
 /// stopped. Refuses before any write when a precondition fails.
 pub(super) fn apply(home: &Home, opts: &Options) -> Result<ForkSlugReport, String> {
+    apply_choosing(home, opts, &[])
+}
+
+/// [`apply`], giving the agents in `choices` the id the user picked. A run being resumed
+/// already has its ids (its journal holds the plan), so a pick can't change them: finish it first.
+pub(super) fn apply_choosing(home: &Home, opts: &Options, choices: &[ForkSlugChoice]) -> Result<ForkSlugReport, String> {
     let _lock = preconditions::take_lock(home)?;
     let installs = home.installs()?;
     let mut journal = match unfinished(home)? {
+        Some(_) if !choices.is_empty() => {
+            return Err("an update that stopped halfway has to finish before an id can be chosen: run it again first".into());
+        }
         Some(j) => {
             let pending: Vec<ForkSlugCandidate> =
                 j.header().1.candidates.iter().filter(|c| !j.verified(&c.uid)).cloned().collect();
@@ -111,7 +120,7 @@ pub(super) fn apply(home: &Home, opts: &Options) -> Result<ForkSlugReport, Strin
             j
         }
         None => {
-            let plan = super::plan::plan_with(home, false, false)?;
+            let plan = super::plan::plan_with(home, false, false, choices)?;
             if !plan.blockers.is_empty() {
                 let why: Vec<&str> = plan.blockers.iter().map(|b| b.message.as_str()).collect();
                 return Err(format!("not migrating: {}", why.join("; ")));
