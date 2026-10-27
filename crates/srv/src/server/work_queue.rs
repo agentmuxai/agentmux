@@ -93,6 +93,10 @@ pub(super) struct EnqueueRequest {
     /// (SPEC_KANBAN_STAGES_COLOURS_AND_NARROW_VIEW_2026_10_23.md §5.1).
     #[serde(default)]
     pub first: Option<String>,
+    /// Kanban: the task changes the UI, so it needs media to be handed in for review
+    /// (SPEC_KANBAN_TASK_MEDIA_2026_10_25.md §5).
+    #[serde(default)]
+    pub ui_change: Option<bool>,
 }
 
 pub(super) async fn handle_work_enqueue(
@@ -136,6 +140,7 @@ pub(super) async fn handle_work_enqueue(
     }
 
     let now = now_ms();
+    let ui_change = req.ui_change;
     let item = WorkItem {
         id: Uuid::new_v4().to_string(),
         title: req.title,
@@ -177,6 +182,7 @@ pub(super) async fn handle_work_enqueue(
     let Some(first) = first else {
         return match enqueue_one(&state, &item, &after, &card) {
             Ok(num) => {
+                let _ = state.work_store.work_ui_set(&item.id, ui_change, None, now);
                 publish_changed(&state);
                 (StatusCode::OK, Json(json!({ "id": item.id, "num": num })))
             }
@@ -204,7 +210,11 @@ pub(super) async fn handle_work_enqueue(
         Err(e) => return e,
     };
     let build_num = match enqueue_one(&state, &build, std::slice::from_ref(&spec.id), &card) {
-        Ok(n) => n,
+        Ok(n) => {
+            // The flag is the build's: the spec is a document.
+            let _ = state.work_store.work_ui_set(&build.id, ui_change, None, now);
+            n
+        }
         Err(e) => {
             publish_changed(&state);
             return e;

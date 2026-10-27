@@ -24,6 +24,7 @@ import {
     stageWord,
     waitingOn,
 } from "./kanban-columns";
+import { CardMedia } from "./kanban-media";
 import { seatOf, useSeatIndex } from "./kanban-seats";
 import type { KanbanAfter, KanbanAgent, KanbanAgentState, KanbanTask } from "./kanban-types";
 
@@ -176,6 +177,7 @@ export function KanbanCard(props: {
             <Show when={!reason() && t().card.note}>
                 <div class="kanban-card__note">{t().card.note}</div>
             </Show>
+            <CardMedia task={t()} />
             <div class="kanban-card__meta">
                 <Show when={who()}>
                     {(w) => (

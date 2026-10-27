@@ -73,6 +73,48 @@ export interface KanbanCardFields {
     pr?: KanbanPr | null;
     /** The path of the spec or report it wrote (`links.doc`), empty when none. */
     doc?: string;
+    /** The files it carries and the UI-change flag (absent from an older srv). */
+    media?: KanbanMediaSummary;
+}
+
+/** A thumbnail on the card (`MediaPreview` in crates/srv/src/backend/storage/work_media.rs). */
+export interface KanbanMediaPreview {
+    sha256: string;
+    kind: "image" | "recording";
+    mime: string;
+    /** Where the stored file is, for the Editor and the thumbnail; empty if srv could not say. */
+    path: string;
+    /** The small copy of an image, empty when there is none (an SVG, a recording). */
+    thumb: string;
+}
+
+/** What the card shows of a task's media (`MediaSummary`). */
+export interface KanbanMediaSummary {
+    count: number;
+    first: KanbanMediaPreview[];
+    /** The task changes the UI, so handing it in for review needs media. */
+    ui_change: boolean;
+    /** Why it was handed in without media, when it was. */
+    no_media_reason: string;
+}
+
+/** One attached file, as `kanban.task` lists it (`MediaItem`). */
+export interface KanbanMediaItem {
+    id: number;
+    work_id: string;
+    sha256: string;
+    name: string;
+    kind: "image" | "recording";
+    mime: string;
+    size: number;
+    caption: string;
+    attached_by: string;
+    attempt: number;
+    at: number;
+    /** When the operator removed it; it then has no path. */
+    removed_at?: number | null;
+    path: string;
+    thumb: string;
 }
 
 export interface KanbanAgent {
@@ -144,6 +186,8 @@ export interface KanbanEvent {
 export interface KanbanTaskDetail {
     task: KanbanTask;
     events: KanbanEvent[];
+    /** Every file the task carries, oldest first, the removed ones marked (absent from an older srv). */
+    media?: KanbanMediaItem[];
 }
 
 /** `kanban.act`'s request: one of the operator's moves. */
@@ -161,7 +205,9 @@ export interface KanbanActRequest {
         | "retry"
         | "track"
         | "release"
-        | "reassign";
+        | "reassign"
+        | "media_remove"
+        | "ui_change";
     id?: string;
     title?: string;
     payload?: string;
@@ -182,6 +228,10 @@ export interface KanbanActRequest {
     first?: "spec" | "research";
     /** cancel, a spec or research task: what happens to the tasks waiting on it. */
     followers?: "cancel" | "hold";
+    /** media_remove: the file to take off the task. */
+    media_id?: number;
+    /** ui_change: whether the task changes the UI. */
+    ui_change?: boolean;
 }
 
 export interface KanbanActResult {

@@ -113,6 +113,61 @@ pub(super) async fn upload(files: Vec<Local>, cx: &ToolCtx<'_>) -> Result<Vec<Je
     Ok(manifest)
 }
 
+/// The most files one task call carries (srv enforces the rest: sizes by kind, 30 and 300 MiB per task).
+const MAX_TASK_FILES_PER_CALL: usize = 10;
+
+/// The `captions` argument, one per file in the same order (missing ones are empty).
+fn captions_for(captions: Option<&Value>, count: usize) -> Result<Vec<String>> {
+    let given: Vec<String> = match captions.filter(|v| !v.is_null()) {
+        None => Vec::new(),
+        Some(v) => v
+            .as_array()
+            .ok_or_else(|| anyhow::anyhow!("captions must be a list of short texts, one per file"))?
+            .iter()
+            .map(|c| c.as_str().map(|s| s.trim().to_string()).ok_or_else(|| anyhow::anyhow!("captions must be a list of short texts, one per file")))
+            .collect::<Result<_>>()?,
+    };
+    if given.len() > count {
+        anyhow::bail!("{} captions for {count} files", given.len());
+    }
+    Ok((0..count).map(|i| given.get(i).cloned().unwrap_or_default()).collect())
+}
+
+/// Check each path, then upload each to srv's task media store; returns what `Tasks` update and submit
+/// carry: `[{sha256, name, caption}]`. Nothing has changed on the task when this fails.
+pub(super) async fn upload_task_media(paths: &[String], captions: Option<&Value>, cx: &ToolCtx<'_>) -> Result<Vec<Value>> {
+    if paths.len() > MAX_TASK_FILES_PER_CALL {
+        anyhow::bail!("{} files is more than the limit of {MAX_TASK_FILES_PER_CALL} per call", paths.len());
+    }
+    let captions = captions_for(captions, paths.len())?;
+    let files = check(paths)?;
+    let url = format!("{}/agentmux/work/media", cx.local_url.trim_end_matches('/'));
+    let mut out = Vec::with_capacity(files.len());
+    for (f, caption) in files.into_iter().zip(captions) {
+        let file = tokio::fs::File::open(&f.path).await.map_err(|e| anyhow::anyhow!("{}: {e}", f.path.display()))?;
+        let resp = cx
+            .client
+            .post(&url)
+            .query(&[("name", f.name.as_str())])
+            .header(AUTH_KEY_HEADER, cx.auth_key)
+            .timeout(UPLOAD_TIMEOUT)
+            .body(reqwest::Body::from(file))
+            .send()
+            .await
+            .map_err(|e| anyhow::anyhow!("{}: upload failed: {e}", f.name))?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body: Value = resp.json().await.unwrap_or_default();
+            let why = body.get("error").and_then(Value::as_str).unwrap_or("");
+            anyhow::bail!("{}: not attached: {why} (HTTP {status})", f.name);
+        }
+        let info: Value = resp.json().await.map_err(|e| anyhow::anyhow!("{}: upload answer unreadable: {e}", f.name))?;
+        let sha256 = info.get("sha256").and_then(Value::as_str).unwrap_or_default();
+        out.push(serde_json::json!({ "sha256": sha256, "name": f.name, "caption": caption }));
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -129,6 +184,17 @@ mod tests {
         assert!(files_arg(&serde_json::json!({ "files": "a.png" })).is_err());
         assert!(files_arg(&serde_json::json!({ "files": [""] })).is_err());
         assert!(files_arg(&serde_json::json!({ "files": [1] })).is_err());
+    }
+
+    #[test]
+    fn captions_pair_with_files_in_order_and_may_be_fewer() {
+        let c = |v: Value, n| captions_for(Some(&v), n);
+        assert_eq!(captions_for(None, 2).unwrap(), ["", ""]);
+        assert_eq!(c(serde_json::json!(["before", "after"]), 2).unwrap(), ["before", "after"]);
+        assert_eq!(c(serde_json::json!([" before "]), 2).unwrap(), ["before", ""]);
+        assert!(c(serde_json::json!(["a", "b", "c"]), 2).unwrap_err().to_string().contains("3 captions for 2 files"));
+        assert!(c(serde_json::json!("after"), 1).is_err());
+        assert!(c(serde_json::json!([1]), 1).is_err());
     }
 
     #[test]

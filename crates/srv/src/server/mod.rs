@@ -54,6 +54,7 @@ pub(crate) mod cron;
 pub(crate) mod job_actions;
 pub(crate) mod job_caps;
 pub(crate) mod work_queue;
+mod work_media;
 mod work_tasks;
 mod work_delegate;
 mod messaging_handlers;
