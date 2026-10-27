@@ -2337,7 +2337,7 @@ export const GeneratedApi = {
     data: ToolIdReq,
     opts?: RpcOpts
   ): Promise<InstallSystemToolResult> {
-    return client.rpcCall("toolchain.install_system_tool", data, opts);
+    return client.rpcCall("toolchain.install_system_tool", data, { timeout: 150000, ...opts });
   },
   // command "toolchain.prune"
   ToolchainPruneCommand(
