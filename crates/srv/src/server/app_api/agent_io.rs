@@ -491,8 +491,7 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // container branch's field is unused for now.
                     let instance_id = obj::meta_get_string(&block.meta, "agentId", "");
                     if agent_mode == "container" {
-                        let cm = container_manager.get().await
-                            .ok_or_else(|| "Docker not available on this host; cannot start container agent".to_string())?;
+                        let cm = container_manager.get_or_explain().await?;
                         let container_image = obj::meta_get_string(&block.meta, "agent:container_image", "");
                         // Use agentId (UUID) — always valid as a Docker name; display names can have spaces.
                         let agent_id = obj::meta_get_string(&block.meta, "agentId", "");

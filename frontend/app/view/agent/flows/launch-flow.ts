@@ -201,6 +201,30 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
         log("docker", "container runtime available");
     }
 
+    // A container agent's CLI is installed inside its container on the first
+    // message (container_turn.rs), so there is no host CLI to find, install or
+    // run an auth check with. An OAuth provider with no account bound goes to
+    // the sign-in prompt, as it does for a host agent; a bound account is
+    // trusted here and checked by the backend when the turn starts.
+    // Spec: SPEC_CONTAINER_AGENTS_AT_PARITY_2026_10_27.md (P10).
+    if (agentMode === "container") {
+        log("cli", `${provider.displayName} runs inside the container: its CLI is installed there on the first message`);
+        if (effectiveAuthEnv && Object.keys(effectiveAuthEnv).length > 0) {
+            await RpcApi.SetMetaCommand(TabRpcClient, {
+                oref,
+                meta: { "cmd:env": { ...blockEnv(blockId), ...effectiveAuthEnv } },
+            });
+        }
+        if (provider.authType === "oauth" && !linkedAccountId) {
+            setPhase({ kind: "first-login" });
+            notify(`${provider.displayName} needs you to sign in before this agent can start. Click "Log in" to continue.`, "info");
+            log("auth", "no account linked: waiting for the user to start a login");
+            return "auth_failed";
+        }
+        opts.onAuthCheckResult?.(false);
+        return finishLaunch(opts, log, setPhase, notify);
+    }
+
     // Phase 1: CLI Detection / Installation
     log("cli", `checking for ${provider.cliCommand}...`);
     if (provider.pinnedVersion) {
@@ -323,6 +347,17 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
         return "auth_failed";
     }
 
+    return finishLaunch(opts, log, setPhase, notify);
+}
+
+/** Phase 3: register the controller and report how the pane starts (fresh or resumed). */
+async function finishLaunch(
+    opts: LaunchFlowOptions,
+    log: LaunchFlowOptions["log"],
+    setPhase: NonNullable<LaunchFlowOptions["setLaunchPhase"]>,
+    notify: NonNullable<LaunchFlowOptions["onNotify"]>,
+): Promise<LaunchFlowResult> {
+    const { blockId } = opts;
     // Phase 3: Controller Registration
     setPhase({ kind: "verifying" });
     log("controller", "registering subprocess controller...");
