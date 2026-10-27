@@ -1058,9 +1058,7 @@ pub async fn run_agent_turn_joining(
         // (struct-completeness — see host_spawn.rs's doc comment).
         let instance_id = crate::backend::obj::meta_get_string(&block.meta, "agentId", "");
         if agent_mode == "container" {
-            let cm = container_manager.get().await.ok_or_else(|| {
-                "Docker not available on this host; cannot start container agent".to_string()
-            })?;
+            let cm = container_manager.get_or_explain().await?;
             let container_image =
                 crate::backend::obj::meta_get_string(&block.meta, "agent:container_image", "");
             // Use agentId (UUID) — always valid as a Docker name; display names can have spaces.

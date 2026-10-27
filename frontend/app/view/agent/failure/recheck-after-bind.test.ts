@@ -27,7 +27,7 @@ describe("retryRecheckAfterBind", () => {
     });
 
     it("retries through failures and picks up a later success — the actual race this fixes", async () => {
-        // Simulates the real bug: the first recheck races bindAccountToAgent's
+        // Simulates the real bug: the first recheck races agent.account.switch's
         // cmd:env refresh and reads stale env; a later attempt (after the
         // refresh has landed) succeeds.
         const recheck = vi.fn()

@@ -86,12 +86,12 @@ export function moveOutcome(r: IdentityAccountMoveAgentsResult): string {
     const names = (list: { agent_name: string }[]) => list.map((a) => a.agent_name).join(", ");
     const parts: string[] = [];
     if (r.moved.length > 0) parts.push(`Moved ${names(r.moved)}.`);
-    if (r.busy.length > 0) parts.push(`Left ${names(r.busy)}: in a turn; move ${r.busy.length === 1 ? "it" : "them"} when it ends.`);
+    if (r.busy.length > 0) parts.push(`${names(r.busy)}: in a turn; ${r.busy.length === 1 ? "moves" : "move"} when the turn ends.`);
     for (const f of r.failed) parts.push(`${f.agent_name || "A pane"}: ${f.error}`);
     return parts.join(" ") || "Nothing to move.";
 }
 
-/** Move the episode's agents (srv moves the idle ones only), then refresh the strip. */
+/** Move the episode's agents (srv moves the idle ones now and queues the rest), then refresh the strip. */
 export async function moveEpisodeAgents(ep: AccountAvailability, to: string): Promise<IdentityAccountMoveAgentsResult> {
     const r = await RpcApi.IdentityAccountMoveAgentsCommand(TabRpcClient, {
         from: ep.account_id,
