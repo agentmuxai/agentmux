@@ -113,3 +113,44 @@ fn appending_after_a_trim_continues_at_the_absolute_end() {
     assert!(held.ends_with(b"tail"));
     assert_eq!(held.len() as i64, 2 * PART);
 }
+
+#[test]
+fn widening_or_lifting_the_window_after_a_trim_does_not_read_back_into_deleted_parts() {
+    let store = circular_store(3 * PART);
+    let chunk: Vec<u8> = (0..PART as usize).map(|i| (i % 249) as u8).collect();
+    for _ in 0..10 {
+        store.append_data_at("z", "term", &chunk).unwrap();
+    }
+    store.trim_circular_head("z", "term").unwrap();
+    assert_eq!(store.stat("z", "term").unwrap().unwrap().data_start_idx(), 7 * PART);
+
+    // A bigger window: what survives is still 3 parts, starting where it did.
+    store.set_circular("z", "term", 20 * PART).unwrap();
+    let file = store.stat("z", "term").unwrap().unwrap();
+    assert_eq!((file.data_start_idx(), file.data_length()), (7 * PART, 3 * PART));
+    let (from, bytes) = store.read_at("z", "term", 0, 0).unwrap();
+    assert_eq!((from, bytes.len() as i64), (7 * PART, 3 * PART));
+    assert_eq!(bytes, chunk.repeat(3));
+
+    // No limit at all: the same.
+    store.set_circular("z", "term", 0).unwrap();
+    let (from, bytes) = store.read_at("z", "term", 0, 0).unwrap();
+    assert_eq!((from, bytes.len() as i64), (7 * PART, 3 * PART));
+    assert_eq!(store.read_file("z", "term").unwrap().unwrap(), chunk.repeat(3));
+
+    // And it keeps growing from there.
+    store.append_data_at("z", "term", b"tail").unwrap();
+    let (from, bytes) = store.read_at("z", "term", 0, 0).unwrap();
+    assert_eq!(from, 7 * PART);
+    assert!(bytes.ends_with(b"tail") && bytes.len() as i64 == 3 * PART + 4);
+}
+
+#[test]
+fn an_untrimmed_file_has_no_retained_start() {
+    let store = circular_store(3 * PART);
+    store.append_data_at("z", "term", &vec![b'q'; PART as usize]).unwrap();
+    store.trim_circular_head("z", "term").unwrap();
+    let file = store.stat("z", "term").unwrap().unwrap();
+    assert!(file.meta.get("retainedfrom").is_none());
+    assert_eq!(file.data_start_idx(), 0);
+}

@@ -11,7 +11,7 @@
 use rusqlite::params;
 
 use super::core::{FileStore, PART_DATA_SIZE};
-use super::types::FileOpts;
+use super::types::{FileMeta, FileOpts, RETAINED_FROM_KEY};
 use crate::backend::storage::error::StoreError;
 
 /// The first part that still holds bytes of a window of `maxsize` ending at
@@ -76,24 +76,24 @@ impl FileStore {
     #[track_caller]
     pub fn trim_circular_head(&self, zone_id: &str, name: &str) -> Result<usize, StoreError> {
         let key = (zone_id.to_string(), name.to_string());
-        let (first_live, removed) = self.write_txn(|tx| {
-            let row: Option<(i64, String)> = tx
-                .query_row("SELECT size, opts FROM db_wave_file WHERE zoneid = ?1 AND name = ?2", params![zone_id, name], |r| {
-                    Ok((r.get(0)?, r.get(1)?))
+        let (first_live, removed, meta) = self.write_txn(|tx| {
+            let row: Option<(i64, String, String)> = tx
+                .query_row("SELECT size, opts, meta FROM db_wave_file WHERE zoneid = ?1 AND name = ?2", params![zone_id, name], |r| {
+                    Ok((r.get(0)?, r.get(1)?, r.get(2)?))
                 })
                 .map(Some)
                 .or_else(|e| match e {
                     rusqlite::Error::QueryReturnedNoRows => Ok(None),
                     other => Err(other),
                 })?;
-            let Some((size, opts_json)) = row else { return Ok((0, 0)) };
+            let Some((size, opts_json, meta_json)) = row else { return Ok((0, 0, None)) };
             let opts: FileOpts = serde_json::from_str(&opts_json).unwrap_or_default();
             if !opts.circular {
-                return Ok((0, 0));
+                return Ok((0, 0, None));
             }
             let first_live = first_live_part(size, opts.maxsize);
             if first_live == 0 {
-                return Ok((0, 0));
+                return Ok((0, 0, None));
             }
             let removed = tx.execute(
                 "DELETE FROM db_file_data WHERE zoneid = ?1 AND name = ?2 AND partidx < ?3",
@@ -105,11 +105,26 @@ impl FileStore {
                 "DELETE FROM db_file_frame WHERE zoneid = ?1 AND name = ?2 AND first_part + part_count <= ?3",
                 params![zone_id, name, first_live],
             )?;
-            Ok((first_live, removed))
+            // What is left starts at this part. Noted in the file's meta so a
+            // later widening of the window, or lifting it, doesn't read back
+            // into the rows that are gone.
+            let mut meta: FileMeta = serde_json::from_str(&meta_json).unwrap_or_default();
+            let retained = first_live as i64 * PART_DATA_SIZE as i64;
+            if meta.get(RETAINED_FROM_KEY).and_then(serde_json::Value::as_i64).unwrap_or(0) < retained {
+                meta.insert(RETAINED_FROM_KEY.to_string(), serde_json::json!(retained));
+                tx.execute(
+                    "UPDATE db_wave_file SET meta = ?1 WHERE zoneid = ?2 AND name = ?3",
+                    params![serde_json::to_string(&meta)?, zone_id, name],
+                )?;
+            }
+            Ok((first_live, removed, Some(meta)))
         })?;
         if first_live > 0 {
             if let Some(entry) = self.cache.lock().unwrap().get_mut(&key) {
                 entry.data_entries.retain(|idx, _| *idx >= first_live);
+                if let (Some(file), Some(meta)) = (entry.file.as_mut(), meta) {
+                    file.meta = meta;
+                }
             }
         }
         Ok(removed)

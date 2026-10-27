@@ -189,7 +189,7 @@ impl FileStore {
         let mut actual_offset = offset;
         let mut actual_size = if size == 0 { data_len } else { size };
 
-        if file.opts.circular && file.opts.maxsize > 0 {
+        if data_start > 0 {
             if actual_offset < data_start {
                 let skip = data_start - actual_offset;
                 actual_offset = data_start;
