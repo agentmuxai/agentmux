@@ -182,7 +182,7 @@ pub(super) async fn handle_work_enqueue(
     let Some(first) = first else {
         return match enqueue_one(&state, &item, &after, &card) {
             Ok(num) => {
-                let _ = state.work_store.work_ui_set(&item.id, ui_change, None, now);
+                let _ = state.work_store.work_ui_set(&item.id, ui_change, None, 0, now);
                 publish_changed(&state);
                 (StatusCode::OK, Json(json!({ "id": item.id, "num": num })))
             }
@@ -212,7 +212,7 @@ pub(super) async fn handle_work_enqueue(
     let build_num = match enqueue_one(&state, &build, std::slice::from_ref(&spec.id), &card) {
         Ok(n) => {
             // The flag is the build's: the spec is a document.
-            let _ = state.work_store.work_ui_set(&build.id, ui_change, None, now);
+            let _ = state.work_store.work_ui_set(&build.id, ui_change, None, 0, now);
             n
         }
         Err(e) => {

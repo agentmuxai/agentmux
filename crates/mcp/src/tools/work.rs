@@ -242,7 +242,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 );
             }
             if !status.is_success() {
-                anyhow::bail!("Tasks {segment} failed: HTTP {status} — {reply}");
+                anyhow::bail!("Tasks {segment} failed: HTTP {status} — {}", refusal_words(&reply));
             }
             let v: Value = serde_json::from_str(&reply).unwrap_or(serde_json::json!({}));
             let attached = attached_text(&v);
@@ -319,7 +319,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 );
             }
             if !status.is_success() {
-                anyhow::bail!("{name} failed: HTTP {status} — {text}");
+                anyhow::bail!("{name} failed: HTTP {status} — {}", refusal_words(&text));
             }
             Ok(match segment {
                 "heartbeat" => format!("Lease extended on {id}."),
@@ -518,6 +518,15 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
 /// The task an action names, as it goes in a URL path: its id, or its number
 /// with or without the `#` the answers print (a raw `#` would start the URL's
 /// fragment). Anything else that isn't an id character is refused.
+/// What srv refused with, in words: its `error` when the answer is JSON that has one, else the answer as it came
+/// (a UI task handed in without media is told what to attach, or to say why it can't).
+fn refusal_words(reply: &str) -> String {
+    serde_json::from_str::<Value>(reply)
+        .ok()
+        .and_then(|v| v.get("error").and_then(Value::as_str).map(str::to_string))
+        .unwrap_or_else(|| reply.to_string())
+}
+
 /// " Attached: a.png (image), b.webm (recording)." for the files an update or submit carried, else "".
 fn attached_text(v: &Value) -> String {
     let Some(list) = v.get("attached").and_then(Value::as_array).filter(|l| !l.is_empty()) else { return String::new() };
@@ -689,6 +698,13 @@ mod tests {
         let same = serde_json::json!({"name": "#12", "changed": false, "for": ""});
         assert_eq!(hold_text("12", "hold", &same), "Task #12 was already on hold.");
         assert!(hold_text("12", "unhold", &same).ends_with("waiting for anyone."));
+    }
+
+    #[test]
+    fn a_refusal_is_worded_not_shown_as_json() {
+        assert_eq!(refusal_words(r#"{"ok":false,"error":"attach a screenshot, or say why"}"#), "attach a screenshot, or say why");
+        assert_eq!(refusal_words("plain text"), "plain text");
+        assert_eq!(refusal_words(r#"{"ok":false}"#), r#"{"ok":false}"#);
     }
 
     #[test]

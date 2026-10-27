@@ -94,6 +94,17 @@ fn a_task_carries_at_most_its_file_and_byte_limits() {
 }
 
 #[test]
+fn the_same_picture_again_after_a_send_back_counts_for_the_new_attempt() {
+    let (s, _d) = store();
+    task(&s, "a");
+    let first = s.work_media_add("a", &file("aa", 10, 1), 2000).unwrap().unwrap();
+    let again = s.work_media_add("a", &file("aa", 10, 2), 3000).unwrap().unwrap();
+    assert_ne!(first.id, again.id, "a new row for the new attempt");
+    assert!(s.work_media_in_attempt("a", 2).unwrap());
+    assert_eq!(s.work_media_add("a", &file("aa", 10, 2), 3100).unwrap().unwrap().id, again.id, "once within an attempt");
+}
+
+#[test]
 fn only_media_from_this_attempt_counts_and_a_removed_file_does_not() {
     let (s, _d) = store();
     task(&s, "a");
@@ -114,14 +125,14 @@ fn only_media_from_this_attempt_counts_and_a_removed_file_does_not() {
 fn the_ui_flag_and_the_reason_are_kept_apart() {
     let (s, _d) = store();
     task(&s, "a");
-    assert_eq!(s.work_ui_get("a").unwrap(), (false, String::new()));
-    s.work_ui_set("a", Some(true), None, 2000).unwrap();
-    s.work_ui_set("a", None, Some("headless host"), 2100).unwrap();
-    assert_eq!(s.work_ui_get("a").unwrap(), (true, "headless host".to_string()));
+    assert_eq!(s.work_ui_get("a").unwrap(), (false, String::new(), 0));
+    s.work_ui_set("a", Some(true), None, 0, 2000).unwrap();
+    s.work_ui_set("a", None, Some("headless host"), 2, 2100).unwrap();
+    assert_eq!(s.work_ui_get("a").unwrap(), (true, "headless host".to_string(), 2), "the reason knows its attempt");
     let card = s.work_board_get("a").unwrap().unwrap().card;
     assert!(card.media.ui_change);
     assert_eq!(card.media.no_media_reason, "headless host");
-    s.work_ui_set("a", Some(false), None, 2200).unwrap();
+    s.work_ui_set("a", Some(false), None, 0, 2200).unwrap();
     assert_eq!(s.work_ui_get("a").unwrap().1, "headless host", "unsetting the flag keeps the reason");
 }
 

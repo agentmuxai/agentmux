@@ -128,6 +128,29 @@ async fn submit_of_a_ui_task_that_waits_for_the_operator_needs_media_or_a_reason
 }
 
 #[tokio::test]
+async fn complete_is_held_to_the_same_rule_as_submit() {
+    let app = app();
+    let (num, attempt) = claimed(&app, json!({"ui_change": true})).await;
+    let uri = format!("/agentmux/work/{num}/complete");
+    let (s, v) = post(&app, &uri, json!({"agent_id": "a1", "attempt": attempt, "result": "done"})).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "{v}");
+    assert!(v["error"].as_str().unwrap().contains("no_media_reason"), "tells how to get through: {v}");
+    let id = app.state.identity_store.work_board_get(&num.to_string()).unwrap().unwrap().item.id;
+    assert_eq!(app.state.identity_store.work_queue_get(&id).unwrap().unwrap().state, "claimed", "nothing moved");
+
+    // A stale attempt is still a conflict, not a media refusal.
+    let (s, _) = post(&app, &uri, json!({"agent_id": "a1", "attempt": attempt + 1, "result": "done"})).await;
+    assert_eq!(s, StatusCode::CONFLICT);
+
+    // Media attached with update, then complete goes through.
+    let (_, up) = upload(&app, "after.png", png(7)).await;
+    let (s, _) = post(&app, &format!("/agentmux/work/{num}/update"), json!({"agent_id": "a1", "attempt": attempt, "media": [{"sha256": up["sha256"]}]})).await;
+    assert_eq!(s, StatusCode::OK);
+    let (s, v) = post(&app, &uri, json!({"agent_id": "a1", "attempt": attempt, "result": "done"})).await;
+    assert_eq!((s, v["state"].as_str()), (StatusCode::OK, Some("review")), "{v}");
+}
+
+#[tokio::test]
 async fn a_reason_lets_a_ui_task_through_and_shows_on_the_card() {
     let app = app();
     let (num, attempt) = claimed(&app, json!({"ui_change": true})).await;
@@ -141,6 +164,26 @@ async fn a_reason_lets_a_ui_task_through_and_shows_on_the_card() {
     let card = app.state.identity_store.work_board_get(&num.to_string()).unwrap().unwrap().card;
     assert_eq!(card.media.no_media_reason, "headless host, nothing to see");
     assert_eq!(card.media.count, 0);
+}
+
+#[tokio::test]
+async fn a_reason_holds_for_its_own_attempt_only() {
+    let app = app();
+    let (num, attempt) = claimed(&app, json!({"ui_change": true})).await;
+    let (s, _) = post(&app, &format!("/agentmux/work/{num}/update"), json!({"agent_id": "a1", "attempt": attempt, "no_media_reason": "nothing to see"})).await;
+    assert_eq!(s, StatusCode::OK);
+    // Handed back and taken again: a new attempt.
+    let (s, _) = post(&app, &format!("/agentmux/work/{num}/release"), json!({"agent_id": "a1", "attempt": attempt, "result": "later"})).await;
+    assert_eq!(s, StatusCode::OK);
+    let (_, c) = post(&app, "/agentmux/work/claim", json!({"agent_id": "a1"})).await;
+    let second = c["attempt"].as_i64().unwrap();
+    assert!(second > attempt, "a new attempt: {c}");
+    let (s, v) = post(&app, &format!("/agentmux/work/{num}/submit"), json!({"agent_id": "a1", "attempt": second, "text": "done"})).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "the old reason does not carry over: {v}");
+    let (s, _) = post(&app, &format!("/agentmux/work/{num}/update"), json!({"agent_id": "a1", "attempt": second, "no_media_reason": "still nothing"})).await;
+    assert_eq!(s, StatusCode::OK);
+    let (s, v) = post(&app, &format!("/agentmux/work/{num}/submit"), json!({"agent_id": "a1", "attempt": second, "text": "done"})).await;
+    assert_eq!((s, v["state"].as_str()), (StatusCode::OK, Some("review")), "{v}");
 }
 
 #[tokio::test]

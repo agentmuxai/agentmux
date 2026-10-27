@@ -950,7 +950,7 @@ pub(crate) async fn act_as(state: &AppState, data: Value, actor: &Actor) -> Resu
             let t = get(&req.id)?;
             let media_id = req.media_id.ok_or("media_remove: media_id is required")?;
             let gone = store
-                .work_media_remove(&t.item.id, media_id, OPERATOR, now)
+                .work_media_remove(&t.item.id, media_id, &actor.name, now)
                 .map_err(|e| e.to_string())?
                 .ok_or("no such file on this task, or it is already removed")?;
             // The bytes go when no task names them.
@@ -959,14 +959,14 @@ pub(crate) async fn act_as(state: &AppState, data: Value, actor: &Actor) -> Resu
                     crate::backend::task_media::remove_content(&root, &gone.sha256, &gone.mime);
                 }
             }
-            record(state, &t.item.id, OPERATOR, OPERATOR, "media_removed", &gone.name, "", &text);
+            record(state, &t.item.id, &actor.name, actor.kind(), "media_removed", &gone.name, "", &text);
             json!({ "ok": true })
         }
         "ui_change" => {
             let t = get(&req.id)?;
             let flag = req.ui_change.ok_or("ui_change: true or false is required")?;
-            store.work_ui_set(&t.item.id, Some(flag), None, now).map_err(|e| e.to_string())?;
-            record(state, &t.item.id, OPERATOR, OPERATOR, "ui_change", if flag { "yes" } else { "no" }, "", &text);
+            store.work_ui_set(&t.item.id, Some(flag), None, 0, now).map_err(|e| e.to_string())?;
+            record(state, &t.item.id, &actor.name, actor.kind(), "ui_change", if flag { "yes" } else { "no" }, "", &text);
             json!({ "ok": true })
         }
         other => return Err(format!("kanban.act: unknown action {other:?}")),
@@ -1199,6 +1199,31 @@ mod tests {
         assert_eq!(own.body(""), "its own work");
         assert_eq!(own.body("looks right"), "its own work (looks right)");
         assert_eq!(Decider::operator().body("typed by them"), "typed by them");
+    }
+
+    #[tokio::test]
+    async fn removing_a_file_and_marking_the_ui_are_recorded_as_whoever_did_it() {
+        use crate::backend::storage::work_media::NewMedia;
+        let state = test_state();
+        let id = held_task(&state, "Naki-2").await;
+        let file = NewMedia { sha256: "ab".repeat(32), name: "a.png".into(), kind: "image".into(), mime: "image/png".into(), size: 1, attempt: 1, ..Default::default() };
+        let row = state.identity_store.work_media_add(&id, &file, 1000).unwrap().unwrap();
+
+        let me = Actor::agent("AgentY");
+        act_as(&state, json!({"action": "ui_change", "id": id, "ui_change": true}), &me).await.unwrap();
+        act_as(&state, json!({"action": "media_remove", "id": id, "media_id": row.id}), &me).await.unwrap();
+        let events = state.identity_store.work_events(&id, 20).unwrap();
+        for kind in ["ui_change", "media_removed"] {
+            let e = events.iter().find(|e| e.kind == kind).unwrap_or_else(|| panic!("{kind}: {events:?}"));
+            assert_eq!((e.actor.as_str(), e.actor_kind.as_str()), ("AgentY", "agent"), "never the operator: {e:?}");
+        }
+        let list = state.identity_store.work_media_list(&id).unwrap();
+        assert_eq!(list[0].removed_at.is_some(), true);
+        assert!(state.identity_store.work_ui_get(&id).unwrap().0);
+
+        // The operator's own move is theirs.
+        let again = act_as(&state, json!({"action": "media_remove", "id": id, "media_id": row.id}), &Actor::operator()).await;
+        assert!(again.unwrap_err().contains("already removed"));
     }
 
     #[tokio::test]

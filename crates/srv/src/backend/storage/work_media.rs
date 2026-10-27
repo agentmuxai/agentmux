@@ -45,6 +45,7 @@ pub(crate) const SCHEMA: &str = "
         work_id         TEXT PRIMARY KEY,
         ui_change       INTEGER NOT NULL DEFAULT 0,
         no_media_reason TEXT NOT NULL DEFAULT '',
+        reason_attempt  INTEGER NOT NULL DEFAULT 0,
         updated_at      INTEGER NOT NULL DEFAULT 0
     );";
 
@@ -201,15 +202,16 @@ pub(crate) fn attach_media(conn: &Connection, tasks: &mut [BoardTask]) -> Result
 }
 
 impl Store {
-    /// Attach a file to a task, inside the per-task limits. A file the task already carries (same content, not
-    /// removed) is not attached twice; the earlier row is returned.
+    /// Attach a file to a task, inside the per-task limits. A file the task already carries for this attempt (same
+    /// content, not removed) is not attached twice; the earlier row is returned. The same picture again after a
+    /// send-back is a new row, so it counts for the new attempt.
     pub fn work_media_add(&self, work_id: &str, m: &NewMedia, now_ms: i64) -> Result<Result<MediaItem, AttachError>, StoreError> {
         let mut conn = self.conn().lock().unwrap();
         let tx = conn.transaction()?;
         let existing = tx
             .query_row(
-                &format!("SELECT {MEDIA_COLS} FROM db_work_media WHERE work_id = ?1 AND sha256 = ?2 AND removed_at IS NULL"),
-                params![work_id, m.sha256],
+                &format!("SELECT {MEDIA_COLS} FROM db_work_media WHERE work_id = ?1 AND sha256 = ?2 AND attempt = ?3 AND removed_at IS NULL"),
+                params![work_id, m.sha256, m.attempt],
                 row_to_media,
             )
             .optional()?;
@@ -277,8 +279,16 @@ impl Store {
         Ok(Some(item))
     }
 
-    /// Set the UI-change flag and/or the reason a task was handed in without media; `None` leaves one as it is.
-    pub fn work_ui_set(&self, work_id: &str, ui_change: Option<bool>, no_media_reason: Option<&str>, now_ms: i64) -> Result<(), StoreError> {
+    /// Set the UI-change flag and/or the reason a task was handed in without media, given in `attempt`; `None`
+    /// leaves one as it is.
+    pub fn work_ui_set(
+        &self,
+        work_id: &str,
+        ui_change: Option<bool>,
+        no_media_reason: Option<&str>,
+        attempt: i64,
+        now_ms: i64,
+    ) -> Result<(), StoreError> {
         if ui_change.is_none() && no_media_reason.is_none() {
             return Ok(());
         }
@@ -289,7 +299,10 @@ impl Store {
             tx.execute("UPDATE db_work_ui SET ui_change = ?2, updated_at = ?3 WHERE work_id = ?1", params![work_id, ui as i64, now_ms])?;
         }
         if let Some(reason) = no_media_reason {
-            tx.execute("UPDATE db_work_ui SET no_media_reason = ?2, updated_at = ?3 WHERE work_id = ?1", params![work_id, reason, now_ms])?;
+            tx.execute(
+                "UPDATE db_work_ui SET no_media_reason = ?2, reason_attempt = ?4, updated_at = ?3 WHERE work_id = ?1",
+                params![work_id, reason, now_ms, attempt],
+            )?;
         }
         tx.execute("UPDATE db_work_cards SET updated_at = MAX(updated_at, ?2) WHERE work_id = ?1", params![work_id, now_ms])?;
         tx.execute("UPDATE db_work_queue SET updated_at = MAX(updated_at, ?2) WHERE id = ?1", params![work_id, now_ms])?;
@@ -297,12 +310,12 @@ impl Store {
         Ok(())
     }
 
-    /// Whether the task changes the UI, and the reason it was handed in without media.
-    pub fn work_ui_get(&self, work_id: &str) -> Result<(bool, String), StoreError> {
+    /// Whether the task changes the UI, the reason it was handed in without media, and the attempt that gave it.
+    pub fn work_ui_get(&self, work_id: &str) -> Result<(bool, String, i64), StoreError> {
         let conn = self.conn().lock().unwrap();
         Ok(conn
-            .query_row("SELECT ui_change, no_media_reason FROM db_work_ui WHERE work_id = ?1", params![work_id], |r| {
-                Ok((r.get::<_, i64>(0)? != 0, r.get::<_, String>(1)?))
+            .query_row("SELECT ui_change, no_media_reason, reason_attempt FROM db_work_ui WHERE work_id = ?1", params![work_id], |r| {
+                Ok((r.get::<_, i64>(0)? != 0, r.get::<_, String>(1)?, r.get::<_, i64>(2)?))
             })
             .optional()?
             .unwrap_or_default())

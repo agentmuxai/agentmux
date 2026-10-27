@@ -1,6 +1,6 @@
 # Spec: Kanban tasks carry media; a UI change that needs the operator's OK comes with screenshots or a recording
 
-**Status:** approved by the operator with the recommendations D1 to D5 of §10 (2026-10-25, through AgentY), plus: phase 2 (recording) starts right after phase 1. Phase 1 is built in #4285.
+**Status:** active. Approved by the operator with the recommendations D1 to D5 of §10 (2026-10-25, through AgentY), plus: phase 2 (recording) starts right after phase 1. Phase 1 is built in #4285 (PR #5612).
 **Date:** 2026-10-25
 **Author:** Naki-2@narko
 **Task:** Spec #4284; the build is #4285 (after this is approved)

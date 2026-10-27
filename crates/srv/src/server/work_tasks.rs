@@ -514,9 +514,6 @@ pub(super) async fn handle_work_submit(
         Ok(rows) => rows,
         Err(refused) => return refused,
     };
-    if let Some(why) = super::work_media::submit_refusal(&state, &id, item.attempts) {
-        return (StatusCode::BAD_REQUEST, Json(json!({ "ok": false, "error": why, "attached": super::work_media::attached_json(&attached) })));
-    }
     if !attached.is_empty() {
         let names = attached.iter().map(|m| m.name.as_str()).collect::<Vec<_>>().join(", ");
         record(&state, &id, &req.agent_id, "agent", "media", &item.state, &item.state, &format!("attached {names}"));
@@ -754,6 +751,15 @@ async fn finish_task(
 ) -> (StatusCode, Json<Value>) {
     let now = now_ms();
     let uid = holder_uid(caller);
+    // A UI task that waits for the operator is handed in with media (submit and complete alike); the
+    // holder's own call only, so a stale or foreign one still gets the usual conflict.
+    if let Ok(Some(item)) = state.work_store.work_queue_get(id) {
+        if holds(&item, agent_id, uid, attempt) {
+            if let Some(why) = super::work_media::submit_refusal(state, id, item.attempts) {
+                return (StatusCode::BAD_REQUEST, Json(json!({ "ok": false, "error": why })));
+            }
+        }
+    }
     let review = state
         .work_store
         .work_board_get(id)

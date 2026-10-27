@@ -202,7 +202,7 @@ pub(super) fn apply(state: &AppState, item: &WorkItem, agent: &str, uid: &str, c
         }
     }
     let reason = call.no_media_reason.as_deref().map(|r| clean(r).chars().take(MAX_CAPTION).collect::<String>());
-    if let Err(e) = state.work_store.work_ui_set(&item.id, call.ui_change, reason.as_deref(), now) {
+    if let Err(e) = state.work_store.work_ui_set(&item.id, call.ui_change, reason.as_deref(), item.attempts, now) {
         return Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))));
     }
     Ok(attached)
@@ -212,8 +212,9 @@ pub(super) fn apply(state: &AppState, item: &WorkItem, agent: &str, uid: &str, c
 /// there is none. `None` lets it through.
 pub(super) fn submit_refusal(state: &AppState, id: &str, attempt: i64) -> Option<String> {
     let review = state.work_store.work_board_get(id).ok().flatten().is_some_and(|t| t.card.review_required);
-    let (ui, reason) = state.work_store.work_ui_get(id).unwrap_or_default();
-    if !(review && ui) || !reason.trim().is_empty() {
+    let (ui, reason, reason_attempt) = state.work_store.work_ui_get(id).unwrap_or_default();
+    // A reason holds for the attempt that gave it: after a send-back the requirement is back.
+    if !(review && ui) || (!reason.trim().is_empty() && reason_attempt == attempt) {
         return None;
     }
     let has = state.work_store.work_media_in_attempt(id, attempt).unwrap_or(false);
@@ -221,12 +222,12 @@ pub(super) fn submit_refusal(state: &AppState, id: &str, attempt: i64) -> Option
 }
 
 pub(super) fn refusal_text() -> &'static str {
-    "This task changes the UI and waits for the operator's OK: attach a before/after screenshot, or a short recording for motion or an interaction (`files`), captured from your own test build. If you cannot capture one, say why in `no_media_reason`."
+    "This task changes the UI and waits for the operator's OK, so it is handed in with media: attach a before/after screenshot, or a short recording for motion or an interaction (`files` on Tasks update or submit), captured from your own test build, then hand it in again. If you cannot capture one, say why in `no_media_reason` (Tasks update or submit)."
 }
 
 /// A reminder for `update` on a UI task with no media yet, when it links a PR (mid-work, so not a refusal).
 pub(super) fn pr_reminder(state: &AppState, id: &str, attempt: i64) -> Option<&'static str> {
-    let (ui, _) = state.work_store.work_ui_get(id).unwrap_or_default();
+    let (ui, _, _) = state.work_store.work_ui_get(id).unwrap_or_default();
     (ui && !state.work_store.work_media_in_attempt(id, attempt).unwrap_or(false))
         .then_some("This task changes the UI: attach screenshots (`files`) from your own test build before you submit it.")
 }

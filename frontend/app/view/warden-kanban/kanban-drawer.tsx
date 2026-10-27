@@ -202,7 +202,8 @@ export function KanbanDrawer(props: {
 
             <KanbanAfterSection model={props.model} task={t()} onOpen={props.onOpenTask} />
 
-            <DrawerMedia task={t()} items={detail()?.media ?? []} now={props.now} busy={busy()} onAct={act} />            <Show when={docs().length > 0}>
+            <DrawerMedia task={t()} items={detail()?.media ?? []} now={props.now} busy={busy()} onAct={act} />
+            <Show when={docs().length > 0}>
                 <section class="kanban-drawer__section">
                     <h4>Document</h4>
                     <For each={docs()}>
