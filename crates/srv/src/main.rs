@@ -386,6 +386,8 @@ async fn app_main() {
     // Claude config dirs get the auto-compact window `agent:compactat` asks for.
     backend::providers::install_config(Arc::clone(&state.config_watcher));
     backend::context_reading::install_config(Arc::clone(&state.config_watcher));
+    // The Supervisor's switch and limits are read live from the settings.
+    backend::supervisor::settings::install_config(Arc::clone(&state.config_watcher));
     backend::transcript::framer::install_config(Arc::clone(&state.config_watcher));
     backend::transcript::damage::install_broker(Arc::clone(&state.broker));
     // The open workspace saves itself as it changes (SPEC_WORKSPACES_2026_10_23.md §4.1).

@@ -14,7 +14,16 @@ use crate::backend::rpc_types::*;
 use super::AppState;
 
 pub fn register(engine: &Arc<WshRpcEngine>, _state: &AppState) {
-    engine.register_typed(COMMAND_SUPERVISOR_SET_MODE, move |cmd: CommandSupervisorSetModeData, _ctx| async move {
+    engine.register_typed(COMMAND_SUPERVISOR_SET_MODE, move |cmd: CommandSupervisorSetModeData, ctx| async move {
+        // Whoever asks is recorded; the mode itself is the Swarm's to set, and
+        // refused for Steady/Drive while the Supervisor is switched off.
+        let caller = if ctx.agent_id.is_empty() { "the app".to_string() } else { format!("agent {}", ctx.agent_id) };
+        tracing::info!(
+            caller = %caller,
+            mode = cmd.mode.as_str(),
+            targets = cmd.targets.len(),
+            "supervisor.set-mode"
+        );
         Ok(set_mode(cmd).await)
     });
 }

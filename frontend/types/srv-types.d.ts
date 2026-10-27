@@ -1176,6 +1176,12 @@ declare global {
         "agent:overlapnotes"?: boolean;
         "agent:retryonreconnect"?: boolean;
         "kanban:reminders"?: boolean;
+        "supervisor:enabled"?: boolean;
+        "supervisor:steady:continuations"?: number;
+        "supervisor:steady:minutes"?: number;
+        "supervisor:drive:continuations"?: number;
+        "supervisor:drive:minutes"?: number;
+        "supervisor:noprogress"?: number;
         "agent:mcpselfheal"?: boolean;
         "agent:outdatedidsnotice"?: boolean;
         "agent:transcriptsinglecopy"?: boolean;

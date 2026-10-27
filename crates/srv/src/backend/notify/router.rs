@@ -1205,6 +1205,7 @@ mod tests {
     /// its notice from the Supervisor; any other pane from the router.
     #[test]
     fn a_supervised_pane_is_left_to_the_supervisor() {
+        crate::backend::supervisor::settings::set_enabled_for_test(true);
         let store = Store::open_in_memory().unwrap();
         crate::backend::wcore::ensure_initial_data(&store).unwrap();
         let mut block = store.get_all::<Block>().unwrap().into_iter().next().expect("seeded block");

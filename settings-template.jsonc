@@ -192,6 +192,21 @@
     // agent on this computer is also changing, so it can message them first.
     // "agent:overlapnotes":        true,
 
+    // -- Swarm Supervisor --
+    // The Supervisor judges each finished turn of a supervised Claude agent and
+    // sends it a continuation or stops and tells you. It is off until you turn
+    // it on here; panes supervised before this was a setting start at Off.
+    // "supervisor:enabled":                false,
+    // Steady: continuations in a row before it hands the agent back (1 to 100),
+    // and a time cap in minutes from the run's first continuation (0 = none).
+    // "supervisor:steady:continuations":   5,
+    // "supervisor:steady:minutes":         0,
+    // Drive: the same two limits.
+    // "supervisor:drive:continuations":    15,
+    // "supervisor:drive:minutes":          120,
+    // Stop after this many continued turns in a row that used no tool (1 to 10).
+    // "supervisor:noprogress":             2,
+
     // Remind an idle agent of the tasks waiting in its Kanban backlog, in a
     // short [AgentMux] note after two minutes idle. Off by default.
     // "kanban:reminders":          false,
