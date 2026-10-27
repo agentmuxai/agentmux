@@ -26,10 +26,12 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::{LazyLock, Mutex};
 
 use axum::extract::State;
-use axum::response::IntoResponse;
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde::{Deserialize, Serialize};
 
+use crate::backend::container_credential::ContainerGrant;
 use crate::backend::memory_delivery::{self, Entry, Reason, Tier};
 
 use super::caller::Caller;
@@ -397,12 +399,39 @@ pub(crate) struct AckRequest {
     part: usize,
 }
 
+/// A container agent asks for its own block's delivery only. Its block is the
+/// grant's (an empty one is filled in); another block's is refused, since the
+/// delivery is cached and composed per block, and a compaction summary is a
+/// block's own conversation.
+fn bind_to_grant(grant: Option<&ContainerGrant>, block_id: &mut String) -> Result<(), Response> {
+    let Some(grant) = grant else { return Ok(()) };
+    if block_id.is_empty() {
+        block_id.clone_from(&grant.block_id);
+    }
+    if *block_id != grant.block_id {
+        tracing::warn!(granted = %grant.block_id, asked = %block_id, "container agent asked for another block's memory delivery: refused");
+        return Err((StatusCode::FORBIDDEN, Json(serde_json::json!({"error": "this container token is for another block"}))).into_response());
+    }
+    Ok(())
+}
+
 /// `POST /api/v1/agent/memory/session-start/part`
 pub(crate) async fn handle_session_start_part(
     State(state): State<AppState>,
     caller: Option<axum::Extension<Caller>>,
-    Json(req): Json<PartRequest>,
-) -> impl IntoResponse {
+    grant: Option<axum::Extension<ContainerGrant>>,
+    Json(mut req): Json<PartRequest>,
+) -> Response {
+    if let Err(refused) = bind_to_grant(grant.as_deref(), &mut req.block_id) {
+        return refused;
+    }
+    session_start_part(state, caller, req, grant.is_some()).await.into_response()
+}
+
+/// `from_container`: the request's `cwd` and `config_dir` are paths inside the
+/// container, so nothing is read from the host for them. The startup files are
+/// the ones in the block's own mounted workspace, as the CLI there read them.
+async fn session_start_part(state: AppState, caller: Option<axum::Extension<Caller>>, req: PartRequest, from_container: bool) -> Json<PartResponse> {
     let Some(reason) = Reason::from_hook_source(&req.source) else {
         return Json(PartResponse { text: None, part: req.part, of: 0 });
     };
@@ -441,7 +470,7 @@ pub(crate) async fn handle_session_start_part(
                 return finish_part(&state, &key, d, req.part);
             }
             let uid = caller.as_ref().and_then(|c| c.uid()).map(str::to_string);
-            let launch = LaunchDirs::from_request(&req);
+            let launch = if from_container { LaunchDirs::of_container_block(&state, &req.block_id) } else { LaunchDirs::from_request(&req) };
             let composed = {
                 let state = state.clone();
                 let block_id = req.block_id.clone();
@@ -513,7 +542,18 @@ fn send_partless_notice(state: &AppState, key: &DeliveryKey) {
 }
 
 /// `POST /api/v1/agent/memory/session-start/ack`
-pub(crate) async fn handle_session_start_ack(State(state): State<AppState>, Json(req): Json<AckRequest>) -> impl IntoResponse {
+pub(crate) async fn handle_session_start_ack(
+    State(state): State<AppState>,
+    grant: Option<axum::Extension<ContainerGrant>>,
+    Json(mut req): Json<AckRequest>,
+) -> Response {
+    if let Err(refused) = bind_to_grant(grant.as_deref(), &mut req.block_id) {
+        return refused;
+    }
+    session_start_ack(state, req).await.into_response()
+}
+
+async fn session_start_ack(state: AppState, req: AckRequest) -> Json<serde_json::Value> {
     let Some(reason) = Reason::from_hook_source(&req.source) else {
         return Json(serde_json::json!({ "complete": false }));
     };
@@ -861,6 +901,9 @@ fn in_startup_file_item(e: &Entry) -> EntrySize {
 struct LaunchDirs {
     cwd: std::path::PathBuf,
     config_dir: Option<std::path::PathBuf>,
+    /// A container agent: only the mounted workspace's own startup files count,
+    /// not the host's parent folders or the user's host `~/.claude`.
+    workspace_only: bool,
 }
 
 impl LaunchDirs {
@@ -869,12 +912,24 @@ impl LaunchDirs {
         (!cwd.is_empty()).then(|| Self {
             cwd: cwd.into(),
             config_dir: Some(req.config_dir.trim()).filter(|c| !c.is_empty()).map(Into::into),
+            workspace_only: false,
         })
+    }
+
+    /// A container's: the workspace srv mounted for the block, which is where its
+    /// CLI reads the startup files. The paths the container reports are its own.
+    fn of_container_block(state: &AppState, block_id: &str) -> Option<Self> {
+        let block = state.mstore.get::<crate::backend::obj::Block>(block_id).ok().flatten()?;
+        let cwd = crate::backend::obj::meta_get_string(&block.meta, "cmd:cwd", "");
+        (!cwd.trim().is_empty()).then(|| Self { cwd: cwd.trim().into(), config_dir: None, workspace_only: true })
     }
 }
 
 /// The files the CLI read by itself at session start.
 fn startup_files(launch: &LaunchDirs) -> Vec<crate::backend::startup_files::StartupFile> {
+    if launch.workspace_only {
+        return crate::backend::startup_files::workspace_startup_files(&launch.cwd);
+    }
     let home = dirs::home_dir();
     crate::backend::startup_files::claude_startup_files(&launch.cwd, launch.config_dir.as_deref(), home.as_deref())
 }
@@ -902,7 +957,7 @@ fn global_memory_in_latest_startup_files(agent_uid: &str, global: &[Entry]) -> b
     else {
         return false;
     };
-    let launch = LaunchDirs { cwd: latest.start.cwd.into(), config_dir: latest.start.config_dir.filter(|c| !c.is_empty()).map(Into::into) };
+    let launch = LaunchDirs { cwd: latest.start.cwd.into(), config_dir: latest.start.config_dir.filter(|c| !c.is_empty()).map(Into::into), workspace_only: false };
     global_memory_in_startup_files(&startup_files(&launch), global)
 }
 
