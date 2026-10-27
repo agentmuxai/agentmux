@@ -63,9 +63,20 @@ const NotificationBubbles = (): JSX.Element => {
     // Kept off any block a pane or drawer marks with `data-toast-avoid` (toast-placement.ts).
     const [placement, setPlacement] = createSignal<Placement>({ bottom: USUAL_BOTTOM });
     let stack: HTMLDivElement | undefined;
+    // A marked block can change size with no DOM change (the composer's textarea grows as you type), so
+    // the marked blocks are watched for resizing too; the set is re-synced at every measure.
+    let onMarkedResize = () => {};
+    const resizeObserver = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(() => onMarkedResize());
+    const watched = new Set<Element>();
+    const syncWatched = (marked: Element[]) => {
+        for (const el of watched) if (!marked.includes(el)) (resizeObserver?.unobserve(el), watched.delete(el));
+        for (const el of marked) if (!watched.has(el)) (resizeObserver?.observe(el), watched.add(el));
+    };
     const measure = () => {
         if (!stack) return;
-        const avoid: Box[] = [...document.querySelectorAll(`[${TOAST_AVOID_ATTR}]`)].map((el) => {
+        const marked = [...document.querySelectorAll(`[${TOAST_AVOID_ATTR}]`)];
+        syncWatched(marked);
+        const avoid: Box[] = marked.map((el) => {
             const r = el.getBoundingClientRect();
             return { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
         });
@@ -92,6 +103,7 @@ const NotificationBubbles = (): JSX.Element => {
         const schedule = () => {
             if (timer === undefined) timer = setTimeout(() => ((timer = undefined), measure()), REPLACE_EVERY_MS);
         };
+        onMarkedResize = schedule;
         const observer = new MutationObserver((records) => {
             if (records.some((m) => !stack || !stack.contains(m.target))) schedule();
         });
@@ -100,6 +112,9 @@ const NotificationBubbles = (): JSX.Element => {
         window.addEventListener("scroll", schedule, true);
         const first = requestAnimationFrame(measure); // now, so a new toast never shows in the wrong place first
         onCleanup(() => {
+            onMarkedResize = () => {};
+            resizeObserver?.disconnect();
+            watched.clear();
             observer.disconnect();
             window.removeEventListener("resize", schedule);
             window.removeEventListener("scroll", schedule, true);
