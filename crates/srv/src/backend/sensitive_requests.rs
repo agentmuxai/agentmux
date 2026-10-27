@@ -49,6 +49,13 @@ impl Status {
     }
 }
 
+/// An agent that asked for something already asked for.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct Asker {
+    pub uid: String,
+    pub slug: String,
+}
+
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct Request {
     pub id: String,
@@ -67,7 +74,7 @@ pub struct Request {
     /// Why it was denied.
     pub deny_reason: String,
     /// Other agents that asked for the same thing while it was open.
-    pub also_asked_by: Vec<String>,
+    pub also_asked_by: Vec<Asker>,
     pub created_ms: i64,
     /// When it was approved, or ended.
     pub decided_ms: Option<i64>,
@@ -126,8 +133,8 @@ impl Registry {
         let mut all = self.lock();
         prune(&mut all, now_ms);
         if let Some(open) = all.iter_mut().find(|r| r.status.is_open() && r.op == spec.op && r.facts == facts) {
-            if open.requester_uid != requester_uid && !open.also_asked_by.iter().any(|s| s == requester_slug) {
-                open.also_asked_by.push(requester_slug.to_string());
+            if !open.asked_by(requester_uid) {
+                open.also_asked_by.push(Asker { uid: requester_uid.to_string(), slug: requester_slug.to_string() });
             }
             return Ok(Filed { id: open.id.clone(), joined: true });
         }
@@ -185,17 +192,26 @@ impl Registry {
         })
     }
 
-    /// The requester withdraws its own request while it is open.
+    /// An agent that asked withdraws its own ask while the request is open. The
+    /// request goes on for the others that asked; it ends when the last one withdraws.
     pub fn cancel(&self, id: &str, requester_uid: &str, now_ms: i64) -> Result<Request, String> {
         self.change(id, |r| {
-            if r.requester_uid != requester_uid {
-                return Err("FORBIDDEN: only the agent that asked can cancel it".to_string());
+            if !r.asked_by(requester_uid) {
+                return Err("FORBIDDEN: only an agent that asked can cancel it".to_string());
             }
             if !r.status.is_open() {
                 return Err(format!("request {} has ended ({})", r.id, status_word(r.status)));
             }
-            r.status = Status::Cancelled;
-            r.ended_ms = Some(now_ms);
+            if r.requester_uid != requester_uid {
+                r.also_asked_by.retain(|a| a.uid != requester_uid);
+            } else if r.also_asked_by.is_empty() {
+                r.status = Status::Cancelled;
+                r.ended_ms = Some(now_ms);
+            } else {
+                let next = r.also_asked_by.remove(0);
+                r.requester_uid = next.uid;
+                r.requester_slug = next.slug;
+            }
             Ok(())
         })
     }
@@ -219,9 +235,9 @@ impl Registry {
         self.lock().iter().find(|r| r.id == id).cloned()
     }
 
-    /// The requests `viewer_uid` may see: its own, or all of them (the super agent).
+    /// The requests `viewer_uid` may see: those it asked for, or all of them (the super agent).
     pub fn list(&self, viewer_uid: &str, all: bool) -> Vec<Request> {
-        self.lock().iter().filter(|r| all || r.requester_uid == viewer_uid).cloned().collect()
+        self.lock().iter().filter(|r| all || r.asked_by(viewer_uid)).cloned().collect()
     }
 
     fn change(&self, id: &str, edit: impl FnOnce(&mut Request) -> Result<(), String>) -> Result<Request, String> {
@@ -229,6 +245,13 @@ impl Registry {
         let r = all.iter_mut().find(|r| r.id == id).ok_or_else(|| format!("no request {id}"))?;
         edit(r)?;
         Ok(r.clone())
+    }
+}
+
+impl Request {
+    /// Whether `uid` asked for this, first or by joining.
+    pub fn asked_by(&self, uid: &str) -> bool {
+        self.requester_uid == uid || self.also_asked_by.iter().any(|a| a.uid == uid)
     }
 }
 

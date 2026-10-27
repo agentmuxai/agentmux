@@ -61,7 +61,7 @@ fn asking_again_for_the_same_thing_joins_the_open_request() {
     assert_eq!((again.joined, &again.id), (true, &first.id));
     assert_eq!((other.joined, &other.id), (true, &first.id));
     let r = reg.get(&first.id).unwrap();
-    assert_eq!(r.also_asked_by, vec!["slug-u2".to_string()], "the same agent isn't listed twice, another is");
+    assert_eq!(r.also_asked_by, vec![Asker { uid: "u2".into(), slug: "slug-u2".into() }], "the same agent isn't listed twice, another is");
     assert_eq!(r.created_ms, 0, "the clock never restarts");
     // A different version is a different request.
     assert!(!upgrade(&reg, "u1", "0.61.0", 7_000).unwrap().joined);
@@ -87,7 +87,7 @@ fn the_super_agent_approves_or_denies_only_what_is_waiting() {
 fn only_the_requester_cancels_and_only_while_open() {
     let reg = Registry::new();
     let id = upgrade(&reg, "u1", "1", 0).unwrap().id;
-    assert!(reg.cancel(&id, "u2", 1).unwrap_err().contains("only the agent that asked"));
+    assert!(reg.cancel(&id, "u2", 1).unwrap_err().contains("only an agent that asked"));
     assert_eq!(reg.get(&id).unwrap().status, Status::Asked);
     assert_eq!(reg.cancel(&id, "u1", 2).unwrap().status, Status::Cancelled);
     assert!(reg.cancel(&id, "u1", 3).unwrap_err().contains("has ended (cancelled)"));
@@ -151,4 +151,31 @@ fn requests_that_differ_only_late_in_a_long_fact_stay_apart() {
     let second = ask(format!("{prefix}agents:send"));
     assert!(!second.joined && first.id != second.id, "the second asks for different permissions");
     assert!(reg.get(&second.id).unwrap().summary.contains("agents:send"), "the banner shows the whole list");
+}
+
+#[test]
+fn an_agent_that_joined_sees_the_request_and_can_withdraw_from_it() {
+    let reg = Registry::new();
+    let id = upgrade(&reg, "u1", "1", 0).unwrap().id;
+    let joined = upgrade(&reg, "u2", "1", 1).unwrap();
+    assert_eq!((joined.joined, &joined.id), (true, &id));
+    assert_eq!(reg.list("u2", false).len(), 1, "it is in the joiner's own list");
+    assert_eq!(reg.list("u3", false).len(), 0);
+
+    // The joiner leaves; the request goes on for the first asker.
+    let after = reg.cancel(&id, "u2", 2).unwrap();
+    assert_eq!((after.status, after.also_asked_by.len()), (Status::Asked, 0));
+    assert_eq!(reg.list("u2", false).len(), 0);
+    assert_eq!(reg.cancel(&id, "u1", 3).unwrap().status, Status::Cancelled, "the last asker ends it");
+}
+
+#[test]
+fn when_the_first_asker_withdraws_the_next_one_keeps_the_request() {
+    let reg = Registry::new();
+    let id = upgrade(&reg, "u1", "1", 0).unwrap().id;
+    upgrade(&reg, "u2", "1", 1).unwrap();
+    let after = reg.cancel(&id, "u1", 2).unwrap();
+    assert_eq!((after.status, after.requester_uid.as_str(), after.requester_slug.as_str()), (Status::Asked, "u2", "slug-u2"));
+    assert!(reg.list("u1", false).is_empty() && reg.list("u2", false).len() == 1);
+    assert_eq!(reg.cancel(&id, "u2", 3).unwrap().status, Status::Cancelled);
 }
