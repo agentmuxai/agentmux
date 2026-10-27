@@ -46,11 +46,9 @@ async fn in_container(cm: &ContainerManager, name: &str, script: &str) -> String
 #[tokio::test]
 #[ignore]
 async fn itest_container_turn_answers_and_calls_a_muxapi_tool() {
-    let state = crate::server::tests::test_state();
-    let instance_key = state.auth_key.clone();
-    let tab = state.mstore.get_all::<crate::backend::obj::Tab>().unwrap().into_iter().next().expect("seeded tab");
-    let block_id = tab.blockids.first().expect("seeded agent block").clone();
-    container_listener::set_router(crate::server::build_routers(state).container);
+    let (_serial, shared) = super::container_listener_itest::begin().await;
+    let instance_key = shared.instance_key.clone();
+    let block_id = shared.block_id.clone();
 
     let cm = ContainerManager::connect().expect("connect to docker (set DOCKER_HOST)");
     cm.check_available().await.expect("docker daemon must be reachable");
@@ -103,6 +101,7 @@ async fn itest_container_turn_answers_and_calls_a_muxapi_tool() {
     let session = controller.session_id();
     let listener_url = container_listener::url().expect("the listener binds the agents network's gateway on a Linux Docker host");
     let _ = cm.remove(name, true).await;
+    container_listener::unbind();
 
     assert!(done, "the stub CLI finished its turn");
     assert!(result.contains("wget=0"), "the MuxAPI call succeeded: {result}");

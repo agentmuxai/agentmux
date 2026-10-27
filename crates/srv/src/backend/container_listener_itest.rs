@@ -4,11 +4,37 @@
 //! A container on `agentmux-agents` reaches the real router through the network's gateway with
 //! its container token, and is refused with anything else.
 
+use std::sync::OnceLock;
+
 use futures_util::StreamExt as _;
 
 use crate::backend::container::{ContainerManager, ContainerMountSpec};
 use crate::backend::container_credential::token_for_block;
 use crate::backend::container_listener;
+
+/// What the Docker tests share: they use the process-wide router and listener, whose server task
+/// lives on the runtime that bound it. So they run one at a time on one state, and each starts
+/// from an unbound listener and unbinds again before its runtime ends.
+pub(super) struct Shared {
+    pub instance_key: String,
+    pub block_id: String,
+}
+
+pub(super) async fn begin() -> (tokio::sync::MutexGuard<'static, ()>, &'static Shared) {
+    static SERIAL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    static SHARED: OnceLock<Shared> = OnceLock::new();
+    let guard = SERIAL.lock().await;
+    let shared = SHARED.get_or_init(|| {
+        let state = crate::server::tests::test_state();
+        let instance_key = state.auth_key.clone();
+        let tab = state.mstore.get_all::<crate::backend::obj::Tab>().unwrap().into_iter().next().expect("seeded tab");
+        let block_id = tab.blockids.first().expect("seeded agent block").clone();
+        container_listener::set_router(crate::server::build_routers(state).container);
+        Shared { instance_key, block_id }
+    });
+    container_listener::unbind();
+    (guard, shared)
+}
 
 /// The HTTP status `wget` inside the container got, or what it said when it got none.
 async fn status(cm: &ContainerManager, name: &str, url: &str, key: Option<&str>) -> String {
@@ -31,9 +57,8 @@ async fn status(cm: &ContainerManager, name: &str, url: &str, key: Option<&str>)
 #[tokio::test]
 #[ignore]
 async fn itest_container_listener_serves_the_agents_network_only() {
-    let state = crate::server::tests::test_state();
-    let instance_key = state.auth_key.clone();
-    container_listener::set_router(crate::server::build_routers(state).container);
+    let (_serial, shared) = begin().await;
+    let instance_key = shared.instance_key.clone();
 
     let cm = ContainerManager::connect().expect("connect to docker (set DOCKER_HOST)");
     cm.check_available().await.expect("docker daemon must be reachable");
@@ -69,6 +94,7 @@ async fn itest_container_listener_serves_the_agents_network_only() {
     let loopback = tokio::net::TcpStream::connect(format!("127.0.0.1:{port}")).await;
     println!("loopback: {loopback:?}");
     let _ = cm.remove(name, true).await;
+    container_listener::unbind();
 
     assert_eq!(got[0].1, "200", "{}", got[0].0);
     assert_eq!(got[1].1, "403", "{}", got[1].0);
