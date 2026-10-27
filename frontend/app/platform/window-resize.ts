@@ -16,7 +16,7 @@
  * style and layout, so the first frame of a resize already benefits.
  */
 
-import { createSignal } from "solid-js";
+import { createSignal, untrack } from "solid-js";
 
 /** How long after the last `resize` event the window counts as settled. */
 export const WINDOW_RESIZE_SETTLE_MS = 120;
@@ -31,12 +31,43 @@ export function windowResizing(): boolean {
 
 /** Record one resize step. Exported for tests and for resizes not seen as a `resize` event. */
 export function noteWindowResize(): void {
+    cancelDrain?.();
+    cancelDrain = null;
     if (!resizing()) setResizing(true);
     if (settleTimer != null) clearTimeout(settleTimer);
     settleTimer = setTimeout(() => {
         settleTimer = null;
         setResizing(false);
+        drainBehind();
     }, WINDOW_RESIZE_SETTLE_MS);
+}
+
+// Panes that skipped layout during a resize (a minimized pane's content, tilelayout.scss) and haven't caught up.
+// They catch up one per idle period once the window settles, not all in one long frame.
+const [behind, setBehind] = createSignal<ReadonlySet<string>>(new Set());
+let cancelDrain: (() => void) | null = null;
+
+/** A pane skipped layout during the resize: it counts as behind until it has caught up. */
+export function markLayoutBehind(id: string): void {
+    if (untrack(behind).has(id)) return;
+    setBehind(new Set(untrack(behind)).add(id));
+}
+
+/** True while the pane has skipped layout and not yet caught up. */
+export function layoutBehind(id: string): boolean {
+    return behind().has(id);
+}
+
+function drainBehind(): void {
+    cancelDrain?.();
+    cancelDrain = drainWhenIdle(() => {
+        const [next] = untrack(behind);
+        if (next == null) return false;
+        const rest = new Set(untrack(behind));
+        rest.delete(next);
+        setBehind(rest);
+        return rest.size > 0;
+    });
 }
 
 let installedOn: Window | null = null;
@@ -54,6 +85,9 @@ export function resetWindowResizeForTests(): void {
     if (settleTimer != null) clearTimeout(settleTimer);
     settleTimer = null;
     setResizing(false);
+    cancelDrain?.();
+    cancelDrain = null;
+    setBehind(new Set<string>());
     installedOn?.removeEventListener("resize", noteWindowResize);
     installedOn = null;
 }
