@@ -384,8 +384,14 @@ fn a_passs_cost_is_the_rise_in_the_sessions_total() {
     t.end_pass(Some(pass(220.5)));
     let l = t.ledger().unwrap();
     assert!((l.cost_usd - 0.5).abs() < 1e-9, "the second turn cost the rise, not the total: {}", l.cost_usd);
-    // A restart begins a new session at zero: the next total is all that pass's.
+    // A restart begins a new session at zero: the next total is all that pass's, even when it
+    // is above the old process's last total.
+    t.note_spawned();
     t.mark_turn_active_from(Some(user("c")));
+    t.end_pass(Some(pass(300.0)));
+    assert!((t.ledger().unwrap().cost_usd - 300.0).abs() < 1e-9);
+    // And one that starts below it needs no spawn note to be seen.
+    t.mark_turn_active_from(Some(user("d")));
     t.end_pass(Some(pass(0.25)));
     assert!((t.ledger().unwrap().cost_usd - 0.25).abs() < 1e-9);
 }

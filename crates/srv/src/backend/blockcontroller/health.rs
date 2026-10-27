@@ -1016,6 +1016,8 @@ impl TurnActivityTracker {
     /// The agent's process was spawned just now.
     pub fn note_spawned(&self) {
         self.spawned_ms.store((self.clock)(), Ordering::Relaxed);
+        // A new process counts its session's cost from zero, whatever the last one reached.
+        self.inner.lock().unwrap().session_cost_usd = 0.0;
     }
 
     /// The agent wrote output just now: a stdout line or a protocol frame.
