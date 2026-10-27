@@ -5,9 +5,10 @@
 import { Button } from "@/element/button";
 import { atoms } from "@/store/global";
 import clsx from "clsx";
-import { createEffect, createMemo, createSignal, For, Show, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 import "./notificationbubbles.scss";
 import { NotificationItem } from "./notificationitem";
+import { placeToasts, TOAST_AVOID_ATTR, type Box, type Placement } from "./toast-placement";
 import { useNotification } from "./usenotification";
 
 /** The most toasts shown at once before "+N more". */
@@ -53,20 +54,69 @@ const NotificationBubbles = (): JSX.Element => {
         }
     });
 
-    const floatingStyles = {
+    // Clear of the status bar (~23px) at the window's bottom edge, plus a gap; at 10px the bottom
+    // toast sat on top of it.
+    const USUAL_BOTTOM = 34;
+    const RIGHT = 58;
+    const TOP = 40;
+    // Kept off any block a pane or drawer marks with `data-toast-avoid` (toast-placement.ts).
+    const [placement, setPlacement] = createSignal<Placement>({ bottom: USUAL_BOTTOM });
+    let stack: HTMLDivElement | undefined;
+    const measure = () => {
+        if (!stack) return;
+        const avoid: Box[] = [...document.querySelectorAll(`[${TOAST_AVOID_ATTR}]`)].map((el) => {
+            const r = el.getBoundingClientRect();
+            return { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
+        });
+        const next = placeToasts({
+            viewportWidth: window.innerWidth,
+            viewportHeight: window.innerHeight,
+            width: stack.offsetWidth,
+            height: stack.offsetHeight,
+            right: RIGHT,
+            bottom: USUAL_BOTTOM,
+            top: TOP,
+            avoid,
+        });
+        const prev = placement();
+        if (prev.bottom !== next.bottom) setPlacement(next);
+    };
+    // While toasts show: re-place them when the window, a scroll or the page's layout changes, at most
+    // once a frame (and not for the stack's own style change).
+    createEffect(() => {
+        if (!isOpen() || notificationPopoverMode()) return;
+        visible();
+        let frame = 0;
+        const schedule = () => {
+            if (!frame) frame = requestAnimationFrame(() => ((frame = 0), measure()));
+        };
+        const observer = new MutationObserver((records) => {
+            if (records.some((m) => !stack || !stack.contains(m.target))) schedule();
+        });
+        observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "style", "hidden"] });
+        window.addEventListener("resize", schedule);
+        window.addEventListener("scroll", schedule, true);
+        schedule();
+        onCleanup(() => {
+            observer.disconnect();
+            window.removeEventListener("resize", schedule);
+            window.removeEventListener("scroll", schedule, true);
+            if (frame) cancelAnimationFrame(frame);
+        });
+    });
+    const floatingStyles = () => ({
         position: "fixed",
-        right: "58px",
-        // Clear of the status bar (~23px) at the window's bottom edge, plus a
-        // gap; at 10px the bottom toast sat on top of it.
-        bottom: "34px",
+        right: `${RIGHT}px`,
+        bottom: `${placement().bottom}px`,
         top: "auto",
         left: "auto",
-    };
+    });
 
     return (
         <Show when={isOpen() && !notificationPopoverMode()}>
             <div
-                style={floatingStyles as any}
+                ref={stack}
+                style={floatingStyles() as any}
                 class="notification-bubbles"
                 onClick={(e) => e.stopPropagation()}
             >

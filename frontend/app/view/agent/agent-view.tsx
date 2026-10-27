@@ -1431,7 +1431,7 @@ export const AgentPresentationView = ({
                 }}
             />
 
-            <div class="agent-composer-region">
+            <div class="agent-composer-region" data-toast-avoid>
                 <Show when={commands.helpVisible()}>
                     <SlashHelpPanel
                         commands={commands.availableCommands()}
