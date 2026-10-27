@@ -127,6 +127,16 @@ pub fn policy(command: &str) -> Option<Policy> {
     }
 }
 
+/// Commands that only read unless the request carries the named field.
+const WRITES_ONLY_WITH: &[(&str, &str)] = &[("agentlastruntime", "runtime")];
+
+/// Whether this request, of a command that can write, only reads.
+pub fn is_a_read(command: &str, data: &serde_json::Value) -> bool {
+    WRITES_ONLY_WITH
+        .iter()
+        .any(|(c, field)| *c == command && data.get(*field).map_or(true, serde_json::Value::is_null))
+}
+
 /// A command that is in no list is recorded: forgetting to decide never hides a call.
 pub fn is_recorded(command: &str, operator: bool) -> bool {
     match policy(command) {
@@ -160,5 +170,9 @@ mod tests {
         assert!(is_recorded("setmeta", false) && !is_recorded("setmeta", true));
         assert!(!is_recorded("listagents", false) && !is_recorded("controllerinput", false));
         assert!(is_recorded("a-command-nobody-decided", true), "an undecided command is recorded");
+        let read = serde_json::json!({"id": "a"});
+        let write = serde_json::json!({"id": "a", "runtime": ""});
+        assert!(is_a_read("agentlastruntime", &read) && !is_a_read("agentlastruntime", &write));
+        assert!(!is_a_read("agent.send", &read));
     }
 }

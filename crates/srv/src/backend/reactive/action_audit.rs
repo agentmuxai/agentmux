@@ -36,6 +36,9 @@ fn entry(rec: &ActionRecord, target_agent: String) -> AuditLogEntry {
     }
 }
 
+/// The most action entries the in-memory ring holds, so the rest stays for other events.
+const ACTIONS_IN_RING_MAX: usize = AUDIT_LOG_MAX / 2;
+
 impl ReactiveHandler {
     /// Record one call. A call that names only a pane is recorded against the agent
     /// running in it. Runs on the reply path, so a poisoned lock is recovered rather than
@@ -48,6 +51,46 @@ impl ReactiveHandler {
             .clone()
             .or_else(|| rec.target.block_id.as_deref().and_then(|b| handler.names_for_block(b).into_iter().next()))
             .unwrap_or_default();
-        super::audit_store::push(&mut handler.audit_log, AUDIT_LOG_MAX, entry(rec, target));
+        // Calls come in bursts; they may not push the deliveries and registrations out of the
+        // ring that `GET /agentmux/reactive/audit` serves. The audit file keeps every one.
+        let ring = &mut handler.audit_log;
+        if ring.iter().filter(|e| e.event_kind == "action").count() >= ACTIONS_IN_RING_MAX {
+            if let Some(oldest) = ring.iter().position(|e| e.event_kind == "action") {
+                ring.remove(oldest);
+            }
+        }
+        super::audit_store::push(ring, AUDIT_LOG_MAX, entry(rec, target));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backend::rpc::action_record::Target;
+    use crate::backend::rpc::actor::Actor;
+
+    fn rec(i: usize) -> ActionRecord {
+        ActionRecord { actor: Actor::Operator, command: format!("c{i}"), target: Target::default(), request_id: i.to_string(), error: None }
+    }
+
+    #[test]
+    fn a_burst_of_calls_does_not_push_the_other_events_out_of_the_ring() {
+        let handler = ReactiveHandler::new();
+        {
+            let mut inner = handler.inner.lock().unwrap();
+            for i in 0..AUDIT_LOG_MAX {
+                let mut e = entry(&rec(i), String::new());
+                e.event_kind = "delivery".to_string();
+                super::super::audit_store::push(&mut inner.audit_log, AUDIT_LOG_MAX, e);
+            }
+        }
+        for i in 0..300 {
+            handler.audit_action(&rec(i));
+        }
+        let log = handler.get_audit_log(AUDIT_LOG_MAX);
+        let actions = log.iter().filter(|e| e.event_kind == "action").count();
+        assert_eq!(log.len(), AUDIT_LOG_MAX);
+        assert_eq!(actions, ACTIONS_IN_RING_MAX);
+        assert_eq!(log[0].outcome.as_deref(), Some("c299"), "the newest call is kept");
     }
 }

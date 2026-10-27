@@ -92,7 +92,7 @@ pub fn outcome_of_response(command: &str, response: Option<&Value>) -> Result<()
 /// Records a finished call of `command`, if it is one that changes state.
 pub fn after_call(command: &str, data: &Value, ctx: &RpcContext, request_id: &str, outcome: &Result<(), String>) {
     let actor = actor_of(ctx);
-    if !super::action_commands::is_recorded(command, actor == Actor::Operator) {
+    if !super::action_commands::is_recorded(command, actor == Actor::Operator) || super::action_commands::is_a_read(command, data) {
         return;
     }
     let record = ActionRecord {
