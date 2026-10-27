@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-26
 **Author:** Opaz, for Kanban #4863, at the operator's request via AgentY
-**Status:** approved 2026-10-26 by the operator ("go with best recommendations", relayed by AgentY): D2 and D3 as recommended in §7. Build is Kanban #4864 (P0, P1; P2 rides the origin spec). Uncommitted by instruction; ships with the code that implements it.
+**Status:** active: approved 2026-10-26 by the operator ("go with best recommendations", relayed by AgentY): D2 and D3 as recommended in §7. Build is Kanban #4864 (P0, P1; P2 rides the origin spec). Uncommitted by instruction; ships with the code that implements it.
 **Operator's words (via AgentY):** "there are messages that agents send each other via the actual claude cli harness, we want visibility into that talking. It would both show in the agent pane in real time when received/sent, and in our messaging auditing/tooling."
 **Related:** `SPEC_MESSAGE_ORIGIN_AND_ONE_CONTAINER_2026_10_25.md` (the typed origin and the one container this spec adds one kind to; its row 17 names "the CLI's own injected text" and leaves it out of scope), `SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01.md`, `SPEC_JEKT_DELIVERY_STATES_AND_MAILBOX_2026_10_01.md` (delivery states), `crates/srv/src/backend/reactive/audit_store.rs` (the jekt audit file).
 
