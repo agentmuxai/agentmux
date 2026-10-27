@@ -11,6 +11,7 @@
 
 pub mod activity_watcher;
 pub mod audit_store;
+pub mod cli_native_audit;
 pub mod handler;
 pub mod held_notes;
 pub mod progress_watcher;

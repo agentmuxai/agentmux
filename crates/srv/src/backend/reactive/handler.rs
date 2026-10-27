@@ -78,7 +78,7 @@ pub struct Handler {
     block_liveness: Option<BlockLivenessProbe>,
     /// Tries an unbound name as a display name's route or a former name (`former_slug.rs`).
     alias_resolvers: former_slug::AliasResolvers,
-    audit_log: Vec<AuditLogEntry>,
+    pub(super) audit_log: Vec<AuditLogEntry>,
     /// The UID of the delivery in flight
     /// (`InjectionRequest::audit_source_uid`), copied onto every audit entry
     /// it writes. Set and restored around one `inject_message_inner` call,
@@ -1548,6 +1548,7 @@ impl Handler {
             audit_source_uid: self.delivery_source_uid.clone(),
             lan_claimed_uid: self.delivery_lan_claimed_uid.clone(),
             wan: self.delivery_wan.clone(),
+            cli_native: None,
         };
 
         super::audit_store::push(&mut self.audit_log, AUDIT_LOG_MAX, entry);
@@ -1585,6 +1586,7 @@ impl Handler {
             audit_source_uid: String::new(),
             lan_claimed_uid: String::new(),
             wan: None,
+            cli_native: None,
         };
 
         super::audit_store::push(&mut self.audit_log, AUDIT_LOG_MAX, entry);
