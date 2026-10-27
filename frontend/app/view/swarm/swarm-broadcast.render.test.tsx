@@ -77,6 +77,29 @@ describe("BroadcastDock", () => {
         expect(second.container.querySelectorAll(".swarm-broadcast-recent-row")).toHaveLength(1);
     });
 
+    it("keeps the message when the call itself fails, and records nothing", async () => {
+        const model = modelStub(["a"]);
+        (model.broadcastToSelection as unknown as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("rpc down"));
+        const { container } = render(() => <BroadcastDock model={model} />);
+        fireEvent.input(box(container), { target: { value: "do not lose me" } });
+        fireEvent.click(sendButton(container));
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(box(container).value).toBe("do not lose me");
+        expect(container.querySelectorAll(".swarm-broadcast-recent-row")).toHaveLength(0);
+    });
+
+    it("does not count an unreachable agent as a failed delivery", async () => {
+        const model = modelStub(["a", "ghost"], { succeeded: ["a"], failed: [{ id: "ghost", error: "no longer listed" }] });
+        const { container } = render(() => <BroadcastDock model={model} />);
+        fireEvent.input(box(container), { target: { value: "hi" } });
+        fireEvent.click(sendButton(container));
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(container.querySelector(".swarm-broadcast-recent-meta")!.textContent).toContain("1 sent · 1 delivered");
+        expect(container.querySelector(".swarm-broadcast-recent-meta")!.textContent).not.toContain("failed");
+    });
+
     it("says why fewer agents get the message than are selected", () => {
         const { container } = render(() => <BroadcastDock model={modelStub(["a", "ghost"])} />);
         expect(container.querySelector(".swarm-fleet-broadcast-gap")!.textContent).toBe("1 of 2 can't be messaged: no longer listed");

@@ -14,7 +14,6 @@ import type { FleetResultEntry, SwarmViewModel } from "./swarm-model";
 import { remoteSections } from "./swarm-remote";
 import { Button, IconButton } from "@/app/element/ui";
 
-
 // Staged rollout only offered once a selection is large enough that
 // blast-radius capping is actually meaningful (spec §5.3) — for a
 // handful of targets the whole point of staging (canary-first,

@@ -5,7 +5,7 @@
 // broadcasts sent from this Swarm. The draft and the recent list live outside the section, so
 // switching away and back loses neither. docs/specs/SPEC_SWARM_SECTIONS_SUPERVISOR_SETTINGS_AND_KANBAN_2026_10_24.md §3.3.
 
-import { createMemo, createSignal, For, Show, type Accessor, type JSX, type Setter } from "solid-js";
+import { createMemo, createSignal, For, onCleanup, Show, type Accessor, type JSX, type Setter } from "solid-js";
 import { Button, TextArea } from "@/app/element/ui";
 import { gapSummary, partitionTargets } from "./swarm-fleet-targets";
 import type { SwarmViewModel } from "./swarm-model";
@@ -62,20 +62,33 @@ export function BroadcastDock(props: { model: SwarmViewModel }): JSX.Element {
     const selected = () => model.selectedBlockIdsAtom().size;
     const gap = () => gapSummary(split().unreachable, selected(), "broadcast");
     const canSend = () => state.draft().trim().length > 0 && recipients() > 0 && !model.fleetActionInFlightAtom();
+    // The ages in the recent list tick; the list itself changes only on a send.
+    const [now, setNow] = createSignal(Date.now());
+    const ticker = setInterval(() => setNow(Date.now()), 30_000);
+    onCleanup(() => clearInterval(ticker));
 
     const send = async (): Promise<void> => {
         if (!canSend()) return;
         const text = state.draft().trim();
         const count = recipients();
+        // The result also lists the targets that could not be reached; they are not among `count`.
+        const unreachable = split().unreachable.length;
         state.setDraft("");
-        const result = await model.broadcastToSelection(text);
+        let result;
+        try {
+            result = await model.broadcastToSelection(text);
+        } catch {
+            // The call itself failed: nothing was sent, so the message is not lost.
+            if (state.draft() === "") state.setDraft(text);
+            return;
+        }
         state.setRecent((list) =>
             withRecent(list, {
                 text,
                 at: Date.now(),
                 recipients: count,
                 delivered: result.succeeded.length,
-                failed: result.failed.length,
+                failed: Math.max(0, result.failed.length - unreachable),
             })
         );
     };
@@ -111,7 +124,7 @@ export function BroadcastDock(props: { model: SwarmViewModel }): JSX.Element {
                             <div class="swarm-broadcast-recent-row" title={r.text}>
                                 <span class="swarm-broadcast-recent-text">{r.text}</span>
                                 <span class="swarm-broadcast-recent-meta">
-                                    {ago(r.at, Date.now())} · {r.recipients} sent · {r.delivered} delivered
+                                    {ago(r.at, now())} · {r.recipients} sent · {r.delivered} delivered
                                     <Show when={r.failed > 0}> · {r.failed} failed</Show>
                                 </span>
                             </div>
