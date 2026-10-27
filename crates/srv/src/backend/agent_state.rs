@@ -37,6 +37,24 @@ pub const META_AWAITING_USER: &str = "term:awaiting_user";
 /// ([`run_accounts_of_block`]).
 pub const RUN_ACCOUNT_META_KEY: &str = "agent:run_account";
 
+/// Written by the agent pane's launch when it stops at "needs sign-in", and
+/// cleared once the pane registers its controller. Such a pane has no
+/// controller, so nothing else says why: a message to it failed with "no
+/// controller for block" instead of being held for the sign-in
+/// ([`current_state_at`], [`unavailable_of_block`]).
+pub const LAUNCH_BLOCKED_META_KEY: &str = "agent:launch_blocked";
+
+/// When (unix ms) the launch stopped there.
+pub const LAUNCH_BLOCKED_AT_META_KEY: &str = "agent:launch_blocked_at_ms";
+
+/// The [`LAUNCH_BLOCKED_META_KEY`] value for a launch waiting on a sign-in.
+pub const LAUNCH_BLOCKED_SIGN_IN: &str = "sign_in";
+
+/// The pane's launch stopped at "needs sign-in" and has not registered since.
+fn launch_blocked_on_sign_in(block: &Block) -> bool {
+    crate::backend::obj::meta_get_string(&block.meta, LAUNCH_BLOCKED_META_KEY, "") == LAUNCH_BLOCKED_SIGN_IN
+}
+
 /// An agent's state as the wire reports it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
@@ -134,15 +152,19 @@ pub fn decide(inputs: &StateInputs) -> Option<AgentState> {
 }
 
 /// The block's state now: its controller's runtime status and the block's
-/// `term:awaiting_user` and `agent:last_failure`. `None` without a controller,
-/// or when the block can't be read.
+/// `term:awaiting_user` and `agent:last_failure`. `None` without a controller
+/// (unless its launch stopped at "needs sign-in": `signed_out`), or when the
+/// block can't be read.
 pub fn current_state(mstore: &Store, block_id: &str) -> Option<AgentState> {
     current_state_at(mstore, block_id, agentmux_common::time::now_ms_u64())
 }
 
 /// [`current_state`] at `now_ms`.
 pub fn current_state_at(mstore: &Store, block_id: &str, now_ms: u64) -> Option<AgentState> {
-    let controller = blockcontroller::get_controller(block_id)?;
+    let Some(controller) = blockcontroller::get_controller(block_id) else {
+        let block = mstore.get::<Block>(block_id).ok()??;
+        return launch_blocked_on_sign_in(&block).then_some(AgentState::SignedOut);
+    };
     let status = controller.get_runtime_status();
     let block = mstore.get::<Block>(block_id).ok()??;
     decide(&StateInputs {
@@ -218,7 +240,17 @@ pub fn unavailable_of_block(mstore: &Store, identity: Option<&Store>, block_id: 
         return None;
     }
     let block = mstore.get::<Block>(block_id).ok()??;
-    let failure = failure_of_block(&block)?;
+    let failure = match failure_of_block(&block) {
+        Some(failure) => failure,
+        // A pane that stopped at "needs sign-in" has run nothing, so no failure of its own.
+        None if state == AgentState::SignedOut && launch_blocked_on_sign_in(&block) => StoredFailure {
+            code: FailureClass::Auth,
+            title: "Needs sign-in".to_string(),
+            resets_at_ms: None,
+            at_ms: block.meta.get(LAUNCH_BLOCKED_AT_META_KEY).and_then(|at| at.as_u64()),
+        },
+        None => return None,
+    };
     // The failure's own time when it has one: the tracker starts over at every srv start.
     let tracked = TRACKER.record(block_id, Some(state), now_ms).map_or(now_ms, |s| s.since_ms);
     let since_ms = failure.at_ms.map_or(tracked, |at| at.min(now_ms));
@@ -707,6 +739,44 @@ mod tests {
         }
         store.insert(&mut block).expect("insert block");
         block.oid
+    }
+
+    #[test]
+    fn a_pane_stopped_at_sign_in_is_signed_out_though_it_has_no_controller() {
+        let store = store();
+        let at = 5_000_u64;
+        let blocked = insert_block(
+            &store,
+            &[
+                (LAUNCH_BLOCKED_META_KEY, serde_json::json!(LAUNCH_BLOCKED_SIGN_IN)),
+                (LAUNCH_BLOCKED_AT_META_KEY, serde_json::json!(at)),
+            ],
+        );
+        assert_eq!(current_state_at(&store, &blocked, 9_000), Some(AgentState::SignedOut));
+        let unavailable = unavailable_of_block(&store, None, &blocked, 9_000).expect("unavailable");
+        assert_eq!(unavailable.state, AgentState::SignedOut);
+        assert_eq!(unavailable.code, FailureClass::Auth);
+        assert_eq!(unavailable.since_ms, at);
+        assert_eq!(unavailable.reason(), "Needs sign-in");
+    }
+
+    #[test]
+    fn a_pane_with_no_controller_and_no_blocked_launch_has_no_state() {
+        let store = store();
+        let plain = insert_block(&store, &[]);
+        assert_eq!(current_state_at(&store, &plain, 9_000), None);
+        assert!(unavailable_of_block(&store, None, &plain, 9_000).is_none());
+        let other = insert_block(&store, &[(LAUNCH_BLOCKED_META_KEY, serde_json::json!("something_else"))]);
+        assert_eq!(current_state_at(&store, &other, 9_000), None);
+    }
+
+    #[test]
+    fn the_blocked_launch_flag_does_not_outlive_a_controller() {
+        let store = store();
+        let blocked = insert_block(&store, &[(LAUNCH_BLOCKED_META_KEY, serde_json::json!(LAUNCH_BLOCKED_SIGN_IN))]);
+        test_support::register_stub(&blocked, BLOCK_CONTROLLER_PERSISTENT, STATUS_RUNNING, false);
+        assert_eq!(current_state_at(&store, &blocked, 9_000), Some(AgentState::Idle));
+        assert!(unavailable_of_block(&store, None, &blocked, 9_000).is_none());
     }
 
     #[test]
