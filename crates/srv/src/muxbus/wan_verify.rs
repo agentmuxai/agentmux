@@ -296,12 +296,21 @@ async fn refresh_key_revocations(wan: &WanIdentityStore, dir: &Directory<'_>, no
         let url = format!("{}/wan-key-revocations?since={since}", dir.base_url.trim_end_matches('/'));
         match get_json::<KeyRevocationFeed>(dir, &url).await {
             Fetched::Found(feed) => {
+                let mut all_kept = true;
                 for revocation in &feed.revocations {
                     match wan.revoked_key_put(revocation, now) {
                         Ok(true) => {}
                         Ok(false) => tracing::warn!("wan verify: the directory's key revocation feed held one that does not verify: ignored"),
-                        Err(e) => tracing::warn!(error = %e, "wan verify: could not keep a key revocation"),
+                        Err(e) => {
+                            tracing::warn!(error = %e, "wan verify: could not keep a key revocation");
+                            all_kept = false;
+                        }
                     }
+                }
+                // A revocation that could not be stored must be read again:
+                // the cursor stays where it was, and the next read retries.
+                if !all_kept {
+                    return;
                 }
                 let next = feed.next_since.unwrap_or(since).max(since);
                 let _ = wan.key_revocation_feed_note(&directory, now, Some(next));

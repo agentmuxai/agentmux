@@ -233,6 +233,27 @@ async fn the_feed_is_read_at_most_every_five_minutes_and_from_where_it_left_off(
 }
 
 #[tokio::test]
+async fn a_revocation_that_could_not_be_stored_is_read_again_from_the_same_place() {
+    let w = world();
+    let s = stub(record_json(&w)).await;
+    *s.feed.lock().unwrap() = (StatusCode::OK, feed_of(&[w.revocation()], 777, false));
+    let directory = crate::muxbus::wan_publish::directory_id(&s.url, "");
+    let path = w._dirs.1.path().join("wan.db");
+
+    // Storing fails (the table cannot be written).
+    rusqlite::Connection::open(&path).unwrap().execute_batch("ALTER TABLE wan_revoked_keys RENAME TO wan_revoked_keys_away;").unwrap();
+    w.verify(&s, "m1", NOW).await;
+    assert_eq!(w.receiver.key_revocation_feed_state(&directory).unwrap().0, 0, "the cursor did not move past it");
+
+    // The store works again: the next read, an interval later, gets the same entry and keeps it.
+    rusqlite::Connection::open(&path).unwrap().execute_batch("ALTER TABLE wan_revoked_keys_away RENAME TO wan_revoked_keys;").unwrap();
+    let v = w.verify(&s, "m2", NOW + 6 * 60).await;
+    assert_eq!(v, WanVerdict::failed("wan_key_revoked"));
+    assert_eq!(s.feed_queries.lock().unwrap().last().unwrap(), "since=0");
+    assert_eq!(w.receiver.key_revocation_feed_state(&directory).unwrap().0, 777);
+}
+
+#[tokio::test]
 async fn pages_of_the_feed_are_followed_and_a_stuck_cursor_stops() {
     let w = world();
     let s = stub(record_json(&w)).await;
