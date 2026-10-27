@@ -583,7 +583,10 @@ pub(crate) async fn act_as(state: &AppState, data: Value, actor: &Actor) -> Resu
                     now,
                 )
                 .map_err(|e| e.to_string())?;
-            store.work_card_edit(id, None, req.review, req.repo.as_deref(), now).map_err(|e| e.to_string())?;
+            // Words an agent put in the payload are the agent's: a later start quotes them under its name
+            // instead of delivering them as the operator's.
+            let author = (!actor.is_operator && req.payload.is_some()).then_some(actor.name.as_str());
+            store.work_card_edit(id, None, req.review, req.repo.as_deref(), author, now).map_err(|e| e.to_string())?;
             let mut body = String::new();
             if let Some(after) = after {
                 body = after_words(store, &after);
@@ -619,7 +622,7 @@ pub(crate) async fn act_as(state: &AppState, data: Value, actor: &Actor) -> Resu
                 None => {}
             }
             if let Some(rank) = req.rank {
-                store.work_card_edit(id, Some(rank), None, None, now).map_err(|e| e.to_string())?;
+                store.work_card_edit(id, Some(rank), None, None, None, now).map_err(|e| e.to_string())?;
             }
             json!({ "ok": true })
         }

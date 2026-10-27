@@ -466,6 +466,7 @@ impl Store {
         rank: Option<f64>,
         review_required: Option<bool>,
         repo: Option<&str>,
+        filed_by: Option<&str>,
         now_ms: i64,
     ) -> Result<(), StoreError> {
         let conn = self.conn().lock().unwrap();
@@ -474,9 +475,10 @@ impl Store {
                 SET rank = COALESCE(?2, rank),
                     review_required = COALESCE(?3, review_required),
                     repo = COALESCE(?4, repo),
-                    updated_at = ?5
+                    filed_by = COALESCE(?5, filed_by),
+                    updated_at = ?6
               WHERE work_id = ?1",
-            params![work_id, rank, review_required.map(|b| b as i64), repo, now_ms],
+            params![work_id, rank, review_required.map(|b| b as i64), repo, filed_by, now_ms],
         )?;
         Ok(())
     }

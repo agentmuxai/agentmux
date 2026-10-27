@@ -414,8 +414,12 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                     body[key] = v.clone();
                 }
             }
-            if let Some(target) = arguments.get("target_agent").and_then(|v| v.as_str()) {
-                body["target"] = serde_json::json!(target);
+            if let Some(target) = arguments.get("target_agent").and_then(|v| v.as_str()).filter(|t| !t.is_empty()) {
+                // Resolve the typed name now, as `enqueue` does, so a stable id still finds the agent after a rename.
+                body["target"] = match resolve_agent_target_at_boundary(&client, local_url, auth_key, target).await? {
+                    crate::identity::BoundaryResolution::NoSuchAgent => anyhow::bail!("{}", no_such_target(target)),
+                    r => serde_json::json!(r.uid().unwrap_or_else(|| target.to_string())),
+                };
             }
             let url = format!("{}/agentmux/work/act", local_url.trim_end_matches('/'));
             let resp = client.post(&url).header(AUTH_KEY_HEADER, auth_key).json(&body).send().await

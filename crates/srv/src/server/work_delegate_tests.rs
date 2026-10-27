@@ -219,3 +219,20 @@ async fn the_act_route_does_not_decide_in_the_operators_name() {
     }
     assert!(w.events(num).iter().all(|e| e.actor_kind != "operator" || e.kind == "created"), "nothing is recorded as the operator");
 }
+
+#[tokio::test]
+async fn words_an_agent_puts_in_an_operators_task_stay_the_agents() {
+    let w = world(None);
+    let (_, made) = w.post("/agentmux/work", json!({"title": "Mine", "payload": "what I wrote", "target_agent": unique("someone")})).await;
+    let num = made["num"].as_i64().unwrap();
+    let id = resolve_id(&w.state, &num.to_string());
+    let filed_by = || w.state.work_store.work_board_get(&id).unwrap().unwrap().card.filed_by;
+    assert_eq!(filed_by(), "");
+    // Editing something other than the payload leaves the authorship alone.
+    let (status, body) = w.post_as_leader("/agentmux/work/act", json!({"agent_id": w.leader_slug, "action": "edit", "id": num.to_string(), "priority": 2})).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(filed_by(), "");
+    let (status, body) = w.post_as_leader("/agentmux/work/act", json!({"agent_id": w.leader_slug, "action": "edit", "id": num.to_string(), "payload": "agent words"})).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(filed_by(), w.leader_slug, "a later start quotes the payload under the agent's name");
+}
