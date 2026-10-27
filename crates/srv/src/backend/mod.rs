@@ -142,6 +142,7 @@ pub mod sampler;
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub mod own_instance;
 pub mod stall_watch;
+pub mod net_counters;
 pub mod sysinfo;
 pub mod blockstats_detail;
 pub mod tower_agentmux;
