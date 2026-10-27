@@ -62,6 +62,7 @@ pub mod cli_install;
 pub mod cli_prune;
 pub mod cli_notice;
 pub mod startup_files;
+pub mod confined_read;
 pub mod workdir_fs;
 pub mod model_catalog;
 pub mod codex_models;

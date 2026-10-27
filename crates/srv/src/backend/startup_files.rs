@@ -119,7 +119,8 @@ fn startup_files_confined<'a>(
     out
 }
 
-/// Whether `path` may be read: with a `confine` folder, only if it resolves inside it.
+/// Whether `path` resolves inside the `confine` folder. For the skill listing, which reads no content (a
+/// count of names); file contents go through `confined_read`, which checks the file it opened.
 fn within(path: &Path, confine: Option<&Path>) -> bool {
     match confine {
         None => true,
@@ -137,10 +138,7 @@ fn add_instructions(
     out: &mut Vec<StartupFile>,
     confine: Option<&Path>,
 ) {
-    if !within(path, confine) {
-        return;
-    }
-    let Ok(text) = std::fs::read_to_string(path) else { return };
+    let Some(text) = crate::backend::confined_read::read_to_string_within(path, confine) else { return };
     let key = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     if !seen.insert(key) {
         return;
@@ -265,10 +263,7 @@ fn skills_item(cwd: &Path, home: Option<&Path>, confine: Option<&Path>) -> Optio
 /// agent's signing keys, so its text never leaves this function.
 fn mcp_item(cwd: &Path, home: Option<&Path>, confine: Option<&Path>) -> Option<StartupFile> {
     let path = cwd.join(".mcp.json");
-    if !within(&path, confine) {
-        return None;
-    }
-    let json: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).ok()?).ok()?;
+    let json: serde_json::Value = serde_json::from_str(&crate::backend::confined_read::read_to_string_within(&path, confine)?).ok()?;
     let names: Vec<&str> = json.get("mcpServers")?.as_object()?.keys().map(String::as_str).collect();
     if names.is_empty() {
         return None;
