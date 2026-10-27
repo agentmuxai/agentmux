@@ -277,6 +277,10 @@ pub struct SettingsType {
     #[serde(rename = "window:showmenubar", default, skip_serializing_if = "is_false")]
     pub window_show_menu_bar: bool,
 
+    /// Draw the status bar (absent = on). The frontend reads it.
+    #[serde(rename = "window:showstatusbar", default, skip_serializing_if = "Option::is_none")]
+    pub window_show_status_bar: Option<bool>,
+
     #[serde(rename = "window:nativetitlebar", default, skip_serializing_if = "is_false")]
     pub window_native_title_bar: bool,
 
