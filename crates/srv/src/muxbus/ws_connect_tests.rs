@@ -165,3 +165,14 @@ async fn a_host_in_no_proxy_connects_direct() {
     let (ws, _) = connect_with_env(format!("ws://127.0.0.1:{port}/socket"), &get).await.unwrap();
     drop(ws);
 }
+
+#[tokio::test]
+async fn an_ipv6_literal_is_sent_to_the_proxy_in_one_pair_of_brackets() {
+    let (proxy_port, seen) = fake_proxy("HTTP/1.1 403 Forbidden\r\n\r\n", None).await;
+    let proxy = format!("http://127.0.0.1:{proxy_port}");
+    let get = env(&[("HTTP_PROXY", proxy.as_str())]);
+    let _ = connect_with_env("ws://[2001:db8::1]:9/socket", &get).await.unwrap_err();
+    let head = seen.await.unwrap();
+    assert!(head.starts_with("CONNECT [2001:db8::1]:9 HTTP/1.1\r\n"), "{head}");
+    assert!(head.contains("Host: [2001:db8::1]:9\r\n"), "{head}");
+}

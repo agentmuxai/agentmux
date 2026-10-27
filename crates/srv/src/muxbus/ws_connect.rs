@@ -186,7 +186,8 @@ pub(crate) async fn connect(request: impl IntoClientRequest + Unpin) -> Result<(
 async fn connect_with_env(request: impl IntoClientRequest + Unpin, get: impl Fn(&str) -> Option<String>) -> Result<(Socket, Response), Error> {
     let request = request.into_client_request()?;
     let uri = request.uri();
-    let host = uri.host().ok_or(Error::Url(UrlError::NoHostName))?.to_string();
+    // `Uri::host` keeps the brackets of an IPv6 literal; `tunnel` adds them back.
+    let host = uri.host().ok_or(Error::Url(UrlError::NoHostName))?.trim_matches(['[', ']']).to_string();
     let tls = uri.scheme_str() == Some("wss");
     let port = uri.port_u16().unwrap_or(if tls { 443 } else { 80 });
     match proxy_for(get, &host, port, tls) {
