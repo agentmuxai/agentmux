@@ -928,12 +928,7 @@ impl LaunchDirs {
 /// The files the CLI read by itself at session start.
 fn startup_files(launch: &LaunchDirs) -> Vec<crate::backend::startup_files::StartupFile> {
     if launch.workspace_only {
-        return crate::backend::startup_files::claude_startup_files_with_ancestors(
-            &launch.cwd,
-            None,
-            None,
-            std::iter::once(launch.cwd.as_path()),
-        );
+        return crate::backend::startup_files::workspace_startup_files(&launch.cwd);
     }
     let home = dirs::home_dir();
     crate::backend::startup_files::claude_startup_files(&launch.cwd, launch.config_dir.as_deref(), home.as_deref())
