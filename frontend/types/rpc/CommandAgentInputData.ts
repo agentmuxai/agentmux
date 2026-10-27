@@ -50,4 +50,9 @@ attachments?: Array<AttachmentRef>,
  * starting a new one. Set only for that flush, never for a fresh send.
  * SPEC_AGENT_TURN_MODEL_AND_LIVE_STATUS_2026_10_08.md §4.3 (J3).
  */
-joins_turn?: number, };
+joins_turn?: number, 
+/**
+ * Not a message: begin a new container agent's start (image, container, CLI) in the background so its
+ * first message finds it ready. Does nothing for any other agent, or for a pane that has run a turn.
+ */
+prestart?: boolean, };
