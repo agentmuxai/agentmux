@@ -24,8 +24,7 @@
 //! string through `sh -c`/`cmd /c` — so there is no interpolation surface
 //! even though nothing in this table is user-suppliable today.
 //!
-//! **Only the user can start an install** (SPEC_ONE_CLICK_VENDOR_CLI_INSTALL_2026_10_20.md §4.3,
-//! §6.1): before anything runs, srv asks the person in the approval window
+//! **Only the user can start an install:** before anything runs, srv asks the person in the approval window
 //! ([`ask_user`](crate::server::app_api::connections::ask_user), served by the window host, which
 //! no pane process can reach or answer). The panel's own confirm is not enough: every agent holds
 //! the key this RPC takes. With no window to ask in, or no answer, nothing runs.
@@ -497,6 +496,22 @@ fn require_approval(answer: Result<UserAnswer, String>, tool_id: &str) -> Result
     }
 }
 
+/// A tool's install claim, released when dropped while `armed`: a refusal, or the request ending
+/// before the install starts.
+struct ClaimGuard {
+    registry: Arc<crate::server::install_handlers::InstallSessionRegistry>,
+    key: String,
+    armed: bool,
+}
+
+impl Drop for ClaimGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            self.registry.release_system_tool(&self.key);
+        }
+    }
+}
+
 /// Ask the user, in the approval window over the main window, whether `step` may run.
 async fn approve_install(state: &AppState, tool_id: &str, step: &SystemInstallStep) -> Result<(), String> {
     require_approval(ask_user(state, "", approval_question(tool_id, step)).await, tool_id)
@@ -545,8 +560,6 @@ pub fn register_system_install_handlers(engine: &Arc<WshRpcEngine>, state: &AppS
                         req.tool_id
                     )
                 })?;
-                // Before anything is claimed or run: the user's yes, asked by srv itself.
-                approve_install(&app, &req.tool_id, &step).await?;
                 let claim_key = claim_key_for_tool(&req.tool_id).to_string();
                 if !registry.try_claim_system_tool(&claim_key) {
                     return Err(format!(
@@ -554,6 +567,12 @@ pub fn register_system_install_handlers(engine: &Arc<WshRpcEngine>, state: &AppS
                         req.tool_id
                     ));
                 }
+                // Held while the user is asked, so a second request for the tool is refused at once
+                // instead of showing a second window. Let go unless the install starts.
+                let mut claim = ClaimGuard { registry: registry.clone(), key: claim_key.clone(), armed: true };
+                // Before anything runs: the user's yes, asked by srv itself.
+                approve_install(&app, &req.tool_id, &step).await?;
+                claim.armed = false;
                 let session_id = format!("sysinstall-{}", uuid::Uuid::new_v4());
                 tracing::info!(
                     session_id = %session_id,
@@ -757,6 +776,19 @@ mod tests {
         assert!(state.host_ipc.lock().await.is_none());
         let err = approve_install(&state, "git", &step()).await.unwrap_err();
         assert!(err.contains("no AgentMux window is connected"), "{err}");
+    }
+
+    /// The claim held while the user is asked goes back unless the install starts.
+    #[tokio::test]
+    async fn the_claim_is_released_on_a_refusal_and_kept_for_an_install() {
+        let registry = crate::server::tests::test_state().install_sessions.clone();
+        let guard = |armed| ClaimGuard { registry: registry.clone(), key: "git".into(), armed };
+        assert!(registry.try_claim_system_tool("git"));
+        drop(guard(true));
+        assert!(registry.try_claim_system_tool("git"), "released: the next request can claim it");
+        drop(guard(false));
+        assert!(!registry.try_claim_system_tool("git"), "kept: the install owns it");
+        registry.release_system_tool("git");
     }
 
     #[test]

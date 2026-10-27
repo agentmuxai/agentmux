@@ -1338,7 +1338,8 @@
         },
         {
             "command": "toolchain.install_system_tool",
-            "method": "ToolchainInstallSystemToolCommand"
+            "method": "ToolchainInstallSystemToolCommand",
+            "opts": "{ timeout: 150000, ...opts }"
         },
         {
             "command": "toolchain.prune",
