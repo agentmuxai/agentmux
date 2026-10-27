@@ -21,12 +21,11 @@
 //!    the job stays open for whatever the block starts next. `Drop` closes
 //!    it, which `KILL_ON_JOB_CLOSE` turns into the same kill.
 
-use std::collections::HashMap;
 use std::ffi::OsString;
 use std::mem::{size_of, zeroed};
 use std::os::windows::ffi::OsStringExt;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::System::JobObjects::{
@@ -194,13 +193,17 @@ impl TrackerHandle for JobObjectTracker {
         }
         let parents = query_parent_pids(&pids);
         pids.into_iter()
-            .map(|pid| TrackedProcess {
-                pid,
-                command: query_command_line(pid),
-                rss_bytes: query_rss(pid),
-                started_at_ms: 0, // deferred; uses NtQueryInformationProcess — skip for v1
-                parent_pid: parents.get(&pid).copied(),
-                exe: String::new(),
+            .map(|pid| {
+                let facts = query_facts(pid);
+                let parent_pid = parent_of(parents.as_deref(), pid, facts.created);
+                TrackedProcess {
+                    pid,
+                    command: facts.command,
+                    rss_bytes: facts.rss,
+                    started_at_ms: 0, // deferred; uses NtQueryInformationProcess — skip for v1
+                    parent_pid,
+                    exe: String::new(),
+                }
             })
             .collect()
     }
@@ -336,101 +339,63 @@ unsafe impl Sync for JobObjectTracker {}
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
-/// Read a process's command line via `GetCommandLineW` is not an option
-/// for foreign processes — that's the calling process's cmdline.
-/// Instead we use `QueryFullProcessImageNameW` for the executable path
-/// and treat cmdline as "unavailable" for v1. WMI can fill this in
-/// later if the user asks for full cmdline.
-fn query_command_line(pid: u32) -> String {
-    use windows_sys::Win32::System::Threading::{
-        QueryFullProcessImageNameW,
-    };
+/// What the tracker reads of one process, through one handle: its executable path (the command
+/// line stays "unavailable" for now; WMI could fill it in), working set, and creation time.
+struct Facts {
+    command: String,
+    rss: u64,
+    created: Option<u64>,
+}
+
+fn query_facts(pid: u32) -> Facts {
+    use windows_sys::Win32::Foundation::FILETIME;
+    use windows_sys::Win32::System::Threading::{GetProcessTimes, QueryFullProcessImageNameW};
+    let mut facts = Facts { command: String::new(), rss: 0, created: None };
     unsafe {
         let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
         if h.is_null() {
-            return String::new();
+            return facts;
         }
         let mut buf = [0u16; 1024];
         let mut len = buf.len() as u32;
-        let ok = QueryFullProcessImageNameW(h, 0, buf.as_mut_ptr(), &mut len);
-        CloseHandle(h);
-        if ok == 0 {
-            return String::new();
-        }
-        OsString::from_wide(&buf[..len as usize])
-            .to_string_lossy()
-            .into_owned()
-    }
-}
-
-/// pid → parent pid for every process on the system. `poll_and_emit` lists
-/// every tracked block back to back each tick, so the snapshot is shared
-/// for a short window instead of re-enumerating the whole system once per
-/// block (ReAgent P2 on #3430). The cache is reused only while it is fresh
-/// AND already knows every PID being listed — a process spawned after the
-/// snapshot forces a new one rather than getting an unknown parent.
-fn query_parent_pids(pids: &[u32]) -> Arc<HashMap<u32, u32>> {
-    static CACHE: Mutex<Option<(Instant, Arc<HashMap<u32, u32>>)>> = Mutex::new(None);
-    let mut cache = CACHE.lock().unwrap();
-    if let Some((at, map)) = cache.as_ref() {
-        if at.elapsed() < PARENT_SNAPSHOT_TTL && pids.iter().all(|p| map.contains_key(p)) {
-            return map.clone();
-        }
-    }
-    let map = Arc::new(snapshot_parent_pids());
-    *cache = Some((Instant::now(), map.clone()));
-    map
-}
-
-const PARENT_SNAPSHOT_TTL: Duration = Duration::from_millis(500);
-
-/// One Toolhelp snapshot. Empty on failure (callers then treat lineage as
-/// unknown).
-fn snapshot_parent_pids() -> HashMap<u32, u32> {
-    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
-        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
-        TH32CS_SNAPPROCESS,
-    };
-    let mut out = HashMap::new();
-    unsafe {
-        let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-        if snap == INVALID_HANDLE_VALUE {
-            return out;
-        }
-        let mut entry: PROCESSENTRY32W = zeroed();
-        entry.dwSize = size_of::<PROCESSENTRY32W>() as u32;
-        if Process32FirstW(snap, &mut entry) != 0 {
-            loop {
-                out.insert(entry.th32ProcessID, entry.th32ParentProcessID);
-                if Process32NextW(snap, &mut entry) == 0 {
-                    break;
-                }
-            }
-        }
-        CloseHandle(snap);
-    }
-    out
-}
-
-fn query_rss(pid: u32) -> u64 {
-    unsafe {
-        let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
-        if h.is_null() {
-            return 0;
+        if QueryFullProcessImageNameW(h, 0, buf.as_mut_ptr(), &mut len) != 0 {
+            facts.command = OsString::from_wide(&buf[..len as usize]).to_string_lossy().into_owned();
         }
         let mut counters: PROCESS_MEMORY_COUNTERS = zeroed();
-        let ok = GetProcessMemoryInfo(
-            h,
-            &mut counters,
-            size_of::<PROCESS_MEMORY_COUNTERS>() as u32,
-        );
-        CloseHandle(h);
-        if ok == 0 {
-            0
-        } else {
-            counters.WorkingSetSize as u64
+        if GetProcessMemoryInfo(h, &mut counters, size_of::<PROCESS_MEMORY_COUNTERS>() as u32) != 0 {
+            facts.rss = counters.WorkingSetSize as u64;
         }
+        let (mut create, mut exit, mut kernel, mut user): (FILETIME, FILETIME, FILETIME, FILETIME) = zeroed();
+        if GetProcessTimes(h, &mut create, &mut exit, &mut kernel, &mut user) != 0 {
+            facts.created = Some(((create.dwHighDateTime as u64) << 32) | create.dwLowDateTime as u64);
+        }
+        CloseHandle(h);
     }
+    facts
+}
+
+/// The parent recorded for this very process: an entry left by an earlier process that held the
+/// PID (its creation time differs) is not used. With no creation time to compare, the entry stands.
+fn parent_of(table: Option<&agentmux_procstats::ParentTable>, pid: u32, created: Option<u64>) -> Option<u32> {
+    let (parent, key) = *table?.get(&pid)?;
+    created.is_none_or(|c| c == key).then_some(parent).flatten()
+}
+
+/// How old the process table `list_members` takes parents from may be. `poll_and_emit` lists every
+/// tracked block back to back each tick, and the pane sampler reads the same table
+/// (`agentmux_procstats::snapshot`), so one read serves both instead of two enumerations of
+/// every process on the machine.
+const PARENT_SNAPSHOT_MAX_AGE: Duration = Duration::from_secs(1);
+
+/// pid -> (parent, creation time) for every process. A process spawned after the table was read
+/// forces a new read rather than getting an unknown parent. `None` when the OS won't say (callers
+/// then treat lineage as unknown).
+fn query_parent_pids(pids: &[u32]) -> Option<Arc<agentmux_procstats::ParentTable>> {
+    let table = agentmux_procstats::recent_parents(PARENT_SNAPSHOT_MAX_AGE).ok()?;
+    if pids.iter().all(|p| table.contains_key(p)) {
+        return Some(table);
+    }
+    agentmux_procstats::recent_parents(Duration::ZERO).ok()
 }
 
 #[cfg(test)]
@@ -502,5 +467,39 @@ mod priority_tests {
 
         t.kill_tree();
         let _ = child.wait();
+    }
+}
+
+#[cfg(test)]
+mod list_tests {
+    use super::*;
+
+    #[test]
+    fn a_parent_is_the_one_recorded_for_the_same_process() {
+        let table: agentmux_procstats::ParentTable = [(10, (Some(4), 777)), (11, (None, 5))].into_iter().collect();
+        assert_eq!(parent_of(Some(&table), 10, Some(777)), Some(4));
+        assert_eq!(parent_of(Some(&table), 10, None), Some(4), "nothing to compare: the entry stands");
+        assert_eq!(parent_of(Some(&table), 10, Some(778)), None, "another process held the PID");
+        assert_eq!(parent_of(Some(&table), 11, Some(5)), None, "no parent recorded");
+        assert_eq!(parent_of(Some(&table), 12, Some(1)), None, "not in the table");
+        assert_eq!(parent_of(None, 10, Some(777)), None, "no table");
+    }
+
+    #[test]
+    fn listing_a_member_reads_its_parent_path_and_memory() {
+        let mut child = std::process::Command::new("cmd")
+            .args(["/c", "ping -n 30 127.0.0.1 >nul"])
+            .spawn()
+            .expect("spawn cmd");
+        let t = JobObjectTracker::new("list-members-test").unwrap();
+        t.assign_process(child.id()).unwrap();
+        std::thread::sleep(Duration::from_millis(300));
+        let members = t.list_members();
+        t.kill_tree();
+        let _ = child.wait();
+        let me = members.iter().find(|m| m.pid == child.id()).expect("the child is listed");
+        assert_eq!(me.parent_pid, Some(std::process::id()), "{me:?}");
+        assert!(me.command.to_lowercase().ends_with("cmd.exe"), "{me:?}");
+        assert!(me.rss_bytes > 0, "{me:?}");
     }
 }
