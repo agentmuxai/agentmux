@@ -699,12 +699,12 @@ mod live_tests {
         );
         let n = next_event(&mut rx, "notification").await;
         assert_eq!(n["kind"], "shutdown_pending");
-        assert_eq!(n["title"], "Closing agent pane in 15 s");
+        assert_eq!(n["title"], "Closing agent pane in 30 s");
         assert_eq!(n["body"], "AgentY asked to close it. It stays in My Agents, with its conversation.");
         assert_eq!(n["actions"], serde_json::json!([{ "id": "keep", "label": "Keep open" }]), "no session runs here");
         assert_eq!(n["countdown"]["title_template"], "Closing agent pane in {n} s");
         let left = n["countdown"]["remaining_ms"].as_i64().unwrap();
-        assert!((13_000..=15_000).contains(&left), "{left}");
+        assert!((28_000..=30_000).contains(&left), "{left}");
         assert!(!n.to_string().contains("abc123") && !n.to_string().contains("tidying"), "the reason is not in the toast: {n}");
         let (id, tag) = (n["id"].as_str().unwrap().to_string(), n["tag"].as_str().unwrap().to_string());
 
@@ -869,7 +869,7 @@ mod live_tests {
             crate::sagas::pending_shutdown::Action::Stop { signal: None },
         );
         let first = next_event(&mut rx, "notification").await;
-        assert_eq!(first["title"], "Stopping agent pane in 15 s");
+        assert_eq!(first["title"], "Stopping agent pane in 30 s");
 
         let close = crate::sagas::pending_shutdown::request(
             &st,
@@ -952,7 +952,7 @@ mod live_tests {
             (
                 "toast-agent",
                 Action::CloseTab { detail: "test".into() },
-                "Closing Lark in 15 s",
+                "Closing Lark in 30 s",
                 "qtest",
                 "QTest asked to close it. It stays in My Agents, with its conversation.",
             ),

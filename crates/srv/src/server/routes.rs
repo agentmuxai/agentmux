@@ -606,7 +606,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // body; this instance writes the header.
         .route("/agentmux/agent/broadcast", post(handle_agent_broadcast_forward))
         // The same forward, for an agent's FleetBulkStop: this instance's
-        // user gets the 15 s override window (SPEC_AGENT_SELF_QUIT §6.5).
+        // user gets the 30 s override window (SPEC_AGENT_SELF_QUIT §6.5).
         .route("/agentmux/agent/stop-pending", post(handle_agent_stop_pending_forward))
         .route("/api/messaging/status", get(messaging_handlers::handle_status))
         .route("/api/messaging/discord/send", post(messaging_handlers::handle_discord_send))

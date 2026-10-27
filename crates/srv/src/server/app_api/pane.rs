@@ -637,7 +637,7 @@ pub(crate) fn pending_body(p: &crate::sagas::pending_shutdown::PendingView) -> s
         "by": p.by,
         "via": p.via,
         "deadline_ms": p.deadline_ms,
-        "wait_at_least_ms": crate::sagas::pending_shutdown::window_for(p.effect).as_millis() as u64,
+        "wait_at_least_ms": crate::sagas::pending_shutdown::wait_at_least_ms(p.deadline_ms),
     })
 }
 
@@ -703,7 +703,7 @@ pub(crate) async fn handle_close_pane(
 }
 
 /// Close the pane that holds `target_block_id` on behalf of `caller_agent_id`:
-/// it waits 15 s for its user to keep it (§6.5) and answers 202 with the
+/// it waits 30 s for its user to keep it (§6.5) and answers 202 with the
 /// pending request. That includes a pane the caller is in: closing it ends
 /// the caller (which only `QuitSelf` may do without the user's window) and
 /// every other tab stacked in it. Audited as `pane.close`. Shared by ClosePane
@@ -779,7 +779,7 @@ pub(crate) async fn close_pane_as(
         return (StatusCode::CONFLICT, json!({ "error": err }));
     }
 
-    // Its user has 30 s (PANE_CLOSE_WINDOW) to keep it (§6.5), whoever's pane it is. A pane the
+    // Its user has 30 s to keep it (§6.5), whoever's pane it is. A pane the
     // caller is in is no exception: closing it would end the caller without
     // QuitSelf's check, and any other agent stacked in it with no window.
     let reason = reason.unwrap_or_default().to_string();
@@ -989,7 +989,7 @@ mod close_pane_tests {
         assert_eq!(resp.status(), axum::http::StatusCode::ACCEPTED);
         let body = body_json(resp).await;
         assert_eq!(body["status"], "pending_user_override");
-        assert_eq!(body["wait_at_least_ms"], 30_000);
+        assert!((29_000..=30_000).contains(&body["wait_at_least_ms"].as_u64().unwrap()), "{body}");
         let request_id = body["request_id"].as_str().unwrap().to_string();
 
         assert_eq!(crate::sagas::pending_shutdown::keep(&state, &target_block, &request_id), "kept_by_user");

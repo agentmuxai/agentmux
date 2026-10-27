@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// External shutdown: 15 seconds (30 for a pane) for the user to override
+// External shutdown: 30 seconds (15 for an agent's own quit) for the user to override
 // (docs/specs/SPEC_AGENT_SELF_QUIT_2026_09_24.md §6.5, contract §12.2–12.3).
 //
 // A shutdown the user didn't ask for doesn't happen at once. `request` marks
@@ -18,10 +18,12 @@ use serde::Serialize;
 
 use crate::server::AppState;
 
-pub const OVERRIDE_WINDOW: std::time::Duration = std::time::Duration::from_secs(15);
-/// The window for closing a pane that holds no agent (a browser, an editor): 30 s,
-/// the default for a human override.
-pub const PANE_CLOSE_WINDOW: std::time::Duration = std::time::Duration::from_secs(30);
+/// How long the user has to keep what another agent asked to stop or close: 30 s, the
+/// default for a human override.
+pub const OVERRIDE_WINDOW: std::time::Duration = std::time::Duration::from_secs(30);
+/// An agent's own quit, from a turn the user didn't start: it waits for that turn to end
+/// anyway, so its window stays short.
+pub const SELF_QUIT_WINDOW: std::time::Duration = std::time::Duration::from_secs(15);
 pub const EVENT_SHUTDOWN_PENDING: &str = "agent:shutdown-pending";
 pub const EVENT_SHUTDOWN_PENDING_CLEARED: &str = "agent:shutdown-pending-cleared";
 /// Finished requests stay answerable this long, then are dropped.
@@ -62,7 +64,10 @@ impl Action {
 
     /// How long the user has to keep it.
     fn window(&self) -> std::time::Duration {
-        window_for(self.effect())
+        match self {
+            Action::SelfQuit { .. } => SELF_QUIT_WINDOW,
+            _ => OVERRIDE_WINDOW,
+        }
     }
 
     /// What the user is told will happen: `PendingView::effect`.
@@ -108,9 +113,9 @@ impl Action {
     }
 }
 
-/// The window a request with this `PendingView::effect` gets.
-pub fn window_for(effect: &str) -> std::time::Duration {
-    if effect == "close_pane" { PANE_CLOSE_WINDOW } else { OVERRIDE_WINDOW }
+/// How long a caller should wait, at least, for a request with this deadline.
+pub fn wait_at_least_ms(deadline_ms: i64) -> u64 {
+    (deadline_ms - now_ms()).max(0) as u64
 }
 
 /// A request as the caller and the frontend see it (§12.2).
@@ -196,7 +201,7 @@ pub fn remember_remote(request_id: &str, local_url: &str, auth_key: &str) {
     let now = now_ms();
     let mut map = REMOTE.lock().unwrap_or_else(|e| e.into_inner());
     // Long after any window has settled, like finished local requests.
-    map.retain(|_, r| now - r.remembered_at_ms < KEEP_FINISHED_MS + PANE_CLOSE_WINDOW.as_millis() as i64);
+    map.retain(|_, r| now - r.remembered_at_ms < KEEP_FINISHED_MS + OVERRIDE_WINDOW.as_millis() as i64);
     map.insert(
         request_id.to_string(),
         RemoteRequest { local_url: local_url.to_string(), auth_key: auth_key.to_string(), remembered_at_ms: now },

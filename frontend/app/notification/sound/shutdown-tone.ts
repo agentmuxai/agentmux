@@ -3,7 +3,7 @@
 
 /**
  * Shutdown-pending tone — something other than the user asked to shut an
- * agent down, and the user has 15 s to keep it
+ * agent down, and the user has 30 s to keep it
  * (docs/specs/SPEC_AGENT_SELF_QUIT_2026_09_24.md §6.5).
  *
  * The same chain as the waiting tone (waiting-tone-player.ts), so it reads as
