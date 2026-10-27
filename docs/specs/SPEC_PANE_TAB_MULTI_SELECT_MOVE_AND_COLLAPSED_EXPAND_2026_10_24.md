@@ -119,7 +119,7 @@ A selected pill is distinguished from the other pill states without colour alone
 - **Order of arrival.** Appended after the target's existing tabs in **layout order**: panes in tree order (depth first, children in order), tabs in strip order within each pane. Click order is invisible to the operator, so it is not used (D6).
 - **Active tab and focus.** The **grabbed** tab becomes active in the target, and the target pane takes focus, as a single-tab move does today. The other moved tabs arrive inactive.
 - **Source panes.** Each source pane whose active tab left passes it to its right neighbour (or the new last tab), per the existing rule. A pane emptied by the move is **removed as a move, not closed** (same as the single-tab rule: no prompt, no close guard, `removeLeafEmptiedByMove`). A collapsed pane emptied this way loses its chip. If removing a source would leave only collapsed panes, the existing restore-nearest rule applies. The last pane in a window never closes; a move that would empty it cannot happen, since the target is another pane.
-- **A collapsed target** expands on drop (D7): the moved tabs are selected on it by the drop, and a drop into a chip that stays a chip would hide where they went.
+- **A collapsed target** stays collapsed (D7 was reversed by the operator on 2026-10-27: "when dragging a pane tab pill between minimized panes, dont auto-open the pane tab's pane"). The moved tabs arrive in it and the grabbed one is active, as before; the pane expands only on a plain click of a pill (§6).
 - **One command.** The move is one atomic operation, not N calls (§5).
 - **After the drop** the selection is cleared and every moved pill plays the landing bounce. A lone picked tab dragged by itself is cleared too; dragging an unpicked tab leaves the pick as it was (§4.1).
 - **Cancel.** Escape during the drag (or a drop on nothing) cancels the drag and keeps the selection, so the operator can try again.
@@ -166,6 +166,7 @@ N sequential `pane.moveTab` calls would be N optimistic edits, N RPCs and N vers
   - A fork pill belonging to another pane keeps its present behaviour: it reveals the pane the block lives in, and that pane expands (already true through `revealBlockLocally`). The pane whose strip was clicked is not expanded for it.
   - A drop onto a chip expands it (§4.3, D7).
   - A Mod+click (multi-select) does not expand (D4).
+  - Only a **plain** click expands (2026-10-27): a drag, the click a drag leaves behind (within 300 ms of its end), a press that moves more than 5 px before release, a Ctrl/Cmd, Shift or Alt click, and a right-click never do (`pane-tab-gesture.ts`). The button that expands is one constant, `PILL_EXPAND_BUTTON`, the left one.
   - Panes hidden by another pane's maximise have no clickable pills, so nothing changes there. Maximised-and-collapsed: `minimizeNodeToggle` restores the chip and leaves the maximise alone, as today.
   - Header and body clicks, and dragging the chip itself, are unchanged. Back/forward history navigation and Cmd+1..9 do not expand a chip today either; I have left them out as a different path (D3 asks).
 - **Doc fix.** Correct the stale "restore on click" sentence in `SPEC_RESIZE_THROUGH_COLLAPSED_PANES` R6 in the build.

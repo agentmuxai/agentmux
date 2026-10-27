@@ -429,18 +429,29 @@
     // bottom shadow, a drag's is opacity, a drop mark is an inset left/right shadow and
     // the activity flash is ::before. An accent outline drawn inward, a faint tint, and
     // a check mark (.pane-tab-selected-mark), so it does not rest on colour alone.
+    //
+    // Nothing here changes the pill's box, or any neighbour's: the ring is an overlay inside the
+    // pill (an inset shadow on ::after, over the pill's own border box), and the mark is out of
+    // flow, so picking or unpicking a pill never moves it, its label or the pills beside it.
     &--selected {
-        outline: 2px solid var(--accent-color);
-        outline-offset: -2px;
         background-image: linear-gradient(rgba(var(--accent-color-rgb), 0.16), rgba(var(--accent-color-rgb), 0.16));
+
+        &::after {
+            content: "";
+            @include mixins.abs-fill;
+            pointer-events: none;
+            box-shadow: inset 0 0 0 2px var(--accent-color);
+        }
     }
 
     .pane-tab-selected-mark {
+        position: absolute;
+        top: 3px;
+        left: 4px;
         display: inline-flex;
         align-items: center;
-        flex-shrink: 0;
-        margin-right: 4px;
-        font-size: 0.85em;
+        font-size: 0.7em;
+        line-height: 1;
         color: var(--accent-color);
     }
 }
@@ -564,6 +575,8 @@
     overflow: hidden;
     pointer-events: none;
     opacity: 0;
+    // Above a picked pill's ring (.pane-tab--selected::after), which would otherwise cover it.
+    z-index: 1;
     // The end of a line fades in its last look rather than cutting.
     transition: opacity var(--duration-moderate) var(--ease-standard);
 
