@@ -3,8 +3,10 @@
 
 /**
  * What an agent's pane tab pill shows about its work: a moving bar while it
- * works, a still line while it waits for the user, is out of quota or is signed
- * out (docs/specs/SPEC_PANE_TAB_PROGRESS_LINE_2026_10_24.md §3.2, §3.3).
+ * works, a still line while it waits for the user or is signed out
+ * (docs/specs/SPEC_PANE_TAB_PROGRESS_LINE_2026_10_24.md §3.2, §3.3). Out of
+ * quota shows no line: a stored usage limit can outlive a move to another
+ * account, so the pill could say it of an agent that can work.
  *
  * The frontend never receives srv's `agent_state` string. It receives the inputs
  * srv's `decide()` reads (`controllerstatus` events and the block's meta) and
@@ -22,14 +24,14 @@ import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { BlockService } from "@/app/store/services";
 import { rankAgentStatus } from "@/app/store/agent-status";
-import { META_LAST_FAILURE, unavailableLineText, unavailableOfMeta } from "@/app/store/agent-unavailable";
-import { createMemo, createRoot, createSignal, onCleanup, createEffect, type Accessor } from "solid-js";
+import { unavailableOfMeta } from "@/app/store/agent-unavailable";
+import { createMemo, createRoot, createSignal, onCleanup, type Accessor } from "solid-js";
 
-export type PaneTabProgressState = "working" | "waiting" | "limited" | "signed_out";
+export type PaneTabProgressState = "working" | "waiting" | "signed_out";
 
 export interface PaneTabProgress {
     state: PaneTabProgressState;
-    /** The state in the Swarm chip's words: "Working", "Waiting for you", "Out of quota until Sun 7 PM", "Signed out". */
+    /** The state in the Swarm chip's words: "Working", "Waiting for you", "Signed out". */
     text: string;
 }
 
@@ -45,7 +47,7 @@ export interface ProgressFacts {
 /** The META key a question sets while it waits for the user (srv's `META_AWAITING_USER`). */
 export const META_AWAITING_USER = "term:awaiting_user";
 
-/** srv's `decide()`, as far as a pill shows it: working, waiting, limited or signed out, else nothing. */
+/** srv's `decide()`, as far as a pill shows it: working, waiting or signed out, else nothing. */
 export function progressOf(facts: ProgressFacts): PaneTabProgress | null {
     if (!facts.isAgentPane) return null;
     const live = facts.turnActive;
@@ -57,18 +59,8 @@ export function progressOf(facts: ProgressFacts): PaneTabProgress | null {
     });
     if (status.kind === "needs-you") return { state: "waiting", text: "Waiting for you" };
     if (status.kind === "working") return { state: "working", text: "Working" };
-    if (status.kind === "unavailable" && unavailable) {
-        const text = unavailable.reason === "signed_out" ? "Signed out" : unavailableLineText(unavailable, facts.now);
-        return { state: unavailable.reason, text };
-    }
+    if (status.kind === "unavailable" && unavailable?.reason === "signed_out") return { state: "signed_out", text: "Signed out" };
     return null;
-}
-
-/** The reset time of a stored usage-limit failure, when the provider gave one. */
-function resetsAtOf(meta: Record<string, unknown> | null | undefined): number | undefined {
-    const failure = meta?.[META_LAST_FAILURE] as { resetsAtMs?: unknown } | undefined;
-    const at = failure?.resetsAtMs;
-    return typeof at === "number" && Number.isFinite(at) && at > 0 ? at : undefined;
 }
 
 interface Entry {
@@ -82,9 +74,6 @@ const entries = new Map<string, Entry>();
 function open(blockId: string): Entry {
     return createRoot((dispose) => {
         const [controller, setController] = createSignal({ isAgentPane: false, turnActive: false });
-        // Bumped when a usage limit's reset passes: nothing publishes at that moment, and
-        // srv turns `limited` into `idle` by the clock (decide()).
-        const [clock, setClock] = createSignal(0);
         const block = MOS.getMuxObjectAtom<Block>(`block:${blockId}`);
 
         // Events only fire on a state flip, so a seed that arrives after one is older than it and
@@ -108,20 +97,10 @@ function open(blockId: string): Entry {
         );
 
         const value = createMemo<PaneTabProgress | null>(
-            () => {
-                clock();
-                return progressOf({ ...controller(), meta: block()?.meta, now: Date.now() });
-            },
+            () => progressOf({ ...controller(), meta: block()?.meta, now: Date.now() }),
             null,
             { equals: (a, b) => a?.state === b?.state && a?.text === b?.text }
         );
-
-        createEffect(() => {
-            const resets = value()?.state === "limited" ? resetsAtOf(block()?.meta) : undefined;
-            if (resets === undefined) return;
-            const timer = setTimeout(() => setClock((n) => n + 1), Math.max(0, resets - Date.now()) + 1);
-            onCleanup(() => clearTimeout(timer));
-        });
 
         return {
             value,

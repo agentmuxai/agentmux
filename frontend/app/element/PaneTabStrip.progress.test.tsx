@@ -19,7 +19,6 @@ const TABS = ["a", "b"];
 const WORDS: Record<PaneTabProgress["state"], string> = {
     working: "Working",
     waiting: "Waiting for you",
-    limited: "Out of quota until Sun 7 PM",
     signed_out: "Signed out",
 };
 
@@ -59,7 +58,7 @@ describe("the pill's progress line", () => {
         expect(pill(container, "b").getAttribute("aria-busy")).toBe("true");
     });
 
-    for (const state of ["waiting", "limited", "signed_out"] as const) {
+    for (const state of ["waiting", "signed_out"] as const) {
         it(`is a still line for ${state}, with its own look and no sweep`, () => {
             const { container } = strip({ progress: { b: () => ({ state, text: WORDS[state] }) } });
             const l = line(container, "b");
@@ -97,8 +96,8 @@ describe("the pill's progress line", () => {
         expect(on(line(container, "b"))).toBe(true);
     });
 
-    it("draws no line for a selected waiting, limited or signed-out agent of an expanded pane", () => {
-        for (const state of ["waiting", "limited", "signed_out"] as const) {
+    it("draws no line for a selected waiting or signed-out agent of an expanded pane", () => {
+        for (const state of ["waiting", "signed_out"] as const) {
             const { container, unmount } = strip({ active: "a", progress: { a: () => ({ state, text: WORDS[state] }) } });
             expect(on(line(container, "a"))).toBe(false);
             unmount();
@@ -106,9 +105,9 @@ describe("the pill's progress line", () => {
     });
 
     it("says the state in words to assistive tech", () => {
-        const { container } = strip({ progress: { b: () => ({ state: "limited", text: WORDS.limited }) } });
+        const { container } = strip({ progress: { b: () => ({ state: "signed_out", text: WORDS.signed_out }) } });
         const id = pill(container, "b").getAttribute("aria-describedby")!;
-        expect(container.querySelector(`#${CSS.escape(id)}`)?.textContent).toBe(WORDS.limited);
+        expect(container.querySelector(`#${CSS.escape(id)}`)?.textContent).toBe(WORDS.signed_out);
     });
 
     it("does not sweep while its window tab is hidden, and keeps the line", () => {
@@ -119,13 +118,13 @@ describe("the pill's progress line", () => {
     });
 
     it("fades out in its last look when the work ends, rather than changing shape", () => {
-        const [progress, setProgress] = createSignal<PaneTabProgress | null>({ state: "limited", text: WORDS.limited });
+        const [progress, setProgress] = createSignal<PaneTabProgress | null>({ state: "signed_out", text: WORDS.signed_out });
         const { container } = strip({ progress: { b: progress } });
         const l = line(container, "b");
-        expect(l.dataset.state).toBe("limited");
+        expect(l.dataset.state).toBe("signed_out");
         setProgress(null);
         expect(on(l)).toBe(false);
-        expect(l.dataset.state).toBe("limited");
+        expect(l.dataset.state).toBe("signed_out");
     });
 
     it("follows a state change on the pill", () => {
