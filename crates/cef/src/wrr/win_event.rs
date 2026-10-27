@@ -252,6 +252,19 @@ const WATCHDOG_LAG_RETRIES_MAX: u32 = 3;
 static WATCHDOG_LAG_RETRY_COUNT: std::sync::atomic::AtomicU32 =
     std::sync::atomic::AtomicU32::new(0);
 
+/// How many times the watchdog re-arms for a drain that still sees a window
+/// the reducer does not count (`WATCHDOG_DEBRIS_REARMS_MAX * QUIT_WATCHDOG_GRACE`
+/// is the longest it waits). Each cycle hides those windows first, so one is
+/// normally enough; the cap is for a window that cannot be hidden. A restart
+/// for an update left the old host in this loop until the launcher was ended
+/// by hand (blank window, 19 cycles, no exit).
+const WATCHDOG_DEBRIS_REARMS_MAX: u32 = 5;
+
+/// Re-arms already spent on drain debris. Reset when the watchdog stands down
+/// or quits.
+static WATCHDOG_DEBRIS_REARM_COUNT: std::sync::atomic::AtomicU32 =
+    std::sync::atomic::AtomicU32::new(0);
+
 /// X-coordinate below which a top-level window is an off-screen warm-pool member
 /// (created at -32000), not a real user window. Mirrors
 /// `commands::window::lifecycle::OFFSCREEN_POOL_THRESHOLD_X`.
@@ -263,14 +276,14 @@ const OFFSCREEN_POOL_THRESHOLD_X: i32 = -20000;
 /// pool window counts (on-screen + app-class); a hidden/recycled or off-screen
 /// pool window does not. Minimized windows remain `IsWindowVisible` and count
 /// (minimize ≠ close).
-unsafe fn count_visible_user_windows() -> usize {
+unsafe fn visible_user_windows() -> Vec<HWND> {
     use windows_sys::Win32::Foundation::{BOOL, LPARAM, RECT};
     use windows_sys::Win32::System::Threading::GetCurrentProcessId;
     use windows_sys::Win32::UI::WindowsAndMessaging::{EnumWindows, GetWindowRect};
 
     struct Ctx {
         pid: u32,
-        count: usize,
+        windows: Vec<HWND>,
     }
     unsafe extern "system" fn enum_cb(hwnd: HWND, lparam: LPARAM) -> BOOL {
         let ctx = &mut *(lparam as *mut Ctx);
@@ -297,15 +310,29 @@ unsafe fn count_visible_user_windows() -> usize {
                 return 1; // off-screen warm-pool window — not user-visible
             }
         }
-        ctx.count += 1;
+        ctx.windows.push(hwnd);
         1
     }
     let mut ctx = Ctx {
         pid: GetCurrentProcessId(),
-        count: 0,
+        windows: Vec::new(),
     };
     EnumWindows(Some(enum_cb), &mut ctx as *mut Ctx as LPARAM);
-    ctx.count
+    ctx.windows
+}
+
+/// How many user-visible top-level windows this process has (see `visible_user_windows`).
+unsafe fn count_visible_user_windows() -> usize {
+    visible_user_windows().len()
+}
+
+/// Hide windows the drain left visible (see `drain_debris_action`). The task
+/// runs on the UI thread, which owns them.
+unsafe fn hide_windows(windows: &[HWND]) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
+    for &hwnd in windows {
+        ShowWindow(hwnd, SW_HIDE);
+    }
 }
 
 /// Diagnostic-only: enumerate every app-class top-level window belonging to
@@ -453,6 +480,32 @@ fn should_extend_lag_retry(registered: usize, draining: bool, retries_used: u32)
     registered > 0 && !draining && retries_used < WATCHDOG_LAG_RETRIES_MAX
 }
 
+/// What the watchdog does when the OS still shows `visible` windows.
+#[derive(Debug, PartialEq, Eq)]
+enum VisibleAction {
+    /// A live window is visible again: stand down.
+    StandDown,
+    /// The drain is under way, the reducer counts no window, and one is still
+    /// shown: hide it and look again.
+    HideAndRearm,
+    /// Same, but the re-arms are spent: the reducer decided to exit, so exit.
+    QuitAnyway,
+}
+
+/// Pure decision for `visible != 0` (the loop this bounds: a window shown
+/// during the drain that nothing closes, which kept the old host alive after
+/// an in-app update). Only a drain with no registered window is debris; any
+/// other state keeps the stand-down.
+fn drain_debris_action(draining: bool, registered: usize, rearms_used: u32) -> VisibleAction {
+    if !(draining && registered == 0) {
+        VisibleAction::StandDown
+    } else if rearms_used < WATCHDOG_DEBRIS_REARMS_MAX {
+        VisibleAction::HideAndRearm
+    } else {
+        VisibleAction::QuitAnyway
+    }
+}
+
 /// Step D — bounded fallback so a missed `UnregisterBrowser` path degrades to
 /// "quit a few seconds late with a loud log" instead of "hang forever as an
 /// invisible zombie instance" (the regression the first cut of this fix caused:
@@ -514,7 +567,9 @@ cef::wrap_task! {
                     st.background_service_enabled,
                 )
             };
-            let visible = unsafe { count_visible_user_windows() };
+            let visible_windows = unsafe { visible_user_windows() };
+            let visible = visible_windows.len();
+            let mut gave_up_on_debris = false;
             if visible != 0 {
                 // Once the reducer has DECIDED to drain and counts zero live
                 // user windows, a clear-and-forget stand-down here is a
@@ -525,24 +580,48 @@ cef::wrap_task! {
                 // minimize never unregisters). Live-caught 2026-07-11: a
                 // pool refill that landed after Stage 1 sat transiently
                 // visible at the spawn sentinel, the recheck stood down, and
-                // the instance hung as a draining corpse. Re-arm and keep
-                // watching until the OS agrees; each cycle is one 3s sleep.
-                if draining && registered == 0 {
-                    tracing::warn!(
-                        target: "wrr",
-                        "[wrr] quit watchdog: {} window(s) transiently visible while draining with 0 registered — re-arming (post-drain debris, e.g. late pool spawn)",
-                        visible
-                    );
-                    arm_quit_watchdog(registered);
-                    return;
+                // the instance hung as a draining corpse. So re-arm and keep
+                // watching, but hide what is shown (nothing is going to close
+                // it) and stop after WATCHDOG_DEBRIS_REARMS_MAX cycles: the
+                // reducer has decided to exit, and a window that survives
+                // being hidden must not keep the process alive (live-caught
+                // 2026-10-27: an in-app update left the old host looping, 19
+                // cycles, until its launcher was ended by hand).
+                let rearms_used = WATCHDOG_DEBRIS_REARM_COUNT.load(SeqCst);
+                match drain_debris_action(draining, registered, rearms_used) {
+                    VisibleAction::HideAndRearm => {
+                        let rearms = WATCHDOG_DEBRIS_REARM_COUNT.fetch_add(1, SeqCst) + 1;
+                        tracing::warn!(
+                            target: "wrr",
+                            "[wrr] quit watchdog: {} window(s) visible while draining with 0 registered — hiding them and re-arming ({}/{})",
+                            visible,
+                            rearms,
+                            WATCHDOG_DEBRIS_REARMS_MAX
+                        );
+                        unsafe {
+                            if rearms == 1 {
+                                diag_dump_app_windows("drain debris");
+                            }
+                            hide_windows(&visible_windows);
+                        }
+                        arm_quit_watchdog(registered);
+                        return;
+                    }
+                    VisibleAction::QuitAnyway => {
+                        gave_up_on_debris = true;
+                        unsafe { diag_dump_app_windows("drain debris, giving up") };
+                    }
+                    VisibleAction::StandDown => {
+                        WATCHDOG_DEBRIS_REARM_COUNT.store(0, SeqCst);
+                        WATCHDOG_LAG_RETRY_COUNT.store(0, SeqCst);
+                        tracing::info!(
+                            target: "wrr",
+                            "[wrr] quit watchdog: {} window(s) visible again — stand down",
+                            visible
+                        );
+                        return;
+                    }
                 }
-                WATCHDOG_LAG_RETRY_COUNT.store(0, SeqCst);
-                tracing::info!(
-                    target: "wrr",
-                    "[wrr] quit watchdog: {} window(s) visible again — stand down",
-                    visible
-                );
-                return;
             }
             // Workstream 0 Phase 1: 0 visible + 0 registered + not draining is
             // the intentional background-service resting state (see
@@ -553,6 +632,7 @@ cef::wrap_task! {
             // close.
             if is_background_service_resting(background_service_enabled, draining) {
                 WATCHDOG_LAG_RETRY_COUNT.store(0, SeqCst);
+                WATCHDOG_DEBRIS_REARM_COUNT.store(0, SeqCst);
                 if registered > 0 {
                     // Not a reason to quit (see `is_background_service_resting`),
                     // but still worth surfacing: the reducer disagreeing with the
@@ -599,7 +679,18 @@ cef::wrap_task! {
                 return;
             }
             WATCHDOG_LAG_RETRY_COUNT.store(0, SeqCst);
+            WATCHDOG_DEBRIS_REARM_COUNT.store(0, SeqCst);
             if QUIT_INITIATED.swap(true, SeqCst) {
+                return;
+            }
+            if gave_up_on_debris {
+                tracing::warn!(
+                    target: "wrr",
+                    "[wrr] quit watchdog: {} window(s) still visible after {} re-arms with the drain under way and 0 registered — quitting (the reducer decided to exit)",
+                    visible,
+                    WATCHDOG_DEBRIS_REARMS_MAX
+                );
+                cef::quit_message_loop();
                 return;
             }
             // Trusting the OS signal alone (the pre-Step-B behavior). The
@@ -835,6 +926,36 @@ mod should_quit_tests {
         // consumption site — there's no live window to protect, so it
         // should still fire on the first cycle, same as before this fix.
         assert!(!should_extend_lag_retry(0, false, 0));
+    }
+
+    #[test]
+    fn a_window_shown_while_draining_with_none_registered_is_hidden_and_the_watchdog_re_arms() {
+        use super::{drain_debris_action, VisibleAction};
+        assert_eq!(drain_debris_action(true, 0, 0), VisibleAction::HideAndRearm);
+        assert_eq!(
+            drain_debris_action(true, 0, super::WATCHDOG_DEBRIS_REARMS_MAX - 1),
+            VisibleAction::HideAndRearm
+        );
+    }
+
+    #[test]
+    fn the_re_arm_for_drain_debris_has_a_cap_and_then_the_app_quits() {
+        use super::{drain_debris_action, VisibleAction};
+        // The loop the update restart hit: 19 cycles and no exit.
+        assert_eq!(
+            drain_debris_action(true, 0, super::WATCHDOG_DEBRIS_REARMS_MAX),
+            VisibleAction::QuitAnyway
+        );
+        assert_eq!(drain_debris_action(true, 0, 19), VisibleAction::QuitAnyway);
+    }
+
+    #[test]
+    fn a_visible_window_is_only_debris_when_draining_with_none_registered() {
+        use super::{drain_debris_action, VisibleAction};
+        // A live window (registered) or no drain decision: stand down, as before.
+        assert_eq!(drain_debris_action(true, 1, 0), VisibleAction::StandDown);
+        assert_eq!(drain_debris_action(false, 0, 0), VisibleAction::StandDown);
+        assert_eq!(drain_debris_action(false, 2, 99), VisibleAction::StandDown);
     }
 }
 

@@ -87,7 +87,7 @@ pub struct FormerSlug {
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct AgentSeat {
     #[serde(default)]
-    #[ts(type = r#""leader" | "worker" | "specialist" | "platform_tester" | "analyst""#)]
+    #[ts(type = r#""leader" | "worker" | "specialist" | "platform_tester" | "analyst" | "super""#)]
     pub role: String,
     /// Shown after the role, e.g. "product".
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -105,6 +105,11 @@ pub struct AgentSeat {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub lane: Option<String>,
+    /// The role this agent had before it became the super agent: what it goes
+    /// back to when another agent takes the seat. Absent otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub prior_role: Option<String>,
     /// When the operator last set it (epoch ms). `0` on an effective seat,
     /// one computed for a spawned worker and never stored.
     #[serde(default)]
@@ -337,6 +342,7 @@ mod tests {
             lead: None,
             area: Some("agent pane".into()),
             lane: None,
+            prior_role: None,
             set_at_ms: 7,
         });
         let written = serde_json::to_value(&r).unwrap();

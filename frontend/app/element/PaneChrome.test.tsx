@@ -718,24 +718,18 @@ describe("renderPaneChromeShell — several tabs dropped on this pane", () => {
         expect(paneTabSelection().has("b2")).toBe(true);
     });
 
-    it("expands a collapsed pane that took the tabs, and leaves an expanded one alone", () => {
+    it("tabs dropped on a collapsed pane leave it collapsed: only a plain click expands a pane", () => {
         moveBlocksInStack.mockReturnValue(["x", "y"]);
         const chip = collapsed(true);
-        headerCalls[0].onReceiveForeignTabs(["x", "y"], "x");
-        expect(chip.minimizeNodeToggle).toHaveBeenCalledWith("node-1");
-
-        cleanup();
-        headerCalls.length = 0;
-        const open = collapsed(false);
-        headerCalls[0].onReceiveForeignTabs(["x", "y"], "x");
-        expect(open.minimizeNodeToggle).not.toHaveBeenCalled();
+        expect(headerCalls[0].onReceiveForeignTabs(["x", "y"], "x")).toEqual(["x", "y"]);
+        expect(chip.minimizeNodeToggle).not.toHaveBeenCalled();
     });
 
-    it("a single tab dropped on a collapsed pane expands it too", () => {
+    it("a single tab dropped on a collapsed pane leaves it collapsed too", () => {
         moveBlockInStack.mockReturnValue(true);
         const chip = collapsed(true);
-        headerCalls[0].onReceiveForeignTab("x");
-        expect(chip.minimizeNodeToggle).toHaveBeenCalledWith("node-1");
+        expect(headerCalls[0].onReceiveForeignTab("x")).toBe(true);
+        expect(chip.minimizeNodeToggle).not.toHaveBeenCalled();
     });
 
     it("a lone picked tab that is dropped is no longer picked; an unpicked one leaves the pick alone", () => {
