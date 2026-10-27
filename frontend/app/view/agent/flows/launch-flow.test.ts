@@ -32,6 +32,7 @@ const hub = vi.hoisted(() => ({
     muxEventSubscribe: vi.fn(),
     getMuxObjectAtom: vi.fn(),
     getObjectValue: vi.fn(),
+    agentInput: vi.fn(),
 }));
 
 vi.mock("@/app/errors/translate", () => ({
@@ -45,6 +46,7 @@ vi.mock("@/app/store/rpc-api", () => ({
         ListAgentIdentitiesCommand: (...args: unknown[]) => hub.listAgentIdentities(...args),
         GetIdentityAccountCommand: (...args: unknown[]) => hub.getIdentityAccount(...args),
         ControllerResyncCommand: (...args: unknown[]) => hub.controllerResync(...args),
+        AgentInputCommand: (...args: unknown[]) => hub.agentInput(...args),
     },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
@@ -99,6 +101,7 @@ beforeEach(() => {
     hub.listAgentIdentities.mockReset().mockResolvedValue([]);
     hub.getIdentityAccount.mockReset().mockResolvedValue({ id: "unused", secret_ref: { backend: "env", env_var: "UNUSED" } });
     hub.controllerResync.mockReset().mockResolvedValue(undefined);
+    hub.agentInput.mockReset().mockResolvedValue(undefined);
     hub.getControllerStatus.mockReset().mockResolvedValue({ shellprocstatus: "init" });
     hub.cancelCliLogin.mockReset().mockResolvedValue(undefined);
     hub.ensureCapability.mockReset().mockResolvedValue(undefined);
@@ -530,6 +533,30 @@ describe("runLaunchFlow — a container agent has no host CLI", () => {
         // Not reported as a confirmed sign-in: nothing was checked here.
         expect(confirmed).toEqual([false]);
         expect(phases).toEqual(["resolving-cli", "verifying", "fresh-ready"]);
+    });
+
+    it("begins starting the container once the pane is fresh, so the first message finds it ready", async () => {
+        await runLaunchFlow({ blockId: "block-1", provider: claude, log: vi.fn(), authEnv: {} });
+        expect(hub.agentInput).toHaveBeenCalledTimes(1);
+        expect(hub.agentInput).toHaveBeenCalledWith({}, { blockid: "block-1", message: "", prestart: true });
+    });
+
+    it("does not start it again for a pane that already ran, nor when no account is linked", async () => {
+        hub.getControllerStatus.mockResolvedValue({ shellprocstatus: "done" });
+        await runLaunchFlow({ blockId: "block-1", provider: claude, log: vi.fn(), authEnv: {} });
+        expect(hub.agentInput).not.toHaveBeenCalled();
+
+        hub.getControllerStatus.mockResolvedValue({ shellprocstatus: "init" });
+        hub.listAgentIdentities.mockResolvedValue([]);
+        await runLaunchFlow({ blockId: "block-1", provider: claude, log: vi.fn(), authEnv: {} });
+        expect(hub.agentInput).not.toHaveBeenCalled();
+    });
+
+    it("never starts a container for a host agent", async () => {
+        hub.getMuxObjectAtom.mockReset().mockReturnValue(() => ({ meta: { agentMode: "host", agentId: "agent-1" } }));
+        hub.checkCliAuth.mockResolvedValue({ authenticated: true });
+        await runLaunchFlow({ blockId: "block-1", provider: claude, log: vi.fn(), authEnv: {} });
+        expect(hub.agentInput).not.toHaveBeenCalled();
     });
 
     it("asks to sign in, still without touching a host CLI, when no account is linked", async () => {
