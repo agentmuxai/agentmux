@@ -642,10 +642,15 @@ mod tests {
         let (mut sweeps, mut tries, mut hits) = (0u64, 0u64, 0u64);
         let start = std::time::Instant::now();
         std::thread::sleep(std::time::Duration::from_millis(50));
-        let (lo, hi) = child_thread_id_range(pid);
+        let (mut lo, mut hi) = child_thread_id_range(pid);
         println!("RANGE {lo}..{hi}");
         while !done.load(std::sync::atomic::Ordering::SeqCst) {
             sweeps += 1;
+            // Later batches can use ids outside the first snapshot: widen the range as it grows.
+            if sweeps % 20 == 0 {
+                let (l, h) = child_thread_id_range(pid);
+                (lo, hi) = (lo.min(l), hi.max(h));
+            }
             let mut tid = lo.saturating_sub(64) & !3;
             while tid < hi + 64 {
                 tries += 1;
