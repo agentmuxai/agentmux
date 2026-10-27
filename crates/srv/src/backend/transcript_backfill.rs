@@ -259,6 +259,8 @@ fn read_zone_output(conn: &Connection, block_oid: &str) -> Option<Vec<u8>> {
             buf.extend_from_slice(&part);
         }
     }
+    // The last part's row can be longer than the file (blank slack, filestore parts.rs).
+    buf.truncate(size.unwrap_or(0).max(0) as usize);
     if buf.is_empty() {
         None
     } else {

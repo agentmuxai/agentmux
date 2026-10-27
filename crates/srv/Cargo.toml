@@ -40,7 +40,7 @@ chrono = "0.4"
 # the tree through chrono, so this adds nothing new.
 iana-time-zone = "0.1"
 tokio-util = { version = "0.7", features = ["io", "rt"] }
-rusqlite = { version = "0.39", features = ["bundled", "backup"] }
+rusqlite = { version = "0.39", features = ["bundled", "backup", "blob"] }
 # TypeScript type generation for the RPC bindings (backend/rpc/schema.rs, and
 # the export_bindings_rpc_schema test that feeds scripts/gen-rpc-stubs.mjs).
 # serde-json-impl gives serde_json::Value a TS impl (JsonValue), which

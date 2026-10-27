@@ -125,6 +125,7 @@ async fn the_agents_global_zone_is_named_as_its_own_stream() {
 /// the counter columns touched (it doesn't know them).
 fn old_build_append(fs: &FileStore, zone: &str, data: &[u8]) {
     let conn = fs.conn().lock().unwrap();
+    crate::backend::storage::filestore::strip_slack_for_test(&conn, zone, "output");
     let size: i64 = conn
         .query_row("SELECT size FROM db_wave_file WHERE zoneid = ?1 AND name = 'output'", [zone], |r| r.get(0))
         .unwrap();

@@ -802,7 +802,10 @@ impl FileStore {
                     0
                 };
                 let remaining = data_len as usize - result.len();
-                let take = remaining.min(part_data.len() - skip);
+                // Not past the file's size: a tail row's slack (parts.rs `tail_capacity`) is not content, and
+                // with a part lost before it, `remaining` would otherwise reach into it.
+                let content = part_data.len().min((file.size - part_start).max(0) as usize);
+                let take = remaining.min(content.saturating_sub(skip));
                 result.extend_from_slice(&part_data[skip..skip + take]);
             }
         }
