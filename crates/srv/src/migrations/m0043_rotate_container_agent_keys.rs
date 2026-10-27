@@ -14,8 +14,7 @@
 //!
 //! The WAN key too: an earlier version injected it into the same file, and the channel-wide `wan.db` key was
 //! imported from that one. Both rows are removed, so the next signing mints a new key and srv's normal
-//! publish puts it in the directory (the relay keeps a record per key fingerprint, so a new key doesn't
-//! clash with the old one).
+//! publish puts it in the directory.
 //!
 //! Only an agent that has keys gets new ones (none is minted). Idempotent: a second run replaces them
 //! again, which is harmless. An agent's key rows are keyed by its slug. A LAN peer that already pinned
