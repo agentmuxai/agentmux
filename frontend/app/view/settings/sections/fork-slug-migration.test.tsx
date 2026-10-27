@@ -58,6 +58,15 @@ const report = {
     notes: ["Relaunch each migrated agent."],
 };
 
+// An agent whose new id is taken, and the same agent once the user picked loap-3-2.
+const REFUSED = cand("Loap #3", "loap-loap-2-loap-3", "loap-3", {
+    uid: "uid-loap-3",
+    refused: "loap-3 is taken: agent x has it",
+    suggestion: "loap-3-2",
+});
+const PICKED = cand("Loap #3", "loap-loap-2-loap-3", "loap-3-2", { uid: "uid-loap-3" });
+const PICK = [{ uid: "uid-loap-3", new_slug: "loap-3-2" }];
+
 /** srv: `plans` answers each plan in turn (the last one repeats). */
 function srv(plans: ForkSlugPlan[]) {
     let i = 0;
@@ -83,6 +92,14 @@ describe("planLine", () => {
         expect(planLine(plan(THREE))).toBe("3 agents have an outdated id.");
         expect(planLine(plan(THREE.slice(0, 1)))).toBe("1 agent has an outdated id.");
         expect(planLine(plan([]))).toBe("Every agent has an up-to-date id.");
+    });
+
+    it("says when agents can't be updated yet because their new id is taken", () => {
+        expect(planLine(plan([THREE[0], REFUSED]))).toBe("2 agents have an outdated id. 1 can't be updated yet: pick another id below.");
+        expect(planLine(plan([REFUSED]))).toBe("1 agent has an outdated id. It can't be updated yet: pick another id below.");
+        expect(planLine(plan([REFUSED, { ...REFUSED, uid: "uid-b" }]))).toBe(
+            "2 agents have an outdated id. None can be updated yet: pick another id below.",
+        );
     });
 });
 
@@ -175,7 +192,7 @@ describe("ForkSlugMigration", () => {
         const refused = cand("Loap #3", "loap-loap-2-loap-3", "loap-3", { refused: "loap-3 is taken: agent x has it", suggestion: "loap-3-2" });
         srv([plan([THREE[0], refused], [OLD])]);
         render(() => <ForkSlugMigration />);
-        await screen.findByText("2 agents have an outdated id.");
+        await screen.findByText("2 agents have an outdated id. 1 can't be updated yet: pick another id below.");
         expect(screen.getByText(/the next free id is loap-3-2/)).toBeInTheDocument();
         expect(screen.getByText(/An older AgentMux is running/)).toBeInTheDocument();
         expect(screen.getByRole("button", { name: "Update them" })).toBeDisabled();
@@ -215,5 +232,104 @@ describe("ForkSlugMigration", () => {
         fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Undo" }));
         await waitFor(() => expect(modes()).toEqual(["plan", "rollback", "plan"]));
         expect(migrate.mock.calls[1][1]).toEqual({ mode: "rollback", journal: report.journal });
+    });
+
+    it("gives a refused agent the suggested id with one click, then clears the pick", async () => {
+        srv([plan([REFUSED]), plan([PICKED]), plan([])]);
+        render(() => <ForkSlugMigration />);
+        await screen.findByText(/It can't be updated yet/);
+        expect(screen.getByRole("button", { name: "Update them" })).toBeDisabled();
+        fireEvent.click(screen.getByRole("button", { name: "Use loap-3-2" }));
+        await waitFor(() => expect(modes()).toEqual(["plan", "plan", "apply", "plan"]));
+        expect(migrate.mock.calls[1][1]).toEqual({ mode: "plan", choices: PICK });
+        expect(migrate.mock.calls[2][1]).toEqual({ mode: "apply", choices: PICK });
+        expect(migrate.mock.calls[3][1]).toEqual({ mode: "plan" });
+        expect(await screen.findByText("Every agent has an up-to-date id.")).toBeInTheDocument();
+    });
+
+    it("says why a picked id can't be used, updates nothing and shows the plan as it was", async () => {
+        const taken = { ...REFUSED, new_slug: "loap-3-2", refused: "loap-3-2 is taken: agent y has it" };
+        srv([plan([REFUSED]), plan([taken]), plan([REFUSED])]);
+        render(() => <ForkSlugMigration />);
+        await screen.findByText(/It can't be updated yet/);
+        fireEvent.click(screen.getByRole("button", { name: "Use loap-3-2" }));
+        expect(await screen.findByRole("alert")).toHaveTextContent("loap-3-2 can't be used: loap-3-2 is taken: agent y has it");
+        await waitFor(() => expect(modes()).toEqual(["plan", "plan", "plan"]));
+        expect(migrate.mock.calls[2][1]).toEqual({ mode: "plan" });
+        expect(screen.getByRole("button", { name: "Use loap-3-2" })).toBeEnabled();
+    });
+
+    it("takes no second pick while the first is being checked", async () => {
+        let release: () => void = () => {};
+        const gate = new Promise<void>((r) => (release = r));
+        srv([plan([REFUSED]), plan([PICKED]), plan([])]);
+        const answer = migrate.getMockImplementation()!;
+        let plans = 0;
+        migrate.mockImplementation(async (c: unknown, data: { mode: string }) => {
+            if (data.mode === "plan" && ++plans === 2) await gate;
+            return answer(c, data);
+        });
+        render(() => <ForkSlugMigration />);
+        await screen.findByText(/It can't be updated yet/);
+        const use = screen.getByRole("button", { name: "Use loap-3-2" });
+        fireEvent.click(use);
+        await waitFor(() => expect(use).toBeDisabled());
+        expect(screen.getByRole("button", { name: "Choose another id" })).toBeDisabled();
+        fireEvent.click(use);
+        expect(modes()).toEqual(["plan", "plan"]);
+        release();
+        await waitFor(() => expect(modes()).toEqual(["plan", "plan", "apply", "plan"]));
+        expect(migrate.mock.calls[2][1]).toEqual({ mode: "apply", choices: PICK });
+    });
+
+    it("takes an id of the user's own for a refused agent", async () => {
+        srv([plan([{ ...REFUSED, suggestion: undefined }]), plan([{ ...PICKED, new_slug: "loap-three" }]), plan([])]);
+        render(() => <ForkSlugMigration />);
+        await screen.findByText(/It can't be updated yet/);
+        expect(screen.queryByRole("button", { name: /^Use loap/ })).not.toBeInTheDocument();
+        fireEvent.click(screen.getByRole("button", { name: "Choose another id" }));
+        const input = screen.getByLabelText("New id for Loap #3");
+        const use = screen.getByRole("button", { name: "Use this id" });
+        expect(use).toBeDisabled();
+        fireEvent.input(input, { target: { value: " loap-three " } });
+        fireEvent.click(use);
+        await waitFor(() => expect(modes()).toEqual(["plan", "plan", "apply", "plan"]));
+        expect(migrate.mock.calls[1][1]).toEqual({ mode: "plan", choices: [{ uid: "uid-loap-3", new_slug: "loap-three" }] });
+    });
+
+    it("offers no pick while other agents can still be updated by the rule", async () => {
+        srv([plan([THREE[0], REFUSED])]);
+        render(() => <ForkSlugMigration />);
+        await screen.findByText(/1 can't be updated yet/);
+        expect(screen.getByText("Update the other agents first; then this one can take another id.")).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Use loap-3-2" })).toBeDisabled();
+        expect(screen.getByRole("button", { name: "Choose another id" })).toBeDisabled();
+    });
+
+    it("stops the panes an agent runs in, with the pick, before it updates it", async () => {
+        const running = { ...PICKED, running: [{ block_id: "b1", channel: "stable", how: "holds its lease" }] };
+        const stopped = { ...PICKED, running: [] };
+        srv([plan([REFUSED]), plan([running], [RUNNING]), plan([running], [RUNNING]), plan([stopped]), plan([])]);
+        render(() => <ForkSlugMigration />);
+        await screen.findByText(/It can't be updated yet/);
+        fireEvent.click(screen.getByRole("button", { name: "Use loap-3-2" }));
+        const dialog = await screen.findByRole("dialog");
+        fireEvent.click(within(dialog).getByRole("button", { name: "Stop and update" }));
+        await waitFor(() => expect(modes()).toEqual(["plan", "plan", "plan", "stop", "plan", "apply", "plan"]));
+        expect(migrate.mock.calls[3][1]).toEqual({ mode: "stop", choices: PICK });
+        expect(migrate.mock.calls[5][1]).toEqual({ mode: "apply", choices: PICK });
+    });
+
+    it("drops the pick when the stop is cancelled", async () => {
+        const running = { ...PICKED, running: [{ block_id: "b1", channel: "stable", how: "holds its lease" }] };
+        srv([plan([REFUSED]), plan([running], [RUNNING]), plan([REFUSED])]);
+        render(() => <ForkSlugMigration />);
+        await screen.findByText(/It can't be updated yet/);
+        fireEvent.click(screen.getByRole("button", { name: "Use loap-3-2" }));
+        const dialog = await screen.findByRole("dialog");
+        fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+        await waitFor(() => expect(modes()).toEqual(["plan", "plan", "plan"]));
+        expect(migrate.mock.calls[2][1]).toEqual({ mode: "plan" });
+        expect(await screen.findByRole("button", { name: "Use loap-3-2" })).toBeEnabled();
     });
 });
