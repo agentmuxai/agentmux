@@ -25,6 +25,8 @@ pub(crate) const META_SESSION_ID: &str = "agent:sessionid";
 /// tab switches and page reloads without requiring the MPS event to be
 /// received in real time.
 pub(crate) const META_LAST_FAILURE: &str = "agent:last_failure";
+/// The field of the stored failure that says when it was recorded (unix ms).
+pub(crate) const META_FAILURE_AT_MS: &str = "atMs";
 
 /// Expand the working directory, create it if missing, set it on `cmd`, and
 /// apply all env-var overrides from `env_vars`.
@@ -262,7 +264,23 @@ pub(crate) fn persist_last_failure(
     let mut meta_update = crate::backend::obj::MetaMapType::new();
     let val = match failure {
         Some(f) => match serde_json::to_value(f) {
-            Ok(v) => v,
+            Ok(mut v) => {
+                // When it was recorded, so the agent's state has a `since` that survives a restart;
+                // the same failure hit again keeps the first time.
+                let first_at = store
+                    .must_get::<crate::backend::obj::Block>(block_id)
+                    .ok()
+                    .and_then(|b| b.meta.get(META_LAST_FAILURE).cloned())
+                    .filter(|old| old.get("code") == v.get("code"))
+                    .and_then(|old| old.get(META_FAILURE_AT_MS).cloned());
+                if let Some(o) = v.as_object_mut() {
+                    o.insert(
+                        META_FAILURE_AT_MS.to_string(),
+                        first_at.unwrap_or_else(|| serde_json::json!(agentmux_common::time::now_ms_u64())),
+                    );
+                }
+                v
+            }
             Err(e) => {
                 tracing::warn!(
                     block_id = %block_id,
@@ -284,6 +302,10 @@ pub(crate) fn persist_last_failure(
             );
         }
         Ok(_) => {
+            if failure.is_none() {
+                // A cleared failure can free held messages (a limited agent's clean turn).
+                crate::backend::reactive::held_jekt_wake().notify_one();
+            }
             let Some(ref bus) = event_bus else {
                 return;
             };

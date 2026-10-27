@@ -9,9 +9,10 @@
 //! executed via `docker exec -i` (no `-t` — avoids CR/LF corruption of NDJSON).
 //!
 //! Platform support (cross-platform, matches SPEC_CONTAINER_PANE_SUPPORT_2026_06_11.md):
+//!   - `DOCKER_HOST` when set (unix, tcp with or without TLS, https, npipe), else the sockets
+//!     Docker, Podman, Colima and OrbStack leave in their usual places; the first that answers a
+//!     ping is used (`container_runtime.rs`).
 //!   - Windows: named pipe `//./pipe/docker_engine`
-//!   - macOS:   socket resolved via `docker context inspect` (Docker Desktop or Rancher)
-//!   - Linux:   `/var/run/docker.sock` or rootless path in XDG_RUNTIME_DIR
 //!
 //! Independence boundary: this module has no dependency on a5af/claw.
 //! Docker best practices here were researched independently.
@@ -27,6 +28,8 @@ use tokio::io::AsyncWrite;
 use tokio::sync::Mutex;
 use futures_util::StreamExt as _;
 use bollard::Docker;
+
+use crate::backend::container_runtime;
 use bollard::container::{
     Config, CreateContainerOptions, ListContainersOptions, StartContainerOptions,
     StopContainerOptions,
@@ -267,6 +270,9 @@ pub struct ContainerManager {
 
 struct ContainerManagerInner {
     docker: Docker,
+    /// The runtime in use, for the pane: `Podman at unix:///…`. `None` for a connection made
+    /// without detection ([`ContainerManager::connect`]).
+    runtime: Option<String>,
     /// Per-container serialization lock: prevents concurrent ensure_running calls
     /// for the same container from both seeing "not found" in Docker and both
     /// attempting create_container (which would fail with a 409 name-conflict
@@ -378,6 +384,10 @@ pub enum ContainerError {
     NoId { name: String },
     #[error("Docker is not available on this host: {0}")]
     NotAvailable(String),
+    /// No container runtime answered; the text says where it looked and why each place failed
+    /// ([`container_runtime::Missing::message`]).
+    #[error("{0}")]
+    NoRuntime(String),
     /// The image could not be downloaded. `detail` is the daemon's own text,
     /// kept for logs; the pane gets [`ContainerError::user_message`].
     #[error("could not pull image {image}: {detail}")]
@@ -406,6 +416,7 @@ impl ContainerError {
                 }
             }
             Self::NotAvailable(_) => docker_unreachable_message(),
+            Self::NoRuntime(message) => message.clone(),
             Self::NoId { .. } => docker_error_message("the container was created without an id"),
             Self::CliInstall { command, detail } => cli_install_failure_message(command, detail),
         }
@@ -420,16 +431,41 @@ impl ContainerManager {
     pub fn connect() -> Result<Self, ContainerError> {
         let docker = Docker::connect_with_local_defaults()
             .map_err(|e| ContainerError::NotAvailable(e.to_string()))?;
-        Ok(Self {
+        Ok(Self::with_docker(docker, None))
+    }
+
+    /// Connect to the runtime [`container_runtime`] finds: `DOCKER_HOST`, else the first socket
+    /// of rootless Docker, Podman, Docker Desktop, Colima, OrbStack or the system that answers a
+    /// ping. `Err` says where it looked and why each place failed.
+    pub async fn connect_detected() -> Result<Self, ContainerError> {
+        let env = container_runtime::Env::from_process();
+        match container_runtime::connect(&env).await {
+            Ok(found) => {
+                let label = found.label();
+                tracing::info!(runtime = %label, "container runtime found");
+                Ok(Self::with_docker(found.docker, Some(label)))
+            }
+            Err(missing) => Err(ContainerError::NoRuntime(missing.message())),
+        }
+    }
+
+    pub(crate) fn with_docker(docker: Docker, runtime: Option<String>) -> Self {
+        Self {
             inner: Arc::new(ContainerManagerInner {
                 docker,
+                runtime,
                 ensure_locks: Mutex::new(HashMap::new()),
                 exec_identities: Mutex::new(HashMap::new()),
                 cli_ready: Mutex::new(std::collections::HashSet::new()),
                 cli_locks: Mutex::new(HashMap::new()),
                 dev_proxy: std::sync::OnceLock::new(),
             }),
-        })
+        }
+    }
+
+    /// Which runtime this connection is to, e.g. `Podman at unix:///run/user/1000/podman/podman.sock`.
+    pub fn runtime_label(&self) -> Option<&str> {
+        self.inner.runtime.as_deref()
     }
 
     /// Wires a dev-proxy routing table into this manager so `stop`/`remove`
@@ -1434,142 +1470,7 @@ impl ContainerManager {
     }
 }
 
-/// State of the container-runtime slot held by [`ContainerRuntimeHandle`].
-enum RuntimeSlot {
-    /// Test/no-docker-expected fixtures — `get()` never attempts a real
-    /// connect, always reports unavailable.
-    #[cfg(test)]
-    Disabled,
-    /// No manager yet: never connected, or the last connect attempt
-    /// failed. `get()` retries `ContainerManager::connect()` on every
-    /// call while in this state.
-    Empty,
-    Connected(ContainerManager),
-}
-
-/// Self-healing holder for the container runtime connection.
-///
-/// A plain `Option<ContainerManager>` fixed at process boot means a Docker
-/// daemon that starts (or a socket/named-pipe that appears) AFTER AgentMux
-/// launched is never picked up without an app restart — every consumer
-/// (the availability probe AND the actual container-launch code paths)
-/// would see a permanent `None`. This type retries on demand instead, so
-/// "start Docker Desktop while AgentMux is already running" is picked up
-/// within one call, everywhere `container_manager` is read.
-///
-/// See docs/retro/RETRO_DOCKER_DETECTION_DIVERGENCE_2026_07_04.md.
-pub struct ContainerRuntimeHandle {
-    slot: tokio::sync::RwLock<RuntimeSlot>,
-    /// Dev-proxy registry to attach to every `ContainerManager` this handle
-    /// ever produces — including across reconnects, each of which creates
-    /// a fresh manager instance with its own unset `attach_dev_proxy_registry`
-    /// state. `None` until `set_dev_proxy_registry` is called (bootstrap
-    /// wires this in once both this handle and the registry exist); tests
-    /// using `disabled()` never set it, and `get()` never even constructs
-    /// a manager in that case. See
-    /// docs/specs/SPEC_NATIVE_CONTAINER_DEV_PROXY_2026_09_19.md.
-    dev_proxy: std::sync::RwLock<Option<crate::backend::dev_proxy::DevProxyRegistry>>,
-}
-
-impl ContainerRuntimeHandle {
-    /// Boot-time constructor. Attempts one connect (same as the prior
-    /// behavior) but never permanently gives up on failure — a failed
-    /// attempt leaves the slot `Empty` so `get()`/`is_available()` retry
-    /// later instead of staying stuck for the process lifetime.
-    pub fn connect_at_startup() -> Self {
-        let slot = match ContainerManager::connect() {
-            Ok(mgr) => RuntimeSlot::Connected(mgr),
-            Err(_) => RuntimeSlot::Empty,
-        };
-        Self {
-            slot: tokio::sync::RwLock::new(slot),
-            dev_proxy: std::sync::RwLock::new(None),
-        }
-    }
-
-    /// Test-only constructor: permanently reports unavailable and never
-    /// attempts a real connect, keeping host-only unit tests hermetic and
-    /// deterministic regardless of whether the test box has Docker.
-    #[cfg(test)]
-    pub fn disabled() -> Self {
-        Self {
-            slot: tokio::sync::RwLock::new(RuntimeSlot::Disabled),
-            dev_proxy: std::sync::RwLock::new(None),
-        }
-    }
-
-    /// Wire a dev-proxy registry into this handle so every
-    /// `ContainerManager` it produces — now and after any future Docker
-    /// reconnect — has `stop`/`remove` clear that agent's routes. Call
-    /// once at bootstrap, after both this handle and the registry exist
-    /// (see `bootstrap::build_app_state`).
-    pub fn set_dev_proxy_registry(&self, registry: crate::backend::dev_proxy::DevProxyRegistry) {
-        if let Ok(mut slot) = self.dev_proxy.write() {
-            *slot = Some(registry.clone());
-        }
-        // Attach immediately to whatever manager already exists (the
-        // common case — `connect_at_startup` usually connects
-        // synchronously before this is called), not just future ones.
-        if let Ok(slot) = self.slot.try_read() {
-            if let RuntimeSlot::Connected(mgr) = &*slot {
-                mgr.attach_dev_proxy_registry(registry);
-            }
-        }
-    }
-
-    /// Returns a connected manager, retrying `ContainerManager::connect()`
-    /// if the slot is currently `Empty`. Cheap on the happy path (a
-    /// read-lock plus a cheap `Arc`-backed clone); only takes the write
-    /// lock and re-dials when we don't already have a manager.
-    pub async fn get(&self) -> Option<ContainerManager> {
-        {
-            let slot = self.slot.read().await;
-            match &*slot {
-                RuntimeSlot::Connected(mgr) => return Some(mgr.clone()),
-                #[cfg(test)]
-                RuntimeSlot::Disabled => return None,
-                RuntimeSlot::Empty => {}
-            }
-        }
-        let mut slot = self.slot.write().await;
-        // Re-check under the write lock — another caller may have already
-        // connected between our read-unlock and this write-lock.
-        if let RuntimeSlot::Connected(mgr) = &*slot {
-            return Some(mgr.clone());
-        }
-        #[cfg(test)]
-        if matches!(&*slot, RuntimeSlot::Disabled) {
-            return None;
-        }
-        match ContainerManager::connect() {
-            Ok(mgr) => {
-                // A reconnect makes a brand-new `ContainerManagerInner`
-                // (fresh `OnceLock`s) — re-attach the registry here so
-                // `stop`/`remove` cleanup survives a Docker daemon
-                // restart, not just the initial connect.
-                if let Ok(guard) = self.dev_proxy.read() {
-                    if let Some(registry) = guard.as_ref() {
-                        mgr.attach_dev_proxy_registry(registry.clone());
-                    }
-                }
-                *slot = RuntimeSlot::Connected(mgr.clone());
-                Some(mgr)
-            }
-            Err(_) => None,
-        }
-    }
-
-    /// True iff a manager is available AND its daemon answers a live ping
-    /// right now. Never trusts a cached `Connected` slot alone — the
-    /// daemon can go down again after a successful connect, and
-    /// `check_available` is a real `docker.ping()`, not a cached flag.
-    pub async fn is_available(&self) -> bool {
-        match self.get().await {
-            Some(mgr) => mgr.check_available().await.is_ok(),
-            None => false,
-        }
-    }
-}
+pub use crate::backend::container_runtime::ContainerRuntimeHandle;
 
 /// What a collected exec produced.
 struct ExecOutcome {

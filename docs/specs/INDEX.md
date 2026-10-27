@@ -594,6 +594,7 @@ partial list.
 | [`SPEC_ACCOUNT_SWITCH_FROM_THE_COMPOSER_NO_BIND_2026_10_26`](SPEC_ACCOUNT_SWITCH_FROM_THE_COMPOSER_NO_BIND_2026_10_26.md) | SPEC: an agent's account is changed from the composer's login email; the Connectors "Bind to agent" step goes; same-email accounts are numbered |
 | [`SPEC_AGENT_ACTIVITY_FLASH_SOUND_SYNC_2026_09_24`](SPEC_AGENT_ACTIVITY_FLASH_SOUND_SYNC_2026_09_24.md) | Activity flash matches its sound: same strikes, same timing, same relative intensity |
 | [`SPEC_AGENT_ARCHITECTURE_2026_05_27`](SPEC_AGENT_ARCHITECTURE_2026_05_27.md) | SPEC: Agent data-model architecture — consolidation plan & status |
+| [`SPEC_AGENT_AVAILABILITY_ONE_STATE_2026_10_26`](SPEC_AGENT_AVAILABILITY_ONE_STATE_2026_10_26.md) | Spec: one availability state for "can this agent take a message now" |
 | [`SPEC_AGENT_CLI_ISOLATION_NOTE_2026_10_18`](SPEC_AGENT_CLI_ISOLATION_NOTE_2026_10_18.md) | SPEC: say, in the new-agent pane and the docs, that AgentMux manages its own agent CLIs |
 | [`SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15`](SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md) | SPEC: Agent Control Protocol — fix AskUserQuestion (+ unblock tool-permission UI) and align muxbus delivery |
 | [`SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07`](SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md) | SPEC: Agents drive a browser pane they open: forms, uploads, and the human in the loop |

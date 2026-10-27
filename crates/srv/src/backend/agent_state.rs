@@ -164,6 +164,8 @@ pub struct StoredFailure {
     pub code: FailureClass,
     pub title: String,
     pub resets_at_ms: Option<u64>,
+    /// When it was recorded (unix ms); absent on one stored before this field.
+    pub at_ms: Option<u64>,
 }
 
 /// The block's stored failure, or `None` when it has none (or one this build
@@ -174,6 +176,7 @@ pub fn failure_of_block(block: &Block) -> Option<StoredFailure> {
         code: serde_json::from_value(f.get("code")?.clone()).ok()?,
         title: f.get("title").and_then(|t| t.as_str()).unwrap_or_default().to_string(),
         resets_at_ms: f.get("resetsAtMs").and_then(|r| r.as_u64()),
+        at_ms: f.get(blockcontroller::core::META_FAILURE_AT_MS).and_then(|r| r.as_u64()),
     })
 }
 
@@ -216,7 +219,9 @@ pub fn unavailable_of_block(mstore: &Store, identity: Option<&Store>, block_id: 
     }
     let block = mstore.get::<Block>(block_id).ok()??;
     let failure = failure_of_block(&block)?;
-    let since_ms = TRACKER.record(block_id, Some(state), now_ms).map_or(now_ms, |s| s.since_ms);
+    // The failure's own time when it has one: the tracker starts over at every srv start.
+    let tracked = TRACKER.record(block_id, Some(state), now_ms).map_or(now_ms, |s| s.since_ms);
+    let since_ms = failure.at_ms.map_or(tracked, |at| at.min(now_ms));
     let account_id = match identity {
         Some(identity) => run_accounts_of_block(identity, &block).into_iter().next(),
         None => block.meta.get(RUN_ACCOUNT_META_KEY).and_then(|a| a.as_str()).map(str::to_string),
@@ -607,6 +612,48 @@ mod tests {
             f["resetsAtMs"] = serde_json::json!(r);
         }
         f
+    }
+
+    #[test]
+    fn the_state_begins_when_the_failure_was_recorded_not_when_srv_first_saw_it() {
+        let store = store();
+        let now = agentmux_common::time::now_ms_u64();
+        let mut failure = failure_meta("usage_limit", Some(now + 60_000));
+        failure["atMs"] = serde_json::json!(now - 3_600_000);
+        let stored = insert_block(&store, &[(blockcontroller::core::META_LAST_FAILURE, failure)]);
+        test_support::register_stub(&stored, BLOCK_CONTROLLER_PERSISTENT, STATUS_RUNNING, false);
+        let u = unavailable_of_block(&store, None, &stored, now).expect("limited");
+        assert_eq!(u.since_ms, now - 3_600_000, "a restart does not move it");
+        let old = insert_block(&store, &[(blockcontroller::core::META_LAST_FAILURE, failure_meta("usage_limit", Some(now + 60_000)))]);
+        test_support::register_stub(&old, BLOCK_CONTROLLER_PERSISTENT, STATUS_RUNNING, false);
+        assert_eq!(unavailable_of_block(&store, None, &old, now).expect("limited").since_ms, now, "one stored before the field: first seen");
+    }
+
+    #[test]
+    fn a_stored_failure_carries_the_time_it_was_first_recorded_and_clearing_removes_it() {
+        let store = std::sync::Arc::new(store());
+        let limit = crate::agents::failure::classify(Some(1), None, "You've hit your weekly limit", None);
+        assert_eq!(limit.code, FailureClass::UsageLimit);
+        let persist = |id: &str, f: Option<&crate::agents::failure::AgentFailure>| {
+            blockcontroller::core::persist_last_failure(id, f, &Some(store.clone()), &None);
+        };
+        let stored = |id: &str| failure_of_block(&store.get::<Block>(id).unwrap().unwrap());
+
+        let fresh = insert_block(&store, &[]);
+        persist(&fresh, Some(&limit));
+        assert!(stored(&fresh).expect("stored").at_ms.is_some_and(|at| at > 0), "stamped when first recorded");
+
+        let mut earlier = failure_meta("usage_limit", None);
+        earlier["atMs"] = serde_json::json!(1_234);
+        let hit_again = insert_block(&store, &[(blockcontroller::core::META_LAST_FAILURE, earlier)]);
+        persist(&hit_again, Some(&limit));
+        assert_eq!(stored(&hit_again).unwrap().at_ms, Some(1_234), "the same failure hit again keeps the first time");
+        let transient = crate::agents::failure::classify(Some(1), None, "HTTP 429 rate_limit", None);
+        persist(&hit_again, Some(&transient));
+        assert_ne!(stored(&hit_again).unwrap().at_ms, Some(1_234), "another kind of failure starts over");
+
+        persist(&hit_again, None);
+        assert!(stored(&hit_again).is_none(), "a clean turn clears it");
     }
 
     #[test]
