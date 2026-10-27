@@ -2,6 +2,7 @@
 
 **Status:** analysis
 **Date:** 2026-06-30
+**Identifiers:** the seller id and tenant id were removed from this public copy on 2026-10-27; the full text is in the private shared-infrastructure repo (`docs/analysis/`).
 **Question:** Can msstore CLI authenticate in CI without Entra admin access / using a personal Microsoft account?
 
 ---
@@ -31,7 +32,7 @@ There is no `--token`, `--apiKey`, or personal-account parameter. The CLI overvi
 
 ### 2. The 401 on entra.microsoft.com is expected for personal MSA holders
 
-Personal Microsoft accounts (`@outlook.com`, `@hotmail.com`) are used to *register* as Windows developers in Partner Center — but they don't automatically give you admin access to an Entra tenant. The tenant ID `4687dc46-1fd2-45e9-9411-ab7a7ad55df5` exists but you're not its admin, hence the 401.
+Personal Microsoft accounts (`@outlook.com`, `@hotmail.com`) are used to *register* as Windows developers in Partner Center — but they don't automatically give you admin access to an Entra tenant. The tenant ID `<tenant id: private copy>` exists but you're not its admin, hence the 401.
 
 ### 3. The fix: create the Entra tenant FROM Partner Center — no Azure portal needed
 
@@ -69,7 +70,7 @@ No documented workaround exists. A June 2024 Microsoft identity platform breakin
    - Generate a new key (client secret) → `MSSTORE_CLIENT_SECRET`
    - The Tenant ID is from step 1 → `MSSTORE_TENANT_ID`
 
-3. **Profile/Seller ID** is already known: `15588cde-ee0a-4471-a7e9-d5828d87ada6` → `MSSTORE_SELLER_ID`
+3. **Profile/Seller ID** is already known: `<seller id: private copy>` → `MSSTORE_SELLER_ID`
 
 4. **Store App ID** (`MSSTORE_APP_ID`): Partner Center → Apps & games → AgentMux → App identity → Store ID (format `9NXXXXXXX`)
 
@@ -96,7 +97,7 @@ The `ms-store` job remains in `release.yml` with `continue-on-error: true` — i
 
 | Secret | Value | Source |
 |---|---|---|
-| `MSSTORE_SELLER_ID` | `15588cde-ee0a-4471-a7e9-d5828d87ada6` | Partner Center profile |
+| `MSSTORE_SELLER_ID` | `<seller id: private copy>` | Partner Center profile |
 | `MSSTORE_TENANT_ID` | pending new tenant creation | Partner Center wizard |
 | `MSSTORE_CLIENT_ID` | pending app registration | Partner Center Users page |
 | `MSSTORE_CLIENT_SECRET` | pending app registration | Partner Center Users page |
