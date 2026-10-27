@@ -141,3 +141,14 @@ fn finished_requests_are_dropped_after_a_while_and_open_ones_are_kept() {
     assert!(reg.get(&done).is_none(), "dropped");
     assert!(reg.get(&open).is_some(), "an open one never is");
 }
+
+#[test]
+fn requests_that_differ_only_late_in_a_long_fact_stay_apart() {
+    let reg = Registry::new();
+    let prefix = "net:https://a.example ".repeat(8);
+    let ask = |perms: String| reg.request("u1", "s1", "widget_install", &facts(&[("widget", "w"), ("publisher", "p"), ("permissions", &perms)]), "", 0).unwrap();
+    let first = ask(format!("{prefix}storage"));
+    let second = ask(format!("{prefix}agents:send"));
+    assert!(!second.joined && first.id != second.id, "the second asks for different permissions");
+    assert!(reg.get(&second.id).unwrap().summary.contains("agents:send"), "the banner shows the whole list");
+}
