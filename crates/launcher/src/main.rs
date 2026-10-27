@@ -125,6 +125,9 @@ fn suppress_os_crash_dialogs() {}
 /// Windows crash modal either. Spec:
 /// docs/specs/SPEC_SERVICE_SUPERVISION_AND_RECOVERY_2026_05_20.md.
 fn main() {
+    // Before any thread or child exists: an instance key inherited from the shell that
+    // started this launcher goes no further; the launcher mints its own for srv and the host.
+    agentmux_common::secret_env::discard_startup_secrets();
     suppress_os_crash_dialogs();
     logging::install_panic_hook();
 
