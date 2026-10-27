@@ -2,6 +2,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { createSignInNotice } from "./sign-in-notice";
 import type { AttachmentRef } from "@/types/rpc/AttachmentRef";
 import {
     snapshot as layoutSnapshot,
@@ -560,8 +561,6 @@ export const AgentPresentationView = ({
     // terminal channel (see docs/specs/SPEC_AGENT_PANE_AUTH_NOTIFICATIONS_2026_07_26.md
     // \u00a71). "success"/"warning" get a symbol prefix; "info" doesn't (used for
     // neutral narration like "Signing in..." or "Ready...").
-    // Whether the transcript says the user must sign in, so a login or a bound account answers it.
-    let signInNoticePosted = false;
     const postSystemNotification = (text: string, style: "info" | "warning" | "success" = "info"): void => {
         const prefix = style === "success" ? "\u2713 " : style === "warning" ? "\u26a0 " : "";
         const node: import("./types").MarkdownNode = {
@@ -576,24 +575,17 @@ export const AgentPresentationView = ({
         });
     };
 
+    const signIn = createSignInNotice((text, style) => postSystemNotification(text, style));
     const status = useAgentControllerStatus({
         blockId: model.blockId,
         provider,
         log,
         onLoginSuccess: (email) => {
-            signInNoticePosted = false;
-            const display = email ? `Logged in as **${email}**` : "Login successful";
-            postSystemNotification(display, "success");
+            signIn.answered();
+            postSystemNotification(email ? `Logged in as **${email}**` : "Login successful", "success");
         },
-        onNotify: (text, style, kind) => {
-            if (kind === "sign-in") signInNoticePosted = true;
-            postSystemNotification(text, style);
-        },
-        onAccountBound: (label) => {
-            if (!signInNoticePosted) return;
-            signInNoticePosted = false;
-            postSystemNotification(`Signed in with **${label}**`, "success");
-        },
+        onNotify: (text, style, kind) => { signIn.seen(kind); postSystemNotification(text, style); },
+        onAccountBound: signIn.bound,
         onReady: () => onReadyFn?.(),
         // A successful recovery (relogin / terminal login) refreshed
         // the credential — retry the failed turn so the agent recovers in one
