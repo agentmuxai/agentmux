@@ -58,6 +58,7 @@ pub const ALWAYS: &[&str] = &[
     "widgets.catalog.install", "widgets.install", "widgets.rescan", "widgets.session", "widgets.setenabled",
     "widgets.uninstall", "writeagentconfig", "writeeditorfile",
     "updatecontainer",
+    "identity.account.signed_in", "identity.account.validate",
 ];
 
 /// The window's own view and bookkeeping state.
@@ -96,7 +97,7 @@ pub const READ_ONLY: &[&str] = &[
     "geteditorroots", "getfullconfig", "getidentityaccount", "getmemory", "getmeta", "gettoolstatus",
     "getwaveairatelimit", "globalmemory:diff", "globalmemory:history", "globalmemory:import_sources",
     "globalmemory:removed", "globalmemory:sections", "history.agent_sessions", "history.agents", "history.locate",
-    "history.usage", "identity.account.availability", "identity.account.signed_in", "identity.account.validate",
+    "history.usage", "identity.account.availability",
     "identity.self.accounts", "install.check", "jobs.dryrun", "jobs.get", "jobs.list", "jobs.runs",
     "jobs.templates.catalog", "jobs.templates.get", "jobs.templates.list", "jobs.templates.update_diff",
     "kanban.list", "kanban.task", "layout.otherBuilds", "layout.preview", "listagenthistory", "listagentidentities",

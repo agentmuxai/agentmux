@@ -111,6 +111,26 @@ describe("WardenAuditManager — fleet-action reason display", () => {
         expect(screen.queryByText("0b")).toBeNull();
     });
 
+    it("shows why a failed action was refused next to the identifier it acted on", async () => {
+        mockFetchWardenAudit.mockResolvedValue([
+            entry({
+                event_kind: "action",
+                source_agent: "agent:opaz",
+                outcome: "widgets.setenabled",
+                message_length: 0,
+                success: false,
+                reason: "id=acme.missing",
+                error_message: "no such widget",
+            }),
+        ]);
+        render(() => <WardenAuditManager />);
+
+        await waitFor(() => {
+            expect(screen.getByText("id=acme.missing")).toBeInTheDocument();
+            expect(screen.getByText("no such widget")).toBeInTheDocument();
+        });
+    });
+
     it("shows a registration as a registration, not a blank delivery", async () => {
         mockFetchWardenAudit.mockResolvedValue([
             entry({

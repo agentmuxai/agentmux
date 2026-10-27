@@ -111,12 +111,11 @@ export const WardenAuditManager = (props: { visible?: boolean }): JSX.Element =>
                                     </Show>
                                     {/* A caller-supplied `reason` (e.g. ClosePane's) shows on
                                         its own: outcome is unset for fleet actions (#3196). */}
-                                    <Show when={entry.reason} fallback={
-                                        <Show when={!entry.success && entry.error_message}>
-                                            <span class="warden-audit-error">{entry.error_message}</span>
-                                        </Show>
-                                    }>
+                                    <Show when={entry.reason}>
                                         <span class="warden-audit-reason">{entry.reason}</span>
+                                    </Show>
+                                    <Show when={!entry.success && entry.error_message}>
+                                        <span class="warden-audit-error">{entry.error_message}</span>
                                     </Show>
                                     <Show when={isRegistration(entry)}>
                                         <span class="warden-audit-reason">{registrationNote(entry)}</span>
