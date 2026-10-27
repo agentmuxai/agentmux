@@ -125,6 +125,10 @@ pub(crate) fn no_proxy_matches(list: &str, host: &str, port: u16) -> bool {
             return net.trim_matches(['[', ']']).parse::<IpAddr>().ok().zip(bits.parse::<u8>().ok()).is_some_and(|(net, bits)| in_range(ip, net, bits));
         }
         let name = name.trim_matches(['[', ']']);
+        // An address entry is the same address however either side writes it (`::1`, `0:0:0:0:0:0:0:1`).
+        if let (Some(ip), Ok(listed)) = (ip, name.parse::<IpAddr>()) {
+            return ip == listed;
+        }
         let name = name.strip_prefix("*.").or_else(|| name.strip_prefix('.')).unwrap_or(name);
         !name.is_empty() && (host == name || host.ends_with(&format!(".{name}")))
     })

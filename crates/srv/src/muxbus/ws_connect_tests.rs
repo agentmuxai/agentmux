@@ -79,6 +79,11 @@ fn no_proxy_follows_the_usual_rules() {
     assert!(m("198.51.100.0/24", "198.51.100.200", 80));
     assert!(!m("198.51.100.0/24", "198.51.101.1", 80));
     assert!(m("::1", "::1", 80));
+    // the same address written another way, on either side
+    assert!(m("::1", "0:0:0:0:0:0:0:1", 80));
+    assert!(m("0:0:0:0:0:0:0:1", "::1", 80));
+    assert!(m("[2001:DB8::1]:443", "2001:db8:0:0:0:0:0:1", 443));
+    assert!(!m("::1", "::2", 80));
     assert!(m("fd00::/8", "fd12::1", 80));
     assert!(m("0.0.0.0/0", "8.8.8.8", 80));
     assert!(!m("44.0.0.0/8", "example.com", 80));
