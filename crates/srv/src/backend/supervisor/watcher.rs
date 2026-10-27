@@ -284,7 +284,11 @@ impl Supervisor {
         let mut outcome = judge::judge(&self.mstore, block_id, generation, mode, &activity.text, state.continuations).await;
         // One more try for a call that failed or timed out (a busy shared
         // login), while the turn is still the latest and the agent still idle.
-        if matches!(outcome, judge::Outcome::Failed) && self.is_current(block_id, generation) && !turn_active(block_id) {
+        if matches!(outcome, judge::Outcome::Failed)
+            && settings::enabled()
+            && self.is_current(block_id, generation)
+            && !turn_active(block_id)
+        {
             let retry = self.next_generation(block_id);
             outcome = judge::judge(&self.mstore, block_id, retry, mode, &activity.text, state.continuations).await;
             generation = retry;
