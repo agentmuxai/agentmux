@@ -647,6 +647,17 @@ impl ContainerRuntimeHandle {
         }
     }
 
+    /// [`get`](Self::get), or the plain-language reason there is no runtime
+    /// (where it looked and why each place failed), for the pane.
+    pub async fn get_or_explain(&self) -> Result<crate::backend::container::ContainerManager, String> {
+        match self.get().await {
+            Some(mgr) => Ok(mgr),
+            None => Err(self
+                .missing_message()
+                .unwrap_or_else(|| "Docker not available on this host; cannot start container agent".to_string())),
+        }
+    }
+
     /// The runtime in use (`Podman at unix:///…`), if one is connected.
     pub async fn runtime_label(&self) -> Option<String> {
         match &*self.slot.read().await {
