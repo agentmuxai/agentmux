@@ -366,7 +366,7 @@ impl Store {
                     ELSE json_remove(json_set(
                         CASE WHEN json_valid(context) AND json_type(context) = 'object'
                              THEN context ELSE '{}' END,
-                        '$.email', ?2), '$.seq')
+                        '$.email', ?2), '$.seq', '$.seqmax')
                 END
               WHERE id = ?1",
             params![id, email],
@@ -374,19 +374,22 @@ impl Store {
         Ok(n > 0)
     }
 
-    /// Set one account's `context.seq`, the number that tells it from other
-    /// accounts with the same provider and email, and nothing else (the same
-    /// narrow write as [`Self::identity_set_context_email`]).
-    pub fn identity_set_context_seq(&self, id: &str, seq: u32) -> Result<bool, StoreError> {
+    /// Set one account's numbering and nothing else (the same narrow write as
+    /// [`Self::identity_set_context_email`]): `context.seq`, the number that tells it
+    /// from other accounts with the same provider and email (left as it is when
+    /// `seq` is `None`), and `context.seqmax`, the highest number the group has
+    /// handed out, which survives the deletion of the account that held it.
+    pub fn identity_set_context_numbering(&self, id: &str, seq: Option<u32>, high: u32) -> Result<bool, StoreError> {
         let conn = self.conn.lock().unwrap();
         let n = conn.execute(
             "UPDATE db_accounts
                 SET context = json_set(
                         CASE WHEN json_valid(context) AND json_type(context) = 'object'
                              THEN context ELSE '{}' END,
-                        '$.seq', ?2)
+                        '$.seq', COALESCE(?2, json_extract(context, '$.seq')),
+                        '$.seqmax', ?3)
               WHERE id = ?1",
-            params![id, seq],
+            params![id, seq, high],
         )?;
         Ok(n > 0)
     }

@@ -59,18 +59,15 @@ fn signed_in(status: &str) -> bool {
 /// out, or a pane on it out of quota). Signed-in ones first, so the picker's
 /// first entry is the one to preselect (spec §13, decision 2).
 pub(super) fn candidates(state: &AppState, from: &str, provider: &str) -> Vec<AccountMoveCandidate> {
-    let accounts: Vec<IdentityAccount> = state
-        .id_store
-        .identity_list(None)
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|a| canonical(&a.provider) == provider && a.id != from)
-        .collect();
+    // Labels are numbered against every account of the provider, the source included.
+    let every: Vec<IdentityAccount> =
+        state.id_store.identity_list(None).unwrap_or_default().into_iter().filter(|a| canonical(&a.provider) == provider).collect();
+    let accounts: Vec<IdentityAccount> = every.iter().filter(|a| a.id != from).cloned().collect();
     let blocked = account_blocks(state, &accounts);
     let mut out: Vec<AccountMoveCandidate> = accounts
         .iter()
         .filter(|a| !blocked.contains_key(&a.id))
-        .map(|a| AccountMoveCandidate { account_id: a.id.clone(), label: account_label_in(a, &accounts), status: a.status.clone() })
+        .map(|a| AccountMoveCandidate { account_id: a.id.clone(), label: account_label_in(a, &every), status: a.status.clone() })
         .collect();
     out.sort_by_key(|c| !signed_in(&c.status));
     out

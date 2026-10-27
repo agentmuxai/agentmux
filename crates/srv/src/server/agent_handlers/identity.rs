@@ -314,6 +314,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         if !crate::identity::account_numbering::same_email(&before, &email) {
                             if let Some(ctx) = account.context.as_object_mut() {
                                 ctx.remove("seq");
+                                ctx.remove("seqmax");
                             }
                         }
                         for store in [&mstore, &identity_store] {
@@ -327,17 +328,20 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // with another a number that stays its own. Computed over the
                 // unfiltered list, so a provider filter can't renumber a group.
                 let all = if cmd.provider.is_some() { mstore.identity_list(None).unwrap_or_default() } else { accounts.clone() };
-                for (id, seq) in crate::identity::account_numbering::missing_seqs(&all) {
+                for u in crate::identity::account_numbering::numbering_updates(&all) {
                     for store in [&mstore, &identity_store] {
-                        if let Err(e) = store.identity_set_context_seq(&id, seq) {
-                            tracing::warn!(target: "identity", account_id = %id, error = %e, "listidentityaccounts: number write failed");
+                        if let Err(e) = store.identity_set_context_numbering(&u.id, u.seq, u.high) {
+                            tracing::warn!(target: "identity", account_id = %u.id, error = %e, "listidentityaccounts: number write failed");
                         }
                     }
-                    if let Some(a) = accounts.iter_mut().find(|a| a.id == id) {
+                    if let Some(a) = accounts.iter_mut().find(|a| a.id == u.id) {
                         if !a.context.is_object() {
                             a.context = serde_json::json!({});
                         }
-                        a.context["seq"] = serde_json::json!(seq);
+                        if let Some(seq) = u.seq {
+                            a.context["seq"] = serde_json::json!(seq);
+                        }
+                        a.context["seqmax"] = serde_json::json!(u.high);
                     }
                 }
                 Ok(accounts)

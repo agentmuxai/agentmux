@@ -627,6 +627,17 @@ async fn listing_accounts_numbers_same_email_groups_and_keeps_the_numbers() {
     let r = list().await;
     assert_eq!(seq(&r, "second"), Some(json!(2)));
 
+    // The highest number is deleted: the next sign-in is not given it again.
+    for (id, at) in [("zed1", 1), ("zed2", 2)] {
+        state.id_store.identity_upsert(&with_email(id, "z@example.com", at)).unwrap();
+    }
+    let r = list().await;
+    assert_eq!((seq(&r, "zed1"), seq(&r, "zed2")), (Some(json!(1)), Some(json!(2))));
+    state.id_store.identity_delete("zed2").unwrap();
+    state.id_store.identity_upsert(&with_email("zed3", "z@example.com", 3)).unwrap();
+    let r = list().await;
+    assert_eq!(seq(&r, "zed3"), Some(json!(3)), "2 was handed out and is not reused");
+
     // A re-login that rebuilds the context from the email alone keeps it too.
     state.id_store.identity_upsert(&with_email("second", "me@example.com", 20)).unwrap();
     let r = list().await;

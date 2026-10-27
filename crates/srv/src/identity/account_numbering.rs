@@ -30,10 +30,25 @@ fn seq_of(a: &IdentityAccount) -> Option<u32> {
     a.context.get("seq")?.as_u64().and_then(|n| u32::try_from(n).ok()).filter(|n| *n > 0)
 }
 
-/// The numbers to write: each account with an email and no number gets the
-/// group's highest number plus one, oldest first (creation time, then id), so
-/// an existing group is numbered in the order its accounts were made.
-pub fn missing_seqs(accounts: &[IdentityAccount]) -> Vec<(String, u32)> {
+fn high_of(a: &IdentityAccount) -> u32 {
+    a.context.get("seqmax").and_then(|n| n.as_u64()).and_then(|n| u32::try_from(n).ok()).unwrap_or(0)
+}
+
+/// One account's numbering to write: its number (`None`: it keeps the one it has)
+/// and the highest number its group has handed out.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NumberingUpdate {
+    pub id: String,
+    pub seq: Option<u32>,
+    pub high: u32,
+}
+
+/// The numbering to write. Each account with an email and no number gets the
+/// group's highest number ever handed out plus one, oldest first (creation time,
+/// then id), so an existing group is numbered in the order its accounts were made.
+/// "Ever": every member records the group's high-water mark (`seqmax`), so deleting
+/// the account that held the highest number doesn't free it for the next sign-in.
+pub fn numbering_updates(accounts: &[IdentityAccount]) -> Vec<NumberingUpdate> {
     let mut groups: HashMap<(String, String), Vec<&IdentityAccount>> = HashMap::new();
     for a in accounts {
         if let Some(k) = group_key(a) {
@@ -42,11 +57,19 @@ pub fn missing_seqs(accounts: &[IdentityAccount]) -> Vec<(String, u32)> {
     }
     let mut out = Vec::new();
     for members in groups.values_mut() {
-        let mut next = members.iter().filter_map(|a| seq_of(a)).max().unwrap_or(0) + 1;
+        let base = members.iter().map(|a| seq_of(a).unwrap_or(0).max(high_of(a))).max().unwrap_or(0);
         members.sort_by(|a, b| (a.created_at, &a.id).cmp(&(b.created_at, &b.id)));
+        let mut next = base;
+        let mut assigned = HashMap::new();
         for a in members.iter().filter(|a| seq_of(a).is_none()) {
-            out.push((a.id.clone(), next));
             next += 1;
+            assigned.insert(a.id.clone(), next);
+        }
+        for a in members.iter() {
+            let seq = assigned.get(&a.id).copied();
+            if seq.is_some() || high_of(a) != next {
+                out.push(NumberingUpdate { id: a.id.clone(), seq, high: next });
+            }
         }
     }
     out
@@ -100,6 +123,9 @@ pub fn carry_over(stored: &serde_json::Value, incoming: &mut serde_json::Value) 
         None => incoming["email"] = serde_json::json!(stored_email),
     }
     incoming["seq"] = seq.clone();
+    if let Some(high) = stored.get("seqmax") {
+        incoming["seqmax"] = high.clone();
+    }
 }
 
 /// Whether `wanted` (an id, name, display name, email, or `email ·N`) names `a`.
@@ -108,17 +134,18 @@ pub fn carry_over(stored: &serde_json::Value, incoming: &mut serde_json::Value) 
 pub fn names(a: &IdentityAccount, wanted: &str, all: &[IdentityAccount]) -> bool {
     let wanted = wanted.trim();
     let email = a.context.get("email").and_then(|e| e.as_str()).unwrap_or("");
-    let numbered = numbered_label(a, email, all);
-    let is_numbered = !email.is_empty() && numbered != email;
-    if is_numbered && numbered.eq_ignore_ascii_case(&normalize_dot(wanted)) {
+    let shared = group_size(a, all) >= 2;
+    // The names a person sees for it: the display name, the email, the account name;
+    // `label ·N` while it shares them with another account.
+    let labels = [a.display_name.as_str(), email, a.name.as_str()];
+    let spoken = normalize_dot(wanted);
+    if labels.iter().any(|l| !l.is_empty() && numbered_label(a, l, all) != *l && numbered_label(a, l, all).eq_ignore_ascii_case(&spoken)) {
         return true;
     }
-    // By the group, not by the number: an account not listed yet has none.
-    let bare_email_is_ambiguous = !email.is_empty() && email.eq_ignore_ascii_case(wanted) && group_size(a, all) >= 2;
-    !bare_email_is_ambiguous
-        && [a.id.as_str(), a.name.as_str(), a.display_name.as_str(), email]
-            .into_iter()
-            .any(|s| !s.is_empty() && s.eq_ignore_ascii_case(wanted))
+    // A bare name its group shares names none of them, numbered or not yet: by the
+    // group, not by the number, which an account not listed yet doesn't have.
+    let bare_is_ambiguous = shared && [a.display_name.as_str(), email].iter().any(|l| !l.is_empty() && l.eq_ignore_ascii_case(wanted));
+    !bare_is_ambiguous && [a.id.as_str(), a.name.as_str(), a.display_name.as_str(), email].into_iter().any(|l| !l.is_empty() && l.eq_ignore_ascii_case(wanted))
 }
 
 /// `user@example.com 2` and `user@example.com·2` read as `user@example.com ·2`.
@@ -161,9 +188,13 @@ mod tests {
     #[test]
     fn an_existing_group_is_numbered_oldest_first() {
         let all = [acct("b", "Me@Example.com", None, 20), acct("a", "me@example.com", None, 10), acct("c", "other@example.com", None, 5)];
-        let mut got = missing_seqs(&all);
+        let mut got: Vec<(String, Option<u32>, u32)> = numbering_updates(&all).into_iter().map(|u| (u.id, u.seq, u.high)).collect();
         got.sort();
-        assert_eq!(got, [("a".to_string(), 1), ("b".to_string(), 2), ("c".to_string(), 1)], "case-folded group, oldest first");
+        assert_eq!(
+            got,
+            [("a".to_string(), Some(1), 2), ("b".to_string(), Some(2), 2), ("c".to_string(), Some(1), 1)],
+            "case-folded group, oldest first; every member records the group's high-water mark"
+        );
     }
 
     #[test]
@@ -171,7 +202,12 @@ mod tests {
         // `·1` was deleted: the survivor stays `·2`, the next sign-in is `·3`.
         let survivor = acct("b", "me@example.com", Some(2), 20);
         let all = [survivor.clone(), acct("d", "me@example.com", None, 30)];
-        assert_eq!(missing_seqs(&all), [("d".to_string(), 3)]);
+        assert_eq!(numbering_updates(&all).into_iter().find(|u| u.id == "d").and_then(|u| u.seq), Some(3));
+        // The highest number is deleted: the next sign-in doesn't get it again.
+        let mut one = acct("a", "me@example.com", Some(1), 10);
+        one.context["seqmax"] = serde_json::json!(2);
+        let updates = numbering_updates(&[one, acct("e", "me@example.com", None, 40)]);
+        assert_eq!(updates.iter().find(|u| u.id == "e").and_then(|u| u.seq), Some(3), "{updates:?}");
         assert_eq!(numbered_label(&survivor, "me@example.com", &[survivor.clone()]), "me@example.com", "alone again: bare");
         assert_eq!(numbered_label(&survivor, "me@example.com", &all), "me@example.com \u{b7}2");
     }
@@ -199,7 +235,7 @@ mod tests {
         codex.provider = "codex".into();
         let all = [acct("a", "me@example.com", Some(1), 1), codex];
         assert_eq!(numbered_label(&all[0], "me@example.com", &all), "me@example.com");
-        assert!(missing_seqs(&[acct("n", "", None, 1)]).is_empty(), "no email, nothing to number");
+        assert!(numbering_updates(&[acct("n", "", None, 1)]).is_empty(), "no email, nothing to number");
     }
 
     #[test]
@@ -211,6 +247,13 @@ mod tests {
         assert!(names(&all[0], "a", &all), "the id still names it");
         let unlisted = [acct("a", "me@example.com", None, 1), acct("b", "me@example.com", None, 2)];
         assert!(!names(&unlisted[0], "me@example.com", &unlisted), "ambiguous before either has a number");
+        // A display name is advertised as `Work ·2` when the pair shares it; that must be accepted.
+        let mut work = [acct("a", "me@example.com", Some(1), 1), acct("b", "me@example.com", Some(2), 2)];
+        for w in &mut work {
+            w.display_name = "Work".into();
+        }
+        assert!(names(&work[1], "Work \u{b7}2", &work) && !names(&work[0], "Work \u{b7}2", &work));
+        assert!(!names(&work[0], "Work", &work) && !names(&work[1], "Work", &work), "a bare shared display name names neither");
         let lone = [acct("a", "me@example.com", Some(1), 1)];
         assert!(names(&lone[0], "ME@example.com", &lone), "a lone account answers to its email");
     }
