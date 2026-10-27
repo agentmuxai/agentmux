@@ -159,8 +159,8 @@ pub fn gateway_and_subnet(ipam: &[(Option<String>, Option<String>)]) -> Option<(
 
 /// Stops serving and forgets the address, so containers fall back to `host.docker.internal`
 /// rather than being pointed at a gateway that is gone.
-#[cfg(target_os = "linux")]
-fn unbind() {
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub(crate) fn unbind() {
     if let Some(old) = BOUND.lock().unwrap().take() {
         old.stop.cancel();
     }
