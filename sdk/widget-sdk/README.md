@@ -40,7 +40,7 @@ That bundles a copy into your widget, which works with any AgentMux that speaks 
 | `am.ui.setTitle`, `setHeaderActions`, `setContextMenu`, `toast`, `openUrl` | The pane's chrome, drawn by AgentMux. `openUrl` needs `links:open`. |
 | `am.ui.setStatusItem(id, { text, icon, tooltip, tone, hidden })` | Update one of the widget's status bar items while this pane is open. |
 | `am.theme.get()` | The current theme. |
-| `am.panes.open(view, meta?, split?)` | Open one of the widget's own panes, with `meta` as that pane's meta. Other views need `panes` and take only a section (`warden:section`, `vault:section`, `connectors:section`, `memory:section`, `settings:section`) or a browser's http(s) `url`; other keys are dropped. |
+| `am.panes.open(view, meta?, split?)` | Open one of the widget's own panes, with `meta` as that pane's meta. Other views need `panes` and take only a section (`swarm:section`, `warden:section`, `vault:section`, `connectors:section`, `memory:section`, `settings:section`) or a browser's http(s) `url`; other keys are dropped. |
 | `am.storage.*` | Per-widget data on this computer (`storage`). |
 | `am.net.fetch(url, init?)` | HTTP to origins the widget declared (`net:<origin>`). |
 | `am.files.pick()`, `am.files.save()` | Files the user picks (`files`). |

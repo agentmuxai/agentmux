@@ -9,6 +9,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { SETTINGS_SECTIONS } from "@/app/view/settings/settings-model";
 import { CONNECTORS_SECTIONS, MEMORY_SECTIONS } from "@/app/view/section-pane/panes";
 import { WARDEN_SECTIONS } from "@/app/view/warden/warden-model";
+import { SWARM_SECTIONS } from "@/app/view/swarm/swarm-section";
 import {
     isSectionMeta,
     sectionKeyOf,
@@ -92,6 +93,7 @@ describe("pane sections", () => {
         for (const m of body.matchAll(/^\s+([a-z]+): (.+);$/gm)) sdk[m[1]] = [...m[2].matchAll(/"([^"]+)"/g)].map((x) => x[1]);
         const ids = (s: PaneSections) => s.items.map((i) => i.id);
         expect(sdk).toEqual({
+            swarm: ids(SWARM_SECTIONS),
             warden: ids(WARDEN_SECTIONS),
             // Not a view: Warden's Vault section's own sections.
             vault: ids(WARDEN_SECTIONS.items.find((s) => s.id === "vault")!.sections!),

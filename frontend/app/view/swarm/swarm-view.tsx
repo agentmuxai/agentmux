@@ -2,20 +2,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { UnseenTurnsDot } from "@/app/block/UnseenTurnsDot";
-import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
-import { holdPaneContent, trackPaneContent } from "@/app/store/pane-content-holds";
-import { createMemo, createSignal, createEffect, onCleanup, onMount, untrack, For, Show, type Accessor, type JSX } from "solid-js";
-import type { SwarmViewModel, AgentTreeNode, ActiveSubagent, ActiveShell, ActiveCron, WorkflowDispatch, SubagentEvent, DispatchActivityEntry, TodoItem } from "./swarm-model";
-import { collectClearableRows, subagentDisplayLabel, subagentRowKey, subagentToolDetail, workflowRetireSignal, AUTO_RETIRE_DELAY_MS } from "./swarm-model";
+import { createMemo, createSignal, createEffect, onCleanup, untrack, For, Show, type Accessor, type JSX } from "solid-js";
+import type { SwarmViewModel, AgentTreeNode, ActiveSubagent, ActiveShell, ActiveCron, WorkflowDispatch, DispatchActivityEntry, TodoItem } from "./swarm-model";
+import { subagentDisplayLabel, subagentRowKey, subagentToolDetail, workflowRetireSignal, AUTO_RETIRE_DELAY_MS } from "./swarm-model";
 import { LOCAL_PROVIDER_UNKNOWN, REMOTE_PROVIDER_UNKNOWN, SwarmProviderIcon } from "./swarm-provider-icon";
 import { IconButton } from "@/app/element/ui";
 import AnsiLine from "@/element/ansiline";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { MOS, atoms } from "@/app/store/global";
+import { MOS } from "@/app/store/global";
 import { isLightThemeActive } from "@/app/block/pane-identity";
 import { showCopyContextMenu } from "@/app/store/contextmenu";
-import { getLayoutModelForTabById } from "@/layout/lib/layoutModelHooks";
 import type { LayoutModel } from "@/layout/lib/layoutModel";
 import { requestSubagentName } from "./subagent-naming";
 import { useTick } from "@/app/hook/useTick";
@@ -23,14 +20,10 @@ import { longRunningToolRows, type LongRunningToolRow } from "./swarm-longrunnin
 import { formatCompactNumber } from "@/util/format-count";
 import { formatElapsedClock, formatTimeLeft } from "@/util/format-time";
 import { HeldTaskChip } from "@/app/view/warden-kanban/kanban-held";
-import { AccountAvailabilityStrip } from "@/app/view/account-availability/account-availability-strip";
 import { revealBlock } from "@/app/util/reveal-block";
-import { selectTrace } from "@/app/util/select-trace";
-import type { SwarmOrderItem } from "./swarm-order";
-import { useSwarmOrder } from "./swarm-order-hold";
 import { phaseToDisplayStatus, type AgentDisplayStatus } from "./swarm-display-status";
 import { BuildSlotNote, LongToolNote, UnavailableChip } from "./swarm-row-notes";
-import { AgentStatusChip, chipStatus } from "./swarm-status-chip";
+import { AgentStatusChip } from "./swarm-status-chip";
 import { unavailableLineText, unavailableOfMeta, unavailableTitle } from "@/app/store/agent-unavailable";
 import { BackgroundTaskBucket, SubagentBackgroundTasks, visibleBackgroundTasks } from "./swarm-background-tasks";
 import type { BackgroundTaskView } from "@/app/store/rpc-api";
@@ -41,11 +34,9 @@ import { setSupervisorMode, SupervisorBucket, SupervisorChip, supervisorRows } f
 import { subagentStatus } from "@/app/store/agent-status";
 import { remoteAgentKey } from "./swarm-fleet-targets";
 import { remoteSeatInfo } from "./swarm-seat-groups";
-import { remoteChip, remoteLine, remoteRows, remoteSections, seenAgo, type RemoteRow } from "./swarm-remote";
-import { SwarmGroupByControl, SwarmSeatBadge, SwarmSeatList, SwarmSeatPill, useSwarmSeats } from "./swarm-seats";
-import { FleetToolbar, FleetResultPanel } from "./swarm-fleet-toolbar";
+import { remoteChip, remoteLine, seenAgo, type RemoteRow } from "./swarm-remote";
+import { SwarmSeatBadge, SwarmSeatPill } from "./swarm-seats";
 import "./swarm-view.scss";
-import { readZoom } from "@/app/store/zoom-factor";
 
 /** The block shown in the focused pane — for a multi-tab pane, its active
  *  tab. Reactive to tab switches inside the pane, not just pane focus. */
@@ -55,200 +46,18 @@ export function focusedActiveBlockId(layoutModel: Pick<LayoutModel, "localTreeSt
     return data?.activeBlockId || data?.blockId || null;
 }
 
-export function SwarmView(props: { model: SwarmViewModel; ctx: PaneTabHostContext }): JSX.Element {
-    const model = props.model;
-    const ctx = props.ctx;
-    // "Loading…" until the first list arrives: hold the pane until then
-    // (pane-content-holds.ts).
-    onCleanup(trackPaneContent(model.blockId));
-    const releaseContent = holdPaneContent(model.blockId);
-    onCleanup(releaseContent);
-    createEffect(() => {
-        if (!model.loadingAtom()) releaseContent();
-    });
-
-    const zoomFactor = createMemo(() => readZoom(ctx.meta()));
-    // Trace presses on agent rows whose click never arrives (select-trace.ts).
-    // Capture listeners on the root, which a rebuild of the rows never replaces.
-    onMount(() => {
-        const root = rootRef;
-        if (!root) return;
-        const onDown = (e: PointerEvent) => {
-            if (e.button !== 0) return;
-            const card = (e.target as Element | null)?.closest<HTMLElement>(".swarm-agent-card");
-            const blockId = card?.dataset.blockId;
-            if (card && blockId) selectTrace.pressed(blockId, card);
-        };
-        const onUp = () => selectTrace.released();
-        const onCancel = () => selectTrace.cancelled();
-        const onClick = (e: MouseEvent) => {
-            const card = (e.target as Element | null)?.closest<HTMLElement>(".swarm-agent-card") ?? null;
-            selectTrace.clicked(card?.dataset.blockId ?? null, card);
-        };
-        root.addEventListener("pointerdown", onDown, true);
-        root.addEventListener("pointerup", onUp, true);
-        root.addEventListener("pointercancel", onCancel, true);
-        root.addEventListener("click", onClick, true);
-        onCleanup(() => {
-            root.removeEventListener("pointerdown", onDown, true);
-            root.removeEventListener("pointerup", onUp, true);
-            root.removeEventListener("pointercancel", onCancel, true);
-            root.removeEventListener("click", onClick, true);
-        });
-    });
-    // Ctrl+scroll and Ctrl/Cmd +/-/0 zoom this pane through the shared handlers
-    // (app.tsx, keymodel.ts): the `paneZoom` capability is all it needs.
-
-    let rootRef: HTMLDivElement | undefined;
-
-    // A Swarm pane nobody can see (another window tab, or a pane tab behind its
-    // siblings) keeps its last list and rebuilds once when it is shown: every
-    // agent event rebuilt every Swarm pane in the window, hidden ones included
-    // (150 to 380 rebuilds a minute across four panes in one busy window).
-    const tree = createMemo<AgentTreeNode[]>((prev) => {
-        if (ctx.visibility() !== "active") return prev ?? [];
-        const rows = model.buildTree();
-        selectTrace.rebuilt();
-        return rows;
-    });
-    // The list is keyed by block id, so a rebuild with the same agents updates the
-    // rows in place; only an agent joining or leaving adds or removes a row.
-    const keyedRows = createMemo(() => {
-        const seen = new Map<string, number>();
-        return tree().map((n) => {
-            const base = agentRowKey(n);
-            const count = (seen.get(base) ?? 0) + 1;
-            seen.set(base, count);
-            return [count === 1 ? base : `${base}#${count}`, n] as const;
-        });
-    });
-    const rowsByKey = createMemo(() => new Map(keyedRows()));
-    const clearableCount = createMemo(() => collectClearableRows(tree()).length);
-    const remote = createMemo(() => remoteRows(remoteSections(model.otherInstancesAtom())));
-    const remoteByKey = createMemo(() => new Map(remote().map((r) => [remoteAgentKey(r.section, r.agent), r] as const)));
-    // The order the rows are shown in: working agents first, the rest by last activity
-    // (swarm-order.ts). A change waits, and waits longer while the list is in use, so a
-    // row never moves under the cursor (swarm-order-hold.ts).
-    let treeRef: HTMLDivElement | undefined;
-    const swarmOrder = useSwarmOrder({
-        list: () => treeRef,
-        zoom: zoomFactor,
-        items: () => [
-            ...keyedRows().map(([key, n]): SwarmOrderItem => {
-                const meta = n.blockId ? MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", n.blockId))()?.meta : undefined;
-                const status = phaseToDisplayStatus(n.blockId, n.agentStatus);
-                return {
-                    key,
-                    remote: false,
-                    working: chipStatus(status, isAwaitingUser(meta, n.agentStatus)) !== "idle",
-                    lastActive: lastActiveMs(meta),
-                    name: n.agentName,
-                };
-            }),
-            ...remote().map(
-                (r): SwarmOrderItem => ({
-                    key: remoteAgentKey(r.section, r.agent),
-                    remote: true,
-                    working: remoteChip(r.agent.status, r.section.stale)?.status === "working",
-                    lastActive: 0,
-                    name: r.agent.name,
-                })
-            ),
-        ],
-    });
-    const seats = useSwarmSeats(ctx, keyedRows, remoteByKey); // Group by lead (swarm-seats.tsx)
-    const localKeys = createMemo(() => tree().flatMap((n) => (n.blockId ? [n.blockId] : [])));
-    // Everything a checkbox can select: this instance's agents, then the remote
-    // ones not gone stale. Select all and the selection both follow it.
-    const selectableKeys = createMemo(() => [
-        ...localKeys(),
-        ...remote().flatMap((r) => (r.section.stale ? [] : [remoteAgentKey(r.section, r.agent)])),
-    ]);
-    // An agent that leaves the list leaves the selection, so the toolbar never
-    // counts one no checkbox shows (docs/specs/SPEC_SWARM_REFINEMENTS_2026_10_17.md §2).
-    createEffect(() => {
-        if (!model.loadingAtom()) model.pruneSelection(localKeys());
-    });
-
-    // Derive the currently-focused block ID from the active tab's layout model.
-    // Switching a multi-tab pane to another tab keeps the SAME focused node and
-    // only changes its active member, so focusedNode() (a memo returning the
-    // node object) doesn't signal and a read of `.data.blockId` would stay on
-    // the previous tab — the selection border stuck on one agent. Subscribing
-    // to localTreeStateAtom (which every tab switch republishes) and reading
-    // the active member the way the pane's own node model does
-    // (layoutNodeModels.ts activeBlockId) keeps it current.
-    const focusedBlockId = createMemo<string | null>(() => {
-        const tabId = atoms.activeTabId();
-        if (!tabId) return null;
-        const layoutModel = getLayoutModelForTabById(tabId);
-        if (!layoutModel) return null;
-        return focusedActiveBlockId(layoutModel);
-    });
-
+/** The Supervisor section's "Clear completed": dismisses every completed or interrupted row shown. */
+export function ClearCompletedButton(props: { model: SwarmViewModel; count: number }): JSX.Element {
     return (
-        <div ref={rootRef} class="swarm-view" style={{ zoom: zoomFactor() }} tabIndex={-1}>
-            <Show
-                when={!model.loadingAtom()}
-                fallback={<div class="swarm-loading">Loading…</div>}
+        <div class="swarm-toolbar">
+            <button
+                type="button"
+                class="swarm-clear-completed-btn"
+                title="Dismiss every completed/interrupted row currently shown"
+                onClick={() => props.model.retireAllCompleted()}
             >
-                {/* Outside the tree's own Show: agents on other instances can be selected
-                    when this instance has none, and the toolbar is what acts on them. It
-                    shows itself only when there is something to select or act on. */}
-                <AccountAvailabilityStrip />
-                <FleetToolbar model={model} allBlockIds={selectableKeys} />
-                <FleetResultPanel model={model} />
-                <Show
-                    when={tree().length > 0}
-                    fallback={
-                        <div classList={{ "swarm-empty-root": true, "swarm-empty-root--compact": remote().length > 0 }}>
-                            <span class="swarm-empty-icon">⬡</span>
-                            <div class="swarm-empty-title">No active agent panes</div>
-                            <div class="swarm-empty-desc">
-                                Start an agent session to see it here.
-                            </div>
-                        </div>
-                    }
-                >
-                    <Show when={clearableCount() > 0}>
-                        <div class="swarm-toolbar">
-                            <button
-                                type="button"
-                                class="swarm-clear-completed-btn"
-                                title="Dismiss every completed/interrupted row currently shown"
-                                onClick={() => model.retireAllCompleted()}
-                            >
-                                Clear completed ({clearableCount()})
-                            </button>
-                        </div>
-                    </Show>
-                </Show>
-                {/* One list: this instance's agents and the other instances', working ones
-                    first (swarm-order.ts; docs/specs/SPEC_SWARM_REFINEMENTS_2026_10_17.md §5). */}
-                <Show when={tree().length > 0 || remote().length > 0}>
-                    <SwarmGroupByControl seats={seats} />
-                    <div
-                        class="swarm-tree"
-                        ref={(el) => {
-                            treeRef = el;
-                            swarmOrder.bindList(el);
-                        }}
-                        {...swarmOrder.listHandlers}
-                    >
-                        <SwarmSeatList seats={seats} order={swarmOrder.order}>
-                            {(key) =>
-                                // Which kind of row it is comes from the maps the rows are read from. A key in
-                                // neither (the agent just left) has no row to show.
-                                rowsByKey().has(key) ? (
-                                    <AgentRowHost rowKey={key} rows={rowsByKey} focusedBlockId={focusedBlockId} model={model} />
-                                ) : remoteByKey().has(key) ? (
-                                    <RemoteAgentRowHost rowKey={key} rows={remoteByKey} model={model} />
-                                ) : null
-                            }
-                        </SwarmSeatList>
-                    </div>
-                </Show>
-            </Show>
+                Clear completed ({props.count})
+            </button>
         </div>
     );
 }
@@ -381,7 +190,7 @@ export function countdownSecondsRemaining(model: SwarmViewModel, rowKey: string,
 const fmtCtx = formatCompactNumber;
 
 /** What identifies an agent's row across rebuilds of the tree. */
-function agentRowKey(node: AgentTreeNode): string {
+export function agentRowKey(node: AgentTreeNode): string {
     return node.blockId ?? `name:${node.agentName}`;
 }
 

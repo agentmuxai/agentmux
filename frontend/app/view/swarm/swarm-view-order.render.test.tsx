@@ -22,7 +22,7 @@ import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
 import type { SwarmViewModel } from "./swarm-model";
 import { SWARM_SETTLE_MS } from "./swarm-order";
 import type { RemoteAgentState, SwarmOtherInstances } from "./swarm-remote";
-import { SwarmView } from "./swarm-view";
+import { SwarmView } from "./swarm-root";
 
 // jsdom has no :hover; the page says whether the pointer is over the list, as a browser would.
 let hovered = false;

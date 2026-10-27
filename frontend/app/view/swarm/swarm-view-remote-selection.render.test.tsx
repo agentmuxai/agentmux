@@ -24,7 +24,7 @@ vi.mock("@/app/store/pane-content-holds", () => ({
 import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
 import type { SwarmViewModel } from "./swarm-model";
 import type { SwarmOtherInstances } from "./swarm-remote";
-import { SwarmView } from "./swarm-view";
+import { SwarmView } from "./swarm-root";
 
 afterEach(cleanup);
 
