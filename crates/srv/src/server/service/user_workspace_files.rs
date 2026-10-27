@@ -27,6 +27,7 @@ use crate::backend::layout_file::{self, LayoutDoc, PlanOptions, WorkspacePlan, W
 use crate::backend::obj::{self, Block, Tab, Workspace};
 use crate::backend::service::{self, WebCallType, WebReturnType};
 use crate::backend::storage::store::Store;
+use crate::server::app_api::agent_io::agent_panes_of;
 use crate::server::AppState;
 
 use super::user_workspace::current_id;
@@ -196,22 +197,59 @@ async fn start_agents(state: &AppState) -> Vec<String> {
     let store = &state.mstore;
     let mut shown = super::session_closed::open_workspaces(store);
     shown.extend(super::session_windows::waiting_workspaces(store));
+    // The tabs the import is showing. A pane in a workspace that was closed
+    // (the one this import replaced) is saved contents, not a second pane: it
+    // only comes back by opening that workspace.
+    let shown_tabs: std::collections::HashSet<String> = shown
+        .iter()
+        .filter_map(|ws| store.get::<Workspace>(ws).ok().flatten())
+        .flat_map(|ws| ws.pinnedtabids.into_iter().chain(ws.tabids))
+        .collect();
     let mut notes = Vec::new();
     for ws in shown {
         for (tab, block, def) in agent_placeholders(store, &ws) {
-            if let Err(e) = crate::server::app_api::agent_open::open_agent_into_block(state, &def, &tab, &block).await {
-                let name = store
+            let name = || {
+                store
                     .get::<Block>(&block)
                     .ok()
                     .flatten()
                     .map(|b| obj::meta_get_string(&b.meta, "agentName", ""))
                     .filter(|n| !n.is_empty())
-                    .unwrap_or(def);
-                notes.push(format!("An agent ({name}) didn't start, so its pane shows the agent picker: {e}"));
+                    .unwrap_or_else(|| def.clone())
+            };
+            // One pane per agent: an agent that already has a pane in the
+            // windows being shown (any tab, running or not), such as the same
+            // agent in two windows of the file, is not opened again here.
+            let open_elsewhere: Vec<_> = agent_panes_of(store, &definition_id(store, &def))
+                .into_iter()
+                .filter(|pane| pane.block_id != block && shown_tabs.contains(&pane.tab_id))
+                .collect();
+            if let Some(pane) = open_elsewhere.first() {
+                notes.push(format!(
+                    "An agent ({}) already has a pane, in \"{}\", so its pane here shows the agent picker.",
+                    name(),
+                    pane.tab_name
+                ));
+                continue;
+            }
+            if let Err(e) = crate::server::app_api::agent_open::open_agent_into_block(state, &def, &tab, &block).await {
+                notes.push(format!("An agent ({}) didn't start, so its pane shows the agent picker: {e}", name()));
             }
         }
     }
     notes
+}
+
+/// The id of the agent definition a layout names (its id, or a user agent's
+/// name as `agent.open` reads it); what it names, as written, when none matches.
+fn definition_id(store: &Store, wanted: &str) -> String {
+    let agents = store.agent_def_list().unwrap_or_default();
+    let mut users = agents.iter().filter(|a| a.is_seeded == 0);
+    users
+        .clone()
+        .find(|a| a.id == wanted)
+        .or_else(|| users.find(|a| a.name.eq_ignore_ascii_case(wanted)))
+        .map_or_else(|| wanted.to_string(), |a| a.id.clone())
 }
 
 /// Import the file at `path` as a new workspace and switch to it from window
