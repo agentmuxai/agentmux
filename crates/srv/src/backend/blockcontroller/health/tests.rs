@@ -612,6 +612,19 @@ fn the_user_s_own_words_are_never_read_as_a_jekt() {
 }
 
 #[test]
+fn the_start_up_document_is_agentmux_s_own_turn_not_the_user_s() {
+    let doc = "# Session Context\nIdentity: Claude\n## Description\nStartup boilerplate";
+    assert_eq!(TurnTrigger::from_input(TurnOrigin::User, doc), trig(TriggerKind::System, None));
+    // In the stream-json line that carries it, as a string or as text blocks.
+    let line = serde_json::json!({"type": "user", "message": {"role": "user", "content": doc}});
+    assert_eq!(TurnTrigger::from_input(TurnOrigin::User, &line.to_string()), trig(TriggerKind::System, None));
+    let blocks = serde_json::json!({"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": doc}]}});
+    assert_eq!(TurnTrigger::from_input(TurnOrigin::User, &blocks.to_string()), trig(TriggerKind::System, None));
+    // Only the heading at the start: the user's own message that mentions it is still theirs.
+    assert_eq!(TurnTrigger::from_input(TurnOrigin::User, "what is a # Session Context?"), trig(TriggerKind::User, None));
+}
+
+#[test]
 fn the_supervisor_s_continuation_is_labelled_as_the_supervisor() {
     let text = crate::backend::reactive::sanitize::supervisor_turn_message("drive", 3, 15, "Keep going.");
     assert_eq!(TurnTrigger::from_input(TurnOrigin::Automated, &text), trig(TriggerKind::Supervisor, None));

@@ -108,6 +108,23 @@ fn off_and_system_turns_are_ignored() {
 }
 
 #[test]
+fn a_paused_pane_stays_paused_when_a_start_up_turn_ends() {
+    // After a restart the pane's start-up document is answered: that turn is AgentMux's, not work.
+    let mut state = running(SupervisorMode::Steady);
+    state.status = SupervisorStatus::Paused;
+    state.reason = "It gave the same reply twice.".into();
+    let before = state.clone();
+    let startup = crate::backend::blockcontroller::health::TurnTrigger::from_input(
+        crate::backend::blockcontroller::health::TurnOrigin::User,
+        "# Session Context
+Identity: Claude",
+    );
+    let f = facts(Some(startup.kind));
+    assert_eq!(policy::on_turn_end(&mut state, SupervisorMode::Steady, &f), PreJudge::Ignore);
+    assert_eq!(state, before);
+}
+
+#[test]
 fn a_question_tool_stops_for_the_user_without_a_model_call() {
     let mut state = running(SupervisorMode::Drive);
     let f = TurnFacts { ending: TurnEnding::AskedUser, ..facts(Some(TriggerKind::User)) };
