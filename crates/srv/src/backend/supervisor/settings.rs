@@ -20,15 +20,29 @@ pub const KEY_STEADY_MINUTES: &str = "supervisor:steady:minutes";
 pub const KEY_DRIVE_CONTINUATIONS: &str = "supervisor:drive:continuations";
 pub const KEY_DRIVE_MINUTES: &str = "supervisor:drive:minutes";
 pub const KEY_NO_PROGRESS: &str = "supervisor:noprogress";
+/// `supervisor:cooldown`: seconds between a turn's end and its continuation.
+pub const KEY_COOLDOWN: &str = "supervisor:cooldown";
+/// `supervisor:hourly`: continuations across all panes in a rolling hour.
+pub const KEY_HOURLY: &str = "supervisor:hourly";
+pub const KEY_NOTIFY_NEEDS_YOU: &str = "supervisor:notify:needsyou";
+pub const KEY_NOTIFY_LIMIT: &str = "supervisor:notify:limit";
+pub const KEY_NOTIFY_FAILED: &str = "supervisor:notify:failed";
+pub const KEY_NOTIFY_DONE: &str = "supervisor:notify:done";
 
 /// Every key the Supervisor reads, for callers that watch for a change.
-pub const KEYS: [&str; 6] = [
+pub const KEYS: [&str; 12] = [
     KEY_ENABLED,
     KEY_STEADY_CONTINUATIONS,
     KEY_STEADY_MINUTES,
     KEY_DRIVE_CONTINUATIONS,
     KEY_DRIVE_MINUTES,
     KEY_NO_PROGRESS,
+    KEY_COOLDOWN,
+    KEY_HOURLY,
+    KEY_NOTIFY_NEEDS_YOU,
+    KEY_NOTIFY_LIMIT,
+    KEY_NOTIFY_FAILED,
+    KEY_NOTIFY_DONE,
 ];
 
 // The defaults are the schema's (schema/settings.json); the settings-defaults
@@ -39,11 +53,16 @@ const DEFAULT_STEADY_MINUTES: u32 = 0;
 const DEFAULT_DRIVE_CONTINUATIONS: u32 = 15;
 const DEFAULT_DRIVE_MINUTES: u32 = 120;
 const DEFAULT_NO_PROGRESS: u32 = 2;
+const DEFAULT_COOLDOWN: u32 = 30;
+const DEFAULT_HOURLY: u32 = 30;
+const DEFAULT_NOTIFY: bool = true;
 
 /// Bounds a value is clamped to (a hand edit can be anything).
 const CONTINUATIONS_RANGE: (u32, u32) = (1, 100);
 const MINUTES_RANGE: (u32, u32) = (0, 1440);
 const NO_PROGRESS_RANGE: (u32, u32) = (1, 10);
+const COOLDOWN_RANGE: (u32, u32) = (0, 600);
+const HOURLY_RANGE: (u32, u32) = (0, 1000);
 
 static CONFIG: OnceLock<Arc<ConfigState>> = OnceLock::new();
 
@@ -61,6 +80,27 @@ pub struct SupervisorSettings {
     pub drive_continuations: u32,
     pub drive_minutes: u32,
     pub no_progress: u32,
+    /// Seconds a continuation waits after its turn ended (0 sends at once).
+    pub cooldown_secs: u32,
+    /// Continuations across every pane in a rolling hour (0 is no cap).
+    pub hourly: u32,
+    pub notify_needs_you: bool,
+    pub notify_limit: bool,
+    pub notify_failed: bool,
+    pub notify_done: bool,
+}
+
+/// The groups of Supervisor notices the notify settings narrow.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NoticeGroup {
+    /// It needs you: a question, "needs you", "blocked".
+    NeedsYou,
+    /// It hit a limit: continuations, time, no progress, the same reply twice, the fleet budget.
+    Limit,
+    /// It couldn't continue: delivery failed, the agent can't run.
+    Failed,
+    /// It found the work done.
+    Done,
 }
 
 impl Default for SupervisorSettings {
@@ -72,6 +112,12 @@ impl Default for SupervisorSettings {
             drive_continuations: DEFAULT_DRIVE_CONTINUATIONS,
             drive_minutes: DEFAULT_DRIVE_MINUTES,
             no_progress: DEFAULT_NO_PROGRESS,
+            cooldown_secs: DEFAULT_COOLDOWN,
+            hourly: DEFAULT_HOURLY,
+            notify_needs_you: DEFAULT_NOTIFY,
+            notify_limit: DEFAULT_NOTIFY,
+            notify_failed: DEFAULT_NOTIFY,
+            notify_done: DEFAULT_NOTIFY,
         }
     }
 }
@@ -113,12 +159,34 @@ impl SupervisorSettings {
             drive_continuations: number(config, KEY_DRIVE_CONTINUATIONS, DEFAULT_DRIVE_CONTINUATIONS, CONTINUATIONS_RANGE),
             drive_minutes: number(config, KEY_DRIVE_MINUTES, DEFAULT_DRIVE_MINUTES, MINUTES_RANGE),
             no_progress: number(config, KEY_NO_PROGRESS, DEFAULT_NO_PROGRESS, NO_PROGRESS_RANGE),
+            cooldown_secs: number(config, KEY_COOLDOWN, DEFAULT_COOLDOWN, COOLDOWN_RANGE),
+            hourly: number(config, KEY_HOURLY, DEFAULT_HOURLY, HOURLY_RANGE),
+            notify_needs_you: config.extra_bool(KEY_NOTIFY_NEEDS_YOU).unwrap_or(DEFAULT_NOTIFY),
+            notify_limit: config.extra_bool(KEY_NOTIFY_LIMIT).unwrap_or(DEFAULT_NOTIFY),
+            notify_failed: config.extra_bool(KEY_NOTIFY_FAILED).unwrap_or(DEFAULT_NOTIFY),
+            notify_done: config.extra_bool(KEY_NOTIFY_DONE).unwrap_or(DEFAULT_NOTIFY),
         }
     }
 
     /// The settings now; the defaults before the config is attached.
     pub fn current() -> Self {
+        #[cfg(test)]
+        if let Some(s) = SETTINGS_IN_TEST.with(|c| c.get()) {
+            return s;
+        }
         CONFIG.get().map(|c| Self::from_config(c)).unwrap_or_default()
+    }
+
+    /// Whether the OS notification for `group` is on. The rows, lines and
+    /// history show every stop regardless; the global `notify:os:*` toggles
+    /// still apply on top.
+    pub fn notifies(&self, group: NoticeGroup) -> bool {
+        match group {
+            NoticeGroup::NeedsYou => self.notify_needs_you,
+            NoticeGroup::Limit => self.notify_limit,
+            NoticeGroup::Failed => self.notify_failed,
+            NoticeGroup::Done => self.notify_done,
+        }
     }
 
     /// `mode`'s limits under these settings. Off has none.
@@ -143,6 +211,13 @@ impl SupervisorSettings {
 #[cfg(test)]
 thread_local! {
     static ENABLED_IN_TEST: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
+    static SETTINGS_IN_TEST: std::cell::Cell<Option<SupervisorSettings>> = const { std::cell::Cell::new(None) };
+}
+
+/// Make [`SupervisorSettings::current`] return `settings` for the calling test thread only.
+#[cfg(test)]
+pub fn set_settings_for_test(settings: SupervisorSettings) {
+    SETTINGS_IN_TEST.with(|c| c.set(Some(settings)));
 }
 
 /// Set the master switch for the calling test thread only.

@@ -15,6 +15,7 @@
 
 pub mod judge;
 pub mod message;
+pub mod pacing;
 pub mod policy;
 pub mod settings;
 pub mod watcher;
