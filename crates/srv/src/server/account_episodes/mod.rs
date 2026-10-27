@@ -590,9 +590,10 @@ pub(crate) fn clear_signed_out(mstore: &Arc<Store>, identity: &Store, event_bus:
     cleared
 }
 
-/// These RPCs are the operator's: an agent connection (`bus:register`) is
-/// refused, since the answer names accounts, the move relinks and restarts
-/// other agents, and a sign-in clears other agents' state.
+/// These RPCs are the operator's, except `agent.account.switch`: an agent connection
+/// (`bus:register`) is refused for the others, since the answer names accounts, the move
+/// relinks and restarts other agents, and a sign-in clears other agents' state. A switch is
+/// open to agents (the caller is `ctx.agent_id`) and is audited under their name.
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let s = state.clone();
     engine.register_typed(COMMAND_IDENTITY_ACCOUNT_SIGNED_IN, move |req: IdentityAccountSignedInReq, ctx| {

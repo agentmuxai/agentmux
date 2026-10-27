@@ -93,7 +93,7 @@ import { useAgentDecisions } from "./hooks/useAgentDecisions";
 import { useAgentDropAttach } from "./hooks/useAgentDropAttach";
 import { useAgentFailure } from "./hooks/useAgentFailure";
 import { lastUserMessage, useOfflineInput } from "./offline/useOfflineInput";
-import { useAccountBinding } from "./failure/useAccountBinding";
+import { useAgentAccountBinding } from "./failure/useAgentAccountBinding";
 import { useAuthHealth, useSyntheticAuthRow } from "./failure/useAuthHealth";
 import { requestAgentTakeover } from "./failure/takeover";
 import { useAgentKeyboard } from "./hooks/useAgentKeyboard";
@@ -1026,13 +1026,11 @@ export const AgentPresentationView = ({
     useSyntheticAuthRow({ canRetry: status.canRetry, paneModel });
 
     // Bind/switch account for this agent (failure/useAccountBinding.ts).
-    const { authEmail, bindCandidates, onBindAccount, onSwitchAccount, canSwitchAccount, pendingAccountLabel, refreshLinkedAccountId } =
-        useAccountBinding({
-            agentDefinitionId: () => getBlockMetaKeyAtom(model.blockId, "agentId")() as string | undefined,
-            providerId: () => provider()?.id,
-            bindExistingAccount: status.bindExistingAccount,
-            pendingAccountId: () => getBlockMetaKeyAtom(model.blockId, "agent:pending_account")() as string | undefined,
-        });
+    const account = useAgentAccountBinding({
+        blockId: model.blockId,
+        providerId: () => provider()?.id,
+        bindExistingAccount: status.bindExistingAccount,
+    });
 
     // Declaring auth healthy, and the auto-unblock after a bind from anywhere
     // (failure/useAuthHealth.ts).
@@ -1041,7 +1039,7 @@ export const AgentPresentationView = ({
         agentDefinitionId: () => getBlockMetaKeyAtom(model.blockId, "agentId")() as string | undefined,
         paneModel,
         status,
-        refreshLinkedAccountId,
+        refreshLinkedAccountId: account.refreshLinkedAccountId,
     });
 
     const failureUI = useAgentFailure({
@@ -1099,8 +1097,8 @@ export const AgentPresentationView = ({
             void status.loginViaTerminal({ retryAfterLogin: turnAttempted });
         },
         // Labelled for the failure row's "Bind: <account>" (email, else name).
-        bindCandidates: () => bindCandidates().map((a) => ({ id: a.id, name: accountLabel(a) })),
-        onBindAccount,
+        bindCandidates: () => account.bindCandidates().map((a) => ({ id: a.id, name: accountLabel(a) })),
+        onBindAccount: account.onBindAccount,
     });
 
     // Held "send now" messages go out at the next tool call or turn end
@@ -1419,10 +1417,10 @@ export const AgentPresentationView = ({
                 autoCompact={autoCompact()}
                 lastReplyModel={paneModel.state.lastContextModel}
                 authStatus={loginStatus()}
-                authEmail={authEmail()}
-                canSwitchAccount={canSwitchAccount()}
-                onSwitchAccount={onSwitchAccount}
-                pendingAccountLabel={pendingAccountLabel()}
+                authEmail={account.authEmail()}
+                canSwitchAccount={account.canSwitchAccount()}
+                onSwitchAccount={account.onSwitchAccount}
+                pendingAccountLabel={account.pendingAccountLabel()}
                 blockId={model.blockId}
                 blockAtom={block}
                 providerId={provider()?.id ?? ""}
