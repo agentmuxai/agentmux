@@ -654,6 +654,15 @@ fn mentions_http_status(hay: &str, code: &str) -> bool {
     .any(|p| hay.contains(p.as_str()))
 }
 
+/// The block id in `held_elsewhere_error`'s "already open in another pane (block X)" refusal, when
+/// `text` is that refusal. The wording is ours, built in one place, so this reads it back.
+pub fn open_in_other_pane_holder(text: &str) -> Option<String> {
+    const MARKER: &str = "is already open in another pane (block ";
+    let rest = &text[text.find(MARKER)? + MARKER.len()..];
+    let id = rest[..rest.find(')')?].trim();
+    (!id.is_empty()).then(|| id.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1166,16 +1175,6 @@ mod tests {
         assert!(v.get("stderrTail").is_some(), "camelCase stderrTail expected: {v}");
     }
 }
-
-/// The block id in `held_elsewhere_error`'s "already open in another pane (block X)" refusal, when
-/// `text` is that refusal. The wording is ours, built in one place, so this reads it back.
-pub fn open_in_other_pane_holder(text: &str) -> Option<String> {
-    const MARKER: &str = "is already open in another pane (block ";
-    let rest = &text[text.find(MARKER)? + MARKER.len()..];
-    let id = rest[..rest.find(')')?].trim();
-    (!id.is_empty()).then(|| id.to_string())
-}
-
 
 /// The one line of `text` that carries a single-live-instance refusal, with
 /// any `[AgentMux] ` prefix removed — the row's detail. Falls back to the

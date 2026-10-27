@@ -237,7 +237,6 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
     // persistently-throttled turn would auto-retry forever). Spec §6.
     const endEpisode = () => {
         autoRetries = 0;
-        forgetRefusedSend(opts.blockId);
         clear();
     };
 
@@ -473,6 +472,7 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
                     // Before the row clears: a clear the recovery didn't hear
                     // about first reads as the operator's send, not a dismiss.
                     opts.reconnect?.failureDismissed();
+                    forgetRefusedSend(opts.blockId);
                     endEpisode();
                 },
                 takeOver: opts.onTakeOver ? () => takeOver(pf.turnAttempted ?? true) : undefined,

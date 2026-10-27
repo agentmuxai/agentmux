@@ -35,7 +35,11 @@ export function openInOtherPaneActions(opts: {
             // The kept message stays until this pane's send is accepted (`sendMessage` forgets it
             // then); a resend that fails leaves it in the row, so Move here can be tried again.
             const refused = refusedSendOf(opts.blockId);
-            if (refused) await opts.send(refused.text, refused.attachments);
+            if (!refused) return;
+            await opts.send(refused.text, refused.attachments);
+            // `send` resolves even when the pane refused the resend: the message is still kept then,
+            // and the row stays with the reason instead of reading as moved.
+            if (refusedSendOf(opts.blockId)) throw new Error("the message was not sent; try Move here again");
         },
     };
 }
