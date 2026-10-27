@@ -1,6 +1,6 @@
 # Spec: the super agent, one place for sensitive operations
 
-**Status:** active — approved by the operator, 2026-10-25 ("looks good", relayed by AgentY), with the answers to the open questions in section 10. Built in steps (section 9); step 1 (the `super` seat) is in the first implementing PR.
+**Status:** active — approved by the operator, 2026-10-25 ("looks good", relayed by AgentY), with the answers to the open questions in section 10. Built in steps (section 9); step 1 (the `super` seat) is built in #5634.
 **Date:** 2026-10-25
 **Author:** Parlo@charlie
 **Changes:** who may trigger the sensitive operations in section 2, and how the Keep running window (`sagas/pending_shutdown.rs`) generalises to them.
