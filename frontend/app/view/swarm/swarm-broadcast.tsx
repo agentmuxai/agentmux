@@ -8,8 +8,10 @@
 import { createMemo, createSignal, For, onCleanup, Show, type Accessor, type JSX, type Setter } from "solid-js";
 import { Button, TextArea } from "@/app/element/ui";
 import { keyLabel } from "@/app/keybindings";
-import { gapSummary, partitionTargets } from "./swarm-fleet-targets";
+import type { SwarmAgents } from "./swarm-agent-list";
+import { gapSummary, localFleetTargets, partitionTargets, remoteFleetTargets } from "./swarm-fleet-targets";
 import type { SwarmViewModel } from "./swarm-model";
+import { remoteSections } from "./swarm-remote";
 
 /** One broadcast sent from this Swarm, kept in memory only. */
 export interface BroadcastRecord {
@@ -55,10 +57,15 @@ function ago(at: number, now: number): string {
     return `${Math.floor(s / 3600)} h ago`;
 }
 
-export function BroadcastDock(props: { model: SwarmViewModel }): JSX.Element {
+export function BroadcastDock(props: { model: SwarmViewModel; agents: Pick<SwarmAgents, "tree"> }): JSX.Element {
     const model = props.model;
     const state = broadcastStateOf(model);
-    const split = createMemo(() => partitionTargets([...model.selectedBlockIdsAtom()], "broadcast", model.fleetTargets()));
+    // From the list the pane already keeps (which rebuilds only while the pane is visible), not
+    // `model.fleetTargets()`, which would rebuild the agent tree on every agent event.
+    const known = createMemo(
+        () => new Map([...localFleetTargets(props.agents.tree()), ...remoteFleetTargets(remoteSections(model.otherInstancesAtom()))])
+    );
+    const split = createMemo(() => partitionTargets([...model.selectedBlockIdsAtom()], "broadcast", known()));
     const recipients = () => split().reachable.length;
     const selected = () => model.selectedBlockIdsAtom().size;
     const gap = () => gapSummary(split().unreachable, selected(), "broadcast");

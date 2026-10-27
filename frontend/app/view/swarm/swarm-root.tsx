@@ -146,7 +146,7 @@ export function SwarmView(props: {
                             <SwarmAgentList model={model} ctx={ctx} agents={agents} density={density} />
                             {/* After the list, so a switch never remounts it. */}
                             <Show when={section() === "broadcast"}>
-                                <BroadcastDock model={model} />
+                                <BroadcastDock model={model} agents={agents} />
                             </Show>
                         </div>
                         <Show when={kanbanSeen()}>

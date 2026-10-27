@@ -10,17 +10,20 @@ import { cleanup, fireEvent, render } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BroadcastDock, MAX_RECENT_BROADCASTS, withRecent, type BroadcastRecord } from "./swarm-broadcast";
-import { localFleetTargets } from "./swarm-fleet-targets";
-import type { SwarmViewModel } from "./swarm-model";
+import type { AgentTreeNode, SwarmViewModel } from "./swarm-model";
 
 afterEach(() => cleanup());
 
+const agents = { tree: () => ["a", "b", "c"].map((k) => ({ blockId: k, agentName: k.toUpperCase() })) as unknown as AgentTreeNode[] };
+
 function modelStub(selectedKeys: string[], result = { succeeded: selectedKeys, failed: [] as { id: string; error: string }[] }) {
     const [selected] = createSignal<Set<string>>(new Set(selectedKeys));
-    const known = new Map(localFleetTargets(["a", "b", "c"].map((k) => ({ blockId: k, agentName: k.toUpperCase() }))));
     return {
         selectedBlockIdsAtom: selected,
-        fleetTargets: () => known,
+        otherInstancesAtom: () => null,
+        fleetTargets: () => {
+            throw new Error("the dock must not rebuild the agent tree");
+        },
         fleetActionInFlightAtom: () => false,
         broadcastToSelection: vi.fn(async () => ({ ...result, aborted_early: false })),
     } as unknown as SwarmViewModel;
@@ -32,7 +35,7 @@ const sendButton = (c: HTMLElement) => c.querySelector<HTMLButtonElement>(".swar
 describe("BroadcastDock", () => {
     it("counts the recipients on the button and sends nothing until there is a message", () => {
         const model = modelStub(["a", "b"]);
-        const { container } = render(() => <BroadcastDock model={model} />);
+        const { container } = render(() => <BroadcastDock model={model} agents={agents} />);
         expect(sendButton(container).textContent).toContain("Send to 2");
         expect(sendButton(container).disabled).toBe(true);
         fireEvent.input(box(container), { target: { value: "  " } });
@@ -41,7 +44,7 @@ describe("BroadcastDock", () => {
 
     it("sends the trimmed message to the selection, clears the box and records the broadcast", async () => {
         const model = modelStub(["a", "b"], { succeeded: ["a"], failed: [{ id: "b", error: "gone" }] });
-        const { container } = render(() => <BroadcastDock model={model} />);
+        const { container } = render(() => <BroadcastDock model={model} agents={agents} />);
         fireEvent.input(box(container), { target: { value: "  ship it \n" } });
         fireEvent.click(sendButton(container));
         await Promise.resolve();
@@ -55,7 +58,7 @@ describe("BroadcastDock", () => {
 
     it("sends on Ctrl+Enter and not on a plain Enter", () => {
         const model = modelStub(["a"]);
-        const { container } = render(() => <BroadcastDock model={model} />);
+        const { container } = render(() => <BroadcastDock model={model} agents={agents} />);
         fireEvent.input(box(container), { target: { value: "hi" } });
         fireEvent.keyDown(box(container), { key: "Enter" });
         expect(model.broadcastToSelection).not.toHaveBeenCalled();
@@ -65,14 +68,14 @@ describe("BroadcastDock", () => {
 
     it("keeps a half-typed message and the recent list across a section switch", async () => {
         const model = modelStub(["a"]);
-        const first = render(() => <BroadcastDock model={model} />);
+        const first = render(() => <BroadcastDock model={model} agents={agents} />);
         fireEvent.input(box(first.container), { target: { value: "sent one" } });
         fireEvent.click(sendButton(first.container));
         await Promise.resolve();
         await Promise.resolve();
         fireEvent.input(box(first.container), { target: { value: "still typing" } });
         first.unmount();
-        const second = render(() => <BroadcastDock model={model} />);
+        const second = render(() => <BroadcastDock model={model} agents={agents} />);
         expect(box(second.container).value).toBe("still typing");
         expect(second.container.querySelectorAll(".swarm-broadcast-recent-row")).toHaveLength(1);
     });
@@ -80,7 +83,7 @@ describe("BroadcastDock", () => {
     it("keeps the message when the call itself fails, and records nothing", async () => {
         const model = modelStub(["a"]);
         (model.broadcastToSelection as unknown as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("rpc down"));
-        const { container } = render(() => <BroadcastDock model={model} />);
+        const { container } = render(() => <BroadcastDock model={model} agents={agents} />);
         fireEvent.input(box(container), { target: { value: "do not lose me" } });
         fireEvent.click(sendButton(container));
         await Promise.resolve();
@@ -91,7 +94,7 @@ describe("BroadcastDock", () => {
 
     it("does not count an unreachable agent as a failed delivery", async () => {
         const model = modelStub(["a", "ghost"], { succeeded: ["a"], failed: [{ id: "ghost", error: "no longer listed" }] });
-        const { container } = render(() => <BroadcastDock model={model} />);
+        const { container } = render(() => <BroadcastDock model={model} agents={agents} />);
         fireEvent.input(box(container), { target: { value: "hi" } });
         fireEvent.click(sendButton(container));
         await Promise.resolve();
@@ -101,7 +104,7 @@ describe("BroadcastDock", () => {
     });
 
     it("says why fewer agents get the message than are selected", () => {
-        const { container } = render(() => <BroadcastDock model={modelStub(["a", "ghost"])} />);
+        const { container } = render(() => <BroadcastDock model={modelStub(["a", "ghost"])} agents={agents} />);
         expect(container.querySelector(".swarm-fleet-broadcast-gap")!.textContent).toBe("1 of 2 can't be messaged: no longer listed");
         expect(sendButton(container).textContent).toContain("Send to 1");
     });

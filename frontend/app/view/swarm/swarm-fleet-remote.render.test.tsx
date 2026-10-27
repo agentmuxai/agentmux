@@ -68,7 +68,8 @@ function modelStub(selectedKeys: string[]) {
 }
 
 const toolbar = (model: SwarmViewModel) => render(() => <FleetToolbar model={model} allBlockIds={() => ["blk-korp"]} />);
-const dock = (model: SwarmViewModel) => render(() => <BroadcastDock model={model} />);
+const dock = (model: SwarmViewModel) =>
+    render(() => <BroadcastDock model={model} agents={{ tree: () => [{ blockId: "blk-korp", agentName: "Korp" }] as never }} />);
 const type = (text: string) =>
     fireEvent.input(document.querySelector<HTMLTextAreaElement>(".swarm-broadcast-input")!, { target: { value: text } });
 
