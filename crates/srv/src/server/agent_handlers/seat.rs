@@ -105,8 +105,12 @@ pub(crate) fn plan_seats(
 ) -> Result<Vec<PlannedSeat>, String> {
     use std::collections::HashMap;
     let now = agentmux_common::time::now_ms();
-    // The lead each agent will have once the changes before this one are written.
+    // The lead each changed agent will have once every change is written.
     let mut pending: HashMap<String, Option<String>> = HashMap::new();
+    // Each seat is checked on its own first (a lead is an agent here, it isn't
+    // itself); cycles are checked below against the whole call, so the answer
+    // doesn't depend on the order of the changes.
+    let alone = |_: &str| None;
     let mut planned = Vec::with_capacity(changes.len());
     for change in changes {
         let agent_id = change.agent_id.trim().to_string();
@@ -116,21 +120,10 @@ pub(crate) fn plan_seats(
         if def.is_seeded != 0 {
             return Err(format!("{refuse}{} is a template; only an agent has a seat", def.name));
         }
-        let lead_of = |id: &str| match pending.get(id) {
-            Some(lead) => lead.clone(),
-            None => defs
-                .iter()
-                .find(|d| d.id == id)
-                .and_then(|d| crate::backend::agent_seat::effective_seat(mstore, d))
-                .and_then(|s| s.lead),
-        };
         let (seat, lead_after) = match &change.seat {
             None => {
                 // A spawned worker's leader becomes its lead again (#5378).
                 let leader = crate::server::app_api::agent_spawn::worker_of(mstore, &agent_id);
-                if let Some(leader) = &leader {
-                    crate::backend::agent_seat::no_cycle(&agent_id, leader, lead_of)?;
-                }
                 (None, leader)
             }
             Some(input) => {
@@ -139,7 +132,7 @@ pub(crate) fn plan_seats(
                     input,
                     now,
                     |id| defs.iter().any(|d| d.id == id && d.is_seeded == 0),
-                    lead_of,
+                    alone,
                 )?;
                 let lead = seat.lead.clone();
                 (Some(seat), lead)
@@ -147,6 +140,21 @@ pub(crate) fn plan_seats(
         };
         pending.insert(agent_id.clone(), lead_after);
         planned.push(PlannedSeat { agent_id, name: def.name.clone(), slug: def.slug.clone(), seat });
+    }
+    // The graph as it will stand: a changed agent has the lead of its change,
+    // any other the lead it has now.
+    let lead_of = |id: &str| match pending.get(id) {
+        Some(lead) => lead.clone(),
+        None => defs
+            .iter()
+            .find(|d| d.id == id)
+            .and_then(|d| crate::backend::agent_seat::effective_seat(mstore, d))
+            .and_then(|s| s.lead),
+    };
+    for p in &planned {
+        if let Some(Some(lead)) = pending.get(&p.agent_id) {
+            crate::backend::agent_seat::no_cycle(&p.agent_id, lead, lead_of)?;
+        }
     }
     Ok(planned)
 }

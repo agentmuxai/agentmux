@@ -165,6 +165,28 @@ async fn an_unknown_agent_or_lead_or_a_template_is_refused_and_nothing_is_writte
     assert!(seat_of(&state, &template).is_none() && seat_of(&state, &a).is_none());
 }
 
+/// The answer for a batch doesn't depend on the order of its changes: it is
+/// judged against the leads as they will stand once every change is written.
+#[tokio::test]
+async fn a_batch_that_reverses_a_reporting_line_is_judged_as_a_whole_in_any_order() {
+    let (state, _dir) = seated_state();
+    let (me, a, b) = (agent(&state, "host", false), agent(&state, "host", false), agent(&state, "host", false));
+    // b reports to a.
+    let (status, body) = call(&state, Some(&me), json!({ "seats": [{ "agent": b.slug, "seat": { "role": "worker", "lead": a.slug } }] })).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    // a now reports to b, and b's seat is cleared: acyclic whichever change comes first.
+    let a_to_b = json!({ "agent": a.slug, "seat": { "role": "worker", "lead": b.slug } });
+    let clear_b = json!({ "agent": b.slug, "seat": null });
+    let (status, body) = call(&state, Some(&me), json!({ "seats": [a_to_b.clone(), clear_b.clone()] })).await;
+    assert_eq!(status, StatusCode::OK, "a then b: {body}");
+    assert!(seat_of(&state, &b).is_none());
+    assert_eq!(seat_of(&state, &a).unwrap().lead.as_deref(), Some(b.id.as_str()));
+    // Back to where it was, then the other order.
+    call(&state, Some(&me), json!({ "seats": [{ "agent": a.slug, "seat": null }, { "agent": b.slug, "seat": { "role": "worker", "lead": a.slug } }] })).await;
+    let (status, body) = call(&state, Some(&me), json!({ "seats": [clear_b, a_to_b] })).await;
+    assert_eq!(status, StatusCode::OK, "b then a: {body}");
+}
+
 #[tokio::test]
 async fn a_cycle_of_leads_is_refused_including_one_made_by_two_changes_in_a_call() {
     let (state, _dir) = seated_state();
