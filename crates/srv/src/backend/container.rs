@@ -1495,7 +1495,6 @@ impl ContainerManager {
                 return;
             }
         }
-
         let connect_opts = ConnectNetworkOptions {
             container: container_name,
             endpoint_config: EndpointSettings {
@@ -1518,6 +1517,7 @@ impl ContainerManager {
                 );
             }
         }
+        crate::backend::container_listener::ensure_bound(&self.inner.docker).await;
     }
 }
 

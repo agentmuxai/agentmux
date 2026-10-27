@@ -158,6 +158,13 @@ pub fn container_exec_env(block_id: &str, env_vars: &HashMap<String, String>) ->
     // doesn't go through `pane_env`'s sanitizers, and srv's values win over
     // any the agent's own env carried.
     out.extend(build_info.iter().map(|(k, v)| (k.to_string(), v.clone())));
+    // On Linux a container cannot reach srv's loopback; when srv listens on the agents network's
+    // gateway (container_listener.rs) that is where the container is pointed.
+    if let Some(url) = crate::backend::container_listener::url() {
+        if let Some(slot) = out.iter_mut().find(|(k, _)| k == "AGENTMUX_LOCAL_URL") {
+            slot.1 = url;
+        }
+    }
     out
 }
 
