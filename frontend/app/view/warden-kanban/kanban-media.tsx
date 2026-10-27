@@ -125,17 +125,28 @@ export function DrawerMedia(props: {
                     <For each={mediaNewestFirst(props.items)}>
                         {(item) => (
                             <figure class="kanban-media__item">
-                                <Show
-                                    when={item.removed_at == null && item.path}
-                                    fallback={
-                                        <div class="kanban-media__removed">removed{item.removed_by ? ` by ${item.removed_by}` : ""}</div>
-                                    }
-                                >
+                                {/* A removed file is one box: its name, who removed it and when, then its caption. */}
+                                <Show when={item.removed_at != null}>
+                                    <div class="kanban-media__removed">
+                                        <div class="kanban-media__name">{item.name}</div>
+                                        <div>
+                                            removed{item.removed_by ? ` by ${item.removed_by}` : ""}, {formatAge(Math.max(0, props.now - (item.removed_at ?? 0)))} ago
+                                        </div>
+                                        <Show when={item.caption}>
+                                            <div class="warden-manager-dim">{item.caption}</div>
+                                        </Show>
+                                        <div class="warden-manager-dim">
+                                            attached by {item.attached_by || "an agent"}, attempt {item.attempt}
+                                        </div>
+                                    </div>
+                                </Show>
+                                <Show when={item.removed_at == null && item.path}>
                                     {/* No alt: the shared component would print it as a second caption; the name and
                                         caption are the figcaption's. */}
                                     <MarkdownImg props={{ src: item.path, alt: "" }} media={{ baseDir: "" }} />
                                 </Show>
-                                <figcaption>
+                                <Show when={item.removed_at == null}>
+                                    <figcaption>
                                     <div class="kanban-media__name">{item.name}</div>
                                     <Show when={item.caption}>
                                         <div>{item.caption}</div>
@@ -144,23 +155,22 @@ export function DrawerMedia(props: {
                                         {item.attached_by || "an agent"}, attempt {item.attempt},{" "}
                                         {formatAge(Math.max(0, props.now - item.at))} ago
                                     </div>
-                                    <Show when={item.removed_at == null}>
-                                        <div class="kanban-drawer__row">
-                                            <Button density="compact" tone="quiet" icon="up-right-from-square" onClick={() => openMediaInEditor(item.path)}>
-                                                Open
-                                            </Button>
-                                            <Button
-                                                density="compact"
-                                                tone="quiet"
-                                                icon="trash"
-                                                disabled={props.busy}
-                                                onClick={() => void props.onAct({ action: "media_remove", media_id: item.id })}
-                                            >
-                                                Remove
-                                            </Button>
-                                        </div>
-                                    </Show>
+                                    <div class="kanban-drawer__row">
+                                        <Button density="compact" tone="quiet" icon="up-right-from-square" onClick={() => openMediaInEditor(item.path)}>
+                                            Open
+                                        </Button>
+                                        <Button
+                                            density="compact"
+                                            tone="quiet"
+                                            icon="trash"
+                                            disabled={props.busy}
+                                            onClick={() => void props.onAct({ action: "media_remove", media_id: item.id })}
+                                        >
+                                            Remove
+                                        </Button>
+                                    </div>
                                 </figcaption>
+                                </Show>
                             </figure>
                         )}
                     </For>

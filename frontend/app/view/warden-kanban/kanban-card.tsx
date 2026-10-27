@@ -256,7 +256,9 @@ export function KanbanCard(props: {
                     </Pill>
                 </Show>
                 <Show when={t().attempts > 1}>
-                    <Pill title="How many times it has been taken">{`${t().attempts}/${t().max_attempts}`}</Pill>
+                    <Pill title={`Taken ${t().attempts} times; it is parked as failed after ${t().max_attempts} attempts`}>
+                        {`attempt ${t().attempts}/${t().max_attempts}`}
+                    </Pill>
                 </Show>
                 <Show when={t().card.repo}>
                     <span class="kanban-card__repo">{t().card.repo.replace(/^local:.*[\\/]/, "")}</span>

@@ -140,7 +140,10 @@ describe("the drawer's Media section", () => {
 
     it("shows a removed file as removed, with no picture and no buttons", () => {
         mount(task({ count: 0, ui_change: true }), [item(4, 1, { removed_at: 5000, removed_by: "operator", path: "" })]);
-        expect(screen.getByText("removed by operator")).toBeTruthy();
+        // One box: the name, who removed it and when, and who attached it.
+        expect(screen.getByText(/removed by operator, \d+[a-z ]* ago/)).toBeTruthy();
+        expect(screen.getByText("shot4.png")).toBeTruthy();
+        expect(screen.getByText(/attached by Naki-2, attempt 1/)).toBeTruthy();
         expect(screen.queryByTestId("media")).toBeNull();
         expect(screen.queryByText("Remove")).toBeNull();
     });
