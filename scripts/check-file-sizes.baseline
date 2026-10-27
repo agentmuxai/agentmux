@@ -32,7 +32,7 @@
 2161 crates/srv/src/persist_subscriber.rs
 1509 crates/srv/src/registry/migrate.rs
 2137 crates/srv/src/server/agent_handlers/input.rs
-1767 crates/srv/src/server/app_api/agent_open.rs
+1752 crates/srv/src/server/app_api/agent_open.rs
 1532 crates/srv/src/server/editor_handlers.rs
 2108 crates/srv/src/server/muxspect_handlers.rs
 1558 crates/srv/src/server/native_memory_handlers.rs

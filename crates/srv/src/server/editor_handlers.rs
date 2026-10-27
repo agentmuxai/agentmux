@@ -273,7 +273,8 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
                 // The launch's .mcp.json signs as the definition's agent; the window's launch also
                 // carries that agent's signing keys (`mcp_json_identity::finish_launch`).
-                crate::backend::mcp_json_identity::finish_launch(&mut cmd.files, &mstore, cmd.agent_id.as_deref(), hands_out_keys);
+                // A container agent's file is mounted into its container, so none, whatever the id resolves to.
+                crate::backend::mcp_json_identity::finish_launch(&mut cmd.files, &mstore, cmd.agent_id.as_deref(), hands_out_keys && !container);
 
                 // Resolve to a final on-disk path. For auto-generated
                 // instance paths (`auto_allocate: true`), use the
