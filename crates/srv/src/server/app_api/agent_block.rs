@@ -13,12 +13,14 @@ use crate::backend::storage::store::Store;
 use super::{resolve_tab_id, resolve_tab_id_for_block};
 
 /// An agent's block and the tab it is in. `tab_id` is `None` for a parked block.
+#[cfg_attr(not(test), allow(dead_code))] // until place_agent (#5838 PR C) calls it
 #[derive(Debug, Clone)]
 pub(crate) struct AgentBlock {
     pub block: Block,
     pub tab_id: Option<String>,
 }
 
+#[cfg_attr(not(test), allow(dead_code))] // until place_agent (#5838 PR C) calls it
 fn is_agent_block_of(block: &Block, agent_uid: &str) -> bool {
     ["agentId", "agent:id"].iter().any(|key| obj::meta_get_string(&block.meta, key, "") == agent_uid)
 }
@@ -31,6 +33,7 @@ fn is_parked(block: &Block) -> bool {
 ///
 /// An agent should have one block. Where old layouts left several, the one with a live controller
 /// wins, then one in a tab over a parked one, then the lowest id (so the answer is stable).
+#[cfg_attr(not(test), allow(dead_code))] // until place_agent (#5838 PR C) calls it
 pub(crate) fn find_agent_block_by_uid(mstore: &Store, agent_uid: &str) -> Result<Option<AgentBlock>, String> {
     let agent_uid = agent_uid.trim();
     if agent_uid.is_empty() {
