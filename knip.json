@@ -12,7 +12,6 @@
         "frontend/types/rpc/**",
         "public/**",
         "sdk/**/*.css",
-        "frontend/app/view/swarm/swarm-kanban-slot.ts",
         "frontend/**/*.{darwin,linux,win32}.scss"
     ],
     "ignoreDependencies": [

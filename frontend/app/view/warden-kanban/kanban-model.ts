@@ -4,7 +4,7 @@
 // The Kanban section's state: the board from srv (`kanban.list`), refreshed when the task queue
 // changes (`workqueue:changed`) and every 15 s while the section is visible, because a task an agent
 // of another AgentMux on this computer moves raises no event here (SPEC_WARDEN_KANBAN_2026_10_20.md
-// §7.3). Nothing is fetched or subscribed while the section is hidden: Warden keeps every section
+// §7.3). Nothing is fetched or subscribed while the section is hidden: the Swarm keeps the section
 // mounted.
 
 import { createSignal, type Accessor } from "solid-js";

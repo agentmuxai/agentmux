@@ -9,7 +9,6 @@ import { WardenLanManager } from "@/app/view/warden-lan/warden-lan-manager";
 import { WardenInternetStub } from "@/app/view/warden-internet/warden-internet-stub";
 import { WardenAuditManager } from "@/app/view/warden-audit/warden-audit-manager";
 import { WardenHistoryManager } from "@/app/view/warden-history/warden-history-manager";
-import { WardenKanbanManager } from "@/app/view/warden-kanban/warden-kanban-manager";
 import { WardenAmbientManager } from "@/app/view/warden-ambient/warden-ambient-manager";
 import { WardenJobsManager } from "@/app/view/warden-jobs/warden-jobs-manager";
 import { VaultView } from "@/app/view/vault/vault-view";
@@ -61,21 +60,11 @@ export function WardenView(props: { model: WardenViewModel }): JSX.Element {
                     {/*
                      * Each section mounts the first time it is shown, then stays mounted, so
                      * switching back is instant. Host, LAN, Audit and Ambient poll every 5s only
-                     * while shown; Kanban and History load while shown. The Vault mounts on first
+                     * while shown; History loads while shown. The Vault mounts on first
                      * show (listing it decrypts its entries, which can make the OS ask for the
                      * Vault key) and counts as shown, for its protections, only while selected
                      * (vault-in-warden.ts).
                      */}
-                    <Lazy id="kanban">
-                        <WardenKanbanManager
-                            visible={shown("kanban")}
-                            onNeedsCount={model.setKanbanNeeds}
-                            openRequest={model.kanbanOpenAtom()}
-                            onOpenHandled={() => model.setMeta({ "kanban:open": null })}
-                            lanes={model.kanbanLanesAtom()}
-                            onLanes={(on) => model.setMeta({ "kanban:lanes": on })}
-                        />
-                    </Lazy>
                     <Lazy id="jobs">
                         <WardenJobsManager visible={shown("jobs")} onFailingCount={model.setJobsFailing} />
                     </Lazy>

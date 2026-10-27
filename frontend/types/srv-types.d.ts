@@ -906,11 +906,11 @@ declare global {
         // block remount and names the pane (section-pane.tsx, warden-model.ts).
         "connectors:section"?: "accounts" | "mcp" | "remotes";
         "memory:section"?: "global" | "personal" | "skills" | "bundles";
-        "swarm:section"?: "supervisor" | "broadcast";
-        "warden:section"?: "kanban" | "jobs" | "vault" | "host" | "lan" | "internet" | "audit" | "history" | "ambient";
-        /** A Kanban task to open in the drawer, set by a link from elsewhere (the Swarm) and cleared once opened. */
+        "swarm:section"?: "supervisor" | "broadcast" | "kanban";
+        "warden:section"?: "jobs" | "vault" | "host" | "lan" | "internet" | "audit" | "history" | "ambient";
+        /** A Kanban task to open in the drawer, set by a link from elsewhere (a Swarm row's task chip) and cleared once opened. Read by the Swarm. */
         "kanban:open"?: string | null;
-        /** The Kanban section shows one lane per repository. */
+        /** The Swarm's Kanban section shows one lane per repository. */
         "kanban:lanes"?: boolean;
         // The Vault's own section, within Warden's Vault section (vault-in-warden.ts).
         "vault:section"?: "personal" | "cards" | "api-keys" | "logins" | "notes" | "kept" | "activity";

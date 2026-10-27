@@ -27,10 +27,6 @@ export class WardenViewModel {
     sectionAtom: Accessor<WardenSection>;
 
     viewName: Accessor<string>;
-    /** How many Kanban tasks need the operator: shown in the title on the Kanban section
-     *  (SPEC_WARDEN_KANBAN_2026_10_20.md §6.1). Set by the section while it is shown. */
-    kanbanNeeds: Accessor<number>;
-    setKanbanNeeds: (n: number) => void;
     /** How many kinds of AgentMux's own model calls are failing: shown in the title on the Ambient
      *  section. Set by the section while it is shown. */
     ambientFailing: Accessor<number>;
@@ -38,10 +34,6 @@ export class WardenViewModel {
     /** How many jobs are failing: shown in the title on the Jobs section. Set by the section while it is shown. */
     jobsFailing: Accessor<number>;
     setJobsFailing: (n: number) => void;
-    /** A task another view asked to show (`kanban:open` meta, kanban-held.tsx), until the section opens it. */
-    kanbanOpenAtom: Accessor<string | null>;
-    /** The Kanban in one lane per repository (`kanban:lanes` meta). */
-    kanbanLanesAtom: Accessor<boolean>;
     /** The Vault section's own model, on this block (vault-in-warden.ts). */
     vault: VaultViewModel;
 
@@ -59,14 +51,6 @@ export class WardenViewModel {
             if (m?.view === "vault" && m["warden:section"] === undefined) return "vault";
             return sectionOf(WARDEN_SECTIONS, "warden", m);
         });
-        this.kanbanOpenAtom = createMemo<string | null>(() => {
-            const id = meta()?.["kanban:open"];
-            return typeof id === "string" && id ? id : null;
-        });
-        this.kanbanLanesAtom = createMemo<boolean>(() => meta()?.["kanban:lanes"] === true);
-        const [kanbanNeeds, setKanbanNeeds] = createSignal(0);
-        this.kanbanNeeds = kanbanNeeds;
-        this.setKanbanNeeds = setKanbanNeeds;
         const [ambientFailing, setAmbientFailing] = createSignal(0);
         this.ambientFailing = ambientFailing;
         this.setAmbientFailing = setAmbientFailing;
@@ -76,11 +60,10 @@ export class WardenViewModel {
         this.vault = new VaultViewModel(vaultHostIn(ctx, () => this.sectionAtom() === "vault"));
         this.viewName = createMemo<string>(() => {
             const section = this.sectionAtom();
-            const n = kanbanNeeds();
             if (section === "vault") return `Vault · ${this.vault.viewName()}`;
             if (section === "ambient" && ambientFailing() > 0) return `Ambient · ${ambientFailing()} failing`;
             if (section === "jobs" && jobsFailing() > 0) return `Jobs · ${jobsFailing()} failing`;
-            return section === "kanban" && n > 0 ? `Kanban · ${n} need${n === 1 ? "s" : ""} you` : WARDEN_SECTION_LABELS[section];
+            return WARDEN_SECTION_LABELS[section];
         });
     }
 }

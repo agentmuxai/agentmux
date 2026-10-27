@@ -709,16 +709,27 @@ pub struct WidgetConfigType {
     pub block_def: BlockDef,
 }
 
+/// Sections that moved from one pane to another, as `(old view, section, new view)`. An entry that
+/// still names the old pair opens the pane that holds the section now. The frontend has the same
+/// table (`MOVED_SECTIONS` in `pane-sections.ts`).
+const MOVED_SECTIONS: &[(&str, &str, &str)] = &[("warden", "kanban", "swarm")];
+
 impl WidgetConfigType {
     /// Writes `section` into the blockdef's meta under `<view>:section`, and a
     /// sub-section under `<section>:section`. Nothing without a section or a view.
+    /// A section that moved panes (`MOVED_SECTIONS`) is written for the pane it lives in now,
+    /// and the blockdef's `view` follows it.
     pub fn resolve_section(&mut self) {
         if self.section.is_empty() {
             return;
         }
-        let Some(view) = self.block_def.meta.get("view").and_then(|v| v.as_str()).map(str::to_owned) else {
+        let Some(mut view) = self.block_def.meta.get("view").and_then(|v| v.as_str()).map(str::to_owned) else {
             return;
         };
+        if let Some((_, _, to)) = MOVED_SECTIONS.iter().find(|(from, id, _)| *from == view && *id == self.section) {
+            view = (*to).to_owned();
+            self.block_def.meta.insert("view".to_owned(), Value::String(view.clone()));
+        }
         let (id, sub) = match self.section.split_once('/') {
             Some((id, sub)) => (id.to_owned(), Some(sub.to_owned())),
             None => (self.section.clone(), None),
