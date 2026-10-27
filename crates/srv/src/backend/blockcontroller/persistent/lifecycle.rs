@@ -503,22 +503,4 @@ impl PersistentSubprocessController {
         }
         crate::backend::agent_admission::check_before_spawn(self.lease_store.clone(), uid, agent, &self.boot_id).await
     }
-
-    /// Stop this pane's CLI process gracefully (a turn in flight finishes, then it is killed at
-    /// `deadline`) so another pane of this process can run the agent. `false` when this pane holds
-    /// nothing to release.
-    pub fn release_to_other_pane(&self, deadline: std::time::Instant) -> bool {
-        let kill = {
-            let mut inner = self.inner.lock().unwrap();
-            if inner.agent_lease.is_none() {
-                return false;
-            }
-            inner.kill_tx.take()
-        };
-        tracing::info!(block_id = %self.block_id, "agent_admission.move_here: handing this agent to another pane");
-        match kill {
-            Some(tx) => tx.send(super::KillRequest::Graceful(deadline)).is_ok(),
-            None => false,
-        }
-    }
 }

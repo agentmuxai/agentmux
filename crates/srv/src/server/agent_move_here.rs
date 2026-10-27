@@ -42,7 +42,7 @@ pub(crate) async fn move_here(state: &AppState, block_id: &str) -> Result<AgentM
     let stopping = blockcontroller::get_controller(&holder)
         .as_ref()
         .and_then(|c| c.as_any().downcast_ref::<persistent::PersistentSubprocessController>())
-        .is_some_and(|p| p.release_to_other_pane(Instant::now() + MOVE_GRACE));
+        .is_some_and(|p| p.release_to_other_instance(Instant::now() + MOVE_GRACE));
     // A holder with no process to signal may already be exiting: the wait below decides.
     tracing::info!(block_id, holder = %holder, stopping, "agent_admission.move_here: asked the holder pane to let go");
 

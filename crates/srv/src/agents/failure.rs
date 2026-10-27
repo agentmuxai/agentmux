@@ -260,7 +260,7 @@ pub fn classify(
         let mut f = build(
             FailureClass::OpenInOtherPane,
             "Open in another pane",
-            "This agent is already open in another pane. Go there to keep working in it, or move it here:              the other pane stops and this one resumes the same conversation.",
+            "This agent is already open in another pane. Go there to keep working in it, or move it here: the other pane stops and this one resumes the same conversation.",
             false,
             exit_code,
             signal,
