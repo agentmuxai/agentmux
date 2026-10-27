@@ -30,6 +30,7 @@ pub const INSTALL_SUBTYPE: &str = "agentmux_cli_install";
 /// Subtype of the frames that say how a container agent's container is coming up.
 pub const CONTAINER_START_SUBTYPE: &str = "agentmux_container_start";
 pub const VERSION_CHANGED_SUBTYPE: &str = "agentmux_cli_version_changed";
+pub const CONTAINER_IMAGE_SUBTYPE: &str = "agentmux_container_image";
 
 /// Per-agent last-run CLI versions, in [`record_dir`] (no schema change: a
 /// new column would lock older builds out of a shared store.db).
@@ -158,6 +159,22 @@ pub fn container_start_frame(
     frame
 }
 
+/// An `agentmux_container_image` frame: the container runs an older agent image than this
+/// AgentMux (`state` `outdated`), or has just been removed so the next message starts it from
+/// the current one (`updated`).
+pub fn container_image_frame(provider: &str, block_id: &str, state: &str, running: &str, current: &str) -> Value {
+    json!({
+        "type": "system",
+        "subtype": CONTAINER_IMAGE_SUBTYPE,
+        "provider": provider,
+        "block_id": block_id,
+        "state": state,
+        "running": running,
+        "current": current,
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+    })
+}
+
 /// An `agentmux_cli_version_changed` frame. `pinned` is the version this
 /// AgentMux build installs, so the pane can say when `to` isn't it (a
 /// self-update, or a stale install).
@@ -284,6 +301,14 @@ pub fn observe_and_notify(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_container_image_frame_names_its_pane_and_both_versions() {
+        let f = container_image_frame("claude", "blk-1", "outdated", "0.59.41", "0.60.2");
+        assert_eq!(f["subtype"], CONTAINER_IMAGE_SUBTYPE);
+        assert_eq!((f["block_id"].as_str(), f["state"].as_str()), (Some("blk-1"), Some("outdated")));
+        assert_eq!((f["running"].as_str(), f["current"].as_str()), (Some("0.59.41"), Some("0.60.2")));
+    }
 
     /// The pane (`frontend/app/view/agent/cli-notice.ts`) reads these field names.
     #[test]

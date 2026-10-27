@@ -6790,6 +6790,25 @@
     }
   },
   {
+    "command": "updatecontainer",
+    "request": "agentmux_srv::backend::rpc_types::agent::CommandUpdateContainerData",
+    "requestName": "CommandUpdateContainerData",
+    "requestTs": {
+      "imports": [
+        "CommandUpdateContainerData"
+      ],
+      "name": "CommandUpdateContainerData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::agent::UpdateContainerResult",
+    "responseName": "UpdateContainerResult",
+    "responseTs": {
+      "imports": [
+        "UpdateContainerResult"
+      ],
+      "name": "UpdateContainerResult"
+    }
+  },
+  {
     "command": "upsertdrone",
     "request": "agentmux_srv::drone::types::DroneDefinition",
     "requestName": "DroneDefinition",

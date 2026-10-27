@@ -131,6 +131,47 @@ describe("a container agent's start-up", () => {
     });
 });
 
+const containerImage = (state: string, extra: Record<string, unknown> = {}) => ({
+    type: "system",
+    subtype: "agentmux_container_image",
+    provider: "claude",
+    block_id: "blk-1",
+    state,
+    running: "0.59.41",
+    current: "0.60.2",
+    timestamp: TS,
+    ...extra,
+});
+
+describe("a container that runs an older agent image", () => {
+    it("is one row per pane, and the updated row replaces the outdated one", () => {
+        const outdated = parseCliNoticeFrame(containerImage("outdated"), 0);
+        const updated = parseCliNoticeFrame(containerImage("updated", { running: "" }), 0);
+        expect(outdated).toMatchObject({ kind: "container_image", imageState: "outdated", blockId: "blk-1", running: "0.59.41" });
+        expect(updated?.id).toBe(outdated?.id);
+        expect(updated).toMatchObject({ imageState: "updated", current: "0.60.2" });
+    });
+
+    it("says which image it uses and what updating costs, then that the container is gone", () => {
+        const text = (state: string, extra: Record<string, unknown> = {}) =>
+            cliNoticeText(parseCliNoticeFrame(containerImage(state, extra), 0) as CliNoticeNode);
+        const outdated = text("outdated");
+        expect(outdated).toMatchObject({ label: "This container uses the 0.59.41 image", tone: "warn" });
+        expect(outdated.detail).toContain("tools installed inside the container");
+        expect(outdated.detail).toContain("the workspace and memory are kept");
+        expect(text("updated", { running: "" })).toMatchObject({
+            label: "Container removed",
+            detail: "The next message starts it from the 0.60.2 image",
+        });
+    });
+
+    it("ignores a frame without a pane, a current version or a known state", () => {
+        expect(parseCliNoticeFrame(containerImage("outdated", { block_id: undefined }), 0)).toBeNull();
+        expect(parseCliNoticeFrame(containerImage("outdated", { current: undefined }), 0)).toBeNull();
+        expect(parseCliNoticeFrame(containerImage("sideways"), 0)).toBeNull();
+    });
+});
+
 describe("replay", () => {
     it("collapses an install's frames into one row that ends in its final state", () => {
         const lines = [install("installing"), install("installed", { seconds: 9 }), changed("2.1.285")].map((f) =>

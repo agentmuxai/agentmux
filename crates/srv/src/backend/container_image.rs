@@ -28,6 +28,15 @@ pub fn versioned_agent_image() -> String {
     format!("{AGENT_BASE_REPO}:{}", env!("CARGO_PKG_VERSION"))
 }
 
+/// Whether `image` is the base image at any tag or digest: what a container made from this
+/// AgentMux's own image runs, as opposed to an image the user chose.
+pub fn is_agent_base_image(image: &str) -> bool {
+    match image.trim().strip_prefix(AGENT_BASE_REPO) {
+        Some(rest) => rest.is_empty() || rest.starts_with(':') || rest.starts_with('@'),
+        None => false,
+    }
+}
+
 /// Whether `image` is a base image pinned to a version (`agent-base:0.60.2`), as opposed to
 /// `:latest` or anything else. Such an image can be missing: a build that has not been
 /// released has no tag yet.
@@ -367,6 +376,16 @@ mod tests {
         assert_eq!(resolve_container_image(DEFAULT_AGENT_IMAGE), versioned, "the default definitions carry :latest");
         assert_eq!(resolve_container_image("my/own:1"), "my/own:1");
         assert_eq!(resolve_container_image("ghcr.io/agentmuxai/agent-base:0.59.1"), "ghcr.io/agentmuxai/agent-base:0.59.1");
+    }
+
+    #[test]
+    fn the_base_image_is_recognised_at_any_tag_and_nothing_else_is() {
+        assert!(is_agent_base_image("ghcr.io/agentmuxai/agent-base:0.59.41"));
+        assert!(is_agent_base_image("ghcr.io/agentmuxai/agent-base:latest"));
+        assert!(is_agent_base_image("ghcr.io/agentmuxai/agent-base"));
+        assert!(is_agent_base_image("ghcr.io/agentmuxai/agent-base@sha256:abc"));
+        assert!(!is_agent_base_image("ghcr.io/agentmuxai/agent-base-extra:1.0.0"));
+        assert!(!is_agent_base_image("my/own:1"));
     }
 
     #[test]

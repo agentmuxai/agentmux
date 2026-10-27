@@ -1469,6 +1469,10 @@
             ]
         },
         {
+            "command": "updatecontainer",
+            "method": "UpdateContainerCommand"
+        },
+        {
             "command": "upsertdrone",
             "method": "UpsertDroneCommand"
         },

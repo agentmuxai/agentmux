@@ -579,6 +579,37 @@ async fn a_slow_container_startup_does_not_hold_up_the_caller_and_a_failed_one_e
     assert_eq!(container_turn_status(&ctrl).await, (STATUS_DONE.to_string(), 1), "the turn ended as failed");
 }
 
+/// An update takes the container's gate exclusively: a turn cannot start inside it, and an
+/// update cannot start while a turn holds the gate.
+#[tokio::test]
+async fn a_turn_and_an_update_of_its_container_exclude_each_other() {
+    let Ok(cm) = crate::backend::container::ContainerManager::connect() else {
+        eprintln!("no Docker client on this machine: skipped");
+        return;
+    };
+    let name = "agentmux-test-update-gate";
+    let ctrl = std::sync::Arc::new(SubprocessController::new(
+        "tab-1".to_string(), "block-gate".to_string(), None, None, None, None, None, std::sync::Arc::from("test-boot"),
+    ));
+    ctrl.set_self_ref();
+    let gate = crate::backend::container::drift::update_gate(name);
+    let updating = gate.clone().try_write_owned().unwrap();
+    let err = ctrl.spawn_container_turn(cm.clone(), name.to_string(), vec!["claude".to_string()], container_config()).unwrap_err();
+    assert!(err.contains("being updated"), "{err}");
+    drop(updating);
+
+    ctrl.set_container_startup(std::sync::Arc::new(|| Box::pin(async { tokio::time::sleep(std::time::Duration::from_millis(300)).await; Err("stop here".to_string()) })));
+    ctrl.spawn_container_turn(cm, name.to_string(), vec!["claude".to_string()], container_config()).expect("accepted once the update is over");
+    assert!(gate.clone().try_write_owned().is_err(), "an update waits for the turn");
+    for _ in 0..100 {
+        if container_turn_status(&ctrl).await.0 == STATUS_DONE {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert!(gate.try_write_owned().is_ok(), "the turn let go of the gate when it ended");
+}
+
 /// A stop while the container is still starting must end the turn then, and
 /// cancel the start-up (dropping it cancels the image download), not wait for
 /// the download to finish.

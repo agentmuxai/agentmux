@@ -224,6 +224,7 @@ import type { CommandUnlinkAgentIdentityData } from "@/types/rpc/CommandUnlinkAg
 import type { CommandUpdateAgentDefinitionData } from "@/types/rpc/CommandUpdateAgentDefinitionData";
 import type { CommandUpdateAgentInstanceData } from "@/types/rpc/CommandUpdateAgentInstanceData";
 import type { CommandUpdateAgentSkillData } from "@/types/rpc/CommandUpdateAgentSkillData";
+import type { CommandUpdateContainerData } from "@/types/rpc/CommandUpdateContainerData";
 import type { CommandUpsertBundleData } from "@/types/rpc/CommandUpsertBundleData";
 import type { CommandViewerAgentHiddenData } from "@/types/rpc/CommandViewerAgentHiddenData";
 import type { CommandViewerCanSendData } from "@/types/rpc/CommandViewerCanSendData";
@@ -482,6 +483,7 @@ import type { TowerSampleReq } from "@/types/rpc/TowerSampleReq";
 import type { TowerSnapshot } from "@/types/rpc/TowerSnapshot";
 import type { UnlinkAgentIdentityResult } from "@/types/rpc/UnlinkAgentIdentityResult";
 import type { UnwatchMediaDirReq } from "@/types/rpc/UnwatchMediaDirReq";
+import type { UpdateContainerResult } from "@/types/rpc/UpdateContainerResult";
 import type { UpgradeRequestsEvent } from "@/types/rpc/UpgradeRequestsEvent";
 import type { ValidationReport } from "@/types/rpc/ValidationReport";
 import type { ViewerAgentHiddenResult } from "@/types/rpc/ViewerAgentHiddenResult";
@@ -2536,6 +2538,14 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<Bundle> {
     return client.rpcCall("upsertmemory", data, opts);
+  },
+  // command "updatecontainer"
+  UpdateContainerCommand(
+    client: RpcClient,
+    data: CommandUpdateContainerData,
+    opts?: RpcOpts
+  ): Promise<UpdateContainerResult> {
+    return client.rpcCall("updatecontainer", data, opts);
   },
   // command "upsertdrone"
   UpsertDroneCommand(client: RpcClient, data: DroneDefinition, opts?: RpcOpts): Promise<DroneDefinition> {

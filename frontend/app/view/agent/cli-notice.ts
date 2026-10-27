@@ -16,6 +16,9 @@
  *   "Downloading the agent image… 42%", "Starting the container…", then
  *   "Container ready (12 s)" or "Couldn't start the container". Every frame of
  *   one start-up shares a `start_id`, so it is one row that updates in place.
+ * - `agentmux_container_image` — the container runs an older agent image than this AgentMux:
+ *   "This container uses the 0.59.41 image" with an Update container button, then (one row, updated
+ *   in place) "Container removed. The next message starts it from the 0.60.2 image".
  * - `agentmux_mcp_health` — the agent's AgentMux MCP server didn't connect and
  *   AgentMux is repairing it (`crates/srv/src/backend/mcp_health.rs`). Every
  *   frame of one episode shares an `episode`, so it is one row that updates.
@@ -32,6 +35,7 @@ const CLI_INSTALL_SUBTYPE = "agentmux_cli_install";
 const CLI_VERSION_CHANGED_SUBTYPE = "agentmux_cli_version_changed";
 const MCP_HEALTH_SUBTYPE = "agentmux_mcp_health";
 const CONTAINER_START_SUBTYPE = "agentmux_container_start";
+const CONTAINER_IMAGE_SUBTYPE = "agentmux_container_image";
 
 const MCP_STATES = ["healing", "restarting", "ok", "gave_up"] as const;
 const CONTAINER_START_STATES = ["pulling", "starting", "ready", "failed"] as const;
@@ -121,6 +125,23 @@ export function parseCliNoticeFrame(rawEvent: unknown, now: number): CliNoticeNo
             timestamp,
         };
     }
+    if (e.subtype === CONTAINER_IMAGE_SUBTYPE) {
+        const imageState = e.state === "outdated" || e.state === "updated" ? e.state : null;
+        const blockId = str(e.block_id);
+        const current = str(e.current);
+        if (!imageState || !blockId || !current) return null;
+        return {
+            type: "cli_notice",
+            id: `container-image-${blockId}`,
+            kind: "container_image",
+            provider,
+            imageState,
+            running: str(e.running) ?? undefined,
+            current,
+            blockId,
+            timestamp,
+        };
+    }
     if (e.subtype === MCP_HEALTH_SUBTYPE) {
         const episode = str(e.episode);
         const mcpState = MCP_STATES.find((s) => s === e.state);
@@ -170,6 +191,7 @@ export function cliNoticeText(node: CliNoticeNode): { label: string; detail: str
     }
     if (node.kind === "mcp_health") return mcpHealthText(node);
     if (node.kind === "container_start") return containerStartText(node);
+    if (node.kind === "container_image") return containerImageText(node);
     if (node.kind === "install") {
         switch (node.state) {
             case "installing":
@@ -187,6 +209,22 @@ export function cliNoticeText(node: CliNoticeNode): { label: string; detail: str
         label: `${name} updated: ${node.from} → ${node.to}`,
         detail: offPin ? `Not the version AgentMux pins (${node.pinned})` : null,
         tone: offPin ? "warn" : "info",
+    };
+}
+
+/** The container's agent image against this AgentMux's, one row per pane. */
+function containerImageText(node: CliNoticeNode): { label: string; detail: string | null; tone: CliNoticeTone } {
+    if (node.imageState === "updated") {
+        return {
+            label: "Container removed",
+            detail: `The next message starts it from the ${node.current} image`,
+            tone: "info",
+        };
+    }
+    return {
+        label: `This container uses the ${node.running ?? "older"} image`,
+        detail: `This AgentMux runs ${node.current}. Updating resets tools installed inside the container; the workspace and memory are kept`,
+        tone: "warn",
     };
 }
 

@@ -2516,6 +2516,18 @@ $transcript-preview-max-height: calc(50vh / 3);
         text-align: center;
     }
 
+    .agent-cli-notice-actions {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        margin-top: 2px;
+    }
+
+    .agent-cli-notice-refused {
+        font-size: var(--text-xs);
+        color: var(--error-color);
+    }
+
     &.agent-cli-notice-warn {
         --cli-notice-tone: var(--warning-color);
     }

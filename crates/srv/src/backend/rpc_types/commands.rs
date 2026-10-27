@@ -377,6 +377,10 @@ pub const COMMAND_AGENT_DEF_CREATE_FROM_TEMPLATE: &str = "agentdefcreatefromtemp
 /// Response: `{ "available": bool }`.
 pub const COMMAND_CONTAINER_RUNTIME_AVAILABLE: &str = "containerruntimeavailable";
 
+/// Remove a container agent's container so its next message starts it from the current agent
+/// image (the pane row's "Update container"). Only between turns.
+pub const COMMAND_UPDATE_CONTAINER: &str = "updatecontainer";
+
 /// Whether a container image can be had on this machine: already in the
 /// Docker daemon, or readable from its registry without credentials. Lets the
 /// create modal avoid preselecting a container that cannot start.

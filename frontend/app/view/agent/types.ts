@@ -704,7 +704,7 @@ export interface SessionOutcomeNode {
 export interface CliNoticeNode {
     type: "cli_notice";
     id: string;
-    kind: "install" | "version_changed" | "compaction_failed" | "mcp_health" | "container_start";
+    kind: "install" | "version_changed" | "compaction_failed" | "mcp_health" | "container_start" | "container_image";
     /** Provider id, e.g. `"claude"`. */
     provider: string;
     /** `install`: the version being installed. */
@@ -725,6 +725,13 @@ export interface CliNoticeNode {
     percent?: number;
     /** `container_start`: the image being started. */
     image?: string;
+    /** `container_image`: the container runs an older agent image (`outdated`), or has been removed so
+     *  the next message starts it from the current one (`updated`). `running` and `current` are the
+     *  image versions; `blockId` is the pane the update acts on. */
+    imageState?: "outdated" | "updated";
+    running?: string;
+    current?: string;
+    blockId?: string;
     /** `mcp_health`: where the repair of the agent's AgentMux MCP server is. */
     mcpState?: "healing" | "restarting" | "ok" | "gave_up";
     /** `mcp_health`, while `healing`: which reconnect. */

@@ -31,6 +31,7 @@ pub(super) const ACTS: &[Act] = &[
     Act { action: "env_get", tool: "AgentEnvGet", rename: &[] },
     Act { action: "env_set", tool: "AgentEnvSet", rename: &[] },
     Act { action: "set_seat", tool: "AgentSetSeat", rename: &[] },
+    Act { action: "update_container", tool: "AgentUpdateContainer", rename: &[] },
 ];
 
 pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
@@ -59,6 +60,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 "AgentEnvGet" => env(cx, "get", &args).await,
                 "AgentEnvSet" => env(cx, "set", &args).await,
                 "AgentSetSeat" => set_seats(cx, &args).await,
+                "AgentUpdateContainer" => update_container(cx, &args).await,
                 _ => history::call(act.tool, &args, cx).await,
             };
             let result = result.map_err(|e| anyhow::anyhow!(public_params(&format!("{e:#}"), act.rename)));
@@ -222,6 +224,30 @@ fn env_request(action: &str, args: &Value) -> Result<Value> {
     }))
 }
 
+/// `update_container`: srv removes the named container agent's container, so its next message
+/// starts it from the current agent image. Refused while that agent has a turn running.
+async fn update_container(cx: &ToolCtx<'_>, args: &Value) -> Result<String> {
+    require_agent_env(cx.local_url, cx.auth_key, cx.block_id)?;
+    let Some(agent) = str_arg(args, "agent") else {
+        anyhow::bail!("Agents update_container needs agent: the container agent's id or slug");
+    };
+    let url = format!("{}/api/v1/agent/container/update", cx.local_url.trim_end_matches('/'));
+    let resp = cx
+        .client
+        .post(&url)
+        .header(AUTH_KEY_HEADER, cx.auth_key)
+        .json(&json!({ "agent": agent }))
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+    let status = resp.status();
+    let body: Value = resp.json().await.unwrap_or(Value::Null);
+    if !status.is_success() {
+        anyhow::bail!("Agents update_container: {}", body["error"].as_str().map(str::to_string).unwrap_or_else(|| format!("srv answered {status}: {body}")));
+    }
+    Ok(serde_json::to_string_pretty(&body)?)
+}
+
 /// `set_seat`: seats set or cleared by srv as the agent this process's token
 /// names, which records each change under that agent (`/api/v1/agent/seats`).
 /// `seats` goes as given; srv checks the shape and every seat.
@@ -287,6 +313,14 @@ mod tests {
         listed.sort();
         want.sort();
         assert_eq!(listed, want);
+    }
+
+    #[test]
+    fn update_container_names_the_agent_and_needs_one() {
+        let (act, args) = pick("Agents", ACTS, &json!({ "action": "update_container", "agent": "Korp" })).unwrap();
+        assert_eq!(act.tool, "AgentUpdateContainer");
+        assert_eq!(str_arg(&args, "agent").as_deref(), Some("Korp"));
+        assert_eq!(str_arg(&json!({}), "agent"), None);
     }
 
     #[test]
