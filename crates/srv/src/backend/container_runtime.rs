@@ -194,7 +194,13 @@ fn configured(host: &str, tls_verify: bool) -> Result<Candidate, String> {
     let (scheme, rest) = host.split_once("://").ok_or_else(|| {
         format!("DOCKER_HOST is \"{host}\", which is not an address (expected unix://, tcp://, https:// or npipe://)")
     })?;
-    let endpoint = match scheme.to_ascii_lowercase().as_str() {
+    let scheme = scheme.to_ascii_lowercase();
+    if matches!(scheme.as_str(), "tcp" | "http" | "https") && host_of(rest.trim_end_matches('/')).is_none() {
+        return Err(format!(
+            "DOCKER_HOST is {host}, which is not a plain host and port (no user name, path or query), as in tcp://localhost:2375"
+        ));
+    }
+    let endpoint = match scheme.as_str() {
         "unix" => Endpoint::Unix(PathBuf::from(rest)),
         "tcp" | "http" => {
             let host = rest.trim_end_matches('/').to_string();
@@ -221,13 +227,33 @@ fn configured(host: &str, tls_verify: bool) -> Result<Candidate, String> {
     Ok(Candidate { kind: Kind::Configured, endpoint, user_owned: false })
 }
 
+/// The host of a plain `host`, `host:port`, `[v6]` or `[v6]:port`; `None` for anything else.
+/// Nothing like user information (`a@b`), a path, a query or a space is accepted: the transport
+/// would read such an address differently from a prefix check, so one that is not plain is refused.
+fn host_of(host_port: &str) -> Option<&str> {
+    if host_port.is_empty() || host_port.contains(|c: char| c.is_whitespace() || matches!(c, '@' | '/' | '?' | '#' | '\\')) {
+        return None;
+    }
+    let port_ok = |p: &str| !p.is_empty() && p.len() <= 5 && p.bytes().all(|b| b.is_ascii_digit());
+    if let Some(rest) = host_port.strip_prefix('[') {
+        let (host, after) = rest.split_once(']')?;
+        let ok = after.is_empty() || after.strip_prefix(':').is_some_and(port_ok);
+        return (ok && !host.is_empty()).then_some(host);
+    }
+    match host_port.matches(':').count() {
+        0 => Some(host_port),
+        1 => {
+            let (host, port) = host_port.split_once(':')?;
+            (!host.is_empty() && port_ok(port)).then_some(host)
+        }
+        // A bare IPv6 address, which has no port.
+        _ => Some(host_port),
+    }
+}
+
 /// Whether `host_port` (`localhost`, `127.0.0.1:2375`, `[::1]:2375`) is this computer.
 fn is_loopback(host_port: &str) -> bool {
-    let host = match host_port.strip_prefix('[') {
-        Some(rest) => rest.split(']').next().unwrap_or(""),
-        None if host_port.matches(':').count() == 1 => host_port.split(':').next().unwrap_or(""),
-        None => host_port,
-    };
+    let Some(host) = host_of(host_port) else { return false };
     host.eq_ignore_ascii_case("localhost")
         || host.parse::<std::net::IpAddr>().is_ok_and(|ip| ip.to_canonical().is_loopback())
 }
@@ -739,6 +765,22 @@ mod tests {
             let why = candidates(&with(remote, false)).unwrap_err();
             assert!(why.contains("unencrypted") && why.contains("https://") && why.contains("DOCKER_TLS_VERIFY"), "{remote}: {why}");
             assert!(!why.contains("  ") && !why.contains('\n'), "the sentence is one line, single-spaced: {why}");
+        }
+        // The address is read as the transport reads it: what comes before an `@` is user
+        // information, not the host.
+        for tricky in [
+            "tcp://[::1]@203.0.113.5:2375",
+            "tcp://127.0.0.1@203.0.113.5:2375",
+            "tcp://localhost@dock.example",
+            "tcp://127.0.0.1:2375/../",
+            "tcp://127.0.0.1:2375?x=1",
+            "tcp://127.0.0.1:",
+            "tcp://127.0.0.1:99999999",
+            "tcp://127.0.0.1 :2375",
+            "tcp://",
+        ] {
+            assert!(candidates(&with(tricky, false)).is_err(), "{tricky} must be refused");
+            assert!(candidates(&with(tricky, true)).is_err(), "{tricky} must be refused with TLS too");
         }
         // With TLS, or over https://, any host is fine.
         assert!(candidates(&with("tcp://203.0.113.5:2376", true)).is_ok());
