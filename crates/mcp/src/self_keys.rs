@@ -62,7 +62,9 @@ const FETCH_TIMEOUT: Duration = Duration::from_secs(3);
 /// keys, exactly as before M4d-3.
 pub(crate) async fn refresh_if_stale(client: &reqwest::Client, local_url: &str, auth_key: &str) {
     let fresh = CACHE.lock().unwrap_or_else(|e| e.into_inner()).as_ref().is_some_and(|c| still_good(c, agentmux_common::time::now_secs()));
-    if fresh || local_url.is_empty() || std::env::var("AGENTMUX_AGENT_TOKEN").map_or(true, |t| t.trim().is_empty()) {
+    // In a container srv signs for the agent and refuses this route; the variable is only a hint to skip the call.
+    let in_container = std::env::var("AGENTMUX_IN_CONTAINER").is_ok_and(|v| v == "1");
+    if fresh || in_container || local_url.is_empty() || std::env::var("AGENTMUX_AGENT_TOKEN").map_or(true, |t| t.trim().is_empty()) {
         return;
     }
     {

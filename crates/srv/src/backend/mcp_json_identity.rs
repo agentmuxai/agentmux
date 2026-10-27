@@ -21,6 +21,54 @@ const AGENT_ID: &str = "/mcpServers/agentmux/env/AGENTMUX_AGENT_ID";
 /// the new name's.
 const NAME_KEYED: [&str; 4] = ["AGENTMUX_JEKT_KEY", "AGENTMUX_LAN_KEY", "AGENTMUX_WAN_KEY", "AGENTMUX_HOST_LABEL"];
 
+/// The signing keys a container must never hold: it sees its workspace through a mount, and srv
+/// attributes and signs a container agent's jekts itself, by its token.
+const SIGNING_SECRETS: [&str; 3] = ["AGENTMUX_JEKT_KEY", "AGENTMUX_LAN_KEY", "AGENTMUX_WAN_KEY"];
+
+/// `content` without the signing keys of its agentmux server. `None` when it carries none, or isn't JSON.
+pub(crate) fn strip_signing_keys(content: &str) -> Option<String> {
+    let mut json: Value = serde_json::from_str(content).ok()?;
+    let env = json.pointer_mut("/mcpServers/agentmux/env")?.as_object_mut()?;
+    let mut removed = false;
+    for key in SIGNING_SECRETS {
+        removed |= env.remove(key).is_some();
+    }
+    removed.then(|| serde_json::to_string_pretty(&json).ok()).flatten()
+}
+
+/// A container agent's workspace `.mcp.json`, with the signing keys an earlier launch wrote taken out.
+/// Run at each container start, under the lock the launch writes the file with. Best-effort: a failure is
+/// logged and the start goes on.
+pub(crate) fn strip_workspace_signing_keys(work_dir: &str) {
+    if work_dir.trim().is_empty() {
+        return;
+    }
+    let expanded = crate::backend::blockcontroller::core::expand_home_dir(work_dir);
+    let Ok(wd) = crate::backend::workdir_fs::Workdir::open(std::path::Path::new(&expanded)) else { return };
+    let Ok(path) = wd.resolve(".mcp.json") else { return };
+    let Ok(content) = std::fs::read_to_string(&path) else { return };
+    if strip_signing_keys(&content).is_none() {
+        return;
+    }
+    let _lock = match wd
+        .open_lock_file(crate::backend::agent_config::MCP_JSON_WRITE_LOCK)
+        .and_then(|f| f.lock().map(|()| f))
+    {
+        Ok(lock) => lock,
+        Err(e) => {
+            tracing::warn!(work_dir, error = %e, "container start: .mcp.json lock unavailable; signing keys not removed this start");
+            return;
+        }
+    };
+    // Read again under the lock: a launch may have rewritten it meanwhile.
+    let Ok(content) = std::fs::read_to_string(&path) else { return };
+    let Some(body) = strip_signing_keys(&content) else { return };
+    match wd.write(".mcp.json", body.as_bytes(), true) {
+        Ok(()) => tracing::info!(work_dir, "container start: removed signing keys from the workspace .mcp.json"),
+        Err(e) => tracing::warn!(work_dir, error = %e, "container start: could not remove signing keys from the workspace .mcp.json"),
+    }
+}
+
 /// `content` with its agentmux server's `AGENTMUX_AGENT_ID` set to `slug`,
 /// and the id it replaced. `None` when it already is `slug`, when there is no
 /// such entry (a `.mcp.json` of the user's own, or none of AgentMux's), or
@@ -156,6 +204,16 @@ pub(crate) fn finish_launch(
         &agent_slug,
         crate::server::agent_self_keys::single_row_slug_folded(mstore, &agent_slug).as_deref(),
     );
+    // A container agent gets none: the file is mounted into its container.
+    let in_container = agent_id
+        .and_then(|id| mstore.agent_def_get(id).ok().flatten())
+        .is_some_and(|def| def.agent_type == "container");
+    if in_container {
+        if let Some(stripped) = strip_signing_keys(&files[pos].content) {
+            files[pos].content = stripped;
+        }
+        return;
+    }
     if !hands_out_keys {
         tracing::info!(agent_slug = %agent_slug, "WriteAgentConfig: signing keys not injected: the caller isn't the AgentMux window");
         return;
@@ -267,6 +325,74 @@ mod tests {
         realign_workspace_mcp_json(&store, &work_dir, "host", "loap-3");
         let v: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
         assert!(v.pointer("/mcpServers/agentmux/env/AGENTMUX_LAN_KEY").is_some(), "a matching id with one key gets the other");
+    }
+
+    fn holds_no_key(content: &str) -> bool {
+        SIGNING_SECRETS.iter().all(|k| !content.contains(k)) && !content.contains("old-key") && !content.contains("old-lan")
+    }
+
+    #[test]
+    fn stripping_takes_out_the_signing_keys_and_only_them() {
+        let out = strip_signing_keys(&mcp("loap-2")).unwrap();
+        assert!(holds_no_key(&out));
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v.pointer(AGENT_ID).and_then(Value::as_str), Some("loap-2"));
+        assert_eq!(v.pointer("/mcpServers/theirs/command").and_then(Value::as_str), Some("x"));
+        assert!(strip_signing_keys(&out).is_none(), "a file with none is left alone");
+        assert!(strip_signing_keys("not json").is_none());
+    }
+
+    #[test]
+    fn a_container_start_removes_keys_an_earlier_launch_wrote_to_the_mounted_workspace() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join(".mcp.json");
+        std::fs::write(&file, mcp("loap-2")).unwrap();
+        strip_workspace_signing_keys(&dir.path().to_string_lossy());
+        assert!(holds_no_key(&std::fs::read_to_string(&file).unwrap()));
+
+        // Nothing there, or nothing to remove: no file is made or changed.
+        let empty = tempfile::tempdir().unwrap();
+        strip_workspace_signing_keys(&empty.path().to_string_lossy());
+        assert!(!empty.path().join(".mcp.json").exists());
+        let clean = std::fs::read_to_string(&file).unwrap();
+        strip_workspace_signing_keys(&dir.path().to_string_lossy());
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), clean);
+    }
+
+    fn agent_of_type(store: &crate::backend::storage::store::Store, agent_type: &str) -> (String, String) {
+        let mut def: crate::backend::storage::agents::AgentDefinition = serde_json::from_value(serde_json::json!({
+            "id": uuid::Uuid::new_v4().to_string(), "name": "Loap", "icon": "", "provider": "claude", "description": "",
+            "created_at": 0, "agent_type": agent_type,
+        }))
+        .unwrap();
+        store.agent_def_insert(&mut def).unwrap();
+        (def.id, def.slug)
+    }
+
+    fn launch(store: &crate::backend::storage::store::Store, id: &str, slug: &str, hands_out_keys: bool) -> String {
+        let mut files = vec![crate::backend::rpc_types::AgentConfigFile {
+            path: ".mcp.json".into(),
+            content: mcp(slug),
+        }];
+        finish_launch(&mut files, store, Some(id), hands_out_keys);
+        files.remove(0).content
+    }
+
+    /// The file a launch writes is mounted into a container agent's container, so no key reaches it
+    /// there, even for the AgentMux window that is otherwise handed them, and a host agent still gets its own.
+    #[test]
+    fn a_launch_writes_no_signing_key_for_a_container_agent() {
+        let store = crate::backend::storage::store::Store::open_in_memory().unwrap();
+        let (boxed_id, boxed_slug) = agent_of_type(&store, "container");
+        let written = launch(&store, &boxed_id, &boxed_slug, true);
+        assert!(holds_no_key(&written), "{written}");
+        assert!(store.agent_jekt_key_load(&boxed_slug).unwrap().is_none(), "and none minted for it");
+
+        let (host_id, host_slug) = agent_of_type(&store, "host");
+        let written = launch(&store, &host_id, &host_slug, true);
+        let v: Value = serde_json::from_str(&written).unwrap();
+        assert!(v.pointer("/mcpServers/agentmux/env/AGENTMUX_JEKT_KEY").is_some());
+        assert!(v.pointer("/mcpServers/agentmux/env/AGENTMUX_LAN_KEY").is_some());
     }
 
     /// No lock, no rewrite: a `.claude` that is a file makes the lock

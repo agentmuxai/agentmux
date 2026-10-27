@@ -1115,7 +1115,17 @@ pub(super) fn write_agent_config_files(
     // `agent_config::inject_jekt_signing_keys_into_mcp_json` — see that
     // function's doc comment for why this must not be duplicated inline
     // again.
-    if let Some(pos) = config_files.iter().position(|f| f.filename == ".mcp.json") {
+    // A container agent gets none (its workspace is mounted into the container); srv attributes and
+    // signs its jekts by token. Any an earlier launch wrote come out.
+    let hands_out_keys = agent.agent_type != "container";
+    if !hands_out_keys {
+        if let Some(file) = config_files.iter_mut().find(|f| f.filename == ".mcp.json") {
+            if let Some(stripped) = crate::backend::mcp_json_identity::strip_signing_keys(&file.content) {
+                file.content = stripped;
+            }
+        }
+    }
+    if let Some(pos) = config_files.iter().position(|f| f.filename == ".mcp.json").filter(|_| hands_out_keys) {
         crate::server::agent_self_keys::record_config_id_drift("m4d.config_id_drift.agent_open", agent_slug, Some(&agent.slug));
         match crate::backend::agent_config::inject_jekt_signing_keys_into_mcp_json(
             &config_files[pos].content,
