@@ -23,11 +23,12 @@ use crate::backend::storage::filestore::FileStore;
 use crate::backend::storage::store::Store;
 
 use super::judge::{self, Judgement};
-use super::settings;
+use super::pacing::{self, WaitOver};
+use super::settings::{self, NoticeGroup};
 use super::policy::{self, Action, PreJudge, TurnFacts};
 use super::{
     message, supports, SupervisorAction, SupervisorDecision, SupervisorMode, SupervisorState, SupervisorStatus,
-    META_MODE, META_STATE,
+    Verdict, META_MODE, META_STATE,
 };
 
 /// The fields of a published `agentturn` the Supervisor reads.
@@ -87,6 +88,10 @@ pub struct Supervisor {
     locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
     /// Turn ends already handled: one end can be published twice.
     seen: Mutex<HashSet<(String, u64, u64)>>,
+    /// Continuations sent in the last hour, across every pane (`supervisor:hourly`).
+    budget: Mutex<pacing::Budget>,
+    /// The fleet-budget notice went out and the budget hasn't had room since: say it once.
+    budget_noticed: std::sync::atomic::AtomicBool,
 }
 
 static INSTANCE: OnceLock<Arc<Supervisor>> = OnceLock::new();
@@ -107,6 +112,8 @@ pub fn start(mstore: Arc<Store>, filestore: Arc<FileStore>, event_bus: Arc<Event
         generations: Mutex::default(),
         locks: Mutex::default(),
         seen: Mutex::default(),
+        budget: Mutex::default(),
+        budget_noticed: Default::default(),
     });
     if INSTANCE.set(sup.clone()).is_err() {
         return;
@@ -192,6 +199,14 @@ impl Supervisor {
         }
     }
 
+    /// An OS notice for a stop of `group`, unless the user turned that group off
+    /// (`supervisor:notify:*`). The row, the line and the history show every stop regardless.
+    fn notify_group(&self, block_id: &str, group: NoticeGroup, text: String) {
+        if settings::SupervisorSettings::current().notifies(group) {
+            self.notify(block_id, NotifyKind::InputWaiting, Some(text));
+        }
+    }
+
     fn notify(&self, block_id: &str, kind: NotifyKind, text: Option<String>) {
         let Some(router) = crate::backend::notify::router::get(&self.broker) else { return };
         let block_id = block_id.to_string();
@@ -204,6 +219,9 @@ impl Supervisor {
     /// something other than the user started is announced only when the user
     /// asked for those (`notify:os:turncompleted:external`).
     fn notify_finished(&self, block_id: &str, trigger: Option<TriggerKind>) {
+        if !settings::SupervisorSettings::current().notifies(NoticeGroup::Done) {
+            return;
+        }
         if is_external_start(trigger)
             && !crate::backend::notify::router::get(&self.broker).is_some_and(|r| r.external_turns_notified())
         {
@@ -214,7 +232,7 @@ impl Supervisor {
 
     /// Judge `block_id`'s last turn and act on it. `notify` is false for the
     /// judgement a mode change asks for: the user is looking at the pane.
-    pub async fn evaluate(&self, block_id: &str, trigger: Option<TriggerKind>, steps: u32, notify: bool) {
+    pub async fn evaluate(self: &Arc<Self>, block_id: &str, trigger: Option<TriggerKind>, steps: u32, notify: bool) {
         let mut generation = self.next_generation(block_id);
         let lock = self.lock_for(block_id);
         let _held = lock.lock().await;
@@ -270,7 +288,9 @@ impl Supervisor {
                 policy::apply_pause(&mut state, &why, &facts);
                 self.save(block_id, generation, &state);
                 if notify {
-                    self.notify(block_id, NotifyKind::InputWaiting, Some(format!("Supervisor paused: {why}")));
+                    // An agent that can't run failed; a question needs the user.
+                    let group = if facts.unavailable.is_some() { NoticeGroup::Failed } else { NoticeGroup::NeedsYou };
+                    self.notify_group(block_id, group, format!("Supervisor paused: {why}"));
                 }
                 return;
             }
@@ -329,23 +349,135 @@ impl Supervisor {
         }
 
         let verdict = judged.as_ref().map(|j| (j.verdict, j.reason.as_str()));
-        let mut action = policy::decide(&state, mode, verdict, &facts);
+        let action = policy::decide(&state, mode, verdict, &facts);
+        let judged_verdict = judged.as_ref().map(|j| j.verdict);
+        let next = judged.as_ref().map(|j| j.next.clone()).unwrap_or_default();
+        // A continuation waits `supervisor:cooldown` seconds after its turn ended. Anything that
+        // starts a turn in that time takes it over, so it never lands after a different turn
+        // than the one the judge saw.
+        let wait = settings::SupervisorSettings::current().cooldown_secs;
+        if let (Action::Continue { reason, .. }, true) = (&action, wait > 0) {
+            state.status = SupervisorStatus::Waiting;
+            state.reason = format!("Continuing in {wait} s: {reason}");
+            self.save(block_id, generation, &state);
+            let sup = self.clone();
+            let block_id = block_id.to_string();
+            tokio::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(u64::from(wait))).await;
+                sup.continue_after_wait(&block_id, generation, mode, action, judged_verdict, next, facts, notify, trigger)
+                    .await;
+            });
+            return;
+        }
+        self.conclude(block_id, generation, &mut state, action, judged_verdict, &next, &facts, mode, notify, trigger);
+    }
+
+    /// The end of a continuation's wait: send it unless something has taken the pane over.
+    #[allow(clippy::too_many_arguments)]
+    async fn continue_after_wait(
+        &self,
+        block_id: &str,
+        generation: u64,
+        mode: SupervisorMode,
+        action: Action,
+        verdict: Option<Verdict>,
+        next: String,
+        mut facts: TurnFacts,
+        notify: bool,
+        trigger: Option<TriggerKind>,
+    ) {
+        let lock = self.lock_for(block_id);
+        let _held = lock.lock().await;
+        let block = self.block(block_id);
+        let over = WaitOver {
+            superseded: !self.is_current(block_id, generation),
+            switched_off: !settings::enabled(),
+            mode_changed: block.as_ref().map(|b| SupervisorMode::from_meta(&b.meta)) != Some(mode),
+            turn_running: turn_active(block_id),
+            // The turn ended at `facts.now_ms`: a Stop since then counts, however early in the wait.
+            stopped: super::stopped_by_user(block_id) || super::stopped_since(block_id, facts.now_ms),
+        };
+        let now_ms = agentmux_common::time::now_ms_u64();
+        if let Some(why) = over.drop_reason() {
+            // A newer request owns the pane and its state. Otherwise this one's "continuing in ..."
+            // line is cleared here: a Stop is recorded as one, the rest say why it was not sent.
+            if over.superseded || over.mode_changed {
+                return;
+            }
+            let Some(block) = block else { return };
+            if over.stopped {
+                self.stand_down_for_stop(block_id, generation, &block, mode, now_ms);
+                return;
+            }
+            let mut state = self.state_for(block_id, &block, mode, now_ms);
+            state.status = SupervisorStatus::Watching;
+            state.reason = format!("Not continued: {why}.");
+            self.save(block_id, generation, &state);
+            return;
+        }
+        let Some(block) = block else { return };
+        facts.now_ms = now_ms;
+        let mut state = self.state_for(block_id, &block, mode, now_ms);
+        // The wait counts toward the time cap: it may have run out while this waited.
+        let action = match action {
+            Action::Continue { .. } => match policy::limit_reached(&state, mode, &facts) {
+                Some(why) => Action::Pause(why),
+                None => action,
+            },
+            other => other,
+        };
+        self.conclude(block_id, generation, &mut state, action, verdict, &next, &facts, mode, notify, trigger);
+    }
+
+    /// Carry out `action`: send a continuation (inside the fleet budget), record the outcome
+    /// in `state` and the pane's meta, and send the notice its group allows.
+    #[allow(clippy::too_many_arguments)]
+    fn conclude(
+        &self,
+        block_id: &str,
+        generation: u64,
+        state: &mut SupervisorState,
+        mut action: Action,
+        verdict: Option<Verdict>,
+        next: &str,
+        facts: &TurnFacts,
+        mode: SupervisorMode,
+        notify: bool,
+        trigger: Option<TriggerKind>,
+    ) {
+        let mut undeliverable = false;
+        let mut repeat_budget_notice = false;
         if let Action::Continue { n, reason } = &action {
-            let next = judged.as_ref().map(|j| j.next.as_str()).unwrap_or("");
-            let text = message::continuation(mode, *n, mode.limits().continuations, reason, next);
-            if let Err(e) = deliver(block_id, &text) {
-                action = Action::Pause(format!("Couldn't continue it: {e}"));
+            let hourly = settings::SupervisorSettings::current().hourly;
+            let spent = self.budget.lock().unwrap_or_else(|e| e.into_inner()).spend(facts.now_ms, hourly);
+            match spent {
+                Err(wait_ms) => {
+                    repeat_budget_notice = self.budget_noticed.swap(true, std::sync::atomic::Ordering::Relaxed);
+                    action = Action::Pause(pacing::budget_reached(hourly, wait_ms));
+                }
+                Ok(ticket) => {
+                    self.budget_noticed.store(false, std::sync::atomic::Ordering::Relaxed);
+                    let text = message::continuation(mode, *n, mode.limits().continuations, reason, next);
+                    if let Err(e) = deliver(block_id, &text) {
+                        self.budget.lock().unwrap_or_else(|e| e.into_inner()).refund(ticket);
+                        undeliverable = true;
+                        action = Action::Pause(format!("Couldn't continue it: {e}"));
+                    }
+                }
             }
         }
-        policy::apply(&mut state, &action, judged.as_ref().map(|j| j.verdict), &facts);
-        self.save(block_id, generation, &state);
+        policy::apply(state, &action, verdict, facts);
+        self.save(block_id, generation, state);
         if !notify {
             return;
         }
-        match action {
+        match &action {
             Action::Continue { .. } => {}
             Action::Pause(why) => {
-                self.notify(block_id, NotifyKind::InputWaiting, Some(format!("Supervisor paused: {why}")))
+                if !repeat_budget_notice {
+                    let group = pacing::pause_group(&action, verdict, undeliverable);
+                    self.notify_group(block_id, group, format!("Supervisor paused: {why}"));
+                }
             }
             Action::Done(_) | Action::NoVerdict => self.notify_finished(block_id, trigger),
         }
@@ -484,5 +616,7 @@ pub(super) fn for_test(mstore: Arc<Store>) -> Arc<Supervisor> {
         generations: Mutex::default(),
         locks: Mutex::default(),
         seen: Mutex::default(),
+        budget: Mutex::default(),
+        budget_noticed: Default::default(),
     })
 }

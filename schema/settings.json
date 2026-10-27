@@ -743,6 +743,40 @@
           "default": 2,
           "description": "Stop after this many continued turns in a row that used no tool, in either mode. See docs/specs/SPEC_SWARM_SECTIONS_SUPERVISOR_SETTINGS_AND_KANBAN_2026_10_24.md §5, §6.2."
         },
+        "supervisor:cooldown": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 600,
+          "default": 30,
+          "description": "Seconds the Supervisor waits between a turn's end and its continuation. A turn that starts in that time (your message, a jekt, a job, a Schedule injection, a Stop) cancels it. 0 sends at once. See docs/specs/SPEC_SWARM_SECTIONS_SUPERVISOR_SETTINGS_AND_KANBAN_2026_10_24.md §6.2."
+        },
+        "supervisor:hourly": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000,
+          "default": 30,
+          "description": "The most continuations the Supervisor sends across all panes in a rolling hour. At the cap it stops continuing until the hour rolls. 0 is no cap. See docs/specs/SPEC_SWARM_SECTIONS_SUPERVISOR_SETTINGS_AND_KANBAN_2026_10_24.md §6.2."
+        },
+        "supervisor:notify:needsyou": {
+          "type": "boolean",
+          "default": true,
+          "description": "Send an OS notice when the Supervisor stops because the agent needs you (a question, needs you, blocked). See docs/specs/SPEC_SWARM_SECTIONS_SUPERVISOR_SETTINGS_AND_KANBAN_2026_10_24.md §6.2."
+        },
+        "supervisor:notify:limit": {
+          "type": "boolean",
+          "default": true,
+          "description": "Send an OS notice when the Supervisor stops at a limit (continuations, time, no progress, the same reply twice, the fleet budget). See docs/specs/SPEC_SWARM_SECTIONS_SUPERVISOR_SETTINGS_AND_KANBAN_2026_10_24.md §6.2."
+        },
+        "supervisor:notify:failed": {
+          "type": "boolean",
+          "default": true,
+          "description": "Send an OS notice when the Supervisor couldn't continue (the message couldn't be delivered, the agent can't run). See docs/specs/SPEC_SWARM_SECTIONS_SUPERVISOR_SETTINGS_AND_KANBAN_2026_10_24.md §6.2."
+        },
+        "supervisor:notify:done": {
+          "type": "boolean",
+          "default": true,
+          "description": "Send an OS notice when the Supervisor finds the work done. See docs/specs/SPEC_SWARM_SECTIONS_SUPERVISOR_SETTINGS_AND_KANBAN_2026_10_24.md §6.2."
+        },
         "kanban:reminders": {
           "type": "boolean",
           "default": false,

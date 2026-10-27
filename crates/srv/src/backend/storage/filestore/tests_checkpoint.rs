@@ -74,6 +74,30 @@ fn an_idle_store_runs_no_checkpoint_and_a_busy_one_runs_until_it_has_caught_up()
     assert_eq!(checkpointer.runs(), runs, "caught up: idle again, no checkpoint");
 }
 
+/// An idle store is looked at less and less often (checkpointer.rs `IDLE_BACKOFF`); the first writes
+/// after a long quiet stretch must still be noticed and checkpointed within a few looks.
+#[test]
+fn a_checkpoint_still_runs_promptly_when_writes_resume_after_a_long_quiet_stretch() {
+    let (_dir, path, conn) = wal_db();
+    let shm = sidecar(&path, "-shm");
+    write_until(&conn, &shm, 300);
+    let poll = Duration::from_millis(10);
+    let checkpointer = Checkpointer::start_with(&path, poll, FRAMES_THRESHOLD).unwrap();
+    // Long enough for the wait to have grown to its largest (80 ms) and stayed there.
+    std::thread::sleep(Duration::from_millis(700));
+    assert_eq!(checkpointer.runs(), 0);
+
+    let resumed = Instant::now();
+    write_until(&conn, &shm, FRAMES_THRESHOLD);
+    wait_for("a checkpoint after the writes resumed", || checkpointer.runs() >= 1);
+    assert!(
+        resumed.elapsed() < Duration::from_secs(2),
+        "took {:?}: the slowest wait is 80 ms, so a few looks at most",
+        resumed.elapsed()
+    );
+    wait_for("the backlog to be copied back", || wal_backlog(&shm) == Some(0));
+}
+
 /// The old trigger: the WAL *file* at 4 MB. After a burst it stays that size
 /// (SQLite only cuts it back with a TRUNCATE or `journal_size_limit`), so it would
 /// have checkpointed every poll for ever.
