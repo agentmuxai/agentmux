@@ -12,7 +12,7 @@
 #
 # --include-unpublished: also append each older version that has no GitHub
 # release, newest first, stopping at the first one that has. A release whose
-# build failed is never published (release.yml's publish needs every build), so
+# build failed is never published (release-core.yml's publish needs every build), so
 # its changes ship in the next release; without this its notes appear on no
 # release page (v0.59.29, whose changes shipped in v0.59.30). Asks
 # `gh release view` against $GITHUB_REPOSITORY (default agentmuxai/agentmux).

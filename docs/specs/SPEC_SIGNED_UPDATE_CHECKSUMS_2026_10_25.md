@@ -126,6 +126,28 @@ account or role). The repository carries the **public** key only. Re-running a p
 re-signs the files it uploads (`--clobber`); the manifest is re-made from what is
 actually there, so the pair always matches.
 
+### 4.1 Who can start a signing run does not matter
+
+The release is a reusable workflow, `release-core.yml`, called from the thin
+`release.yml` on a `v*` tag as `release-core.yml@main`. The tag's own `release.yml`
+holds no logic, so whoever can create a tag cannot change what runs. The signing
+service accepts an identity token only from a job of `release-core.yml` at
+`refs/heads/main` (the token's `job_workflow_ref` claim): a tag's own workflow, a
+branch workflow or a job of any other workflow is refused, whatever its name or trigger.
+
+The first job of the core, the gate (`scripts/release-gate.mjs`, run from a checkout of
+`main`), refuses the run unless the tag points at a `chore: release vX.Y.Z` commit that is
+on `main`, that changes only the release files (the five version files, and deleted
+changesets), and whose five version locations equal the tag. Nothing is built, waits, or
+asks for a token otherwise. Every job checks out the commit the run was created for
+(`github.sha`), never the tag name, and the signing job runs the gate again after its
+environment wait, so a tag moved during the wait changes nothing. The signing job also
+checks, before it asks for credentials, that its token names `release-core.yml` on `main`.
+
+What this leaves to protect is `main` itself: a change to `release-core.yml`,
+`scripts/release-gate.mjs` or `scripts/release-manifest.mjs` is a pull request through the
+merge queue, a review and the required checks.
+
 ## 5. In the app
 
 ### 5.1 Pinned keys
