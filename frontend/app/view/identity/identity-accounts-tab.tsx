@@ -83,6 +83,7 @@ export function AccountsTab({ model }: { model: IdentityViewModel }): JSX.Elemen
                                                 <>
                                                     <AccountRow
                                                         account={account}
+                                                        all={model.accountsAtom()}
                                                         expanded={expanded()}
                                                         onClick={() => toggle(account)}
                                                         onContextMenu={(e) => handleRowContextMenu(account, e)}
@@ -173,6 +174,8 @@ export function AccountDeleteNotice({ model }: { model: IdentityViewModel }): JS
 
 function AccountRow(props: {
     account: Account;
+    /** Every account, so two with one email show `email ·2`. */
+    all?: readonly Account[];
     expanded: boolean;
     onClick: () => void;
     onContextMenu?: (e: MouseEvent) => void;
@@ -212,7 +215,7 @@ function AccountRow(props: {
                 (`claude-oauth`) stays in the tooltip, and a user-set display
                 name still shows beside it. */}
             <span class="identity-account-name" title={a.name}>
-                {accountLabel(a)}
+                {accountLabel(a, props.all)}
             </span>
             <div class="identity-row-meta">
                 <Show when={a.display_name}>
@@ -443,7 +446,7 @@ export function DeleteAccountConfirm({ model, account }: { model: IdentityViewMo
         <ConfirmModal
             open={true}
             scope="tab"
-            title={`Delete ${accountLabel(account)}?`}
+            title={`Delete ${accountLabel(account, model.accountsAtom())}?`}
             confirmLabel="Delete account"
             destructive
             onConfirm={() => model.confirmDelete()}

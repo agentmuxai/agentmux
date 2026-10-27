@@ -1027,9 +1027,8 @@ export const AgentPresentationView = ({
 
     // Bind/switch account for this agent (failure/useAccountBinding.ts).
     const account = useAgentAccountBinding({
-        blockId: model.blockId,
-        providerId: () => provider()?.id,
-        bindExistingAccount: status.bindExistingAccount,
+        blockId: model.blockId, providerId: () => provider()?.id, bindExistingAccount: status.bindExistingAccount,
+        signedOut: () => loginStatus() === "unauthenticated", onLogin: () => void status.relogin(),
     });
 
     // Declaring auth healthy, and the auto-unblock after a bind from anywhere

@@ -87,6 +87,18 @@ describe("Accounts as cards", () => {
         expect(rpc.ListAllAgentIdentitiesCommand).toHaveBeenCalledTimes(1);
     });
 
+    it("numbers cards that share a provider and an email (email ·N), and a lone one stays bare", async () => {
+        const seq = (id: string, n: number) =>
+            account(id, "claude", "me@example.com", { context: { email: "me@example.com", seq: n } });
+        rpc.ListIdentityAccountsCommand.mockResolvedValue([seq("c1", 1), seq("c2", 2), account("c3", "claude", "solo@example.com")]);
+        render(() => <AccountsManager />);
+        await waitFor(() => expect(cards()).toHaveLength(4));
+        expect(cards()).toEqual(expect.arrayContaining(["me@example.com ·1", "me@example.com ·2", "solo@example.com"]));
+        // The filter finds a card by its number too.
+        fireEvent.input(screen.getByPlaceholderText("Filter accounts"), { target: { value: "·2" } });
+        await waitFor(() => expect(cards()).toEqual(["me@example.com ·2"]));
+    });
+
     it("filters by every word of the title and subtitle", async () => {
         render(() => <AccountsManager />);
         await waitFor(() => expect(cards()).toHaveLength(4));

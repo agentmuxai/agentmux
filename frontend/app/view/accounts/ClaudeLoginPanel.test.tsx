@@ -125,6 +125,24 @@ describe("ClaudeLoginPanel — staleAliasProvider cleanup (reagent P0 on PR #241
         expect(hub.unlinkAgentIdentity).not.toHaveBeenCalled();
     });
 
+    it("hands the new account's id to onSignedIn after a successful sign-in, and not after a failed one", async () => {
+        const onSignedIn = vi.fn();
+        hub.runProviderLogin.mockImplementation(async (opts: any) => {
+            opts.onAccountRegistered?.("acct-new", "/tmp/acct-new");
+            return "inapp-success";
+        });
+        render(() => <ClaudeLoginPanel onClose={() => {}} onSignedIn={onSignedIn} />);
+        await waitFor(() => expect(onSignedIn).toHaveBeenCalledWith("acct-new"));
+        expect(onSignedIn).toHaveBeenCalledTimes(1);
+        cleanup();
+
+        const failed = vi.fn();
+        hub.runProviderLogin.mockImplementation(async () => "inapp-timeout");
+        render(() => <ClaudeLoginPanel onClose={() => {}} onSignedIn={failed} />);
+        await waitFor(() => expect(screen.getByText(/timed out/i)).toBeTruthy());
+        expect(failed).not.toHaveBeenCalled();
+    });
+
     it("does NOT unlink on a failed/unregistered login — nothing to clean up if the new link never landed", async () => {
         hub.runProviderLogin.mockResolvedValue("inapp-timeout");
 

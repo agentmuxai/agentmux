@@ -64,7 +64,7 @@ export function AccountsManager(): JSX.Element {
             items.push({ kind: "agentmux" });
         }
         for (const account of sortAccounts(model.accountsAtom())) {
-            if (matchesEveryWord(q, ...accountSearchText(account))) items.push({ kind: "account", account });
+            if (matchesEveryWord(q, ...accountSearchText(account, model.accountsAtom()))) items.push({ kind: "account", account });
         }
         return items;
     });
@@ -139,6 +139,7 @@ export function AccountsManager(): JSX.Element {
                                 ) : (
                                     <AccountCard
                                         account={item.account}
+                                        all={model.accountsAtom()}
                                         usedBy={usedBy().get(item.account.id) ?? 0}
                                         selected={model.selectedAccountAtom()?.id === item.account.id}
                                         onSelect={() => toggle(item.account)}
