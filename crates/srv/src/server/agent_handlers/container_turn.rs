@@ -123,9 +123,18 @@ fn prestart_applies(agent_mode: &str, runtime_status: &str) -> bool {
     agent_mode == "container" && runtime_status == crate::backend::blockcontroller::STATUS_INIT
 }
 
-/// Blocks whose pre-start is under way, so a second request for one does nothing, and the handle that
-/// ends it (set once its task exists) so closing the pane can.
-static PRESTARTING: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, Option<tokio::task::AbortHandle>>>> =
+/// Where a block's pre-start is.
+enum Prestart {
+    /// Preparing; no task yet.
+    Preparing,
+    /// The pane closed before the task existed: it must not start one.
+    Cancelled,
+    /// Running; closing the pane aborts it.
+    Running(tokio::task::AbortHandle),
+}
+
+/// Blocks whose pre-start is under way, so a second request for one does nothing, and how to end it.
+static PRESTARTING: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, Prestart>>> =
     std::sync::LazyLock::new(Default::default);
 
 struct PrestartSlot(String);
@@ -136,15 +145,24 @@ impl PrestartSlot {
         match map.entry(block_id.to_string()) {
             std::collections::hash_map::Entry::Occupied(_) => None,
             std::collections::hash_map::Entry::Vacant(v) => {
-                v.insert(None);
+                v.insert(Prestart::Preparing);
                 Some(Self(block_id.to_string()))
             }
         }
     }
 
+    /// Whether the pane closed while this was preparing.
+    fn cancelled(&self) -> bool {
+        matches!(PRESTARTING.lock().unwrap_or_else(|e| e.into_inner()).get(&self.0), Some(Prestart::Cancelled))
+            || crate::backend::blockcontroller::is_closing(&self.0)
+    }
+
+    /// The task exists. If the pane closed since `cancelled` was asked, it ends here.
     fn running(&self, task: tokio::task::AbortHandle) {
-        if let Some(handle) = PRESTARTING.lock().unwrap_or_else(|e| e.into_inner()).get_mut(&self.0) {
-            *handle = Some(task);
+        let mut map = PRESTARTING.lock().unwrap_or_else(|e| e.into_inner());
+        match map.get_mut(&self.0) {
+            Some(state @ Prestart::Preparing) => *state = Prestart::Running(task),
+            _ => task.abort(),
         }
     }
 }
@@ -152,8 +170,15 @@ impl PrestartSlot {
 /// End the pre-start of a pane that is closing, so a start still pulling its image can't create and run a
 /// container for a pane that is gone. The caller stops the container afterwards. Nothing under way: nothing done.
 pub(crate) fn cancel_prestart(block_id: &str) {
-    // Aborted outside the lock: dropping the task drops its slot, which takes the lock.
-    let task = PRESTARTING.lock().unwrap_or_else(|e| e.into_inner()).get_mut(block_id).and_then(Option::take);
+    // Aborted outside the lock: ending the task drops its slot, which takes the lock.
+    let task = match PRESTARTING.lock().unwrap_or_else(|e| e.into_inner()).get_mut(block_id) {
+        Some(state @ Prestart::Preparing) => {
+            *state = Prestart::Cancelled;
+            None
+        }
+        Some(Prestart::Running(task)) => Some(task.clone()),
+        _ => None,
+    };
     if let Some(task) = task {
         task.abort();
     }
@@ -209,6 +234,10 @@ pub(crate) async fn prestart(deps: &super::input::AgentTurnDeps, block_id: Strin
         deps.filestore_gate.clone(),
         deps.mstore.clone(),
     );
+    // The pane may have closed while the account and mounts were resolved; closing sees the entry from here on.
+    if slot.cancelled() {
+        return Ok(());
+    }
     // The slot outlives the task (the waiter below drops it), so the handle is always set on a live entry.
     let task = tokio::spawn({
         let slot_block = block_id.clone();
@@ -415,6 +444,7 @@ mod tests {
     #[tokio::test]
     async fn closing_a_pane_ends_its_prestart_and_frees_its_slot() {
         let slot = PrestartSlot::take("block-prestart-cancel").expect("the first takes it");
+        assert!(!slot.cancelled());
         let task = tokio::spawn(std::future::pending::<()>());
         slot.running(task.abort_handle());
         let waiter = tokio::spawn(async move {
@@ -427,6 +457,19 @@ mod tests {
         // Nothing under way, or no such block: nothing happens.
         cancel_prestart("block-prestart-cancel");
         cancel_prestart("block-never-prestarted");
+    }
+
+    #[tokio::test]
+    async fn a_pane_closed_while_the_prestart_prepares_never_starts_it() {
+        let slot = PrestartSlot::take("block-prestart-early").expect("taken");
+        cancel_prestart("block-prestart-early");
+        assert!(slot.cancelled(), "the prestart sees the close before it spawns");
+        // Closed in the instant between that check and the spawn: the task ends as soon as it is registered.
+        let task = tokio::spawn(std::future::pending::<()>());
+        slot.running(task.abort_handle());
+        assert!(task.await.unwrap_err().is_cancelled());
+        drop(slot);
+        assert!(PrestartSlot::take("block-prestart-early").is_some(), "free again");
     }
 
     #[test]
