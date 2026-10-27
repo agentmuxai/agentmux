@@ -199,7 +199,9 @@ fn configured(host: &str, tls_verify: bool) -> Result<Candidate, String> {
             // daemon across the network must be reached over TLS.
             if !tls_verify && !is_loopback(&host) {
                 return Err(format!(
-                    "DOCKER_HOST is {scheme}://{host}, an unencrypted connection to another computer,                      and a container agent's daemon is given the account's credentials.                      Use https:// or set DOCKER_TLS_VERIFY and DOCKER_CERT_PATH, or point DOCKER_HOST at localhost"
+                    "DOCKER_HOST is {scheme}://{host}, an unencrypted connection to another computer, \
+                     and a container agent's daemon is given the account's credentials. \
+                     Use https:// or set DOCKER_TLS_VERIFY and DOCKER_CERT_PATH, or point DOCKER_HOST at localhost"
                 ));
             }
             Endpoint::Tcp { host, tls: tls_verify }
@@ -433,9 +435,9 @@ enum RuntimeSlot {
     /// connect, always reports unavailable.
     #[cfg(test)]
     Disabled,
-    /// No manager yet: never connected, or the last connect attempt
-    /// failed. `get()` retries `ContainerManager::connect()` on every
-    /// call while in this state.
+    /// No manager yet: never found a runtime, or the last one stopped answering. `get()` looks
+    /// again ([`ContainerManager::connect_detected`]) while in this state, at most once per
+    /// [`RETRY_DETECT_AFTER`].
     Empty,
     Connected(ContainerManager),
 }
@@ -721,6 +723,7 @@ mod tests {
         for remote in ["tcp://203.0.113.5:2375", "http://dock.example:2375", "tcp://198.51.100.2", "tcp://[2001:db8::1]:2375", "tcp://localhost.example.com:2375", "tcp://127.0.0.1.example.com:2375"] {
             let why = candidates(&with(remote, false)).unwrap_err();
             assert!(why.contains("unencrypted") && why.contains("https://") && why.contains("DOCKER_TLS_VERIFY"), "{remote}: {why}");
+            assert!(!why.contains("  ") && !why.contains('\n'), "the sentence is one line, single-spaced: {why}");
         }
         // With TLS, or over https://, any host is fine.
         assert!(candidates(&with("tcp://203.0.113.5:2376", true)).is_ok());
