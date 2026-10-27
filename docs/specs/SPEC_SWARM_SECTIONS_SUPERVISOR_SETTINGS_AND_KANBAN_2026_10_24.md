@@ -1,6 +1,6 @@
 # Spec: the Swarm as three sections (Supervisor, Broadcast, Kanban); the Supervisor switched off until the operator turns it on, with its settings in the Supervisor section
 
-**Status:** active. Phase A1 is built (the master switch, the one-time reset, the limits as settings, the `set-mode` refusal, the attribution log; this PR); phase A2 (wait before continuing, the fleet budget, the notify toggles) and phases B to D are not built. The §9 decisions are built as recommended (AgentX assigned the build on 2026-10-26); the operator-only guards in §6.2 were dropped, see there.
+**Status:** active. Phase A1 is built in PR #5560 (the master switch, the one-time reset, the limits as settings, the `set-mode` refusal, the attribution log; this PR); phase A2 (wait before continuing, the fleet budget, the notify toggles) and phases B to D are not built. The §9 decisions are built as recommended (AgentX assigned the build on 2026-10-26); the operator-only guards in §6.2 were dropped, see there.
 **Date:** 2026-10-24
 **Author:** Camper@narko
 **Task:** Spec #2415; the builds are #2416 (the sections, the Supervisor settings: Camper) and #2417 (the Kanban in the Swarm: Naki-2), both after this is approved
