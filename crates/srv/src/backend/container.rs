@@ -17,6 +17,7 @@
 //! Docker best practices here were researched independently.
 
 mod pull;
+mod reap;
 pub use self::pull::{StartEvent, StartObserver};
 
 use std::collections::HashMap;
@@ -475,22 +476,10 @@ impl ContainerManager {
     /// are detected. Concurrent calls for the **same** `container_name` are
     /// serialized via a per-container mutex. Concurrent calls for **different**
     /// containers proceed in parallel.
-    #[cfg(test)]
-    pub async fn ensure_running(
-        &self,
-        container_name: &str,
-        image: &str,
-        volumes: &[String],
-        env_vars: &[(String, String)],
-        spec: &ContainerMountSpec,
-    ) -> Result<(), ContainerError> {
-        self.ensure_running_observed(container_name, image, volumes, env_vars, spec, &|_| {}).await
-    }
-
-    /// [`ensure_running`](Self::ensure_running), telling `observe` about the
-    /// steps that take long enough for a person to wonder: downloading the
-    /// image (with how far it has got) and creating the container. Nothing is
-    /// reported when the container is already up.
+    ///
+    /// `observe` is told about the steps that take long enough for a person to
+    /// wonder: downloading the image (with how far it has got) and creating the
+    /// container. Nothing is reported when the container is already up.
     pub async fn ensure_running_observed(
         &self,
         container_name: &str,
@@ -1013,9 +1002,11 @@ impl ContainerManager {
 
         tracing::info!(container = container_name, command = %install.command, specs = ?install.specs, "installing the provider CLI in the container");
         let started = std::time::Instant::now();
+        let reaper = reap::ReapOnDrop::new(self, container_name);
         let run = self
             .exec_collect(container_name, &install.install_argv(limits), limits.run)
             .await?;
+        reaper.disarm();
         if run.exit == Some(0) {
             self.inner.cli_ready.lock().await.insert(key.to_string());
             return Ok(CliProvision::Installed { seconds: started.elapsed().as_secs_f64() });
@@ -1984,9 +1975,9 @@ mod tests {
         let _ = cm.remove(name, true).await; // clean slate; ignore if absent
 
         // create path: pull + create + start
-        cm.ensure_running(name, image, &[], &[], &ContainerMountSpec::default()).await.expect("ensure_running (create)");
+        cm.ensure_running_observed(name, image, &[], &[], &ContainerMountSpec::default(), &|_| {}).await.expect("ensure_running (create)");
         // reuse path: already running → must no-op, not error or re-create
-        cm.ensure_running(name, image, &[], &[], &ContainerMountSpec::default()).await.expect("ensure_running (reuse)");
+        cm.ensure_running_observed(name, image, &[], &[], &ContainerMountSpec::default(), &|_| {}).await.expect("ensure_running (reuse)");
 
         // env reaches the in-container process via the Docker socket, not argv.
         // Drop the (unused) stdin half first: bollard's exec output stream does
@@ -2102,7 +2093,7 @@ mod tests {
         let _ = cm.remove(name, true).await;
         let _ = cm.inner.docker.remove_volume(&format!("agentmux-cli-{name}"), None).await;
         let _ = cm.inner.docker.remove_volume(&format!("agentmux-claude-{name}"), None).await;
-        cm.ensure_running(name, &image, &[], &[], &ContainerMountSpec::default()).await.expect("ensure_running");
+        cm.ensure_running_observed(name, &image, &[], &[], &ContainerMountSpec::default(), &|_| {}).await.expect("ensure_running");
         let install = CliInstall::for_provider("claude", "claude").unwrap();
 
         // The host gives up after 3 s; the script's own limit is far away, so
@@ -2144,7 +2135,7 @@ mod tests {
         // The script's own limit is the other path: it kills npm itself.
         let _ = cm.remove(name, true).await;
         let _ = cm.inner.docker.remove_volume(&format!("agentmux-cli-{name}"), None).await;
-        cm.ensure_running(name, &image, &[], &[], &ContainerMountSpec::default()).await.expect("recreate");
+        cm.ensure_running_observed(name, &image, &[], &[], &ContainerMountSpec::default(), &|_| {}).await.expect("recreate");
         let script_limited = InstallLimits {
             run: std::time::Duration::from_secs(300),
             script: std::time::Duration::from_secs(2),
@@ -2199,7 +2190,7 @@ mod tests {
         let _ = cm.inner.docker.remove_volume(&format!("agentmux-cli-{name}"), None).await;
         let _ = cm.inner.docker.remove_volume(&format!("agentmux-claude-{name}"), None).await;
 
-        cm.ensure_running(name, &image, &[], &[], &ContainerMountSpec::default()).await.expect("ensure_running");
+        cm.ensure_running_observed(name, &image, &[], &[], &ContainerMountSpec::default(), &|_| {}).await.expect("ensure_running");
         let install = CliInstall::for_provider("claude", "claude").unwrap();
 
         let mut announced = 0;
@@ -2232,7 +2223,7 @@ mod tests {
 
         // The container is recreated (an image update, say): the volume keeps the install.
         cm.remove(name, true).await.expect("remove");
-        cm.ensure_running(name, &image, &[], &[], &ContainerMountSpec::default()).await.expect("recreate");
+        cm.ensure_running_observed(name, &image, &[], &[], &ContainerMountSpec::default(), &|_| {}).await.expect("recreate");
         let recreated = cm.provision_cli(name, &install, || announced += 1).await.expect("provision after recreate");
         assert_eq!(recreated, CliProvision::Present);
         assert_eq!(announced, 1, "the volume survives the container");
@@ -2266,7 +2257,7 @@ mod tests {
         let registry = crate::backend::dev_proxy::DevProxyRegistry::new();
         cm.attach_dev_proxy_registry(registry.clone());
 
-        cm.ensure_running(name, image, &[], &[], &ContainerMountSpec::default())
+        cm.ensure_running_observed(name, image, &[], &[], &ContainerMountSpec::default(), &|_| {})
             .await
             .expect("ensure_running (create)");
 

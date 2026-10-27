@@ -60,18 +60,27 @@ pub(crate) fn error_result_frame(message: &str) -> Value {
     })
 }
 
-/// Ends the start-up row if the start-up is dropped before it did (a stop).
-struct UnfinishedRow<'a> {
-    done: AtomicBool,
-    shown: &'a AtomicBool,
-    write: &'a (dyn Fn(ContainerStartState, Option<u8>, &str, Option<&str>) + Sync),
-    image: &'a str,
+/// Runs `f` when dropped unless [disarmed](Self::disarm): closes a pane row
+/// whose work was cancelled (a stop drops the start-up future mid-way).
+struct IfDropped<F: Fn()> {
+    armed: AtomicBool,
+    f: F,
 }
 
-impl Drop for UnfinishedRow<'_> {
+impl<F: Fn()> IfDropped<F> {
+    fn new(f: F) -> Self {
+        Self { armed: AtomicBool::new(true), f }
+    }
+
+    fn disarm(&self) {
+        self.armed.store(false, Ordering::Relaxed);
+    }
+}
+
+impl<F: Fn()> Drop for IfDropped<F> {
     fn drop(&mut self) {
-        if !self.done.load(Ordering::Relaxed) && self.shown.load(Ordering::Relaxed) {
-            (self.write)(ContainerStartState::Failed, None, self.image, Some("Stopped before the container was ready"));
+        if self.armed.load(Ordering::Relaxed) {
+            (self.f)();
         }
     }
 }
@@ -95,7 +104,11 @@ impl ContainerStartup {
         };
         // A stop drops this future while the row says "Downloading…"; the
         // guard then ends that row so a reload doesn't show it for good.
-        let row_open = UnfinishedRow { done: AtomicBool::new(false), shown: &shown, write: &start_row, image: &image };
+        let row_open = IfDropped::new(|| {
+            if shown.load(Ordering::Relaxed) {
+                start_row(ContainerStartState::Failed, None, &image, Some("Stopped before the container was ready"));
+            }
+        });
         let observe = |event: StartEvent<'_>| {
             shown.store(true, Ordering::Relaxed);
             match event {
@@ -113,13 +126,13 @@ impl ContainerStartup {
             if shown.load(Ordering::Relaxed) {
                 start_row(ContainerStartState::Failed, None, &image, Some(&e.user_message()));
             }
-            row_open.done.store(true, Ordering::Relaxed);
+            row_open.disarm();
             return Err(self.fail(&e));
         }
         if shown.load(Ordering::Relaxed) {
             start_row(ContainerStartState::Ready, None, &image, None);
         }
-        row_open.done.store(true, Ordering::Relaxed);
+        row_open.disarm();
 
         let Some(install) = CliInstall::for_provider(&self.provider_id, &self.container_command) else {
             return Ok(());
@@ -130,14 +143,21 @@ impl ContainerStartup {
             cli_notice::append_to_pane(&self.broker, &self.filestore, &self.mstore, &self.block_id, &frame);
         };
 
-        let mut started_install = false;
+        let started_install = AtomicBool::new(false);
+        // Same for a stop during the install, which also reaps it in the container.
+        let install_open = IfDropped::new(|| {
+            if started_install.load(Ordering::Relaxed) {
+                notice(InstallState::Failed, None, Some("Stopped before the install finished"));
+            }
+        });
         let outcome = self
             .cm
             .provision_cli(&self.container_name, &install, || {
-                started_install = true;
+                started_install.store(true, Ordering::Relaxed);
                 notice(InstallState::Installing, None, None);
             })
             .await;
+        install_open.disarm();
         match outcome {
             Ok(CliProvision::Present) => Ok(()),
             Ok(CliProvision::Installed { seconds }) => {
@@ -145,7 +165,7 @@ impl ContainerStartup {
                 Ok(())
             }
             Err(e) => {
-                if started_install {
+                if started_install.load(Ordering::Relaxed) {
                     let detail = match &e {
                         ContainerError::CliInstall { detail, .. } => detail.clone(),
                         other => other.to_string(),
