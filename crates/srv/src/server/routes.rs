@@ -17,6 +17,10 @@ use agentmux_common::AUTH_KEY_HEADER;
 pub struct SrvRouters {
     pub full: Router,
     pub lan: Router,
+    /// What the Linux container listener serves (`backend::container_listener`): the full
+    /// router behind a guard that admits only container tokens, on container routes, from the
+    /// agents subnet.
+    pub container: Router,
 }
 
 /// Build the full router (see [`build_routers`]).
@@ -698,8 +702,9 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         None => full,
     };
     let full = full.layer(version_header).layer(cors).with_state(state);
+    let container = crate::backend::container_listener::layer(full.clone(), crate::backend::container_listener::current_subnet);
 
-    SrvRouters { full, lan }
+    SrvRouters { full, lan, container }
 }
 
 /// Serve the built frontend in `dir` for every path no route claims, `/`

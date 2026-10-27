@@ -407,6 +407,7 @@ async fn app_main() {
         Arc::clone(&state.config_watcher),
     );
     let routers = build_routers(state);
+    backend::container_listener::set_router(routers.container);
     let router = routers.full;
 
     // Native dev-proxy (docs/specs/SPEC_NATIVE_CONTAINER_DEV_PROXY_2026_09_19.md)
