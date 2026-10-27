@@ -154,3 +154,32 @@ fn an_untrimmed_file_has_no_retained_start() {
     assert!(file.meta.get("retainedfrom").is_none());
     assert_eq!(file.data_start_idx(), 0);
 }
+
+#[test]
+fn a_read_never_returns_an_offset_earlier_than_its_body_while_trims_run() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    let store = Arc::new(circular_store(4 * PART));
+    let done = Arc::new(AtomicBool::new(false));
+    let writer = {
+        let (store, done) = (Arc::clone(&store), Arc::clone(&done));
+        std::thread::spawn(move || {
+            // A distinct byte per part, so a body's first byte names the part it starts in.
+            for i in 0..400u32 {
+                store.append_data_at("z", "term", &vec![(i % 251) as u8; PART as usize]).unwrap();
+                store.trim_circular_head("z", "term").unwrap();
+            }
+            done.store(true, Ordering::SeqCst);
+        })
+    };
+    while !done.load(Ordering::SeqCst) {
+        let Ok((from, bytes)) = store.read_at("z", "term", 0, 0) else { continue };
+        if bytes.is_empty() {
+            continue;
+        }
+        assert_eq!(from % PART, 0, "the window starts on a part here");
+        assert_eq!(bytes[0] as i64, (from / PART) % 251, "the body starts where the offset says");
+        assert_eq!(bytes.len() as i64 % PART, 0);
+    }
+    writer.join().unwrap();
+}

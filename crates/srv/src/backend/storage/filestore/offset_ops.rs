@@ -174,9 +174,11 @@ impl FileStore {
         offset: i64,
         size: i64,
     ) -> Result<(i64, Vec<u8>), StoreError> {
-        let file = self
-            .stat(zone_id, name)?
-            .ok_or(StoreError::NotFound)?;
+        // The row and the parts are read under one hold of the connection: a
+        // trim (trim.rs) between the two would delete parts this read was about
+        // to load, and the offset returned would be earlier than the body.
+        let conn = self.lock_conn();
+        let file = super::trim::file_row(&conn, zone_id, name)?.ok_or(StoreError::NotFound)?;
 
         if file.size == 0 {
             return Ok((0, Vec::new()));
@@ -220,7 +222,6 @@ impl FileStore {
         let end_part = ((actual_offset + actual_size - 1) / pds) as i32;
 
         // Load parts from DB, past a damaged one (parts.rs).
-        let conn = self.lock_conn();
         let parts_map = load_parts(&conn, zone_id, name, start_part, end_part, file.size)?;
         drop(conn);
 

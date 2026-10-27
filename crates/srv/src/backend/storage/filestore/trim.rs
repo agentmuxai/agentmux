@@ -23,6 +23,30 @@ pub(crate) fn first_live_part(size: i64, maxsize: i64) -> i32 {
     ((size - maxsize) / PART_DATA_SIZE as i64) as i32
 }
 
+/// `name`'s row as the database holds it now, for a reader that holds the
+/// connection until it has loaded the parts the row says to load.
+pub(super) fn file_row(conn: &rusqlite::Connection, zone_id: &str, name: &str) -> Result<Option<super::types::MuxFile>, StoreError> {
+    use rusqlite::OptionalExtension;
+    Ok(conn
+        .query_row(
+            "SELECT size, createdts, modts, opts, meta FROM db_wave_file WHERE zoneid = ?1 AND name = ?2",
+            params![zone_id, name],
+            |r| {
+                let (opts, meta): (String, String) = (r.get(3)?, r.get(4)?);
+                Ok(super::types::MuxFile {
+                    zoneid: zone_id.to_string(),
+                    name: name.to_string(),
+                    size: r.get(0)?,
+                    createdts: r.get(1)?,
+                    modts: r.get(2)?,
+                    opts: serde_json::from_str(&opts).unwrap_or_default(),
+                    meta: serde_json::from_str(&meta).unwrap_or_default(),
+                })
+            },
+        )
+        .optional()?)
+}
+
 impl FileStore {
     /// Make `name` circular with a window of `maxsize` bytes (0 or less lifts
     /// the limit), keeping what it holds. Returns whether the options changed.
