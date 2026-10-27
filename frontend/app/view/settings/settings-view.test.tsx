@@ -13,6 +13,7 @@
  * rather than an RPC mock.
  */
 
+import { takeSupervisorSettingsRequest } from "@/app/store/supervisor-settings-request";
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -21,7 +22,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 // §3.2) that settings-index.ts aggregates and SettingsSearchBar reads — a
 // bare `{ AppearanceSection: ... }` mock would strip that export out from
 // under settings-index.ts too, since it replaces the whole module.
-const opened = vi.hoisted(() => ({ openOrFocusPaneByView: vi.fn(async () => {}) }));
+const opened = vi.hoisted(() => ({ openOrFocusPaneByView: vi.fn(async () => "swarm-block" as string | undefined) }));
 vi.mock("@/app/store/block-component-registry", async (importOriginal) => ({
     ...(await importOriginal<object>()),
     openOrFocusPaneByView: opened.openOrFocusPaneByView,
@@ -225,7 +226,7 @@ describe("SettingsView search bar", () => {
         expect(screen.queryByTestId("settings-search-results")).not.toBeInTheDocument();
     });
 
-    it("opens the Swarm's Supervisor settings for a Supervisor result, and stays in this section", () => {
+    it("opens the Swarm's Supervisor settings for a Supervisor result, and stays in this section", async () => {
         const { model } = renderSettings();
         const input = screen.getByTestId("settings-search-input");
         fireEvent.input(input, { target: { value: "supervisor" } });
@@ -237,6 +238,9 @@ describe("SettingsView search bar", () => {
             { meta: { view: "swarm", "swarm:section": "supervisor" } },
             { "swarm:section": "supervisor" }
         );
+        // The ask names the pane that was focused or created, so only that Swarm opens its panel.
+        await vi.waitFor(() => expect(takeSupervisorSettingsRequest("swarm-block")).toBe(true));
+        expect(takeSupervisorSettingsRequest("another-swarm")).toBe(false);
         expect(model.activeSection()).toBe("appearance");
         expect(model.query()).toBe("");
     });

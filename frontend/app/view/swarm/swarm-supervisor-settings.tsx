@@ -124,13 +124,14 @@ export function limitValue(settings: Record<string, unknown> | null | undefined,
     return typeof v === "number" ? v : item.fallback;
 }
 
-export function SupervisorSettingsBar(): JSX.Element {
+/** `blockId`: this Swarm pane, which the Settings search names when it asks for the panel to open. */
+export function SupervisorSettingsBar(props: { blockId?: string }): JSX.Element {
     const settings = () => settingsAtom() as Record<string, unknown> | null | undefined;
     const on = () => supervisorEnabled(settings());
     const [open, setOpen] = createSignal(false);
     // Asked to open from the Settings pane's search: at once if this is showing, else on mount.
     const answerRequest = () => {
-        if (takeSupervisorSettingsRequest()) setOpen(true);
+        if (takeSupervisorSettingsRequest(props.blockId)) setOpen(true);
     };
     onMount(answerRequest);
     createEffect(onChange(supervisorSettingsRequests, answerRequest, { defer: true }));

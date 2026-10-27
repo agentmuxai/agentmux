@@ -11,9 +11,14 @@ import { requestSupervisorSettingsOpen } from "@/app/store/supervisor-settings-r
 import type { SettingsIndexEntry } from "../settings-model";
 
 /** Show the Supervisor's settings: the tab's Swarm on its Supervisor section, or a new one, panel open. */
-export function openSupervisorSettings(): void {
-    requestSupervisorSettingsOpen();
-    void openOrFocusPaneByView("swarm", { meta: { view: "swarm", "swarm:section": "supervisor" } }, { "swarm:section": "supervisor" });
+export async function openSupervisorSettings(): Promise<void> {
+    const blockId = await openOrFocusPaneByView(
+        "swarm",
+        { meta: { view: "swarm", "swarm:section": "supervisor" } },
+        { "swarm:section": "supervisor" }
+    );
+    // Only the pane that was focused or created answers, not a Swarm in another tab.
+    if (blockId) requestSupervisorSettingsOpen(blockId);
 }
 
 export const SUPERVISOR_SETTINGS = {

@@ -8,26 +8,25 @@
 
 import { createSignal } from "solid-js";
 
-let pending = false;
+let pending = new Set<string>();
 const [requests, setRequests] = createSignal(0);
 
 /** Count of asks so far; a panel that is already mounted watches it. */
 export const supervisorSettingsRequests = requests;
 
-/** Ask for the panel to open: now if a Swarm shows it, else when one mounts. */
-export function requestSupervisorSettingsOpen(): void {
-    pending = true;
+/** Ask the panel of one Swarm pane (`blockId`) to open: now if it shows, else when it mounts. A Swarm
+ *  in another tab stays mounted and watches the same count, so the ask names the pane. */
+export function requestSupervisorSettingsOpen(blockId: string): void {
+    pending.add(blockId);
     setRequests((n) => n + 1);
 }
 
-/** The panel's side: whether an ask is waiting, taking it (so one ask opens one panel). */
-export function takeSupervisorSettingsRequest(): boolean {
-    const was = pending;
-    pending = false;
-    return was;
+/** The panel's side: whether an ask for this pane is waiting, taking it (so one ask opens one panel). */
+export function takeSupervisorSettingsRequest(blockId: string | null | undefined): boolean {
+    return blockId != null && pending.delete(blockId);
 }
 
 /** For tests. */
 export function resetSupervisorSettingsRequest(): void {
-    pending = false;
+    pending = new Set();
 }

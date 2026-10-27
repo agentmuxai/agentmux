@@ -25,7 +25,7 @@ function SectionActions(props: { model: SwarmViewModel; agents: SwarmAgents; sec
     return (
         <>
             <Show when={props.section === "supervisor"}>
-                <SupervisorSettingsBar />
+                <SupervisorSettingsBar blockId={model.blockId} />
             </Show>
             {/* Outside the tree's own Show: agents on other instances can be selected
                 when this instance has none, and the toolbar is what acts on them. It
