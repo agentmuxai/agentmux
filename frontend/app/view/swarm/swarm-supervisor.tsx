@@ -11,6 +11,7 @@ import clsx from "clsx";
 import { createMemo, createSignal, For, Show, type JSX } from "solid-js";
 import { Button, type UiTone } from "@/app/element/ui";
 import { ContextMenuModel } from "@/app/store/contextmenu";
+import { settingsAtom } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import {
@@ -19,8 +20,10 @@ import {
     readSupervisorMode,
     readSupervisorState,
     supervisorChipDetail,
+    supervisorEnabled,
     supervisorSupported,
     SUPERVISOR_MODES,
+    SUPERVISOR_OFF_REASON,
 } from "@/app/store/supervisor";
 import type { SupervisorDecision } from "@/types/rpc/SupervisorDecision";
 import type { SupervisorMode } from "@/types/rpc/SupervisorMode";
@@ -28,21 +31,31 @@ import type { SupervisorState } from "@/types/rpc/SupervisorState";
 
 type Meta = Record<string, unknown> | undefined;
 
-/** The mode menu: one radio item per mode, the current one checked. */
-export function supervisorMenuItems(current: SupervisorMode, pick: (mode: SupervisorMode) => void): ContextMenuItem[] {
-    return SUPERVISOR_MODES.map((mode) => ({
-        label: `Supervisor: ${MODE_LABELS[mode]}`,
-        sublabel: MODE_DESCRIPTIONS[mode],
-        type: "radio" as const,
-        checked: mode === current,
-        click: () => pick(mode),
-    }));
+/** The mode menu: one radio item per mode, the current one checked. While the Supervisor is switched
+ *  off, Steady and Drive are disabled and say why (srv refuses them too); Off is always offered. */
+export function supervisorMenuItems(
+    current: SupervisorMode,
+    pick: (mode: SupervisorMode) => void,
+    enabled = true
+): ContextMenuItem[] {
+    return SUPERVISOR_MODES.map((mode) => {
+        const blocked = !enabled && mode !== "off";
+        return {
+            label: `Supervisor: ${MODE_LABELS[mode]}`,
+            sublabel: blocked ? SUPERVISOR_OFF_REASON : MODE_DESCRIPTIONS[mode],
+            type: "radio" as const,
+            checked: mode === current,
+            enabled: !blocked,
+            click: () => pick(mode),
+        };
+    });
 }
 
 /** The chip's tooltip: the mode, what it does, and the last decision. */
-export function supervisorChipTitle(mode: SupervisorMode, state: SupervisorState | null): string {
+export function supervisorChipTitle(mode: SupervisorMode, state: SupervisorState | null, enabled = true): string {
     const lines = [`Supervisor: ${MODE_LABELS[mode]}`, MODE_DESCRIPTIONS[mode]];
     if (mode !== "off" && state?.reason) lines.push(state.reason);
+    if (!enabled) lines.push(SUPERVISOR_OFF_REASON);
     lines.push("Click to change.");
     return lines.join("\n");
 }
@@ -68,10 +81,14 @@ export function SupervisorChip(props: {
         e.stopPropagation();
         e.preventDefault();
         ContextMenuModel.showContextMenu(
-            supervisorMenuItems(mode(), (next) => {
-                setError(null);
-                void props.onSet(next).then(setError);
-            }),
+            supervisorMenuItems(
+                mode(),
+                (next) => {
+                    setError(null);
+                    void props.onSet(next).then(setError);
+                },
+                supervisorEnabled(settingsAtom())
+            ),
             e
         );
     };
@@ -87,7 +104,7 @@ export function SupervisorChip(props: {
                     detail() === "paused" && "swarm-supervisor-chip--paused",
                     !!error() && "swarm-supervisor-chip--error"
                 )}
-                title={error() ?? supervisorChipTitle(mode(), state())}
+                title={error() ?? supervisorChipTitle(mode(), state(), supervisorEnabled(settingsAtom()))}
                 aria-label={`Supervisor: ${MODE_LABELS[mode()]}`}
                 onClick={open}
                 onContextMenu={open}

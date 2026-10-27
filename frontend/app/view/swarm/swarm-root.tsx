@@ -11,16 +11,20 @@ import { readZoom } from "@/app/store/zoom-factor";
 import { SwarmAgentList, useSwarmAgents, type SwarmAgents } from "./swarm-agent-list";
 import { ClearCompletedButton } from "./swarm-view";
 import { SwarmSectionBar } from "./swarm-section-bar";
-import { createSwarmSection, swarmDensityOf } from "./swarm-section";
+import { createSwarmSection, swarmDensityOf, type SwarmSection } from "./swarm-section";
+import { SupervisorSettingsBar } from "./swarm-supervisor-settings";
 import { FleetToolbar, FleetResultPanel } from "./swarm-fleet-toolbar";
 import "./swarm-view.scss";
 
 /** What a section shows above the shared list: the fleet toolbar and its result, then either an
  *  empty-state note or the "Clear completed" button. */
-function SectionActions(props: { model: SwarmViewModel; agents: SwarmAgents }): JSX.Element {
+function SectionActions(props: { model: SwarmViewModel; agents: SwarmAgents; section: SwarmSection }): JSX.Element {
     const { model, agents } = props;
     return (
         <>
+            <Show when={props.section === "supervisor"}>
+                <SupervisorSettingsBar />
+            </Show>
             {/* Outside the tree's own Show: agents on other instances can be selected
                 when this instance has none, and the toolbar is what acts on them. It
                 shows itself only when there is something to select or act on. */}
@@ -108,7 +112,7 @@ export function SwarmView(props: { model: SwarmViewModel; ctx: PaneTabHostContex
                         follows the section, the list itself is rendered once and never remounted
                         by a switch, which is what keeps a press on a row from being lost (#5208). */}
                     <div class="swarm-section-body">
-                        <SectionActions model={model} agents={agents} />
+                        <SectionActions model={model} agents={agents} section={section()} />
                         <SwarmAgentList model={model} ctx={ctx} agents={agents} density={density} />
                     </div>
                 </SwarmSectionBar>

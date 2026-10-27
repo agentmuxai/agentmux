@@ -1251,3 +1251,43 @@
     font-size: var(--text-xs);
     color: var(--secondary-text-color);
 }
+
+// The Supervisor section's settings: one line (the master switch), then the limits when opened.
+.swarm-supervisor-settings {
+    border-bottom: 1px solid var(--border-color);
+    padding: 6px 10px;
+
+    &-line {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
+
+    &-state {
+        font-weight: 600;
+        font-size: var(--text-sm);
+    }
+
+    &-hint {
+        color: var(--secondary-text-color);
+        font-size: var(--text-sm);
+    }
+
+    &-toggle {
+        margin-left: auto;
+    }
+
+    // Bounded and scrolling: the section body clips, so a short pane would hide the lower limits.
+    &-panel {
+        margin-top: 6px;
+        max-height: 45vh;
+        overflow-y: auto;
+    }
+
+    &-note {
+        color: var(--secondary-text-color);
+        font-size: var(--text-sm);
+        padding: 6px 0 2px;
+    }
+}
