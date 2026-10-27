@@ -35,6 +35,14 @@ impl Store {
         let mut stmt = conn.prepare("SELECT public_key FROM db_lan_peer_uid_pins WHERE agent_id = ?1 AND uid = ?2")?;
         stmt.query_row(params![name, uid], |row| row.get(0)).map_err(Into::into)
     }
+
+    /// Whether any UID is pinned under `agent_id`: this name has been seen
+    /// giving a UID key, so a later message that claims a UID is owed one.
+    pub fn lan_peer_uid_pin_exists(&self, agent_id: &str) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT 1 FROM db_lan_peer_uid_pins WHERE agent_id = ?1 LIMIT 1")?;
+        Ok(stmt.exists(params![agent_id.to_lowercase()])?)
+    }
 }
 
 #[cfg(test)]
@@ -50,6 +58,15 @@ mod tests {
         let store = object_store();
         assert_eq!(store.lan_peer_uid_pin_get_or_set("Korp", "uid-1", "key-a").unwrap(), "key-a");
         assert_eq!(store.lan_peer_uid_pin_get_or_set("korp", "uid-1", "key-b").unwrap(), "key-a");
+    }
+
+    #[test]
+    fn a_name_has_a_uid_pin_only_once_one_was_set() {
+        let store = object_store();
+        assert!(!store.lan_peer_uid_pin_exists("korp").unwrap());
+        store.lan_peer_uid_pin_get_or_set("Korp", "uid-1", "key-a").unwrap();
+        assert!(store.lan_peer_uid_pin_exists("korp").unwrap());
+        assert!(!store.lan_peer_uid_pin_exists("lark").unwrap());
     }
 
     #[test]
