@@ -250,3 +250,25 @@ async fn an_agent_reassigns_a_held_task_to_anyone_with_an_empty_target() {
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(w.state_of(num), work_state::OPEN);
 }
+
+#[tokio::test]
+async fn an_agent_reassigns_a_held_task_to_an_agent_that_is_not_running() {
+    let w = world(None);
+    let stopped_uid = unique("uid");
+    let mut def = crate::backend::storage::agents::test_agent_def(&stopped_uid, &unique("Idle"), "claude", "host", 1, "");
+    def.slug = unique("idle");
+    w.state.mstore.agent_def_insert(&mut def).unwrap();
+    let stopped_slug = w.state.mstore.agent_def_get(&stopped_uid).unwrap().unwrap().slug;
+    assert_ne!(stopped_slug, stopped_uid);
+    let (_, made) = w.post("/agentmux/work", json!({"title": "Held", "payload": "p", "target_agent_uid": w.leader_uid})).await;
+    let num = made["num"].as_i64().unwrap();
+    let id = resolve_id(&w.state, &num.to_string());
+    w.state.identity_store.work_start_for(&id, &w.leader_slug, &w.leader_uid, 1, 120_000).unwrap().expect("claimed");
+    let (status, body) = w
+        .post_as_leader("/agentmux/work/act", json!({"agent_id": w.leader_slug, "action": "reassign", "id": num.to_string(), "target": stopped_uid}))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let item = w.state.identity_store.work_queue_get(&id).unwrap().unwrap();
+    assert_eq!(item.target_agent_uid, stopped_uid, "the task is for that agent, so it can claim it");
+    assert_eq!(item.target_agent, stopped_slug, "the name column holds the agent's name, not its uid");
+}

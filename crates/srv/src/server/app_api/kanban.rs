@@ -388,6 +388,22 @@ fn agent_named(regs: &[AgentRegistration], name: &str) -> Option<AgentRegistrati
     }
 }
 
+/// The name and uid a task is for, from what was typed: a registered agent, else an agent the
+/// identity store knows by uid (stopped now), else the bare name.
+fn target_of(state: &AppState, regs: &[AgentRegistration], typed: &str) -> (String, String) {
+    let typed = typed.trim();
+    if typed.is_empty() {
+        return (String::new(), String::new());
+    }
+    if let Some(r) = agent_named(regs, typed) {
+        return (r.agent_id.clone(), r.uid.clone().unwrap_or_default());
+    }
+    match state.mstore.agent_names_by_id(typed) {
+        Ok(Some(row)) => (row.slug, typed.to_string()),
+        _ => (typed.to_string(), String::new()),
+    }
+}
+
 /// Whether this agent's process runs, so a message reaches it.
 fn alive(reg: &AgentRegistration) -> bool {
     crate::backend::blockcontroller::get_block_controller_status(&reg.block_id)
@@ -452,10 +468,7 @@ fn create_one(
 ) -> Result<(String, i64), String> {
     let store = &state.work_store;
     let (target, target_uid) = match req.agent.as_deref().map(str::trim).filter(|a| !a.is_empty()) {
-        Some(a) => match agent_named(regs, a) {
-            Some(r) => (r.agent_id.clone(), r.uid.clone().unwrap_or_default()),
-            None => (a.to_string(), String::new()),
-        },
+        Some(a) => target_of(state, regs, a),
         None => (String::new(), String::new()),
     };
     let item = WorkItem {
@@ -598,10 +611,7 @@ pub(crate) async fn act_as(state: &AppState, data: Value, actor: &Actor) -> Resu
             let t = get(&req.id)?;
             let id = &t.item.id;
             if let Some(agent) = req.agent.as_deref() {
-                let (name, uid) = match agent_named(&regs, agent) {
-                    Some(r) => (r.agent_id.clone(), r.uid.clone().unwrap_or_default()),
-                    None => (agent.trim().to_string(), String::new()),
-                };
+                let (name, uid) = target_of(state, &regs, agent);
                 if !store.work_assign(id, &name, &uid, now).map_err(|e| e.to_string())? {
                     return Err("only a waiting task can be moved to another agent".into());
                 }
@@ -835,10 +845,7 @@ pub(crate) async fn act_as(state: &AppState, data: Value, actor: &Actor) -> Resu
             // anyone when empty. `release` leaves who it is for as it was.
             let retarget = if reassign {
                 let agent = req.agent.as_deref().ok_or("reassign: to which agent? (empty for anyone)")?.trim();
-                Some(match agent_named(&regs, agent) {
-                    Some(r) => (r.agent_id.clone(), r.uid.clone().unwrap_or_default()),
-                    None => (agent.to_string(), String::new()),
-                })
+                Some(target_of(state, &regs, agent))
             } else {
                 None
             };
