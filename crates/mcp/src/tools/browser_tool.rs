@@ -25,6 +25,7 @@ pub(super) const ACTS: &[Act] = &[
     Act { action: "forward", tool: "BrowserForward", rename: &[] },
     Act { action: "reload", tool: "BrowserReload", rename: &[] },
     Act { action: "key", tool: "BrowserDispatchKey", rename: &[] },
+    Act { action: "terminal", tool: "BrowserTerminal", rename: &[] },
     Act { action: "focus", tool: "BrowserFocusElement", rename: &[] },
     Act { action: "focus_info", tool: "BrowserFocusInfo", rename: &[] },
     Act {
@@ -66,7 +67,8 @@ async fn run(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     let (act, args) = pick("Browser", ACTS, arguments)?;
     // `wait`'s own conditions are the until_* parameters (pick renamed
     // them for its handler): for wait they are not a follow-up.
-    let is_wait = act.action == "wait";
+    // `terminal` waits for its own output (until_text, timeout_seconds), so its until_* is no follow-up either.
+    let is_wait = act.action == "wait" || act.action == "terminal";
     let follow_wait =
         !is_wait && ["until_text", "until_url", "until_gone"].iter().any(|k| arguments.get(*k).is_some());
     let follow_snapshot = arguments.get("snapshot").and_then(|v| v.as_bool()).unwrap_or(false);

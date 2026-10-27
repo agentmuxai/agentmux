@@ -40,6 +40,7 @@ pub mod routes;
 pub mod secret;
 pub mod shortcuts;
 pub mod snapshot;
+pub mod terminal;
 pub mod types;
 pub mod vault_fill;
 pub mod vault_slots;
@@ -69,6 +70,8 @@ pub fn register_routes(router: Router<Arc<AppState>>) -> Router<Arc<AppState>> {
         .route("/agentmux/browser/click_element", post(routes::click_element))
         .route("/agentmux/browser/focus_element", post(routes::focus_element))
         .route("/agentmux/browser/dispatch_key", post(routes::dispatch_key))
+        .route("/agentmux/browser/terminal_state", post(terminal::terminal_state))
+        .route("/agentmux/browser/terminal_keys", post(terminal::terminal_keys))
         .route("/agentmux/browser/navigate", post(routes::navigate))
         .route("/agentmux/browser/back", post(routes::back))
         .route("/agentmux/browser/forward", post(routes::forward))

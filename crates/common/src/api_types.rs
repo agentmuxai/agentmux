@@ -915,6 +915,36 @@ pub struct UiBrowserRequestBypassRequest {
     /// How long, in minutes: 15, 60 (default) or 240; other values round down.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub minutes: Option<u64>,
+    /// What it needs besides committing clicks, which every grant has:
+    /// `"terminal"` (run commands in a web terminal). None: just clicks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub powers: Option<Vec<String>>,
+}
+
+/// `POST /api/v1/ui/browser/terminal` — backs Browser's `terminal` action
+/// (SPEC_BROWSER_WEB_TERMINAL_TYPING_2026_10_23.md §4.2): type and run commands
+/// in a web terminal on a site the person granted.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiBrowserTerminalRequest {
+    #[serde(flatten)]
+    pub auth: UiAutomationAuth,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane: Option<String>,
+    /// Text to type. Each line break is a real Enter press.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    /// Press Enter after `text` (default true).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enter: Option<bool>,
+    /// Named keys to press after the text: Enter, Tab, Ctrl+C and the rest.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keys: Option<Vec<String>>,
+    /// Wait until the terminal shows this text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub until_text: Option<String>,
+    /// How long to wait for output, in seconds (default 5, at most 60).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_seconds: Option<u64>,
 }
 
 /// `POST /api/v1/ui/browser/end_bypass` — backs Browser's `end_bypass`: the
