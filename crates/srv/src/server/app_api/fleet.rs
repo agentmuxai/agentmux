@@ -659,7 +659,7 @@ pub(crate) async fn fleet_bulk_stop_impl(
 
 /// The shared cross-channel registry entry for `block_id` on ANOTHER
 /// instance on this machine: loopback only, never this instance itself.
-fn shared_channel_for(state: &AppState, block_id: &str) -> Option<crate::backend::reactive::registry::AgentEntry> {
+pub(crate) fn shared_channel_for(state: &AppState, block_id: &str) -> Option<crate::backend::reactive::registry::AgentEntry> {
     let shared_dir = crate::registry::resolve_shared_reactive_dir()?;
     let entry = crate::backend::reactive::registry::list_all_shared(&shared_dir)
         .into_iter()

@@ -1169,15 +1169,25 @@ describe("AgentComposerStrip — sign-in chip switches account", () => {
         expect(link(container)).not.toBeNull();
     });
 
-    it("signed out is unchanged: no link even with candidates", () => {
+    it("signed out with a menu: the chip is a link that opens it", () => {
+        const onSwitchAccount = vi.fn();
         const { container } = render(() => (
             <AgentComposerStrip
                 {...baseProps}
                 authStatus="unauthenticated"
                 canSwitchAccount={true}
-                onSwitchAccount={() => {}}
+                onSwitchAccount={onSwitchAccount}
             />
         ));
+        expect(link(container)).not.toBeNull();
+        expect(chip(container)).toHaveTextContent("Not logged in");
+        expect(chip(container).getAttribute("title")).toBe("Not signed in — click to log in or switch account");
+        link(container)!.click();
+        expect(onSwitchAccount).toHaveBeenCalledTimes(1);
+    });
+
+    it("signed out with no menu is plain text", () => {
+        const { container } = render(() => <AgentComposerStrip {...baseProps} authStatus="unauthenticated" />);
         expect(link(container)).toBeNull();
         expect(chip(container)).toHaveTextContent("Not logged in");
         expect(chip(container).getAttribute("title")).toBe("Not signed in — click Log in to continue");

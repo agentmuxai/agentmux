@@ -6,6 +6,7 @@
 import { useAccountEpisodes, episodeReason } from "@/app/store/account-availability";
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import { pushNotification } from "@/app/store/flash-notifications";
+import { openModal } from "@/app/store/modalmodel";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import {
@@ -20,6 +21,7 @@ import { createEffect, createMemo, createSignal, on, onCleanup, type Accessor } 
 import { resolveProviderAlias } from "../providers";
 import { lastLinkedAccountId } from "../providers/provider-id-aliases";
 import { accountPickerItems, planBind, type BindMode } from "./account-picker";
+import { AnotherAccountLogin } from "./AnotherAccountLogin";
 import { computeAccountBindCandidates } from "./bind-account-candidates";
 
 /** Where the hook reads accounts and links from, and how it shows its picker; real ones by default. */
@@ -33,6 +35,8 @@ export interface AccountBindingDeps {
     /** What the signed-in-accounts menu says about an account's quota, if anything ("out of quota until …"). */
     quotaNote: (accountId: string) => string | undefined;
     notify: (type: "info" | "warning" | "error", title: string, message?: string) => void;
+    /** Run a fresh sign-in that adds an account; `onSignedIn` gets the new account's id. */
+    signInAnother: (onSignedIn: (accountId: string) => void) => void;
 }
 
 const defaultDeps: AccountBindingDeps = {
@@ -43,6 +47,7 @@ const defaultDeps: AccountBindingDeps = {
     switchAccount: (agentId, accountId) =>
         RpcApi.AgentAccountSwitchCommand(TabRpcClient, { agent_id: agentId, account: accountId, when: "after_turn" }),
     quotaNote: () => undefined,
+    signInAnother: (onSignedIn) => void openModal(AnotherAccountLogin, { onSignedIn }),
     notify: (type, title, message = "") =>
         pushNotification({
             icon: type === "info" ? "fa-check" : "fa-triangle-exclamation",
@@ -61,9 +66,10 @@ export interface AccountBinding {
     bindCandidates: Accessor<Account[]>;
     /** The failure row's "adopt": binds a lone candidate at once, else opens the picker. */
     onBindAccount: (e?: MouseEvent) => void;
-    /** The composer chip's menu: every signed-in account of the provider, the current one checked. */
+    /** The composer chip's menu: every signed-in account of the provider, the current one checked, then
+     *  "Log in" (when signed out) and "Sign in with another account…". */
     onSwitchAccount: (e: MouseEvent) => void;
-    /** Whether the menu has an account other than the current one. */
+    /** Whether the chip has a menu: another account, "Log in" or "Sign in with another account…". */
     canSwitchAccount: Accessor<boolean>;
     /** The account a queued switch is waiting to move to (after the current turn), as the chip names it. */
     pendingAccountLabel: Accessor<string | undefined>;
@@ -78,6 +84,9 @@ export function useAccountBinding(opts: {
     bindExistingAccount: (account: Account) => Promise<void>;
     /** `agent:pending_account` of this pane: the account id a queued switch moves to. */
     pendingAccountId?: Accessor<string | undefined>;
+    /** The agent is signed out: its chip menu offers "Log in" (`onLogin`) next to the accounts. */
+    signedOut?: Accessor<boolean>;
+    onLogin?: () => void;
     deps?: Partial<AccountBindingDeps>;
 }): AccountBinding {
     const deps = { ...defaultDeps, ...opts.deps };
@@ -176,19 +185,27 @@ export function useAccountBinding(opts: {
             .filter((a) => resolveProviderAlias(a.provider) === provider && a.status === "valid")
             .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
     });
-    const canSwitchAccount = createMemo(() => switchChoices().some((a) => a.id !== linkedAccountId()));
+    // Signing in a new account is the in-app Claude login; other providers have no such panel yet.
+    const canSignInAnother = createMemo(() => resolveProviderAlias(opts.providerId() ?? "") === "claude");
+    const canLogIn = () => !!opts.signedOut?.() && !!opts.onLogin;
+    const canSwitchAccount = createMemo(
+        () => switchChoices().some((a) => a.id !== linkedAccountId()) || canSignInAnother() || canLogIn(),
+    );
     const pendingAccountLabel = createMemo(() => {
         const id = opts.pendingAccountId?.();
         const a = id ? accountCache().find((x) => x.id === id) : undefined;
         return a ? accountLabel(a, accountCache()) : undefined;
     });
     const switchTo = async (account: Account) => {
-        const agentId = opts.agentDefinitionId();
         // Picking the account it is on cancels a queued switch; with none queued there is nothing to do.
-        if (!agentId || (account.id === linkedAccountId() && !opts.pendingAccountId?.())) return;
-        const label = accountLabel(account, accountCache());
+        if (account.id === linkedAccountId() && !opts.pendingAccountId?.()) return;
+        await switchToId(account.id, accountLabel(account, accountCache()));
+    };
+    const switchToId = async (accountId: string, label: string) => {
+        const agentId = opts.agentDefinitionId();
+        if (!agentId) return;
         try {
-            const r = await deps.switchAccount(agentId, account.id);
+            const r = await deps.switchAccount(agentId, accountId);
             // Connectors' account cards and open detail list agents from the links.
             notifyLinksChanged();
             if (r.status === "unchanged") {
@@ -203,23 +220,30 @@ export function useAccountBinding(opts: {
             deps.notify("error", `Couldn't switch to ${label}`, String(e?.message ?? e));
         }
     };
+    // A sign-in that just added an account: the agent moves to it (now, or after its turn).
+    const switchToNewAccount = (accountId: string) => {
+        const all = deps.loadAccounts();
+        const account = accountCache().find((a) => a.id === accountId) ?? all.find((a) => a.id === accountId);
+        void switchToId(accountId, account ? accountLabel(account, all) : "the new account");
+    };
     const onSwitchAccount = (e: MouseEvent) => {
-        const choices = switchChoices();
-        if (choices.length === 0) return;
         const current = linkedAccountId();
-        deps.showPicker(
-            choices.map((a) => {
-                const note = quotaNote(a.id);
-                return {
-                    label: accountLabel(a, accountCache()),
-                    sublabel: note,
-                    type: "checkbox" as const,
-                    checked: a.id === current,
-                    click: () => void switchTo(a),
-                };
-            }),
-            e,
-        );
+        const items: ContextMenuItem[] = switchChoices().map((a) => ({
+            label: accountLabel(a, accountCache()),
+            sublabel: quotaNote(a.id),
+            type: "checkbox" as const,
+            checked: a.id === current,
+            click: () => void switchTo(a),
+        }));
+        const actions: ContextMenuItem[] = [];
+        if (canLogIn()) actions.push({ label: "Log in", click: () => opts.onLogin?.() });
+        if (canSignInAnother()) {
+            actions.push({ label: "Sign in with another account\u2026", click: () => deps.signInAnother(switchToNewAccount) });
+        }
+        if (items.length > 0 && actions.length > 0) items.push({ type: "separator" });
+        items.push(...actions);
+        if (items.length === 0) return;
+        deps.showPicker(items, e);
     };
 
     return {
