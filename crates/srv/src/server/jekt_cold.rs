@@ -61,13 +61,14 @@ pub(super) fn decide(
         let _ = mstore.jekt_held_delete_idle_copies(target_uid, &source, &message);
         return Decision::Deliver;
     }
-    if !cold_hold::is_cold(last_output_ms, now_ms, after_ms) {
-        return Decision::Deliver;
+    use crate::backend::agent_availability::{verdict, Availability};
+    let idle = Availability::Idle { quiet_for_ms: last_output_ms.map(|at| u64::try_from(now_ms.saturating_sub(at)).unwrap_or(0)) };
+    let rule = verdict(&idle, false, true, u64::try_from(after_ms).ok(), || hands_over_work(identity, req, target_uid, target_slug, now_ms));
+    if rule.waits() {
+        Decision::Hold
+    } else {
+        Decision::Deliver
     }
-    if hands_over_work(identity, req, target_uid, target_slug, now_ms) {
-        return Decision::Deliver;
-    }
-    Decision::Hold
 }
 
 /// Hold `req` when its target is a running Claude session gone cold and the

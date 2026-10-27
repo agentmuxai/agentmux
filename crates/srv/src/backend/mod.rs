@@ -5,6 +5,7 @@
 pub mod agent_admission;
 pub mod agent_line;
 pub mod agent_seat;
+pub mod agent_availability;
 pub mod agent_state;
 pub mod attachments;
 pub mod agent_color;
