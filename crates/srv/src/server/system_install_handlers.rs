@@ -23,6 +23,12 @@
 //! passed straight to `Command::new(program).args(args)` — never a shell
 //! string through `sh -c`/`cmd /c` — so there is no interpolation surface
 //! even though nothing in this table is user-suppliable today.
+//!
+//! **Only the user can start an install** (SPEC_ONE_CLICK_VENDOR_CLI_INSTALL_2026_10_20.md §4.3,
+//! §6.1): before anything runs, srv asks the person in the approval window
+//! ([`ask_user`](crate::server::app_api::connections::ask_user), served by the window host, which
+//! no pane process can reach or answer). The panel's own confirm is not enough: every agent holds
+//! the key this RPC takes. With no window to ask in, or no answer, nothing runs.
 
 #[cfg(windows)]
 use agentmux_common::win32::NoWindow;
@@ -33,6 +39,7 @@ use serde_json::json;
 
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::mps::Broker;
+use crate::server::app_api::connections::{ask_user, UserAnswer};
 use crate::server::install_handlers::{resolve_tool_path, InstallChunkEvent, InstallStream};
 use crate::server::AppState;
 
@@ -466,6 +473,35 @@ struct InstallSystemToolResult {
     session_id: String,
 }
 
+/// The question the user is asked before `step` runs: the exact command, and that it may ask for
+/// permission.
+fn approval_question(tool_id: &str, step: &SystemInstallStep) -> serde_json::Value {
+    let command = format!("{} {}", step.program, step.args.join(" "));
+    let elevation = if step.needs_elevation { "\n\nIt will ask for your permission (or password) to continue." } else { "" };
+    json!({
+        "kind": "consent",
+        "title": format!("Install {tool_id}"),
+        "message": format!("AgentMux will run this on this computer:\n\n{command}{elevation}\n\nInstall it?"),
+        "ok_label": "Install",
+        "cancel_label": "Cancel",
+    })
+}
+
+/// `Ok` only for an answered yes. A missing window, a closed one, a timeout and a no all refuse.
+fn require_approval(answer: Result<UserAnswer, String>, tool_id: &str) -> Result<(), String> {
+    match answer {
+        Ok(a) if a.answered && a.approve => Ok(()),
+        Ok(a) if a.answered => Err(format!("toolchain.install_system_tool: the user declined to install {tool_id}")),
+        Ok(_) => Err(format!("toolchain.install_system_tool: the user did not approve installing {tool_id} in time")),
+        Err(e) => Err(format!("toolchain.install_system_tool: installing {tool_id} needs the user's approval, and {e}")),
+    }
+}
+
+/// Ask the user, in the approval window over the main window, whether `step` may run.
+async fn approve_install(state: &AppState, tool_id: &str, step: &SystemInstallStep) -> Result<(), String> {
+    require_approval(ask_user(state, "", approval_question(tool_id, step)).await, tool_id)
+}
+
 pub fn register_system_install_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     engine.register_typed(COMMAND_TOOLCHAIN_RESOLVE_INSTALL_COMMAND, move |req: ToolIdReq, _ctx| {
         async move {
@@ -491,9 +527,11 @@ pub fn register_system_install_handlers(engine: &Arc<WshRpcEngine>, state: &AppS
 
     let registry = state.install_sessions.clone();
     let broker = state.broker.clone();
+    let app = state.clone();
     engine.register_typed(COMMAND_TOOLCHAIN_INSTALL_SYSTEM_TOOL, move |req: ToolIdReq, _ctx| {
         let registry = registry.clone();
         let broker = broker.clone();
+        let app = app.clone();
         async move {
                 if !is_safe_tool_id(&req.tool_id) {
                     return Err(format!(
@@ -507,6 +545,8 @@ pub fn register_system_install_handlers(engine: &Arc<WshRpcEngine>, state: &AppS
                         req.tool_id
                     )
                 })?;
+                // Before anything is claimed or run: the user's yes, asked by srv itself.
+                approve_install(&app, &req.tool_id, &step).await?;
                 let claim_key = claim_key_for_tool(&req.tool_id).to_string();
                 if !registry.try_claim_system_tool(&claim_key) {
                     return Err(format!(
@@ -679,6 +719,45 @@ fn spawn_system_install_task(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn step() -> SystemInstallStep {
+        resolve_windows_step("git", None).unwrap()
+    }
+
+    fn answer(answered: bool, approve: bool) -> Result<UserAnswer, String> {
+        Ok(UserAnswer { answered, approve, ..Default::default() })
+    }
+
+    #[test]
+    fn the_question_names_the_exact_command_and_the_permission_prompt() {
+        let q = approval_question("git", &step());
+        assert_eq!(q["kind"], "consent");
+        let message = q["message"].as_str().unwrap();
+        assert!(message.contains("winget install"), "{message}");
+        assert!(message.contains("Git.Git"), "{message}");
+        assert!(message.contains("permission"), "git needs elevation on Windows: {message}");
+    }
+
+    #[test]
+    fn only_an_answered_yes_approves() {
+        assert!(require_approval(answer(true, true), "git").is_ok());
+        assert!(require_approval(answer(true, false), "git").unwrap_err().contains("declined"));
+        // Closed, timed out, or never opened.
+        assert!(require_approval(answer(false, true), "git").unwrap_err().contains("in time"));
+        assert!(require_approval(answer(false, false), "git").is_err());
+        assert!(require_approval(Err("no AgentMux window is connected to ask the user in".into()), "git")
+            .unwrap_err()
+            .contains("needs the user's approval"));
+    }
+
+    /// A caller that reaches the RPC with no window to ask in gets nothing started.
+    #[tokio::test]
+    async fn with_no_window_to_ask_in_nothing_is_approved() {
+        let state = crate::server::tests::test_state();
+        assert!(state.host_ipc.lock().await.is_none());
+        let err = approve_install(&state, "git", &step()).await.unwrap_err();
+        assert!(err.contains("no AgentMux window is connected"), "{err}");
+    }
 
     #[test]
     fn is_safe_tool_id_accepts_the_real_catalog_ids() {
