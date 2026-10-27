@@ -105,6 +105,28 @@ fn the_same_picture_again_after_a_send_back_counts_for_the_new_attempt() {
 }
 
 #[test]
+fn a_call_over_the_limit_attaches_none_of_its_files() {
+    let (s, _d) = store();
+    task(&s, "a");
+    for i in 0..(MAX_FILES_PER_TASK - 1) {
+        s.work_media_add("a", &file(&format!("f{i:02}"), 1, 1), 2000).unwrap().unwrap();
+    }
+    // 29 carried; two more in one call: the first would fit, the second would not.
+    let batch = [file("new1", 1, 1), file("new2", 1, 1)];
+    assert_eq!(s.work_media_add_all("a", &batch, 3000).unwrap().unwrap_err(), AttachError::TooMany);
+    assert_eq!(s.work_media_list("a").unwrap().len() as i64, MAX_FILES_PER_TASK - 1, "the first was rolled back");
+    assert!(!s.work_media_named("new1").unwrap());
+    // One that fits goes in.
+    assert_eq!(s.work_media_add_all("a", &batch[..1], 3100).unwrap().unwrap().len(), 1);
+
+    // The same for the bytes.
+    task(&s, "b");
+    let big = [file("big1", MAX_BYTES_PER_TASK - 5, 1), file("big2", 6, 1)];
+    assert_eq!(s.work_media_add_all("b", &big, 3200).unwrap().unwrap_err(), AttachError::TooBig);
+    assert!(s.work_media_list("b").unwrap().is_empty());
+}
+
+#[test]
 fn only_media_from_this_attempt_counts_and_a_removed_file_does_not() {
     let (s, _d) = store();
     task(&s, "a");
@@ -127,13 +149,34 @@ fn the_ui_flag_and_the_reason_are_kept_apart() {
     task(&s, "a");
     assert_eq!(s.work_ui_get("a").unwrap(), (false, String::new(), 0));
     s.work_ui_set("a", Some(true), None, 0, 2000).unwrap();
-    s.work_ui_set("a", None, Some("headless host"), 2, 2100).unwrap();
-    assert_eq!(s.work_ui_get("a").unwrap(), (true, "headless host".to_string(), 2), "the reason knows its attempt");
+    s.work_ui_set("a", None, Some("headless host"), 0, 2100).unwrap();
+    assert_eq!(s.work_ui_get("a").unwrap(), (true, "headless host".to_string(), 0), "the reason knows its attempt");
     let card = s.work_board_get("a").unwrap().unwrap().card;
     assert!(card.media.ui_change);
     assert_eq!(card.media.no_media_reason, "headless host");
     s.work_ui_set("a", Some(false), None, 0, 2200).unwrap();
     assert_eq!(s.work_ui_get("a").unwrap().1, "headless host", "unsetting the flag keeps the reason");
+}
+
+#[test]
+fn the_card_shows_a_reason_only_for_the_current_attempt() {
+    let (s, _d) = store();
+    task(&s, "a");
+    s.work_ui_set("a", Some(true), Some("nothing to see"), 1, 2000).unwrap();
+    s.work_media_add("a", &file("old", 1, 1), 2000).unwrap().unwrap();
+    let on = |attempts: i64| {
+        s.conn().lock().unwrap().execute("UPDATE db_work_queue SET attempts = ?1 WHERE id = 'a'", [attempts]).unwrap();
+        s.work_board_get("a").unwrap().unwrap().card.media
+    };
+    let same = on(1);
+    assert_eq!(same.no_media_reason, "nothing to see");
+    assert_eq!(same.count, 1, "older files stay in the count");
+    let after_send_back = on(2);
+    assert_eq!(after_send_back.no_media_reason, "", "attempt 1's reason is not attempt 2's");
+    assert_eq!(after_send_back.count, 1);
+    // Given again in attempt 2, it shows even though attempt 1's pictures are still there.
+    s.work_ui_set("a", None, Some("still nothing"), 2, 3000).unwrap();
+    assert_eq!(on(2).no_media_reason, "still nothing");
 }
 
 #[test]

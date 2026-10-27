@@ -193,14 +193,12 @@ pub(super) fn apply(state: &AppState, item: &WorkItem, agent: &str, uid: &str, c
             });
         }
     }
-    let mut attached = Vec::new();
-    for m in &ready {
-        match state.work_store.work_media_add(&item.id, m, now) {
-            Ok(Ok(row)) => attached.push(row),
-            Ok(Err(why @ (AttachError::TooMany | AttachError::TooBig))) => return Err(bad(why.words())),
-            Err(e) => return Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() })))),
-        }
-    }
+    // All of the call's files or none: one over a limit leaves nothing attached.
+    let attached = match state.work_store.work_media_add_all(&item.id, &ready, now) {
+        Ok(Ok(rows)) => rows,
+        Ok(Err(why @ (AttachError::TooMany | AttachError::TooBig))) => return Err(bad(why.words())),
+        Err(e) => return Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() })))),
+    };
     let reason = call.no_media_reason.as_deref().map(|r| clean(r).chars().take(MAX_CAPTION).collect::<String>());
     if let Err(e) = state.work_store.work_ui_set(&item.id, call.ui_change, reason.as_deref(), item.attempts, now) {
         return Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))));

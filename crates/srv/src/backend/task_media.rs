@@ -93,10 +93,23 @@ pub fn ext_of_mime(mime: &str) -> &'static str {
     }
 }
 
-/// The folder, in the shared home.
+/// Where the folder is, given where the work store is: beside a work store this channel has to itself (a
+/// `task dev` build's), else in the shared home with the store every channel shares. The sweep deletes
+/// what its own store does not name, so two stores must never share one folder.
+pub fn root_beside(isolated_work_store: Option<PathBuf>, shared_dir: Option<PathBuf>) -> Option<PathBuf> {
+    match isolated_work_store {
+        Some(store) => store.parent().map(|dir| dir.join("task-media")),
+        None => shared_dir.map(|dir| dir.join("task-media")),
+    }
+}
+
+/// The folder this srv uses, in step with its work store (see [`root_beside`]).
 #[cfg(not(test))]
 pub fn default_root() -> Option<PathBuf> {
-    agentmux_common::DataPaths::from_env().map(|p| p.shared_dir.join("task-media"))
+    root_beside(
+        crate::registry::resolve_isolated_work_store_path(&super::base::get_mux_db_dir()),
+        agentmux_common::DataPaths::from_env().map(|p| p.shared_dir),
+    )
 }
 
 /// In tests, a folder of the test process's own, never the real shared home.

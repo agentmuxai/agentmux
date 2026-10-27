@@ -103,6 +103,10 @@ describe("the card's strip", () => {
         expect(noMediaWords(task({ ui_change: true }, "open"))).toBeNull();
         expect(noMediaWords(task({ ui_change: false }, "review"))).toBeNull();
         expect(noMediaWords(task({ ui_change: true, count: 1 }, "review"))).toBeNull();
+        // Sent back and handed in again without new pictures: the reason shows beside the old ones.
+        expect(noMediaWords(task({ ui_change: true, count: 2, no_media_reason: "not captured this time" }, "review"))).toBe(
+            "No media: not captured this time"
+        );
         expect(noMediaWords(task(null, "review"))).toBeNull();
         const { container } = render(() => <CardMedia task={task({ ui_change: true }, "review")} />);
         expect(container.textContent).toContain("no media");

@@ -29,8 +29,11 @@ export function mediaOverflow(count: number, shown: number): number {
 /** What a UI task without media says on its card, or `null` when it needs no words. */
 export function noMediaWords(task: KanbanTask): string | null {
     const m = task.card.media;
-    if (!m || !m.ui_change || m.count > 0 || !STARTED.has(task.state)) return null;
-    return m.no_media_reason ? `No media: ${m.no_media_reason}` : "no media";
+    if (!m || !m.ui_change || !STARTED.has(task.state)) return null;
+    // srv sends the reason only while it is the current attempt's, so it shows even beside an earlier
+    // attempt's pictures (a send-back handed in again without new ones).
+    if (m.no_media_reason) return `No media: ${m.no_media_reason}`;
+    return m.count > 0 ? null : "no media";
 }
 
 /** One thumbnail: an image's small copy (or the file itself for an SVG), a recording's tile with a play mark. */

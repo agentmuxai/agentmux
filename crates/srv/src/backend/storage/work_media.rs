@@ -166,6 +166,7 @@ const MEDIA_COLS: &str = "id, work_id, sha256, name, kind, mime, size, caption, 
 pub(crate) fn attach_media(conn: &Connection, tasks: &mut [BoardTask]) -> Result<(), StoreError> {
     let ids: Vec<String> = tasks.iter().map(|t| t.item.id.clone()).collect();
     let mut found: HashMap<String, MediaSummary> = HashMap::new();
+    let mut reason_attempts: HashMap<String, i64> = HashMap::new();
     for chunk in ids.chunks(IDS_PER_QUERY) {
         let marks = vec!["?"; chunk.len()].join(",");
         let sql = format!(
@@ -183,20 +184,26 @@ pub(crate) fn attach_media(conn: &Connection, tasks: &mut [BoardTask]) -> Result
                 s.first.push(preview);
             }
         }
-        let sql = format!("SELECT work_id, ui_change, no_media_reason FROM db_work_ui WHERE work_id IN ({marks})");
+        let sql = format!("SELECT work_id, ui_change, no_media_reason, reason_attempt FROM db_work_ui WHERE work_id IN ({marks})");
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map(params_from_iter(chunk.iter()), |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? != 0, r.get::<_, String>(2)?))
+            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? != 0, r.get::<_, String>(2)?, r.get::<_, i64>(3)?))
         })?;
         for row in rows {
-            let (id, ui, reason) = row?;
-            let s = found.entry(id).or_default();
+            let (id, ui, reason, attempt) = row?;
+            let s = found.entry(id.clone()).or_default();
             s.ui_change = ui;
             s.no_media_reason = reason;
+            reason_attempts.insert(id, attempt);
         }
     }
     for t in tasks {
-        t.card.media = found.remove(&t.item.id).unwrap_or_default();
+        let mut summary = found.remove(&t.item.id).unwrap_or_default();
+        // A reason is for the attempt that gave it: after a send-back the old one is not the new attempt's.
+        if reason_attempts.get(&t.item.id).is_some_and(|&a| a != t.item.attempts) {
+            summary.no_media_reason.clear();
+        }
+        t.card.media = summary;
     }
     Ok(())
 }
@@ -206,41 +213,23 @@ impl Store {
     /// content, not removed) is not attached twice; the earlier row is returned. The same picture again after a
     /// send-back is a new row, so it counts for the new attempt.
     pub fn work_media_add(&self, work_id: &str, m: &NewMedia, now_ms: i64) -> Result<Result<MediaItem, AttachError>, StoreError> {
+        Ok(self.work_media_add_all(work_id, std::slice::from_ref(m), now_ms)?.map(|mut rows| rows.remove(0)))
+    }
+
+    /// Attach a call's files in one transaction: if one is over a limit none is attached.
+    pub fn work_media_add_all(&self, work_id: &str, files: &[NewMedia], now_ms: i64) -> Result<Result<Vec<MediaItem>, AttachError>, StoreError> {
         let mut conn = self.conn().lock().unwrap();
         let tx = conn.transaction()?;
-        let existing = tx
-            .query_row(
-                &format!("SELECT {MEDIA_COLS} FROM db_work_media WHERE work_id = ?1 AND sha256 = ?2 AND attempt = ?3 AND removed_at IS NULL"),
-                params![work_id, m.sha256, m.attempt],
-                row_to_media,
-            )
-            .optional()?;
-        if let Some(item) = existing {
-            return Ok(Ok(item));
+        let mut rows = Vec::with_capacity(files.len());
+        for m in files {
+            match add_in(&tx, work_id, m, now_ms)? {
+                Ok(row) => rows.push(row),
+                // The transaction is dropped, so the files before this one are not kept.
+                Err(why) => return Ok(Err(why)),
+            }
         }
-        let (count, bytes): (i64, i64) = tx.query_row(
-            "SELECT COUNT(*), COALESCE(SUM(size), 0) FROM db_work_media WHERE work_id = ?1 AND removed_at IS NULL",
-            params![work_id],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        )?;
-        if count >= MAX_FILES_PER_TASK {
-            return Ok(Err(AttachError::TooMany));
-        }
-        if bytes + m.size > MAX_BYTES_PER_TASK {
-            return Ok(Err(AttachError::TooBig));
-        }
-        tx.execute(
-            "INSERT INTO db_work_media (work_id, sha256, name, kind, mime, size, caption, attached_by, attached_by_uid, attempt, at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
-            params![work_id, m.sha256, m.name, m.kind, m.mime, m.size, m.caption, m.attached_by, m.attached_by_uid, m.attempt, now_ms],
-        )?;
-        let id = tx.last_insert_rowid();
-        // The card changes, so boards elsewhere see it.
-        tx.execute("UPDATE db_work_cards SET updated_at = MAX(updated_at, ?2) WHERE work_id = ?1", params![work_id, now_ms])?;
-        tx.execute("UPDATE db_work_queue SET updated_at = MAX(updated_at, ?2) WHERE id = ?1", params![work_id, now_ms])?;
-        let item = tx.query_row(&format!("SELECT {MEDIA_COLS} FROM db_work_media WHERE id = ?1"), params![id], row_to_media)?;
         tx.commit()?;
-        Ok(Ok(item))
+        Ok(Ok(rows))
     }
 
     /// Every file of a task, oldest first, the removed ones marked.
@@ -250,6 +239,45 @@ impl Store {
         let rows = stmt.query_map(params![work_id], row_to_media)?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
+}
+
+/// One file inside a transaction (see [`Store::work_media_add`]).
+fn add_in(tx: &rusqlite::Transaction, work_id: &str, m: &NewMedia, now_ms: i64) -> Result<Result<MediaItem, AttachError>, StoreError> {
+    let existing = tx
+        .query_row(
+            &format!("SELECT {MEDIA_COLS} FROM db_work_media WHERE work_id = ?1 AND sha256 = ?2 AND attempt = ?3 AND removed_at IS NULL"),
+            params![work_id, m.sha256, m.attempt],
+            row_to_media,
+        )
+        .optional()?;
+    if let Some(item) = existing {
+        return Ok(Ok(item));
+    }
+    let (count, bytes): (i64, i64) = tx.query_row(
+        "SELECT COUNT(*), COALESCE(SUM(size), 0) FROM db_work_media WHERE work_id = ?1 AND removed_at IS NULL",
+        params![work_id],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?;
+    if count >= MAX_FILES_PER_TASK {
+        return Ok(Err(AttachError::TooMany));
+    }
+    if bytes + m.size > MAX_BYTES_PER_TASK {
+        return Ok(Err(AttachError::TooBig));
+    }
+    tx.execute(
+        "INSERT INTO db_work_media (work_id, sha256, name, kind, mime, size, caption, attached_by, attached_by_uid, attempt, at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        params![work_id, m.sha256, m.name, m.kind, m.mime, m.size, m.caption, m.attached_by, m.attached_by_uid, m.attempt, now_ms],
+    )?;
+    let id = tx.last_insert_rowid();
+    // The card changes, so boards elsewhere see it.
+    tx.execute("UPDATE db_work_cards SET updated_at = MAX(updated_at, ?2) WHERE work_id = ?1", params![work_id, now_ms])?;
+    tx.execute("UPDATE db_work_queue SET updated_at = MAX(updated_at, ?2) WHERE id = ?1", params![work_id, now_ms])?;
+    let item = tx.query_row(&format!("SELECT {MEDIA_COLS} FROM db_work_media WHERE id = ?1"), params![id], row_to_media)?;
+    Ok(Ok(item))
+}
+
+impl Store {
 
     /// Whether an image or a recording was attached to this task in `attempt` (and is not removed).
     pub fn work_media_in_attempt(&self, work_id: &str, attempt: i64) -> Result<bool, StoreError> {

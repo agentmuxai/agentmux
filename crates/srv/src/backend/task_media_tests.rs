@@ -29,6 +29,17 @@ fn what_a_file_is_comes_from_its_content_not_its_name() {
 }
 
 #[test]
+fn the_folder_goes_with_the_work_store_so_two_stores_never_share_one() {
+    let shared = Some(PathBuf::from("/home/u/.agentmux/shared"));
+    // The store every channel shares: the shared home.
+    assert_eq!(root_beside(None, shared.clone()), Some(PathBuf::from("/home/u/.agentmux/shared/task-media")));
+    // A `task dev` build's own store: beside it, never the shared folder its sweep would clear.
+    let own = Some(PathBuf::from("/home/u/.agentmux/dev/branch/work-store.db"));
+    assert_eq!(root_beside(own, shared), Some(PathBuf::from("/home/u/.agentmux/dev/branch/task-media")));
+    assert_eq!(root_beside(None, None), None);
+}
+
+#[test]
 fn a_hash_that_is_not_one_never_makes_a_path() {
     let root = Path::new("/store");
     assert!(blob_path(root, "../../etc/passwd", "image/png").is_none());
