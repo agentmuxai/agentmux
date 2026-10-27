@@ -131,6 +131,31 @@ The same lab run (10 agents, 10 rounds, same app and frontend, only srv replaced
 
 -45% of the bytes (the model said -37%): the temp files are gone, and the WAL took 17% fewer pages too, because `REPLACE` also allocated a fresh overflow chain and freed the old one for every append. Cause 1 (the whole tail part rewritten per line) is untouched: 3.9 GB of the 4.0 GB is still the two stores' WAL.
 
+## Measured after PR 2 (the tail row appended in place)
+
+Same lab run, `origin/main` `1cc62406f` plus the change (a line of a line-oriented file is written into its tail row's slack with SQLite's incremental blob write; the row doubles only when full):
+
+| | before PR 1 | after PR 1 | after PR 2 |
+|---|---:|---:|---:|
+| srv bytes written (counter / lab) | 7,230 / 7,306 MB | 4,016 / 3,999 MB | **871 / 833 MB** |
+| shared `filestore.db-wal` | 2,478 MB | 2,055 MB | 396 MB |
+| channel `filestore.db-wal` | 2,275 MB | 1,822 MB | 389 MB |
+| checkpoints into the two databases | 138 MB | 129 MB | 76 MB |
+| srv CPU seconds | 54.2 | 32.6 | **21.1** |
+| round time, median | 6.3 s | 5.8 s | 6.0 s |
+
+-89% of the original bytes and -61% of srv's CPU; round time is the same within the run-to-run spread.
+
+Per-line commit latency, SQL level, on the real schema with its triggers (one file, 20,000 lines of 560 bytes, WAL, `synchronous=NORMAL`, SQLite 3.51.3, three runs each, the figures were the same to the third digit):
+
+| tail strategy | bytes written | mean | p50 | p99 |
+|---|---:|---:|---:|---:|
+| `REPLACE` of the whole part (before PR 1) | 1,579 MB | 0.26 ms | 0.12 ms | 0.8 ms |
+| `UPDATE` of the whole part (PR 1) | 916 MB | 0.10 ms | 0.10 ms | 0.23 ms |
+| in place into the slack (PR 2) | **206 MB** | **0.029 ms** | **0.021 ms** | **0.17 ms** |
+
+A line costs 3.6 times less to commit than after PR 1 and 9 times less than before it. The maximum of a run (4 to 18 ms) is the occasional checkpoint or file extension, the same in all three.
+
 ## Limits of this measurement
 
 - One workload: synthetic lines of about 560 bytes played by the fake Claude as fast as it goes. Real agents stream smaller deltas more slowly and will have a different arrival pattern; the per-line cost (60 KB) should hold for any line, the lines per second will not.
