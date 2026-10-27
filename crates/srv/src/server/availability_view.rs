@@ -63,6 +63,14 @@ pub(super) fn describe(av: &Availability, v: &Verdict) -> Value {
     out
 }
 
+/// The block the agent with this UID runs in, when it is registered here under that UID.
+pub(super) fn block_of_uid(handler: &crate::backend::reactive::handler::ReactiveHandler, uid: &str) -> Option<String> {
+    match handler.lookup_delivery_target(uid) {
+        LookupOutcome::One(reg) => Some(reg.block_id),
+        LookupOutcome::Ambiguous(_) | LookupOutcome::NotFound => None,
+    }
+}
+
 /// [`describe`] for the agent on `block_id`, or for a defined agent with no live pane (`None`).
 pub(super) fn describe_block(mstore: &Store, block_id: Option<&str>, cold_after_ms: Option<u64>, now_ms: u64) -> Value {
     let av = match block_id {
@@ -201,6 +209,17 @@ mod tests {
         let v = view(Availability::Idle { quiet_for_ms: Some(AFTER + 1) });
         assert_eq!((v["state"].as_str(), v["would"].as_str(), v["reason"].as_str()), (Some("idle"), Some("hold"), Some("idle")));
         assert_eq!(v["retry_when"], "session_active");
+    }
+
+    /// Two agents with one display name are told apart by UID, which is what discovery asks.
+    #[test]
+    fn agents_sharing_a_display_name_resolve_to_their_own_blocks_by_uid() {
+        use crate::backend::reactive::handler::ReactiveHandler;
+        let h = ReactiveHandler::new();
+        h.register_agent_full("Twin", "block-a", None, 0, None, Some("uid-a"), "test").unwrap();
+        h.register_agent_full("Twin", "block-b", None, 0, None, Some("uid-b"), "test").unwrap();
+        assert_eq!((block_of_uid(&h, "uid-a").as_deref(), block_of_uid(&h, "uid-b").as_deref()), (Some("block-a"), Some("block-b")));
+        assert_eq!(block_of_uid(&h, "uid-none"), None);
     }
 
     #[test]
