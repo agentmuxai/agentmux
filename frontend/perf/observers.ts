@@ -15,6 +15,7 @@
  * every interaction, not just the first.
  */
 
+import { startLongFrameObserver } from "./long-frames";
 import { perfStore } from "./store";
 
 const PERF_LOG_PREFIX = "[perf]";
@@ -97,7 +98,7 @@ function startEventObserver(): (() => void) | null {
  * tears these down.
  */
 export function startAllObservers(): () => void {
-    const stops = [startLongTaskObserver(), startEventObserver()].filter(
+    const stops = [startLongTaskObserver(), startLongFrameObserver(), startEventObserver()].filter(
         (f): f is () => void => f != null,
     );
     return () => {
