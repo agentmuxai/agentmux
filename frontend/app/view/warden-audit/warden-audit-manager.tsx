@@ -11,7 +11,7 @@ import { useTick } from "@/app/hook/useTick";
 
 import { ageMs, formatAge, pollWhileVisible, WARDEN_REFRESH_MS } from "@/app/view/warden-shared/warden-shared";
 import { WardenSecrets } from "@/app/view/vault/vault-warden";
-import { fetchWardenAudit, WARDEN_AUDIT_LIMIT, type AuditEntry } from "./warden-audit-shared";
+import { actionCommand, fetchWardenAudit, WARDEN_AUDIT_LIMIT, type AuditEntry } from "./warden-audit-shared";
 
 import "@/app/view/warden-shared/warden-manager-chrome.scss";
 import "./warden-audit-manager.scss";
@@ -104,8 +104,11 @@ export const WardenAuditManager = (props: { visible?: boolean }): JSX.Element =>
                                         {status()}
                                     </span>
                                     <span class="warden-audit-bytes">
-                                        <Show when={!isRegistration(entry)}>{entry.message_length}b</Show>
+                                        <Show when={!isRegistration(entry) && !actionCommand(entry)}>{entry.message_length}b</Show>
                                     </span>
+                                    <Show when={actionCommand(entry)}>
+                                        <span class="warden-manager-mono">{actionCommand(entry)}</span>
+                                    </Show>
                                     {/* A caller-supplied `reason` (e.g. ClosePane's) shows on
                                         its own: outcome is unset for fleet actions (#3196). */}
                                     <Show when={entry.reason} fallback={
