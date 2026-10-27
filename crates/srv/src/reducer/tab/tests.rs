@@ -1241,3 +1241,25 @@ fn move_tab_into_a_window_with_its_name_renames_it() {
     assert_eq!(state.tabs[&moving].name, "Tab 4 (2)");
     assert_eq!(tab_names(&state, &dst), vec!["Tab 4 (2)", "Tab 4"]);
 }
+
+#[test]
+fn a_year_in_a_tab_name_is_kept_when_the_name_collides() {
+    let mut state = State::default();
+    let ws = create_workspace(&mut state, "w");
+    create_tab(&mut state, &ws, "Report (2024)");
+    update(&mut state, Command::CreateTab { workspace_id: ws.clone(), name: "Report (2024)".into() }, &ctx(1));
+    assert_eq!(tab_names(&state, &ws), vec!["Report (2024)", "Report (2024) (2)"]);
+}
+
+#[test]
+fn a_counter_the_naming_generated_past_ninety_nine_is_recognised_again() {
+    let mut state = State::default();
+    let ws = create_workspace(&mut state, "w");
+    for n in 1..=101 {
+        update(&mut state, Command::CreateTab { workspace_id: ws.clone(), name: "Report".into() }, &ctx(n));
+    }
+    assert_eq!(tab_names(&state, &ws).last().map(String::as_str), Some("Report (101)"));
+    update(&mut state, Command::CreateTab { workspace_id: ws.clone(), name: "Report (100)".into() }, &ctx(500));
+    let names = tab_names(&state, &ws);
+    assert_eq!(names.last().map(String::as_str), Some("Report (102)"), "not Report (100) (2)");
+}
