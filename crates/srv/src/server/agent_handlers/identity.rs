@@ -327,21 +327,37 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // #4936 §3.3: give each account that shares a provider and email
                 // with another a number that stays its own. Computed over the
                 // unfiltered list, so a provider filter can't renumber a group.
-                let all = if cmd.provider.is_some() { mstore.identity_list(None).unwrap_or_default() } else { accounts.clone() };
+                // One allocation at a time, from a fresh read: two overlapping lists must not
+                // both plan the same number, or the one written last renumbers what the first returned.
+                static NUMBERING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+                let _numbering = NUMBERING.lock().unwrap_or_else(|e| e.into_inner());
+                let all = mstore.identity_list(None).unwrap_or_default();
                 for u in crate::identity::account_numbering::numbering_updates(&all) {
                     for store in [&mstore, &identity_store] {
                         if let Err(e) = store.identity_set_context_numbering(&u.id, u.seq, u.high) {
                             tracing::warn!(target: "identity", account_id = %u.id, error = %e, "listidentityaccounts: number write failed");
                         }
                     }
-                    if let Some(a) = accounts.iter_mut().find(|a| a.id == u.id) {
-                        if !a.context.is_object() {
-                            a.context = serde_json::json!({});
+                }
+                // Answer with the numbers as stored now, including any a list that ran just
+                // before this one allocated.
+                let numbered = mstore.identity_list(None).unwrap_or_default();
+                for a in &mut accounts {
+                    let Some(stored) = numbered.iter().find(|n| n.id == a.id) else { continue };
+                    for key in ["seq", "seqmax"] {
+                        match stored.context.get(key) {
+                            Some(v) => {
+                                if !a.context.is_object() {
+                                    a.context = serde_json::json!({});
+                                }
+                                a.context[key] = v.clone();
+                            }
+                            None => {
+                                if let Some(ctx) = a.context.as_object_mut() {
+                                    ctx.remove(key);
+                                }
+                            }
                         }
-                        if let Some(seq) = u.seq {
-                            a.context["seq"] = serde_json::json!(seq);
-                        }
-                        a.context["seqmax"] = serde_json::json!(u.high);
                     }
                 }
                 Ok(accounts)

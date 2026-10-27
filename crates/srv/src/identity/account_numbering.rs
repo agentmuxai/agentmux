@@ -117,7 +117,15 @@ pub fn carry_over(stored: &serde_json::Value, incoming: &mut serde_json::Value) 
     }
     let stored_email = stored.get("email").and_then(|e| e.as_str()).unwrap_or("");
     match incoming.get("email").and_then(|e| e.as_str()).filter(|e| !e.trim().is_empty()) {
-        Some(email) if !same_email(email, stored_email) => return,
+        // Another address is another group: the numbering the incoming context carries
+        // (a reconnect clones the old context and replaces only the email) is the old group's.
+        Some(email) if !same_email(email, stored_email) => {
+            if let Some(ctx) = incoming.as_object_mut() {
+                ctx.remove("seq");
+                ctx.remove("seqmax");
+            }
+            return;
+        }
         Some(_) => {}
         None => incoming["email"] = serde_json::json!(stored_email),
     }
@@ -233,6 +241,10 @@ mod tests {
         let mut other = serde_json::json!({ "email": "else@example.com" });
         carry_over(&stored, &mut other);
         assert!(other.get("seq").is_none(), "another address is another group");
+        // A reconnect that replaced only the email on a clone of the old context drops the old numbering.
+        let mut cloned = serde_json::json!({ "email": "else@example.com", "seq": 2, "seqmax": 4 });
+        carry_over(&stored, &mut cloned);
+        assert!(cloned.get("seq").is_none() && cloned.get("seqmax").is_none(), "{cloned}");
         let mut given = serde_json::json!({ "email": "me@example.com", "seq": 5 });
         carry_over(&stored, &mut given);
         assert_eq!(given["seq"], 5, "an explicit number stands");
