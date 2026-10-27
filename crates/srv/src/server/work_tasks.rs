@@ -322,6 +322,25 @@ pub(super) struct UpdateRequest {
     /// `ask`: the question; `submit`: the result.
     #[serde(default)]
     pub text: String,
+    /// Files already uploaded (`POST /agentmux/work/media`) to attach to the task.
+    #[serde(default)]
+    pub media: Vec<super::work_media::MediaRef>,
+    /// The task changes the UI (it then needs media to be handed in for review).
+    #[serde(default)]
+    pub ui_change: Option<bool>,
+    /// Why it is handed in without media.
+    #[serde(default)]
+    pub no_media_reason: Option<String>,
+}
+
+impl UpdateRequest {
+    fn media_call(&self) -> super::work_media::MediaCall {
+        super::work_media::MediaCall {
+            media: self.media.clone(),
+            ui_change: self.ui_change,
+            no_media_reason: self.no_media_reason.clone(),
+        }
+    }
 }
 
 /// Why a handed-in document path can't be kept, if it can't. The card's Open
@@ -402,6 +421,10 @@ pub(super) async fn handle_work_update(
     }
     let now = now_ms();
     let _ = state.work_store.work_card_ensure(&id, now);
+    let attached = match super::work_media::apply(&state, &item, &req.agent_id, holder_uid(caller), &req.media_call()) {
+        Ok(rows) => rows,
+        Err(refused) => return refused,
+    };
     let u = card_update(&req);
     if let Err(e) = state.work_store.work_card_update(&id, &u, now) {
         return failed(e);
@@ -421,8 +444,19 @@ pub(super) async fn handle_work_update(
             .join(" ");
         record(&state, &id, &req.agent_id, "agent", "linked", &item.state, &item.state, &link);
     }
+    let mut answer = json!({ "ok": true });
+    if !attached.is_empty() {
+        let names = attached.iter().map(|m| m.name.as_str()).collect::<Vec<_>>().join(", ");
+        record(&state, &id, &req.agent_id, "agent", "media", &item.state, &item.state, &format!("attached {names}"));
+        answer["attached"] = super::work_media::attached_json(&attached);
+    }
+    if u.pr_url.is_some() {
+        if let Some(reminder) = super::work_media::pr_reminder(&state, &id, item.attempts) {
+            answer["reminder"] = json!(reminder);
+        }
+    }
     super::work_queue::publish_changed(&state);
-    (StatusCode::OK, Json(json!({ "ok": true })))
+    (StatusCode::OK, Json(answer))
 }
 
 /// `POST /agentmux/work/:id/ask`: the holder needs the operator. The task
@@ -471,7 +505,24 @@ pub(super) async fn handle_work_submit(
         return (StatusCode::BAD_REQUEST, Json(json!({ "error": why })));
     }
     let id = resolve_id(&state, &id);
-    finish(&state, caller, &id, &req.agent_id, req.attempt, &result, Some(card_update(&req))).await
+    let Ok(Some(item)) = state.work_store.work_queue_get(&id) else { return conflict() };
+    if !holds(&item, &req.agent_id, holder_uid(caller), req.attempt) {
+        return conflict();
+    }
+    // The files first, so the check below sees them; a bad file fails the call before anything changes.
+    let attached = match super::work_media::apply(&state, &item, &req.agent_id, holder_uid(caller), &req.media_call()) {
+        Ok(rows) => rows,
+        Err(refused) => return refused,
+    };
+    if !attached.is_empty() {
+        let names = attached.iter().map(|m| m.name.as_str()).collect::<Vec<_>>().join(", ");
+        record(&state, &id, &req.agent_id, "agent", "media", &item.state, &item.state, &format!("attached {names}"));
+    }
+    let (status, Json(mut body)) = finish(&state, caller, &id, &req.agent_id, req.attempt, &result, Some(card_update(&req))).await;
+    if !attached.is_empty() {
+        body["attached"] = super::work_media::attached_json(&attached);
+    }
+    (status, Json(body))
 }
 
 #[derive(Debug, Deserialize)]
@@ -700,6 +751,15 @@ async fn finish_task(
 ) -> (StatusCode, Json<Value>) {
     let now = now_ms();
     let uid = holder_uid(caller);
+    // A UI task that waits for the operator is handed in with media (submit and complete alike); the
+    // holder's own call only, so a stale or foreign one still gets the usual conflict.
+    if let Ok(Some(item)) = state.work_store.work_queue_get(id) {
+        if holds(&item, agent_id, uid, attempt) {
+            if let Some(why) = super::work_media::submit_refusal(state, id, item.attempts) {
+                return (StatusCode::BAD_REQUEST, Json(json!({ "ok": false, "error": why })));
+            }
+        }
+    }
     let review = state
         .work_store
         .work_board_get(id)

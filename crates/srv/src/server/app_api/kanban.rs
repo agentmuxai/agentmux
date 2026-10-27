@@ -254,7 +254,10 @@ async fn list(state: &AppState) -> Result<Value, String> {
     let mstore = state.mstore.clone();
     tokio::task::spawn_blocking(move || {
         let now = now_ms();
-        let tasks = work.work_board_list(now - FINISHED_WINDOW_MS, LIST_LIMIT, now).map_err(|e| e.to_string())?;
+        let mut tasks = work.work_board_list(now - FINISHED_WINDOW_MS, LIST_LIMIT, now).map_err(|e| e.to_string())?;
+        for t in &mut tasks {
+            fill_media_paths(t);
+        }
         let accepts = work.work_delegate_accepts(now - crate::backend::kanban_delegate::REOPEN_WINDOW_MS).unwrap_or_default();
         let stamp = work.work_board_stamp().unwrap_or(0);
         let states: Vec<Option<AgentState>> = regs.iter().map(|r| agent_state::current_state(&mstore, &r.block_id)).collect();
@@ -299,13 +302,49 @@ async fn list(state: &AppState) -> Result<Value, String> {
     .map_err(|e| e.to_string())?
 }
 
+/// Where a task's pictures are stored, for the card's thumbnails and the Editor.
+fn fill_media_paths(t: &mut BoardTask) {
+    let Some(root) = crate::backend::task_media::default_root() else { return };
+    for p in &mut t.card.media.first {
+        if let Some(path) = crate::backend::task_media::blob_path(&root, &p.sha256, &p.mime) {
+            p.path = path.to_string_lossy().into_owned();
+        }
+        if let Some(thumb) = crate::backend::task_media::thumb_path(&root, &p.sha256).filter(|t| t.exists()) {
+            p.thumb = thumb.to_string_lossy().into_owned();
+        }
+    }
+}
+
+/// Every file a task carries, with where each is stored (a removed one has no path).
+fn media_json(id: &str, store: &crate::backend::storage::store::Store) -> Value {
+    let root = crate::backend::task_media::default_root();
+    let rows = store.work_media_list(id).unwrap_or_default();
+    Value::Array(
+        rows.into_iter()
+            .map(|mut m| {
+                let mut thumb = String::new();
+                if let (Some(root), None) = (&root, m.removed_at) {
+                    m.path = crate::backend::task_media::blob_path(root, &m.sha256, &m.mime).map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
+                    if let Some(t) = crate::backend::task_media::thumb_path(root, &m.sha256).filter(|t| t.exists()) {
+                        thumb = t.to_string_lossy().into_owned();
+                    }
+                }
+                let mut v = serde_json::to_value(&m).unwrap_or_default();
+                v["thumb"] = json!(thumb);
+                v
+            })
+            .collect(),
+    )
+}
+
 async fn task(state: &AppState, data: &Value) -> Result<Value, String> {
     let id = data.get("id").and_then(Value::as_str).ok_or("kanban.task: id is required")?;
     let id = resolve_id(state, id);
-    let t = state.work_store.work_board_get(&id).map_err(|e| e.to_string())?.ok_or("no such task")?;
+    let mut t = state.work_store.work_board_get(&id).map_err(|e| e.to_string())?.ok_or("no such task")?;
+    fill_media_paths(&mut t);
     let events = state.work_store.work_events(&t.item.id, 200).map_err(|e| e.to_string())?;
     let accepts = state.work_store.work_delegate_accepts(now_ms() - crate::backend::kanban_delegate::REOPEN_WINDOW_MS).unwrap_or_default();
-    Ok(json!({ "task": task_json(&t, None, None, &accepts), "events": events }))
+    Ok(json!({ "task": task_json(&t, None, None, &accepts), "events": events, "media": media_json(&t.item.id, &state.work_store) }))
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -355,6 +394,12 @@ struct ActRequest {
     /// on it, `"cancel"` (the default) or `"hold"` (§6).
     #[serde(default)]
     followers: Option<String>,
+    /// media_remove: the file to take off the task.
+    #[serde(default)]
+    media_id: Option<i64>,
+    /// ui_change: whether the task changes the UI (then it needs media to be handed in for review).
+    #[serde(default)]
+    ui_change: Option<bool>,
 }
 
 /// "#12, #15" for the history.
@@ -901,6 +946,29 @@ pub(crate) async fn act_as(state: &AppState, data: Value, actor: &Actor) -> Resu
             }
             json!({ "ok": true, "id": back.id })
         }
+        "media_remove" => {
+            let t = get(&req.id)?;
+            let media_id = req.media_id.ok_or("media_remove: media_id is required")?;
+            let gone = store
+                .work_media_remove(&t.item.id, media_id, &actor.name, now)
+                .map_err(|e| e.to_string())?
+                .ok_or("no such file on this task, or it is already removed")?;
+            // The bytes go when no task names them.
+            if !store.work_media_named(&gone.sha256).unwrap_or(true) {
+                if let Some(root) = crate::backend::task_media::default_root() {
+                    crate::backend::task_media::remove_content(&root, &gone.sha256, &gone.mime);
+                }
+            }
+            record(state, &t.item.id, &actor.name, actor.kind(), "media_removed", &gone.name, "", &text);
+            json!({ "ok": true })
+        }
+        "ui_change" => {
+            let t = get(&req.id)?;
+            let flag = req.ui_change.ok_or("ui_change: true or false is required")?;
+            store.work_ui_set(&t.item.id, Some(flag), None, 0, now).map_err(|e| e.to_string())?;
+            record(state, &t.item.id, &actor.name, actor.kind(), "ui_change", if flag { "yes" } else { "no" }, "", &text);
+            json!({ "ok": true })
+        }
         other => return Err(format!("kanban.act: unknown action {other:?}")),
     };
     changed(state);
@@ -1131,6 +1199,31 @@ mod tests {
         assert_eq!(own.body(""), "its own work");
         assert_eq!(own.body("looks right"), "its own work (looks right)");
         assert_eq!(Decider::operator().body("typed by them"), "typed by them");
+    }
+
+    #[tokio::test]
+    async fn removing_a_file_and_marking_the_ui_are_recorded_as_whoever_did_it() {
+        use crate::backend::storage::work_media::NewMedia;
+        let state = test_state();
+        let id = held_task(&state, "Naki-2").await;
+        let file = NewMedia { sha256: "ab".repeat(32), name: "a.png".into(), kind: "image".into(), mime: "image/png".into(), size: 1, attempt: 1, ..Default::default() };
+        let row = state.identity_store.work_media_add(&id, &file, 1000).unwrap().unwrap();
+
+        let me = Actor::agent("AgentY");
+        act_as(&state, json!({"action": "ui_change", "id": id, "ui_change": true}), &me).await.unwrap();
+        act_as(&state, json!({"action": "media_remove", "id": id, "media_id": row.id}), &me).await.unwrap();
+        let events = state.identity_store.work_events(&id, 20).unwrap();
+        for kind in ["ui_change", "media_removed"] {
+            let e = events.iter().find(|e| e.kind == kind).unwrap_or_else(|| panic!("{kind}: {events:?}"));
+            assert_eq!((e.actor.as_str(), e.actor_kind.as_str()), ("AgentY", "agent"), "never the operator: {e:?}");
+        }
+        let list = state.identity_store.work_media_list(&id).unwrap();
+        assert_eq!(list[0].removed_at.is_some(), true);
+        assert!(state.identity_store.work_ui_get(&id).unwrap().0);
+
+        // The operator's own move is theirs.
+        let again = act_as(&state, json!({"action": "media_remove", "id": id, "media_id": row.id}), &Actor::operator()).await;
+        assert!(again.unwrap_err().contains("already removed"));
     }
 
     #[tokio::test]

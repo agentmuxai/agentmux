@@ -128,6 +128,9 @@ pub struct WorkCard {
     /// The path of the document it wrote (`links.doc`), empty when none.
     #[serde(default)]
     pub doc: String,
+    /// The files it carries and the UI-change flag (`work_media.rs`).
+    #[serde(default)]
+    pub media: super::work_media::MediaSummary,
 }
 
 /// A task as the board shows it: the queue row and its card.
@@ -209,6 +212,7 @@ fn row_to_card(row: &Row) -> rusqlite::Result<WorkCard> {
         followers: Vec::new(),
         pr: None,
         doc: String::new(),
+        media: Default::default(),
     })
 }
 
@@ -298,6 +302,7 @@ impl Store {
         let mut one = [t];
         attach_after(&conn, &mut one)?;
         super::work_prs::attach_prs(&conn, &mut one)?;
+        super::work_media::attach_media(&conn, &mut one)?;
         let [t] = one;
         Ok(Some(t))
     }
@@ -332,6 +337,7 @@ impl Store {
         }
         attach_after(&conn, &mut out)?;
         super::work_prs::attach_prs(&conn, &mut out)?;
+        super::work_media::attach_media(&conn, &mut out)?;
         Ok(out)
     }
 

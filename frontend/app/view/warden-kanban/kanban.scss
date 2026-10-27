@@ -611,3 +611,87 @@ $kanban-narrow: 760px;
     color: var(--secondary-text-color);
     overflow-wrap: anywhere;
 }
+
+// The files a task carries (SPEC_KANBAN_TASK_MEDIA_2026_10_25.md §4).
+.kanban-media__strip {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+}
+
+.ui-button.kanban-media__thumb {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    min-width: 0;
+    height: 32px;
+    min-height: 0;
+    padding: 0;
+    overflow: hidden;
+    color: var(--secondary-text-color);
+    background: var(--main-bg-color);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+
+    img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+}
+
+.kanban-media__play {
+    position: absolute;
+    right: var(--space-1);
+    bottom: var(--space-1);
+    font-size: var(--text-2xs);
+    color: var(--main-text-color);
+}
+
+.kanban-media__more {
+    font-size: var(--text-xs);
+    color: var(--secondary-text-color);
+}
+
+.kanban-media__flag {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-1);
+    font-size: var(--text-xs);
+    color: var(--secondary-text-color);
+}
+
+.kanban-media__grid {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
+.kanban-media__item {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    font-size: var(--text-xs);
+}
+
+.kanban-media__removed {
+    padding: var(--space-2);
+    color: var(--secondary-text-color);
+    border: 1px dashed var(--border-color);
+    border-radius: var(--radius-sm);
+}
+
+// The shared inline-media component names a recording by its stored (content-hash) file name; the file's own
+// name is the figcaption's first line, so its label keeps only the size.
+.kanban-media__item .am-media-card-name {
+    display: none;
+}
+
+.kanban-media__name {
+    overflow-wrap: anywhere;
+    color: var(--main-text-color);
+}

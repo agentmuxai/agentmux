@@ -320,6 +320,10 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md §6.2, §6.5.
         .route("/api/v1/attachments/upload", post(attachments::handle_attachment_upload))
         .route("/api/v1/attachments/:id/:kind", get(attachments::handle_attachment_file))
+        // A screenshot or recording for a Kanban task: streamed and hashed like the attachments upload (the agent-token
+        // layer above buffers whole bodies, so it is not behind it); the task call that names the file is.
+        // SPEC_KANBAN_TASK_MEDIA_2026_10_25.md §3.1.
+        .route("/agentmux/work/media", post(work_media::handle_work_media_upload))
         // First-class agent API (SPEC_AGENT_API_FIRST_CLASS_SURFACE_2026_06_17.md).
         // `GET /api/v1/self?block_id=` resolves the caller's place in the tree;
         // `POST /api/v1/window/name` sets the window display name (taskbar title).
