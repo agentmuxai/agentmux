@@ -107,8 +107,9 @@ fn refresh_auth_env(state: &AppState, block: &Block, to: &IdentityAccount, provi
     env.insert(var.to_string(), dir.clone());
     let mut update = obj::MetaMapType::new();
     update.insert("cmd:env".to_string(), serde_json::json!(env));
-    if let Err(e) = crate::server::service::update_object_meta(&state.mstore, &format!("block:{}", block.oid), &update) {
-        tracing::warn!(block_id = %block.oid, error = %e, "agent.account.switch: the pane's auth env was not updated");
+    match crate::server::service::update_object_meta(&state.mstore, &format!("block:{}", block.oid), &update) {
+        Ok(()) => blockcontroller::core::broadcast_block_update(&state.mstore, &state.event_bus, &block.oid),
+        Err(e) => tracing::warn!(block_id = %block.oid, error = %e, "agent.account.switch: the pane's auth env was not updated"),
     }
 }
 
