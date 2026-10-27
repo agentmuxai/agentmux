@@ -77,7 +77,7 @@ pub(crate) const BROWSER_TOOL: &str = r#"{
       "ignore_cache":    { "type": "boolean", "description": "reload: bypass the HTTP cache" },
       "scope":           { "type": "string", "description": "snapshot (and snapshot: true): read only one element's part of the page: a ref from a snapshot or find (e12), or, with no ref yet, a role and quoted name like dialog \"Edit item\" (or just \"Edit item\"): the first element find would list" },
       "snapshot":        { "type": "boolean", "description": "After click, fill, select, check, key, navigate, back, forward or reload (and any until_* wait): read the page again in the same call" },
-      "until_text":      { "type": "string", "description": "wait (or after an action): until the page's visible text, in any frame, contains this" },
+      "until_text":      { "type": "string", "description": "wait (or after an action): until the page's visible text, in any frame, contains this (text in a hidden frame, one whose iframe is display:none, does not count, even if it is in the page's DOM)" },
       "until_url":       { "type": "string", "description": "wait (or after an action): until the page URL contains this" },
       "until_gone":      { "type": "string", "description": "wait (or after an action): until the element with this ref has left the page" },
       "timeout_seconds": { "type": "number", "description": "wait: give up after this long (default 10, max 60)" },
