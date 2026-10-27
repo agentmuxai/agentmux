@@ -21,6 +21,7 @@ struct World {
     app: axum::Router,
     leader_uid: String,
     leader_slug: String,
+    leader_name: String,
     _defs: tempfile::TempDir,
 }
 
@@ -47,12 +48,30 @@ fn world(role: Option<&str>) -> World {
         .register_agent_full(&name, &leader_block, None, 0, Some(&leader_slug), Some(&leader_uid), "test.delegate")
         .unwrap();
     let app = crate::server::build_router(state.clone());
-    World { state, app, leader_uid, leader_slug, _defs: defs }
+    World { state, app, leader_uid, leader_slug, leader_name: name, _defs: defs }
 }
 
 impl World {
     async fn post(&self, uri: &str, body: Value) -> (StatusCode, Value) {
         let token = crate::server::tests::token_for(&self.state, &crate::server::tests::actor_in(&body));
+        let req = Request::builder()
+            .uri(uri)
+            .method("POST")
+            .header("X-AuthKey", "test-secret-key")
+            .header("X-Agent-Token", token)
+            .header("Content-Type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap();
+        let resp = self.app.clone().oneshot(req).await.unwrap();
+        let status = resp.status();
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+    }
+
+    /// A POST carrying the leader's own token.
+    async fn post_as_leader(&self, uri: &str, body: Value) -> (StatusCode, Value) {
+        self.state.mstore.attach_token_index().unwrap();
+        let token = self.state.mstore.agent_token_ensure(&self.leader_uid).unwrap();
         let req = Request::builder()
             .uri(uri)
             .method("POST")
@@ -115,7 +134,7 @@ async fn any_agent_accepts_and_the_history_says_which() {
         assert_eq!(status, StatusCode::OK, "{role:?}: {body}");
         assert_eq!(w.state_of(num), work_state::DONE);
         let e = w.events(num).into_iter().find(|e| e.kind == "accepted").expect("an accepted line");
-        assert_eq!((e.actor.as_str(), e.actor_kind.as_str()), (w.leader_slug.as_str(), "delegate"), "{role:?}");
+        assert_eq!((e.actor.as_str(), e.actor_kind.as_str()), (w.leader_name.as_str(), "delegate"), "{role:?}");
         assert!(!e.body.contains("operator"), "never the operator's: {}", e.body);
     }
 }
@@ -167,7 +186,7 @@ async fn an_agent_sends_back_with_a_reason() {
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(w.state_of(num), work_state::OPEN);
     let e = w.events(num).into_iter().find(|e| e.kind == "sent_back").expect("a sent_back line");
-    assert_eq!((e.actor.as_str(), e.actor_kind.as_str()), (w.leader_slug.as_str(), "delegate"));
+    assert_eq!((e.actor.as_str(), e.actor_kind.as_str()), (w.leader_name.as_str(), "delegate"));
     assert!(e.body.contains("it misses the tests") && !e.body.contains("operator"), "{}", e.body);
 }
 
@@ -177,13 +196,13 @@ async fn an_agent_cancels_through_the_route_as_itself() {
     let (_, made) = w.post("/agentmux/work", json!({"title": "Drop me", "payload": "p", "target_agent": unique("someone")})).await;
     let num = made["num"].as_i64().unwrap();
     let (status, body) = w
-        .post("/agentmux/work/act", json!({"agent_id": w.leader_slug, "action": "cancel", "id": num.to_string(), "text": "not needed"}))
+        .post_as_leader("/agentmux/work/act", json!({"agent_id": w.leader_slug, "action": "cancel", "id": num.to_string(), "text": "not needed"}))
         .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(w.state_of(num), work_state::CANCELLED);
     let e = w.events(num).into_iter().find(|e| e.kind == "cancelled").expect("a cancelled line");
     assert_eq!((e.actor.as_str(), e.actor_kind.as_str()), (w.leader_slug.as_str(), "agent"), "never the operator");
     // Filing is `Tasks enqueue`, not the Kanban window's create.
-    let (_, body) = w.post("/agentmux/work/act", json!({"agent_id": w.leader_slug, "action": "create", "title": "x"})).await;
+    let (_, body) = w.post_as_leader("/agentmux/work/act", json!({"agent_id": w.leader_slug, "action": "create", "title": "x"})).await;
     assert!(body["error"].as_str().unwrap_or_default().contains("Tasks enqueue"), "{body}");
 }
