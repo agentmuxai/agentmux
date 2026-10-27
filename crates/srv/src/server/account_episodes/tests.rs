@@ -621,4 +621,9 @@ async fn listing_accounts_numbers_same_email_groups_and_keeps_the_numbers() {
     state.id_store.identity_set_context_email("third", "new@example.com").unwrap();
     let r = list().await;
     assert_eq!(seq(&r, "third"), Some(json!(1)), "numbered afresh in its new group");
+
+    // A change of case only is the same group and keeps its number.
+    state.id_store.identity_set_context_email("second", "ME@Example.com ").unwrap();
+    let r = list().await;
+    assert_eq!(seq(&r, "second"), Some(json!(2)));
 }

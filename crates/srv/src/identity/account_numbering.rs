@@ -56,14 +56,26 @@ pub fn missing_seqs(accounts: &[IdentityAccount]) -> Vec<(String, u32)> {
 /// shares its provider and email. `all` is every account that could be shown
 /// beside it.
 pub fn numbered_label(a: &IdentityAccount, label: &str, all: &[IdentityAccount]) -> String {
-    let (Some(key), Some(n)) = (group_key(a), seq_of(a)) else {
+    let (Some(_), Some(n)) = (group_key(a), seq_of(a)) else {
         return label.to_string();
     };
-    let shared = all.iter().filter(|o| group_key(o).as_ref() == Some(&key)).count();
-    if shared < 2 {
+    if group_size(a, all) < 2 {
         return label.to_string();
     }
     format!("{label} \u{b7}{n}")
+}
+
+/// How many of `all` share `a`'s provider and email, `a` included; 1 without an email.
+fn group_size(a: &IdentityAccount, all: &[IdentityAccount]) -> usize {
+    match group_key(a) {
+        Some(key) => all.iter().filter(|o| group_key(o).as_ref() == Some(&key)).count(),
+        None => 1,
+    }
+}
+
+/// Whether two emails are the same group's: equal ignoring case and padding.
+pub fn same_email(a: &str, b: &str) -> bool {
+    a.trim().to_lowercase() == b.trim().to_lowercase()
 }
 
 /// Whether `wanted` (an id, name, display name, email, or `email ·N`) names `a`.
@@ -77,7 +89,8 @@ pub fn names(a: &IdentityAccount, wanted: &str, all: &[IdentityAccount]) -> bool
     if is_numbered && numbered.eq_ignore_ascii_case(&normalize_dot(wanted)) {
         return true;
     }
-    let bare_email_is_ambiguous = is_numbered && email.eq_ignore_ascii_case(wanted);
+    // By the group, not by the number: an account not listed yet has none.
+    let bare_email_is_ambiguous = !email.is_empty() && email.eq_ignore_ascii_case(wanted) && group_size(a, all) >= 2;
     !bare_email_is_ambiguous
         && [a.id.as_str(), a.name.as_str(), a.display_name.as_str(), email]
             .into_iter()
@@ -155,6 +168,8 @@ mod tests {
         assert!(names(&all[1], "me@example.com \u{b7}2", &all) && !names(&all[0], "me@example.com \u{b7}2", &all));
         assert!(names(&all[1], "me@example.com 2", &all), "the dot is optional when typing");
         assert!(names(&all[0], "a", &all), "the id still names it");
+        let unlisted = [acct("a", "me@example.com", None, 1), acct("b", "me@example.com", None, 2)];
+        assert!(!names(&unlisted[0], "me@example.com", &unlisted), "ambiguous before either has a number");
         let lone = [acct("a", "me@example.com", Some(1), 1)];
         assert!(names(&lone[0], "ME@example.com", &lone), "a lone account answers to its email");
     }

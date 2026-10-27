@@ -308,7 +308,14 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // meanwhile, or repoint the mirror's `secret_ref`). A failed
                 // write still returns the email.
                 for account in &mut accounts {
+                    let before = account.context.get("email").and_then(|e| e.as_str()).unwrap_or("").to_string();
                     if let Some(email) = crate::identity::account_email::refresh_account_email(account) {
+                        // Another address is another group (the store drops the number the same way).
+                        if !crate::identity::account_numbering::same_email(&before, &email) {
+                            if let Some(ctx) = account.context.as_object_mut() {
+                                ctx.remove("seq");
+                            }
+                        }
                         for store in [&mstore, &identity_store] {
                             if let Err(e) = store.identity_set_context_email(&account.id, &email) {
                                 tracing::warn!(target: "identity", account_id = %account.id, error = %e, "listidentityaccounts: email backfill write failed");

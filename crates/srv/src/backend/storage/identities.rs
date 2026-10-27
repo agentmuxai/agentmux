@@ -356,12 +356,18 @@ impl Store {
         let conn = self.conn.lock().unwrap();
         // A different address is a different group: the old number goes, and
         // the next list numbers the account afresh (`identity::account_numbering`).
+        // A change of case or padding only is the same group and keeps it.
         let n = conn.execute(
             "UPDATE db_accounts
-                SET context = json_remove(json_set(
+                SET context = CASE
+                    WHEN json_valid(context) AND json_type(context) = 'object'
+                         AND lower(trim(COALESCE(json_extract(context, '$.email'), ''))) = lower(trim(?2))
+                    THEN json_set(context, '$.email', ?2)
+                    ELSE json_remove(json_set(
                         CASE WHEN json_valid(context) AND json_type(context) = 'object'
                              THEN context ELSE '{}' END,
                         '$.email', ?2), '$.seq')
+                END
               WHERE id = ?1",
             params![id, email],
         )?;
