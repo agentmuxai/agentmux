@@ -47,6 +47,19 @@ impl WaitReason {
     }
 }
 
+impl WaitReason {
+    /// What ends the wait, as the answer names it (`retry_when`): the sender decides from this,
+    /// never from the wording of the error.
+    pub fn retry_when(self) -> &'static str {
+        match self {
+            Self::NotRunning => "start",
+            Self::NeedsLogin => "sign_in",
+            Self::UsageLimit => "reset_or_account_move",
+            Self::Cold => "session_active",
+        }
+    }
+}
+
 /// What to do with one message.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Verdict {
@@ -182,6 +195,7 @@ mod tests {
     fn the_wire_strings_are_the_existing_held_reasons() {
         let all = [WaitReason::NotRunning, WaitReason::NeedsLogin, WaitReason::UsageLimit, WaitReason::Cold];
         assert_eq!(all.map(WaitReason::as_str), ["not_running", "needs_login", "usage_limit", "idle"]);
+        assert_eq!(all.map(WaitReason::retry_when), ["start", "sign_in", "reset_or_account_move", "session_active"]);
     }
 
     /// What `jekt_hold::holding_unavailable` filtered before it asked this module: out of quota with

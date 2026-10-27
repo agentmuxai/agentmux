@@ -563,17 +563,19 @@ describe("runLaunchFlow — a container agent has no host CLI", () => {
         hub.listAgentIdentities.mockResolvedValue([]);
         const phases: string[] = [];
         const notices: string[] = [];
+        const kinds: Array<string | undefined> = [];
         const result = await runLaunchFlow({
             blockId: "block-1",
             provider: claude,
             log: vi.fn(),
             setLaunchPhase: (p) => { if (p) phases.push(p.kind); },
-            onNotify: (text) => notices.push(text),
+            onNotify: (text, _style, kind) => { notices.push(text); kinds.push(kind); },
         });
 
         expect(result).toBe("auth_failed");
         expect(phases).toEqual(["resolving-cli", "first-login"]);
         expect(notices[0]).toMatch(/sign in/i);
+        expect(kinds[0]).toBe("sign-in");
         expect(hub.resolveCli).not.toHaveBeenCalled();
         expect(hub.checkCliAuth).not.toHaveBeenCalled();
     });

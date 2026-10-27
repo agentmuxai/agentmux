@@ -75,8 +75,10 @@ export interface LaunchFlowOptions {
      *  anything that isn't a login *success* (the hook's `onLoginSuccess`) but
      *  still shouldn't be silent: a warning before an automatic relogin
      *  attempt, or the end-of-mount "ready"/"resumed" summary. See
-     *  docs/specs/SPEC_AGENT_PANE_AUTH_NOTIFICATIONS_2026_07_26.md. */
-    onNotify?: (text: string, style: "info" | "warning") => void;
+     *  docs/specs/SPEC_AGENT_PANE_AUTH_NOTIFICATIONS_2026_07_26.md.
+     *  `kind: "sign-in"` marks the line that says the user must sign in, which a later
+     *  sign-in (a login or an account bound) answers in the transcript. */
+    onNotify?: (text: string, style: "info" | "warning", kind?: "sign-in") => void;
     /**
      * Returns the pane's current `{rows, cols}` (or undefined if not laid out
      * yet). Used to seed the PTY size on the Phase-3 resync so the agent CLI is
@@ -217,7 +219,7 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
         }
         if (provider.authType === "oauth" && !linkedAccountId) {
             setPhase({ kind: "first-login" });
-            notify(`${provider.displayName} needs you to sign in before this agent can start. Click "Log in" to continue.`, "info");
+            notify(`${provider.displayName} needs you to sign in before this agent can start. Click "Log in" to continue.`, "info", "sign-in");
             log("auth", "no account linked: waiting for the user to start a login");
             return "auth_failed";
         }
@@ -338,10 +340,10 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
         // for why first-login and auth-expired still get different wording.
         if (existingAccountId) {
             setPhase({ kind: "auth-expired" });
-            notify(`Your ${provider.displayName} login has expired. Click "Log in" to continue.`, "warning");
+            notify(`Your ${provider.displayName} login has expired. Click "Log in" to continue.`, "warning", "sign-in");
         } else {
             setPhase({ kind: "first-login" });
-            notify(`${provider.displayName} needs you to sign in before this agent can start. Click "Log in" to continue.`, "info");
+            notify(`${provider.displayName} needs you to sign in before this agent can start. Click "Log in" to continue.`, "info", "sign-in");
         }
         log("auth", "not authenticated — waiting for the user to start a login");
         return "auth_failed";

@@ -308,6 +308,11 @@ impl ContainerStartup {
     }
 
     async fn run_reporting(&self, report_failure: bool) -> Result<(), String> {
+        // The workspace is mounted into the container: signing keys an earlier launch wrote into its
+        // .mcp.json come out before it starts (and a launch no longer writes them).
+        if let Some(dir) = self.mount_spec.workspace_host_dir.clone() {
+            let _ = tokio::task::spawn_blocking(move || crate::backend::mcp_json_identity::strip_workspace_signing_keys(&dir)).await;
+        }
         let image = resolve_container_image(&self.image);
         let began = Instant::now();
         let start_id = uuid::Uuid::new_v4().to_string();

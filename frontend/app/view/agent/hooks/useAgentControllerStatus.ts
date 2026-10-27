@@ -65,7 +65,11 @@ export interface UseAgentControllerStatusOptions {
     log: LogFn;
     onLoginSuccess?: (email: string | null) => void;
     /** Forwarded to the launch flow — see `LaunchFlowOptions.onNotify`. */
-    onNotify?: (text: string, style: "info" | "warning") => void;
+    onNotify?: (text: string, style: "info" | "warning", kind?: "sign-in") => void;
+    /** An account was bound to this agent (`bindExistingAccount`) and the move is in effect or will
+     *  be: `label` names it. The transcript's "sign in" line is answered here, as a login answers it
+     *  through `onLoginSuccess`. */
+    onAccountBound?: (label: string) => void;
     /** Called once when the launch flow completes successfully and the agent is ready to receive messages. */
     onReady?: () => void;
     /**
@@ -627,6 +631,7 @@ export function useAgentControllerStatus(
             if (r.failed.length > 0) setAuthNotice(r.failed.join(" "));
             // Another pane of this agent is in a turn: the move waits for it.
             else if (r.status === "queued") setAuthNotice(`Moves to ${r.account_label} when the turn ends.`);
+            if (r.failed.length === 0) opts.onAccountBound?.(account.display_name || account.name);
         } catch (e: any) {
             // A failed link upsert surfaces as a notice, like every other
             // failed recovery here (callers don't attach their own catch).
