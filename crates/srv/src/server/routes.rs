@@ -602,7 +602,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
             get(agent_self_keys::handle_agent_self_keys),
         )
         .route("/agentmux/work", get(work_queue::handle_work_list))
-        // Kanban: a leader's decision on a task in review (signed, not a token).
+        // Kanban: an agent's decision on a task in review (signed, not a token).
         .route("/agentmux/work/:id/accept", post(work_delegate::handle_work_accept))
         .route("/agentmux/work/:id/send_back", post(work_delegate::handle_work_send_back))
         .merge(bus_routes)

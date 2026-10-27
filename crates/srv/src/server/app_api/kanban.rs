@@ -515,6 +515,11 @@ pub(crate) async fn act_as(state: &AppState, data: Value, actor: &Actor) -> Resu
     if !actor.is_operator && matches!(req.action.as_str(), "create" | "track") {
         return Err(format!("{}: file a task with Tasks enqueue and take it with claim", req.action));
     }
+    // An agent decides on a task in review through its own routes, which record the agent
+    // (and its own work); here the decision would be recorded as the operator's.
+    if !actor.is_operator && matches!(req.action.as_str(), "accept" | "send_back") {
+        return Err(format!("{}: an agent decides with Tasks {}", req.action, req.action));
+    }
     let now = now_ms();
     let regs = state.reactive_handler.list_agents();
     let store = &state.work_store;

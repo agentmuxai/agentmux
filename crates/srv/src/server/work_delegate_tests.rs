@@ -206,3 +206,17 @@ async fn an_agent_cancels_through_the_route_as_itself() {
     let (_, body) = w.post_as_leader("/agentmux/work/act", json!({"agent_id": w.leader_slug, "action": "create", "title": "x"})).await;
     assert!(body["error"].as_str().unwrap_or_default().contains("Tasks enqueue"), "{body}");
 }
+
+#[tokio::test]
+async fn the_act_route_does_not_decide_in_the_operators_name() {
+    let w = world(None);
+    let num = w.in_review().await;
+    for action in ["accept", "send_back"] {
+        let (status, body) = w
+            .post_as_leader("/agentmux/work/act", json!({"agent_id": w.leader_slug, "action": action, "id": num.to_string(), "text": "because"}))
+            .await;
+        assert_eq!(status, StatusCode::CONFLICT, "{body}");
+        assert_eq!(w.state_of(num), work_state::REVIEW, "{action} must not move the task");
+    }
+    assert!(w.events(num).iter().all(|e| e.actor_kind != "operator" || e.kind == "created"), "nothing is recorded as the operator");
+}
