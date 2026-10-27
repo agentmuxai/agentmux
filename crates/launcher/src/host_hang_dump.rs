@@ -92,20 +92,73 @@ pub fn prune_old_dumps(dir: &Path, keep: usize) {
     }
 }
 
+/// A copy of a process handle with the same rights, for a dump written off the supervisor's
+/// thread while the original stays with its `Child`. Close it with [`close_copy`].
+#[cfg(target_os = "windows")]
+pub fn copy_handle(raw: std::os::windows::io::RawHandle) -> Option<usize> {
+    use windows_sys::Win32::Foundation::{DuplicateHandle, DUPLICATE_SAME_ACCESS, HANDLE};
+    use windows_sys::Win32::System::Threading::GetCurrentProcess;
+    let mut out: HANDLE = std::ptr::null_mut();
+    // SAFETY: duplicates a handle this process owns into this process.
+    let ok = unsafe { DuplicateHandle(GetCurrentProcess(), raw as HANDLE, GetCurrentProcess(), &mut out, 0, 0, DUPLICATE_SAME_ACCESS) };
+    (ok != 0 && !out.is_null()).then_some(out as usize)
+}
+
+#[cfg(target_os = "windows")]
+pub fn close_copy(handle: usize) {
+    // SAFETY: `handle` came from [`copy_handle`] and is closed once.
+    unsafe { windows_sys::Win32::Foundation::CloseHandle(handle as windows_sys::Win32::Foundation::HANDLE) };
+}
+
+/// What a snapshot of the host keeps for the dump: its memory (cloned), handles with their names,
+/// threads and their registers.
+#[cfg(target_os = "windows")]
+const SNAPSHOT_CAPTURE: u32 = 0x1 | 0x4 | 0x8 | 0x10 | 0x20 | 0x80 | 0x100;
+
+#[cfg(all(target_os = "windows", target_arch = "aarch64"))]
+const THREAD_CONTEXT_ALL: u32 = windows_sys::Win32::System::Diagnostics::Debug::CONTEXT_ALL_ARM64;
+#[cfg(all(target_os = "windows", not(target_arch = "aarch64")))]
+const THREAD_CONTEXT_ALL: u32 = windows_sys::Win32::System::Diagnostics::Debug::CONTEXT_ALL_AMD64;
+
+/// Tells the dump writer its process handle is a snapshot (callback type `IsProcessSnapshotCallback`
+/// answers `S_FALSE`).
+#[cfg(target_os = "windows")]
+unsafe extern "system" fn snapshot_callback(
+    _param: *mut core::ffi::c_void,
+    input: *const windows_sys::Win32::System::Diagnostics::Debug::MINIDUMP_CALLBACK_INPUT,
+    output: *mut windows_sys::Win32::System::Diagnostics::Debug::MINIDUMP_CALLBACK_OUTPUT,
+) -> windows_sys::Win32::Foundation::BOOL {
+    use windows_sys::Win32::System::Diagnostics::Debug::IsProcessSnapshotCallback;
+    // SAFETY: the dump writer passes valid pointers to packed structs; read and write unaligned.
+    unsafe {
+        let kind = std::ptr::addr_of!((*input).CallbackType).read_unaligned();
+        if kind == IsProcessSnapshotCallback as u32 {
+            std::ptr::addr_of_mut!((*output).Anonymous.Status).write_unaligned(windows_sys::Win32::Foundation::S_FALSE);
+        }
+    }
+    1
+}
+
 /// Write a minidump of process `pid` into `dir` from OUTSIDE the process —
 /// works while every thread of the target is blocked. Thread stacks + thread
 /// info + handles (for lock/wait analysis) + module lists; not full memory,
 /// which keeps it to a few MB and limits what user data it can contain.
+///
+/// `handle` is a handle to the process with the rights a dump needs (the one `CreateProcess`
+/// returned, or a copy of it): the host refuses other processes of the user those rights once it
+/// has hardened itself, so the launcher must not open it by pid. The caller keeps ownership of
+/// the handle. With `None` the process is opened by pid.
 #[cfg(target_os = "windows")]
-pub fn write_hang_dump(pid: u32, dir: &Path) -> Result<PathBuf, String> {
+pub fn write_hang_dump(pid: u32, handle: Option<usize>, dir: &Path) -> Result<PathBuf, String> {
     use std::os::windows::io::AsRawHandle;
     use windows_sys::Win32::Foundation::CloseHandle;
     use windows_sys::Win32::System::Diagnostics::Debug::{
         MiniDumpWithHandleData, MiniDumpWithThreadInfo, MiniDumpWithUnloadedModules,
-        MiniDumpWriteDump,
+        MiniDumpWriteDump, MINIDUMP_CALLBACK_INFORMATION,
     };
+    use windows_sys::Win32::System::Diagnostics::ProcessSnapshotting::{PssCaptureSnapshot, PssFreeSnapshot};
     use windows_sys::Win32::System::Threading::{
-        OpenProcess, PROCESS_DUP_HANDLE, PROCESS_QUERY_INFORMATION, PROCESS_VM_READ,
+        GetCurrentProcess, OpenProcess, PROCESS_DUP_HANDLE, PROCESS_QUERY_INFORMATION, PROCESS_VM_READ,
     };
 
     std::fs::create_dir_all(dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
@@ -120,28 +173,47 @@ pub fn write_hang_dump(pid: u32, dir: &Path) -> Result<PathBuf, String> {
         // DUP_HANDLE: MiniDumpWithHandleData silently omits the handle
         // stream without it — and handles are how a deadlock dump shows
         // which mutex/event each thread is waiting on.
-        let process = OpenProcess(
-            PROCESS_QUERY_INFORMATION | PROCESS_VM_READ | PROCESS_DUP_HANDLE,
-            0,
-            pid,
-        );
+        let process = match handle {
+            Some(h) => h as windows_sys::Win32::Foundation::HANDLE,
+            None => OpenProcess(
+                PROCESS_QUERY_INFORMATION | PROCESS_VM_READ | PROCESS_DUP_HANDLE,
+                0,
+                pid,
+            ),
+        };
         if process.is_null() {
             drop(file);
             let _ = std::fs::remove_file(&path);
             return Err(format!("OpenProcess({pid}) failed: {}", std::io::Error::last_os_error()));
         }
         let dump_type = MiniDumpWithThreadInfo | MiniDumpWithHandleData | MiniDumpWithUnloadedModules;
+        // The dump writer reads the process through its own handle to it, which a hardened process
+        // refuses; a snapshot taken through the handle we hold is a copy of the process in our own
+        // hands, and that it can dump.
+        let mut snapshot: windows_sys::Win32::System::Diagnostics::ProcessSnapshotting::HPSS = std::ptr::null_mut();
+        let from_snapshot = handle.is_some()
+            && PssCaptureSnapshot(process, SNAPSHOT_CAPTURE, THREAD_CONTEXT_ALL, &mut snapshot) == 0
+            && !snapshot.is_null();
+        let callbacks = MINIDUMP_CALLBACK_INFORMATION {
+            CallbackRoutine: Some(snapshot_callback),
+            CallbackParam: std::ptr::null_mut(),
+        };
         let ok = MiniDumpWriteDump(
-            process,
+            if from_snapshot { snapshot as _ } else { process },
             pid,
             file.as_raw_handle() as _,
             dump_type,
             std::ptr::null(),
             std::ptr::null(),
-            std::ptr::null(),
+            if from_snapshot { &callbacks } else { std::ptr::null() },
         );
         let err = std::io::Error::last_os_error();
-        CloseHandle(process);
+        if from_snapshot {
+            PssFreeSnapshot(GetCurrentProcess(), snapshot);
+        }
+        if handle.is_none() {
+            CloseHandle(process);
+        }
         if ok == 0 {
             Err(err)
         } else {
@@ -247,7 +319,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("amux-hang-dump-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
 
-        let result = write_hang_dump(child.id(), &dir);
+        let result = write_hang_dump(child.id(), None, &dir);
         let _ = child.kill();
         let _ = child.wait();
 
@@ -263,6 +335,62 @@ mod tests {
         const HANDLE_DATA: u32 = 12;
         assert!(types.contains(&THREAD_LIST), "thread stacks: {types:?}");
         assert!(types.contains(&HANDLE_DATA), "handle data: {types:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Runs only as the child of the next test: hardens itself and waits for its stdin to close.
+    #[cfg(target_os = "windows")]
+    #[test]
+    #[ignore = "runs as the child of dumps_a_hardened_process_through_the_handle_its_creator_holds"]
+    fn hardened_hang_child() {
+        use std::io::{Read, Write};
+        if std::env::var_os("AGENTMUX_HD_CHILD").is_none() {
+            return;
+        }
+        println!("HARDENED {}", agentmux_common::process_hardening::apply());
+        std::io::stdout().flush().unwrap();
+        let _ = std::io::stdin().read_to_end(&mut Vec::new());
+    }
+
+    /// The host hardens itself, so the launcher cannot open it by pid for a dump; it uses a copy of
+    /// the handle `CreateProcess` gave it.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn dumps_a_hardened_process_through_the_handle_its_creator_holds() {
+        use std::io::{BufRead, BufReader};
+        use std::os::windows::io::AsRawHandle;
+        use std::process::{Command, Stdio};
+        let mut child = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "host_hang_dump::tests::hardened_hang_child", "--ignored", "--nocapture"])
+            .env("AGENTMUX_HD_CHILD", "1")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
+        let hardened = lines.by_ref().map(|l| l.unwrap()).find(|l| l.starts_with("HARDENED "));
+        assert_eq!(hardened.as_deref(), Some("HARDENED true"));
+        let dir = std::env::temp_dir().join(format!("amux-hang-dump-hardened-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let by_pid = write_hang_dump(child.id(), None, &dir);
+        assert!(by_pid.is_err(), "opening a hardened process by pid is refused: {by_pid:?}");
+
+        let copy = copy_handle(child.as_raw_handle()).expect("a copy of the creation handle");
+        let by_handle = write_hang_dump(child.id(), Some(copy), &dir);
+        close_copy(copy);
+        drop(child.stdin.take());
+        let _ = child.wait();
+
+        let path = by_handle.unwrap_or_else(|e| panic!("dump written through the held handle: {e}"));
+        let bytes = std::fs::read(&path).unwrap();
+        assert_eq!(&bytes[..4], b"MDMP", "minidump signature");
+        // Same streams as the dump taken by pid: thread stacks and the handle table survive the snapshot.
+        let u32_at = |o: usize| u32::from_le_bytes(bytes[o..o + 4].try_into().unwrap());
+        let (n, stream_dir) = (u32_at(8) as usize, u32_at(12) as usize);
+        let types: Vec<u32> = (0..n).map(|i| u32_at(stream_dir + 12 * i)).collect();
+        assert!(types.contains(&3), "thread stacks: {types:?}");
+        assert!(types.contains(&12), "handle data: {types:?}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
