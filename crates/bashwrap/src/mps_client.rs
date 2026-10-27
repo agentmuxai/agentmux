@@ -22,6 +22,25 @@ use std::sync::Arc;
 
 const PUBLISH_PATH: &str = "/agentmux/wps/publish";
 
+/// Where a container agent's output goes: srv takes only its own pane's `tool_chunk` there, and
+/// refuses its token on the generic relay above.
+const CONTAINER_TOOL_CHUNK_PATH: &str = "/api/v1/agent/tool-chunk";
+
+/// Where `event` is published from here, or `None` when srv takes it from nobody here: a
+/// container's `compaction_started` is refused, and srv ignores it anyway.
+fn publish_path(event: &str, in_container: bool) -> Option<&'static str> {
+    match (in_container, event) {
+        (false, _) => Some(PUBLISH_PATH),
+        (true, TOOL_CHUNK_EVENT) => Some(CONTAINER_TOOL_CHUNK_PATH),
+        (true, _) => None,
+    }
+}
+
+/// Set by srv for a turn in a container, as a hint for this client (`container_exec_env`).
+fn in_container() -> bool {
+    std::env::var("AGENTMUX_IN_CONTAINER").is_ok_and(|v| v == "1")
+}
+
 /// Per-launch sidecar config + reusable HTTP client. Cheap to clone
 /// (the inner `reqwest::Client` uses Arc internally).
 #[derive(Clone)]
@@ -180,13 +199,14 @@ impl WpsClient {
         payload: &impl Serialize,
         timeout_override: Option<std::time::Duration>,
     ) -> Result<()> {
+        let Some(path) = publish_path(event, in_container()) else { return Ok(()) };
         let body = WpsPublishRequest {
             event: event.to_string(),
             scopes: block_id.map(|b| vec![format!("block:{b}")]).unwrap_or_default(),
             persist,
             data: serde_json::to_value(payload)?,
         };
-        let url = format!("{}{}", self.endpoint, PUBLISH_PATH);
+        let url = format!("{}{}", self.endpoint, path);
         let mut req = self
             .inner
             .post(&url)
@@ -222,6 +242,14 @@ mod tests {
     fn clear_env() {
         std::env::remove_var("AGENTMUX_LOCAL_URL");
         std::env::remove_var("AGENTMUX_AUTH_KEY");
+    }
+
+    #[test]
+    fn a_container_streams_to_its_own_route_and_sends_nothing_else() {
+        assert_eq!(publish_path("tool_chunk", false), Some("/agentmux/wps/publish"));
+        assert_eq!(publish_path("compaction_started", false), Some("/agentmux/wps/publish"));
+        assert_eq!(publish_path("tool_chunk", true), Some("/api/v1/agent/tool-chunk"));
+        assert_eq!(publish_path("compaction_started", true), None);
     }
 
     #[test]

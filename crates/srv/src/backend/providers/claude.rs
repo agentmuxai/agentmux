@@ -50,6 +50,9 @@ pub(super) static CLAUDE: ProviderConfig = ProviderConfig {
         "--verbose",
         "--include-partial-messages",
         "--exclude-dynamic-system-prompt-sections",
+        // Replays the user turns the CLI takes in, with their typed origin, so a message
+        // another session sends this agent shows up in the stream (`backend::cli_native`).
+        "--replay-user-messages",
         // Enable the control protocol so the sidecar can answer can_use_tool /
         // AskUserQuestion. Replaces --dangerously-skip-permissions (which bypasses it).
         "--permission-prompt-tool",

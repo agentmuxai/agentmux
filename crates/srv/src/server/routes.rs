@@ -247,6 +247,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/schema/*path", get(files::handle_schema))
         .route("/api/lan-instances", get(handle_lan_instances))
         .route("/agentmux/discovery", get(handle_discovery))
+        .route("/agentmux/reactive/availability", get(super::availability_view::handle_availability))
         .route("/agentmux/diag/sagas", get(handle_diag_sagas))
         // Streaming-bash wrapper publish endpoint
         // (SPEC_STREAMING_BASH_RUNNER_2026_05_11.md §4.3). agentmux-bashwrap
@@ -254,6 +255,13 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // Bash command is running; we forward to the in-process MPS broker.
         // Auth-gated like the other reactive routes (PR #801 pattern).
         .route("/agentmux/wps/publish", post(handle_wps_publish))
+        // A container agent's bashwrap: its own pane's `tool_chunk` only (the generic relay above
+        // is refused to a container token).
+        .route(
+            "/api/v1/agent/tool-chunk",
+            post(container_tool_chunk::handle_container_tool_chunk)
+                .layer(axum::extract::DefaultBodyLimit::max(container_tool_chunk::MAX_BODY_BYTES)),
+        )
         // Persistent shell launch endpoint
         // (SPEC_PERSISTENT_SHELL_NODE_2026_06_11.md §5.3). agentmux-mcp's
         // Shell tool POSTs here; we publish shell_node_create + spawn a

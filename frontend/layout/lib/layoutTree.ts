@@ -34,6 +34,7 @@ import {
 } from "./types";
 
 import { newLayoutNode } from "./layoutNode";
+import { dockedStackOf, moveStackIntoDockColumn } from "./layoutRestore";
 import { countExpandedLeaves, isEffectivelyMinimized, isNodeLocked } from "./layoutMinimize";
 import { LayoutTreeReplaceNodeAction, LayoutTreeSplitHorizontalAction, LayoutTreeSplitVerticalAction } from "./types";
 
@@ -553,7 +554,10 @@ export function minimizeNode(layoutState: LayoutTreeState, action: LayoutTreeMin
 export function restoreNode(layoutState: LayoutTreeState, action: LayoutTreeMinimizeNodeAction) {
     const node = findNode(layoutState.rootNode, action.nodeId);
     if (!node || node.children?.length) return;
+    // A chip docked onto a pane of its Row grows in that pane's column, not in a column of its own.
+    const stack = dockedStackOf(layoutState.rootNode, node);
     node.minimized = undefined;
+    if (stack) moveStackIntoDockColumn(stack.row, stack.dock, stack.items);
 }
 
 export function clearTree(layoutState: LayoutTreeState) {
