@@ -75,6 +75,8 @@ pub(crate) fn extract_version(e: &Event) -> u64 {
         | Event::WindowMetaUpdated { version, .. }
         | Event::TabMoved { version, .. }
         | Event::BlockMoved { version, .. }
+        | Event::BlockParked { version, .. }
+        | Event::BlockAttached { version, .. }
         | Event::FocusedNodeChanged { version, .. }
         | Event::MagnifiedNodeChanged { version, .. }
         | Event::SagaActionFailed { version, .. }
