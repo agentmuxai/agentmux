@@ -138,13 +138,19 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     // slug migration's precondition (`slug_migration::stamp`).
     crate::backend::slug_migration::stamp::write(&base::get_mux_data_dir());
 
-    // Startup diagnostics
+    // Startup diagnostics. `home` is the folder this instance's whole data lives under: the real
+    // ~/.agentmux unless `AGENTMUX_HOME_OVERRIDE` names another (`task dev` always does).
+    let home_override = std::env::var_os("AGENTMUX_HOME_OVERRIDE").filter(|v| !v.is_empty());
     tracing::info!(
         data_dir = %base::get_mux_data_dir().display(),
         db_dir = %base::get_mux_db_dir().display(),
         app_path = %config.app_path,
         instance_id = %config.instance_id,
         secret_store = crate::identity::secret_store::backend_name(),
+        home = %home_override.as_ref().map(|h| h.to_string_lossy().into_owned()).unwrap_or_else(|| {
+            agentmux_common::data_paths::agentmux_root().map(|p| p.display().to_string()).unwrap_or_default()
+        }),
+        home_isolated = home_override.is_some(),
         "backend directories initialized"
     );
 

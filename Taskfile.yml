@@ -83,6 +83,10 @@ tasks:
             AGENTMUX_ENVFILE: "{{.ROOT_DIR}}/.env"
             AGENTMUX_DEV: "1"
 
+    dev:seed:
+        desc: 'Give the running task dev build''s isolated home an agent that works with no account (the scripted fake Claude Code, a placeholder account, an agent linked to it). Run it once the dev window is up. Optional: -- --agents 3 --name demo --port 9223 --home <dir>. See scripts/dev-seed.mjs.'
+        cmd: node scripts/dev-seed.mjs {{.CLI_ARGS}}
+
     dev:standalone:
         desc: Run AgentMux in dev mode with the launcher BYPASSED (host invoked directly). Escape hatch for debugging the no-launcher fallback path. See docs/specs/SPEC_LAUNCHER_DEV_INTEGRATION_2026-05-13.md §5.4.
         cmds:
@@ -1075,6 +1079,10 @@ tasks:
                 bash scripts/vite-port.sh check "$AGENTMUX_VITE_PORT" || exit 1
                 VITE_URL="http://localhost:$AGENTMUX_VITE_PORT"
                 export AGENTMUX_VITE_PORT
+                # The dev build's own data home, so it never reads or changes the real ~/.agentmux
+                # (its agents, accounts, transcripts). Opt out with AGENTMUX_DEV_USE_REAL_HOME=1.
+                # See scripts/dev-home.mjs and .claude/skills/run/SKILL.md.
+                eval "$(node scripts/dev-home.mjs "$(pwd -P 2>/dev/null || pwd)" "$AGENTMUX_VITE_PORT")" || exit 1
 
                 # Resolve a possibly-`subst`'d drive to its real underlying path
                 # (Windows only; subst is how docs/retro/RETRO_CEF_C1083_PARALLEL_BUILD_RACE_2026_07_14.md's
@@ -1355,6 +1363,10 @@ tasks:
                 bash scripts/vite-port.sh check "$AGENTMUX_VITE_PORT" || exit 1
                 VITE_URL="http://localhost:$AGENTMUX_VITE_PORT"
                 export AGENTMUX_VITE_PORT
+                # The dev build's own data home, so it never reads or changes the real ~/.agentmux
+                # (its agents, accounts, transcripts). Opt out with AGENTMUX_DEV_USE_REAL_HOME=1.
+                # See scripts/dev-home.mjs and .claude/skills/run/SKILL.md.
+                eval "$(node scripts/dev-home.mjs "$(pwd -P 2>/dev/null || pwd)" "$AGENTMUX_VITE_PORT")" || exit 1
                 if curl -s --max-time 1 "$VITE_URL" > /dev/null 2>&1; then
                   echo "❌ Port $AGENTMUX_VITE_PORT is already in use."
                   echo "   Override with AGENTMUX_VITE_PORT=<free-port> task dev:standalone"
