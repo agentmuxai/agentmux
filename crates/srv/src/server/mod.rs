@@ -34,6 +34,7 @@ pub(crate) mod agent_self_keys;
 pub(crate) mod jekt_held;
 mod jekt_hold;
 mod jekt_cold;
+mod limit_probe;
 pub(crate) mod jekt_files;
 pub(crate) mod jekt_cloud;
 pub(crate) mod jekt_seal;
