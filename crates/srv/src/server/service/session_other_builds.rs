@@ -390,7 +390,8 @@ pub(crate) async fn restore(
     let windows = windows_of(&record);
     let first = windows.first().ok_or("the saved layout has no windows")?;
 
-    let (events, replayed) = replay_tabs(state, &ws_id, &replay_tabs_of(first), "restore_other_build").await;
+    let saved_tabs = replay_tabs_of(first);
+    let (events, replayed) = replay_tabs(state, &ws_id, &saved_tabs, "restore_other_build").await;
     publish_events(state, &events);
     let by_index: HashMap<usize, String> =
         replayed.iter().enumerate().filter_map(|(i, r)| r.as_ref().map(|r| (i, r.tab_id.clone()))).collect();
@@ -423,6 +424,21 @@ pub(crate) async fn restore(
         None => false,
     };
     if replaced_default {
+        // The default tab held a name (say "Tab 1") while the saved tabs were
+        // made, so one with that name came back suffixed. It is gone now:
+        // give them back their saved names, where no other tab has them.
+        for (saved, came_back) in saved_tabs.iter().zip(&replayed) {
+            let Some(came_back) = came_back else { continue };
+            let current = store.get::<Tab>(&came_back.tab_id).ok().flatten().map(|t| t.name);
+            if current.as_deref().is_some_and(|c| c != saved.name) && !saved.name.is_empty() {
+                let evs = dispatch_to_reducer(
+                    state,
+                    Command::RenameTab { tab_id: came_back.tab_id.clone(), name: saved.name.clone() },
+                )
+                .await;
+                apply_publish(state, &evs).await;
+            }
+        }
         // The window becomes the saved one: its name and appearance too.
         let patch = first.get("window").map(patch_of).unwrap_or_default();
         if !patch.is_empty() {
