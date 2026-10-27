@@ -127,7 +127,9 @@ async fn decide(state: &AppState, caller: Option<&Caller>, id: &str, req: Decisi
             refused(r)
         }
         Ok(()) => {
-            let by = Decider::agent(&reg.agent_id, own_work);
+            // The history names the agent by its slug, as the other Kanban moves do.
+            let slug = reg.uid.as_deref().and_then(|u| state.mstore.agent_names_by_id(u).ok().flatten()).map(|r| r.slug);
+            let by = Decider::agent(slug.as_deref().unwrap_or(&reg.agent_id), own_work);
             let text = super::work_tasks::clean(&req.text);
             let now = now_ms();
             let done = match verb {

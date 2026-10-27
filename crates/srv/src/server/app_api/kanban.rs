@@ -230,7 +230,7 @@ fn holder_of<'a>(regs: &'a [AgentRegistration], item: &WorkItem) -> Option<&'a A
     })
 }
 
-/// A Done task a leader accepted on the operator's word, for its card and Reopen.
+/// A Done task an agent accepted, for its card and Reopen.
 type DelegateAccepts = std::collections::HashMap<String, (String, String, i64)>;
 
 fn task_json(t: &BoardTask, holder: Option<Value>, unavailable: Option<Value>, accepts: &DelegateAccepts) -> Value {

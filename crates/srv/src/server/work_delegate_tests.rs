@@ -21,7 +21,6 @@ struct World {
     app: axum::Router,
     leader_uid: String,
     leader_slug: String,
-    leader_name: String,
     _defs: tempfile::TempDir,
 }
 
@@ -48,7 +47,7 @@ fn world(role: Option<&str>) -> World {
         .register_agent_full(&name, &leader_block, None, 0, Some(&leader_slug), Some(&leader_uid), "test.delegate")
         .unwrap();
     let app = crate::server::build_router(state.clone());
-    World { state, app, leader_uid, leader_slug, leader_name: name, _defs: defs }
+    World { state, app, leader_uid, leader_slug, _defs: defs }
 }
 
 impl World {
@@ -134,7 +133,7 @@ async fn any_agent_accepts_and_the_history_says_which() {
         assert_eq!(status, StatusCode::OK, "{role:?}: {body}");
         assert_eq!(w.state_of(num), work_state::DONE);
         let e = w.events(num).into_iter().find(|e| e.kind == "accepted").expect("an accepted line");
-        assert_eq!((e.actor.as_str(), e.actor_kind.as_str()), (w.leader_name.as_str(), "delegate"), "{role:?}");
+        assert_eq!((e.actor.as_str(), e.actor_kind.as_str()), (w.leader_slug.as_str(), "delegate"), "{role:?}");
         assert!(!e.body.contains("operator"), "never the operator's: {}", e.body);
     }
 }
@@ -186,7 +185,7 @@ async fn an_agent_sends_back_with_a_reason() {
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(w.state_of(num), work_state::OPEN);
     let e = w.events(num).into_iter().find(|e| e.kind == "sent_back").expect("a sent_back line");
-    assert_eq!((e.actor.as_str(), e.actor_kind.as_str()), (w.leader_name.as_str(), "delegate"));
+    assert_eq!((e.actor.as_str(), e.actor_kind.as_str()), (w.leader_slug.as_str(), "delegate"));
     assert!(e.body.contains("it misses the tests") && !e.body.contains("operator"), "{}", e.body);
 }
 
