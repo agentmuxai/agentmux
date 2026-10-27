@@ -177,7 +177,8 @@ pub(super) fn switch(state: &AppState, caller: &str, req: &AgentAccountSwitchReq
         .map_err(|e| format!("agent.account.switch: {e}"))?
         .into_iter()
         .find(|d| d.id == def_id)
-        .map(|d| canonical(&d.provider))
+        // The provider its launch uses: its own, or its bundle's when it has none.
+        .map(|d| canonical(&state.mstore.resolve_effective_provider_id(&d)))
         .ok_or("agent.account.switch: no such agent")?;
     let accounts: Vec<IdentityAccount> = state
         .id_store

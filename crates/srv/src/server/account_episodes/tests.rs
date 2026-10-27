@@ -713,6 +713,43 @@ async fn a_switch_applies_at_once_when_idle_waits_for_a_turn_and_cancels_on_the_
     cleanup(&[&idle, &busy]);
 }
 
+/// An agent with no provider of its own launches with its bundle's, so its accounts are that provider's.
+#[tokio::test]
+async fn an_agent_with_no_provider_switches_among_its_bundles_accounts() {
+    let state = test_state();
+    for id in ["old", "new"] {
+        state.id_store.identity_upsert(&account(id, "claude", "valid")).unwrap();
+    }
+    state
+        .mstore
+        .bundle_upsert(&crate::backend::storage::bundles::Bundle {
+            id: "b1".into(),
+            name: "b1".into(),
+            description: String::new(),
+            is_blank: false,
+            is_global: false,
+            provider: "claude".into(),
+            model: String::new(),
+            instructions: String::new(),
+            instructions_by_provider: "{}".into(),
+            context_files: "[]".into(),
+            mcp_servers: "[]".into(),
+            skills: "[]".into(),
+            sort_order: 0,
+            created_at: 0,
+            updated_at: 0,
+            is_system: false,
+        })
+        .unwrap();
+    let mut def = crate::backend::storage::agents::test_agent_def("inherits", "Agent inherits", "", "host", 1, "");
+    def.memory_id = "b1".into();
+    state.mstore.agent_def_insert(&mut def).unwrap();
+    state.identity_store.agent_identity_link("inherits", "old", "claude").unwrap();
+    let r = switch::switch(&state, "", &switch_req("inherits", "new", switch::AccountSwitchWhen::AfterTurn)).unwrap();
+    assert_eq!(r.status, switch::AccountSwitchStatus::Switched);
+    assert_eq!(linked_account(&state, "inherits"), ["new"]);
+}
+
 /// A connection that is neither a registered agent nor the proven window can't switch anyone
 /// (it would be recorded as the operator); an agent and the window can.
 #[tokio::test]
