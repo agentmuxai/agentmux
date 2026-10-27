@@ -183,6 +183,8 @@ pub mod container_image;
 pub mod container_listener;
 #[cfg(test)]
 mod container_listener_itest;
+#[cfg(test)]
+mod container_turn_itest;
 pub mod container_runtime;
 pub mod registry_probe;
 pub mod cron;
