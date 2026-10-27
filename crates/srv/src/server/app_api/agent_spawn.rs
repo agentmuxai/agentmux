@@ -424,14 +424,14 @@ fn choose_account(state: &AppState, leader: &Leader, provider: &str, requested: 
     let blocked = account_blocks(state, &accounts);
     let pick = |a: &IdentityAccount, note: Option<String>| WorkerAccount {
         id: a.id.clone(),
-        label: account_label(a),
+        label: account_label_in(a, &accounts),
         provider: provider.clone(),
         note,
     };
     let usable = || accounts.iter().find(|o| !blocked.contains_key(&o.id));
     if let Some(wanted) = requested.map(str::trim).filter(|w| !w.is_empty()) {
-        let Some(a) = accounts.iter().find(|a| account_matches(a, wanted)) else {
-            let known: Vec<String> = accounts.iter().map(account_label).collect();
+        let Some(a) = accounts.iter().find(|a| account_matches(a, wanted, &accounts)) else {
+            let known: Vec<String> = accounts.iter().map(|a| account_label_in(a, &accounts)).collect();
             return Err(refuse(
                 StatusCode::BAD_REQUEST,
                 format!("UNKNOWN_ACCOUNT: no {provider} account {wanted:?}; the user's are: {}", known.join(", ")),
@@ -440,7 +440,7 @@ fn choose_account(state: &AppState, leader: &Leader, provider: &str, requested: 
         if let Some(why) = blocked.get(&a.id) {
             return Err(refuse(
                 StatusCode::CONFLICT,
-                format!("ACCOUNT_CANT_RUN: {} {why}; name another account, or leave account out", account_label(a)),
+                format!("ACCOUNT_CANT_RUN: {} {why}; name another account, or leave account out", account_label_in(a, &accounts)),
             ));
         }
         return Ok(pick(a, None));
@@ -453,14 +453,14 @@ fn choose_account(state: &AppState, leader: &Leader, provider: &str, requested: 
     match (leader_account, usable()) {
         (Some(a), _) if !blocked.contains_key(&a.id) => Ok(pick(a, None)),
         (Some(a), Some(other)) => {
-            let note = format!("Your account {} {}, so it runs on {} instead.", account_label(a), blocked[&a.id], account_label(other));
+            let note = format!("Your account {} {}, so it runs on {} instead.", account_label_in(a, &accounts), blocked[&a.id], account_label_in(other, &accounts));
             Ok(pick(other, Some(note)))
         }
         (Some(a), None) => Err(refuse(
             StatusCode::CONFLICT,
-            format!("NO_ACCOUNT: your account {} {}, and none of the user's other {provider} accounts can run", account_label(a), blocked[&a.id]),
+            format!("NO_ACCOUNT: your account {} {}, and none of the user's other {provider} accounts can run", account_label_in(a, &accounts), blocked[&a.id]),
         )),
-        (None, Some(other)) => Ok(pick(other, Some(format!("You have no {provider} account linked, so it runs on {}.", account_label(other))))),
+        (None, Some(other)) => Ok(pick(other, Some(format!("You have no {provider} account linked, so it runs on {}.", account_label_in(other, &accounts))))),
         (None, None) => Err(refuse(StatusCode::CONFLICT, format!("NO_ACCOUNT: none of the user's {provider} accounts can run"))),
     }
 }
@@ -542,6 +542,12 @@ pub(crate) fn note_run_account(mstore: &Store, identity_store: &Store, block_id:
     }
 }
 
+/// [`account_label`] with the number that tells it from the other accounts of
+/// its provider and email (`all`).
+pub(crate) fn account_label_in(a: &IdentityAccount, all: &[IdentityAccount]) -> String {
+    crate::identity::account_numbering::numbered_label(a, &account_label(a), all)
+}
+
 pub(crate) fn account_label(a: &IdentityAccount) -> String {
     let email = a.context.get("email").and_then(|e| e.as_str()).unwrap_or("");
     [a.display_name.as_str(), email, a.name.as_str()]
@@ -552,11 +558,8 @@ pub(crate) fn account_label(a: &IdentityAccount) -> String {
 }
 
 /// `wanted` names `a`: its id, name, display name or email, ignoring case.
-fn account_matches(a: &IdentityAccount, wanted: &str) -> bool {
-    let email = a.context.get("email").and_then(|e| e.as_str()).unwrap_or("");
-    [a.id.as_str(), a.name.as_str(), a.display_name.as_str(), email]
-        .into_iter()
-        .any(|s| !s.is_empty() && s.eq_ignore_ascii_case(wanted))
+fn account_matches(a: &IdentityAccount, wanted: &str, all: &[IdentityAccount]) -> bool {
+    crate::identity::account_numbering::names(a, wanted, all)
 }
 
 /// "<Leader> worker N", the first N no agent is named.

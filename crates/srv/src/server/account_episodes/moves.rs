@@ -14,7 +14,7 @@ use crate::backend::agent_state::{self, AgentState};
 use crate::backend::blockcontroller;
 use crate::backend::obj::{self, Block};
 use crate::backend::storage::identities::IdentityAccount;
-use crate::server::app_api::agent_spawn::{account_blocks, account_label};
+use crate::server::app_api::agent_spawn::{account_blocks, account_label_in};
 use crate::server::AppState;
 
 use super::{canonical, AccountEpisodeAgent, AccountMoveCandidate};
@@ -59,18 +59,15 @@ fn signed_in(status: &str) -> bool {
 /// out, or a pane on it out of quota). Signed-in ones first, so the picker's
 /// first entry is the one to preselect (spec §13, decision 2).
 pub(super) fn candidates(state: &AppState, from: &str, provider: &str) -> Vec<AccountMoveCandidate> {
-    let accounts: Vec<IdentityAccount> = state
-        .id_store
-        .identity_list(None)
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|a| canonical(&a.provider) == provider && a.id != from)
-        .collect();
+    // Labels are numbered against every account of the provider, the source included.
+    let every: Vec<IdentityAccount> =
+        state.id_store.identity_list(None).unwrap_or_default().into_iter().filter(|a| canonical(&a.provider) == provider).collect();
+    let accounts: Vec<IdentityAccount> = every.iter().filter(|a| a.id != from).cloned().collect();
     let blocked = account_blocks(state, &accounts);
     let mut out: Vec<AccountMoveCandidate> = accounts
         .iter()
         .filter(|a| !blocked.contains_key(&a.id))
-        .map(|a| AccountMoveCandidate { account_id: a.id.clone(), label: account_label(a), status: a.status.clone() })
+        .map(|a| AccountMoveCandidate { account_id: a.id.clone(), label: account_label_in(a, &every), status: a.status.clone() })
         .collect();
     out.sort_by_key(|c| !signed_in(&c.status));
     out
@@ -132,11 +129,11 @@ pub(super) fn move_agents(state: &AppState, req: &IdentityAccountMoveAgentsReq) 
     let provider = canonical(&to.provider);
     if let Some(from) = accounts.iter().find(|a| a.id == req.from) {
         if canonical(&from.provider) != provider {
-            return Err(format!("identity.account.move_agents: {} is a {} account; agents never move across providers", account_label(to), to.provider));
+            return Err(format!("identity.account.move_agents: {} is a {} account; agents never move across providers", account_label_in(to, &accounts), to.provider));
         }
     }
     if let Some(why) = account_blocks(state, std::slice::from_ref(to)).get(&to.id) {
-        return Err(format!("identity.account.move_agents: {} {why}", account_label(to)));
+        return Err(format!("identity.account.move_agents: {} {why}", account_label_in(to, &accounts)));
     }
 
     let mut result = IdentityAccountMoveAgentsResult::default();
@@ -156,7 +153,7 @@ pub(super) fn move_agents(state: &AppState, req: &IdentityAccountMoveAgentsReq) 
     }
 
     let request_id = uuid::Uuid::new_v4().to_string();
-    let reason = format!("moved to {}", account_label(to));
+    let reason = format!("moved to {}", account_label_in(to, &accounts));
     let open = super::tab_blocks(&state.mstore);
     for (agent_id, asked) in by_agent {
         // The link is the agent's, for every pane of it, not only the ones

@@ -354,14 +354,42 @@ impl Store {
     /// inside a list). Returns whether a row was updated.
     pub fn identity_set_context_email(&self, id: &str, email: &str) -> Result<bool, StoreError> {
         let conn = self.conn.lock().unwrap();
+        // A different address is a different group: the old number goes, and
+        // the next list numbers the account afresh (`identity::account_numbering`).
+        // A change of case or padding only is the same group and keeps it.
+        let n = conn.execute(
+            "UPDATE db_accounts
+                SET context = CASE
+                    WHEN json_valid(context) AND json_type(context) = 'object'
+                         AND lower(trim(COALESCE(json_extract(context, '$.email'), ''))) = lower(trim(?2))
+                    THEN json_set(context, '$.email', ?2)
+                    ELSE json_remove(json_set(
+                        CASE WHEN json_valid(context) AND json_type(context) = 'object'
+                             THEN context ELSE '{}' END,
+                        '$.email', ?2), '$.seq', '$.seqmax')
+                END
+              WHERE id = ?1",
+            params![id, email],
+        )?;
+        Ok(n > 0)
+    }
+
+    /// Set one account's numbering and nothing else (the same narrow write as
+    /// [`Self::identity_set_context_email`]): `context.seq`, the number that tells it
+    /// from other accounts with the same provider and email (left as it is when
+    /// `seq` is `None`), and `context.seqmax`, the highest number the group has
+    /// handed out, which survives the deletion of the account that held it.
+    pub fn identity_set_context_numbering(&self, id: &str, seq: Option<u32>, high: u32) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap();
         let n = conn.execute(
             "UPDATE db_accounts
                 SET context = json_set(
                         CASE WHEN json_valid(context) AND json_type(context) = 'object'
                              THEN context ELSE '{}' END,
-                        '$.email', ?2)
+                        '$.seq', COALESCE(?2, json_extract(context, '$.seq')),
+                        '$.seqmax', ?3)
               WHERE id = ?1",
-            params![id, email],
+            params![id, seq, high],
         )?;
         Ok(n > 0)
     }
@@ -379,7 +407,14 @@ impl Store {
     pub fn identity_upsert(&self, account: &IdentityAccount) -> Result<(), StoreError> {
         let conn = self.conn.lock().unwrap();
         let secret_ref_json = serde_json::to_string(&account.secret_ref)?;
-        let context_json = serde_json::to_string(&account.context)?;
+        // A rewrite that doesn't carry the account's number keeps it
+        // (`identity::account_numbering::carry_over`).
+        let mut context = account.context.clone();
+        let stored: Option<String> = conn.query_row("SELECT context FROM db_accounts WHERE id = ?1", params![account.id], |r| r.get(0)).ok();
+        if let Some(stored) = stored.and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok()) {
+            crate::identity::account_numbering::carry_over(&stored, &mut context);
+        }
+        let context_json = serde_json::to_string(&context)?;
         conn.execute(
             "INSERT INTO db_accounts
                 (id, name, provider, kind, display_name, secret_ref, context,
