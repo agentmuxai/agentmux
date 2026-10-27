@@ -249,3 +249,193 @@ fn an_unset_setting_runs_the_framer_and_only_false_turns_it_off() {
     assert!(on_unless_false(Some(true)));
     assert!(!on_unless_false(Some(false)), "the opt-out");
 }
+
+// ---------------------------------------------------------------------------
+// Multi-process stress (ignored; run by hand): several srv-like processes on one
+// scratch shared store, appending, framing, reading and truncating the WAL, with
+// random SIGKILLs and restarts, and an integrity check while it runs.
+//   STRESS_DIR=/tmp/x STRESS_SECS=60 cargo test -p agentmux-srv --lib stress_parent -- --ignored --nocapture
+// ---------------------------------------------------------------------------
+
+fn stress_env(name: &str, default: u64) -> u64 {
+    std::env::var(name).ok().and_then(|v| v.parse().ok()).unwrap_or(default)
+}
+
+fn stress_line(n: u64, tag: &str) -> Vec<u8> {
+    let mut v = format!("{{\"type\":\"stream_event\",\"event\":{{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{{\"type\":\"text_delta\",\"text\":\"{tag} word {n} \"}}}},\"session_id\":\"s\",\"parent_tool_use_id\":null,\"uuid\":\"{:08x}-0000-4000-8000-{:012x}\"}}\n", n as u32, n).into_bytes();
+    if n % 40 == 39 {
+        v.extend_from_slice(format!("{{\"type\":\"assistant\",\"n\":{n}}}\n").as_bytes());
+    }
+    v
+}
+
+#[test]
+#[ignore]
+fn stress_child() {
+    let dir = std::path::PathBuf::from(std::env::var("STRESS_DIR").expect("STRESS_DIR"));
+    let role = std::env::var("STRESS_ROLE").expect("STRESS_ROLE");
+    let deadline = stress_env("STRESS_DEADLINE_MS", 0) as i64;
+    let zones = stress_env("STRESS_ZONES", 6);
+    let fs = FileStore::open_global_transcripts(&dir.join("filestore.db")).expect("open");
+    mark_reader(&dir);
+    let mut skip = HashSet::new();
+    let mut n: u64 = std::process::id() as u64 * 1_000_000;
+    let mut rng = n ^ 0x9E37_79B9_7F4A_7C15;
+    let mut next = || {
+        rng ^= rng << 13;
+        rng ^= rng >> 7;
+        rng ^= rng << 17;
+        rng
+    };
+    let fail = |what: &str, e: &dyn std::fmt::Display| {
+        println!("STRESS-ERROR role={role} pid={} {what}: {e}", std::process::id());
+        std::process::exit(3);
+    };
+    while agentmux_common::time::now_ms() < deadline {
+        match role.as_str() {
+            "appender" => {
+                let zone = format!("agent:z{}:current", next() % zones);
+                let mut data = Vec::new();
+                let target = 256 * 1024 + (next() % (768 * 1024)) as usize;
+                while data.len() < target {
+                    n += 1;
+                    data.extend_from_slice(&stress_line(n, &zone));
+                }
+                if let Err(e) = fs.append_lines(&zone, "output", &data) {
+                    fail("append", &e);
+                }
+                std::thread::sleep(std::time::Duration::from_millis(40 + next() % 120));
+            }
+            "framer" => {
+                match pass_with(&fs, &nobody_blocks, 8, &mut skip, agentmux_common::time::now_ms() + 2 * MS_PER_DAY) {
+                    Ok(r) => println!("STRESS-PASS pid={} frames={} busy={} done={}", std::process::id(), r.frames, r.busy, r.done),
+                    Err(e) => fail("pass", &e),
+                }
+                std::thread::sleep(std::time::Duration::from_millis(200));
+            }
+            "reader" => {
+                let zone = format!("agent:z{}:current", next() % zones);
+                match fs.read_file(&zone, "output") {
+                    Ok(_) => {}
+                    Err(e) => fail("read", &e),
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            "truncater" => {
+                if let Err(e) = fs.checkpoint_truncate_apart() {
+                    fail("truncate", &e);
+                }
+                std::thread::sleep(std::time::Duration::from_millis(1500));
+            }
+            other => panic!("unknown role {other}"),
+        }
+    }
+}
+
+#[test]
+#[ignore]
+fn stress_parent() {
+    use std::process::{Child, Command, Stdio};
+    let dir = std::path::PathBuf::from(std::env::var("STRESS_DIR").expect("STRESS_DIR"));
+    std::fs::create_dir_all(&dir).unwrap();
+    let secs = stress_env("STRESS_SECS", 60);
+    let zones = stress_env("STRESS_ZONES", 6);
+    let seed_mib = stress_env("STRESS_SEED_MIB", 30) as i64;
+    let kill = stress_env("STRESS_KILL", 1) == 1;
+    // roles: appender,appender,framer,framer,reader,truncater by default
+    let roles: Vec<String> = std::env::var("STRESS_ROLES")
+        .unwrap_or_else(|_| "appender,appender,framer,framer,reader,truncater".into())
+        .split(',')
+        .map(str::to_string)
+        .collect();
+    if std::env::var("STRESS_AUTOVAC").as_deref() == Ok("none") {
+        // Like the live store: a file that already holds a page is left in the default (no auto-vacuum) mode.
+        let conn = rusqlite::Connection::open(dir.join("filestore.db")).unwrap();
+        conn.execute_batch("PRAGMA auto_vacuum=NONE; CREATE TABLE _seed(x); DROP TABLE _seed;").unwrap();
+    }
+    {
+        let fs = FileStore::open_global_transcripts(&dir.join("filestore.db")).unwrap();
+        for z in 0..zones {
+            transcript(&fs, &format!("agent:z{z}:current"), seed_mib << 20);
+        }
+    }
+    let started = agentmux_common::time::now_ms();
+    let deadline = started + (secs as i64) * 1000;
+    let exe = std::env::current_exe().unwrap();
+    let spawn = |role: &str| -> Child {
+        Command::new(&exe)
+            .args(["--exact", "backend::transcript::framer::tests::stress_child", "--ignored", "--nocapture", "--test-threads=1"])
+            .env("STRESS_DIR", &dir)
+            .env("STRESS_ROLE", role)
+            .env("STRESS_DEADLINE_MS", deadline.to_string())
+            .env("STRESS_ZONES", zones.to_string())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap()
+    };
+    let mut kids: Vec<(String, Child)> = roles.iter().map(|r| (r.clone(), spawn(r))).collect();
+    let mut rng = 0x2545_F491_4F6C_DD1Du64 ^ deadline as u64;
+    let (mut kills, mut bad_exits, mut checks) = (0, 0, 0);
+    let mut next_check = agentmux_common::time::now_ms();
+    let mut next_kill = agentmux_common::time::now_ms() + 3000;
+    let mut verdict: Option<String> = None;
+    while agentmux_common::time::now_ms() < deadline && verdict.is_none() {
+        std::thread::sleep(std::time::Duration::from_millis(250));
+        let now = agentmux_common::time::now_ms();
+        for (role, kid) in kids.iter_mut() {
+            if let Ok(Some(status)) = kid.try_wait() {
+                if !status.success() && status.code().is_some() {
+                    bad_exits += 1;
+                    println!("STRESS-CHILD-EXIT role={role} status={status}");
+                }
+                if now < deadline {
+                    *kid = spawn(role);
+                }
+            }
+        }
+        if kill && now >= next_kill {
+            rng ^= rng << 13;
+            rng ^= rng >> 7;
+            rng ^= rng << 17;
+            let i = (rng % kids.len() as u64) as usize;
+            let role = kids[i].0.clone();
+            let _ = kids[i].1.kill();
+            let _ = kids[i].1.wait();
+            kills += 1;
+            println!("STRESS-KILL role={role}");
+            kids[i].1 = spawn(&role);
+            next_kill = now + 2000 + ((rng >> 8) % 5000) as i64;
+        }
+        if now >= next_check {
+            next_check = now + 5000;
+            checks += 1;
+            let conn = rusqlite::Connection::open(dir.join("filestore.db")).unwrap();
+            conn.execute_batch("PRAGMA busy_timeout=20000;").unwrap();
+            let rows: Vec<String> = conn
+                .prepare("PRAGMA integrity_check(20)")
+                .unwrap()
+                .query_map([], |r| r.get::<_, String>(0))
+                .unwrap()
+                .filter_map(Result::ok)
+                .collect();
+            if rows != ["ok"] {
+                verdict = Some(format!("integrity_check at check #{checks} (t={}s, kills so far {kills}): {:?}", (now - started) / 1000, rows.iter().map(|r| r.lines().nth(1).unwrap_or("").to_string()).collect::<Vec<_>>()));
+            }
+        }
+    }
+    for (_, kid) in kids.iter_mut() {
+        let _ = kid.wait();
+    }
+    let conn = rusqlite::Connection::open(dir.join("filestore.db")).unwrap();
+    let rows: Vec<String> = conn
+        .prepare("PRAGMA integrity_check(20)")
+        .unwrap()
+        .query_map([], |r| r.get::<_, String>(0))
+        .unwrap()
+        .filter_map(Result::ok)
+        .collect();
+    let frames: i64 = conn.query_row("select count(*) from db_file_frame", [], |r| r.get(0)).unwrap();
+    println!("STRESS-SUMMARY secs={secs} kills={kills} bad_exits={bad_exits} checks={checks} frames={frames} final_integrity_first_lines={:?} mid_run={verdict:?}", rows.iter().map(|r| r.lines().take(3).collect::<Vec<_>>().join(" | ")).collect::<Vec<_>>());
+    assert!(verdict.is_none() && rows == ["ok"], "store damaged: {verdict:?} {rows:?}");
+}

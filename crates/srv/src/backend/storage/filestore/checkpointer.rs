@@ -29,6 +29,7 @@
 //! set on every connection to the store) when a writer restarts the log, and by
 //! the periodic TRUNCATE (`bootstrap::spawn_global_transcripts_truncate_loop`).
 
+#[cfg(not(unix))]
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -131,10 +132,51 @@ fn due(backlog: Option<u32>, threshold: u32, written: Option<SystemTime>, last_w
 /// the database has caught up). Format: https://www.sqlite.org/walformat.html.
 /// A plain read takes no lock; `None` when the file is missing, short, or being
 /// rewritten (the two header copies differ), so a pass can fall back.
+///
+/// **On Unix this never closes a handle on the file.** POSIX advisory locks belong to the
+/// process, not to the descriptor: `close()` of *any* descriptor on a file releases *all* of
+/// the process's locks on it, including the WAL-index locks SQLite holds for this process's
+/// own connections. Opening the `-shm` every poll and dropping the handle took the write
+/// lock away from a transaction in progress on this process's writer, so another srv
+/// could write at the same time and the store's pages were cross-linked
+/// (`framer_tests::stress_parent` reproduces it in seconds; a long framer transaction is
+/// the likeliest to be hit). One read-only handle per file is kept for the life of the
+/// process instead (https://www.sqlite.org/howtocorrupt.html §2.2).
 pub(super) fn wal_backlog(shm: &Path) -> Option<u32> {
     let mut head = [0u8; 100];
-    std::fs::File::open(shm).ok()?.read_exact(&mut head).ok()?;
+    read_index_head(shm, &mut head)?;
     backlog_from_index(&head)
+}
+
+#[cfg(unix)]
+fn read_index_head(shm: &Path, head: &mut [u8; 100]) -> Option<()> {
+    use std::collections::HashMap;
+    use std::os::unix::fs::{FileExt, MetadataExt};
+    use std::sync::{Mutex, OnceLock};
+
+    /// The handle kept for each `-shm` path, and the file (device, inode) it was opened on.
+    static HANDLES: OnceLock<Mutex<HashMap<PathBuf, (std::fs::File, (u64, u64))>>> = OnceLock::new();
+    // `metadata` stats the path; it opens nothing, so it is safe to call here.
+    let meta = std::fs::metadata(shm).ok()?;
+    let id = (meta.dev(), meta.ino());
+    let mut handles = HANDLES.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner());
+    if handles.get(shm).is_none_or(|(_, kept)| *kept != id) {
+        // First look, or the file was replaced (every connection closed and a new one made it).
+        let file = std::fs::File::open(shm).ok()?;
+        if let Some((old, _)) = handles.insert(shm.to_path_buf(), (file, id)) {
+            // Never closed: even a handle on a replaced file is left open, for the reason above.
+            std::mem::forget(old);
+        }
+    }
+    let (file, _) = handles.get(shm)?;
+    file.read_exact_at(head, 0).ok()
+}
+
+/// Windows locks belong to the handle, so opening and closing the file here costs the
+/// store nothing; and a handle kept open would stop SQLite deleting the file.
+#[cfg(not(unix))]
+fn read_index_head(shm: &Path, head: &mut [u8; 100]) -> Option<()> {
+    std::fs::File::open(shm).ok()?.read_exact(head).ok()
 }
 
 fn backlog_from_index(head: &[u8; 100]) -> Option<u32> {
