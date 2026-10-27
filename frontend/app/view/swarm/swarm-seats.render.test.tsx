@@ -27,7 +27,7 @@ import { NO_BACKGROUND_TASKS } from "./swarm-background";
 import type { AgentTreeNode, SwarmViewModel } from "./swarm-model";
 import { SWARM_SETTLE_MS } from "./swarm-order";
 import type { SwarmOtherInstances } from "./swarm-remote";
-import { SwarmView } from "./swarm-view";
+import { SwarmView } from "./swarm-root";
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => {

@@ -902,6 +902,7 @@ declare global {
         // block remount and names the pane (section-pane.tsx, warden-model.ts).
         "connectors:section"?: "accounts" | "mcp" | "remotes";
         "memory:section"?: "global" | "personal" | "skills" | "bundles";
+        "swarm:section"?: "supervisor" | "broadcast";
         "warden:section"?: "kanban" | "jobs" | "vault" | "host" | "lan" | "internet" | "audit" | "history" | "ambient";
         /** A Kanban task to open in the drawer, set by a link from elsewhere (the Swarm) and cleared once opened. */
         "kanban:open"?: string | null;

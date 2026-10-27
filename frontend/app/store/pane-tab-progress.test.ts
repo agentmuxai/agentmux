@@ -46,7 +46,7 @@ const fixture: { rows: Row[] } = JSON.parse(readFileSync(join(ROOT, "test/fixtur
 
 /** The controller types srv reports `is_agent_pane` for. */
 const AGENT_CONTROLLERS = new Set(["persistent", "subprocess", "acp", "msp", "app-server"]);
-const SHOWN = new Set(["working", "waiting", "limited", "signed_out"]);
+const SHOWN = new Set(["working", "waiting", "signed_out"]);
 
 function metaOf(row: Row): Record<string, unknown> {
     const meta: Record<string, unknown> = {};
@@ -73,7 +73,7 @@ describe("the pill's progress follows srv's decide() rows", () => {
                 meta: metaOf(row),
                 now: row.now_ms,
             });
-            // A pill shows working, waiting, limited and signed out; every other state shows nothing.
+            // A pill shows working, waiting and signed out; every other state (out of quota too) shows nothing.
             expect(got?.state ?? null).toBe(SHOWN.has(row.expected) ? row.expected : null);
         });
     }
@@ -86,16 +86,14 @@ describe("the pill's words", () => {
         expect(progressOf({ ...base, turnActive: true, meta: {} })?.text).toBe("Working");
         expect(progressOf({ ...base, turnActive: true, meta: { "term:awaiting_user": true } })?.text).toBe("Waiting for you");
         expect(progressOf({ ...base, turnActive: false, meta: { "agent:last_failure": { code: "auth" } } })?.text).toBe("Signed out");
-        const limited = progressOf({
-            ...base,
-            turnActive: false,
-            meta: { "agent:last_failure": { code: "usage_limit", resetsAtMs: now + 3 * 3600_000 } },
-        });
-        expect(limited?.state).toBe("limited");
-        expect(limited?.text).toMatch(/^Out of quota until /);
+    });
+
+    it("shows no line for an out-of-quota agent, with or without a reset", () => {
+        const base = { isAgentPane: true, now, turnActive: false };
         expect(
-            progressOf({ ...base, turnActive: false, meta: { "agent:last_failure": { code: "usage_limit" } } })?.text
-        ).toBe("Out of quota");
+            progressOf({ ...base, meta: { "agent:last_failure": { code: "usage_limit", resetsAtMs: now + 3 * 3600_000 } } })
+        ).toBeNull();
+        expect(progressOf({ ...base, meta: { "agent:last_failure": { code: "usage_limit" } } })).toBeNull();
     });
 });
 
@@ -165,25 +163,6 @@ describe("the per-block subscription", () => {
         expect(runs).toBe(afterSeed);
         h.listeners[0].cb({ is_agent_pane: true });
         expect(runs).toBe(afterSeed + 1);
-        dispose();
-    });
-
-    it("ends the limited line at the reset, with no event", async () => {
-        h.status = { is_agent_pane: true, turn_active: false };
-        const resetsAt = Date.now() + 60_000;
-        h.metaSignal![1]({ "agent:last_failure": { code: "usage_limit", resetsAtMs: resetsAt } });
-        let dispose!: () => void;
-        let progress!: ReturnType<typeof usePaneTabProgress>;
-        createRoot((d) => {
-            dispose = d;
-            progress = usePaneTabProgress("blk-3");
-        });
-        await vi.advanceTimersByTimeAsync(0);
-        expect(progress()?.state).toBe("limited");
-        await vi.advanceTimersByTimeAsync(59_000);
-        expect(progress()?.state).toBe("limited");
-        await vi.advanceTimersByTimeAsync(2_000);
-        expect(progress()).toBeNull();
         dispose();
     });
 

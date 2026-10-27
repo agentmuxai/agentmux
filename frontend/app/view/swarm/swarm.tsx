@@ -5,6 +5,7 @@
 // first Swarm pane (swarm-instance.tsx).
 
 import { lazyPaneTab } from "@/app/block/lazy-pane-tab";
+import { SWARM_SECTIONS } from "./swarm-section";
 
 /** Swarm as a native pane tab (Pane Tab contract Phase 2c). */
 export const swarmPaneTab = lazyPaneTab({
@@ -15,6 +16,7 @@ export const swarmPaneTab = lazyPaneTab({
     defaultHue: 0,
     // Applies `term:zoom` as CSS zoom; fills the pane edge to edge.
     capabilities: { paneZoom: {}, noPadding: true },
-    members: [],
+    sections: SWARM_SECTIONS,
+    members: ["liveTitle"],
     load: () => import("./swarm-instance"),
 });

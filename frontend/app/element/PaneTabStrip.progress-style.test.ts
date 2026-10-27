@@ -50,9 +50,8 @@ describe("the progress line's stylesheet", () => {
 
     it("gives every state its own shape", () => {
         expect(strip).toMatch(/\[data-state="waiting"\] \{\s*border-top: 2px solid var\(--accent-color\)/);
-        expect(rule(strip, '&[data-state="limited"]')).toContain("repeating-linear-gradient"); // dotted
         expect(rule(strip, '&[data-state="signed_out"]')).toContain("repeating-linear-gradient"); // dashed
-        expect(rule(strip, '&[data-state="limited"]')).not.toBe(rule(strip, '&[data-state="signed_out"]'));
+        expect(strip).not.toMatch(/data-state="limited"/); // out of quota has no line
     });
 
     it("stops and parks the bar under the motion policy's status category, not a raw media query", () => {
