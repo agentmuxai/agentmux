@@ -33,11 +33,20 @@ pub(crate) const STOP_RUN_PATH: &str = "/agentmux/jobs/stop-run";
 /// How long the other srv has to answer: it only closes a row and signals a pane.
 const ASK_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// Where the AgentMux holding a pane listens, and its key: `(url, auth key)`.
+type Resolve = Arc<dyn Fn(&str) -> Option<(String, String)> + Send + Sync>;
+
+/// The shared registry's entry for the pane, on another instance of this computer.
+fn registry_resolver(state: &AppState) -> Resolve {
+    let state = state.clone();
+    Arc::new(move |block_id: &str| shared_channel_for(&state, block_id).map(|e| (e.local_url, e.auth_key)))
+}
+
 /// Deliver `stop` to the srv that follows its run, and say how it went.
-async fn forward(state: &AppState, stop: &RemoteStop) -> Result<(), String> {
-    let entry = shared_channel_for(state, &stop.block_id)
+async fn forward(http: &reqwest::Client, resolve: &Resolve, stop: &RemoteStop) -> Result<(), String> {
+    let (url, auth_key) = resolve(&stop.block_id)
         .ok_or_else(|| "the AgentMux that follows this run is not listed on this computer".to_string())?;
-    post_stop(&state.http_client, &entry.local_url, &entry.auth_key, stop).await
+    post_stop(http, &url, &auth_key, stop).await
 }
 
 /// `POST` `stop` to the srv at `url`, which answers whether it took it.
@@ -69,12 +78,17 @@ async fn post_stop(http: &reqwest::Client, url: &str, auth_key: &str, stop: &Rem
 
 /// Let `ledger` ask another channel to stop the runs it follows.
 pub(crate) fn install(state: &AppState, ledger: &Arc<RunLedger>) {
-    let (state, weak) = (state.clone(), Arc::downgrade(ledger));
+    install_with(state.http_client.clone(), registry_resolver(state), ledger);
+}
+
+/// [`install`] with the lookup of the other srv given: tests point it at one they started.
+fn install_with(http: reqwest::Client, resolve: Resolve, ledger: &Arc<RunLedger>) {
+    let weak = Arc::downgrade(ledger);
     let Ok(rt) = tokio::runtime::Handle::try_current() else { return };
     ledger.install_remote_stop(Arc::new(move |stop: RemoteStop| {
-        let (state, weak) = (state.clone(), weak.clone());
+        let (http, resolve, weak) = (http.clone(), resolve.clone(), weak.clone());
         rt.spawn(async move {
-            let outcome = forward(&state, &stop).await;
+            let outcome = forward(&http, &resolve, &stop).await;
             let Some(ledger) = weak.upgrade() else { return };
             let _ = tokio::task::spawn_blocking(move || match outcome {
                 Ok(()) => ledger.remote_stop_done(&stop.run_id),
@@ -194,6 +208,78 @@ mod tests {
         assert!(post_stop(&http, &url, "", &stop()).await.unwrap_err().contains("unreadable"));
         // Nothing listens there.
         assert!(post_stop(&http, "http://127.0.0.1:9", "", &stop()).await.unwrap_err().contains("could not reach"));
+    }
+
+    /// Two AgentMux instances sharing one ledger, the receiving one served over
+    /// loopback HTTP: a timeout on the firing side closes the run and interrupts the
+    /// pane on the other, through the hook, the request, the route and the ledger.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_timeout_on_the_firing_side_interrupts_the_pane_of_the_other_instance_over_http() {
+        use crate::backend::cron::test_job;
+        use crate::backend::jobs::{Begin, BY_SCHEDULER, TRIGGER_SCHEDULE};
+        use crate::backend::storage::job_runs::{infra, reason, state as run_state};
+        use crate::backend::storage::store::Store;
+
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(Store::open_identity_store(&dir.path().join("identity-store.db")).unwrap());
+
+        // The AgentMux that follows the run, listening on loopback.
+        let state_b = test_state();
+        let ledger_b = RunLedger::new_in(store.clone(), Some(state_b.mstore.clone()), state_b.broker.clone(), "chan-b");
+        let interrupted: Arc<std::sync::Mutex<Vec<String>>> = Arc::default();
+        let sink = interrupted.clone();
+        ledger_b.install_interrupt(Arc::new(move |block: &str| sink.lock().unwrap().push(block.to_string())));
+        state_b.cron_scheduler.install_runs(ledger_b.clone());
+        let app = axum::Router::new().route(STOP_RUN_PATH, axum::routing::post(handle_jobs_stop_run)).with_state(state_b);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let token = tokio_util::sync::CancellationToken::new();
+        let child = token.clone();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).with_graceful_shutdown(async move { child.cancelled().await }).await;
+        });
+        let _guard = token.drop_guard();
+
+        // The AgentMux that fired it.
+        let state_a = test_state();
+        let ledger_a = RunLedger::new_in(store.clone(), Some(state_a.mstore.clone()), state_a.broker.clone(), "chan-a");
+        let looked_up: Arc<std::sync::Mutex<Vec<String>>> = Arc::default();
+        let seen = looked_up.clone();
+        let resolve: Resolve = Arc::new(move |block: &str| {
+            seen.lock().unwrap().push(block.to_string());
+            Some((url.clone(), "k-b".to_string()))
+        });
+        install_with(reqwest::Client::new(), resolve, &ledger_a);
+
+        // A run fired by A, delivered to a pane B holds, and followed there.
+        let job = test_job("j-live", "check the build", "AgentY", "uid-y", "uid-creator");
+        let Begin::Run(run_id) = ledger_a.begin_cron(&job, TRIGGER_SCHEDULE, Some(1), BY_SCHEDULER) else { panic!("no run") };
+        assert!(ledger_b.follow_forwarded(&run_id, "b-remote", agentmux_common::time::now_ms()));
+        let run = store.job_run_get(&run_id).unwrap().unwrap();
+        assert_eq!(run.state, run_state::RUNNING);
+
+        // Its timeout comes up on A.
+        assert!(!ledger_a.stop_run(&run, infra::TIMEOUT, reason::TIMEOUT, "stopped after 1 minutes (timeout_minutes)"));
+        let mut closed = None;
+        for _ in 0..200 {
+            let r = store.job_run_get(&run_id).unwrap().unwrap();
+            if r.state == run_state::FINISHED {
+                closed = Some(r);
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        let r = closed.expect("the run never closed");
+        assert_eq!((r.infra.as_str(), r.reason.as_str()), (infra::TIMEOUT, reason::TIMEOUT));
+        assert_eq!(r.summary, "stopped after 1 minutes (timeout_minutes)");
+        assert_eq!(*interrupted.lock().unwrap(), ["b-remote"], "the pane on B was interrupted once");
+        assert_eq!(*looked_up.lock().unwrap(), ["b-remote"]);
+        assert!(r.links.get("stop_error").is_none(), "{:?}", r.links);
+
+        // Another AgentMux (a third channel) naming the same run stops nothing more.
+        let ledger_c = RunLedger::new_in(store, None, state_a.broker.clone(), "chan-c");
+        assert!(ledger_c.stop_followed_here(&run_id, "b-remote", "chan-c").is_err());
+        assert_eq!(interrupted.lock().unwrap().len(), 1);
     }
 
     fn request(run_id: &str) -> Json<StopRunRequest> {

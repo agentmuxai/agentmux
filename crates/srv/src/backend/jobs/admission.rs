@@ -267,6 +267,11 @@ impl RunLedger {
         if decision != Decision::Wait(reason::OVERLAP) || job.policy.overlap != Overlap::CancelOther {
             return;
         }
+        // A replacement a cap would refuse isn't worth the run going now, as a
+        // local `cancel_other` leaves the old run alone when the caps refuse the new one.
+        if self.cap_gate(job).refusal.is_some() {
+            return;
+        }
         for r in self.store.job_runs_occupying().unwrap_or_default() {
             if r.job_id == job.id && r.state == state::RUNNING && self.run_followed_elsewhere(&r) {
                 self.request_remote_stop(&r, infra::INTERRUPTED, reason::OVERLAP, "stopped: the job's next run started (overlap: cancel_other)");
