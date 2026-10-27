@@ -23,6 +23,7 @@ use crate::backend::storage::filestore::FileStore;
 use crate::backend::storage::store::Store;
 
 use super::judge::{self, Judgement};
+use super::settings;
 use super::policy::{self, Action, PreJudge, TurnFacts};
 use super::{
     message, supports, SupervisorAction, SupervisorDecision, SupervisorMode, SupervisorState, SupervisorStatus,
@@ -222,7 +223,7 @@ impl Supervisor {
         }
         let Some(block) = self.block(block_id) else { return };
         let mode = SupervisorMode::from_meta(&block.meta);
-        if mode == SupervisorMode::Off || !supports(&block.meta) {
+        if !settings::enabled() || mode == SupervisorMode::Off || !supports(&block.meta) {
             return;
         }
         let now_ms = agentmux_common::time::now_ms_u64();
@@ -283,7 +284,11 @@ impl Supervisor {
         let mut outcome = judge::judge(&self.mstore, block_id, generation, mode, &activity.text, state.continuations).await;
         // One more try for a call that failed or timed out (a busy shared
         // login), while the turn is still the latest and the agent still idle.
-        if matches!(outcome, judge::Outcome::Failed) && self.is_current(block_id, generation) && !turn_active(block_id) {
+        if matches!(outcome, judge::Outcome::Failed)
+            && settings::enabled()
+            && self.is_current(block_id, generation)
+            && !turn_active(block_id)
+        {
             let retry = self.next_generation(block_id);
             outcome = judge::judge(&self.mstore, block_id, retry, mode, &activity.text, state.continuations).await;
             generation = retry;
@@ -299,6 +304,16 @@ impl Supervisor {
             return;
         }
         if self.block(block_id).map(|b| SupervisorMode::from_meta(&b.meta)) != Some(mode) {
+            return;
+        }
+        // Switched off while the judge ran: its verdict is dropped, the pane
+        // stops showing "judging", and the notice the router left to us goes out.
+        if !settings::enabled() {
+            state.status = SupervisorStatus::Watching;
+            self.save(block_id, generation, &state);
+            if notify && trigger != Some(TriggerKind::System) {
+                self.notify_finished(block_id, trigger);
+            }
             return;
         }
         if turn_active(block_id) {
@@ -362,6 +377,9 @@ impl Supervisor {
     /// last turn is judged at once (spec §3.1).
     pub async fn set_mode(self: &Arc<Self>, block_id: &str, mode: SupervisorMode) -> Result<(), String> {
         let block = self.block(block_id).ok_or_else(|| "no such pane".to_string())?;
+        if mode != SupervisorMode::Off && !settings::enabled() {
+            return Err(settings::SWITCHED_OFF.to_string());
+        }
         if mode != SupervisorMode::Off && !supports(&block.meta) {
             return Err("the Supervisor works with Claude agents only for now".to_string());
         }
@@ -453,4 +471,18 @@ pub(super) fn parse_turn_ended_for_test(data: &serde_json::Value) -> Option<(Str
 #[cfg(test)]
 pub(super) fn is_external_start_for_test(trigger: Option<TriggerKind>) -> bool {
     is_external_start(trigger)
+}
+
+#[cfg(test)]
+pub(super) fn for_test(mstore: Arc<Store>) -> Arc<Supervisor> {
+    Arc::new(Supervisor {
+        mstore,
+        filestore: Arc::new(FileStore::open_in_memory().unwrap()),
+        event_bus: Arc::new(EventBus::new()),
+        broker: Arc::new(Broker::new()),
+        runs: Mutex::default(),
+        generations: Mutex::default(),
+        locks: Mutex::default(),
+        seen: Mutex::default(),
+    })
 }

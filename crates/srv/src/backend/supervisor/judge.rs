@@ -117,6 +117,12 @@ pub async fn judge(
     let Some(mut slot) = call::admit(&purpose::SUPERVISOR_VERDICT, block_id, generation).await else {
         return Outcome::Superseded;
     };
+    // Switched off while this waited for a slot: no call is made. `evaluate`
+    // sees the switch off and settles the pane.
+    if !super::settings::enabled() {
+        slot.abandon(crate::ambient::outcome::Outcome::Gated);
+        return Outcome::NoVerdict;
+    }
     let Some(target) = mstore.get::<Block>(block_id).ok().flatten().and_then(|b| CliTarget::from_meta(&b.meta)) else {
         slot.abandon(crate::ambient::outcome::Outcome::Gated);
         return Outcome::NoVerdict;

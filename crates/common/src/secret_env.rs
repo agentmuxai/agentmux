@@ -38,6 +38,16 @@ pub fn stash_startup_secrets() {
     stash(STARTUP_SECRETS);
 }
 
+/// Wipes [`STARTUP_SECRETS`] from the environment for good, keeping no copy. For
+/// a process that mints its own secrets and never needs the ones it was started
+/// with (the launcher): a pane or shell that holds an instance's key must not
+/// pass it on through `/proc/<pid>/environ`.
+pub fn discard_startup_secrets() {
+    for name in STARTUP_SECRETS {
+        take_from_env(name);
+    }
+}
+
 /// Moves each named variable that is set and not empty into the stash.
 pub fn stash(names: &[&str]) {
     for name in names {
@@ -109,6 +119,40 @@ mod tests {
         assert_eq!(take("AM_SECRET_ENV_TEST_A").as_deref(), Some("the-secret-value"));
         assert!(std::env::var("AM_SECRET_ENV_TEST_A").is_err());
         assert_eq!(take("AM_SECRET_ENV_TEST_A"), None);
+    }
+
+    #[test]
+    fn a_discarded_secret_leaves_the_environment_and_is_not_kept() {
+        let name = STARTUP_SECRETS[0];
+        std::env::set_var(name, "inherited-from-a-pane");
+        discard_startup_secrets();
+        assert!(std::env::var(name).is_err());
+        assert!(!is_set(name));
+        assert_eq!(take(name), None);
+    }
+
+    // What another process of the user reads: the environment block as exec left it. Runs the
+    // test binary again so the block really starts with the secret in it.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_discarded_secret_is_gone_from_proc_environ() {
+        const MARK: &str = "AM_DISCARD_CHILD";
+        if std::env::var_os(MARK).is_some() {
+            let before = std::fs::read("/proc/self/environ").unwrap();
+            assert!(String::from_utf8_lossy(&before).contains("inherited-secret-value"));
+            discard_startup_secrets();
+            let after = std::fs::read("/proc/self/environ").unwrap();
+            assert!(!String::from_utf8_lossy(&after).contains("inherited-secret-value"));
+            return;
+        }
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "secret_env::tests::a_discarded_secret_is_gone_from_proc_environ", "--test-threads=1"])
+            .env(MARK, "1")
+            .env(STARTUP_SECRETS[0], "inherited-secret-value")
+            .env(STARTUP_SECRETS[1], "inherited-secret-value")
+            .status()
+            .unwrap();
+        assert!(status.success());
     }
 
     #[test]
