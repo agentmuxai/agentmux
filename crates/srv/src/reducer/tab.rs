@@ -36,9 +36,9 @@ pub(super) fn handle_create_tab(
     // — pinnedtabids stays at zero in production since pinning
     // was removed in E.2c.3b, so reducer-only counting matches).
     let resolved_name = if name.is_empty() {
-        format!("Tab {}", workspace_record.tab_ids.len() + 1)
+        next_default_tab_name(state, &workspace_id, workspace_record.tab_ids.len() + 1)
     } else {
-        name
+        free_tab_name(state, &workspace_id, &name, None)
     };
     state.tabs.insert(
         tab_id.clone(),
@@ -78,6 +78,57 @@ pub(super) fn handle_create_tab(
         });
     }
     events
+}
+
+/// `desired`, or the first of `desired (2)`, `desired (3)`, … that no other tab
+/// in the workspace uses (compared ignoring case and surrounding spaces), so
+/// "Tab 4 in this window" never names two places. A trailing ` (n)` on
+/// `desired` is dropped first, so a name that was already suffixed doesn't
+/// grow `(2) (2)`. `own_tab_id` is the tab being renamed or moved, which
+/// doesn't count against itself.
+fn free_tab_name(state: &State, workspace_id: &str, desired: &str, own_tab_id: Option<&str>) -> String {
+    let Some(workspace) = state.workspaces.get(workspace_id) else {
+        return desired.to_string();
+    };
+    let taken: std::collections::HashSet<String> = workspace
+        .tab_ids
+        .iter()
+        .filter(|id| Some(id.as_str()) != own_tab_id)
+        .filter_map(|id| state.tabs.get(id))
+        .map(|t| t.name.trim().to_lowercase())
+        .collect();
+    if !taken.contains(desired.trim().to_lowercase().as_str()) {
+        return desired.to_string();
+    }
+    let base = strip_copy_suffix(desired.trim());
+    (2u32..)
+        .map(|n| format!("{base} ({n})"))
+        .find(|candidate| !taken.contains(&candidate.to_lowercase()))
+        .expect("an unbounded range always yields a free name")
+}
+
+/// The default name for a new tab: `Tab {first}`, or the next number up that
+/// the workspace doesn't already use (closing a middle tab leaves the count
+/// below the highest number in use).
+fn next_default_tab_name(state: &State, workspace_id: &str, first: usize) -> String {
+    (first..)
+        .map(|n| format!("Tab {n}"))
+        .find(|candidate| free_tab_name(state, workspace_id, candidate, None) == *candidate)
+        .expect("an unbounded range always yields a free name")
+}
+
+/// `name` without a trailing ` (n)` counter, when what is left isn't empty.
+fn strip_copy_suffix(name: &str) -> &str {
+    let Some(open) = name.rfind(" (") else {
+        return name;
+    };
+    let counter = &name[open + 2..];
+    match counter.strip_suffix(')') {
+        Some(digits) if !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()) && open > 0 => {
+            &name[..open]
+        }
+        _ => name,
+    }
 }
 
 /// The tab that takes over as active when the active tab leaves
@@ -377,24 +428,41 @@ pub(super) fn handle_move_tab(
         .expect("checked")
         .workspace_id = dst_workspace_id.clone();
 
+    // The destination may already have a tab by this name: the moved tab
+    // takes a suffix, so the window never holds two of one name.
+    let current_name = state.tabs[&tab_id].name.clone();
+    let moved_name = free_tab_name(state, &dst_workspace_id, &current_name, Some(&tab_id));
+
     let v = state.bump_version();
-    vec![Event::TabMoved {
+    let mut events = vec![Event::TabMoved {
         tab_id: tab_id.clone(),
         src_workspace_id,
         dst_workspace_id,
         dst_index: final_dst_index,
         new_src_active_tab_id,
-        new_dst_active_tab_id: Some(tab_id),
+        new_dst_active_tab_id: Some(tab_id.clone()),
         version: v,
-    }]
+    }];
+    if moved_name != current_name {
+        state.tabs.get_mut(&tab_id).expect("checked").name = moved_name.clone();
+        let v = state.bump_version();
+        events.push(Event::TabRenamed {
+            tab_id,
+            name: moved_name,
+            version: v,
+        });
+    }
+    events
 }
 
 /// Phase E.5.3 — rename a tab. Errors if missing; no-op if the
 /// name is unchanged.
 pub(super) fn handle_rename_tab(state: &mut State, tab_id: String, name: String) -> Vec<Event> {
-    let Some(tab) = state.tabs.get_mut(&tab_id) else {
+    let Some(tab) = state.tabs.get(&tab_id) else {
         return invalid_command(state, format!("RenameTab: tab not found: {}", tab_id));
     };
+    let name = free_tab_name(state, &tab.workspace_id.clone(), &name, Some(&tab_id));
+    let tab = state.tabs.get_mut(&tab_id).expect("checked");
     if tab.name == name {
         return Vec::new();
     }

@@ -27,27 +27,13 @@ pub(crate) async fn handle_create_tab(state: &AppState, call: &WebCallType) -> W
     let tab_name: String = service::get_arg(args, 1).unwrap_or_default();
     let activate: bool = service::get_arg(args, 2).unwrap_or(true);
     // args[3] (`pinned`) intentionally ignored.
-    // Auto-generate a `Tab {N}` name when the caller passed
-    // empty so behaviour matches the prior wcore path. Counts
-    // both `tabids` and any leftover `pinnedtabids` from
-    // legacy data so the numbering doesn't collide with
-    // pre-removal entries that bootstrap will surface as
-    // regular tabs.
-    let resolved_name = if tab_name.is_empty() {
-        match store.get::<Workspace>(&ws_id) {
-            Ok(Some(ws)) => {
-                format!("Tab {}", ws.tabids.len() + ws.pinnedtabids.len() + 1)
-            }
-            _ => "Tab 1".to_string(),
-        }
-    } else {
-        tab_name.clone()
-    };
+    // An empty name stays empty: the reducer picks the next free `Tab {N}`
+    // and suffixes any name the workspace already has.
     let events = dispatch_to_reducer(
         state,
         agentmux_common::ipc::Command::CreateTab {
             workspace_id: ws_id.clone(),
-            name: resolved_name,
+            name: tab_name.clone(),
         },
     )
     .await;

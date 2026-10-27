@@ -1153,3 +1153,91 @@ fn update_meta_of_unknown_tab_errors() {
     );
     assert!(matches!(&events[..], [Event::Error { message, .. }] if message.contains("UpdateTabMeta")));
 }
+
+
+fn tab_names(state: &State, ws: &str) -> Vec<String> {
+    state.workspaces[ws].tab_ids.iter().map(|id| state.tabs[id].name.clone()).collect()
+}
+
+#[test]
+fn create_tab_with_a_taken_name_gets_a_suffix() {
+    let mut state = State::default();
+    let ws = create_workspace(&mut state, "w");
+    for n in 1..=3 {
+        update(&mut state, Command::CreateTab { workspace_id: ws.clone(), name: "Tab 4".into() }, &ctx(n));
+    }
+    assert_eq!(tab_names(&state, &ws), vec!["Tab 4", "Tab 4 (2)", "Tab 4 (3)"]);
+}
+
+#[test]
+fn create_tab_default_name_skips_numbers_in_use() {
+    let mut state = State::default();
+    let ws = create_workspace(&mut state, "w");
+    create_tab(&mut state, &ws, "Tab 1");
+    create_tab(&mut state, &ws, "Tab 3");
+    // Two tabs, so the count says "Tab 3", which is taken.
+    update(&mut state, Command::CreateTab { workspace_id: ws.clone(), name: String::new() }, &ctx(7));
+    assert_eq!(tab_names(&state, &ws), vec!["Tab 1", "Tab 3", "Tab 4"]);
+}
+
+#[test]
+fn the_same_name_in_another_window_is_fine() {
+    let mut state = State::default();
+    let a = create_workspace(&mut state, "a");
+    let b = create_workspace(&mut state, "b");
+    create_tab(&mut state, &a, "Tab 4");
+    update(&mut state, Command::CreateTab { workspace_id: b.clone(), name: "Tab 4".into() }, &ctx(1));
+    assert_eq!(tab_names(&state, &b), vec!["Tab 4"]);
+}
+
+#[test]
+fn rename_tab_to_a_taken_name_gets_a_suffix_and_the_event_says_so() {
+    let mut state = State::default();
+    let ws = create_workspace(&mut state, "w");
+    create_tab(&mut state, &ws, "Tab 4");
+    let other = create_tab(&mut state, &ws, "Tab 5");
+    let events = update(&mut state, Command::RenameTab { tab_id: other.clone(), name: " tab 4 ".into() }, &ctx(1));
+    assert!(matches!(&events[..], [Event::TabRenamed { name, .. }] if name == "tab 4 (2)"));
+    assert_eq!(state.tabs[&other].name, "tab 4 (2)");
+    // Renaming to its own current name stays a silent no-op.
+    let again = update(&mut state, Command::RenameTab { tab_id: other, name: "tab 4 (2)".into() }, &ctx(2));
+    assert!(again.is_empty(), "got {:?}", again);
+}
+
+#[test]
+fn a_suffixed_name_does_not_grow_a_second_suffix() {
+    let mut state = State::default();
+    let ws = create_workspace(&mut state, "w");
+    create_tab(&mut state, &ws, "Tab 4");
+    create_tab(&mut state, &ws, "Tab 4 (2)");
+    update(&mut state, Command::CreateTab { workspace_id: ws.clone(), name: "Tab 4 (2)".into() }, &ctx(1));
+    assert_eq!(tab_names(&state, &ws), vec!["Tab 4", "Tab 4 (2)", "Tab 4 (3)"]);
+}
+
+#[test]
+fn move_tab_into_a_window_with_its_name_renames_it() {
+    let mut state = State::default();
+    let src = create_workspace(&mut state, "src");
+    let dst = create_workspace(&mut state, "dst");
+    let moving = create_tab(&mut state, &src, "Tab 4");
+    create_tab(&mut state, &src, "Tab 9");
+    create_tab(&mut state, &dst, "Tab 4");
+    let events = update(
+        &mut state,
+        Command::MoveTab {
+            tab_id: moving.clone(),
+            src_workspace_id: src,
+            dst_workspace_id: dst.clone(),
+            dst_index: 0,
+            allow_empty_source: false,
+        },
+        &ctx(1),
+    );
+    assert!(
+        matches!(&events[..], [Event::TabMoved { .. }, Event::TabRenamed { name, .. }] if name == "Tab 4 (2)"),
+        "got {:?}",
+        events
+    );
+    assert_eq!(state.tabs[&moving].name, "Tab 4 (2)");
+    assert_eq!(tab_names(&state, &dst), vec!["Tab 4 (2)", "Tab 4"]);
+}
