@@ -46,8 +46,10 @@ vi.mock("@/app/store/rpc-api", () => ({
         LinkAgentIdentityCommand: vi.fn().mockResolvedValue(undefined),
         ListAgentIdentitiesCommand: vi.fn().mockResolvedValue([]),
         SetMetaCommand: vi.fn().mockResolvedValue(undefined),
+        AgentAccountSwitchCommand: vi.fn().mockResolvedValue({ failed: [], status: "done", account_label: "work" }),
     },
 }));
+vi.mock("@/app/view/identity/account-agents", () => ({ notifyLinksChanged: vi.fn() }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 vi.mock("@/app/store/services", () => ({
     BlockService: { GetControllerStatus: vi.fn().mockResolvedValue(undefined) },
@@ -69,6 +71,33 @@ afterEach(() => {
     vi.useRealTimers();
     hub.agentDefinitionId = undefined;
     hub.agentMode = undefined;
+});
+
+describe("useAgentControllerStatus — binding an account answers the transcript's sign-in line", () => {
+    const account = { id: "acct-1", name: "work", display_name: "Work (me@example.com)" } as any;
+
+    it("tells the pane which account was bound, once the move is in effect", async () => {
+        hub.agentDefinitionId = "def-1";
+        const onAccountBound = vi.fn();
+        await createRoot(async (dispose) => {
+            const status = useAgentControllerStatus({ blockId: "block-1", provider: () => claude, log: () => {}, onAccountBound });
+            await status.bindExistingAccount(account);
+            expect(onAccountBound).toHaveBeenCalledWith("Work (me@example.com)");
+            dispose();
+        });
+    });
+
+    it("says nothing when a pane did not restart on the account", async () => {
+        hub.agentDefinitionId = "def-1";
+        vi.mocked(RpcApi.AgentAccountSwitchCommand).mockResolvedValueOnce({ failed: ["could not restart"], status: "done", account_label: "work" } as any);
+        const onAccountBound = vi.fn();
+        await createRoot(async (dispose) => {
+            const status = useAgentControllerStatus({ blockId: "block-1", provider: () => claude, log: () => {}, onAccountBound });
+            await status.bindExistingAccount(account);
+            expect(onAccountBound).not.toHaveBeenCalled();
+            dispose();
+        });
+    });
 });
 
 // REMOVED 2026-08-31 — three describes that exercised `useGlobalLogin()`:
