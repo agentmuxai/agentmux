@@ -57,12 +57,24 @@ const RETRY_AFTER: Duration = Duration::from_secs(60);
 /// Short, so a slow srv delays a tool call by this at most.
 const FETCH_TIMEOUT: Duration = Duration::from_secs(3);
 
+/// Whether this process runs in a container agent's container, by the hint srv puts in its environment.
+/// Only a hint for this client (srv never reads it): it makes the MCP skip signing material it holds none
+/// of, and srv attributes the request by the container's token.
+pub(crate) fn in_container() -> bool {
+    is_container_hint(std::env::var("AGENTMUX_IN_CONTAINER").ok().as_deref())
+}
+
+fn is_container_hint(value: Option<&str>) -> bool {
+    value == Some("1")
+}
+
 /// Fetch the keys if there is no copy yet, or it is older than 20 h. Errors
 /// leave the old copy (or none) in place: signing then falls back to the env
 /// keys, exactly as before M4d-3.
 pub(crate) async fn refresh_if_stale(client: &reqwest::Client, local_url: &str, auth_key: &str) {
     let fresh = CACHE.lock().unwrap_or_else(|e| e.into_inner()).as_ref().is_some_and(|c| still_good(c, agentmux_common::time::now_secs()));
-    if fresh || local_url.is_empty() || std::env::var("AGENTMUX_AGENT_TOKEN").map_or(true, |t| t.trim().is_empty()) {
+    // In a container srv signs for the agent and refuses this route: the hint skips the call.
+    if fresh || in_container() || local_url.is_empty() || std::env::var("AGENTMUX_AGENT_TOKEN").map_or(true, |t| t.trim().is_empty()) {
         return;
     }
     {
@@ -141,6 +153,14 @@ pub(crate) fn clear_for_test() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn only_a_one_is_the_container_hint() {
+        assert!(super::is_container_hint(Some("1")));
+        assert!(!super::is_container_hint(None));
+        assert!(!super::is_container_hint(Some("0")));
+        assert!(!super::is_container_hint(Some("")));
+    }
+
     use super::*;
 
     /// [7; 32] and [1; 32], base64.
