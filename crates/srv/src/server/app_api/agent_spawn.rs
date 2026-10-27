@@ -139,7 +139,7 @@ async fn spawn_with(
     let leader_runtime = state.mstore.agent_last_runtime_get(&leader.def.id).unwrap_or_default();
     let runtime = worker_runtime(&provider, &leader_runtime, req.model.as_deref(), req.effort.as_deref())
         .map_err(|e| refuse(StatusCode::BAD_REQUEST, format!("INVALID_ARG: {e}")))?;
-    let tab_id = super::resolve_tab_id_for_block(&state.mstore, &leader.block_id)
+    let tab_id = super::agent_block::resolve_tab_id_or_active(&state.mstore, &leader.block_id)
         .map_err(|e| refuse(StatusCode::CONFLICT, format!("NO_TAB: your pane isn't in a tab: {e}")))?;
     // Held until the worker's pane exists (or nothing was made), so a second
     // call counts it: parallel spawns can't each see room for one more.
