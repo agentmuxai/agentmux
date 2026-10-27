@@ -7,6 +7,7 @@
 
 import { createMemo, createSignal, For, onCleanup, Show, type Accessor, type JSX, type Setter } from "solid-js";
 import { Button, TextArea } from "@/app/element/ui";
+import { keyLabel } from "@/app/keybindings";
 import { gapSummary, partitionTargets } from "./swarm-fleet-targets";
 import type { SwarmViewModel } from "./swarm-model";
 
@@ -114,7 +115,7 @@ export function BroadcastDock(props: { model: SwarmViewModel }): JSX.Element {
                 <Button tone="accent" class="swarm-fleet-btn swarm-fleet-btn--primary" disabled={!canSend()} onClick={() => void send()}>
                     <i class="fa-solid fa-tower-broadcast" /> Send to {recipients()}
                 </Button>
-                <span class="swarm-broadcast-hint">Ctrl+Enter sends</span>
+                <span class="swarm-broadcast-hint">{keyLabel("mod+enter")} sends</span>
                 <Show when={gap()}>{(text) => <span class="swarm-fleet-broadcast-gap">{text()}</span>}</Show>
             </div>
             <Show when={state.recent().length > 0}>
