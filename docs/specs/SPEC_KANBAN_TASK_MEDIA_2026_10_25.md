@@ -31,7 +31,7 @@
 
 ### 3.1 The tool
 
-`Tasks` takes **`files`**: an array of absolute paths, on `enqueue`, `update` and `submit` (and `complete`, which is `submit` for a task that needs no review). Same checks as `Message send`'s `files` run before anything is sent (a readable, non-empty file, resolved from the agent's working directory). Each file is also given an optional caption through the paired array `captions` (same order; short text, "after: the Kanban in narrow width"). The answer lists what was attached (name, kind, size) and what was refused and why.
+`Tasks` takes **`files`**: an array of absolute paths, on `update` and `submit`. (Built so: a task that is not yet claimed has nothing to show, so `enqueue` takes only the `ui_change` flag; `complete` is held to the same media rule as `submit` for a task that waits for the operator, and refuses `files` with a pointer to `submit`.) Same checks as `Message send`'s `files` run before anything is sent (a readable, non-empty file, resolved from the agent's working directory). Each file is also given an optional caption through the paired array `captions` (same order; short text, "after: the Kanban in narrow width"). The answer lists what was attached (name, kind, size) and what was refused and why.
 
 **Upload, then reference** (the Message pattern), so a call is atomic: the MCP uploads each file to a new `POST /agentmux/work/media` (behind the auth key, like the attachments upload: the agent-token layer buffers whole bodies, so a streamed upload is not behind it; the task call that names the file is), which streams it to a staging folder, hashes it and sniffs its type; the task call then carries `media: [{sha256, name, caption}]`. A bad file fails the call before the task changes. Staging files left behind are removed after an hour.
 
@@ -68,7 +68,7 @@ A **Media** section above Document: a grid of thumbnails, newest attempt first, 
 
 ### 4.3 Who changes them
 
-Agents add; **only the operator removes** (`kanban.act` `media_remove`, operator-only through the host-proven connection like `accept`). An agent cannot delete another agent's picture, and the operator can take out a file that shows something it should not. A removed file leaves a row marked `removed_at` so the drawer says "removed" and who asked.
+Agents add. Removing a file (`kanban.act` `media_remove`) and toggling `ui_change` (`kanban.act` `ui_change`) are moves on the board like the others: the operator makes them from the drawer, and an agent can make them too. **Built differently from the first draft of this spec,** which said "only the operator removes" (D5): on current main an agent makes every board move except `create` and `track`, and the history names whoever made it, so no operator-only guard was added (the operator's rule of 2026-10-25: agents do anything but put words in the operator's mouth). What keeps it honest is attribution: both moves are recorded as the actor that made them, never as the operator. A removed file leaves a row marked `removed_at` so the drawer says "removed", and its bytes are deleted when no task names them.
 
 ## 5. The rule
 
@@ -120,13 +120,13 @@ Files touched in phase 1 (all existing owners told first; the Kanban files are m
 | **D2** | How long media are kept | 30 days after the task finishes (as its history), unless the operator removes it sooner; one file at most 25 MiB (image) or 100 MiB (recording), 30 files and 300 MiB per task |
 | **D3** | Missing media at submit | Refuse, with `no_media_reason` as the way through (shown on the card) |
 | **D4** | Recordings | Phase 1 is images (a filmstrip meets the rule); phase 2 adds `UI record` if the capture proves out |
-| **D5** | Who removes a file | Only the operator |
+| **D5** | Who removes a file | Approved as "only the operator". **Built as:** whoever makes the move, recorded as themselves (see §4.3); no operator-only guard |
 
 ## 11. Tests
 
 Each written to fail without its change.
 
-- **srv:** an upload is hashed and typed by content (a `.png` that is not a PNG is refused; an SVG with a script is stored and served as an image only); the per-call, per-task and size limits; the same bytes stored once for two tasks; `submit` of a `ui_change` + `review_required` task without media is refused, passes with media from this attempt, passes with `no_media_reason`, and media from an earlier attempt does not count; a task not marked is unchanged; `update` with a PR link on a marked task without media carries the reminder; the hourly prune removes the media of a task 30 days after it finished and not before, and a blob still named by another task stays; `media_remove` refuses an agent caller and an unproven connection and keeps a `removed_at` row; a staging file older than an hour goes.
+- **srv:** an upload is hashed and typed by content (a `.png` that is not a PNG is refused; an SVG with a script is stored and served as an image only); the per-call, per-task and size limits; the same bytes stored once for two tasks; `submit` of a `ui_change` + `review_required` task without media is refused, passes with media from this attempt, passes with `no_media_reason`, and media from an earlier attempt does not count; a task not marked is unchanged; `update` with a PR link on a marked task without media carries the reminder; the hourly prune removes the media of a task 30 days after it finished and not before, and a blob still named by another task stays; `media_remove` and `ui_change` are recorded as the actor that made them (an agent is never recorded as the operator), and `media_remove` keeps a `removed_at` row; `complete` is held to the same rule as `submit`; the same picture attached again after a send-back counts for the new attempt, and a `no_media_reason` holds only for the attempt that gave it; a staging file older than an hour goes.
 - **mcp:** `files` and `captions` on enqueue, update and submit; the path checks; a failed upload fails the call before the task changes; the schema lists the new parameters and the handler table matches.
 - **frontend:** the card shows up to three thumbnails and "+N"; no strip for a task without media; the "no media" pill; the drawer lists newest attempt first with who/when/attempt; a click opens the Editor on the stored path; a recording does not autoplay.
 - **Live (my own `task dev`, built from current main):** an image and a recording attached to a task filed in the build's own queue (#5455), the strip and the drawer in wide and narrow width.
