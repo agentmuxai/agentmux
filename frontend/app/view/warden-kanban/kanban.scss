@@ -619,13 +619,15 @@ $kanban-narrow: 760px;
     gap: var(--space-1);
 }
 
-.kanban-media__thumb {
+.ui-button.kanban-media__thumb {
     position: relative;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     width: 44px;
+    min-width: 0;
     height: 32px;
+    min-height: 0;
     padding: 0;
     overflow: hidden;
     color: var(--secondary-text-color);

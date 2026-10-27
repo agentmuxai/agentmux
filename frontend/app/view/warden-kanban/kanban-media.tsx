@@ -56,10 +56,10 @@ function Thumb(props: { p: KanbanMediaPreview }): JSX.Element {
         if (made) URL.revokeObjectURL(made);
     });
     return (
-        <button
-            type="button"
-            class="kanban-media__thumb"
-            classList={{ "kanban-media__thumb--recording": props.p.kind === "recording" }}
+        <Button
+            density="compact"
+            tone="quiet"
+            class={props.p.kind === "recording" ? "kanban-media__thumb kanban-media__thumb--recording" : "kanban-media__thumb"}
             title={props.p.kind === "recording" ? "Recording" : "Screenshot"}
             onClick={(e) => {
                 e.stopPropagation();
@@ -72,7 +72,7 @@ function Thumb(props: { p: KanbanMediaPreview }): JSX.Element {
             <Show when={props.p.kind === "recording"}>
                 <i class="fa-solid fa-play kanban-media__play" aria-hidden="true" />
             </Show>
-        </button>
+        </Button>
     );
 }
 
