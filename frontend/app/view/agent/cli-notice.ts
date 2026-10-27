@@ -12,6 +12,10 @@
  * - `agentmux_cli_version_changed` — "Claude Code updated: 2.1.218 →
  *   2.1.285", with a warning when the running version isn't the one AgentMux
  *   pins.
+ * - `agentmux_container_start` — a container agent's container is coming up:
+ *   "Downloading the agent image… 42%", "Starting the container…", then
+ *   "Container ready (12 s)" or "Couldn't start the container". Every frame of
+ *   one start-up shares a `start_id`, so it is one row that updates in place.
  * - `agentmux_mcp_health` — the agent's AgentMux MCP server didn't connect and
  *   AgentMux is repairing it (`crates/srv/src/backend/mcp_health.rs`). Every
  *   frame of one episode shares an `episode`, so it is one row that updates.
@@ -27,8 +31,10 @@ import type { CliNoticeNode } from "./types";
 const CLI_INSTALL_SUBTYPE = "agentmux_cli_install";
 const CLI_VERSION_CHANGED_SUBTYPE = "agentmux_cli_version_changed";
 const MCP_HEALTH_SUBTYPE = "agentmux_mcp_health";
+const CONTAINER_START_SUBTYPE = "agentmux_container_start";
 
 const MCP_STATES = ["healing", "restarting", "ok", "gave_up"] as const;
+const CONTAINER_START_STATES = ["pulling", "starting", "ready", "failed"] as const;
 
 function str(v: unknown): string | null {
     return typeof v === "string" && v.length > 0 ? v : null;
@@ -98,6 +104,23 @@ export function parseCliNoticeFrame(rawEvent: unknown, now: number): CliNoticeNo
             timestamp,
         };
     }
+    if (e.subtype === CONTAINER_START_SUBTYPE) {
+        const startId = str(e.start_id);
+        const startState = CONTAINER_START_STATES.find((s) => s === e.state);
+        if (!startId || !startState) return null;
+        return {
+            type: "cli_notice",
+            id: `container-start-${startId}`,
+            kind: "container_start",
+            provider,
+            startState,
+            percent: typeof e.percent === "number" ? e.percent : undefined,
+            image: str(e.image) ?? undefined,
+            seconds: typeof e.seconds === "number" ? e.seconds : undefined,
+            error: str(e.error) ?? undefined,
+            timestamp,
+        };
+    }
     if (e.subtype === MCP_HEALTH_SUBTYPE) {
         const episode = str(e.episode);
         const mcpState = MCP_STATES.find((s) => s === e.state);
@@ -146,6 +169,7 @@ export function cliNoticeText(node: CliNoticeNode): { label: string; detail: str
         return { label: `${name} couldn't compact the conversation`, detail: node.error ?? null, tone: "error" };
     }
     if (node.kind === "mcp_health") return mcpHealthText(node);
+    if (node.kind === "container_start") return containerStartText(node);
     if (node.kind === "install") {
         switch (node.state) {
             case "installing":
@@ -164,6 +188,28 @@ export function cliNoticeText(node: CliNoticeNode): { label: string; detail: str
         detail: offPin ? `Not the version AgentMux pins (${node.pinned})` : null,
         tone: offPin ? "warn" : "info",
     };
+}
+
+/** A container agent's start-up, one row per start. */
+function containerStartText(node: CliNoticeNode): { label: string; detail: string | null; tone: CliNoticeTone } {
+    switch (node.startState) {
+        case "pulling": {
+            const percent = node.percent != null ? ` ${Math.round(node.percent)}%` : "";
+            return {
+                label: `Downloading the agent image…${percent}`,
+                detail: "First start only. The agent answers once it's downloaded",
+                tone: "info",
+            };
+        }
+        case "starting":
+            return { label: "Starting the container…", detail: null, tone: "info" };
+        case "ready": {
+            const took = node.seconds != null ? ` (${Math.max(1, Math.round(node.seconds))} s)` : "";
+            return { label: `Container ready${took}`, detail: null, tone: "info" };
+        }
+        default:
+            return { label: "Couldn't start the container", detail: node.error ?? null, tone: "error" };
+    }
 }
 
 const SAFE_PROFILE_DETAIL = "Running without the shell prefix until AgentMux restarts";

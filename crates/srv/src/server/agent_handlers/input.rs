@@ -1116,23 +1116,27 @@ pub async fn run_agent_turn_joining(
             let agent_provider =
                 crate::backend::obj::meta_get_string(&block.meta, "agentProvider", "claude");
 
-            // Start the container (pulling the image if needed) and make sure
-            // the provider CLI is installed in it. A failure is written to the
-            // pane as a plain-language error before it is returned.
-            super::container_turn::prepare(super::container_turn::ContainerTurnPrep {
-                cm: &cm,
-                block_id: &block_id,
-                container_name: &container_name,
-                image: &container_image,
-                volumes: &volumes,
-                mount_spec: &mount_spec,
-                provider_id: &agent_provider,
-                container_command: &container_command,
-                broker: &broker,
-                filestore: &filestore_gate,
-                mstore: &mstore,
-            })
-            .await?;
+            // Starting the container (pulling the image if needed) and making
+            // sure the provider CLI is installed in it take minutes the first
+            // time. They run at the start of the turn's own task, not here: the
+            // RPC engine drops this handler after five seconds, which used to
+            // cancel the download for good. A failure is written to the pane
+            // as a plain-language error.
+            subprocess_ctrl.set_container_startup(super::container_turn::startup_step(
+                super::container_turn::ContainerStartup {
+                    cm: cm.clone(),
+                    block_id: block_id.clone(),
+                    container_name: container_name.clone(),
+                    image: container_image.clone(),
+                    volumes: volumes.clone(),
+                    mount_spec: mount_spec.clone(),
+                    provider_id: agent_provider.clone(),
+                    container_command: container_command.clone(),
+                    broker: broker.clone(),
+                    filestore: filestore_gate.clone(),
+                    mstore: mstore.clone(),
+                },
+            ));
 
             tracing::info!(
                 block_id = %block_id,

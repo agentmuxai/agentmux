@@ -175,6 +175,14 @@ impl SubprocessController {
     ///
     /// Takes `cm` and `container_name` by value (not reference) so the returned
     /// future is `'static` — required for `tokio::spawn` in the queue-drain path.
+    /// Record what a container turn does before its exec (start the container,
+    /// install the CLI). Call before [`spawn_container_turn`](Self::spawn_container_turn):
+    /// the step runs at the start of that turn's own task, and again for each
+    /// message queued behind it, so a failed start-up is retried by the next one.
+    pub fn set_container_startup(&self, step: super::StartupStep) {
+        *self.container_startup.lock().unwrap() = Some(step);
+    }
+
     pub fn spawn_container_turn(
         &self,
         cm: crate::backend::container::ContainerManager,
@@ -268,6 +276,7 @@ impl SubprocessController {
         // racing on the same path, including the `rm -f` that cleans it up.
         let turn_id = uuid::Uuid::new_v4().to_string();
         let turn_message = config.message.clone();
+        let startup = self.container_startup.lock().unwrap().clone();
         let user_record = self.user_record_sink(config.message_id.is_some());
         let self_ref_done = self.self_ref.lock().unwrap().clone().unwrap_or_default();
 
@@ -325,7 +334,19 @@ impl SubprocessController {
             // its stdin redirected from that file. See `container_turn_exec`
             // and `ContainerManager::upload_turn_prompt` for why neither the
             // exec's own stdin, nor argv, nor an env var can carry it.
-            let exec_result = match cm
+            //
+            // Before that, get the container ready (first message: download the
+            // image, create the container, install the CLI). That is minutes of
+            // work, so it happens here and not in the handler that took the
+            // message. Its failure has already been written to the pane.
+            let startup_failed = match &startup {
+                Some(step) => step().await.is_err(),
+                None => false,
+            };
+            let exec_result: Result<_, Option<crate::backend::container::ContainerError>> = if startup_failed {
+                Err(None)
+            } else {
+                match cm
                 .upload_turn_prompt(&container_name, &turn_id, &turn_message)
                 .await
             {
@@ -347,15 +368,18 @@ impl SubprocessController {
                             // `rm -f "$F"` — clean up here or the prompt is
                             // orphaned in the container (reagent P2, PR #2883).
                             cm.remove_turn_prompt(&container_name, &prompt_path).await;
-                            Err(e)
+                            Err(Some(e))
                         }
                     }
                 }
-                Err(e) => Err(e),
+                Err(e) => Err(Some(e)),
+            }
             };
             let exec_session = match exec_result {
                 Ok(s) => s,
                 Err(e) => {
+                    // `None`: the start-up step failed and already told the pane.
+                    if let Some(e) = &e {
                     tracing::warn!(block_id = %block_id, error = %e, "container exec failed");
                     // Surface the error in the agent pane so the user sees what went wrong.
                     if let Some(ref b) = broker {
@@ -374,6 +398,7 @@ impl SubprocessController {
                             format!("{error_frame}\n").as_bytes(),
                             filestore.as_ref(), global_zone.as_deref(),
                         );
+                    }
                     }
                     // A failed exec must still run the SAME completion + queue
                     // drain as the normal-exit path below: publish a terminal
