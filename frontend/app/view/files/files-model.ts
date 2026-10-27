@@ -27,6 +27,7 @@ import type { FsPlace } from "@/types/rpc/FsPlace";
 import { isMacOS, isWindows } from "@/util/platformutil";
 import { isSshConnection } from "@/app/view/term/ssh-connection";
 import { isValidAgentColor, pickAgentColor } from "@/app/view/agent/agent-color";
+import { compareLastUsed } from "@/app/view/agent/agent-recency";
 import { blockRoleColor, isLightThemeActive } from "@/app/block/pane-identity";
 import type { RemoteRecord } from "@/app/store/rpc-api/remotes";
 import { displayName, groupRemotes, remoteColor } from "@/app/view/remotes/remotes-sections";
@@ -435,7 +436,8 @@ export class FilesModel {
             const rows = await RpcApi.ListNamedAgentsCommand(TabRpcClient, { limit: 200 });
             const seen = new Set<string>();
             const picked: { name: string; path: string; definitionId: string }[] = [];
-            for (const r of rows) {
+            // Most recently used first: an agent shows once, by its newest use.
+            for (const r of [...rows].sort(compareLastUsed)) {
                 const dir = r.working_directory;
                 if (!dir || seen.has(dir.toLowerCase())) continue;
                 seen.add(dir.toLowerCase());
@@ -452,7 +454,6 @@ export class FilesModel {
                     color: await loadAgentColor(definitionId),
                 }))
             );
-            agents.sort((a, b) => a.name.localeCompare(b.name));
             if (!this.disposed) this.setAgents(agents);
         } catch {
             // No agents section.

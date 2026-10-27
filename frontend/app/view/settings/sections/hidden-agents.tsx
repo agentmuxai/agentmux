@@ -12,6 +12,7 @@ import { createSignal, For, onMount, Show, type JSX } from "solid-js";
 import { RpcApi, type AgentDefinition } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { SettingsIndexEntry } from "../settings-model";
+import { sortByLastUsed } from "@/app/view/agent/agent-recency";
 
 export const HIDDEN_AGENTS_SETTING = {
     id: "devices.hidden_agents",
@@ -61,7 +62,7 @@ export function HiddenAgents(): JSX.Element {
     };
 
     const hiddenAgents = () => (agents() ?? []).filter((a) => hiddenIds().includes(a.id));
-    const candidates = () => (agents() ?? []).filter((a) => !hiddenIds().includes(a.id));
+    const candidates = () => sortByLastUsed((agents() ?? []).filter((a) => !hiddenIds().includes(a.id)), agentName);
     const picked = () => candidates().find((a) => a.id === pick());
 
     return (

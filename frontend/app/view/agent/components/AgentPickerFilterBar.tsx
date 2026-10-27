@@ -22,7 +22,8 @@
 import { type Accessor, type JSX } from "solid-js";
 import { FilterInput } from "@/app/element/ui";
 
-/** "Recently launched" (most recent `started_at` first) is the default —
+/** "Recently used" (most recent `last_active_at`, else `started_at`, first; see
+ *  agent-recency.ts) is the default —
  *  it matches the backend's own existing sort intent (see
  *  `listrecentsessions`'s row ordering before the picker ever added a
  *  user-facing sort control at all), so leaving the control untouched
@@ -64,7 +65,7 @@ export const AgentPickerFilterBar = (props: AgentPickerFilterBarProps): JSX.Elem
                     value={props.sortBy()}
                     onChange={(e) => props.onSortChange(e.currentTarget.value as AgentSortOption)}
                 >
-                    <option value="recent">Recently launched</option>
+                    <option value="recent">Recently used</option>
                     <option value="name">Name (A–Z)</option>
                     <option value="type">Type</option>
                 </select>

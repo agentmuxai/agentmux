@@ -422,11 +422,11 @@ describe("MyAgentsList — sortBy (docs/reports/REPORT_AGENT_PICKER_FIELD_ORDER_
         return entries.map((e) => e.querySelector(".agent-recent-sessions-name")?.textContent ?? "");
     };
 
-    it('defaults to "recent" (most-recently-launched first) when sortBy is omitted — existing callers get the same client-side sort as the explicit default, not raw backend order', async () => {
+    it('defaults to "recent" (most recently used first) when sortBy is omitted — existing callers get the same client-side sort as the explicit default, not raw backend order', async () => {
         vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(
             okResult([
-                makeRow({ instance_id: "a", instance_name: "Zebra", started_at: 1000 }),
-                makeRow({ instance_id: "b", instance_name: "Alpha", started_at: 2000 }),
+                makeRow({ instance_id: "a", instance_name: "Zebra", started_at: 1000, last_active_at: 1000 }),
+                makeRow({ instance_id: "b", instance_name: "Alpha", started_at: 2000, last_active_at: 2000 }),
             ])
         );
         render(() => <MyAgentsList onReattach={() => {}} />);
@@ -446,17 +446,29 @@ describe("MyAgentsList — sortBy (docs/reports/REPORT_AGENT_PICKER_FIELD_ORDER_
         expect(await namesInOrder()).toEqual(["Alpha", "middle", "zebra"]);
     });
 
-    it('sorts by most-recently-launched first when sortBy is "recent"', async () => {
+    it('sorts by most recently used first when sortBy is "recent"', async () => {
         vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(
             okResult([
-                makeRow({ instance_id: "a", instance_name: "Oldest", started_at: 1000 }),
-                makeRow({ instance_id: "b", instance_name: "Newest", started_at: 3000 }),
-                makeRow({ instance_id: "c", instance_name: "Middle", started_at: 2000 }),
+                makeRow({ instance_id: "a", instance_name: "Oldest", started_at: 1000, last_active_at: 1000 }),
+                makeRow({ instance_id: "b", instance_name: "Newest", started_at: 3000, last_active_at: 3000 }),
+                makeRow({ instance_id: "c", instance_name: "Middle", started_at: 2000, last_active_at: 2000 }),
             ])
         );
         const [sortBy] = createSignal<AgentSortOption>("recent");
         render(() => <MyAgentsList sortBy={sortBy} onReattach={() => {}} />);
         expect(await namesInOrder()).toEqual(["Newest", "Middle", "Oldest"]);
+    });
+
+    it('ranks an agent you talked to since over one launched later but idle, when sortBy is "recent"', async () => {
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(
+            okResult([
+                makeRow({ instance_id: "a", instance_name: "Launched late, idle", started_at: 5000, last_active_at: 5000 }),
+                makeRow({ instance_id: "b", instance_name: "Chatted since", started_at: 1000, last_active_at: 9000 }),
+            ])
+        );
+        const [sortBy] = createSignal<AgentSortOption>("recent");
+        render(() => <MyAgentsList sortBy={sortBy} onReattach={() => {}} />);
+        expect(await namesInOrder()).toEqual(["Chatted since", "Launched late, idle"]);
     });
 
     it('sorts Host before Sandbox (Container) before unknown when sortBy is "type", each group alphabetical', async () => {
@@ -493,8 +505,8 @@ describe("MyAgentsList — sortBy (docs/reports/REPORT_AGENT_PICKER_FIELD_ORDER_
     it("re-sorts reactively when sortBy changes after mount", async () => {
         vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(
             okResult([
-                makeRow({ instance_id: "a", instance_name: "Zebra", started_at: 2000 }),
-                makeRow({ instance_id: "b", instance_name: "Alpha", started_at: 1000 }),
+                makeRow({ instance_id: "a", instance_name: "Zebra", started_at: 2000, last_active_at: 2000 }),
+                makeRow({ instance_id: "b", instance_name: "Alpha", started_at: 1000, last_active_at: 1000 }),
             ])
         );
         const [sortBy, setSortBy] = createSignal<AgentSortOption>("recent");
