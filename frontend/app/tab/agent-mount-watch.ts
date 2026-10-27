@@ -19,13 +19,16 @@ export const mountWatchEnv = {
 };
 
 const waiting = new Map<string, { timer: ReturnType<typeof setTimeout>; since: number }>();
+/** Blocks whose wait ended with a mount (or that are not agents): not watched again until forgotten. */
+const settled = new Set<string>();
 
 /** Start waiting for `blockId`'s agent view to mount. `describe` is read when the wait runs out. */
 export function expectAgentMount(blockId: string, describe: () => string): void {
-    if (!blockId || waiting.has(blockId)) return;
+    if (!blockId || waiting.has(blockId) || settled.has(blockId)) return;
     const since = mountWatchEnv.now();
     const timer = setTimeout(() => {
         waiting.delete(blockId);
+        settled.add(blockId); // said once; a later run of the pane's effect does not say it again
         const seconds = Math.round((mountWatchEnv.now() - since) / 1000);
         mountWatchEnv.log(`[pane-mount] block=${blockId.slice(0, 8)} agent view has not started after ${seconds} s: ${describe()}`);
     }, MOUNT_WATCH_MS);
@@ -34,8 +37,15 @@ export function expectAgentMount(blockId: string, describe: () => string): void 
 
 /** The agent view mounted, or the block is not an agent (or gone): stop waiting. */
 export function agentMountSettled(blockId: string): void {
+    settled.add(blockId);
     const entry = waiting.get(blockId);
     if (!entry) return;
     clearTimeout(entry.timer);
     waiting.delete(blockId);
+}
+
+/** The block left its pane: stop waiting, and watch it afresh if it comes back. */
+export function agentMountForgotten(blockId: string): void {
+    agentMountSettled(blockId);
+    settled.delete(blockId);
 }

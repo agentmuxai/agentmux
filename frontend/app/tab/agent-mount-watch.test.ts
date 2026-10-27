@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { agentMountSettled, expectAgentMount, MOUNT_WATCH_MS, mountWatchEnv } from "./agent-mount-watch";
+import { agentMountForgotten, agentMountSettled, expectAgentMount, MOUNT_WATCH_MS, mountWatchEnv } from "./agent-mount-watch";
 
 describe("agent mount watch", () => {
     let lines: string[];
@@ -18,8 +18,8 @@ describe("agent mount watch", () => {
     });
 
     afterEach(() => {
-        agentMountSettled("0f0b7d4d-1111");
-        agentMountSettled("bfbeea15-2222");
+        agentMountForgotten("0f0b7d4d-1111");
+        agentMountForgotten("bfbeea15-2222");
         vi.useRealTimers();
         Object.assign(mountWatchEnv, original);
     });
@@ -60,6 +60,19 @@ describe("agent mount watch", () => {
         run(10_000);
         expect(lines).toHaveLength(2);
         expect(lines[1]).toContain("block=bfbeea15");
+    });
+
+    it("does not watch a block again after its view mounted, until it leaves its pane", () => {
+        expectAgentMount("0f0b7d4d-1111", () => "first");
+        agentMountSettled("0f0b7d4d-1111");
+        // A later run of the pane's effect (a meta update to the block) asks again.
+        expectAgentMount("0f0b7d4d-1111", () => "again");
+        run(MOUNT_WATCH_MS * 2);
+        expect(lines).toEqual([]);
+        agentMountForgotten("0f0b7d4d-1111");
+        expectAgentMount("0f0b7d4d-1111", () => "back in a pane");
+        run(MOUNT_WATCH_MS);
+        expect(lines).toHaveLength(1);
     });
 
     it("ignores an empty block id", () => {
