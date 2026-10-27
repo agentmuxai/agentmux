@@ -118,6 +118,7 @@ pub fn start(mstore: Arc<Store>, filestore: Arc<FileStore>, event_bus: Arc<Event
     if INSTANCE.set(sup.clone()).is_err() {
         return;
     }
+    sup.clone().drop_restarted_waits();
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<TurnEnded>();
     // On the broker's publish path: parse and enqueue only.
     broker.add_observer(Arc::new(move |ev: &MuxEvent| {
@@ -142,6 +143,38 @@ pub fn start(mstore: Arc<Store>, filestore: Arc<FileStore>, event_bus: Arc<Event
 }
 
 impl Supervisor {
+    /// A continuation's wait is not persisted: a pane that still says "Continuing in ..." from
+    /// before this start will never send it, so its row says so instead.
+    fn drop_restarted_waits(self: Arc<Self>) {
+        tokio::task::spawn_blocking(move || {
+            let blocks = match self.mstore.get_all::<Block>() {
+                Ok(b) => b,
+                Err(e) => {
+                    tracing::warn!(error = %e, "supervisor: could not read panes to clear interrupted waits");
+                    return;
+                }
+            };
+            for block in blocks {
+                let Some(mut state) = SupervisorState::from_meta(&block.meta) else { continue };
+                if !pacing::drop_restarted_wait(&mut state) {
+                    continue;
+                }
+                let Ok(value) = serde_json::to_value(&state) else { continue };
+                let id = block.oid.clone();
+                let written = self.mstore.with_tx(|tx| {
+                    let mut b = tx.must_get::<Block>(&id)?;
+                    b.meta.insert(META_STATE.to_string(), value);
+                    tx.update(&mut b)?;
+                    Ok(())
+                });
+                match written {
+                    Ok(()) => broadcast_block_update(&self.mstore, &self.event_bus, &id),
+                    Err(e) => tracing::warn!(block_id = %id, error = %e, "supervisor: could not clear an interrupted wait"),
+                }
+            }
+        });
+    }
+
     fn first_sighting(&self, end: &TurnEnded) -> bool {
         let mut seen = self.seen.lock().unwrap_or_else(|e| e.into_inner());
         if seen.len() > SEEN_MAX {
@@ -358,7 +391,7 @@ impl Supervisor {
         let wait = settings::SupervisorSettings::current().cooldown_secs;
         if let (Action::Continue { reason, .. }, true) = (&action, wait > 0) {
             state.status = SupervisorStatus::Waiting;
-            state.reason = format!("Continuing in {wait} s: {reason}");
+            state.reason = format!("{}{wait} s: {reason}", pacing::WAIT_PREFIX);
             self.save(block_id, generation, &state);
             let sup = self.clone();
             let block_id = block_id.to_string();
