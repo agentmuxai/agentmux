@@ -1077,12 +1077,7 @@ pub async fn run_agent_turn_joining(
             // the in-container CLI ever sees `.credentials.json`. Without this a
             // container agent authenticates never, no matter how many times the
             // operator logs in via Connectors → Accounts.
-            let mount_spec = crate::backend::container::ContainerMountSpec {
-                claude_config_host_dir: env_vars
-                    .get("CLAUDE_CONFIG_DIR")
-                    .and_then(|d| crate::backend::container::credentials_dir_if_file_backed(d)),
-                workspace_host_dir: Some(working_dir.clone()).filter(|d| !d.is_empty()),
-            };
+            let mount_spec = crate::backend::container::ContainerMountSpec::for_agent(&env_vars, &working_dir);
 
             // AGENTMUX_LOCAL_URL is never explicitly set in env_vars for a host
             // agent either (see the PATH-block comment above) — a host
