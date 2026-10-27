@@ -156,6 +156,13 @@ pub fn names(a: &IdentityAccount, wanted: &str, all: &[IdentityAccount]) -> bool
     if labels.iter().any(|l| !l.is_empty() && numbered_label(a, l, all) != *l && numbered_label(a, l, all).eq_ignore_ascii_case(&spoken)) {
         return true;
     }
+    // A number once advertised keeps naming its account after a sibling is deleted, when
+    // the label no longer shows it.
+    if let Some(n) = seq_of(a).filter(|_| group_key(a).is_some()) {
+        if labels.iter().any(|l| !l.is_empty() && format!("{l} \u{b7}{n}").eq_ignore_ascii_case(&spoken)) {
+            return true;
+        }
+    }
     // A bare email its group shares, or a display name two accounts carry, names none of
     // them, numbered or not yet: by the group, not by the number, which an account not
     // listed yet doesn't have. A display name only one carries still names it.
@@ -283,6 +290,9 @@ mod tests {
         work[0].display_name = "Personal".into();
         assert!(names(&work[0], "Personal", &work) && names(&work[1], "Work", &work), "a display name only one carries still names it");
         let lone = [acct("a", "me@example.com", Some(1), 1)];
+        let survivor = [acct("b", "me@example.com", Some(2), 2)];
+        assert!(names(&survivor[0], "me@example.com \u{b7}2", &survivor), "a number advertised before its sibling went still names it");
+        assert!(!names(&survivor[0], "me@example.com \u{b7}1", &survivor));
         assert!(names(&lone[0], "ME@example.com", &lone), "a lone account answers to its email");
     }
 }
