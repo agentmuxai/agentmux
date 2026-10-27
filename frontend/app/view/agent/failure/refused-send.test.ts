@@ -21,6 +21,14 @@ describe("refused sends", () => {
         expect(refusedSendOf("b1")?.text).toBe("first");
     });
 
+    it("keeps both payloads when the same text is refused with different attachments", () => {
+        const one = { path: "1.png" } as unknown as AttachmentRef;
+        const two = { path: "2.png" } as unknown as AttachmentRef;
+        rememberRefusedSend("b1", { text: "look", attachments: [one] });
+        rememberRefusedSend("b1", { text: "look", attachments: [two] });
+        expect(refusedSendOf("b1")?.attachments).toEqual([one, two]);
+    });
+
     it("forgets a kept message", () => {
         rememberRefusedSend("b1", { text: "x", attachments: [] });
         forgetRefusedSend("b1");

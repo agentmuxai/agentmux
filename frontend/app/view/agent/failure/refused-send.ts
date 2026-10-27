@@ -30,7 +30,7 @@ export function rememberRefusedSend(blockId: string, send: RefusedSend): void {
         // resent and refused again stays as it is.
         const kept = prev.get(blockId);
         const merged =
-            !kept || kept.text === send.text
+            !kept || (kept.text === send.text && JSON.stringify(kept.attachments) === JSON.stringify(send.attachments))
                 ? send
                 : { text: [kept.text, send.text].join("\n\n"), attachments: [...kept.attachments, ...send.attachments] };
         return new Map(prev).set(blockId, merged);
