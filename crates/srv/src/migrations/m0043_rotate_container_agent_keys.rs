@@ -9,6 +9,9 @@
 //! with a fresh one that is written nowhere a container can see. srv signs and attributes a container
 //! agent's messages itself, by its token, so nothing needs the old keys.
 //!
+//! The copies of those keys that are kept per agent UID (`..._by_uid`) are removed as well: a UID copy of an
+//! exposed key would still verify, and the next use copies the new name-keyed key, or mints one.
+//!
 //! The WAN key too: an earlier version injected it into the same file, and the channel-wide `wan.db` key was
 //! imported from that one. Both rows are removed, so the next signing mints a new key and srv's normal
 //! publish puts it in the directory (the relay keeps a record per key fingerprint, so a new key doesn't
@@ -82,14 +85,14 @@ enum Wan {
     Unavailable,
 }
 
-/// The slugs of the agents that run, or ran, as container agents: those defined as one, and those a pane
-/// still records as running in one (the store keeps no history of a definition's type, so an agent switched
-/// to host since is found only by its pane).
-fn container_agent_slugs(store: &Store) -> Result<Vec<String>, String> {
-    let mut slugs: Vec<String> = Vec::new();
+/// The `(id, slug)` of the agents that run, or ran, as container agents: those defined as one, and those a
+/// pane still records as running in one (the store keeps no history of a definition's type, so an agent
+/// switched to host since is found only by its pane).
+fn container_agents(store: &Store) -> Result<Vec<(String, String)>, String> {
+    let mut slugs: Vec<(String, String)> = Vec::new();
     for def in store.agent_def_list().map_err(|e| format!("rotate_container_agent_keys: read agents: {e}"))? {
         if def.agent_type == "container" {
-            slugs.push(def.slug);
+            slugs.push((def.id, def.slug));
         }
     }
     let conn = store.conn().lock().unwrap();
@@ -110,10 +113,10 @@ fn container_agent_slugs(store: &Store) -> Result<Vec<String>, String> {
             continue;
         }
         if let Some(def) = meta["agentId"].as_str().and_then(|id| store.agent_def_get(id).ok().flatten()) {
-            slugs.push(def.slug);
+            slugs.push((def.id, def.slug));
         }
     }
-    slugs.retain(|s| !s.trim().is_empty());
+    slugs.retain(|(_, slug)| !slug.trim().is_empty());
     slugs.sort();
     slugs.dedup();
     Ok(slugs)
@@ -122,7 +125,10 @@ fn container_agent_slugs(store: &Store) -> Result<Vec<String>, String> {
 /// Replace the keys of each container agent; how many agents had any.
 fn rotate_container_keys(store: &Store, wan: &Wan) -> Result<usize, String> {
     let mut rotated = 0;
-    for slug in container_agent_slugs(store)? {
+    for (id, slug) in container_agents(store)? {
+        let uid_copies = store
+            .agent_uid_keys_delete(&id)
+            .map_err(|e| format!("rotate_container_agent_keys: UID keys of {slug}: {e}"))?;
         let wan_removed = match wan {
             Wan::Store(wan) => {
                 let current = wan
@@ -145,7 +151,7 @@ fn rotate_container_keys(store: &Store, wan: &Wan) -> Result<usize, String> {
         let lan = store
             .agent_lan_key_rotate(&slug)
             .map_err(|e| format!("rotate_container_agent_keys: LAN key of {slug}: {e}"))?;
-        rotated += usize::from(jekt || lan || wan_removed);
+        rotated += usize::from(jekt || lan || wan_removed || uid_copies);
     }
     Ok(rotated)
 }
@@ -179,6 +185,24 @@ mod tests {
         assert_ne!(store.agent_lan_key_load(&boxed).unwrap().unwrap().private_key, boxed_lan.private_key);
         assert_eq!(store.agent_jekt_key_load(&host).unwrap().unwrap(), host_jekt, "a host agent keeps its keys");
         assert_eq!(store.agent_lan_key_load(&host).unwrap().unwrap(), host_lan);
+    }
+
+    #[test]
+    fn the_per_uid_copies_of_a_container_agents_keys_are_replaced_too() {
+        let store = Store::open_in_memory().unwrap();
+        let boxed = agent(&store, "Boxed", "container");
+        let host = agent(&store, "Hosty", "host");
+        let id_of = |slug: &str| store.agent_def_list().unwrap().into_iter().find(|d| d.slug == slug).unwrap().id;
+        let (boxed_id, host_id) = (id_of(&boxed), id_of(&host));
+        let boxed_before = store.agent_uid_keys_ensure(&boxed_id).unwrap().unwrap().0;
+        let host_before = store.agent_uid_keys_ensure(&host_id).unwrap().unwrap().0;
+
+        assert_eq!(rotate_container_keys(&store, &Wan::Unavailable).unwrap(), 1);
+
+        let boxed_after = store.agent_uid_keys_ensure(&boxed_id).unwrap().unwrap().0;
+        assert_ne!(boxed_after.lan.private_key, boxed_before.lan.private_key, "the exposed UID key no longer verifies");
+        assert_ne!(boxed_after.wan.private_key, boxed_before.wan.private_key);
+        assert_eq!(store.agent_uid_keys_ensure(&host_id).unwrap().unwrap().0.lan.private_key, host_before.lan.private_key);
     }
 
     #[test]
