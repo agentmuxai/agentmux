@@ -558,10 +558,7 @@ impl FileStore {
             let to_copy = (PART_DATA_SIZE - offset_in_part).min(data.len());
             part.extend_from_slice(&data[..to_copy]);
             data_offset = to_copy;
-            tx.execute(
-                "REPLACE INTO db_file_data (zoneid, name, partidx, data) VALUES (?1, ?2, ?3, ?4)",
-                params![zone_id, name, current_part, &part[..]],
-            )?;
+            super::parts::put_part(tx, zone_id, name, current_part, &part[..])?;
             // A part that was stored longer than a part (a torn append) must not
             // leave a big buffer behind.
             if part.capacity() > 2 * PART_DATA_SIZE {
@@ -571,10 +568,7 @@ impl FileStore {
         }
         while data_offset < data.len() {
             let end = (data_offset + PART_DATA_SIZE).min(data.len());
-            tx.execute(
-                "REPLACE INTO db_file_data (zoneid, name, partidx, data) VALUES (?1, ?2, ?3, ?4)",
-                params![zone_id, name, current_part, &data[data_offset..end]],
-            )?;
+            super::parts::put_part(tx, zone_id, name, current_part, &data[data_offset..end])?;
             data_offset = end;
             current_part += 1;
         }

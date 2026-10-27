@@ -91,10 +91,7 @@ fn patch_range_in(tx: &rusqlite::Transaction<'_>, zone_id: &str, name: &str, off
             part.resize(hi, 0);
         }
         part[lo..hi].copy_from_slice(&data[(from - offset) as usize..(to - offset) as usize]);
-        tx.execute(
-            "REPLACE INTO db_file_data (zoneid, name, partidx, data) VALUES (?1, ?2, ?3, ?4)",
-            params![zone_id, name, idx as i32, part],
-        )?;
+        super::parts::put_part(tx, zone_id, name, idx as i32, &part)?;
     }
     Ok(())
 }
@@ -120,10 +117,7 @@ pub(super) fn truncate_parts_in(tx: &rusqlite::Transaction<'_>, zone_id: &str, n
             .optional()?;
         if let Some(mut part) = part.filter(|p| p.len() > in_last) {
             part.truncate(in_last);
-            tx.execute(
-                "REPLACE INTO db_file_data (zoneid, name, partidx, data) VALUES (?1, ?2, ?3, ?4)",
-                params![zone_id, name, last, part],
-            )?;
+            super::parts::put_part(tx, zone_id, name, last, &part)?;
         }
     }
     Ok(())

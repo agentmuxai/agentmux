@@ -8,7 +8,7 @@ use std::path::Path;
 use std::sync::{Arc, Barrier};
 
 use proptest::prelude::*;
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 
 use super::{AppendPos, FileMeta, FileOpts, FileStore, LineState};
 use crate::backend::blockcontroller::shell::rebuild_output_idx;
@@ -547,6 +547,36 @@ fn an_older_builds_append_order_does_not_bump_rev() {
 }
 
 #[test]
+fn a_part_is_replaced_or_inserted_and_only_a_changed_prefix_bumps_rev() {
+    // `put_part` stands in for `REPLACE INTO db_file_data` (it must not leave
+    // a statement journal behind): same rows, same `rev` rule.
+    let fs = mem();
+    fs.make_file(ZONE, NAME, FileMeta::new(), FileOpts::default()).unwrap();
+    let put = |idx: i32, data: &[u8]| super::parts::put_part(&fs.conn().lock().unwrap(), ZONE, NAME, idx, data).unwrap();
+    let part = |idx: i32| -> Option<Vec<u8>> {
+        fs.conn()
+            .lock()
+            .unwrap()
+            .query_row("SELECT data FROM db_file_data WHERE zoneid = ?1 AND name = ?2 AND partidx = ?3", params![ZONE, NAME, idx], |r| r.get(0))
+            .optional()
+            .unwrap()
+    };
+    let before = rev(&fs);
+    put(0, b"abc\n");
+    assert_eq!(part(0).as_deref(), Some(&b"abc\n"[..]), "no row yet: inserted");
+    put(0, b"abc\ndef\n");
+    assert_eq!(part(0).as_deref(), Some(&b"abc\ndef\n"[..]), "a row: replaced");
+    assert_eq!(rev(&fs), before, "the old content is a prefix of the new: an append");
+    put(0, b"xbc\ndef\n");
+    assert_eq!(part(0).as_deref(), Some(&b"xbc\ndef\n"[..]));
+    assert_eq!(rev(&fs), before + 1, "changed bytes bump rev once, as REPLACE did");
+    put(1, b"more\n");
+    assert_eq!(part(1).as_deref(), Some(&b"more\n"[..]));
+    let rows: i64 = fs.conn().lock().unwrap().query_row("SELECT count(*) FROM db_file_data WHERE zoneid = ?1", params![ZONE], |r| r.get(0)).unwrap();
+    assert_eq!(rows, 2);
+}
+
+#[test]
 fn a_stamped_append_writes_the_line_and_its_stamp_together() {
     let fs = mem();
     fs.make_file(ZONE, NAME, FileMeta::new(), FileOpts::default()).unwrap();
@@ -566,6 +596,8 @@ fn a_stamped_append_writes_the_line_and_its_stamp_together() {
         .unwrap()
         .execute_batch(
             "CREATE TRIGGER no_stamp BEFORE INSERT ON db_file_data WHEN NEW.name = 'output.tsidx'
+             BEGIN SELECT RAISE(ABORT, 'injected'); END;
+             CREATE TRIGGER no_stamp_update BEFORE UPDATE OF data ON db_file_data WHEN NEW.name = 'output.tsidx'
              BEGIN SELECT RAISE(ABORT, 'injected'); END;",
         )
         .unwrap();
