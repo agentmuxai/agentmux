@@ -37,17 +37,21 @@ pub(in crate::server) async fn hold_for_absent_target(
 
 /// Why messages to the agent on `block_id` wait now: it is signed out, or
 /// out of quota until a known reset. A confirmed sign-in clears auth failures.
-/// Limits without a reset still allow turns to discover recovery. BLOCKING.
+/// Limits without a reset still allow turns to discover recovery. While a probe turn
+/// runs (`limit_probe`) the pane counts as working, but its limit still holds
+/// until that turn clears it. BLOCKING.
 pub(in crate::server) fn holding_unavailable(
     mstore: &crate::backend::storage::store::Store,
     block_id: &str,
 ) -> Option<crate::backend::agent_state::Unavailable> {
-    crate::backend::agent_state::unavailable_of_block(mstore, None, block_id, agentmux_common::time::now_ms_u64())
+    let now_ms = agentmux_common::time::now_ms_u64();
+    crate::backend::agent_state::unavailable_of_block(mstore, None, block_id, now_ms)
         .filter(|unavailable| {
             use crate::backend::agent_state::AgentState;
             unavailable.state == AgentState::SignedOut
                 || (unavailable.state == AgentState::Limited && unavailable.resets_at_ms.is_some())
         })
+        .or_else(|| super::limit_probe::unavailable_while_probing(mstore, block_id, now_ms))
 }
 
 /// Whether a peer's answer to a forwarded jekt is a refusal by an instance

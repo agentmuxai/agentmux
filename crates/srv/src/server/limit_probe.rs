@@ -16,7 +16,10 @@
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 
-use crate::backend::agent_state::{AgentState, Unavailable};
+use crate::agents::failure::FailureClass;
+use crate::backend::agent_state::{failure_of_block, AgentState, Unavailable};
+use crate::backend::obj::Block;
+use crate::backend::storage::store::Store;
 use crate::backend::reactive::InjectionRequest;
 
 use super::AppState;
@@ -28,7 +31,12 @@ pub(super) const PROBE_EVERY_MS: u64 = 15 * 60 * 1000;
 pub(super) const PROBE_NOTE: &str =
     "[AgentMux] A message for you is waiting while your account was out of quota. Reply with the single word: ok";
 
+/// How long after it started a probe's turn is taken to still be running.
+const PROBE_WINDOW_MS: u64 = 10 * 60 * 1000;
+
 static LAST_PROBE: LazyLock<Mutex<HashMap<String, u64>>> = LazyLock::new(Default::default);
+/// The panes with a probe turn in flight, and when it began.
+static PROBING: LazyLock<Mutex<HashMap<String, u64>>> = LazyLock::new(Default::default);
 
 /// Whether a held message to this agent warrants a probe: the agent is out of
 /// quota until a known reset (without one, messages are delivered and a turn
@@ -46,6 +54,32 @@ pub(super) fn take_slot(key: &str, now_ms: u64) -> bool {
     }
     last.insert(key.to_string(), now_ms);
     true
+}
+
+/// The limit of the agent on `block_id` while its probe turn runs. A turn in
+/// flight makes the pane `working`, so the usual check would let a replay pass
+/// release held messages into the probe, and a probe that fails would lose
+/// them. The hold lasts until the probe clears the stored failure (a clean
+/// turn) or [`PROBE_WINDOW_MS`] has passed. BLOCKING.
+pub(super) fn unavailable_while_probing(mstore: &Store, block_id: &str, now_ms: u64) -> Option<Unavailable> {
+    {
+        let mut probing = PROBING.lock().unwrap_or_else(|e| e.into_inner());
+        let started = *probing.get(block_id)?;
+        if now_ms.saturating_sub(started) >= PROBE_WINDOW_MS {
+            probing.remove(block_id);
+            return None;
+        }
+    }
+    let failure = failure_of_block(&mstore.get::<Block>(block_id).ok()??)?;
+    let resets_at_ms = failure.resets_at_ms.filter(|r| *r > now_ms)?;
+    (failure.code == FailureClass::UsageLimit).then(|| Unavailable {
+        state: AgentState::Limited,
+        code: failure.code,
+        title: failure.title,
+        resets_at_ms: Some(resets_at_ms),
+        since_ms: failure.at_ms.unwrap_or(now_ms).min(now_ms),
+        account_id: None,
+    })
 }
 
 /// After `req` was held for a limited agent: start a probe turn if it
@@ -67,9 +101,12 @@ pub(super) async fn maybe_probe(state: &AppState, req: &InjectionRequest, unavai
     .ok()
     .flatten();
     let Some(key) = key else { return };
+    let Some(block_id) = state.reactive_handler.block_for_uid(&key) else { return };
     if !take_slot(&key, now_ms) {
         return;
     }
+    // Before the turn starts, so no replay pass can see the pane working and unheld.
+    PROBING.lock().unwrap_or_else(|e| e.into_inner()).insert(block_id, now_ms);
     match state.reactive_handler.deliver_system_note(&req.target_agent, PROBE_NOTE) {
         Ok(()) => tracing::info!(target = %req.target_agent, "limit probe: started a turn to see whether the account can work again"),
         Err(e) => tracing::info!(target = %req.target_agent, error = %e, "limit probe: not started"),
@@ -101,5 +138,32 @@ mod tests {
         assert!(!take_slot(key, 1_000_000 + PROBE_EVERY_MS - 1));
         assert!(take_slot(key, 1_000_000 + PROBE_EVERY_MS));
         assert!(take_slot("probe-test-other", 1_000_001), "another agent has its own slot");
+    }
+
+    fn limited_block(store: &Store, oid: &str, now: u64, with_failure: bool) {
+        let mut b = Block { oid: oid.to_string(), ..Default::default() };
+        if with_failure {
+            b.meta.insert(
+                crate::backend::blockcontroller::core::META_LAST_FAILURE.to_string(),
+                serde_json::json!({"code": "usage_limit", "title": "Usage limit reached", "detail": "", "retryable": false, "resetsAtMs": now + 60_000, "atMs": now - 1_000}),
+            );
+        }
+        store.insert(&mut b).unwrap();
+    }
+
+    #[test]
+    fn the_limit_holds_while_a_probe_runs_and_ends_with_the_probe_or_its_failure() {
+        let store = Store::open_in_memory().unwrap();
+        let now = 5_000_000;
+        limited_block(&store, "probe-test-limited", now, true);
+        limited_block(&store, "probe-test-cleared", now, false);
+        assert_eq!(unavailable_while_probing(&store, "probe-test-limited", now), None, "no probe in flight: the usual check decides");
+        PROBING.lock().unwrap().insert("probe-test-limited".to_string(), now);
+        PROBING.lock().unwrap().insert("probe-test-cleared".to_string(), now);
+        let held = unavailable_while_probing(&store, "probe-test-limited", now + 1).expect("held while the probe runs");
+        assert_eq!((held.state, held.resets_at_ms, held.since_ms), (AgentState::Limited, Some(now + 60_000), now - 1_000));
+        assert_eq!(unavailable_while_probing(&store, "probe-test-cleared", now + 1), None, "a clean turn cleared the failure: replay goes");
+        assert_eq!(unavailable_while_probing(&store, "probe-test-limited", now + 60_001), None, "the reset passed");
+        assert_eq!(unavailable_while_probing(&store, "probe-test-limited", now + PROBE_WINDOW_MS), None, "a probe that never ends stops holding");
     }
 }
