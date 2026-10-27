@@ -30,6 +30,7 @@ pub(super) const ACTS: &[Act] = &[
     Act { action: "fresh", tool: "AgentFresh", rename: &[] },
     Act { action: "env_get", tool: "AgentEnvGet", rename: &[] },
     Act { action: "env_set", tool: "AgentEnvSet", rename: &[] },
+    Act { action: "set_seat", tool: "AgentSetSeat", rename: &[] },
 ];
 
 pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
@@ -57,6 +58,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 },
                 "AgentEnvGet" => env(cx, "get", &args).await,
                 "AgentEnvSet" => env(cx, "set", &args).await,
+                "AgentSetSeat" => set_seats(cx, &args).await,
                 _ => history::call(act.tool, &args, cx).await,
             };
             let result = result.map_err(|e| anyhow::anyhow!(public_params(&format!("{e:#}"), act.rename)));
@@ -218,6 +220,31 @@ fn env_request(action: &str, args: &Value) -> Result<Value> {
         "set": set,
         "unset": args.get("unset").filter(|v| !v.is_null()),
     }))
+}
+
+/// `set_seat`: seats set or cleared by srv as the agent this process's token
+/// names, which records each change under that agent (`/api/v1/agent/seats`).
+/// `seats` goes as given; srv checks the shape and every seat.
+async fn set_seats(cx: &ToolCtx<'_>, args: &Value) -> Result<String> {
+    require_agent_env(cx.local_url, cx.auth_key, cx.block_id)?;
+    let seats = args.get("seats").filter(|v| v.is_array()).ok_or_else(|| {
+        anyhow::anyhow!("Agents set_seat needs seats: [{{agent, seat}}], seat null to clear an agent's seat")
+    })?;
+    let url = format!("{}/api/v1/agent/seats", cx.local_url.trim_end_matches('/'));
+    let resp = cx
+        .client
+        .post(&url)
+        .header(AUTH_KEY_HEADER, cx.auth_key)
+        .json(&json!({ "seats": seats }))
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+    let status = resp.status();
+    let body: Value = resp.json().await.unwrap_or(Value::Null);
+    if !status.is_success() {
+        anyhow::bail!("Agents set_seat: {}", body["error"].as_str().map(str::to_string).unwrap_or_else(|| format!("srv answered {status}: {body}")));
+    }
+    Ok(serde_json::to_string_pretty(&body)?)
 }
 
 /// `env_get` and `env_set`: a definition's extra environment variables, read or
