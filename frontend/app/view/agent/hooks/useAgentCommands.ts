@@ -32,7 +32,7 @@ import { parseBangCommand } from "../bang-command";
 import type { ProviderDefinition } from "../providers";
 import type { DocumentNode } from "../types";
 import type { AttachmentRef } from "@/types/rpc/AttachmentRef";
-import { isOpenInOtherPaneError, rememberRefusedSend } from "../failure/refused-send";
+import { forgetRefusedSend, isOpenInOtherPaneError, rememberRefusedSend } from "../failure/refused-send";
 import type { LogFn } from "./useAgentControllerStatus";
 import { setBlockMeta } from "@/app/store/block-meta";
 
@@ -930,6 +930,8 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                 ...(joinsTurn != null ? { joins_turn: joinsTurn } : {}),
             });
             attachmentsByMessage.delete(messageId);
+            // This pane is the agent's live one: a message kept from an earlier refusal is stale.
+            forgetRefusedSend(opts.blockId);
         } catch (err: any) {
             attachmentsByMessage.delete(messageId);
             opts.log("error", err?.message ?? String(err), "error");

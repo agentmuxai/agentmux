@@ -55,7 +55,7 @@ import type { AgentPaneModel } from "@/app/store/agent-pane-model";
 import type { PaneFailure } from "@/app/store/agent-pane-state/types";
 import type { FailedTurnRecovery } from "../offline/failed-turn";
 import { failureToRow, isTransient, type FailureRow } from "../failure/failure-accessory";
-import { refusedSendOf } from "../failure/refused-send";
+import { forgetRefusedSend, refusedSendOf } from "../failure/refused-send";
 import { registerRecycleBlocker } from "@/app/store/recycle-blockers";
 import { copyErrorReport } from "@/app/errors/CopyErrorButton";
 import { formatErrorReport } from "@/app/errors/error-report";
@@ -237,6 +237,7 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
     // persistently-throttled turn would auto-retry forever). Spec §6.
     const endEpisode = () => {
         autoRetries = 0;
+        forgetRefusedSend(opts.blockId);
         clear();
     };
 

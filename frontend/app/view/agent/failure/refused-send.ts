@@ -25,7 +25,16 @@ export function isOpenInOtherPaneError(error: string): boolean {
 const [refused, setRefused] = createSignal<ReadonlyMap<string, RefusedSend>>(new Map());
 
 export function rememberRefusedSend(blockId: string, send: RefusedSend): void {
-    setRefused((prev) => new Map(prev).set(blockId, send));
+    setRefused((prev) => {
+        // A second refusal adds to the first: neither message is dropped.
+        const kept = prev.get(blockId);
+        const merged = kept
+            ? { text: `${kept.text}
+
+${send.text}`, attachments: [...kept.attachments, ...send.attachments] }
+            : send;
+        return new Map(prev).set(blockId, merged);
+    });
 }
 
 /** The message pane `blockId` last had refused, still waiting to be sent (reactive). */
