@@ -235,6 +235,12 @@ pub fn stopped_by_user(block_id: &str) -> bool {
     crate::backend::user_stop::stopped_recently(block_id)
 }
 
+/// Whether the user stopped the pane at or after `since_ms`: what a continuation
+/// that waited checks, since the grace window is shorter than the wait.
+pub fn stopped_since(block_id: &str, since_ms: u64) -> bool {
+    crate::backend::user_stop::stopped_since(block_id, since_ms as i64)
+}
+
 /// Whether the Supervisor can work on this pane at all: a Claude agent, whose
 /// conversation srv can read and whose CLI runs the judge (spec §2.1).
 pub fn supports(meta: &MetaMapType) -> bool {

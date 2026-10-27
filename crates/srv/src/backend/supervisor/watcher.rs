@@ -394,7 +394,8 @@ impl Supervisor {
             switched_off: !settings::enabled(),
             mode_changed: block.as_ref().map(|b| SupervisorMode::from_meta(&b.meta)) != Some(mode),
             turn_running: turn_active(block_id),
-            stopped: super::stopped_by_user(block_id),
+            // The turn ended at `facts.now_ms`: a Stop since then counts, however early in the wait.
+            stopped: super::stopped_by_user(block_id) || super::stopped_since(block_id, facts.now_ms),
         };
         let now_ms = agentmux_common::time::now_ms_u64();
         if let Some(why) = over.drop_reason() {
@@ -417,6 +418,14 @@ impl Supervisor {
         let Some(block) = block else { return };
         facts.now_ms = now_ms;
         let mut state = self.state_for(block_id, &block, mode, now_ms);
+        // The wait counts toward the time cap: it may have run out while this waited.
+        let action = match action {
+            Action::Continue { .. } => match policy::limit_reached(&state, mode, &facts) {
+                Some(why) => Action::Pause(why),
+                None => action,
+            },
+            other => other,
+        };
         self.conclude(block_id, generation, &mut state, action, verdict, &next, &facts, mode, notify, trigger);
     }
 
@@ -446,11 +455,11 @@ impl Supervisor {
                     repeat_budget_notice = self.budget_noticed.swap(true, std::sync::atomic::Ordering::Relaxed);
                     action = Action::Pause(pacing::budget_reached(hourly, wait_ms));
                 }
-                Ok(()) => {
+                Ok(ticket) => {
                     self.budget_noticed.store(false, std::sync::atomic::Ordering::Relaxed);
                     let text = message::continuation(mode, *n, mode.limits().continuations, reason, next);
                     if let Err(e) = deliver(block_id, &text) {
-                        self.budget.lock().unwrap_or_else(|e| e.into_inner()).refund(facts.now_ms);
+                        self.budget.lock().unwrap_or_else(|e| e.into_inner()).refund(ticket);
                         undeliverable = true;
                         action = Action::Pause(format!("Couldn't continue it: {e}"));
                     }

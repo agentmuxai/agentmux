@@ -16,31 +16,34 @@ const HOUR_MS: u64 = 60 * 60 * 1000;
 /// Continuations sent in the last hour, across every pane. In memory: a restart starts a fresh hour.
 #[derive(Debug, Default)]
 pub struct Budget {
-    sent: VecDeque<u64>,
+    /// (reservation number, when) in the order they were taken.
+    sent: VecDeque<(u64, u64)>,
+    next: u64,
 }
 
 impl Budget {
     /// Count a continuation sent at `now_ms` if fewer than `cap` went in the last
-    /// hour (`cap` 0 is no cap); else `Err` with the milliseconds until one is free.
-    pub fn spend(&mut self, now_ms: u64, cap: u32) -> Result<(), u64> {
-        while self.sent.front().is_some_and(|t| now_ms.saturating_sub(*t) >= HOUR_MS) {
+    /// hour (`cap` 0 is no cap) and return its reservation number for [`Budget::refund`];
+    /// else `Err` with the milliseconds until one is free.
+    pub fn spend(&mut self, now_ms: u64, cap: u32) -> Result<u64, u64> {
+        while self.sent.front().is_some_and(|(_, t)| now_ms.saturating_sub(*t) >= HOUR_MS) {
             self.sent.pop_front();
         }
         if cap > 0 && self.sent.len() >= cap as usize {
-            let oldest = self.sent.front().copied().unwrap_or(now_ms);
+            let oldest = self.sent.front().map_or(now_ms, |(_, t)| *t);
             return Err((oldest + HOUR_MS).saturating_sub(now_ms));
         }
-        self.sent.push_back(now_ms);
-        Ok(())
+        self.next += 1;
+        self.sent.push_back((self.next, now_ms));
+        Ok(self.next)
     }
 }
 
 impl Budget {
-    /// Take back the continuation counted at `now_ms` when it turned out not to be sent.
-    pub fn refund(&mut self, now_ms: u64) {
-        if self.sent.back() == Some(&now_ms) {
-            self.sent.pop_back();
-        }
+    /// Take back reservation `ticket` when its continuation turned out not to be sent,
+    /// whatever was reserved after it.
+    pub fn refund(&mut self, ticket: u64) {
+        self.sent.retain(|(n, _)| *n != ticket);
     }
 }
 
@@ -102,26 +105,36 @@ mod tests {
     #[test]
     fn the_budget_stops_at_the_cap_and_frees_a_slot_as_the_hour_rolls() {
         let mut b = Budget::default();
-        assert_eq!(b.spend(1_000, 2), Ok(()));
-        assert_eq!(b.spend(2_000, 2), Ok(()));
+        assert!(b.spend(1_000, 2).is_ok());
+        assert!(b.spend(2_000, 2).is_ok());
         assert_eq!(b.spend(3_000, 2), Err(HOUR_MS - 2_000), "the first one frees a slot an hour after it");
-        assert_eq!(b.spend(1_000 + HOUR_MS, 2), Ok(()), "an hour on, the oldest no longer counts");
+        assert!(b.spend(1_000 + HOUR_MS, 2).is_ok(), "an hour on, the oldest no longer counts");
     }
 
     #[test]
     fn a_continuation_that_was_not_sent_gives_its_slot_back() {
         let mut b = Budget::default();
-        b.spend(1_000, 1).unwrap();
+        let ticket = b.spend(1_000, 1).unwrap();
         assert!(b.spend(2_000, 1).is_err());
-        b.refund(1_000);
-        assert_eq!(b.spend(3_000, 1), Ok(()));
+        b.refund(ticket);
+        assert!(b.spend(3_000, 1).is_ok());
+    }
+
+    #[test]
+    fn a_refund_takes_back_its_own_reservation_not_the_latest() {
+        let mut b = Budget::default();
+        let first = b.spend(1_000, 2).unwrap();
+        b.spend(2_000, 2).unwrap();
+        b.refund(first);
+        assert!(b.spend(3_000, 2).is_ok(), "the first one's slot is free again");
+        assert!(b.spend(4_000, 2).is_err(), "the second one still counts");
     }
 
     #[test]
     fn a_cap_of_zero_is_no_cap() {
         let mut b = Budget::default();
         for t in 0..2_000 {
-            assert_eq!(b.spend(t, 0), Ok(()));
+            assert!(b.spend(t, 0).is_ok());
         }
     }
 
