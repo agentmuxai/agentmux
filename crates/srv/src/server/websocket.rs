@@ -1660,13 +1660,12 @@ pub(super) fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, con
     let lan_listeners_setconfig = state.lan_listeners.clone();
     // `Value` request, parsed into its struct below (a partial settings object); the stub keeps its
     // hand-written request type (generated-manifest.json `dataType`).
-    engine.register_typed(COMMAND_SET_CONFIG, move |data: serde_json::Value, _ctx| {
+    engine.register_typed(COMMAND_SET_CONFIG, move |data: serde_json::Value, ctx| {
             let cw = config_watcher_setconfig.clone();
             let eb = event_bus_setconfig.clone();
             let lan_listeners = lan_listeners_setconfig.clone();
         async move {
-                let new_keys: serde_json::Map<String, serde_json::Value> =
-                    serde_json::from_value(data).map_err(|e| format!("setconfig: {e}"))?;
+                let new_keys = crate::backend::supervisor::settings::parse_setconfig(data, &ctx.agent_id)?;
 
                 // 1. Write to disk (fs watcher will re-broadcast, harmlessly)
                 crate::backend::config_watcher_fs::merge_settings_to_disk(new_keys.clone())
