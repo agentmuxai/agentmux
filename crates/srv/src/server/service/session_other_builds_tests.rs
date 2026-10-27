@@ -301,7 +301,7 @@ async fn a_used_window_keeps_its_tabs_and_gets_the_layout_beside_them() {
     let after = tabs_of(&here, &win.workspaceid);
     assert_eq!(after.len(), before.len() + 1 + 2);
     assert_eq!(after[0], before[0], "what was open stays");
-    assert_eq!(after[2].0, "Tab 1");
+    assert_eq!(after[2].0, "Tab 1 (2)", "a restored tab never takes a name the window already has");
     assert_eq!(after[3].1[0]["agentId"], "a2", "agent panes come back as the same agents");
     assert_eq!(after[3].1[0]["agent:sessionid"], "s-a2");
 }
