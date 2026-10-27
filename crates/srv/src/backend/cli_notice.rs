@@ -302,7 +302,6 @@ pub fn observe_and_notify(
 mod tests {
     use super::*;
 
-    /// The pane (`frontend/app/view/agent/cli-notice.ts`) reads these field names.
     #[test]
     fn the_container_image_frame_names_its_pane_and_both_versions() {
         let f = container_image_frame("claude", "blk-1", "outdated", "0.59.41", "0.60.2");
@@ -311,6 +310,7 @@ mod tests {
         assert_eq!((f["running"].as_str(), f["current"].as_str()), (Some("0.59.41"), Some("0.60.2")));
     }
 
+    /// The pane (`frontend/app/view/agent/cli-notice.ts`) reads these field names.
     #[test]
     fn a_container_start_frame_carries_what_the_pane_reads() {
         let f = container_start_frame("s1", "claude", "img:1", ContainerStartState::Pulling, Some(150), None, None);

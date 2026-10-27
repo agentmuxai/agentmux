@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::backend::cli_notice;
 use crate::backend::container::ContainerManager;
-use crate::backend::container_image::{is_versioned_agent_image, resolve_container_image, versioned_agent_image};
+use crate::backend::container_image::{is_agent_base_image, is_versioned_agent_image, resolve_container_image, versioned_agent_image};
 use crate::server::AppState;
 
 /// The version this AgentMux ships the agent image for.
@@ -55,13 +55,22 @@ pub(crate) async fn update_for_block(state: &AppState, block_id: &str) -> Result
         return Err("this agent does not run in a container".into());
     }
     let image = resolve_container_image(&meta_get_string(&block.meta, "agent:container_image", ""));
+    if !is_agent_base_image(&image) {
+        return Err(format!("this agent runs its own image ({image}); updating the container would start it from the same image"));
+    }
     if is_versioned_agent_image(&image) && image != versioned_agent_image() {
         return Err(format!("this agent is pinned to {image}; change its container image to update it"));
     }
-    if crate::backend::blockcontroller::get_block_controller_status(block_id).is_some_and(|s| s.turn_active) {
-        return Err("a turn is running; update the container when it has finished".into());
-    }
     let agent_id = meta_get_string(&block.meta, "agentId", "");
+    // Every pane of this agent runs its turns in the one container.
+    let sharing = state.mstore.get_all::<Block>().unwrap_or_default().into_iter().filter(|b| {
+        b.oid == block_id || (meta_get_string(&b.meta, "agentMode", "host") == "container" && meta_get_string(&b.meta, "agentId", "") == agent_id)
+    });
+    for b in sharing {
+        if crate::backend::blockcontroller::get_block_controller_status(&b.oid).is_some_and(|s| s.turn_active) {
+            return Err("a turn is running; update the container when it has finished".into());
+        }
+    }
     let container_name = crate::backend::container::container_name_for_slug(&agent_id);
     let cm = state.container_manager.get().await.ok_or("Docker is not available on this machine")?;
     cm.update_container(&container_name).await.map_err(|e| e.user_message())?;
@@ -121,6 +130,11 @@ mod tests {
         set_meta(&state, &block_id, &[("agentMode", "host")]);
         let err = update_for_block(&state, &block_id).await.unwrap_err();
         assert!(err.contains("does not run in a container"), "{err}");
+
+        // An agent on its own image is told: updating would start it from the same image.
+        set_meta(&state, &block_id, &[("agentMode", "container"), ("agent:container_image", "my/own:1")]);
+        let err = update_for_block(&state, &block_id).await.unwrap_err();
+        assert!(err.contains("runs its own image (my/own:1)"), "{err}");
 
         // An agent pinned to another version of the image is told, not silently left or moved.
         set_meta(&state, &block_id, &[("agentMode", "container"), ("agent:container_image", "ghcr.io/agentmuxai/agent-base:0.59.41")]);

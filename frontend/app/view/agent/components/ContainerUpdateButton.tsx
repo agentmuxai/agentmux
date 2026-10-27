@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createSignal, Show } from "solid-js";
+import { Button } from "@/app/element/ui";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 
@@ -26,9 +27,9 @@ export function ContainerUpdateButton(props: { blockId: string }) {
     };
     return (
         <div class="agent-cli-notice-actions">
-            <button class="agent-cli-notice-action" disabled={busy()} onClick={() => void update()}>
+            <Button density="compact" busy={busy()} onClick={() => void update()}>
                 {busy() ? "Updating…" : "Update container"}
-            </button>
+            </Button>
             <Show when={refused()}>
                 <span class="agent-cli-notice-refused">{refused()}</span>
             </Show>
