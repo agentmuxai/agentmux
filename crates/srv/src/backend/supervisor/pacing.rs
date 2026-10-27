@@ -9,7 +9,7 @@ use std::collections::VecDeque;
 
 use super::policy::Action;
 use super::settings::NoticeGroup;
-use super::Verdict;
+use super::{SupervisorState, SupervisorStatus, Verdict};
 
 const HOUR_MS: u64 = 60 * 60 * 1000;
 
@@ -51,6 +51,22 @@ impl Budget {
 pub fn budget_reached(cap: u32, wait_ms: u64) -> String {
     let minutes = wait_ms.div_ceil(60_000).max(1);
     format!("Fleet budget reached: {cap} continuations in the last hour. It can continue again in about {minutes} min.")
+}
+
+/// The start of a pane's reason while its continuation waits ("Continuing in 30 s: ...").
+pub const WAIT_PREFIX: &str = "Continuing in ";
+
+/// What a pane says when AgentMux restarted during a continuation's wait: the wait is not persisted.
+pub const RESTARTED: &str = "Not continued: AgentMux restarted.";
+
+/// Clear a "Continuing in ..." line left by a previous run of srv, whose wait is gone. Whether it changed.
+pub fn drop_restarted_wait(state: &mut SupervisorState) -> bool {
+    if state.status != SupervisorStatus::Waiting || !state.reason.starts_with(WAIT_PREFIX) {
+        return false;
+    }
+    state.status = SupervisorStatus::Watching;
+    state.reason = RESTARTED.to_string();
+    true
 }
 
 /// What a waiting continuation checks when its wait is over.
@@ -151,6 +167,23 @@ mod tests {
     fn the_budget_sentence_rounds_up_to_whole_minutes() {
         assert!(budget_reached(30, 61_000).contains("about 2 min"));
         assert!(budget_reached(30, 1).contains("about 1 min"));
+    }
+
+    #[test]
+    fn a_wait_left_by_a_previous_run_is_cleared_and_nothing_else_is() {
+        let waiting = |reason: &str, status| SupervisorState {
+            status,
+            reason: reason.to_string(),
+            ..SupervisorState::default()
+        };
+        let mut s = waiting("Continuing in 30 s: still has work", SupervisorStatus::Waiting);
+        assert!(drop_restarted_wait(&mut s));
+        assert_eq!((s.status, s.reason.as_str()), (SupervisorStatus::Watching, RESTARTED));
+        assert!(!drop_restarted_wait(&mut s), "a second pass changes nothing");
+        // "Waiting" is also the status of a pane held for its background work.
+        let mut bg = waiting("Waiting for its background work to finish.", SupervisorStatus::Waiting);
+        assert!(!drop_restarted_wait(&mut bg));
+        assert_eq!(bg.status, SupervisorStatus::Waiting);
     }
 
     #[test]
