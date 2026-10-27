@@ -9,12 +9,19 @@
 //! with a fresh one that is written nowhere a container can see. srv signs and attributes a container
 //! agent's messages itself, by its token, so nothing needs the old keys.
 //!
+//! The WAN key too: an earlier version injected it into the same file, and the channel-wide `wan.db` key was
+//! imported from that one. Both rows are removed, so the next signing mints a new key and srv's normal
+//! publish puts it in the directory (the relay keeps a record per key fingerprint, so a new key doesn't
+//! clash with the old one).
+//!
 //! Only an agent that has keys gets new ones (none is minted). Idempotent: a second run replaces them
-//! again, which is harmless. An agent's key rows are keyed by its slug.
+//! again, which is harmless. An agent's key rows are keyed by its slug. A LAN peer that already pinned
+//! an agent's old LAN key keeps flagging that agent's LAN messages until it clears the pin.
 
 use std::sync::Arc;
 
 use crate::backend::storage::store::Store;
+use crate::backend::storage::wan_identity::{self, WanIdentityStore};
 
 use super::{Migration, MigrationContext, MigrationError, MigrationScope, VerifyOutcome};
 
@@ -35,7 +42,21 @@ impl Migration for M0043RotateContainerAgentKeys {
             Store::open(&ctx.channel_store_path)
                 .map_err(|e| MigrationError(format!("rotate_container_agent_keys: open store: {e}")))?,
         );
-        let rotated = rotate_container_keys(&store).map_err(MigrationError)?;
+        // `wan.db` is shared by every version of the channel. Without a path to it, or when it can't be
+        // opened, the WAN key is left alone (and so is the legacy copy it would be imported from again).
+        let wan_path = wan_identity::resolve_wan_identity_path();
+        let wan = match &wan_path {
+            Some(path) if path.exists() => match WanIdentityStore::open(path) {
+                Ok(wan) => Wan::Store(wan),
+                Err(e) => {
+                    tracing::warn!(error = %e, "rotate_container_agent_keys: wan.db not opened; WAN keys not replaced");
+                    Wan::Unavailable
+                }
+            },
+            Some(_) => Wan::NoneYet,
+            None => Wan::Unavailable,
+        };
+        let rotated = rotate_container_keys(&store, &wan).map_err(MigrationError)?;
         if rotated > 0 {
             tracing::info!(rotated, "rotate_container_agent_keys: replaced container agents' signing keys");
         }
@@ -53,18 +74,78 @@ impl Migration for M0043RotateContainerAgentKeys {
     }
 }
 
+/// The channel's WAN keys, as far as this migration can reach them.
+enum Wan {
+    Store(WanIdentityStore),
+    /// No `wan.db` yet: only the legacy copy a later import would use exists.
+    NoneYet,
+    Unavailable,
+}
+
+/// The slugs of the agents that run, or ran, as container agents: those defined as one, and those a pane
+/// still records as running in one (the store keeps no history of a definition's type, so an agent switched
+/// to host since is found only by its pane).
+fn container_agent_slugs(store: &Store) -> Result<Vec<String>, String> {
+    let mut slugs: Vec<String> = Vec::new();
+    for def in store.agent_def_list().map_err(|e| format!("rotate_container_agent_keys: read agents: {e}"))? {
+        if def.agent_type == "container" {
+            slugs.push(def.slug);
+        }
+    }
+    let conn = store.conn().lock().unwrap();
+    let mut stmt = conn
+        .prepare("SELECT data FROM db_block")
+        .map_err(|e| format!("rotate_container_agent_keys: read db_block: {e}"))?;
+    let datas: Vec<Vec<u8>> = stmt
+        .query_map([], |row| row.get::<_, Vec<u8>>(0))
+        .map_err(|e| format!("rotate_container_agent_keys: read db_block: {e}"))?
+        .filter_map(Result::ok)
+        .collect();
+    drop(stmt);
+    drop(conn);
+    for data in datas {
+        let Ok(block) = serde_json::from_slice::<serde_json::Value>(&data) else { continue };
+        let meta = &block["meta"];
+        if meta["agentMode"].as_str() != Some("container") {
+            continue;
+        }
+        if let Some(def) = meta["agentId"].as_str().and_then(|id| store.agent_def_get(id).ok().flatten()) {
+            slugs.push(def.slug);
+        }
+    }
+    slugs.retain(|s| !s.trim().is_empty());
+    slugs.sort();
+    slugs.dedup();
+    Ok(slugs)
+}
+
 /// Replace the keys of each container agent; how many agents had any.
-fn rotate_container_keys(store: &Store) -> Result<usize, String> {
-    let defs = store.agent_def_list().map_err(|e| format!("rotate_container_agent_keys: read agents: {e}"))?;
+fn rotate_container_keys(store: &Store, wan: &Wan) -> Result<usize, String> {
     let mut rotated = 0;
-    for def in defs.iter().filter(|d| d.agent_type == "container" && !d.slug.trim().is_empty()) {
+    for slug in container_agent_slugs(store)? {
+        let wan_removed = match wan {
+            Wan::Store(wan) => {
+                let current = wan
+                    .agent_keys_delete(std::slice::from_ref(&slug))
+                    .map_err(|e| format!("rotate_container_agent_keys: WAN key of {slug}: {e}"))?;
+                // After the `wan.db` row, which would otherwise be imported from this one again.
+                let legacy = store
+                    .agent_wan_key_delete(&slug)
+                    .map_err(|e| format!("rotate_container_agent_keys: legacy WAN key of {slug}: {e}"))?;
+                current > 0 || legacy
+            }
+            Wan::NoneYet => store
+                .agent_wan_key_delete(&slug)
+                .map_err(|e| format!("rotate_container_agent_keys: legacy WAN key of {slug}: {e}"))?,
+            Wan::Unavailable => false,
+        };
         let jekt = store
-            .agent_jekt_key_rotate(&def.slug)
-            .map_err(|e| format!("rotate_container_agent_keys: jekt key of {}: {e}", def.slug))?;
+            .agent_jekt_key_rotate(&slug)
+            .map_err(|e| format!("rotate_container_agent_keys: jekt key of {slug}: {e}"))?;
         let lan = store
-            .agent_lan_key_rotate(&def.slug)
-            .map_err(|e| format!("rotate_container_agent_keys: LAN key of {}: {e}", def.slug))?;
-        rotated += usize::from(jekt || lan);
+            .agent_lan_key_rotate(&slug)
+            .map_err(|e| format!("rotate_container_agent_keys: LAN key of {slug}: {e}"))?;
+        rotated += usize::from(jekt || lan || wan_removed);
     }
     Ok(rotated)
 }
@@ -92,7 +173,7 @@ mod tests {
         let (boxed_jekt, host_jekt) = (store.agent_jekt_key_ensure(&boxed).unwrap(), store.agent_jekt_key_ensure(&host).unwrap());
         let (boxed_lan, host_lan) = (store.agent_lan_key_ensure(&boxed).unwrap(), store.agent_lan_key_ensure(&host).unwrap());
 
-        assert_eq!(rotate_container_keys(&store).unwrap(), 1);
+        assert_eq!(rotate_container_keys(&store, &Wan::Unavailable).unwrap(), 1);
 
         assert_ne!(store.agent_jekt_key_load(&boxed).unwrap().unwrap(), boxed_jekt);
         assert_ne!(store.agent_lan_key_load(&boxed).unwrap().unwrap().private_key, boxed_lan.private_key);
@@ -101,10 +182,57 @@ mod tests {
     }
 
     #[test]
+    fn an_agent_switched_to_host_is_found_by_the_pane_that_ran_it_as_a_container() {
+        use crate::backend::obj::Block;
+        let store = Store::open_in_memory().unwrap();
+        let switched = agent(&store, "Switched", "host");
+        let (id, other) = (store.agent_def_list().unwrap().iter().find(|d| d.slug == switched).unwrap().id.clone(), agent(&store, "Other", "host"));
+        store.agent_jekt_key_ensure(&switched).unwrap();
+        let before = store.agent_jekt_key_ensure(&other).unwrap();
+        let mut block = Block { oid: uuid::Uuid::new_v4().to_string(), ..Default::default() };
+        block.meta = serde_json::json!({ "agentMode": "container", "agentId": id }).as_object().unwrap().clone().into_iter().collect();
+        store.insert(&mut block).unwrap();
+
+        assert_eq!(rotate_container_keys(&store, &Wan::Unavailable).unwrap(), 1);
+        assert_eq!(store.agent_jekt_key_load(&other).unwrap().unwrap(), before, "an agent no pane ran as a container is left alone");
+    }
+
+    #[test]
+    fn a_container_agents_wan_key_and_the_legacy_copy_it_came_from_are_replaced() {
+        let store = Store::open_in_memory().unwrap();
+        let (dir, wan) = crate::backend::storage::wan_identity::attach_temp_wan_identity(&store);
+        let wan_path = dir.path().join("wan.db");
+        let boxed = agent(&store, "Boxed", "container");
+        let host = agent(&store, "Hosty", "host");
+        let legacy = store.agent_wan_key_ensure(&boxed).unwrap();
+        store.agent_wan_key_ensure(&host).unwrap();
+        let exposed = store.channel_wan_key(&wan, &boxed).unwrap();
+        assert_eq!(exposed.private_key, legacy.private_key, "wan.db took the legacy key");
+        let host_before = store.channel_wan_key(&wan, &host).unwrap();
+
+        let reopened = Wan::Store(WanIdentityStore::open(&wan_path).unwrap());
+        assert_eq!(rotate_container_keys(&store, &reopened).unwrap(), 1);
+
+        let fresh = store.channel_wan_key(&wan, &boxed).unwrap();
+        assert_ne!(fresh.private_key, exposed.private_key, "a new key, not the exposed one imported again");
+        assert!(store.agent_wan_key_load(&boxed).unwrap().is_none());
+        assert_eq!(store.channel_wan_key(&wan, &host).unwrap().private_key, host_before.private_key);
+    }
+
+    #[test]
+    fn without_a_wan_db_yet_the_legacy_copy_is_removed_so_it_is_never_imported() {
+        let store = Store::open_in_memory().unwrap();
+        let boxed = agent(&store, "Boxed", "container");
+        store.agent_wan_key_ensure(&boxed).unwrap();
+        assert_eq!(rotate_container_keys(&store, &Wan::NoneYet).unwrap(), 1);
+        assert!(store.agent_wan_key_load(&boxed).unwrap().is_none());
+    }
+
+    #[test]
     fn a_container_agent_with_no_keys_gets_none_minted() {
         let store = Store::open_in_memory().unwrap();
         let boxed = agent(&store, "Boxed", "container");
-        assert_eq!(rotate_container_keys(&store).unwrap(), 0);
+        assert_eq!(rotate_container_keys(&store, &Wan::Unavailable).unwrap(), 0);
         assert!(store.agent_jekt_key_load(&boxed).unwrap().is_none());
         assert!(store.agent_lan_key_load(&boxed).unwrap().is_none());
     }
