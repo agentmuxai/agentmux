@@ -9,7 +9,7 @@ import { createSignal, For, Show, type JSX } from "solid-js";
 import { Button, Switch } from "@/app/element/ui";
 import { settingsAtom } from "@/app/store/global";
 import { supervisorEnabled } from "@/app/store/supervisor";
-import { NumberControl, set, SettingRow } from "@/app/view/settings/settings-controls";
+import { NumberControl, set, SettingRow, ToggleControl } from "@/app/view/settings/settings-controls";
 
 export interface LimitSetting {
     key: string;
@@ -62,7 +62,60 @@ export const SUPERVISOR_LIMITS: LimitSetting[] = [
         max: 10,
         fallback: 2,
     },
+    {
+        key: "supervisor:cooldown",
+        label: "Wait before continuing (seconds)",
+        description:
+            "A continuation is sent this long after its turn ended. A turn that starts in that time (your message, a jekt, a job) or a Stop cancels it. 0 sends at once. 0 to 600.",
+        min: 0,
+        max: 600,
+        fallback: 30,
+    },
+    {
+        key: "supervisor:hourly",
+        label: "Fleet budget (continuations per hour)",
+        description:
+            "The most continuations across all panes in a rolling hour. At the cap a pane stops, with the reason. 0 means no cap. 0 to 1000.",
+        min: 0,
+        max: 1000,
+        fallback: 30,
+    },
 ];
+
+export interface NoticeSetting {
+    key: string;
+    label: string;
+    description: string;
+}
+
+/** Which stops send an OS notice; the rows and the history show every stop whatever these say. */
+export const SUPERVISOR_NOTICES: NoticeSetting[] = [
+    {
+        key: "supervisor:notify:needsyou",
+        label: "Notify when it needs you",
+        description: "A question, \"needs you\" or \"blocked\".",
+    },
+    {
+        key: "supervisor:notify:limit",
+        label: "Notify when it hits a limit",
+        description: "Continuations, time, no progress, the same reply twice, or the fleet budget.",
+    },
+    {
+        key: "supervisor:notify:failed",
+        label: "Notify when it couldn't continue",
+        description: "The message couldn't be delivered, or the agent can't run.",
+    },
+    {
+        key: "supervisor:notify:done",
+        label: "Notify when it finds the work done",
+        description: "The agent's work looks finished.",
+    },
+];
+
+/** A notice setting's value; every notice is on until turned off. */
+export function noticeOn(settings: Record<string, unknown> | null | undefined, item: NoticeSetting): boolean {
+    return settings?.[item.key] !== false;
+}
 
 /** A setting's value, or its default when unset. */
 export function limitValue(settings: Record<string, unknown> | null | undefined, item: LimitSetting): number {
@@ -102,6 +155,21 @@ export function SupervisorSettingsBar(): JSX.Element {
                                         step={1}
                                         parse="int"
                                         value={limitValue(settings(), item)}
+                                        onChange={(v) => set(item.key, v)}
+                                    />
+                                }
+                            />
+                        )}
+                    </For>
+                    <For each={SUPERVISOR_NOTICES}>
+                        {(item) => (
+                            <SettingRow
+                                id={`supervisor.${item.key.slice("supervisor:".length).replaceAll(":", "_")}`}
+                                label={item.label}
+                                description={item.description}
+                                control={
+                                    <ToggleControl
+                                        checked={noticeOn(settings(), item)}
                                         onChange={(v) => set(item.key, v)}
                                     />
                                 }

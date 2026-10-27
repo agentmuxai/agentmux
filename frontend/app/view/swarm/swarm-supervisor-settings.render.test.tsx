@@ -54,7 +54,7 @@ describe("SupervisorSettingsBar", () => {
         expect(container.querySelector(".swarm-supervisor-settings-panel")).toBeNull();
         fireEvent.click(getByText("Settings"));
         const inputs = [...container.querySelectorAll<HTMLInputElement>(".swarm-supervisor-settings-panel input")];
-        expect(inputs.map((i) => Number(i.value))).toEqual([5, 0, 15, 45, 2]);
+        expect(inputs.map((i) => Number(i.value))).toEqual([5, 0, 15, 45, 2, 30, 30]);
         expect(container.textContent).toContain("Default 120");
     });
 
@@ -75,6 +75,20 @@ describe("SupervisorSettingsBar", () => {
             ["supervisor:drive:continuations", 15, 1, 100],
             ["supervisor:drive:minutes", 120, 0, 1440],
             ["supervisor:noprogress", 2, 1, 10],
+            ["supervisor:cooldown", 30, 0, 600],
+            ["supervisor:hourly", 30, 0, 1000],
         ]);
+    });
+
+    it("each notice is on until turned off, and a toggle writes its key", () => {
+        withSettings({ "supervisor:notify:limit": false });
+        const { container, getByText } = render(() => <SupervisorSettingsBar />);
+        fireEvent.click(getByText("Settings"));
+        const toggles = [...container.querySelectorAll<HTMLElement>(".swarm-supervisor-settings-panel [role=switch]")];
+        expect(toggles.map((t) => t.getAttribute("aria-checked"))).toEqual(["true", "false", "true", "true"]);
+        fireEvent.click(toggles[1]);
+        expect(h.setConfig).toHaveBeenCalledWith({}, { "supervisor:notify:limit": true });
+        fireEvent.click(toggles[3]);
+        expect(h.setConfig).toHaveBeenCalledWith({}, { "supervisor:notify:done": false });
     });
 });
