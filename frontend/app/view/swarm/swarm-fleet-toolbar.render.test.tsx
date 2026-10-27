@@ -86,46 +86,20 @@ describe("FleetToolbar — no Groups or Stats", () => {
     });
 });
 
-describe("FleetToolbar — broadcast composer vs. Stop button", () => {
-    it("hides the Stop button while the broadcast composer is open", () => {
-        const model = modelStub(["a"]);
-        const { getByText, queryByText } = render(() => (
-            <FleetToolbar model={model} allBlockIds={() => ["a"]} />
-        ));
-
+describe("FleetToolbar — by section", () => {
+    it("the Supervisor section has Stop and the mode menu and no Broadcast button", () => {
+        const { queryByText } = render(() => <FleetToolbar model={modelStub(["a"])} allBlockIds={() => ["a"]} section="supervisor" />);
         expect(queryByText("Stop 1")).not.toBeNull();
+        expect(queryByText("Supervisor")).not.toBeNull();
+        expect(queryByText("Broadcast")).toBeNull();
+    });
 
-        fireEvent.click(getByText("Broadcast"));
-
+    it("the Broadcast section keeps the selection and has neither Stop nor the mode menu", () => {
+        const { queryByText } = render(() => <FleetToolbar model={modelStub(["a"])} allBlockIds={() => ["a"]} section="broadcast" />);
+        expect(queryByText("1 selected")).not.toBeNull();
+        expect(queryByText("Select none")).not.toBeNull();
         expect(queryByText("Stop 1")).toBeNull();
-        expect(queryByText("Cancel")).not.toBeNull();
-    });
-
-    it("restores the Stop button once the broadcast composer is cancelled", () => {
-        const model = modelStub(["a"]);
-        const { getByText, queryByText } = render(() => (
-            <FleetToolbar model={model} allBlockIds={() => ["a"]} />
-        ));
-
-        fireEvent.click(getByText("Broadcast"));
-        fireEvent.click(getByText("Cancel"));
-
-        expect(queryByText("Stop 1")).not.toBeNull();
-    });
-
-    // REPORT_FOCUS_ON_OPEN_AUDIT_2026_10_08.md: the composer replaces the
-    // button that opened it, so without an explicit focus the caret fell to
-    // <body> and the user had to click into the field before typing.
-    it("puts the caret in the message field when Broadcast opens it", async () => {
-        const model = modelStub(["a"]);
-        const { getByText, container } = render(() => <FleetToolbar model={model} allBlockIds={() => ["a"]} />);
-        const button = getByText("Broadcast").closest("button")!;
-        button.focus();
-
-        fireEvent.click(button);
-        await Promise.resolve();
-
-        expect(document.activeElement).toBe(container.querySelector(".swarm-fleet-broadcast-input"));
+        expect(queryByText("Supervisor")).toBeNull();
     });
 });
 

@@ -1291,3 +1291,50 @@
         padding: 6px 0 2px;
     }
 }
+
+// The Broadcast section: the composer docked under the list, then the recent broadcasts.
+.swarm-broadcast-dock {
+    flex-shrink: 0;
+    border-top: 1px solid var(--border-color);
+    padding: 8px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 55%;
+    overflow-y: auto;
+}
+
+.swarm-broadcast-input {
+    width: 100%;
+    resize: vertical;
+}
+
+.swarm-broadcast-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.swarm-broadcast-hint {
+    color: var(--secondary-text-color);
+    font-size: var(--text-sm);
+}
+
+.swarm-broadcast-recent-row {
+    display: flex;
+    flex-direction: column;
+    padding: 4px 0;
+    border-top: 1px solid var(--border-color);
+}
+
+.swarm-broadcast-recent-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.swarm-broadcast-recent-meta {
+    color: var(--secondary-text-color);
+    font-size: var(--text-sm);
+}

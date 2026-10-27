@@ -9,11 +9,11 @@ import { ConfirmModal } from "@/app/element/confirm-modal";
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import { settingsAtom } from "@/app/store/global";
 import { MODE_DESCRIPTIONS, MODE_LABELS, SUPERVISOR_MODES, SUPERVISOR_OFF_REASON, supervisorEnabled } from "@/app/store/supervisor";
-import { gapSummary, localTarget, partitionTargets, remoteFleetTargets, unavailableReason, type FleetAction } from "./swarm-fleet-targets";
+import { localTarget, partitionTargets, remoteFleetTargets, unavailableReason, type FleetAction } from "./swarm-fleet-targets";
 import type { FleetResultEntry, SwarmViewModel } from "./swarm-model";
 import { remoteSections } from "./swarm-remote";
 import { Button, IconButton } from "@/app/element/ui";
-import { focusOnOpen } from "@/util/focusutil";
+
 
 // Staged rollout only offered once a selection is large enough that
 // blast-radius capping is actually meaningful (spec §5.3) — for a
@@ -34,8 +34,11 @@ const NOTHING_SUPERVISABLE = "The Supervisor runs in each AgentMux for its own a
 export function FleetToolbar({
     model,
     allBlockIds,
+    section = "supervisor",
 }: {
     model: SwarmViewModel;
+    /** The Supervisor shows Stop and the mode menu; Broadcast has the selection only (its composer is docked). */
+    section?: "supervisor" | "broadcast";
     /** Every currently-listed agent's blockId, for "Select all". Passed down
      *  rather than read via `model.buildTree()` here — SwarmView already
      *  computes this from the same memo the row list renders from, so the
@@ -68,23 +71,12 @@ export function FleetToolbar({
     const split = (action: FleetAction) => partitionTargets([...selected()], action, known());
     const reachable = (action: FleetAction) => split(action).reachable.length;
     // Why "N selected" and "send to M" differ, when they do (spec §2.2).
-    const broadcastGap = () => gapSummary(split("broadcast").unreachable, count(), "broadcast");
     const plural = (n: number) => `agent${n === 1 ? "" : "s"}`;
 
-    const [broadcastOpen, setBroadcastOpen] = createSignal(false);
-    const [broadcastText, setBroadcastText] = createSignal("");
     const [stopConfirmOpen, setStopConfirmOpen] = createSignal(false);
     const [useStaging, setUseStaging] = createSignal(false);
     const [batchSize, setBatchSize] = createSignal(DEFAULT_BATCH_SIZE);
     const [maxFailPercentage, setMaxFailPercentage] = createSignal(DEFAULT_MAX_FAIL_PERCENTAGE);
-
-    const sendBroadcast = async (): Promise<void> => {
-        const message = broadcastText().trim();
-        if (!message) return;
-        setBroadcastOpen(false);
-        setBroadcastText("");
-        await model.broadcastToSelection(message);
-    };
 
     const confirmStop = async (): Promise<void> => {
         setStopConfirmOpen(false);
@@ -125,55 +117,7 @@ export function FleetToolbar({
                         <Show when={otherMachineN() > 0}> · {otherMachineN()} on other machines</Show>
                     </span>
 
-                    <Show
-                        when={!broadcastOpen()}
-                        fallback={
-                            <div class="swarm-fleet-broadcast-inline">
-                                <input
-                                    type="text"
-                                    class="swarm-fleet-broadcast-input"
-                                    placeholder={`Message to send to ${reachable("broadcast")} ${plural(reachable("broadcast"))}…`}
-                                    value={broadcastText()}
-                                    onInput={(e) => setBroadcastText(e.currentTarget.value)}
-                                    onKeyDown={(e) => {
-                                        if (e.key === "Enter") void sendBroadcast();
-                                        if (e.key === "Escape") { setBroadcastOpen(false); setBroadcastText(""); }
-                                    }}
-                                    ref={(el) => focusOnOpen(el)}
-                                />
-                                <Button
-                                    tone="accent"
-                                    class="swarm-fleet-btn swarm-fleet-btn--primary"
-                                    disabled={!broadcastText().trim() || model.fleetActionInFlightAtom()}
-                                    onClick={() => void sendBroadcast()}
-                                >
-                                    Send
-                                </Button>
-                                <Button class="swarm-fleet-btn" onClick={() => { setBroadcastOpen(false); setBroadcastText(""); }}>
-                                    Cancel
-                                </Button>
-                                <Show when={broadcastGap()}>
-                                    {(gap) => <span class="swarm-fleet-broadcast-gap">{gap()}</span>}
-                                </Show>
-                            </div>
-                        }
-                    >
-                        <Button
-                            class="swarm-fleet-btn"
-                            disabled={reachable("broadcast") === 0}
-                            title={broadcastGap() ?? undefined}
-                            onClick={() => setBroadcastOpen(true)}
-                        >
-                            <i class="fa-solid fa-tower-broadcast" /> Broadcast
-                        </Button>
-                    </Show>
-
-                    {/* Hidden while the broadcast composer is open — two
-                        destructive-adjacent actions competing for the same
-                        row invites mis-clicks, and Stop's own confirm modal
-                        already covers the "changed my mind" path once this
-                        reappears (Cancel closes the composer, not Stop). */}
-                    <Show when={!broadcastOpen()}>
+                    <Show when={section !== "broadcast"}>
                         <Button
                             tone="danger"
                             class="swarm-fleet-btn swarm-fleet-btn--destructive"
