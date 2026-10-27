@@ -1278,8 +1278,11 @@
         margin-left: auto;
     }
 
+    // Bounded and scrolling: the section body clips, so a short pane would hide the lower limits.
     &-panel {
         margin-top: 6px;
+        max-height: 45vh;
+        overflow-y: auto;
     }
 
     &-note {
