@@ -39,8 +39,12 @@ use std::time::{Duration, SystemTime};
 /// Copy the WAL back once this many frames (4 KB pages) are waiting: SQLite's
 /// own automatic-checkpoint default.
 pub(super) const FRAMES_THRESHOLD: u32 = 1000;
-/// How often the WAL index is looked at.
+/// How often the WAL index is looked at while the WAL is changing.
 const POLL: Duration = Duration::from_millis(250);
+/// While nothing in the WAL has changed between looks, the wait doubles up to this many times `POLL`.
+/// An idle srv then looks every two seconds instead of four times a second, and each look on
+/// Windows opens, reads and closes two files.
+const IDLE_BACKOFF: u32 = 8;
 /// Cap the WAL file at 64 MB when a writer restarts the log after a complete
 /// checkpoint. It is per connection, so every connection to the store sets it.
 pub(super) const JOURNAL_SIZE_LIMIT: &str = "PRAGMA journal_size_limit=67108864;";
@@ -67,17 +71,22 @@ impl Checkpointer {
         let stop = Arc::new(AtomicBool::new(false));
         let runs = Arc::new(AtomicU64::new(0));
         let (thread_stop, thread_runs) = (Arc::clone(&stop), Arc::clone(&runs));
+        let slowest = poll * IDLE_BACKOFF;
         let thread = std::thread::Builder::new()
             .name("filestore-checkpoint".into())
             .spawn(move || {
                 let mut last_written: Option<SystemTime> = None;
+                let (mut wait, mut last_look) = (poll, None);
                 while !thread_stop.load(Ordering::Relaxed) {
-                    std::thread::park_timeout(poll);
+                    std::thread::park_timeout(wait);
                     if thread_stop.load(Ordering::Relaxed) {
                         break;
                     }
                     let written = std::fs::metadata(&wal).and_then(|m| m.modified()).ok();
-                    if !due(wal_backlog(&shm), threshold, written, &mut last_written) {
+                    let backlog = wal_backlog(&shm);
+                    wait = next_wait(wait, poll, slowest, last_look != Some((backlog, written)));
+                    last_look = Some((backlog, written));
+                    if !due(backlog, threshold, written, &mut last_written) {
                         continue;
                     }
                     thread_runs.fetch_add(1, Ordering::Relaxed);
@@ -109,6 +118,16 @@ impl Drop for Checkpointer {
             thread.thread().unpark();
             let _ = thread.join();
         }
+    }
+}
+
+/// The wait before the next look: `fast` once the WAL changed since the last one, else twice the
+/// current wait, up to `slowest`.
+fn next_wait(current: Duration, fast: Duration, slowest: Duration, changed: bool) -> Duration {
+    if changed {
+        fast
+    } else {
+        (current * 2).min(slowest)
     }
 }
 
@@ -224,6 +243,19 @@ mod tests {
         let mut torn = index(3_007_000, 1, 5000, 0);
         torn[50] ^= 0xff;
         assert_eq!(backlog_from_index(&torn), None, "the two copies differ");
+    }
+
+    #[test]
+    fn the_wait_doubles_while_nothing_changes_and_drops_back_when_something_does() {
+        let (fast, slowest) = (Duration::from_millis(250), Duration::from_millis(2000));
+        let mut wait = fast;
+        let mut seen = Vec::new();
+        for _ in 0..5 {
+            wait = next_wait(wait, fast, slowest, false);
+            seen.push(wait.as_millis());
+        }
+        assert_eq!(seen, [500, 1000, 2000, 2000, 2000], "doubles, then stays at the slowest");
+        assert_eq!(next_wait(slowest, fast, slowest, true), fast, "a change brings the fast poll straight back");
     }
 
     #[test]
