@@ -7,12 +7,14 @@
 // Code, a placeholder account, and one or more agents linked to that account. Run it once the dev
 // window is up; it is safe to run again.
 //
-//   node scripts/dev-seed.mjs [--port 9223] [--home <dir>] [--agents 1] [--name fake-agent] [--script <conversation.json>] [--no-open]
+//   node scripts/dev-seed.mjs [--port <cdp port>] [--home <dir>] [--agents 1] [--name fake-agent] [--script <conversation.json>] [--no-open]
 //
-// --home defaults to AGENTMUX_HOME_OVERRIDE, else the one folder under ./.dev-home. It refuses the
+// --home defaults to AGENTMUX_HOME_OVERRIDE, else the one folder under ./.dev-home. The window it
+// drives is the build running on that home (found from the authkey.dev that build writes there, so
+// another clone's build on the usual port is never touched). It refuses the
 // real ~/.agentmux, and a window that is not a dev build (one served by Vite on localhost).
 
-import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { homeProblem, installFakeClaude } from "./ui-screenshots/install-fake-claude.mjs";
@@ -36,15 +38,56 @@ export function pickHome({ home, env, cwd }) {
     );
 }
 
+const pidAlive = (pid) => {
+    try {
+        process.kill(pid, 0);
+        return true;
+    } catch (err) {
+        return err.code === "EPERM";
+    }
+};
+
+const subdirs = (dir) => (existsSync(dir) ? readdirSync(dir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name) : []);
+
+/** The CDP port of the running dev build whose data lives under `home`: each build writes its own
+ *  `<home>/dev/<branch>/<clone>/data/authkey.dev` with the port it actually bound and its pid. */
+export function findInstancePort(home, alive = pidAlive) {
+    const root = join(home, "dev");
+    const live = [];
+    for (const branch of subdirs(root)) {
+        for (const clone of subdirs(join(root, branch))) {
+            try {
+                const info = JSON.parse(readFileSync(join(root, branch, clone, "data", "authkey.dev"), "utf8"));
+                if (info.debug_port > 0 && alive(info.host_pid)) live.push(info);
+            } catch {
+                // No file, or half-written: not a running build.
+            }
+        }
+    }
+    live.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+    return live[0]?.debug_port;
+}
+
+/** The port to drive: the one the build on `home` is on. A `--port` for any other build is refused. */
+export function resolvePort(home, requested, alive) {
+    const port = findInstancePort(home, alive);
+    if (!port) throw new Error(`no running dev build is using ${home}: start \`task dev\` for it first`);
+    if (requested != null && requested !== port) {
+        throw new Error(`port ${requested} is not the build running on ${home} (that one is on ${port}): not seeding it`);
+    }
+    return port;
+}
+
 /** In the page: the user-owned agent definitions named `name`. */
 const agentNamed = (name) => `(async () => {
     const r = await TabRpcClient.rpcCall("listagents", {});
     return (r.agents ?? r).filter((d) => !d.is_seeded && d.name === ${JSON.stringify(name)}).map((d) => d.id);
 })()`;
 
-export async function seed({ home, port, count, name, open, script }) {
+export async function seed({ home, port: requested, count, name, open, script }) {
     const problem = homeProblem(home);
     if (problem) throw new Error(`${home}: ${problem}`);
+    const port = resolvePort(home, requested);
     const target = await findMainTarget(port);
     // A dev build's page is served by Vite on localhost; a release's is not.
     if (new URL(target.url).hostname !== "localhost") {
@@ -97,7 +140,7 @@ function parse(argv) {
     };
     return {
         home: get("--home"),
-        port: Number(get("--port", process.env.AGENTMUX_CDP_PORT && /^\d+$/.test(process.env.AGENTMUX_CDP_PORT) ? process.env.AGENTMUX_CDP_PORT : 9223)),
+        port: get("--port") === undefined ? undefined : Number(get("--port")),
         count: Math.max(1, Number(get("--agents", 1))),
         name: get("--name", "fake-agent"),
         script: get("--script"),

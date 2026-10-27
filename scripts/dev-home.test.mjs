@@ -1,12 +1,14 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { banner, chooseHome, shellLines, USE_REAL_HOME } from "./dev-home.mjs";
-import { pickHome } from "./dev-seed.mjs";
+import { findInstancePort, pickHome, resolvePort } from "./dev-seed.mjs";
 
 let tmp;
 beforeEach(() => {
@@ -79,5 +81,81 @@ describe("the home dev-seed picks", () => {
         mkdirSync(join(tmp, ".dev-home", "5206"), { recursive: true });
         mkdirSync(join(tmp, ".dev-home", "5300"), { recursive: true });
         expect(() => pickHome({ env: {}, cwd: tmp })).toThrow(/more than one/);
+    });
+});
+
+/** A build's authkey.dev under `home`, as the CEF host writes it. */
+const writeBuild = (home, { branch = "main", clone = "abc", port, pid, at = "2026-10-27T10:00:00Z" }) => {
+    const dir = join(home, "dev", branch, clone, "data");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "authkey.dev"), JSON.stringify({ debug_port: port, host_pid: pid, created_at: at }));
+};
+const alive = (...pids) => (pid) => pids.includes(pid);
+
+describe("the window dev-seed drives", () => {
+    it("is the build running on the home, not whatever holds the usual port", () => {
+        const mine = join(tmp, "clone-b", ".dev-home", "5210");
+        const other = join(tmp, "clone-a", ".dev-home", "5206");
+        writeBuild(other, { port: 9223, pid: 11 });
+        writeBuild(mine, { port: 51234, pid: 22 });
+        expect(findInstancePort(mine, alive(11, 22))).toBe(51234);
+        expect(findInstancePort(other, alive(11, 22))).toBe(9223);
+    });
+
+    it("ignores a build that is no longer running, and takes the newest of the running ones", () => {
+        const home = join(tmp, "h");
+        writeBuild(home, { branch: "old", port: 9301, pid: 1, at: "2026-10-27T09:00:00Z" });
+        writeBuild(home, { branch: "a", port: 9302, pid: 2, at: "2026-10-27T10:00:00Z" });
+        writeBuild(home, { branch: "b", port: 9303, pid: 3, at: "2026-10-27T11:00:00Z" });
+        expect(findInstancePort(home, alive(2, 3))).toBe(9303);
+        expect(findInstancePort(home, alive(2))).toBe(9302);
+        expect(findInstancePort(home, alive())).toBeUndefined();
+        expect(findInstancePort(join(tmp, "empty"), alive(1))).toBeUndefined();
+    });
+
+    it("refuses a home with no running build, and a port that belongs to another build", () => {
+        const home = join(tmp, "h");
+        expect(() => resolvePort(home, undefined, alive(1))).toThrow(/no running dev build is using/);
+        writeBuild(home, { port: 51234, pid: 1 });
+        expect(resolvePort(home, undefined, alive(1))).toBe(51234);
+        expect(resolvePort(home, 51234, alive(1))).toBe(51234);
+        expect(() => resolvePort(home, 9223, alive(1))).toThrow(/port 9223 is not the build running on .* \(that one is on 51234\)/);
+    });
+});
+
+// The Taskfile steps that choose the home run in a shell, so their exit status is part of the
+// behaviour: a refused home must stop the build there, not carry on with the refused override.
+describe.skipIf(spawnSync("bash", ["-c", "true"]).status !== 0)("the Taskfile's home step", () => {
+    const repo = join(dirname(fileURLToPath(import.meta.url)), "..");
+    const taskfile = readFileSync(join(repo, "Taskfile.yml"), "utf8").replace(/\r\n/g, "\n");
+    const steps = [...taskfile.matchAll(/^[ \t]*(\w+)="\$\(node scripts\/dev-home\.mjs[^\n]*\|\| exit 1\n[ \t]*eval "\$\1"$/gm)].map((m) => m[0]);
+    const run = (step, env) =>
+        spawnSync("bash", ["-c", `${step}\necho "reached override=$AGENTMUX_HOME_OVERRIDE"`], {
+            cwd: repo,
+            encoding: "utf8",
+            env: { PATH: process.env.PATH, HOME: tmp, USERPROFILE: tmp, AGENTMUX_VITE_PORT: "5173", ...env },
+        });
+
+    it("is in both dev tasks, and never evals the command substitution directly", () => {
+        expect(steps).toHaveLength(2);
+        expect(taskfile).not.toMatch(/eval "\$\(node scripts\/dev-home\.mjs/);
+    });
+
+    it("stops when the home is refused, instead of running on the real one", () => {
+        mkdirSync(join(tmp, ".agentmux"));
+        for (const step of steps) {
+            const r = run(step, { AGENTMUX_HOME_OVERRIDE: join(tmp, ".agentmux") });
+            expect(r.status).toBe(1);
+            expect(r.stdout).not.toContain("reached");
+            expect(r.stderr).toMatch(/own ~\/\.agentmux/);
+        }
+    });
+
+    it("carries on, on a home of its own, when nothing is refused", () => {
+        for (const step of steps) {
+            const r = run(step, {});
+            expect(r.status).toBe(0);
+            expect(r.stdout).toMatch(/reached override=.*\.dev-home\/5173/);
+        }
     });
 });

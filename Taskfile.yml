@@ -1082,7 +1082,9 @@ tasks:
                 # The dev build's own data home, so it never reads or changes the real ~/.agentmux
                 # (its agents, accounts, transcripts). Opt out with AGENTMUX_DEV_USE_REAL_HOME=1.
                 # See scripts/dev-home.mjs and .claude/skills/run/SKILL.md.
-                eval "$(node scripts/dev-home.mjs "$(pwd -P 2>/dev/null || pwd)" "$AGENTMUX_VITE_PORT")" || exit 1
+                # (Not `eval "$(…)" || exit 1`: eval of empty output succeeds, so a refusal would not stop it.)
+                dev_home="$(node scripts/dev-home.mjs "$(pwd -P 2>/dev/null || pwd)" "$AGENTMUX_VITE_PORT")" || exit 1
+                eval "$dev_home"
 
                 # Resolve a possibly-`subst`'d drive to its real underlying path
                 # (Windows only; subst is how docs/retro/RETRO_CEF_C1083_PARALLEL_BUILD_RACE_2026_07_14.md's
@@ -1366,7 +1368,9 @@ tasks:
                 # The dev build's own data home, so it never reads or changes the real ~/.agentmux
                 # (its agents, accounts, transcripts). Opt out with AGENTMUX_DEV_USE_REAL_HOME=1.
                 # See scripts/dev-home.mjs and .claude/skills/run/SKILL.md.
-                eval "$(node scripts/dev-home.mjs "$(pwd -P 2>/dev/null || pwd)" "$AGENTMUX_VITE_PORT")" || exit 1
+                # (Not `eval "$(…)" || exit 1`: eval of empty output succeeds, so a refusal would not stop it.)
+                dev_home="$(node scripts/dev-home.mjs "$(pwd -P 2>/dev/null || pwd)" "$AGENTMUX_VITE_PORT")" || exit 1
+                eval "$dev_home"
                 if curl -s --max-time 1 "$VITE_URL" > /dev/null 2>&1; then
                   echo "❌ Port $AGENTMUX_VITE_PORT is already in use."
                   echo "   Override with AGENTMUX_VITE_PORT=<free-port> task dev:standalone"

@@ -151,8 +151,11 @@ shows your real agents, that is a bug: stop it, check the `[dev] home:` line, an
 **An agent that works with no account.** Once the window is up, `task dev:seed` (or
 `node scripts/dev-seed.mjs`) puts the scripted fake Claude Code (`scripts/ui-screenshots/fake-claude`)
 in the home, adds a placeholder account (`dev@example.invalid`) and one agent linked to it, and opens
-it. Options after `--`: `--agents 3 --name demo --port 9223 --home <dir> --script <conversation.json> --no-open`.
-It refuses the real home and a window that is not a dev build, and can be run again. The stand-in plays
+it. Options after `--`: `--agents 3 --name demo --home <dir> --script <conversation.json> --no-open`.
+It drives the build running on that home (it reads the debugging port from the `authkey.dev` the
+build writes in its data folder, so a second clone's build on the usual port is never touched; a
+`--port` for any other build is refused). It refuses the real home and a window that is not a dev
+build, and can be run again. The stand-in plays
 a script turn by turn: the default is `scripts/ui-screenshots/fake-claude/conversation.json` (send
 `hello` for its first reply), and `--script` gives it your own, so a live check of an agent pane needs
 no model, account or tokens. Container agents need a real account: use the real flow in your isolated
