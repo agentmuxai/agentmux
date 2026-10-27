@@ -5,20 +5,16 @@
  * Candidate accounts for the agent-pane failure row's "Bind account" action
  * — SPEC_AGENT_LOGIN_FLOW_TIGHTENING_2026_09_04.md §3.3.
  *
- * The inverse of `bind-to-agent-menu.ts`'s `computeBindCandidates` (one
- * account → many agents, Connectors → Accounts' perspective): this is one agent → many
- * accounts, the failure row's perspective. Filtering RULES mostly follow
+ * One agent → many accounts, the failure row's perspective (Connectors → Accounts
+ * used to offer the inverse, one account → many agents, with a "Bind to Agent"
+ * submenu that is gone). Filtering RULES mostly follow
  * `SPEC_ACCOUNT_ADOPTION_PIGGYBACK_LOGIN_2026_08_09.md` §2.3 — alias
  * canonicalization on both sides, OAuth-class accounts only, exclude the
  * already-linked account — with one deliberate departure: `status === "valid"`
  * only, not "expired selectable but marked" (see below).
  *
- * Deliberately a separate pure function rather than reusing
- * `computeBindCandidates` directly — that function's shape (candidate
- * AGENTS for one account) doesn't invert cleanly, and duplicating this much
- * smaller filter is cheaper than forcing one function to serve both
- * directions. It DOES reuse `resolveProviderAlias`, the actual thing that
- * must not drift between the two.
+ * It reuses `resolveProviderAlias`, the thing that must not drift between the
+ * failure row and the composer's account switch.
  *
  * **Why valid-only (amended 2026-09-05, reagentx P1):** the original design
  * allowed an expired candidate through ("adopting then re-logging is still

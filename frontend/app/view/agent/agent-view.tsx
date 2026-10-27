@@ -1026,11 +1026,13 @@ export const AgentPresentationView = ({
     useSyntheticAuthRow({ canRetry: status.canRetry, paneModel });
 
     // Bind/switch account for this agent (failure/useAccountBinding.ts).
-    const { authEmail, bindCandidates, onBindAccount, onSwitchAccount, refreshLinkedAccountId } = useAccountBinding({
-        agentDefinitionId: () => getBlockMetaKeyAtom(model.blockId, "agentId")() as string | undefined,
-        providerId: () => provider()?.id,
-        bindExistingAccount: status.bindExistingAccount,
-    });
+    const { authEmail, bindCandidates, onBindAccount, onSwitchAccount, canSwitchAccount, pendingAccountLabel, refreshLinkedAccountId } =
+        useAccountBinding({
+            agentDefinitionId: () => getBlockMetaKeyAtom(model.blockId, "agentId")() as string | undefined,
+            providerId: () => provider()?.id,
+            bindExistingAccount: status.bindExistingAccount,
+            pendingAccountId: () => getBlockMetaKeyAtom(model.blockId, "agent:pending_account")() as string | undefined,
+        });
 
     // Declaring auth healthy, and the auto-unblock after a bind from anywhere
     // (failure/useAuthHealth.ts).
@@ -1418,8 +1420,9 @@ export const AgentPresentationView = ({
                 lastReplyModel={paneModel.state.lastContextModel}
                 authStatus={loginStatus()}
                 authEmail={authEmail()}
-                canSwitchAccount={bindCandidates().length > 0}
+                canSwitchAccount={canSwitchAccount()}
                 onSwitchAccount={onSwitchAccount}
+                pendingAccountLabel={pendingAccountLabel()}
                 blockId={model.blockId}
                 blockAtom={block}
                 providerId={provider()?.id ?? ""}

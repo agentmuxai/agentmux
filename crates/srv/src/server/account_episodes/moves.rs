@@ -50,7 +50,7 @@ pub struct IdentityAccountMoveAgentsResult {
     pub failed: Vec<AccountMoveFailure>,
 }
 
-fn signed_in(status: &str) -> bool {
+pub(super) fn signed_in(status: &str) -> bool {
     matches!(status, "valid" | "ok")
 }
 
@@ -76,7 +76,7 @@ pub(super) fn candidates(state: &AppState, from: &str, provider: &str) -> Vec<Ac
 /// Link `agent_id` to `to` for `provider`: unlink its rows stored under an
 /// alias of the provider first (one would otherwise silently win at the next
 /// spawn), then link, then clear the failures its old account caused.
-fn relink(state: &AppState, agent_id: &str, to: &str, provider: &str) -> Result<(), String> {
+pub(super) fn relink(state: &AppState, agent_id: &str, to: &str, provider: &str) -> Result<(), String> {
     let before = super::failed_panes(&state.mstore, &state.identity_store, agent_id, provider);
     let links = state.identity_store.agent_identity_list_for_agent(agent_id).map_err(|e| e.to_string())?;
     for l in links.iter().filter(|l| l.provider != provider && canonical(&l.provider) == provider) {
@@ -93,7 +93,7 @@ fn relink(state: &AppState, agent_id: &str, to: &str, provider: &str) -> Result<
 
 /// Restart `block`'s process on the new link, keeping its conversation
 /// (`ControllerResync` with `forcerestart`).
-fn restart(state: &AppState, block: &Block) -> Result<(), String> {
+pub(super) fn restart(state: &AppState, block: &Block) -> Result<(), String> {
     let tab_id = block.parentoref.strip_prefix("tab:").ok_or("the pane is in no tab")?;
     blockcontroller::resync_controller(
         block,
@@ -115,7 +115,7 @@ fn restart(state: &AppState, block: &Block) -> Result<(), String> {
 }
 
 /// Whether the pane is in a turn: it isn't moved under it.
-fn busy(state: &AppState, block_id: &str) -> bool {
+pub(super) fn busy(state: &AppState, block_id: &str) -> bool {
     matches!(agent_state::current_state(&state.mstore, block_id), Some(AgentState::Working | AgentState::Waiting))
 }
 

@@ -387,14 +387,17 @@ pub(crate) const DESKTOP_TOOL: &str = r#"{
 /// Identity: an agent's presets and linked provider accounts.
 pub(crate) const IDENTITY_TOOL: &str = r#"{
   "name": "Identity",
-  "description": "Your presets and linked provider accounts. Every call takes an action. presets: the presets available to you, summary fields only (a preset is a provider-agnostic bundle of instructions, context files and skills). preset: one preset in full, by id or name; with neither, your own bound preset. accounts: your own linked identity accounts: account_id, provider, name, kind, status, masked_tail and updated_at. Secrets are never returned, only masked tails. validate: live-probe one of your accounts (account_id, from accounts) against its provider with the stored key, to confirm it still works; you never supply a secret. Returns valid, status, masked_tail and error.",
+  "description": "Your presets and linked provider accounts. Every call takes an action. presets: the presets available to you, summary fields only (a preset is a provider-agnostic bundle of instructions, context files and skills). preset: one preset in full, by id or name; with neither, your own bound preset. accounts: your own linked identity accounts: account_id, provider, name, kind, status, masked_tail and updated_at. Secrets are never returned, only masked tails. validate: live-probe one of your accounts (account_id, from accounts) against its provider with the stored key, to confirm it still works; you never supply a secret. Returns valid, status, masked_tail and error. switch: move an agent (you, or another with agent) to another signed-in account of its provider: account is its id or the label the pane shows (an email, or `email ·2` when several share it). when is after_turn (default: it moves when the agent is not in a turn, so a working agent finishes first) or now (restarts it, ending the turn). Returns status switched, queued or unchanged. A refusal lists the accounts it could use.",
   "inputSchema": {
     "type": "object",
     "properties": {
-      "action":     { "type": "string", "enum": ["presets", "preset", "accounts", "validate"], "description": "What to do" },
+      "action":     { "type": "string", "enum": ["presets", "preset", "accounts", "validate", "switch"], "description": "What to do" },
       "id":         { "type": "string", "description": "preset: the preset's id" },
       "name":       { "type": "string", "description": "preset: the preset's name" },
-      "account_id": { "type": "string", "description": "validate: one of your accounts, from accounts" }
+      "account_id": { "type": "string", "description": "validate: one of your accounts, from accounts" },
+      "account":    { "type": "string", "description": "switch: the account to move to, by id or the label the pane shows" },
+      "agent":      { "type": "string", "description": "switch: the agent to move; yourself when absent" },
+      "when":       { "type": "string", "enum": ["after_turn", "now"], "description": "switch: after_turn (default) or now" }
     },
     "required": ["action"]
   }

@@ -643,3 +643,101 @@ async fn listing_accounts_numbers_same_email_groups_and_keeps_the_numbers() {
     let r = list().await;
     assert_eq!(seq(&r, "second"), Some(json!(2)));
 }
+
+fn switch_req(agent: &str, account: &str, when: switch::AccountSwitchWhen) -> switch::AgentAccountSwitchReq {
+    switch::AgentAccountSwitchReq { agent_id: Some(agent.to_string()), account: account.to_string(), when }
+}
+
+fn linked_account(state: &AppState, agent: &str) -> Vec<String> {
+    state.identity_store.agent_identity_list_for_agent(agent).unwrap().into_iter().map(|l| l.account_id).collect()
+}
+
+fn pending_of(state: &AppState, block: &str) -> Option<serde_json::Value> {
+    state.mstore.get::<Block>(block).unwrap().unwrap().meta.get(switch::META_PENDING_ACCOUNT).cloned().filter(|v| !v.is_null())
+}
+
+/// An idle agent moves at once; one in a turn waits and moves when the turn ends;
+/// "now" does not wait; the same account changes nothing and cancels a wait (#4936 §3.2).
+#[tokio::test]
+async fn a_switch_applies_at_once_when_idle_waits_for_a_turn_and_cancels_on_the_current_account() {
+    use switch::AccountSwitchWhen::{AfterTurn, Now};
+    let state = test_state();
+    for id in ["old", "new"] {
+        state.id_store.identity_upsert(&account(id, "claude", "valid")).unwrap();
+    }
+    agent_def(&state, "idle");
+    agent_def(&state, "busy");
+    for a in ["idle", "busy"] {
+        state.identity_store.agent_identity_link(a, "old", "claude").unwrap();
+    }
+    let tab = new_tab(&state).await;
+    let lim = || Some(failure("usage_limit", None, None));
+    let idle = pane(&state, &tab, "idle", "Idle", "old", lim(), false).await;
+    let busy = pane(&state, &tab, "busy", "Busy", "old", lim(), true).await;
+
+    let r = switch::switch(&state, "", &switch_req("idle", "new", AfterTurn)).unwrap();
+    assert_eq!((r.status.clone(), r.restarted), (switch::AccountSwitchStatus::Switched, 1));
+    assert_eq!(linked_account(&state, "idle"), ["new"]);
+    assert_eq!(stored_failure(&state, &idle), None, "the old account's limit goes with the move");
+
+    let r = switch::switch(&state, "busy", &switch_req("busy", "new", AfterTurn)).unwrap();
+    assert_eq!(r.status, switch::AccountSwitchStatus::Queued);
+    assert_eq!(linked_account(&state, "busy"), ["old"], "not moved under a turn");
+    assert_eq!(pending_of(&state, &busy), Some(json!("new")));
+    switch::apply_pending(&state);
+    assert_eq!(linked_account(&state, "busy"), ["old"], "still in its turn");
+
+    // Choosing the account it is on cancels the wait.
+    let r = switch::switch(&state, "", &switch_req("busy", "old", AfterTurn)).unwrap();
+    assert_eq!(r.status, switch::AccountSwitchStatus::Unchanged);
+    assert_eq!(pending_of(&state, &busy), None);
+
+    // Queue again; the turn ends; the queued switch applies.
+    switch::switch(&state, "", &switch_req("busy", "new", AfterTurn)).unwrap();
+    register_stub(&busy, BLOCK_CONTROLLER_PERSISTENT, STATUS_RUNNING, false);
+    switch::apply_pending(&state);
+    assert_eq!(linked_account(&state, "busy"), ["new"]);
+    assert_eq!(pending_of(&state, &busy), None, "the wait is cleared once applied");
+
+    // "now" doesn't wait for a turn.
+    state.identity_store.agent_identity_link("busy", "old", "claude").unwrap();
+    register_stub(&busy, BLOCK_CONTROLLER_PERSISTENT, STATUS_RUNNING, true);
+    let r = switch::switch(&state, "", &switch_req("busy", "new", Now)).unwrap();
+    assert_eq!(r.status, switch::AccountSwitchStatus::Switched);
+    cleanup(&[&idle, &busy]);
+}
+
+/// The account must be a signed-in one of the agent's provider, named by id or by
+/// the label the pane shows; a bare email two accounts share is refused (#4936 §3.3).
+#[tokio::test]
+async fn a_switch_names_the_account_by_id_or_numbered_label_and_refuses_what_cant_run() {
+    use switch::AccountSwitchWhen::AfterTurn;
+    let state = test_state();
+    let with_email = |id: &str, status: &str, seq: Option<u32>| {
+        let mut a = account(id, "claude", status);
+        a.context = json!({ "email": "me@example.com" });
+        if let Some(n) = seq {
+            a.context["seq"] = json!(n);
+        }
+        a
+    };
+    for a in [with_email("one", "valid", Some(1)), with_email("two", "valid", Some(2)), with_email("out", "expired", Some(3)), account("gh", "github", "valid")] {
+        state.id_store.identity_upsert(&a).unwrap();
+    }
+    agent_def(&state, "ag");
+    state.identity_store.agent_identity_link("ag", "one", "claude").unwrap();
+
+    let e = switch::switch(&state, "", &switch_req("ag", "me@example.com", AfterTurn)).unwrap_err();
+    assert!(e.starts_with("UNKNOWN_ACCOUNT") && e.contains("me@example.com \u{b7}2"), "{e}");
+    let e = switch::switch(&state, "", &switch_req("ag", "out", AfterTurn)).unwrap_err();
+    assert!(e.starts_with("ACCOUNT_CANT_RUN"), "{e}");
+    let e = switch::switch(&state, "", &switch_req("ag", "gh", AfterTurn)).unwrap_err();
+    assert!(e.starts_with("UNKNOWN_ACCOUNT"), "another provider's account isn't offered: {e}");
+    let e = switch::switch(&state, "", &switch::AgentAccountSwitchReq { agent_id: None, account: "two".into(), when: AfterTurn }).unwrap_err();
+    assert!(e.contains("say which agent"), "{e}");
+
+    let r = switch::switch(&state, "", &switch_req("ag", "me@example.com \u{b7}2", AfterTurn)).unwrap();
+    assert_eq!((r.account_id.as_str(), r.status), ("two", switch::AccountSwitchStatus::Switched));
+    assert_eq!(r.account_label, "me@example.com \u{b7}2");
+    assert_eq!(linked_account(&state, "ag"), ["two"]);
+}
