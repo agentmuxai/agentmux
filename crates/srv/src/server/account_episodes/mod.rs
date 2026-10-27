@@ -634,6 +634,10 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         let s = s.clone();
         async move {
             let caller = ctx.agent_id.clone();
+            // Not a registered agent: only the proven window may, and it is recorded as the operator.
+            if caller.is_empty() {
+                ctx.operator_only("changing an agent's account is for the AgentMux window or an agent")?;
+            }
             tokio::task::spawn_blocking(move || switch::switch(&s, &caller, &req)).await.map_err(|e| e.to_string())?
         }
     });

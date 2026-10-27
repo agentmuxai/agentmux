@@ -713,6 +713,27 @@ async fn a_switch_applies_at_once_when_idle_waits_for_a_turn_and_cancels_on_the_
     cleanup(&[&idle, &busy]);
 }
 
+/// A connection that is neither a registered agent nor the proven window can't switch anyone
+/// (it would be recorded as the operator); an agent and the window can.
+#[tokio::test]
+async fn an_unproven_connection_cannot_switch_an_agents_account() {
+    let state = test_state();
+    for id in ["old", "new"] {
+        state.id_store.identity_upsert(&account(id, "claude", "valid")).unwrap();
+    }
+    agent_def(&state, "idle");
+    state.identity_store.agent_identity_link("idle", "old", "claude").unwrap();
+    let req = json!({ "agent_id": "idle", "account": "new" });
+    let e = call_with(&state, Default::default(), COMMAND_AGENT_ACCOUNT_SWITCH, req.clone()).await.unwrap_err();
+    assert!(e.starts_with("FORBIDDEN") && e.contains("isn't the AgentMux window"), "{e}");
+    assert_eq!(linked_account(&state, "idle"), ["old"], "nothing moved");
+    call(&state, None, COMMAND_AGENT_ACCOUNT_SWITCH, req.clone()).await.unwrap();
+    assert_eq!(linked_account(&state, "idle"), ["new"]);
+    state.identity_store.agent_identity_link("idle", "old", "claude").unwrap();
+    call(&state, Some("idle"), COMMAND_AGENT_ACCOUNT_SWITCH, req).await.unwrap();
+    assert_eq!(linked_account(&state, "idle"), ["new"]);
+}
+
 /// The account must be a signed-in one of the agent's provider, named by id or by
 /// the label the pane shows; a bare email two accounts share is refused (#4936 §3.3).
 #[tokio::test]
