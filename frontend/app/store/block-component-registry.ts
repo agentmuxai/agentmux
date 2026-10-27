@@ -188,9 +188,17 @@ export function refocusNode(blockId: string) {
  * If a block with the given viewType already exists in the current tab's layout,
  * focus it, first merging `focusMeta` into its meta (a section to show, say).
  * Otherwise create a new block using blockDef (defaults to `{ meta: { view: viewType } }`).
- * Resolves to the id of the block it focused or created.
  */
 export async function openOrFocusPaneByView(
+    viewType: string,
+    blockDef?: BlockDef,
+    focusMeta?: MetaType
+): Promise<void> {
+    await openOrFocusPaneIdByView(viewType, blockDef, focusMeta);
+}
+
+/** `openOrFocusPaneByView`, resolving to the id of the block it focused or created. */
+export async function openOrFocusPaneIdByView(
     viewType: string,
     blockDef?: BlockDef,
     focusMeta?: MetaType

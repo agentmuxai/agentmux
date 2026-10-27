@@ -22,10 +22,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 // §3.2) that settings-index.ts aggregates and SettingsSearchBar reads — a
 // bare `{ AppearanceSection: ... }` mock would strip that export out from
 // under settings-index.ts too, since it replaces the whole module.
-const opened = vi.hoisted(() => ({ openOrFocusPaneByView: vi.fn(async () => "swarm-block" as string | undefined) }));
+const opened = vi.hoisted(() => ({ openOrFocusPaneIdByView: vi.fn(async () => "swarm-block" as string | undefined) }));
 vi.mock("@/app/store/block-component-registry", async (importOriginal) => ({
     ...(await importOriginal<object>()),
-    openOrFocusPaneByView: opened.openOrFocusPaneByView,
+    openOrFocusPaneIdByView: opened.openOrFocusPaneIdByView,
 }));
 vi.mock("./sections/appearance-section", async (importOriginal) => ({
     ...(await importOriginal<object>()),
@@ -233,7 +233,7 @@ describe("SettingsView search bar", () => {
         const result = screen.getAllByTestId("settings-search-result")[0];
         expect(result).toHaveTextContent("Swarm Supervisor");
         fireEvent.click(result);
-        expect(opened.openOrFocusPaneByView).toHaveBeenCalledWith(
+        expect(opened.openOrFocusPaneIdByView).toHaveBeenCalledWith(
             "swarm",
             { meta: { view: "swarm", "swarm:section": "supervisor" } },
             { "swarm:section": "supervisor" }

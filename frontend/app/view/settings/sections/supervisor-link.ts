@@ -6,13 +6,13 @@
 // here. Choosing it opens that section's settings panel.
 // docs/specs/SPEC_SWARM_SECTIONS_SUPERVISOR_SETTINGS_AND_KANBAN_2026_10_24.md §6.2.
 
-import { openOrFocusPaneByView } from "@/app/store/block-component-registry";
+import { openOrFocusPaneIdByView } from "@/app/store/block-component-registry";
 import { requestSupervisorSettingsOpen } from "@/app/store/supervisor-settings-request";
 import type { SettingsIndexEntry } from "../settings-model";
 
 /** Show the Supervisor's settings: the tab's Swarm on its Supervisor section, or a new one, panel open. */
 export async function openSupervisorSettings(): Promise<void> {
-    const blockId = await openOrFocusPaneByView(
+    const blockId = await openOrFocusPaneIdByView(
         "swarm",
         { meta: { view: "swarm", "swarm:section": "supervisor" } },
         { "swarm:section": "supervisor" }
