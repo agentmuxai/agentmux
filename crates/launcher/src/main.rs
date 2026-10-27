@@ -154,6 +154,11 @@ fn main() {
         background_config::apply(&args);
     }
 
+    // Windows: the launcher keeps the handles CreateProcess gave it for srv and the host, so its
+    // own access list matters as much as theirs. Linux and macOS have no such handle to take.
+    #[cfg(windows)]
+    agentmux_common::process_hardening::deny_memory_access(false);
+
     // macOS: paint the splash FIRST, on the main thread, before any heavy work
     // — this is the whole reason the splash lives in the small fast launcher
     // rather than the slow CEF host. AppKit must own the main thread, so the

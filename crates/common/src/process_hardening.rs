@@ -19,6 +19,9 @@
 //! non-dumpable browser process cannot (`No usable sandbox!`). Every helper is started
 //! from those zygotes or by `exec`, so none of them inherits the flag.
 //!
+//! On Windows the launcher calls it too, at startup: it holds the handles it started srv and the
+//! host with.
+//!
 //! Left alone, on purpose: a headless srv (it runs without a launcher, and the
 //! launcher's check for an orphaned one reads its environment), a dev build
 //! (people attach debuggers to those), and any process started with
@@ -126,7 +129,8 @@ pub fn restore() -> bool {
 ///
 /// A handle opened before the change keeps the rights it was opened with. That is what lets the
 /// launcher, which holds the handles `CreateProcess` gave it for srv and the host, still wait
-/// for them, end them and write a dump of a hung host.
+/// for them, end them and write a dump of a hung host. On Windows the launcher gets the same
+/// list, so those handles cannot be copied out of it.
 ///
 /// The system account keeps every right, so Windows Error Reporting still writes its dumps.
 #[cfg(windows)]
