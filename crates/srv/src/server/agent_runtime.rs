@@ -3,7 +3,7 @@
 
 //! What state every created agent is in, with or without a pane: `agentruntime.list`, the
 //! `agentruntime:changed:<agent id>` event that carries a change, and `agent.start`
-//! (`docs/specs/SPEC_ALWAYS_AVAILABLE_AGENTS_2026_10_27.md` §3.4, §5).
+//! (the always-available agents spec, §3.4 and §5).
 //!
 //! One source: the availability view (`availability_view`, which is what a message to the agent
 //! asks), mapped onto the states a viewer sees. An agent with no live pane is `stopped`; its row
