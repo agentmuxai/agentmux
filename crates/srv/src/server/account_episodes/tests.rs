@@ -626,4 +626,9 @@ async fn listing_accounts_numbers_same_email_groups_and_keeps_the_numbers() {
     state.id_store.identity_set_context_email("second", "ME@Example.com ").unwrap();
     let r = list().await;
     assert_eq!(seq(&r, "second"), Some(json!(2)));
+
+    // A re-login that rebuilds the context from the email alone keeps it too.
+    state.id_store.identity_upsert(&with_email("second", "me@example.com", 20)).unwrap();
+    let r = list().await;
+    assert_eq!(seq(&r, "second"), Some(json!(2)));
 }

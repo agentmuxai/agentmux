@@ -404,7 +404,14 @@ impl Store {
     pub fn identity_upsert(&self, account: &IdentityAccount) -> Result<(), StoreError> {
         let conn = self.conn.lock().unwrap();
         let secret_ref_json = serde_json::to_string(&account.secret_ref)?;
-        let context_json = serde_json::to_string(&account.context)?;
+        // A rewrite that doesn't carry the account's number keeps it
+        // (`identity::account_numbering::carry_over`).
+        let mut context = account.context.clone();
+        let stored: Option<String> = conn.query_row("SELECT context FROM db_accounts WHERE id = ?1", params![account.id], |r| r.get(0)).ok();
+        if let Some(stored) = stored.and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok()) {
+            crate::identity::account_numbering::carry_over(&stored, &mut context);
+        }
+        let context_json = serde_json::to_string(&context)?;
         conn.execute(
             "INSERT INTO db_accounts
                 (id, name, provider, kind, display_name, secret_ref, context,

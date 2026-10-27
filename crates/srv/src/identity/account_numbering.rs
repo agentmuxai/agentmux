@@ -78,6 +78,30 @@ pub fn same_email(a: &str, b: &str) -> bool {
     a.trim().to_lowercase() == b.trim().to_lowercase()
 }
 
+/// An account is written again with a `context` that doesn't carry what the
+/// stored one had: a re-login that rebuilds it as `{ "email": .. }`, or a client
+/// holding a copy from before numbering. Keep the stored number when the new
+/// context has none and names the same address (or none: the email backfill
+/// settles that on the next list, and drops the number if it really changed).
+pub fn carry_over(stored: &serde_json::Value, incoming: &mut serde_json::Value) {
+    let Some(seq) = stored.get("seq").filter(|n| n.as_u64().is_some_and(|n| n > 0)) else {
+        return;
+    };
+    if incoming.get("seq").is_some_and(|n| n.as_u64().is_some_and(|n| n > 0)) {
+        return;
+    }
+    if !incoming.is_object() {
+        *incoming = serde_json::json!({});
+    }
+    let stored_email = stored.get("email").and_then(|e| e.as_str()).unwrap_or("");
+    match incoming.get("email").and_then(|e| e.as_str()).filter(|e| !e.trim().is_empty()) {
+        Some(email) if !same_email(email, stored_email) => return,
+        Some(_) => {}
+        None => incoming["email"] = serde_json::json!(stored_email),
+    }
+    incoming["seq"] = seq.clone();
+}
+
 /// Whether `wanted` (an id, name, display name, email, or `email ·N`) names `a`.
 /// A bare email that more than one account in `all` carries names none of them:
 /// the caller reports the candidates instead of taking the first.
@@ -150,6 +174,23 @@ mod tests {
         assert_eq!(missing_seqs(&all), [("d".to_string(), 3)]);
         assert_eq!(numbered_label(&survivor, "me@example.com", &[survivor.clone()]), "me@example.com", "alone again: bare");
         assert_eq!(numbered_label(&survivor, "me@example.com", &all), "me@example.com \u{b7}2");
+    }
+
+    #[test]
+    fn a_rewrite_of_the_context_keeps_the_stored_number_unless_the_address_changed() {
+        let stored = serde_json::json!({ "email": "me@example.com", "seq": 2 });
+        let mut rebuilt = serde_json::json!({ "email": "Me@Example.com" });
+        carry_over(&stored, &mut rebuilt);
+        assert_eq!(rebuilt["seq"], 2, "a re-login of the same address keeps it");
+        let mut empty = serde_json::json!({});
+        carry_over(&stored, &mut empty);
+        assert_eq!((empty["seq"].clone(), empty["email"].clone()), (serde_json::json!(2), serde_json::json!("me@example.com")), "a context with no email keeps both");
+        let mut other = serde_json::json!({ "email": "else@example.com" });
+        carry_over(&stored, &mut other);
+        assert!(other.get("seq").is_none(), "another address is another group");
+        let mut given = serde_json::json!({ "email": "me@example.com", "seq": 5 });
+        carry_over(&stored, &mut given);
+        assert_eq!(given["seq"], 5, "an explicit number stands");
     }
 
     #[test]
