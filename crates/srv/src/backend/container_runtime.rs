@@ -12,8 +12,9 @@
 //! the first that answers a ping is used:
 //!
 //! - Linux: rootless Docker (`$XDG_RUNTIME_DIR/docker.sock`), rootless Podman
-//!   (`$XDG_RUNTIME_DIR/podman/podman.sock`), Docker Desktop (`~/.docker/run/docker.sock`), the
-//!   system Docker (`/var/run/docker.sock`), the system Podman (`/run/podman/podman.sock`).
+//!   (`$XDG_RUNTIME_DIR/podman/podman.sock`), Docker Desktop (`~/.docker/desktop/docker.sock`, and
+//!   `~/.docker/run/docker.sock`), the system Docker (`/var/run/docker.sock`), the system Podman
+//!   (`/run/podman/podman.sock`).
 //! - macOS: Docker Desktop (`~/.docker/run/docker.sock`), OrbStack (`~/.orbstack/run/docker.sock`),
 //!   Colima (`~/.colima/default/docker.sock`), Rancher Desktop (`~/.rd/docker.sock`), then the
 //!   system path.
@@ -168,6 +169,8 @@ pub fn candidates(env: &Env) -> Result<Vec<Candidate>, String> {
                 out.push(unix(Kind::RootlessPodman, xdg.join("podman/podman.sock"), true));
             }
             if let Some(home) = &env.home {
+                // Docker Desktop for Linux keeps its socket in `desktop/`; `run/` is the macOS place.
+                out.push(unix(Kind::DockerDesktop, home.join(".docker/desktop/docker.sock"), true));
                 out.push(unix(Kind::DockerDesktop, home.join(".docker/run/docker.sock"), true));
             }
             out.push(system_docker);
@@ -320,8 +323,12 @@ async fn try_candidate(c: &Candidate, env: &Env) -> Result<Docker, String> {
         Endpoint::Unix(path) => {
             check_socket(path, c.user_owned, env.uid)?;
             ping_unix(path, env.ping_timeout).await?;
-            Docker::connect_with_unix(&path.to_string_lossy(), API_TIMEOUT_SECS, bollard::API_DEFAULT_VERSION)
-                .map_err(|e| e.to_string())
+            #[cfg(unix)]
+            return Docker::connect_with_unix(&path.to_string_lossy(), API_TIMEOUT_SECS, bollard::API_DEFAULT_VERSION)
+                .map_err(|e| e.to_string());
+            // `check_socket` has already refused a unix socket here.
+            #[cfg(not(unix))]
+            Err("unix sockets are not available on this system".to_string())
         }
         Endpoint::Tcp { .. } | Endpoint::Pipe(_) => {
             // bollard reads `DOCKER_HOST` and the TLS variables itself.
@@ -677,6 +684,7 @@ mod tests {
             [
                 "unix:///t/run-user/docker.sock",
                 "unix:///t/run-user/podman/podman.sock",
+                "unix:///t/home/.docker/desktop/docker.sock",
                 "unix:///t/home/.docker/run/docker.sock",
                 "unix:///t/root/var/run/docker.sock",
                 "unix:///t/root/run/podman/podman.sock",
@@ -684,11 +692,18 @@ mod tests {
         );
         assert_eq!(
             kinds(&e),
-            [Kind::RootlessDocker, Kind::RootlessPodman, Kind::DockerDesktop, Kind::Docker, Kind::Podman]
+            [
+                Kind::RootlessDocker,
+                Kind::RootlessPodman,
+                Kind::DockerDesktop,
+                Kind::DockerDesktop,
+                Kind::Docker,
+                Kind::Podman
+            ]
         );
         // Without a runtime dir there is no rootless to look for.
         let e = Env { xdg_runtime_dir: None, ..e };
-        assert_eq!(kinds(&e), [Kind::DockerDesktop, Kind::Docker, Kind::Podman]);
+        assert_eq!(kinds(&e), [Kind::DockerDesktop, Kind::DockerDesktop, Kind::Docker, Kind::Podman]);
     }
 
     #[test]
@@ -772,13 +787,24 @@ mod tests {
         system.abort();
     }
 
+    /// Docker Desktop for Linux keeps its socket in `~/.docker/desktop/`, not `run/`.
+    #[tokio::test]
+    async fn docker_desktop_on_linux_is_found_at_its_own_path() {
+        let t = tempfile::TempDir::new().unwrap();
+        let desktop = serve(at(t.path(), "home/.docker/desktop/docker.sock"), "200 OK");
+        let got = connect(&env(t.path(), Os::Linux)).await.ok().expect("Docker Desktop answers");
+        assert_eq!(got.kind, Kind::DockerDesktop);
+        assert!(got.label().ends_with("/home/.docker/desktop/docker.sock"), "{}", got.label());
+        desktop.abort();
+    }
+
     #[tokio::test]
     async fn nothing_answering_says_what_each_place_was() {
         let t = tempfile::TempDir::new().unwrap();
         let e = env(t.path(), Os::Linux);
         stale(at(t.path(), "run-user/docker.sock"));
         std::fs::write(at(t.path(), "root/var/run/docker.sock"), b"not a socket").unwrap();
-        let bad = serve(at(t.path(), "home/.docker/run/docker.sock"), "500 Internal Server Error");
+        let bad = serve(at(t.path(), "home/.docker/desktop/docker.sock"), "500 Internal Server Error");
 
         let Err(missing) = connect(&e).await else { panic!("nothing should answer") };
         let why = |k: Kind| missing.tried.iter().find(|t| t.kind == k).unwrap().why.clone();
