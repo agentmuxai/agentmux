@@ -88,6 +88,19 @@ describe("SupervisorChip", () => {
     });
 });
 
+describe("supervisorMenuItems when the Supervisor is switched off", () => {
+    it("disables Steady and Drive with the reason, and keeps Off", () => {
+        const items = supervisorMenuItems("off", vi.fn(), false);
+        expect(items.map((i) => i.enabled)).toEqual([true, false, false]);
+        expect(items[1].sublabel).toContain("Switched off");
+        expect(items[0].sublabel).not.toContain("Switched off");
+    });
+
+    it("offers every mode when it is on", () => {
+        expect(supervisorMenuItems("off", vi.fn()).map((i) => i.enabled)).toEqual([true, true, true]);
+    });
+});
+
 describe("supervisorMenuItems", () => {
     it("checks the current mode", () => {
         expect(supervisorMenuItems("drive", vi.fn()).map((i) => i.checked)).toEqual([false, false, true]);
