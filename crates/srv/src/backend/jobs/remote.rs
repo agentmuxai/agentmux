@@ -17,12 +17,25 @@
 //! srv that wrote the claim (`process_identity::srv_alive`): a pid another
 //! program reused reads as gone. Every close is the conditional `job_run_finish`,
 //! so whichever side writes first wins and the other changes nothing.
+//!
+//! **Stopping such a run.** A timeout, or a `cancel_other` overlap, can't
+//! interrupt the pane from the firing instance, and closing the row there
+//! would free its place while the agent goes on working. So the firing
+//! instance asks the following one ([`RunLedger::request_remote_stop`], a
+//! [`RemoteStopHook`] the server installs), notes the ask in
+//! `links.stop_requested`, and leaves the row open. The following instance
+//! ([`RunLedger::stop_followed_here`]) closes the row with the status asked
+//! for and interrupts the pane, as a local stop does. When the ask can't be
+//! delivered the reason goes in `links.stop_error` and it is tried again.
 
+use std::sync::Arc;
+
+use agentmux_common::time::now_ms;
 use serde_json::json;
 
 use super::follower::NO_TURN_AFTER_MS;
 use super::{registered_uid, RunLedger, SOURCE_CRON};
-use crate::backend::storage::job_runs::{infra, JobRun};
+use crate::backend::storage::job_runs::{infra, reason, JobRun};
 
 /// The `links` keys the following instance writes: its channel, its
 /// process id, and when it took the run.
@@ -34,6 +47,38 @@ pub const FOLLOWED_AT_MS: &str = "followed_at_ms";
 pub const NOT_FOLLOWED: &str = "delivered to an agent in another channel; AgentMux can't follow its turn from here";
 /// The summary of a run whose following instance stopped during it.
 pub const FOLLOWER_GONE: &str = "the AgentMux that followed this run stopped during it";
+
+/// The `links` keys of a stop the firing instance asked for, and of why the
+/// ask could not be delivered.
+pub const STOP_REQUESTED: &str = "stop_requested";
+pub const STOP_ERROR: &str = "stop_error";
+/// An ask is repeated no sooner than this, and no more than `STOP_ATTEMPTS`
+/// times: a following instance that never answers is left to the checks
+/// above (its process gone, its turn ending).
+const STOP_RETRY_MS: i64 = 60_000;
+const STOP_ATTEMPTS: u64 = 5;
+
+/// A stop for a run another channel follows, as it is asked of that channel.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RemoteStop {
+    pub run_id: String,
+    /// The pane in the following channel.
+    pub block_id: String,
+    pub infra: String,
+    pub reason: String,
+    pub summary: String,
+}
+
+/// How the server delivers a [`RemoteStop`] (it needs the shared registry and
+/// an HTTP client, which the ledger has not). It reports back through
+/// [`RunLedger::remote_stop_done`] or [`RunLedger::remote_stop_failed`].
+pub type RemoteStopHook = Arc<dyn Fn(RemoteStop) + Send + Sync>;
+
+/// The statuses a stop may close a run with, and the reasons it may give:
+/// what a timeout and `cancel_other` write, so a request can't write others.
+fn stop_is_known(infra_status: &str, why: &str) -> bool {
+    matches!((infra_status, why), (infra::TIMEOUT, reason::TIMEOUT) | (infra::INTERRUPTED, reason::OVERLAP))
+}
 
 /// Who follows a run, from its `links`.
 #[derive(Debug, Clone, PartialEq)]
@@ -167,6 +212,100 @@ impl RunLedger {
                 self.turn_finished(run_id, infra, None, summary);
                 true
             }
+        }
+    }
+
+    /// How to ask another channel's instance to stop a run it follows.
+    pub fn install_remote_stop(&self, hook: RemoteStopHook) {
+        let _ = self.remote_stop.set(hook);
+    }
+
+    /// Ask the instance that follows `run` to stop it with `infra_status`,
+    /// `why` and `summary`: a timeout, or `cancel_other`. Notes the ask in
+    /// the run's links and leaves the row open, for the follower to close
+    /// (see the module doc). `true` when an ask went out now; `false` when
+    /// nobody follows it, there is no way to ask, or an ask is already under
+    /// way (or all of them were used).
+    pub(super) fn request_remote_stop(&self, run: &JobRun, infra_status: &str, why: &str, summary: &str) -> bool {
+        if followed_by(run).is_none() || run.block_id.is_empty() || !stop_is_known(infra_status, why) {
+            return false;
+        }
+        let Some(hook) = self.remote_stop.get() else { return false };
+        let asked = run.links.get(STOP_REQUESTED);
+        let attempts = asked.and_then(|a| a.get("attempts")).and_then(|v| v.as_u64()).unwrap_or(0);
+        let last = asked.and_then(|a| a.get("at_ms")).and_then(|v| v.as_i64()).unwrap_or(0);
+        let now = now_ms();
+        if attempts >= STOP_ATTEMPTS || now - last < STOP_RETRY_MS {
+            return false;
+        }
+        let note = json!({ STOP_REQUESTED: {
+            "at_ms": now, "attempts": attempts + 1, "by_channel": self.channel,
+            "infra": infra_status, "reason": why, "summary": summary,
+        }});
+        if let Err(e) = self.store.job_run_add_links(&run.id, &note) {
+            // Without the note the ask would repeat at every pass.
+            tracing::warn!(run_id = %run.id, error = %e, "jobs: couldn't note a stop asked of another channel");
+            return false;
+        }
+        hook(RemoteStop {
+            run_id: run.id.clone(),
+            block_id: run.block_id.clone(),
+            infra: infra_status.to_string(),
+            reason: why.to_string(),
+            summary: summary.to_string(),
+        });
+        tracing::info!(run_id = %run.id, block_id = %run.block_id, reason = why, "jobs: asking the AgentMux that follows a run to stop it");
+        true
+    }
+
+    /// The follower stopped the run: its row is closed. This instance's
+    /// Jobs tab and a run waiting on this one's place move on.
+    pub fn remote_stop_done(&self, run_id: &str) {
+        self.run_changed(run_id);
+        super::pending_wake().notify_one();
+    }
+
+    /// The ask couldn't be delivered: say why in the run's links, where the
+    /// operator and the next pass see it. The row stays open.
+    pub fn remote_stop_failed(&self, run_id: &str, error: &str) {
+        let note = json!({ STOP_ERROR: { "at_ms": now_ms(), "error": error } });
+        if let Err(e) = self.store.job_run_add_links(run_id, &note) {
+            tracing::warn!(run_id, error = %e, "jobs: couldn't note why a stop could not be delivered");
+        }
+        tracing::warn!(run_id, error, "jobs: the AgentMux that follows a run could not be asked to stop it");
+        self.run_changed(run_id);
+    }
+
+    /// The following side of [`Self::request_remote_stop`]: close the run
+    /// this instance follows, as a local stop does, and interrupt its pane's
+    /// turn. `Ok(false)` when it had ended already; an error when the run is
+    /// not one this process follows in `block_id`, or the stop is not one a
+    /// timeout or `cancel_other` writes.
+    pub fn stop_followed_here(&self, run_id: &str, block_id: &str, infra_status: &str, why: &str, summary: &str) -> Result<bool, String> {
+        if !stop_is_known(infra_status, why) {
+            return Err("that is not a stop a run can be given".to_string());
+        }
+        let run = self.store.job_run_get(run_id).map_err(|e| e.to_string())?.ok_or_else(|| "no such run".to_string())?;
+        if !run.is_open() {
+            return Ok(false);
+        }
+        let follows = followed_by(&run).is_some_and(|f| f.channel == self.channel && (f.pid == 0 || f.pid == std::process::id()));
+        if !follows {
+            return Err("this AgentMux does not follow that run".to_string());
+        }
+        if run.block_id.is_empty() || run.block_id != block_id {
+            return Err("that run is not in that pane".to_string());
+        }
+        match self.store.job_run_stop(&run.id, infra_status, why, summary, now_ms()) {
+            Ok(true) => {
+                self.interrupt_block(&run.block_id);
+                self.reap_worker(&run.id);
+                self.run_changed(&run.id);
+                super::pending_wake().notify_one();
+                Ok(true)
+            }
+            Ok(false) => Ok(false),
+            Err(e) => Err(e.to_string()),
         }
     }
 }

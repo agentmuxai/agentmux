@@ -268,25 +268,96 @@ async fn a_waiting_run_another_instance_recorded_is_left_alone() {
     assert_eq!((run.state.as_str(), run.reason.as_str()), (state::SCHEDULED, reason::GROUP_BUSY));
 }
 
-/// A run another channel's instance follows can't be interrupted from here, so
-/// a timeout or a replacement doesn't close its row and free its place.
+/// The stops asked of another channel's instance, as the server would send them.
+fn remote_stops(rig: &Rig) -> Arc<Mutex<Vec<remote::RemoteStop>>> {
+    let seen: Arc<Mutex<Vec<remote::RemoteStop>>> = Arc::default();
+    let sink = seen.clone();
+    rig.ledger.install_remote_stop(Arc::new(move |stop| sink.lock().unwrap().push(stop)));
+    seen
+}
+
+/// `run_id` as another channel's instance follows it.
+fn followed_elsewhere(rig: &Rig, run_id: &str) {
+    rig.store.job_run_add_links(run_id, &json!({ "followed_by_channel": "elsewhere", "followed_by_pid": 1 })).unwrap();
+}
+
+/// A timeout can't interrupt a pane another channel holds, and closing the row
+/// here would free its place while the agent goes on working: the follower is
+/// asked to stop it, and the row stays open until it has.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_run_followed_by_another_channel_is_not_stopped_from_here() {
+async fn a_timeout_of_a_run_another_channel_follows_is_asked_of_that_channel() {
     let rig = rig();
     let stopped = interrupts(&rig);
-    let job = make(&rig, "j-remote", |j| {
-        j.policy.overlap = Overlap::CancelOther;
+    let asked = remote_stops(&rig);
+    let job = make(&rig, "j-remote", |j| j.policy.timeout_minutes = Some(1));
+    let first = rig.sched.fire(&job, slot(0)).await.run_id.unwrap();
+    followed_elsewhere(&rig, &first);
+    rig.store.conn().lock().unwrap().execute("UPDATE db_job_runs SET started_at_ms = 1 WHERE id = ?1", [&first]).unwrap();
+
+    assert_eq!(rig.ledger.enforce_timeouts(), 0, "not closed from here");
+    let run = rig.store.job_run_get(&first).unwrap().unwrap();
+    assert_eq!(run.state, state::RUNNING, "left open for the follower to close");
+    assert!(stopped.lock().unwrap().is_empty(), "this process has no such pane to interrupt");
+    let asked_now = asked.lock().unwrap().clone();
+    assert_eq!(asked_now.len(), 1);
+    assert_eq!((asked_now[0].run_id.as_str(), asked_now[0].block_id.as_str()), (first.as_str(), run.block_id.as_str()));
+    assert_eq!((asked_now[0].infra.as_str(), asked_now[0].reason.as_str()), (infra::TIMEOUT, reason::TIMEOUT));
+    assert!(asked_now[0].summary.contains("stopped after 1 minutes"), "{}", asked_now[0].summary);
+    assert_eq!(run.links["stop_requested"]["attempts"], 1);
+
+    assert_eq!(rig.ledger.enforce_timeouts(), 0);
+    assert_eq!(asked.lock().unwrap().len(), 1, "the next pass doesn't ask again at once");
+}
+
+/// `cancel_other` against a run another channel follows: the new run waits (it
+/// must not start before the stop lands, or the interrupt could hit its own
+/// turn), the follower is asked, and the new run starts once the old one is closed.
+#[tokio::test(flavor = "multi_thread")]
+async fn cancel_other_asks_the_channel_that_follows_the_old_run_and_waits_for_it() {
+    let rig = rig();
+    let asked = remote_stops(&rig);
+    let job = make(&rig, "j-cancel-remote", |j| j.policy.overlap = Overlap::CancelOther);
+    let first = rig.sched.fire(&job, slot(0)).await.run_id.unwrap();
+    followed_elsewhere(&rig, &first);
+
+    let second = rig.sched.fire(&job, slot(1)).await;
+    assert_eq!(second.waiting, Some(reason::OVERLAP), "waits for the old run");
+    let waiting = second.run_id.unwrap();
+    assert_eq!(rig.store.job_run_get(&first).unwrap().unwrap().state, state::RUNNING);
+    {
+        let asked = asked.lock().unwrap();
+        assert_eq!(asked.len(), 1);
+        assert_eq!((asked[0].run_id.as_str(), asked[0].infra.as_str(), asked[0].reason.as_str()), (first.as_str(), infra::INTERRUPTED, reason::OVERLAP));
+    }
+    assert_eq!(rig.sched.run_policy_pass().await, 0, "the old run is still open");
+
+    // The follower closed it.
+    assert!(rig.store.job_run_stop(&first, infra::INTERRUPTED, reason::OVERLAP, "stopped", agentmux_common::time::now_ms()).unwrap());
+    assert_eq!(rig.sched.run_policy_pass().await, 1);
+    assert_eq!(rig.store.job_run_get(&waiting).unwrap().unwrap().state, state::RUNNING);
+}
+
+/// With no way to ask (an instance that can't reach the registry), the run is
+/// left alone as before: it ends with its turn, and the slot is skipped.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_run_another_channel_follows_is_left_open_when_nobody_can_be_asked() {
+    let rig = rig();
+    let stopped = interrupts(&rig);
+    let job = make(&rig, "j-remote-unasked", |j| {
+        j.policy.overlap = Overlap::Skip;
         j.policy.timeout_minutes = Some(1);
     });
     let first = rig.sched.fire(&job, slot(0)).await.run_id.unwrap();
-    rig.store.job_run_add_links(&first, &json!({ "followed_by_channel": "elsewhere", "followed_by_pid": 1 })).unwrap();
+    followed_elsewhere(&rig, &first);
     rig.store.conn().lock().unwrap().execute("UPDATE db_job_runs SET started_at_ms = 1 WHERE id = ?1", [&first]).unwrap();
 
-    assert_eq!(rig.ledger.enforce_timeouts(), 0, "past its timeout, but not ours to stop");
+    assert_eq!(rig.ledger.enforce_timeouts(), 0);
     let second = rig.sched.fire(&job, slot(1)).await;
-    assert_eq!(second.run_id, None, "cancel_other can't replace it: the slot is skipped");
+    assert_eq!(second.run_id, None, "the slot is skipped");
     assert!(stopped.lock().unwrap().is_empty());
-    assert_eq!(rig.store.job_run_get(&first).unwrap().unwrap().state, state::RUNNING);
+    let run = rig.store.job_run_get(&first).unwrap().unwrap();
+    assert_eq!(run.state, state::RUNNING);
+    assert!(run.links.get("stop_requested").is_none(), "nothing was asked");
 }
 
 /// A pending fire told to start holds its place while it is delivered, so a
