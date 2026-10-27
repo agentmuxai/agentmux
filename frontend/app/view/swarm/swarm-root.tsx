@@ -117,7 +117,7 @@ export function SwarmView(props: { model: SwarmViewModel; ctx: PaneTabHostContex
                         <SwarmAgentList model={model} ctx={ctx} agents={agents} density={density} />
                         {/* After the list, so a switch never remounts it. */}
                         <Show when={section() === "broadcast"}>
-                            <BroadcastDock model={model} />
+                            <BroadcastDock model={model} agents={agents} />
                         </Show>
                     </div>
                 </SwarmSectionBar>
