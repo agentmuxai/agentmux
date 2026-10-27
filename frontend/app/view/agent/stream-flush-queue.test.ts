@@ -77,6 +77,34 @@ describe("StreamFlushQueue.flushNow", () => {
         expect(flush.command.newNodes.map((n: DocumentNode) => n.id)).toEqual(["n1"]);
     });
 
+    describe("start-up rows", () => {
+        const notice = (id: string): DocumentNode => ({ type: "cli_notice", id, kind: "container_start", startState: "ready" }) as unknown as DocumentNode;
+        const flushedRelevance = (phase: string | undefined, nodes: DocumentNode[]) => {
+            const { model, dispatched } = makeModel();
+            if (phase) model.state = { turnPhase: { kind: phase } };
+            const q = createStreamFlushQueue(model);
+            for (const n of nodes) q.pushNewNode(n);
+            q.flushNow();
+            return dispatched.find((d) => d.command.type === "StreamFlushObserved")!.command.turnRelevant;
+        };
+
+        it("do not make an idle pane look busy", () => {
+            expect(flushedRelevance("Idle", [notice("n1")])).toBe(false);
+            expect(flushedRelevance("Disconnected", [notice("n1")])).toBe(false);
+            expect(flushedRelevance("Done", [notice("n1")])).toBe(false);
+        });
+
+        it("still count while a turn waits on them, or when the phase is not known", () => {
+            expect(flushedRelevance("Submitting", [notice("n1")])).toBe(true);
+            expect(flushedRelevance("Streaming", [notice("n1")])).toBe(true);
+            expect(flushedRelevance(undefined, [notice("n1")])).toBe(true);
+        });
+
+        it("never hide what the model wrote alongside them", () => {
+            expect(flushedRelevance("Idle", [notice("n1"), textNode("n2")])).toBe(true);
+        });
+    });
+
     it("lists the new nodes queued until they are flushed", () => {
         const { model } = makeModel();
         const q = createStreamFlushQueue(model);
