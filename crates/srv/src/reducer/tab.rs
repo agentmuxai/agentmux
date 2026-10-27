@@ -117,15 +117,17 @@ fn next_default_tab_name(state: &State, workspace_id: &str, first: usize) -> Str
         .expect("an unbounded range always yields a free name")
 }
 
-/// `name` without a trailing ` (n)` counter of one or two digits, when what is
-/// left isn't empty. A longer number is the user's own ("Report (2024)").
+/// `name` without a trailing ` (n)` counter of up to three digits, when what is
+/// left isn't empty: the counters `free_tab_name` generates (it counts well past
+/// 99 for a name shared by that many tabs). A four-digit number is the user's
+/// own ("Report (2024)").
 fn strip_copy_suffix(name: &str) -> &str {
     let Some(open) = name.rfind(" (") else {
         return name;
     };
     let counter = &name[open + 2..];
     match counter.strip_suffix(')') {
-        Some(digits) if (1..=2).contains(&digits.len()) && digits.bytes().all(|b| b.is_ascii_digit()) && open > 0 => {
+        Some(digits) if (1..=3).contains(&digits.len()) && digits.bytes().all(|b| b.is_ascii_digit()) && open > 0 => {
             &name[..open]
         }
         _ => name,
