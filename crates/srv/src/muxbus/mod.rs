@@ -11,6 +11,7 @@ pub mod relay;
 pub mod wan_presence;
 pub mod wan_publish;
 pub mod wan_verify;
+pub(crate) mod ws_connect;
 
 use crate::backend::storage::muxbus::MuxBusCredentials;
 use crate::broker::CredentialState;
