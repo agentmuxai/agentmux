@@ -52,6 +52,14 @@ fn the_parts_below_the_window_are_deleted_and_the_window_reads_as_before() {
     assert_eq!(held, chunk.repeat(4));
     let (from, bytes) = store.read_at("z", "term", 0, 12 * PART).unwrap();
     assert_eq!((from, bytes.len() as i64), (8 * PART, 4 * PART), "a read from before the window starts at the window");
+    // "To the end" (size 0) is the whole window too, from offset 0 or any stale
+    // offset below it, and from an offset inside it only what follows.
+    for stale in [0, 100, 8 * PART - 1] {
+        let (from, bytes) = store.read_at("z", "term", stale, 0).unwrap();
+        assert_eq!((from, bytes.len() as i64), (8 * PART, 4 * PART), "read to the end from {stale}");
+    }
+    let (from, bytes) = store.read_at("z", "term", 10 * PART, 0).unwrap();
+    assert_eq!((from, bytes.len() as i64), (10 * PART, 2 * PART));
 }
 
 #[test]

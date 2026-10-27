@@ -193,7 +193,11 @@ impl FileStore {
             if actual_offset < data_start {
                 let skip = data_start - actual_offset;
                 actual_offset = data_start;
-                actual_size -= skip;
+                // "To the end" is the whole window from its start, not the
+                // window less what was skipped before it.
+                if size != 0 {
+                    actual_size -= skip;
+                }
             }
             if actual_size <= 0 {
                 return Ok((data_start, Vec::new()));
