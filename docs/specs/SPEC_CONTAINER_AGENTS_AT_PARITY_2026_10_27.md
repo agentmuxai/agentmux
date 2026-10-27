@@ -1,6 +1,6 @@
 # SPEC: container agents at parity with native agents: start responsive, same context
 
-**Status:** approved 2026-10-27 by AgentY with the section 4 recommendations, under the operator's standing instruction to use best recommendations (task #5162). Building (task #5163): P0, P1 and P2 are in the first PR; the rest follows in later PRs.
+**Status:** active. Approved 2026-10-27 by AgentY with the section 4 recommendations, under the operator's standing instruction to use best recommendations (task #5162). Building (task #5163): P0, P1 and P2 are in the first PR; the rest follows in later PRs.
 **Trigger:** The operator, 2026-10-27: *"we also want to get container agents working well. I just started a new JCont, and it is not responsive. It needs all the same context injection the native agents get."*
 **Builds on:** `SPEC_CONTAINER_AGENTS_WORK_FOR_EVERYONE_2026_10_07.md` (shipped in #4461: base image, CLI installed at first start, clear failures). This spec is about what is still missing.
 
