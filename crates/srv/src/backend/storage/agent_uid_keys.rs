@@ -155,6 +155,17 @@ impl Store {
         Ok(Some((AgentUidKeys { lan, wan }, [lan_origin, wan_origin])))
     }
 
+    /// Remove the UID's LAN and WAN keypairs, so the next `agent_uid_keys_ensure` takes the (current)
+    /// name-keyed ones or mints new: for a UID whose copied keys were exposed. `true` when a row was removed.
+    pub fn agent_uid_keys_delete(&self, uid: &str) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut removed = 0;
+        for tier in [Tier::Lan, Tier::Wan] {
+            removed += conn.execute(&format!("DELETE FROM {} WHERE uid = ?1", tier.uid_table()), params![uid.trim()])?;
+        }
+        Ok(removed > 0)
+    }
+
     /// The UID's LAN public key, if it has one; never creates one.
     pub fn agent_uid_lan_public_key_load(&self, uid: &str) -> Result<Option<String>, StoreError> {
         let conn = self.conn.lock().unwrap();
