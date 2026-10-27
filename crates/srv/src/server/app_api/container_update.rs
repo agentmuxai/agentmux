@@ -26,6 +26,14 @@ fn first_report(container_name: &str, running: &str, current: &str) -> bool {
     running != current && told().insert(format!("{container_name}@{running}"))
 }
 
+/// Whether this AgentMux's own agent image can be had: on this machine, or from the registry. When it
+/// can't (a build ahead of its release), a container is on `:latest` because nothing newer exists.
+async fn current_image_available(cm: &ContainerManager) -> bool {
+    let image = versioned_agent_image();
+    cm.has_image_locally(&image).await
+        || crate::backend::registry_probe::probe_anonymous(&image).await == crate::backend::rpc_types::ContainerImageAccess::Public
+}
+
 /// Writes one pane row, and one log line, when an existing container runs another agent image
 /// version than this AgentMux.
 pub(crate) async fn note_outdated(
@@ -38,7 +46,7 @@ pub(crate) async fn note_outdated(
     mstore: &Arc<crate::backend::storage::store::Store>,
 ) {
     let Some(running) = cm.base_image_version(container_name).await else { return };
-    if !first_report(container_name, &running, CURRENT) {
+    if running == CURRENT || !current_image_available(cm).await || !first_report(container_name, &running, CURRENT) {
         return;
     }
     tracing::info!(container = container_name, running = %running, current = CURRENT, "container runs an older agent image than this AgentMux");
@@ -73,6 +81,9 @@ pub(crate) async fn update_for_block(state: &AppState, block_id: &str) -> Result
     }
     let container_name = crate::backend::container::container_name_for_slug(&agent_id);
     let cm = state.container_manager.get().await.ok_or("Docker is not available on this machine")?;
+    if !current_image_available(&cm).await {
+        return Err(format!("the agent image for AgentMux {CURRENT} is not available yet, so a new container would start from the same image"));
+    }
     cm.update_container(&container_name).await.map_err(|e| e.user_message())?;
     told().retain(|k| !k.starts_with(&format!("{container_name}@")));
     let provider = meta_get_string(&block.meta, "agentProvider", "claude");
