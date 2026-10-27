@@ -96,6 +96,8 @@ function setup(initial: Record<string, unknown> = {}, local = false) {
         dismissFleetResult: () => {},
         clearSelection: () => setSelected(new Set<string>()),
         selectAll: (keys: string[]) => setSelected(new Set(keys)),
+        fleetTargets: () => new Map(),
+        broadcastToSelection: async () => ({ succeeded: [], failed: [], aborted_early: false }),
     } as unknown as SwarmViewModel;
     const written: Record<string, unknown>[] = [];
     const ctx = {

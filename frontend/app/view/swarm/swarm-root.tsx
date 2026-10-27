@@ -12,6 +12,7 @@ import { SwarmAgentList, useSwarmAgents, type SwarmAgents } from "./swarm-agent-
 import { ClearCompletedButton } from "./swarm-view";
 import { SwarmSectionBar } from "./swarm-section-bar";
 import { createSwarmSection, swarmDensityOf, type SwarmSection } from "./swarm-section";
+import { BroadcastDock } from "./swarm-broadcast";
 import { SupervisorSettingsBar } from "./swarm-supervisor-settings";
 import { FleetToolbar, FleetResultPanel } from "./swarm-fleet-toolbar";
 import "./swarm-view.scss";
@@ -28,7 +29,7 @@ function SectionActions(props: { model: SwarmViewModel; agents: SwarmAgents; sec
             {/* Outside the tree's own Show: agents on other instances can be selected
                 when this instance has none, and the toolbar is what acts on them. It
                 shows itself only when there is something to select or act on. */}
-            <FleetToolbar model={model} allBlockIds={agents.selectableKeys} />
+            <FleetToolbar model={model} allBlockIds={agents.selectableKeys} section={props.section} />
             <FleetResultPanel model={model} />
             <Show
                 when={agents.tree().length > 0}
@@ -114,6 +115,10 @@ export function SwarmView(props: { model: SwarmViewModel; ctx: PaneTabHostContex
                     <div class="swarm-section-body">
                         <SectionActions model={model} agents={agents} section={section()} />
                         <SwarmAgentList model={model} ctx={ctx} agents={agents} density={density} />
+                        {/* After the list, so a switch never remounts it. */}
+                        <Show when={section() === "broadcast"}>
+                            <BroadcastDock model={model} />
+                        </Show>
                     </div>
                 </SwarmSectionBar>
             </Show>
