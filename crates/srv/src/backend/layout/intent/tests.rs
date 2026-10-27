@@ -408,6 +408,103 @@ fn minimize_sets_the_flag_keeps_the_size_and_unmagnifies() {
     assert!(!find_node_by_id(tree.as_ref().unwrap(), "b").unwrap().minimized);
 }
 
+/// A leaf of 10 in a column of `size`, for the restore tests below.
+fn sized(mut node: LayoutNode, size: f32) -> LayoutNode {
+    node.size = size;
+    node
+}
+
+fn is_minimized(tree: &Option<LayoutNode>, id: &str) -> bool {
+    find_node_by_id(tree.as_ref().unwrap(), id).unwrap().minimized
+}
+
+#[test]
+fn a_restored_chip_grows_in_the_column_it_is_docked_onto() {
+    // a | b(chip) | c: b's chip shows above c, so b grows above c, in c's column.
+    let mut tree = three_in_a_row();
+    apply(&mut tree, LayoutIntent::Minimize { node_id: "b".into() }).unwrap();
+    apply(&mut tree, LayoutIntent::Restore { node_id: "b".into() }).unwrap();
+    assert_eq!(root_kids(&tree), vec!["a", "00000001-0000-4000-8000-00000000abcd"]);
+    assert_eq!(kids(&tree, "00000001-0000-4000-8000-00000000abcd"), vec!["b", "c"]);
+    let group = find_node_by_id(tree.as_ref().unwrap(), "00000001-0000-4000-8000-00000000abcd").unwrap();
+    assert_eq!(group.flex_direction, FlexDirection::Column);
+    assert_eq!(group.size, 10.0, "the column keeps the width c had");
+    assert!(!is_minimized(&tree, "b"));
+    assert_eq!(find_node_by_id(tree.as_ref().unwrap(), "b").unwrap().size, 10.0);
+}
+
+#[test]
+fn a_restored_chip_takes_its_place_in_the_stack_of_chips_above_the_pane() {
+    // m1 and m2 are stacked over c in row order; m2 grows below m1, m1 stays a chip above it.
+    let mut tree = Some(branch(
+        "r",
+        FlexDirection::Row,
+        vec![leaf("a", "ba"), minimized(leaf("m1", "b1")), minimized(leaf("m2", "b2")), leaf("c", "bc")],
+    ));
+    apply(&mut tree, LayoutIntent::Restore { node_id: "m2".into() }).unwrap();
+    let group = "00000001-0000-4000-8000-00000000abcd";
+    assert_eq!(root_kids(&tree), vec!["a", group]);
+    assert_eq!(kids(&tree, group), vec!["m1", "m2", "c"]);
+    assert!(is_minimized(&tree, "m1"));
+    assert!(!is_minimized(&tree, "m2"));
+}
+
+#[test]
+fn a_chip_docked_onto_a_column_joins_that_column() {
+    // The pane's column already holds two panes: the restored chip is a third, at the top.
+    let col = branch("col", FlexDirection::Column, vec![sized(leaf("x", "bx"), 6.0), sized(leaf("y", "by"), 10.0)]);
+    let mut tree = Some(branch("r", FlexDirection::Row, vec![leaf("a", "ba"), minimized(leaf("m", "bm")), col]));
+    apply(&mut tree, LayoutIntent::Restore { node_id: "m".into() }).unwrap();
+    assert_eq!(root_kids(&tree), vec!["a", "col"]);
+    assert_eq!(kids(&tree, "col"), vec!["m", "x", "y"]);
+    assert_eq!(find_node_by_id(tree.as_ref().unwrap(), "m").unwrap().size, 8.0, "the mean of the column's panes");
+}
+
+#[test]
+fn a_chip_with_no_pane_to_its_right_docks_left_and_grows_there() {
+    let mut tree = Some(branch("r", FlexDirection::Row, vec![leaf("a", "ba"), leaf("b", "bb"), minimized(leaf("m", "bm"))]));
+    apply(&mut tree, LayoutIntent::Restore { node_id: "m".into() }).unwrap();
+    let group = "00000001-0000-4000-8000-00000000abcd";
+    assert_eq!(root_kids(&tree), vec!["a", group]);
+    assert_eq!(kids(&tree, group), vec!["m", "b"]);
+}
+
+#[test]
+fn a_chip_in_a_stack_of_chips_is_restored_in_the_column_of_the_pane_the_stack_docks_onto() {
+    let chips = branch("chips", FlexDirection::Column, vec![minimized(leaf("m1", "b1")), minimized(leaf("m2", "b2"))]);
+    let mut tree = Some(branch("r", FlexDirection::Row, vec![leaf("a", "ba"), chips, leaf("c", "bc")]));
+    apply(&mut tree, LayoutIntent::Restore { node_id: "m1".into() }).unwrap();
+    let group = "00000001-0000-4000-8000-00000000abcd";
+    assert_eq!(root_kids(&tree), vec!["a", group]);
+    assert_eq!(kids(&tree, group), vec!["m1", "m2", "c"]);
+    assert!(is_minimized(&tree, "m2"));
+}
+
+#[test]
+fn a_chip_in_a_column_grows_in_place_and_keeps_its_span() {
+    // A pane under two columns (it spans both) and a stack in one column: each grows where it is.
+    let top = branch("top", FlexDirection::Row, vec![leaf("a", "ba"), leaf("b", "bb")]);
+    let mut tree = Some(branch("r", FlexDirection::Column, vec![top, minimized(leaf("wide", "bw"))]));
+    apply(&mut tree, LayoutIntent::Restore { node_id: "wide".into() }).unwrap();
+    assert_eq!(root_kids(&tree), vec!["top", "wide"]);
+    assert!(!is_minimized(&tree, "wide"));
+
+    let col = branch("col", FlexDirection::Column, vec![leaf("x", "bx"), minimized(leaf("m", "bm")), leaf("y", "by")]);
+    let mut tree = Some(branch("r", FlexDirection::Row, vec![leaf("a", "ba"), col]));
+    apply(&mut tree, LayoutIntent::Restore { node_id: "m".into() }).unwrap();
+    assert_eq!(kids(&tree, "col"), vec!["x", "m", "y"]);
+}
+
+#[test]
+fn restoring_the_last_chip_of_a_column_leaves_the_others_where_they_are() {
+    // x is the only chip in its Row slot; its restore still goes to the pane it docks onto.
+    let mut tree = Some(branch("r", FlexDirection::Row, vec![minimized(leaf("x", "bx")), leaf("a", "ba"), leaf("b", "bb")]));
+    apply(&mut tree, LayoutIntent::Restore { node_id: "x".into() }).unwrap();
+    let group = "00000001-0000-4000-8000-00000000abcd";
+    assert_eq!(root_kids(&tree), vec![group, "b"]);
+    assert_eq!(kids(&tree, group), vec!["x", "a"]);
+}
+
 #[test]
 fn minimize_refuses_the_last_expanded_pane_and_branches() {
     let mut tree = Some(branch("r", FlexDirection::Row, vec![leaf("a", "ba"), minimized(leaf("m", "bm"))]));
