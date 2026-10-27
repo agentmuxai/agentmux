@@ -114,6 +114,25 @@
     }
   },
   {
+    "command": "agent.account.switch",
+    "request": "agentmux_srv::server::account_episodes::switch::AgentAccountSwitchReq",
+    "requestName": "AgentAccountSwitchReq",
+    "requestTs": {
+      "imports": [
+        "AgentAccountSwitchReq"
+      ],
+      "name": "AgentAccountSwitchReq"
+    },
+    "response": "agentmux_srv::server::account_episodes::switch::AgentAccountSwitchResult",
+    "responseName": "AgentAccountSwitchResult",
+    "responseTs": {
+      "imports": [
+        "AgentAccountSwitchResult"
+      ],
+      "name": "AgentAccountSwitchResult"
+    }
+  },
+  {
     "command": "agent.define",
     "request": "agentmux_srv::backend::rpc_types::agent::CommandAgentDefineData",
     "requestName": "CommandAgentDefineData",

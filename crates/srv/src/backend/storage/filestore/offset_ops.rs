@@ -128,10 +128,7 @@ impl FileStore {
                     part_data.extend_from_slice(&actual_data[data_pos..data_pos + to_copy]);
                 }
 
-                tx.execute(
-                    "REPLACE INTO db_file_data (zoneid, name, partidx, data) VALUES (?1, ?2, ?3, ?4)",
-                    params![zone_id, name, part_idx, part_data],
-                )?;
+                super::parts::put_part(tx, zone_id, name, part_idx, &part_data)?;
                 data_pos += to_copy;
             }
 

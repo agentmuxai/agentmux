@@ -502,3 +502,132 @@ async fn a_turn_stamps_its_spawn_time_and_last_output() {
     assert!(output >= spawned, "output {output} before spawn {spawned}");
     let _ = std::fs::remove_file(script);
 }
+
+
+// ---- container start-up runs in the turn's task, not in the caller ----
+
+fn container_config() -> SubprocessSpawnConfig {
+    SubprocessSpawnConfig {
+        cli_command: String::new(),
+        cli_args: vec![],
+        working_dir: String::new(),
+        env_vars: Default::default(),
+        message: "hello".to_string(),
+        resume_flag: "--resume".to_string(),
+        resume_strategy: "flag".to_string(),
+        prompt_arg_flag: String::new(),
+        session_id_field: "session_id".to_string(),
+        message_id: None,
+        session_id: None,
+        instance_id: "inst-1".to_string(),
+    }
+}
+
+async fn container_turn_status(ctrl: &SubprocessController) -> (String, i32) {
+    let s = ctrl.get_runtime_status();
+    (s.shellprocstatus, s.shellprocexitcode)
+}
+
+/// The reported bug: the image download ran inside the RPC handler, which the
+/// engine drops after 5 s. The start-up now belongs to the turn's task, so
+/// `spawn_container_turn` returns at once however long it takes, the pane's
+/// agent is "running" meanwhile, and a failed start-up ends the turn without
+/// ever reaching the exec.
+#[tokio::test]
+async fn a_slow_container_startup_does_not_hold_up_the_caller_and_a_failed_one_ends_the_turn() {
+    let Ok(cm) = crate::backend::container::ContainerManager::connect() else {
+        eprintln!("no Docker client on this machine: skipped");
+        return;
+    };
+    let ctrl = std::sync::Arc::new(SubprocessController::new(
+        "tab-1".to_string(),
+        "block-startup".to_string(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        std::sync::Arc::from("test-boot"),
+    ));
+    ctrl.set_self_ref();
+    let ran = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let ran_in_step = ran.clone();
+    ctrl.set_container_startup(std::sync::Arc::new(move || {
+        let ran = ran_in_step.clone();
+        Box::pin(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+            ran.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Err("the image could not be downloaded".to_string())
+        })
+    }));
+
+    let began = std::time::Instant::now();
+    ctrl.spawn_container_turn(cm, "agentmux-test-startup".to_string(), vec!["claude".to_string()], container_config())
+        .expect("the turn is accepted");
+    assert!(began.elapsed() < std::time::Duration::from_millis(150), "the caller is not held up: {:?}", began.elapsed());
+    assert_eq!(ran.load(std::sync::atomic::Ordering::SeqCst), 0, "the start-up has not finished yet");
+    tokio::task::yield_now().await; // let the turn's task begin
+    assert_eq!(container_turn_status(&ctrl).await.0, crate::backend::blockcontroller::STATUS_RUNNING);
+
+    for _ in 0..100 {
+        if container_turn_status(&ctrl).await.0 == STATUS_DONE {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert_eq!(ran.load(std::sync::atomic::Ordering::SeqCst), 1, "the start-up ran once, in the turn's task");
+    assert_eq!(container_turn_status(&ctrl).await, (STATUS_DONE.to_string(), 1), "the turn ended as failed");
+}
+
+/// A stop while the container is still starting must end the turn then, and
+/// cancel the start-up (dropping it cancels the image download), not wait for
+/// the download to finish.
+#[tokio::test]
+async fn a_stop_during_container_startup_cancels_it_and_ends_the_turn() {
+    struct DropFlag(std::sync::Arc<std::sync::atomic::AtomicBool>);
+    impl Drop for DropFlag {
+        fn drop(&mut self) {
+            self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+    let Ok(cm) = crate::backend::container::ContainerManager::connect() else {
+        eprintln!("no Docker client on this machine: skipped");
+        return;
+    };
+    let ctrl = std::sync::Arc::new(SubprocessController::new(
+        "tab-1".to_string(),
+        "block-startup-stop".to_string(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        std::sync::Arc::from("test-boot"),
+    ));
+    ctrl.set_self_ref();
+    let cancelled = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let in_step = cancelled.clone();
+    ctrl.set_container_startup(std::sync::Arc::new(move || {
+        let flag = DropFlag(in_step.clone());
+        Box::pin(async move {
+            let _flag = flag;
+            tokio::time::sleep(std::time::Duration::from_secs(600)).await;
+            Ok(())
+        })
+    }));
+    ctrl.spawn_container_turn(cm, "agentmux-test-startup-stop".to_string(), vec!["claude".to_string()], container_config())
+        .expect("the turn is accepted");
+    tokio::task::yield_now().await;
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    assert_eq!(container_turn_status(&ctrl).await.0, crate::backend::blockcontroller::STATUS_RUNNING);
+
+    ctrl.stop_subprocess(false).expect("the stop is accepted");
+    for _ in 0..100 {
+        if container_turn_status(&ctrl).await.0 == STATUS_DONE {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert_eq!(container_turn_status(&ctrl).await.0, STATUS_DONE, "the stop ended the turn during start-up");
+    assert!(cancelled.load(std::sync::atomic::Ordering::SeqCst), "the start-up was dropped, which cancels the download");
+}

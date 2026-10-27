@@ -42,8 +42,11 @@ pub fn starts_an_agent(job: &CronJob) -> bool {
 pub struct Occupancy {
     /// This job's runs that are running or being delivered.
     pub job_running: usize,
-    /// Of those, the ones already running (a `cancel_other` can stop them).
+    /// Of those, the ones already running here (a `cancel_other` can stop them).
     pub job_started: usize,
+    /// Of those, the ones running in another channel: stopped by asking that
+    /// channel, so a `cancel_other` run waits for them to end.
+    pub job_remote: usize,
     /// This job's runs waiting on its own previous run (`overlap`).
     pub job_buffered: usize,
     /// This job's runs that wait for a place (`group_busy`, `global_limit`):
@@ -82,7 +85,11 @@ pub fn decide(job: &CronJob, occ: &Occupancy, waiting: bool) -> Decision {
             Overlap::BufferOne => return Decision::Wait(reason::OVERLAP),
             // Only a started run can be stopped; one still being delivered
             // is left to finish its start, so the new slot is skipped.
-            Overlap::CancelOther if occ.job_running > occ.job_started => return Decision::SkipOverlap,
+            Overlap::CancelOther if occ.job_running > occ.job_started + occ.job_remote => return Decision::SkipOverlap,
+            // A run in another channel is stopped by its follower, which takes a
+            // moment: the new run waits for it, as one buffered run does.
+            Overlap::CancelOther if occ.job_remote > 0 && (waiting || occ.job_buffered == 0) => return Decision::Wait(reason::OVERLAP),
+            Overlap::CancelOther if occ.job_remote > 0 => return Decision::SkipOverlap,
             Overlap::CancelOther => cancel = true,
         }
     }

@@ -75,8 +75,10 @@ export interface LaunchFlowOptions {
      *  anything that isn't a login *success* (the hook's `onLoginSuccess`) but
      *  still shouldn't be silent: a warning before an automatic relogin
      *  attempt, or the end-of-mount "ready"/"resumed" summary. See
-     *  docs/specs/SPEC_AGENT_PANE_AUTH_NOTIFICATIONS_2026_07_26.md. */
-    onNotify?: (text: string, style: "info" | "warning") => void;
+     *  docs/specs/SPEC_AGENT_PANE_AUTH_NOTIFICATIONS_2026_07_26.md.
+     *  `kind: "sign-in"` marks the line that says the user must sign in, which a later
+     *  sign-in (a login or an account bound) answers in the transcript. */
+    onNotify?: (text: string, style: "info" | "warning", kind?: "sign-in") => void;
     /**
      * Returns the pane's current `{rows, cols}` (or undefined if not laid out
      * yet). Used to seed the PTY size on the Phase-3 resync so the agent CLI is
@@ -201,6 +203,30 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
         log("docker", "container runtime available");
     }
 
+    // A container agent's CLI is installed inside its container on the first
+    // message (container_turn.rs), so there is no host CLI to find, install or
+    // run an auth check with. An OAuth provider with no account bound goes to
+    // the sign-in prompt, as it does for a host agent; a bound account is
+    // trusted here and checked by the backend when the turn starts.
+    // Spec: SPEC_CONTAINER_AGENTS_AT_PARITY_2026_10_27.md (P10).
+    if (agentMode === "container") {
+        log("cli", `${provider.displayName} runs inside the container: its CLI is installed there on the first message`);
+        if (effectiveAuthEnv && Object.keys(effectiveAuthEnv).length > 0) {
+            await RpcApi.SetMetaCommand(TabRpcClient, {
+                oref,
+                meta: { "cmd:env": { ...blockEnv(blockId), ...effectiveAuthEnv } },
+            });
+        }
+        if (provider.authType === "oauth" && !linkedAccountId) {
+            setPhase({ kind: "first-login" });
+            notify(`${provider.displayName} needs you to sign in before this agent can start. Click "Log in" to continue.`, "info", "sign-in");
+            log("auth", "no account linked: waiting for the user to start a login");
+            return "auth_failed";
+        }
+        opts.onAuthCheckResult?.(false);
+        return finishLaunch(opts, log, setPhase, notify, true);
+    }
+
     // Phase 1: CLI Detection / Installation
     log("cli", `checking for ${provider.cliCommand}...`);
     if (provider.pinnedVersion) {
@@ -314,15 +340,28 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
         // for why first-login and auth-expired still get different wording.
         if (existingAccountId) {
             setPhase({ kind: "auth-expired" });
-            notify(`Your ${provider.displayName} login has expired. Click "Log in" to continue.`, "warning");
+            notify(`Your ${provider.displayName} login has expired. Click "Log in" to continue.`, "warning", "sign-in");
         } else {
             setPhase({ kind: "first-login" });
-            notify(`${provider.displayName} needs you to sign in before this agent can start. Click "Log in" to continue.`, "info");
+            notify(`${provider.displayName} needs you to sign in before this agent can start. Click "Log in" to continue.`, "info", "sign-in");
         }
         log("auth", "not authenticated — waiting for the user to start a login");
         return "auth_failed";
     }
 
+    return finishLaunch(opts, log, setPhase, notify);
+}
+
+/** Phase 3: register the controller and report how the pane starts (fresh or resumed). */
+async function finishLaunch(
+    opts: LaunchFlowOptions,
+    log: LaunchFlowOptions["log"],
+    setPhase: NonNullable<LaunchFlowOptions["setLaunchPhase"]>,
+    notify: NonNullable<LaunchFlowOptions["onNotify"]>,
+    /** A container agent: once its pane is fresh, begin starting its container so the first message finds it ready. */
+    prestartContainer = false,
+): Promise<LaunchFlowResult> {
+    const { blockId } = opts;
     // Phase 3: Controller Registration
     setPhase({ kind: "verifying" });
     log("controller", "registering subprocess controller...");
@@ -340,6 +379,12 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
         if (rts) opts.onControllerStatus?.(rts);
         if (status === "init") {
             log("agent", "ready — type a message below to start");
+            if (prestartContainer) {
+                // The first message's own start-up shares its locks, so nothing is done twice.
+                RpcApi.AgentInputCommand(TabRpcClient, { blockid: blockId, message: "", prestart: true }).catch((err: any) =>
+                    log("container", `pre-start skipped: ${err?.message ?? String(err)}`),
+                );
+            }
         } else if (status === "done" || status === "running") {
             // "running" means a persistent controller resumed while its
             // process was still alive (possibly mid-turn) — if anything a

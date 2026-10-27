@@ -31,7 +31,7 @@ use std::time::Duration;
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
-use tokio_tungstenite::{connect_async_tls_with_config, tungstenite::Message};
+use tokio_tungstenite::tungstenite::Message;
 
 use crate::backend::reactive::handler::get_global_handler;
 use crate::backend::reactive::types::InjectionRequest;
@@ -653,7 +653,7 @@ async fn connect_and_run(
     let request = ClientRequestBuilder::new(uri)
         .with_header("Authorization", format!("Bearer {}", token));
 
-    let connected = connect_async_tls_with_config(request, None, false, None).await;
+    let connected = super::ws_connect::connect(request).await;
     crate::connectivity::report_ws_connect(crate::connectivity::Service::Muxbus, connected.as_ref().err());
     let (ws_stream, _) = connected.map_err(|e| format!("connect: {e}"))?;
 

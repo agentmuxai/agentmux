@@ -20,9 +20,22 @@ const oauth = (id: string, email: string, updated = "2026-09-01"): Account =>
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
-function mount(opts: { accounts: Account[]; links?: Array<{ provider: string; account_id: string }>; listFails?: boolean }) {
+function mount(opts: {
+    accounts: Account[];
+    links?: Array<{ provider: string; account_id: string }>;
+    listFails?: boolean;
+    pending?: string;
+    switchResult?: { status: string; account_label: string; failed: string[] };
+    quota?: Record<string, string>;
+    provider?: string;
+    signedOut?: boolean;
+}) {
+    const switchAccount = vi.fn(async () => opts.switchResult ?? { status: "switched", account_label: "", failed: [] });
+    const notify = vi.fn();
     const bind = vi.fn<(account: Account) => Promise<void>>(async () => {});
     const showPicker = vi.fn();
+    const signInAnother = vi.fn<(onSignedIn: (accountId: string) => void) => void>();
+    const onLogin = vi.fn();
     let push: ((list: Account[]) => void) | undefined;
     const deps: AccountBindingDeps = {
         loadAccounts: () => opts.accounts,
@@ -35,18 +48,25 @@ function mount(opts: { accounts: Account[]; links?: Array<{ provider: string; ac
             return opts.links ?? [];
         },
         showPicker,
+        switchAccount,
+        quotaNote: (id) => opts.quota?.[id],
+        notify,
+        signInAnother,
     };
     const root = createRoot((dispose) => {
         const [agentId, setAgentId] = createSignal<string | undefined>("agent-1");
         const b = useAccountBinding({
             agentDefinitionId: agentId,
-            providerId: () => "claude",
+            providerId: () => opts.provider ?? "claude",
             bindExistingAccount: bind,
+            pendingAccountId: () => opts.pending,
+            signedOut: () => !!opts.signedOut,
+            onLogin,
             deps,
         });
         return { ...b, setAgentId, dispose };
     });
-    return { ...root, bind, showPicker, push: (l: Account[]) => push?.(l) };
+    return { ...root, bind, showPicker, switchAccount, notify, signInAnother, onLogin, push: (l: Account[]) => push?.(l) };
 }
 
 describe("useAccountBinding", () => {
@@ -86,6 +106,141 @@ describe("useAccountBinding", () => {
         expect(m.bind).not.toHaveBeenCalled();
         expect(m.showPicker).toHaveBeenCalledTimes(1);
         expect(m.showPicker.mock.calls[0][1]).toBe(ev);
+        m.dispose();
+    });
+
+    it("the switch menu lists every signed-in account of the provider, the current one checked, with quota notes", async () => {
+        const m = mount({
+            accounts: [oauth("acc-a", "a@x", "2026-09-02"), oauth("acc-b", "b@x"), { ...oauth("acc-c", "c@x"), status: "expired" } as Account],
+            links: [{ provider: "claude", account_id: "acc-a" }],
+            quota: { "acc-b": "out of quota until Sun 7:00 PM" },
+        });
+        await flush();
+        expect(m.canSwitchAccount()).toBe(true);
+        m.onSwitchAccount(new MouseEvent("click"));
+        const items = m.showPicker.mock.calls[0][0] as ContextMenuItem[];
+        expect(items.map((i) => [i.label, i.checked, i.sublabel])).toEqual([
+            ["a@x", true, undefined],
+            ["b@x", false, "out of quota until Sun 7:00 PM"],
+            [undefined, undefined, undefined],
+            ["Sign in with another account…", undefined, undefined],
+        ]);
+        expect(items[2].type).toBe("separator");
+        m.dispose();
+    });
+
+    it("a lone linked account has nothing to switch to, except signing in another (Claude only)", async () => {
+        const claude = mount({ accounts: [oauth("acc-a", "a@x")], links: [{ provider: "claude", account_id: "acc-a" }] });
+        await flush();
+        expect(claude.canSwitchAccount()).toBe(true);
+        claude.onSwitchAccount(new MouseEvent("click"));
+        const items = claude.showPicker.mock.calls[0][0] as ContextMenuItem[];
+        expect(items.map((i) => i.label)).toEqual(["a@x", undefined, "Sign in with another account…"]);
+        claude.dispose();
+
+        const other = mount({ accounts: [], provider: "codex" });
+        await flush();
+        expect(other.canSwitchAccount()).toBe(false);
+        other.onSwitchAccount(new MouseEvent("click"));
+        expect(other.showPicker).not.toHaveBeenCalled();
+        other.dispose();
+    });
+
+    it("\"Sign in with another account…\" signs in, then switches the agent to the new account", async () => {
+        const m = mount({
+            accounts: [oauth("acc-a", "a@x"), oauth("acc-new", "n@x")],
+            links: [{ provider: "claude", account_id: "acc-a" }],
+        });
+        await flush();
+        m.onSwitchAccount(new MouseEvent("click"));
+        const items = m.showPicker.mock.calls[0][0] as ContextMenuItem[];
+        items.find((i) => i.label === "Sign in with another account…")!.click!();
+        expect(m.signInAnother).toHaveBeenCalledTimes(1);
+        expect(m.switchAccount).not.toHaveBeenCalled();
+        // The sign-in completes with the new account's id.
+        m.signInAnother.mock.calls[0][0]("acc-new");
+        await flush();
+        expect(m.switchAccount).toHaveBeenCalledWith("agent-1", "acc-new");
+        m.dispose();
+    });
+
+    it("a signed-out agent's chip menu has Log in and the accounts it could use", async () => {
+        const m = mount({
+            accounts: [oauth("acc-b", "b@x")],
+            signedOut: true,
+        });
+        await flush();
+        expect(m.canSwitchAccount()).toBe(true);
+        m.onSwitchAccount(new MouseEvent("click"));
+        const items = m.showPicker.mock.calls[0][0] as ContextMenuItem[];
+        expect(items.map((i) => i.label)).toEqual(["b@x", undefined, "Log in", "Sign in with another account…"]);
+        items.find((i) => i.label === "Log in")!.click!();
+        expect(m.onLogin).toHaveBeenCalledTimes(1);
+        items.find((i) => i.label === "b@x")!.click!();
+        await flush();
+        expect(m.switchAccount).toHaveBeenCalledWith("agent-1", "acc-b");
+        m.dispose();
+    });
+
+    it("a signed-in agent's menu has no Log in", async () => {
+        const m = mount({ accounts: [oauth("acc-a", "a@x"), oauth("acc-b", "b@x")], links: [{ provider: "claude", account_id: "acc-a" }] });
+        await flush();
+        m.onSwitchAccount(new MouseEvent("click"));
+        const items = m.showPicker.mock.calls[0][0] as ContextMenuItem[];
+        expect(items.map((i) => i.label)).not.toContain("Log in");
+        m.dispose();
+    });
+
+    it("picking an account asks srv to switch and says so when it waits for the turn", async () => {
+        const m = mount({
+            accounts: [oauth("acc-a", "a@x"), oauth("acc-b", "b@x")],
+            links: [{ provider: "claude", account_id: "acc-a" }],
+            switchResult: { status: "queued", account_label: "b@x", failed: [] },
+        });
+        await flush();
+        m.onSwitchAccount(new MouseEvent("click"));
+        const items = m.showPicker.mock.calls[0][0] as ContextMenuItem[];
+        items.find((i) => i.label === "b@x")!.click!();
+        await flush();
+        expect(m.switchAccount).toHaveBeenCalledWith("agent-1", "acc-b");
+        expect(m.notify).toHaveBeenCalledWith("info", "Switching to b@x after this turn", expect.any(String));
+        // The account it is on is not a switch.
+        items.find((i) => i.label === "a@x")!.click!();
+        await flush();
+        expect(m.switchAccount).toHaveBeenCalledTimes(1);
+        m.dispose();
+    });
+
+    it("picking the account it is on, while a switch waits, cancels the switch", async () => {
+        const m = mount({
+            accounts: [oauth("acc-a", "a@x"), oauth("acc-b", "b@x")],
+            links: [{ provider: "claude", account_id: "acc-a" }],
+            pending: "acc-b",
+            switchResult: { status: "unchanged", account_label: "a@x", failed: [] },
+        });
+        await flush();
+        m.onSwitchAccount(new MouseEvent("click"));
+        const items = m.showPicker.mock.calls[0][0] as ContextMenuItem[];
+        items.find((i) => i.label === "a@x")!.click!();
+        await flush();
+        expect(m.switchAccount).toHaveBeenCalledWith("agent-1", "acc-a");
+        expect(m.notify).toHaveBeenCalledWith("info", "Staying on a@x", expect.any(String));
+        m.dispose();
+    });
+
+    it("names same-email accounts with their numbers, in the chip and the menu", async () => {
+        const numbered = (id: string, seq: number): Account => ({ ...oauth(id, "me@x"), context: { email: "me@x", seq } }) as Account;
+        const m = mount({
+            accounts: [numbered("acc-1", 1), numbered("acc-2", 2)],
+            links: [{ provider: "claude", account_id: "acc-2" }],
+            pending: "acc-1",
+        });
+        await flush();
+        expect(m.authEmail()).toBe("me@x \u00b72");
+        expect(m.pendingAccountLabel()).toBe("me@x \u00b71");
+        m.onSwitchAccount(new MouseEvent("click"));
+        const items = m.showPicker.mock.calls[0][0] as ContextMenuItem[];
+        expect(items.filter((i) => i.type === "checkbox").map((i) => i.label).sort()).toEqual(["me@x \u00b71", "me@x \u00b72"]);
         m.dispose();
     });
 

@@ -391,14 +391,19 @@ pub(crate) fn sign_outgoing_jekt(
 pub(crate) fn sign_ui_automation_auth() -> Result<agentmux_common::api_types::UiAutomationAuth> {
     let agent_id = agent_slug()?;
     // The jekt key it signs v1 with (identity M4d-3): fetched when ours.
-    let key = crate::self_keys::jekt_key().ok_or_else(|| {
-        anyhow::anyhow!(
+    let ts_secs = agentmux_common::time::now_secs();
+    let Some(key) = crate::self_keys::jekt_key() else {
+        // A container agent holds no key: srv attributes the request by the container's token and ignores
+        // the signature then. Should it not, the empty signature fails there like any other bad one.
+        if crate::self_keys::in_container() {
+            return Ok(agentmux_common::api_types::UiAutomationAuth { agent_id, ts_secs, sig: String::new() });
+        }
+        anyhow::bail!(
             "AGENTMUX_JEKT_KEY is not set (or not valid base64) and srv served no key — this agent \
              needs to be respawned to get a signing key before it can use UI automation \
              (the UI tool)"
-        )
-    })?;
-    let ts_secs = agentmux_common::time::now_secs();
+        );
+    };
     let sig = agentmux_common::jekt_sign::sign_jekt(
         &key,
         "ui-automation-identity",

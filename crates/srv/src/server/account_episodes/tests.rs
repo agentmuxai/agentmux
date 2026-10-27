@@ -273,7 +273,7 @@ async fn a_sign_in_leaves_another_accounts_panes_alone() {
 }
 
 #[tokio::test]
-async fn the_move_relinks_idle_agents_and_leaves_busy_ones() {
+async fn the_move_relinks_idle_agents_and_queues_busy_ones() {
     let state = test_state();
     for a in [account("old", "claude", "valid"), account("spare", "claude", "valid"), account("gh", "github", "valid")] {
         state.id_store.identity_upsert(&a).unwrap();
@@ -302,6 +302,8 @@ async fn the_move_relinks_idle_agents_and_leaves_busy_ones() {
     assert_eq!(stored_failure(&state, &idle), None, "its failure was the old account's");
     assert!(stored_failure(&state, &busy).is_some());
     assert_eq!(state.identity_store.agent_identity_list_for_agent("busy").unwrap()[0].account_id, "old");
+    assert_eq!(pending_of(&state, &busy), Some(json!("spare")), "its move waits for the turn to end");
+    assert_eq!(pending_of(&state, &idle), None);
 
     // Never across providers, never to the same account, never to one that can't run.
     let bad = |to: &str| moves::move_agents(&state, &IdentityAccountMoveAgentsReq { from: "old".into(), to: to.into(), block_ids: vec![idle.clone()] });
@@ -403,9 +405,8 @@ async fn only_the_operators_client_may_list_episodes_or_move_agents() {
     cleanup(&[&idle]);
 }
 
-/// The link is the agent's: a pane of it in a turn keeps the agent where it
-/// is, even when that pane isn't the episode's; once all are idle, every pane
-/// restarts on the new link.
+/// The link is the agent's: a pane of it in a turn queues the move, even when that pane isn't
+/// the episode's; once all are idle, every pane restarts on the new link.
 #[tokio::test]
 async fn an_agent_moves_only_when_none_of_its_panes_is_in_a_turn() {
     let state = test_state();
@@ -427,6 +428,7 @@ async fn an_agent_moves_only_when_none_of_its_panes_is_in_a_turn() {
     both.sort();
     assert_eq!(busy, both, "listed, with the pane in a turn");
     assert_eq!(state.identity_store.agent_identity_list_for_agent("twin").unwrap()[0].account_id, "old", "not relinked");
+    assert_eq!(pending_of(&state, &limited), Some(json!("spare")), "queued on the episode's pane too");
 
     blockcontroller::delete_controller(&working);
     register_stub(&working, BLOCK_CONTROLLER_PERSISTENT, STATUS_RUNNING, false);
@@ -435,6 +437,7 @@ async fn an_agent_moves_only_when_none_of_its_panes_is_in_a_turn() {
     moved.sort();
     assert_eq!(moved, both, "both panes restart on the new link");
     assert_eq!(state.identity_store.agent_identity_list_for_agent("twin").unwrap()[0].account_id, "spare");
+    assert_eq!(pending_of(&state, &limited), None, "applied, so no longer queued");
     cleanup(&[&limited, &working]);
 }
 
@@ -642,4 +645,195 @@ async fn listing_accounts_numbers_same_email_groups_and_keeps_the_numbers() {
     state.id_store.identity_upsert(&with_email("second", "me@example.com", 20)).unwrap();
     let r = list().await;
     assert_eq!(seq(&r, "second"), Some(json!(2)));
+}
+
+fn switch_req(agent: &str, account: &str, when: switch::AccountSwitchWhen) -> switch::AgentAccountSwitchReq {
+    switch::AgentAccountSwitchReq { agent_id: Some(agent.to_string()), account: account.to_string(), when }
+}
+
+fn linked_account(state: &AppState, agent: &str) -> Vec<String> {
+    state.identity_store.agent_identity_list_for_agent(agent).unwrap().into_iter().map(|l| l.account_id).collect()
+}
+
+fn pending_of(state: &AppState, block: &str) -> Option<serde_json::Value> {
+    state.mstore.get::<Block>(block).unwrap().unwrap().meta.get(switch::META_PENDING_ACCOUNT).cloned().filter(|v| !v.is_null())
+}
+
+/// What the strip queued lands when the turn ends, even on an account not checked yet; and a bind
+/// from the failure row replaces an alias row that points elsewhere instead of calling it unchanged.
+#[tokio::test]
+async fn a_queued_strip_move_to_an_unchecked_account_lands_and_a_stale_alias_row_is_replaced() {
+    use switch::AccountSwitchWhen::AfterTurn;
+    let state = test_state();
+    for (id, status) in [("old", "valid"), ("fresh", "unknown"), ("a", "valid"), ("b", "valid")] {
+        state.id_store.identity_upsert(&account(id, "claude", status)).unwrap();
+    }
+    agent_def(&state, "busy");
+    agent_def(&state, "dup");
+    state.identity_store.agent_identity_link("busy", "old", "claude").unwrap();
+    let tab = new_tab(&state).await;
+    let busy = pane(&state, &tab, "busy", "Busy", "old", None, true).await;
+    let req = IdentityAccountMoveAgentsReq { from: "old".into(), to: "fresh".into(), block_ids: vec![busy.clone()] };
+    assert_eq!(moves::move_agents(&state, &req).unwrap().busy.len(), 1, "queued");
+    register_stub(&busy, BLOCK_CONTROLLER_PERSISTENT, STATUS_RUNNING, false);
+    switch::apply_pending(&state);
+    assert_eq!(linked_account(&state, "busy"), ["fresh"]);
+
+    // `claude -> a` and a stale `claude-code -> b`: the effective account is b, so a is a real move.
+    state.identity_store.agent_identity_link("dup", "a", "claude").unwrap();
+    state.identity_store.agent_identity_link("dup", "b", "claude-code").unwrap();
+    let r = switch::switch(&state, "", &switch_req("dup", "a", AfterTurn)).unwrap();
+    assert_eq!(r.status, switch::AccountSwitchStatus::Switched);
+    assert_eq!(linked_account(&state, "dup"), ["a"], "the alias row went");
+    cleanup(&[&busy]);
+}
+
+/// An idle agent moves at once; one in a turn waits and moves when the turn ends;
+/// "now" does not wait; the same account changes nothing and cancels a wait (#4936 §3.2).
+#[tokio::test]
+async fn a_switch_applies_at_once_when_idle_waits_for_a_turn_and_cancels_on_the_current_account() {
+    use switch::AccountSwitchWhen::{AfterTurn, Now};
+    let state = test_state();
+    for id in ["old", "new"] {
+        state.id_store.identity_upsert(&account(id, "claude", "valid")).unwrap();
+    }
+    agent_def(&state, "idle");
+    agent_def(&state, "busy");
+    for a in ["idle", "busy"] {
+        state.identity_store.agent_identity_link(a, "old", "claude").unwrap();
+    }
+    let tab = new_tab(&state).await;
+    let lim = || Some(failure("usage_limit", None, None));
+    let idle = pane(&state, &tab, "idle", "Idle", "old", lim(), false).await;
+    let busy = pane(&state, &tab, "busy", "Busy", "old", lim(), true).await;
+
+    let r = switch::switch(&state, "", &switch_req("idle", "new", AfterTurn)).unwrap();
+    assert_eq!((r.status.clone(), r.restarted), (switch::AccountSwitchStatus::Switched, 1));
+    assert_eq!(linked_account(&state, "idle"), ["new"]);
+    assert_eq!(stored_failure(&state, &idle), None, "the old account's limit goes with the move");
+    let env = state.mstore.get::<Block>(&idle).unwrap().unwrap().meta.get("cmd:env").cloned();
+    assert_eq!(env.and_then(|e| e.get("CLAUDE_CONFIG_DIR").cloned()), Some(json!("/tmp/new")), "the pane's own auth env follows the link");
+
+    let r = switch::switch(&state, "busy", &switch_req("busy", "new", AfterTurn)).unwrap();
+    assert_eq!(r.status, switch::AccountSwitchStatus::Queued);
+    assert_eq!(linked_account(&state, "busy"), ["old"], "not moved under a turn");
+    assert_eq!(pending_of(&state, &busy), Some(json!("new")));
+    switch::apply_pending(&state);
+    assert_eq!(linked_account(&state, "busy"), ["old"], "still in its turn");
+
+    // Choosing the account it is on cancels the wait.
+    let r = switch::switch(&state, "", &switch_req("busy", "old", AfterTurn)).unwrap();
+    assert_eq!(r.status, switch::AccountSwitchStatus::Unchanged);
+    assert_eq!(pending_of(&state, &busy), None);
+
+    // Queue again; the turn ends; the queued switch applies.
+    switch::switch(&state, "", &switch_req("busy", "new", AfterTurn)).unwrap();
+    register_stub(&busy, BLOCK_CONTROLLER_PERSISTENT, STATUS_RUNNING, false);
+    switch::apply_pending(&state);
+    assert_eq!(linked_account(&state, "busy"), ["new"]);
+    assert_eq!(pending_of(&state, &busy), None, "the wait is cleared once applied");
+
+    // "now" doesn't wait for a turn.
+    state.identity_store.agent_identity_link("busy", "old", "claude").unwrap();
+    register_stub(&busy, BLOCK_CONTROLLER_PERSISTENT, STATUS_RUNNING, true);
+    let r = switch::switch(&state, "", &switch_req("busy", "new", Now)).unwrap();
+    assert_eq!(r.status, switch::AccountSwitchStatus::Switched);
+    assert!(
+        blockcontroller::get_controller(&busy).is_none_or(|c| !c.get_runtime_status().turn_active),
+        "now ends the turn: a forced resync alone would only defer the restart to its end"
+    );
+    cleanup(&[&idle, &busy]);
+}
+
+/// An agent with no provider of its own launches with its bundle's, so its accounts are that provider's.
+#[tokio::test]
+async fn an_agent_with_no_provider_switches_among_its_bundles_accounts() {
+    let state = test_state();
+    for id in ["old", "new"] {
+        state.id_store.identity_upsert(&account(id, "claude", "valid")).unwrap();
+    }
+    state
+        .mstore
+        .bundle_upsert(&crate::backend::storage::bundles::Bundle {
+            id: "b1".into(),
+            name: "b1".into(),
+            description: String::new(),
+            is_blank: false,
+            is_global: false,
+            provider: "claude".into(),
+            model: String::new(),
+            instructions: String::new(),
+            instructions_by_provider: "{}".into(),
+            context_files: "[]".into(),
+            mcp_servers: "[]".into(),
+            skills: "[]".into(),
+            sort_order: 0,
+            created_at: 0,
+            updated_at: 0,
+            is_system: false,
+        })
+        .unwrap();
+    let mut def = crate::backend::storage::agents::test_agent_def("inherits", "Agent inherits", "", "host", 1, "");
+    def.memory_id = "b1".into();
+    state.mstore.agent_def_insert(&mut def).unwrap();
+    state.identity_store.agent_identity_link("inherits", "old", "claude").unwrap();
+    let r = switch::switch(&state, "", &switch_req("inherits", "new", switch::AccountSwitchWhen::AfterTurn)).unwrap();
+    assert_eq!(r.status, switch::AccountSwitchStatus::Switched);
+    assert_eq!(linked_account(&state, "inherits"), ["new"]);
+}
+
+/// A connection that is neither a registered agent nor the proven window can't switch anyone
+/// (it would be recorded as the operator); an agent and the window can.
+#[tokio::test]
+async fn an_unproven_connection_cannot_switch_an_agents_account() {
+    let state = test_state();
+    for id in ["old", "new"] {
+        state.id_store.identity_upsert(&account(id, "claude", "valid")).unwrap();
+    }
+    agent_def(&state, "idle");
+    state.identity_store.agent_identity_link("idle", "old", "claude").unwrap();
+    let req = json!({ "agent_id": "idle", "account": "new" });
+    let e = call_with(&state, Default::default(), COMMAND_AGENT_ACCOUNT_SWITCH, req.clone()).await.unwrap_err();
+    assert!(e.starts_with("FORBIDDEN") && e.contains("isn't the AgentMux window"), "{e}");
+    assert_eq!(linked_account(&state, "idle"), ["old"], "nothing moved");
+    call(&state, None, COMMAND_AGENT_ACCOUNT_SWITCH, req.clone()).await.unwrap();
+    assert_eq!(linked_account(&state, "idle"), ["new"]);
+    state.identity_store.agent_identity_link("idle", "old", "claude").unwrap();
+    call(&state, Some("idle"), COMMAND_AGENT_ACCOUNT_SWITCH, req).await.unwrap();
+    assert_eq!(linked_account(&state, "idle"), ["new"]);
+}
+
+/// The account must be a signed-in one of the agent's provider, named by id or by
+/// the label the pane shows; a bare email two accounts share is refused (#4936 §3.3).
+#[tokio::test]
+async fn a_switch_names_the_account_by_id_or_numbered_label_and_refuses_what_cant_run() {
+    use switch::AccountSwitchWhen::AfterTurn;
+    let state = test_state();
+    let with_email = |id: &str, status: &str, seq: Option<u32>| {
+        let mut a = account(id, "claude", status);
+        a.context = json!({ "email": "me@example.com" });
+        if let Some(n) = seq {
+            a.context["seq"] = json!(n);
+        }
+        a
+    };
+    for a in [with_email("one", "valid", Some(1)), with_email("two", "valid", Some(2)), with_email("out", "expired", Some(3)), account("gh", "github", "valid")] {
+        state.id_store.identity_upsert(&a).unwrap();
+    }
+    agent_def(&state, "ag");
+    state.identity_store.agent_identity_link("ag", "one", "claude").unwrap();
+
+    let e = switch::switch(&state, "", &switch_req("ag", "me@example.com", AfterTurn)).unwrap_err();
+    assert!(e.starts_with("UNKNOWN_ACCOUNT") && e.contains("me@example.com \u{b7}2"), "{e}");
+    let e = switch::switch(&state, "", &switch_req("ag", "out", AfterTurn)).unwrap_err();
+    assert!(e.starts_with("ACCOUNT_CANT_RUN"), "{e}");
+    let e = switch::switch(&state, "", &switch_req("ag", "gh", AfterTurn)).unwrap_err();
+    assert!(e.starts_with("UNKNOWN_ACCOUNT"), "another provider's account isn't offered: {e}");
+    let e = switch::switch(&state, "", &switch::AgentAccountSwitchReq { agent_id: None, account: "two".into(), when: AfterTurn }).unwrap_err();
+    assert!(e.contains("say which agent"), "{e}");
+
+    let r = switch::switch(&state, "", &switch_req("ag", "me@example.com \u{b7}2", AfterTurn)).unwrap();
+    assert_eq!((r.account_id.as_str(), r.status), ("two", switch::AccountSwitchStatus::Switched));
+    assert_eq!(r.account_label, "me@example.com \u{b7}2");
+    assert_eq!(linked_account(&state, "ag"), ["two"]);
 }

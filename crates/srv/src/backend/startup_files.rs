@@ -73,6 +73,25 @@ pub(crate) fn claude_startup_files_with_ancestors<'a>(
     home: Option<&Path>,
     ancestors: impl Iterator<Item = &'a Path>,
 ) -> Vec<StartupFile> {
+    startup_files_confined(cwd, config_dir, home, ancestors, None)
+}
+
+/// The startup files of a container agent's workspace, which the container can write: only files that
+/// resolve (symlinks and `@` imports followed) to somewhere inside the workspace are read, so nothing
+/// it plants there makes srv read another path on the host.
+pub(crate) fn workspace_startup_files(workspace: &Path) -> Vec<StartupFile> {
+    let Ok(root) = std::fs::canonicalize(workspace) else { return Vec::new() };
+    startup_files_confined(workspace, None, None, std::iter::once(workspace), Some(&root))
+}
+
+/// `confine`: the canonical folder every file read must resolve inside, or `None` for no limit.
+fn startup_files_confined<'a>(
+    cwd: &Path,
+    config_dir: Option<&Path>,
+    home: Option<&Path>,
+    ancestors: impl Iterator<Item = &'a Path>,
+    confine: Option<&Path>,
+) -> Vec<StartupFile> {
     let mut out = Vec::new();
     let mut seen = HashSet::new();
     let user_md = config_dir
@@ -80,7 +99,7 @@ pub(crate) fn claude_startup_files_with_ancestors<'a>(
         .or_else(|| home.map(|h| h.join(".claude")))
         .map(|d| d.join("CLAUDE.md"));
     if let Some(p) = user_md {
-        add_instructions(&p, "user_instructions", cwd, home, 0, &mut seen, &mut out);
+        add_instructions(&p, "user_instructions", cwd, home, 0, &mut seen, &mut out, confine);
     }
     let mut dirs: Vec<&Path> = ancestors.collect();
     // "Up to, but not including, the root directory."
@@ -88,16 +107,25 @@ pub(crate) fn claude_startup_files_with_ancestors<'a>(
     dirs.reverse();
     for dir in dirs {
         for name in ["CLAUDE.md", ".claude/CLAUDE.md", "CLAUDE.local.md"] {
-            add_instructions(&dir.join(name), "instructions", cwd, home, 0, &mut seen, &mut out);
+            add_instructions(&dir.join(name), "instructions", cwd, home, 0, &mut seen, &mut out, confine);
         }
     }
-    if let Some(skills) = skills_item(cwd, home) {
+    if let Some(skills) = skills_item(cwd, home, confine) {
         out.push(skills);
     }
-    if let Some(mcp) = mcp_item(cwd, home) {
+    if let Some(mcp) = mcp_item(cwd, home, confine) {
         out.push(mcp);
     }
     out
+}
+
+/// Whether `path` resolves inside the `confine` folder. For the skill listing, which reads no content (a
+/// count of names); file contents go through `confined_read`, which checks the file it opened.
+fn within(path: &Path, confine: Option<&Path>) -> bool {
+    match confine {
+        None => true,
+        Some(root) => std::fs::canonicalize(path).is_ok_and(|resolved| resolved.starts_with(root)),
+    }
 }
 
 fn add_instructions(
@@ -108,8 +136,9 @@ fn add_instructions(
     depth: usize,
     seen: &mut HashSet<PathBuf>,
     out: &mut Vec<StartupFile>,
+    confine: Option<&Path>,
 ) {
-    let Ok(text) = std::fs::read_to_string(path) else { return };
+    let Some(text) = crate::backend::confined_read::read_to_string_within(path, confine) else { return };
     let key = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     if !seen.insert(key) {
         return;
@@ -127,7 +156,7 @@ fn add_instructions(
         contains,
     });
     for import in imports {
-        add_instructions(&import, "instructions_import", cwd, home, depth + 1, seen, out);
+        add_instructions(&import, "instructions_import", cwd, home, depth + 1, seen, out, confine);
     }
 }
 
@@ -201,16 +230,30 @@ fn imports_of(text: &str, file: &Path, home: Option<&Path>) -> Vec<PathBuf> {
 /// The skill listing Claude Code builds from `.claude/commands/*.md` and
 /// `.claude/skills/*/SKILL.md`: one item with a count, no text (the CLI lists
 /// each by name and description).
-fn skills_item(cwd: &Path, home: Option<&Path>) -> Option<StartupFile> {
+fn skills_item(cwd: &Path, home: Option<&Path>, confine: Option<&Path>) -> Option<StartupFile> {
+    if !within(&cwd.join(".claude"), confine) {
+        return None;
+    }
     let mut count = 0usize;
-    if let Ok(entries) = std::fs::read_dir(cwd.join(".claude/commands")) {
+    // In a container's workspace, which the container can change, each folder and file counted must itself
+    // resolve inside it: a link to a host folder isn't listed.
+    let inside = |p: &Path| within(p, confine);
+    let commands = cwd.join(".claude/commands");
+    if let Some(entries) = inside(&commands).then(|| std::fs::read_dir(&commands).ok()).flatten() {
         count += entries
             .flatten()
-            .filter(|e| e.path().extension().is_some_and(|x| x == "md"))
+            .filter(|e| e.path().extension().is_some_and(|x| x == "md") && inside(&e.path()))
             .count();
     }
-    if let Ok(entries) = std::fs::read_dir(cwd.join(".claude/skills")) {
-        count += entries.flatten().filter(|e| e.path().join("SKILL.md").is_file()).count();
+    let skills = cwd.join(".claude/skills");
+    if let Some(entries) = inside(&skills).then(|| std::fs::read_dir(&skills).ok()).flatten() {
+        count += entries
+            .flatten()
+            .filter(|e| {
+                let skill = e.path().join("SKILL.md");
+                inside(&e.path()) && inside(&skill) && skill.is_file()
+            })
+            .count();
     }
     (count > 0).then(|| StartupFile {
         role: "skills",
@@ -229,9 +272,9 @@ fn skills_item(cwd: &Path, home: Option<&Path>) -> Option<StartupFile> {
 
 /// The MCP servers in `cwd/.mcp.json`, by name only: the file carries the
 /// agent's signing keys, so its text never leaves this function.
-fn mcp_item(cwd: &Path, home: Option<&Path>) -> Option<StartupFile> {
+fn mcp_item(cwd: &Path, home: Option<&Path>, confine: Option<&Path>) -> Option<StartupFile> {
     let path = cwd.join(".mcp.json");
-    let json: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).ok()?).ok()?;
+    let json: serde_json::Value = serde_json::from_str(&crate::backend::confined_read::read_to_string_within(&path, confine)?).ok()?;
     let names: Vec<&str> = json.get("mcpServers")?.as_object()?.keys().map(String::as_str).collect();
     if names.is_empty() {
         return None;
@@ -313,6 +356,58 @@ mod tests {
         let memory = &files[3];
         assert_eq!(memory.contains, ["global_memory", "skills_index"]);
         assert_eq!(files[2].contains, ["skills_index"]);
+    }
+
+    /// A container can write its workspace: an `@` import that points outside it (absolute, or up
+    /// through `..`) must not make srv read that file, or list it in the card.
+    #[test]
+    fn a_workspace_import_outside_the_workspace_is_not_read() {
+        let t = tempfile::tempdir().unwrap();
+        let ws = t.path().join("ws");
+        write(&t.path().join("outside.md"), "host file");
+        write(&t.path().join("abs.md"), "another host file");
+        write(&ws.join("inside.md"), "project file");
+        write(
+            &ws.join("CLAUDE.md"),
+            &format!("@inside.md
+@../outside.md
+@{}
+", t.path().join("abs.md").display()),
+        );
+        let files = workspace_startup_files(&ws);
+        let names: Vec<&str> = files.iter().map(|f| f.name.as_str()).collect();
+        assert!(names.iter().any(|n| n.ends_with("inside.md")), "{names:?}");
+        assert!(!names.iter().any(|n| n.ends_with("outside.md") || n.ends_with("abs.md")), "{names:?}");
+        assert!(files.iter().all(|f| !f.text.contains("host file")), "no host file's text was read");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_workspace_symlink_to_a_host_file_is_not_read() {
+        let t = tempfile::tempdir().unwrap();
+        let ws = t.path().join("ws");
+        write(&t.path().join("host.json"), r#"{"mcpServers":{"hostsecret":{}}}"#);
+        std::fs::create_dir_all(&ws).unwrap();
+        std::os::unix::fs::symlink(t.path().join("host.json"), ws.join(".mcp.json")).unwrap();
+        std::os::unix::fs::symlink(t.path().join("host.json"), ws.join("CLAUDE.md")).unwrap();
+        assert!(workspace_startup_files(&ws).is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_workspace_skills_link_to_a_host_folder_is_not_counted() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ws = tmp.path().join("ws");
+        std::fs::create_dir_all(ws.join(".claude")).unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        for name in ["a", "b", "c"] {
+            write(&outside.path().join(name).join("SKILL.md"), "x");
+            write(&outside.path().join(format!("{name}.md")), "x");
+        }
+        std::os::unix::fs::symlink(outside.path(), ws.join(".claude/skills")).unwrap();
+        std::os::unix::fs::symlink(outside.path(), ws.join(".claude/commands")).unwrap();
+        let files = workspace_startup_files(&ws);
+        assert!(files.iter().all(|f| f.role != "skills"), "nothing outside the workspace is counted");
     }
 
     #[test]

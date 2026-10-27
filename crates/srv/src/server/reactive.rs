@@ -742,7 +742,7 @@ pub(crate) async fn deliver(
         if let Some(held) = hold_for_absent_target(state, auth_via, &req, &resp, HoldReason::NeedsLogin, &mut replay).await {
             return held;
         }
-        return serde_json::to_value(&resp).unwrap_or_default();
+        return super::jekt_hold::needs_login_refusal(serde_json::to_value(&resp).unwrap_or_default());
     }
 
     // 2. On "agent not found", check cross-instance file registry and forward.
@@ -784,7 +784,7 @@ pub(crate) async fn deliver(
     // sends `forwarded_req` untouched — the peer authenticates it via
     // `lan_key` and forces `lan` regardless of the body.
     let same_host_tier = same_host_forward_tier(req.delivery_tier.as_deref());
-    let mut same_host_req = forwarded_req.clone();
+    let mut same_host_req = lan_v2::channel_sign_at_origin(&state.mstore, caller_uid, forwarded_req.clone());
     same_host_req.delivery_tier = Some(same_host_tier.to_string());
 
     // Whether any forwarding tier found the target alive elsewhere. A target

@@ -92,6 +92,14 @@ impl Store {
         }
     }
 
+    /// Remove this agent's legacy WAN keypair, so the channel-wide `wan.db` key is not imported from it
+    /// again. `true` when a row was removed.
+    pub fn agent_wan_key_delete(&self, agent_id: &str) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let removed = conn.execute("DELETE FROM db_agent_wan_keys WHERE agent_id = ?1", params![agent_id.to_lowercase()])?;
+        Ok(removed > 0)
+    }
+
     /// Return this agent's WAN keypair, minting and persisting a fresh random
     /// one on first use. Race-safe under concurrent first-use — same
     /// `INSERT OR IGNORE` + re-read pattern as `agent_lan_key_ensure`: two

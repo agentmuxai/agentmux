@@ -5,6 +5,7 @@
 pub mod agent_admission;
 pub mod agent_line;
 pub mod agent_seat;
+pub mod agent_availability;
 pub mod agent_state;
 pub mod attachments;
 pub mod agent_color;
@@ -61,6 +62,7 @@ pub mod cli_install;
 pub mod cli_prune;
 pub mod cli_notice;
 pub mod startup_files;
+pub mod confined_read;
 pub mod workdir_fs;
 pub mod model_catalog;
 pub mod codex_models;
@@ -140,6 +142,7 @@ pub mod sampler;
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub mod own_instance;
 pub mod stall_watch;
+pub mod net_counters;
 pub mod sysinfo;
 pub mod blockstats_detail;
 pub mod tower_agentmux;
@@ -179,6 +182,12 @@ pub mod container;
 pub mod container_cli;
 pub mod container_credential;
 pub mod container_image;
+pub mod container_listener;
+#[cfg(test)]
+mod container_listener_itest;
+#[cfg(test)]
+mod container_turn_itest;
+pub mod container_runtime;
 pub mod registry_probe;
 pub mod cron;
 pub mod jobs;
@@ -191,7 +200,7 @@ pub mod kanban;
 pub mod limit_wake;
 /// Which model a Claude agent's sub-agents run on (SPEC_SUBAGENT_MODELS_2026_10_25.md).
 pub mod subagent_model;
-/// A leader accepting or sending back a task on the operator's word.
+/// An agent accepting or sending back a task in Review.
 pub mod kanban_delegate;
 /// Holding a routine message for an agent whose session has gone cold (SPEC_JEKT_HOLD_FOR_COLD_SESSIONS_2026_10_25.md).
 pub mod cold_hold;

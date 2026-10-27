@@ -82,6 +82,7 @@ actor_sites! {
     IdentityAccounts => "identity_accounts",
     PresetGet => "preset_get",
     IdentityValidate => "identity_validate",
+    IdentitySwitch => "identity_switch",
     HistorySearch => "history_search",
     WorkEnqueue => "work_enqueue",
     WorkClaim => "work_claim",

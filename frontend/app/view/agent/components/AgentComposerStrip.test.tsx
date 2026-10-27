@@ -1029,9 +1029,9 @@ describe("AgentComposerStrip — sign-in chip shows the account email", () => {
     });
 });
 
-// The chip is a "switch account" link when signed in, idle, and another account
-// of the same provider exists. A switch restarts the agent, so it is plain text
-// while a turn or a compaction is running.
+// The chip is a "switch account" link when signed in and another account of the
+// same provider exists. A switch restarts the agent, so srv holds one asked for
+// during a turn or a compaction until it ends, and the chip says where it is going.
 // SPEC_COMPOSER_ACCOUNT_SWITCH_AND_JEKT_HEIGHT_CAP_2026_09_26.md Part A.
 describe("AgentComposerStrip — sign-in chip switches account", () => {
     const chip = (container: HTMLElement) => container.querySelector(".agent-composer-strip-auth")!;
@@ -1112,14 +1112,33 @@ describe("AgentComposerStrip — sign-in chip switches account", () => {
                 onSwitchAccount={() => {}}
             />
         ));
-        expect(link(container)).toBeNull();
+        // srv holds a switch asked for in a turn until the turn ends (agent.account.switch).
+        expect(link(container)).not.toBeNull();
         expect(chip(container)).toHaveTextContent("alice@example.com");
         expect(chip(container).getAttribute("title")).toBe(
-            "Signed in as alice@example.com. Switching accounts restarts the agent — wait for the current turn to finish."
+            "Signed in as alice@example.com. Click to switch account; it takes effect when the current turn ends."
         );
     });
 
-    it("is plain text while a compaction is in progress", () => {
+    it("says where a queued switch is going", () => {
+        const { container } = render(() => (
+            <AgentComposerStrip
+                {...baseProps}
+                loading={true}
+                authStatus="authenticated"
+                authEmail="alice@example.com"
+                pendingAccountLabel="bob@example.com"
+                canSwitchAccount={true}
+                onSwitchAccount={() => {}}
+            />
+        ));
+        expect(chip(container)).toHaveTextContent("alice@example.com \u2192 bob@example.com");
+        expect(chip(container).getAttribute("title")).toBe(
+            "Signed in as alice@example.com. Switching to bob@example.com when this turn ends."
+        );
+    });
+
+    it("is still a link while a compaction is in progress", () => {
         const { container } = render(() => (
             <AgentComposerStrip
                 {...baseProps}
@@ -1130,10 +1149,10 @@ describe("AgentComposerStrip — sign-in chip switches account", () => {
                 onSwitchAccount={() => {}}
             />
         ));
-        expect(link(container)).toBeNull();
+        expect(link(container)).not.toBeNull();
     });
 
-    it("becomes a link again once the turn ends", () => {
+    it("stays a link when the turn ends", () => {
         const [loading, setLoading] = createSignal(true);
         const { container } = render(() => (
             <AgentComposerStrip
@@ -1145,20 +1164,30 @@ describe("AgentComposerStrip — sign-in chip switches account", () => {
                 onSwitchAccount={() => {}}
             />
         ));
-        expect(link(container)).toBeNull();
+        expect(link(container)).not.toBeNull();
         setLoading(false);
         expect(link(container)).not.toBeNull();
     });
 
-    it("signed out is unchanged: no link even with candidates", () => {
+    it("signed out with a menu: the chip is a link that opens it", () => {
+        const onSwitchAccount = vi.fn();
         const { container } = render(() => (
             <AgentComposerStrip
                 {...baseProps}
                 authStatus="unauthenticated"
                 canSwitchAccount={true}
-                onSwitchAccount={() => {}}
+                onSwitchAccount={onSwitchAccount}
             />
         ));
+        expect(link(container)).not.toBeNull();
+        expect(chip(container)).toHaveTextContent("Not logged in");
+        expect(chip(container).getAttribute("title")).toBe("Not signed in — click to log in or switch account");
+        link(container)!.click();
+        expect(onSwitchAccount).toHaveBeenCalledTimes(1);
+    });
+
+    it("signed out with no menu is plain text", () => {
+        const { container } = render(() => <AgentComposerStrip {...baseProps} authStatus="unauthenticated" />);
         expect(link(container)).toBeNull();
         expect(chip(container)).toHaveTextContent("Not logged in");
         expect(chip(container).getAttribute("title")).toBe("Not signed in — click Log in to continue");

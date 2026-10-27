@@ -73,14 +73,14 @@ describe("the account episode's words", () => {
         expect(preselectedCandidate(episode({ candidates: [] }))).toBe("");
     });
 
-    it("says what moved, what was left in a turn, and what failed", () => {
+    it("says what moved, what waits for its turn, and what failed", () => {
         expect(
             moveOutcome({
                 moved: [{ block_id: "b1", agent_id: "d1", agent_name: "Naki-2" }],
                 busy: [{ block_id: "b2", agent_id: "d2", agent_name: "Loap-3" }],
                 failed: [{ block_id: "b3", agent_name: "", error: "not an open agent pane" }],
             })
-        ).toBe("Moved Naki-2. Left Loap-3: in a turn; move it when it ends. A pane: not an open agent pane");
+        ).toBe("Moved Naki-2. Loap-3: in a turn; moves when the turn ends. A pane: not an open agent pane");
     });
 });
 
@@ -103,7 +103,7 @@ describe("AccountAvailabilityStrip", () => {
         expect([...picker.options].map((o) => o.textContent)).toEqual(["Spare (not checked yet)", "Home (signed in)"]);
         fireEvent.click(screen.getByRole("button", { name: "Move" }));
         await waitFor(() => expect(move).toHaveBeenCalledWith({}, { from: "acct-1", to: "home", block_ids: ["b1", "b2"] }));
-        expect(await screen.findByText(/Moved Naki-2\. Left Loap-3: in a turn/)).toBeTruthy();
+        expect(await screen.findByText(/Moved Naki-2\. Loap-3: in a turn/)).toBeTruthy();
     });
 
     it("says so when there is no account to move to, and follows srv's changes", async () => {

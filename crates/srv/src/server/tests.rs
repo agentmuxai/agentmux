@@ -7809,3 +7809,155 @@ async fn full_key_still_reaches_routes_containers_cannot() {
     assert_ne!(status_with_key("POST", "/api/v1/pane/open", "test-secret-key").await, StatusCode::FORBIDDEN);
     assert_ne!(status_with_key("POST", "/api/v1/pane/open", "test-secret-key").await, StatusCode::UNAUTHORIZED);
 }
+
+// ---- A container agent's memory delivery (SessionStart hook) ----
+
+/// `uri` called with a container token, as the in-container hook does.
+async fn container_post(state: &AppState, container_token: &str, uri: &str, body: serde_json::Value) -> (StatusCode, serde_json::Value) {
+    let req = Request::builder()
+        .method(Method::POST)
+        .uri(uri)
+        .header("X-AuthKey", container_token)
+        .header("Content-Type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let resp = build_router(state.clone()).oneshot(req).await.unwrap();
+    let status = resp.status();
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    (status, serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null))
+}
+
+fn global_rules_bundle(state: &AppState) {
+    let bundle: crate::backend::storage::store::Bundle = serde_json::from_value(serde_json::json!({
+        "id": "g-rules", "name": "Rules", "is_global": true, "instructions": "workspace rules",
+    }))
+    .unwrap();
+    state.id_store.bundle_upsert(&bundle).unwrap();
+}
+
+/// The memory a container agent's hook gets is its own: its Global and
+/// Personal Memory, with no host file read for the paths the container names.
+#[tokio::test]
+async fn a_container_token_gets_its_own_blocks_memory_and_no_host_startup_files() {
+    let (state, agent_token) = m4c1_state();
+    global_rules_bundle(&state);
+    let block_id = format!("blk-{}", uuid::Uuid::new_v4());
+    let session = format!("sess-{}", uuid::Uuid::new_v4());
+    let token = crate::backend::container_credential::token_for_block(&block_id, Some(&agent_token));
+    // A host directory whose CLAUDE.md would carry the Global Memory already:
+    // for a host agent that makes the hook skip it. A container's `cwd` is
+    // not a host path, so it must not be consulted.
+    let ws = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(ws.path().join(".claude")).unwrap();
+    std::fs::write(ws.path().join("CLAUDE.md"), "@.claude/AGENTMUX_MEMORY.md\n").unwrap();
+    std::fs::write(ws.path().join(".claude/AGENTMUX_MEMORY.md"), "# Memory\n# [Workspace] Rules\n\nworkspace rules\n").unwrap();
+    let cwd = ws.path().to_string_lossy().into_owned();
+    let req = |part: usize| serde_json::json!({"block_id": block_id, "session_id": session, "source": "startup", "part": part, "cwd": cwd});
+
+    let (status, v) = container_post(&state, &token, "/api/v1/agent/memory/session-start/part", req(1)).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    let text = v["text"].as_str().expect("the hook gets the Global Memory itself");
+    assert!(text.contains("workspace rules"), "{text}");
+    let of = v["of"].as_u64().unwrap() as usize;
+    for part in 1..=of {
+        let (status, v) = container_post(&state, &token, "/api/v1/agent/memory/session-start/ack", req(part)).await;
+        assert_eq!(status, StatusCode::OK, "{v}");
+    }
+    let written = state
+        .filestore
+        .read_file(&block_id, crate::backend::blockcontroller::persistent::PERSISTENT_OUTPUT_SUBJECT)
+        .unwrap()
+        .map(|b| String::from_utf8(b).unwrap())
+        .expect("the card for the delivery");
+    let frame: serde_json::Value = serde_json::from_str(written.trim()).unwrap();
+    assert!(
+        frame["entries"].as_array().unwrap().iter().all(|e| e["kind"] != "startup_file"),
+        "no host startup file was read: {frame}"
+    );
+}
+
+/// What the container's CLI loaded from its mounted workspace counts, as for a
+/// host agent: a startup file there that already carries the Global Memory means
+/// the hook doesn't send it a second time. The workspace is the block's own
+/// `cmd:cwd`; the `cwd` the container reports ("/workspace") is not a host path.
+#[tokio::test]
+async fn a_container_hook_skips_global_memory_its_mounted_workspace_file_carries() {
+    let (state, agent_token) = m4c1_state();
+    global_rules_bundle(&state);
+    let ws = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(ws.path().join(".claude")).unwrap();
+    std::fs::write(ws.path().join("CLAUDE.md"), "@.claude/AGENTMUX_MEMORY.md
+").unwrap();
+    std::fs::write(ws.path().join(".claude/AGENTMUX_MEMORY.md"), "# Memory
+# [Workspace] Rules
+
+workspace rules
+").unwrap();
+    let mut block = crate::backend::obj::Block { oid: uuid::Uuid::new_v4().to_string(), ..Default::default() };
+    block.meta.insert("agentMode".to_string(), serde_json::json!("container"));
+    block.meta.insert("cmd:cwd".to_string(), serde_json::json!(ws.path().to_string_lossy()));
+    state.mstore.insert(&mut block).expect("insert the container agent's block");
+    let token = crate::backend::container_credential::token_for_block(&block.oid, Some(&agent_token));
+
+    let req = serde_json::json!({"block_id": block.oid, "session_id": "sess-ws", "source": "startup", "part": 1, "cwd": "/workspace"});
+    let (status, v) = container_post(&state, &token, "/api/v1/agent/memory/session-start/part", req).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert!(v["text"].is_null() && v["of"] == 0, "the workspace file already carries it: {v}");
+    let written = state
+        .filestore
+        .read_file(&block.oid, crate::backend::blockcontroller::persistent::PERSISTENT_OUTPUT_SUBJECT)
+        .unwrap()
+        .map(|b| String::from_utf8(b).unwrap())
+        .expect("the card goes out without any part to acknowledge");
+    let frame: serde_json::Value = serde_json::from_str(written.trim()).unwrap();
+    let rules = frame["entries"].as_array().unwrap().iter().find(|e| e["name"] == "Rules").expect("the Global entry is listed");
+    assert_eq!(rules["via"], "startup_file");
+}
+
+/// A container's token is for its own block: another block's delivery, which
+/// is cached per block and carries a compaction summary of its conversation,
+/// is not reachable with it.
+#[tokio::test]
+async fn a_container_token_is_refused_another_blocks_memory_delivery() {
+    let (state, agent_token) = m4c1_state();
+    global_rules_bundle(&state);
+    let mine = format!("blk-mine-{}", uuid::Uuid::new_v4());
+    let other = format!("blk-other-{}", uuid::Uuid::new_v4());
+    let session = format!("sess-{}", uuid::Uuid::new_v4());
+    let token = crate::backend::container_credential::token_for_block(&mine, Some(&agent_token));
+    for uri in ["/api/v1/agent/memory/session-start/part", "/api/v1/agent/memory/session-start/ack"] {
+        let body = serde_json::json!({"block_id": other, "session_id": session, "source": "startup", "part": 1});
+        let (status, v) = container_post(&state, &token, uri, body).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{uri}: {v}");
+    }
+    // Nothing was composed or written for the other block.
+    assert!(state
+        .filestore
+        .read_file(&other, crate::backend::blockcontroller::persistent::PERSISTENT_OUTPUT_SUBJECT)
+        .unwrap()
+        .is_none());
+}
+
+/// A hook that sends no block id is taken to mean the token's own block.
+#[tokio::test]
+async fn a_container_hook_without_a_block_id_is_bound_to_its_own() {
+    let (state, agent_token) = m4c1_state();
+    global_rules_bundle(&state);
+    let block_id = format!("blk-{}", uuid::Uuid::new_v4());
+    let token = crate::backend::container_credential::token_for_block(&block_id, Some(&agent_token));
+    let body = serde_json::json!({"block_id": "", "session_id": "sess-empty", "source": "startup", "part": 1});
+    let (status, v) = container_post(&state, &token, "/api/v1/agent/memory/session-start/part", body).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert!(v["text"].as_str().is_some_and(|t| t.contains("workspace rules")), "{v}");
+}
+
+/// Without an agent identity the container token still can't read memory (the
+/// delivery is Personal Memory too).
+#[tokio::test]
+async fn a_container_token_without_identity_gets_no_memory_delivery() {
+    let (state, _) = m4c1_state();
+    let token = crate::backend::container_credential::token_for_block("blk-anon-delivery", None);
+    let body = serde_json::json!({"block_id": "blk-anon-delivery", "session_id": "s", "source": "startup", "part": 1});
+    let (status, _) = container_post(&state, &token, "/api/v1/agent/memory/session-start/part", body).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}
