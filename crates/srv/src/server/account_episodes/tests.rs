@@ -273,7 +273,7 @@ async fn a_sign_in_leaves_another_accounts_panes_alone() {
 }
 
 #[tokio::test]
-async fn the_move_relinks_idle_agents_and_leaves_busy_ones() {
+async fn the_move_relinks_idle_agents_and_queues_busy_ones() {
     let state = test_state();
     for a in [account("old", "claude", "valid"), account("spare", "claude", "valid"), account("gh", "github", "valid")] {
         state.id_store.identity_upsert(&a).unwrap();
@@ -302,6 +302,8 @@ async fn the_move_relinks_idle_agents_and_leaves_busy_ones() {
     assert_eq!(stored_failure(&state, &idle), None, "its failure was the old account's");
     assert!(stored_failure(&state, &busy).is_some());
     assert_eq!(state.identity_store.agent_identity_list_for_agent("busy").unwrap()[0].account_id, "old");
+    assert_eq!(pending_of(&state, &busy), Some(json!("spare")), "its move waits for the turn to end");
+    assert_eq!(pending_of(&state, &idle), None);
 
     // Never across providers, never to the same account, never to one that can't run.
     let bad = |to: &str| moves::move_agents(&state, &IdentityAccountMoveAgentsReq { from: "old".into(), to: to.into(), block_ids: vec![idle.clone()] });
@@ -403,9 +405,8 @@ async fn only_the_operators_client_may_list_episodes_or_move_agents() {
     cleanup(&[&idle]);
 }
 
-/// The link is the agent's: a pane of it in a turn keeps the agent where it
-/// is, even when that pane isn't the episode's; once all are idle, every pane
-/// restarts on the new link.
+/// The link is the agent's: a pane of it in a turn queues the move, even when that pane isn't
+/// the episode's; once all are idle, every pane restarts on the new link.
 #[tokio::test]
 async fn an_agent_moves_only_when_none_of_its_panes_is_in_a_turn() {
     let state = test_state();
@@ -427,6 +428,7 @@ async fn an_agent_moves_only_when_none_of_its_panes_is_in_a_turn() {
     both.sort();
     assert_eq!(busy, both, "listed, with the pane in a turn");
     assert_eq!(state.identity_store.agent_identity_list_for_agent("twin").unwrap()[0].account_id, "old", "not relinked");
+    assert_eq!(pending_of(&state, &limited), Some(json!("spare")), "queued on the episode's pane too");
 
     blockcontroller::delete_controller(&working);
     register_stub(&working, BLOCK_CONTROLLER_PERSISTENT, STATUS_RUNNING, false);
@@ -435,6 +437,7 @@ async fn an_agent_moves_only_when_none_of_its_panes_is_in_a_turn() {
     moved.sort();
     assert_eq!(moved, both, "both panes restart on the new link");
     assert_eq!(state.identity_store.agent_identity_list_for_agent("twin").unwrap()[0].account_id, "spare");
+    assert_eq!(pending_of(&state, &limited), None, "applied, so no longer queued");
     cleanup(&[&limited, &working]);
 }
 
@@ -654,6 +657,35 @@ fn linked_account(state: &AppState, agent: &str) -> Vec<String> {
 
 fn pending_of(state: &AppState, block: &str) -> Option<serde_json::Value> {
     state.mstore.get::<Block>(block).unwrap().unwrap().meta.get(switch::META_PENDING_ACCOUNT).cloned().filter(|v| !v.is_null())
+}
+
+/// What the strip queued lands when the turn ends, even on an account not checked yet; and a bind
+/// from the failure row replaces an alias row that points elsewhere instead of calling it unchanged.
+#[tokio::test]
+async fn a_queued_strip_move_to_an_unchecked_account_lands_and_a_stale_alias_row_is_replaced() {
+    use switch::AccountSwitchWhen::AfterTurn;
+    let state = test_state();
+    for (id, status) in [("old", "valid"), ("fresh", "unknown"), ("a", "valid"), ("b", "valid")] {
+        state.id_store.identity_upsert(&account(id, "claude", status)).unwrap();
+    }
+    agent_def(&state, "busy");
+    agent_def(&state, "dup");
+    state.identity_store.agent_identity_link("busy", "old", "claude").unwrap();
+    let tab = new_tab(&state).await;
+    let busy = pane(&state, &tab, "busy", "Busy", "old", None, true).await;
+    let req = IdentityAccountMoveAgentsReq { from: "old".into(), to: "fresh".into(), block_ids: vec![busy.clone()] };
+    assert_eq!(moves::move_agents(&state, &req).unwrap().busy.len(), 1, "queued");
+    register_stub(&busy, BLOCK_CONTROLLER_PERSISTENT, STATUS_RUNNING, false);
+    switch::apply_pending(&state);
+    assert_eq!(linked_account(&state, "busy"), ["fresh"]);
+
+    // `claude -> a` and a stale `claude-code -> b`: the effective account is b, so a is a real move.
+    state.identity_store.agent_identity_link("dup", "a", "claude").unwrap();
+    state.identity_store.agent_identity_link("dup", "b", "claude-code").unwrap();
+    let r = switch::switch(&state, "", &switch_req("dup", "a", AfterTurn)).unwrap();
+    assert_eq!(r.status, switch::AccountSwitchStatus::Switched);
+    assert_eq!(linked_account(&state, "dup"), ["a"], "the alias row went");
+    cleanup(&[&busy]);
 }
 
 /// An idle agent moves at once; one in a turn waits and moves when the turn ends;

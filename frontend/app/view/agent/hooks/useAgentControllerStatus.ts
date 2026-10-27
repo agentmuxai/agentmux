@@ -44,7 +44,7 @@ import {
 import { registerController } from "../flows/register-controller";
 import type { LaunchPhase } from "../flows/launch-phase";
 import type { ProviderDefinition } from "../providers";
-import { bindAccountToAgent, type BindCandidate } from "@/app/view/identity/bind-to-agent-menu";
+import { notifyLinksChanged } from "@/app/view/identity/account-agents";
 import type { Account } from "@/app/view/identity/identity-model";
 import {
     createLaunchPhaseStore,
@@ -263,10 +263,9 @@ export interface UseAgentControllerStatus {
      */
     recheckAuthAfterBind: () => Promise<boolean>;
     /**
-     * Bind `account` to this pane's agent (link upsert + best-effort live
-     * `cmd:env`/forced-resync apply) — identical sequence to Connectors'
-     * Bind-to-Agent context menu (`bindAccountToAgent`, reused directly, not
-     * reimplemented). Deliberately does NOT retry the failed turn or call
+     * Move this pane's agent to `account` through `agent.account.switch` (srv replaces
+     * the link, refreshes the pane's auth env and restarts the pane with `--resume`);
+     * the composer's account menu and agents use the same door. Deliberately does NOT retry the failed turn or call
      * `recheckAuthAfterBind` itself: binding fires the same
      * `agentidentities:changed:<agentId>` event any other bind source does,
      * and the pane's own subscription to that event (agent-view.tsx) is
@@ -610,14 +609,17 @@ export function useAgentControllerStatus(
         beginRecoveryFlow();
         setAuthNotice(null);
         try {
-            const candidate: BindCandidate = {
-                agentId: agentDefinitionId,
-                agentName: "",
-                runningBlockId: opts.blockId,
-                boundHere: false,
-                boundElsewhereName: null,
-            };
-            await bindAccountToAgent(account, candidate);
+            const r = await RpcApi.AgentAccountSwitchCommand(TabRpcClient, {
+                agent_id: agentDefinitionId,
+                account: account.id,
+                when: "after_turn",
+            });
+            // Connectors' account cards and open detail list agents from the links.
+            notifyLinksChanged();
+            // Linked, but a pane did not restart on it: it uses the account when it next starts.
+            if (r.failed.length > 0) setAuthNotice(r.failed.join(" "));
+            // Another pane of this agent is in a turn: the move waits for it.
+            else if (r.status === "queued") setAuthNotice(`Moves to ${r.account_label} when the turn ends.`);
         } catch (e: any) {
             // A failed link upsert surfaces as a notice, like every other
             // failed recovery here (callers don't attach their own catch).
