@@ -185,6 +185,26 @@ describe("FleetResultPanel", () => {
         expect(document.querySelector(".swarm-fleet-result-row")!.textContent).toContain("blk-x");
     });
 
+    it("follows the section while it stays mounted: quiet for a clean result in Broadcast, shown for a failure", () => {
+        const clean: FleetResultEntry = {
+            action: "broadcast",
+            result: { succeeded: ["blk-x"], failed: [], aborted_early: false },
+            labels: {},
+        };
+        const [entry, setEntry] = createSignal<FleetResultEntry>(clean);
+        const [quiet, setQuiet] = createSignal(false);
+        const model = { lastFleetResultAtom: entry, dismissFleetResult: () => {} } as unknown as SwarmViewModel;
+        render(() => <FleetResultPanel model={model} quietWhenClean={quiet()} />);
+        expect(document.querySelector(".swarm-fleet-result-panel")).not.toBeNull();
+        setQuiet(true);
+        expect(document.querySelector(".swarm-fleet-result-panel")).toBeNull();
+        setEntry({ ...clean, result: { succeeded: [], failed: [{ id: "blk-y", error: "gone" }], aborted_early: false } });
+        expect(document.querySelector(".swarm-fleet-result-panel")).not.toBeNull();
+        setQuiet(false);
+        setEntry(clean);
+        expect(document.querySelector(".swarm-fleet-result-panel")).not.toBeNull();
+    });
+
     it("is dismissed with its Dismiss button", () => {
         const entry: FleetResultEntry = {
             action: "bulk-stop",

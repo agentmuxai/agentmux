@@ -104,6 +104,27 @@
     flex-direction: column;
     overflow-y: auto;
     padding: 6px 0 12px;
+    // Rows are measured against the pane's width, not the window's.
+    container-type: inline-size;
+    container-name: swarm-tree;
+}
+
+// A narrow pane: the row's name keeps room by giving up what only decorates it (the age, the
+// Supervisor chip's state word, which its tooltip still says).
+@container swarm-tree (max-width: 360px) {
+    .swarm-agent-row {
+        .swarm-last-active {
+            display: none;
+        }
+
+        .swarm-agent-label {
+            min-width: 6ch;
+        }
+    }
+
+    .swarm-supervisor-chip .swarm-supervisor-detail {
+        display: none;
+    }
 }
 
 // Bulk "Clear completed" action (SPEC_SWARM_DISPATCH_ATTRIBUTION_AND_LIFECYCLE_2026_08_19.md §3.3)
@@ -1291,12 +1312,20 @@
 // The Broadcast section: the composer docked under the list, then the recent broadcasts.
 .swarm-broadcast-dock {
     flex-shrink: 0;
+    // Under the list when it fills the pane, at the bottom of the pane when it doesn't.
+    margin-top: auto;
     border-top: 1px solid var(--border-color);
     padding: 8px 10px;
     display: flex;
     flex-direction: column;
     gap: 6px;
-    max-height: 55%;
+    max-height: 50%;
+    overflow-y: auto;
+}
+
+// Ten recent broadcasts would take the pane; the list scrolls so the agents stay in view.
+.swarm-broadcast-recent {
+    max-height: 9.5rem;
     overflow-y: auto;
 }
 

@@ -56,6 +56,11 @@ describe("BroadcastDock", () => {
         expect(row.textContent).toContain("2 sent · 1 delivered · 1 failed");
     });
 
+    it("names the key as Enter, capitalised", () => {
+        const { container } = render(() => <BroadcastDock model={modelStub(["a"])} agents={agents} />);
+        expect(container.querySelector(".swarm-broadcast-hint")!.textContent).toMatch(/^(Ctrl\+Enter|⌘Enter) sends$/);
+    });
+
     it("sends on Ctrl+Enter and not on a plain Enter", () => {
         const model = modelStub(["a"]);
         const { container } = render(() => <BroadcastDock model={model} agents={agents} />);
