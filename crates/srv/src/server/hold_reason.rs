@@ -34,6 +34,17 @@ impl HoldReason {
         }
     }
 
+    /// The same reason in `agent_availability`'s terms.
+    pub(crate) fn wait_reason(self) -> crate::backend::agent_availability::WaitReason {
+        use crate::backend::agent_availability::WaitReason;
+        match self {
+            HoldReason::NotRunning => WaitReason::NotRunning,
+            HoldReason::NeedsLogin => WaitReason::NeedsLogin,
+            HoldReason::Limited => WaitReason::UsageLimit,
+            HoldReason::Idle => WaitReason::Cold,
+        }
+    }
+
     /// The reason a message to an agent in `state` is held, or `None` when
     /// that state doesn't hold messages.
     pub(crate) fn for_state(state: AgentState) -> Option<Self> {

@@ -127,17 +127,22 @@ pub(super) async fn hold_if_cold(
     replay.delivered();
     crate::backend::agent_resolve::record_uid_fallback("jekt.held");
     tracing::info!(target = %req.target_agent, "reactive inject: session is cold, holding a routine message until it is next active");
-    let target = &req.target_agent;
-    Some(json!({
+    Some(held_answer(&req.target_agent, &held.request_id))
+}
+
+/// The answer to a routine message held because the target's session is cold.
+fn held_answer(target: &str, request_id: &str) -> serde_json::Value {
+    json!({
         "success": false,
         "held": true,
         "held_reason": HoldReason::Idle.as_str(),
-        "request_id": held.request_id,
+        "retry_when": HoldReason::Idle.wait_reason().retry_when(),
+        "request_id": request_id,
         "error": format!(
             "agent {target}'s session has been idle — held until it is next active (for up to 24 h). \
              To wake it now, send it again with urgent: true"
         ),
-    }))
+    })
 }
 
 #[cfg(test)]
@@ -261,6 +266,14 @@ mod tests {
         i3.work_queue_enqueue(&task("t1", "uid-z", "uid-l", NOW - 5 * 60_000)).unwrap();
         i3.work_card_create("t1", &Default::default(), 1).unwrap();
         assert_eq!(decision(&m3, &i3, &req("take a look when you can"), COLD), "hold");
+    }
+
+    #[test]
+    fn the_idle_held_answer_says_when_to_retry() {
+        let a = held_answer("loap", "req-1");
+        assert_eq!(a["held_reason"], "idle");
+        assert_eq!(a["retry_when"], "session_active");
+        assert_eq!(a["request_id"], "req-1");
     }
 
     #[test]

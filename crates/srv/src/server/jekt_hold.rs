@@ -59,6 +59,7 @@ pub(in crate::server) fn holding_unavailable(
 /// returned as is: not a stale route to evict and route around.
 pub(super) fn peer_refused(body: &serde_json::Value) -> bool {
     body.get("files_refused").and_then(|v| v.as_bool()) == Some(true)
+        || body.get("refused_reason").and_then(|v| v.as_str()).is_some()
         || body.get("error").and_then(|v| v.as_str()).is_some_and(crate::backend::reactive::is_unavailable_refusal)
 }
 
@@ -128,7 +129,28 @@ pub(super) async fn hold_for_unavailable(
         }
         return held;
     }
-    serde_json::to_value(&resp).unwrap_or_default()
+    with_refusal(serde_json::to_value(&resp).unwrap_or_default(), reason.wait_reason(), unavailable.resets_at_ms)
+}
+
+/// `body`, the answer to a message refused (not kept) because the agent can't take it now, with
+/// the reason as data: `refused_reason` (the `held_reason` strings), `retry_when` and, when
+/// known, `until_ms`. A sender reads these instead of the wording of `error`.
+pub(super) fn with_refusal(
+    mut body: serde_json::Value,
+    reason: crate::backend::agent_availability::WaitReason,
+    until_ms: Option<u64>,
+) -> serde_json::Value {
+    body["refused_reason"] = json!(reason.as_str());
+    body["retry_when"] = json!(reason.retry_when());
+    if let Some(until) = until_ms {
+        body["until_ms"] = json!(until);
+    }
+    body
+}
+
+/// [`with_refusal`] for a spawn gate that refused: the agent is not signed in.
+pub(super) fn needs_login_refusal(body: serde_json::Value) -> serde_json::Value {
+    with_refusal(body, crate::backend::agent_availability::WaitReason::NeedsLogin, None)
 }
 
 /// "Sun 7:00 PM": a reset time in this machine's zone, as the Kanban and
@@ -216,6 +238,7 @@ async fn hold_with_reason(
                 "success": false,
                 "held": true,
                 "held_reason": reason.as_str(),
+                "retry_when": reason.wait_reason().retry_when(),
                 "request_id": resp.request_id,
                 "error": error,
             });
@@ -294,4 +317,27 @@ pub(super) fn hold_applies(
         && req.delivery_tier.as_deref() == Some("host")
         && req.source_agent.as_deref() != Some("cron")
         && !resp.request_id.is_empty()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backend::agent_availability::WaitReason;
+
+    #[test]
+    fn a_refusal_carries_its_reason_and_what_ends_the_wait_as_data() {
+        let body = with_refusal(json!({"success": false, "error": "agent unavailable: X needs to sign in again"}), WaitReason::NeedsLogin, None);
+        assert_eq!((body["refused_reason"].as_str(), body["retry_when"].as_str()), (Some("needs_login"), Some("sign_in")));
+        assert!(body.get("until_ms").is_none());
+        let limited = with_refusal(json!({"success": false}), WaitReason::UsageLimit, Some(42));
+        assert_eq!((limited["refused_reason"].as_str(), limited["retry_when"].as_str(), limited["until_ms"].as_u64()), (Some("usage_limit"), Some("reset_or_account_move"), Some(42)));
+    }
+
+    #[test]
+    fn a_peer_refusal_is_known_by_its_reason_or_by_the_old_wording() {
+        assert!(peer_refused(&json!({"refused_reason": "usage_limit", "error": "anything"})));
+        assert!(peer_refused(&json!({"error": "agent unavailable: X's account is out of quota"})));
+        assert!(peer_refused(&json!({"files_refused": true})));
+        assert!(!peer_refused(&json!({"error": "agent not found: X"})));
+    }
 }
