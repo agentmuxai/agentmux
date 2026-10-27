@@ -146,6 +146,23 @@ describe("useAccountBinding", () => {
         m.dispose();
     });
 
+    it("picking the account it is on, while a switch waits, cancels the switch", async () => {
+        const m = mount({
+            accounts: [oauth("acc-a", "a@x"), oauth("acc-b", "b@x")],
+            links: [{ provider: "claude", account_id: "acc-a" }],
+            pending: "acc-b",
+            switchResult: { status: "unchanged", account_label: "a@x", failed: [] },
+        });
+        await flush();
+        m.onSwitchAccount(new MouseEvent("click"));
+        const items = m.showPicker.mock.calls[0][0] as ContextMenuItem[];
+        items.find((i) => i.label === "a@x")!.click!();
+        await flush();
+        expect(m.switchAccount).toHaveBeenCalledWith("agent-1", "acc-a");
+        expect(m.notify).toHaveBeenCalledWith("info", "Staying on a@x", expect.any(String));
+        m.dispose();
+    });
+
     it("names same-email accounts with their numbers, in the chip and the menu", async () => {
         const numbered = (id: string, seq: number): Account => ({ ...oauth(id, "me@x"), context: { email: "me@x", seq } }) as Account;
         const m = mount({

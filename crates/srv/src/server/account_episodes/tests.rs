@@ -679,6 +679,8 @@ async fn a_switch_applies_at_once_when_idle_waits_for_a_turn_and_cancels_on_the_
     assert_eq!((r.status.clone(), r.restarted), (switch::AccountSwitchStatus::Switched, 1));
     assert_eq!(linked_account(&state, "idle"), ["new"]);
     assert_eq!(stored_failure(&state, &idle), None, "the old account's limit goes with the move");
+    let env = state.mstore.get::<Block>(&idle).unwrap().unwrap().meta.get("cmd:env").cloned();
+    assert_eq!(env.and_then(|e| e.get("CLAUDE_CONFIG_DIR").cloned()), Some(json!("/tmp/new")), "the pane's own auth env follows the link");
 
     let r = switch::switch(&state, "busy", &switch_req("busy", "new", AfterTurn)).unwrap();
     assert_eq!(r.status, switch::AccountSwitchStatus::Queued);
@@ -704,6 +706,10 @@ async fn a_switch_applies_at_once_when_idle_waits_for_a_turn_and_cancels_on_the_
     register_stub(&busy, BLOCK_CONTROLLER_PERSISTENT, STATUS_RUNNING, true);
     let r = switch::switch(&state, "", &switch_req("busy", "new", Now)).unwrap();
     assert_eq!(r.status, switch::AccountSwitchStatus::Switched);
+    assert!(
+        blockcontroller::get_controller(&busy).is_none_or(|c| !c.get_runtime_status().turn_active),
+        "now ends the turn: a forced resync alone would only defer the restart to its end"
+    );
     cleanup(&[&idle, &busy]);
 }
 

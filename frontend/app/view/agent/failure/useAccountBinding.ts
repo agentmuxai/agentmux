@@ -183,11 +183,14 @@ export function useAccountBinding(opts: {
     });
     const switchTo = async (account: Account) => {
         const agentId = opts.agentDefinitionId();
-        if (!agentId || account.id === linkedAccountId()) return;
+        // Picking the account it is on cancels a queued switch; with none queued there is nothing to do.
+        if (!agentId || (account.id === linkedAccountId() && !opts.pendingAccountId?.())) return;
         const label = accountLabel(account, accountCache());
         try {
             const r = await deps.switchAccount(agentId, account.id);
-            if (r.status === "queued") {
+            if (r.status === "unchanged") {
+                deps.notify("info", `Staying on ${label}`, "The queued switch was cancelled.");
+            } else if (r.status === "queued") {
                 deps.notify("info", `Switching to ${label} after this turn`, "The agent keeps working; it moves when the turn ends.");
             } else if (r.failed.length > 0) {
                 deps.notify("warning", `Switched to ${label}, with a problem`, r.failed.join(" "));

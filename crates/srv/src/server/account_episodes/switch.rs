@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use crate::backend::agent_resolve::resolve_agent_id;
 use crate::backend::blockcontroller;
 use crate::backend::obj::{self, Block};
-use crate::backend::storage::identities::IdentityAccount;
+use crate::backend::storage::identities::{IdentityAccount, SecretRef};
 use crate::server::app_api::agent_spawn::account_label_in;
 use crate::server::AppState;
 
@@ -98,8 +98,31 @@ fn set_pending(state: &AppState, blocks: &[Block], pending: Option<(&str, &str)>
     }
 }
 
-/// Link `agent` to `to` and restart each of `blocks` on it. `actor` is recorded.
-fn apply(state: &AppState, actor: &str, def_id: &str, to: &IdentityAccount, provider: &str, blocks: &[Block], all: &[IdentityAccount]) -> AgentAccountSwitchResult {
+/// Point the pane's own `cmd:env` config-dir variable at `to`. The spawn injects the linked
+/// account over it, but the window's auth re-check and login recovery read `cmd:env` as it is.
+fn refresh_auth_env(state: &AppState, block: &Block, to: &IdentityAccount, provider: &str) {
+    let SecretRef::OAuthConfigDir { dir } = &to.secret_ref else { return };
+    let Some(var) = crate::backend::providers::get_provider(provider).map(|p| p.auth_config_dir_env_var).filter(|v| !v.is_empty()) else { return };
+    let mut env = blockcontroller::cmd_env_of(&block.meta);
+    env.insert(var.to_string(), dir.clone());
+    let mut update = obj::MetaMapType::new();
+    update.insert("cmd:env".to_string(), serde_json::json!(env));
+    if let Err(e) = crate::server::service::update_object_meta(&state.mstore, &format!("block:{}", block.oid), &update) {
+        tracing::warn!(block_id = %block.oid, error = %e, "agent.account.switch: the pane's auth env was not updated");
+    }
+}
+
+/// End the pane's turn by replacing its process. A forced resync of a persistent pane in a turn
+/// only defers the restart to the turn's end, which is `after_turn`, not `now`.
+fn stop_turn(block: &Block) {
+    if let Some(ctrl) = blockcontroller::take_controller(&block.oid) {
+        let _ = crate::sagas::agent_teardown::replace_now(ctrl.as_ref());
+    }
+}
+
+/// Link `agent` to `to` and restart each of `blocks` on it. `actor` is recorded. `now` ends a
+/// turn in progress; otherwise the caller has seen that no pane is in one.
+fn apply(state: &AppState, actor: &str, def_id: &str, to: &IdentityAccount, provider: &str, blocks: &[Block], all: &[IdentityAccount], now: bool) -> AgentAccountSwitchResult {
     set_pending(state, blocks, None);
     let label = account_label_in(to, all);
     let mut result = AgentAccountSwitchResult { status: AccountSwitchStatus::Switched, account_id: to.id.clone(), account_label: label.clone(), restarted: 0, failed: Vec::new() };
@@ -107,9 +130,13 @@ fn apply(state: &AppState, actor: &str, def_id: &str, to: &IdentityAccount, prov
     let request_id = uuid::Uuid::new_v4().to_string();
     let reason = format!("switched to {label}");
     for block in blocks {
-        let outcome = linked
-            .clone()
-            .and_then(|()| restart(state, block).map_err(|e| format!("linked, but its pane didn't restart ({e}); it uses the new account when it next starts")));
+        let outcome = linked.clone().and_then(|()| {
+            refresh_auth_env(state, block, to, provider);
+            if now && busy(state, &block.oid) {
+                stop_turn(block);
+            }
+            restart(state, block).map_err(|e| format!("linked, but its pane didn't restart ({e}); it uses the new account when it next starts"))
+        });
         state.reactive_handler.log_fleet_action_audit(
             Some(actor),
             &agent_name(&state.mstore, block),
@@ -184,7 +211,7 @@ pub(super) fn switch(state: &AppState, caller: &str, req: &AgentAccountSwitchReq
         set_pending(state, &blocks, Some((&to.id, actor)));
         return Ok(AgentAccountSwitchResult { status: AccountSwitchStatus::Queued, account_id: to.id.clone(), account_label: label, restarted: 0, failed: Vec::new() });
     }
-    Ok(apply(state, actor, &def_id, to, &provider, &blocks, &accounts))
+    Ok(apply(state, actor, &def_id, to, &provider, &blocks, &accounts, req.when == AccountSwitchWhen::Now))
 }
 
 /// Apply each queued switch whose agent has no pane in a turn. Runs with every
@@ -211,6 +238,6 @@ pub(super) fn apply_pending(state: &AppState) {
         };
         let provider = canonical(&to.provider);
         let same_provider: Vec<IdentityAccount> = accounts.iter().filter(|a| canonical(&a.provider) == provider).cloned().collect();
-        apply(state, &by, &def_id, to, &provider, &blocks, &same_provider);
+        apply(state, &by, &def_id, to, &provider, &blocks, &same_provider, false);
     }
 }
