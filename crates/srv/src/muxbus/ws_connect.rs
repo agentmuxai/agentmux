@@ -74,8 +74,30 @@ pub(crate) fn parse_proxy(address: &str) -> Result<Proxy, String> {
         Some(p) if !p.is_empty() => p.parse::<u16>().map_err(|_| BAD.to_string())?,
         _ => 80,
     };
-    let authorization = userinfo.map(|u| format!("Basic {}", base64::engine::general_purpose::STANDARD.encode(u)));
+    let authorization = userinfo.map(|u| format!("Basic {}", base64::engine::general_purpose::STANDARD.encode(percent_decode(u))));
     Ok(Proxy { host: host.to_string(), port, authorization })
+}
+
+/// `s` with its `%XX` escapes decoded, as curl and reqwest read the credentials of a proxy address; a `%` not
+/// followed by two hex digits stays as it is.
+fn percent_decode(s: &str) -> Vec<u8> {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let hex = |b: u8| (b as char).to_digit(16);
+        match (bytes[i], bytes.get(i + 1).copied().and_then(hex), bytes.get(i + 2).copied().and_then(hex)) {
+            (b'%', Some(hi), Some(lo)) => {
+                out.push((hi * 16 + lo) as u8);
+                i += 3;
+            }
+            (b, _, _) => {
+                out.push(b);
+                i += 1;
+            }
+        }
+    }
+    out
 }
 
 /// Whether `NO_PROXY` (a comma list) exempts `host:port`: `*`; a name, matching itself and its subdomains (a leading

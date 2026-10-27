@@ -28,6 +28,18 @@ fn parses_an_http_proxy_with_or_without_a_port_and_credentials() {
 }
 
 #[test]
+fn credentials_in_the_proxy_address_are_percent_decoded_before_they_are_sent() {
+    let basic = |raw: &str| format!("Basic {}", base64::engine::general_purpose::STANDARD.encode(raw));
+    let p = parse_proxy("http://user:p%40ss%3Aword@proxy.corp:8080").unwrap();
+    assert_eq!(p.authorization.as_deref(), Some(basic("user:p@ss:word").as_str()));
+    // not an escape: left as written
+    let p = parse_proxy("http://user:100%@proxy.corp").unwrap();
+    assert_eq!(p.authorization.as_deref(), Some(basic("user:100%").as_str()));
+    let p = parse_proxy("http://us%zzer:pw@proxy.corp").unwrap();
+    assert_eq!(p.authorization.as_deref(), Some(basic("us%zzer:pw").as_str()));
+}
+
+#[test]
 fn refuses_other_schemes_and_never_repeats_the_address_in_the_error() {
     for bad in ["https://proxy:443", "socks5://u:secretpw@proxy:1080", "proxy:8080", "", "http://", "http://host:notaport", "http://u:secretpw@:80"] {
         let err = parse_proxy(bad).unwrap_err();
