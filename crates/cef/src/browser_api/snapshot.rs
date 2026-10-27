@@ -413,11 +413,18 @@ fn walk(
 /// The frame held by the `<iframe>` element `backend` (with accessible role
 /// `role`) in frame `frame`, if one was read.
 fn frame_of_owner<'a>(frames: &'a [FrameTree], frame: usize, role: &str, backend: Option<i64>) -> Option<&'a FrameTree> {
-    if role != "Iframe" {
+    if !is_iframe_role(role) {
         return None;
     }
     let b = backend?;
     frames.iter().find(|f| f.parent == frame && f.owner_backend == Some(b))
+}
+
+/// An `<iframe>` element's accessible role. A frame whose element says
+/// `role="presentation"` (the Azure portal's blades do) is `IframePresentational`
+/// instead of `Iframe`, and its content is as much the page's as any other's.
+fn is_iframe_role(role: &str) -> bool {
+    matches!(role, "Iframe" | "IframePresentational")
 }
 
 /// Render one frame's tree at `depth`, under its `<iframe>` line.
@@ -691,7 +698,7 @@ pub fn find(nodes: &[Value], facts: &HashMap<i64, DomFacts>, q: &ElementQuery, r
     for (node, context) in shown_nodes(nodes) {
         let role = str_of(node, "role");
         let name = str_of(node, "name").trim();
-        if role == "Iframe" {
+        if is_iframe_role(role) {
             found.frames += 1;
         }
         let backend = node.get("backendDOMNodeId").and_then(|v| v.as_i64());
@@ -990,6 +997,21 @@ mod tests {
             note: None,
         };
         (top, frame)
+    }
+
+    #[test]
+    fn an_iframe_the_page_marks_presentational_still_shows_its_tree() {
+        // The Azure portal's blades: `<iframe role="presentation">` is `IframePresentational`.
+        let (mut top, frame) = frame_page();
+        top[2]["role"] = json!({ "type": "role", "value": "IframePresentational" });
+        let s = render_with_frames(&top, &HashMap::new(), None, "", &[frame]);
+        let lines: Vec<&str> = s.text.lines().collect();
+        assert_eq!(
+            lines[1],
+            "- IframePresentational \"Application form\" [frame=f1 origin=https://forms.example.gov cross-origin]"
+        );
+        assert!(lines[3].starts_with("  - textbox \"Taxpayer's TIN\" [ref=f1e1]"), "{}", lines[3]);
+        assert!(is_iframe_role("Iframe") && is_iframe_role("IframePresentational") && !is_iframe_role("generic"));
     }
 
     #[test]
