@@ -62,6 +62,11 @@ mod tests {
         std::fs::write(dir.join(name), b"").unwrap();
     }
 
+    /// The host's name on this platform: Windows falls back to `agentmux-cef.exe`.
+    fn host_name() -> String {
+        format!("agentmux-cef{}", if cfg!(target_os = "windows") { ".exe" } else { "" })
+    }
+
     /// The installed .deb/.rpm layout: host, launcher, srv and the upgrade
     /// helper side by side. The helper must never be picked as the host.
     #[test]
@@ -70,7 +75,7 @@ mod tests {
         for n in ["agentmux-cef", "agentmux-launcher", "agentmux-install-update", "agentmux-srv-0.60.3-linux.x64"] {
             touch(dir.path(), n);
         }
-        assert_eq!(find_cef_binary(dir.path()), dir.path().join("agentmux-cef"));
+        assert_eq!(find_cef_binary(dir.path()), dir.path().join(host_name()));
     }
 
     #[test]
@@ -79,7 +84,7 @@ mod tests {
         for n in ["agentmux-cef", "agentmux-bashwrap", "agentmux-mcp", "agentmux-install-update"] {
             touch(dir.path(), n);
         }
-        assert_eq!(find_cef_binary(dir.path()), dir.path().join("agentmux-cef"));
+        assert_eq!(find_cef_binary(dir.path()), dir.path().join(host_name()));
     }
 
     #[test]
