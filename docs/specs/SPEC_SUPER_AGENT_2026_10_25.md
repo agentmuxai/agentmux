@@ -61,7 +61,7 @@ The request still gets its window; only the agent in front is missing. If no age
 
 - the request goes to the countdown anyway, with double the op's window (so a quit is 60 s), the banner saying "no super agent reviewed this";
 - the person's veto stays the only check;
-- a destructive pair (`quit_agentmux`, `upgrade`) is the exception worth deciding (see Open questions).
+- a destructive pair (`quit_agentmux`, `upgrade`) proceeds after the doubled window as well; refusing until a super agent exists would be a ban (section 10, item 1).
 
 A super agent that stops while a request is `asked` leaves the request to expire into the same fallback; one that stops while it is `pending` changes nothing (the countdown runs).
 
