@@ -3,6 +3,8 @@ frontend/dist
 dist/
 /log
 dist-dev/
+# A task dev build's own data home (scripts/dev-home.mjs)
+.dev-home/
 frontend/node_modules
 node_modules/
 frontend/bindings

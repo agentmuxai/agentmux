@@ -1,6 +1,6 @@
 ---
 name: run
-description: Launch and verify AgentMux's own `task dev` build on Windows — the MAX_PATH subst workaround, a real free-port check instead of trusting the hash, how to confirm the window is actually ready (poll state, not logs), and a safe cleanup pattern for a host running several agents' dev sessions at once.
+description: Launch and verify AgentMux's own `task dev` build on Windows, on its own isolated data home (never the operator's agents), with a seedable fake agent — the MAX_PATH subst workaround, a real free-port check instead of trusting the hash, how to confirm the window is actually ready (poll state, not logs), and a safe cleanup pattern for a host running several agents' dev sessions at once.
 ---
 
 # Running AgentMux itself (`task dev`, Windows)
@@ -124,6 +124,43 @@ behind a Vite problem (§2), not slow — check
 `Get-NetTCPConnection -LocalPort $port` to confirm something is actually
 listening.
 
+## 3b. The data home: your build's own, never the operator's
+
+`task dev` runs on a data home of its own: `<clone>/.dev-home/<vite port>` (git-ignored, kept between
+runs of the same port). It prints `[dev] home: <path> (isolated)` as it starts, and srv logs the same
+(`home` and `home_isolated` on its "backend directories initialized" line). The home starts empty:
+no agents, no accounts, no MuxBus sign-in, and a Swarm that lists only your own build.
+
+**Why it matters.** A dev build keeps its own database and logs under `<home>/dev/<branch>/<clone>`,
+but everything under `<home>/shared` (the agent definitions, registry and transcripts, accounts, agent
+CLIs, identity folders) and `<home>/agents` (agent workspaces) is shared by every instance with the same
+home. With the real `~/.agentmux` as the home, your build shows the operator's agents with their real
+last prompts, lists the live instance's agents in its Swarm, and what it does there (open, send,
+broadcast, delete, a migration of a shared store) is done to the operator's data. **If your dev build
+shows your real agents, that is a bug: stop it, check the `[dev] home:` line, and report it.**
+
+- Opt out, on purpose only: `AGENTMUX_DEV_USE_REAL_HOME=1 task dev` (the banner then says REAL).
+- A home of your own choosing: `AGENTMUX_HOME_OVERRIDE=<dir> task dev`. The real home named that way is
+  refused unless you also set `AGENTMUX_DEV_USE_REAL_HOME=1`.
+- Not isolated by the home: the OS keychain (an API key added in Connectors is stored there), the
+  machine's Docker daemon (containers and images are named by agent id, so a container agent you make
+  is yours to remove, and so is an image you pulled), and the shared build-slot lock, which is meant to
+  be shared.
+- Start over: stop the build (section 4), then delete `<clone>/.dev-home/<port>`.
+
+**An agent that works with no account.** Once the window is up, `task dev:seed` (or
+`node scripts/dev-seed.mjs`) puts the scripted fake Claude Code (`scripts/ui-screenshots/fake-claude`)
+in the home, adds a placeholder account (`dev@example.invalid`) and one agent linked to it, and opens
+it. Options after `--`: `--agents 3 --name demo --home <dir> --script <conversation.json> --no-open`.
+It drives the build running on that home (it reads the debugging port from the `authkey.dev` the
+build writes in its data folder, so a second clone's build on the usual port is never touched; a
+`--port` for any other build is refused). It refuses the real home and a window that is not a dev
+build, and can be run again. The stand-in plays
+a script turn by turn: the default is `scripts/ui-screenshots/fake-claude/conversation.json` (send
+`hello` for its first reply), and `--script` gives it your own, so a live check of an agent pane needs
+no model, account or tokens. Container agents need a real account: use the real flow in your isolated
+home, with an account you are allowed to use.
+
 ## 4. Cleanup: scope every kill to a confirmed-yours PID
 
 On a host running several agents, a loose filter like `*cef-dev*` or `*K:*`
@@ -140,6 +177,8 @@ Only then:
 ```bash
 powershell -NoProfile -Command "Stop-Process -Id <pid> -Force -ErrorAction SilentlyContinue"
 ```
+
+Your build's data home (`<clone>/.dev-home/<port>`, section 3b) is yours to delete once the build is stopped. A container agent you made in it leaves a Docker container and its volumes (named by the agent id) behind: remove those, and an image you pulled, by name.
 
 A CEF app's process tree needs two passes sometimes (parent exits, orphaned
 children take a moment to follow) — re-check and re-run once if any of your
