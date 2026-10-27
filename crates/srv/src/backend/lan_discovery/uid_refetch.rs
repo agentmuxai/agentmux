@@ -30,9 +30,24 @@ impl LanDiscoveryController {
         if !self.pubkey_lookup_allowed() {
             return None;
         }
-        match self.pubkey_from_peers(peers, agent_id, http).await {
+        // The fan-out caches whatever it finds, a miss included. An ask that
+        // does not confirm this name key with a UID key must leave the cache as
+        // it was, or a miss would stand in for the key that just verified.
+        let before = self.pubkey_cache.read().ok().and_then(|cache| {
+            cache.get(agent_id).map(|e| LanPubkeyCacheEntry { public_key: e.public_key.clone(), uid_key: e.uid_key.clone(), expires: e.expires })
+        });
+        let shown = match self.pubkey_from_peers(peers, agent_id, http).await {
             LanPubkeyLookup::Found(key) if key == name_key => self.cached_lan_uid_key(agent_id),
             _ => None,
+        };
+        if shown.is_none() {
+            if let Ok(mut cache) = self.pubkey_cache.write() {
+                match before {
+                    Some(entry) => cache.insert(agent_id.to_string(), entry),
+                    None => cache.remove(agent_id),
+                };
+            }
         }
+        shown
     }
 }

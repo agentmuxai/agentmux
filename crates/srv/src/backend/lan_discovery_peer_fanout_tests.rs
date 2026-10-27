@@ -250,3 +250,22 @@ async fn a_refetch_with_no_uid_key_in_the_answer_or_no_peer_gives_none() {
     assert!(c.refetch_lan_uid_key_from(&[peer_at(&addr)], "agentx", b"key", &http).await.is_none());
     assert!(c.refetch_lan_uid_key_from(&[], "agentx", b"key", &http).await.is_none());
 }
+
+/// A refetch that shows nothing must not replace the cached answer that
+/// verified the message: not with a miss, not with another peer's key.
+#[tokio::test]
+async fn a_refetch_that_shows_nothing_leaves_the_cached_answer_as_it_was() {
+    let c = controller();
+    let http = reqwest::Client::new();
+    c.seed_lan_pubkey_for_test("agentx", b"key".to_vec(), None);
+    assert!(c.refetch_lan_uid_key_from(&[], "agentx", b"key", &http).await.is_none());
+    assert!(matches!(c.find_agent_lan_pubkey("agentx", &http).await, LanPubkeyLookup::Found(k) if k == b"key"), "no miss cached over the key");
+
+    let (addr, _) = routed_peer(vec![("agentx", r#"{"lan_public_key":"b3RoZXI=","uid":"u-1","uid_public_key":"dWtleQ=="}"#)]).await;
+    assert!(c.refetch_lan_uid_key_from(&[peer_at(&addr)], "agentx", b"key", &http).await.is_none());
+    assert!(matches!(c.find_agent_lan_pubkey("agentx", &http).await, LanPubkeyLookup::Found(k) if k == b"key"), "another peer's key not cached over it");
+
+    // Nothing cached before: nothing cached after.
+    assert!(c.refetch_lan_uid_key_from(&[], "agenty", b"key", &http).await.is_none());
+    assert!(!cached(&c, "agenty"));
+}
