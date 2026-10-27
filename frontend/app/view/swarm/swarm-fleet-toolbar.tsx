@@ -7,7 +7,8 @@
 import { createMemo, createSignal, For, Show, type JSX } from "solid-js";
 import { ConfirmModal } from "@/app/element/confirm-modal";
 import { ContextMenuModel } from "@/app/store/contextmenu";
-import { MODE_DESCRIPTIONS, MODE_LABELS, SUPERVISOR_MODES } from "@/app/store/supervisor";
+import { settingsAtom } from "@/app/store/global";
+import { MODE_DESCRIPTIONS, MODE_LABELS, SUPERVISOR_MODES, SUPERVISOR_OFF_REASON, supervisorEnabled } from "@/app/store/supervisor";
 import { gapSummary, localTarget, partitionTargets, remoteFleetTargets, unavailableReason, type FleetAction } from "./swarm-fleet-targets";
 import type { FleetResultEntry, SwarmViewModel } from "./swarm-model";
 import { remoteSections } from "./swarm-remote";
@@ -192,11 +193,16 @@ export function FleetToolbar({
                             title={reachable("supervise") === 0 ? NOTHING_SUPERVISABLE : undefined}
                             onClick={(e: MouseEvent) =>
                                 ContextMenuModel.showContextMenu(
-                                    SUPERVISOR_MODES.map((mode) => ({
-                                        label: `Supervisor: ${MODE_LABELS[mode]} for ${reachable("supervise")} ${plural(reachable("supervise"))}`,
-                                        sublabel: MODE_DESCRIPTIONS[mode],
-                                        click: () => void model.superviseSelection(mode),
-                                    })),
+                                    SUPERVISOR_MODES.map((mode) => {
+                                        // Switched off: srv refuses Steady and Drive, so say so here (Off is always fine).
+                                        const blocked = mode !== "off" && !supervisorEnabled(settingsAtom());
+                                        return {
+                                            label: `Supervisor: ${MODE_LABELS[mode]} for ${reachable("supervise")} ${plural(reachable("supervise"))}`,
+                                            sublabel: blocked ? SUPERVISOR_OFF_REASON : MODE_DESCRIPTIONS[mode],
+                                            enabled: !blocked,
+                                            click: () => void model.superviseSelection(mode),
+                                        };
+                                    }),
                                     e
                                 )
                             }
