@@ -48,8 +48,12 @@ pub struct WaitForData {
 }
 
 /// Run in an isolated world with the text as its argument, so the page's own
-/// scripts can't answer for it.
-const HAS_TEXT: &str = "((t) => !!(document.body && document.body.innerText.includes(t)))";
+/// scripts can't answer for it. A frame nobody can see (its `<iframe>` is
+/// `display: none`, as the Azure portal leaves the blade it just left) has no
+/// layout, so its body has no boxes and `innerText` would fall back to the raw
+/// text: it only counts while the body has a box.
+const HAS_TEXT: &str =
+    "((t) => !!(document.body && document.body.getClientRects().length > 0 && document.body.innerText.includes(t)))";
 
 /// The isolated worlds made during one wait, by session and frame: a wait of
 /// up to a minute looks four times a second, and needs one world per frame,
@@ -177,6 +181,12 @@ mod tests {
         let text = "Step 2\" ); alert(1); (\"";
         let expression = format!("{HAS_TEXT}({})", serde_json::to_string(text).unwrap());
         assert!(expression.ends_with(r#"("Step 2\" ); alert(1); (\"")"#), "{expression}");
+    }
+
+    #[test]
+    fn text_in_a_frame_with_no_layout_does_not_count() {
+        assert!(HAS_TEXT.contains("getClientRects().length > 0"), "{HAS_TEXT}");
+        assert!(HAS_TEXT.find("getClientRects").unwrap() < HAS_TEXT.find("innerText").unwrap());
     }
 
     #[test]
