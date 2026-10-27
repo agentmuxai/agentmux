@@ -60,6 +60,22 @@ pub(crate) fn error_result_frame(message: &str) -> Value {
     })
 }
 
+/// Ends the start-up row if the start-up is dropped before it did (a stop).
+struct UnfinishedRow<'a> {
+    done: AtomicBool,
+    shown: &'a AtomicBool,
+    write: &'a (dyn Fn(ContainerStartState, Option<u8>, &str, Option<&str>) + Sync),
+    image: &'a str,
+}
+
+impl Drop for UnfinishedRow<'_> {
+    fn drop(&mut self) {
+        if !self.done.load(Ordering::Relaxed) && self.shown.load(Ordering::Relaxed) {
+            (self.write)(ContainerStartState::Failed, None, self.image, Some("Stopped before the container was ready"));
+        }
+    }
+}
+
 impl ContainerStartup {
     /// Start the container, then make sure the provider CLI is in it. The pane
     /// shows each step that takes time (frames persisted, so they survive a
@@ -77,6 +93,9 @@ impl ContainerStartup {
             let frame = cli_notice::container_start_frame(&start_id, &self.provider_id, image, state, percent, seconds, error);
             cli_notice::append_to_pane(&self.broker, &self.filestore, &self.mstore, &self.block_id, &frame);
         };
+        // A stop drops this future while the row says "Downloading…"; the
+        // guard then ends that row so a reload doesn't show it for good.
+        let row_open = UnfinishedRow { done: AtomicBool::new(false), shown: &shown, write: &start_row, image: &image };
         let observe = |event: StartEvent<'_>| {
             shown.store(true, Ordering::Relaxed);
             match event {
@@ -94,11 +113,13 @@ impl ContainerStartup {
             if shown.load(Ordering::Relaxed) {
                 start_row(ContainerStartState::Failed, None, &image, Some(&e.user_message()));
             }
+            row_open.done.store(true, Ordering::Relaxed);
             return Err(self.fail(&e));
         }
         if shown.load(Ordering::Relaxed) {
             start_row(ContainerStartState::Ready, None, &image, None);
         }
+        row_open.done.store(true, Ordering::Relaxed);
 
         let Some(install) = CliInstall::for_provider(&self.provider_id, &self.container_command) else {
             return Ok(());

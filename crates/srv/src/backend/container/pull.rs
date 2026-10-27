@@ -126,7 +126,14 @@ impl PullTracker {
     fn observe(&mut self, info: &bollard::models::CreateImageInfo, now: std::time::Instant) -> Option<PullProgress> {
         let id = info.id.as_deref()?;
         let status = info.status.as_deref().unwrap_or_default();
-        if let Some(total) = info.progress_detail.as_ref().and_then(|d| d.total).filter(|t| *t > 0) {
+        // Only `Downloading` counts are download bytes: `Extracting` reports
+        // uncompressed sizes, which would make the percentage jump back.
+        if let Some(total) = info
+            .progress_detail
+            .as_ref()
+            .and_then(|d| d.total)
+            .filter(|t| *t > 0 && status.starts_with("Downloading"))
+        {
             let current = info.progress_detail.as_ref().and_then(|d| d.current).unwrap_or(0).clamp(0, total);
             self.layers.insert(id.to_string(), (current as u64, total as u64));
         } else if status.starts_with("Download complete") || status.starts_with("Pull complete") {
@@ -299,6 +306,10 @@ mod tests {
         // A layer that says it is complete counts as fully downloaded, and a 10-point jump is shown at once.
         let done = CreateImageInfo { id: Some("a".into()), status: Some("Download complete".into()), ..Default::default() };
         assert_eq!(t.observe(&done, later).map(|p| p.percent()), Some(60));
+        // A layer extracting after its download is not download progress.
+        let extracting = layer("a", "Extracting", 5, 1000);
+        assert_eq!(t.observe(&extracting, later + Duration::from_secs(5)), None);
+        assert_eq!(t.observe(&layer("c", "Downloading", 0, 100), later + Duration::from_secs(5)).map(|p| p.percent()), Some(40));
         // Items without a layer id or byte counts say nothing.
         assert_eq!(t.observe(&CreateImageInfo { status: Some("Pulling fs layer".into()), ..Default::default() }, later), None);
     }
