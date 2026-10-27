@@ -108,6 +108,23 @@ fn off_and_system_turns_are_ignored() {
 }
 
 #[test]
+fn a_paused_pane_stays_paused_when_a_start_up_turn_ends() {
+    // After a restart the pane's start-up document is answered: that turn is AgentMux's, not work.
+    let mut state = running(SupervisorMode::Steady);
+    state.status = SupervisorStatus::Paused;
+    state.reason = "It gave the same reply twice.".into();
+    let before = state.clone();
+    let startup = crate::backend::blockcontroller::health::TurnTrigger::from_input(
+        crate::backend::blockcontroller::health::TurnOrigin::User,
+        "# Session Context
+Identity: Claude",
+    );
+    let f = facts(Some(startup.kind));
+    assert_eq!(policy::on_turn_end(&mut state, SupervisorMode::Steady, &f), PreJudge::Ignore);
+    assert_eq!(state, before);
+}
+
+#[test]
 fn a_question_tool_stops_for_the_user_without_a_model_call() {
     let mut state = running(SupervisorMode::Drive);
     let f = TurnFacts { ending: TurnEnding::AskedUser, ..facts(Some(TriggerKind::User)) };
@@ -378,6 +395,20 @@ fn a_completed_turn_is_read_from_the_ledger_and_a_running_one_is_not() {
         watcher::parse_turn_ended_for_test(&ended),
         Some(("b1".to_string(), Some(TriggerKind::Supervisor), 4))
     );
+    // A turn AgentMux started (a pane's start-up document) that took the user's message before it
+    // ended is the user's: it is judged. One that took nothing stays AgentMux's.
+    let mut startup = ended.clone();
+    startup["trigger"] = serde_json::json!({ "kind": "system", "external": false });
+    assert_eq!(watcher::parse_turn_ended_for_test(&startup).unwrap().1, Some(TriggerKind::System));
+    startup["absorbed"] = serde_json::json!([{ "kind": "user", "external": false }]);
+    assert_eq!(watcher::parse_turn_ended_for_test(&startup).unwrap().1, Some(TriggerKind::User));
+    startup["absorbed"] = serde_json::json!([{ "kind": "system", "external": false }, { "kind": "agent", "from": "korp", "external": true }]);
+    assert_eq!(watcher::parse_turn_ended_for_test(&startup).unwrap().1, Some(TriggerKind::Agent));
+    // A turn that began with the user keeps its own trigger whatever joined it.
+    let mut user_first = ended.clone();
+    user_first["trigger"] = serde_json::json!({ "kind": "user", "external": false });
+    user_first["absorbed"] = serde_json::json!([{ "kind": "agent", "from": "korp", "external": true }]);
+    assert_eq!(watcher::parse_turn_ended_for_test(&user_first).unwrap().1, Some(TriggerKind::User));
     let mut running = ended.clone();
     running.as_object_mut().unwrap().remove("end");
     assert_eq!(watcher::parse_turn_ended_for_test(&running), None);

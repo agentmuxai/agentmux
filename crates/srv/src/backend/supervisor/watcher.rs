@@ -42,8 +42,24 @@ struct PublishedTurn {
     end: Option<TurnEnd>,
     #[serde(default)]
     trigger: Option<TurnTrigger>,
+    /// The labelled inputs that joined the turn after it started.
+    #[serde(default)]
+    absorbed: Vec<TurnTrigger>,
     #[serde(default)]
     steps: u32,
+}
+
+impl PublishedTurn {
+    /// What the Supervisor treats as having started the turn. A turn AgentMux started on its own
+    /// (a pane's start-up document) that took a real input before it ended is that input's: its
+    /// answer is the agent's work and is judged.
+    fn effective_trigger(&self) -> Option<TriggerKind> {
+        let first = self.trigger.as_ref().map(|t| t.kind);
+        if first != Some(TriggerKind::System) {
+            return first;
+        }
+        self.absorbed.iter().map(|t| t.kind).find(|k| *k != TriggerKind::System).or(first)
+    }
 }
 
 /// A completed turn, as the Supervisor takes it.
@@ -63,11 +79,12 @@ fn parse_turn_ended(data: &serde_json::Value) -> Option<TurnEnded> {
     if t.end != Some(TurnEnd::Completed) {
         return None;
     }
+    let trigger = t.effective_trigger();
     Some(TurnEnded {
         block_id: t.block_id,
         turn_id: t.turn_id,
         ended_at_ms: t.ended_at_ms.unwrap_or(0),
-        trigger: t.trigger.map(|t| t.kind),
+        trigger,
         steps: t.steps,
     })
 }

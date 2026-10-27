@@ -130,6 +130,9 @@ impl TurnTrigger {
             // srv rewrites a broadcast marker found inside any jekt, so only a
             // user-origin input can carry a real one.
             TurnOrigin::User if text.contains(BROADCAST_MARKER) => Self::of(TriggerKind::Broadcast, None),
+            // The pane sends its start-up document through the composer's own path, so it arrives
+            // as the user's; it is AgentMux's, and the agent's answer to it is no work to judge.
+            TurnOrigin::User if starts_with_text(text, STARTUP_CONTEXT_HEADING) => Self::of(TriggerKind::System, None),
             TurnOrigin::User => Self::of(TriggerKind::User, None),
             TurnOrigin::System => Self::of(TriggerKind::System, None),
             // srv quotes this header inside every delivered body, so only the
@@ -162,7 +165,16 @@ impl TurnTrigger {
 /// for [`jekt_sender`]; in the line, the text follows the content's opening
 /// quote, so the header is looked for at the start of the text either way.
 fn is_supervisor_input(text: &str) -> bool {
-    let prefix = crate::backend::reactive::sanitize::SUPERVISOR_HEADER_PREFIX;
+    starts_with_text(text, crate::backend::reactive::sanitize::SUPERVISOR_HEADER_PREFIX)
+}
+
+/// The heading the pane's start-up document begins with
+/// (`frontend/app/view/agent/startup/buildStartupPayload.ts`).
+const STARTUP_CONTEXT_HEADING: &str = "# Session Context";
+
+/// Whether an input's text starts with `prefix`: the input may be the plain text or the
+/// stream-json user line carrying it.
+fn starts_with_text(text: &str, prefix: &str) -> bool {
     if text.starts_with(prefix) {
         return true;
     }
