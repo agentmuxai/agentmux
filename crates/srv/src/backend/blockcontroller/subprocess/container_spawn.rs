@@ -150,6 +150,14 @@ mod turn_exec_tests {
 }
 
 impl SubprocessController {
+    /// Record what a container turn does before its exec (start the container,
+    /// install the CLI). Call before [`spawn_container_turn`](Self::spawn_container_turn):
+    /// the step runs at the start of that turn's own task, and again for each
+    /// message queued behind it, so a failed start-up is retried by the next one.
+    pub fn set_container_startup(&self, step: super::StartupStep) {
+        *self.container_startup.lock().unwrap() = Some(step);
+    }
+
     /// Spawn a container agent turn via Docker socket (P1a: no secrets in argv).
     ///
     /// This is the secure alternative to `spawn_turn` for container agents. Instead
@@ -175,14 +183,6 @@ impl SubprocessController {
     ///
     /// Takes `cm` and `container_name` by value (not reference) so the returned
     /// future is `'static` — required for `tokio::spawn` in the queue-drain path.
-    /// Record what a container turn does before its exec (start the container,
-    /// install the CLI). Call before [`spawn_container_turn`](Self::spawn_container_turn):
-    /// the step runs at the start of that turn's own task, and again for each
-    /// message queued behind it, so a failed start-up is retried by the next one.
-    pub fn set_container_startup(&self, step: super::StartupStep) {
-        *self.container_startup.lock().unwrap() = Some(step);
-    }
-
     pub fn spawn_container_turn(
         &self,
         cm: crate::backend::container::ContainerManager,
@@ -339,8 +339,17 @@ impl SubprocessController {
             // image, create the container, install the CLI). That is minutes of
             // work, so it happens here and not in the handler that took the
             // message. Its failure has already been written to the pane.
+            //
+            // A stop during that wait ends the turn here: dropping the step
+            // cancels the download at the daemon, and the exec never starts.
             let startup_failed = match &startup {
-                Some(step) => step().await.is_err(),
+                Some(step) => tokio::select! {
+                    done = step() => done.is_err(),
+                    _ = &mut kill_rx => {
+                        tracing::info!(block_id = %block_id, "container turn stopped while its container was starting");
+                        true
+                    }
+                },
                 None => false,
             };
             let exec_result: Result<_, Option<crate::backend::container::ContainerError>> = if startup_failed {

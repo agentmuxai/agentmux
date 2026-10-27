@@ -1116,12 +1116,8 @@ pub async fn run_agent_turn_joining(
             let agent_provider =
                 crate::backend::obj::meta_get_string(&block.meta, "agentProvider", "claude");
 
-            // Starting the container (pulling the image if needed) and making
-            // sure the provider CLI is installed in it take minutes the first
-            // time. They run at the start of the turn's own task, not here: the
-            // RPC engine drops this handler after five seconds, which used to
-            // cancel the download for good. A failure is written to the pane
-            // as a plain-language error.
+            // Starting the container takes minutes the first time, so it runs in
+            // the turn's own task: this handler is dropped after five seconds.
             subprocess_ctrl.set_container_startup(super::container_turn::startup_step(
                 super::container_turn::ContainerStartup {
                     cm: cm.clone(),

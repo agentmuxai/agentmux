@@ -578,3 +578,56 @@ async fn a_slow_container_startup_does_not_hold_up_the_caller_and_a_failed_one_e
     assert_eq!(ran.load(std::sync::atomic::Ordering::SeqCst), 1, "the start-up ran once, in the turn's task");
     assert_eq!(container_turn_status(&ctrl).await, (STATUS_DONE.to_string(), 1), "the turn ended as failed");
 }
+
+/// A stop while the container is still starting must end the turn then, and
+/// cancel the start-up (dropping it cancels the image download), not wait for
+/// the download to finish.
+#[tokio::test]
+async fn a_stop_during_container_startup_cancels_it_and_ends_the_turn() {
+    struct DropFlag(std::sync::Arc<std::sync::atomic::AtomicBool>);
+    impl Drop for DropFlag {
+        fn drop(&mut self) {
+            self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+    let Ok(cm) = crate::backend::container::ContainerManager::connect() else {
+        eprintln!("no Docker client on this machine: skipped");
+        return;
+    };
+    let ctrl = std::sync::Arc::new(SubprocessController::new(
+        "tab-1".to_string(),
+        "block-startup-stop".to_string(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        std::sync::Arc::from("test-boot"),
+    ));
+    ctrl.set_self_ref();
+    let cancelled = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let in_step = cancelled.clone();
+    ctrl.set_container_startup(std::sync::Arc::new(move || {
+        let flag = DropFlag(in_step.clone());
+        Box::pin(async move {
+            let _flag = flag;
+            tokio::time::sleep(std::time::Duration::from_secs(600)).await;
+            Ok(())
+        })
+    }));
+    ctrl.spawn_container_turn(cm, "agentmux-test-startup-stop".to_string(), vec!["claude".to_string()], container_config())
+        .expect("the turn is accepted");
+    tokio::task::yield_now().await;
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    assert_eq!(container_turn_status(&ctrl).await.0, crate::backend::blockcontroller::STATUS_RUNNING);
+
+    ctrl.stop_subprocess(false).expect("the stop is accepted");
+    for _ in 0..100 {
+        if container_turn_status(&ctrl).await.0 == STATUS_DONE {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert_eq!(container_turn_status(&ctrl).await.0, STATUS_DONE, "the stop ended the turn during start-up");
+    assert!(cancelled.load(std::sync::atomic::Ordering::SeqCst), "the start-up was dropped, which cancels the download");
+}
