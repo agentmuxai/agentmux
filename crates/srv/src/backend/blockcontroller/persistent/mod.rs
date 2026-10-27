@@ -66,7 +66,7 @@ pub const BLOCK_CONTROLLER_PERSISTENT: &str = "persistent";
 /// so that `is_held_elsewhere_error` is checked against the same text
 /// `spawn_process` actually returns, rather than a second copy that could
 /// drift; `tests/reopen_guard.rs` pins the wording users see.
-pub(super) fn held_elsewhere_error(other: &str, closing: bool) -> String {
+pub(crate) fn held_elsewhere_error(other: &str, closing: bool) -> String {
     if closing {
         format!("This conversation's previous process (block {other}) is still shutting down. Try again in a few seconds.")
     } else {
@@ -82,7 +82,7 @@ pub(super) fn held_elsewhere_error(other: &str, closing: bool) -> String {
 /// it silently hands the user's accepted prompt to a new conversation
 /// while the real one is open next door — exactly what the guard exists to
 /// prevent (codex P1 on PR #3551).
-pub(super) fn is_held_elsewhere_error(err: &str) -> bool {
+pub(crate) fn is_held_elsewhere_error(err: &str) -> bool {
     err.starts_with("This conversation's previous process (block ")
         || err.starts_with("This conversation is already open in another pane (block ")
 }
@@ -1253,18 +1253,6 @@ impl PersistentSubprocessController {
         Ok(Some(Arc::new(held)))
     }
 
-    /// The early admission check (spec I9) for this controller's agent:
-    /// refuses while another instance holds it. Runs before any shared write.
-    pub(crate) async fn check_admission(&self, uid: &str, agent: &str) -> Result<(), String> {
-        crate::backend::agent_admission::check_before_spawn(
-            self.lease_store.clone(),
-            uid,
-            agent,
-            &self.boot_id,
-        )
-        .await
-    }
-
     /// The pre-turn fence (spec I4): `Err` if this pane's CLI process lost
     /// its lease to another instance. Also stops that process, so it cannot
     /// keep driving the agent. `Ok` when no lease is held (nothing spawned
@@ -1656,7 +1644,7 @@ mod eager_resume;
 mod input;
 #[cfg(test)]
 use input::park_tool_permission_request;
-mod lifecycle;
+pub(crate) mod lifecycle;
 pub(crate) mod outcome_line;
 mod process_waiter;
 mod queue;

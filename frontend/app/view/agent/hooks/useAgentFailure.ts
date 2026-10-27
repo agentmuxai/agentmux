@@ -55,6 +55,7 @@ import type { AgentPaneModel } from "@/app/store/agent-pane-model";
 import type { PaneFailure } from "@/app/store/agent-pane-state/types";
 import type { FailedTurnRecovery } from "../offline/failed-turn";
 import { failureToRow, isTransient, type FailureRow } from "../failure/failure-accessory";
+import { refusedSendOf } from "../failure/refused-send";
 import { registerRecycleBlocker } from "@/app/store/recycle-blockers";
 import { copyErrorReport } from "@/app/errors/CopyErrorButton";
 import { formatErrorReport } from "@/app/errors/error-report";
@@ -154,6 +155,10 @@ export interface UseAgentFailureOptions {
      * no Take over. Spec: SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24.md §4.6.
      */
     onTakeOver?: (turnAttempted: boolean) => Promise<void>;
+    /** `open_in_other_pane`: focus the pane that holds the agent. */
+    onGoThere?: (holderBlockId: string) => void;
+    /** `open_in_other_pane`: stop the holder pane and run the agent here, sending the refused message. */
+    onMoveHere?: () => Promise<void>;
     /** The pane's failed-turn recovery (offline/failed-turn.ts): a failure
      *  it waits on gets no timed retry, its Retry goes there, and the row's
      *  meta says what happens once the API is back. */
@@ -380,9 +385,10 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
         selfInitiatedClear = false;
     });
 
-    // First click arms, the second (within TAKEOVER_CONFIRM_MS) takes over.
-    const takeOver = (turnAttempted: boolean) => {
-        if (takingOver() || !opts.onTakeOver) return;
+    // First click arms, the second (within TAKEOVER_CONFIRM_MS) runs `run`: both Take over and Move here stop
+    // the agent where it is running, so neither fires on one click.
+    const confirmed = (run: () => Promise<void>, failedTitle: string) => {
+        if (takingOver()) return;
         if (!takeoverArmed()) {
             setTakeoverArmed(true);
             disarmTimer = setTimeout(disarmTakeover, TAKEOVER_CONFIRM_MS);
@@ -390,7 +396,7 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
         }
         disarmTakeover();
         setTakingOver(true);
-        opts.onTakeOver(turnAttempted).then(
+        run().then(
             () => {
                 setTakingOver(false);
                 endEpisode();
@@ -399,18 +405,26 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
                 setTakingOver(false);
                 const pf = opts.failure();
                 if (!pf) return;
-                // Keep the row, but say why the takeover failed.
+                // Keep the row, but say why it failed.
                 opts.model.dispatchPane({
                     type: "FailureObserved",
                     failure: {
                         ...pf.data,
-                        title: "Could not take over",
+                        title: failedTitle,
                         detail: err instanceof Error ? err.message : String(err),
                     },
                     at: Date.now(),
                 });
             },
         );
+    };
+    const takeOver = (turnAttempted: boolean) => {
+        const onTakeOver = opts.onTakeOver;
+        if (onTakeOver) confirmed(() => onTakeOver(turnAttempted), "Could not take over");
+    };
+    const moveHere = () => {
+        const onMoveHere = opts.onMoveHere;
+        if (onMoveHere) confirmed(onMoveHere, "Could not move it here");
     };
 
     const row = (): FailureRow | null => {
@@ -431,6 +445,7 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
                 takingOver: takingOver(),
                 copyState: copyState(),
                 reconnectHint: opts.reconnect?.reconnectHint() ?? null,
+                notSent: f.code === "open_in_other_pane" ? refusedSendOf(opts.blockId)?.text : undefined,
             },
             {
                 retry: doRetry,
@@ -460,6 +475,8 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
                     endEpisode();
                 },
                 takeOver: opts.onTakeOver ? () => takeOver(pf.turnAttempted ?? true) : undefined,
+                goThere: opts.onGoThere && f.holderBlockId ? () => opts.onGoThere!(f.holderBlockId!) : undefined,
+                moveHere: opts.onMoveHere ? moveHere : undefined,
             },
         );
     };

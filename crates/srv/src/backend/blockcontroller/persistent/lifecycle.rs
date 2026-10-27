@@ -50,14 +50,7 @@ impl PersistentSubprocessController {
     /// a stale id refused because the agent's live pane holds the lease is
     /// still "open in another pane", not "another instance" (Camper on #3935).
     pub(super) fn agent_held_by_other_pane(&self, uid: &str) -> Option<String> {
-        super::super::get_all_controllers().into_iter().find_map(|(block_id, ctrl)| {
-            if block_id == self.block_id {
-                return None;
-            }
-            let other = ctrl.as_any().downcast_ref::<PersistentSubprocessController>()?;
-            let holds = other.inner.lock().unwrap().agent_lease.as_ref().is_some_and(|l| l.agent_uid() == uid);
-            holds.then_some(block_id)
-        })
+        local_holder_of(uid, &self.block_id)
     }
 
     pub(super) fn request_stop(&self, request: KillRequest) -> Result<(), String> {
@@ -479,5 +472,53 @@ impl PersistentSubprocessController {
         };
         let joined = self.note_into_turn_or_hold("mcp-down", &text);
         handler.audit_system_note(&target, &self.block_id, &text, joined);
+    }
+}
+
+/// The pane of this process, other than `except`, whose CLI process holds agent `uid`'s
+/// single-live-instance lease: its block id.
+pub(crate) fn local_holder_of(uid: &str, except: &str) -> Option<String> {
+    super::super::get_all_controllers().into_iter().find_map(|(block_id, ctrl)| {
+        if block_id == except {
+            return None;
+        }
+        let other = ctrl.as_any().downcast_ref::<PersistentSubprocessController>()?;
+        let holds = other.inner.lock().unwrap().agent_lease.as_ref().is_some_and(|l| l.agent_uid() == uid);
+        holds.then_some(block_id)
+    })
+}
+
+impl PersistentSubprocessController {
+    /// The early admission check (spec I9) for this controller's agent:
+    /// refuses while another pane of this process or another instance holds it.
+    /// Runs before any shared write.
+    pub(crate) async fn check_admission(&self, uid: &str, agent: &str) -> Result<(), String> {
+        // Another pane of this process: the lease store below skips a holder with this srv's boot id,
+        // so it never sees one, and the spawn env's shared writes would run for a doomed spawn.
+        if !uid.is_empty() {
+            if let Some(other) = self.agent_held_by_other_pane(uid) {
+                tracing::warn!(agent, uid, holder_block = %other, "agent_admission.denied (early check): the agent is open in another pane");
+                return Err(super::held_elsewhere_error(&other, false));
+            }
+        }
+        crate::backend::agent_admission::check_before_spawn(self.lease_store.clone(), uid, agent, &self.boot_id).await
+    }
+
+    /// Stop this pane's CLI process gracefully (a turn in flight finishes, then it is killed at
+    /// `deadline`) so another pane of this process can run the agent. `false` when this pane holds
+    /// nothing to release.
+    pub fn release_to_other_pane(&self, deadline: std::time::Instant) -> bool {
+        let kill = {
+            let mut inner = self.inner.lock().unwrap();
+            if inner.agent_lease.is_none() {
+                return false;
+            }
+            inner.kill_tx.take()
+        };
+        tracing::info!(block_id = %self.block_id, "agent_admission.move_here: handing this agent to another pane");
+        match kill {
+            Some(tx) => tx.send(super::KillRequest::Graceful(deadline)).is_ok(),
+            None => false,
+        }
     }
 }

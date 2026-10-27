@@ -16,6 +16,7 @@
  * REPORT_LOGIN_PERSIST_FAILURE_AND_STUCK_WORKING_2026_07_27.md.
  */
 
+import { forgetRefusedSend, refusedSendOf } from "../failure/refused-send";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createRoot } from "solid-js";
 
@@ -132,6 +133,48 @@ describe("useAgentCommands — turnPhase recovery on a failed send", () => {
             expect(paneSnapshot(BLOCK_ID)?.pending).toEqual([]);
             dispose();
         });
+    });
+
+    // The agent is open in another pane: the pane goes back to idle and the refused text is kept, so the
+    // failure row's Move here can send it. The pending bubble is still taken off the conversation.
+    it("keeps the text of a send refused because the agent is open in another pane", async () => {
+        hub.agentInput.mockRejectedValue(
+            new Error("This conversation is already open in another pane (block 96a441d2). Close it there, or switch to it, instead of opening a second copy."),
+        );
+        const model = registerPane(BLOCK_ID, fullRegistration());
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
+        await createRoot(async (dispose) => {
+            const commands = useAgentCommands({
+                blockId: BLOCK_ID,
+                model,
+                block: () => undefined,
+                provider: () => undefined,
+                documentNodes: () => [],
+                log: () => {},
+                setAuthUrl: () => {},
+                canRetry: () => false,
+                loginWaiting: () => false,
+                setAuthNotice: () => {},
+                notifyControllerHealthy: () => {},
+                forceControllerRefresh: async () => true,
+                beginRecoveryFlow: () => {},
+                endRecoveryFlow: () => {},
+                isCancelled: () => false,
+                resetCancelled: () => {},
+                isBackendTurnActive: () => false,
+                isBackendTurnConfirmedIdle: () => true,
+                backToPicker: async () => {},
+            });
+            model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+            await commands.sendMessage("u there", false);
+
+            expect(paneSnapshot(BLOCK_ID)?.turnPhase.kind).toBe("Idle");
+            expect(paneSnapshot(BLOCK_ID)?.pending).toEqual([]);
+            expect(refusedSendOf(BLOCK_ID)).toEqual({ text: "u there", attachments: [] });
+            dispose();
+        });
+        forgetRefusedSend(BLOCK_ID);
     });
 
     it("does NOT reset turnPhase when a held (queued-while-busy) message's flush rejects — a real turn is already in flight", async () => {

@@ -56,6 +56,11 @@ pub enum FailureClass {
     /// process ran here; a Retry is refused identically while the other
     /// instance holds it — the recovery is Take over.
     LiveElsewhere,
+    /// This agent is already open in another pane of this AgentMux, so this
+    /// pane cannot run it. No process ran here; a Retry is refused identically
+    /// while the other pane holds it. The recovery is to go to that pane
+    /// (`AgentFailure::holder_block_id`) or move the agent here.
+    OpenInOtherPane,
 }
 
 /// A classified agent failure: the class, a user-facing title + detail,
@@ -89,6 +94,10 @@ pub struct AgentFailure {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub limit_window: Option<String>,
+    /// For `OpenInOtherPane`: the block of the pane that holds the agent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub holder_block_id: Option<String>,
 }
 
 impl AgentFailure {
@@ -244,6 +253,21 @@ pub fn classify(
             signal,
             &tail,
         );
+    }
+    // Another pane of this AgentMux holds the agent (`held_elsewhere_error`).
+    // Checked before the instance refusal: both can name "another" holder.
+    if let Some(holder) = open_in_other_pane_holder(&combined) {
+        let mut f = build(
+            FailureClass::OpenInOtherPane,
+            "Open in another pane",
+            "This agent is already open in another pane. Go there to keep working in it, or move it here:              the other pane stops and this one resumes the same conversation.",
+            false,
+            exit_code,
+            signal,
+            &tail,
+        );
+        f.holder_block_id = Some(holder);
+        return f;
     }
     // A single-live-instance refusal (backend::agent_admission — our own
     // wording, recognised by the same markers that module uses). Checked
@@ -476,6 +500,7 @@ fn build(
         retryable,
         resets_at_ms: None,
         limit_window: None,
+        holder_block_id: None,
     }
 }
 
@@ -1114,6 +1139,24 @@ mod tests {
         assert_eq!(extract_spawn_gate_provider("some unrelated error text"), None);
     }
 
+    /// The agent is open in another pane of this AgentMux: its own class, with that pane's block,
+    /// and never a Retry (the refusal is identical while the holder runs).
+    #[test]
+    fn open_in_another_pane_is_its_own_class_naming_the_holder() {
+        let msg = "This conversation is already open in another pane (block 96a441d2). Close it there, or switch to it, instead of opening a second copy.";
+        let f = classify(None, None, msg, None);
+        assert_eq!(f.code, FailureClass::OpenInOtherPane);
+        assert_eq!(f.holder_block_id.as_deref(), Some("96a441d2"));
+        assert!(!f.retryable);
+        let framed = classify(None, None, &format!("[AgentMux] {msg}"), None);
+        assert_eq!(framed.holder_block_id.as_deref(), Some("96a441d2"));
+        assert_eq!(serde_json::to_value(FailureClass::OpenInOtherPane).unwrap(), "open_in_other_pane");
+        assert_eq!(serde_json::to_value(&f).unwrap()["holderBlockId"], "96a441d2");
+        // The closing variant is a wait, not a pane to go to.
+        let closing = "This conversation's previous process (block 96a441d2) is still shutting down. Try again in a few seconds.";
+        assert_eq!(classify(None, None, closing, None).holder_block_id, None);
+    }
+
     #[test]
     fn serializes_snake_case_code_camel_fields() {
         let f = classify(Some(1), None, "Rate limited", None);
@@ -1123,6 +1166,16 @@ mod tests {
         assert!(v.get("stderrTail").is_some(), "camelCase stderrTail expected: {v}");
     }
 }
+
+/// The block id in `held_elsewhere_error`'s "already open in another pane (block X)" refusal, when
+/// `text` is that refusal. The wording is ours, built in one place, so this reads it back.
+pub fn open_in_other_pane_holder(text: &str) -> Option<String> {
+    const MARKER: &str = "is already open in another pane (block ";
+    let rest = &text[text.find(MARKER)? + MARKER.len()..];
+    let id = rest[..rest.find(')')?].trim();
+    (!id.is_empty()).then(|| id.to_string())
+}
+
 
 /// The one line of `text` that carries a single-live-instance refusal, with
 /// any `[AgentMux] ` prefix removed — the row's detail. Falls back to the
