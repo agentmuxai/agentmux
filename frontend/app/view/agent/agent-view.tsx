@@ -568,11 +568,7 @@ export const AgentPresentationView = ({
             id: `system_notification_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
             content: `${prefix}${text}`,
         } as import("./types").MarkdownNode;
-        paneModel.dispatchDoc({
-            type: "StreamFlush",
-            newNodes: [node],
-            updatedNodes: [],
-        });
+        paneModel.dispatchDoc({ type: "StreamFlush", newNodes: [node], updatedNodes: [] });
     };
 
     const signIn = createSignInNotice((text, style) => postSystemNotification(text, style));
