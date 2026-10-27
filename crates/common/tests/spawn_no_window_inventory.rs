@@ -142,6 +142,8 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
      "test: the unix-only kill and start-time tests' children"),
     ("crates/common/src/process.rs", "\"sh\"", 4,
      "test: the unix-only group-kill tests' agent stand-ins"),
+    ("crates/common/src/secret_env.rs", "std::env::current_exe(", 1,
+     "test: the unix-only test re-runs the test binary to read its real environment block"),
     ("crates/common/src/agent_roots.rs", "\"sleep\"", 1,
      "test: the unix-only orphan-cleanup test's stand-in CLIs"),
     ("crates/common/src/agent_roots.rs", "\"sh\"", 1,
