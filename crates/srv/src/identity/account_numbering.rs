@@ -107,10 +107,9 @@ pub fn same_email(a: &str, b: &str) -> bool {
 /// context has none and names the same address (or none: the email backfill
 /// settles that on the next list, and drops the number if it really changed).
 pub fn carry_over(stored: &serde_json::Value, incoming: &mut serde_json::Value) {
-    let Some(seq) = stored.get("seq").filter(|n| n.as_u64().is_some_and(|n| n > 0)) else {
-        return;
-    };
-    if incoming.get("seq").is_some_and(|n| n.as_u64().is_some_and(|n| n > 0)) {
+    let positive = |v: Option<&serde_json::Value>| v.and_then(|n| n.as_u64()).filter(|n| *n > 0);
+    let (stored_seq, stored_high) = (positive(stored.get("seq")), positive(stored.get("seqmax")));
+    if stored_seq.is_none() && stored_high.is_none() {
         return;
     }
     if !incoming.is_object() {
@@ -122,9 +121,16 @@ pub fn carry_over(stored: &serde_json::Value, incoming: &mut serde_json::Value) 
         Some(_) => {}
         None => incoming["email"] = serde_json::json!(stored_email),
     }
-    incoming["seq"] = seq.clone();
-    if let Some(high) = stored.get("seqmax") {
-        incoming["seqmax"] = high.clone();
+    if positive(incoming.get("seq")).is_none() {
+        if let Some(seq) = stored_seq {
+            incoming["seq"] = serde_json::json!(seq);
+        }
+    }
+    // The high-water mark only ever rises: a copy of the account from before another
+    // sign-in was numbered and deleted must not lower it.
+    let high = [stored_high, stored_seq, positive(incoming.get("seqmax"))].into_iter().flatten().max();
+    if let Some(high) = high {
+        incoming["seqmax"] = serde_json::json!(high);
     }
 }
 
@@ -142,9 +148,12 @@ pub fn names(a: &IdentityAccount, wanted: &str, all: &[IdentityAccount]) -> bool
     if labels.iter().any(|l| !l.is_empty() && numbered_label(a, l, all) != *l && numbered_label(a, l, all).eq_ignore_ascii_case(&spoken)) {
         return true;
     }
-    // A bare name its group shares names none of them, numbered or not yet: by the
-    // group, not by the number, which an account not listed yet doesn't have.
-    let bare_is_ambiguous = shared && [a.display_name.as_str(), email].iter().any(|l| !l.is_empty() && l.eq_ignore_ascii_case(wanted));
+    // A bare email its group shares, or a display name two accounts carry, names none of
+    // them, numbered or not yet: by the group, not by the number, which an account not
+    // listed yet doesn't have. A display name only one carries still names it.
+    let same_display = |o: &IdentityAccount| !o.display_name.is_empty() && o.display_name.eq_ignore_ascii_case(wanted);
+    let bare_is_ambiguous = (shared && !email.is_empty() && email.eq_ignore_ascii_case(wanted))
+        || (same_display(a) && all.iter().filter(|o| same_display(o)).count() >= 2);
     !bare_is_ambiguous && [a.id.as_str(), a.name.as_str(), a.display_name.as_str(), email].into_iter().any(|l| !l.is_empty() && l.eq_ignore_ascii_case(wanted))
 }
 
@@ -227,6 +236,11 @@ mod tests {
         let mut given = serde_json::json!({ "email": "me@example.com", "seq": 5 });
         carry_over(&stored, &mut given);
         assert_eq!(given["seq"], 5, "an explicit number stands");
+        // A stale copy of an account can't lower the group's high-water mark.
+        let stored = serde_json::json!({ "email": "me@example.com", "seq": 1, "seqmax": 3 });
+        let mut stale = serde_json::json!({ "email": "me@example.com", "seq": 1, "seqmax": 1 });
+        carry_over(&stored, &mut stale);
+        assert_eq!(stale["seqmax"], 3);
     }
 
     #[test]
@@ -254,6 +268,8 @@ mod tests {
         }
         assert!(names(&work[1], "Work \u{b7}2", &work) && !names(&work[0], "Work \u{b7}2", &work));
         assert!(!names(&work[0], "Work", &work) && !names(&work[1], "Work", &work), "a bare shared display name names neither");
+        work[0].display_name = "Personal".into();
+        assert!(names(&work[0], "Personal", &work) && names(&work[1], "Work", &work), "a display name only one carries still names it");
         let lone = [acct("a", "me@example.com", Some(1), 1)];
         assert!(names(&lone[0], "ME@example.com", &lone), "a lone account answers to its email");
     }
