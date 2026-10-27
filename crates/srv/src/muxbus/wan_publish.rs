@@ -263,8 +263,15 @@ pub(crate) async fn publish_pending(
             PublishOutcome::Published => match wan.agent_key_mark_published(agent_id, &key.public_key, directory) {
                 Ok(true) => result.published += 1,
                 // The key changed under us (agent deleted and recreated
-                // mid-PUT); the new key is picked up next pass.
-                Ok(false) => {}
+                // mid-PUT); the new key is picked up next pass. The directory
+                // took the old one all the same, and nothing else knows it
+                // did, so it is retired for this directory now.
+                Ok(false) => {
+                    if let Err(e) = wan.retirement_add(agent_id, &key.public_key, directory, agentmux_common::time::now_secs()) {
+                        tracing::warn!(agent = %agent_id, error = %e, "wan publish: could not retire a key replaced mid-publish");
+                        result.failed += 1;
+                    }
+                }
                 Err(e) => {
                     tracing::warn!(agent = %agent_id, error = %e, "wan publish: could not record publication");
                     result.failed += 1;
@@ -402,6 +409,15 @@ mod tests {
 
     /// As [`stub_directory`], answering `revocation_status` to a key revocation.
     async fn stub_with_revocations(status: axum::http::StatusCode, revocation_status: axum::http::StatusCode) -> Stub {
+        stub_full(status, revocation_status, None).await
+    }
+
+    /// As [`stub_with_revocations`], running `during_put` while a key PUT is in flight.
+    async fn stub_full(
+        status: axum::http::StatusCode,
+        revocation_status: axum::http::StatusCode,
+        during_put: Option<Arc<dyn Fn() + Send + Sync>>,
+    ) -> Stub {
         let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
         let revoked = Arc::new(std::sync::Mutex::new(Vec::new()));
         let (sink, revoked_sink) = (seen.clone(), revoked.clone());
@@ -413,9 +429,13 @@ mod tests {
                           headers: axum::http::HeaderMap,
                           body: axum::Json<serde_json::Value>| {
                         let sink = sink.clone();
+                        let during_put = during_put.clone();
                         async move {
                             let auth = headers.get("authorization").and_then(|v| v.to_str().ok()).map(str::to_string);
                             sink.lock().unwrap().push((agent_id, auth, body.0));
+                            if let Some(hook) = &during_put {
+                                hook();
+                            }
                             (status, "{}")
                         }
                     },
@@ -638,6 +658,33 @@ mod tests {
         assert!(result.failed >= 1);
         assert_eq!(wan.retirements_pending(DIR).unwrap().len(), 1, "still owed to the directory");
         assert!(wan.revoked_key_exists(&instance.instance_id, "camper", "stable", &old_fp).unwrap());
+    }
+
+    #[tokio::test]
+    async fn a_key_replaced_while_its_first_publish_is_in_flight_is_still_revoked() {
+        let (_dir, wan, instance) = temp_wan();
+        let wan = Arc::new(wan);
+        let first = wan.agent_key_ensure("camper", None).unwrap();
+        let sent_fp = agentmux_common::jekt_sign::wan_key_fingerprint(&first.public_key_bytes().unwrap());
+        // The agent is deleted after the directory has the PUT, before the
+        // publisher can record it.
+        let hook_wan = wan.clone();
+        let hook: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
+            hook_wan.agent_keys_delete(&["camper".to_string()]).unwrap();
+        });
+        let stub = stub_full(axum::http::StatusCode::OK, axum::http::StatusCode::OK, Some(hook)).await;
+
+        let pass = publish_pending(&wan, &instance, "stable", &stub.url, &reqwest::Client::new(), "tok", DIR).await;
+        assert_eq!(pass.published, 0, "the key it published is gone, so nothing counts as published");
+        let owed = wan.retirements_pending(DIR).unwrap();
+        assert_eq!(owed.len(), 1, "the directory holds a key that must be retired");
+        assert_eq!(owed[0].key_fp, sent_fp);
+
+        let next = publish_pending(&wan, &instance, "stable", &stub.url, &reqwest::Client::new(), "tok", DIR).await;
+        assert_eq!(next.revoked, 1);
+        let sent = stub.revoked.lock().unwrap().clone();
+        let revocation: WanKeyRevocation = serde_json::from_value(sent[0].2.clone()).unwrap();
+        assert!(revocation.verify() && revocation.names(&instance.instance_id, "camper", "stable", &sent_fp));
     }
 
     #[tokio::test]

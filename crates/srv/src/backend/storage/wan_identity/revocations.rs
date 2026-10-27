@@ -55,6 +55,21 @@ impl WanIdentityStore {
         Ok(())
     }
 
+    /// `directory` accepted `public_key` for `agent_id`, but the key was
+    /// replaced or removed while the publish was in flight, so no publication
+    /// could be recorded and [`Self::retire_agent_key_locked`] found none. The
+    /// directory holds a key nothing else knows it holds: write the retirement
+    /// now. `Ok(false)` for a malformed key.
+    pub fn retirement_add(&self, agent_id: &str, public_key: &str, directory: &str, now: i64) -> Result<bool, StoreError> {
+        let Some(public) = decode_32(public_key) else { return Ok(false) };
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        conn.execute(
+            "INSERT OR IGNORE INTO wan_key_retirements (agent_id, key_fp, directory, retired_at) VALUES (?1, ?2, ?3, ?4)",
+            params![agent_id.to_lowercase(), wan_key_fingerprint(&public), directory, now],
+        )?;
+        Ok(true)
+    }
+
     /// The keys `directory` has not yet been told were retired.
     pub fn retirements_pending(&self, directory: &str) -> Result<Vec<Retirement>, StoreError> {
         let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
@@ -209,6 +224,22 @@ mod tests {
             assert!(pending[0].retired_at > 0);
         }
         assert!(store.retirements_pending("https://relay#nobody").unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_key_the_directory_took_after_it_was_replaced_is_retired_for_it() {
+        let (_dir, store) = temp_store();
+        let key = store.agent_key_ensure("camper", None).unwrap();
+        let fp = fingerprint(&store, "camper");
+        store.agent_keys_delete(&["camper".to_string()]).unwrap();
+        assert!(store.retirements_pending(DIR).unwrap().is_empty(), "nothing was confirmed yet");
+
+        assert!(store.retirement_add("Camper", &key.public_key, DIR, 7).unwrap());
+        assert!(store.retirement_add("camper", &key.public_key, DIR, 8).unwrap(), "twice is once");
+        let pending = store.retirements_pending(DIR).unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!((pending[0].key_fp.as_str(), pending[0].retired_at), (fp.as_str(), 7));
+        assert!(!store.retirement_add("camper", "not a key", DIR, 9).unwrap());
     }
 
     #[test]
