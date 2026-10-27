@@ -156,7 +156,47 @@ pub(crate) fn plan_seats(
             crate::backend::agent_seat::no_cycle(&p.agent_id, lead, lead_of)?;
         }
     }
+    one_super_agent(mstore, defs, &mut planned, refuse)?;
     Ok(planned)
+}
+
+/// At most one agent holds the `super` seat: naming a second one moves it. The
+/// agent that held it goes back to the role it had (`prior_role`, else
+/// worker), keeping its qualifier, lead and area. An agent made super
+/// remembers the role it had.
+fn one_super_agent(mstore: &Store, defs: &[AgentDefinition], planned: &mut Vec<PlannedSeat>, refuse: &str) -> Result<(), String> {
+    use crate::backend::agent_seat::{super_holder, SUPER_ROLE};
+    let is_super = |p: &PlannedSeat| p.seat.as_ref().is_some_and(|s| s.role == SUPER_ROLE);
+    let mut new_supers = planned.iter().filter(|p| is_super(p));
+    let Some(new_super) = new_supers.next().map(|p| p.agent_id.clone()) else {
+        return Ok(());
+    };
+    if new_supers.next().is_some() {
+        return Err(format!("{refuse}only one agent can be the super agent"));
+    }
+    for p in planned.iter_mut().filter(|p| is_super(p)) {
+        let was = mstore.agent_seat_get(&p.agent_id);
+        let seat = p.seat.as_mut().expect("a super seat");
+        seat.prior_role = match was {
+            Some(w) if w.role == SUPER_ROLE => w.prior_role,
+            Some(w) => Some(w.role),
+            None => None,
+        };
+    }
+    let Some(holder) = super_holder(mstore, defs).filter(|h| *h != new_super) else {
+        return Ok(());
+    };
+    // The holder may be in the same call, set to something else: that stands.
+    if planned.iter().any(|p| p.agent_id == holder) {
+        return Ok(());
+    }
+    let (Some(def), Some(mut seat)) = (defs.iter().find(|d| d.id == holder), mstore.agent_seat_get(&holder)) else {
+        return Ok(());
+    };
+    seat.role = seat.prior_role.take().filter(|r| crate::backend::agent_seat::is_role(r) && r != SUPER_ROLE).unwrap_or_else(|| "worker".to_string());
+    seat.set_at_ms = agentmux_common::time::now_ms();
+    planned.push(PlannedSeat { agent_id: holder, name: def.name.clone(), slug: def.slug.clone(), seat: Some(seat) });
+    Ok(())
 }
 
 /// Write planned seats and log each as an identity change by `actor`. The

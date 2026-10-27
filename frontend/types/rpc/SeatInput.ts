@@ -6,9 +6,9 @@
  */
 export type SeatInput = { 
 /**
- * One of `leader`, `worker`, `specialist`, `platform_tester`, `analyst`.
+ * One of `leader`, `worker`, `specialist`, `platform_tester`, `analyst`, `super`.
  */
-role: "leader" | "worker" | "specialist" | "platform_tester" | "analyst", 
+role: "leader" | "worker" | "specialist" | "platform_tester" | "analyst" | "super", 
 /**
  * At most 40 characters; blank means none.
  */

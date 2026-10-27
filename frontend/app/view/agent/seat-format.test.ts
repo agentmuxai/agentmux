@@ -29,6 +29,7 @@ describe("seat-format", () => {
         expect(seatBadgeText(leader)).toBe("Leader · product");
         expect(seatBadgeText(worker)).toBe("Worker");
         expect(roleLabel("platform_tester")).toBe("Platform tester");
+        expect(roleLabel("super")).toBe("Super agent");
         expect(roleLabel("captain")).toBe("captain");
     });
 
