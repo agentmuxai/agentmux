@@ -125,7 +125,8 @@ pub fn restore() -> bool {
 /// injecting a thread, duplicating handles out of the process and attaching a debugger. After
 /// [`harden`] the user keeps what the tools that watch and stop a process need (its existence,
 /// times, working set and command line; waiting for it; ending it; putting it in a job), and
-/// loses reading and writing its memory, threads, handles and the right to rewrite the list.
+/// loses reading and writing its memory, creating threads in it, duplicating its handles and the
+/// right to rewrite the list. This is the process object's list only.
 ///
 /// A handle opened before the change keeps the rights it was opened with. That is what lets the
 /// launcher, which holds the handles `CreateProcess` gave it for srv and the host, still wait

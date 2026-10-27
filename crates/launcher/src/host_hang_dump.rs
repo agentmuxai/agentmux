@@ -113,7 +113,7 @@ pub fn close_copy(handle: usize) {
 /// What a snapshot of the host keeps for the dump: its memory (cloned), handles with their names,
 /// threads and their registers.
 #[cfg(target_os = "windows")]
-const SNAPSHOT_CAPTURE: u32 = 0x1 | 0x4 | 0x8 | 0x20 | 0x80 | 0x100;
+const SNAPSHOT_CAPTURE: u32 = 0x1 | 0x4 | 0x8 | 0x10 | 0x20 | 0x80 | 0x100;
 
 #[cfg(all(target_os = "windows", target_arch = "aarch64"))]
 const THREAD_CONTEXT_ALL: u32 = windows_sys::Win32::System::Diagnostics::Debug::CONTEXT_ALL_ARM64;
@@ -385,6 +385,12 @@ mod tests {
         let path = by_handle.unwrap_or_else(|e| panic!("dump written through the held handle: {e}"));
         let bytes = std::fs::read(&path).unwrap();
         assert_eq!(&bytes[..4], b"MDMP", "minidump signature");
+        // Same streams as the dump taken by pid: thread stacks and the handle table survive the snapshot.
+        let u32_at = |o: usize| u32::from_le_bytes(bytes[o..o + 4].try_into().unwrap());
+        let (n, stream_dir) = (u32_at(8) as usize, u32_at(12) as usize);
+        let types: Vec<u32> = (0..n).map(|i| u32_at(stream_dir + 12 * i)).collect();
+        assert!(types.contains(&3), "thread stacks: {types:?}");
+        assert!(types.contains(&12), "handle data: {types:?}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
