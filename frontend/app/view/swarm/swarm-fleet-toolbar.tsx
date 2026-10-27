@@ -67,7 +67,6 @@ export function FleetToolbar(props: {
     });
     const split = (action: FleetAction) => partitionTargets([...selected()], action, known());
     const reachable = (action: FleetAction) => split(action).reachable.length;
-    // Why "N selected" and "send to M" differ, when they do (spec §2.2).
     const plural = (n: number) => `agent${n === 1 ? "" : "s"}`;
 
     const [stopConfirmOpen, setStopConfirmOpen] = createSignal(false);
