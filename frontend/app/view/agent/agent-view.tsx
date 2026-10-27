@@ -2,6 +2,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { createSignInNotice } from "./sign-in-notice";
 import type { AttachmentRef } from "@/types/rpc/AttachmentRef";
 import {
     snapshot as layoutSnapshot,
@@ -567,22 +568,20 @@ export const AgentPresentationView = ({
             id: `system_notification_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
             content: `${prefix}${text}`,
         } as import("./types").MarkdownNode;
-        paneModel.dispatchDoc({
-            type: "StreamFlush",
-            newNodes: [node],
-            updatedNodes: [],
-        });
+        paneModel.dispatchDoc({ type: "StreamFlush", newNodes: [node], updatedNodes: [] });
     };
 
+    const signIn = createSignInNotice((text, style) => postSystemNotification(text, style));
     const status = useAgentControllerStatus({
         blockId: model.blockId,
         provider,
         log,
         onLoginSuccess: (email) => {
-            const display = email ? `Logged in as **${email}**` : "Login successful";
-            postSystemNotification(display, "success");
+            signIn.answered();
+            postSystemNotification(email ? `Logged in as **${email}**` : "Login successful", "success");
         },
-        onNotify: (text, style) => postSystemNotification(text, style),
+        onNotify: (text, style, kind) => { signIn.seen(kind); postSystemNotification(text, style); },
+        onAccountBound: signIn.bound,
         onReady: () => onReadyFn?.(),
         // A successful recovery (relogin / terminal login) refreshed
         // the credential — retry the failed turn so the agent recovers in one
