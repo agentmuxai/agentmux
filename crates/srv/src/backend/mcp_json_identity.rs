@@ -183,6 +183,31 @@ fn names_missing_a_key(content: &str, slug: &str) -> bool {
         && (env.get("AGENTMUX_JEKT_KEY").is_none() || env.get("AGENTMUX_LAN_KEY").is_none())
 }
 
+/// `agent_open`'s generated `.mcp.json`: the agent's signing keys, except for a container agent, which
+/// gets none (its workspace is mounted into the container) and has any an earlier launch wrote taken out.
+pub(crate) fn keys_for_agent_open(
+    content: &mut String,
+    mstore: &crate::backend::storage::store::Store,
+    agent_slug: &str,
+    agent: &crate::backend::storage::agents::AgentDefinition,
+) {
+    if agent.agent_type == "container" {
+        if let Some(stripped) = strip_signing_keys(content) {
+            *content = stripped;
+        }
+        return;
+    }
+    crate::server::agent_self_keys::record_config_id_drift("m4d.config_id_drift.agent_open", agent_slug, Some(&agent.slug));
+    match crate::backend::agent_config::inject_jekt_signing_keys_into_mcp_json(content, mstore, agent_slug) {
+        Some(rewritten) => *content = rewritten,
+        None => tracing::warn!(
+            agent_id = %agent.id,
+            "agent_open: jekt/LAN signing keys not injected into .mcp.json — this agent's jekts will render \
+             TRUST=self-declared / TRUST=network-claimed instead of verified"
+        ),
+    }
+}
+
 /// A launch's generated `.mcp.json` (`writeagentconfig`): named for the definition's agent id, and,
 /// when `hands_out_keys`, carrying that agent's host-tier and LAN-tier signing keys.
 ///
@@ -393,6 +418,19 @@ mod tests {
         let v: Value = serde_json::from_str(&written).unwrap();
         assert!(v.pointer("/mcpServers/agentmux/env/AGENTMUX_JEKT_KEY").is_some());
         assert!(v.pointer("/mcpServers/agentmux/env/AGENTMUX_LAN_KEY").is_some());
+    }
+
+    /// `agent_open` writes the same file: none for a container agent, its own for a host agent.
+    #[test]
+    fn an_agent_open_writes_no_signing_key_for_a_container_agent() {
+        let store = crate::backend::storage::store::Store::open_in_memory().unwrap();
+        for (agent_type, keyed) in [("container", false), ("host", true)] {
+            let (id, slug) = agent_of_type(&store, agent_type);
+            let agent = store.agent_def_get(&id).unwrap().unwrap();
+            let mut content = mcp(&slug);
+            keys_for_agent_open(&mut content, &store, &slug, &agent);
+            assert_eq!(!holds_no_key(&content), keyed, "{agent_type}: {content}");
+        }
     }
 
     /// No lock, no rewrite: a `.claude` that is a file makes the lock
