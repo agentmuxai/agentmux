@@ -17,6 +17,7 @@
 //! Independence boundary: this module has no dependency on a5af/claw.
 //! Docker best practices here were researched independently.
 
+mod drift;
 mod mounts;
 mod pull;
 mod reap;
@@ -84,8 +85,7 @@ pub struct ContainerMountSpec {
     /// [`CONTAINER_WORKSPACE_DIR`]. `None`/empty leaves `/workspace` empty, which
     /// is what shipped before this existed.
     pub workspace_host_dir: Option<String>,
-    /// The agent's Personal Memory folder on the host, bind-mounted where Claude in the
-    /// container reads memory ([`mounts::container_memory_dir`]); `None` mounts nothing.
+    /// The agent's Personal Memory folder on the host, bind-mounted where Claude reads memory in the container.
     pub memory_host_dir: Option<String>,
 }
 

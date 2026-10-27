@@ -30,6 +30,7 @@ import { UserMessageBlock } from "../components/UserMessageBlock";
 import { useNodePeek } from "../hooks/useNodePeek";
 import { historyLinkLabel } from "../live-feed";
 import { cliNoticeText } from "../cli-notice";
+import { ContainerUpdateButton } from "../components/ContainerUpdateButton";
 import type { ContextDeliveryNode, DocumentNode, DocumentState, HistoryLinkNode, ShellNode, UserMessageNode } from "../types";
 import { markRowMount } from "./perf-probe";
 import { estimateTokenCount, formatCompactNumber } from "@/util/format-count";
@@ -737,6 +738,9 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                             </div>
                             <Show when={text().detail}>
                                 <div class="agent-cli-notice-detail">{text().detail}</div>
+                            </Show>
+                            <Show when={node().kind === "container_image" && node().imageState === "outdated" && node().blockId}>
+                                <ContainerUpdateButton blockId={node().blockId!} />
                             </Show>
                         </div>
                     );

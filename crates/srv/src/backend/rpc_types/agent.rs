@@ -1007,6 +1007,21 @@ pub struct ContainerRuntimeAvailableResult {
     pub detail: Option<String>,
 }
 
+/// Request for `updatecontainer`: remove a container agent's container so its next message
+/// starts it from the current agent image. Refused while a turn is running.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandUpdateContainerData {
+    pub block_id: String,
+}
+
+/// Result of `updatecontainer`: the agent image version the next start uses.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct UpdateContainerResult {
+    pub image_version: String,
+}
+
 /// Request for `containerimagecheck`. An empty `image` means the default image.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]

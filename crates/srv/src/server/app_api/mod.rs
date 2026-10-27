@@ -43,6 +43,7 @@ pub(crate) mod agent_context;
 pub(crate) mod agent_env;
 pub(crate) mod agent_io;
 mod agent_define;
+pub(crate) mod container_update;
 /// Re-exported so the human-facing creation/edit RPC handlers
 /// (`server::agent_handlers::template`/`core`) can reuse the same
 /// vendor-base-url validation `agent.define` already uses, instead of
