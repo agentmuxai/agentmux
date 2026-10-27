@@ -74,7 +74,14 @@ pub(crate) fn parse_proxy(address: &str) -> Result<Proxy, String> {
         Some(p) if !p.is_empty() => p.parse::<u16>().map_err(|_| BAD.to_string())?,
         _ => 80,
     };
-    let authorization = userinfo.map(|u| format!("Basic {}", base64::engine::general_purpose::STANDARD.encode(percent_decode(u))));
+    let authorization = userinfo.map(|u| {
+        // Basic is `user:password`, with the colon even when the password is empty.
+        let mut pair = percent_decode(u);
+        if !pair.contains(&b':') {
+            pair.push(b':');
+        }
+        format!("Basic {}", base64::engine::general_purpose::STANDARD.encode(pair))
+    });
     Ok(Proxy { host: host.to_string(), port, authorization })
 }
 

@@ -32,6 +32,11 @@ fn credentials_in_the_proxy_address_are_percent_decoded_before_they_are_sent() {
     let basic = |raw: &str| format!("Basic {}", base64::engine::general_purpose::STANDARD.encode(raw));
     let p = parse_proxy("http://user:p%40ss%3Aword@proxy.corp:8080").unwrap();
     assert_eq!(p.authorization.as_deref(), Some(basic("user:p@ss:word").as_str()));
+    // a user with no password still sends the colon
+    let p = parse_proxy("http://alice@proxy.corp:8080").unwrap();
+    assert_eq!(p.authorization.as_deref(), Some(basic("alice:").as_str()));
+    let p = parse_proxy("http://alice:@proxy.corp:8080").unwrap();
+    assert_eq!(p.authorization.as_deref(), Some(basic("alice:").as_str()));
     // not an escape: left as written
     let p = parse_proxy("http://user:100%@proxy.corp").unwrap();
     assert_eq!(p.authorization.as_deref(), Some(basic("user:100%").as_str()));
