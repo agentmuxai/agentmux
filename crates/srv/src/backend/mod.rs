@@ -17,6 +17,7 @@ pub mod name_resolution;
 pub mod identity_spawn;
 pub mod agent_session;
 pub mod blockcontroller;
+pub mod cli_native;
 pub mod bookmarks_store;
 pub mod browser_profiles_store;
 pub mod layout_file;

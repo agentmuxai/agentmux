@@ -193,7 +193,9 @@ impl PersistentSubprocessController {
                 let is_current_generation = inner.spawn_generation == my_generation_wait;
                 if is_current_generation {
                     inner.proc_exit_code = exit_code;
-                    inner.current_pid = None;
+                    if let Some(ended) = inner.current_pid.take() {
+                        crate::backend::cli_native::pids::clear(&block_id_wait, ended);
+                    }
                     inner.stdin_tx = None;
                     inner.kill_tx = None;
                     // This process no longer drives the agent: release
@@ -578,7 +580,9 @@ impl PersistentSubprocessController {
                 let is_current_generation = inner.spawn_generation == my_generation_wait;
                 if is_current_generation {
                     inner.proc_exit_code = -1;
-                    inner.current_pid = None;
+                    if let Some(ended) = inner.current_pid.take() {
+                        crate::backend::cli_native::pids::clear(&block_id_wait, ended);
+                    }
                     inner.stdin_tx = None;
                     inner.kill_tx = None;
                     // This process no longer drives the agent: release
