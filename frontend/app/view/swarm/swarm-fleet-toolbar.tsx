@@ -259,10 +259,12 @@ const FLEET_ACTION_TITLES: Record<FleetResultEntry["action"], string> = {
 
 /** `quietWhenClean`: show a result only when something failed, for a section that already lists
  *  what it sent (the Broadcast dock's recent list). */
-export function FleetResultPanel({ model, quietWhenClean = false }: { model: SwarmViewModel; quietWhenClean?: boolean }): JSX.Element {
+export function FleetResultPanel(props: { model: SwarmViewModel; quietWhenClean?: boolean }): JSX.Element {
+    const model = props.model;
+    // `quietWhenClean` follows the section while this stays mounted, so it is read through `props`.
     const entry = () => {
         const e = model.lastFleetResultAtom();
-        if (!e || !quietWhenClean) return e;
+        if (!e || !props.quietWhenClean) return e;
         return e.result.failed.length > 0 || e.result.aborted_early ? e : null;
     };
 
