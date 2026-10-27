@@ -212,6 +212,7 @@ const REPLACED: &[(&str, &str)] = &[
     ("PresetGet", "Identity with action \"preset\""),
     ("IdentityAccounts", "Identity with action \"accounts\""),
     ("IdentityValidate", "Identity with action \"validate\""),
+    ("IdentitySwitch", "Identity with action \"switch\""),
     ("DiscoverAgents", "Agents with action \"list\""),
     ("FleetList", "Agents with action \"list\""),
     ("ListConversations", "Agents with action \"conversations\""),

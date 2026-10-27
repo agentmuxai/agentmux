@@ -528,23 +528,26 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         let agent_provider = obj::meta_get_string(&block.meta, "agentProvider", "claude");
 
                         // Start the container and make sure the provider CLI is
-                        // installed in it; a failure is written to the pane first.
-                        crate::server::agent_handlers::container_turn::prepare(
-                            crate::server::agent_handlers::container_turn::ContainerTurnPrep {
-                                cm: &cm,
-                                block_id: &cmd.block_id,
-                                container_name: &container_name,
-                                image: &container_image,
-                                volumes: &volumes,
-                                mount_spec: &mount_spec,
-                                provider_id: &agent_provider,
-                                container_command: &container_command,
-                                broker: &broker,
-                                filestore: &filestore,
-                                mstore: &mstore,
-                            },
-                        )
-                        .await?;
+                        // installed in it, at the start of the turn's own task
+                        // (see the `agentinput` path); a failure is written to the
+                        // pane.
+                        subprocess_ctrl.set_container_startup(
+                            crate::server::agent_handlers::container_turn::startup_step(
+                                crate::server::agent_handlers::container_turn::ContainerStartup {
+                                    cm: cm.clone(),
+                                    block_id: cmd.block_id.clone(),
+                                    container_name: container_name.clone(),
+                                    image: container_image.clone(),
+                                    volumes: volumes.clone(),
+                                    mount_spec: mount_spec.clone(),
+                                    provider_id: agent_provider.clone(),
+                                    container_command: container_command.clone(),
+                                    broker: broker.clone(),
+                                    filestore: filestore.clone(),
+                                    mstore: mstore.clone(),
+                                },
+                            ),
+                        );
 
 
                         tracing::info!(

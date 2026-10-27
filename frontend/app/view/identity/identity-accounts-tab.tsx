@@ -17,7 +17,7 @@ import type { AgentIdentityLink } from "@/types/rpc/AgentIdentityLink";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { brandForProvider, isCliOAuthProvider } from "@/app/view/accounts/provider-brand";
 import { ContextMenuModel } from "@/app/store/contextmenu";
-import { agentsUsingAccount, linksRevision, unbindAccountFromAgent, type AccountAgent } from "./account-agents";
+import { agentsUsingAccount, linksRevision, type AccountAgent } from "./account-agents";
 import { buildAccountRowMenu } from "./bind-to-agent-menu";
 import { ConfirmModal } from "@/app/element/confirm-modal";
 import "./identity-view.scss";
@@ -43,35 +43,13 @@ const STATUS_DOT: Record<string, string> = {
 
 export function AccountsTab({ model }: { model: IdentityViewModel }): JSX.Element {
     const groups = () => model.accountsByProvider();
-    const [agents] = useAgentDefinitions();
 
-    // Right-click an account row → "Bind to Agent" submenu, Copy account ID
-    // (SPEC_ARMORY_BIND_TO_AGENT_CONTEXT_MENU_2026_08_09.md) and Delete
-    // account… (SPEC_ARMORY_ACCOUNTS_DELETE_AND_INLINE_DETAIL_2026_10_04.md
-    // §3.1). Menu contents are computed fresh per open (links + open-pane
-    // snapshot), so the binding annotations are current without any
-    // subscription here. The account list itself re-renders via the shared
-    // cache's live sync (identityaccounts:changed → #2474) after a bind.
-    // Latest-right-click-wins: buildAccountRowMenu awaits an RPC, so a
-    // second right-click on a different row before the first resolves could
-    // otherwise let the earlier request's menu win the race and open for
-    // the wrong account (reagentx P2 on #2485).
-    let menuSeq = 0;
+    // Right-click an account row → Copy account ID and Delete account…
+    // (SPEC_ARMORY_ACCOUNTS_DELETE_AND_INLINE_DETAIL_2026_10_04.md §3.1).
     const handleRowContextMenu = (account: Account, e: MouseEvent) => {
         e.preventDefault();
         e.stopPropagation();
-        const seq = ++menuSeq;
-        void buildAccountRowMenu(
-            account,
-            agents(),
-            model.accountsAtom(),
-            (msg) => model.showNotice(msg),
-            undefined,
-            () => model.requestDelete(account),
-        ).then((items) => {
-            if (seq !== menuSeq) return; // superseded by a later right-click
-            ContextMenuModel.showContextMenu(items, e);
-        });
+        ContextMenuModel.showContextMenu(buildAccountRowMenu(account, () => model.requestDelete(account)), e);
     };
 
     // A click on the open row closes its panel; on another row, moves it.
@@ -274,17 +252,6 @@ function useAccountAgents(account: Account): Accessor<AccountAgent[]> {
 
 export function AccountDetailPanel({ model, account }: { model: IdentityViewModel; account: Account }): JSX.Element {
     const usedBy = useAccountAgents(account);
-    const [unbinding, setUnbinding] = createSignal<string | null>(null);
-    const unbind = async (agent: AccountAgent) => {
-        setUnbinding(agent.id);
-        try {
-            await unbindAccountFromAgent(account.id, agent);
-        } catch (e) {
-            model.showNotice(`Couldn't unbind ${agent.name} from "${accountLabel(account)}": ${(e as Error)?.message ?? e}`);
-        } finally {
-            setUnbinding(null);
-        }
-    };
     let panelRef: HTMLDivElement | undefined;
 
     // Bring the whole panel into view without jumping its row to the top.
@@ -419,17 +386,6 @@ export function AccountDetailPanel({ model, account }: { model: IdentityViewMode
                         {(agent) => (
                             <li class="identity-agent-use">
                                 <span class="identity-agent-chip">{agent.name}</span>
-                                <Show when={agent.providers.length > 0}>
-                                    <Button
-                                        density="compact"
-                                        aria-label={`Unbind ${agent.name}`}
-                                        busy={unbinding() === agent.id}
-                                        disabled={unbinding() !== null}
-                                        onClick={() => void unbind(agent)}
-                                    >
-                                        Unbind
-                                    </Button>
-                                </Show>
                             </li>
                         )}
                     </For>
@@ -498,8 +454,8 @@ export function DeleteAccountConfirm({ model, account }: { model: IdentityViewMo
                 <Show when={usedBy().length > 0}>
                     <p>
                         Used by {usedBy().length === 1 ? "1 agent" : `${usedBy().length} agents`}: {usedBy().join(", ")}.
-                        They won't start until you bind another account. Any that are running keep working until they
-                        restart.
+                        They will need another account: the login email in an agent's composer switches it. Any that are
+                        running keep working until they restart.
                     </p>
                 </Show>
                 <Show when={keepsHistory}>

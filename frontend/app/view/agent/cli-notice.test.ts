@@ -93,6 +93,44 @@ describe("cliNoticeText", () => {
     });
 });
 
+const containerStart = (state: string, extra: Record<string, unknown> = {}) => ({
+    type: "system",
+    subtype: "agentmux_container_start",
+    start_id: "start-1",
+    provider: "claude",
+    image: "ghcr.io/agentmuxai/agent-base:latest",
+    state,
+    timestamp: TS,
+    ...extra,
+});
+
+describe("a container agent's start-up", () => {
+    it("is one row for every state of the same start, updated in place", () => {
+        const pulling = parseCliNoticeFrame(containerStart("pulling", { percent: 42 }), 0);
+        const ready = parseCliNoticeFrame(containerStart("ready", { seconds: 61.4 }), 0);
+        expect(pulling?.id).toBe("container-start-start-1");
+        expect(ready?.id).toBe(pulling?.id);
+        expect(pulling).toMatchObject({ kind: "container_start", startState: "pulling", percent: 42 });
+    });
+
+    it("says what it is doing, with how far the download has got once it is known", () => {
+        const text = (state: string, extra: Record<string, unknown> = {}) =>
+            cliNoticeText(parseCliNoticeFrame(containerStart(state, extra), 0) as CliNoticeNode);
+        expect(text("pulling").label).toBe("Downloading the agent image…");
+        expect(text("pulling", { percent: 41.6 }).label).toBe("Downloading the agent image… 42%");
+        expect(text("starting").label).toBe("Starting the container…");
+        expect(text("ready", { seconds: 61.4 }).label).toBe("Container ready (61 s)");
+        const failed = text("failed", { error: "the download of x stopped (no data for 60 s)" });
+        expect(failed).toMatchObject({ label: "Couldn't start the container", tone: "error" });
+        expect(failed.detail).toContain("no data for 60 s");
+    });
+
+    it("ignores a frame without an id or a known state", () => {
+        expect(parseCliNoticeFrame(containerStart("pulling", { start_id: undefined }), 0)).toBeNull();
+        expect(parseCliNoticeFrame(containerStart("dancing"), 0)).toBeNull();
+    });
+});
+
 describe("replay", () => {
     it("collapses an install's frames into one row that ends in its final state", () => {
         const lines = [install("installing"), install("installed", { seconds: 9 }), changed("2.1.285")].map((f) =>

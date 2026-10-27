@@ -108,6 +108,13 @@ Hypothesis for the stale limit behind #5558 (to be confirmed by test T5 before t
 | Delete-account confirmation | Text becomes "N agents use this account and will need another one." |
 | Existing bindings | **No migration of links**: they are the agent's current account. Only `m0042` (numbers) is new. |
 
+### 3.7 As built (2026-10-27)
+
+- **Numbering, no migration.** The account list (`listidentityaccounts`) numbers any account with an email that has no number, oldest first, and records the group's high-water mark (`context.seqmax`) on every member so the highest number is not handed out again after its account is deleted. An email change (other than case or padding) drops the number. A rewrite of an account's context keeps its number and can't lower the mark. This replaces the migration `m0042` of §3.3: the first list after upgrade numbers existing groups, and it also covers every later sign-in, whose email is only known after login.
+- **The queue.** A switch asked for in a turn is stored on the agent's panes as `agent:pending_account` (and `agent:pending_account_by`) and applied by the account-episode refresh (every 15 s and on a turn event) once no pane of the agent is in a turn. It survives a restart. Choosing the current account cancels it.
+- **Chip.** The email is a link whenever the agent is signed in and the provider has another signed-in account; a turn no longer disables it. A signed-out agent still gets the failure row's Bind account, not the chip menu.
+- **Not yet.** "Sign in with another account…" in the menu; the failure row and the Swarm banner calling `agent.account.switch` (they use their own paths, which already clear stale limits through §3.5); numbered labels on the Connectors cards.
+
 ## 4. Edge cases
 
 - Switching to an account of another provider: refused (menu never lists it; API returns an error naming the provider).

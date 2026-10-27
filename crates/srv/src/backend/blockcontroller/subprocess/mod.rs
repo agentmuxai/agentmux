@@ -186,7 +186,17 @@ pub struct SubprocessController {
     lease_store: Option<Arc<crate::registry::LeaseStore>>,
     /// This process's boot id — the lease owner id. See `AppState::boot_id`.
     boot_id: Arc<str>,
+    /// Container agents: what a turn does before its `docker exec` (start the
+    /// container, install the CLI). Set by the handler that accepts a message,
+    /// run at the start of the turn's own task, so it is not cut short with the
+    /// request. `None` for a host agent.
+    container_startup: Mutex<Option<StartupStep>>,
 }
+
+/// A container turn's first step: ready the container. `Err` carries the text
+/// the pane has already been shown; the turn ends without running.
+pub type StartupStep =
+    Arc<dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send>> + Send + Sync>;
 
 impl SubprocessController {
     /// Create a new SubprocessController.
@@ -224,6 +234,7 @@ impl SubprocessController {
             tab_id,
             block_id,
             run_lock: Arc::new(AtomicBool::new(false)),
+            container_startup: Mutex::new(None),
             inner: Arc::new(Mutex::new(SubprocessControllerInner {
                 proc_status: STATUS_INIT.to_string(),
                 proc_exit_code: 0,
