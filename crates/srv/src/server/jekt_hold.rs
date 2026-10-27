@@ -119,6 +119,9 @@ pub(super) async fn hold_for_unavailable(
     };
     tracing::info!(target = %target, state = ?unavailable.state, "reactive inject: target can't work now, holding or refusing");
     if let Some(held) = hold_with_reason(state, auth_via, req, &resp, reason, unavailable.resets_at_ms, replay).await {
+        if held.get("held").and_then(|h| h.as_bool()) == Some(true) {
+            super::limit_probe::maybe_probe(state, req, unavailable).await;
+        }
         return held;
     }
     serde_json::to_value(&resp).unwrap_or_default()
