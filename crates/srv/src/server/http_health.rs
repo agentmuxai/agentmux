@@ -115,6 +115,10 @@ pub(super) async fn handle_discovery(State(state): State<AppState>) -> Json<serd
     // Each agent's seat, by its definition (SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md
     // §4): `null` when it has none.
     let defs = state.mstore.agent_def_list().unwrap_or_default();
+    // What a routine message to each would do now (`availability_view`).
+    let cold_after_ms = crate::backend::cold_hold::cold_after_ms(&state.config_watcher.get_full_config().settings.extra)
+        .and_then(|ms| u64::try_from(ms).ok());
+    let now_ms = agentmux_common::time::now_ms_u64();
     let agents: Vec<serde_json::Value> = instances
         .into_iter()
         .map(|i| {
@@ -132,6 +136,7 @@ pub(super) async fn handle_discovery(State(state): State<AppState>) -> Json<serd
                 "addressable": live_block.is_some(),
                 "block_id": live_block,
                 "seat": seat,
+                "availability": super::availability_view::describe_block(&state.mstore, live_block.as_deref(), cold_after_ms, now_ms),
             })
         })
         .collect();

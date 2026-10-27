@@ -33,6 +33,7 @@ pub(crate) mod caller;
 pub(crate) mod agent_self_keys;
 pub(crate) mod jekt_held;
 mod jekt_hold;
+mod availability_view;
 mod jekt_cold;
 mod limit_probe;
 pub(crate) mod jekt_files;
