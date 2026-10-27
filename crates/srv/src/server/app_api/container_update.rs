@@ -20,6 +20,10 @@ fn told() -> std::sync::MutexGuard<'static, HashSet<String>> {
     TOLD.get_or_init(Default::default).lock().unwrap()
 }
 
+fn already_told(container_name: &str, running: &str) -> bool {
+    told().contains(&format!("{container_name}@{running}"))
+}
+
 /// Whether the container named `container_name` runs another image version than `current`, and has
 /// not been reported yet. Marks it reported.
 fn first_report(container_name: &str, running: &str, current: &str) -> bool {
@@ -34,6 +38,22 @@ async fn current_image_available(cm: &ContainerManager) -> bool {
         || crate::backend::registry_probe::probe_anonymous(&image).await == crate::backend::rpc_types::ContainerImageAccess::Public
 }
 
+/// [`current_image_available`] for the check made on every turn: a registry answer is kept for a
+/// while, so a slow or unreachable registry does not delay each message.
+async fn current_image_available_cached(cm: &ContainerManager) -> bool {
+    static SEEN: OnceLock<Mutex<Option<(std::time::Instant, bool)>>> = OnceLock::new();
+    const KEEP: std::time::Duration = std::time::Duration::from_secs(600);
+    let seen = SEEN.get_or_init(Default::default);
+    if let Some((at, available)) = *seen.lock().unwrap() {
+        if at.elapsed() < KEEP {
+            return available;
+        }
+    }
+    let available = current_image_available(cm).await;
+    *seen.lock().unwrap() = Some((std::time::Instant::now(), available));
+    available
+}
+
 /// Writes one pane row, and one log line, when an existing container runs another agent image
 /// version than this AgentMux.
 pub(crate) async fn note_outdated(
@@ -46,7 +66,10 @@ pub(crate) async fn note_outdated(
     mstore: &Arc<crate::backend::storage::store::Store>,
 ) {
     let Some(running) = cm.base_image_version(container_name).await else { return };
-    if running == CURRENT || !current_image_available(cm).await || !first_report(container_name, &running, CURRENT) {
+    if running == CURRENT || already_told(container_name, &running) || !current_image_available_cached(cm).await {
+        return;
+    }
+    if !first_report(container_name, &running, CURRENT) {
         return;
     }
     tracing::info!(container = container_name, running = %running, current = CURRENT, "container runs an older agent image than this AgentMux");

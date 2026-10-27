@@ -18,7 +18,8 @@ export function ContainerUpdateButton(props: { blockId: string }) {
         setBusy(true);
         setRefused(null);
         try {
-            await RpcApi.UpdateContainerCommand(TabRpcClient, { block_id: props.blockId });
+            // The registry check and stopping the container can take longer than the default 5 s.
+            await RpcApi.UpdateContainerCommand(TabRpcClient, { block_id: props.blockId }, { timeout: 60000 });
         } catch (e) {
             setRefused(e instanceof Error ? e.message : String(e));
         } finally {
