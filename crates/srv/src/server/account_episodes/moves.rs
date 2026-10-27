@@ -175,10 +175,17 @@ pub(super) fn move_agents(state: &AppState, req: &IdentityAccountMoveAgentsReq) 
         match super::switch::switch_to(state, "operator", &agent_id, to, &provider, &same_provider, super::switch::AccountSwitchWhen::AfterTurn) {
             Ok(r) if r.status == super::switch::AccountSwitchStatus::Queued => result.busy.extend(agents),
             Ok(r) if r.failed.is_empty() => result.moved.extend(agents),
+            // Linked, but some panes didn't restart. The failures don't say which pane, and the
+            // strip names the agent, so the counts are what matters: one failure per pane that
+            // didn't restart, the rest moved.
             Ok(r) => {
-                if let Some(first) = agents.into_iter().next() {
-                    result.failed.push(AccountMoveFailure { block_id: first.block_id, agent_name: first.agent_name, error: r.failed.join(" ") });
+                let mut panes = agents.into_iter();
+                for error in &r.failed {
+                    if let Some(a) = panes.next() {
+                        result.failed.push(AccountMoveFailure { block_id: a.block_id, agent_name: a.agent_name, error: error.clone() });
+                    }
                 }
+                result.moved.extend(panes);
             }
             Err(error) => {
                 result.failed.extend(agents.into_iter().map(|a| AccountMoveFailure { block_id: a.block_id, agent_name: a.agent_name, error: error.clone() }))
