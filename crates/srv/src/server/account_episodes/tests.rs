@@ -659,8 +659,6 @@ fn pending_of(state: &AppState, block: &str) -> Option<serde_json::Value> {
     state.mstore.get::<Block>(block).unwrap().unwrap().meta.get(switch::META_PENDING_ACCOUNT).cloned().filter(|v| !v.is_null())
 }
 
-/// An idle agent moves at once; one in a turn waits and moves when the turn ends;
-/// "now" does not wait; the same account changes nothing and cancels a wait (#4936 §3.2).
 /// What the strip queued lands when the turn ends, even on an account not checked yet; and a bind
 /// from the failure row replaces an alias row that points elsewhere instead of calling it unchanged.
 #[tokio::test]
@@ -690,6 +688,8 @@ async fn a_queued_strip_move_to_an_unchecked_account_lands_and_a_stale_alias_row
     cleanup(&[&busy]);
 }
 
+/// An idle agent moves at once; one in a turn waits and moves when the turn ends;
+/// "now" does not wait; the same account changes nothing and cancels a wait (#4936 §3.2).
 #[tokio::test]
 async fn a_switch_applies_at_once_when_idle_waits_for_a_turn_and_cancels_on_the_current_account() {
     use switch::AccountSwitchWhen::{AfterTurn, Now};
