@@ -118,7 +118,8 @@ pub fn start(mstore: Arc<Store>, filestore: Arc<FileStore>, event_bus: Arc<Event
     if INSTANCE.set(sup.clone()).is_err() {
         return;
     }
-    sup.clone().drop_restarted_waits();
+    // Before the observer below is registered, so no live wait exists yet to be mistaken for a stale one.
+    sup.drop_restarted_waits();
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<TurnEnded>();
     // On the broker's publish path: parse and enqueue only.
     broker.add_observer(Arc::new(move |ev: &MuxEvent| {
@@ -144,42 +145,34 @@ pub fn start(mstore: Arc<Store>, filestore: Arc<FileStore>, event_bus: Arc<Event
 
 impl Supervisor {
     /// A continuation's wait is not persisted: a pane that still says "Continuing in ..." from
-    /// before this start will never send it, so its row says so instead.
-    fn drop_restarted_waits(self: Arc<Self>) {
-        tokio::task::spawn_blocking(move || {
-            let blocks = match self.mstore.get_all::<Block>() {
-                Ok(b) => b,
-                Err(e) => {
-                    tracing::warn!(error = %e, "supervisor: could not read panes to clear interrupted waits");
-                    return;
-                }
-            };
-            for block in blocks {
-                let Some(state) = SupervisorState::from_meta(&block.meta) else { continue };
-                if state.status != SupervisorStatus::Waiting {
-                    continue;
-                }
-                let id = block.oid.clone();
-                // Decide from the stored state inside the transaction: a turn that ended since the
-                // scan may have saved a live wait, which must stay.
-                let written = self.mstore.with_tx(|tx| {
-                    let mut b = tx.must_get::<Block>(&id)?;
-                    let Some(mut current) = SupervisorState::from_meta(&b.meta) else { return Ok(false) };
-                    if !pacing::drop_restarted_wait(&mut current) {
-                        return Ok(false);
-                    }
-                    let Ok(value) = serde_json::to_value(&current) else { return Ok(false) };
-                    b.meta.insert(META_STATE.to_string(), value);
-                    tx.update(&mut b)?;
-                    Ok(true)
-                });
-                match written {
-                    Ok(true) => broadcast_block_update(&self.mstore, &self.event_bus, &id),
-                    Ok(false) => {}
-                    Err(e) => tracing::warn!(block_id = %id, error = %e, "supervisor: could not clear an interrupted wait"),
-                }
+    /// before this start will never send it, so its row says so instead. Runs once, at start,
+    /// before the first turn end can save a live wait.
+    fn drop_restarted_waits(&self) {
+        let blocks = match self.mstore.get_all::<Block>() {
+            Ok(b) => b,
+            Err(e) => {
+                tracing::warn!(error = %e, "supervisor: could not read panes to clear interrupted waits");
+                return;
             }
-        });
+        };
+        for block in blocks {
+            let Some(mut state) = SupervisorState::from_meta(&block.meta) else { continue };
+            if !pacing::drop_restarted_wait(&mut state) {
+                continue;
+            }
+            let Ok(value) = serde_json::to_value(&state) else { continue };
+            let id = block.oid.clone();
+            let written = self.mstore.with_tx(|tx| {
+                let mut b = tx.must_get::<Block>(&id)?;
+                b.meta.insert(META_STATE.to_string(), value);
+                tx.update(&mut b)?;
+                Ok(())
+            });
+            match written {
+                Ok(()) => broadcast_block_update(&self.mstore, &self.event_bus, &id),
+                Err(e) => tracing::warn!(block_id = %id, error = %e, "supervisor: could not clear an interrupted wait"),
+            }
+        }
     }
 
     fn first_sighting(&self, end: &TurnEnded) -> bool {
