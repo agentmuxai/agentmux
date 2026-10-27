@@ -13,6 +13,15 @@
 //! anyway: never `/reactive/release`, because nothing re-wakes a released row
 //! and it could expire undelivered (§1.2).
 //!
+//! **Replaced keys.** An install that replaces an agent's key signs a
+//! [`WanKeyRevocation`] for the old one. A message signed by a fingerprint
+//! this install holds a revocation of is `Some(false)` (`wan_key_revoked`),
+//! whatever its timestamp says, and the key is not looked up again. A revocation
+//! is learned from the directory's answer for the key (HTTP 410 with the signed
+//! notice) or from the account's feed, read at most every
+//! [`KEY_FEED_REFRESH_SECS`] while signed messages arrive; each must verify
+//! before it is kept (`wan_identity::revocations`).
+//!
 //! The HTTP entry point never reaches this: an HTTP caller's self-declared
 //! `delivery_tier: "wan"` can't set `wan_verified` (`skip_deserializing`).
 
@@ -20,6 +29,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use agentmux_common::jekt_sign::{self, WanCarried, WanCheckFailure, WanKeyRecord};
+use agentmux_common::wan_key_revocation::WanKeyRevocation;
 
 use crate::backend::reactive::types::{WanInstanceInfo, WanInstanceStatus};
 use crate::backend::storage::wan_identity::WanIdentityStore;
@@ -31,6 +41,17 @@ const FETCH_TIMEOUT: Duration = Duration::from_secs(2);
 /// How stale an instance's revocation status may be before it is re-checked
 /// on the next message from it (§2.3: hourly).
 const REVOCATION_REFRESH_SECS: i64 = 60 * 60;
+
+/// How long after reading the account's key revocation feed it may be read
+/// again, on the next signed message. This bounds how long a receiver that
+/// cached a key keeps accepting it after its install replaced it.
+const KEY_FEED_REFRESH_SECS: i64 = 5 * 60;
+
+/// How long a cloud without the feed route is left alone.
+const KEY_FEED_UNSUPPORTED_SECS: i64 = 60 * 60;
+
+/// Pages of the feed read in one go; the rest waits for the next read.
+const KEY_FEED_MAX_PAGES: usize = 4;
 
 /// Global fetch budget: at most this many directory requests per minute, so
 /// a flood of signed messages can't turn this install into a directory
@@ -102,6 +123,9 @@ pub(crate) struct Directory<'a> {
 enum Fetched<T> {
     Found(T),
     NotFound,
+    /// HTTP 410: the directory no longer serves this. For a key, the body
+    /// carries the revocation the install signed.
+    Gone(serde_json::Value),
     /// Why, for the verdict's `detail`: the last attempt's cause.
     Unavailable(String),
 }
@@ -153,6 +177,9 @@ async fn get_json<T: serde::de::DeserializeOwned>(dir: &Directory<'_>, url: &str
             .await;
         match resp {
             Ok(r) if r.status() == reqwest::StatusCode::NOT_FOUND => return Fetched::NotFound,
+            Ok(r) if r.status() == reqwest::StatusCode::GONE => {
+                return Fetched::Gone(r.json::<serde_json::Value>().await.unwrap_or_default());
+            }
             Ok(r) if r.status().is_success() => {
                 return match r.json::<T>().await {
                     Ok(v) => Fetched::Found(v),
@@ -226,11 +253,102 @@ async fn fetch_revoked(dir: &Directory<'_>, instance_id: &str) -> Option<bool> {
         },
         // An older cloud with no such route: not known to be revoked.
         Fetched::NotFound => Some(false),
+        // Not an answer this route gives.
+        Fetched::Gone(_) => None,
         // No verdict carries this one, so it is the only place to say it.
         Fetched::Unavailable(cause) => {
             tracing::warn!(instance_id, cause = %cause, "wan verify: revocation check couldn't reach the directory");
             None
         }
+    }
+}
+
+/// The revocation a 410 carries, if it is one the install signed for exactly
+/// this key. Anything else is not acted on: the directory can say a key is
+/// gone, but only the install can retire it.
+fn gone_revocation(body: &serde_json::Value, instance: &str, agent: &str, channel: &str, key_fp: &str) -> Option<WanKeyRevocation> {
+    let revocation: WanKeyRevocation = serde_json::from_value(body.get("revocation")?.clone()).ok()?;
+    (revocation.names(instance, agent, channel, key_fp) && revocation.verify()).then_some(revocation)
+}
+
+#[derive(serde::Deserialize)]
+struct KeyRevocationFeed {
+    #[serde(default)]
+    revocations: Vec<WanKeyRevocation>,
+    #[serde(default)]
+    next_since: Option<i64>,
+    #[serde(default)]
+    more: bool,
+}
+
+/// Read the account's key revocations the directory has received since the
+/// last read, keep those that verify, and drop the cached records they name.
+/// At most once per [`KEY_FEED_REFRESH_SECS`] per directory; a failed read is
+/// not retried sooner, so a down directory costs one request per interval.
+async fn refresh_key_revocations(wan: &WanIdentityStore, dir: &Directory<'_>, now: i64) {
+    let directory = crate::muxbus::wan_publish::directory_id(dir.base_url, &crate::muxbus::pkce::token_sub(dir.token));
+    let Ok((mut since, checked_at)) = wan.key_revocation_feed_state(&directory) else { return };
+    if now.saturating_sub(checked_at) < KEY_FEED_REFRESH_SECS {
+        return;
+    }
+    let _ = wan.key_revocation_feed_note(&directory, now, None);
+    for _ in 0..KEY_FEED_MAX_PAGES {
+        let url = format!("{}/wan-key-revocations?since={since}", dir.base_url.trim_end_matches('/'));
+        match get_json::<KeyRevocationFeed>(dir, &url).await {
+            Fetched::Found(feed) => {
+                let mut all_kept = true;
+                for revocation in &feed.revocations {
+                    match wan.revoked_key_put(revocation, now) {
+                        Ok(true) => {}
+                        Ok(false) => tracing::warn!("wan verify: the directory's key revocation feed held one that does not verify: ignored"),
+                        Err(e) => {
+                            tracing::warn!(error = %e, "wan verify: could not keep a key revocation");
+                            all_kept = false;
+                        }
+                    }
+                }
+                // A revocation that could not be stored must be read again:
+                // the cursor stays where it was, and the next read retries.
+                if !all_kept {
+                    return;
+                }
+                let next = feed.next_since.unwrap_or(since).max(since);
+                let _ = wan.key_revocation_feed_note(&directory, now, Some(next));
+                if !feed.more || next == since {
+                    return;
+                }
+                since = next;
+            }
+            // A cloud without the feed: ask again in an hour.
+            Fetched::NotFound => {
+                let _ = wan.key_revocation_feed_note(&directory, now + KEY_FEED_UNSUPPORTED_SECS - KEY_FEED_REFRESH_SECS, None);
+                return;
+            }
+            Fetched::Gone(_) => return,
+            Fetched::Unavailable(cause) => {
+                tracing::warn!(cause = %cause, "wan verify: the key revocation feed couldn't be read");
+                return;
+            }
+        }
+    }
+}
+
+/// Whether this install holds a verified revocation of the key. `Err` when
+/// that can't be told.
+fn key_is_revoked(wan: &WanIdentityStore, instance: &str, agent: &str, channel: &str, key_fp: &str) -> Result<bool, String> {
+    wan.revoked_key_exists(instance, agent, channel, key_fp).map_err(|e| e.to_string())
+}
+
+/// What a 410 for this key means: refused if the install signed its
+/// retirement (kept, so the next message needn't ask), otherwise a directory
+/// answer that can't be acted on.
+fn gone_verdict(wan: &WanIdentityStore, body: &serde_json::Value, instance: &str, agent: &str, channel: &str, key_fp: &str, now: i64) -> WanVerdict {
+    match gone_revocation(body, instance, agent, channel, key_fp) {
+        Some(revocation) => {
+            let _ = wan.revoked_key_put(&revocation, now);
+            WanVerdict::failed("wan_key_revoked")
+        }
+        None => WanVerdict::unchecked("wan_key_unavailable", "directory answered 410 without a revocation the install signed for this key"),
     }
 }
 
@@ -258,6 +376,7 @@ async fn fetch_listed(dir: &Directory<'_>, instance_id: &str) -> Option<bool> {
     match get_json::<PresenceList>(dir, &url).await {
         Fetched::Found(list) => Some(list.instances.iter().any(|row| !row.gone && row.instance_id == instance_id)),
         Fetched::NotFound => Some(false),
+        Fetched::Gone(_) => None,
         Fetched::Unavailable(cause) => {
             tracing::warn!(instance_id, cause = %cause, "wan verify: the presence list couldn't be read");
             None
@@ -395,11 +514,20 @@ pub(crate) async fn verify(
         return WanVerdict::from_failure(f);
     }
 
+    // A key its install retired is refused before anything else is read for it.
+    refresh_key_revocations(wan, dir, now).await;
+    match key_is_revoked(wan, source_host, source_agent, source_channel, key_fp) {
+        Ok(false) => {}
+        Ok(true) => return WanVerdict::failed("wan_key_revoked"),
+        Err(cause) => return WanVerdict::unchecked("wan_revocation_unavailable", cause),
+    }
+
     let record = match wan.peer_record_get(source_host, source_agent, source_channel, key_fp) {
         Ok(Some(cached)) => cached,
         _ => match fetch_record(dir, &carried).await {
             Fetched::Found(record) => record,
             Fetched::NotFound => return WanVerdict::none("wan_key_not_found"),
+            Fetched::Gone(body) => return gone_verdict(wan, &body, source_host, source_agent, source_channel, key_fp, now),
             Fetched::Unavailable(cause) => return WanVerdict::unchecked("wan_key_unavailable", cause),
         },
     };
@@ -453,11 +581,25 @@ pub(crate) async fn recipient_record(
     key_fp: &str,
     now: i64,
 ) -> Result<WanKeyRecord, String> {
+    const RETIRED: &str = "has a key its install retired; wait for the agent's new one";
+    refresh_key_revocations(wan, dir, now).await;
+    if key_is_revoked(wan, instance, agent, channel, key_fp).map_err(|e| format!("couldn't be checked for a retired key ({e})"))? {
+        return Err(RETIRED.to_string());
+    }
     let record = match wan.peer_record_get(instance, agent, channel, key_fp) {
         Ok(Some(cached)) => cached,
         _ => match fetch_record_for(dir, agent, instance, channel, key_fp).await {
             Fetched::Found(record) => record,
             Fetched::NotFound => return Err("has no key in the account's key directory yet; try again in a minute".to_string()),
+            Fetched::Gone(body) => {
+                return Err(match gone_revocation(&body, instance, agent, channel, key_fp) {
+                    Some(revocation) => {
+                        let _ = wan.revoked_key_put(&revocation, now);
+                        RETIRED.to_string()
+                    }
+                    None => "couldn't be looked up in the account's key directory (it answered 410 without a revocation that checks out)".to_string(),
+                });
+            }
             Fetched::Unavailable(cause) => return Err(format!("couldn't be looked up in the account's key directory ({cause})")),
         },
     };
@@ -491,5 +633,7 @@ pub(crate) fn record_delivered(wan: &WanIdentityStore, verdict: &WanVerdict, row
     }
 }
 
+#[cfg(test)]
+mod key_revocation_tests;
 #[cfg(test)]
 mod tests;
