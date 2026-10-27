@@ -588,6 +588,13 @@ export function useAgentControllerStatus(
         if (!prov) return false;
         // Check the env this pane will actually spawn with (after a bind,
         // the newly-bound account's dir), never a freshly derived one.
+        // A container agent has no host CLI to run the check with (its CLI is in
+        // its container): the bind is trusted, and the turn's own credential gate
+        // reports an account that doesn't work.
+        if (getBlockMetaKeyAtom(opts.blockId, "agentMode")() === "container") {
+            notifyControllerHealthy();
+            return true;
+        }
         const cliPath = getBlockMetaKeyAtom(opts.blockId, "cmd")() as string | undefined;
         if (!cliPath) return false;
         try {

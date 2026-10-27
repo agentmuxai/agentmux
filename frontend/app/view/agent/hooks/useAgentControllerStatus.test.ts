@@ -24,6 +24,7 @@ const hub = vi.hoisted(() => ({
     // this agent has no definition id) — set per-test to exercise
     // existingAccountIdFor's ListAgentIdentitiesCommand lookup.
     agentDefinitionId: undefined as string | undefined,
+    agentMode: undefined as string | undefined,
 }));
 
 vi.mock("@/app/store/global", () => ({
@@ -34,6 +35,7 @@ vi.mock("@/app/store/global", () => ({
     getBlockMetaKeyAtom: (_blockId: string, key: string) => () => {
         if (key === "cmd") return "claude-cli";
         if (key === "agentId") return hub.agentDefinitionId;
+        if (key === "agentMode") return hub.agentMode;
         return undefined;
     },
     staticTabId: () => "tab-1",
@@ -66,6 +68,7 @@ afterEach(() => {
     vi.clearAllMocks();
     vi.useRealTimers();
     hub.agentDefinitionId = undefined;
+    hub.agentMode = undefined;
 });
 
 // REMOVED 2026-08-31 — three describes that exercised `useGlobalLogin()`:
@@ -979,6 +982,30 @@ describe("useAgentControllerStatus — launch-phase reducer wiring", () => {
             expect(status.canRetry()).toBe(false);
             expect(status.authStatus()).toBe("authenticated");
             expect(onReady).toHaveBeenCalledOnce();
+            dispose();
+        });
+    });
+});
+
+
+describe("useAgentControllerStatus — recheckAuthAfterBind for a container agent", () => {
+    // A container agent has no host CLI, so there is nothing to run the auth
+    // check with; before this the bind left its "Not signed in" row up for good
+    // (SPEC_CONTAINER_AGENTS_AT_PARITY_2026_10_27.md, P4 and P10).
+    it("trusts the bind: reports healthy without a host check", async () => {
+        hub.agentMode = "container";
+        await createRoot(async (dispose) => {
+            const status = useAgentControllerStatus({ blockId: "block-1", provider: () => claude, log: () => {} });
+            expect(await status.recheckAuthAfterBind()).toBe(true);
+            dispose();
+        });
+    });
+
+    it("still needs a real host check for a host agent (the mocked check can't confirm, so it stays blocked)", async () => {
+        hub.agentMode = "host";
+        await createRoot(async (dispose) => {
+            const status = useAgentControllerStatus({ blockId: "block-1", provider: () => claude, log: () => {} });
+            expect(await status.recheckAuthAfterBind()).toBe(false);
             dispose();
         });
     });
