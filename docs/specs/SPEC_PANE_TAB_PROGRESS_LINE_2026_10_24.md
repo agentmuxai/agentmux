@@ -1,6 +1,6 @@
 # Spec: A working agent shows a progress line on its pane tab pill, in every pane; a collapsed pane never shows the border animation
 
-**Status:** implemented — approved by the operator on 2026-10-25 with the recommendations in §9; built in task #2360 (spec and change together). The live check in §5 runs on a dev build.
+**Status:** implemented — approved by the operator on 2026-10-25 with the recommendations in §9; built in task #2360 (spec and change together). The live check in §5 runs on a dev build. **Changed 2026-10-27 (operator):** the out-of-quota (limited) dotted line is removed: a stored usage limit can outlive a move to another account, so the pill said it of agents that could work. Limited now shows no line; the Swarm chip and banner still show it. The rows below that describe the limited line are kept as the record.
 **Date:** 2026-10-24
 **Author:** Camper@narko
 **Task:** Spec #2359; the build is #2360 and starts after this is approved
