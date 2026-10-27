@@ -1261,10 +1261,11 @@ tasks:
                 # sees "AgentMux failed to start" with no obvious recovery.
                 # On macOS 26 Tahoe this used to happen after every drag-
                 # induced crash (see #1138 / SPEC_MACOS_TEAROFF_STABILITY).
-                # Scoped to ~/.agentmux/dev/* so portable/installed locks
+                # Scoped to the dev/* folders of this build's data home (the
+                # isolated one, else ~/.agentmux) so portable/installed locks
                 # are never touched; only flags actually-dead PIDs.
                 if [ "{{OS}}" != "windows" ]; then
-                  for lock in "$HOME/.agentmux/dev/"*/*/cef-cache/SingletonLock; do
+                  for lock in "${AGENTMUX_HOME_OVERRIDE:-$HOME/.agentmux}/dev/"*/*/cef-cache/SingletonLock; do
                     [ -L "$lock" ] || continue
                     target=$(readlink "$lock") || continue
                     pid="${target##*-}"

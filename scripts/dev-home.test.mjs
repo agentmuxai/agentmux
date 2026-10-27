@@ -141,6 +141,11 @@ describe.skipIf(spawnSync("bash", ["-c", "true"]).status !== 0)("the Taskfile's 
         expect(taskfile).not.toMatch(/eval "\$\(node scripts\/dev-home\.mjs/);
     });
 
+    it("looks for a crashed host's stale Chromium lock in the selected home, not only the real one", () => {
+        expect(taskfile).toContain('"${AGENTMUX_HOME_OVERRIDE:-$HOME/.agentmux}/dev/"*/*/cef-cache/SingletonLock');
+        expect(taskfile).not.toContain('"$HOME/.agentmux/dev/"*/*/cef-cache');
+    });
+
     it("stops when the home is refused, instead of running on the real one", () => {
         mkdirSync(join(tmp, ".agentmux"));
         for (const step of steps) {
