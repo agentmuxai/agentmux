@@ -535,3 +535,54 @@ async fn a_retry_turn_keeps_the_pane_in_its_episode() {
     assert_eq!(eps.get("acct-1").unwrap().opened_at_ms, now);
     cleanup(&[&block]);
 }
+
+/// Runs `command` on an engine with the agent handlers (link, unlink) registered.
+async fn call_agent_handlers(state: &AppState, command: &str, data: serde_json::Value) -> Result<serde_json::Value, String> {
+    use crate::backend::rpc_types::RpcMessage;
+    let (engine, mut rx) = WshRpcEngine::new();
+    crate::server::agent_handlers::register_agent_handlers(&engine, state);
+    engine.set_rpc_context(crate::backend::rpc_types::RpcContext::operator_for_tests());
+    engine.handle_message(RpcMessage { command: command.to_string(), reqid: "req-1".to_string(), data: Some(data), ..Default::default() });
+    let resp = tokio::time::timeout(Duration::from_secs(10), rx.recv()).await.unwrap().unwrap();
+    if resp.error.is_empty() {
+        Ok(resp.data.unwrap_or_default())
+    } else {
+        Err(resp.error)
+    }
+}
+
+/// Moving an agent to another account must not leave a stored usage limit
+/// behind (#4936 §3.5), including the limit of a pane from before
+/// `agent:run_account` was stamped, which counts against the agent's links.
+#[tokio::test]
+async fn a_link_to_another_account_clears_an_unstamped_panes_limit() {
+    let state = test_state();
+    for id in ["old", "new"] {
+        state.id_store.identity_upsert(&account(id, "claude", "valid")).unwrap();
+    }
+    agent_def(&state, "agent-x");
+    state.identity_store.agent_identity_link("agent-x", "old", "claude").unwrap();
+    let tab = new_tab(&state).await;
+    let limited = pane(&state, &tab, "agent-x", "X", "", Some(failure("usage_limit", None, None)), false).await;
+    call_agent_handlers(&state, "linkagentidentity", json!({ "agent_id": "agent-x", "account_id": "new", "provider": "claude" })).await.unwrap();
+    assert_eq!(stored_failure(&state, &limited), None, "the limit was the old account's");
+    cleanup(&[&limited]);
+}
+
+/// An unlink leaves the agent with no account, so its panes' limits go too;
+/// a silent one is the first half of a rebind and clears nothing itself.
+#[tokio::test]
+async fn an_unlink_clears_the_limit_unless_it_is_the_silent_half_of_a_rebind() {
+    let state = test_state();
+    state.id_store.identity_upsert(&account("old", "claude", "valid")).unwrap();
+    agent_def(&state, "agent-x");
+    state.identity_store.agent_identity_link("agent-x", "old", "claude").unwrap();
+    let tab = new_tab(&state).await;
+    let limited = pane(&state, &tab, "agent-x", "X", "old", Some(failure("usage_limit", None, None)), false).await;
+    call_agent_handlers(&state, "unlinkagentidentity", json!({ "agent_id": "agent-x", "provider": "claude", "silent": true })).await.unwrap();
+    assert!(stored_failure(&state, &limited).is_some(), "silent: the link that follows decides");
+    state.identity_store.agent_identity_link("agent-x", "old", "claude").unwrap();
+    call_agent_handlers(&state, "unlinkagentidentity", json!({ "agent_id": "agent-x", "provider": "claude" })).await.unwrap();
+    assert_eq!(stored_failure(&state, &limited), None);
+    cleanup(&[&limited]);
+}

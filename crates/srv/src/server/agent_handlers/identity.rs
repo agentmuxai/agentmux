@@ -841,12 +841,15 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
     let mstore = state.identity_store.clone();
     let broker = state.broker.clone();
+    let (panes, event_bus) = (state.mstore.clone(), state.event_bus.clone());
     engine.register_typed(
         COMMAND_UNLINK_AGENT_IDENTITY,
         move |cmd: CommandUnlinkAgentIdentityData, _ctx| {
             let mstore = mstore.clone();
             let broker = broker.clone();
+            let (panes, event_bus) = (panes.clone(), event_bus.clone());
             async move {
+                let failed = crate::server::account_episodes::failed_panes(&panes, &mstore, &cmd.agent_id, &cmd.provider);
                 let removed = mstore
                     .agent_identity_unlink(&cmd.agent_id, &cmd.provider)
                     .map_err(|e| format!("unlinkagentidentity: {e}"))?;
@@ -860,6 +863,11 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     "identity.unlink: agent-identity link removed (unlinkagentidentity)"
                 );
                 if removed {
+                    // A silent unlink is the first half of a rebind (alias rows), the link that follows
+                    // clears; a real one leaves the agent without an account, so its old limit goes.
+                    if !cmd.silent {
+                        crate::server::account_episodes::after_rebind(&panes, &event_bus, failed, "");
+                    }
                     broker.publish_event_for::<crate::backend::mps_events::AgentIdentitiesChanged>(&cmd.agent_id, &(), vec![], 0);
                     // Spec §3 names unlink alongside delete: a live process
                     // for this agent still holds the unlinked account's

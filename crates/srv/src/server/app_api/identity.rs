@@ -258,6 +258,10 @@ fn register_identity_account_upsert(engine: &Arc<WshRpcEngine>, state: &AppState
                 // the agent's existing provider link with no compensation (the
                 // failure branch below only cleans up for is_new accounts) —
                 // removed rather than adding yet another compensating delete.
+                // Read before the link changes (see COMMAND_LINK_AGENT_IDENTITY):
+                // a pane left over from an earlier sign-in still carries that
+                // account's usage limit, which must not outlive the move.
+                let failed = crate::server::account_episodes::failed_panes(&state.mstore, identity_store, &def_id, &req.provider);
                 if let Err(e) = identity_store.agent_identity_link(&def_id, &account_id, &req.provider) {
                     // Only clean up for new accounts — on the update path the
                     // account still exists in the DB and may be linked to other providers,
@@ -274,6 +278,7 @@ fn register_identity_account_upsert(engine: &Arc<WshRpcEngine>, state: &AppState
                     }
                     return Err(format!("identity.account.upsert: link: {e}"));
                 }
+                crate::server::account_episodes::after_rebind(&state.mstore, &state.event_bus, failed, &account_id);
 
                 broker.publish_event::<crate::backend::mps_events::IdentityAccountsChanged>(&(), vec![], 0);
                 broker.publish_event_for::<crate::backend::mps_events::AgentIdentitiesChanged>(&req.agent_id, &(), vec![], 0);
@@ -344,6 +349,7 @@ fn register_identity_self_unlink(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // unlinking by slug always matched zero rows (silent no-op).
                 let def_id = resolve_agent_definition_id(&state, &req.agent_id)
                     .map_err(|e| format!("identity.self.unlink: {e}"))?;
+                let failed = crate::server::account_episodes::failed_panes(&state.mstore, identity_store, &def_id, &req.provider);
                 let unlinked = identity_store
                     .agent_identity_unlink(&def_id, &req.provider)
                     .map_err(|e| format!("identity.self.unlink: {e}"))?;
@@ -365,6 +371,8 @@ fn register_identity_self_unlink(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     "identity.unlink: self-service provider unlink (identity.self.unlink)"
                 );
                 if unlinked {
+                    // No account left: whatever limit its panes carried belonged to the one it left.
+                    crate::server::account_episodes::after_rebind(&state.mstore, &state.event_bus, failed, "");
                     broker.publish_event_for::<crate::backend::mps_events::AgentIdentitiesChanged>(&req.agent_id, &(), vec![], 0);
                 }
                 Ok(IdentitySelfUnlinkResult { unlinked })
