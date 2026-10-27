@@ -39,11 +39,11 @@ async fn itest_container_listener_serves_the_agents_network_only() {
     cm.check_available().await.expect("docker daemon must be reachable");
     let name = "agentmux-itest-listener";
     let _ = cm.remove(name, true).await;
-    cm.ensure_running(name, "nginx:alpine", &[], &[], &ContainerMountSpec::default()).await.expect("ensure_running");
+    cm.ensure_running_observed(name, "nginx:alpine", &[], &[], &ContainerMountSpec::default(), &|_| {}).await.expect("ensure_running");
 
     // A second start with the same network reuses the listener (it once deadlocked here).
     let first = container_listener::url();
-    tokio::time::timeout(std::time::Duration::from_secs(30), cm.ensure_running(name, "nginx:alpine", &[], &[], &ContainerMountSpec::default()))
+    tokio::time::timeout(std::time::Duration::from_secs(30), cm.ensure_running_observed(name, "nginx:alpine", &[], &[], &ContainerMountSpec::default(), &|_| {}))
         .await
         .expect("a second ensure_running must not hang")
         .expect("ensure_running (reuse)");
