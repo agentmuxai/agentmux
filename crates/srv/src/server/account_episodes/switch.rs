@@ -195,25 +195,32 @@ pub(super) fn switch(state: &AppState, caller: &str, req: &AgentAccountSwitchReq
     if !signed_in(&to.status) {
         return Err(format!("ACCOUNT_CANT_RUN: {} is not signed in; sign in to it first", account_label_in(to, &accounts)));
     }
-    let blocks = open_panes(state, &def_id);
+    let actor = if caller.is_empty() { "operator" } else { caller };
+    switch_to(state, actor, &def_id, to, &provider, &accounts, req.when)
+}
+
+/// Move the agent `def_id` to `to` (a signed-in account of `provider`; `accounts` are all of the
+/// provider's, for the labels): at once, or queued while a pane of it is in a turn. Also the door
+/// for the account strip's move of a whole episode (`moves::move_agents`).
+pub(super) fn switch_to(state: &AppState, actor: &str, def_id: &str, to: &IdentityAccount, provider: &str, accounts: &[IdentityAccount], when: AccountSwitchWhen) -> Result<AgentAccountSwitchResult, String> {
+    let blocks = open_panes(state, def_id);
     let current = state
         .identity_store
-        .agent_identity_list_for_agent(&def_id)
+        .agent_identity_list_for_agent(def_id)
         .map_err(|e| format!("agent.account.switch: {e}"))?
         .into_iter()
         .find(|l| canonical(&l.provider) == provider)
         .map(|l| l.account_id);
-    let label = account_label_in(to, &accounts);
+    let label = account_label_in(to, accounts);
     if current.as_deref() == Some(to.id.as_str()) {
         set_pending(state, &blocks, None);
         return Ok(AgentAccountSwitchResult { status: AccountSwitchStatus::Unchanged, account_id: to.id.clone(), account_label: label, restarted: 0, failed: Vec::new() });
     }
-    let actor = if caller.is_empty() { "operator" } else { caller };
-    if req.when == AccountSwitchWhen::AfterTurn && blocks.iter().any(|b| busy(state, &b.oid)) {
+    if when == AccountSwitchWhen::AfterTurn && blocks.iter().any(|b| busy(state, &b.oid)) {
         set_pending(state, &blocks, Some((&to.id, actor)));
         return Ok(AgentAccountSwitchResult { status: AccountSwitchStatus::Queued, account_id: to.id.clone(), account_label: label, restarted: 0, failed: Vec::new() });
     }
-    Ok(apply(state, actor, &def_id, to, &provider, &blocks, &accounts, req.when == AccountSwitchWhen::Now))
+    Ok(apply(state, actor, def_id, to, provider, &blocks, accounts, when == AccountSwitchWhen::Now))
 }
 
 /// Apply each queued switch whose agent has no pane in a turn. Runs with every
