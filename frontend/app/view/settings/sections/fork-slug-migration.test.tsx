@@ -259,6 +259,29 @@ describe("ForkSlugMigration", () => {
         expect(screen.getByRole("button", { name: "Use loap-3-2" })).toBeEnabled();
     });
 
+    it("takes no second pick while the first is being checked", async () => {
+        let release: () => void = () => {};
+        const gate = new Promise<void>((r) => (release = r));
+        srv([plan([REFUSED]), plan([PICKED]), plan([])]);
+        const answer = migrate.getMockImplementation()!;
+        let plans = 0;
+        migrate.mockImplementation(async (c: unknown, data: { mode: string }) => {
+            if (data.mode === "plan" && ++plans === 2) await gate;
+            return answer(c, data);
+        });
+        render(() => <ForkSlugMigration />);
+        await screen.findByText(/It can't be updated yet/);
+        const use = screen.getByRole("button", { name: "Use loap-3-2" });
+        fireEvent.click(use);
+        await waitFor(() => expect(use).toBeDisabled());
+        expect(screen.getByRole("button", { name: "Choose another id" })).toBeDisabled();
+        fireEvent.click(use);
+        expect(modes()).toEqual(["plan", "plan"]);
+        release();
+        await waitFor(() => expect(modes()).toEqual(["plan", "plan", "apply", "plan"]));
+        expect(migrate.mock.calls[2][1]).toEqual({ mode: "apply", choices: PICK });
+    });
+
     it("takes an id of the user's own for a refused agent", async () => {
         srv([plan([{ ...REFUSED, suggestion: undefined }]), plan([{ ...PICKED, new_slug: "loap-three" }]), plan([])]);
         render(() => <ForkSlugMigration />);

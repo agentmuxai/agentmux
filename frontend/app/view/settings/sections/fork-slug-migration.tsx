@@ -35,7 +35,7 @@ export const FORK_SLUG_SETTING = {
     keywords: ["fork", "slug", "agent id", "id", "rename", "migrate", "outdated", "chain"],
 } satisfies SettingsIndexEntry;
 
-type Phase = "loading" | "idle" | "stopping" | "applying" | "undoing";
+type Phase = "loading" | "checking" | "idle" | "stopping" | "applying" | "undoing";
 
 const plural = (n: number, one: string, many: string = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
 
@@ -165,12 +165,15 @@ export function ForkSlugMigration(): JSX.Element {
     // An agent can be given another id only once the ones the rule can name are
     // done: the update then has nothing else to do, and a pick changes nothing
     // but that agent.
-    const canPick = () => !busy() && ready().length === 0 && unclearable(plan()).length === 0;
+    // Not while another pick is being checked or waits on the stop dialog: one
+    // pick at a time, so what is applied is what was checked.
+    const canPick = () => !busy() && !confirmStop() && ready().length === 0 && unclearable(plan()).length === 0;
 
     /** Give `c` the id `slug` instead of its own (taken) one: check it, then update as "Update them" does. */
     const useId = async (c: ForkSlugCandidate, slug: string) => {
         const id = slug.trim();
         if (!id || !canPick()) return;
+        setPhase("checking");
         setError(null);
         setChosen([{ uid: c.uid, new_slug: id }]);
         const p = await load();
@@ -180,10 +183,12 @@ export function ForkSlugMigration(): JSX.Element {
             if (mine?.refused) setError(`${id} can't be used: ${mine.refused}`);
             setChosen([]);
             await load();
+            setPhase("idle");
             return;
         }
         setCustomFor(null);
         setCustomId("");
+        setPhase("idle");
         start();
     };
 
@@ -219,6 +224,7 @@ export function ForkSlugMigration(): JSX.Element {
     const line = () => {
         switch (phase()) {
             case "loading":
+            case "checking":
                 return "Checking agent ids…";
             case "stopping":
                 return "Stopping the panes. Each can still be kept running from its own pane for 15 s.";
