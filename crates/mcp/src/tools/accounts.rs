@@ -62,6 +62,40 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
             Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))
         }
+        "IdentitySwitch" => {
+            let account = arguments
+                .get("account")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: account"))?;
+            require_agent_env(local_url, auth_key, block_id)?;
+            let agent_id = agent_slug()?;
+            let url = format!("{}/api/v1/agent/identity/switch", local_url.trim_end_matches('/'));
+            let mut body = json!({ "agent_id": agent_id, "account": account });
+            if let Some(target) = arguments.get("agent").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+                body["target"] = json!(target);
+            }
+            if let Some(when) = arguments.get("when").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+                body["when"] = json!(when);
+            }
+            let resp = client
+                .post(&url)
+                .header(AUTH_KEY_HEADER, auth_key)
+                .json(&body)
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                anyhow::bail!("identity/switch failed: HTTP {status} — {text}");
+            }
+            let result: Value = resp
+                .json()
+                .await
+                .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
+            Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))
+        }
         _ => Err(not_in_family()),
     }
 }

@@ -30,6 +30,7 @@
 
 mod machine;
 mod moves;
+mod switch;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -43,7 +44,7 @@ use crate::backend::eventbus::EventBus;
 use crate::backend::mps::MuxEvent;
 use crate::backend::obj::{self, Block, Tab};
 use crate::backend::rpc::engine::WshRpcEngine;
-use crate::backend::rpc_types::{NoArgsReq, COMMAND_IDENTITY_ACCOUNT_AVAILABILITY, COMMAND_IDENTITY_ACCOUNT_MOVE_AGENTS, COMMAND_IDENTITY_ACCOUNT_SIGNED_IN};
+use crate::backend::rpc_types::{NoArgsReq, COMMAND_IDENTITY_ACCOUNT_AVAILABILITY, COMMAND_AGENT_ACCOUNT_SWITCH, COMMAND_IDENTITY_ACCOUNT_MOVE_AGENTS, COMMAND_IDENTITY_ACCOUNT_SIGNED_IN};
 use crate::backend::storage::store::Store;
 use crate::server::AppState;
 
@@ -165,6 +166,7 @@ pub struct IdentityAccountSignedInResult {
 }
 
 use moves::IdentityAccountMoveAgentsReq;
+pub(crate) use switch::{AccountSwitchWhen, AgentAccountSwitchReq, AgentAccountSwitchResult};
 
 struct Runtime {
     state: AppState,
@@ -202,6 +204,12 @@ pub fn install(state: AppState) {
     });
 }
 
+/// `agent.account.switch` for a caller that is not on the RPC engine (the `Identity` tool's HTTP
+/// route). `caller` is the agent's slug. Runs off the async workers.
+pub(crate) async fn switch_account(state: AppState, caller: String, req: AgentAccountSwitchReq) -> Result<AgentAccountSwitchResult, String> {
+    tokio::task::spawn_blocking(move || switch::switch(&state, &caller, &req)).await.map_err(|e| e.to_string())?
+}
+
 /// Rebuild the episodes soon (a failure, a turn end, a rebind).
 pub(crate) fn refresh_soon() {
     if let Some(rt) = RUNTIME.get() {
@@ -218,6 +226,7 @@ fn refresh() {
     for effect in effects {
         apply(&rt.state, effect);
     }
+    switch::apply_pending(&rt.state);
 }
 
 /// The failure kinds an episode is made of: a usage limit or a refused sign-in.
@@ -581,9 +590,10 @@ pub(crate) fn clear_signed_out(mstore: &Arc<Store>, identity: &Store, event_bus:
     cleared
 }
 
-/// These RPCs are the operator's: an agent connection (`bus:register`) is
-/// refused, since the answer names accounts, the move relinks and restarts
-/// other agents, and a sign-in clears other agents' state.
+/// These RPCs are the operator's, except `agent.account.switch`: an agent connection
+/// (`bus:register`) is refused for the others, since the answer names accounts, the move
+/// relinks and restarts other agents, and a sign-in clears other agents' state. A switch is
+/// open to agents (the caller is `ctx.agent_id`) and is audited under their name.
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let s = state.clone();
     engine.register_typed(COMMAND_IDENTITY_ACCOUNT_SIGNED_IN, move |req: IdentityAccountSignedInReq, ctx| {
@@ -615,6 +625,20 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             let result = tokio::task::spawn_blocking(move || moves::move_agents(&s, &req)).await.map_err(|e| e.to_string())??;
             refresh_soon();
             Ok(result)
+        }
+    });
+    // Open to agents (spec §3.4): an agent switches itself or another; the
+    // audit row names the caller. The window's calls are recorded as the operator.
+    let s = state.clone();
+    engine.register_typed(COMMAND_AGENT_ACCOUNT_SWITCH, move |req: AgentAccountSwitchReq, ctx| {
+        let s = s.clone();
+        async move {
+            let caller = ctx.agent_id.clone();
+            // Not a registered agent: only the proven window may, and it is recorded as the operator.
+            if caller.is_empty() {
+                ctx.operator_only("changing an agent's account is for the AgentMux window or an agent")?;
+            }
+            tokio::task::spawn_blocking(move || switch::switch(&s, &caller, &req)).await.map_err(|e| e.to_string())?
         }
     });
 }

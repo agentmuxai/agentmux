@@ -1,14 +1,12 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Which agents use an account, with the link rows to remove for each, and the
-// unbind itself (docs/specs/SPEC_DROP_THE_AGENT_STASH_2026_10_24.md §3).
+// Which agents use an account, read from the link rows
+// (docs/specs/SPEC_DROP_THE_AGENT_STASH_2026_10_24.md §3).
 
 import { createSignal } from "solid-js";
 
 import type { AgentDefinition } from "@/app/store/rpc-api";
-import { RpcApi } from "@/app/store/rpc-api";
-import { TabRpcClient } from "@/app/store/rpc-util";
 import { parseAgentAccounts } from "./identity-model";
 
 /** An agent using an account. `providers` are its link rows for the account,
@@ -54,20 +52,4 @@ export function agentsUsingAccount(
         }
     }
     return [...out.values()];
-}
-
-/** Removes `accountId` from `agent`: the link rows the agent holds for that
- *  account right now, read again at click time (the open list may be stale,
- *  and an unlink by provider would remove whichever account holds it). Then
- *  tells the lists built from the links to reload. Throws if srv refuses. */
-export async function unbindAccountFromAgent(accountId: string, agent: AccountAgent): Promise<void> {
-    try {
-        const links = await RpcApi.ListAllAgentIdentitiesCommand(TabRpcClient);
-        for (const link of links) {
-            if (link.agent_id !== agent.id || link.account_id !== accountId) continue;
-            await RpcApi.UnlinkAgentIdentityCommand(TabRpcClient, { agent_id: agent.id, provider: link.provider });
-        }
-    } finally {
-        setLinksRevision((n) => n + 1);
-    }
 }

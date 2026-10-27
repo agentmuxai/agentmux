@@ -3,16 +3,20 @@
 
 // Split out of agent-view.tsx (SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30.md §3.5 step 9).
 
+import { useAccountEpisodes, episodeReason } from "@/app/store/account-availability";
 import { ContextMenuModel } from "@/app/store/contextmenu";
+import { pushNotification } from "@/app/store/flash-notifications";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import {
+    accountLabel,
     boundAccountEmail,
     loadAccounts,
     subscribeAccountChanges,
     type Account,
 } from "@/app/view/identity/identity-model";
 import { createEffect, createMemo, createSignal, on, onCleanup, type Accessor } from "solid-js";
+import { resolveProviderAlias } from "../providers";
 import { lastLinkedAccountId } from "../providers/provider-id-aliases";
 import { accountPickerItems, planBind, type BindMode } from "./account-picker";
 import { computeAccountBindCandidates } from "./bind-account-candidates";
@@ -22,7 +26,12 @@ export interface AccountBindingDeps {
     loadAccounts: () => Account[];
     subscribeAccountChanges: (cb: (list: Account[]) => void) => () => void;
     listIdentities: (agentId: string) => Promise<Array<{ provider: string; account_id: string }>>;
-    showPicker: (items: ReturnType<typeof accountPickerItems>, e: MouseEvent) => void;
+    showPicker: (items: ContextMenuItem[], e: MouseEvent) => void;
+    /** `agent.account.switch`: srv links the account and restarts the agent's panes, now or after its turn. */
+    switchAccount: (agentId: string, accountId: string) => Promise<{ status: string; account_label: string; failed: string[] }>;
+    /** What the signed-in-accounts menu says about an account's quota, if anything ("out of quota until …"). */
+    quotaNote: (accountId: string) => string | undefined;
+    notify: (type: "info" | "warning" | "error", title: string, message?: string) => void;
 }
 
 const defaultDeps: AccountBindingDeps = {
@@ -30,6 +39,18 @@ const defaultDeps: AccountBindingDeps = {
     subscribeAccountChanges,
     listIdentities: (agentId) => RpcApi.ListAgentIdentitiesCommand(TabRpcClient, { agent_id: agentId }),
     showPicker: (items, e) => ContextMenuModel.showContextMenu(items, e),
+    switchAccount: (agentId, accountId) =>
+        RpcApi.AgentAccountSwitchCommand(TabRpcClient, { agent_id: agentId, account: accountId, when: "after_turn" }),
+    quotaNote: () => undefined,
+    notify: (type, title, message = "") =>
+        pushNotification({
+            icon: type === "info" ? "fa-check" : "fa-triangle-exclamation",
+            title,
+            message,
+            timestamp: new Date().toISOString(),
+            type,
+            expiration: Date.now() + 8000,
+        }),
 };
 
 export interface AccountBinding {
@@ -39,8 +60,12 @@ export interface AccountBinding {
     bindCandidates: Accessor<Account[]>;
     /** The failure row's "adopt": binds a lone candidate at once, else opens the picker. */
     onBindAccount: (e?: MouseEvent) => void;
-    /** The composer chip's "switch": always a named choice from the picker. */
+    /** The composer chip's menu: every signed-in account of the provider, the current one checked. */
     onSwitchAccount: (e: MouseEvent) => void;
+    /** Whether the menu has an account other than the current one. */
+    canSwitchAccount: Accessor<boolean>;
+    /** The account a queued switch is waiting to move to (after the current turn), as the chip names it. */
+    pendingAccountLabel: Accessor<string | undefined>;
     /** Re-read the linked account (the identity links changed). */
     refreshLinkedAccountId: () => Promise<void>;
 }
@@ -50,9 +75,18 @@ export function useAccountBinding(opts: {
     agentDefinitionId: Accessor<string | undefined>;
     providerId: Accessor<string | undefined>;
     bindExistingAccount: (account: Account) => Promise<void>;
+    /** `agent:pending_account` of this pane: the account id a queued switch moves to. */
+    pendingAccountId?: Accessor<string | undefined>;
     deps?: Partial<AccountBindingDeps>;
 }): AccountBinding {
     const deps = { ...defaultDeps, ...opts.deps };
+    // Quota notes come from srv's account episodes, the same source as the Swarm strip.
+    const episodes = opts.deps?.quotaNote ? undefined : useAccountEpisodes();
+    const quotaNote = (accountId: string): string | undefined => {
+        if (!episodes) return deps.quotaNote(accountId);
+        const ep = episodes().find((e) => e.account_id === accountId);
+        return ep ? episodeReason(ep) : undefined;
+    };
 
     // Cross-pane/cross-tab live account cache. Seeded synchronously (no network
     // round trip; the app-wide cache is already warm) then kept live.
@@ -128,7 +162,70 @@ export function useAccountBinding(opts: {
         );
     };
     const onBindAccount = (e?: MouseEvent) => runBind("adopt", e);
-    const onSwitchAccount = (e: MouseEvent) => runBind("switch", e, "Switch to ");
 
-    return { authEmail, bindCandidates, onBindAccount, onSwitchAccount, refreshLinkedAccountId };
+    // The composer chip (SPEC_ACCOUNT_SWITCH_FROM_THE_COMPOSER_NO_BIND_2026_10_26.md §3.2): every
+    // signed-in account of the agent's provider, the current one checked, with its quota state.
+    // srv does the switch (`agent.account.switch`): at once when the agent is idle, else when its
+    // turn ends.
+    const switchChoices = createMemo(() => {
+        const providerId = opts.providerId();
+        if (!providerId) return [];
+        const provider = resolveProviderAlias(providerId);
+        return accountCache()
+            .filter((a) => resolveProviderAlias(a.provider) === provider && a.status === "valid")
+            .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+    });
+    const canSwitchAccount = createMemo(() => switchChoices().some((a) => a.id !== linkedAccountId()));
+    const pendingAccountLabel = createMemo(() => {
+        const id = opts.pendingAccountId?.();
+        const a = id ? accountCache().find((x) => x.id === id) : undefined;
+        return a ? accountLabel(a, accountCache()) : undefined;
+    });
+    const switchTo = async (account: Account) => {
+        const agentId = opts.agentDefinitionId();
+        // Picking the account it is on cancels a queued switch; with none queued there is nothing to do.
+        if (!agentId || (account.id === linkedAccountId() && !opts.pendingAccountId?.())) return;
+        const label = accountLabel(account, accountCache());
+        try {
+            const r = await deps.switchAccount(agentId, account.id);
+            if (r.status === "unchanged") {
+                deps.notify("info", `Staying on ${label}`, "The queued switch was cancelled.");
+            } else if (r.status === "queued") {
+                deps.notify("info", `Switching to ${label} after this turn`, "The agent keeps working; it moves when the turn ends.");
+            } else if (r.failed.length > 0) {
+                deps.notify("warning", `Switched to ${label}, with a problem`, r.failed.join(" "));
+            }
+            await refreshLinkedAccountId();
+        } catch (e: any) {
+            deps.notify("error", `Couldn't switch to ${label}`, String(e?.message ?? e));
+        }
+    };
+    const onSwitchAccount = (e: MouseEvent) => {
+        const choices = switchChoices();
+        if (choices.length === 0) return;
+        const current = linkedAccountId();
+        deps.showPicker(
+            choices.map((a) => {
+                const note = quotaNote(a.id);
+                return {
+                    label: accountLabel(a, accountCache()),
+                    sublabel: note,
+                    type: "checkbox" as const,
+                    checked: a.id === current,
+                    click: () => void switchTo(a),
+                };
+            }),
+            e,
+        );
+    };
+
+    return {
+        authEmail,
+        bindCandidates,
+        onBindAccount,
+        onSwitchAccount,
+        canSwitchAccount,
+        pendingAccountLabel,
+        refreshLinkedAccountId,
+    };
 }

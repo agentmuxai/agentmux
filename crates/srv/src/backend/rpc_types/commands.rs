@@ -621,6 +621,7 @@ pub const COMMAND_IDENTITY_ACCOUNT_AVAILABILITY: &str = "identity.account.availa
 /// Move an episode's idle agents to another signed-in account. The operator's
 /// window only.
 pub const COMMAND_IDENTITY_ACCOUNT_MOVE_AGENTS: &str = "identity.account.move_agents";
+pub const COMMAND_AGENT_ACCOUNT_SWITCH: &str = "agent.account.switch";
 /// A sign-in the window ran for an account completed: its agents' "signed
 /// out" ends (#2237). The operator's window only.
 pub const COMMAND_IDENTITY_ACCOUNT_SIGNED_IN: &str = "identity.account.signed_in";

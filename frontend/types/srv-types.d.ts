@@ -845,6 +845,10 @@ declare global {
         "agent:historySourceBlockId"?: string;
         /** Last classified agent failure; set on error exit, cleared on clean exit. */
         "agent:last_failure"?: import("@/types/rpc/AgentFailure").AgentFailure;
+        /** A switch of the agent's account asked for mid-turn, applied by srv when no pane of the agent is in a
+         *  turn (agent.account.switch, `after_turn`): the account id, and who asked. */
+        "agent:pending_account"?: string;
+        "agent:pending_account_by"?: string;
         /** Messages typed while the agent's model API was unreachable, not yet
          *  sent, and the agent they were typed to. Frontend-only
          *  (view/agent/offline/useOfflineInput.ts). */

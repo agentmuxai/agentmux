@@ -70,24 +70,11 @@ export function AccountsManager(): JSX.Element {
     });
     const total = () => model.accountsAtom().length + (agentMuxConnected() ? 1 : 0);
 
-    // Right-click a card: Bind to agent ▸, Copy account ID, Delete account….
-    // Latest right-click wins: the menu awaits an RPC, and an earlier one
-    // resolving late must not open for the wrong account.
-    let menuSeq = 0;
+    // Right-click a card: Copy account ID, Delete account….
     const openMenu = (account: Account, e: MouseEvent) => {
         e.preventDefault();
         e.stopPropagation();
-        const seq = ++menuSeq;
-        void buildAccountRowMenu(
-            account,
-            agents(),
-            model.accountsAtom(),
-            (msg) => model.showNotice(msg),
-            undefined,
-            () => model.requestDelete(account),
-        ).then((items) => {
-            if (seq === menuSeq) ContextMenuModel.showContextMenu(items, e);
-        });
+        ContextMenuModel.showContextMenu(buildAccountRowMenu(account, () => model.requestDelete(account)), e);
     };
 
     const toggle = (account: Account) =>
