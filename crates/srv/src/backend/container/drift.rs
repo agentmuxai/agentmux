@@ -9,6 +9,15 @@
 use super::{ContainerError, ContainerManager};
 use crate::backend::container_image::is_agent_base_image;
 
+/// Held shared by every turn that runs in a container, and exclusively while the container is
+/// being updated: a turn cannot start inside an update, and an update cannot start under a turn.
+pub(crate) fn update_gate(container_name: &str) -> std::sync::Arc<tokio::sync::RwLock<()>> {
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex, OnceLock};
+    static GATES: OnceLock<Mutex<HashMap<String, Arc<tokio::sync::RwLock<()>>>>> = OnceLock::new();
+    GATES.get_or_init(Default::default).lock().unwrap().entry(container_name.to_string()).or_default().clone()
+}
+
 /// The label the release workflow's metadata step puts the version in.
 const VERSION_LABEL: &str = "org.opencontainers.image.version";
 

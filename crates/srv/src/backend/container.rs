@@ -17,7 +17,7 @@
 //! Independence boundary: this module has no dependency on a5af/claw.
 //! Docker best practices here were researched independently.
 
-mod drift;
+pub(crate) mod drift;
 mod mounts;
 mod pull;
 mod reap;
