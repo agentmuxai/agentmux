@@ -207,6 +207,16 @@
     // "supervisor:drive:minutes":          120,
     // Stop after this many continued turns in a row that used no tool (1 to 10).
     // "supervisor:noprogress":             2,
+    // Seconds to wait between a turn's end and its continuation (0 to 600; 0 sends
+    // at once); a turn that starts in that time cancels the continuation.
+    // "supervisor:cooldown":               30,
+    // The most continuations across all panes in a rolling hour (0 = no cap).
+    // "supervisor:hourly":                 30,
+    // OS notices for a stop: it needs you, hit a limit, couldn't continue, found the work done.
+    // "supervisor:notify:needsyou":        true,
+    // "supervisor:notify:limit":           true,
+    // "supervisor:notify:failed":          true,
+    // "supervisor:notify:done":            true,
 
     // Remind an idle agent of the tasks waiting in its Kanban backlog, in a
     // short [AgentMux] note after two minutes idle. Off by default.
