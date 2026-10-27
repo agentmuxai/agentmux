@@ -45,11 +45,11 @@ pub(in crate::server) fn holding_unavailable(
     block_id: &str,
 ) -> Option<crate::backend::agent_state::Unavailable> {
     let now_ms = agentmux_common::time::now_ms_u64();
+    use crate::backend::agent_availability::{of_unavailable, verdict, Verdict, WaitReason};
     crate::backend::agent_state::unavailable_of_block(mstore, None, block_id, now_ms)
         .filter(|unavailable| {
-            use crate::backend::agent_state::AgentState;
-            unavailable.state == AgentState::SignedOut
-                || (unavailable.state == AgentState::Limited && unavailable.resets_at_ms.is_some())
+            let rule = verdict(&of_unavailable(unavailable), false, true, None, || false);
+            matches!(rule, Verdict::Wait { reason: WaitReason::UsageLimit | WaitReason::NeedsLogin, .. })
         })
         .or_else(|| super::limit_probe::unavailable_while_probing(mstore, block_id, now_ms))
 }

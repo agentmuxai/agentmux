@@ -352,6 +352,9 @@ impl SubprocessController {
                 },
                 None => false,
             };
+            // Starting the container is what binds the listener on a first turn.
+            let mut container_env = container_env;
+            crate::backend::container_listener::point_env_at_listener(&mut container_env);
             let exec_result: Result<_, Option<crate::backend::container::ContainerError>> = if startup_failed {
                 Err(None)
             } else {
