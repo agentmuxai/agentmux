@@ -399,15 +399,25 @@ impl FileStore {
         let site = std::panic::Location::caller();
         super::off_worker::off_worker(|| {
             let mut conn = self.lock_conn_at(site);
-            let began = std::time::Instant::now();
-            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-            let begun = began.elapsed();
-            let ran = std::time::Instant::now();
-            let out = f(&tx)?;
-            let ran = ran.elapsed();
-            let committing = std::time::Instant::now();
-            tx.commit()?;
-            let committed = committing.elapsed();
+            // Each phase is timed whether or not it succeeds: a write that gives up after
+            // `busy_timeout` waiting for another srv's lock is the stall this exists to show.
+            let mut took = [std::time::Duration::ZERO; 3];
+            let result = (|| {
+                let began = std::time::Instant::now();
+                let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate);
+                took[0] = began.elapsed();
+                let tx = tx?;
+                let ran = std::time::Instant::now();
+                let out = f(&tx);
+                took[1] = ran.elapsed();
+                let out = out?;
+                let committing = std::time::Instant::now();
+                let committed = tx.commit();
+                took[2] = committing.elapsed();
+                committed?;
+                Ok::<T, StoreError>(out)
+            })();
+            let [begun, ran, committed] = took;
             if begun + ran + committed >= SLOW_CONN {
                 tracing::warn!(
                     site = %site,
@@ -415,10 +425,11 @@ impl FileStore {
                     body_ms = ran.as_millis() as u64,
                     commit_ms = committed.as_millis() as u64,
                     slowest = slowest_phase(begun, ran, committed),
+                    ok = result.is_ok(),
                     "filestore: write transaction was slow"
                 );
             }
-            Ok(out)
+            result
         })
     }
 
