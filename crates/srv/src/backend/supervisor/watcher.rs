@@ -144,7 +144,7 @@ pub fn start(mstore: Arc<Store>, filestore: Arc<FileStore>, event_bus: Arc<Event
 }
 
 impl Supervisor {
-    /// A continuation's wait is not persisted: a pane that still says "Continuing in ..." from
+    /// A continuation's wait is not persisted: a pane that still says "Continuing after a ..." from
     /// before this start will never send it, so its row says so instead. Runs once, at start,
     /// before the first turn end can save a live wait.
     fn drop_restarted_waits(&self) {
@@ -391,7 +391,7 @@ impl Supervisor {
         let wait = settings::SupervisorSettings::current().cooldown_secs;
         if let (Action::Continue { reason, .. }, true) = (&action, wait > 0) {
             state.status = SupervisorStatus::Waiting;
-            state.reason = format!("{}{wait} s: {reason}", pacing::WAIT_PREFIX);
+            state.reason = format!("{}{wait} s wait: {reason}", pacing::WAIT_PREFIX);
             self.save(block_id, generation, &state);
             let sup = self.clone();
             let block_id = block_id.to_string();
@@ -486,7 +486,8 @@ impl Supervisor {
             match spent {
                 Err(wait_ms) => {
                     repeat_budget_notice = self.budget_noticed.swap(true, std::sync::atomic::Ordering::Relaxed);
-                    action = Action::Pause(pacing::budget_reached(hourly, wait_ms));
+                    let sent = self.budget.lock().unwrap_or_else(|e| e.into_inner()).sent_in_hour(facts.now_ms);
+                    action = Action::Pause(pacing::budget_reached(sent, hourly, wait_ms));
                 }
                 Ok(ticket) => {
                     self.budget_noticed.store(false, std::sync::atomic::Ordering::Relaxed);

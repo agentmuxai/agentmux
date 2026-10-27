@@ -37,6 +37,11 @@ impl Budget {
         self.sent.push_back((self.next, now_ms));
         Ok(self.next)
     }
+
+    /// How many continuations went in the hour before `now_ms`.
+    pub fn sent_in_hour(&self, now_ms: u64) -> usize {
+        self.sent.iter().filter(|(_, t)| now_ms.saturating_sub(*t) < HOUR_MS).count()
+    }
 }
 
 impl Budget {
@@ -47,21 +52,28 @@ impl Budget {
     }
 }
 
-/// The sentence a pane shows when the fleet budget stops its continuation.
-pub fn budget_reached(cap: u32, wait_ms: u64) -> String {
+/// The sentence a pane shows when the fleet budget stops its continuation: what went out in the
+/// last hour, the cap, and when there is room again.
+pub fn budget_reached(sent: usize, cap: u32, wait_ms: u64) -> String {
     let minutes = wait_ms.div_ceil(60_000).max(1);
-    format!("Fleet budget reached: {cap} continuations in the last hour. It can continue again in about {minutes} min.")
+    let noun = if sent == 1 { "continuation" } else { "continuations" };
+    format!(
+        "Fleet budget reached: {sent} {noun} in the last hour (the cap is {cap}). It can continue again in about {minutes} min."
+    )
 }
 
-/// The start of a pane's reason while its continuation waits ("Continuing in 30 s: ...").
-pub const WAIT_PREFIX: &str = "Continuing in ";
+/// The start of a pane's reason while its continuation waits ("Continuing after a 30 s wait: ...").
+/// It names the wait, not the time left, so it is true for as long as the pane shows it.
+pub const WAIT_PREFIX: &str = "Continuing after a ";
+/// What v0.60.3 wrote, which a pane saved by it may still carry.
+const LEGACY_WAIT_PREFIX: &str = "Continuing in ";
 
 /// What a pane says when AgentMux restarted during a continuation's wait: the wait is not persisted.
 pub const RESTARTED: &str = "Not continued: AgentMux restarted.";
 
-/// Clear a "Continuing in ..." line left by a previous run of srv, whose wait is gone. Whether it changed.
+/// Clear a "Continuing after a ..." line left by a previous run of srv, whose wait is gone. Whether it changed.
 pub fn drop_restarted_wait(state: &mut SupervisorState) -> bool {
-    if state.status != SupervisorStatus::Waiting || !state.reason.starts_with(WAIT_PREFIX) {
+    if state.status != SupervisorStatus::Waiting || !(state.reason.starts_with(WAIT_PREFIX) || state.reason.starts_with(LEGACY_WAIT_PREFIX)) {
         return false;
     }
     state.status = SupervisorStatus::Watching;
@@ -165,8 +177,26 @@ mod tests {
 
     #[test]
     fn the_budget_sentence_rounds_up_to_whole_minutes() {
-        assert!(budget_reached(30, 61_000).contains("about 2 min"));
-        assert!(budget_reached(30, 1).contains("about 1 min"));
+        assert!(budget_reached(30, 30, 61_000).contains("about 2 min"));
+        assert!(budget_reached(30, 30, 1).contains("about 1 min"));
+    }
+
+    #[test]
+    fn the_budget_sentence_says_what_went_out_and_the_cap() {
+        assert_eq!(
+            budget_reached(1, 1, 3_420_000),
+            "Fleet budget reached: 1 continuation in the last hour (the cap is 1). It can continue again in about 57 min."
+        );
+        assert!(budget_reached(3, 1, 60_000).starts_with("Fleet budget reached: 3 continuations in the last hour (the cap is 1)."));
+    }
+
+    #[test]
+    fn the_budget_counts_only_the_last_hour() {
+        let mut b = Budget::default();
+        b.spend(0, 0).unwrap();
+        b.spend(1_000, 0).unwrap();
+        assert_eq!(b.sent_in_hour(2_000), 2);
+        assert_eq!(b.sent_in_hour(HOUR_MS + 500), 1);
     }
 
     #[test]
@@ -176,11 +206,14 @@ mod tests {
             reason: reason.to_string(),
             ..SupervisorState::default()
         };
-        let mut s = waiting("Continuing in 30 s: still has work", SupervisorStatus::Waiting);
+        let mut s = waiting("Continuing after a 30 s wait: still has work", SupervisorStatus::Waiting);
         assert!(drop_restarted_wait(&mut s));
         assert_eq!((s.status, s.reason.as_str()), (SupervisorStatus::Watching, RESTARTED));
         assert!(!drop_restarted_wait(&mut s), "a second pass changes nothing");
         // "Waiting" is also the status of a pane held for its background work.
+        // A wait saved by v0.60.3 reads "Continuing in N s: ...".
+        let mut old = waiting("Continuing in 30 s: still has work", SupervisorStatus::Waiting);
+        assert!(drop_restarted_wait(&mut old));
         let mut bg = waiting("Waiting for its background work to finish.", SupervisorStatus::Waiting);
         assert!(!drop_restarted_wait(&mut bg));
         assert_eq!(bg.status, SupervisorStatus::Waiting);
