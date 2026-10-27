@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// External shutdown: 15 seconds for the user to override
+// External shutdown: 15 seconds (30 for a pane) for the user to override
 // (docs/specs/SPEC_AGENT_SELF_QUIT_2026_09_24.md §6.5, contract §12.2–12.3).
 //
 // A shutdown the user didn't ask for doesn't happen at once. `request` marks
@@ -19,6 +19,9 @@ use serde::Serialize;
 use crate::server::AppState;
 
 pub const OVERRIDE_WINDOW: std::time::Duration = std::time::Duration::from_secs(15);
+/// The window for closing a pane that holds no agent (a browser, an editor): 30 s,
+/// the default for a human override.
+pub const PANE_CLOSE_WINDOW: std::time::Duration = std::time::Duration::from_secs(30);
 pub const EVENT_SHUTDOWN_PENDING: &str = "agent:shutdown-pending";
 pub const EVENT_SHUTDOWN_PENDING_CLEARED: &str = "agent:shutdown-pending-cleared";
 /// Finished requests stay answerable this long, then are dropped.
@@ -55,6 +58,11 @@ impl Action {
             Action::SelfQuit { .. } | Action::CloseTab { .. } => 1,
             Action::ClosePane { .. } => 2,
         }
+    }
+
+    /// How long the user has to keep it.
+    fn window(&self) -> std::time::Duration {
+        window_for(self.effect())
     }
 
     /// What the user is told will happen: `PendingView::effect`.
@@ -98,6 +106,11 @@ impl Action {
             _ => {}
         }
     }
+}
+
+/// The window a request with this `PendingView::effect` gets.
+pub fn window_for(effect: &str) -> std::time::Duration {
+    if effect == "close_pane" { PANE_CLOSE_WINDOW } else { OVERRIDE_WINDOW }
 }
 
 /// A request as the caller and the frontend see it (§12.2).
@@ -183,7 +196,7 @@ pub fn remember_remote(request_id: &str, local_url: &str, auth_key: &str) {
     let now = now_ms();
     let mut map = REMOTE.lock().unwrap_or_else(|e| e.into_inner());
     // Long after any window has settled, like finished local requests.
-    map.retain(|_, r| now - r.remembered_at_ms < KEEP_FINISHED_MS + OVERRIDE_WINDOW.as_millis() as i64);
+    map.retain(|_, r| now - r.remembered_at_ms < KEEP_FINISHED_MS + PANE_CLOSE_WINDOW.as_millis() as i64);
     map.insert(
         request_id.to_string(),
         RemoteRequest { local_url: local_url.to_string(), auth_key: auth_key.to_string(), remembered_at_ms: now },
@@ -271,7 +284,8 @@ fn notify_router(state: &AppState) -> Option<Arc<crate::backend::notify::router:
 /// for (ReAgent P1 on #3798). The returned view says whose request it is: a
 /// caller whose `by`/`via` differ has joined someone else's.
 pub fn request(state: &AppState, block_id: &str, by: &str, via: &str, reason: &str, action: Action) -> PendingView {
-    request_within(state, block_id, by, via, reason, action, OVERRIDE_WINDOW)
+    let window = action.window();
+    request_within(state, block_id, by, via, reason, action, window)
 }
 
 fn request_within(
@@ -286,7 +300,7 @@ fn request_within(
     let new_covers = action.covers(block_id);
     // What the user sees is the cleaned text; `by` and `via` keep their raw
     // form for the audit (`requesters`).
-    let shown_by = clean_by(by);
+    let shown_by = clean_by(&asker_name(state, by));
     let shown_reason = clean_reason(reason);
     let view = {
         let mut map = entries();
@@ -377,7 +391,7 @@ fn request_within(
         publish_pending(state, b, &view);
     }
     raise_toast(state, &view);
-    tracing::info!(block_id, by, via, request_id = %view.request_id, "shutdown pending: user has 15 s to keep it");
+    tracing::info!(block_id, by, via, request_id = %view.request_id, window_s = window.as_secs(), "shutdown pending: the user can keep it");
 
     let kept = entries().get(&view.request_id).map(|e| e.kept.clone());
     let (state, v) = (state.clone(), view.clone());
@@ -470,6 +484,19 @@ pub fn clean_reason(raw: &str) -> String {
 
 /// The longest asker name the banner and toast show.
 const BY_MAX: usize = 64;
+
+/// The asker as the user knows them: the display name of the agent whose id `by`
+/// is (`QTest`, not `qtest`), else `by` as given (a fixed app string, a name
+/// another AgentMux claims, or an agent that is not running).
+fn asker_name(state: &AppState, by: &str) -> String {
+    state
+        .reactive_handler
+        .get_agent(by)
+        .and_then(|a| state.mstore.get::<crate::backend::obj::Block>(&a.block_id).ok().flatten())
+        .map(|b| crate::backend::obj::meta_get_string(&b.meta, "agentName", ""))
+        .filter(|n| !n.trim().is_empty())
+        .unwrap_or_else(|| by.to_string())
+}
 
 /// The asker's name, cleaned for display. Normally a verified agent id; the
 /// only other sources are fixed app strings and a name another AgentMux on
