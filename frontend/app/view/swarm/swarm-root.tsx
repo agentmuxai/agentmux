@@ -30,7 +30,7 @@ function SectionActions(props: { model: SwarmViewModel; agents: SwarmAgents; sec
                 when this instance has none, and the toolbar is what acts on them. It
                 shows itself only when there is something to select or act on. */}
             <FleetToolbar model={model} allBlockIds={agents.selectableKeys} section={props.section} />
-            <FleetResultPanel model={model} />
+            <FleetResultPanel model={model} quietWhenClean={props.section === "broadcast"} />
             <Show
                 when={agents.tree().length > 0}
                 fallback={

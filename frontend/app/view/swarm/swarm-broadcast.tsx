@@ -122,7 +122,7 @@ export function BroadcastDock(props: { model: SwarmViewModel; agents: Pick<Swarm
                 <Button tone="accent" class="swarm-fleet-btn swarm-fleet-btn--primary" disabled={!canSend()} onClick={() => void send()}>
                     <i class="fa-solid fa-tower-broadcast" /> Send to {recipients()}
                 </Button>
-                <span class="swarm-broadcast-hint">{keyLabel("mod+enter")} sends</span>
+                <span class="swarm-broadcast-hint">{keyLabel("mod+Enter")} sends</span>
                 <Show when={gap()}>{(text) => <span class="swarm-fleet-broadcast-gap">{text()}</span>}</Show>
             </div>
             <Show when={state.recent().length > 0}>
