@@ -9,7 +9,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use sysinfo::{DiskRefreshKind, Disks, Networks, Pid, ProcessRefreshKind, ProcessesToUpdate};
+use crate::backend::net_counters::NetCounters;
+use sysinfo::{DiskRefreshKind, Disks, MemoryRefreshKind, Pid, ProcessRefreshKind, ProcessesToUpdate};
 
 use crate::backend::blockcontroller::pidregistry;
 use crate::backend::blockcontroller::process_tree;
@@ -971,14 +972,7 @@ impl NetState {
     }
 
     /// Collect network I/O rates (in MB/s).
-    fn get_net_data(&mut self, networks: &Networks, values: &mut HashMap<String, f64>) {
-        // Sum across all interfaces
-        let mut total_sent: u64 = 0;
-        let mut total_recv: u64 = 0;
-        for (_name, data) in networks.iter() {
-            total_sent += data.total_transmitted();
-            total_recv += data.total_received();
-        }
+    fn get_net_data(&mut self, (total_sent, total_recv): (u64, u64), values: &mut HashMap<String, f64>) {
 
         let now = Instant::now();
         if let Some(prev_time) = self.prev_time {
@@ -1134,7 +1128,7 @@ pub async fn run_sysinfo_loop(
     // CPU and memory only: `new_all()` also kept a full snapshot of every process.
     let kind = sysinfo::RefreshKind::everything().without_processes();
     let mut sys = sysinfo::System::new_with_specifics(kind);
-    let mut networks = Networks::new_with_refreshed_list();
+    let mut networks = NetCounters::new();
     let mut net_state = NetState::new();
     let mut disks = Disks::new_with_refreshed_list();
     let mut last_disk_full_refresh = Instant::now();
@@ -1221,10 +1215,12 @@ pub async fn run_sysinfo_loop(
             // involved) — so its result is computed here too, alongside the
             // other blocking OS reads, not in the async section below.
             let mut pagefile_values = HashMap::new();
+            let mut net_totals = (0, 0);
             tokio::task::block_in_place(|| {
                 sys.refresh_cpu_usage();
-                sys.refresh_memory();
-                networks.refresh(true);
+                // RAM only: the swap figures cost a whole-system query and nothing reads them.
+                sys.refresh_memory_specifics(MemoryRefreshKind::nothing().with_ram());
+                net_totals = networks.totals();
                 if last_disk_full_refresh.elapsed() >= DISK_FULL_REFRESH {
                     disks.refresh(true);
                     last_disk_full_refresh = Instant::now();
@@ -1244,7 +1240,7 @@ pub async fn run_sysinfo_loop(
             get_cpu_data(&sys, &mut values);
             get_mem_data(&sys, &mut values);
             get_commit_data(&mut values);
-            net_state.get_net_data(&networks, &mut values);
+            net_state.get_net_data(net_totals, &mut values);
             get_disk_data(&disks, elapsed_secs, &mut values);
             // Must follow get_disk_data: it summarises the per-volume figures that
             // call just wrote. The Windows equivalent already ran inside
