@@ -123,15 +123,39 @@ fn prestart_applies(agent_mode: &str, runtime_status: &str) -> bool {
     agent_mode == "container" && runtime_status == crate::backend::blockcontroller::STATUS_INIT
 }
 
-/// Blocks whose pre-start is under way, so a second request for one does nothing.
-static PRESTARTING: std::sync::LazyLock<std::sync::Mutex<std::collections::HashSet<String>>> = std::sync::LazyLock::new(Default::default);
+/// Blocks whose pre-start is under way, so a second request for one does nothing, and the handle that
+/// ends it (set once its task exists) so closing the pane can.
+static PRESTARTING: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, Option<tokio::task::AbortHandle>>>> =
+    std::sync::LazyLock::new(Default::default);
 
 struct PrestartSlot(String);
 
 impl PrestartSlot {
     fn take(block_id: &str) -> Option<Self> {
-        let mut set = PRESTARTING.lock().unwrap_or_else(|e| e.into_inner());
-        set.insert(block_id.to_string()).then(|| Self(block_id.to_string()))
+        let mut map = PRESTARTING.lock().unwrap_or_else(|e| e.into_inner());
+        match map.entry(block_id.to_string()) {
+            std::collections::hash_map::Entry::Occupied(_) => None,
+            std::collections::hash_map::Entry::Vacant(v) => {
+                v.insert(None);
+                Some(Self(block_id.to_string()))
+            }
+        }
+    }
+
+    fn running(&self, task: tokio::task::AbortHandle) {
+        if let Some(handle) = PRESTARTING.lock().unwrap_or_else(|e| e.into_inner()).get_mut(&self.0) {
+            *handle = Some(task);
+        }
+    }
+}
+
+/// End the pre-start of a pane that is closing, so a start still pulling its image can't create and run a
+/// container for a pane that is gone. The caller stops the container afterwards. Nothing under way: nothing done.
+pub(crate) fn cancel_prestart(block_id: &str) {
+    // Aborted outside the lock: dropping the task drops its slot, which takes the lock.
+    let task = PRESTARTING.lock().unwrap_or_else(|e| e.into_inner()).get_mut(block_id).and_then(Option::take);
+    if let Some(task) = task {
+        task.abort();
     }
 }
 
@@ -185,12 +209,21 @@ pub(crate) async fn prestart(deps: &super::input::AgentTurnDeps, block_id: Strin
         deps.filestore_gate.clone(),
         deps.mstore.clone(),
     );
-    tokio::spawn(async move {
-        let _slot = slot;
-        // A failure is on the pane as the start row's Failed state; the first message tries again.
-        if let Err(e) = startup.run_quietly().await {
-            tracing::info!(block_id = %startup.block_id, error = %e, "container pre-start did not finish");
+    // The slot outlives the task (the waiter below drops it), so the handle is always set on a live entry.
+    let task = tokio::spawn({
+        let slot_block = block_id.clone();
+        async move {
+            // A failure is on the pane as the start row's Failed state; the first message tries again.
+            if let Err(e) = startup.run_quietly().await {
+                tracing::info!(block_id = %slot_block, error = %e, "container pre-start did not finish");
+            }
         }
+    });
+    slot.running(task.abort_handle());
+    tokio::spawn(async move {
+        // Holds the slot until the pre-start ends, however it ends (finished, failed or aborted).
+        let _ = task.await;
+        drop(slot);
     });
     Ok(())
 }
@@ -377,6 +410,23 @@ mod tests {
         assert!(PrestartSlot::take("block-prestart-other").is_some(), "another block is its own");
         drop(first);
         assert!(PrestartSlot::take("block-prestart-slot").is_some(), "free again once it ended");
+    }
+
+    #[tokio::test]
+    async fn closing_a_pane_ends_its_prestart_and_frees_its_slot() {
+        let slot = PrestartSlot::take("block-prestart-cancel").expect("the first takes it");
+        let task = tokio::spawn(std::future::pending::<()>());
+        slot.running(task.abort_handle());
+        let waiter = tokio::spawn(async move {
+            let _ = task.await;
+            drop(slot);
+        });
+        cancel_prestart("block-prestart-cancel");
+        waiter.await.unwrap();
+        assert!(PrestartSlot::take("block-prestart-cancel").is_some(), "free once it ended");
+        // Nothing under way, or no such block: nothing happens.
+        cancel_prestart("block-prestart-cancel");
+        cancel_prestart("block-never-prestarted");
     }
 
     #[test]
