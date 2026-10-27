@@ -5,8 +5,8 @@
 //! it owns (its area), `SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md`.
 //!
 //! A seat is stored on the agent's shared definition record
-//! (`DefinitionRecordV1::seat`), set only by the operator through
-//! `agent.setSeat`. This module holds what reads and writes have in common:
+//! (`DefinitionRecordV1::seat`), set by the operator through `agent.setSeat`
+//! or by an agent through `Agents set_seat` (`app_api/agent_seats.rs`). This module holds what reads and writes have in common:
 //! the validation of a new seat (§2), the effective seat of a spawned worker
 //! that has none of its own, and the summary shown in MuxAPI's `Agents list`,
 //! a LAN peer's agent list and My Agents (§4, §5). Seats inform; nothing is

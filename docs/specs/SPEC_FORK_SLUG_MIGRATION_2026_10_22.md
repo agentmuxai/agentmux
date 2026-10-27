@@ -370,7 +370,10 @@ Anything else is left alone and listed as "not a pre-fix chain". This includes a
 user-visible custom slug, or a missing parent (the old rule can't be recomputed).
 
 If the target is taken by a different uid, the migration refuses that agent and suggests the next free `-N`, never
-picks one silently. The other agents can still migrate.
+picks one silently. The other agents can still migrate. The user can pick the id for a refused agent: Settings >
+Agents offers "Use <suggestion>" and a field for an id of their own once nothing else is left to update, and sends
+it as `choices` (`uid`, `new_slug`) on `plan`, `stop` and `apply`. The pick is checked like any computed id (taken or
+not an agent id, it is refused again with the reason), and a run that is resuming takes none.
 
 ### 5.2 Order
 

@@ -284,3 +284,85 @@ fn duplicate_slugs_are_reported_with_a_proposal() {
     assert!(plan.summary.contains("2 agents share the id claude-2"), "{}", plan.summary);
     assert!(plan.candidates.is_empty() && plan.blockers.is_empty(), "{plan:?}");
 }
+
+fn choice(uid: &str, slug: &str) -> crate::backend::rpc_types::ForkSlugChoice {
+    crate::backend::rpc_types::ForkSlugChoice { uid: uid.to_string(), new_slug: slug.to_string() }
+}
+
+/// An agent whose computed id is taken can be given the id the user picks: the plan
+/// checks the pick like any other new id.
+#[test]
+fn a_chosen_id_stands_in_for_a_refused_one_and_is_checked_like_it() {
+    let fx = Fx::empty();
+    let data = fx.version("stable", "0.59.1");
+    fx.chains(&data, true);
+    let old = fx.version("local-x", "0.58.0");
+    fx.agent(&old, "uid-squatter", "Someone", "loap-3", "", "", false);
+    let plan = super::super::plan_choosing(&fx.home, false, &[choice(LOAP3, "loap-3-2")]).unwrap();
+    let loap3 = by_name(&plan.candidates, "Loap #3");
+    assert_eq!((loap3.old_slug.as_str(), loap3.new_slug.as_str()), ("loap-loap-2-loap-3", "loap-3-2"));
+    assert_eq!(loap3.refused, None, "the pick is free");
+    assert!(loap3.locations.iter().any(|l| l.key == "K2"), "its locations are listed for the pick");
+    // The others keep the id the rule gives them.
+    assert_eq!(by_name(&plan.candidates, "Loap #2").new_slug, "loap-2");
+    // The same agent, picking the id that is taken, is refused again with that reason.
+    let again = super::super::plan_choosing(&fx.home, false, &[choice(LOAP3, "loap-3")]).unwrap();
+    assert!(by_name(&again.candidates, "Loap #3").refused.as_deref().is_some_and(|r| r.contains("uid-squatter")));
+    // Picking what another candidate gets is refused too (here its name routes there).
+    let clash = super::super::plan_choosing(&fx.home, false, &[choice(LOAP3, "loap-2")]).unwrap();
+    let refused = by_name(&clash.candidates, "Loap #3").refused.clone();
+    assert!(refused.as_deref().is_some_and(|r| r.contains("loap-2 is taken") && r.contains("Loap #2")), "{refused:?}");
+    // Two picks for the same id: the plan takes them parent first, so the earlier agent keeps it
+    // and the later one is refused.
+    let twice = super::super::plan_choosing(&fx.home, false, &[choice(LOAP3, "loap-9"), choice(NAKI2, "loap-9")]).unwrap();
+    assert_eq!(by_name(&twice.candidates, "Naki #2").refused, None);
+    let later = by_name(&twice.candidates, "Loap #3").refused.clone();
+    assert!(later.as_deref().is_some_and(|r| r.contains("this run renames agent uid-naki-2")), "{later:?}");
+}
+
+#[test]
+fn a_pick_that_cannot_be_an_id_for_that_agent_is_an_error() {
+    let fx = Fx::standard();
+    let plan = |c: &[crate::backend::rpc_types::ForkSlugChoice]| super::super::plan_choosing(&fx.home, false, c);
+    assert!(plan(&[choice("uid-nobody", "loap-9")]).unwrap_err().contains("isn't an agent with an outdated id"));
+    assert!(plan(&[choice(LOAP3, "Not A Slug!")]).unwrap_err().contains("isn't a valid agent id"));
+    assert!(plan(&[choice(LOAP3, "")]).unwrap_err().contains("isn't a valid agent id"));
+    assert!(plan(&[choice(LOAP3, "loap-loap-2-loap-3")]).unwrap_err().contains("already has the id"));
+    assert!(plan(&[choice(LOAP3, "loap-9")]).is_ok());
+}
+
+/// A run gives the agent the picked id everywhere the rule's id would go, and a pick can't
+/// be made while a stopped run is waiting to be finished.
+#[test]
+fn a_run_with_a_chosen_id_migrates_the_agent_to_it() {
+    use super::super::run::{self, Options};
+    let fx = Fx::empty();
+    let data = fx.version("stable", "0.59.1");
+    fx.chains(&data, true);
+    let old = fx.version("local-x", "0.58.0");
+    fx.agent(&old, "uid-squatter", "Someone", "loap-3", "", "", false);
+    let report = run::apply_choosing(&fx.home, &Options::default(), &[choice(LOAP3, "loap-3-2")]).unwrap();
+    assert_eq!(report.failed, None);
+    let mut migrated: Vec<(&str, &str)> = report.migrated.iter().map(|m| (m.old_slug.as_str(), m.new_slug.as_str())).collect();
+    migrated.sort();
+    assert!(migrated.contains(&("loap-loap-2-loap-3", "loap-3-2")), "{migrated:?}");
+    let def = read_json(&fx.home.definitions().join(format!("{LOAP3}.json")));
+    assert_eq!(def["data"]["slug"], "loap-3-2");
+    assert!(def["data"]["former_slugs"].to_string().contains("loap-loap-2-loap-3"), "the old id is kept as a former id");
+    // It is no longer outdated; the squatter still holds loap-3.
+    let after = super::super::plan(&fx.home, false).unwrap();
+    assert!(after.candidates.iter().all(|c| c.uid != LOAP3), "{:?}", after.candidates);
+}
+
+#[test]
+fn a_pick_is_refused_while_an_unfinished_run_waits() {
+    use super::super::run::{self, Crash, Options, CRASHED};
+    use super::super::journal::Step;
+    let fx = Fx::standard();
+    let crash = Options { crash: Some((LOAP3.to_string(), Crash::BeforeDone(Step::S1))), ..Default::default() };
+    assert_eq!(run::apply(&fx.home, &crash).unwrap_err(), CRASHED);
+    let err = run::apply_choosing(&fx.home, &Options::default(), &[choice(LOAP3, "loap-9")]).unwrap_err();
+    assert!(err.contains("has to finish before an id can be chosen"), "{err}");
+    // Without a pick the run resumes as before.
+    assert_eq!(super::apply(&fx.home).unwrap().failed, None);
+}

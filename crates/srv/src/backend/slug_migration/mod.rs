@@ -50,7 +50,7 @@ mod tests;
 pub use holders::HostSlugs;
 pub use home::Home;
 
-use crate::backend::rpc_types::{ForkSlugMigrationMode, ForkSlugPlan, ForkSlugReport, MigrateForkSlugsResult};
+use crate::backend::rpc_types::{ForkSlugChoice, ForkSlugMigrationMode, ForkSlugPlan, ForkSlugReport, MigrateForkSlugsResult};
 
 /// The plan for `home`; `quick` finds the candidates only.
 pub fn plan(home: &Home, quick: bool) -> Result<ForkSlugPlan, String> {
@@ -60,6 +60,23 @@ pub fn plan(home: &Home, quick: bool) -> Result<ForkSlugPlan, String> {
 /// `plan`, `apply`, `rollback` or `restore` on `home`. `stop` needs the
 /// running instance and is the RPC's.
 pub fn run(home: &Home, mode: ForkSlugMigrationMode, journal: Option<&str>, quick: bool) -> Result<MigrateForkSlugsResult, String> {
+    run_choosing(home, mode, journal, quick, &[])
+}
+
+/// The plan for `home` with ids the user picked for some agents (`choices`).
+pub fn plan_choosing(home: &Home, quick: bool, choices: &[ForkSlugChoice]) -> Result<ForkSlugPlan, String> {
+    plan::plan_choosing(home, quick, choices)
+}
+
+/// [`run`] with ids the user picked for some agents; `plan` and `apply` take them, the
+/// other modes ignore them.
+pub fn run_choosing(
+    home: &Home,
+    mode: ForkSlugMigrationMode,
+    journal: Option<&str>,
+    quick: bool,
+    choices: &[ForkSlugChoice],
+) -> Result<MigrateForkSlugsResult, String> {
     let result = |plan: Option<ForkSlugPlan>, report: Option<ForkSlugReport>| {
         let summary = match (&plan, &report) {
             (Some(p), _) => p.summary.clone(),
@@ -69,8 +86,8 @@ pub fn run(home: &Home, mode: ForkSlugMigrationMode, journal: Option<&str>, quic
         MigrateForkSlugsResult { mode, plan, report, pending: Vec::new(), wait_ms: 0, summary }
     };
     match mode {
-        ForkSlugMigrationMode::Plan => Ok(result(Some(plan::plan(home, quick)?), None)),
-        ForkSlugMigrationMode::Apply => Ok(result(None, Some(run::apply(home, &run::Options::default())?))),
+        ForkSlugMigrationMode::Plan => Ok(result(Some(plan::plan_choosing(home, quick, choices)?), None)),
+        ForkSlugMigrationMode::Apply => Ok(result(None, Some(run::apply_choosing(home, &run::Options::default(), choices)?))),
         ForkSlugMigrationMode::Rollback => Ok(result(None, Some(run::rollback(home, journal)?))),
         ForkSlugMigrationMode::Restore => Ok(result(None, Some(run::restore(home, journal)?))),
         ForkSlugMigrationMode::Stop => Err("stop runs in the app, through agents.migrateForkSlugs".into()),
