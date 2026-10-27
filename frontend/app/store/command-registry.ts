@@ -27,6 +27,7 @@ import { redockThisFloater } from "@/app/block/floating-redock";
 import { userInThisWindow } from "@/app/store/input-owner";
 import { openConnectors, openMemory } from "@/app/view/section-pane/panes";
 import { openOrFocusPaneByView } from "@/app/store/block-component-registry";
+import { toggleStatusBar } from "@/app/statusbar/status-bar-visibility";
 import { paneHistoryBack, paneHistoryForward } from "@/app/store/pane-history";
 
 // ---------------------------------------------------------------------------
@@ -480,6 +481,14 @@ export function registerDefaultCommands(): void {
         execute: () => {
             openModal(CommandPaletteModal);
         },
+    });
+    commandRegistry.register({
+        id: "view:statusbar:toggle",
+        label: "Toggle Status Bar",
+        category: "View",
+        icon: "window-minimize",
+        keywords: "hide show status bar footer window:showstatusbar",
+        execute: () => toggleStatusBar(),
     });
     commandRegistry.register({
         id: "view:zoom:in",

@@ -1088,6 +1088,8 @@ declare global {
         "window:reducedmotion"?: boolean;
         "window:tilegapsize"?: number;
         "window:showmenubar"?: boolean;
+        /** Draw the status bar (absent = on). */
+        "window:showstatusbar"?: boolean;
         "window:nativetitlebar"?: boolean;
         "window:disablehardwareacceleration"?: boolean;
         "window:maxtabcachesize"?: number;
