@@ -48,9 +48,7 @@ async fn post_stop(http: &reqwest::Client, url: &str, auth_key: &str, stop: &Rem
         .json(&json!({
             "run_id": stop.run_id,
             "block_id": stop.block_id,
-            "infra": stop.infra,
-            "reason": stop.reason,
-            "summary": stop.summary,
+            "from_channel": stop.from_channel,
         }));
     if !auth_key.is_empty() {
         req = req.header(AUTH_KEY_HEADER, auth_key);
@@ -91,15 +89,16 @@ pub(crate) fn install(state: &AppState, ledger: &Arc<RunLedger>) {
 pub(crate) struct StopRunRequest {
     run_id: String,
     block_id: String,
-    infra: String,
-    reason: String,
-    #[serde(default)]
-    summary: String,
+    /// The AgentMux asking: it must be the one that fired the run, and must
+    /// have asked in the run's row.
+    from_channel: String,
 }
 
 /// `POST /agentmux/jobs/stop-run`: close the run this instance follows and
 /// interrupt its pane's turn. Only a run this process follows in the named
-/// pane, and only the stops a timeout or `cancel_other` write.
+/// pane, that the asking AgentMux fired and asked in its row to stop. The
+/// route is on the full-key router only: not LAN-reachable, and not on the
+/// container allowlist.
 pub(crate) async fn handle_jobs_stop_run(
     State(state): State<AppState>,
     caller: Option<axum::Extension<super::caller::Caller>>,
@@ -114,7 +113,7 @@ pub(crate) async fn handle_jobs_stop_run(
         return refuse(StatusCode::OK, "the run ledger isn't ready");
     };
     let outcome = tokio::task::spawn_blocking(move || {
-        ledger.stop_followed_here(&req.run_id, &req.block_id, &req.infra, &req.reason, &req.summary)
+        ledger.stop_followed_here(&req.run_id, &req.block_id, &req.from_channel)
     })
     .await
     .unwrap_or_else(|e| Err(e.to_string()));
@@ -133,6 +132,7 @@ mod tests {
         RemoteStop {
             run_id: "r1".into(),
             block_id: "b1".into(),
+            from_channel: "chan-a".into(),
             infra: "timeout".into(),
             reason: "timeout".into(),
             summary: "stopped after 5 minutes (timeout_minutes)".into(),
@@ -170,10 +170,15 @@ mod tests {
         assert_eq!(post_stop(&reqwest::Client::new(), &url, "k-b", &stop()).await, Ok(()));
         let seen = seen.lock().unwrap();
         assert_eq!(seen[0].0.as_deref(), Some("k-b"));
-        assert_eq!(
-            seen[0].1,
-            json!({"run_id": "r1", "block_id": "b1", "infra": "timeout", "reason": "timeout", "summary": "stopped after 5 minutes (timeout_minutes)"})
-        );
+        // Only who is asking and about what: the stop itself is in the shared ledger.
+        assert_eq!(seen[0].1, json!({"run_id": "r1", "block_id": "b1", "from_channel": "chan-a"}));
+    }
+
+    /// The route is on the full-key router: a container's credential is not
+    /// accepted for it, and it is not among the LAN-reachable routes.
+    #[test]
+    fn the_route_is_not_open_to_containers() {
+        assert!(!crate::backend::container_credential::container_route_allowed(STOP_RUN_PATH));
     }
 
     #[tokio::test]
@@ -195,9 +200,7 @@ mod tests {
         Json(StopRunRequest {
             run_id: run_id.into(),
             block_id: "b1".into(),
-            infra: "timeout".into(),
-            reason: "timeout".into(),
-            summary: String::new(),
+            from_channel: "chan-a".into(),
         })
     }
 

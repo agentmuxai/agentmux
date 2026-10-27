@@ -314,7 +314,7 @@ async fn a_stop_asked_of_the_follower_closes_the_run_and_interrupts_its_pane() {
     let (receiver, sender) = (p.receiver.clone(), p.sender.clone());
     p.sender.install_remote_stop(Arc::new(move |stop| {
         // What the server does: carry the ask over, and report how it went.
-        match receiver.stop_followed_here(&stop.run_id, &stop.block_id, &stop.infra, &stop.reason, &stop.summary) {
+        match receiver.stop_followed_here(&stop.run_id, &stop.block_id, &stop.from_channel) {
             Ok(_) => sender.remote_stop_done(&stop.run_id),
             Err(e) => sender.remote_stop_failed(&stop.run_id, &e),
         }
@@ -373,34 +373,68 @@ async fn a_stop_that_cannot_be_delivered_is_noted_and_tried_again() {
     assert_eq!(p.get(&run.id).state, state::RUNNING);
 }
 
-/// The following side stops only what it follows, in the pane it was told, with
-/// the stops a timeout or `cancel_other` write.
+/// The following side stops only what it follows, in the pane it was told, that
+/// the asking AgentMux fired and asked, in the run's row, to stop. Another
+/// channel that guesses a run id, or names the right channel, stops nothing.
 #[tokio::test(flavor = "multi_thread")]
-async fn the_follower_refuses_a_stop_that_is_not_its_to_make() {
+async fn the_follower_refuses_a_stop_that_is_not_its_origins_to_ask() {
     let p = pair();
     let interrupted = receiver_interrupts(&p);
     let run = followed_run(&p, 1);
-    let take = |run_id: &str, block: &str, infra_status: &str, why: &str| p.receiver.stop_followed_here(run_id, block, infra_status, why, "s");
+    let take = |run_id: &str, block: &str, from: &str| p.receiver.stop_followed_here(run_id, block, from);
+    let nothing_happened = || {
+        assert_eq!(p.get(&run.id).state, state::RUNNING, "nothing above closed it");
+        assert!(interrupted.lock().unwrap().is_empty());
+    };
 
-    assert!(take("no-such-run", PANE, infra::TIMEOUT, reason::TIMEOUT).is_err());
-    assert!(take(&run.id, "b-other", infra::TIMEOUT, reason::TIMEOUT).unwrap_err().contains("not in that pane"));
-    assert!(take(&run.id, "", infra::TIMEOUT, reason::TIMEOUT).is_err());
-    for (i, r) in [(infra::OK, reason::TIMEOUT), (infra::TIMEOUT, reason::OVERLAP), (infra::ERROR, reason::TIMEOUT), ("", "")] {
-        assert!(take(&run.id, PANE, i, r).unwrap_err().contains("not a stop"), "{i}/{r}");
+    assert!(take("no-such-run", PANE, "chan-a").is_err());
+    assert!(take(&run.id, "b-other", "chan-a").unwrap_err().contains("not in that pane"));
+    assert!(take(&run.id, "", "chan-a").is_err());
+    assert!(p.sender.stop_followed_here(&run.id, PANE, "chan-a").unwrap_err().contains("does not follow"));
+
+    // The origin has not asked: nobody can stop the run by naming it.
+    for from in ["chan-a", "chan-b", "chan-c", ""] {
+        assert!(take(&run.id, PANE, from).is_err(), "no stop asked, from {from:?}");
     }
-    assert!(p.sender.stop_followed_here(&run.id, PANE, infra::TIMEOUT, reason::TIMEOUT, "s").unwrap_err().contains("does not follow"));
-    assert_eq!(p.get(&run.id).state, state::RUNNING, "nothing above closed it");
-    assert!(interrupted.lock().unwrap().is_empty());
+    nothing_happened();
 
-    // Another process of the same channel (a pid that isn't this one's) isn't the follower.
-    p.store.job_run_add_links(&run.id, &json!({ FOLLOWED_BY_PID: u32::MAX })).unwrap();
-    assert!(take(&run.id, PANE, infra::TIMEOUT, reason::TIMEOUT).unwrap_err().contains("does not follow"));
-    p.store.job_run_add_links(&run.id, &json!({ FOLLOWED_BY_PID: std::process::id() })).unwrap();
+    // The origin asks (a note in the shared row).
+    p.sender.install_remote_stop(Arc::new(|_| {}));
+    assert!(p.sender.request_remote_stop(&run, infra::INTERRUPTED, reason::OVERLAP, "stopped: the job's next run started"));
 
-    assert_eq!(take(&run.id, PANE, infra::INTERRUPTED, reason::OVERLAP), Ok(true));
+    // Another channel names itself, or the receiver's own, or none: it did not fire the run.
+    for from in ["chan-c", "chan-b", "chan-", ""] {
+        assert!(take(&run.id, PANE, from).unwrap_err().contains("not fired by that AgentMux"), "from {from:?}");
+    }
+    nothing_happened();
+
+    // A stop another channel wrote into the row is not the origin's.
+    let forged = json!({ STOP_REQUESTED: { "by_channel": "chan-c", "infra": infra::TIMEOUT, "reason": reason::TIMEOUT, "summary": "x" } });
+    p.store.job_run_add_links(&run.id, &forged).unwrap();
+    assert!(take(&run.id, PANE, "chan-a").unwrap_err().contains("has not asked"));
+    // And the status is the row's: a note with a stop no timeout or overlap writes is refused.
+    let odd = json!({ STOP_REQUESTED: { "by_channel": "chan-a", "infra": infra::OK, "reason": "anything", "summary": "x" } });
+    p.store.job_run_add_links(&run.id, &odd).unwrap();
+    assert!(take(&run.id, PANE, "chan-a").unwrap_err().contains("has not asked"));
+    nothing_happened();
+
+    // The origin's own note, from the origin: it lands, once.
+    let again = p.get(&run.id);
+    let mut note = again.links[STOP_REQUESTED].clone();
+    note = json!({ "by_channel": "chan-a", "infra": infra::INTERRUPTED, "reason": reason::OVERLAP, "summary": "stopped: the job's next run started", "at_ms": note["at_ms"] });
+    p.store.job_run_add_links(&run.id, &json!({ STOP_REQUESTED: note })).unwrap();
+    assert_eq!(take(&run.id, PANE, "chan-a"), Ok(true));
+    let r = p.get(&run.id);
+    assert_eq!((r.infra.as_str(), r.reason.as_str(), r.summary.as_str()), (infra::INTERRUPTED, reason::OVERLAP, "stopped: the job's next run started"));
     assert_eq!(*interrupted.lock().unwrap(), [PANE]);
-    assert_eq!(take(&run.id, PANE, infra::INTERRUPTED, reason::OVERLAP), Ok(false), "closed already: nothing more is done");
+    assert_eq!(take(&run.id, PANE, "chan-a"), Ok(false), "closed already: nothing more is done");
     assert_eq!(interrupted.lock().unwrap().len(), 1, "no second interrupt");
+
+    // A process of the same channel that is not the follower (a pid that isn't this one's).
+    let other = followed_run(&p, 2);
+    p.sender.request_remote_stop(&other, infra::TIMEOUT, reason::TIMEOUT, "stopped");
+    p.store.job_run_add_links(&other.id, &json!({ FOLLOWED_BY_PID: u32::MAX })).unwrap();
+    assert!(take(&other.id, PANE, "chan-a").unwrap_err().contains("does not follow"));
 }
 
 #[test]

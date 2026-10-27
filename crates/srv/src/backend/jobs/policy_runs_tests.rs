@@ -337,6 +337,27 @@ async fn cancel_other_asks_the_channel_that_follows_the_old_run_and_waits_for_it
     assert_eq!(rig.store.job_run_get(&waiting).unwrap().unwrap().state, state::RUNNING);
 }
 
+/// Two schedulers sharing a job fire the same slot: the one that finds it taken
+/// admits nothing, and so must not stop the run that is going (the slot lease
+/// is what keeps a slot from firing twice).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_slot_another_scheduler_took_does_not_stop_the_running_run() {
+    let rig = rig();
+    let asked = remote_stops(&rig);
+    let job = make(&rig, "j-taken", |j| j.policy.overlap = Overlap::CancelOther);
+    let first = rig.sched.fire(&job, slot(0)).await.run_id.unwrap();
+    followed_elsewhere(&rig, &first);
+
+    // The other scheduler's claim on the next slot.
+    let next = SLOT0 + 60_000;
+    let claimed = rig.ledger.begin_cron(&job, TRIGGER_SCHEDULE, Some(next), BY_SCHEDULER);
+    assert!(matches!(claimed, Begin::Run(_)));
+    let fired = rig.sched.fire(&job, slot(1)).await;
+    assert_eq!((fired.run_id, fired.waiting), (None, None), "the slot is taken");
+    assert!(asked.lock().unwrap().is_empty(), "nothing was asked of the follower");
+    assert_eq!(rig.store.job_run_get(&first).unwrap().unwrap().links.get("stop_requested"), None);
+}
+
 /// With no way to ask (an instance that can't reach the registry), the run is
 /// left alone as before: it ends with its turn, and the slot is skipped.
 #[tokio::test(flavor = "multi_thread")]

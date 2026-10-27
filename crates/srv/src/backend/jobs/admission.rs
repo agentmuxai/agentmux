@@ -186,6 +186,7 @@ impl RunLedger {
                     tracing::warn!(run_id = %id, error = %e, "jobs: couldn't make a run wait");
                 }
                 self.changed(&job.id);
+                self.ask_remote_stops(job, decision);
                 Admission::Waiting(id, why)
             }
             Decision::CancelThenStart => {
@@ -251,20 +252,26 @@ impl RunLedger {
         stopped
     }
 
-    /// [`policy::decide`] for `job` now. A `cancel_other` job whose previous
-    /// run is in another channel waits for that run (`overlap`) and asks its
-    /// follower to stop it: the replacement must not start before the stop
-    /// has landed, or the interrupt could hit the new run's turn.
+    /// [`policy::decide`] for `job` now.
     fn decide(&self, job: &CronJob, waiting: bool) -> Decision {
-        let decision = policy::decide(job, &self.occupancy(job), waiting);
-        if decision == Decision::Wait(reason::OVERLAP) && job.policy.overlap == Overlap::CancelOther {
-            for r in self.store.job_runs_occupying().unwrap_or_default() {
-                if r.job_id == job.id && r.state == state::RUNNING && self.run_followed_elsewhere(&r) {
-                    self.request_remote_stop(&r, infra::INTERRUPTED, reason::OVERLAP, "stopped: the job's next run started (overlap: cancel_other)");
-                }
+        policy::decide(job, &self.occupancy(job), waiting)
+    }
+
+    /// A `cancel_other` job whose previous run is in another channel waits
+    /// for that run (`overlap`): ask the follower to stop it. Called once the
+    /// waiting run has its row (a slot another scheduler fired must not cost
+    /// the run already going), and again while it waits; the replacement does
+    /// not start before the stop has landed, or the interrupt could hit the
+    /// new run's turn.
+    fn ask_remote_stops(&self, job: &CronJob, decision: Decision) {
+        if decision != Decision::Wait(reason::OVERLAP) || job.policy.overlap != Overlap::CancelOther {
+            return;
+        }
+        for r in self.store.job_runs_occupying().unwrap_or_default() {
+            if r.job_id == job.id && r.state == state::RUNNING && self.run_followed_elsewhere(&r) {
+                self.request_remote_stop(&r, infra::INTERRUPTED, reason::OVERLAP, "stopped: the job's next run started (overlap: cancel_other)");
             }
         }
-        decision
     }
 
     /// Whether another channel's instance follows `run`: its agent is there,
@@ -311,7 +318,9 @@ impl RunLedger {
             if run.reason == reason::RETRY_WAIT && run.links["retry_at_ms"].as_i64().unwrap_or(0) > now {
                 continue;
             }
-            match self.decide(&job, true) {
+            let decision = self.decide(&job, true);
+            self.ask_remote_stops(&job, decision);
+            match decision {
                 Decision::Start | Decision::CancelThenStart => {
                     let gate = self.cap_gate(&job);
                     if let Some(refusal) = gate.refusal {
@@ -336,7 +345,9 @@ impl RunLedger {
     /// would cancel its own running run does so here, as a new slot would.
     pub fn pending_may_start(&self, job: &CronJob, run_id: &str) -> bool {
         let _one_at_a_time = self.admission.lock().unwrap_or_else(|e| e.into_inner());
-        let start = match self.decide(job, true) {
+        let decision = self.decide(job, true);
+        self.ask_remote_stops(job, decision);
+        let start = match decision {
             Decision::Start | Decision::CancelThenStart => {
                 // Caps weigh the runs still going, so they are asked once policy
                 // says it may start, as for a waiting run (§5.3).

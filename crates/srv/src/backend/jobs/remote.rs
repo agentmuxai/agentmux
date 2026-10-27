@@ -27,6 +27,12 @@
 //! ([`RunLedger::stop_followed_here`]) closes the row with the status asked
 //! for and interrupts the pane, as a local stop does. When the ask can't be
 //! delivered the reason goes in `links.stop_error` and it is tried again.
+//!
+//! **Whose stop it is.** The ask over HTTP names only the run, the pane and the
+//! asking channel. What the follower acts on is the note in the shared ledger,
+//! which only the instance that fired the run writes, so another channel that
+//! guesses a run id, or names the right channel, stops nothing: the row has to
+//! carry a stop its own origin asked for.
 
 use std::sync::Arc;
 
@@ -64,6 +70,8 @@ pub struct RemoteStop {
     pub run_id: String,
     /// The pane in the following channel.
     pub block_id: String,
+    /// The channel asking: the one that fired the run.
+    pub from_channel: String,
     pub infra: String,
     pub reason: String,
     pub summary: String,
@@ -250,6 +258,7 @@ impl RunLedger {
         hook(RemoteStop {
             run_id: run.id.clone(),
             block_id: run.block_id.clone(),
+            from_channel: self.channel.clone(),
             infra: infra_status.to_string(),
             reason: why.to_string(),
             summary: summary.to_string(),
@@ -278,17 +287,13 @@ impl RunLedger {
 
     /// The following side of [`Self::request_remote_stop`]: close the run
     /// this instance follows, as a local stop does, and interrupt its pane's
-    /// turn. `Ok(false)` when it had ended already; an error when the run is
-    /// not one this process follows in `block_id`, or the stop is not one a
-    /// timeout or `cancel_other` writes.
-    pub fn stop_followed_here(&self, run_id: &str, block_id: &str, infra_status: &str, why: &str, summary: &str) -> Result<bool, String> {
-        if !stop_is_known(infra_status, why) {
-            return Err("that is not a stop a run can be given".to_string());
-        }
+    /// turn, when `from_channel` fired the run and asked, in the run's row,
+    /// for this stop. The status, reason and summary are the row's, not the
+    /// request's. `Ok(false)` when it had ended already; an error when the run
+    /// is not one this process follows in `block_id`, was fired by another
+    /// channel than `from_channel`, or carries no stop of that channel's.
+    pub fn stop_followed_here(&self, run_id: &str, block_id: &str, from_channel: &str) -> Result<bool, String> {
         let run = self.store.job_run_get(run_id).map_err(|e| e.to_string())?.ok_or_else(|| "no such run".to_string())?;
-        if !run.is_open() {
-            return Ok(false);
-        }
         let follows = followed_by(&run).is_some_and(|f| f.channel == self.channel && (f.pid == 0 || f.pid == std::process::id()));
         if !follows {
             return Err("this AgentMux does not follow that run".to_string());
@@ -296,7 +301,19 @@ impl RunLedger {
         if run.block_id.is_empty() || run.block_id != block_id {
             return Err("that run is not in that pane".to_string());
         }
-        match self.store.job_run_stop(&run.id, infra_status, why, summary, now_ms()) {
+        if from_channel.is_empty() || !recorded_in(&run.recorded_by, from_channel) {
+            return Err("that run was not fired by that AgentMux".to_string());
+        }
+        let asked = run.links.get(STOP_REQUESTED).filter(|a| a.get("by_channel").and_then(|c| c.as_str()) == Some(from_channel));
+        let text = |key: &str| asked.and_then(|a| a.get(key)).and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let (infra_status, why, summary) = (text("infra"), text("reason"), text("summary"));
+        if asked.is_none() || !stop_is_known(&infra_status, &why) {
+            return Err("that AgentMux has not asked for a stop of that run".to_string());
+        }
+        if !run.is_open() {
+            return Ok(false);
+        }
+        match self.store.job_run_stop(&run.id, &infra_status, &why, &summary, now_ms()) {
             Ok(true) => {
                 self.interrupt_block(&run.block_id);
                 self.reap_worker(&run.id);
