@@ -615,6 +615,8 @@ export function useAgentControllerStatus(
             });
             // Linked, but a pane did not restart on it: it uses the account when it next starts.
             if (r.failed.length > 0) setAuthNotice(r.failed.join(" "));
+            // Another pane of this agent is in a turn: the move waits for it.
+            else if (r.status === "queued") setAuthNotice(`Moves to ${r.account_label} when the turn ends.`);
         } catch (e: any) {
             // A failed link upsert surfaces as a notice, like every other
             // failed recovery here (callers don't attach their own catch).
