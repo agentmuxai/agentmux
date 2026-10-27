@@ -29,10 +29,19 @@ fn is_parked(block: &Block) -> bool {
     obj::meta_get_bool(&block.meta, crate::persist_subscriber::parked::PARKED_META_KEY, false)
 }
 
+/// Whether the block runs its agent now: a controller that has not ended. A stopped one stays
+/// registered, so presence alone would not tell it from a running one.
+fn controller_is_live(block_id: &str) -> bool {
+    blockcontroller::get_controller(block_id)
+        .is_some_and(|c| c.get_runtime_status().shellprocstatus != blockcontroller::STATUS_DONE)
+}
+
 /// The block of the agent with this UID, in any tab or parked. `None` when it has none.
 ///
-/// An agent should have one block. Where old layouts left several, the one with a live controller
-/// wins, then one in a tab over a parked one, then the lowest id (so the answer is stable).
+/// Only a block that is in a tab or marked parked counts: an unmarked block in no tab is an
+/// orphan boot drops (`persist.rs`), which `AttachBlock` could not attach. An agent should have
+/// one block. Where old layouts left several, the one with a live controller wins, then one in a
+/// tab over a parked one, then the lowest id (so the answer is stable).
 #[cfg_attr(not(test), allow(dead_code))] // until place_agent (#5838 PR C) calls it
 pub(crate) fn find_agent_block_by_uid(mstore: &Store, agent_uid: &str) -> Result<Option<AgentBlock>, String> {
     let agent_uid = agent_uid.trim();
@@ -50,8 +59,11 @@ pub(crate) fn find_agent_block_by_uid(mstore: &Store, agent_uid: &str) -> Result
     }
     let tabs: Vec<Tab> = mstore.get_all::<Tab>().map_err(|e| format!("find_agent_block_by_uid: list tabs: {e}"))?;
     let tab_of = |block: &Block| tabs.iter().find(|t| t.blockids.iter().any(|id| id == &block.oid)).map(|t| t.oid.clone());
-    found.sort_by_key(|b| (blockcontroller::get_controller(&b.oid).is_none(), tab_of(b).is_none(), b.oid.clone()));
-    let block = found.swap_remove(0);
+    found.retain(|b| is_parked(b) || tab_of(b).is_some());
+    found.sort_by_key(|b| (!controller_is_live(&b.oid), tab_of(b).is_none(), b.oid.clone()));
+    let Some(block) = found.into_iter().next() else {
+        return Ok(None);
+    };
     let tab_id = tab_of(&block);
     Ok(Some(AgentBlock { block, tab_id }))
 }
@@ -101,6 +113,16 @@ mod tests {
         assert_eq!((bob.block.oid.as_str(), bob.tab_id), (parked.as_str(), None));
         assert!(find_agent_block_by_uid(&store, "nobody").unwrap().is_none());
         assert!(find_agent_block_by_uid(&store, "  ").unwrap().is_none());
+    }
+
+    #[test]
+    fn an_unmarked_block_in_no_tab_is_not_the_agents_block() {
+        let store = Store::open_in_memory().unwrap();
+        let orphan = insert_block(&store, "ann", false);
+        assert!(find_agent_block_by_uid(&store, "ann").unwrap().is_none(), "{orphan} is an orphan boot drops");
+        let parked = insert_block(&store, "ann", true);
+        let found = find_agent_block_by_uid(&store, "ann").unwrap().unwrap();
+        assert_eq!(found.block.oid, parked);
     }
 
     #[test]
