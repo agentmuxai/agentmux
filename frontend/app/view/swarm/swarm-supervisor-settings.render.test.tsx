@@ -34,6 +34,7 @@ describe("SupervisorSettingsBar", () => {
         const { container, getByRole } = render(() => <SupervisorSettingsBar />);
         expect(container.textContent).toContain("Supervisor: off");
         expect(container.textContent).toContain("Turn it on to set modes");
+        expect(getByRole("switch").getAttribute("aria-label")).toBe("Supervisor");
         fireEvent.click(getByRole("switch"));
         expect(h.setConfig).toHaveBeenCalledWith({}, { "supervisor:enabled": true });
     });

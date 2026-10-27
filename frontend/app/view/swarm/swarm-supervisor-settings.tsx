@@ -6,10 +6,10 @@
 // docs/specs/SPEC_SWARM_SECTIONS_SUPERVISOR_SETTINGS_AND_KANBAN_2026_10_24.md §6.2.
 
 import { createSignal, For, Show, type JSX } from "solid-js";
-import { Button } from "@/app/element/ui";
+import { Button, Switch } from "@/app/element/ui";
 import { settingsAtom } from "@/app/store/global";
 import { supervisorEnabled } from "@/app/store/supervisor";
-import { NumberControl, set, SettingRow, ToggleControl } from "@/app/view/settings/settings-controls";
+import { NumberControl, set, SettingRow } from "@/app/view/settings/settings-controls";
 
 export interface LimitSetting {
     key: string;
@@ -77,7 +77,7 @@ export function SupervisorSettingsBar(): JSX.Element {
     return (
         <div class="swarm-supervisor-settings" classList={{ "swarm-supervisor-settings--off": !on() }}>
             <div class="swarm-supervisor-settings-line">
-                <ToggleControl checked={on()} onChange={(v) => set("supervisor:enabled", v)} />
+                <Switch ariaLabel="Supervisor" checked={on()} onChange={(v) => set("supervisor:enabled", v)} />
                 <span class="swarm-supervisor-settings-state">{on() ? "Supervisor: on" : "Supervisor: off"}</span>
                 <Show when={!on()}>
                     <span class="swarm-supervisor-settings-hint">Agents run until they stop. Turn it on to set modes.</span>
