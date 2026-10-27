@@ -44,6 +44,7 @@ import {
 import { registerController } from "../flows/register-controller";
 import type { LaunchPhase } from "../flows/launch-phase";
 import type { ProviderDefinition } from "../providers";
+import { notifyLinksChanged } from "@/app/view/identity/account-agents";
 import type { Account } from "@/app/view/identity/identity-model";
 import {
     createLaunchPhaseStore,
@@ -613,6 +614,8 @@ export function useAgentControllerStatus(
                 account: account.id,
                 when: "after_turn",
             });
+            // Connectors' account cards and open detail list agents from the links.
+            notifyLinksChanged();
             // Linked, but a pane did not restart on it: it uses the account when it next starts.
             if (r.failed.length > 0) setAuthNotice(r.failed.join(" "));
             // Another pane of this agent is in a turn: the move waits for it.

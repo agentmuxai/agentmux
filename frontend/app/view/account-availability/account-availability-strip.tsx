@@ -16,6 +16,7 @@ import {
     preselectedCandidate,
     useAccountEpisodes,
 } from "@/app/store/account-availability";
+import { notifyLinksChanged } from "@/app/view/identity/account-agents";
 import type { AccountAvailability } from "@/types/rpc/AccountAvailability";
 
 import "./account-availability-strip.scss";
@@ -39,7 +40,9 @@ function EpisodeRow(props: { ep: Accessor<AccountAvailability> }): JSX.Element {
     const move = async () => {
         setMoving(true);
         try {
-            setNote(moveOutcome(await moveEpisodeAgents(props.ep(), to())));
+            const moved = await moveEpisodeAgents(props.ep(), to());
+            notifyLinksChanged(); // Connectors' account cards list agents from the links
+            setNote(moveOutcome(moved));
             setPicking(false);
         } catch (e) {
             setNote(e instanceof Error ? e.message : String(e));

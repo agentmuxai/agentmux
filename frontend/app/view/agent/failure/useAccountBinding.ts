@@ -15,6 +15,7 @@ import {
     subscribeAccountChanges,
     type Account,
 } from "@/app/view/identity/identity-model";
+import { notifyLinksChanged } from "@/app/view/identity/account-agents";
 import { createEffect, createMemo, createSignal, on, onCleanup, type Accessor } from "solid-js";
 import { resolveProviderAlias } from "../providers";
 import { lastLinkedAccountId } from "../providers/provider-id-aliases";
@@ -188,6 +189,8 @@ export function useAccountBinding(opts: {
         const label = accountLabel(account, accountCache());
         try {
             const r = await deps.switchAccount(agentId, account.id);
+            // Connectors' account cards and open detail list agents from the links.
+            notifyLinksChanged();
             if (r.status === "unchanged") {
                 deps.notify("info", `Staying on ${label}`, "The queued switch was cancelled.");
             } else if (r.status === "queued") {
