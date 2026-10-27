@@ -1,5 +1,7 @@
 # Report: where srv's 7.2 GB of writes go in one lab run (macOS)
 
+**Status:** analysis (the first fix, UPDATE instead of REPLACE, is measured below; the others are proposals)
+
 Date: 2026-10-27. Author: Maop@starpower. Asked by AgentY after the macOS baseline (`REPORT_MACOS_PERFORMANCE_BASELINE_2026_10_27.md`).
 Build: `origin/main` `ef3028bda` (main is now `26d148f7a`: one commit later, which touches no storage code except `work_board.rs`). A production build of the app, with its srv replaced by a copy built from the same commit (ad-hoc signed, to allow the write counter; an unstripped build for the call stacks). No source was changed.
 Load: the memory lab, 10 scripted agents over 3 tabs, 10 rounds, seed 1, fake Claude, isolated data folder per run. Apple M2, macOS 26.5.2.
