@@ -1189,6 +1189,12 @@ declare global {
         "supervisor:drive:continuations"?: number;
         "supervisor:drive:minutes"?: number;
         "supervisor:noprogress"?: number;
+        "supervisor:cooldown"?: number;
+        "supervisor:hourly"?: number;
+        "supervisor:notify:needsyou"?: boolean;
+        "supervisor:notify:limit"?: boolean;
+        "supervisor:notify:failed"?: boolean;
+        "supervisor:notify:done"?: boolean;
         "agent:mcpselfheal"?: boolean;
         "agent:outdatedidsnotice"?: boolean;
         "agent:transcriptsinglecopy"?: boolean;

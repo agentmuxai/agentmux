@@ -16,6 +16,10 @@ use std::sync::{Mutex, MutexGuard, OnceLock};
 /// action.
 pub const STOP_GRACE_MS: i64 = 15_000;
 
+/// How long a Stop is remembered for [`stopped_since`]: longer than the longest
+/// Supervisor wait before a continuation (`supervisor:cooldown`, 600 s).
+const STOP_KEEP_MS: i64 = 11 * 60 * 1000;
+
 /// block_id → when the user last stopped its turn (epoch ms).
 #[derive(Default)]
 struct Stops(HashMap<String, i64>);
@@ -23,12 +27,16 @@ struct Stops(HashMap<String, i64>);
 impl Stops {
     fn note(&mut self, block_id: &str, now_ms: i64) {
         // Bounded: an entry past the grace window can't matter any more.
-        self.0.retain(|_, at| now_ms - *at < STOP_GRACE_MS);
+        self.0.retain(|_, at| now_ms - *at < STOP_KEEP_MS);
         self.0.insert(block_id.to_string(), now_ms);
     }
 
     fn recent(&self, block_id: &str, now_ms: i64) -> bool {
         self.0.get(block_id).is_some_and(|at| now_ms - *at < STOP_GRACE_MS)
+    }
+
+    fn since(&self, block_id: &str, since_ms: i64) -> bool {
+        self.0.get(block_id).is_some_and(|at| *at >= since_ms)
     }
 
     fn forget(&mut self, block_id: &str) {
@@ -49,6 +57,12 @@ pub fn note_user_stop(block_id: &str) {
 /// Whether the user stopped this block's turn within the grace window.
 pub fn stopped_recently(block_id: &str) -> bool {
     stops().recent(block_id, agentmux_common::time::now_ms())
+}
+
+/// Whether the user stopped this block's turn at or after `since_ms` (epoch ms), however long
+/// ago that is within [`STOP_KEEP_MS`]: a continuation that waited asks this, not the grace window.
+pub fn stopped_since(block_id: &str, since_ms: i64) -> bool {
+    stops().since(block_id, since_ms)
 }
 
 /// A new turn started on this block: an earlier Stop no longer applies to it.
@@ -93,7 +107,7 @@ mod tests {
     fn stops_past_the_window_are_dropped_when_a_new_one_is_noted() {
         let mut stops = Stops::default();
         stops.note("old", 1_000_000);
-        stops.note("new", 1_000_000 + STOP_GRACE_MS);
+        stops.note("new", 1_000_000 + STOP_KEEP_MS);
         assert!(!stops.0.contains_key("old"));
         assert!(stops.0.contains_key("new"));
     }
@@ -105,5 +119,18 @@ mod tests {
         assert!(stopped_recently(block));
         forget(block);
         assert!(!stopped_recently(block));
+    }
+
+    #[test]
+    fn a_stop_is_remembered_past_the_grace_window_for_a_waiting_continuation() {
+        let mut stops = Stops::default();
+        stops.note("b1", 1_000_000);
+        let later = 1_000_000 + 5 * 60 * 1000;
+        assert!(!stops.recent("b1", later), "the grace window is over");
+        assert!(stops.since("b1", 1_000_000 - 1), "but a wait that began before the Stop still sees it");
+        assert!(!stops.since("b1", 1_000_001), "a Stop before the wait began is not this wait's");
+        assert!(!stops.since("other", 0));
+        stops.note("b2", later);
+        assert!(stops.since("b1", 0), "another pane's Stop doesn't erase it within the keep window");
     }
 }

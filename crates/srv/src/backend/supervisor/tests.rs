@@ -518,7 +518,7 @@ fn only_turns_another_agent_a_service_a_schedule_or_a_task_started_are_external(
 
 // ── The master switch and the settings (spec §5, §6.2) ──────────────────
 
-use super::settings::{self, SupervisorSettings};
+use super::settings::{self, NoticeGroup, SupervisorSettings};
 use crate::backend::storage::store::Store;
 use crate::backend::wconfig::ConfigState;
 use std::sync::Arc;
@@ -671,4 +671,61 @@ async fn set_mode_refuses_steady_and_drive_while_switched_off_but_accepts_off() 
     sup.set_mode(&pane, SupervisorMode::Steady).await.expect("accepted once it is on");
     let meta = store.get::<crate::backend::obj::Block>(&pane).unwrap().unwrap().meta;
     assert_eq!(SupervisorMode::from_meta(&meta), SupervisorMode::Steady);
+}
+
+
+#[test]
+fn the_pacing_and_notice_settings_default_to_the_specs_and_are_clamped() {
+    let s = SupervisorSettings::from_config(&ConfigState::new());
+    assert_eq!((s.cooldown_secs, s.hourly), (30, 30));
+    for group in [NoticeGroup::NeedsYou, NoticeGroup::Limit, NoticeGroup::Failed, NoticeGroup::Done] {
+        assert!(s.notifies(group), "{group:?} is on by default");
+    }
+    let config = config_with(&[
+        (settings::KEY_COOLDOWN, serde_json::json!(100_000)),
+        (settings::KEY_HOURLY, serde_json::json!(5_000)),
+    ]);
+    let s = SupervisorSettings::from_config(&config);
+    assert_eq!((s.cooldown_secs, s.hourly), (600, 1000));
+    let zero = SupervisorSettings::from_config(&config_with(&[
+        (settings::KEY_COOLDOWN, serde_json::json!(0)),
+        (settings::KEY_HOURLY, serde_json::json!(0)),
+    ]));
+    assert_eq!((zero.cooldown_secs, zero.hourly), (0, 0), "0 is allowed for both");
+}
+
+#[test]
+fn each_notify_toggle_turns_off_only_its_own_group() {
+    let groups = [
+        (settings::KEY_NOTIFY_NEEDS_YOU, NoticeGroup::NeedsYou),
+        (settings::KEY_NOTIFY_LIMIT, NoticeGroup::Limit),
+        (settings::KEY_NOTIFY_FAILED, NoticeGroup::Failed),
+        (settings::KEY_NOTIFY_DONE, NoticeGroup::Done),
+    ];
+    for (key, off) in groups {
+        let s = SupervisorSettings::from_config(&config_with(&[(key, serde_json::json!(false))]));
+        for (_, group) in groups {
+            assert_eq!(s.notifies(group), group != off, "{key} turns off {off:?} only, saw {group:?}");
+        }
+    }
+}
+
+#[test]
+fn a_settings_override_reaches_current_for_the_test_thread() {
+    settings::set_settings_for_test(SupervisorSettings { cooldown_secs: 0, ..SupervisorSettings::default() });
+    assert_eq!(SupervisorSettings::current().cooldown_secs, 0);
+}
+
+#[test]
+fn every_key_is_watched_for_changes() {
+    for key in [
+        settings::KEY_COOLDOWN,
+        settings::KEY_HOURLY,
+        settings::KEY_NOTIFY_NEEDS_YOU,
+        settings::KEY_NOTIFY_LIMIT,
+        settings::KEY_NOTIFY_FAILED,
+        settings::KEY_NOTIFY_DONE,
+    ] {
+        assert!(settings::KEYS.contains(&key), "{key}");
+    }
 }
