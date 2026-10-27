@@ -40,16 +40,19 @@ fn entry(rec: &ActionRecord, target_agent: String) -> AuditLogEntry {
 const ACTIONS_IN_RING_MAX: usize = AUDIT_LOG_MAX / 2;
 
 impl ReactiveHandler {
-    /// Record one call. A call that names only a pane is recorded against the agent
+    /// Record one call. A call that names a pane is recorded against the agent
     /// running in it. Runs on the reply path, so a poisoned lock is recovered rather than
     /// allowed to stop the reply.
     pub fn audit_action(&self, rec: &ActionRecord) {
         let mut handler = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        // A pane's own registration says whom it acts on; an agent field in the request is only a
+        // claim (a command may ignore it), so it is used when no pane is named or registered.
         let target = rec
             .target
-            .agent
-            .clone()
-            .or_else(|| rec.target.block_id.as_deref().and_then(|b| handler.names_for_block(b).into_iter().next()))
+            .block_id
+            .as_deref()
+            .and_then(|b| handler.names_for_block(b).into_iter().next())
+            .or_else(|| rec.target.agent.clone())
             .unwrap_or_default();
         // Calls come in bursts; they may not push the deliveries and registrations out of the
         // ring that `GET /agentmux/reactive/audit` serves. The audit file keeps every one.
@@ -92,5 +95,20 @@ mod tests {
         assert_eq!(log.len(), AUDIT_LOG_MAX);
         assert_eq!(actions, ACTIONS_IN_RING_MAX);
         assert_eq!(log[0].outcome.as_deref(), Some("c299"), "the newest call is kept");
+    }
+
+    #[test]
+    fn the_panes_registration_names_the_target_not_an_agent_field_in_the_request() {
+        let handler = ReactiveHandler::new();
+        handler.inner.lock().unwrap().register_agent("victim", "blk-1", None).unwrap();
+        let mut r = rec(1);
+        r.target = Target { agent: Some("someone-else".into()), block_id: Some("blk-1".into()), subject: None };
+        handler.audit_action(&r);
+        let mut r = rec(2);
+        r.target = Target { agent: Some("named".into()), block_id: Some("unregistered".into()), subject: None };
+        handler.audit_action(&r);
+        let log = handler.get_audit_log(2);
+        assert_eq!(log[1].target_agent, "victim");
+        assert_eq!(log[0].target_agent, "named", "an unregistered pane falls back to the named agent");
     }
 }
