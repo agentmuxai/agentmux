@@ -35,7 +35,7 @@ on:
     types: [build-windows]
     # client_payload: { ref: "vX.Y.Z", release_tag: "vX.Y.Z", cef_runtime_tag: "" }
   workflow_call:
-    # Lets release.yml invoke this as a reusable workflow instead of inlining
+    # Lets release-core.yml invoke this as a reusable workflow instead of inlining
     # a second copy of the CEF-provisioning + packaging steps.
     inputs:
       ref:
