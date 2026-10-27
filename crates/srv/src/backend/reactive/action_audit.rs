@@ -32,6 +32,7 @@ fn entry(rec: &ActionRecord, target_agent: String) -> AuditLogEntry {
         audit_source_uid: String::new(),
         lan_claimed_uid: String::new(),
         wan: None,
+        cli_native: None,
     }
 }
 
