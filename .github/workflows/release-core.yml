@@ -310,14 +310,6 @@ jobs:
         with:
           ref: ${{ github.sha }}
 
-      # main's copy of the gate, beside the commit being signed (not inside it).
-      - uses: actions/checkout@v4
-        with:
-          ref: main
-          path: release-gate-main
-          sparse-checkout: scripts/release-gate.mjs
-          sparse-checkout-cone-mode: false
-
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -330,7 +322,10 @@ jobs:
           SHA: ${{ github.sha }}
           REPO: ${{ github.repository }}
         run: |
-          node release-gate-main/scripts/release-gate.mjs --ref-type "$REF_TYPE" --ref-name "$REF_NAME" --sha "$SHA" --repo "$REPO"
+          # main's copy of the gate, kept outside the workspace (which is the commit being signed).
+          gate="$RUNNER_TEMP/release-gate.mjs"
+          gh api -H "Accept: application/vnd.github.raw+json" "repos/${REPO}/contents/scripts/release-gate.mjs?ref=main" > "$gate"
+          node "$gate" --ref-type "$REF_TYPE" --ref-name "$REF_NAME" --sha "$SHA" --repo "$REPO"
           # The workspace is the gated commit and nothing else.
           test "$(git rev-parse HEAD)" = "$SHA"
 
