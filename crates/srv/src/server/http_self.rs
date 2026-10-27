@@ -81,7 +81,7 @@ pub(super) async fn handle_agent_identity_accounts(
 
 #[derive(serde::Deserialize)]
 pub(super) struct AgentIdentitySwitchRequest {
-    /// The calling agent's slug (S1: must be the token's own).
+    /// The calling agent's name (S1: must be one only the token's own agent answers to).
     pub(super) agent_id: String,
     /// The agent to move; the caller itself when absent.
     #[serde(default)]
@@ -99,15 +99,17 @@ pub(super) async fn handle_agent_identity_switch(
     caller: Option<Extension<caller::Caller>>,
     Json(req): Json<AgentIdentitySwitchRequest>,
 ) -> impl IntoResponse {
-    if let Err(e) = actor::require_token(&state, caller.as_deref(), actor::ActorSite::IdentitySwitch, &req.agent_id) {
-        return app_api_response::<()>(Err(e));
-    }
+    // The audit row names who switched, so the caller is the agent the token proves, never the body's word.
+    let (slug, _) = match actor::require_token_actor(&state, caller.as_deref(), actor::ActorSite::IdentitySwitch, &req.agent_id).await {
+        Ok(who) => who,
+        Err(e) => return app_api_response::<()>(Err(e)),
+    };
     let switch = crate::server::account_episodes::AgentAccountSwitchReq {
-        agent_id: Some(req.target.unwrap_or_else(|| req.agent_id.clone())),
+        agent_id: Some(req.target.unwrap_or_else(|| slug.clone())),
         account: req.account,
         when: req.when,
     };
-    app_api_response(crate::server::account_episodes::switch_account(state, req.agent_id, switch).await)
+    app_api_response(crate::server::account_episodes::switch_account(state, slug, switch).await)
 }
 
 #[derive(serde::Deserialize)]
