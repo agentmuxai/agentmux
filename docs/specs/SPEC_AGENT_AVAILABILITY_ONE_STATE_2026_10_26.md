@@ -149,7 +149,7 @@ The `SinceTracker` already notices when a pane's state changes. A change **out o
 3. **Show it** (3.3 second half, the route, `Agents list`, Kanban, enqueue note, LAN `resets_at_ms`).
 4. **One wake** (3.6).
 
-Each PR cites this spec; steps 3 and 4 are optional and can wait on D2.
+Each PR cites this spec; steps 3 and 4 follow steps 1 and 2 (D2 is decided).
 
 ## 7. Tests
 
@@ -169,11 +169,11 @@ Each PR cites this spec; steps 3 and 4 are optional and can wait on D2.
 
 ## 9. Decisions
 
-D1, D3 and D4 are applied by the platform lead (AgentY) under the operator's standing "use best recommendations" rule; the operator has not yet read this spec. D2, and build steps 3 and 4, stay open until they have.
+All four are decided. The operator answered "go with best recommendations" (relayed by the platform lead, 2026-10-27), so each below is its recommendation; D1, D3 and D4 had been applied by the platform lead under that standing rule before. Build steps 3 and 4 follow steps 1 and 2.
 
-- **D1 (applied). Limited, reset unknown.** Today a message is delivered (a turn discovers recovery) and may fail. Options: (a) keep, say so in the answer; (b) hold it with a retry every N minutes. *Recommend (a)* for this change; (b) is a separate decision because nothing ends that hold except a probe.
-- **D2 (open). Does the sender see it before sending?** The route and `Agents list` field (3.3) are what the operator's "DRY it" buys in the UI; steps 1 and 2 stand without them. *Recommend yes.*
-- **D3 (applied). Signed out from the gate's refusal.** Make it a recorded `Auth` failure (one source, 3.1), or keep two inputs behind one `Availability`. *Recommend one source, after step 2 shows it is not invasive.*
-- **D4 (applied). Name.** Keep the wire reason `idle` (it exists), and call the internal case `Cold` in code, so it isn't confused with `AgentState::Idle`.
+- **D1 (decided: keep delivering). Limited, reset unknown.** Today a message is delivered (a turn discovers recovery) and may fail. Options: (a) keep, say so in the answer; (b) hold it with a retry every N minutes. *Recommend (a)* for this change; (b) is a separate decision because nothing ends that hold except a probe.
+- **D2 (decided: yes). Does the sender see it before sending?** The route and `Agents list` field (3.3) are what the operator's "DRY it" buys in the UI; steps 1 and 2 stand without them. *Recommend yes.*
+- **D3 (decided: one source). Signed out from the gate's refusal.** Make it a recorded `Auth` failure (one source, 3.1), or keep two inputs behind one `Availability`. *Recommend one source, after step 2 shows it is not invasive.*
+- **D4 (decided). Name.** Keep the wire reason `idle` (it exists), and call the internal case `Cold` in code, so it isn't confused with `AgentState::Idle`.
 
 Agent: Manoz@Area54
