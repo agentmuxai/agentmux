@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::{
-    CommandMigrateForkSlugsData, ForkSlugMigrationMode, ForkSlugStopPending, MigrateForkSlugsResult, COMMAND_AGENTS_MIGRATE_FORK_SLUGS,
+    CommandMigrateForkSlugsData, ForkSlugChoice, ForkSlugMigrationMode, ForkSlugStopPending, MigrateForkSlugsResult, COMMAND_AGENTS_MIGRATE_FORK_SLUGS,
 };
 use crate::backend::slug_migration::{self, Home};
 use crate::server::AppState;
@@ -26,11 +26,12 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         async move {
             let home = Home::from_env().map_err(|e| format!("agents.migrateForkSlugs: {e}"))?;
             if cmd.mode == ForkSlugMigrationMode::Stop {
-                return stop(&state, home).await;
+                return stop(&state, home, cmd.choices.clone().unwrap_or_default()).await;
             }
             let quick = cmd.quick.unwrap_or(false);
             let journal = cmd.journal.clone();
-            let result = tokio::task::spawn_blocking(move || slug_migration::run(&home, cmd.mode, journal.as_deref(), quick))
+            let choices = cmd.choices.clone().unwrap_or_default();
+            let result = tokio::task::spawn_blocking(move || slug_migration::run_choosing(&home, cmd.mode, journal.as_deref(), quick, &choices))
                 .await
                 .map_err(|e| format!("agents.migrateForkSlugs: task: {e}"))?
                 .map_err(|e| format!("agents.migrateForkSlugs: {e}"))?;
@@ -44,8 +45,8 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 }
 
 /// Stop every pane the plan finds running an agent it can migrate.
-async fn stop(state: &AppState, home: Home) -> Result<MigrateForkSlugsResult, String> {
-    let plan = tokio::task::spawn_blocking(move || slug_migration::plan(&home, false))
+async fn stop(state: &AppState, home: Home, choices: Vec<ForkSlugChoice>) -> Result<MigrateForkSlugsResult, String> {
+    let plan = tokio::task::spawn_blocking(move || slug_migration::plan_choosing(&home, false, &choices))
         .await
         .map_err(|e| format!("agents.migrateForkSlugs: task: {e}"))??;
     let mut blocks: Vec<String> = plan

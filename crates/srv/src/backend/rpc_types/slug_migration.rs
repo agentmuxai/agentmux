@@ -40,6 +40,20 @@ pub struct CommandMigrateForkSlugsData {
     #[serde(default)]
     #[ts(optional)]
     pub quick: Option<bool>,
+    /// `plan`, `stop` and `apply`: the id to give an agent instead of the one the rule
+    /// computes, picked by the user for an agent whose computed id is taken. The plan
+    /// checks it like any other new id; a run that is resuming takes none.
+    #[serde(default)]
+    #[ts(optional)]
+    pub choices: Option<Vec<ForkSlugChoice>>,
+}
+
+/// An id the user picked for one agent (`CommandMigrateForkSlugsData::choices`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct ForkSlugChoice {
+    pub uid: String,
+    pub new_slug: String,
 }
 
 /// One place an agent's old slug is stored, with what it holds there. Never
