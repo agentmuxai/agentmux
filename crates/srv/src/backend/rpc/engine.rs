@@ -595,7 +595,7 @@ impl WshRpcEngine {
 
             // Who did what, recorded here so no handler can leave it out (`action_record`).
             let outcome = match &result {
-                Ok(Ok(_)) => Ok(()),
+                Ok(Ok(resp)) => super::action_record::outcome_of_response(&command, resp.as_ref()),
                 Ok(Err(err)) => Err(err.clone()),
                 Err(_) => Err(format!("EC-TIME: timeout ({}ms)", timeout_ms)),
             };

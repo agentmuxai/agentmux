@@ -78,6 +78,17 @@ pub fn target_of(data: &Value) -> Target {
     }
 }
 
+/// Commands that answer `{ "ok": false }` when they did nothing.
+const ANSWERS_OK_FLAG: &[&str] = &["agent.kill-process", "agent.kill-tree"];
+
+/// How a call went, from what the handler answered: a command that answers
+/// `ok: false` did not do what was asked.
+pub fn outcome_of_response(command: &str, response: Option<&Value>) -> Result<(), String> {
+    let refused = ANSWERS_OK_FLAG.contains(&command)
+        && response.and_then(|r| r.get("ok")).and_then(Value::as_bool) == Some(false);
+    if refused { Err("not done: the command answered ok=false".to_string()) } else { Ok(()) }
+}
+
 /// Records a finished call of `command`, if it is one that changes state.
 pub fn after_call(command: &str, data: &Value, ctx: &RpcContext, request_id: &str, outcome: &Result<(), String>) {
     let actor = actor_of(ctx);
@@ -106,6 +117,16 @@ mod tests {
         assert_eq!(t.subject.as_deref(), Some("pid=42 signal=SIGKILL"));
         let t = target_of(&json!({"block_id": "b2", "id": "acme.widget"}));
         assert_eq!((t.block_id.as_deref(), t.subject.as_deref()), (Some("b2"), Some("id=acme.widget")));
+    }
+
+    #[test]
+    fn a_kill_that_answers_not_ok_is_recorded_as_not_done() {
+        let no = json!({"ok": false});
+        assert!(outcome_of_response("agent.kill-tree", Some(&no)).is_err());
+        assert!(outcome_of_response("agent.kill-process", Some(&no)).is_err());
+        assert!(outcome_of_response("agent.kill-tree", Some(&json!({"ok": true}))).is_ok());
+        assert!(outcome_of_response("agent.kill-tree", None).is_ok());
+        assert!(outcome_of_response("agent.send", Some(&no)).is_ok());
     }
 
     #[test]
