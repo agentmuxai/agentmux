@@ -302,8 +302,14 @@ impl Supervisor {
         if self.block(block_id).map(|b| SupervisorMode::from_meta(&b.meta)) != Some(mode) {
             return;
         }
-        // Switched off while the judge ran: its verdict is dropped.
+        // Switched off while the judge ran: its verdict is dropped, the pane
+        // stops showing "judging", and the notice the router left to us goes out.
         if !settings::enabled() {
+            state.status = SupervisorStatus::Watching;
+            self.save(block_id, generation, &state);
+            if notify && trigger != Some(TriggerKind::System) {
+                self.notify_finished(block_id, trigger);
+            }
             return;
         }
         if turn_active(block_id) {

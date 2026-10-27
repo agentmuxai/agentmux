@@ -76,12 +76,27 @@ impl Default for SupervisorSettings {
     }
 }
 
+/// Whether this out-of-range `(key, value)` hasn't been logged yet: settings
+/// are read at every decision, and one bad value would repeat its warning.
+fn first_clamp(key: &str, value: u64) -> bool {
+    static LOGGED: std::sync::Mutex<Vec<(String, u64)>> = std::sync::Mutex::new(Vec::new());
+    let mut logged = LOGGED.lock().unwrap_or_else(|e| e.into_inner());
+    if logged.iter().any(|(k, v)| k == key && *v == value) {
+        return false;
+    }
+    if logged.len() >= 64 {
+        logged.clear();
+    }
+    logged.push((key.to_string(), value));
+    true
+}
+
 fn number(config: &ConfigState, key: &str, default: u32, (min, max): (u32, u32)) -> u32 {
     match config.extra_u64(key) {
         None => default,
         Some(v) => {
             let clamped = v.clamp(u64::from(min), u64::from(max)) as u32;
-            if u64::from(clamped) != v {
+            if u64::from(clamped) != v && first_clamp(key, v) {
                 tracing::warn!(key, value = v, used = clamped, "supervisor: setting out of range, clamped");
             }
             clamped
@@ -158,4 +173,16 @@ pub fn log_change(new_keys: &serde_json::Map<String, serde_json::Value>, agent_i
     }
     let caller = if agent_id.is_empty() { "the app" } else { agent_id };
     tracing::info!(caller, changed = %changed.join(", "), "supervisor: settings changed");
+}
+
+/// Parse a `setconfig` request into its keys, logging who changed a
+/// Supervisor key (anyone who can write settings may; none is anonymous).
+pub fn parse_setconfig(
+    data: serde_json::Value,
+    agent_id: &str,
+) -> Result<serde_json::Map<String, serde_json::Value>, String> {
+    let keys: serde_json::Map<String, serde_json::Value> =
+        serde_json::from_value(data).map_err(|e| format!("setconfig: {e}"))?;
+    log_change(&keys, agent_id);
+    Ok(keys)
 }

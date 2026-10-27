@@ -1665,11 +1665,7 @@ pub(super) fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, con
             let eb = event_bus_setconfig.clone();
             let lan_listeners = lan_listeners_setconfig.clone();
         async move {
-                let new_keys: serde_json::Map<String, serde_json::Value> =
-                    serde_json::from_value(data).map_err(|e| format!("setconfig: {e}"))?;
-                // The Supervisor's switch and limits are changed by anyone who can
-                // write settings; say who, so a change is never anonymous.
-                crate::backend::supervisor::settings::log_change(&new_keys, &ctx.agent_id);
+                let new_keys = crate::backend::supervisor::settings::parse_setconfig(data, &ctx.agent_id)?;
 
                 // 1. Write to disk (fs watcher will re-broadcast, harmlessly)
                 crate::backend::config_watcher_fs::merge_settings_to_disk(new_keys.clone())
