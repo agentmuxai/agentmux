@@ -131,6 +131,17 @@ pub fn url() -> Option<String> {
     BOUND.lock().unwrap().as_ref().map(|b| format!("http://{}:{}", b.gateway, b.port))
 }
 
+/// Points a container turn's `AGENTMUX_LOCAL_URL` at the listener, if it is up. Called when the
+/// environment is built and again once the container has started, which is what binds the
+/// listener on the first turn after srv restarts.
+pub fn point_env_at_listener(env: &mut [(String, String)]) {
+    if let Some(url) = url() {
+        if let Some(slot) = env.iter_mut().find(|(k, _)| k == "AGENTMUX_LOCAL_URL") {
+            slot.1 = url;
+        }
+    }
+}
+
 /// Whether `gateway` is an address this listener may bind: a private IPv4 address that is not
 /// loopback or unspecified, and inside `subnet`.
 fn bindable(gateway: Ipv4Addr, subnet: &Subnet) -> bool {
@@ -386,6 +397,19 @@ mod tests {
         // The guard is not simply refusing everything.
         let got = raw_status(addr, "/agentmux/discovery", &token).await;
         assert!(got != "401" && got != "403" && got != "400", "discovery answered {got}");
+    }
+
+    #[test]
+    fn an_environment_without_a_listener_is_left_alone() {
+        let mut env = vec![("AGENTMUX_LOCAL_URL".to_string(), "http://host.docker.internal:1".to_string())];
+        let before = env.clone();
+        if url().is_none() {
+            point_env_at_listener(&mut env);
+            assert_eq!(env, before);
+        }
+        let mut other = vec![("OTHER".to_string(), "x".to_string())];
+        point_env_at_listener(&mut other);
+        assert_eq!(other, vec![("OTHER".to_string(), "x".to_string())], "no URL slot is added");
     }
 
     #[tokio::test]

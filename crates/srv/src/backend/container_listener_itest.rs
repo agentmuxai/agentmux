@@ -50,6 +50,10 @@ async fn itest_container_listener_serves_the_agents_network_only() {
     assert_eq!(container_listener::url(), first, "the listener is reused, not rebound");
 
     let base = container_listener::url().expect("the listener binds the agents network's gateway on a Linux Docker host");
+    // An environment built before the container started is repointed once it has.
+    let mut stale = vec![("AGENTMUX_LOCAL_URL".to_string(), "http://host.docker.internal:1".to_string())];
+    container_listener::point_env_at_listener(&mut stale);
+    assert_eq!(stale[0].1, base);
     let token = token_for_block(name, None);
     let got = [
         ("a container token on an agent route", status(&cm, name, &format!("{base}/agentmux/discovery"), Some(&token)).await),
