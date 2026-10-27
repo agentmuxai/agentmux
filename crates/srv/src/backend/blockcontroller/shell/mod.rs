@@ -35,6 +35,7 @@ mod pty;
 mod spawn_cwd;
 mod ssh_pane;
 pub(crate) mod stamps;
+pub(crate) mod term_cap;
 mod translation;
 
 // Flat re-exports preserving the pre-split `shell::<item>` call sites used

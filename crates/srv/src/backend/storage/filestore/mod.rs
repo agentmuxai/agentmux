@@ -24,6 +24,7 @@ mod offset_ops;
 mod parts;
 pub mod reclaim;
 mod replace;
+mod trim;
 mod truncate_owner;
 mod types;
 mod zone_txn;
@@ -46,6 +47,8 @@ mod tests_replace;
 #[cfg(test)]
 mod tests_stamp_throttle;
 #[cfg(test)]
+mod tests_trim;
+#[cfg(test)]
 mod tests_readers;
 #[cfg(test)]
 mod tests_checkpoint;
@@ -61,6 +64,7 @@ pub use types::{FileMeta, FileOpts, MuxFile};
 #[allow(unused_imports)] // the memory record (SPEC_MEMORY_FOLLOWS_THE_AGENT M3)
 pub use zone_txn::ZoneTxn;
 pub(crate) use lines::is_blank_line;
+pub(crate) use trim::first_live_part;
 pub(crate) use frames::{FrameOutcome, CODEC_DELTAS, CODEC_ZSTD, FRAME_PARTS};
 #[allow(unused_imports)] // consumed by the transcript writers in 5a-3
 pub use counter::{normalized_records, AppendPos, Counted, CountedAppend, LineState, TailState};
