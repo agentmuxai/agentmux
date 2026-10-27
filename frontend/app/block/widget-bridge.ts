@@ -9,7 +9,7 @@
  */
 
 import type { WidgetPackageInfo, WidgetPaneInfo } from "@/app/store/rpc-api/widgets";
-import { isSectionMeta } from "./pane-sections";
+import { isSectionMeta, movedMeta } from "./pane-sections";
 import type { PaneTabHostContext } from "./pane-tab-registry";
 import type { StatusLook, StatusTone } from "./widget-panes";
 
@@ -335,17 +335,23 @@ async function answer(host: BridgeHost, state: BridgeState, method: string, para
             return ok(bridgeTheme(pkg));
         case "panes.open": {
             if (!str(p.view, 200)) return fail(ERR.INVALID_PARAMS, "panes.open needs { view }");
+            // A section that moved opens where it lives now (`panes.open("warden", { "warden:section": "kanban" })`).
+            const own = pkg.panes.some((pane) => pane.view === p.view);
+            const moved = !own && isObj(p.meta) ? movedMeta({ ...p.meta, view: p.view }) : undefined;
+            const { view: movedView, ...movedRest } = moved ?? {};
+            const openView = moved && movedView !== p.view ? (movedView as string) : p.view;
+            const openMeta = moved && movedView !== p.view ? movedRest : isObj(p.meta) ? p.meta : {};
             const split = p.split === "down" || p.split === "tab" ? p.split : "right";
             if (isObj(p.meta) && pkg.panes.some((pane) => pane.view === p.view) && Object.keys(p.meta).some((k) => !k || k.length > 200)) {
                 return fail(ERR.INVALID_PARAMS, "meta keys are non-empty strings");
             }
             // Measured after filtering: a key another view drops doesn't count.
-            const meta = paneMetaForWidget(pkg, p.view, isObj(p.meta) ? p.meta : {});
+            const meta = paneMetaForWidget(pkg, openView, openMeta);
             if (new TextEncoder().encode(JSON.stringify(meta)).length > META_LIMIT_BYTES) {
                 return fail(ERR.LIMIT_EXCEEDED, "a pane's widget meta is limited to 64 KB", { limit: "meta" });
             }
             if (!host.openPane) return fail(ERR.UNAVAILABLE, "this AgentMux can't open panes from widgets");
-            return ok({ pane: await host.openPane(p.view, meta, split) });
+            return ok({ pane: await host.openPane(openView, meta, split) });
         }
         case "storage.get":
         case "storage.set":

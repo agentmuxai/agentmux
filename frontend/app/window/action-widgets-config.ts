@@ -18,7 +18,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { createBlock, openOrFocusPaneByView } from "@/store/global";
 import { fireAndForget } from "@/util/util";
 import { isLightThemeActive, widgetRoleColor } from "@/app/block/pane-identity";
-import { sectionKeysIn } from "@/app/block/pane-sections";
+import { movedMeta, sectionKeysIn } from "@/app/block/pane-sections";
 import { paneRoleColor, type PaneColorRole } from "@/app/block/pane-color-scheme";
 import type { JSX } from "solid-js";
 
@@ -326,16 +326,22 @@ export function buildPaneWidgetMenuItems(
 
 /** Views whose widget focuses the pane already open in this tab instead of
  *  opening another: there's one Connectors, one Memory and one Warden (with the
- *  Vault) to manage. An entry for a section (Kanban, Vault) switches it there. */
+ *  Vault) to manage. An entry for a section (Vault, or the Swarm's Kanban) switches it there. */
 const FOCUS_EXISTING_VIEWS = new Set(["connectors", "memory", "warden"]);
 
 export async function handleWidgetSelect(widget: WidgetConfigType) {
-    const view = widget.blockdef?.meta?.["view"] as string | undefined;
-    if (view && FOCUS_EXISTING_VIEWS.has(view) && !widget.magnified) {
-        await openOrFocusPaneByView(view, widget.blockdef, sectionKeysIn(widget.blockdef?.meta) as MetaType | undefined);
+    // An entry that still names a section that moved (Warden's Kanban) opens where it lives now.
+    const meta = movedMeta(widget.blockdef?.meta as Record<string, unknown> | undefined);
+    const blockdef = meta === widget.blockdef?.meta ? widget.blockdef : { ...widget.blockdef, meta: meta as MetaType };
+    const view = meta?.["view"] as string | undefined;
+    // The Swarm focuses the one in this tab only to switch it to a section (the Kanban's button); its
+    // plain button opens another Swarm, as before.
+    const focusSection = view === "swarm" && sectionKeysIn(meta) !== undefined;
+    if (view && (FOCUS_EXISTING_VIEWS.has(view) || focusSection) && !widget.magnified) {
+        await openOrFocusPaneByView(view, blockdef, sectionKeysIn(meta) as MetaType | undefined);
         return;
     }
-    createBlock(widget.blockdef, widget.magnified);
+    createBlock(blockdef, widget.magnified);
 }
 
 export function pinWidget(shortName: string, settings: Record<string, any>, wmap: Record<string, WidgetConfigType>) {

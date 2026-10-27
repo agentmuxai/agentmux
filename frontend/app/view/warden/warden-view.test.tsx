@@ -24,12 +24,6 @@ vi.mock("@/app/view/warden-internet/warden-internet-stub", () => ({
 vi.mock("@/app/view/warden-audit/warden-audit-manager", () => ({
     WardenAuditManager: (props: { visible?: boolean }) => <div data-testid="audit-manager" data-visible={String(props.visible)} />,
 }));
-vi.mock("@/app/view/warden-kanban/warden-kanban-manager", () => ({
-    WardenKanbanManager: (props: { visible: boolean; onNeedsCount?: (n: number) => void }) => {
-        props.onNeedsCount?.(2);
-        return <div data-testid="kanban-manager" data-visible={String(props.visible)} />;
-    },
-}));
 vi.mock("@/app/view/vault/vault-view", () => ({
     VaultView: (props: { model: { shown: () => boolean; zoomAtom: () => number } }) => (
         <div data-testid="vault-view" data-shown={String(props.model.shown())} data-zoom={String(props.model.zoomAtom())} />
@@ -89,11 +83,11 @@ describe("WardenView rail", () => {
         ));
     }
 
-    it("orders the rail as Kanban, Jobs, Vault, Host, LAN, Internet, Audit, History, Ambient", () => {
+    it("orders the rail as Jobs, Vault, Host, LAN, Internet, Audit, History, Ambient", () => {
         renderWarden();
         const rail = screen.getByRole("tablist", { name: "Warden section" });
         const labels = Array.from(rail.querySelectorAll('[role="tab"]')).map((el) => el.textContent);
-        expect(labels).toEqual(["Kanban", "Jobs", "Vault", "Host", "LAN", "Internet", "Audit", "History", "Ambient"]);
+        expect(labels).toEqual(["Jobs", "Vault", "Host", "LAN", "Internet", "Audit", "History", "Ambient"]);
     });
 
     // The Vault became a section of Warden (vault-in-warden.ts): its protections follow the
@@ -164,11 +158,11 @@ describe("WardenView rail", () => {
         renderWarden();
         // Opened on Host: only Host is mounted, so no other section's poll runs.
         expect(screen.getByTestId("host-manager")).toBeInTheDocument();
-        for (const id of ["kanban-manager", "lan-manager", "internet-stub", "audit-manager", "history-manager", "vault-view"]) {
+        for (const id of ["lan-manager", "internet-stub", "audit-manager", "history-manager", "vault-view"]) {
             expect(screen.queryByTestId(id), id).toBeNull();
         }
-        for (const name of ["Kanban", "LAN", "Internet", "Audit", "History"]) screen.getByRole("tab", { name }).click();
-        for (const id of ["kanban-manager", "host-manager", "lan-manager", "internet-stub", "audit-manager", "history-manager"]) {
+        for (const name of ["LAN", "Internet", "Audit", "History"]) screen.getByRole("tab", { name }).click();
+        for (const id of ["host-manager", "lan-manager", "internet-stub", "audit-manager", "history-manager"]) {
             expect(screen.getByTestId(id), id).toBeInTheDocument();
         }
     });
@@ -183,15 +177,6 @@ describe("WardenView rail", () => {
         screen.getByRole("tab", { name: "Host" }).click();
         expect(screen.getByTestId("host-manager").dataset.visible).toBe("true");
         expect(screen.getByTestId("audit-manager").dataset.visible).toBe("false");
-    });
-
-    it("Kanban knows when it is shown, so it only fetches then", () => {
-        renderWarden();
-        screen.getByRole("tab", { name: "Kanban" }).click();
-        const kanban = screen.getByTestId("kanban-manager");
-        expect(kanban.dataset.visible).toBe("true");
-        screen.getByRole("tab", { name: "Host" }).click();
-        expect(kanban.dataset.visible).toBe("false");
     });
 
     it("History gets the Warden block and knows when it is shown", () => {
@@ -235,10 +220,15 @@ describe("WardenView pane title", () => {
         expect(auditPane?.classList.contains("is-hidden")).toBe(false);
     });
 
-    it("on the Kanban section, the title counts the tasks that need the operator", () => {
+    // The Kanban moved to the Swarm (SPEC_SWARM_SECTIONS_SUPERVISOR_SETTINGS_AND_KANBAN_2026_10_24.md §4):
+    // Warden keeps no stub, and a Warden saved on it opens on Host.
+    it("has no Kanban section, and a block saved on it opens on Host", () => {
+        setBlockMeta({ "warden:section": "kanban" });
         const { model } = renderWarden();
-        screen.getByRole("tab", { name: "Kanban" }).click();
-        expect(model.viewName()).toBe("Kanban · 2 need you");
+        expect(screen.queryByRole("tab", { name: "Kanban" })).toBeNull();
+        expect(model.sectionAtom()).toBe("host");
+        expect(model.viewName()).toBe("Host");
+        expect(screen.getByTestId("host-manager").dataset.visible).toBe("true");
     });
 
     it("selecting a section from the keyboard writes warden:section and updates viewName()", () => {

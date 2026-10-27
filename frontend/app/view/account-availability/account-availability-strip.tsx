@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // The persistent item for an account episode (docs/specs/SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §6.2):
-// a strip at the top of Warden ▸ Kanban and of the Swarm, one row per account whose agents are out of
+// a strip at the top of the Swarm (above its Supervisor, Broadcast and Kanban sections), one row per account whose agents are out of
 // quota or signed out, with "Move these agents to another signed-in account" (§6.3). The move asks which
 // account, the first signed-in one preselected (§13, decision 2); srv moves the idle agents and queues the rest for the end of their turn.
 

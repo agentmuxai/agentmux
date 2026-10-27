@@ -12,6 +12,7 @@ import { MODE_DESCRIPTIONS, MODE_LABELS, SUPERVISOR_MODES, SUPERVISOR_OFF_REASON
 import { localTarget, partitionTargets, remoteFleetTargets, unavailableReason, type FleetAction } from "./swarm-fleet-targets";
 import type { FleetResultEntry, SwarmViewModel } from "./swarm-model";
 import { remoteSections } from "./swarm-remote";
+import type { SwarmSection } from "./swarm-section";
 import { Button, IconButton } from "@/app/element/ui";
 
 // Staged rollout only offered once a selection is large enough that
@@ -33,7 +34,7 @@ const NOTHING_SUPERVISABLE = "The Supervisor runs in each AgentMux for its own a
 export function FleetToolbar(props: {
     model: SwarmViewModel;
     /** The Supervisor shows Stop and the mode menu; Broadcast has the selection only (its composer is docked). */
-    section?: "supervisor" | "broadcast";
+    section?: SwarmSection;
     /** Every currently-listed agent's blockId, for "Select all". Passed down
      *  rather than read via `model.buildTree()` here — SwarmView already
      *  computes this from the same memo the row list renders from, so the

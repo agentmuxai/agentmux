@@ -297,8 +297,9 @@ mod tests {
     fn a_section_entry_opens_its_pane_on_that_section() {
         let config = build_default_config();
         let kanban = &config.widgets["defwidget@kanban"].block_def.meta;
-        assert_eq!(kanban.get("view").and_then(|v| v.as_str()), Some("warden"));
-        assert_eq!(kanban.get("warden:section").and_then(|v| v.as_str()), Some("kanban"));
+        assert_eq!(kanban.get("view").and_then(|v| v.as_str()), Some("swarm"));
+        assert_eq!(kanban.get("swarm:section").and_then(|v| v.as_str()), Some("kanban"));
+        assert!(kanban.get("warden:section").is_none());
 
         let vault = &config.widgets["defwidget@vault"].block_def.meta;
         assert_eq!(vault.get("view").and_then(|v| v.as_str()), Some("warden"));
@@ -312,6 +313,17 @@ mod tests {
         cards.resolve_section();
         assert_eq!(cards.block_def.meta.get("warden:section").and_then(|v| v.as_str()), Some("vault"));
         assert_eq!(cards.block_def.meta.get("vault:section").and_then(|v| v.as_str()), Some("cards"));
+
+        // An entry that still names Warden's Kanban (a user's own, or a pin from before the move)
+        // opens the Swarm on it.
+        let mut old: WidgetConfigType = serde_json::from_str(
+            r#"{"label":"Kanban","section":"kanban","blockdef":{"meta":{"view":"warden"}}}"#,
+        )
+        .unwrap();
+        old.resolve_section();
+        assert_eq!(old.block_def.meta.get("view").and_then(|v| v.as_str()), Some("swarm"));
+        assert_eq!(old.block_def.meta.get("swarm:section").and_then(|v| v.as_str()), Some("kanban"));
+        assert!(old.block_def.meta.get("warden:section").is_none());
 
         // No view: nothing to key it by, so the meta is left alone.
         let mut orphan: WidgetConfigType = serde_json::from_str(r#"{"section":"cards"}"#).unwrap();

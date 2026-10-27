@@ -53,6 +53,33 @@ export function sectionOf<Id extends string>(
     return hasSection(sections, s) ? s : sections.default;
 }
 
+/** A section that moved from one pane to another (the Kanban left Warden for the Swarm). An old
+ *  pin, widget entry or `am.panes.open` call naming the old pair keeps working through this table:
+ *  the widget bridge, `sectionProblem`, the widget bar's pins, `openWarden` and srv's
+ *  `resolve_section` (crates/srv/src/backend/wconfig/types.rs, which has the same table) all read it. */
+const MOVED_SECTIONS: readonly { from: { view: string; section: string }; to: { view: string; section: string } }[] = [
+    { from: { view: "warden", section: "kanban" }, to: { view: "swarm", section: "kanban" } },
+];
+
+/** Where `view`'s `section` lives now, or null when it has not moved. */
+export function movedSection(view: string | null | undefined, section: string): { view: string; section: string } | null {
+    return MOVED_SECTIONS.find((m) => m.from.view === view && m.from.section === section)?.to ?? null;
+}
+
+/** `meta` as the pane that holds a moved section reads it: a blockdef or `panes.open` meta naming
+ *  the old pair (`view: warden`, `warden:section: kanban`) comes back naming the new one. Any other
+ *  meta comes back as it is. */
+export function movedMeta(meta: Record<string, unknown>): Record<string, unknown>;
+export function movedMeta(meta: Record<string, unknown> | undefined): Record<string, unknown> | undefined;
+export function movedMeta(meta: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+    if (!meta) return meta;
+    const view = typeof meta.view === "string" ? meta.view : undefined;
+    const to = movedSection(view, String(meta[sectionKeyOf(view ?? "")]));
+    if (!view || !to) return meta;
+    const { [sectionKeyOf(view)]: _old, ...rest } = meta;
+    return { ...rest, view: to.view, [sectionKeyOf(to.view)]: to.section };
+}
+
 /** The sections a registered view declares (an old alias resolves to its view). */
 export function paneSectionsOf(view: string | null | undefined): PaneSections | undefined {
     return getPaneTab(view)?.sections;
@@ -69,6 +96,8 @@ export function sectionProblem(view: string | null | undefined, section: string)
     const name = resolvePaneTabView(view);
     if (name !== view) return `"${view}" is now the ${name} pane: use "view": "${name}"`;
     const [id, sub, ...rest] = section.split("/");
+    // A moved pair is not wrong: it opens where the section lives now.
+    if (sub === undefined && movedSection(name, id)) return null;
     if (!hasSection(sections, id)) {
         return `the ${name} pane has no "${id}" section (it has ${sections.items.map((s) => s.id).join(", ")})`;
     }

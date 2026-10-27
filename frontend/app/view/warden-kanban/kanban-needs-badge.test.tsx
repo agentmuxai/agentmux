@@ -2,7 +2,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-/** The Needs-you badge on widget-bar entries that open Warden's Kanban (SPEC_WARDEN_KANBAN_2026_10_20.md §6.13). */
+/** The Needs-you badge on widget-bar entries that open the Swarm's Kanban (SPEC_WARDEN_KANBAN_2026_10_20.md §6.13). */
 
 import { cleanup, render, screen, waitFor } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -32,15 +32,18 @@ afterEach(() => {
 });
 
 describe("the Kanban's Needs-you badge", () => {
-    it("counts the tasks in Needs you, as the Warden tab title does", () => {
+    it("counts the tasks in Needs you, as the Swarm title does", () => {
         const tasks = [t("blocked"), t("failed"), t("claimed", { state: "waiting" }), t("claimed", { state: "working" }), t("review"), t("open")];
         expect(needsCountOf(tasks)).toBe(3);
     });
 
-    it("shows on entries that open Warden's Kanban section, and only those", () => {
-        expect(opensKanban({ blockdef: { meta: { view: "warden", "warden:section": "kanban" } } } as never)).toBe(true);
-        expect(opensKanban({ blockdef: { meta: { view: "warden" } } } as never)).toBe(false);
+    it("shows on entries that open the Swarm's Kanban section, and only those", () => {
+        expect(opensKanban({ blockdef: { meta: { view: "swarm", "swarm:section": "kanban" } } } as never)).toBe(true);
+        expect(opensKanban({ blockdef: { meta: { view: "swarm" } } } as never)).toBe(false);
+        expect(opensKanban({ blockdef: { meta: { view: "swarm", "swarm:section": "broadcast" } } } as never)).toBe(false);
         expect(opensKanban({ blockdef: { meta: { view: "warden", "warden:section": "vault" } } } as never)).toBe(false);
+        // An entry from before the move, still naming Warden's Kanban, opens the Swarm's now.
+        expect(opensKanban({ blockdef: { meta: { view: "warden", "warden:section": "kanban" } } } as never)).toBe(true);
         expect(opensKanban(undefined)).toBe(false);
     });
 

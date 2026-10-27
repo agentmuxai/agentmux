@@ -11,7 +11,7 @@
  * More, like any other widget.
  */
 
-import { paneSectionsOf, sectionKeysIn, sectionMetaOf, sectionOf } from "@/app/block/pane-sections";
+import { movedMeta, paneSectionsOf, sectionKeysIn, sectionMetaOf, sectionOf } from "@/app/block/pane-sections";
 import { resolvePaneTabView } from "@/app/block/pane-tab-registry";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -54,7 +54,8 @@ export function sectionEntryKey(section: ShownSection, widgets: Record<string, W
     const same = (got: Record<string, unknown> | undefined) =>
         !!got && Object.keys(got).length === Object.keys(want).length && Object.entries(want).every(([k, v]) => got[k] === v);
     return Object.entries(widgets).find(([, w]) => {
-        const meta = w?.blockdef?.meta as Record<string, unknown> | undefined;
+        // An entry that still names a moved section (Warden's Kanban) is the entry for where it lives now.
+        const meta = movedMeta(w?.blockdef?.meta as Record<string, unknown> | undefined);
         return meta?.view === section.view && !w.children?.length && same(sectionKeysIn(meta));
     })?.[0];
 }

@@ -23,7 +23,7 @@ export const COLUMNS: { id: ColumnId; label: string }[] = [
     { id: "released", label: "Released" },
 ];
 
-/** Warden's width at or under which the board is one list (§8 of the stages spec); `kanban.scss`'s
+/** The Kanban section's width at or under which the board is one list (§8 of the stages spec); `kanban.scss`'s
  *  `$kanban-narrow` is the same number. */
 export const KANBAN_NARROW_PX = 760;
 
@@ -127,7 +127,7 @@ export function coveredByEpisode(t: KanbanTask, episodes: readonly CoveringEpiso
     return episodes.some((e) => (!!block && e.block_ids.includes(block)) || uids.some((u) => e.agent_ids.includes(u)));
 }
 
-/** How many tasks need the operator: the Warden tab title's count and the widget-bar badge's. A task whose
+/** How many tasks need the operator: the Swarm's title count on the Kanban and the widget-bar badge's. A task whose
  *  holder is out of quota or signed out still sits in Needs you with its reason, but is counted only when no
  *  open account episode covers that holder (e.g. no run account could be resolved); the episodes are counted
  *  once each by the caller. */

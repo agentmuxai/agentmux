@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 //! The operator's side of the Kanban (docs/specs/SPEC_WARDEN_KANBAN_2026_10_20.md
-//! §6.4, §7.2), websocket RPCs from the Warden Kanban section:
+//! §6.4, §7.2), websocket RPCs from the Swarm's Kanban section:
 //!
 //! - `kanban.list`: every task the board shows, with its card and its holder's
 //!   live state, and this instance's agents.
