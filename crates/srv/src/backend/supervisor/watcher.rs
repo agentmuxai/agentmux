@@ -155,20 +155,27 @@ impl Supervisor {
                 }
             };
             for block in blocks {
-                let Some(mut state) = SupervisorState::from_meta(&block.meta) else { continue };
-                if !pacing::drop_restarted_wait(&mut state) {
+                let Some(state) = SupervisorState::from_meta(&block.meta) else { continue };
+                if state.status != SupervisorStatus::Waiting {
                     continue;
                 }
-                let Ok(value) = serde_json::to_value(&state) else { continue };
                 let id = block.oid.clone();
+                // Decide from the stored state inside the transaction: a turn that ended since the
+                // scan may have saved a live wait, which must stay.
                 let written = self.mstore.with_tx(|tx| {
                     let mut b = tx.must_get::<Block>(&id)?;
+                    let Some(mut current) = SupervisorState::from_meta(&b.meta) else { return Ok(false) };
+                    if !pacing::drop_restarted_wait(&mut current) {
+                        return Ok(false);
+                    }
+                    let Ok(value) = serde_json::to_value(&current) else { return Ok(false) };
                     b.meta.insert(META_STATE.to_string(), value);
                     tx.update(&mut b)?;
-                    Ok(())
+                    Ok(true)
                 });
                 match written {
-                    Ok(()) => broadcast_block_update(&self.mstore, &self.event_bus, &id),
+                    Ok(true) => broadcast_block_update(&self.mstore, &self.event_bus, &id),
+                    Ok(false) => {}
                     Err(e) => tracing::warn!(block_id = %id, error = %e, "supervisor: could not clear an interrupted wait"),
                 }
             }
