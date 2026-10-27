@@ -37,9 +37,10 @@ fn entry(rec: &ActionRecord, target_agent: String) -> AuditLogEntry {
 
 impl ReactiveHandler {
     /// Record one call. A call that names only a pane is recorded against the agent
-    /// running in it.
+    /// running in it. Runs on the reply path, so a poisoned lock is recovered rather than
+    /// allowed to stop the reply.
     pub fn audit_action(&self, rec: &ActionRecord) {
-        let mut handler = self.inner.lock().unwrap();
+        let mut handler = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let target = rec
             .target
             .agent
