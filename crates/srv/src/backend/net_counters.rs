@@ -35,22 +35,36 @@ pub fn sum_rows(rows: &[IfRow]) -> (u64, u64) {
         .fold((0, 0), |(sent, recv), r| (sent.saturating_add(r.out_octets), recv.saturating_add(r.in_octets)))
 }
 
+/// The totals after a read: those of `rows`, or the last good ones when the table could not be read
+/// (a zero would become the next tick's baseline and show as a spike of the whole lifetime count).
+#[cfg_attr(not(windows), allow(dead_code))]
+fn after_read(last: &mut (u64, u64), rows: Option<Vec<IfRow>>) -> (u64, u64) {
+    if let Some(rows) = rows {
+        *last = sum_rows(&rows);
+    }
+    *last
+}
+
 #[cfg(windows)]
 mod imp {
-    use super::{sum_rows, IfRow};
+    use super::{after_read, IfRow};
     use windows_sys::Win32::NetworkManagement::IpHelper::{FreeMibTable, GetIfTable2, MIB_IF_TABLE2};
     use windows_sys::Win32::NetworkManagement::Ndis::MediaConnectStateDisconnected;
 
-    pub struct NetCounters;
+    pub struct NetCounters {
+        last: (u64, u64),
+    }
 
     impl NetCounters {
         pub fn new() -> Self {
-            NetCounters
+            let mut counters = NetCounters { last: (0, 0) };
+            counters.totals();
+            counters
         }
 
-        /// `(bytes sent, bytes received)`, or zeros when the table can't be read.
+        /// `(bytes sent, bytes received)`; the last good ones when the table can't be read.
         pub fn totals(&mut self) -> (u64, u64) {
-            read_rows().map_or((0, 0), |rows| sum_rows(&rows))
+            after_read(&mut self.last, read_rows())
         }
     }
 
@@ -137,6 +151,14 @@ mod tests {
     fn an_unusable_row_does_not_make_its_group_shared() {
         let rows = [row(1, true, 100, 10), row(1, false, 900, 90)];
         assert_eq!(sum_rows(&rows), (10, 100));
+    }
+
+    #[test]
+    fn a_failed_read_keeps_the_last_good_totals() {
+        let mut last = (0, 0);
+        assert_eq!(after_read(&mut last, Some(vec![row(1, true, 100, 10)])), (10, 100));
+        assert_eq!(after_read(&mut last, None), (10, 100));
+        assert_eq!(after_read(&mut last, Some(vec![row(1, true, 150, 12)])), (12, 150));
     }
 
     #[test]
