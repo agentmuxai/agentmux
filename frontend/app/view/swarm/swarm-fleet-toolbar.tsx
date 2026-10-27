@@ -30,11 +30,7 @@ const NOTHING_REACHABLE = "Stopping agents on another machine isn't supported ye
  *  supervises its own agents. */
 const NOTHING_SUPERVISABLE = "The Supervisor runs in each AgentMux for its own agents; select agents of this one";
 
-export function FleetToolbar({
-    model,
-    allBlockIds,
-    section = "supervisor",
-}: {
+export function FleetToolbar(props: {
     model: SwarmViewModel;
     /** The Supervisor shows Stop and the mode menu; Broadcast has the selection only (its composer is docked). */
     section?: "supervisor" | "broadcast";
@@ -44,6 +40,8 @@ export function FleetToolbar({
      *  toolbar and the rows never disagree about what's selectable. */
     allBlockIds: () => string[];
 }): JSX.Element {
+    // `section` changes while this stays mounted, so it is read through `props`, never destructured.
+    const { model, allBlockIds } = props;
     const selected = () => model.selectedBlockIdsAtom();
     const count = () => selected().size;
     const allSelected = () => {
@@ -116,7 +114,7 @@ export function FleetToolbar({
                         <Show when={otherMachineN() > 0}> · {otherMachineN()} on other machines</Show>
                     </span>
 
-                    <Show when={section !== "broadcast"}>
+                    <Show when={props.section !== "broadcast"}>
                         <Button
                             tone="danger"
                             class="swarm-fleet-btn swarm-fleet-btn--destructive"

@@ -94,6 +94,18 @@ describe("FleetToolbar — by section", () => {
         expect(queryByText("Broadcast")).toBeNull();
     });
 
+    it("follows the section while it stays mounted", () => {
+        const [section, setSection] = createSignal<"supervisor" | "broadcast">("supervisor");
+        const { queryByText } = render(() => <FleetToolbar model={modelStub(["a"])} allBlockIds={() => ["a"]} section={section()} />);
+        expect(queryByText("Stop 1")).not.toBeNull();
+        setSection("broadcast");
+        expect(queryByText("Stop 1")).toBeNull();
+        expect(queryByText("Supervisor")).toBeNull();
+        setSection("supervisor");
+        expect(queryByText("Stop 1")).not.toBeNull();
+        expect(queryByText("Supervisor")).not.toBeNull();
+    });
+
     it("the Broadcast section keeps the selection and has neither Stop nor the mode menu", () => {
         const { queryByText } = render(() => <FleetToolbar model={modelStub(["a"])} allBlockIds={() => ["a"]} section="broadcast" />);
         expect(queryByText("1 selected")).not.toBeNull();
