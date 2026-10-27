@@ -206,6 +206,35 @@ pub(crate) fn open_agent_panes(store: &Store, block_ids: &[String]) -> Vec<Agent
     panes
 }
 
+/// Every pane of the agent whose definition id is `agent_id`, in every
+/// window and tab of this instance, running or not (a pane whose agent has
+/// stopped, a pane in a window nobody is looking at): where it is open, as
+/// [`open_agent_panes`] reports it. `window_ids` is empty for a pane no window
+/// shows. One agent should have one pane; a caller that is about to make one
+/// (an import, a restore, a drag) asks this first and reuses what it finds
+/// instead of creating a second.
+pub(crate) fn agent_panes_of(store: &Store, agent_id: &str) -> Vec<AgentOpenPane> {
+    if agent_id.is_empty() {
+        return Vec::new();
+    }
+    let agent_blocks: Vec<String> = store
+        .get_all::<Block>()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|b| {
+            ["agentId", "agent:id", "view"].iter().any(|k| {
+                let v = obj::meta_get_string(&b.meta, k, "");
+                !v.is_empty() && (*k != "view" || v == "agent")
+            })
+        })
+        .map(|b| b.oid)
+        .collect();
+    open_agent_panes(store, &agent_blocks)
+        .into_iter()
+        .filter(|pane| pane.agent_id == agent_id)
+        .collect()
+}
+
 fn register_agent_kill_process(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let process_tracker = state.process_tracker.clone();
     engine.register_typed(COMMAND_AGENT_KILL_PROCESS, move |cmd: AgentKillProcessCommand, _ctx| {
@@ -969,6 +998,41 @@ mod open_panes_tests {
         let a3 = panes.iter().find(|p| p.block_id == agent3).expect("main pane listed");
         assert_eq!(a3.tab_name, "Tab 2");
         assert_eq!(a3.window_ids, vec![main_win.oid]);
+    }
+
+    /// Every pane of one agent, wherever it is, and no other agent's.
+    #[test]
+    fn agent_panes_of_finds_all_of_an_agents_panes_and_only_its_own() {
+        let store = Store::open_in_memory().unwrap();
+        let tab_a = insert_tab(&store, "Tab 4");
+        let ws_a = insert_workspace(&store, &[&tab_a.oid]);
+        let win_a = insert_window(&store, &ws_a.oid);
+        let tab_b = insert_tab(&store, "Tab 4");
+        let ws_b = insert_workspace(&store, &[&tab_b.oid]);
+        let win_b = insert_window(&store, &ws_b.oid);
+        // A workspace no window shows.
+        let tab_c = insert_tab(&store, "Parked");
+        insert_workspace(&store, &[&tab_c.oid]);
+
+        let first = insert_block(&store, &tab_a.oid, Some("qtest-def"));
+        let second = insert_block(&store, &tab_b.oid, Some("qtest-def"));
+        let parked = insert_block(&store, &tab_c.oid, Some("qtest-def"));
+        let other = insert_block(&store, &tab_a.oid, Some("korp-def"));
+        insert_block(&store, &tab_a.oid, None);
+
+        let panes = agent_panes_of(&store, "qtest-def");
+        let mut got: Vec<&str> = panes.iter().map(|p| p.block_id.as_str()).collect();
+        got.sort();
+        let mut want = vec![first.as_str(), second.as_str(), parked.as_str()];
+        want.sort();
+        assert_eq!(got, want);
+        assert!(!panes.iter().any(|p| p.block_id == other));
+        let by_block = |id: &str| panes.iter().find(|p| p.block_id == id).unwrap();
+        assert_eq!(by_block(&first).window_ids, vec![win_a.oid]);
+        assert_eq!(by_block(&second).window_ids, vec![win_b.oid]);
+        assert!(by_block(&parked).window_ids.is_empty(), "a pane no window shows is still a pane");
+        assert!(agent_panes_of(&store, "nobody-def").is_empty());
+        assert!(agent_panes_of(&store, "").is_empty());
     }
 
     /// A pane from an older build carries only the legacy `agent:id` key.

@@ -34,10 +34,15 @@ pub(crate) async fn open_window(state: &AppState, label: &str) -> Window {
 
 /// A pane of the user's in contents `ws_id`, so they are worth keeping.
 pub(crate) async fn add_pane(state: &AppState, ws_id: &str, view: &str) {
+    add_pane_with_meta(state, ws_id, json!({ "view": view })).await;
+}
+
+/// [`add_pane`] with the pane's whole meta.
+pub(crate) async fn add_pane_with_meta(state: &AppState, ws_id: &str, meta: Value) {
     let ws = state.mstore.get::<Workspace>(ws_id).unwrap().unwrap();
     let tab_id = ws.tabids.iter().chain(ws.pinnedtabids.iter()).next().unwrap().clone();
     let first = state.mstore.get::<Tab>(&tab_id).unwrap().unwrap().blockids.first().cloned();
-    let events = dispatch_to_reducer(state, Command::CreateBlock { tab_id: tab_id.clone(), meta: json!({ "view": view }) }).await;
+    let events = dispatch_to_reducer(state, Command::CreateBlock { tab_id: tab_id.clone(), meta }).await;
     for ev in &events {
         crate::persist_subscriber::apply_event_to_mstore(ev, &state.mstore).unwrap();
     }
