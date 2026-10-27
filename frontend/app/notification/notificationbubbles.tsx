@@ -59,6 +59,7 @@ const NotificationBubbles = (): JSX.Element => {
     const USUAL_BOTTOM = 34;
     const RIGHT = 58;
     const TOP = 40;
+    const REPLACE_EVERY_MS = 200;
     // Kept off any block a pane or drawer marks with `data-toast-avoid` (toast-placement.ts).
     const [placement, setPlacement] = createSignal<Placement>({ bottom: USUAL_BOTTOM });
     let stack: HTMLDivElement | undefined;
@@ -82,13 +83,14 @@ const NotificationBubbles = (): JSX.Element => {
         if (prev.bottom !== next.bottom) setPlacement(next);
     };
     // While toasts show: re-place them when the window, a scroll or the page's layout changes, at most
-    // once a frame (and not for the stack's own style change).
+    // every REPLACE_EVERY_MS (streaming text and animations change the DOM constantly, and a persistent
+    // toast can stay up for hours), and not for the stack's own style change.
     createEffect(() => {
         if (!isOpen() || notificationPopoverMode()) return;
         visible();
-        let frame = 0;
+        let timer: ReturnType<typeof setTimeout> | undefined;
         const schedule = () => {
-            if (!frame) frame = requestAnimationFrame(() => ((frame = 0), measure()));
+            if (timer === undefined) timer = setTimeout(() => ((timer = undefined), measure()), REPLACE_EVERY_MS);
         };
         const observer = new MutationObserver((records) => {
             if (records.some((m) => !stack || !stack.contains(m.target))) schedule();
@@ -96,12 +98,13 @@ const NotificationBubbles = (): JSX.Element => {
         observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "style", "hidden"] });
         window.addEventListener("resize", schedule);
         window.addEventListener("scroll", schedule, true);
-        schedule();
+        const first = requestAnimationFrame(measure); // now, so a new toast never shows in the wrong place first
         onCleanup(() => {
             observer.disconnect();
             window.removeEventListener("resize", schedule);
             window.removeEventListener("scroll", schedule, true);
-            if (frame) cancelAnimationFrame(frame);
+            clearTimeout(timer);
+            cancelAnimationFrame(first);
         });
     });
     const floatingStyles = () => ({
