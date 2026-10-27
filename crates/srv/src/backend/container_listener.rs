@@ -157,6 +157,15 @@ pub fn gateway_and_subnet(ipam: &[(Option<String>, Option<String>)]) -> Option<(
     })
 }
 
+/// Stops serving and forgets the address, so containers fall back to `host.docker.internal`
+/// rather than being pointed at a gateway that is gone.
+#[cfg(target_os = "linux")]
+fn unbind() {
+    if let Some(old) = BOUND.lock().unwrap().take() {
+        old.stop.cancel();
+    }
+}
+
 /// Binds the listener to the agents network's gateway if the network exists and the address can
 /// be bound, and returns its URL. Idempotent: the same gateway keeps its listener. Linux only;
 /// anywhere else, or when the bind fails, `None` and the old route (`host.docker.internal`) stays.
@@ -182,6 +191,7 @@ pub async fn ensure_bound(docker: &bollard::Docker) -> Option<String> {
         let (gateway, subnet) = gateway_and_subnet(&ipam)?;
         if !bindable(gateway, &subnet) {
             tracing::debug!(%gateway, "container listener: the gateway is not a private address of this host; not binding");
+            unbind();
             return None;
         }
         // One binder at a time, so two containers starting together bind once.
@@ -197,6 +207,7 @@ pub async fn ensure_bound(docker: &bollard::Docker) -> Option<String> {
                 // Docker Desktop and rootless Docker keep the gateway out of this host's
                 // network namespace, so the address cannot be bound here.
                 tracing::info!(%gateway, error = %e, "container listener: could not bind the agents network's gateway; containers keep host.docker.internal");
+                unbind();
                 return None;
             }
         };
