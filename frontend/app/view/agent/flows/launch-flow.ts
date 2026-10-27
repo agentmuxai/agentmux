@@ -224,7 +224,7 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
             return "auth_failed";
         }
         opts.onAuthCheckResult?.(false);
-        return finishLaunch(opts, log, setPhase, notify);
+        return finishLaunch(opts, log, setPhase, notify, true);
     }
 
     // Phase 1: CLI Detection / Installation
@@ -358,6 +358,8 @@ async function finishLaunch(
     log: LaunchFlowOptions["log"],
     setPhase: NonNullable<LaunchFlowOptions["setLaunchPhase"]>,
     notify: NonNullable<LaunchFlowOptions["onNotify"]>,
+    /** A container agent: once its pane is fresh, begin starting its container so the first message finds it ready. */
+    prestartContainer = false,
 ): Promise<LaunchFlowResult> {
     const { blockId } = opts;
     // Phase 3: Controller Registration
@@ -377,6 +379,12 @@ async function finishLaunch(
         if (rts) opts.onControllerStatus?.(rts);
         if (status === "init") {
             log("agent", "ready — type a message below to start");
+            if (prestartContainer) {
+                // The first message's own start-up shares its locks, so nothing is done twice.
+                RpcApi.AgentInputCommand(TabRpcClient, { blockid: blockId, message: "", prestart: true }).catch((err: any) =>
+                    log("container", `pre-start skipped: ${err?.message ?? String(err)}`),
+                );
+            }
         } else if (status === "done" || status === "running") {
             // "running" means a persistent controller resumed while its
             // process was still alive (possibly mid-turn) — if anything a
