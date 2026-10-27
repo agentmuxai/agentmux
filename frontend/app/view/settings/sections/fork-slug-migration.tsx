@@ -7,16 +7,19 @@
 // `backend/slug_migration`, docs/specs/SPEC_FORK_SLUG_MIGRATION_2026_10_22.md
 // §4 Phase 2). The plan is shown first; panes still running an affected agent
 // are stopped through the usual 15 s override before anything changes, and a
-// finished update can be undone from its journal.
+// finished update can be undone from its journal. An agent whose new id is
+// taken is listed with the reason and the next free id; "Use <id>" (or an id of
+// the user's own) gives it that one, as the spec asks: never picked silently.
 
 import { createSignal, For, onMount, Show, type JSX } from "solid-js";
 
 import { ConfirmModal } from "@/app/element/confirm-modal";
-import { Button } from "@/app/element/ui";
+import { Button, TextInput } from "@/app/element/ui";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { ForkSlugBlocker } from "@/types/rpc/ForkSlugBlocker";
 import type { ForkSlugCandidate } from "@/types/rpc/ForkSlugCandidate";
+import type { ForkSlugChoice } from "@/types/rpc/ForkSlugChoice";
 import type { ForkSlugMigrationMode } from "@/types/rpc/ForkSlugMigrationMode";
 import type { ForkSlugPlan } from "@/types/rpc/ForkSlugPlan";
 import type { ForkSlugReport } from "@/types/rpc/ForkSlugReport";
@@ -32,7 +35,7 @@ export const FORK_SLUG_SETTING = {
     keywords: ["fork", "slug", "agent id", "id", "rename", "migrate", "outdated", "chain"],
 } satisfies SettingsIndexEntry;
 
-type Phase = "loading" | "idle" | "stopping" | "applying" | "undoing";
+type Phase = "loading" | "checking" | "idle" | "stopping" | "applying" | "undoing";
 
 const plural = (n: number, one: string, many: string = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
 
@@ -59,11 +62,16 @@ export function planLine(plan: ForkSlugPlan): string {
     }
     const n = plan.candidates.length;
     if (n === 0) return "Every agent has an up-to-date id.";
-    return `${plural(n, "agent")} ${n === 1 ? "has" : "have"} an outdated id.`;
+    const base = `${plural(n, "agent")} ${n === 1 ? "has" : "have"} an outdated id.`;
+    const refused = plan.candidates.filter((c) => c.refused).length;
+    if (refused === 0) return base;
+    if (refused === n) return `${base} ${n === 1 ? "It can't" : "None can"} be updated yet: pick another id below.`;
+    return `${base} ${refused} can't be updated yet: pick another id below.`;
 }
 
-function call(mode: ForkSlugMigrationMode, journal?: string): Promise<MigrateForkSlugsResult> {
-    return RpcApi.AgentsMigrateForkSlugsCommand(TabRpcClient, journal ? { mode, journal } : { mode });
+function call(mode: ForkSlugMigrationMode, journal?: string, choices?: ForkSlugChoice[]): Promise<MigrateForkSlugsResult> {
+    const data = { mode, ...(journal ? { journal } : {}), ...(choices && choices.length > 0 ? { choices } : {}) };
+    return RpcApi.AgentsMigrateForkSlugsCommand(TabRpcClient, data);
 }
 
 export function ForkSlugMigration(): JSX.Element {
@@ -74,10 +82,15 @@ export function ForkSlugMigration(): JSX.Element {
     const [confirmStop, setConfirmStop] = createSignal(false);
     const [confirmUndo, setConfirmUndo] = createSignal(false);
     const [showWhere, setShowWhere] = createSignal(false);
+    // The id the user picked for an agent whose own is taken; sent with every
+    // call until the update that uses it is done or given up.
+    const [chosen, setChosen] = createSignal<ForkSlugChoice[]>([]);
+    const [customFor, setCustomFor] = createSignal<string | null>(null);
+    const [customId, setCustomId] = createSignal("");
 
     const load = async (): Promise<ForkSlugPlan | null> => {
         try {
-            const p = (await call("plan")).plan ?? null;
+            const p = (await call("plan", undefined, chosen())).plan ?? null;
             setPlan(p);
             return p;
         } catch (e) {
@@ -106,12 +119,13 @@ export function ForkSlugMigration(): JSX.Element {
         setPhase("applying");
         setError(null);
         try {
-            const r = await call("apply");
+            const r = await call("apply", undefined, chosen());
             setReport(r.report ?? null);
             if (r.report?.failed) setError(`The update stopped: ${r.report.failed}`);
         } catch (e) {
             setError(`Couldn't update: ${errorText(e)}`);
         }
+        setChosen([]);
         await load();
         setPhase("idle");
     };
@@ -128,7 +142,7 @@ export function ForkSlugMigration(): JSX.Element {
             return;
         }
         try {
-            const r = await call("stop");
+            const r = await call("stop", undefined, chosen());
             if (r.wait_ms > 0) await sleep(r.wait_ms + 1000);
         } catch (e) {
             setError(`Couldn't stop the panes: ${errorText(e)}`);
@@ -146,6 +160,44 @@ export function ForkSlugMigration(): JSX.Element {
     const start = () => {
         if (running().length > 0) setConfirmStop(true);
         else void apply();
+    };
+
+    // An agent can be given another id only once the ones the rule can name are
+    // done: the update then has nothing else to do, and a pick changes nothing
+    // but that agent.
+    // Not while another pick is being checked or waits on the stop dialog: one
+    // pick at a time, so what is applied is what was checked.
+    const canPick = () => !busy() && !confirmStop() && ready().length === 0 && unclearable(plan()).length === 0;
+
+    /** Give `c` the id `slug` instead of its own (taken) one: check it, then update as "Update them" does. */
+    const useId = async (c: ForkSlugCandidate, slug: string) => {
+        const id = slug.trim();
+        if (!id || !canPick()) return;
+        setPhase("checking");
+        setError(null);
+        setChosen([{ uid: c.uid, new_slug: id }]);
+        const p = await load();
+        const mine = p?.candidates.find((x) => x.uid === c.uid);
+        if (!mine || mine.refused) {
+            // Taken after all, or not an id: say so, and show the plan as it was.
+            if (mine?.refused) setError(`${id} can't be used: ${mine.refused}`);
+            setChosen([]);
+            await load();
+            setPhase("idle");
+            return;
+        }
+        setCustomFor(null);
+        setCustomId("");
+        setPhase("idle");
+        start();
+    };
+
+    const cancelStop = () => {
+        setConfirmStop(false);
+        if (chosen().length > 0) {
+            setChosen([]);
+            void load();
+        }
     };
 
     // The run Undo reverses: this session's, or the latest one on disk, so
@@ -172,6 +224,7 @@ export function ForkSlugMigration(): JSX.Element {
     const line = () => {
         switch (phase()) {
             case "loading":
+            case "checking":
                 return "Checking agent ids…";
             case "stopping":
                 return "Stopping the panes. Each can still be kept running from its own pane for 15 s.";
@@ -221,6 +274,48 @@ export function ForkSlugMigration(): JSX.Element {
                                         <div class="setting-fork-slugs-note">
                                             Not now: {why()}
                                             <Show when={c.suggestion}>{(s) => <> (the next free id is {s()})</>}</Show>
+                                            <Show when={ready().length > 0}>
+                                                <div>Update the other agents first; then this one can take another id.</div>
+                                            </Show>
+                                            <div class="setting-fork-slugs-actions">
+                                                <Show when={c.suggestion}>
+                                                    {(s) => (
+                                                        <Button tone="accent" density="compact" disabled={!canPick()} onClick={() => void useId(c, s())}>
+                                                            Use {s()}
+                                                        </Button>
+                                                    )}
+                                                </Show>
+                                                <Button
+                                                    tone="quiet"
+                                                    density="compact"
+                                                    disabled={!canPick()}
+                                                    onClick={() => setCustomFor(customFor() === c.uid ? null : c.uid)}
+                                                >
+                                                    Choose another id
+                                                </Button>
+                                            </div>
+                                            <Show when={customFor() === c.uid}>
+                                                <div class="setting-fork-slugs-actions">
+                                                    <TextInput
+                                                        density="compact"
+                                                        aria-label={`New id for ${c.name}`}
+                                                        placeholder="a-new-id"
+                                                        value={customId()}
+                                                        onInput={(e) => setCustomId(e.currentTarget.value)}
+                                                        onKeyDown={(e) => {
+                                                            if (e.key === "Enter") void useId(c, customId());
+                                                        }}
+                                                    />
+                                                    <Button
+                                                        tone="accent"
+                                                        density="compact"
+                                                        disabled={!canPick() || customId().trim() === ""}
+                                                        onClick={() => void useId(c, customId())}
+                                                    >
+                                                        Use this id
+                                                    </Button>
+                                                </div>
+                                            </Show>
                                         </div>
                                     )}
                                 </Show>
@@ -320,7 +415,7 @@ export function ForkSlugMigration(): JSX.Element {
                 description="These panes run agents being updated. Each one shows a Keep running button for 15 seconds before it stops; the update starts once they have."
                 confirmLabel="Stop and update"
                 onConfirm={stopThenApply}
-                onCancel={() => setConfirmStop(false)}
+                onCancel={cancelStop}
             >
                 <ul class="setting-fork-slugs-list">
                     <For each={running()}>{(r) => <li>{r.name}{r.channel ? ` (${r.channel})` : ""}</li>}</For>
