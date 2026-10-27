@@ -83,7 +83,7 @@ After exhausting all available paths (2026-06-30):
 | Path | Outcome |
 |---|---|
 | Partner Center → Tenants → Create new Azure AD tenant | Blocked — requires work/school account at sign-in |
-| `entra.microsoft.com` | 401 — tenant `4687dc46-...` exists but Microsoft is the admin, not the account holder |
+| `entra.microsoft.com` | 401 — tenant `<tenant id: private copy>` exists but Microsoft is the admin, not the account holder |
 | Microsoft 365 Developer Program sandbox | Rejected — account doesn't meet activity threshold |
 | Azure free account tenant creation | Blocked — Microsoft now requires a **paid Entra P1/P2 license** to create new Workforce tenants. Free accounts, trial subscriptions, and verified Azure free accounts are all explicitly blocked. Error: "Customers must own a paid license to create Microsoft Entra Workforce tenant." Introduced after Microsoft's security team flagged free tenant creation as a fraud vector (2024). |
 
