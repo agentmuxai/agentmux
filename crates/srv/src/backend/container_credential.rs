@@ -241,6 +241,10 @@ mod tests {
             "/api/v1/agent/shutdown/",
             "/api/v1/self/",
             "//api/v1/self",
+            // srv signs for a container agent, which holds no key to fetch.
+            "/agentmux/agents/self/keys",
+            // MCP health beats belong to persistent controllers; a container's turns are per-exec.
+            "/api/v1/agent/self/mcp-beat",
         ] {
             assert!(!container_route_allowed(denied), "{denied} should be refused");
         }
