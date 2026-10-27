@@ -95,7 +95,7 @@ const NotificationBubbles = (): JSX.Element => {
         const observer = new MutationObserver((records) => {
             if (records.some((m) => !stack || !stack.contains(m.target))) schedule();
         });
-        observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "style", "hidden"] });
+        observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "style", "hidden", TOAST_AVOID_ATTR] });
         window.addEventListener("resize", schedule);
         window.addEventListener("scroll", schedule, true);
         const first = requestAnimationFrame(measure); // now, so a new toast never shows in the wrong place first
