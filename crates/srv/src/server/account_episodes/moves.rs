@@ -53,6 +53,12 @@ pub(super) fn signed_in(status: &str) -> bool {
     matches!(status, "valid" | "ok")
 }
 
+/// Whether a queued move may still land on the account: what the strip offered (signed in, or not
+/// checked yet), so a move it reported as queued isn't dropped when the turn ends.
+pub(super) fn can_receive(status: &str) -> bool {
+    signed_in(status) || status == "unknown"
+}
+
 /// Where `from`'s agents can go (spec §6.3): the channel's other accounts of
 /// the same canonical provider that nothing blocks (`account_blocks`: signed
 /// out, or a pane on it out of quota). Signed-in ones first, so the picker's

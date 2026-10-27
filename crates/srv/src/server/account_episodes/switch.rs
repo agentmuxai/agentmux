@@ -19,7 +19,7 @@ use crate::backend::storage::identities::{IdentityAccount, SecretRef};
 use crate::server::app_api::agent_spawn::account_label_in;
 use crate::server::AppState;
 
-use super::moves::{busy, relink, restart, signed_in};
+use super::moves::{busy, can_receive, relink, restart, signed_in};
 use super::{agent_name, canonical, tab_blocks};
 
 /// A pane's pending switch: the account id the agent moves to once none of its
@@ -204,15 +204,19 @@ pub(super) fn switch(state: &AppState, caller: &str, req: &AgentAccountSwitchReq
 /// for the account strip's move of a whole episode (`moves::move_agents`).
 pub(super) fn switch_to(state: &AppState, actor: &str, def_id: &str, to: &IdentityAccount, provider: &str, accounts: &[IdentityAccount], when: AccountSwitchWhen) -> Result<AgentAccountSwitchResult, String> {
     let blocks = open_panes(state, def_id);
-    let current = state
+    // Every link stored for the provider, an alias row (`claude-code`) included. Only when all of
+    // them are the target is there nothing to do: a stale alias row to another account would
+    // otherwise win at the next spawn, and the relink is what removes it.
+    let links: Vec<String> = state
         .identity_store
         .agent_identity_list_for_agent(def_id)
         .map_err(|e| format!("agent.account.switch: {e}"))?
         .into_iter()
-        .find(|l| canonical(&l.provider) == provider)
-        .map(|l| l.account_id);
+        .filter(|l| canonical(&l.provider) == provider)
+        .map(|l| l.account_id)
+        .collect();
     let label = account_label_in(to, accounts);
-    if current.as_deref() == Some(to.id.as_str()) {
+    if !links.is_empty() && links.iter().all(|a| *a == to.id) {
         set_pending(state, &blocks, None);
         return Ok(AgentAccountSwitchResult { status: AccountSwitchStatus::Unchanged, account_id: to.id.clone(), account_label: label, restarted: 0, failed: Vec::new() });
     }
@@ -240,7 +244,7 @@ pub(super) fn apply_pending(state: &AppState) {
             continue;
         }
         let accounts: Vec<IdentityAccount> = state.id_store.identity_list(None).unwrap_or_default();
-        let Some(to) = accounts.iter().find(|a| a.id == account_id && signed_in(&a.status)) else {
+        let Some(to) = accounts.iter().find(|a| a.id == account_id && can_receive(&a.status)) else {
             tracing::info!(def_id = %def_id, "agent.account.switch: a queued switch was dropped, its account is gone or signed out");
             set_pending(state, &blocks, None);
             continue;

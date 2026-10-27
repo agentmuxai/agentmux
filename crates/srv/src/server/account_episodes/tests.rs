@@ -661,6 +661,35 @@ fn pending_of(state: &AppState, block: &str) -> Option<serde_json::Value> {
 
 /// An idle agent moves at once; one in a turn waits and moves when the turn ends;
 /// "now" does not wait; the same account changes nothing and cancels a wait (#4936 §3.2).
+/// What the strip queued lands when the turn ends, even on an account not checked yet; and a bind
+/// from the failure row replaces an alias row that points elsewhere instead of calling it unchanged.
+#[tokio::test]
+async fn a_queued_strip_move_to_an_unchecked_account_lands_and_a_stale_alias_row_is_replaced() {
+    use switch::AccountSwitchWhen::AfterTurn;
+    let state = test_state();
+    for (id, status) in [("old", "valid"), ("fresh", "unknown"), ("a", "valid"), ("b", "valid")] {
+        state.id_store.identity_upsert(&account(id, "claude", status)).unwrap();
+    }
+    agent_def(&state, "busy");
+    agent_def(&state, "dup");
+    state.identity_store.agent_identity_link("busy", "old", "claude").unwrap();
+    let tab = new_tab(&state).await;
+    let busy = pane(&state, &tab, "busy", "Busy", "old", None, true).await;
+    let req = IdentityAccountMoveAgentsReq { from: "old".into(), to: "fresh".into(), block_ids: vec![busy.clone()] };
+    assert_eq!(moves::move_agents(&state, &req).unwrap().busy.len(), 1, "queued");
+    register_stub(&busy, BLOCK_CONTROLLER_PERSISTENT, STATUS_RUNNING, false);
+    switch::apply_pending(&state);
+    assert_eq!(linked_account(&state, "busy"), ["fresh"]);
+
+    // `claude -> a` and a stale `claude-code -> b`: the effective account is b, so a is a real move.
+    state.identity_store.agent_identity_link("dup", "a", "claude").unwrap();
+    state.identity_store.agent_identity_link("dup", "b", "claude-code").unwrap();
+    let r = switch::switch(&state, "", &switch_req("dup", "a", AfterTurn)).unwrap();
+    assert_eq!(r.status, switch::AccountSwitchStatus::Switched);
+    assert_eq!(linked_account(&state, "dup"), ["a"], "the alias row went");
+    cleanup(&[&busy]);
+}
+
 #[tokio::test]
 async fn a_switch_applies_at_once_when_idle_waits_for_a_turn_and_cancels_on_the_current_account() {
     use switch::AccountSwitchWhen::{AfterTurn, Now};
