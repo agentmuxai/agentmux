@@ -503,4 +503,27 @@ impl PersistentSubprocessController {
         }
         crate::backend::agent_admission::check_before_spawn(self.lease_store.clone(), uid, agent, &self.boot_id).await
     }
+
+    /// Hand this pane's agent over to another AgentMux instance that asked
+    /// for it (spec §4.6, `POST /agentmux/agent/release`): if this pane's CLI
+    /// process holds the agent's single-live-instance lease, stop it
+    /// gracefully — stdin EOF, so a turn in flight finishes, then kill at
+    /// the deadline — and let its exit release the lease. `false` when this
+    /// pane holds nothing (no process, or no lease).
+    pub fn release_to_other_instance(&self, deadline: std::time::Instant) -> bool {
+        let kill = {
+            let mut inner = self.inner.lock().unwrap();
+            if inner.agent_lease.is_none() {
+                return false;
+            }
+            // A deferred runtime-config restart must not respawn the agent this hands away.
+            inner.config_restart_generation = None;
+            inner.kill_tx.take()
+        };
+        tracing::info!(block_id = %self.block_id, "agent_admission.takeover: handing this agent to another instance");
+        match kill {
+            Some(tx) => tx.send(super::KillRequest::Graceful(deadline)).is_ok(),
+            None => false,
+        }
+    }
 }
