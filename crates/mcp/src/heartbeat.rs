@@ -89,6 +89,11 @@ pub(crate) fn start(health: Arc<Health>, local_url: String, auth_key: String) {
     else {
         return;
     };
+    // The beats feed the health of a persistent controller's long-lived MCP server; a container
+    // agent's turns each start their own, so srv has nothing to record and refuses the route.
+    if crate::self_keys::in_container() {
+        return;
+    }
     if local_url.is_empty() || auth_key.is_empty() {
         return;
     }
