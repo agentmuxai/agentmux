@@ -32,6 +32,7 @@ const hub = vi.hoisted(() => ({
     muxEventSubscribe: vi.fn(),
     getMuxObjectAtom: vi.fn(),
     getObjectValue: vi.fn(),
+    agentInput: vi.fn(),
 }));
 
 vi.mock("@/app/errors/translate", () => ({
@@ -45,6 +46,7 @@ vi.mock("@/app/store/rpc-api", () => ({
         ListAgentIdentitiesCommand: (...args: unknown[]) => hub.listAgentIdentities(...args),
         GetIdentityAccountCommand: (...args: unknown[]) => hub.getIdentityAccount(...args),
         ControllerResyncCommand: (...args: unknown[]) => hub.controllerResync(...args),
+        AgentInputCommand: (...args: unknown[]) => hub.agentInput(...args),
     },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
@@ -99,6 +101,7 @@ beforeEach(() => {
     hub.listAgentIdentities.mockReset().mockResolvedValue([]);
     hub.getIdentityAccount.mockReset().mockResolvedValue({ id: "unused", secret_ref: { backend: "env", env_var: "UNUSED" } });
     hub.controllerResync.mockReset().mockResolvedValue(undefined);
+    hub.agentInput.mockReset().mockResolvedValue(undefined);
     hub.getControllerStatus.mockReset().mockResolvedValue({ shellprocstatus: "init" });
     hub.cancelCliLogin.mockReset().mockResolvedValue(undefined);
     hub.ensureCapability.mockReset().mockResolvedValue(undefined);
@@ -491,5 +494,96 @@ describe("runLaunchFlow — mount-time auth check resolves the linked account's 
             expect.objectContaining({ auth_env: { CLAUDE_CONFIG_DIR: "/generic/shared/dir" } }),
             expect.anything(),
         );
+    });
+});
+
+describe("runLaunchFlow — a container agent has no host CLI", () => {
+    // SPEC_CONTAINER_AGENTS_AT_PARITY_2026_10_27.md (P10): the CLI is installed
+    // inside the container on the first message, so launching must not install,
+    // find or run the CLI on this computer.
+    beforeEach(() => {
+        hub.getMuxObjectAtom.mockReset().mockReturnValue(() => ({ meta: { agentMode: "container", agentId: "agent-1" } }));
+        hub.listAgentIdentities.mockResolvedValue([{ provider: "claude", account_id: "acct-1" }]);
+        hub.getIdentityAccount.mockResolvedValue({
+            id: "acct-1",
+            secret_ref: { backend: "oauth_config_dir", dir: "/per-account/acct-1" },
+        });
+    });
+
+    it("never resolves, installs or auth-checks a host CLI, and still starts the pane with the account's dir", async () => {
+        const phases: string[] = [];
+        const confirmed: boolean[] = [];
+        const result = await runLaunchFlow({
+            blockId: "block-1",
+            provider: claude,
+            log: vi.fn(),
+            authEnv: { CLAUDE_CONFIG_DIR: "/generic/shared/dir" },
+            setLaunchPhase: (p) => { if (p) phases.push(p.kind); },
+            onAuthCheckResult: (ok) => confirmed.push(ok),
+        });
+
+        expect(result).toBe("success");
+        expect(hub.resolveCli).not.toHaveBeenCalled();
+        expect(hub.checkCliAuth).not.toHaveBeenCalled();
+        // The pane's env carries the account dir, but no host `cmd` is recorded.
+        const metas = hub.setMeta.mock.calls.map((c) => (c[1] as any).meta);
+        expect(metas).toHaveLength(1);
+        expect(metas[0]["cmd:env"]).toMatchObject({ CLAUDE_CONFIG_DIR: "/per-account/acct-1" });
+        expect("cmd" in metas[0]).toBe(false);
+        // Not reported as a confirmed sign-in: nothing was checked here.
+        expect(confirmed).toEqual([false]);
+        expect(phases).toEqual(["resolving-cli", "verifying", "fresh-ready"]);
+    });
+
+    it("begins starting the container once the pane is fresh, so the first message finds it ready", async () => {
+        await runLaunchFlow({ blockId: "block-1", provider: claude, log: vi.fn(), authEnv: {} });
+        expect(hub.agentInput).toHaveBeenCalledTimes(1);
+        expect(hub.agentInput).toHaveBeenCalledWith({}, { blockid: "block-1", message: "", prestart: true });
+    });
+
+    it("does not start it again for a pane that already ran, nor when no account is linked", async () => {
+        hub.getControllerStatus.mockResolvedValue({ shellprocstatus: "done" });
+        await runLaunchFlow({ blockId: "block-1", provider: claude, log: vi.fn(), authEnv: {} });
+        expect(hub.agentInput).not.toHaveBeenCalled();
+
+        hub.getControllerStatus.mockResolvedValue({ shellprocstatus: "init" });
+        hub.listAgentIdentities.mockResolvedValue([]);
+        await runLaunchFlow({ blockId: "block-1", provider: claude, log: vi.fn(), authEnv: {} });
+        expect(hub.agentInput).not.toHaveBeenCalled();
+    });
+
+    it("never starts a container for a host agent", async () => {
+        hub.getMuxObjectAtom.mockReset().mockReturnValue(() => ({ meta: { agentMode: "host", agentId: "agent-1" } }));
+        hub.checkCliAuth.mockResolvedValue({ authenticated: true });
+        await runLaunchFlow({ blockId: "block-1", provider: claude, log: vi.fn(), authEnv: {} });
+        expect(hub.agentInput).not.toHaveBeenCalled();
+    });
+
+    it("asks to sign in, still without touching a host CLI, when no account is linked", async () => {
+        hub.listAgentIdentities.mockResolvedValue([]);
+        const phases: string[] = [];
+        const notices: string[] = [];
+        const kinds: Array<string | undefined> = [];
+        const result = await runLaunchFlow({
+            blockId: "block-1",
+            provider: claude,
+            log: vi.fn(),
+            setLaunchPhase: (p) => { if (p) phases.push(p.kind); },
+            onNotify: (text, _style, kind) => { notices.push(text); kinds.push(kind); },
+        });
+
+        expect(result).toBe("auth_failed");
+        expect(phases).toEqual(["resolving-cli", "first-login"]);
+        expect(notices[0]).toMatch(/sign in/i);
+        expect(kinds[0]).toBe("sign-in");
+        expect(hub.resolveCli).not.toHaveBeenCalled();
+        expect(hub.checkCliAuth).not.toHaveBeenCalled();
+    });
+
+    it("still stops when no container runtime is available", async () => {
+        hub.getCapability.mockReturnValue({ status: "missing" });
+        const result = await runLaunchFlow({ blockId: "block-1", provider: claude, log: vi.fn() });
+        expect(result).toBe("fatal");
+        expect(hub.resolveCli).not.toHaveBeenCalled();
     });
 });

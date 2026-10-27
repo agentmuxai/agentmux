@@ -997,6 +997,14 @@ pub struct CommandExportAgentsData {}
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct ContainerRuntimeAvailableResult {
     pub available: bool,
+    /// The runtime in use when `available`, e.g. `Podman at unix:///run/user/1000/podman/podman.sock`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub runtime: Option<String>,
+    /// When not `available`: where srv looked and why each place failed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub detail: Option<String>,
 }
 
 /// Request for `containerimagecheck`. An empty `image` means the default image.

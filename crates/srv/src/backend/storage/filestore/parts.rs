@@ -28,6 +28,32 @@ use rusqlite::{params, Connection, ErrorCode};
 use super::core::{GLOBAL_TRANSCRIPT_STORE_VERSION, PART_DATA_SIZE};
 use crate::backend::storage::error::StoreError;
 
+/// Store `data` as part `idx` of a file: replace the part if it has a row,
+/// insert it if not. The same result as `REPLACE INTO db_file_data`, without
+/// what `REPLACE` costs a transcript append.
+///
+/// `REPLACE` deletes and inserts, so SQLite keeps a statement journal for it:
+/// the original content of every page the statement touches. A tail part is up
+/// to 64 KB (about 17 pages, 70 KB with the journal's page numbers), more than
+/// the 64 KB SQLite holds in memory, so the journal went to a new temp file
+/// for every appended line: 32% of the bytes srv wrote in the memory lab's
+/// 10-agent run (REPORT_SRV_WRITE_AMPLIFICATION_2026_10_27.md). An `UPDATE` of
+/// one row, or an `INSERT` of a new one, needs none.
+///
+/// The revision triggers on `db_file_data` see the same change either way: the
+/// `INSERT` trigger for a new row, the `UPDATE OF data` trigger for a changed
+/// one, each bumping `rev` only when the old content is not a prefix of the new.
+pub(super) fn put_part(conn: &Connection, zone_id: &str, name: &str, idx: i32, data: &[u8]) -> Result<(), StoreError> {
+    let changed = conn
+        .prepare_cached("UPDATE db_file_data SET data = ?4 WHERE zoneid = ?1 AND name = ?2 AND partidx = ?3")?
+        .execute(params![zone_id, name, idx, data])?;
+    if changed == 0 {
+        conn.prepare_cached("INSERT INTO db_file_data (zoneid, name, partidx, data) VALUES (?1, ?2, ?3, ?4)")?
+            .execute(params![zone_id, name, idx, data])?;
+    }
+    Ok(())
+}
+
 /// Whether a part missing inside `name`'s size is lost content, to read as
 /// blank: transcript text (`output`) in the shared store, the one database
 /// stamped [`GLOBAL_TRANSCRIPT_STORE_VERSION`]. Binary files keep refusing

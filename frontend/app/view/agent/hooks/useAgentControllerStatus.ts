@@ -34,7 +34,7 @@ import { sleep } from "@/util/util";
 import { RpcApi } from "@/app/store/rpc-api";
 import * as MOS from "@/app/store/mos";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { runLaunchFlow } from "../flows/launch-flow";
+import { prestartContainerAgent, runLaunchFlow } from "../flows/launch-flow";
 import {
     checkCliAuth,
     linkedAccountFor,
@@ -44,7 +44,7 @@ import {
 import { registerController } from "../flows/register-controller";
 import type { LaunchPhase } from "../flows/launch-phase";
 import type { ProviderDefinition } from "../providers";
-import { bindAccountToAgent, type BindCandidate } from "@/app/view/identity/bind-to-agent-menu";
+import { notifyLinksChanged } from "@/app/view/identity/account-agents";
 import type { Account } from "@/app/view/identity/identity-model";
 import {
     createLaunchPhaseStore,
@@ -65,7 +65,11 @@ export interface UseAgentControllerStatusOptions {
     log: LogFn;
     onLoginSuccess?: (email: string | null) => void;
     /** Forwarded to the launch flow — see `LaunchFlowOptions.onNotify`. */
-    onNotify?: (text: string, style: "info" | "warning") => void;
+    onNotify?: (text: string, style: "info" | "warning", kind?: "sign-in") => void;
+    /** An account was bound to this agent (`bindExistingAccount`) and the move is in effect or will
+     *  be: `label` names it. The transcript's "sign in" line is answered here, as a login answers it
+     *  through `onLoginSuccess`. */
+    onAccountBound?: (label: string) => void;
     /** Called once when the launch flow completes successfully and the agent is ready to receive messages. */
     onReady?: () => void;
     /**
@@ -263,10 +267,9 @@ export interface UseAgentControllerStatus {
      */
     recheckAuthAfterBind: () => Promise<boolean>;
     /**
-     * Bind `account` to this pane's agent (link upsert + best-effort live
-     * `cmd:env`/forced-resync apply) — identical sequence to Connectors'
-     * Bind-to-Agent context menu (`bindAccountToAgent`, reused directly, not
-     * reimplemented). Deliberately does NOT retry the failed turn or call
+     * Move this pane's agent to `account` through `agent.account.switch` (srv replaces
+     * the link, refreshes the pane's auth env and restarts the pane with `--resume`);
+     * the composer's account menu and agents use the same door. Deliberately does NOT retry the failed turn or call
      * `recheckAuthAfterBind` itself: binding fires the same
      * `agentidentities:changed:<agentId>` event any other bind source does,
      * and the pane's own subscription to that event (agent-view.tsx) is
@@ -588,6 +591,13 @@ export function useAgentControllerStatus(
         if (!prov) return false;
         // Check the env this pane will actually spawn with (after a bind,
         // the newly-bound account's dir), never a freshly derived one.
+        // A container agent has no host CLI to run the check with (its CLI is in
+        // its container): the bind is trusted, and the turn's own credential gate
+        // reports an account that doesn't work.
+        if (getBlockMetaKeyAtom(opts.blockId, "agentMode")() === "container") {
+            notifyControllerHealthy();
+            return true;
+        }
         const cliPath = getBlockMetaKeyAtom(opts.blockId, "cmd")() as string | undefined;
         if (!cliPath) return false;
         try {
@@ -610,14 +620,22 @@ export function useAgentControllerStatus(
         beginRecoveryFlow();
         setAuthNotice(null);
         try {
-            const candidate: BindCandidate = {
-                agentId: agentDefinitionId,
-                agentName: "",
-                runningBlockId: opts.blockId,
-                boundHere: false,
-                boundElsewhereName: null,
-            };
-            await bindAccountToAgent(account, candidate);
+            const r = await RpcApi.AgentAccountSwitchCommand(TabRpcClient, {
+                agent_id: agentDefinitionId,
+                account: account.id,
+                when: "after_turn",
+            });
+            // Connectors' account cards and open detail list agents from the links.
+            notifyLinksChanged();
+            // Linked, but a pane did not restart on it: it uses the account when it next starts.
+            if (r.failed.length > 0) setAuthNotice(r.failed.join(" "));
+            // Another pane of this agent is in a turn: the move waits for it.
+            else if (r.status === "queued") setAuthNotice(`Moves to ${r.account_label} when the turn ends.`);
+            if (r.failed.length === 0) {
+                opts.onAccountBound?.(account.display_name || account.name);
+                // The launch flow stopped at "sign in", so nothing has started this agent's container yet.
+                if (getBlockMetaKeyAtom(opts.blockId, "agentMode")() === "container") prestartContainerAgent(opts.blockId, opts.log);
+            }
         } catch (e: any) {
             // A failed link upsert surfaces as a notice, like every other
             // failed recovery here (callers don't attach their own catch).

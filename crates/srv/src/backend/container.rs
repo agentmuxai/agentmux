@@ -9,12 +9,19 @@
 //! executed via `docker exec -i` (no `-t` — avoids CR/LF corruption of NDJSON).
 //!
 //! Platform support (cross-platform, matches SPEC_CONTAINER_PANE_SUPPORT_2026_06_11.md):
+//!   - `DOCKER_HOST` when set (unix, tcp with or without TLS, https, npipe), else the sockets
+//!     Docker, Podman, Colima and OrbStack leave in their usual places; the first that answers a
+//!     ping is used (`container_runtime.rs`).
 //!   - Windows: named pipe `//./pipe/docker_engine`
-//!   - macOS:   socket resolved via `docker context inspect` (Docker Desktop or Rancher)
-//!   - Linux:   `/var/run/docker.sock` or rootless path in XDG_RUNTIME_DIR
 //!
 //! Independence boundary: this module has no dependency on a5af/claw.
 //! Docker best practices here were researched independently.
+
+mod mount_source;
+mod mounts;
+mod pull;
+mod reap;
+pub use self::pull::{StartEvent, StartObserver};
 
 use std::collections::HashMap;
 use std::pin::Pin;
@@ -23,19 +30,22 @@ use tokio::io::AsyncWrite;
 use tokio::sync::Mutex;
 use futures_util::StreamExt as _;
 use bollard::Docker;
+
+use crate::backend::container_runtime;
+use self::mount_source::fold_mount_source;
+use self::mounts::agent_home_mounts;
 use bollard::container::{
     Config, CreateContainerOptions, ListContainersOptions, StartContainerOptions,
     StopContainerOptions,
 };
 use bollard::exec::{CreateExecOptions, StartExecOptions, StartExecResults};
-use bollard::image::CreateImageOptions;
 use bollard::models::{ContainerInspectResponse, HostConfig, Mount, MountTypeEnum};
 use crate::backend::container_cli::{
     check_says_present, install_failure_detail, reap_argv, reap_says_gone, CliInstall, InstallLimits,
 };
 use crate::backend::container_image::{CONTAINER_CLI_DIR,
-    classify_pull_error, cli_install_failure_message, docker_error_message, docker_unreachable_message, is_legacy_agent_image,
-    looks_like_daemon_unreachable, pull_failure_message, PullFailure, DEFAULT_AGENT_IMAGE,
+    cli_install_failure_message, docker_error_message, docker_unreachable_message,
+    looks_like_daemon_unreachable, pull_failure_message, PullFailure,
 };
 
 /// Where the agent CLI's config dir lives inside the image (`CLAUDE_CONFIG_DIR`).
@@ -76,30 +86,15 @@ pub struct ContainerMountSpec {
     /// [`CONTAINER_WORKSPACE_DIR`]. `None`/empty leaves `/workspace` empty, which
     /// is what shipped before this existed.
     pub workspace_host_dir: Option<String>,
+    /// The agent's Personal Memory folder on the host, bind-mounted where Claude in the
+    /// container reads memory ([`mounts::container_memory_dir`]); `None` mounts nothing.
+    pub memory_host_dir: Option<String>,
 }
 
 /// Normalize a host path for Docker's mount API: backslashes are not accepted in
 /// a bind source, so `C:\Users\x` has to travel as `C:/Users/x`.
 fn normalize_host_path(path: &str) -> String {
     path.replace('\\', "/")
-}
-
-/// Canonical form of a mount source for comparison.
-///
-/// Case folding is Windows-only, deliberately (codex P2 on PR #2933). Docker on
-/// Windows can report a differently-cased drive letter than we asked for, so a
-/// case-sensitive compare there produces phantom drift and a needless recreate.
-/// Folding UNCONDITIONALLY is the opposite bug: on a case-sensitive host,
-/// switching an agent's workspace from `/work/Foo` to the genuinely different
-/// `/work/foo` would look like a match, `ensure_running` would skip the
-/// recreate, and `/workspace` would keep serving the old directory.
-fn fold_mount_source(source: &str) -> String {
-    let normalized = normalize_host_path(source);
-    if cfg!(windows) {
-        normalized.to_lowercase()
-    } else {
-        normalized
-    }
 }
 
 /// The credentials file inside the account's config dir, and inside the image.
@@ -136,75 +131,6 @@ pub fn credentials_dir_if_file_backed(claude_config_host_dir: &str) -> Option<St
          Keychain). The agent will start but will not be authenticated."
     );
     None
-}
-
-/// The mounts that make up the agent's home dir inside the container.
-///
-/// The per-agent named volume stays mounted at [`CONTAINER_CLAUDE_DIR`] exactly
-/// as before, and a bound account contributes ONE extra mount: its
-/// `.credentials.json`, bind-mounted as a single file on top of that volume.
-///
-/// Binding the account's whole config dir over `…/.claude` would be the more
-/// obvious shape, and it does NOT work — both failures verified live on
-/// 2026-09-02 against `ghcr.io/agentmuxai/agent-claude:latest`:
-///
-///  1. That dir's `projects` entry is a symlink into the shared identities tree,
-///     which does not resolve in-container (`ls` → "No such file or directory").
-///  2. Shadowing it with a nested volume at `…/.claude/projects` SILENTLY does
-///     not mount — Docker will not mount over a path that is a symlink inside a
-///     bind mount. `mount` shows only the parent 9p bind, and the CLI is left
-///     writing session state through the broken link. Chowning does not help;
-///     there is nothing there to chown.
-///
-/// Keeping the volume and binding just the credential file avoids both, and
-/// preserves the existing ownership story: the volume is initialised from the
-/// image, so `projects`/`sessions` stay writable by uid 1000. Verified end to
-/// end — a container agent using this shape completed a real turn against the
-/// bound account (`"result":"AUTH_OK"`, `is_error: false`).
-///
-/// Known limitation — HOST UID PARITY. A bind preserves the host file's owner
-/// and mode (`.credentials.json` is typically 0600), while the image always
-/// execs as `agent`, uid 1000. On a host whose AgentMux user is not uid 1000,
-/// the container cannot read the token and authentication stays broken there.
-///
-/// That is deliberately NOT worked around here. It is the container design's
-/// pre-existing, documented assumption — "`agent` non-root user (UID 1000) …
-/// Host filesystem UID parity" (SPEC_CONTAINER_PANE_SUPPORT_2026_06_11.md §
-/// "What claw's containers provide"; the Dockerfile renames node:22-slim's
-/// uid-1000 user for exactly this) — and the `/workspace` bind below has the
-/// identical problem: at uid != 1000 the agent cannot write its own workspace
-/// either. Special-casing credentials would fix one symptom of that assumption
-/// and leave the other, while adding a second provisioning path to maintain.
-/// The real fix is to exec as the host uid/gid, which is an architectural change
-/// affecting every mount, and belongs in its own PR.
-///
-/// Known limitation: a single-file bind follows the inode. If the CLI ever
-/// replaces `.credentials.json` by atomic rename rather than writing in place, a
-/// refreshed token would land on the host but not be seen by the running
-/// container until it is recreated. Reads — the case that was totally broken —
-/// are unaffected.
-fn agent_home_mounts(container_name: &str, spec: &ContainerMountSpec) -> Vec<Mount> {
-    let mut mounts = vec![Mount {
-        target: Some(CONTAINER_CLAUDE_DIR.to_string()),
-        source: Some(format!("agentmux-claude-{container_name}")),
-        typ: Some(MountTypeEnum::VOLUME),
-        read_only: Some(false),
-        ..Default::default()
-    }];
-
-    if let Some(host_dir) = spec.claude_config_host_dir.as_deref().filter(|d| !d.is_empty()) {
-        let host_dir = normalize_host_path(host_dir);
-        mounts.push(Mount {
-            target: Some(format!("{CONTAINER_CLAUDE_DIR}/{CLAUDE_CREDENTIALS_FILE}")),
-            source: Some(format!("{}/{CLAUDE_CREDENTIALS_FILE}", host_dir.trim_end_matches('/'))),
-            typ: Some(MountTypeEnum::BIND),
-            // Writable: an in-place token refresh should reach the host copy
-            // rather than being silently confined to the container.
-            read_only: Some(false),
-            ..Default::default()
-        });
-    }
-    mounts
 }
 
 /// Rewrite a host-loopback `AGENTMUX_LOCAL_URL` (e.g. `http://127.0.0.1:PORT`)
@@ -264,6 +190,9 @@ pub struct ContainerManager {
 
 struct ContainerManagerInner {
     docker: Docker,
+    /// The runtime in use, for the pane: `Podman at unix:///…`. `None` for a connection made
+    /// without detection ([`ContainerManager::connect`]).
+    runtime: Option<String>,
     /// Per-container serialization lock: prevents concurrent ensure_running calls
     /// for the same container from both seeing "not found" in Docker and both
     /// attempting create_container (which would fail with a 409 name-conflict
@@ -375,6 +304,10 @@ pub enum ContainerError {
     NoId { name: String },
     #[error("Docker is not available on this host: {0}")]
     NotAvailable(String),
+    /// No container runtime answered; the text says where it looked and why each place failed
+    /// ([`container_runtime::Missing::message`]).
+    #[error("{0}")]
+    NoRuntime(String),
     /// The image could not be downloaded. `detail` is the daemon's own text,
     /// kept for logs; the pane gets [`ContainerError::user_message`].
     #[error("could not pull image {image}: {detail}")]
@@ -403,6 +336,7 @@ impl ContainerError {
                 }
             }
             Self::NotAvailable(_) => docker_unreachable_message(),
+            Self::NoRuntime(message) => message.clone(),
             Self::NoId { .. } => docker_error_message("the container was created without an id"),
             Self::CliInstall { command, detail } => cli_install_failure_message(command, detail),
         }
@@ -417,16 +351,41 @@ impl ContainerManager {
     pub fn connect() -> Result<Self, ContainerError> {
         let docker = Docker::connect_with_local_defaults()
             .map_err(|e| ContainerError::NotAvailable(e.to_string()))?;
-        Ok(Self {
+        Ok(Self::with_docker(docker, None))
+    }
+
+    /// Connect to the runtime [`container_runtime`] finds: `DOCKER_HOST`, else the first socket
+    /// of rootless Docker, Podman, Docker Desktop, Colima, OrbStack or the system that answers a
+    /// ping. `Err` says where it looked and why each place failed.
+    pub async fn connect_detected() -> Result<Self, ContainerError> {
+        let env = container_runtime::Env::from_process();
+        match container_runtime::connect(&env).await {
+            Ok(found) => {
+                let label = found.label();
+                tracing::info!(runtime = %label, "container runtime found");
+                Ok(Self::with_docker(found.docker, Some(label)))
+            }
+            Err(missing) => Err(ContainerError::NoRuntime(missing.message())),
+        }
+    }
+
+    pub(crate) fn with_docker(docker: Docker, runtime: Option<String>) -> Self {
+        Self {
             inner: Arc::new(ContainerManagerInner {
                 docker,
+                runtime,
                 ensure_locks: Mutex::new(HashMap::new()),
                 exec_identities: Mutex::new(HashMap::new()),
                 cli_ready: Mutex::new(std::collections::HashSet::new()),
                 cli_locks: Mutex::new(HashMap::new()),
                 dev_proxy: std::sync::OnceLock::new(),
             }),
-        })
+        }
+    }
+
+    /// Which runtime this connection is to, e.g. `Podman at unix:///run/user/1000/podman/podman.sock`.
+    pub fn runtime_label(&self) -> Option<&str> {
+        self.inner.runtime.as_deref()
     }
 
     /// Wires a dev-proxy routing table into this manager so `stop`/`remove`
@@ -473,13 +432,18 @@ impl ContainerManager {
     /// are detected. Concurrent calls for the **same** `container_name` are
     /// serialized via a per-container mutex. Concurrent calls for **different**
     /// containers proceed in parallel.
-    pub async fn ensure_running(
+    ///
+    /// `observe` is told about the steps that take long enough for a person to
+    /// wonder: downloading the image (with how far it has got) and creating the
+    /// container. Nothing is reported when the container is already up.
+    pub async fn ensure_running_observed(
         &self,
         container_name: &str,
         image: &str,
         volumes: &[String],
         env_vars: &[(String, String)],
         spec: &ContainerMountSpec,
+        observe: StartObserver<'_>,
     ) -> Result<(), ContainerError> {
         // Acquire the per-container serialization lock before touching Docker.
         // Concurrent callers for the same container_name queue here; once the
@@ -493,7 +457,7 @@ impl ContainerManager {
         };
         let guard = container_lock.lock().await;
 
-        let result = self.ensure_running_locked(container_name, image, volumes, env_vars, spec).await;
+        let result = self.ensure_running_locked(container_name, image, volumes, env_vars, spec, observe).await;
 
         // Release the per-container lock, then evict its map entry when no other
         // caller is queued on it — otherwise `ensure_locks` grows unbounded (one
@@ -524,6 +488,7 @@ impl ContainerManager {
         volumes: &[String],
         env_vars: &[(String, String)],
         spec: &ContainerMountSpec,
+        observe: StartObserver<'_>,
     ) -> Result<(), ContainerError> {
         // Always query Docker — do not rely on an in-memory cache. The container
         // can be stopped or removed externally (e.g. `docker rm -f`), and a
@@ -566,9 +531,11 @@ impl ContainerManager {
                 // has the image locally. Unlike `docker run`, the Engine's
                 // create_container does NOT auto-pull — it returns 404 if the image
                 // is absent. pull_image is a no-op when the image already exists.
-                let image = self.pull_with_fallback(image).await?;
+                let image = self.pull_with_fallback(image, observe).await?;
                 // Create and start.
+                observe(StartEvent::Starting);
                 self.create_and_start(container_name, &image, volumes, env_vars, spec).await?;
+                self.own_memory_parents(container_name, spec).await;
                 tracing::info!(container = container_name, image = image, "created and started container");
             }
         }
@@ -992,9 +959,11 @@ impl ContainerManager {
 
         tracing::info!(container = container_name, command = %install.command, specs = ?install.specs, "installing the provider CLI in the container");
         let started = std::time::Instant::now();
+        let reaper = reap::ReapOnDrop::new(self, container_name);
         let run = self
             .exec_collect(container_name, &install.install_argv(limits), limits.run)
             .await?;
+        reaper.disarm();
         if run.exit == Some(0) {
             self.inner.cli_ready.lock().await.insert(key.to_string());
             return Ok(CliProvision::Installed { seconds: started.elapsed().as_secs_f64() });
@@ -1249,72 +1218,9 @@ impl ContainerManager {
         Ok(None)
     }
 
-    /// Pull `image`; a legacy image that the registry refuses or no longer has
-    /// is replaced by the public base image. Returns the image to run.
-    async fn pull_with_fallback(&self, image: &str) -> Result<String, ContainerError> {
-        match self.pull_image(image).await {
-            Ok(()) => Ok(image.to_string()),
-            Err(ContainerError::ImagePull { kind, .. }) if kind.is_unavailable_image() && is_legacy_agent_image(image) => {
-                tracing::warn!(
-                    image = image,
-                    fallback = DEFAULT_AGENT_IMAGE,
-                    "legacy agent image can't be pulled; using the public base image"
-                );
-                self.pull_image(DEFAULT_AGENT_IMAGE).await?;
-                Ok(DEFAULT_AGENT_IMAGE.to_string())
-            }
-            Err(e) => Err(e),
-        }
-    }
-
     /// Whether the daemon already has `image`.
     pub async fn has_image_locally(&self, image: &str) -> bool {
         self.inner.docker.inspect_image(image).await.is_ok()
-    }
-
-    /// Pull `image` via the Docker socket (create_image API).
-    ///
-    /// Streams the pull response to completion before returning. If the image is
-    /// already present locally, Docker returns an empty stream immediately — this
-    /// function treats that as success (no pull needed).
-    ///
-    /// Errors only on genuine pull failures (network, auth, no such image).
-    async fn pull_image(&self, image: &str) -> Result<(), ContainerError> {
-        // Skip the pull entirely when the image is already present locally.
-        // `create_image` always contacts the registry, so on an offline host the
-        // pull stream errors out even when the image is cached — aborting
-        // container creation even though `docker run` would start it from the
-        // local cache. An `inspect_image` short-circuit makes the cached-offline
-        // path work (and avoids a redundant registry round-trip when online).
-        if self.inner.docker.inspect_image(image).await.is_ok() {
-            tracing::info!(image = image, "image already present locally; skipping pull");
-            return Ok(());
-        }
-
-        tracing::info!(image = image, "pulling image (not cached locally)");
-        let mut stream = self.inner.docker.create_image(
-            Some(CreateImageOptions {
-                from_image: image,
-                ..Default::default()
-            }),
-            None,
-            None,
-        );
-        while let Some(item) = stream.next().await {
-            match item {
-                Ok(info) => {
-                    if let Some(status) = info.status {
-                        tracing::debug!(image = image, status = %status, "pull progress");
-                    }
-                }
-                Err(e) => {
-                    tracing::warn!(image = image, error = %e, "image pull error");
-                    return Err(pull_error(image, &e));
-                }
-            }
-        }
-        tracing::info!(image = image, "image pull complete (or already cached)");
-        Ok(())
     }
 
     async fn create_and_start(
@@ -1459,7 +1365,6 @@ impl ContainerManager {
                 return;
             }
         }
-
         let connect_opts = ConnectNetworkOptions {
             container: container_name,
             endpoint_config: EndpointSettings {
@@ -1482,145 +1387,11 @@ impl ContainerManager {
                 );
             }
         }
+        crate::backend::container_listener::ensure_bound(&self.inner.docker).await;
     }
 }
 
-/// State of the container-runtime slot held by [`ContainerRuntimeHandle`].
-enum RuntimeSlot {
-    /// Test/no-docker-expected fixtures — `get()` never attempts a real
-    /// connect, always reports unavailable.
-    #[cfg(test)]
-    Disabled,
-    /// No manager yet: never connected, or the last connect attempt
-    /// failed. `get()` retries `ContainerManager::connect()` on every
-    /// call while in this state.
-    Empty,
-    Connected(ContainerManager),
-}
-
-/// Self-healing holder for the container runtime connection.
-///
-/// A plain `Option<ContainerManager>` fixed at process boot means a Docker
-/// daemon that starts (or a socket/named-pipe that appears) AFTER AgentMux
-/// launched is never picked up without an app restart — every consumer
-/// (the availability probe AND the actual container-launch code paths)
-/// would see a permanent `None`. This type retries on demand instead, so
-/// "start Docker Desktop while AgentMux is already running" is picked up
-/// within one call, everywhere `container_manager` is read.
-///
-/// See docs/retro/RETRO_DOCKER_DETECTION_DIVERGENCE_2026_07_04.md.
-pub struct ContainerRuntimeHandle {
-    slot: tokio::sync::RwLock<RuntimeSlot>,
-    /// Dev-proxy registry to attach to every `ContainerManager` this handle
-    /// ever produces — including across reconnects, each of which creates
-    /// a fresh manager instance with its own unset `attach_dev_proxy_registry`
-    /// state. `None` until `set_dev_proxy_registry` is called (bootstrap
-    /// wires this in once both this handle and the registry exist); tests
-    /// using `disabled()` never set it, and `get()` never even constructs
-    /// a manager in that case. See
-    /// docs/specs/SPEC_NATIVE_CONTAINER_DEV_PROXY_2026_09_19.md.
-    dev_proxy: std::sync::RwLock<Option<crate::backend::dev_proxy::DevProxyRegistry>>,
-}
-
-impl ContainerRuntimeHandle {
-    /// Boot-time constructor. Attempts one connect (same as the prior
-    /// behavior) but never permanently gives up on failure — a failed
-    /// attempt leaves the slot `Empty` so `get()`/`is_available()` retry
-    /// later instead of staying stuck for the process lifetime.
-    pub fn connect_at_startup() -> Self {
-        let slot = match ContainerManager::connect() {
-            Ok(mgr) => RuntimeSlot::Connected(mgr),
-            Err(_) => RuntimeSlot::Empty,
-        };
-        Self {
-            slot: tokio::sync::RwLock::new(slot),
-            dev_proxy: std::sync::RwLock::new(None),
-        }
-    }
-
-    /// Test-only constructor: permanently reports unavailable and never
-    /// attempts a real connect, keeping host-only unit tests hermetic and
-    /// deterministic regardless of whether the test box has Docker.
-    #[cfg(test)]
-    pub fn disabled() -> Self {
-        Self {
-            slot: tokio::sync::RwLock::new(RuntimeSlot::Disabled),
-            dev_proxy: std::sync::RwLock::new(None),
-        }
-    }
-
-    /// Wire a dev-proxy registry into this handle so every
-    /// `ContainerManager` it produces — now and after any future Docker
-    /// reconnect — has `stop`/`remove` clear that agent's routes. Call
-    /// once at bootstrap, after both this handle and the registry exist
-    /// (see `bootstrap::build_app_state`).
-    pub fn set_dev_proxy_registry(&self, registry: crate::backend::dev_proxy::DevProxyRegistry) {
-        if let Ok(mut slot) = self.dev_proxy.write() {
-            *slot = Some(registry.clone());
-        }
-        // Attach immediately to whatever manager already exists (the
-        // common case — `connect_at_startup` usually connects
-        // synchronously before this is called), not just future ones.
-        if let Ok(slot) = self.slot.try_read() {
-            if let RuntimeSlot::Connected(mgr) = &*slot {
-                mgr.attach_dev_proxy_registry(registry);
-            }
-        }
-    }
-
-    /// Returns a connected manager, retrying `ContainerManager::connect()`
-    /// if the slot is currently `Empty`. Cheap on the happy path (a
-    /// read-lock plus a cheap `Arc`-backed clone); only takes the write
-    /// lock and re-dials when we don't already have a manager.
-    pub async fn get(&self) -> Option<ContainerManager> {
-        {
-            let slot = self.slot.read().await;
-            match &*slot {
-                RuntimeSlot::Connected(mgr) => return Some(mgr.clone()),
-                #[cfg(test)]
-                RuntimeSlot::Disabled => return None,
-                RuntimeSlot::Empty => {}
-            }
-        }
-        let mut slot = self.slot.write().await;
-        // Re-check under the write lock — another caller may have already
-        // connected between our read-unlock and this write-lock.
-        if let RuntimeSlot::Connected(mgr) = &*slot {
-            return Some(mgr.clone());
-        }
-        #[cfg(test)]
-        if matches!(&*slot, RuntimeSlot::Disabled) {
-            return None;
-        }
-        match ContainerManager::connect() {
-            Ok(mgr) => {
-                // A reconnect makes a brand-new `ContainerManagerInner`
-                // (fresh `OnceLock`s) — re-attach the registry here so
-                // `stop`/`remove` cleanup survives a Docker daemon
-                // restart, not just the initial connect.
-                if let Ok(guard) = self.dev_proxy.read() {
-                    if let Some(registry) = guard.as_ref() {
-                        mgr.attach_dev_proxy_registry(registry.clone());
-                    }
-                }
-                *slot = RuntimeSlot::Connected(mgr.clone());
-                Some(mgr)
-            }
-            Err(_) => None,
-        }
-    }
-
-    /// True iff a manager is available AND its daemon answers a live ping
-    /// right now. Never trusts a cached `Connected` slot alone — the
-    /// daemon can go down again after a successful connect, and
-    /// `check_available` is a real `docker.ping()`, not a cached flag.
-    pub async fn is_available(&self) -> bool {
-        match self.get().await {
-            Some(mgr) => mgr.check_available().await.is_ok(),
-            None => false,
-        }
-    }
-}
+pub use crate::backend::container_runtime::ContainerRuntimeHandle;
 
 /// What a collected exec produced.
 struct ExecOutcome {
@@ -1645,20 +1416,6 @@ fn cli_dir_mount(container_name: &str) -> Mount {
         typ: Some(MountTypeEnum::VOLUME),
         read_only: Some(false),
         ..Default::default()
-    }
-}
-
-/// Map a bollard pull error to [`ContainerError::ImagePull`].
-fn pull_error(image: &str, e: &bollard::errors::Error) -> ContainerError {
-    let status = match e {
-        bollard::errors::Error::DockerResponseServerError { status_code, .. } => Some(*status_code),
-        _ => None,
-    };
-    let detail = e.to_string();
-    ContainerError::ImagePull {
-        image: image.to_string(),
-        kind: classify_pull_error(status, &detail),
-        detail,
     }
 }
 
@@ -1716,6 +1473,7 @@ fn parse_volume_spec(spec: &str) -> Option<(&str, &str, bool)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use {super::pull::pull_error, crate::backend::container_image::DEFAULT_AGENT_IMAGE};
 
     #[test]
     fn test_container_name_for_slug() {
@@ -1779,7 +1537,7 @@ mod tests {
     fn a_bound_accounts_credentials_file_is_bind_mounted_into_the_container() {
         let spec = ContainerMountSpec {
             claude_config_host_dir: Some(r"C:\Users\me\.agentmux\identities\acct\claude".into()),
-            workspace_host_dir: None,
+            workspace_host_dir: None, ..Default::default()
         };
         let mounts = agent_home_mounts("agentmux-x", &spec);
 
@@ -1803,7 +1561,7 @@ mod tests {
     fn the_claude_dir_itself_stays_the_per_agent_named_volume() {
         let spec = ContainerMountSpec {
             claude_config_host_dir: Some("/host/acct/claude".into()),
-            workspace_host_dir: None,
+            workspace_host_dir: None, ..Default::default()
         };
         let mounts = agent_home_mounts("agentmux-x", &spec);
 
@@ -1837,7 +1595,7 @@ mod tests {
     fn an_empty_config_dir_is_treated_as_no_bound_account() {
         let spec = ContainerMountSpec {
             claude_config_host_dir: Some(String::new()),
-            workspace_host_dir: None,
+            workspace_host_dir: None, ..Default::default()
         };
         assert_eq!(agent_home_mounts("agentmux-x", &spec).len(), 1);
     }
@@ -1856,7 +1614,7 @@ mod tests {
     fn unbinding_an_account_drops_the_credentials_mount_from_the_desired_set() {
         let bound = ContainerMountSpec {
             claude_config_host_dir: Some("/host/acct/claude".into()),
-            workspace_host_dir: None,
+            workspace_host_dir: None, ..Default::default()
         };
         let unbound = ContainerMountSpec::default();
         let creds_target = format!("{CONTAINER_CLAUDE_DIR}/{CLAUDE_CREDENTIALS_FILE}");
@@ -1884,7 +1642,7 @@ mod tests {
     fn clearing_the_working_directory_drops_the_workspace_from_the_desired_set() {
         let with_ws = ContainerMountSpec {
             claude_config_host_dir: None,
-            workspace_host_dir: Some(r"C:\repo".into()),
+            workspace_host_dir: Some(r"C:\repo".into()), ..Default::default()
         };
         let desired = ContainerManager::desired_owned_mounts("agentmux-x", &with_ws);
         assert_eq!(desired.get(CONTAINER_WORKSPACE_DIR).map(String::as_str), Some("C:/repo"));
@@ -1935,22 +1693,6 @@ mod tests {
             Some(dir.to_string_lossy().as_ref()),
         );
         let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    /// Case folding must be Windows-only: on a case-sensitive host `/work/Foo`
-    /// and `/work/foo` are different directories, and folding them together
-    /// would hide real drift and leave /workspace on the stale one.
-    #[test]
-    fn mount_source_case_is_folded_only_where_the_filesystem_is_case_insensitive() {
-        let a = fold_mount_source("/work/Foo");
-        let b = fold_mount_source("/work/foo");
-        if cfg!(windows) {
-            assert_eq!(a, b, "windows paths are case-insensitive");
-        } else {
-            assert_ne!(a, b, "a case-sensitive host must see these as different mounts");
-        }
-        // Slash normalization is unconditional either way.
-        assert_eq!(fold_mount_source(r"C:\a\b"), fold_mount_source("C:/a/b"));
     }
 
     #[test]
@@ -2039,9 +1781,9 @@ mod tests {
         let _ = cm.remove(name, true).await; // clean slate; ignore if absent
 
         // create path: pull + create + start
-        cm.ensure_running(name, image, &[], &[], &ContainerMountSpec::default()).await.expect("ensure_running (create)");
+        cm.ensure_running_observed(name, image, &[], &[], &ContainerMountSpec::default(), &|_| {}).await.expect("ensure_running (create)");
         // reuse path: already running → must no-op, not error or re-create
-        cm.ensure_running(name, image, &[], &[], &ContainerMountSpec::default()).await.expect("ensure_running (reuse)");
+        cm.ensure_running_observed(name, image, &[], &[], &ContainerMountSpec::default(), &|_| {}).await.expect("ensure_running (reuse)");
 
         // env reaches the in-container process via the Docker socket, not argv.
         // Drop the (unused) stdin half first: bollard's exec output stream does
@@ -2157,7 +1899,7 @@ mod tests {
         let _ = cm.remove(name, true).await;
         let _ = cm.inner.docker.remove_volume(&format!("agentmux-cli-{name}"), None).await;
         let _ = cm.inner.docker.remove_volume(&format!("agentmux-claude-{name}"), None).await;
-        cm.ensure_running(name, &image, &[], &[], &ContainerMountSpec::default()).await.expect("ensure_running");
+        cm.ensure_running_observed(name, &image, &[], &[], &ContainerMountSpec::default(), &|_| {}).await.expect("ensure_running");
         let install = CliInstall::for_provider("claude", "claude").unwrap();
 
         // The host gives up after 3 s; the script's own limit is far away, so
@@ -2199,7 +1941,7 @@ mod tests {
         // The script's own limit is the other path: it kills npm itself.
         let _ = cm.remove(name, true).await;
         let _ = cm.inner.docker.remove_volume(&format!("agentmux-cli-{name}"), None).await;
-        cm.ensure_running(name, &image, &[], &[], &ContainerMountSpec::default()).await.expect("recreate");
+        cm.ensure_running_observed(name, &image, &[], &[], &ContainerMountSpec::default(), &|_| {}).await.expect("recreate");
         let script_limited = InstallLimits {
             run: std::time::Duration::from_secs(300),
             script: std::time::Duration::from_secs(2),
@@ -2227,11 +1969,11 @@ mod tests {
 
         let legacy_but_absent = "ghcr.io/agentmuxai/agent-claude:itest-no-such-tag";
         assert!(!cm.has_image_locally(legacy_but_absent).await);
-        let chosen = cm.pull_with_fallback(legacy_but_absent).await.expect("fallback");
+        let chosen = cm.pull_with_fallback(legacy_but_absent, &|_| {}).await.expect("fallback");
         assert_eq!(chosen, DEFAULT_AGENT_IMAGE);
 
         // A custom image gets no fallback: its refusal is reported as it is.
-        let err = cm.pull_with_fallback("ghcr.io/agentmuxai/agent-claude-not-legacy:itest").await.unwrap_err();
+        let err = cm.pull_with_fallback("ghcr.io/agentmuxai/agent-claude-not-legacy:itest", &|_| {}).await.unwrap_err();
         assert!(matches!(err, ContainerError::ImagePull { kind: PullFailure::Denied, .. }), "{err:?}");
         println!("{}", err.user_message());
     }
@@ -2254,7 +1996,7 @@ mod tests {
         let _ = cm.inner.docker.remove_volume(&format!("agentmux-cli-{name}"), None).await;
         let _ = cm.inner.docker.remove_volume(&format!("agentmux-claude-{name}"), None).await;
 
-        cm.ensure_running(name, &image, &[], &[], &ContainerMountSpec::default()).await.expect("ensure_running");
+        cm.ensure_running_observed(name, &image, &[], &[], &ContainerMountSpec::default(), &|_| {}).await.expect("ensure_running");
         let install = CliInstall::for_provider("claude", "claude").unwrap();
 
         let mut announced = 0;
@@ -2287,7 +2029,7 @@ mod tests {
 
         // The container is recreated (an image update, say): the volume keeps the install.
         cm.remove(name, true).await.expect("remove");
-        cm.ensure_running(name, &image, &[], &[], &ContainerMountSpec::default()).await.expect("recreate");
+        cm.ensure_running_observed(name, &image, &[], &[], &ContainerMountSpec::default(), &|_| {}).await.expect("recreate");
         let recreated = cm.provision_cli(name, &install, || announced += 1).await.expect("provision after recreate");
         assert_eq!(recreated, CliProvision::Present);
         assert_eq!(announced, 1, "the volume survives the container");
@@ -2321,7 +2063,7 @@ mod tests {
         let registry = crate::backend::dev_proxy::DevProxyRegistry::new();
         cm.attach_dev_proxy_registry(registry.clone());
 
-        cm.ensure_running(name, image, &[], &[], &ContainerMountSpec::default())
+        cm.ensure_running_observed(name, image, &[], &[], &ContainerMountSpec::default(), &|_| {})
             .await
             .expect("ensure_running (create)");
 

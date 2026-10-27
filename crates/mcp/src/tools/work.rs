@@ -65,6 +65,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 "review": arguments.get("review").and_then(|v| v.as_bool()),
                 "after": arguments.get("after").filter(|a| a.is_array()).cloned().unwrap_or(Value::Array(vec![])),
                 "first": arguments.get("first").and_then(|v| v.as_str()),
+                "ui_change": arguments.get("ui_change").and_then(|v| v.as_bool()),
             });
             let resp = client.post(&url).header(AUTH_KEY_HEADER, auth_key).json(&body).send().await
                 .map_err(|e| anyhow::anyhow!("work enqueue request failed: {e}"))?;
@@ -209,6 +210,13 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 _ => ("update", ""),
             };
             let links = arguments.get("links").cloned().unwrap_or(Value::Null);
+            // Screenshots and recordings (SPEC_KANBAN_TASK_MEDIA_2026_10_25.md §3): checked, then uploaded,
+            // before the task changes, so a bad file fails the whole call.
+            let media = match (segment, send_files::files_arg(arguments)?) {
+                ("ask", Some(_)) => anyhow::bail!("Tasks ask takes no files: attach them with update or submit"),
+                (_, Some(paths)) => send_files::upload_task_media(&paths, arguments.get("captions"), cx).await?,
+                (_, None) => Vec::new(),
+            };
             let url = format!("{}/agentmux/work/{}/{}", local_url.trim_end_matches('/'), id, segment);
             let body = serde_json::json!({
                 "agent_id": self_id,
@@ -219,6 +227,9 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 "branch": links.get("branch").and_then(|v| v.as_str()),
                 "doc": links.get("doc").and_then(|v| v.as_str()),
                 "text": text,
+                "media": media,
+                "ui_change": arguments.get("ui_change").and_then(|v| v.as_bool()),
+                "no_media_reason": str_arg("no_media_reason"),
             });
             let resp = client.post(&url).header(AUTH_KEY_HEADER, auth_key).json(&body).send().await
                 .map_err(|e| anyhow::anyhow!("work {segment} request failed: {e}"))?;
@@ -231,16 +242,20 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 );
             }
             if !status.is_success() {
-                anyhow::bail!("Tasks {segment} failed: HTTP {status} — {reply}");
+                anyhow::bail!("Tasks {segment} failed: HTTP {status} — {}", refusal_words(&reply));
             }
             let v: Value = serde_json::from_str(&reply).unwrap_or(serde_json::json!({}));
+            let attached = attached_text(&v);
             Ok(match segment {
                 "ask" => format!(
                     "Asked: task {id} now waits in the operator's Needs you column, and stays yours. \
                      Their answer comes to you as a message."
                 ),
-                "submit" => finished_text(id, &v),
-                _ => format!("Updated task {id}."),
+                "submit" => format!("{}{attached}", finished_text(id, &v)),
+                _ => {
+                    let reminder = v.get("reminder").and_then(Value::as_str).map(|r| format!(" {r}")).unwrap_or_default();
+                    format!("Updated task {id}.{attached}{reminder}")
+                }
             })
         }
         "WorkHeartbeat" | "WorkComplete" | "WorkRelease" => {
@@ -253,6 +268,9 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
 
             let (segment, result_text) = match name {
                 "WorkHeartbeat" => ("heartbeat", String::new()),
+                "WorkComplete" if send_files::files_arg(arguments)?.is_some() => {
+                    anyhow::bail!("Tasks complete takes no files: a task with media is handed in with submit")
+                }
                 "WorkComplete" => (
                     "complete",
                     // Enforced at runtime as well as in the schema (Codex P2 on
@@ -301,7 +319,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 );
             }
             if !status.is_success() {
-                anyhow::bail!("{name} failed: HTTP {status} — {text}");
+                anyhow::bail!("{name} failed: HTTP {status} — {}", refusal_words(&text));
             }
             Ok(match segment {
                 "heartbeat" => format!("Lease extended on {id}."),
@@ -356,19 +374,13 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             }
             Ok(hold_text(id, segment, &v))
         }
-        // A leader accepts or sends back a task in Review on the operator's word
-        // (SPEC_KANBAN_ACCEPT_ON_THE_OPERATORS_WORD_2026_10_23.md). srv checks all of
-        // it; the caller is the agent whose signed identity it verifies.
+        // Any agent accepts or sends back a task in Review; srv records the agent that did it.
         "WorkAccept" | "WorkSendBack" => {
             require_agent_env(local_url, auth_key, block_id)?;
             let id = task_id(arguments)?;
             let accept = name == "WorkAccept";
             let segment = if accept { "accept" } else { "send_back" };
             let url = format!("{}/agentmux/work/{}/{}", local_url.trim_end_matches('/'), id, segment);
-            let said = arguments.get("user_instruction").and_then(|v| v.as_str()).unwrap_or("").trim();
-            if said.is_empty() {
-                anyhow::bail!("Tasks {segment}: user_instruction is required: the operator's own words, quoted from the message that started this turn.");
-            }
             let key = if accept { "note" } else { "reason" };
             let text = arguments.get(key).and_then(|v| v.as_str()).unwrap_or("");
             if !accept && text.trim().is_empty() {
@@ -379,7 +391,6 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 "agent_id": auth.agent_id,
                 "ts_secs": auth.ts_secs,
                 "sig": auth.sig,
-                "user_instruction": said,
                 "text": text,
             });
             let resp = client.post(&url).header(AUTH_KEY_HEADER, auth_key).json(&body).send().await
@@ -388,7 +399,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let reply = resp.text().await.unwrap_or_default();
             let v: Value = serde_json::from_str(&reply).unwrap_or(serde_json::json!({}));
             if status == reqwest::StatusCode::NOT_FOUND && v.get("error").is_none() {
-                anyhow::bail!("This AgentMux can't {segment} tasks on the operator's word yet; ask the operator to do it in the Kanban.");
+                anyhow::bail!("This AgentMux can't {segment} tasks for agents yet; ask the operator to do it in the Kanban.");
             }
             if !status.is_success() {
                 // srv's own words say what to do instead; they are the answer.
@@ -396,6 +407,61 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 anyhow::bail!("Tasks {segment}: {why}");
             }
             Ok(decision_text(id, accept, &v))
+        }
+        // The Kanban's other moves, made by this agent (`POST /agentmux/work/act`).
+        "WorkEdit" | "WorkMove" | "WorkStart" | "WorkAnswer" | "WorkCancel" | "WorkReopen" | "WorkRetry" | "WorkTakeBack" | "WorkReassign" => {
+            require_agent_env(local_url, auth_key, block_id)?;
+            let self_id = std::env::var("AGENTMUX_AGENT_ID").ok().filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("AGENTMUX_AGENT_ID is not set"))?;
+            let id = task_id(arguments)?;
+            let action = match name {
+                "WorkEdit" => "edit",
+                "WorkMove" => "move",
+                "WorkStart" => "start",
+                "WorkAnswer" => "answer",
+                "WorkCancel" => "cancel",
+                "WorkReopen" => "reopen",
+                "WorkRetry" => "retry",
+                "WorkTakeBack" => "release",
+                _ => "reassign",
+            };
+            let text = arguments.get("text").or_else(|| arguments.get("reason")).and_then(|v| v.as_str()).unwrap_or("");
+            let mut body = serde_json::json!({ "agent_id": self_id, "action": action, "id": id, "text": text });
+            for key in ["title", "payload", "kind", "priority", "repo", "review", "after", "hold", "rank", "confirm", "followers"] {
+                if let Some(v) = arguments.get(key).filter(|v| !v.is_null()) {
+                    body[key] = v.clone();
+                }
+            }
+            if let Some(target) = arguments.get("target_agent").and_then(|v| v.as_str()) {
+                // Empty means anyone. A typed name is resolved now, as `enqueue` does, so a stable id
+                // still finds the agent after a rename.
+                body["target"] = if target.is_empty() {
+                    serde_json::json!("")
+                } else {
+                    match resolve_agent_target_at_boundary(&client, local_url, auth_key, target).await? {
+                        crate::identity::BoundaryResolution::NoSuchAgent => anyhow::bail!("{}", no_such_target(target)),
+                        r => serde_json::json!(r.uid().unwrap_or_else(|| target.to_string())),
+                    }
+                };
+            }
+            let url = format!("{}/agentmux/work/act", local_url.trim_end_matches('/'));
+            let resp = client.post(&url).header(AUTH_KEY_HEADER, auth_key).json(&body).send().await
+                .map_err(|e| anyhow::anyhow!("work {action} request failed: {e}"))?;
+            let status = resp.status();
+            let reply = resp.text().await.unwrap_or_default();
+            let v: Value = serde_json::from_str(&reply).unwrap_or(serde_json::json!({}));
+            if status == reqwest::StatusCode::NOT_FOUND && v.get("error").is_none() {
+                anyhow::bail!("This AgentMux can't {action} tasks for agents yet; ask the operator to do it in the Kanban.");
+            }
+            if !status.is_success() {
+                let why = v.get("error").and_then(|e| e.as_str()).map(str::to_string).unwrap_or(reply);
+                anyhow::bail!("Tasks {action}: {why}");
+            }
+            // A take back or reassign of a task with a branch or PR asks first: say what it asked.
+            if let Some(ask) = v.get("confirm").and_then(|c| c.as_str()) {
+                return Ok(format!("Task #{id} not changed. {ask} Call again with confirm: true to go ahead."));
+            }
+            Ok(format!("Task #{id}: {action} done."))
         }
         "WorkList" => {
             require_agent_env(local_url, auth_key, block_id)?;
@@ -452,6 +518,29 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
 /// The task an action names, as it goes in a URL path: its id, or its number
 /// with or without the `#` the answers print (a raw `#` would start the URL's
 /// fragment). Anything else that isn't an id character is refused.
+/// What srv refused with, in words: its `error` when the answer is JSON that has one, else the answer as it came
+/// (a UI task handed in without media is told what to attach, or to say why it can't).
+fn refusal_words(reply: &str) -> String {
+    serde_json::from_str::<Value>(reply)
+        .ok()
+        .and_then(|v| v.get("error").and_then(Value::as_str).map(str::to_string))
+        .unwrap_or_else(|| reply.to_string())
+}
+
+/// " Attached: a.png (image), b.webm (recording)." for the files an update or submit carried, else "".
+fn attached_text(v: &Value) -> String {
+    let Some(list) = v.get("attached").and_then(Value::as_array).filter(|l| !l.is_empty()) else { return String::new() };
+    let names: Vec<String> = list
+        .iter()
+        .map(|m| {
+            let name = m.get("name").and_then(Value::as_str).unwrap_or("file");
+            let kind = m.get("kind").and_then(Value::as_str).unwrap_or("file");
+            format!("{name} ({kind})")
+        })
+        .collect();
+    format!(" Attached: {}.", names.join(", "))
+}
+
 fn task_id(arguments: &Value) -> Result<&str> {
     let id = arguments
         .get("id")
@@ -499,11 +588,11 @@ fn starts_after_text(after: Option<&Value>) -> String {
 /// The answer to `accept` or `send_back`: what was done, and what it set off.
 fn decision_text(id: &str, accept: bool, v: &Value) -> String {
     if !accept {
-        return format!("Task #{id} was sent back, on the operator's word. Its holder has the reason.");
+        return format!("Task #{id} was sent back. Its holder has the reason.");
     }
     match v.get("unlocked").and_then(|n| n.as_u64()).unwrap_or(0) {
-        0 => format!("Task #{id} is accepted, on the operator's word."),
-        n => format!("Task #{id} is accepted, on the operator's word. {n} waiting build{} told it can start.", if n == 1 { " was" } else { "s were" }),
+        0 => format!("Task #{id} is accepted."),
+        n => format!("Task #{id} is accepted. {n} waiting build{} told it can start.", if n == 1 { " was" } else { "s were" }),
     }
 }
 
@@ -581,12 +670,12 @@ mod tests {
     #[test]
     fn a_decision_is_worded_with_what_it_unlocked() {
         let done = serde_json::json!({ "ok": true, "unlocked": 0 });
-        assert_eq!(decision_text("12", true, &done), "Task #12 is accepted, on the operator's word.");
+        assert_eq!(decision_text("12", true, &done), "Task #12 is accepted.");
         let unlocked = serde_json::json!({ "ok": true, "unlocked": 2 });
         assert!(decision_text("12", true, &unlocked).ends_with("2 waiting builds were told it can start."));
         let one = serde_json::json!({ "unlocked": 1 });
         assert!(decision_text("12", true, &one).ends_with("1 waiting build was told it can start."));
-        assert!(decision_text("12", false, &done).contains("sent back, on the operator's word"));
+        assert!(decision_text("12", false, &done).contains("was sent back"));
     }
 
     #[test]
@@ -609,6 +698,13 @@ mod tests {
         let same = serde_json::json!({"name": "#12", "changed": false, "for": ""});
         assert_eq!(hold_text("12", "hold", &same), "Task #12 was already on hold.");
         assert!(hold_text("12", "unhold", &same).ends_with("waiting for anyone."));
+    }
+
+    #[test]
+    fn a_refusal_is_worded_not_shown_as_json() {
+        assert_eq!(refusal_words(r#"{"ok":false,"error":"attach a screenshot, or say why"}"#), "attach a screenshot, or say why");
+        assert_eq!(refusal_words("plain text"), "plain text");
+        assert_eq!(refusal_words(r#"{"ok":false}"#), r#"{"ok":false}"#);
     }
 
     #[test]

@@ -14,6 +14,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const hub = vi.hoisted(() => ({
+    resolveCli: vi.fn(),
     checkCliAuth: vi.fn(),
     runProviderLogin: vi.fn(),
     persistAndLinkAccount: vi.fn(),
@@ -21,6 +22,7 @@ const hub = vi.hoisted(() => ({
 
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
+        ResolveCliCommand: (...args: unknown[]) => hub.resolveCli(...args),
         CheckCliAuthCommand: (...args: unknown[]) => hub.checkCliAuth(...args),
     },
 }));
@@ -65,6 +67,7 @@ function makeCtx(): SlashCommandContext {
 }
 
 beforeEach(() => {
+    hub.resolveCli.mockReset().mockResolvedValue({ cli_path: "/resolved/claude", source: "found", version: "1" });
     hub.checkCliAuth.mockReset().mockResolvedValue({ authenticated: true });
     // Simulates tier 1: onAccountRegistered fires with a minted (not yet
     // persisted) account, then the outcome resolves "opened" — the handler's
@@ -379,5 +382,25 @@ describe("/login on the shared login-and-confirm core", () => {
             message: "/login: the login succeeded, but AgentMux couldn't save the account record. Try again in a moment.",
         });
         expect(ctx.notifyControllerHealthy).not.toHaveBeenCalled();
+    });
+});
+
+
+describe("loginCommand — a container agent, which records no host CLI at launch", () => {
+    const noCmdCtx = (): SlashCommandContext => ({ ...makeCtx(), block: () => ({ meta: { agentId: "agent-1", agentMode: "container" } }) as any });
+
+    it("finds the host CLI on the user's request and logs in with it, instead of failing", async () => {
+        // What happens after the login starts is covered above; this is about which CLI it runs.
+        await loginCommand.handler(noCmdCtx(), "");
+        expect(hub.resolveCli).toHaveBeenCalledTimes(1);
+        expect(hub.runProviderLogin).toHaveBeenCalledWith(expect.objectContaining({ cliPath: "/resolved/claude" }));
+    });
+
+    it("says why when the host CLI can't be found", async () => {
+        hub.resolveCli.mockRejectedValue(new Error("no npm"));
+        const result = await loginCommand.handler(noCmdCtx(), "");
+        expect(result).toMatchObject({ kind: "error" });
+        expect((result as any).message).toMatch(/couldn't find the .* CLI to run the login: no npm/);
+        expect(hub.runProviderLogin).not.toHaveBeenCalled();
     });
 });

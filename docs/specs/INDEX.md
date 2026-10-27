@@ -594,6 +594,7 @@ partial list.
 | [`SPEC_ACCOUNT_SWITCH_FROM_THE_COMPOSER_NO_BIND_2026_10_26`](SPEC_ACCOUNT_SWITCH_FROM_THE_COMPOSER_NO_BIND_2026_10_26.md) | SPEC: an agent's account is changed from the composer's login email; the Connectors "Bind to agent" step goes; same-email accounts are numbered |
 | [`SPEC_AGENT_ACTIVITY_FLASH_SOUND_SYNC_2026_09_24`](SPEC_AGENT_ACTIVITY_FLASH_SOUND_SYNC_2026_09_24.md) | Activity flash matches its sound: same strikes, same timing, same relative intensity |
 | [`SPEC_AGENT_ARCHITECTURE_2026_05_27`](SPEC_AGENT_ARCHITECTURE_2026_05_27.md) | SPEC: Agent data-model architecture — consolidation plan & status |
+| [`SPEC_AGENT_AVAILABILITY_ONE_STATE_2026_10_26`](SPEC_AGENT_AVAILABILITY_ONE_STATE_2026_10_26.md) | Spec: one availability state for "can this agent take a message now" |
 | [`SPEC_AGENT_CLI_ISOLATION_NOTE_2026_10_18`](SPEC_AGENT_CLI_ISOLATION_NOTE_2026_10_18.md) | SPEC: say, in the new-agent pane and the docs, that AgentMux manages its own agent CLIs |
 | [`SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15`](SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md) | SPEC: Agent Control Protocol — fix AskUserQuestion (+ unblock tool-permission UI) and align muxbus delivery |
 | [`SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07`](SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md) | SPEC: Agents drive a browser pane they open: forms, uploads, and the human in the loop |
@@ -663,6 +664,7 @@ partial list.
 | [`SPEC_CODE_COMMENT_DENSITY_AND_CONDENSING_2026_09_30`](SPEC_CODE_COMMENT_DENSITY_AND_CONDENSING_2026_09_30.md) | SPEC: Code comment density and condensing |
 | [`SPEC_COMPACTION_ESTIMATED_PROGRESS_AND_STREAM_FRAMES_2026_10_01`](SPEC_COMPACTION_ESTIMATED_PROGRESS_AND_STREAM_FRAMES_2026_10_01.md) | SPEC: compaction progress — what the CLI really emits, an estimated progress bar (Tier 4), and a stream-frame bug found on the way |
 | [`SPEC_CONNECTORS_MCP_WHAT_AGENTS_RUN_2026_10_10`](SPEC_CONNECTORS_MCP_WHAT_AGENTS_RUN_2026_10_10.md) | SPEC: Connectors → MCP servers shows what agents run |
+| [`SPEC_CONTAINER_AGENTS_AT_PARITY_2026_10_27`](SPEC_CONTAINER_AGENTS_AT_PARITY_2026_10_27.md) | SPEC: container agents at parity with native agents: start responsive, same context |
 | [`SPEC_CONTENT_RESIZE_CONTRACT_2026_08_31`](SPEC_CONTENT_RESIZE_CONTRACT_2026_08_31.md) | SPEC: A single content-resize contract for the agent pane |
 | [`SPEC_CONTEXT_DELIVERY_2026_09_30`](SPEC_CONTEXT_DELIVERY_2026_09_30.md) | SPEC: Context deliveries — what the agent was given, one item at a time |
 | [`SPEC_CONTEXT_MENU_ICONS_2026_10_25`](SPEC_CONTEXT_MENU_ICONS_2026_10_25.md) | SPEC: Icons in every right-click (context) menu |
@@ -710,6 +712,7 @@ partial list.
 | [`SPEC_KANBAN_AGENTS_HOLD_AND_UNHOLD_2026_10_22`](SPEC_KANBAN_AGENTS_HOLD_AND_UNHOLD_2026_10_22.md) | Spec: agents put Kanban tasks on hold and take them off hold |
 | [`SPEC_KANBAN_REMINDER_OFF_BY_DEFAULT_2026_10_22`](SPEC_KANBAN_REMINDER_OFF_BY_DEFAULT_2026_10_22.md) | Spec: the Kanban's backlog reminder off by default, with a setting to turn it on |
 | [`SPEC_KANBAN_STAGES_COLOURS_AND_NARROW_VIEW_2026_10_23`](SPEC_KANBAN_STAGES_COLOURS_AND_NARROW_VIEW_2026_10_23.md) | Spec: the Kanban's stages (Backlog, In Research, Spec'd, In progress, Review, Merged, Released), its colours, and its narrow view |
+| [`SPEC_KANBAN_TASK_MEDIA_2026_10_25`](SPEC_KANBAN_TASK_MEDIA_2026_10_25.md) | Spec: Kanban tasks carry media; a UI change that needs the operator's OK comes with screenshots or a recording |
 | [`SPEC_KEYED_SLOT_RETENTION_FIX_2026_10_12`](SPEC_KEYED_SLOT_RETENTION_FIX_2026_10_12.md) | Spec: `<Key>` slots must not keep old rows alive |
 | [`SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30`](SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30.md) | SPEC: Large-file module analysis and DRY opportunities |
 | [`SPEC_LAUNCHER_TEARDOWN_BACKSTOP_2026_07_11`](SPEC_LAUNCHER_TEARDOWN_BACKSTOP_2026_07_11.md) | SPEC: Launcher-side teardown backstop (UI-thread liveness probe + armed J0 teardown) |

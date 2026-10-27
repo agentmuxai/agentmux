@@ -11,6 +11,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
     drainWhenIdle,
     installWindowResizeTracking,
+    layoutBehind,
+    markLayoutBehind,
     noteWindowResize,
     resetWindowResizeForTests,
     WINDOW_RESIZE_SETTLE_MS,
@@ -81,6 +83,44 @@ describe("drainWhenIdle", () => {
         cancel();
         vi.advanceTimersByTime(200);
         expect(step).toHaveBeenCalledTimes(1);
+        vi.unstubAllGlobals();
+    });
+});
+
+describe("layoutBehind", () => {
+    it("holds a pane that skipped layout until the window settles, then releases one per idle period", () => {
+        vi.useFakeTimers();
+        vi.stubGlobal("requestIdleCallback", undefined);
+        noteWindowResize();
+        for (const id of ["a", "b", "c"]) markLayoutBehind(id);
+        expect(["a", "b", "c"].map(layoutBehind)).toEqual([true, true, true]);
+        vi.advanceTimersByTime(WINDOW_RESIZE_SETTLE_MS - 1);
+        expect(["a", "b", "c"].map(layoutBehind)).toEqual([true, true, true]);
+        vi.advanceTimersByTime(1);
+        expect(windowResizing()).toBe(false);
+        // the first idle period after the settle releases the first pane only
+        vi.advanceTimersByTime(16);
+        expect(["a", "b", "c"].map(layoutBehind)).toEqual([false, true, true]);
+        vi.advanceTimersByTime(16);
+        expect(["a", "b", "c"].map(layoutBehind)).toEqual([false, false, true]);
+        vi.advanceTimersByTime(16);
+        expect(["a", "b", "c"].map(layoutBehind)).toEqual([false, false, false]);
+        vi.unstubAllGlobals();
+    });
+
+    it("stops releasing when the window is resized again, and picks up at the next settle", () => {
+        vi.useFakeTimers();
+        vi.stubGlobal("requestIdleCallback", undefined);
+        noteWindowResize();
+        markLayoutBehind("a");
+        markLayoutBehind("b");
+        vi.advanceTimersByTime(WINDOW_RESIZE_SETTLE_MS + 16);
+        expect(layoutBehind("a")).toBe(false);
+        noteWindowResize();
+        vi.advanceTimersByTime(100);
+        expect(layoutBehind("b")).toBe(true);
+        vi.advanceTimersByTime(WINDOW_RESIZE_SETTLE_MS + 16);
+        expect(layoutBehind("b")).toBe(false);
         vi.unstubAllGlobals();
     });
 });

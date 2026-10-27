@@ -1115,23 +1115,8 @@ pub(super) fn write_agent_config_files(
     // `agent_config::inject_jekt_signing_keys_into_mcp_json` — see that
     // function's doc comment for why this must not be duplicated inline
     // again.
-    if let Some(pos) = config_files.iter().position(|f| f.filename == ".mcp.json") {
-        crate::server::agent_self_keys::record_config_id_drift("m4d.config_id_drift.agent_open", agent_slug, Some(&agent.slug));
-        match crate::backend::agent_config::inject_jekt_signing_keys_into_mcp_json(
-            &config_files[pos].content,
-            &mstore,
-            agent_slug,
-        ) {
-            Some(rewritten) => config_files[pos].content = rewritten,
-            None => {
-                tracing::warn!(
-                    agent_id = %agent.id,
-                    "agent_open: jekt/LAN signing keys not injected into .mcp.json — \
-                     this agent's jekts will render TRUST=self-declared / TRUST=network-claimed \
-                     instead of verified"
-                );
-            }
-        }
+    if let Some(file) = config_files.iter_mut().find(|f| f.filename == ".mcp.json") {
+        crate::backend::mcp_json_identity::keys_for_agent_open(&mut file.content, &mstore, agent_slug, &agent);
     }
 
     // Expand ~ in work_dir

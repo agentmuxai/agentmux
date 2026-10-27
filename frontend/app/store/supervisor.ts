@@ -29,6 +29,14 @@ export const MODE_DESCRIPTIONS: Record<SupervisorMode, string> = {
 
 type Meta = Record<string, unknown> | undefined;
 
+/** The master switch (`supervisor:enabled`): off until the operator turns it on. */
+export function supervisorEnabled(settings: Record<string, unknown> | null | undefined): boolean {
+    return settings?.["supervisor:enabled"] === true;
+}
+
+/** Why Steady and Drive can't be chosen while the switch is off. */
+export const SUPERVISOR_OFF_REASON = "Switched off. Turn the Supervisor on in the Swarm's Supervisor settings.";
+
 /** The pane's mode; anything unset or unknown is Off, as srv reads it. */
 export function readSupervisorMode(meta: Meta): SupervisorMode {
     const v = meta?.[META_SUPERVISOR_MODE];

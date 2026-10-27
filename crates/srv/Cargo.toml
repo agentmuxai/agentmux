@@ -128,7 +128,7 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 sevenz-rust2 = { version = "0.24", default-features = false }
 tar = "0.4"
 tempfile = "3"
-bollard = { version = "0.18", features = ["chrono"] }
+bollard = { version = "0.18", features = ["chrono", "ssl"] }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
 # Cron expression parsing for the persistent cron scheduler
@@ -212,6 +212,8 @@ windows-sys = { version = "0.59", features = [
     "Win32_System_IO",
     # Who holds UDP 5353 (backend/lan_mdns_diag.rs): GetExtendedUdpTable.
     "Win32_NetworkManagement_IpHelper",
+    # Interface byte counters without sysinfo's per-refresh address lookups (backend/net_counters.rs).
+    "Win32_NetworkManagement_Ndis",
     "Win32_Networking_WinSock",
 ] }
 

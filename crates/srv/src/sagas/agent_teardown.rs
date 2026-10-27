@@ -496,6 +496,8 @@ async fn close_cli(
     //    AgentInput either.
     blockcontroller::mark_closing(block_id);
     state.reactive_handler.unregister_block(block_id);
+    // A container's pre-start has no controller: end it before the container is stopped below.
+    crate::server::agent_handlers::container_turn::cancel_prestart(block_id);
     let ctrl = blockcontroller::take_controller(block_id);
     // 2–4. End the turn, ask the process to exit, force-kill at the deadline;
     //      resolves once it has actually exited.

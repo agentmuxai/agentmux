@@ -125,10 +125,7 @@ pub fn register_shell_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
                 // ── Container agents ─────────────────────────────────────────
                 if agent_mode == "container" {
-                    let cm = cm_opt.get().await.ok_or_else(|| {
-                        "shellexec: Docker not available on this host; \
-                         cannot exec in container agent".to_string()
-                    })?;
+                    let cm = cm_opt.get_or_explain().await.map_err(|e| format!("shellexec: {e}"))?;
 
                     let agent_id = crate::backend::obj::meta_get_string(
                         &block.meta, "agentId", "",

@@ -20,7 +20,7 @@
 
 import { snapshot as paneSnapshot } from "@/app/store/agent-pane-state-store";
 import { withLoginWindow } from "../../flows/login-window";
-import { logInAndConfirm } from "../../flows/login-and-confirm";
+import { logInAndConfirm, resolveProviderCli } from "../../flows/login-and-confirm";
 import type { SlashCommand, SlashCommandContext, SlashResult } from "../types";
 
 /**
@@ -116,7 +116,16 @@ function notDetectedResult(stage: "link" | "inapp" | "terminal"): SlashResult {
 
 async function runLogin(ctx: SlashCommandContext): Promise<SlashResult> {
     const prov = ctx.provider();
-    const cliPath = ctx.block()?.meta?.["cmd"] ?? "";
+    let cliPath: string = ctx.block()?.meta?.["cmd"] ?? "";
+    if (prov && !cliPath) {
+        // A container agent records no host CLI when it launches (its CLI is in the container), but
+        // signing in runs the host CLI: found, or installed, now that the user asked for it.
+        try {
+            cliPath = (await resolveProviderCli(prov, ctx.blockId)).cli_path;
+        } catch (err: any) {
+            return { kind: "error", message: `/login: couldn't find the ${prov.cliCommand} CLI to run the login: ${err?.message ?? String(err)}` };
+        }
+    }
     if (!prov || !cliPath) {
         return { kind: "error", message: "/login: provider or CLI path not available" };
     }

@@ -48,8 +48,14 @@ pub struct WaitForData {
 }
 
 /// Run in an isolated world with the text as its argument, so the page's own
-/// scripts can't answer for it.
-const HAS_TEXT: &str = "((t) => !!(document.body && document.body.innerText.includes(t)))";
+/// scripts can't answer for it. Text in a frame nobody can see doesn't count
+/// (`scripts/has_text.js`).
+const HAS_TEXT: &str = include_str!("scripts/has_text.js");
+
+/// The expression to evaluate: the script called with `text`.
+fn has_text_expression(text: &str) -> String {
+    format!("({HAS_TEXT})({})", serde_json::to_string(text).unwrap_or_else(|_| "\"\"".into()))
+}
 
 /// The isolated worlds made during one wait, by session and frame: a wait of
 /// up to a minute looks four times a second, and needs one world per frame,
@@ -61,7 +67,7 @@ type Worlds = HashMap<(Option<String>, String), i64>;
 async fn frame_has_text(root: &CdpSession, frame: &RawFrame, text: &str, worlds: &mut Worlds) -> bool {
     let key = (frame.session.clone(), frame.id.clone());
     let mut on = root.in_session(frame.session.as_deref());
-    let expression = format!("{HAS_TEXT}({})", serde_json::to_string(text).unwrap_or_else(|_| "\"\"".into()));
+    let expression = has_text_expression(text);
     for _ in 0..2 {
         let ctx = match worlds.get(&key) {
             Some(c) => *c,
@@ -175,8 +181,16 @@ mod tests {
     #[test]
     fn the_text_is_passed_as_a_string_not_spliced_into_the_script() {
         let text = "Step 2\" ); alert(1); (\"";
-        let expression = format!("{HAS_TEXT}({})", serde_json::to_string(text).unwrap());
+        let expression = has_text_expression(text);
         assert!(expression.ends_with(r#"("Step 2\" ); alert(1); (\"")"#), "{expression}");
+    }
+
+    #[test]
+    fn the_has_text_script_is_spliced_in_whole() {
+        // The behaviour is tested in scripts/has_text.test.mjs, on this same text.
+        let expression = has_text_expression("x");
+        assert!(expression.starts_with("(// Copyright") && expression.contains("getClientRects"), "{expression}");
+        assert_eq!(HAS_TEXT.trim_end().matches("((t) =>").count(), 1);
     }
 
     #[test]

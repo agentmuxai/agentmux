@@ -866,3 +866,14 @@ fn test_lru_default_cap_constant() {
     // Sanity check that the public constant is what we expect.
     assert_eq!(MAX_CACHE_BYTES, 128 * 1024 * 1024);
 }
+
+#[test]
+fn a_slow_write_names_the_phase_that_took_longest() {
+    use super::core::slowest_phase;
+    use std::time::Duration as D;
+    let ms = D::from_millis;
+    assert_eq!(slowest_phase(ms(900), ms(10), ms(20)), "begin", "waiting for another srv's write lock");
+    assert_eq!(slowest_phase(ms(1), ms(10), ms(2000)), "commit", "waiting for the disk");
+    assert_eq!(slowest_phase(ms(1), ms(700), ms(20)), "body", "the work inside the transaction");
+    assert_eq!(slowest_phase(ms(0), ms(0), ms(0)), "begin", "a tie goes to the earlier phase");
+}

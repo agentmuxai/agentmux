@@ -413,7 +413,21 @@ Checks, in order:
 | record's instance, channel or agent (ASCII case-insensitive) ≠ the carried ones | `Some(false)` |
 | message signature fails under `agent_pubkey` | `Some(false)` |
 | `(instance, agent, wan_msg_id)` already seen (§2.5) | `Some(false)`, audit reason `wan_sig_replay` |
+| the key's fingerprint was retired by its install (a signed notice this install holds, see "Replaced keys" below) | `Some(false)`, audit reason `wan_key_revoked`; checked before the record is read |
 | all pass | `Some(true)`, with the instance id and host hint |
+
+**Replaced keys.** An install that replaces an agent's key signs a notice
+naming the old key (instance, agent, channel, fingerprint) with its instance key
+and publishes it to every directory that held the key
+(`PUT /agents/:agent_id/wan-key/revocation`). The directory then answers `410`
+with the notice for that key, and refuses to store its certificate again.
+Nothing is deleted. A receiver keeps a notice only once its signature checks
+out, learns of them from the `410` or from the account's feed
+(`GET /wan-key-revocations?since=`, read at most every 5 minutes while signed
+messages arrive), drops the cached record, and refuses any message signed by
+that fingerprint, whatever timestamp it carries. Notices are kept across
+sign-outs: they are signed by the instance and name the key, so they hold under
+any account. A directory without the routes behaves as before.
 
 **Why an unavailable directory gives `None`, not `Some(false)`.** The LAN
 tier maps a rate-limited lookup to `Some(false)`, so an attacker can't

@@ -314,7 +314,12 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             let cm = container_manager_cra.clone();
             async move {
                 let available = cm.is_available().await;
-                Ok(ContainerRuntimeAvailableResult { available })
+                let (runtime, detail) = if available {
+                    (cm.runtime_label().await, None)
+                } else {
+                    (None, cm.missing_message())
+                };
+                Ok(ContainerRuntimeAvailableResult { available, runtime, detail })
             }
         },
     );

@@ -44,13 +44,16 @@ use super::agent_lan_keys::random_seed_bytes;
 use super::error::StoreError;
 
 pub mod pins;
+pub mod revocations;
 
 /// Bumped only by additive changes (new tables, new nullable columns).
 /// v2 (D2): the receiver tables — peer-record cache, known instances, and
 /// seen signatures.
 /// v3: `wan_agent_key_publications` — publication recorded per directory.
 /// v4: `wan_agent_instance_pins` — which install speaks for an agent name.
-const SCHEMA_VERSION: i64 = 4;
+/// v5: `wan_key_retirements` (keys this install replaced, owed to a directory)
+/// and `wan_revoked_keys` (revocations learned, `revocations.rs`).
+const SCHEMA_VERSION: i64 = 5;
 
 const SCHEMA: &str = "
     CREATE TABLE IF NOT EXISTS wan_meta (
@@ -131,6 +134,29 @@ const SCHEMA: &str = "
         conflict_at          INTEGER,
         conflict_count       INTEGER,
         PRIMARY KEY (agent_id, channel)
+    );
+    -- v5: a key this install replaced or removed, and a directory that was
+    -- confirmed to hold it. Written in the same transaction as the delete;
+    -- removed once that directory has the signed revocation.
+    CREATE TABLE IF NOT EXISTS wan_key_retirements (
+        agent_id   TEXT    NOT NULL,
+        key_fp     TEXT    NOT NULL,
+        directory  TEXT    NOT NULL,
+        retired_at INTEGER NOT NULL,
+        PRIMARY KEY (agent_id, key_fp, directory)
+    );
+    -- v5: verified revocations of any install's agent key. Sticky, and kept
+    -- across sign-outs: the notice is signed by the instance and names the
+    -- key, so it holds under any account.
+    CREATE TABLE IF NOT EXISTS wan_revoked_keys (
+        instance_id TEXT    NOT NULL,
+        agent_id    TEXT    NOT NULL,
+        channel     TEXT    NOT NULL,
+        key_fp      TEXT    NOT NULL,
+        revoked_at  INTEGER NOT NULL,
+        record      TEXT    NOT NULL,
+        learned_at  INTEGER NOT NULL,
+        PRIMARY KEY (instance_id, agent_id, channel, key_fp)
     );
     -- (instance, agent, msgid) already delivered (§2.5). Written after
     -- successful local delivery; pruned once the message could no longer
@@ -646,12 +672,21 @@ impl WanIdentityStore {
     /// The agent-delete purge (`storage/agents/name_keys.rs`) passes exactly the names
     /// it decided no other agent signs under, so a later agent that takes a
     /// name never inherits the dead agent's key. Returns rows removed.
+    ///
+    /// Each key that a directory was confirmed to hold is also written down as
+    /// retired for that directory (`revocations.rs`), in the same transaction,
+    /// so the publisher can tell the directory it is no longer valid.
     pub fn agent_keys_delete(&self, names: &[String]) -> Result<usize, StoreError> {
-        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        let mut conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let now = agentmux_common::time::now_secs();
         let mut removed = 0;
         for name in names {
-            removed += conn.execute("DELETE FROM wan_agent_keys WHERE agent_id = ?1", params![name.to_lowercase()])?;
+            let name = name.to_lowercase();
+            Self::retire_agent_key_locked(&tx, &name, now)?;
+            removed += tx.execute("DELETE FROM wan_agent_keys WHERE agent_id = ?1", params![name])?;
         }
+        tx.commit()?;
         Ok(removed)
     }
 }
@@ -876,7 +911,7 @@ mod tests {
         }
         assert_eq!(store.agent_keys_unpublished("https://relay#acct").unwrap().len(), 1);
         assert!(!store.agent_key_is_published_to("camper", &camper, "https://relay#acct").unwrap());
-        assert_eq!(store.schema_version().unwrap(), 4);
+        assert_eq!(store.schema_version().unwrap(), 5);
     }
 
     #[test]

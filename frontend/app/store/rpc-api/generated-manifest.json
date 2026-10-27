@@ -1338,7 +1338,8 @@
         },
         {
             "command": "toolchain.install_system_tool",
-            "method": "ToolchainInstallSystemToolCommand"
+            "method": "ToolchainInstallSystemToolCommand",
+            "opts": "{ timeout: 150000, ...opts }"
         },
         {
             "command": "toolchain.prune",
@@ -1549,6 +1550,10 @@
         {
             "command": "identity.account.availability",
             "method": "IdentityAccountAvailabilityCommand"
+        },
+        {
+            "command": "agent.account.switch",
+            "method": "AgentAccountSwitchCommand"
         },
         {
             "command": "identity.account.move_agents",

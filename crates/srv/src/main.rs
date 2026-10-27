@@ -239,6 +239,8 @@ async fn app_main() {
     // Runs are weighed against Settings' spending caps before they start, and
     // stopped when they reach their own (jobs spec §5.3).
     server::job_caps::install(&state, &run_ledger);
+    // A timeout or cancel of a run another channel follows is asked of that channel.
+    server::jobs_remote_stop::install(&state, &run_ledger);
     // A failing job opens one incident for its owner (jobs spec §3.4).
     run_ledger.install_incidents(server::cron::jobs_store(&state));
     {
@@ -407,6 +409,7 @@ async fn app_main() {
         Arc::clone(&state.config_watcher),
     );
     let routers = build_routers(state);
+    backend::container_listener::set_router(routers.container);
     let router = routers.full;
 
     // Native dev-proxy (docs/specs/SPEC_NATIVE_CONTAINER_DEV_PROXY_2026_09_19.md)

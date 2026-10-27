@@ -23,6 +23,7 @@
 // three platform files; this file is never platform-resolved.
 
 import { shouldReduceMotion } from "@/app/motion/motion";
+import { layoutBehind, markLayoutBehind, windowResizing } from "@/app/platform/window-resize";
 import { DURATION_BASE_MS, DURATION_QUICK_MS, EASE_OUT } from "@/app/motion/tokens";
 import { gatingNodeIds } from "@/app/store/tab-reveal";
 import { draggable } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
@@ -554,6 +555,13 @@ export function createTileLayout(platform: TileLayoutPlatform) {
 
         const tileTransform = () => addlProps()?.transform;
 
+        // A minimized pane does not lay its content out while the window is resized, nor until it is its turn to catch up
+        // afterwards (window-resize.ts): ten of them laid out in one frame is a long frame of its own.
+        const skipsLayout = () => nodeModel.isMinimized() && (windowResizing() || layoutBehind(props.node.id));
+        createEffect(() => {
+            if (nodeModel.isMinimized() && windowResizing()) markLayoutBehind(props.node.id);
+        });
+
         // SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22 — hide this leaf while
         // it's mid-remount (a block-stack push/switch, e.g. "+", Quick Fork,
         // Agent History all force `<Key>` above to tear down and rebuild this
@@ -575,6 +583,7 @@ export function createTileLayout(platform: TileLayoutPlatform) {
                     dragging: isDragging(),
                     "tile-hidden": magnifyActive(),
                     "tile-minimized": nodeModel.isMinimized(),
+                    "tile-resize-skip": skipsLayout(),
                 })}
                 ref={tileNodeRef}
                 id={props.node.id}
