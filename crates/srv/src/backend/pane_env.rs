@@ -460,6 +460,8 @@ mod spawn_site_coverage {
          "sanitized: probe_version runs a third-party binary, strict policy (this PR)"),
         ("src/crash_monitor.rs", "&exe", 1,
          "own-exe: re-spawns OUR OWN binary as the crash monitor; it must stay this instance, so inheritance is the requirement here, not the defect"),
+        ("src/crash_monitor.rs", "std::env::current_exe(", 1,
+         "test: re-runs the test harness as a child that hardens itself, to prove its crash dump is still written"),
         ("src/backend/cli_install.rs", "\"cmd\"", 1,
          "sanitized: shell wrapper for npm install, sanitize_external_std_command"),
         ("src/backend/cli_install.rs", "\"npm\"", 1,

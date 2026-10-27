@@ -16,6 +16,7 @@
 pub mod judge;
 pub mod message;
 pub mod policy;
+pub mod settings;
 pub mod watcher;
 
 #[cfg(test)]
@@ -66,14 +67,9 @@ impl SupervisorMode {
         Self::parse(&obj::meta_get_string(meta, META_MODE, ""))
     }
 
+    /// This mode's limits under the settings as they are now.
     pub fn limits(self) -> Limits {
-        match self {
-            SupervisorMode::Off => Limits { continuations: 0, run_ms: None, no_progress: 0 },
-            SupervisorMode::Steady => Limits { continuations: 5, run_ms: None, no_progress: 2 },
-            SupervisorMode::Drive => {
-                Limits { continuations: 15, run_ms: Some(2 * 60 * 60 * 1000), no_progress: 2 }
-            }
-        }
+        settings::SupervisorSettings::current().limits(self)
     }
 }
 
@@ -247,7 +243,8 @@ pub fn supports(meta: &MetaMapType) -> bool {
 
 /// Whether a pane is supervised now: a mode is set and the pane supports it.
 /// The notification router skips its generic "finished" notice for these, as
-/// the Supervisor sends its own (spec §3.7).
+/// the Supervisor sends its own (spec §3.7). Never while the master switch is
+/// off: a stored mode is not read then.
 pub fn is_supervised(meta: &MetaMapType) -> bool {
-    SupervisorMode::from_meta(meta) != SupervisorMode::Off && supports(meta)
+    settings::enabled() && SupervisorMode::from_meta(meta) != SupervisorMode::Off && supports(meta)
 }

@@ -125,6 +125,9 @@ fn suppress_os_crash_dialogs() {}
 /// Windows crash modal either. Spec:
 /// docs/specs/SPEC_SERVICE_SUPERVISION_AND_RECOVERY_2026_05_20.md.
 fn main() {
+    // Before any thread or child exists: an instance key inherited from the shell that
+    // started this launcher goes no further; the launcher mints its own for srv and the host.
+    agentmux_common::secret_env::discard_startup_secrets();
     suppress_os_crash_dialogs();
     logging::install_panic_hook();
 
@@ -153,6 +156,11 @@ fn main() {
         // SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.md §4.1.
         background_config::apply(&args);
     }
+
+    // Windows: the launcher keeps the handles CreateProcess gave it for srv and the host, so its
+    // own access list matters as much as theirs. Linux and macOS have no such handle to take.
+    #[cfg(windows)]
+    agentmux_common::process_hardening::deny_memory_access(false);
 
     // macOS: paint the splash FIRST, on the main thread, before any heavy work
     // — this is the whole reason the splash lives in the small fast launcher

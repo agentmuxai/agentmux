@@ -63,6 +63,9 @@ windows-sys = { version = "0.59", features = [
     # win32::resume_main_thread (CREATE_SUSPENDED children).
     "Win32_System_Diagnostics_ToolHelp",
     "Win32_System_Threading",
+    # process_hardening: the process's own access-control list.
+    "Win32_Security",
+    "Win32_Security_Authorization",
 ] }
 
 [dev-dependencies]

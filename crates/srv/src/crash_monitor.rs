@@ -223,11 +223,7 @@ pub fn spawn_and_attach() -> Option<CrashHandlerGuard> {
                 // Send our PID to the monitor BEFORE requesting the dump so that
                 // on_message sets crash_pid before create_minidump_file is called.
                 // The send uses a fixed-size stack buffer internally — no heap allocation.
-                let pid_bytes = crash_context.process_id.to_le_bytes();
-                let _ = client.send_message(MSG_KIND_CRASH_PID, &pid_bytes);
-
-                // Best-effort dump request. If the pipe is broken we can't do anything useful.
-                let _ = client.request_dump(crash_context);
+                request_dump_of_this_process(&client, crash_context);
                 // Return Handled(false): let the exception continue propagating so that
                 // WER still fires (necessary for __fastfail which bypasses VEH anyway,
                 // and to preserve normal Windows crash reporting for other exception types).
@@ -246,6 +242,23 @@ pub fn spawn_and_attach() -> Option<CrashHandlerGuard> {
             None
         }
     }
+}
+
+/// Tells the monitor which process is crashing and asks it for a dump.
+///
+/// The monitor opens this process by pid to read it, and a hardened process refuses that to every
+/// other process of the user: open it for the length of the request, then close it again (the
+/// exception may yet be handled). Both calls only switch a security descriptor prepared at startup,
+/// so nothing here allocates. The send uses a fixed-size stack buffer too.
+fn request_dump_of_this_process(client: &minidumper::Client, crash_context: &crash_handler::CrashContext) {
+    // Send our PID to the monitor BEFORE requesting the dump so that on_message sets crash_pid
+    // before create_minidump_file is called.
+    let pid_bytes = crash_context.process_id.to_le_bytes();
+    let _ = client.send_message(MSG_KIND_CRASH_PID, &pid_bytes);
+    agentmux_common::process_hardening::relax();
+    // Best-effort dump request. If the pipe is broken we can't do anything useful.
+    let _ = client.request_dump(crash_context);
+    agentmux_common::process_hardening::restore();
 }
 
 /// Try to connect to the server socket up to `attempts` times, sleeping `delay` between tries.
@@ -267,4 +280,86 @@ fn connect_with_retry(
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::process::{Command, Stdio};
+
+    /// Runs only as the child of the tests below: hardens itself, connects to the monitor in
+    /// the test process, and reports a crash through the real handler path (a simulated
+    /// exception, so the process does not die). `AGENTMUX_CM_PLAIN=1` skips the
+    /// `relax`/`restore` pair, to show the hardening alone would lose the dump.
+    #[test]
+    #[ignore = "runs as the child of the crash monitor tests"]
+    fn crash_child() {
+        let Some(socket) = std::env::var_os("AGENTMUX_CM_CHILD") else { return };
+        assert!(agentmux_common::process_hardening::apply(), "the child hardens itself");
+        let socket = socket.into_string().expect("a utf-8 socket path");
+        let client = connect_with_retry(minidumper::SocketName::path(&socket), 100, std::time::Duration::from_millis(50))
+            .expect("the monitor is listening");
+        let plain = std::env::var_os("AGENTMUX_CM_PLAIN").is_some();
+        let handler = crash_handler::CrashHandler::attach(unsafe {
+            crash_handler::make_crash_event(move |ctx: &crash_handler::CrashContext| {
+                if plain {
+                    let _ = client.send_message(MSG_KIND_CRASH_PID, &ctx.process_id.to_le_bytes());
+                    let _ = client.request_dump(ctx);
+                } else {
+                    request_dump_of_this_process(&client, ctx);
+                }
+                crash_handler::CrashEventResult::Handled(true)
+            })
+        })
+        .expect("handler attached");
+        handler.simulate_exception(None);
+    }
+
+    /// A real second process, hardened, reports a crash; the monitor (this process) writes the dump.
+    fn dump_size(plain: bool) -> u64 {
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("monitor.sock");
+        let dumps = dir.path().join("dumps");
+        std::fs::create_dir_all(&dumps).unwrap();
+
+        let mut server = minidumper::Server::with_name(minidumper::SocketName::path(socket.to_str().unwrap())).unwrap();
+        let handler = Box::new(CrashDumpHandler { dump_dir: dumps.clone(), crash_pid: AtomicU32::new(0) });
+        let shutdown = std::sync::Arc::new(AtomicBool::new(false));
+        let stop = shutdown.clone();
+        let server_thread = std::thread::spawn(move || {
+            let _ = server.run(handler, &stop, None);
+        });
+
+        let mut child = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "crash_monitor::tests::crash_child", "--ignored", "--nocapture"])
+            .env("AGENTMUX_CM_CHILD", &socket)
+            .envs(plain.then_some(("AGENTMUX_CM_PLAIN", "1")))
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+        let status = child.wait().unwrap();
+        assert!(status.success(), "the child ran to the end: {status}");
+        // Give the monitor a moment to finish writing, then stop it.
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+        shutdown.store(true, Ordering::Relaxed);
+        let _ = server_thread.join();
+
+        std::fs::read_dir(&dumps)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().is_some_and(|x| x == "dmp"))
+            .map(|e| e.metadata().map(|m| m.len()).unwrap_or(0))
+            .max()
+            .unwrap_or(0)
+    }
+
+    #[test]
+    fn a_hardened_process_still_gets_its_crash_dump_written() {
+        assert!(dump_size(false) > 0, "a dump of the hardened child was written");
+    }
+
+    #[test]
+    fn without_relaxing_a_hardened_process_could_not_be_dumped() {
+        assert_eq!(dump_size(true), 0, "the control: hardening alone refuses the monitor");
+    }
 }
