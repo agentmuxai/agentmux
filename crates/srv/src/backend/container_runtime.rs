@@ -1,11 +1,11 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Which container runtime this srv talks to
-//! (`SPEC_CONTAINER_AGENTS_AT_PARITY_2026_10_27.md` P11).
+//! Which container runtime this srv talks to (P11 of the container-parity work).
 //!
 //! `DOCKER_HOST` decides when it is set: a `unix://` socket, `tcp://` or `http://` (with TLS when
-//! `DOCKER_TLS_VERIFY` is), `https://`, or Windows' `npipe://`. Anything else (`ssh://`) is named
+//! `DOCKER_TLS_VERIFY` is; without it only to this computer, because the daemon is handed the
+//! account's credentials), `https://`, or Windows' `npipe://`. Anything else (`ssh://`) is named
 //! as unsupported, and nothing else is tried: the person chose a runtime.
 //!
 //! When it is not set, the sockets a runtime leaves in the usual places are tried in order and
@@ -193,7 +193,17 @@ fn configured(host: &str, tls_verify: bool) -> Result<Candidate, String> {
     })?;
     let endpoint = match scheme.to_ascii_lowercase().as_str() {
         "unix" => Endpoint::Unix(PathBuf::from(rest)),
-        "tcp" | "http" => Endpoint::Tcp { host: rest.trim_end_matches('/').to_string(), tls: tls_verify },
+        "tcp" | "http" => {
+            let host = rest.trim_end_matches('/').to_string();
+            // The daemon is handed the account credential mount and the scoped srv token, so a
+            // daemon across the network must be reached over TLS.
+            if !tls_verify && !is_loopback(&host) {
+                return Err(format!(
+                    "DOCKER_HOST is {scheme}://{host}, an unencrypted connection to another computer,                      and a container agent's daemon is given the account's credentials.                      Use https:// or set DOCKER_TLS_VERIFY and DOCKER_CERT_PATH, or point DOCKER_HOST at localhost"
+                ));
+            }
+            Endpoint::Tcp { host, tls: tls_verify }
+        }
         "https" => Endpoint::Tcp { host: rest.trim_end_matches('/').to_string(), tls: true },
         "npipe" => Endpoint::Pipe(rest.to_string()),
         other => {
@@ -204,6 +214,17 @@ fn configured(host: &str, tls_verify: bool) -> Result<Candidate, String> {
         }
     };
     Ok(Candidate { kind: Kind::Configured, endpoint, user_owned: false })
+}
+
+/// Whether `host_port` (`localhost`, `127.0.0.1:2375`, `[::1]:2375`) is this computer.
+fn is_loopback(host_port: &str) -> bool {
+    let host = match host_port.strip_prefix('[') {
+        Some(rest) => rest.split(']').next().unwrap_or(""),
+        None if host_port.matches(':').count() == 1 => host_port.split(':').next().unwrap_or(""),
+        None => host_port,
+    };
+    host.eq_ignore_ascii_case("localhost")
+        || host.parse::<std::net::IpAddr>().is_ok_and(|ip| ip.to_canonical().is_loopback())
 }
 
 /// A place that did not work, and why.
@@ -450,13 +471,11 @@ pub struct ContainerRuntimeHandle {
 }
 
 impl ContainerRuntimeHandle {
-    /// Boot-time constructor. Attempts one connect (same as the prior
-    /// behavior) but never permanently gives up on failure — a failed
-    /// attempt leaves the slot `Empty` so `get()`/`is_available()` retry
-    /// later instead of staying stuck for the process lifetime.
+    /// Boot-time constructor. The slot starts `Empty`: finding the runtime pings sockets, which
+    /// is async, so the first `get()` (the availability check spawned at boot makes it) runs
+    /// [`ContainerManager::connect_detected`]. A failed look leaves the slot `Empty`, so
+    /// `get()`/`is_available()` look again later instead of staying stuck for the process lifetime.
     pub fn connect_at_startup() -> Self {
-        // The slot starts empty: finding the runtime pings sockets, which is async, and the
-        // availability check spawned at boot makes the first `get()`.
         Self {
             slot: tokio::sync::RwLock::new(RuntimeSlot::Empty),
             last_miss: std::sync::Mutex::new(None),
@@ -476,6 +495,16 @@ impl ContainerRuntimeHandle {
         }
     }
 
+    /// Test-only: a handle that already holds `mgr`.
+    #[cfg(test)]
+    fn connected_for_test(mgr: ContainerManager) -> Self {
+        Self {
+            slot: tokio::sync::RwLock::new(RuntimeSlot::Connected(mgr)),
+            last_miss: std::sync::Mutex::new(None),
+            dev_proxy: std::sync::RwLock::new(None),
+        }
+    }
+
     /// Wire a dev-proxy registry into this handle so every
     /// `ContainerManager` it produces — now and after any future Docker
     /// reconnect — has `stop`/`remove` clear that agent's routes. Call
@@ -485,9 +514,8 @@ impl ContainerRuntimeHandle {
         if let Ok(mut slot) = self.dev_proxy.write() {
             *slot = Some(registry.clone());
         }
-        // Attach immediately to whatever manager already exists (the
-        // common case — `connect_at_startup` usually connects
-        // synchronously before this is called), not just future ones.
+        // Attach immediately to a manager that already exists (none at boot, where the slot is
+        // still `Empty`), not just future ones: `get()` attaches the stored registry itself.
         if let Ok(slot) = self.slot.try_read() {
             if let RuntimeSlot::Connected(mgr) = &*slot {
                 mgr.attach_dev_proxy_registry(registry);
@@ -495,10 +523,11 @@ impl ContainerRuntimeHandle {
         }
     }
 
-    /// Returns a connected manager, retrying `ContainerManager::connect()`
-    /// if the slot is currently `Empty`. Cheap on the happy path (a
-    /// read-lock plus a cheap `Arc`-backed clone); only takes the write
-    /// lock and re-dials when we don't already have a manager.
+    /// Returns a connected manager, looking for the runtime
+    /// ([`ContainerManager::connect_detected`]) if the slot is currently `Empty`. Cheap on the
+    /// happy path (a read-lock plus a cheap `Arc`-backed clone); only takes the write lock and
+    /// looks again when we don't already have a manager, and not within [`RETRY_DETECT_AFTER`]
+    /// of a look that found none.
     pub async fn get(&self) -> Option<ContainerManager> {
         {
             let slot = self.slot.read().await;
@@ -575,6 +604,13 @@ impl ContainerRuntimeHandle {
                 let mut slot = self.slot.write().await;
                 if matches!(&*slot, RuntimeSlot::Connected(_)) {
                     *slot = RuntimeSlot::Empty;
+                    // Say so in `missing_message()`, backdated so the next call still looks again.
+                    let said = match mgr.runtime_label() {
+                        Some(label) => format!("Container agents need Docker or Podman, and {label} stopped answering. Start it again, or set DOCKER_HOST to another socket."),
+                        None => "Container agents need Docker or Podman, and the runtime stopped answering. Start it again, or set DOCKER_HOST to another socket.".to_string(),
+                    };
+                    let at = std::time::Instant::now().checked_sub(RETRY_DETECT_AFTER).unwrap_or_else(std::time::Instant::now);
+                    *self.last_miss.lock().unwrap() = Some((at, said));
                 }
                 false
             }
@@ -670,6 +706,27 @@ mod tests {
         assert_eq!(c[0].endpoint, Endpoint::Pipe("//./pipe/docker_engine".to_string()));
     }
 
+    /// Plain tcp:// or http:// only to this computer: the daemon is handed the account's
+    /// credentials and the scoped srv token.
+    #[test]
+    fn an_unencrypted_docker_host_is_for_this_computer_only() {
+        let with = |h: &str, tls: bool| Env {
+            docker_host: Some(h.to_string()),
+            tls_verify: tls,
+            ..env(Path::new("/t"), Os::Linux)
+        };
+        for local in ["tcp://localhost:2375", "http://LOCALHOST:2375", "tcp://127.0.0.1:2375", "tcp://127.8.9.10", "tcp://[::1]:2375", "tcp://[::ffff:127.0.0.1]:2375", "tcp://::1"] {
+            assert!(candidates(&with(local, false)).is_ok(), "{local} is this computer");
+        }
+        for remote in ["tcp://203.0.113.5:2375", "http://dock.example:2375", "tcp://198.51.100.2", "tcp://[2001:db8::1]:2375", "tcp://localhost.example.com:2375", "tcp://127.0.0.1.example.com:2375"] {
+            let why = candidates(&with(remote, false)).unwrap_err();
+            assert!(why.contains("unencrypted") && why.contains("https://") && why.contains("DOCKER_TLS_VERIFY"), "{remote}: {why}");
+        }
+        // With TLS, or over https://, any host is fine.
+        assert!(candidates(&with("tcp://203.0.113.5:2376", true)).is_ok());
+        assert!(candidates(&with("https://dock.example:2376", false)).is_ok());
+    }
+
     #[test]
     fn docker_host_decides_alone() {
         let with = |h: &str, tls: bool| Env {
@@ -683,8 +740,8 @@ mod tests {
             c[0].endpoint.clone()
         };
         assert_eq!(one("unix:///run/x.sock", false), Endpoint::Unix("/run/x.sock".into()));
-        assert_eq!(one("tcp://10.0.0.5:2375", false), Endpoint::Tcp { host: "10.0.0.5:2375".into(), tls: false });
-        assert_eq!(one("tcp://10.0.0.5:2376", true), Endpoint::Tcp { host: "10.0.0.5:2376".into(), tls: true });
+        assert_eq!(one("tcp://127.0.0.1:2375", false), Endpoint::Tcp { host: "127.0.0.1:2375".into(), tls: false });
+        assert_eq!(one("tcp://203.0.113.5:2376", true), Endpoint::Tcp { host: "203.0.113.5:2376".into(), tls: true });
         assert_eq!(one("https://dock.example:2376/", false), Endpoint::Tcp { host: "dock.example:2376".into(), tls: true });
         assert_eq!(one("npipe:////./pipe/docker_engine", false), Endpoint::Pipe("//./pipe/docker_engine".into()));
         assert_eq!(
@@ -789,6 +846,26 @@ mod tests {
         assert!(m.contains("/nonexistent.sock") && m.contains("DOCKER_HOST is set"), "{m}");
         assert!(!m.contains("To use another socket"), "{m}");
         server.abort();
+    }
+
+    /// A runtime that stops answering is forgotten, and the next availability answer says so.
+    #[tokio::test]
+    async fn a_runtime_that_stops_answering_is_forgotten_with_a_reason() {
+        let t = tempfile::TempDir::new().unwrap();
+        let path = at(t.path(), "run-user/docker.sock");
+        let server = serve(path.clone(), "200 OK");
+        let docker = Docker::connect_with_unix(&path.to_string_lossy(), 5, bollard::API_DEFAULT_VERSION).unwrap();
+        let mgr = ContainerManager::with_docker(docker, Some(format!("rootless Docker at unix://{}", path.display())));
+        let handle = ContainerRuntimeHandle::connected_for_test(mgr);
+        assert!(handle.is_available().await, "answers while the service is up");
+        assert!(handle.runtime_label().await.unwrap().starts_with("rootless Docker at"));
+
+        server.abort();
+        let _ = server.await; // the listener drops with the task
+        assert!(!handle.is_available().await, "stopped");
+        assert!(handle.runtime_label().await.is_none(), "forgotten");
+        let said = handle.missing_message().expect("says why");
+        assert!(said.contains("rootless Docker at") && said.contains("stopped answering"), "{said}");
     }
 
     #[test]

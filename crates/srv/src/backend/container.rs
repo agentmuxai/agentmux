@@ -446,7 +446,7 @@ impl ContainerManager {
         }
     }
 
-    fn with_docker(docker: Docker, runtime: Option<String>) -> Self {
+    pub(crate) fn with_docker(docker: Docker, runtime: Option<String>) -> Self {
         Self {
             inner: Arc::new(ContainerManagerInner {
                 docker,
