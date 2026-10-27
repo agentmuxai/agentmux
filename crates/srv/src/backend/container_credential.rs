@@ -108,6 +108,11 @@ pub fn container_route_allowed(path: &str) -> bool {
         "/api/v1/agent/globalmemory/diff",
         "/api/v1/agent/self/quit",
         "/api/v1/agent/pane/close",
+        // The `SessionStart` hook's delivery of Global and Personal Memory. The
+        // handlers bind the request to the grant's own block and agent
+        // (`memory_delivery_handlers`), and ignore the host paths it names.
+        "/api/v1/agent/memory/session-start/part",
+        "/api/v1/agent/memory/session-start/ack",
     ];
     if EXACT.contains(&path) {
         return true;
