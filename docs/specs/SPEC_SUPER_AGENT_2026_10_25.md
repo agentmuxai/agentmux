@@ -16,17 +16,17 @@ The model already exists: `Stop agents` and `ClosePane` open the 15 s keep-runni
 | Operation (`op`) | Today | Countdown | What the banner shows |
 |---|---|---|---|
 | `stop_agents`, `close_pane` | 15 s window | 15 s (unchanged, no super agent in front: the window is the oversight) | asker, target |
-| `quit_agentmux` (close this AgentMux) | the window | 30 s | requester, super agent |
-| `upgrade` | operator's words gate | 30 s | requester, target version |
+| `quit_agentmux` (close this AgentMux) | the window | 2 min (a restart of AgentMux is critical) | requester, super agent |
+| `upgrade` | operator's words gate | 2 min (a restart of AgentMux is critical) | requester, target version |
 | `widget_install` | the person's prompt | 30 s | widget, publisher, every permission |
 | `desktop_control_grant` | consent dialog | 30 s | requester, scope |
-| `vault_use` | per-use approval | 15 s per use | requester, entry label and kind (never a value) |
+| `vault_use` | per-use approval | 30 s per use | requester, entry label and kind (never a value) |
 | `vault_always_allow` | the person's | 30 s | requester, entry label, what it permits |
 | `sender_key_repin` | the person's | 30 s | agent name, old and new fingerprint |
 | `job_template_install`, `job_template_approve` | the person's | 30 s | template, publisher |
 | `tower_pair` | the person's | 30 s | device |
 
-Two lists, kept in one table in srv (`sensitive_ops.rs`), so adding an operation is one row: its countdown and the text its banner shows. The banner text is built by AgentMux from the structured request, never from the requester's words (as `toast_body` and `clean_by` do today).
+The operator's windows: 30 s by default, at most 2 min, and only for the critical operations. Kept in one table in srv (`backend/sensitive_ops.rs`), so adding an operation is one row: its countdown, whether the super agent reviews it, and the facts its banner shows. The banner text is built by AgentMux from the structured request, never from the requester's words (as `toast_body` and `clean_by` do today).
 
 ## 3. The super agent
 
@@ -59,9 +59,9 @@ On `approve`, srv opens a window per op (table in section 2). It reuses `pending
 
 The request still gets its window; only the agent in front is missing. If no agent has the `super` seat, or it is not running or does not answer within 2 minutes:
 
-- the request goes to the countdown anyway, with double the op's window (so a quit is 60 s), the banner saying "no super agent reviewed this";
+- the request goes to the countdown anyway, with double the op's window up to the 2 min longest (a restart is already at it), the banner saying "no super agent reviewed this";
 - the person's veto stays the only check;
-- a destructive pair (`quit_agentmux`, `upgrade`) proceeds after the doubled window as well; refusing until a super agent exists would be a ban (section 10, item 1).
+- a destructive pair (`quit_agentmux`, `upgrade`) proceeds after the doubled window (up to 2 min) as well; refusing until a super agent exists would be a ban (section 10, item 1).
 
 A super agent that stops while a request is `asked` leaves the request to expire into the same fallback; one that stops while it is `pending` changes nothing (the countdown runs).
 
@@ -78,7 +78,7 @@ One audit row per step, through `log_fleet_action_audit` (shown in Warden's Audi
 ## 9. Build plan
 
 1. Seat role `super` and the at-most-one rule (built).
-2. `sensitive_ops.rs` (table) and the `sensitive` request registry.
+2. `sensitive_ops.rs` (table) and the `sensitive` request registry (built).
 3. `pending_shutdown` `Action::Sensitive`, banner and toast wording, human veto / approve-now (frontend: relabel the Keep button per effect).
 4. HTTP routes and the `Sensitive` MCP tool; wrap `App upgrade`, `Stop` quit, `Widget install`, `Desktop`, `Vault` to file requests.
 5. Fallback timer and audit rows.
@@ -88,7 +88,7 @@ One PR per step, each behaviour-only text.
 
 ## 10. Decisions on the open questions
 
-1. No super agent, destructive ops: proceed after the doubled window. Refusing would be a ban.
+1. No super agent, destructive ops: proceed after the doubled window (up to 2 min). Refusing would be a ban.
 2. Vault `use`: a per-session grant after the first countdown for each agent; every use is still in the audit log.
 3. A host with no super agent defaults to its first leader seat until a seat names one.
 4. A leader stopping its own spawned worker skips the window; it is logged.
