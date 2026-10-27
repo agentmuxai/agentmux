@@ -149,8 +149,8 @@ pub struct WorkEvent {
     pub at: i64,
     /// Who: an agent's name, `operator`, or `agentmux`.
     pub actor: String,
-    /// `agent`, `operator`, `system`, or `delegate` (a leader, on the
-    /// operator's word).
+    /// `agent`, `operator`, `system`, or `delegate` (an agent deciding on a
+    /// task in review).
     pub actor_kind: String,
     /// `created`, `filed_for_later`, `claimed`, `started`, `held`, `unheld`,
     /// `assigned`, `ranked`, `edited`, `updated`, `asked`, `answered`,
@@ -472,6 +472,7 @@ impl Store {
         rank: Option<f64>,
         review_required: Option<bool>,
         repo: Option<&str>,
+        filed_by: Option<&str>,
         now_ms: i64,
     ) -> Result<(), StoreError> {
         let conn = self.conn().lock().unwrap();
@@ -480,9 +481,10 @@ impl Store {
                 SET rank = COALESCE(?2, rank),
                     review_required = COALESCE(?3, review_required),
                     repo = COALESCE(?4, repo),
-                    updated_at = ?5
+                    filed_by = COALESCE(?5, filed_by),
+                    updated_at = ?6
               WHERE work_id = ?1",
-            params![work_id, rank, review_required.map(|b| b as i64), repo, now_ms],
+            params![work_id, rank, review_required.map(|b| b as i64), repo, filed_by, now_ms],
         )?;
         Ok(())
     }
@@ -853,9 +855,8 @@ impl Store {
         Ok(found.is_some())
     }
 
-    /// The tasks whose latest acceptance, since `since_ms`, was a leader's on
-    /// the operator's word: work id to (the leader, the history line's body,
-    /// when).
+    /// The tasks whose latest acceptance, since `since_ms`, was an agent's:
+    /// work id to (the agent, the history line's body, when).
     pub fn work_delegate_accepts(&self, since_ms: i64) -> Result<std::collections::HashMap<String, (String, String, i64)>, StoreError> {
         let conn = self.conn().lock().unwrap();
         let mut stmt = conn.prepare(
@@ -867,7 +868,7 @@ impl Store {
         rows.collect::<Result<_, _>>().map_err(Into::into)
     }
 
-    /// The operator takes back a leader's acceptance: Done to Review again.
+    /// Take back an agent's acceptance: Done to Review again.
     pub fn work_reopen(&self, work_id: &str, now_ms: i64) -> Result<Option<Moved>, StoreError> {
         self.work_move(work_id, &[work_state::DONE], work_state::REVIEW, "", &[], now_ms)
     }

@@ -28,6 +28,7 @@ mod agent_names;
 mod events;
 mod lan_instances;
 mod udp_peers;
+mod uid_refetch;
 
 pub use events::{LanDiscoverability, LanDiscoveryError, LanInstanceList};
 pub(crate) use agent_names::{agent_names_body, parse_agent_names_body, PeerAgents};
@@ -1691,12 +1692,7 @@ impl LanDiscoveryController {
         // otherwise exhaust this limiter with junk lookups, then slip a
         // forged signature for a REAL agent's identity through unverified
         // instead of forced-sensitive.
-        let allowed = self
-            .pubkey_lookup_limiter
-            .lock()
-            .map(|mut limiter| limiter.check())
-            .unwrap_or(true);
-        if !allowed {
+        if !self.pubkey_lookup_allowed() {
             tracing::debug!(agent_id, "LAN pubkey lookup rate-limited — skipping peer fan-out");
             return LanPubkeyLookup::RateLimited;
         }

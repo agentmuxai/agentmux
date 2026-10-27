@@ -113,6 +113,15 @@
             visibility: hidden;
         }
 
+        // While the window is being resized, a minimized pane's content is not
+        // laid out either: `visibility: hidden` still lays it out on every frame
+        // of a drag, which with many long transcripts starved the renderer. It
+        // catches up after the resize settles, one pane per idle period, as a hidden
+        // window tab does (workspace.tsx; window-resize.ts; ANALYSIS_WINDOW_RESIZE_REPAINT_LAG_2026_10_06.md).
+        &.tile-minimized.tile-resize-skip .block-content {
+            content-visibility: hidden;
+        }
+
         .tile-leaf {
             overflow: clip; // not scrollable either — see .tile-node
             // Containing block for Block's own loading cover — `<PaneLoadingCover>`

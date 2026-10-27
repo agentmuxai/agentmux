@@ -2,9 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! "Move these agents to another signed-in account"
-//! (`docs/specs/SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md` §6.3): the steps the
-//! account menu's bind does in the window (`bindAccountToAgent`), done here as
-//! one audited action, for idle agents only.
+//! (`docs/specs/SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md` §6.3): `agent.account.switch`
+//! (`switch::switch_to`) for each agent of the episode, so an agent in a turn is queued.
 
 use std::collections::BTreeMap;
 
@@ -14,7 +13,7 @@ use crate::backend::agent_state::{self, AgentState};
 use crate::backend::blockcontroller;
 use crate::backend::obj::{self, Block};
 use crate::backend::storage::identities::IdentityAccount;
-use crate::server::app_api::agent_spawn::{account_blocks, account_label};
+use crate::server::app_api::agent_spawn::{account_blocks, account_label_in};
 use crate::server::AppState;
 
 use super::{canonical, AccountEpisodeAgent, AccountMoveCandidate};
@@ -44,14 +43,20 @@ pub struct AccountMoveFailure {
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct IdentityAccountMoveAgentsResult {
     pub moved: Vec<AccountEpisodeAgent>,
-    /// In a turn (working, or waiting on a question): left where it is. Move
-    /// it again after its turn ends.
+    /// In a turn (working, or waiting on a question): its move is queued and
+    /// happens when the turn ends (`agent:pending_account`).
     pub busy: Vec<AccountEpisodeAgent>,
     pub failed: Vec<AccountMoveFailure>,
 }
 
-fn signed_in(status: &str) -> bool {
+pub(super) fn signed_in(status: &str) -> bool {
     matches!(status, "valid" | "ok")
+}
+
+/// Whether a queued move may still land on the account: what the strip offered (signed in, or not
+/// checked yet), so a move it reported as queued isn't dropped when the turn ends.
+pub(super) fn can_receive(status: &str) -> bool {
+    signed_in(status) || status == "unknown"
 }
 
 /// Where `from`'s agents can go (spec §6.3): the channel's other accounts of
@@ -59,18 +64,15 @@ fn signed_in(status: &str) -> bool {
 /// out, or a pane on it out of quota). Signed-in ones first, so the picker's
 /// first entry is the one to preselect (spec §13, decision 2).
 pub(super) fn candidates(state: &AppState, from: &str, provider: &str) -> Vec<AccountMoveCandidate> {
-    let accounts: Vec<IdentityAccount> = state
-        .id_store
-        .identity_list(None)
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|a| canonical(&a.provider) == provider && a.id != from)
-        .collect();
+    // Labels are numbered against every account of the provider, the source included.
+    let every: Vec<IdentityAccount> =
+        state.id_store.identity_list(None).unwrap_or_default().into_iter().filter(|a| canonical(&a.provider) == provider).collect();
+    let accounts: Vec<IdentityAccount> = every.iter().filter(|a| a.id != from).cloned().collect();
     let blocked = account_blocks(state, &accounts);
     let mut out: Vec<AccountMoveCandidate> = accounts
         .iter()
         .filter(|a| !blocked.contains_key(&a.id))
-        .map(|a| AccountMoveCandidate { account_id: a.id.clone(), label: account_label(a), status: a.status.clone() })
+        .map(|a| AccountMoveCandidate { account_id: a.id.clone(), label: account_label_in(a, &every), status: a.status.clone() })
         .collect();
     out.sort_by_key(|c| !signed_in(&c.status));
     out
@@ -79,7 +81,7 @@ pub(super) fn candidates(state: &AppState, from: &str, provider: &str) -> Vec<Ac
 /// Link `agent_id` to `to` for `provider`: unlink its rows stored under an
 /// alias of the provider first (one would otherwise silently win at the next
 /// spawn), then link, then clear the failures its old account caused.
-fn relink(state: &AppState, agent_id: &str, to: &str, provider: &str) -> Result<(), String> {
+pub(super) fn relink(state: &AppState, agent_id: &str, to: &str, provider: &str) -> Result<(), String> {
     let before = super::failed_panes(&state.mstore, &state.identity_store, agent_id, provider);
     let links = state.identity_store.agent_identity_list_for_agent(agent_id).map_err(|e| e.to_string())?;
     for l in links.iter().filter(|l| l.provider != provider && canonical(&l.provider) == provider) {
@@ -96,7 +98,7 @@ fn relink(state: &AppState, agent_id: &str, to: &str, provider: &str) -> Result<
 
 /// Restart `block`'s process on the new link, keeping its conversation
 /// (`ControllerResync` with `forcerestart`).
-fn restart(state: &AppState, block: &Block) -> Result<(), String> {
+pub(super) fn restart(state: &AppState, block: &Block) -> Result<(), String> {
     let tab_id = block.parentoref.strip_prefix("tab:").ok_or("the pane is in no tab")?;
     blockcontroller::resync_controller(
         block,
@@ -118,7 +120,7 @@ fn restart(state: &AppState, block: &Block) -> Result<(), String> {
 }
 
 /// Whether the pane is in a turn: it isn't moved under it.
-fn busy(state: &AppState, block_id: &str) -> bool {
+pub(super) fn busy(state: &AppState, block_id: &str) -> bool {
     matches!(agent_state::current_state(&state.mstore, block_id), Some(AgentState::Working | AgentState::Waiting))
 }
 
@@ -132,11 +134,11 @@ pub(super) fn move_agents(state: &AppState, req: &IdentityAccountMoveAgentsReq) 
     let provider = canonical(&to.provider);
     if let Some(from) = accounts.iter().find(|a| a.id == req.from) {
         if canonical(&from.provider) != provider {
-            return Err(format!("identity.account.move_agents: {} is a {} account; agents never move across providers", account_label(to), to.provider));
+            return Err(format!("identity.account.move_agents: {} is a {} account; agents never move across providers", account_label_in(to, &accounts), to.provider));
         }
     }
     if let Some(why) = account_blocks(state, std::slice::from_ref(to)).get(&to.id) {
-        return Err(format!("identity.account.move_agents: {} {why}", account_label(to)));
+        return Err(format!("identity.account.move_agents: {} {why}", account_label_in(to, &accounts)));
     }
 
     let mut result = IdentityAccountMoveAgentsResult::default();
@@ -155,13 +157,10 @@ pub(super) fn move_agents(state: &AppState, req: &IdentityAccountMoveAgentsReq) 
         }
     }
 
-    let request_id = uuid::Uuid::new_v4().to_string();
-    let reason = format!("moved to {}", account_label(to));
+    let same_provider: Vec<IdentityAccount> = accounts.iter().filter(|a| canonical(&a.provider) == provider).cloned().collect();
     let open = super::tab_blocks(&state.mstore);
     for (agent_id, asked) in by_agent {
-        // The link is the agent's, for every pane of it, not only the ones
-        // asked for: one pane in a turn keeps them all where they are, and
-        // otherwise every pane restarts on the new link.
+        // The link is the agent's, for every pane of it, not only the ones asked for.
         let mut blocks: Vec<Block> = open.iter().filter(|b| obj::meta_get_string(&b.meta, "agentId", "") == agent_id).cloned().collect();
         for b in asked {
             if !blocks.iter().any(|o| o.oid == b.oid) {
@@ -172,28 +171,24 @@ pub(super) fn move_agents(state: &AppState, req: &IdentityAccountMoveAgentsReq) 
             .iter()
             .map(|b| AccountEpisodeAgent { block_id: b.oid.clone(), agent_id: agent_id.clone(), agent_name: super::agent_name(&state.mstore, b) })
             .collect();
-        if blocks.iter().any(|b| busy(state, &b.oid)) {
-            result.busy.extend(agents);
-            continue;
-        }
-        let outcome = relink(state, &agent_id, &to.id, &provider);
-        for (block, agent) in blocks.iter().zip(agents) {
-            let outcome = outcome.clone().and_then(|()| {
-                restart(state, block).map_err(|e| format!("linked, but its pane didn't restart ({e}); it uses the new account when it next starts"))
-            });
-            state.reactive_handler.log_fleet_action_audit(
-                Some("operator"),
-                &agent.agent_name,
-                &block.oid,
-                "identity.account.move_agents",
-                outcome.is_ok(),
-                outcome.as_ref().err().map(String::as_str),
-                &request_id,
-                Some(&reason),
-            );
-            match outcome {
-                Ok(()) => result.moved.push(agent),
-                Err(error) => result.failed.push(AccountMoveFailure { block_id: agent.block_id, agent_name: agent.agent_name, error }),
+        // The one door the composer and agents use: an agent in a turn is queued, not left.
+        match super::switch::switch_to(state, "operator", &agent_id, to, &provider, &same_provider, super::switch::AccountSwitchWhen::AfterTurn) {
+            Ok(r) if r.status == super::switch::AccountSwitchStatus::Queued => result.busy.extend(agents),
+            Ok(r) if r.failed.is_empty() => result.moved.extend(agents),
+            // Linked, but some panes didn't restart. The failures don't say which pane, and the
+            // strip names the agent, so the counts are what matters: one failure per pane that
+            // didn't restart, the rest moved.
+            Ok(r) => {
+                let mut panes = agents.into_iter();
+                for error in &r.failed {
+                    if let Some(a) = panes.next() {
+                        result.failed.push(AccountMoveFailure { block_id: a.block_id, agent_name: a.agent_name, error: error.clone() });
+                    }
+                }
+                result.moved.extend(panes);
+            }
+            Err(error) => {
+                result.failed.extend(agents.into_iter().map(|a| AccountMoveFailure { block_id: a.block_id, agent_name: a.agent_name, error: error.clone() }))
             }
         }
     }

@@ -55,6 +55,7 @@ fn a_mode_is_read_from_meta_and_anything_else_is_off() {
 
 #[test]
 fn only_claude_agents_can_be_supervised() {
+    settings::set_enabled_for_test(true);
     let mut meta = MetaMapType::new();
     meta.insert(META_MODE.into(), serde_json::json!("drive"));
     meta.insert("agentProvider".into(), serde_json::json!("codex"));
@@ -513,4 +514,161 @@ fn only_turns_another_agent_a_service_a_schedule_or_a_task_started_are_external(
         assert!(!watcher::is_external_start_for_test(Some(kind)), "{kind:?}");
     }
     assert!(!watcher::is_external_start_for_test(None), "a mode change's own judgement");
+}
+
+// ── The master switch and the settings (spec §5, §6.2) ──────────────────
+
+use super::settings::{self, SupervisorSettings};
+use crate::backend::storage::store::Store;
+use crate::backend::wconfig::ConfigState;
+use std::sync::Arc;
+
+fn config_with(pairs: &[(&str, serde_json::Value)]) -> ConfigState {
+    let config = ConfigState::new();
+    let mut s = config.get_settings();
+    for (k, v) in pairs {
+        s.extra.insert((*k).to_string(), v.clone());
+    }
+    config.update_settings(s);
+    config
+}
+
+fn supervised_meta() -> MetaMapType {
+    let mut meta = MetaMapType::new();
+    meta.insert(META_MODE.into(), serde_json::json!("drive"));
+    meta.insert("agentProvider".into(), serde_json::json!("claude"));
+    meta.insert("agentOutputFormat".into(), serde_json::json!("claude-stream-json"));
+    meta
+}
+
+#[test]
+fn the_supervisor_is_off_until_it_is_switched_on() {
+    assert!(!SupervisorSettings::from_config(&ConfigState::new()).enabled, "off by default");
+    assert!(!SupervisorSettings::default().enabled);
+    settings::set_enabled_for_test(false);
+    assert!(!is_supervised(&supervised_meta()), "a stored Drive is not read while the switch is off");
+    settings::set_enabled_for_test(true);
+    assert!(is_supervised(&supervised_meta()));
+}
+
+#[test]
+fn the_defaults_are_todays_limits() {
+    let s = SupervisorSettings::from_config(&ConfigState::new());
+    assert_eq!(s.limits(SupervisorMode::Steady), Limits { continuations: 5, run_ms: None, no_progress: 2 });
+    assert_eq!(
+        s.limits(SupervisorMode::Drive),
+        Limits { continuations: 15, run_ms: Some(2 * 60 * 60 * 1000), no_progress: 2 }
+    );
+    assert_eq!(s.limits(SupervisorMode::Off), Limits { continuations: 0, run_ms: None, no_progress: 0 });
+}
+
+#[test]
+fn the_limits_come_from_the_settings_and_a_change_reaches_the_next_read() {
+    let config = config_with(&[
+        (settings::KEY_ENABLED, serde_json::json!(true)),
+        (settings::KEY_STEADY_CONTINUATIONS, serde_json::json!(3)),
+        (settings::KEY_STEADY_MINUTES, serde_json::json!(45)),
+        (settings::KEY_DRIVE_CONTINUATIONS, serde_json::json!(40)),
+        (settings::KEY_DRIVE_MINUTES, serde_json::json!(0)),
+        (settings::KEY_NO_PROGRESS, serde_json::json!(4)),
+    ]);
+    let s = SupervisorSettings::from_config(&config);
+    assert!(s.enabled);
+    assert_eq!(s.limits(SupervisorMode::Steady), Limits { continuations: 3, run_ms: Some(45 * 60_000), no_progress: 4 });
+    assert_eq!(s.limits(SupervisorMode::Drive), Limits { continuations: 40, run_ms: None, no_progress: 4 }, "0 minutes is no cap");
+
+    // The same ConfigState, changed the way setconfig and the file watcher change it.
+    let mut next = config.get_settings();
+    next.extra.insert(settings::KEY_ENABLED.into(), serde_json::json!(false));
+    next.extra.insert(settings::KEY_STEADY_CONTINUATIONS.into(), serde_json::json!(8));
+    config.update_settings(next);
+    let s = SupervisorSettings::from_config(&config);
+    assert!(!s.enabled);
+    assert_eq!(s.limits(SupervisorMode::Steady).continuations, 8);
+}
+
+#[test]
+fn out_of_range_values_are_clamped() {
+    let config = config_with(&[
+        (settings::KEY_STEADY_CONTINUATIONS, serde_json::json!(0)),
+        (settings::KEY_DRIVE_CONTINUATIONS, serde_json::json!(100_000)),
+        (settings::KEY_DRIVE_MINUTES, serde_json::json!(99_999)),
+        (settings::KEY_NO_PROGRESS, serde_json::json!(0)),
+        (settings::KEY_STEADY_MINUTES, serde_json::json!("soon")),
+    ]);
+    let s = SupervisorSettings::from_config(&config);
+    assert_eq!(s.steady_continuations, 1);
+    assert_eq!(s.drive_continuations, 100);
+    assert_eq!(s.drive_minutes, 1440);
+    assert_eq!(s.no_progress, 1);
+    assert_eq!(s.steady_minutes, 0, "not a number: the default");
+}
+
+#[test]
+fn the_policy_stops_at_the_limits_it_is_given() {
+    let limits = Limits { continuations: 2, run_ms: Some(30 * 60_000), no_progress: 1 };
+    let mut state = running(SupervisorMode::Steady);
+    let f = TurnFacts { now_ms: 10_000_000, ..facts(Some(TriggerKind::User)) };
+    assert_eq!(policy::limit_reached_in(&limits, &state, &f), None);
+    state.continuations = 2;
+    assert!(policy::limit_reached_in(&limits, &state, &f).unwrap().starts_with("2 continuations"));
+    state.continuations = 0;
+    state.run_started_at_ms = f.now_ms - 30 * 60_000;
+    assert_eq!(
+        policy::limit_reached_in(&limits, &state, &f).as_deref(),
+        Some("Kept going for 30 minutes; over to you.")
+    );
+    state.run_started_at_ms = 0;
+    state.no_progress = 1;
+    assert!(policy::limit_reached_in(&limits, &state, &f).unwrap().starts_with("No progress"));
+}
+
+#[test]
+fn a_two_hour_cap_still_reads_as_hours() {
+    let mut state = running(SupervisorMode::Drive);
+    let f = TurnFacts { now_ms: 10_000_000, ..facts(Some(TriggerKind::User)) };
+    state.run_started_at_ms = f.now_ms - 2 * 60 * 60 * 1000;
+    let limits = Limits { continuations: 99, run_ms: Some(2 * 60 * 60 * 1000), no_progress: 9 };
+    assert_eq!(
+        policy::limit_reached_in(&limits, &state, &f).as_deref(),
+        Some("Kept going for 2 hours; over to you.")
+    );
+}
+
+#[test]
+fn a_settings_write_is_logged_only_when_it_touches_the_supervisor() {
+    // Smoke: neither call panics, and an unrelated write finds nothing to log.
+    let mut keys = serde_json::Map::new();
+    keys.insert("term:theme".into(), serde_json::json!("dark"));
+    settings::log_change(&keys, "");
+    keys.insert(settings::KEY_ENABLED.into(), serde_json::json!(true));
+    settings::log_change(&keys, "agent3");
+}
+
+fn claude_pane(store: &Store) -> String {
+    let mut block = crate::backend::obj::Block { oid: uuid::Uuid::new_v4().to_string(), ..Default::default() };
+    block.meta.insert("agentProvider".into(), serde_json::json!("claude"));
+    block.meta.insert("agentOutputFormat".into(), serde_json::json!("claude-stream-json"));
+    store.insert(&mut block).unwrap();
+    block.oid
+}
+
+#[tokio::test]
+async fn set_mode_refuses_steady_and_drive_while_switched_off_but_accepts_off() {
+    let store = Arc::new(Store::open_in_memory().unwrap());
+    let sup = watcher::for_test(store.clone());
+    let pane = claude_pane(&store);
+
+    settings::set_enabled_for_test(false);
+    for mode in [SupervisorMode::Steady, SupervisorMode::Drive] {
+        let err = sup.set_mode(&pane, mode).await.unwrap_err();
+        assert_eq!(err, settings::SWITCHED_OFF);
+    }
+    assert!(store.get::<crate::backend::obj::Block>(&pane).unwrap().unwrap().meta.get(META_MODE).is_none());
+    sup.set_mode(&pane, SupervisorMode::Off).await.expect("Off is always accepted");
+
+    settings::set_enabled_for_test(true);
+    sup.set_mode(&pane, SupervisorMode::Steady).await.expect("accepted once it is on");
+    let meta = store.get::<crate::backend::obj::Block>(&pane).unwrap().unwrap().meta;
+    assert_eq!(SupervisorMode::from_meta(&meta), SupervisorMode::Steady);
 }

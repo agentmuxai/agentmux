@@ -12,6 +12,8 @@ import type { AccountOAuthClientInfo } from "@/types/rpc/AccountOAuthClientInfo"
 import type { AccountOAuthStartResult } from "@/types/rpc/AccountOAuthStartResult";
 import type { AckResp } from "@/types/rpc/AckResp";
 import type { ActivitySummaryResult } from "@/types/rpc/ActivitySummaryResult";
+import type { AgentAccountSwitchReq } from "@/types/rpc/AgentAccountSwitchReq";
+import type { AgentAccountSwitchResult } from "@/types/rpc/AgentAccountSwitchResult";
 import type { AgentArchiveRow } from "@/types/rpc/AgentArchiveRow";
 import type { AgentBundlesResult } from "@/types/rpc/AgentBundlesResult";
 import type { AgentContent } from "@/types/rpc/AgentContent";
@@ -2335,7 +2337,7 @@ export const GeneratedApi = {
     data: ToolIdReq,
     opts?: RpcOpts
   ): Promise<InstallSystemToolResult> {
-    return client.rpcCall("toolchain.install_system_tool", data, opts);
+    return client.rpcCall("toolchain.install_system_tool", data, { timeout: 150000, ...opts });
   },
   // command "toolchain.prune"
   ToolchainPruneCommand(
@@ -2673,6 +2675,14 @@ export const GeneratedApi = {
   // command "identity.account.availability"
   IdentityAccountAvailabilityCommand(client: RpcClient, opts?: RpcOpts): Promise<IdentityAccountAvailabilityResult> {
     return client.rpcCall("identity.account.availability", {}, opts);
+  },
+  // command "agent.account.switch"
+  AgentAccountSwitchCommand(
+    client: RpcClient,
+    data: AgentAccountSwitchReq,
+    opts?: RpcOpts
+  ): Promise<AgentAccountSwitchResult> {
+    return client.rpcCall("agent.account.switch", data, opts);
   },
   // command "identity.account.move_agents"
   IdentityAccountMoveAgentsCommand(

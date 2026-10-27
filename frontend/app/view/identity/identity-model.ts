@@ -50,6 +50,12 @@ export interface AccountContext {
      * to show" stays distinguishable from "signed in as ''".
      */
     email?: string;
+    /**
+     * The number that tells this account from others with the same provider and
+     * email, assigned by srv (SPEC_ACCOUNT_SWITCH_FROM_THE_COMPOSER_NO_BIND_2026_10_26.md §3.3).
+     * Shown as `email ·N` only while two or more accounts share the email.
+     */
+    seq?: number;
     github_username?: string;
     github_scopes?: string[];
     aws_profile?: string;
@@ -426,18 +432,39 @@ export function primeAccountCache(): void {
  * tells two accounts on one provider apart
  * (SPEC_ACCOUNT_EMAIL_IN_ARMORY_2026_09_23.md §3).
  */
-export function accountLabel(a: Pick<Account, "name" | "context">): string {
-    return a.context?.email || a.name;
+export function accountLabel(
+    a: Pick<Account, "name" | "context"> & Partial<Pick<Account, "provider">>,
+    all?: readonly (Pick<Account, "context"> & Partial<Pick<Account, "provider">>)[]
+): string {
+    const base = a.context?.email || a.name;
+    return all ? numberedLabel(a, base, all) : base;
+}
+
+/** `label ·N` when another account of `all` shares `a`'s provider and email (case-folded). */
+export function numberedLabel(
+    a: Pick<Account, "context"> & Partial<Pick<Account, "provider">>,
+    label: string,
+    all: readonly (Pick<Account, "context"> & Partial<Pick<Account, "provider">>)[]
+): string {
+    const email = a.context?.email?.trim().toLowerCase();
+    const seq = a.context?.seq;
+    if (!email || !seq) return label;
+    const shared = all.filter(
+        (o) => o.context?.email?.trim().toLowerCase() === email && (!a.provider || !o.provider || o.provider === a.provider)
+    );
+    return shared.length >= 2 ? `${label} \u00b7${seq}` : label;
 }
 
 /** The login email of the account an agent is bound to (`linkedAccountId`),
  *  if that account recorded one — what the agent composer's sign-in chip shows. */
 export function boundAccountEmail(
-    accounts: readonly Pick<Account, "id" | "context">[],
+    accounts: readonly (Pick<Account, "id" | "name" | "context"> & Partial<Pick<Account, "provider">>)[],
     linkedAccountId: string | undefined
 ): string | undefined {
     if (!linkedAccountId) return undefined;
-    return accounts.find((a) => a.id === linkedAccountId)?.context?.email || undefined;
+    const a = accounts.find((x) => x.id === linkedAccountId);
+    if (!a?.context?.email) return undefined;
+    return accountLabel(a, accounts);
 }
 
 /** Keep `s`'s first `head` characters and its last `tail`, joined by "…". */
@@ -459,6 +486,9 @@ function ellipsizeMiddle(s: string, head: number, tail: number): string {
  * pathological address can still exceed `max` rather than lose its shape.
  */
 export function shortenEmail(email: string, max = 22): string {
+    // A trailing ` \u00b7N` (a number among same-email accounts) is kept whole.
+    const numbered = /^(.*?)( \u00b7\d+)$/.exec(email);
+    if (numbered) return shortenEmail(numbered[1], max) + numbered[2];
     if (email.length <= max) return email;
     const at = email.lastIndexOf("@");
     if (at <= 0) {

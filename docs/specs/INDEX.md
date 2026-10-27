@@ -591,8 +591,10 @@ partial list.
 | [`REPORT_AGENT_PANE_STATE_RECONCILIATION_2026_07_07`](REPORT_AGENT_PANE_STATE_RECONCILIATION_2026_07_07.md) | Report: agent/swarm pane loading, ambient-call flood, and stale status |
 | [`SPEC_ABF_V0_2_PROVIDER_AWARE_COMPONENTS_AND_NATIVE_MEMORY_2026_08_10`](SPEC_ABF_V0_2_PROVIDER_AWARE_COMPONENTS_AND_NATIVE_MEMORY_2026_08_10.md) | Spec: ABF v0.2 — Provider-Aware Components + Native Memory |
 | [`SPEC_ACCOUNT_EMAIL_IN_ARMORY_2026_09_23`](SPEC_ACCOUNT_EMAIL_IN_ARMORY_2026_09_23.md) | SPEC: show the provider account's email in the Armory |
+| [`SPEC_ACCOUNT_SWITCH_FROM_THE_COMPOSER_NO_BIND_2026_10_26`](SPEC_ACCOUNT_SWITCH_FROM_THE_COMPOSER_NO_BIND_2026_10_26.md) | SPEC: an agent's account is changed from the composer's login email; the Connectors "Bind to agent" step goes; same-email accounts are numbered |
 | [`SPEC_AGENT_ACTIVITY_FLASH_SOUND_SYNC_2026_09_24`](SPEC_AGENT_ACTIVITY_FLASH_SOUND_SYNC_2026_09_24.md) | Activity flash matches its sound: same strikes, same timing, same relative intensity |
 | [`SPEC_AGENT_ARCHITECTURE_2026_05_27`](SPEC_AGENT_ARCHITECTURE_2026_05_27.md) | SPEC: Agent data-model architecture — consolidation plan & status |
+| [`SPEC_AGENT_AVAILABILITY_ONE_STATE_2026_10_26`](SPEC_AGENT_AVAILABILITY_ONE_STATE_2026_10_26.md) | Spec: one availability state for "can this agent take a message now" |
 | [`SPEC_AGENT_CLI_ISOLATION_NOTE_2026_10_18`](SPEC_AGENT_CLI_ISOLATION_NOTE_2026_10_18.md) | SPEC: say, in the new-agent pane and the docs, that AgentMux manages its own agent CLIs |
 | [`SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15`](SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md) | SPEC: Agent Control Protocol — fix AskUserQuestion (+ unblock tool-permission UI) and align muxbus delivery |
 | [`SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07`](SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md) | SPEC: Agents drive a browser pane they open: forms, uploads, and the human in the loop |
@@ -662,6 +664,7 @@ partial list.
 | [`SPEC_CODE_COMMENT_DENSITY_AND_CONDENSING_2026_09_30`](SPEC_CODE_COMMENT_DENSITY_AND_CONDENSING_2026_09_30.md) | SPEC: Code comment density and condensing |
 | [`SPEC_COMPACTION_ESTIMATED_PROGRESS_AND_STREAM_FRAMES_2026_10_01`](SPEC_COMPACTION_ESTIMATED_PROGRESS_AND_STREAM_FRAMES_2026_10_01.md) | SPEC: compaction progress — what the CLI really emits, an estimated progress bar (Tier 4), and a stream-frame bug found on the way |
 | [`SPEC_CONNECTORS_MCP_WHAT_AGENTS_RUN_2026_10_10`](SPEC_CONNECTORS_MCP_WHAT_AGENTS_RUN_2026_10_10.md) | SPEC: Connectors → MCP servers shows what agents run |
+| [`SPEC_CONTAINER_AGENTS_AT_PARITY_2026_10_27`](SPEC_CONTAINER_AGENTS_AT_PARITY_2026_10_27.md) | SPEC: container agents at parity with native agents: start responsive, same context |
 | [`SPEC_CONTENT_RESIZE_CONTRACT_2026_08_31`](SPEC_CONTENT_RESIZE_CONTRACT_2026_08_31.md) | SPEC: A single content-resize contract for the agent pane |
 | [`SPEC_CONTEXT_DELIVERY_2026_09_30`](SPEC_CONTEXT_DELIVERY_2026_09_30.md) | SPEC: Context deliveries — what the agent was given, one item at a time |
 | [`SPEC_CONTEXT_MENU_ICONS_2026_10_25`](SPEC_CONTEXT_MENU_ICONS_2026_10_25.md) | SPEC: Icons in every right-click (context) menu |
@@ -763,6 +766,7 @@ partial list.
 | [`SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20`](SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20.md) | SPEC — live subagent reconciliation + Retire action (best-practices plan) |
 | [`SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02`](SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02.md) | SPEC: The Swarm shows the agents of every other instance this one knows about |
 | [`SPEC_SWARM_REFINEMENTS_2026_10_17`](SPEC_SWARM_REFINEMENTS_2026_10_17.md) | Spec: Swarm refinements — the selection count, provider icons on remote agents, broadcast to remote agents |
+| [`SPEC_SWARM_SECTIONS_SUPERVISOR_SETTINGS_AND_KANBAN_2026_10_24`](SPEC_SWARM_SECTIONS_SUPERVISOR_SETTINGS_AND_KANBAN_2026_10_24.md) | Spec: the Swarm as three sections (Supervisor, Broadcast, Kanban); the Supervisor switched off until the operator turns it on, with its settings in the Supervisor section |
 | [`SPEC_TEAROFF_PAINT_LATENCY_2026_09_30`](SPEC_TEAROFF_PAINT_LATENCY_2026_09_30.md) | SPEC: Tear-off paint latency: show the torn-off content as fast as the window |
 | [`SPEC_TERMINAL_INPUT_PRIORITY_OVER_SYSINFO_2026_06_16`](SPEC_TERMINAL_INPUT_PRIORITY_OVER_SYSINFO_2026_06_16.md) | SPEC: Terminal I/O Has Complete Priority Over Perf Monitoring |
 | [`SPEC_TERM_STATS_BADGE_TOP_OFFSET_AND_TOGGLE_2026_09_17`](SPEC_TERM_STATS_BADGE_TOP_OFFSET_AND_TOGGLE_2026_09_17.md) | SPEC: Terminal CPU%/Mem badge — fix top-right offset, add a Settings toggle |

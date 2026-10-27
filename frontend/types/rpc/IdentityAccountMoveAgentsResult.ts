@@ -8,7 +8,7 @@ import type { AccountMoveFailure } from "./AccountMoveFailure";
  */
 export type IdentityAccountMoveAgentsResult = { moved: Array<AccountEpisodeAgent>, 
 /**
- * In a turn (working, or waiting on a question): left where it is. Move
- * it again after its turn ends.
+ * In a turn (working, or waiting on a question): its move is queued and
+ * happens when the turn ends (`agent:pending_account`).
  */
 busy: Array<AccountEpisodeAgent>, failed: Array<AccountMoveFailure>, };

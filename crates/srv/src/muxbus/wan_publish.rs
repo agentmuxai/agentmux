@@ -22,6 +22,14 @@
 //! per-agent M2M token — a per-agent client may be unowned, and the
 //! directory is keyed by account.
 //!
+//! **Retired keys.** When this install replaces an agent's key, `wan.db` writes
+//! down a retirement for each directory that held the old one
+//! (`wan_identity::revocations`). The same pass signs a
+//! [`WanKeyRevocation`] for each with the instance key and puts it there, and the
+//! retirement goes once the directory has it. The revocation is also kept
+//! locally at once, so this install refuses the old key even while the
+//! directory is out of reach.
+//!
 //! Nothing here ever makes a jekt fail: until a key is confirmed published,
 //! the relay simply sends that agent's jekts unsigned
 //! (`relay::wan_sign_at_origin`, condition 2).
@@ -30,6 +38,7 @@ use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use agentmux_common::jekt_sign::WanKeyRecord;
+use agentmux_common::wan_key_revocation::WanKeyRevocation;
 
 use crate::backend::storage::store::Store;
 use crate::backend::storage::wan_identity::{WanAgentKey, WanIdentityStore, WanInstance};
@@ -125,14 +134,99 @@ pub(crate) async fn publish_record(
     }
 }
 
-/// Result of one pass over the unpublished keys.
+/// `PUT /agents/:agent_id/wan-key/revocation`: tell the directory a key was
+/// retired. The same outcomes as [`publish_record`]; a 404 here means the
+/// cloud has no revocation route (it may still have the key directory).
+pub(crate) async fn publish_revocation(
+    base_url: &str,
+    http: &reqwest::Client,
+    token: &str,
+    revocation: &WanKeyRevocation,
+) -> PublishOutcome {
+    let url = format!("{}/agents/{}/wan-key/revocation", base_url.trim_end_matches('/'), revocation.agent_id);
+    let resp = http
+        .put(&url)
+        .header("Authorization", format!("Bearer {token}"))
+        .timeout(Duration::from_secs(PUBLISH_TIMEOUT_SECS))
+        .json(revocation)
+        .send()
+        .await;
+    match resp {
+        Ok(r) if r.status().is_success() => PublishOutcome::Published,
+        Ok(r) if r.status() == reqwest::StatusCode::NOT_FOUND => PublishOutcome::NotSupported,
+        Ok(r) => {
+            let status = r.status();
+            PublishOutcome::Failed(format!("HTTP {status}: {}", r.text().await.unwrap_or_default()))
+        }
+        Err(e) => PublishOutcome::Failed(format!("unreachable: {e}")),
+    }
+}
+
+/// Result of one pass over the unpublished keys and the retired ones.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(crate) struct PassResult {
     pub published: usize,
+    /// Retired keys the directory now has the revocation of.
+    pub revoked: usize,
     pub not_supported: bool,
+    /// The cloud has the key directory but no revocation route: retirements
+    /// wait, and are tried again hourly.
+    pub revocations_not_supported: bool,
     pub failed: usize,
-    /// Keys still unpublished after the pass.
+    /// Keys still unpublished, and retirements still owed, after the pass.
     pub remaining: usize,
+}
+
+/// Tell `directory` about every key this install retired that it held. Each
+/// revocation is kept locally before it is sent. Stops at the first 404.
+#[allow(clippy::too_many_arguments)]
+async fn publish_retirements(
+    wan: &WanIdentityStore,
+    instance: &WanInstance,
+    channel: &str,
+    base_url: &str,
+    http: &reqwest::Client,
+    token: &str,
+    directory: &str,
+    result: &mut PassResult,
+) {
+    let pending = match wan.retirements_pending(directory) {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::warn!(error = %e, "wan publish: could not read retired keys from wan.db");
+            result.failed += 1;
+            return;
+        }
+    };
+    for retirement in pending {
+        let Some(revocation) =
+            WanKeyRevocation::sign(&instance.private_key, &retirement.agent_id, channel, &retirement.key_fp, retirement.retired_at)
+        else {
+            tracing::warn!(agent = %retirement.agent_id, "wan publish: could not sign a key revocation — skipped");
+            result.failed += 1;
+            continue;
+        };
+        if let Err(e) = wan.revoked_key_put(&revocation, agentmux_common::time::now_secs()) {
+            tracing::warn!(agent = %retirement.agent_id, error = %e, "wan publish: could not keep a key revocation locally");
+        }
+        match publish_revocation(base_url, http, token, &revocation).await {
+            PublishOutcome::Published => match wan.retirement_done(&retirement.agent_id, &retirement.key_fp, directory) {
+                Ok(()) => result.revoked += 1,
+                Err(e) => {
+                    tracing::warn!(agent = %retirement.agent_id, error = %e, "wan publish: could not record a revocation as sent");
+                    result.failed += 1;
+                }
+            },
+            PublishOutcome::NotSupported => {
+                result.revocations_not_supported = true;
+                return;
+            }
+            PublishOutcome::Failed(e) => {
+                tracing::warn!(agent = %retirement.agent_id, error = %e, "wan publish: directory rejected or unreachable for a key revocation");
+                result.failed += 1;
+            }
+        }
+    }
 }
 
 /// Publish every key `wan` doesn't yet have confirmed. Stops at the first
@@ -154,6 +248,8 @@ pub(crate) async fn publish_pending(
         }
     };
     let mut result = PassResult::default();
+    // Retired keys first: a key that should no longer be trusted is the more urgent news.
+    publish_retirements(wan, instance, channel, base_url, http, token, directory, &mut result).await;
     for (agent_id, key) in &pending {
         let Some(record) = certify(instance, agent_id, channel, key) else {
             tracing::warn!(agent = %agent_id, "wan publish: malformed key in wan.db — skipped");
@@ -167,8 +263,15 @@ pub(crate) async fn publish_pending(
             PublishOutcome::Published => match wan.agent_key_mark_published(agent_id, &key.public_key, directory) {
                 Ok(true) => result.published += 1,
                 // The key changed under us (agent deleted and recreated
-                // mid-PUT); the new key is picked up next pass.
-                Ok(false) => {}
+                // mid-PUT); the new key is picked up next pass. The directory
+                // took the old one all the same, and nothing else knows it
+                // did, so it is retired for this directory now.
+                Ok(false) => {
+                    if let Err(e) = wan.retirement_add(agent_id, &key.public_key, directory, agentmux_common::time::now_secs()) {
+                        tracing::warn!(agent = %agent_id, error = %e, "wan publish: could not retire a key replaced mid-publish");
+                        result.failed += 1;
+                    }
+                }
                 Err(e) => {
                     tracing::warn!(agent = %agent_id, error = %e, "wan publish: could not record publication");
                     result.failed += 1;
@@ -185,6 +288,9 @@ pub(crate) async fn publish_pending(
         }
     }
     result.remaining = wan.agent_keys_unpublished(directory).map(|p| p.len()).unwrap_or(pending.len());
+    if !result.revocations_not_supported {
+        result.remaining += wan.retirements_pending(directory).map(|p| p.len()).unwrap_or(0);
+    }
     result
 }
 
@@ -247,7 +353,9 @@ async fn run_pass(wan: &Arc<WanIdentityStore>, id_store: &Arc<Store>, http: &req
     }
     let base_url = crate::muxbus::relay::rest_base_url();
     let directory = directory_id(&base_url, &account);
-    if wan.agent_keys_unpublished(&directory).map(|p| p.is_empty()).unwrap_or(false) {
+    let nothing_owed = wan.agent_keys_unpublished(&directory).map(|p| p.is_empty()).unwrap_or(false)
+        && wan.retirements_pending(&directory).map(|p| p.is_empty()).unwrap_or(false);
+    if nothing_owed {
         return Wait::Idle;
     }
     let result = publish_pending(
@@ -263,11 +371,17 @@ async fn run_pass(wan: &Arc<WanIdentityStore>, id_store: &Arc<Store>, http: &req
     if result.published > 0 {
         tracing::info!(published = result.published, instance = %instance.instance_id, "wan publish: agent keys published");
     }
+    if result.revoked > 0 {
+        tracing::info!(revoked = result.revoked, instance = %instance.instance_id, "wan publish: retired agent keys revoked");
+    }
     if result.not_supported {
         tracing::info!("wan publish: cloud has no WAN key directory yet — retrying hourly");
         Wait::NotSupported
     } else if result.remaining > 0 {
         Wait::Retry
+    } else if result.revocations_not_supported {
+        tracing::info!("wan publish: cloud has no key revocation route yet — retrying hourly");
+        Wait::NotSupported
     } else {
         Wait::Idle
     }
@@ -282,29 +396,66 @@ mod tests {
 
     struct Stub {
         seen: Arc<std::sync::Mutex<Seen>>,
+        /// The same, for `PUT /agents/:agent_id/wan-key/revocation`.
+        revoked: Arc<std::sync::Mutex<Seen>>,
         _guard: tokio_util::sync::DropGuard,
         url: String,
     }
 
     /// A stub directory that answers `status` to every PUT and records it.
     async fn stub_directory(status: axum::http::StatusCode) -> Stub {
+        stub_with_revocations(status, axum::http::StatusCode::OK).await
+    }
+
+    /// As [`stub_directory`], answering `revocation_status` to a key revocation.
+    async fn stub_with_revocations(status: axum::http::StatusCode, revocation_status: axum::http::StatusCode) -> Stub {
+        stub_full(status, revocation_status, None).await
+    }
+
+    /// As [`stub_with_revocations`], running `during_put` while a key PUT is in flight.
+    async fn stub_full(
+        status: axum::http::StatusCode,
+        revocation_status: axum::http::StatusCode,
+        during_put: Option<Arc<dyn Fn() + Send + Sync>>,
+    ) -> Stub {
         let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
-        let sink = seen.clone();
-        let app = axum::Router::new().route(
-            "/agents/:agent_id/wan-key",
-            axum::routing::put(
-                move |axum::extract::Path(agent_id): axum::extract::Path<String>,
-                      headers: axum::http::HeaderMap,
-                      body: axum::Json<serde_json::Value>| {
-                    let sink = sink.clone();
-                    async move {
-                        let auth = headers.get("authorization").and_then(|v| v.to_str().ok()).map(str::to_string);
-                        sink.lock().unwrap().push((agent_id, auth, body.0));
-                        (status, "{}")
-                    }
-                },
-            ),
-        );
+        let revoked = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let (sink, revoked_sink) = (seen.clone(), revoked.clone());
+        let app = axum::Router::new()
+            .route(
+                "/agents/:agent_id/wan-key",
+                axum::routing::put(
+                    move |axum::extract::Path(agent_id): axum::extract::Path<String>,
+                          headers: axum::http::HeaderMap,
+                          body: axum::Json<serde_json::Value>| {
+                        let sink = sink.clone();
+                        let during_put = during_put.clone();
+                        async move {
+                            let auth = headers.get("authorization").and_then(|v| v.to_str().ok()).map(str::to_string);
+                            sink.lock().unwrap().push((agent_id, auth, body.0));
+                            if let Some(hook) = &during_put {
+                                hook();
+                            }
+                            (status, "{}")
+                        }
+                    },
+                ),
+            )
+            .route(
+                "/agents/:agent_id/wan-key/revocation",
+                axum::routing::put(
+                    move |axum::extract::Path(agent_id): axum::extract::Path<String>,
+                          headers: axum::http::HeaderMap,
+                          body: axum::Json<serde_json::Value>| {
+                        let sink = revoked_sink.clone();
+                        async move {
+                            let auth = headers.get("authorization").and_then(|v| v.to_str().ok()).map(str::to_string);
+                            sink.lock().unwrap().push((agent_id, auth, body.0));
+                            (revocation_status, "{}")
+                        }
+                    },
+                ),
+            );
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let token = tokio_util::sync::CancellationToken::new();
@@ -312,7 +463,7 @@ mod tests {
         tokio::spawn(async move {
             let _ = axum::serve(listener, app).with_graceful_shutdown(async move { child.cancelled().await }).await;
         });
-        Stub { seen, _guard: token.drop_guard(), url: format!("http://{addr}") }
+        Stub { seen, revoked, _guard: token.drop_guard(), url: format!("http://{addr}") }
     }
 
     const DIR: &str = "https://relay.test#acct";
@@ -435,6 +586,166 @@ mod tests {
         assert!(published(&wan, "camper", &new));
         assert!(published(&wan, "camper", &old), "the old directory's record stays true");
         assert_eq!(stub.seen.lock().unwrap().len(), 2);
+    }
+
+    /// camper's key is published to `DIR`, then replaced by a new one.
+    fn replaced_after_publishing(wan: &WanIdentityStore) -> String {
+        let old = wan.agent_key_ensure("camper", None).unwrap();
+        assert!(wan.agent_key_mark_published("camper", &old.public_key, DIR).unwrap());
+        let fp = agentmux_common::jekt_sign::wan_key_fingerprint(&old.public_key_bytes().unwrap());
+        wan.agent_keys_delete(&["camper".to_string()]).unwrap();
+        wan.agent_key_ensure("camper", None).unwrap();
+        fp
+    }
+
+    #[tokio::test]
+    async fn a_replaced_key_is_revoked_at_the_directory_that_held_it() {
+        let stub = stub_directory(axum::http::StatusCode::OK).await;
+        let (_dir, wan, instance) = temp_wan();
+        let old_fp = replaced_after_publishing(&wan);
+
+        let result = publish_pending(&wan, &instance, "stable", &stub.url, &reqwest::Client::new(), "tok", DIR).await;
+        assert_eq!(result, PassResult { published: 1, revoked: 1, remaining: 0, ..Default::default() });
+
+        let sent = stub.revoked.lock().unwrap().clone();
+        assert_eq!(sent.len(), 1);
+        let (agent_id, auth, body) = sent[0].clone();
+        assert_eq!((agent_id.as_str(), auth.as_deref()), ("camper", Some("Bearer tok")));
+        let revocation: WanKeyRevocation = serde_json::from_value(body).unwrap();
+        assert!(revocation.verify(), "what goes on the wire passes the cloud's check");
+        assert!(revocation.names(&instance.instance_id, "camper", "stable", &old_fp));
+        assert!(wan.retirements_pending(DIR).unwrap().is_empty());
+        assert!(wan.revoked_key_exists(&instance.instance_id, "camper", "stable", &old_fp).unwrap(), "refused here too");
+        // The new key is not the revoked one.
+        let current = wan.agent_key_load("camper").unwrap().unwrap();
+        let current_fp = agentmux_common::jekt_sign::wan_key_fingerprint(&current.public_key_bytes().unwrap());
+        assert!(!wan.revoked_key_exists(&instance.instance_id, "camper", "stable", &current_fp).unwrap());
+
+        // Nothing is owed any more: a second pass sends nothing.
+        let again = publish_pending(&wan, &instance, "stable", &stub.url, &reqwest::Client::new(), "tok", DIR).await;
+        assert_eq!(again, PassResult::default());
+        assert_eq!(stub.revoked.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_revocation_that_failed_is_sent_again_unchanged() {
+        let down = stub_with_revocations(axum::http::StatusCode::OK, axum::http::StatusCode::SERVICE_UNAVAILABLE).await;
+        let up = stub_directory(axum::http::StatusCode::OK).await;
+        let (_dir, wan, instance) = temp_wan();
+        replaced_after_publishing(&wan);
+
+        let first = publish_pending(&wan, &instance, "stable", &down.url, &reqwest::Client::new(), "tok", DIR).await;
+        assert_eq!(first.revoked, 0);
+        assert_eq!(first.failed, 1);
+        assert_eq!(first.remaining, 1, "still owed");
+        assert_eq!(wan.retirements_pending(DIR).unwrap().len(), 1);
+
+        let second = publish_pending(&wan, &instance, "stable", &up.url, &reqwest::Client::new(), "tok", DIR).await;
+        assert_eq!(second.revoked, 1);
+        assert_eq!(second.remaining, 0);
+        assert_eq!(down.revoked.lock().unwrap()[0].2, up.revoked.lock().unwrap()[0].2, "the same signed record, not a new one");
+    }
+
+    #[tokio::test]
+    async fn this_install_refuses_the_retired_key_even_when_the_directory_cannot_be_reached() {
+        let url = {
+            let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            format!("http://{}", l.local_addr().unwrap())
+        };
+        let (_dir, wan, instance) = temp_wan();
+        let old_fp = replaced_after_publishing(&wan);
+        let result = publish_pending(&wan, &instance, "stable", &url, &reqwest::Client::new(), "tok", DIR).await;
+        assert!(result.failed >= 1);
+        assert_eq!(wan.retirements_pending(DIR).unwrap().len(), 1, "still owed to the directory");
+        assert!(wan.revoked_key_exists(&instance.instance_id, "camper", "stable", &old_fp).unwrap());
+    }
+
+    #[tokio::test]
+    async fn a_key_replaced_while_its_first_publish_is_in_flight_is_still_revoked() {
+        let (_dir, wan, instance) = temp_wan();
+        let wan = Arc::new(wan);
+        let first = wan.agent_key_ensure("camper", None).unwrap();
+        let sent_fp = agentmux_common::jekt_sign::wan_key_fingerprint(&first.public_key_bytes().unwrap());
+        // The agent is deleted after the directory has the PUT, before the
+        // publisher can record it.
+        let hook_wan = wan.clone();
+        let hook: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
+            hook_wan.agent_keys_delete(&["camper".to_string()]).unwrap();
+        });
+        let stub = stub_full(axum::http::StatusCode::OK, axum::http::StatusCode::OK, Some(hook)).await;
+
+        let pass = publish_pending(&wan, &instance, "stable", &stub.url, &reqwest::Client::new(), "tok", DIR).await;
+        assert_eq!(pass.published, 0, "the key it published is gone, so nothing counts as published");
+        let owed = wan.retirements_pending(DIR).unwrap();
+        assert_eq!(owed.len(), 1, "the directory holds a key that must be retired");
+        assert_eq!(owed[0].key_fp, sent_fp);
+
+        let next = publish_pending(&wan, &instance, "stable", &stub.url, &reqwest::Client::new(), "tok", DIR).await;
+        assert_eq!(next.revoked, 1);
+        let sent = stub.revoked.lock().unwrap().clone();
+        let revocation: WanKeyRevocation = serde_json::from_value(sent[0].2.clone()).unwrap();
+        assert!(revocation.verify() && revocation.names(&instance.instance_id, "camper", "stable", &sent_fp));
+    }
+
+    #[tokio::test]
+    async fn a_rotation_done_offline_is_revoked_after_a_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("wan.db");
+        let old_fp;
+        let instance_id;
+        {
+            // Rotated while the relay cannot be reached: nothing is delivered.
+            let url = {
+                let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+                format!("http://{}", l.local_addr().unwrap())
+            };
+            let wan = WanIdentityStore::open(&path).unwrap();
+            let instance = wan.instance_ensure("narko").unwrap();
+            instance_id = instance.instance_id.clone();
+            old_fp = replaced_after_publishing(&wan);
+            let offline = publish_pending(&wan, &instance, "stable", &url, &reqwest::Client::new(), "tok", DIR).await;
+            assert_eq!(offline.revoked, 0);
+        } // the process ends: the store is closed
+
+        let wan = WanIdentityStore::open(&path).unwrap();
+        let instance = wan.instance_ensure("narko").unwrap();
+        assert_eq!(instance.instance_id, instance_id, "the same install");
+        let owed = wan.retirements_pending(DIR).unwrap();
+        assert_eq!(owed.len(), 1, "still owed after the restart");
+        assert_eq!(owed[0].key_fp, old_fp);
+
+        let stub = stub_directory(axum::http::StatusCode::OK).await;
+        let result = publish_pending(&wan, &instance, "stable", &stub.url, &reqwest::Client::new(), "tok", DIR).await;
+        assert_eq!(result.revoked, 1);
+        let sent = stub.revoked.lock().unwrap().clone();
+        let revocation: WanKeyRevocation = serde_json::from_value(sent[0].2.clone()).unwrap();
+        assert!(revocation.verify() && revocation.names(&instance_id, "camper", "stable", &old_fp));
+        assert!(wan.retirements_pending(DIR).unwrap().is_empty(), "cleared only once the directory has it");
+    }
+
+    #[tokio::test]
+    async fn a_cloud_without_the_revocation_route_still_gets_the_keys_and_is_asked_again_later() {
+        let stub = stub_with_revocations(axum::http::StatusCode::OK, axum::http::StatusCode::NOT_FOUND).await;
+        let (_dir, wan, instance) = temp_wan();
+        replaced_after_publishing(&wan);
+        let result = publish_pending(&wan, &instance, "stable", &stub.url, &reqwest::Client::new(), "tok", DIR).await;
+        assert_eq!(result.published, 1, "the new key is published all the same");
+        assert!(result.revocations_not_supported);
+        assert!(!result.not_supported);
+        assert_eq!(result.remaining, 0, "not counted, or the pass would run hot");
+        assert_eq!(wan.retirements_pending(DIR).unwrap().len(), 1, "kept for when the route exists");
+    }
+
+    #[tokio::test]
+    async fn another_directory_is_not_told_about_a_key_it_never_held() {
+        let stub = stub_directory(axum::http::StatusCode::OK).await;
+        let (_dir, wan, instance) = temp_wan();
+        replaced_after_publishing(&wan);
+        let other = directory_id(&stub.url, "other-account");
+        let result = publish_pending(&wan, &instance, "stable", &stub.url, &reqwest::Client::new(), "tok2", &other).await;
+        assert_eq!(result.revoked, 0);
+        assert!(stub.revoked.lock().unwrap().is_empty());
+        assert_eq!(wan.retirements_pending(DIR).unwrap().len(), 1, "DIR is still owed");
     }
 
     #[test]

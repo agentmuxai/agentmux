@@ -29,6 +29,7 @@
 //! is deferred.
 
 pub mod account_email;
+pub mod account_numbering;
 pub mod auth_diag;
 pub mod auth_patterns;
 pub mod auth_session;

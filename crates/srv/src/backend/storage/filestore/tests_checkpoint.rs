@@ -125,3 +125,87 @@ fn the_truncate_runs_without_the_writer_mutex_and_cuts_the_wal_file_back() {
     drop(held);
     assert_eq!(std::fs::metadata(&wal).unwrap().len(), 0, "the WAL file is cut back");
 }
+
+// ---------------------------------------------------------------------------
+// Reading the WAL index must not close a handle on the `-shm` file: on Unix that
+// releases every lock the process holds on it, SQLite's own included.
+// ---------------------------------------------------------------------------
+
+/// Run by `reading_the_wal_index_leaves_the_writers_lock_in_place` in a process of its own:
+/// try to take the database's write lock without waiting, and say whether it was free.
+#[test]
+#[ignore]
+fn lock_probe_child() {
+    let Some(db) = std::env::var_os("LOCK_PROBE_DB") else { return };
+    let conn = Connection::open(db).unwrap();
+    conn.execute_batch("PRAGMA busy_timeout=0;").unwrap();
+    match conn.execute_batch("BEGIN IMMEDIATE") {
+        Ok(()) => println!("PROBE-GOT-THE-WRITE-LOCK"),
+        Err(_) => println!("PROBE-WRITE-LOCK-BUSY"),
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn reading_the_wal_index_leaves_the_writers_lock_in_place() {
+    let (_dir, path, conn) = wal_db();
+    let shm = sidecar(&path, "-shm");
+    conn.execute("INSERT INTO t (b) VALUES (zeroblob(100))", []).unwrap();
+    // A write transaction in progress, as the framer's is for a good part of a second.
+    conn.execute_batch("BEGIN IMMEDIATE").unwrap();
+    conn.execute("INSERT INTO t (b) VALUES (zeroblob(100))", []).unwrap();
+    for _ in 0..5 {
+        assert!(wal_backlog(&shm).is_some());
+    }
+    let out = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", "backend::storage::filestore::tests_checkpoint::lock_probe_child", "--ignored", "--nocapture", "--test-threads=1"])
+        .env("LOCK_PROBE_DB", &path)
+        .output()
+        .unwrap();
+    let out = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.contains("PROBE-WRITE-LOCK-BUSY"),
+        "another process got the write lock while a transaction held it, after the WAL index was read: {out}"
+    );
+    conn.execute_batch("ROLLBACK").unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn the_kept_handle_on_the_wal_index_is_not_inherited_by_child_processes() {
+    use std::os::unix::fs::MetadataExt;
+    let (_dir, path, conn) = wal_db();
+    let shm = sidecar(&path, "-shm");
+    conn.execute("INSERT INTO t (b) VALUES (zeroblob(100))", []).unwrap();
+    assert!(wal_backlog(&shm).is_some());
+    let want = std::fs::metadata(&shm).unwrap();
+    let want = (want.dev(), want.ino());
+    // SQLite keeps handles on the same file; every one of them, and ours, is close-on-exec.
+    let mut seen = 0;
+    for fd in 3..1024 {
+        let mut st: libc::stat = unsafe { std::mem::zeroed() };
+        if unsafe { libc::fstat(fd, &mut st) } != 0 || (st.st_dev as u64, st.st_ino as u64) != want {
+            continue;
+        }
+        seen += 1;
+        assert!(unsafe { libc::fcntl(fd, libc::F_GETFD) } & libc::FD_CLOEXEC != 0, "fd {fd} on the -shm file is inherited by children");
+    }
+    assert!(seen >= 1, "no open handle on the -shm file found");
+}
+
+#[test]
+fn a_wal_index_that_is_replaced_or_gone_is_read_afresh_or_not_at_all() {
+    let (_dir, path, conn) = wal_db();
+    let shm = sidecar(&path, "-shm");
+    write_until(&conn, &shm, 50);
+    assert!(wal_backlog(&shm).unwrap() >= 50);
+    // Every connection closed: the -shm goes away and the handle kept for it must not answer for it.
+    drop(conn);
+    assert_eq!(wal_backlog(&shm), None, "no index: the checkpointer falls back to the WAL's write time");
+    // A new connection creates a new index, which starts again from nothing.
+    let conn = Connection::open(&path).unwrap();
+    conn.execute_batch(&format!("PRAGMA wal_autocheckpoint=0; {JOURNAL_SIZE_LIMIT}")).unwrap();
+    conn.execute("INSERT INTO t (b) VALUES (zeroblob(3000))", []).unwrap();
+    let backlog = wal_backlog(&shm).expect("the new index is read");
+    assert!(backlog >= 1 && backlog < 50, "read from the old index: {backlog}");
+}

@@ -73,6 +73,37 @@ async fn no_uid_key_to_check_against_leaves_v1_standing() {
 }
 
 #[tokio::test]
+async fn a_peer_that_pinned_a_uid_key_and_now_gives_none_fails_the_jekt() {
+    let state = test_state();
+    let (name_public, name_private) = generate_lan_keypair([1u8; 32]);
+    let (uid_public, uid_private) = generate_lan_keypair([2u8; 32]);
+    state.lan_discovery.seed_lan_pubkey_for_test("korp", name_public.to_vec(), Some(("uid-k".into(), uid_public.to_vec())));
+    let mut first = signed(&name_private, Some(("uid-k", &uid_private)));
+    verify_lan_signature(&state, &mut first).await; // pins uid-k's key under korp
+    assert_eq!(first.lan_verified, Some(true));
+
+    // The next answer carries no UID key, and the peers have none to give on a fresh ask.
+    state.lan_discovery.seed_lan_pubkey_for_test("korp", name_public.to_vec(), None);
+    let mut req = signed(&name_private, Some(("uid-k", &uid_private)));
+    verify_lan_signature(&state, &mut req).await;
+    assert_eq!(req.lan_verified, Some(false), "a pinned name owes its UID key");
+    assert_eq!(req.lan_claimed_uid, "");
+}
+
+#[tokio::test]
+async fn a_pinned_name_without_a_uid_key_still_passes_a_jekt_that_claims_no_uid() {
+    let state = test_state();
+    let (name_public, name_private) = generate_lan_keypair([1u8; 32]);
+    let (uid_public, uid_private) = generate_lan_keypair([2u8; 32]);
+    state.lan_discovery.seed_lan_pubkey_for_test("korp", name_public.to_vec(), Some(("uid-k".into(), uid_public.to_vec())));
+    verify_lan_signature(&state, &mut signed(&name_private, Some(("uid-k", &uid_private)))).await;
+    state.lan_discovery.seed_lan_pubkey_for_test("korp", name_public.to_vec(), None);
+    let mut req = signed(&name_private, None);
+    verify_lan_signature(&state, &mut req).await;
+    assert_eq!(req.lan_verified, Some(true), "no v2 at all is judged on v1");
+}
+
+#[tokio::test]
 async fn a_jekt_with_no_v2_at_all_stays_verified_on_v1() {
     let state = test_state();
     let (name_public, name_private) = generate_lan_keypair([1u8; 32]);
@@ -260,5 +291,72 @@ mod origin {
         assert!(out.lan_sig.is_some());
         assert_eq!(out.source_uid.as_deref(), Some("uid-claimed-by-the-sender"));
         assert_eq!(out.lan_sig_v2, None, "a v2 for a UID the token does not name is not made");
+    }
+}
+
+// ── channel_sign_at_origin: the same-machine, other-instance hop ───────────────
+// A container agent's MCP holds no signing key, so the cross-channel signature a receiving instance looks
+// for on a published sender is made here.
+mod channel_origin {
+    use super::*;
+    use crate::backend::storage::store::Store;
+    use crate::server::reactive::lan_v2::channel_sign_at_origin;
+    use agentmux_common::jekt_sign::{decode_key, verify_channel_jekt, verify_channel_jekt_v2};
+
+    fn store_with_coddy() -> Store {
+        let store = Store::open_in_memory().unwrap();
+        let mut def = crate::backend::storage::agents::test_agent_def("uid-coddy", "Coddy", "codex", "agent", 1, "");
+        def.slug = "coddy".into();
+        store.agent_def_insert(&mut def).unwrap();
+        store
+    }
+
+    fn unsigned() -> InjectionRequest {
+        InjectionRequest {
+            target_agent: "agenty".into(),
+            message: "hello across channels".into(),
+            source_agent: Some("coddy".into()),
+            delivery_tier: Some("host".into()),
+            request_id: Some("1792887204449-3664-1".into()),
+            ts_secs: Some(now()),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn what_the_origin_signs_verifies_against_the_keys_the_agent_publishes() {
+        let store = store_with_coddy();
+        let out = channel_sign_at_origin(&store, "uid-coddy", unsigned());
+        let channel = out.source_channel.clone().expect("the channel the signature binds");
+        let (name_pub, uid_pub) = (
+            decode_key(&store.agent_lan_public_key_load("coddy").unwrap().unwrap()).unwrap(),
+            decode_key(&store.agent_uid_keys_ensure("uid-coddy").unwrap().unwrap().0.lan.public_key).unwrap(),
+        );
+        let (id, ts) = (out.request_id.as_deref().unwrap(), out.ts_secs.unwrap());
+        assert!(verify_channel_jekt(&name_pub, id, "coddy", &channel, "agenty", ts, &out.message, out.channel_sig.as_deref().unwrap()));
+        assert_eq!(out.source_uid.as_deref(), Some("uid-coddy"));
+        assert!(verify_channel_jekt_v2(&uid_pub, id, "coddy", "uid-coddy", &channel, "agenty", ts, &out.message, out.channel_sig_v2.as_deref().unwrap()));
+        let mut changed = out.message.clone();
+        changed.push_str(" (forged)");
+        assert!(!verify_channel_jekt(&name_pub, id, "coddy", &channel, "agenty", ts, &changed, out.channel_sig.as_deref().unwrap()));
+    }
+
+    #[test]
+    fn an_agents_own_signature_is_never_replaced_and_only_the_origin_signs() {
+        let store = store_with_coddy();
+        let mut own = unsigned();
+        own.channel_sig = Some("the agent's own".into());
+        let out = channel_sign_at_origin(&store, "uid-coddy", own);
+        assert_eq!(out.channel_sig.as_deref(), Some("the agent's own"));
+        assert_eq!(out.channel_sig_v2, None);
+
+        let signed = |req: InjectionRequest, caller: &str| channel_sign_at_origin(&store, caller, req).channel_sig.is_some();
+        assert!(signed(unsigned(), "uid-coddy"));
+        assert!(!signed(unsigned(), ""), "a hop carries no caller");
+        assert!(!signed(unsigned(), "uid-nobody"));
+        assert!(!signed(InjectionRequest { source_agent: Some("agenta".into()), ..unsigned() }, "uid-coddy"), "another agent's name");
+        for tier in ["lan", "wan", "channel"] {
+            assert!(!signed(InjectionRequest { delivery_tier: Some(tier.into()), ..unsigned() }, "uid-coddy"), "{tier}");
+        }
     }
 }

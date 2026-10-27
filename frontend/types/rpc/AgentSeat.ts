@@ -2,8 +2,8 @@
 
 /**
  * An agent's seat: its role, whom it reports to and what it owns
- * (`SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md` §2). Set only by the operator
- * (`agent.setSeat`); `backend::agent_seat` validates it. Every field but
+ * (`SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md` §2). Set by the operator
+ * (`agent.setSeat`) or by an agent (`Agents set_seat`); `backend::agent_seat` validates it. Every field but
  * `role` is optional, and `role` is kept as text, so a seat written by a
  * newer build with a role this one doesn't know still loads.
  */

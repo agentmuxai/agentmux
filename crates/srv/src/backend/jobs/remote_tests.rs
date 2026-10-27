@@ -288,6 +288,155 @@ async fn both_sides_closing_write_the_end_once() {
     }
 }
 
+/// The panes the receiver was told to interrupt.
+fn receiver_interrupts(p: &Pair) -> Arc<std::sync::Mutex<Vec<String>>> {
+    let seen: Arc<std::sync::Mutex<Vec<String>>> = Arc::default();
+    let sink = seen.clone();
+    p.receiver.install_interrupt(Arc::new(move |block: &str| sink.lock().unwrap().push(block.to_string())));
+    seen
+}
+
+/// A run the receiver follows in `PANE`, running, as the sender sees it.
+fn followed_run(p: &Pair, slot: i64) -> JobRun {
+    let (id, job) = p.begin(slot);
+    assert!(p.receiver.follow_forwarded(&id, PANE, now_ms()));
+    p.deliver(&id, &job, PANE);
+    p.get(&id)
+}
+
+/// A timeout (or `cancel_other`) on the firing side reaches the channel that
+/// follows the run: it closes the row with the status asked for and interrupts
+/// the agent's turn there, the interrupt a local stop sends.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_stop_asked_of_the_follower_closes_the_run_and_interrupts_its_pane() {
+    let p = pair();
+    let interrupted = receiver_interrupts(&p);
+    let (receiver, sender) = (p.receiver.clone(), p.sender.clone());
+    p.sender.install_remote_stop(Arc::new(move |stop| {
+        // What the server does: carry the ask over, and report how it went.
+        match receiver.stop_followed_here(&stop.run_id, &stop.block_id, &stop.from_channel) {
+            Ok(_) => sender.remote_stop_done(&stop.run_id),
+            Err(e) => sender.remote_stop_failed(&stop.run_id, &e),
+        }
+    }));
+    let run = followed_run(&p, 1);
+
+    let stopped_here = p.sender.stop_run(&run, infra::TIMEOUT, reason::TIMEOUT, "stopped after 5 minutes (timeout_minutes)");
+    assert!(!stopped_here, "the sender didn't close it itself");
+    let r = p.get(&run.id);
+    assert_eq!((r.state.as_str(), r.infra.as_str(), r.reason.as_str()), (state::FINISHED, infra::TIMEOUT, reason::TIMEOUT));
+    assert_eq!(r.summary, "stopped after 5 minutes (timeout_minutes)");
+    assert!(r.ended_at_ms.is_some());
+    assert_eq!(*interrupted.lock().unwrap(), [PANE], "the agent's turn was interrupted where it runs");
+    assert_eq!(r.links[STOP_REQUESTED]["by_channel"], "chan-a");
+    assert!(r.links.get(STOP_ERROR).is_none());
+
+    // Its turn ending afterwards changes nothing.
+    let t = now_ms() + 1;
+    p.turn(json!({"block_id": PANE, "turn_id": t, "started_at_ms": t, "active": false, "ended_at_ms": t + 1, "end": "exited"}));
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    assert_eq!(p.get(&run.id), r);
+}
+
+/// An ask that can't be delivered is written to the run's links, the row stays
+/// open, and the ask is repeated after a while, a few times.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_stop_that_cannot_be_delivered_is_noted_and_tried_again() {
+    let p = pair();
+    let interrupted = receiver_interrupts(&p);
+    let (asks, sender) = (Arc::new(std::sync::Mutex::new(0usize)), p.sender.clone());
+    let counted = asks.clone();
+    p.sender.install_remote_stop(Arc::new(move |stop| {
+        *counted.lock().unwrap() += 1;
+        sender.remote_stop_failed(&stop.run_id, "could not reach the AgentMux that follows this run");
+    }));
+    let run = followed_run(&p, 1);
+
+    p.sender.stop_run(&run, infra::TIMEOUT, reason::TIMEOUT, "stopped");
+    let r = p.get(&run.id);
+    assert_eq!(r.state, state::RUNNING, "not closed on a guess");
+    assert_eq!(r.links[STOP_ERROR]["error"], "could not reach the AgentMux that follows this run");
+    assert!(interrupted.lock().unwrap().is_empty());
+
+    p.sender.stop_run(&r, infra::TIMEOUT, reason::TIMEOUT, "stopped");
+    assert_eq!(*asks.lock().unwrap(), 1, "not again within the retry interval");
+    for attempt in 2..=STOP_ATTEMPTS {
+        let aged = json!({ STOP_REQUESTED: { "at_ms": 1, "attempts": attempt - 1 } });
+        p.store.job_run_add_links(&run.id, &aged).unwrap();
+        p.sender.stop_run(&p.get(&run.id), infra::TIMEOUT, reason::TIMEOUT, "stopped");
+        assert_eq!(*asks.lock().unwrap(), attempt as usize);
+    }
+    let spent = json!({ STOP_REQUESTED: { "at_ms": 1, "attempts": STOP_ATTEMPTS } });
+    p.store.job_run_add_links(&run.id, &spent).unwrap();
+    p.sender.stop_run(&p.get(&run.id), infra::TIMEOUT, reason::TIMEOUT, "stopped");
+    assert_eq!(*asks.lock().unwrap(), STOP_ATTEMPTS as usize, "no more than a few asks");
+    assert_eq!(p.get(&run.id).state, state::RUNNING);
+}
+
+/// The following side stops only what it follows, in the pane it was told, that
+/// the asking AgentMux fired and asked, in the run's row, to stop. Another
+/// channel that guesses a run id, or names the right channel, stops nothing.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_follower_refuses_a_stop_that_is_not_its_origins_to_ask() {
+    let p = pair();
+    let interrupted = receiver_interrupts(&p);
+    let run = followed_run(&p, 1);
+    let take = |run_id: &str, block: &str, from: &str| p.receiver.stop_followed_here(run_id, block, from);
+    let nothing_happened = || {
+        assert_eq!(p.get(&run.id).state, state::RUNNING, "nothing above closed it");
+        assert!(interrupted.lock().unwrap().is_empty());
+    };
+
+    assert!(take("no-such-run", PANE, "chan-a").is_err());
+    assert!(take(&run.id, "b-other", "chan-a").unwrap_err().contains("not in that pane"));
+    assert!(take(&run.id, "", "chan-a").is_err());
+    assert!(p.sender.stop_followed_here(&run.id, PANE, "chan-a").unwrap_err().contains("does not follow"));
+
+    // The origin has not asked: nobody can stop the run by naming it.
+    for from in ["chan-a", "chan-b", "chan-c", ""] {
+        assert!(take(&run.id, PANE, from).is_err(), "no stop asked, from {from:?}");
+    }
+    nothing_happened();
+
+    // The origin asks (a note in the shared row).
+    p.sender.install_remote_stop(Arc::new(|_| {}));
+    assert!(p.sender.request_remote_stop(&run, infra::INTERRUPTED, reason::OVERLAP, "stopped: the job's next run started"));
+
+    // Another channel names itself, or the receiver's own, or none: it did not fire the run.
+    for from in ["chan-c", "chan-b", "chan-", ""] {
+        assert!(take(&run.id, PANE, from).unwrap_err().contains("not fired by that AgentMux"), "from {from:?}");
+    }
+    nothing_happened();
+
+    // A stop another channel wrote into the row is not the origin's.
+    let forged = json!({ STOP_REQUESTED: { "by_channel": "chan-c", "infra": infra::TIMEOUT, "reason": reason::TIMEOUT, "summary": "x" } });
+    p.store.job_run_add_links(&run.id, &forged).unwrap();
+    assert!(take(&run.id, PANE, "chan-a").unwrap_err().contains("has not asked"));
+    // And the status is the row's: a note with a stop no timeout or overlap writes is refused.
+    let odd = json!({ STOP_REQUESTED: { "by_channel": "chan-a", "infra": infra::OK, "reason": "anything", "summary": "x" } });
+    p.store.job_run_add_links(&run.id, &odd).unwrap();
+    assert!(take(&run.id, PANE, "chan-a").unwrap_err().contains("has not asked"));
+    nothing_happened();
+
+    // The origin's own note, from the origin: it lands, once.
+    let again = p.get(&run.id);
+    let mut note = again.links[STOP_REQUESTED].clone();
+    note = json!({ "by_channel": "chan-a", "infra": infra::INTERRUPTED, "reason": reason::OVERLAP, "summary": "stopped: the job's next run started", "at_ms": note["at_ms"] });
+    p.store.job_run_add_links(&run.id, &json!({ STOP_REQUESTED: note })).unwrap();
+    assert_eq!(take(&run.id, PANE, "chan-a"), Ok(true));
+    let r = p.get(&run.id);
+    assert_eq!((r.infra.as_str(), r.reason.as_str(), r.summary.as_str()), (infra::INTERRUPTED, reason::OVERLAP, "stopped: the job's next run started"));
+    assert_eq!(*interrupted.lock().unwrap(), [PANE]);
+    assert_eq!(take(&run.id, PANE, "chan-a"), Ok(false), "closed already: nothing more is done");
+    assert_eq!(interrupted.lock().unwrap().len(), 1, "no second interrupt");
+
+    // A process of the same channel that is not the follower (a pid that isn't this one's).
+    let other = followed_run(&p, 2);
+    p.sender.request_remote_stop(&other, infra::TIMEOUT, reason::TIMEOUT, "stopped");
+    p.store.job_run_add_links(&other.id, &json!({ FOLLOWED_BY_PID: u32::MAX })).unwrap();
+    assert!(take(&other.id, PANE, "chan-a").unwrap_err().contains("does not follow"));
+}
+
 #[test]
 fn the_senders_verdict() {
     let mut run = JobRun::new("r", "j", SOURCE_CRON, "n", TRIGGER_SCHEDULE, state::RUNNING, 0);

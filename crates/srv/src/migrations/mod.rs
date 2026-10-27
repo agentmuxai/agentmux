@@ -89,6 +89,8 @@ mod m0038_drop_drone_runs_definition_fk;
 mod m0039_vault_into_warden;
 mod m0040_cron_jobs_to_db_jobs;
 mod m0041_retire_untouched_starter_skills;
+mod m0042_supervisor_modes_reset;
+mod m0043_rotate_container_agent_keys;
 mod backup;
 mod gate;
 mod prepare;
@@ -270,4 +272,6 @@ static REGISTRY: &[&(dyn Migration + Sync)] = &[
     &m0039_vault_into_warden::M0039VaultIntoWarden,
     &m0040_cron_jobs_to_db_jobs::M0040CronJobsToDbJobs,
     &m0041_retire_untouched_starter_skills::M0041RetireUntouchedStarterSkills,
+    &m0042_supervisor_modes_reset::M0042SupervisorModesReset,
+    &m0043_rotate_container_agent_keys::M0043RotateContainerAgentKeys,
 ];

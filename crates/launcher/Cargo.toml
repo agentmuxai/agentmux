@@ -95,6 +95,8 @@ windows-sys = { version = "0.59", features = [
     "Win32_Storage_FileSystem",
     "Win32_System_Kernel",
     "Win32_System_Memory",
+    # PssCaptureSnapshot: a hang dump of a host that has hardened itself (host_hang_dump.rs).
+    "Win32_System_Diagnostics_ProcessSnapshotting",
 ] }
 # WinRT toast notifications (src/notify/windows.rs). 0.61 is already in the
 # lockfile via sysinfo; windows-sys has no WinRT projections.

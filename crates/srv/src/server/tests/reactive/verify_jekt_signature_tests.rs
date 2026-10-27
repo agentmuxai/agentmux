@@ -255,3 +255,24 @@ async fn a_token_caller_acts_on_its_uid_pane_with_no_key_on_file() {
     let other = agentmux_common::api_types::UiAutomationAuth { agent_id: "M4d4Ui".into(), ..auth.clone() };
     assert!(crate::server::ui_handlers::verified_block_id(&state, Some(&caller), &other).is_err(), "display name: the name path");
 }
+
+/// An unsigned UI-automation request (what a container's MCP sends, as it holds no key) is attributed by
+/// the token alone: to the token's own pane, never another agent's, and never with no token at all.
+#[tokio::test]
+async fn an_unsigned_ui_request_is_attributed_by_its_token_to_its_own_pane_only() {
+    let state = test_state();
+    row(&state, "uid-unsigned-a", "unsigned-a", "UnsignedA");
+    row(&state, "uid-unsigned-b", "unsigned-b", "UnsignedB");
+    let handler = crate::backend::reactive::handler::get_global_handler();
+    handler.register_agent_full("unsigned-a", "block-unsigned-a", None, 0, None, Some("uid-unsigned-a"), "test").unwrap();
+    handler.register_agent_full("unsigned-b", "block-unsigned-b", None, 0, None, Some("uid-unsigned-b"), "test").unwrap();
+    let a = crate::server::caller::Caller::Agent { uid: "uid-unsigned-a".into() };
+    let unsigned = |agent_id: &str| agentmux_common::api_types::UiAutomationAuth { agent_id: agent_id.into(), ts_secs: 0, sig: String::new() };
+    let verify = |caller: Option<&crate::server::caller::Caller>, agent_id: &str| crate::server::ui_handlers::verified_block_id(&state, caller, &unsigned(agent_id));
+
+    assert_eq!(verify(Some(&a), "unsigned-a").unwrap(), "block-unsigned-a");
+    assert!(verify(Some(&a), "unsigned-b").is_err(), "another agent's name from this token: refused");
+    assert!(verify(None, "unsigned-a").is_err(), "no token: the signature path, and none is given");
+    let unattributed = crate::server::caller::Caller::Unattributed;
+    assert!(verify(Some(&unattributed), "unsigned-a").is_err(), "a caller no token names: refused");
+}

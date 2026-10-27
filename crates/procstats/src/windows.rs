@@ -12,7 +12,10 @@
 //! layout every Windows since Vista uses (and that Task Manager, Process
 //! Explorer and sysinfo read). Its size and offsets are pinned by tests.
 
+use std::collections::HashMap;
 use std::mem::{offset_of, size_of};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use windows_sys::Wdk::System::SystemInformation::{NtQuerySystemInformation, SystemProcessInformation};
 use windows_sys::Wdk::System::Threading::{NtQueryInformationProcess, ProcessCommandLineInformation};
@@ -119,6 +122,26 @@ unsafe fn read_unicode(s: &UnicodeString) -> String {
     String::from_utf16_lossy(units)
 }
 
+/// Each process of the last [`snapshot`]: its parent as the OS recorded it, and its creation time
+/// (`start_key`), which tells it from a later process that reused the PID.
+pub type ParentTable = HashMap<u32, (Option<u32>, u64)>;
+
+static LAST_TABLE: Mutex<Option<(Instant, Arc<ParentTable>)>> = Mutex::new(None);
+
+/// The parent table of a snapshot at most `max_age` old: the last one any caller took, else a new
+/// one. Lets a second reader of the process table (the agent process tracker) share the pane
+/// sampler's read instead of enumerating every process again.
+pub fn recent_parents(max_age: Duration) -> std::io::Result<Arc<ParentTable>> {
+    let last = |lock: &Mutex<Option<(Instant, Arc<ParentTable>)>>| lock.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    if let Some((at, table)) = last(&LAST_TABLE) {
+        if at.elapsed() <= max_age {
+            return Ok(table);
+        }
+    }
+    snapshot()?;
+    last(&LAST_TABLE).map(|(_, table)| table).ok_or_else(|| std::io::Error::other("no process table"))
+}
+
 pub fn snapshot() -> std::io::Result<Vec<ProcInfo>> {
     let buf = query_process_table()?;
     let bytes = buf.len() * 8;
@@ -159,6 +182,8 @@ pub fn snapshot() -> std::io::Result<Vec<ProcInfo>> {
         }
         offset += entry.next_entry_offset as usize;
     }
+    let table: ParentTable = out.iter().map(|p| (p.pid, (p.ppid, p.start_key))).collect();
+    *LAST_TABLE.lock().unwrap_or_else(|e| e.into_inner()) = Some((Instant::now(), Arc::new(table)));
     Ok(out)
 }
 
@@ -267,6 +292,26 @@ mod tests {
             assert_ne!(GetProcessMemoryInfo(h, &mut counters, size), 0);
             CloseHandle(h);
             counters
+        }
+    }
+
+    /// The shared table lists a live process with its parent and the creation time `start_key` reads,
+    /// whether it came from a fresh read or an earlier one.
+    #[test]
+    fn recent_parents_lists_a_child_with_its_parent_and_creation_time() {
+        let mut child = std::process::Command::new("cmd")
+            .args(["/C", "ping -n 30 127.0.0.1 > nul"])
+            .spawn()
+            .expect("spawn an idle child");
+        let pid = child.id();
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        let fresh = recent_parents(Duration::ZERO).unwrap();
+        let reused = recent_parents(Duration::from_secs(60)).unwrap();
+        let key = start_key(pid).expect("the child's creation time");
+        let _ = child.kill();
+        let _ = child.wait();
+        for table in [fresh, reused] {
+            assert_eq!(table.get(&pid), Some(&(Some(std::process::id()), key)));
         }
     }
 

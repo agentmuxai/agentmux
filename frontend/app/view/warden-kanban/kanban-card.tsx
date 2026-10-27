@@ -244,7 +244,7 @@ export function KanbanCard(props: {
                 </Show>
                 <Show when={t().accepted_by}>
                     {(a) => (
-                        <Pill icon="user-check" title={`Accepted by ${a().name} on your word. ${a().said}`}>
+                        <Pill icon="user-check" title={`Accepted by ${a().name}.${a().said ? ` ${a().said}` : ""}`}>
                             {`accepted by ${a().name}`}
                         </Pill>
                     )}

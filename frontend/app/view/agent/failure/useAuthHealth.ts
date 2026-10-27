@@ -123,9 +123,8 @@ export function useAuthHealth(opts: {
     // before it even responds to the RPC (the `COMMAND_LINK_AGENT_IDENTITY`
     // handler in agent_handlers/identity.rs);
     // RPC responses and WS events share one in-order connection, so this
-    // pane's subscription below fires before `bindAccountToAgent`'s own
-    // `SetMetaCommand` — which only runs AFTER that same Link RPC resolves
-    // client-side — has refreshed `cmd:env` to the newly-bound account's
+    // pane's subscription below fires before `agent.account.switch`'s own
+    // `cmd:env` refresh — which srv does right AFTER the link — has refreshed `cmd:env` to the newly-bound account's
     // dir. The very first recheck therefore reads STALE env and fails on
     // essentially every bind, not as an edge case but as the common case —
     // reagentx P1 on PR #2969. Retry ladder lives in recheck-after-bind.ts,

@@ -257,6 +257,11 @@
         "window:showmenubar": {
           "type": "boolean"
         },
+        "window:showstatusbar": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the status bar along the bottom of the window. Default true; set false to hide it. It comes back by itself while the backend is down. The \"Toggle Status Bar\" palette command flips it."
+        },
         "window:nativetitlebar": {
           "type": "boolean"
         },
@@ -697,6 +702,46 @@
           "type": "boolean",
           "default": true,
           "description": "When an agent edits a file another agent on this computer has uncommitted or edited in the last two hours (same repository and path, in any clone), AgentMux sends the editing agent a short [AgentMux] note naming the other agent, so it can message them first. Rate-limited: one note per other agent and file every two hours, three per agent per ten minutes. Set false to turn the notes off. See docs/specs/SPEC_AGENT_OVERLAP_AWARENESS_2026_10_10.md §3.3."
+        },
+        "supervisor:enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "The Swarm Supervisor's master switch. While off, nothing is judged or continued, a pane can't be set to Steady or Drive, and a mode set earlier is not read. Turning it on does not bring back panes that were supervised before it became a setting: they start at Off. See docs/specs/SPEC_SWARM_SECTIONS_SUPERVISOR_SETTINGS_AND_KANBAN_2026_10_24.md §5, §6.2."
+        },
+        "supervisor:steady:continuations": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 5,
+          "description": "Steady: how many continuations in a row the Supervisor sends before it stops and hands the agent back to you. Takes effect at the next decision. See docs/specs/SPEC_SWARM_SECTIONS_SUPERVISOR_SETTINGS_AND_KANBAN_2026_10_24.md §5, §6.2."
+        },
+        "supervisor:steady:minutes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1440,
+          "default": 0,
+          "description": "Steady: stop after this many minutes from a run's first continuation. 0 is no time cap. See docs/specs/SPEC_SWARM_SECTIONS_SUPERVISOR_SETTINGS_AND_KANBAN_2026_10_24.md §5, §6.2."
+        },
+        "supervisor:drive:continuations": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 15,
+          "description": "Drive: how many continuations in a row the Supervisor sends before it stops and hands the agent back to you. Takes effect at the next decision. See docs/specs/SPEC_SWARM_SECTIONS_SUPERVISOR_SETTINGS_AND_KANBAN_2026_10_24.md §5, §6.2."
+        },
+        "supervisor:drive:minutes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1440,
+          "default": 120,
+          "description": "Drive: stop after this many minutes from a run's first continuation. 0 is no time cap. See docs/specs/SPEC_SWARM_SECTIONS_SUPERVISOR_SETTINGS_AND_KANBAN_2026_10_24.md §5, §6.2."
+        },
+        "supervisor:noprogress": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10,
+          "default": 2,
+          "description": "Stop after this many continued turns in a row that used no tool, in either mode. See docs/specs/SPEC_SWARM_SECTIONS_SUPERVISOR_SETTINGS_AND_KANBAN_2026_10_24.md §5, §6.2."
         },
         "kanban:reminders": {
           "type": "boolean",

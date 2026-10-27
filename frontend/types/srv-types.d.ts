@@ -845,6 +845,10 @@ declare global {
         "agent:historySourceBlockId"?: string;
         /** Last classified agent failure; set on error exit, cleared on clean exit. */
         "agent:last_failure"?: import("@/types/rpc/AgentFailure").AgentFailure;
+        /** A switch of the agent's account asked for mid-turn, applied by srv when no pane of the agent is in a
+         *  turn (agent.account.switch, `after_turn`): the account id, and who asked. */
+        "agent:pending_account"?: string;
+        "agent:pending_account_by"?: string;
         /** Messages typed while the agent's model API was unreachable, not yet
          *  sent, and the agent they were typed to. Frontend-only
          *  (view/agent/offline/useOfflineInput.ts). */
@@ -902,6 +906,7 @@ declare global {
         // block remount and names the pane (section-pane.tsx, warden-model.ts).
         "connectors:section"?: "accounts" | "mcp" | "remotes";
         "memory:section"?: "global" | "personal" | "skills" | "bundles";
+        "swarm:section"?: "supervisor" | "broadcast";
         "warden:section"?: "kanban" | "jobs" | "vault" | "host" | "lan" | "internet" | "audit" | "history" | "ambient";
         /** A Kanban task to open in the drawer, set by a link from elsewhere (the Swarm) and cleared once opened. */
         "kanban:open"?: string | null;
@@ -1087,6 +1092,8 @@ declare global {
         "window:reducedmotion"?: boolean;
         "window:tilegapsize"?: number;
         "window:showmenubar"?: boolean;
+        /** Draw the status bar (absent = on). */
+        "window:showstatusbar"?: boolean;
         "window:nativetitlebar"?: boolean;
         "window:disablehardwareacceleration"?: boolean;
         "window:maxtabcachesize"?: number;
@@ -1176,6 +1183,12 @@ declare global {
         "agent:overlapnotes"?: boolean;
         "agent:retryonreconnect"?: boolean;
         "kanban:reminders"?: boolean;
+        "supervisor:enabled"?: boolean;
+        "supervisor:steady:continuations"?: number;
+        "supervisor:steady:minutes"?: number;
+        "supervisor:drive:continuations"?: number;
+        "supervisor:drive:minutes"?: number;
+        "supervisor:noprogress"?: number;
         "agent:mcpselfheal"?: boolean;
         "agent:outdatedidsnotice"?: boolean;
         "agent:transcriptsinglecopy"?: boolean;

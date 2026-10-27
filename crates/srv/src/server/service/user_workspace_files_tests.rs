@@ -10,7 +10,7 @@ use serde_json::json;
 use super::*;
 use crate::backend::obj::Window;
 use crate::server::service::user_workspace_switch::tests::{
-    add_pane, close, closed_list, fresh_state, open_window, shown_by, views, window_rpc, workspace_rpc,
+    add_pane, add_pane_with_meta, close, closed_list, fresh_state, open_window, shown_by, views, window_rpc, workspace_rpc,
 };
 use crate::server::service::user_workspace_switch::wait_for_switch;
 
@@ -202,4 +202,80 @@ fn names_come_from_the_file_and_never_repeat() {
     super::super::user_workspace_switch::insert_workspace(&store, "ops 2").unwrap();
     assert_eq!(unique_name(&store, "Ops"), "Ops 3");
     assert_eq!(unique_name(&store, "Fresh"), "Fresh");
+}
+
+/// The agent panes an import is still waiting to start, across every window it
+/// shows or has waiting to open (`start_agents` looks at the same set).
+fn unstarted_agent_panes(state: &AppState) -> usize {
+    let mut shown = crate::server::service::session_closed::open_workspaces(&state.mstore);
+    shown.extend(crate::server::service::session_windows::waiting_workspaces(&state.mstore));
+    shown.iter().map(|ws| agent_placeholders(&state.mstore, ws).len()).sum()
+}
+
+#[tokio::test]
+async fn an_import_starts_the_agents_of_every_window_not_only_the_first() {
+    let state = fresh_state().await;
+    let main = open_window(&state, "main").await;
+    let mut windows = vec![main.workspaceid.clone()];
+    for i in 2..=4 {
+        windows.push(open_window(&state, &format!("window-{i}")).await.workspaceid);
+    }
+    for (i, ws) in windows.iter().enumerate() {
+        let mut def = crate::backend::storage::agents::test_agent_def(&format!("agent{i}"), &format!("Agent{i}"), "claude", "host", 1, "");
+        state.mstore.agent_def_insert(&mut def).unwrap();
+        add_pane_with_meta(&state, ws, json!({ "view": "agent", "agentId": def.id, "agentName": def.name })).await;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("Four.agentmux-workspace.json");
+    export(&state.mstore, &path.to_string_lossy(), &ctx()).unwrap();
+
+    let (_, notes) = import(&state, &path.to_string_lossy(), None, &main.oid, &trust(dir.path())).await.unwrap();
+    wait_for_switch().await;
+
+    // Whether or not a test host can run the agents, each pane must have been tried:
+    // a pane that was never tried still waits with its definition.
+    assert_eq!(unstarted_agent_panes(&state), notes.len(), "a pane that was never started: {notes:?}");
+    assert!(!notes.is_empty() || unstarted_agent_panes(&state) == 0);
+}
+
+
+#[tokio::test]
+async fn an_agent_with_a_pane_in_a_shown_window_is_not_opened_again_by_the_import() {
+    let state = fresh_state().await;
+    let main = open_window(&state, "main").await;
+    let mut def = crate::backend::storage::agents::test_agent_def("agent0", "Agent0", "claude", "host", 1, "");
+    state.mstore.agent_def_insert(&mut def).unwrap();
+    // The agent already has a pane in the window, and the file asks for it again.
+    add_pane_with_meta(&state, &main.workspaceid, json!({ "view": "agent", "agentId": def.id, "agentName": def.name })).await;
+    add_pane_with_meta(&state, &main.workspaceid, json!({ "view": "agent", layout_file::META_LAYOUT_AGENT: def.id, "agentName": def.name })).await;
+
+    let notes = start_agents(&state).await;
+
+    assert!(notes.iter().any(|n| n.contains("already has a pane") && n.contains("Agent0")), "{notes:?}");
+    assert_eq!(agent_panes_of(&state.mstore, &def.id).len(), 1, "no second pane");
+}
+
+#[tokio::test]
+async fn a_pane_in_the_workspace_an_import_replaced_does_not_block_the_agent() {
+    let state = fresh_state().await;
+    let main = open_window(&state, "main").await;
+    let mut def = crate::backend::storage::agents::test_agent_def("agent0", "Agent0", "claude", "host", 1, "");
+    state.mstore.agent_def_insert(&mut def).unwrap();
+    // A closed workspace's saved pane: no window shows its tab.
+    let mut parked = crate::backend::obj::Tab { oid: uuid::Uuid::new_v4().to_string(), name: "Old".into(), ..Default::default() };
+    state.mstore.insert(&mut parked).unwrap();
+    let mut old_pane = Block {
+        oid: uuid::Uuid::new_v4().to_string(),
+        parentoref: format!("tab:{}", parked.oid),
+        meta: serde_json::from_value(json!({ "view": "agent", "agentId": def.id })).unwrap(),
+        ..Default::default()
+    };
+    state.mstore.insert(&mut old_pane).unwrap();
+    let mut old_ws = crate::backend::obj::Workspace { oid: uuid::Uuid::new_v4().to_string(), name: "Old".into(), tabids: vec![parked.oid.clone()], ..Default::default() };
+    state.mstore.insert(&mut old_ws).unwrap();
+    add_pane_with_meta(&state, &main.workspaceid, json!({ "view": "agent", layout_file::META_LAYOUT_AGENT: def.id, "agentName": def.name })).await;
+
+    let notes = start_agents(&state).await;
+
+    assert!(!notes.iter().any(|n| n.contains("already has a pane")), "{notes:?}");
 }

@@ -21,9 +21,11 @@ mod build_slot;
 mod identity;
 mod instance;
 mod session;
-mod seat;
+pub(crate) mod seat;
 #[cfg(test)]
 mod transcript_write_tests;
+#[cfg(test)]
+mod transcript_key_tests;
 pub(crate) mod bundle;
 mod bash_prefix;
 pub(crate) mod container_turn;

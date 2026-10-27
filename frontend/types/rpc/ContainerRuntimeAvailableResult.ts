@@ -4,4 +4,12 @@
  * Result of `containerruntimeavailable`. Was an inline
  * `json!({ "available": .. })`.
  */
-export type ContainerRuntimeAvailableResult = { available: boolean, };
+export type ContainerRuntimeAvailableResult = { available: boolean, 
+/**
+ * The runtime in use when `available`, e.g. `Podman at unix:///run/user/1000/podman/podman.sock`.
+ */
+runtime?: string, 
+/**
+ * When not `available`: where srv looked and why each place failed.
+ */
+detail?: string, };

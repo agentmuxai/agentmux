@@ -308,10 +308,54 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // meanwhile, or repoint the mirror's `secret_ref`). A failed
                 // write still returns the email.
                 for account in &mut accounts {
+                    let before = account.context.get("email").and_then(|e| e.as_str()).unwrap_or("").to_string();
                     if let Some(email) = crate::identity::account_email::refresh_account_email(account) {
+                        // Another address is another group (the store drops the number the same way).
+                        if !crate::identity::account_numbering::same_email(&before, &email) {
+                            if let Some(ctx) = account.context.as_object_mut() {
+                                ctx.remove("seq");
+                                ctx.remove("seqmax");
+                            }
+                        }
                         for store in [&mstore, &identity_store] {
                             if let Err(e) = store.identity_set_context_email(&account.id, &email) {
                                 tracing::warn!(target: "identity", account_id = %account.id, error = %e, "listidentityaccounts: email backfill write failed");
+                            }
+                        }
+                    }
+                }
+                // #4936 §3.3: give each account that shares a provider and email
+                // with another a number that stays its own. Computed over the
+                // unfiltered list, so a provider filter can't renumber a group.
+                // One allocation at a time, from a fresh read: two overlapping lists must not
+                // both plan the same number, or the one written last renumbers what the first returned.
+                static NUMBERING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+                let _numbering = NUMBERING.lock().unwrap_or_else(|e| e.into_inner());
+                let all = mstore.identity_list(None).unwrap_or_default();
+                for u in crate::identity::account_numbering::numbering_updates(&all) {
+                    for store in [&mstore, &identity_store] {
+                        if let Err(e) = store.identity_set_context_numbering(&u.id, u.seq, u.high) {
+                            tracing::warn!(target: "identity", account_id = %u.id, error = %e, "listidentityaccounts: number write failed");
+                        }
+                    }
+                }
+                // Answer with the numbers as stored now, including any a list that ran just
+                // before this one allocated.
+                let numbered = mstore.identity_list(None).unwrap_or_default();
+                for a in &mut accounts {
+                    let Some(stored) = numbered.iter().find(|n| n.id == a.id) else { continue };
+                    for key in ["seq", "seqmax"] {
+                        match stored.context.get(key) {
+                            Some(v) => {
+                                if !a.context.is_object() {
+                                    a.context = serde_json::json!({});
+                                }
+                                a.context[key] = v.clone();
+                            }
+                            None => {
+                                if let Some(ctx) = a.context.as_object_mut() {
+                                    ctx.remove(key);
+                                }
                             }
                         }
                     }
@@ -841,12 +885,15 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
     let mstore = state.identity_store.clone();
     let broker = state.broker.clone();
+    let (panes, event_bus) = (state.mstore.clone(), state.event_bus.clone());
     engine.register_typed(
         COMMAND_UNLINK_AGENT_IDENTITY,
         move |cmd: CommandUnlinkAgentIdentityData, _ctx| {
             let mstore = mstore.clone();
             let broker = broker.clone();
+            let (panes, event_bus) = (panes.clone(), event_bus.clone());
             async move {
+                let failed = crate::server::account_episodes::failed_panes(&panes, &mstore, &cmd.agent_id, &cmd.provider);
                 let removed = mstore
                     .agent_identity_unlink(&cmd.agent_id, &cmd.provider)
                     .map_err(|e| format!("unlinkagentidentity: {e}"))?;
@@ -860,6 +907,11 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     "identity.unlink: agent-identity link removed (unlinkagentidentity)"
                 );
                 if removed {
+                    // A silent unlink is the first half of a rebind (alias rows), the link that follows
+                    // clears; a real one leaves the agent without an account, so its old limit goes.
+                    if !cmd.silent {
+                        crate::server::account_episodes::after_rebind(&panes, &event_bus, failed, "");
+                    }
                     broker.publish_event_for::<crate::backend::mps_events::AgentIdentitiesChanged>(&cmd.agent_id, &(), vec![], 0);
                     // Spec §3 names unlink alongside delete: a live process
                     // for this agent still holds the unlinked account's

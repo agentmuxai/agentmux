@@ -76,6 +76,7 @@ import type { AgentSortOption } from "./AgentPickerFilterBar";
 import { RuntimeBadge } from "./RuntimeBadge";
 
 import { WpsEvent } from "@/app/store/mps-events";
+import { compareLastUsed } from "../agent-recency";
 /** "type" sort groups Native (stored as "host") before Container before anything
  *  unrecognized, matching `RuntimeBadge`'s own known-runtime ordering —
  *  not alphabetical ("container" < "host" would put Container first, which
@@ -116,7 +117,7 @@ function compareRows(sort: AgentSortOption, a: RecentSessionRow, b: RecentSessio
         }
         case "recent":
         default:
-            return b.started_at - a.started_at;
+            return compareLastUsed(a, b);
     }
 }
 

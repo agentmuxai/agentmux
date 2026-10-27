@@ -20,19 +20,26 @@ use super::{AppState, InjectionRequest};
 /// checks (the peer gave another UID for the name, the pin holds a different
 /// key, the signature does not verify, the pin store cannot be read) is no
 /// longer verified: `lan_verified` becomes `Some(false)`. A request with no v2
-/// at all, or whose peer gave no UID key to check against, is left as v1
-/// decided it: there is nothing to contradict.
-pub(super) fn claim_uid(state: &AppState, req: &mut InjectionRequest, claimed: &str) {
+/// at all is left as v1 decided it, and so is one whose peer gave no UID key
+/// for a name that never gave one: there is nothing to contradict. Once a UID
+/// is pinned under the name, the peer owes its key again: a cache that no
+/// longer holds it is asked afresh (`name_key` must come back unchanged), and
+/// an answer without it fails the jekt rather than fall back to v1.
+pub(super) async fn claim_uid(state: &AppState, req: &mut InjectionRequest, claimed: &str, name_key: &[u8]) {
     if req.lan_verified != Some(true) {
         return;
     }
     let (Some(sig), Some(uid)) = (req.lan_sig_v2.clone(), req.source_uid.clone().filter(|u| !u.is_empty())) else {
         return;
     };
-    let Some((answered_uid, key)) = state.lan_discovery.cached_lan_uid_key(claimed) else {
+    let record = crate::backend::agent_resolve::record_uid_fallback;
+    let Some((answered_uid, key)) = uid_key_owed(state, claimed, name_key).await else {
+        if state.mstore.lan_peer_uid_pin_exists(claimed).unwrap_or(true) {
+            record("m4d.lan_v2_pinned_peer_gave_no_uid_key");
+            req.lan_verified = Some(false);
+        }
         return;
     };
-    let record = crate::backend::agent_resolve::record_uid_fallback;
     if answered_uid != uid {
         record("m4d.lan_v2_other_uid");
         req.lan_verified = Some(false);
@@ -70,6 +77,19 @@ pub(super) fn claim_uid(state: &AppState, req: &mut InjectionRequest, claimed: &
     }
 }
 
+/// The UID key the peer gave beside `claimed`'s name key: the cached answer,
+/// or, when a UID is already pinned under the name and the cache has none, one
+/// fresh ask.
+async fn uid_key_owed(state: &AppState, claimed: &str, name_key: &[u8]) -> Option<(String, Vec<u8>)> {
+    if let Some(answer) = state.lan_discovery.cached_lan_uid_key(claimed) {
+        return Some(answer);
+    }
+    if !state.mstore.lan_peer_uid_pin_exists(claimed).unwrap_or(true) {
+        return None;
+    }
+    state.lan_discovery.refetch_lan_uid_key(claimed, name_key, &state.http_client).await
+}
+
 /// The LAN forward of a jekt from an agent that signed nothing itself. A Codex
 /// agent's jekts arrived at every LAN peer with no signature (so
 /// `TRUST=network-claimed`, however good the receiver's checks) though srv held
@@ -101,14 +121,7 @@ pub(super) fn sign_at_origin(
     let Some(key) = mstore.agent_lan_key_ensure(&signer).ok().and_then(|k| agentmux_common::jekt_sign::decode_key(&k.private_key)) else {
         return req;
     };
-    // The MCP sets both; a sender that did not (a shell's `muxsh agent send`)
-    // gets them here, so the signature has something to cover.
-    let msgid = req.request_id.clone().filter(|m| !m.is_empty()).unwrap_or_else(|| {
-        static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        format!("{}-{}-s{n}", agentmux_common::time::now_ms_u64(), std::process::id())
-    });
-    let ts = req.ts_secs.filter(|t| *t > 0).unwrap_or_else(agentmux_common::time::now_secs);
+    let (msgid, ts) = msgid_and_ts(&req);
     let Some(sig) = agentmux_common::jekt_sign::sign_lan_jekt(&key, &msgid, &signer, &req.target_agent, ts, &req.message) else {
         return req;
     };
@@ -124,6 +137,56 @@ pub(super) fn sign_at_origin(
         }
     }
     tracing::info!(agent_id = %signer, "LAN jekt signed at the origin: the sender's process signed nothing");
+    req
+}
+
+/// The message id and time a signature covers. The MCP sets both; a sender that did not (a shell's
+/// `muxsh agent send`) gets them here, so the signature has something to cover.
+fn msgid_and_ts(req: &InjectionRequest) -> (String, i64) {
+    let msgid = req.request_id.clone().filter(|m| !m.is_empty()).unwrap_or_else(|| {
+        static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        format!("{}-{}-s{n}", agentmux_common::time::now_ms_u64(), std::process::id())
+    });
+    (msgid, req.ts_secs.filter(|t| *t > 0).unwrap_or_else(agentmux_common::time::now_secs))
+}
+
+/// The same-machine, other-instance counterpart of [`sign_at_origin`]: the cross-channel signatures
+/// (`channel_sig`, and `channel_sig_v2` when the sender carried no UID of its own) for an agent whose own
+/// process signed nothing, so the receiving instance still finds a published key's signature on it. The
+/// conditions are `sign_at_origin`'s, and a signature already there is never replaced.
+pub(super) fn channel_sign_at_origin(
+    mstore: &crate::backend::storage::store::Store,
+    caller_uid: &str,
+    mut req: InjectionRequest,
+) -> InjectionRequest {
+    if req.channel_sig.is_some() || req.delivery_tier.as_deref() != Some("host") {
+        return req;
+    }
+    let Some(signer) = crate::server::actor::wan_signer(mstore, caller_uid, &req).map(str::to_string) else {
+        return req;
+    };
+    let Some(key) = mstore.agent_lan_key_ensure(&signer).ok().and_then(|k| agentmux_common::jekt_sign::decode_key(&k.private_key)) else {
+        return req;
+    };
+    let (msgid, ts) = msgid_and_ts(&req);
+    let channel = crate::backend::reactive::registry::local_channel_id();
+    let Some(sig) = agentmux_common::jekt_sign::sign_channel_jekt(&key, &msgid, &signer, &channel, &req.target_agent, ts, &req.message) else {
+        return req;
+    };
+    req.request_id = Some(msgid.clone());
+    req.ts_secs = Some(ts);
+    req.channel_sig = Some(sig);
+    if req.channel_sig_v2.is_none() && req.source_uid.as_deref().is_none_or(str::is_empty) {
+        let uid_key = mstore.agent_uid_keys_ensure(caller_uid).ok().flatten()
+            .and_then(|(keys, _)| agentmux_common::jekt_sign::decode_key(&keys.lan.private_key));
+        if let Some(v2) = uid_key.and_then(|k| agentmux_common::jekt_sign::sign_channel_jekt_v2(&k, &msgid, &signer, caller_uid, &channel, &req.target_agent, ts, &req.message)) {
+            req.source_uid = Some(caller_uid.to_string());
+            req.channel_sig_v2 = Some(v2);
+        }
+    }
+    req.source_channel = Some(channel);
+    tracing::info!(agent_id = %signer, "cross-channel jekt signed at the origin: the sender's process signed nothing");
     req
 }
 

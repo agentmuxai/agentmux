@@ -17,6 +17,10 @@ use agentmux_common::AUTH_KEY_HEADER;
 pub struct SrvRouters {
     pub full: Router,
     pub lan: Router,
+    /// What the Linux container listener serves (`backend::container_listener`): the full
+    /// router behind a guard that admits only container tokens, on container routes, from the
+    /// agents subnet.
+    pub container: Router,
 }
 
 /// Build the full router (see [`build_routers`]).
@@ -210,6 +214,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/agentmux/work/:id/submit", post(work_tasks::handle_work_submit))
         .route("/agentmux/work/:id/hold", post(work_tasks::handle_work_hold))
         .route("/agentmux/work/:id/unhold", post(work_tasks::handle_work_unhold))
+        .route("/agentmux/work/act", post(work_act::handle_work_act))
         // Presence claims and posts to a repository's coordination channel
         // (SPEC_AGENT_COORDINATION_CHANNEL_2026_10_15.md); reading is open.
         .route("/api/v1/work-claims", post(work_claims_handlers::handle_claim_work))
@@ -458,6 +463,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/api/v1/agent/preset/get", get(handle_agent_preset_get))
         .route("/api/v1/agent/identity/accounts", get(handle_agent_identity_accounts))
         .route("/api/v1/agent/identity/validate", post(handle_agent_identity_validate))
+        .route("/api/v1/agent/identity/switch", post(handle_agent_identity_switch))
         // Agent UI automation (SPEC_AGENT_UI_AUTOMATION_CLICK_SCREENSHOT_2026_08_18.md)
         // — proxies to the paired CEF host's browser_api CDP routes. `block_id`
         // is stamped by agentmux-mcp from AGENTMUX_BLOCKID, same trust model as
@@ -546,6 +552,8 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/api/v1/agent/self/fresh", post(app_api::agent_context::handle_fresh_self))
         // An agent reading and editing a definition's extra environment variables.
         .route("/api/v1/agent/env", post(app_api::agent_env::handle_agent_env))
+        // An agent sets or clears seats, several at once; recorded under its name.
+        .route("/api/v1/agent/seats", post(app_api::agent_seats::handle_agent_seats))
         // The outcome of a shutdown waiting on the user's override (§6.5):
         // the MCP tools poll it after their 202.
         // axum 0.7: a path parameter is `:name`; `{name}` would be a literal.
@@ -578,6 +586,9 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // shared registry). Loopback-only by construction: the caller only
         // ever forwards to a `local_url` it already verified is loopback.
         .route("/agentmux/agent/stop", post(handle_agent_stop_forward))
+        // A Job run's timeout or cancel, forwarded to the AgentMux that follows it
+        // (same trust model as the stop forward above).
+        .route(super::jobs_remote_stop::STOP_RUN_PATH, post(super::jobs_remote_stop::handle_jobs_stop_run))
         // A Swarm broadcast's cross-channel forward target
         // (SPEC_SWARM_REMOTE_AGENTS_PLATFORM_TAG_AND_SELECTION_2026_10_03.md §5.2):
         // same trust model as the stop forward above. The caller sends only the
@@ -605,7 +616,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
             get(agent_self_keys::handle_agent_self_keys),
         )
         .route("/agentmux/work", get(work_queue::handle_work_list))
-        // Kanban: a leader's decision on a task in review (signed, not a token).
+        // Kanban: an agent's decision on a task in review (signed, not a token).
         .route("/agentmux/work/:id/accept", post(work_delegate::handle_work_accept))
         .route("/agentmux/work/:id/send_back", post(work_delegate::handle_work_send_back))
         .merge(bus_routes)
@@ -698,8 +709,9 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         None => full,
     };
     let full = full.layer(version_header).layer(cors).with_state(state);
+    let container = crate::backend::container_listener::layer(full.clone(), crate::backend::container_listener::current_subnet);
 
-    SrvRouters { full, lan }
+    SrvRouters { full, lan, container }
 }
 
 /// Serve the built frontend in `dir` for every path no route claims, `/`

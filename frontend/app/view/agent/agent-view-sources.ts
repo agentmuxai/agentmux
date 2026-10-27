@@ -26,6 +26,7 @@ export const AGENT_VIEW_SOURCES: readonly string[] = [
     "components/AgentShellDrawer.tsx",
     "components/AgentBottomPanels.tsx",
     "failure/useAccountBinding.ts",
+    "failure/useAgentAccountBinding.ts",
     "failure/useAuthHealth.ts",
     "agent-media.tsx",
     "hooks/usePaneReveal.ts",

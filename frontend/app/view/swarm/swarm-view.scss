@@ -15,6 +15,31 @@
     overflow: hidden;
 }
 
+// ── Sections ─────────────────────────────────────────────────────────────
+// The section tabs sit under the account strip and take the rest of the pane. Their panel and
+// the body inside it are flex columns with a definite size, so the list scrolls itself and a
+// section's own view (the Kanban's board) can fill the body.
+
+.swarm-view > .swarm-sections {
+    flex: 1 1 0;
+    height: auto;
+}
+
+.swarm-section-panel {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.swarm-section-body {
+    display: flex;
+    flex: 1 1 0;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+}
+
 // ── Loading / empty root ─────────────────────────────────────────────────
 
 .swarm-loading {

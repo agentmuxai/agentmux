@@ -654,6 +654,8 @@ interface AgentComposerStripProps {
      *  the chip only offers it when no turn is running (`loading`) and no
      *  compaction is in progress (`compacting`). */
     onSwitchAccount?: (e: MouseEvent) => void;
+    /** The account a queued switch moves to when the turn ends. */
+    pendingAccountLabel?: string;
 
     /** Cumulative cost/tokens/duration for this pane, shown in the
      *  session-stats popover the context reading opens. */
@@ -841,21 +843,22 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                 render: () => {
                     const authed = () => props.authStatus === "authenticated";
                     const hasOthers = () => !!props.canSwitchAccount && !!props.onSwitchAccount;
-                    // A switch restarts the agent (bindAccountToAgent ends in a
-                    // forced controller resync), which would kill a turn or
-                    // compaction in flight.
+                    // srv holds a switch asked for in a turn until it ends (agent.account.switch).
                     const busy = () => !!props.loading || props.compacting != null;
-                    const canSwitch = () => authed() && hasOthers() && !busy();
-                    const label = () =>
-                        authed() ? (props.authEmail ? shortenEmail(props.authEmail) : "Logged in") : "Not logged in";
+                    const canSwitch = () => hasOthers();
+                    const label = () => {
+                        const base = !authed() ? "Not logged in" : props.authEmail ? shortenEmail(props.authEmail) : "Logged in";
+                        return props.pendingAccountLabel ? `${base} → ${shortenEmail(props.pendingAccountLabel)}` : base;
+                    };
                     const title = () => {
-                        if (!authed()) return "Not signed in — click Log in to continue";
+                        if (!authed()) return hasOthers() ? "Not signed in — click to log in or switch account" : "Not signed in — click Log in to continue";
                         const base = props.authEmail
                             ? `Signed in as ${props.authEmail}`
                             : "Signed in to this agent's provider";
+                        if (props.pendingAccountLabel) return `${base}. Switching to ${props.pendingAccountLabel} when this turn ends.`;
                         if (!hasOthers()) return base;
                         return busy()
-                            ? `${base}. Switching accounts restarts the agent — wait for the current turn to finish.`
+                            ? `${base}. Click to switch account; it takes effect when the current turn ends.`
                             : `${base}. Click to switch account.`;
                     };
                     return (

@@ -23,9 +23,18 @@ pub(super) const ACTS: &[Act] = &[
     // SPEC_KANBAN_AGENTS_HOLD_AND_UNHOLD_2026_10_22.md §3.1.
     Act { action: "hold", tool: "WorkHold", rename: &[] },
     Act { action: "unhold", tool: "WorkUnhold", rename: &[] },
-    // SPEC_KANBAN_ACCEPT_ON_THE_OPERATORS_WORD_2026_10_23.md §4.1.
+    // Any agent decides a task in Review, and makes the Kanban's other moves; each is recorded as the agent.
     Act { action: "accept", tool: "WorkAccept", rename: &[] },
     Act { action: "send_back", tool: "WorkSendBack", rename: &[] },
+    Act { action: "edit", tool: "WorkEdit", rename: &[] },
+    Act { action: "move", tool: "WorkMove", rename: &[] },
+    Act { action: "start", tool: "WorkStart", rename: &[] },
+    Act { action: "answer", tool: "WorkAnswer", rename: &[] },
+    Act { action: "cancel", tool: "WorkCancel", rename: &[] },
+    Act { action: "reopen", tool: "WorkReopen", rename: &[] },
+    Act { action: "retry", tool: "WorkRetry", rename: &[] },
+    Act { action: "take_back", tool: "WorkTakeBack", rename: &[] },
+    Act { action: "reassign", tool: "WorkReassign", rename: &[] },
 ];
 
 pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {

@@ -88,6 +88,17 @@ impl Store {
         }
     }
 
+    /// Replace this agent's signing key with a fresh one, if it has one (none is minted for an agent
+    /// that never had one). The old key signs nothing from then on. `true` when a key was replaced.
+    pub fn agent_jekt_key_rotate(&self, agent_id: &str) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let changed = conn.execute(
+            "UPDATE db_agent_jekt_keys SET hmac_key = ?1, created_at = ?2 WHERE agent_id = ?3",
+            params![BASE64.encode(random_seed_bytes()), now_secs(), agent_id.to_lowercase()],
+        )?;
+        Ok(changed > 0)
+    }
+
     /// Return this agent's signing key, minting and persisting a fresh
     /// random one on first use. Race-safe under concurrent first-use: the
     /// insert is `OR IGNORE`, and the winning row (whichever call actually
@@ -146,6 +157,18 @@ mod tests {
 
     fn object_store() -> Store {
         Store::open(std::path::Path::new(":memory:")).unwrap()
+    }
+
+    #[test]
+    fn rotate_replaces_an_existing_key_and_mints_none() {
+        let store = object_store();
+        assert!(!store.agent_jekt_key_rotate("agentx").unwrap(), "no key, nothing replaced");
+        assert!(store.agent_jekt_key_load("agentx").unwrap().is_none(), "and none minted");
+        let old = store.agent_jekt_key_ensure("agentx").unwrap();
+        assert!(store.agent_jekt_key_rotate("AgentX").unwrap());
+        let new = store.agent_jekt_key_load("agentx").unwrap().unwrap();
+        assert_ne!(old, new);
+        assert_eq!(new.len(), 32);
     }
 
     #[test]

@@ -372,6 +372,30 @@ fn the_ledger_serializes_for_the_pane() {
     assert!(v.get("ended_at_ms").is_none(), "absent, not null");
 }
 
+/// Claude's `result.total_cost_usd` counts the whole session, so a turn's cost is the rise over the
+/// pass before, not the total (a job in a long-lived pane read the session's $220 as its run's).
+#[test]
+fn a_passs_cost_is_the_rise_in_the_sessions_total() {
+    let (t, _, _) = ledger_tracker();
+    let pass = |total: f64| PassStats { output_tokens: 10, cost_usd: total, steps: 1, duration_api_ms: 1 };
+    t.mark_turn_active_from(Some(user("a")));
+    t.end_pass(Some(pass(220.0)));
+    t.mark_turn_active_from(Some(user("b")));
+    t.end_pass(Some(pass(220.5)));
+    let l = t.ledger().unwrap();
+    assert!((l.cost_usd - 0.5).abs() < 1e-9, "the second turn cost the rise, not the total: {}", l.cost_usd);
+    // A restart begins a new session at zero: the next total is all that pass's, even when it
+    // is above the old process's last total.
+    t.note_spawned();
+    t.mark_turn_active_from(Some(user("c")));
+    t.end_pass(Some(pass(300.0)));
+    assert!((t.ledger().unwrap().cost_usd - 300.0).abs() < 1e-9);
+    // And one that starts below it needs no spawn note to be seen.
+    t.mark_turn_active_from(Some(user("d")));
+    t.end_pass(Some(pass(0.25)));
+    assert!((t.ledger().unwrap().cost_usd - 0.25).abs() < 1e-9);
+}
+
 /// A pass's figures belong to its own turn, even when input that opens a
 /// new turn arrives right after its `result` (#4492).
 #[test]
@@ -735,6 +759,7 @@ fn a_task_that_lost_the_race_is_not_credited_to_a_later_continuation() {
 #[test]
 fn a_cli_pass_with_no_task_has_no_trigger() {
     let mut inner = TurnActivityTrackerInner {
+        session_cost_usd: 0.0,
         active_turn: true,
         exit_code: None,
         provenance: None,

@@ -17,6 +17,7 @@ import { agentStateWords, AgentChip } from "./kanban-card";
 import { columnOf, isFinishedColumn, isResearchKind, needsReason, requestedBy } from "./kanban-columns";
 import type { KanbanModel } from "./kanban-model";
 import type { KanbanActRequest, KanbanAgent, KanbanEvent, KanbanTask } from "./kanban-types";
+import { agentsByRecentUse } from "./kanban-agent-order";
 
 const EVENT_WORDS: Record<string, string> = {
     created: "created it",
@@ -113,7 +114,7 @@ export function KanbanDrawer(props: {
                   .map((f) => `Unlocks #${f.num} "${f.title}"`)
                   .join("; ")
             : "";
-    const runningAgents = () => props.agents.filter((a) => a.state !== "stopped" && a.state !== "gone");
+    const runningAgents = () => agentsByRecentUse(props.agents.filter((a) => a.state !== "stopped" && a.state !== "gone"));
 
     const act = async (req: KanbanActRequest) => {
         setBusy(true);
@@ -350,7 +351,7 @@ export function KanbanDrawer(props: {
                                 density="compact"
                                 icon="rotate-left"
                                 disabled={busy()}
-                                title={`${a().name} accepted it on your word. This puts it back in Review.`}
+                                title={`${a().name} accepted it. This puts it back in Review.`}
                                 onClick={() => void act({ action: "reopen", text: text() })}
                             >
                                 Reopen

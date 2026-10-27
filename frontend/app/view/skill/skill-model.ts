@@ -14,6 +14,7 @@
 
 import { createMemo, createSignal, type Accessor } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
+import { sortByLastUsed } from "@/app/view/agent/agent-recency";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { onMuxEvent } from "@/app/store/mps";
 import type { AgentDefinition } from "@/app/store/rpc-api";
@@ -116,7 +117,7 @@ export class SkillCatalogModel {
     async loadAgents(): Promise<void> {
         try {
             const agents = await RpcApi.ListAgentDefinitionsCommand(TabRpcClient);
-            this.setAgents(agents);
+            this.setAgents(sortByLastUsed(agents, (a) => a.name));
         } catch {
             this.setAgents([]);
         }

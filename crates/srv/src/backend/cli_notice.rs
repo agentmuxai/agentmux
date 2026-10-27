@@ -27,6 +27,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 pub const INSTALL_SUBTYPE: &str = "agentmux_cli_install";
+/// Subtype of the frames that say how a container agent's container is coming up.
+pub const CONTAINER_START_SUBTYPE: &str = "agentmux_container_start";
 pub const VERSION_CHANGED_SUBTYPE: &str = "agentmux_cli_version_changed";
 
 /// Per-agent last-run CLI versions, in [`record_dir`] (no schema change: a
@@ -91,6 +93,62 @@ pub fn install_frame(
         "state": state.as_str(),
         "timestamp": chrono::Utc::now().to_rfc3339(),
     });
+    if let Some(s) = seconds {
+        frame["seconds"] = json!((s * 10.0).round() / 10.0);
+    }
+    if let Some(e) = error {
+        frame["error"] = json!(e);
+    }
+    frame
+}
+
+/// Where a container agent's start-up is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContainerStartState {
+    /// The image is being downloaded.
+    Pulling,
+    /// The image is here; the container is being created.
+    Starting,
+    /// The container is up.
+    Ready,
+    Failed,
+}
+
+impl ContainerStartState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Pulling => "pulling",
+            Self::Starting => "starting",
+            Self::Ready => "ready",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+/// An `agentmux_container_start` frame. `start_id` is the same for every frame
+/// of one start-up, so the pane updates one row. `percent` is how much of the
+/// image has arrived, once the daemon has said.
+pub fn container_start_frame(
+    start_id: &str,
+    provider: &str,
+    image: &str,
+    state: ContainerStartState,
+    percent: Option<u8>,
+    seconds: Option<f64>,
+    error: Option<&str>,
+) -> Value {
+    let mut frame = json!({
+        "type": "system",
+        "subtype": CONTAINER_START_SUBTYPE,
+        "start_id": start_id,
+        "provider": provider,
+        "image": image,
+        "state": state.as_str(),
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+    });
+    if let Some(p) = percent {
+        frame["percent"] = json!(p.min(100));
+    }
     if let Some(s) = seconds {
         frame["seconds"] = json!((s * 10.0).round() / 10.0);
     }
@@ -226,6 +284,22 @@ pub fn observe_and_notify(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The pane (`frontend/app/view/agent/cli-notice.ts`) reads these field names.
+    #[test]
+    fn a_container_start_frame_carries_what_the_pane_reads() {
+        let f = container_start_frame("s1", "claude", "img:1", ContainerStartState::Pulling, Some(150), None, None);
+        assert_eq!(f["type"], "system");
+        assert_eq!(f["subtype"], "agentmux_container_start");
+        assert_eq!(f["start_id"], "s1");
+        assert_eq!(f["provider"], "claude");
+        assert_eq!(f["image"], "img:1");
+        assert_eq!(f["state"], "pulling");
+        assert_eq!(f["percent"], 100, "a percentage never reads above 100");
+        assert!(f.get("seconds").is_none() && f.get("error").is_none());
+        let failed = container_start_frame("s1", "claude", "img:1", ContainerStartState::Failed, None, None, Some("why"));
+        assert_eq!((failed["state"].as_str(), failed["error"].as_str()), (Some("failed"), Some("why")));
+    }
 
     #[test]
     fn version_token_finds_the_number() {

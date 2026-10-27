@@ -43,6 +43,9 @@ export function ClaudeLoginPanel(props: {
      *  launch/Stash bind). */
     existingAccountId?: string;
     linkTarget?: { blockId?: string; agentDefinitionId: string };
+    /** Called with the new account's id once it is saved and the sign-in succeeded (the composer's
+     *  "Sign in with another account…" switches the agent to it). */
+    onSignedIn?: (accountId: string) => void;
     /** reagent P0 on PR #2414: set when the row this panel was opened from
      *  carries a legacy-alias provider string (e.g. "claude-code") — a
      *  successful login here links the CANONICAL "claude" provider
@@ -273,6 +276,7 @@ export function ClaudeLoginPanel(props: {
                             });
                         }
                         setDone(true);
+                        props.onSignedIn?.(registeredAccountId);
                     } else {
                         setError("Login completed but the account couldn't be registered. Try again.");
                     }

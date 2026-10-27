@@ -315,6 +315,29 @@ async fn a_job_messaging_its_owner_has_no_message_limit() {
     assert!(rig.ledger.cap_alerts().is_empty());
 }
 
+/// `cancel_other` against a run another channel follows: a replacement the caps
+/// would refuse doesn't cost the old run its turn.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_cancel_other_replacement_the_caps_refuse_does_not_stop_a_run_in_another_channel() {
+    let rig = rig();
+    let asked: Arc<Mutex<Vec<String>>> = Arc::default();
+    let sink = asked.clone();
+    rig.ledger.install_remote_stop(Arc::new(move |stop| sink.lock().unwrap().push(stop.run_id)));
+    let job = make(&rig, "j-msg-remote", 1.0, 20.0, |j| {
+        j.policy.overlap = Overlap::CancelOther;
+        j.policy.caps.as_mut().unwrap().messages_per_day = Some(1);
+    });
+    let first = rig.sched.fire(&job, slot(0)).await.run_id.expect("within the limit");
+    rig.store
+        .job_run_add_links(&first, &serde_json::json!({ "followed_by_channel": "elsewhere", "followed_by_pid": 1 }))
+        .unwrap();
+
+    // The day's one message is spent: the next slot would be refused, so it stops nothing.
+    rig.sched.fire(&job, slot(1)).await;
+    assert!(asked.lock().unwrap().is_empty(), "the old run is left to finish");
+    assert_eq!(rig.store.job_run_get(&first).unwrap().unwrap().state, state::RUNNING);
+}
+
 // ── providers that report no cost ───────────────────────────────────────
 
 #[tokio::test(flavor = "multi_thread")]

@@ -20,6 +20,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { AgentSeat } from "@/types/rpc/AgentSeat";
 import { MAX_AREA_CHARS, MAX_QUALIFIER_CHARS, SEAT_ROLES, type SeatRole } from "../seat-format";
+import { sortByLastUsed } from "../agent-recency";
 import { useAgentList } from "../use-agent-list";
 import { SeatRosterImport } from "./SeatRosterImport";
 import "./AgentPrimitiveModal.scss";
@@ -74,10 +75,10 @@ export const AgentSeatPanel = (props: AgentSeatPanelProps): JSX.Element => {
         ...SEAT_ROLES.map((r) => ({ value: r.value, label: r.label })),
     ];
     const leadOptions = createMemo((): SelectOption[] => {
-        const options = people()
-            .filter((a) => a.id !== props.agentId)
-            .map((a) => ({ value: a.id, label: a.name }))
-            .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: "base" }));
+        const options = sortByLastUsed(
+            people().filter((a) => a.id !== props.agentId),
+            (a) => a.name
+        ).map((a) => ({ value: a.id, label: a.name }));
         const current = lead();
         if (current && !options.some((o) => o.value === current)) {
             options.unshift({ value: current, label: "An agent not on this machine" });

@@ -7,6 +7,7 @@ import { ModalsRenderer } from "@/app/modals/modalsrenderer";
 import { PaneMediaPermissionPrompt } from "@/app/window/pane-media-permission-prompt";
 import { PaneMediaCaptureIndicator } from "@/app/window/pane-media-capture-indicator";
 import { StatusBar } from "@/app/statusbar/StatusBar";
+import { statusBarVisible } from "@/app/statusbar/status-bar-visibility";
 import { WindowHeader } from "@/app/window/window-header";
 import { TabContent } from "@/app/tab/tabcontent";
 import { shouldReduceMotion } from "@/app/motion/motion";
@@ -489,7 +490,9 @@ function WorkspaceElem(): JSX.Element {
                     <PaneMediaCaptureIndicator />
                 </ErrorBoundary>
             </div>
-            <StatusBar />
+            <Show when={statusBarVisible()}>
+                <StatusBar />
+            </Show>
         </div>
     );
 }

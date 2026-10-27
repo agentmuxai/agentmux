@@ -268,6 +268,17 @@ pub struct TurnLedger {
     pub end: Option<TurnEnd>,
 }
 
+impl TurnActivityTrackerInner {
+    /// What a pass cost, given the `total_cost_usd` its `result` reported: the rise over the last
+    /// total. A total below the last is a new process (a restart resumes at zero), so it is all
+    /// this pass's.
+    fn pass_cost(&mut self, total: f64) -> f64 {
+        let cost = if total >= self.session_cost_usd { total - self.session_cost_usd } else { total };
+        self.session_cost_usd = total;
+        cost
+    }
+}
+
 impl TurnLedger {
     fn absorb(&mut self, trigger: Option<TurnTrigger>) {
         if let Some(t) = trigger.filter(|_| self.absorbed.len() < ABSORBED_CAP) {
@@ -450,6 +461,9 @@ impl TurnProvenance {
 }
 
 struct TurnActivityTrackerInner {
+    /// The `total_cost_usd` of the last `result` frame. Claude's figure counts the whole
+    /// session (the process), not the pass, so a pass costs the rise since the one before.
+    session_cost_usd: f64,
     active_turn: bool,
     exit_code: Option<i32>,
     /// What started the CURRENT turn. Cleared on every idle→active flip that
@@ -661,6 +675,7 @@ impl TurnActivityTracker {
         Self {
             block_id,
             inner: Mutex::new(TurnActivityTrackerInner {
+                session_cost_usd: 0.0,
                 active_turn: false,
                 exit_code: None,
                 provenance: None,
@@ -865,6 +880,9 @@ impl TurnActivityTracker {
         let was_active = inner.active_turn;
         inner.active_turn = false;
         let ended = inner.provenance.take();
+        // The session's running total becomes this pass's own cost, whether or not a turn is
+        // open to take it, so the next pass starts from here.
+        let stats = stats.map(|s| PassStats { cost_usd: inner.pass_cost(s.cost_usd), ..s });
         if let (Some(stats), Some(l)) = (stats, inner.ledger.as_mut().filter(|l| l.active)) {
             l.add_stats(stats);
         }
@@ -998,6 +1016,8 @@ impl TurnActivityTracker {
     /// The agent's process was spawned just now.
     pub fn note_spawned(&self) {
         self.spawned_ms.store((self.clock)(), Ordering::Relaxed);
+        // A new process counts its session's cost from zero, whatever the last one reached.
+        self.inner.lock().unwrap().session_cost_usd = 0.0;
     }
 
     /// The agent wrote output just now: a stdout line or a protocol frame.

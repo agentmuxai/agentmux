@@ -7,7 +7,7 @@
 use crate::ambient::digest::TurnEnding;
 use crate::backend::blockcontroller::health::TriggerKind;
 
-use super::{SupervisorDecision, SupervisorMode, SupervisorState, SupervisorStatus, Verdict};
+use super::{Limits, SupervisorDecision, SupervisorMode, SupervisorState, SupervisorStatus, Verdict};
 
 /// What the watcher knows about a turn that just ended.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -106,13 +106,17 @@ pub fn decide(state: &SupervisorState, mode: SupervisorMode, verdict: Option<(Ve
 
 /// Why another continuation would pass a limit, or `None`.
 pub fn limit_reached(state: &SupervisorState, mode: SupervisorMode, facts: &TurnFacts) -> Option<String> {
-    let limits = mode.limits();
+    limit_reached_in(&mode.limits(), state, facts)
+}
+
+/// `limit_reached` under explicit `limits` (the settings, read once).
+pub fn limit_reached_in(limits: &Limits, state: &SupervisorState, facts: &TurnFacts) -> Option<String> {
     if state.continuations >= limits.continuations {
         return Some(format!("{} continuations in a row; over to you.", state.continuations));
     }
     if let Some(run_ms) = limits.run_ms {
         if state.run_started_at_ms > 0 && facts.now_ms.saturating_sub(state.run_started_at_ms) >= run_ms {
-            return Some(format!("Kept going for {} hours; over to you.", run_ms / 3_600_000));
+            return Some(format!("Kept going for {}; over to you.", duration_text(run_ms)));
         }
     }
     if state.no_progress >= limits.no_progress {
@@ -123,6 +127,17 @@ pub fn limit_reached(state: &SupervisorState, mode: SupervisorMode, facts: &Turn
         return Some("It gave the same reply twice.".to_string());
     }
     None
+}
+
+/// "2 hours", "1 hour", "90 minutes": the time cap as a person would say it.
+fn duration_text(ms: u64) -> String {
+    let minutes = ms / 60_000;
+    let plural = |n: u64, unit: &str| format!("{n} {unit}{}", if n == 1 { "" } else { "s" });
+    if minutes >= 60 && minutes % 60 == 0 {
+        plural(minutes / 60, "hour")
+    } else {
+        plural(minutes, "minute")
+    }
 }
 
 /// Record `action` in `state` (status, counters, history).

@@ -764,11 +764,17 @@ pub(crate) async fn run_windows(
                                 pid,
                                 dir.display()
                             ));
+                            // The dump uses a copy of the handle CreateProcess gave this
+                            // launcher: the host refuses other processes the rights it needs.
+                            let host_handle = host_child.raw_handle().and_then(crate::host_hang_dump::copy_handle);
                             // A few MB of I/O: off the supervisor loop.
                             tokio::task::spawn_blocking(move || {
-                                match crate::host_hang_dump::write_hang_dump(pid, &dir) {
+                                match crate::host_hang_dump::write_hang_dump(pid, host_handle, &dir) {
                                     Ok(path) => log(&format!("[host-hang] minidump written: {}", path.display())),
                                     Err(e) => log(&format!("[host-hang] minidump failed: {}", e)),
+                                }
+                                if let Some(h) = host_handle {
+                                    crate::host_hang_dump::close_copy(h);
                                 }
                             });
                         }

@@ -206,6 +206,35 @@ pub(crate) fn open_agent_panes(store: &Store, block_ids: &[String]) -> Vec<Agent
     panes
 }
 
+/// Every pane of the agent whose definition id is `agent_id`, in every
+/// window and tab of this instance, running or not (a pane whose agent has
+/// stopped, a pane in a window nobody is looking at): where it is open, as
+/// [`open_agent_panes`] reports it. `window_ids` is empty for a pane no window
+/// shows. One agent should have one pane; a caller that is about to make one
+/// (an import, a restore, a drag) asks this first and reuses what it finds
+/// instead of creating a second.
+pub(crate) fn agent_panes_of(store: &Store, agent_id: &str) -> Vec<AgentOpenPane> {
+    if agent_id.is_empty() {
+        return Vec::new();
+    }
+    let agent_blocks: Vec<String> = store
+        .get_all::<Block>()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|b| {
+            ["agentId", "agent:id", "view"].iter().any(|k| {
+                let v = obj::meta_get_string(&b.meta, k, "");
+                !v.is_empty() && (*k != "view" || v == "agent")
+            })
+        })
+        .map(|b| b.oid)
+        .collect();
+    open_agent_panes(store, &agent_blocks)
+        .into_iter()
+        .filter(|pane| pane.agent_id == agent_id)
+        .collect()
+}
+
 fn register_agent_kill_process(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let process_tracker = state.process_tracker.clone();
     engine.register_typed(COMMAND_AGENT_KILL_PROCESS, move |cmd: AgentKillProcessCommand, _ctx| {
@@ -462,8 +491,7 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // container branch's field is unused for now.
                     let instance_id = obj::meta_get_string(&block.meta, "agentId", "");
                     if agent_mode == "container" {
-                        let cm = container_manager.get().await
-                            .ok_or_else(|| "Docker not available on this host; cannot start container agent".to_string())?;
+                        let cm = container_manager.get_or_explain().await?;
                         let container_image = obj::meta_get_string(&block.meta, "agent:container_image", "");
                         // Use agentId (UUID) — always valid as a Docker name; display names can have spaces.
                         let agent_id = obj::meta_get_string(&block.meta, "agentId", "");
@@ -475,12 +503,7 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         // builds — see its comment. `CLAUDE_CONFIG_DIR` is a host
                         // path stripped by CONTAINER_ENV_DENYLIST, so mounting it
                         // is the only way the in-container CLI sees credentials.
-                        let mount_spec = crate::backend::container::ContainerMountSpec {
-                            claude_config_host_dir: env_vars
-                            .get("CLAUDE_CONFIG_DIR")
-                            .and_then(|d| crate::backend::container::credentials_dir_if_file_backed(d)),
-                            workspace_host_dir: Some(working_dir.clone()).filter(|d| !d.is_empty()),
-                        };
+                        let mount_spec = crate::backend::container::ContainerMountSpec::for_agent(&env_vars, &working_dir);
 
                         // Same AGENTMUX_LOCAL_URL rewrite the `agentinput` path
                         // does — see its comment (input.rs). Without this a
@@ -499,23 +522,26 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         let agent_provider = obj::meta_get_string(&block.meta, "agentProvider", "claude");
 
                         // Start the container and make sure the provider CLI is
-                        // installed in it; a failure is written to the pane first.
-                        crate::server::agent_handlers::container_turn::prepare(
-                            crate::server::agent_handlers::container_turn::ContainerTurnPrep {
-                                cm: &cm,
-                                block_id: &cmd.block_id,
-                                container_name: &container_name,
-                                image: &container_image,
-                                volumes: &volumes,
-                                mount_spec: &mount_spec,
-                                provider_id: &agent_provider,
-                                container_command: &container_command,
-                                broker: &broker,
-                                filestore: &filestore,
-                                mstore: &mstore,
-                            },
-                        )
-                        .await?;
+                        // installed in it, at the start of the turn's own task
+                        // (see the `agentinput` path); a failure is written to the
+                        // pane.
+                        subprocess_ctrl.set_container_startup(
+                            crate::server::agent_handlers::container_turn::startup_step(
+                                crate::server::agent_handlers::container_turn::ContainerStartup {
+                                    cm: cm.clone(),
+                                    block_id: cmd.block_id.clone(),
+                                    container_name: container_name.clone(),
+                                    image: container_image.clone(),
+                                    volumes: volumes.clone(),
+                                    mount_spec: mount_spec.clone(),
+                                    provider_id: agent_provider.clone(),
+                                    container_command: container_command.clone(),
+                                    broker: broker.clone(),
+                                    filestore: filestore.clone(),
+                                    mstore: mstore.clone(),
+                                },
+                            ),
+                        );
 
 
                         tracing::info!(
@@ -969,6 +995,41 @@ mod open_panes_tests {
         let a3 = panes.iter().find(|p| p.block_id == agent3).expect("main pane listed");
         assert_eq!(a3.tab_name, "Tab 2");
         assert_eq!(a3.window_ids, vec![main_win.oid]);
+    }
+
+    /// Every pane of one agent, wherever it is, and no other agent's.
+    #[test]
+    fn agent_panes_of_finds_all_of_an_agents_panes_and_only_its_own() {
+        let store = Store::open_in_memory().unwrap();
+        let tab_a = insert_tab(&store, "Tab 4");
+        let ws_a = insert_workspace(&store, &[&tab_a.oid]);
+        let win_a = insert_window(&store, &ws_a.oid);
+        let tab_b = insert_tab(&store, "Tab 4");
+        let ws_b = insert_workspace(&store, &[&tab_b.oid]);
+        let win_b = insert_window(&store, &ws_b.oid);
+        // A workspace no window shows.
+        let tab_c = insert_tab(&store, "Parked");
+        insert_workspace(&store, &[&tab_c.oid]);
+
+        let first = insert_block(&store, &tab_a.oid, Some("qtest-def"));
+        let second = insert_block(&store, &tab_b.oid, Some("qtest-def"));
+        let parked = insert_block(&store, &tab_c.oid, Some("qtest-def"));
+        let other = insert_block(&store, &tab_a.oid, Some("korp-def"));
+        insert_block(&store, &tab_a.oid, None);
+
+        let panes = agent_panes_of(&store, "qtest-def");
+        let mut got: Vec<&str> = panes.iter().map(|p| p.block_id.as_str()).collect();
+        got.sort();
+        let mut want = vec![first.as_str(), second.as_str(), parked.as_str()];
+        want.sort();
+        assert_eq!(got, want);
+        assert!(!panes.iter().any(|p| p.block_id == other));
+        let by_block = |id: &str| panes.iter().find(|p| p.block_id == id).unwrap();
+        assert_eq!(by_block(&first).window_ids, vec![win_a.oid]);
+        assert_eq!(by_block(&second).window_ids, vec![win_b.oid]);
+        assert!(by_block(&parked).window_ids.is_empty(), "a pane no window shows is still a pane");
+        assert!(agent_panes_of(&store, "nobody-def").is_empty());
+        assert!(agent_panes_of(&store, "").is_empty());
     }
 
     /// A pane from an older build carries only the legacy `agent:id` key.

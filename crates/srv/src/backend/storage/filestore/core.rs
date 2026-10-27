@@ -1073,10 +1073,7 @@ impl FileStore {
                             params![file.size, file.modts, meta_json, file.zoneid, file.name],
                         )?;
                         for data_entry in entry.data_entries.values() {
-                            tx.execute(
-                                "REPLACE INTO db_file_data (zoneid, name, partidx, data) VALUES (?1, ?2, ?3, ?4)",
-                                params![file.zoneid, file.name, data_entry.part_idx, data_entry.data],
-                            )?;
+                            super::parts::put_part(tx, &file.zoneid, &file.name, data_entry.part_idx, &data_entry.data)?;
                         }
                         Ok(())
                     })?;

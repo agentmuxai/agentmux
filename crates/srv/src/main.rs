@@ -239,6 +239,8 @@ async fn app_main() {
     // Runs are weighed against Settings' spending caps before they start, and
     // stopped when they reach their own (jobs spec §5.3).
     server::job_caps::install(&state, &run_ledger);
+    // A timeout or cancel of a run another channel follows is asked of that channel.
+    server::jobs_remote_stop::install(&state, &run_ledger);
     // A failing job opens one incident for its owner (jobs spec §3.4).
     run_ledger.install_incidents(server::cron::jobs_store(&state));
     {
@@ -386,6 +388,8 @@ async fn app_main() {
     // Claude config dirs get the auto-compact window `agent:compactat` asks for.
     backend::providers::install_config(Arc::clone(&state.config_watcher));
     backend::context_reading::install_config(Arc::clone(&state.config_watcher));
+    // The Supervisor's switch and limits are read live from the settings.
+    backend::supervisor::settings::install_config(Arc::clone(&state.config_watcher));
     backend::transcript::framer::install_config(Arc::clone(&state.config_watcher));
     backend::transcript::damage::install_broker(Arc::clone(&state.broker));
     // The open workspace saves itself as it changes (SPEC_WORKSPACES_2026_10_23.md §4.1).
@@ -405,6 +409,7 @@ async fn app_main() {
         Arc::clone(&state.config_watcher),
     );
     let routers = build_routers(state);
+    backend::container_listener::set_router(routers.container);
     let router = routers.full;
 
     // Native dev-proxy (docs/specs/SPEC_NATIVE_CONTAINER_DEV_PROXY_2026_09_19.md)
