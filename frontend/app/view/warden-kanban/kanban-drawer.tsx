@@ -16,6 +16,7 @@ import { agentStateWords, AgentChip } from "./kanban-card";
 import { columnOf, isFinishedColumn, isResearchKind, needsReason, requestedBy } from "./kanban-columns";
 import type { KanbanModel } from "./kanban-model";
 import type { KanbanActRequest, KanbanAgent, KanbanEvent, KanbanTask } from "./kanban-types";
+import { agentsByRecentUse } from "./kanban-agent-order";
 
 const EVENT_WORDS: Record<string, string> = {
     created: "created it",
@@ -112,7 +113,7 @@ export function KanbanDrawer(props: {
                   .map((f) => `Unlocks #${f.num} "${f.title}"`)
                   .join("; ")
             : "";
-    const runningAgents = () => props.agents.filter((a) => a.state !== "stopped" && a.state !== "gone");
+    const runningAgents = () => agentsByRecentUse(props.agents.filter((a) => a.state !== "stopped" && a.state !== "gone"));
 
     const act = async (req: KanbanActRequest) => {
         setBusy(true);

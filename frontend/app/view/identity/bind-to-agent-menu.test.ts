@@ -156,6 +156,21 @@ describe("computeBindCandidates", () => {
         expect(out[0].runningBlockId).toBe("block-r");
     });
 
+    it("within running and idle, puts the most recently used agent first", () => {
+        const agents = [
+            mkAgent({ id: "a", name: "Alpha", updated_at: 100 }),
+            mkAgent({ id: "z", name: "Zeta", updated_at: 300 }),
+            mkAgent({ id: "r1", name: "RunOld", updated_at: 50 }),
+            mkAgent({ id: "r2", name: "RunNew", updated_at: 400 }),
+        ];
+        const open = new Map([
+            ["r1", "block-1"],
+            ["r2", "block-2"],
+        ]);
+        const out = computeBindCandidates(mkAccount(), agents, NO_LINKS, open, NO_NAMES);
+        expect(out.map((c) => c.agentName)).toEqual(["RunNew", "RunOld", "Zeta", "Alpha"]);
+    });
+
     // #2594 — the optional resolver param lets a caller offer/filter by
     // an agent's EFFECTIVE (bundle-resolved) provider instead of the
     // possibly-drifted `agent.provider` column, without breaking every

@@ -19,6 +19,7 @@ import {
     type PillTone,
     type SelectOption,
 } from "@/app/element/ui";
+import { sortByLastUsed } from "@/app/view/agent/agent-recency";
 import { useAgentList } from "@/app/view/agent/use-agent-list";
 import { refreshVault, vaultAvailable, vaultEntries } from "@/app/view/vault/vault-store";
 import type { CapDefaults } from "@/types/rpc/CapDefaults";
@@ -73,7 +74,7 @@ export function JobEditor(props: {
 
     const manifest = createMemo(() => templates().find((t) => t.id === draft.template?.id)?.manifest ?? null);
     const agentOptions = createMemo<SelectOption[]>(() =>
-        (agents() ?? []).filter((a) => !a.is_seeded).map((a) => ({ value: a.id, label: a.name }))
+        sortByLastUsed((agents() ?? []).filter((a) => !a.is_seeded), (a) => a.name).map((a) => ({ value: a.id, label: a.name }))
     );
     const nameOf = (id: string) => agentOptions().find((o) => o.value === id)?.label ?? id;
     const vault = () => (vaultAvailable() ? (vaultEntries() ?? []) : null);

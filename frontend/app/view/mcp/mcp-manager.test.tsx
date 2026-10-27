@@ -102,8 +102,9 @@ const OBSERVED = [
 ];
 
 const AGENTS = [
-    { id: "a1", name: "Korp" },
-    { id: "a2", name: "AgentY" },
+    // The bind picker lists the most recently used agent first.
+    { id: "a1", name: "Korp", updated_at: 200 },
+    { id: "a2", name: "AgentY", updated_at: 100 },
 ];
 
 async function renderManager() {

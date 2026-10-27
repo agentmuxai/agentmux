@@ -10,6 +10,7 @@
 // future surface share one implementation.
 
 import { RpcApi } from "@/app/store/rpc-api";
+import { lastUsedMs } from "@/app/view/agent/agent-recency";
 import { MENU_ICON } from "@/app/util/menu-icons";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { MOS, workspace } from "@/app/store/global";
@@ -32,6 +33,8 @@ export interface BindCandidate {
     boundHere: boolean;
     /** Name of the different account currently bound for this provider, if any. */
     boundElsewhereName: string | null;
+    /** When the agent was last used (`lastUsedMs`), the order within each group. */
+    lastUsedMs?: number;
 }
 
 /**
@@ -43,7 +46,7 @@ export interface BindCandidate {
  *    canonicalizes to the account's — alias-canonicalized on BOTH sides
  *    (the codex-P1-on-#2377 bug class);
  *  - service accounts (github/aws/… api-key class) offer every agent;
- *  - running agents (open pane) sort first, then by name.
+ *  - running agents (open pane) sort first, then most recently used first (agent-recency.ts), then by name.
  */
 export function computeBindCandidates(
     account: Account,
@@ -91,6 +94,7 @@ export function computeBindCandidates(
             runningBlockId: openDefinitions.get(agent.id) ?? null,
             boundHere,
             boundElsewhereName,
+            lastUsedMs: lastUsedMs(agent),
         });
     }
 
@@ -98,7 +102,7 @@ export function computeBindCandidates(
         const runA = a.runningBlockId != null ? 0 : 1;
         const runB = b.runningBlockId != null ? 0 : 1;
         if (runA !== runB) return runA - runB;
-        return a.agentName.localeCompare(b.agentName);
+        return (b.lastUsedMs ?? 0) - (a.lastUsedMs ?? 0) || a.agentName.localeCompare(b.agentName);
     });
     return candidates;
 }
