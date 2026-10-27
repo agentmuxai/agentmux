@@ -334,7 +334,9 @@ pub(crate) fn send_message_outcome(to: &str, result: &Value) -> Result<String> {
     // recoverable (the receiver signs in). srv now holds it (`needs_login`
     // above); this answer remains for an older srv, a cron sender or a
     // non-host tier, which are not held.
-    if err.starts_with("identity spawn gate") {
+    if err.starts_with("identity spawn gate")
+        || (result.get("refused_reason").and_then(|v| v.as_str()) == Some("needs_login") && !err.starts_with("agent unavailable: "))
+    {
         anyhow::bail!(
             "Message delivery failed (needs_login): {to}'s agent cannot start because it is not \
              signed in, and the message was NOT kept. Send it again after they sign in. ({err})"
@@ -346,7 +348,13 @@ pub(crate) fn send_message_outcome(to: &str, result: &Value) -> Result<String> {
     // An agent out of quota or signed out, where it can't be held (a LAN or
     // cross-channel hop): srv's `UNAVAILABLE_PREFIX`.
     if let Some(why) = err.strip_prefix("agent unavailable: ") {
-        let retry = if why.ends_with(" needs to sign in again") {
+        // What ends the wait is data in the answer (`retry_when`); a srv from before it
+        // is read from the wording.
+        let signs_in = match result.get("retry_when").and_then(|v| v.as_str()) {
+            Some(when) => when == "sign_in",
+            None => why.ends_with(" needs to sign in again"),
+        };
+        let retry = if signs_in {
             "after they sign in".to_string()
         } else {
             format!("when {to} can work (an account move or the reset)")

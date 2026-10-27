@@ -742,7 +742,7 @@ pub(crate) async fn deliver(
         if let Some(held) = hold_for_absent_target(state, auth_via, &req, &resp, HoldReason::NeedsLogin, &mut replay).await {
             return held;
         }
-        return serde_json::to_value(&resp).unwrap_or_default();
+        return super::jekt_hold::needs_login_refusal(serde_json::to_value(&resp).unwrap_or_default());
     }
 
     // 2. On "agent not found", check cross-instance file registry and forward.
