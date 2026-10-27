@@ -76,6 +76,19 @@ impl Drop for TimedConn<'_> {
     }
 }
 
+/// Which part of a slow write took longest: `begin` waits for the write lock (another srv
+/// instance holds it: the global store is one file for every instance), `body` is the work
+/// inside the transaction, `commit` waits for the disk.
+pub(super) fn slowest_phase(begin: std::time::Duration, body: std::time::Duration, commit: std::time::Duration) -> &'static str {
+    if begin >= body && begin >= commit {
+        "begin"
+    } else if commit >= body {
+        "commit"
+    } else {
+        "body"
+    }
+}
+
 /// `user_version` value stamped into the GLOBAL transcript store
 /// (`shared/agents/transcripts/filestore.db`) by builds that bundle SQLite 3.51.3
 /// or later. The schema is the same as [`FILESTORE_SCHEMA_VERSION`]'s; the number
@@ -386,9 +399,25 @@ impl FileStore {
         let site = std::panic::Location::caller();
         super::off_worker::off_worker(|| {
             let mut conn = self.lock_conn_at(site);
+            let began = std::time::Instant::now();
             let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let begun = began.elapsed();
+            let ran = std::time::Instant::now();
             let out = f(&tx)?;
+            let ran = ran.elapsed();
+            let committing = std::time::Instant::now();
             tx.commit()?;
+            let committed = committing.elapsed();
+            if begun + ran + committed >= SLOW_CONN {
+                tracing::warn!(
+                    site = %site,
+                    begin_ms = begun.as_millis() as u64,
+                    body_ms = ran.as_millis() as u64,
+                    commit_ms = committed.as_millis() as u64,
+                    slowest = slowest_phase(begun, ran, committed),
+                    "filestore: write transaction was slow"
+                );
+            }
             Ok(out)
         })
     }
