@@ -32,6 +32,9 @@ const WARN_EVERY: Duration = Duration::from_secs(3600);
 const RETRY_AFTER: Duration = Duration::from_secs(30 * 60);
 /// Unix seconds before which no warning is tried.
 static NEXT_TRY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// How long a finished task's cleanup waits for another srv's pass, and how often it looks.
+const TASK_LOCK_WAIT: Duration = Duration::from_secs(15 * 60);
+const LOCK_POLL: Duration = Duration::from_millis(500);
 /// How many agents with the largest build folders hear of a warning.
 const WARN_AGENTS: usize = 3;
 
@@ -100,6 +103,26 @@ fn may_clean(s: &Start) -> bool {
 fn host_lock() -> Option<std::fs::File> {
     let path = dirs::home_dir()?.join(".agentmux").join("shared").join("locks").join("build-cache-clean.lock");
     try_lock_file(&path)
+}
+
+/// [`host_lock`], waiting up to `wait` for the srv that holds it: for work only this pass does
+/// (an agent's finished task), which the holder's pass does not cover and nothing repeats.
+fn host_lock_within(wait: Duration) -> Option<std::fs::File> {
+    let path = dirs::home_dir()?.join(".agentmux").join("shared").join("locks").join("build-cache-clean.lock");
+    lock_file_within(&path, wait)
+}
+
+fn lock_file_within(path: &Path, wait: Duration) -> Option<std::fs::File> {
+    let deadline = std::time::Instant::now() + wait;
+    loop {
+        if let Some(file) = try_lock_file(path) {
+            return Some(file);
+        }
+        if std::time::Instant::now() >= deadline {
+            return None;
+        }
+        std::thread::sleep(LOCK_POLL);
+    }
 }
 
 fn try_lock_file(path: &Path) -> Option<std::fs::File> {
@@ -367,7 +390,10 @@ pub fn agent_task_done(mstore: Arc<Store>, config: Arc<ConfigState>, agent: Stri
         if mine.is_empty() {
             return;
         }
-        let Some(_one_at_a_time) = host_lock() else { return };
+        let Some(_one_at_a_time) = host_lock_within(TASK_LOCK_WAIT) else {
+            tracing::warn!(agent = %agent, "build cache: task cleanup skipped, another srv kept the host lock for too long");
+            return;
+        };
         let log = bc::log_path();
         let busy = fresh_busy_check;
         let mut seen: Vec<PathBuf> = Vec::new();
@@ -526,6 +552,20 @@ mod tests {
         assert!(try_lock_file(&path).is_none(), "a second srv waits for the next pass");
         drop(first);
         assert!(try_lock_file(&path).is_some(), "free again once the pass is done");
+    }
+
+    #[test]
+    fn a_finished_tasks_cleanup_waits_for_the_pass_that_holds_the_lock() {
+        let t = tempfile::tempdir().unwrap();
+        let path = t.path().join("build-cache-clean.lock");
+        let held = try_lock_file(&path).unwrap();
+        assert!(lock_file_within(&path, Duration::from_millis(50)).is_none(), "gives up when the pass outlasts the wait");
+        let releaser = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(200));
+            drop(held);
+        });
+        assert!(lock_file_within(&path, Duration::from_secs(10)).is_some(), "takes the lock once the pass is done");
+        releaser.join().unwrap();
     }
 
     #[test]
