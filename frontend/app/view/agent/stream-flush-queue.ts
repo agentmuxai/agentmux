@@ -173,6 +173,19 @@ export interface StreamFlushQueue {
 }
 
 /**
+ * A flush of start-up rows (a container coming up, a CLI install) for a pane with no turn waiting on
+ * them. They are not the model working: a container agent's container is started before its first
+ * message, and the pane must not read "Working…" (and queue what the user types) for that. With a turn
+ * submitted or streaming they still count, so a long image pull is not taken for a hung turn.
+ */
+function idleNoticeOnly(model: AgentPaneModel, added: DocumentNode[], updated: DocumentNode[], other: number): boolean {
+    const phase = model.state?.turnPhase?.kind;
+    if (phase == null || phase === "Submitting" || phase === "Streaming" || phase === "Interrupting") return false;
+    const nodes = [...added, ...updated];
+    return other === 0 && nodes.length > 0 && nodes.every((n) => n.type === "cli_notice");
+}
+
+/**
  * Build one flush queue for a mounted `useAgentStream` instance. `model` is
  * the per-pane dispatch handle — all six pending buffers below are wrapped
  * into ONE `batch()` and dispatched through it, in the documented order:
@@ -265,10 +278,11 @@ export function createStreamFlushQueue(model: AgentPaneModel): StreamFlushQueue 
                 // never dispatches; the gap was that a shell-output-only flush
                 // is empty AS FAR AS THE TURN IS CONCERNED and still did.
                 turnRelevant:
-                    batchNew.length > 0
-                    || batchUpdates.length > 0
-                    || batchChunks.length > 0
-                    || batchShellCreates.length > 0,
+                    (batchNew.length > 0
+                        || batchUpdates.length > 0
+                        || batchChunks.length > 0
+                        || batchShellCreates.length > 0)
+                    && !idleNoticeOnly(model, batchNew, batchUpdates, batchChunks.length + batchShellCreates.length),
             });
         });
     }
