@@ -704,7 +704,7 @@ export interface SessionOutcomeNode {
 export interface CliNoticeNode {
     type: "cli_notice";
     id: string;
-    kind: "install" | "version_changed" | "compaction_failed" | "mcp_health";
+    kind: "install" | "version_changed" | "compaction_failed" | "mcp_health" | "container_start";
     /** Provider id, e.g. `"claude"`. */
     provider: string;
     /** `install`: the version being installed. */
@@ -719,6 +719,12 @@ export interface CliNoticeNode {
     to?: string;
     /** `version_changed`: the version AgentMux pins, when known. */
     pinned?: string | null;
+    /** `container_start`: where a container agent's start-up is. */
+    startState?: "pulling" | "starting" | "ready" | "failed";
+    /** `container_start`, while `pulling`: how much of the image has arrived, once the daemon has said. */
+    percent?: number;
+    /** `container_start`: the image being started. */
+    image?: string;
     /** `mcp_health`: where the repair of the agent's AgentMux MCP server is. */
     mcpState?: "healing" | "restarting" | "ok" | "gave_up";
     /** `mcp_health`, while `healing`: which reconnect. */

@@ -17,6 +17,10 @@
 //! Independence boundary: this module has no dependency on a5af/claw.
 //! Docker best practices here were researched independently.
 
+mod pull;
+mod reap;
+pub use self::pull::{StartEvent, StartObserver};
+
 use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -31,14 +35,13 @@ use bollard::container::{
     StopContainerOptions,
 };
 use bollard::exec::{CreateExecOptions, StartExecOptions, StartExecResults};
-use bollard::image::CreateImageOptions;
 use bollard::models::{ContainerInspectResponse, HostConfig, Mount, MountTypeEnum};
 use crate::backend::container_cli::{
     check_says_present, install_failure_detail, reap_argv, reap_says_gone, CliInstall, InstallLimits,
 };
 use crate::backend::container_image::{CONTAINER_CLI_DIR,
-    classify_pull_error, cli_install_failure_message, docker_error_message, docker_unreachable_message, is_legacy_agent_image,
-    looks_like_daemon_unreachable, pull_failure_message, PullFailure, DEFAULT_AGENT_IMAGE,
+    cli_install_failure_message, docker_error_message, docker_unreachable_message,
+    looks_like_daemon_unreachable, pull_failure_message, PullFailure,
 };
 
 /// Where the agent CLI's config dir lives inside the image (`CLAUDE_CONFIG_DIR`).
@@ -509,13 +512,18 @@ impl ContainerManager {
     /// are detected. Concurrent calls for the **same** `container_name` are
     /// serialized via a per-container mutex. Concurrent calls for **different**
     /// containers proceed in parallel.
-    pub async fn ensure_running(
+    ///
+    /// `observe` is told about the steps that take long enough for a person to
+    /// wonder: downloading the image (with how far it has got) and creating the
+    /// container. Nothing is reported when the container is already up.
+    pub async fn ensure_running_observed(
         &self,
         container_name: &str,
         image: &str,
         volumes: &[String],
         env_vars: &[(String, String)],
         spec: &ContainerMountSpec,
+        observe: StartObserver<'_>,
     ) -> Result<(), ContainerError> {
         // Acquire the per-container serialization lock before touching Docker.
         // Concurrent callers for the same container_name queue here; once the
@@ -529,7 +537,7 @@ impl ContainerManager {
         };
         let guard = container_lock.lock().await;
 
-        let result = self.ensure_running_locked(container_name, image, volumes, env_vars, spec).await;
+        let result = self.ensure_running_locked(container_name, image, volumes, env_vars, spec, observe).await;
 
         // Release the per-container lock, then evict its map entry when no other
         // caller is queued on it — otherwise `ensure_locks` grows unbounded (one
@@ -560,6 +568,7 @@ impl ContainerManager {
         volumes: &[String],
         env_vars: &[(String, String)],
         spec: &ContainerMountSpec,
+        observe: StartObserver<'_>,
     ) -> Result<(), ContainerError> {
         // Always query Docker — do not rely on an in-memory cache. The container
         // can be stopped or removed externally (e.g. `docker rm -f`), and a
@@ -602,8 +611,9 @@ impl ContainerManager {
                 // has the image locally. Unlike `docker run`, the Engine's
                 // create_container does NOT auto-pull — it returns 404 if the image
                 // is absent. pull_image is a no-op when the image already exists.
-                let image = self.pull_with_fallback(image).await?;
+                let image = self.pull_with_fallback(image, observe).await?;
                 // Create and start.
+                observe(StartEvent::Starting);
                 self.create_and_start(container_name, &image, volumes, env_vars, spec).await?;
                 tracing::info!(container = container_name, image = image, "created and started container");
             }
@@ -1028,9 +1038,11 @@ impl ContainerManager {
 
         tracing::info!(container = container_name, command = %install.command, specs = ?install.specs, "installing the provider CLI in the container");
         let started = std::time::Instant::now();
+        let reaper = reap::ReapOnDrop::new(self, container_name);
         let run = self
             .exec_collect(container_name, &install.install_argv(limits), limits.run)
             .await?;
+        reaper.disarm();
         if run.exit == Some(0) {
             self.inner.cli_ready.lock().await.insert(key.to_string());
             return Ok(CliProvision::Installed { seconds: started.elapsed().as_secs_f64() });
@@ -1285,72 +1297,9 @@ impl ContainerManager {
         Ok(None)
     }
 
-    /// Pull `image`; a legacy image that the registry refuses or no longer has
-    /// is replaced by the public base image. Returns the image to run.
-    async fn pull_with_fallback(&self, image: &str) -> Result<String, ContainerError> {
-        match self.pull_image(image).await {
-            Ok(()) => Ok(image.to_string()),
-            Err(ContainerError::ImagePull { kind, .. }) if kind.is_unavailable_image() && is_legacy_agent_image(image) => {
-                tracing::warn!(
-                    image = image,
-                    fallback = DEFAULT_AGENT_IMAGE,
-                    "legacy agent image can't be pulled; using the public base image"
-                );
-                self.pull_image(DEFAULT_AGENT_IMAGE).await?;
-                Ok(DEFAULT_AGENT_IMAGE.to_string())
-            }
-            Err(e) => Err(e),
-        }
-    }
-
     /// Whether the daemon already has `image`.
     pub async fn has_image_locally(&self, image: &str) -> bool {
         self.inner.docker.inspect_image(image).await.is_ok()
-    }
-
-    /// Pull `image` via the Docker socket (create_image API).
-    ///
-    /// Streams the pull response to completion before returning. If the image is
-    /// already present locally, Docker returns an empty stream immediately — this
-    /// function treats that as success (no pull needed).
-    ///
-    /// Errors only on genuine pull failures (network, auth, no such image).
-    async fn pull_image(&self, image: &str) -> Result<(), ContainerError> {
-        // Skip the pull entirely when the image is already present locally.
-        // `create_image` always contacts the registry, so on an offline host the
-        // pull stream errors out even when the image is cached — aborting
-        // container creation even though `docker run` would start it from the
-        // local cache. An `inspect_image` short-circuit makes the cached-offline
-        // path work (and avoids a redundant registry round-trip when online).
-        if self.inner.docker.inspect_image(image).await.is_ok() {
-            tracing::info!(image = image, "image already present locally; skipping pull");
-            return Ok(());
-        }
-
-        tracing::info!(image = image, "pulling image (not cached locally)");
-        let mut stream = self.inner.docker.create_image(
-            Some(CreateImageOptions {
-                from_image: image,
-                ..Default::default()
-            }),
-            None,
-            None,
-        );
-        while let Some(item) = stream.next().await {
-            match item {
-                Ok(info) => {
-                    if let Some(status) = info.status {
-                        tracing::debug!(image = image, status = %status, "pull progress");
-                    }
-                }
-                Err(e) => {
-                    tracing::warn!(image = image, error = %e, "image pull error");
-                    return Err(pull_error(image, &e));
-                }
-            }
-        }
-        tracing::info!(image = image, "image pull complete (or already cached)");
-        Ok(())
     }
 
     async fn create_and_start(
@@ -1549,20 +1498,6 @@ fn cli_dir_mount(container_name: &str) -> Mount {
     }
 }
 
-/// Map a bollard pull error to [`ContainerError::ImagePull`].
-fn pull_error(image: &str, e: &bollard::errors::Error) -> ContainerError {
-    let status = match e {
-        bollard::errors::Error::DockerResponseServerError { status_code, .. } => Some(*status_code),
-        _ => None,
-    };
-    let detail = e.to_string();
-    ContainerError::ImagePull {
-        image: image.to_string(),
-        kind: classify_pull_error(status, &detail),
-        detail,
-    }
-}
-
 /// Derive the stable container name for an agent from its slug.
 /// Format: `agentmux-<slug>`. Deterministic so restarts reuse the same container.
 pub fn container_name_for_slug(slug: &str) -> String {
@@ -1617,6 +1552,7 @@ fn parse_volume_spec(spec: &str) -> Option<(&str, &str, bool)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use {super::pull::pull_error, crate::backend::container_image::DEFAULT_AGENT_IMAGE};
 
     #[test]
     fn test_container_name_for_slug() {
@@ -1940,9 +1876,9 @@ mod tests {
         let _ = cm.remove(name, true).await; // clean slate; ignore if absent
 
         // create path: pull + create + start
-        cm.ensure_running(name, image, &[], &[], &ContainerMountSpec::default()).await.expect("ensure_running (create)");
+        cm.ensure_running_observed(name, image, &[], &[], &ContainerMountSpec::default(), &|_| {}).await.expect("ensure_running (create)");
         // reuse path: already running → must no-op, not error or re-create
-        cm.ensure_running(name, image, &[], &[], &ContainerMountSpec::default()).await.expect("ensure_running (reuse)");
+        cm.ensure_running_observed(name, image, &[], &[], &ContainerMountSpec::default(), &|_| {}).await.expect("ensure_running (reuse)");
 
         // env reaches the in-container process via the Docker socket, not argv.
         // Drop the (unused) stdin half first: bollard's exec output stream does
@@ -2058,7 +1994,7 @@ mod tests {
         let _ = cm.remove(name, true).await;
         let _ = cm.inner.docker.remove_volume(&format!("agentmux-cli-{name}"), None).await;
         let _ = cm.inner.docker.remove_volume(&format!("agentmux-claude-{name}"), None).await;
-        cm.ensure_running(name, &image, &[], &[], &ContainerMountSpec::default()).await.expect("ensure_running");
+        cm.ensure_running_observed(name, &image, &[], &[], &ContainerMountSpec::default(), &|_| {}).await.expect("ensure_running");
         let install = CliInstall::for_provider("claude", "claude").unwrap();
 
         // The host gives up after 3 s; the script's own limit is far away, so
@@ -2100,7 +2036,7 @@ mod tests {
         // The script's own limit is the other path: it kills npm itself.
         let _ = cm.remove(name, true).await;
         let _ = cm.inner.docker.remove_volume(&format!("agentmux-cli-{name}"), None).await;
-        cm.ensure_running(name, &image, &[], &[], &ContainerMountSpec::default()).await.expect("recreate");
+        cm.ensure_running_observed(name, &image, &[], &[], &ContainerMountSpec::default(), &|_| {}).await.expect("recreate");
         let script_limited = InstallLimits {
             run: std::time::Duration::from_secs(300),
             script: std::time::Duration::from_secs(2),
@@ -2128,11 +2064,11 @@ mod tests {
 
         let legacy_but_absent = "ghcr.io/agentmuxai/agent-claude:itest-no-such-tag";
         assert!(!cm.has_image_locally(legacy_but_absent).await);
-        let chosen = cm.pull_with_fallback(legacy_but_absent).await.expect("fallback");
+        let chosen = cm.pull_with_fallback(legacy_but_absent, &|_| {}).await.expect("fallback");
         assert_eq!(chosen, DEFAULT_AGENT_IMAGE);
 
         // A custom image gets no fallback: its refusal is reported as it is.
-        let err = cm.pull_with_fallback("ghcr.io/agentmuxai/agent-claude-not-legacy:itest").await.unwrap_err();
+        let err = cm.pull_with_fallback("ghcr.io/agentmuxai/agent-claude-not-legacy:itest", &|_| {}).await.unwrap_err();
         assert!(matches!(err, ContainerError::ImagePull { kind: PullFailure::Denied, .. }), "{err:?}");
         println!("{}", err.user_message());
     }
@@ -2155,7 +2091,7 @@ mod tests {
         let _ = cm.inner.docker.remove_volume(&format!("agentmux-cli-{name}"), None).await;
         let _ = cm.inner.docker.remove_volume(&format!("agentmux-claude-{name}"), None).await;
 
-        cm.ensure_running(name, &image, &[], &[], &ContainerMountSpec::default()).await.expect("ensure_running");
+        cm.ensure_running_observed(name, &image, &[], &[], &ContainerMountSpec::default(), &|_| {}).await.expect("ensure_running");
         let install = CliInstall::for_provider("claude", "claude").unwrap();
 
         let mut announced = 0;
@@ -2188,7 +2124,7 @@ mod tests {
 
         // The container is recreated (an image update, say): the volume keeps the install.
         cm.remove(name, true).await.expect("remove");
-        cm.ensure_running(name, &image, &[], &[], &ContainerMountSpec::default()).await.expect("recreate");
+        cm.ensure_running_observed(name, &image, &[], &[], &ContainerMountSpec::default(), &|_| {}).await.expect("recreate");
         let recreated = cm.provision_cli(name, &install, || announced += 1).await.expect("provision after recreate");
         assert_eq!(recreated, CliProvision::Present);
         assert_eq!(announced, 1, "the volume survives the container");
@@ -2222,7 +2158,7 @@ mod tests {
         let registry = crate::backend::dev_proxy::DevProxyRegistry::new();
         cm.attach_dev_proxy_registry(registry.clone());
 
-        cm.ensure_running(name, image, &[], &[], &ContainerMountSpec::default())
+        cm.ensure_running_observed(name, image, &[], &[], &ContainerMountSpec::default(), &|_| {})
             .await
             .expect("ensure_running (create)");
 

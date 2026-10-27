@@ -55,8 +55,18 @@ pub enum PullFailure {
     NotFound,
     /// The registry could not be reached.
     Network,
+    /// The download started and then stopped: no data for [`PULL_STALL_SECS`].
+    Stalled,
+    /// The download kept going but did not finish within [`PULL_TOTAL_SECS`].
+    TooSlow,
     Other,
 }
+
+/// A pull that gets no data from the registry for this long has stalled.
+pub const PULL_STALL_SECS: u64 = 60;
+/// A pull that has not finished after this long is given up, however much
+/// data is still arriving.
+pub const PULL_TOTAL_SECS: u64 = 600;
 
 impl PullFailure {
     /// Whether falling back to the base image can help: the legacy image is
@@ -123,6 +133,17 @@ pub fn pull_failure_message(image: &str, kind: PullFailure, detail: &str) -> Str
             "Couldn't start the container for this agent: couldn't reach the registry to download {image}. \
              Check your internet connection and any proxy set in Docker, then send your message again, \
              or create the agent to run on this computer (host)."
+        ),
+        PullFailure::Stalled => format!(
+            "Couldn't start the container for this agent: the download of {image} stopped (no data for {PULL_STALL_SECS} s). \
+             Check your internet connection and any proxy set in Docker, then send your message again, \
+             or create the agent to run on this computer (host)."
+        ),
+        PullFailure::TooSlow => format!(
+            "Couldn't start the container for this agent: the download of {image} was still not finished after {} minutes, so AgentMux gave up. \
+             Check your internet connection, then send your message again, \
+             or create the agent to run on this computer (host).",
+            PULL_TOTAL_SECS / 60
         ),
         PullFailure::Other => format!(
             "Couldn't start the container for this agent: couldn't download {image}: {}. \
