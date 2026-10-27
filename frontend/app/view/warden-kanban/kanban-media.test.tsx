@@ -139,8 +139,8 @@ describe("the drawer's Media section", () => {
     });
 
     it("shows a removed file as removed, with no picture and no buttons", () => {
-        mount(task({ count: 0, ui_change: true }), [item(4, 1, { removed_at: 5000, path: "" })]);
-        expect(screen.getByText("removed")).toBeTruthy();
+        mount(task({ count: 0, ui_change: true }), [item(4, 1, { removed_at: 5000, removed_by: "operator", path: "" })]);
+        expect(screen.getByText("removed by operator")).toBeTruthy();
         expect(screen.queryByTestId("media")).toBeNull();
         expect(screen.queryByText("Remove")).toBeNull();
     });

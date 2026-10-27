@@ -78,8 +78,11 @@ pub struct MediaItem {
     pub attached_by: String,
     pub attempt: i64,
     pub at: i64,
-    /// When the operator removed it; the drawer says so and shows no picture.
+    /// When it was removed; the drawer says so and shows no picture.
     pub removed_at: Option<i64>,
+    /// Who removed it (the operator, or an agent's name).
+    #[serde(default)]
+    pub removed_by: String,
     /// Where the stored file is, for the Editor (filled in by srv when it answers; empty if removed).
     #[serde(default)]
     pub path: String,
@@ -156,11 +159,12 @@ fn row_to_media(r: &Row) -> rusqlite::Result<MediaItem> {
         attempt: r.get("attempt")?,
         at: r.get("at")?,
         removed_at: r.get("removed_at")?,
+        removed_by: r.get("removed_by")?,
         path: String::new(),
     })
 }
 
-const MEDIA_COLS: &str = "id, work_id, sha256, name, kind, mime, size, caption, attached_by, attempt, at, removed_at";
+const MEDIA_COLS: &str = "id, work_id, sha256, name, kind, mime, size, caption, attached_by, attempt, at, removed_at, removed_by";
 
 /// Fill each task's `card.media`.
 pub(crate) fn attach_media(conn: &Connection, tasks: &mut [BoardTask]) -> Result<(), StoreError> {

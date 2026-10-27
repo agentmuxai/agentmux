@@ -684,3 +684,14 @@ $kanban-narrow: 760px;
     border: 1px dashed var(--border-color);
     border-radius: var(--radius-sm);
 }
+
+// The shared inline-media component names a recording by its stored (content-hash) file name; the file's own
+// name is the figcaption's first line, so its label keeps only the size.
+.kanban-media__item .am-media-card-name {
+    display: none;
+}
+
+.kanban-media__name {
+    overflow-wrap: anywhere;
+    color: var(--main-text-color);
+}

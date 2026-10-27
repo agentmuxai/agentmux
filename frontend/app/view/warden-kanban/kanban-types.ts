@@ -111,8 +111,10 @@ export interface KanbanMediaItem {
     attached_by: string;
     attempt: number;
     at: number;
-    /** When the operator removed it; it then has no path. */
+    /** When it was removed; it then has no path. */
     removed_at?: number | null;
+    /** Who removed it: "operator", or an agent's name. */
+    removed_by?: string;
     path: string;
     thumb: string;
 }

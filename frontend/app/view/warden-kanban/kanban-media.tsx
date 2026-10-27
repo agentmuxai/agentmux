@@ -127,11 +127,16 @@ export function DrawerMedia(props: {
                             <figure class="kanban-media__item">
                                 <Show
                                     when={item.removed_at == null && item.path}
-                                    fallback={<div class="kanban-media__removed">removed</div>}
+                                    fallback={
+                                        <div class="kanban-media__removed">removed{item.removed_by ? ` by ${item.removed_by}` : ""}</div>
+                                    }
                                 >
-                                    <MarkdownImg props={{ src: item.path, alt: item.caption || item.name }} media={{ baseDir: "" }} />
+                                    {/* No alt: the shared component would print it as a second caption; the name and
+                                        caption are the figcaption's. */}
+                                    <MarkdownImg props={{ src: item.path, alt: "" }} media={{ baseDir: "" }} />
                                 </Show>
                                 <figcaption>
+                                    <div class="kanban-media__name">{item.name}</div>
                                     <Show when={item.caption}>
                                         <div>{item.caption}</div>
                                     </Show>

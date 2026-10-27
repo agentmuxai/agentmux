@@ -135,6 +135,7 @@ fn only_media_from_this_attempt_counts_and_a_removed_file_does_not() {
     assert!(!s.work_media_in_attempt("a", 2).unwrap(), "an earlier attempt's picture does not satisfy a new submit");
     let gone = s.work_media_remove("a", m.id, "operator", 3000).unwrap().unwrap();
     assert_eq!(gone.removed_at, Some(3000));
+    assert_eq!(gone.removed_by, "operator", "who took it off is kept");
     assert!(!s.work_media_in_attempt("a", 1).unwrap());
     assert!(s.work_media_remove("a", m.id, "operator", 3100).unwrap().is_none(), "removing twice finds nothing");
     let all = s.work_media_list("a").unwrap();
