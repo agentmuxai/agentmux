@@ -35,6 +35,7 @@ mod container_tool_chunk;
 pub(crate) mod jekt_held;
 mod jekt_hold;
 mod availability_view;
+pub(crate) mod agent_runtime;
 mod jekt_cold;
 mod limit_probe;
 pub(crate) mod jekt_files;

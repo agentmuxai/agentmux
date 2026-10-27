@@ -13,6 +13,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_agent_open_panes(engine, state);
     register_agent_kill_process(engine, state);
     register_agent_kill_tree(engine, state);
+    crate::server::agent_runtime::register(engine, state);
 }
 
 fn register_agent_process_list(engine: &Arc<WshRpcEngine>, state: &AppState) {

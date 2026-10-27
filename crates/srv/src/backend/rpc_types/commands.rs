@@ -418,6 +418,10 @@ pub const COMMAND_LIST_DRONE_RUNS: &str = "listdroneruns";
 pub const COMMAND_AGENT_OPEN: &str = "agent.open";
 pub const COMMAND_AGENT_SEND: &str = "agent.send";
 pub const COMMAND_AGENT_STOP_API: &str = "agent.stop";
+/// Start an agent that has no pane (always-available agents; not available yet).
+pub const COMMAND_AGENT_START: &str = "agent.start";
+/// Every created agent with its runtime state (`server::agent_runtime`).
+pub const COMMAND_AGENTRUNTIME_LIST: &str = "agentruntime.list";
 pub const COMMAND_AGENT_STATUS: &str = "agent.status";
 pub const COMMAND_AGENT_LIST: &str = "agent.list";
 pub const COMMAND_AGENT_OUTPUT: &str = "agent.output";
