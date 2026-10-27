@@ -46,6 +46,20 @@ fn overlap_cancel_other_stops_a_started_run_but_not_one_being_delivered() {
 }
 
 #[test]
+fn overlap_cancel_other_waits_for_a_run_another_channel_is_asked_to_stop() {
+    let j = job(Overlap::CancelOther);
+    let elsewhere = Occupancy { job_running: 1, job_remote: 1, ..Default::default() };
+    assert_eq!(decide(&j, &elsewhere, false), Decision::Wait(reason::OVERLAP), "the new run waits for the stop to land");
+    let buffered = Occupancy { job_buffered: 1, ..elsewhere.clone() };
+    assert_eq!(decide(&j, &buffered, false), Decision::SkipOverlap, "one place in the buffer, as for buffer_one");
+    assert_eq!(decide(&j, &buffered, true), Decision::Wait(reason::OVERLAP), "the waiting run keeps waiting");
+    let delivering = Occupancy { job_running: 2, job_remote: 1, ..Default::default() };
+    assert_eq!(decide(&j, &delivering, false), Decision::SkipOverlap, "a run being delivered can't be stopped");
+    // The other policies never ask another channel to stop anything.
+    assert_eq!(decide(&job(Overlap::Skip), &elsewhere, false), Decision::SkipOverlap);
+}
+
+#[test]
 fn a_group_runs_one_at_a_time_and_deploy_is_built_in() {
     let mut grouped = job(Overlap::Skip);
     grouped.policy.group = Some("nightly".into());

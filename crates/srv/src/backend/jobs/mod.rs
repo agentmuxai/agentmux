@@ -173,6 +173,8 @@ pub struct RunLedger {
     pending_claims: std::sync::Mutex<std::collections::HashMap<String, String>>,
     interrupt: std::sync::OnceLock<BlockHook>,
     worker_stop: std::sync::OnceLock<BlockHook>,
+    /// How to ask another channel's instance to stop a run it follows (`remote.rs`).
+    remote_stop: std::sync::OnceLock<remote::RemoteStopHook>,
     /// Spending caps: Settings' figures and where a run would go
     /// (`reservation.rs`).
     caps: std::sync::OnceLock<reservation::CapSources>,
@@ -210,6 +212,7 @@ impl RunLedger {
             pending_claims: std::sync::Mutex::default(),
             interrupt: std::sync::OnceLock::new(),
             worker_stop: std::sync::OnceLock::new(),
+            remote_stop: std::sync::OnceLock::new(),
             caps: std::sync::OnceLock::new(),
             #[cfg(test)]
             day_start: std::sync::Mutex::new(None),

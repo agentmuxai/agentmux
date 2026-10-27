@@ -582,6 +582,9 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // shared registry). Loopback-only by construction: the caller only
         // ever forwards to a `local_url` it already verified is loopback.
         .route("/agentmux/agent/stop", post(handle_agent_stop_forward))
+        // A Job run's timeout or cancel, forwarded to the AgentMux that follows it
+        // (same trust model as the stop forward above).
+        .route(super::jobs_remote_stop::STOP_RUN_PATH, post(super::jobs_remote_stop::handle_jobs_stop_run))
         // A Swarm broadcast's cross-channel forward target
         // (SPEC_SWARM_REMOTE_AGENTS_PLATFORM_TAG_AND_SELECTION_2026_10_03.md §5.2):
         // same trust model as the stop forward above. The caller sends only the
