@@ -44,6 +44,10 @@ describe("supervisor meta", () => {
     it("is offered for Claude agents only", () => {
         expect(supervisorSupported({ agentProvider: "claude" })).toBe(true);
         expect(supervisorSupported({ agentProvider: "codex" })).toBe(false);
+        // srv reads only some output formats; a Claude pane with another gets no chip.
+        expect(supervisorSupported({ agentProvider: "claude", agentOutputFormat: "claude-stream-json" })).toBe(true);
+        expect(supervisorSupported({ agentProvider: "claude", agentOutputFormat: "" })).toBe(true);
+        expect(supervisorSupported({ agentProvider: "claude", agentOutputFormat: "plain-text" })).toBe(false);
         expect(supervisorSupported(undefined)).toBe(false);
     });
 
