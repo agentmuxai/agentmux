@@ -11,8 +11,8 @@
  * the RPC (`agent_handlers/identity.rs`'s `COMMAND_LINK_AGENT_IDENTITY`
  * registration). RPC responses and WS
  * events share one in-order connection, so the frontend's subscription
- * fires before `bindAccountToAgent`'s own `SetMetaCommand` — which only
- * runs AFTER that same Link RPC resolves client-side — has refreshed
+ * fires before `agent.account.switch`'s own `cmd:env` refresh — which srv
+ * does right AFTER the link — has refreshed
  * `cmd:env` to the newly-bound account's dir. A single, immediate recheck
  * therefore reads STALE env and fails on essentially every bind, not as an
  * edge case but as the common one.

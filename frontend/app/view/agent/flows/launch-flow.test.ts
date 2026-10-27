@@ -493,3 +493,68 @@ describe("runLaunchFlow — mount-time auth check resolves the linked account's 
         );
     });
 });
+
+describe("runLaunchFlow — a container agent has no host CLI", () => {
+    // SPEC_CONTAINER_AGENTS_AT_PARITY_2026_10_27.md (P10): the CLI is installed
+    // inside the container on the first message, so launching must not install,
+    // find or run the CLI on this computer.
+    beforeEach(() => {
+        hub.getMuxObjectAtom.mockReset().mockReturnValue(() => ({ meta: { agentMode: "container", agentId: "agent-1" } }));
+        hub.listAgentIdentities.mockResolvedValue([{ provider: "claude", account_id: "acct-1" }]);
+        hub.getIdentityAccount.mockResolvedValue({
+            id: "acct-1",
+            secret_ref: { backend: "oauth_config_dir", dir: "/per-account/acct-1" },
+        });
+    });
+
+    it("never resolves, installs or auth-checks a host CLI, and still starts the pane with the account's dir", async () => {
+        const phases: string[] = [];
+        const confirmed: boolean[] = [];
+        const result = await runLaunchFlow({
+            blockId: "block-1",
+            provider: claude,
+            log: vi.fn(),
+            authEnv: { CLAUDE_CONFIG_DIR: "/generic/shared/dir" },
+            setLaunchPhase: (p) => { if (p) phases.push(p.kind); },
+            onAuthCheckResult: (ok) => confirmed.push(ok),
+        });
+
+        expect(result).toBe("success");
+        expect(hub.resolveCli).not.toHaveBeenCalled();
+        expect(hub.checkCliAuth).not.toHaveBeenCalled();
+        // The pane's env carries the account dir, but no host `cmd` is recorded.
+        const metas = hub.setMeta.mock.calls.map((c) => (c[1] as any).meta);
+        expect(metas).toHaveLength(1);
+        expect(metas[0]["cmd:env"]).toMatchObject({ CLAUDE_CONFIG_DIR: "/per-account/acct-1" });
+        expect("cmd" in metas[0]).toBe(false);
+        // Not reported as a confirmed sign-in: nothing was checked here.
+        expect(confirmed).toEqual([false]);
+        expect(phases).toEqual(["resolving-cli", "verifying", "fresh-ready"]);
+    });
+
+    it("asks to sign in, still without touching a host CLI, when no account is linked", async () => {
+        hub.listAgentIdentities.mockResolvedValue([]);
+        const phases: string[] = [];
+        const notices: string[] = [];
+        const result = await runLaunchFlow({
+            blockId: "block-1",
+            provider: claude,
+            log: vi.fn(),
+            setLaunchPhase: (p) => { if (p) phases.push(p.kind); },
+            onNotify: (text) => notices.push(text),
+        });
+
+        expect(result).toBe("auth_failed");
+        expect(phases).toEqual(["resolving-cli", "first-login"]);
+        expect(notices[0]).toMatch(/sign in/i);
+        expect(hub.resolveCli).not.toHaveBeenCalled();
+        expect(hub.checkCliAuth).not.toHaveBeenCalled();
+    });
+
+    it("still stops when no container runtime is available", async () => {
+        hub.getCapability.mockReturnValue({ status: "missing" });
+        const result = await runLaunchFlow({ blockId: "block-1", provider: claude, log: vi.fn() });
+        expect(result).toBe("fatal");
+        expect(hub.resolveCli).not.toHaveBeenCalled();
+    });
+});
