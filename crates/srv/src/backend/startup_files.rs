@@ -235,14 +235,25 @@ fn skills_item(cwd: &Path, home: Option<&Path>, confine: Option<&Path>) -> Optio
         return None;
     }
     let mut count = 0usize;
-    if let Ok(entries) = std::fs::read_dir(cwd.join(".claude/commands")) {
+    // In a container's workspace, which the container can change, each folder and file counted must itself
+    // resolve inside it: a link to a host folder isn't listed.
+    let inside = |p: &Path| within(p, confine);
+    let commands = cwd.join(".claude/commands");
+    if let Some(entries) = inside(&commands).then(|| std::fs::read_dir(&commands).ok()).flatten() {
         count += entries
             .flatten()
-            .filter(|e| e.path().extension().is_some_and(|x| x == "md"))
+            .filter(|e| e.path().extension().is_some_and(|x| x == "md") && inside(&e.path()))
             .count();
     }
-    if let Ok(entries) = std::fs::read_dir(cwd.join(".claude/skills")) {
-        count += entries.flatten().filter(|e| e.path().join("SKILL.md").is_file()).count();
+    let skills = cwd.join(".claude/skills");
+    if let Some(entries) = inside(&skills).then(|| std::fs::read_dir(&skills).ok()).flatten() {
+        count += entries
+            .flatten()
+            .filter(|e| {
+                let skill = e.path().join("SKILL.md");
+                inside(&e.path()) && inside(&skill) && skill.is_file()
+            })
+            .count();
     }
     (count > 0).then(|| StartupFile {
         role: "skills",
@@ -380,6 +391,23 @@ mod tests {
         std::os::unix::fs::symlink(t.path().join("host.json"), ws.join(".mcp.json")).unwrap();
         std::os::unix::fs::symlink(t.path().join("host.json"), ws.join("CLAUDE.md")).unwrap();
         assert!(workspace_startup_files(&ws).is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_workspace_skills_link_to_a_host_folder_is_not_counted() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ws = tmp.path().join("ws");
+        std::fs::create_dir_all(ws.join(".claude")).unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        for name in ["a", "b", "c"] {
+            write(&outside.path().join(name).join("SKILL.md"), "x");
+            write(&outside.path().join(format!("{name}.md")), "x");
+        }
+        std::os::unix::fs::symlink(outside.path(), ws.join(".claude/skills")).unwrap();
+        std::os::unix::fs::symlink(outside.path(), ws.join(".claude/commands")).unwrap();
+        let files = workspace_startup_files(&ws);
+        assert!(files.iter().all(|f| f.role != "skills"), "nothing outside the workspace is counted");
     }
 
     #[test]
