@@ -32,6 +32,7 @@
     // "window:zoom":              1.0,
     // "window:tilegapsize":       3,
     // "window:showmenubar":       false,
+    // "window:showstatusbar":     true,
     // "window:nativetitlebar":    false,
     // "window:confirmclose":      false,
     // "tab:confirmclose":         false,

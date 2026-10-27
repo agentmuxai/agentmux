@@ -39,6 +39,14 @@ export const WINDOW_SETTINGS = {
         section: "window",
         keywords: ["mouse", "side button", "back", "forward", "history", "mouse:sidebuttons"],
     },
+    showStatusBar: {
+        id: "window.show_status_bar",
+        label: "Show the status bar",
+        description:
+            "The bar along the bottom with the backend dot, system stats, token and history totals, and the version. Hiding it frees a row of space; it comes back by itself if the backend goes down, and \"Toggle Status Bar\" in the command palette flips it",
+        section: "window",
+        keywords: ["hide status bar", "footer", "bottom bar", "statusbar", "window:showstatusbar"],
+    },
     confirmTabClose: {
         id: "window.confirm_tab_close",
         label: "Confirm before closing a tab",
@@ -107,6 +115,17 @@ export function WindowPanesSection(): JSX.Element {
                     <ToggleControl
                         checked={(s()["mouse:sidebuttons"] ?? true) as boolean}
                         onChange={(v) => set("mouse:sidebuttons", v)}
+                    />
+                }
+            />
+            <SettingRow
+                id={WINDOW_SETTINGS.showStatusBar.id}
+                label={WINDOW_SETTINGS.showStatusBar.label}
+                description={WINDOW_SETTINGS.showStatusBar.description}
+                control={
+                    <ToggleControl
+                        checked={s()["window:showstatusbar"] !== false}
+                        onChange={(v) => set("window:showstatusbar", v)}
                     />
                 }
             />

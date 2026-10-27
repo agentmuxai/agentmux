@@ -257,6 +257,11 @@
         "window:showmenubar": {
           "type": "boolean"
         },
+        "window:showstatusbar": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the status bar along the bottom of the window. Default true; set false to hide it. It comes back by itself while the backend is down. The \"Toggle Status Bar\" palette command flips it."
+        },
         "window:nativetitlebar": {
           "type": "boolean"
         },
