@@ -30,7 +30,7 @@ Two lists, kept in one table in srv (`sensitive_ops.rs`), so adding an operation
 
 ## 3. The super agent
 
-- A seat role, `super`, set like any seat (`agent.setSeat`, and `Agents set_seat`). `ROLES` in `backend/agent_seat.rs` gains it. At most one per AgentMux instance: setting it on a second agent moves it, and the first reverts to the role it had (the seat remembers it as `prior_role`; worker when it had none), keeping its qualifier, lead and area. Naming two super agents in one call is refused. A host's other instances each have their own.
+- A seat role, `super`, set like any seat (`agent.setSeat`, and `Agents set_seat`). `ROLES` in `backend/agent_seat.rs` gains it. At most one in the shared agent roster (a seat is stored on the shared definition, so every AgentMux on the same data home sees the same holder): setting it on a second agent moves it, and the first reverts to the role it had (the seat remembers it as `prior_role`; worker when it had none), keeping its qualifier, lead and area. Naming two super agents in one call is refused. An AgentMux that doesn't share that roster has its own holder. Only a holder that is running in the AgentMux where a request is made can approve it (section 4).
 - It is an ordinary agent: it reads requests, may check facts (look at the widget's folder, read the Vault entry's label, run `App version`), and approves or denies with a reason. It holds no extra tools. What makes it special is that srv accepts approvals for sensitive ops only from the agent whose seat is `super`.
 - The super agent may itself ask for a sensitive op. It approves its own request; the countdown and veto are the oversight, so nothing is gained by blocking self-approval.
 - It is recorded as the approver, never as the operator. Its approval is not "the operator said yes".
@@ -40,7 +40,7 @@ Two lists, kept in one table in srv (`sensitive_ops.rs`), so adding an operation
 One MCP tool, `Sensitive`, and one HTTP route family under `/api/v1/sensitive/` guarded by `agent_only` (agent token required, requester proven by `proven_slug`, as `agent_routes` does):
 
 - `request {op, params, reason}`: srv records a request (id, requester uid and slug, op, params, reason cleaned by `clean_reason`, status `asked`). It sends the super agent one message: "<requester> asks for <op>: <structured summary built by srv>. Approve or deny with Sensitive." The message is from the system, labelled as the requester's request; nothing in it is the operator's voice. Returns the request id and status at once.
-- `approve {id}` / `deny {id, reason}`: only the agent whose seat is `super`. `approve` moves the request to `pending` and opens the countdown (section 5). `deny` ends it and tells the requester.
+- `approve {id}` / `deny {id, reason}`: only the agent whose seat is `super` and that is running in this AgentMux. `approve` moves the request to `pending` and opens the countdown (section 5). `deny` ends it and tells the requester.
 - `status {id}` / `list`: any registered agent; the requester sees its own, the super agent sees all.
 - `cancel {id}`: the requester withdraws its own request while it is `asked` or `pending`.
 

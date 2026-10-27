@@ -22,7 +22,8 @@ use crate::registry::AgentSeat;
 /// The roles a seat may name, as stored.
 pub const ROLES: [&str; 6] = ["leader", "worker", "specialist", "platform_tester", "analyst", SUPER_ROLE];
 /// The role of the one agent that reviews sensitive operations
-/// (`SPEC_SUPER_AGENT_2026_10_25.md`): at most one per AgentMux instance.
+/// (`SPEC_SUPER_AGENT_2026_10_25.md`): at most one in the shared agent roster,
+/// since a seat is stored on the shared definition.
 pub const SUPER_ROLE: &str = "super";
 pub const MAX_QUALIFIER_CHARS: usize = 40;
 pub const MAX_AREA_CHARS: usize = 120;
