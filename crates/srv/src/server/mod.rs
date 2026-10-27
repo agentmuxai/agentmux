@@ -31,6 +31,7 @@ pub(crate) mod reactive;
 mod name_resolution;
 pub(crate) mod caller;
 pub(crate) mod agent_self_keys;
+mod container_tool_chunk;
 pub(crate) mod jekt_held;
 mod jekt_hold;
 mod jekt_cold;

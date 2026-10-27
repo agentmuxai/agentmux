@@ -113,6 +113,9 @@ pub fn container_route_allowed(path: &str) -> bool {
         // (`memory_delivery_handlers`), and ignore the host paths it names.
         "/api/v1/agent/memory/session-start/part",
         "/api/v1/agent/memory/session-start/ack",
+        // `agentmux-bashwrap`'s live output into the grant's own pane, as a typed `tool_chunk` only
+        // (`server::container_tool_chunk`); the generic `/agentmux/wps/publish` relay stays refused.
+        "/api/v1/agent/tool-chunk",
     ];
     if EXACT.contains(&path) {
         return true;
@@ -217,6 +220,7 @@ mod tests {
             "/api/v1/agent/globalmemory/read",
             "/api/v1/agent/pane/close",
             "/api/v1/agent/shutdown/req-12",
+            "/api/v1/agent/tool-chunk",
         ] {
             assert!(container_route_allowed(ok), "{ok} should be allowed");
         }
