@@ -128,7 +128,7 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 sevenz-rust2 = { version = "0.24", default-features = false }
 tar = "0.4"
 tempfile = "3"
-bollard = { version = "0.18", features = ["chrono"] }
+bollard = { version = "0.18", features = ["chrono", "ssl"] }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
 # Cron expression parsing for the persistent cron scheduler
