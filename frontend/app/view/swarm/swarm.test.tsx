@@ -12,7 +12,7 @@ vi.mock("./swarm-model", () => ({
         dispose = dispose;
     },
 }));
-vi.mock("./swarm-view", () => ({ SwarmView: () => null }));
+vi.mock("./swarm-root", () => ({ SwarmView: () => null }));
 
 import { swarmPaneTab } from "./swarm";
 import { create } from "./swarm-instance";

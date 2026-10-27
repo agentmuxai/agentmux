@@ -6,7 +6,7 @@
 import type { PaneTabHostContext, PaneTabInstance } from "@/app/block/pane-tab-registry";
 import { SwarmViewModel } from "./swarm-model";
 import { createSwarmSection, swarmTitleOf } from "./swarm-section";
-import { SwarmView } from "./swarm-view";
+import { SwarmView } from "./swarm-root";
 
 export function create(ctx: PaneTabHostContext): PaneTabInstance {
     const model = new SwarmViewModel(ctx.blockId);

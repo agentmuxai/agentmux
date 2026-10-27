@@ -9,11 +9,10 @@ import { createEffect, createMemo, Show, type Accessor, type JSX } from "solid-j
 import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
 import { MOS, atoms } from "@/app/store/global";
 import { getLayoutModelForTabById } from "@/layout/lib/layoutModelHooks";
-import type { LayoutModel } from "@/layout/lib/layoutModel";
 import { isAwaitingUser } from "@/app/store/swarm-line";
 import { readZoom } from "@/app/store/zoom-factor";
 import { selectTrace } from "@/app/util/select-trace";
-import { AgentRowHost, RemoteAgentRowHost, agentRowKey } from "./swarm-agent-row";
+import { AgentRowHost, RemoteAgentRowHost, agentRowKey, focusedActiveBlockId } from "./swarm-view";
 import { phaseToDisplayStatus } from "./swarm-display-status";
 import { remoteAgentKey } from "./swarm-fleet-targets";
 import { lastActiveMs } from "./swarm-last-active";
@@ -24,14 +23,6 @@ import { remoteChip, remoteRows, remoteSections, type RemoteRow } from "./swarm-
 import type { SwarmDensity } from "./swarm-section";
 import { SwarmGroupByControl, SwarmSeatList, useSwarmSeats } from "./swarm-seats";
 import { chipStatus } from "./swarm-status-chip";
-
-/** The block shown in the focused pane — for a multi-tab pane, its active
- *  tab. Reactive to tab switches inside the pane, not just pane focus. */
-export function focusedActiveBlockId(layoutModel: Pick<LayoutModel, "localTreeStateAtom" | "focusedNode">): string | null {
-    layoutModel.localTreeStateAtom();
-    const data = layoutModel.focusedNode()?.data;
-    return data?.activeBlockId || data?.blockId || null;
-}
 
 /** The agents the Swarm lists, derived once for the list and for the sections' actions above it. */
 export interface SwarmAgents {
