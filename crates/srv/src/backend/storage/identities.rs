@@ -354,14 +354,33 @@ impl Store {
     /// inside a list). Returns whether a row was updated.
     pub fn identity_set_context_email(&self, id: &str, email: &str) -> Result<bool, StoreError> {
         let conn = self.conn.lock().unwrap();
+        // A different address is a different group: the old number goes, and
+        // the next list numbers the account afresh (`identity::account_numbering`).
+        let n = conn.execute(
+            "UPDATE db_accounts
+                SET context = json_remove(json_set(
+                        CASE WHEN json_valid(context) AND json_type(context) = 'object'
+                             THEN context ELSE '{}' END,
+                        '$.email', ?2), '$.seq')
+              WHERE id = ?1",
+            params![id, email],
+        )?;
+        Ok(n > 0)
+    }
+
+    /// Set one account's `context.seq`, the number that tells it from other
+    /// accounts with the same provider and email, and nothing else (the same
+    /// narrow write as [`Self::identity_set_context_email`]).
+    pub fn identity_set_context_seq(&self, id: &str, seq: u32) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap();
         let n = conn.execute(
             "UPDATE db_accounts
                 SET context = json_set(
                         CASE WHEN json_valid(context) AND json_type(context) = 'object'
                              THEN context ELSE '{}' END,
-                        '$.email', ?2)
+                        '$.seq', ?2)
               WHERE id = ?1",
-            params![id, email],
+            params![id, seq],
         )?;
         Ok(n > 0)
     }

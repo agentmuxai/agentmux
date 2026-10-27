@@ -369,13 +369,10 @@ fn publish(state: &AppState, payload: AccountAvailabilityEvent) {
 }
 
 fn label_of(state: &AppState, account_id: &str) -> String {
-    state
-        .id_store
-        .identity_list(None)
-        .unwrap_or_default()
-        .iter()
+    let all = state.id_store.identity_list(None).unwrap_or_default();
+    all.iter()
         .find(|a| a.id == account_id)
-        .map(crate::server::app_api::agent_spawn::account_label)
+        .map(|a| crate::server::app_api::agent_spawn::account_label_in(a, &all))
         .unwrap_or_else(|| "an account no longer in AgentMux".to_string())
 }
 

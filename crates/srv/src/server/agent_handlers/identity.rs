@@ -316,6 +316,23 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         }
                     }
                 }
+                // #4936 §3.3: give each account that shares a provider and email
+                // with another a number that stays its own. Computed over the
+                // unfiltered list, so a provider filter can't renumber a group.
+                let all = if cmd.provider.is_some() { mstore.identity_list(None).unwrap_or_default() } else { accounts.clone() };
+                for (id, seq) in crate::identity::account_numbering::missing_seqs(&all) {
+                    for store in [&mstore, &identity_store] {
+                        if let Err(e) = store.identity_set_context_seq(&id, seq) {
+                            tracing::warn!(target: "identity", account_id = %id, error = %e, "listidentityaccounts: number write failed");
+                        }
+                    }
+                    if let Some(a) = accounts.iter_mut().find(|a| a.id == id) {
+                        if !a.context.is_object() {
+                            a.context = serde_json::json!({});
+                        }
+                        a.context["seq"] = serde_json::json!(seq);
+                    }
+                }
                 Ok(accounts)
                 })
                 .await

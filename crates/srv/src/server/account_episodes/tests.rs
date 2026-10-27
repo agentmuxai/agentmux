@@ -586,3 +586,39 @@ async fn an_unlink_clears_the_limit_unless_it_is_the_silent_half_of_a_rebind() {
     assert_eq!(stored_failure(&state, &limited), None);
     cleanup(&[&limited]);
 }
+
+/// Listing the accounts numbers a group that shares a provider and an email, in
+/// the order its accounts were made, keeps a number once given, and drops it when
+/// the email changes (#4936 §3.3).
+#[tokio::test]
+async fn listing_accounts_numbers_same_email_groups_and_keeps_the_numbers() {
+    let state = test_state();
+    let with_email = |id: &str, email: &str, created_at: i64| {
+        let mut a = account(id, "claude", "valid");
+        a.context = json!({ "email": email });
+        a.created_at = created_at;
+        a
+    };
+    for a in [with_email("second", "Me@example.com", 20), with_email("first", "me@example.com", 10), with_email("other", "x@example.com", 5)] {
+        state.id_store.identity_upsert(&a).unwrap();
+    }
+    let list = || async { call_agent_handlers(&state, "listidentityaccounts", json!({})).await.unwrap() };
+    let seq = |v: &serde_json::Value, id: &str| v.as_array().unwrap().iter().find(|a| a["id"] == id).map(|a| a["context"]["seq"].clone());
+    let r = list().await;
+    assert_eq!((seq(&r, "first"), seq(&r, "second"), seq(&r, "other")), (Some(json!(1)), Some(json!(2)), Some(json!(1))));
+
+    // `first` is removed and a third sign-in arrives: `second` stays 2, the new one is 3.
+    state.id_store.identity_delete("first").unwrap();
+    state.id_store.identity_upsert(&with_email("third", "me@example.com", 30)).unwrap();
+    let r = list().await;
+    assert_eq!((seq(&r, "second"), seq(&r, "third")), (Some(json!(2)), Some(json!(3))));
+
+    // A provider filter doesn't renumber the group.
+    let r = call_agent_handlers(&state, "listidentityaccounts", json!({ "provider": "claude" })).await.unwrap();
+    assert_eq!(seq(&r, "third"), Some(json!(3)));
+
+    // A different address is a different group: the old number goes.
+    state.id_store.identity_set_context_email("third", "new@example.com").unwrap();
+    let r = list().await;
+    assert_eq!(seq(&r, "third"), Some(json!(1)), "numbered afresh in its new group");
+}
