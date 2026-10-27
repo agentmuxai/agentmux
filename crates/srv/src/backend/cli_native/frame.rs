@@ -27,8 +27,8 @@ pub struct PeerFrame {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Replay {
     Peer(PeerFrame),
-    /// The human's own prompt or any other replayed turn.
-    Other,
+    /// Any other replayed user turn: the echo of one srv wrote, or a frame of the CLI's own.
+    Other { uuid: Option<String> },
 }
 
 /// `Some` for a replayed user frame, `None` for any other frame.
@@ -37,9 +37,10 @@ pub fn replay(v: &Value) -> Option<Replay> {
         return None;
     }
     let origin = v.get("origin").filter(|o| o.get("kind").and_then(Value::as_str) == Some("peer"));
-    let (Some(origin), Some(uuid)) = (origin, v.get("uuid").and_then(Value::as_str)) else { return Some(Replay::Other) };
+    let other = || Some(Replay::Other { uuid: v.get("uuid").and_then(Value::as_str).map(str::to_string) });
+    let (Some(origin), Some(uuid)) = (origin, v.get("uuid").and_then(Value::as_str)) else { return other() };
     let text = |k: &str| origin.get(k).and_then(Value::as_str).map(str::to_string);
-    let Some(msg_id) = text("msg_id") else { return Some(Replay::Other) };
+    let Some(msg_id) = text("msg_id") else { return other() };
     Some(Replay::Peer(PeerFrame {
         uuid: uuid.to_string(),
         msg_id,
@@ -188,16 +189,16 @@ mod tests {
         // The wrapper text in a replayed frame with no typed origin is not a peer message.
         let mut f = peer_frame();
         f.as_object_mut().unwrap().remove("origin");
-        assert_eq!(replay(&f), Some(Replay::Other));
+        assert_eq!(replay(&f), Some(Replay::Other { uuid: Some("df2a326a-967c-49d0-87cc-f80823165a7f".into()) }));
         let mut f = peer_frame();
         f["origin"]["kind"] = json!("task-notification");
-        assert_eq!(replay(&f), Some(Replay::Other));
+        assert!(matches!(replay(&f), Some(Replay::Other { .. })));
     }
 
     #[test]
     fn the_humans_replayed_prompt_and_ordinary_frames() {
         let typed = json!({"type":"user","message":{"role":"user","content":"hello"},"uuid":"u","isReplay":true});
-        assert_eq!(replay(&typed), Some(Replay::Other));
+        assert_eq!(replay(&typed), Some(Replay::Other { uuid: Some("u".into()) }));
         let tool_result = json!({"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t","content":"x"}]},"uuid":"u"});
         assert_eq!(replay(&tool_result), None);
         assert_eq!(replay(&json!({"type":"assistant","isReplay":true})), None);

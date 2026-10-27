@@ -30,6 +30,8 @@ pub(super) struct StdoutReaderCtx {
     pub(super) segment_read: super::segments::SegmentRef,
     pub(super) relocated_copy_read: Option<crate::backend::continuity_relocate::Relocated>,
     pub(super) forked_from_read: Option<String>,
+    /// The user turns the stdin writer sent (`backend::cli_native::sent`).
+    pub(super) sent_prompts: crate::backend::cli_native::sent::SentPrompts,
 }
 
 impl PersistentSubprocessController {
@@ -55,6 +57,7 @@ impl PersistentSubprocessController {
             segment_read,
             mut relocated_copy_read,
             forked_from_read,
+            sent_prompts,
         } = ctx;
         let reader = BufReader::new(stdout);
         let mut lines = reader.lines();
@@ -75,7 +78,7 @@ impl PersistentSubprocessController {
         // Messages other agents send this one through the CLI's own messaging, and the
         // user turns the CLI replays because it is launched with `--replay-user-messages`
         // (`backend::cli_native`).
-        let mut cli_native = crate::backend::cli_native::reader::CliNativeReader::new(&block_id_read);
+        let mut cli_native = crate::backend::cli_native::reader::CliNativeReader::new(&block_id_read, sent_prompts);
 
         // NOTE: OSC window-title extraction is NOT done here.
         // PersistentSubprocessController uses piped stdout with stream-json
@@ -91,8 +94,9 @@ impl PersistentSubprocessController {
             if line.trim().is_empty() {
                 continue;
             }
-            // A replayed user turn is not output of the conversation: the human's own prompt is
-            // recorded by srv and the pane already, and a peer message is audited here instead.
+            // A replayed user turn is not output of the conversation: the echo of a turn srv wrote is
+            // recorded by srv and the pane already, and a peer message is audited here instead. The
+            // CLI's own replayed frames (a local command's output) stay.
             if line.contains("\"isReplay\"") {
                 if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
                     use crate::backend::cli_native::reader::Disposition;

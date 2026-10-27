@@ -3,7 +3,7 @@
 
 //! Messages from other sessions through a real process and the real stdout
 //! reader (`backend::cli_native`). The stub writes what Claude Code 2.1.288
-//! writes under `--replay-user-messages`: the human's prompt replayed, a peer
+//! writes under `--replay-user-messages`: the turn it was given replayed, a peer
 //! message with its typed origin, the lifecycle lines about it.
 
 use super::super::*;
@@ -22,8 +22,10 @@ rl.on("line", (line) => {
   try { m = JSON.parse(line); } catch { return; }
   if (m.type !== "user") return;
   out({ type: "system", subtype: "init", session_id: "stub-session" });
-  // The human's own prompt, replayed.
-  out({ type: "user", uuid: "u-typed", isReplay: true, session_id: "stub-session", message: { role: "user", content: "TYPED-PROMPT" } });
+  // The turn srv wrote, replayed with the uuid it was given.
+  out({ type: "user", uuid: m.uuid, isReplay: true, session_id: "stub-session", message: m.message });
+  // A frame of the CLI's own, marked isReplay without the flag: it must stay.
+  out({ type: "user", uuid: "u-card", isReplay: true, session_id: "stub-session", message: { role: "user", content: "<local-command-stdout>Compacted </local-command-stdout>" } });
   // From this very CLI process (so: this agent), signing itself as someone else.
   out(peer("u-peer-1", "m-agent", process.pid, "somebody-else"));
   out({ type: "command_lifecycle", command_uuid: "u-peer-1", state: "started", session_id: "stub-session" });
@@ -40,7 +42,7 @@ fn node_on_path() -> bool {
     std::env::var_os("PATH").is_some_and(|path| std::env::split_paths(&path).any(|d| d.join("node").is_file() || d.join("node.exe").is_file()))
 }
 
-/// The pane's transcript has the answer and none of the replayed turns; the audit has
+/// The pane's transcript has the answer, the CLI's own card, and none of the replayed turns; the audit has
 /// both messages, the sender named from the pid and not from the name the message gave.
 #[tokio::test]
 async fn a_replayed_turn_stays_out_of_the_transcript_and_a_peer_message_is_audited() {
@@ -96,9 +98,12 @@ async fn a_replayed_turn_stays_out_of_the_transcript_and_a_peer_message_is_audit
     assert!(output.contains("ANSWER-TEXT"), "{output}");
     // What the CLI says about its own turns is kept, as it was before the flag.
     assert!(output.contains(r#""command_uuid":"u-peer-1""#), "{output}");
-    for replayed in ["TYPED-PROMPT", "isReplay", "verifiedPeerPid", "cross-session-message", "the body"] {
+    // The echo of the turn srv wrote ("go") and the peer messages are not in it; the CLI's own card is.
+    assert_eq!(output.matches("isReplay").count(), 1, "only the CLI's own card is a replayed frame: {output}");
+    for replayed in ["verifiedPeerPid", "cross-session-message", "the body"] {
         assert!(!output.contains(replayed), "{replayed} reached the transcript: {output}");
     }
+    assert!(output.contains("<local-command-stdout>Compacted </local-command-stdout>"), "{output}");
 
     let mut from_cli = audited("m-agent");
     from_cli.sort_by_key(|e| e.outcome.clone());

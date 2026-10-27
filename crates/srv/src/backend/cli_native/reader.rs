@@ -11,6 +11,7 @@ use serde_json::Value;
 
 use super::frame::{self, Lifecycle, PeerFrame, Replay};
 use super::sender::{self, ProcView, Sender};
+use super::sent::SentPrompts;
 
 /// Frames and messages remembered per pane.
 const REMEMBERED: usize = 256;
@@ -19,8 +20,8 @@ const REMEMBERED: usize = 256;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Disposition {
     Keep,
-    /// The CLI replayed it only because of `--replay-user-messages`: the human's own
-    /// prompt (recorded by srv and the pane already) or a message handled here.
+    /// The CLI replayed it only because of `--replay-user-messages`: a turn srv wrote
+    /// (recorded by srv and the pane already) or a peer message handled here.
     Drop,
 }
 
@@ -66,6 +67,7 @@ pub trait Env {
 
 pub struct CliNativeReader {
     block_id: String,
+    sent: SentPrompts,
     /// `SendMessage` calls waiting for the CLI's answer, by tool use id.
     sends: BoundedMap<frame::SendCall>,
     /// Messages handed to the model whose turn has not ended, by frame uuid.
@@ -98,17 +100,23 @@ impl<T> BoundedMap<T> {
 }
 
 impl CliNativeReader {
-    pub fn new(block_id: &str) -> Self {
-        Self { block_id: block_id.to_string(), sends: BoundedMap::new(), inbound: BoundedMap::new(), seen: VecDeque::new() }
+    /// `sent`: the user turns srv writes to this CLI.
+    pub fn new(block_id: &str, sent: SentPrompts) -> Self {
+        Self { block_id: block_id.to_string(), sent, sends: BoundedMap::new(), inbound: BoundedMap::new(), seen: VecDeque::new() }
     }
 
     /// Reads one stdout frame.
     pub fn observe(&mut self, v: &Value, env: &dyn Env) -> Disposition {
-        if let Some(replay) = frame::replay(v) {
-            if let Replay::Peer(peer) = replay {
+        match frame::replay(v) {
+            Some(Replay::Peer(peer)) => {
                 self.received(peer, env);
+                return Disposition::Drop;
             }
-            return Disposition::Drop;
+            // The echo of a turn srv wrote goes; a replay of the CLI's own stays.
+            Some(Replay::Other { uuid }) => {
+                return if uuid.is_some_and(|u| self.sent.take(&u)) { Disposition::Drop } else { Disposition::Keep };
+            }
+            None => {}
         }
         if let Some(hold) = frame::peer_hold(v) {
             self.held(hold, env);
@@ -264,7 +272,7 @@ mod tests {
 
     #[test]
     fn a_message_is_read_then_done_under_the_name_agentmux_maps() {
-        let (env, mut r) = (Fake::new(), CliNativeReader::new("block-me"));
+        let (env, mut r) = (Fake::new(), CliNativeReader::new("block-me", SentPrompts::default()));
         assert_eq!(r.observe(&peer(101, "alpha-session-7", "m1", "u1"), &env), Disposition::Drop);
         assert_eq!(r.observe(&json!({"type":"command_lifecycle","command_uuid":"u1","state":"started"}), &env), Disposition::Keep);
         assert_eq!(r.observe(&json!({"type":"command_lifecycle","command_uuid":"u1","state":"completed"}), &env), Disposition::Keep);
@@ -278,7 +286,7 @@ mod tests {
     #[test]
     fn a_claimed_name_never_becomes_the_sender() {
         // A process under beta's CLI says it is alpha; a stranger says it is beta.
-        let (env, mut r) = (Fake::new(), CliNativeReader::new("block-me"));
+        let (env, mut r) = (Fake::new(), CliNativeReader::new("block-me", SentPrompts::default()));
         r.observe(&peer(200, "alpha", "m1", "u1"), &env);
         r.observe(&peer(300, "beta", "m2", "u2"), &env);
         r.observe(&peer(0, "alpha", "m3", "u3"), &env);
@@ -290,7 +298,7 @@ mod tests {
 
     #[test]
     fn a_message_the_cli_holds_is_audited_as_held_with_its_cause_and_no_sender() {
-        let (env, mut r) = (Fake::new(), CliNativeReader::new("block-me"));
+        let (env, mut r) = (Fake::new(), CliNativeReader::new("block-me", SentPrompts::default()));
         let held = json!({"type":"system","subtype":"peer_message_hold","state":"held","message_uuid":"h1","from_name":"alpha","cause":"mode-mismatch"});
         assert_eq!(r.observe(&held, &env), Disposition::Keep);
         r.observe(&held, &env);
@@ -302,23 +310,38 @@ mod tests {
 
     #[test]
     fn a_replayed_message_is_audited_once() {
-        let (env, mut r) = (Fake::new(), CliNativeReader::new("block-me"));
+        let (env, mut r) = (Fake::new(), CliNativeReader::new("block-me", SentPrompts::default()));
         r.observe(&peer(100, "alpha", "m1", "u1"), &env);
         assert_eq!(r.observe(&peer(100, "alpha", "m1", "u1-again"), &env), Disposition::Drop);
         assert_eq!(env.events().len(), 1);
     }
 
     #[test]
-    fn the_humans_replayed_prompt_leaves_the_stream_and_records_nothing() {
-        let (env, mut r) = (Fake::new(), CliNativeReader::new("block-me"));
-        let typed = json!({"type":"user","message":{"role":"user","content":"hello"},"uuid":"u","isReplay":true});
-        assert_eq!(r.observe(&typed, &env), Disposition::Drop);
+    fn the_echo_of_a_turn_srv_wrote_leaves_the_stream_and_records_nothing() {
+        let sent = SentPrompts::default();
+        let tagged = sent.tag(r#"{"type":"user","message":{"role":"user","content":"hello"}}"#);
+        let uuid = serde_json::from_str::<Value>(&tagged).unwrap()["uuid"].as_str().unwrap().to_string();
+        let (env, mut r) = (Fake::new(), CliNativeReader::new("block-me", sent));
+        let echo = json!({"type":"user","message":{"role":"user","content":"hello"},"uuid":uuid,"isReplay":true});
+        assert_eq!(r.observe(&echo, &env), Disposition::Drop);
+        assert_eq!(r.observe(&echo, &env), Disposition::Keep, "an echo is dropped once");
+        assert!(env.events().is_empty());
+    }
+
+    #[test]
+    fn a_replayed_frame_of_the_clis_own_stays_in_the_stream() {
+        // The card a /compact leaves: the CLI marks it isReplay without the flag; srv wrote no turn for it.
+        let (env, mut r) = (Fake::new(), CliNativeReader::new("block-me", SentPrompts::default()));
+        let card = json!({"type":"user","message":{"role":"user","content":"<local-command-stdout>Compacted </local-command-stdout>"},"uuid":"51d8a799","isReplay":true});
+        assert_eq!(r.observe(&card, &env), Disposition::Keep);
+        let no_uuid = json!({"type":"user","message":{"role":"user","content":"x"},"isReplay":true});
+        assert_eq!(r.observe(&no_uuid, &env), Disposition::Keep);
         assert!(env.events().is_empty());
     }
 
     #[test]
     fn a_sent_message_is_audited_when_the_cli_accepts_it() {
-        let (env, mut r) = (Fake::new(), CliNativeReader::new("block-me"));
+        let (env, mut r) = (Fake::new(), CliNativeReader::new("block-me", SentPrompts::default()));
         let call = json!({"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"SendMessage","input":{"to":"recv-82","message":"hello"}}]}});
         assert_eq!(r.observe(&call, &env), Disposition::Keep);
         assert!(env.events().is_empty(), "nothing before the CLI answers");
@@ -332,7 +355,7 @@ mod tests {
 
     #[test]
     fn a_refused_send_and_another_tool_record_nothing() {
-        let (env, mut r) = (Fake::new(), CliNativeReader::new("block-me"));
+        let (env, mut r) = (Fake::new(), CliNativeReader::new("block-me", SentPrompts::default()));
         let calls = json!({"type":"assistant","message":{"content":[
             {"type":"tool_use","id":"t1","name":"SendMessage","input":{"to":"x","message":"m"}},
             {"type":"tool_use","id":"t2","name":"mcp__agentmux__SendMessage","input":{"to":"y","message":"m"}}]}});
@@ -346,7 +369,7 @@ mod tests {
 
     #[test]
     fn ordinary_frames_are_kept() {
-        let (env, mut r) = (Fake::new(), CliNativeReader::new("block-me"));
+        let (env, mut r) = (Fake::new(), CliNativeReader::new("block-me", SentPrompts::default()));
         for f in [json!({"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}), json!({"type":"result"}), json!({"type":"system","subtype":"init"})] {
             assert_eq!(r.observe(&f, &env), Disposition::Keep);
         }

@@ -716,6 +716,9 @@ impl PersistentSubprocessController {
             super::super::session_recovery::mark_active_pid(mstore, &self.block_id, pid);
         }
 
+        // The user turns this writer sends, by uuid: the CLI echoes them back (`cli_native::sent`).
+        let sent_prompts = crate::backend::cli_native::sent::SentPrompts::default();
+        let sent_prompts_write = sent_prompts.clone();
         // Spawn stdin writer task
         tokio::spawn(async move {
             let mut stdin = stdin;
@@ -733,6 +736,7 @@ impl PersistentSubprocessController {
                     }
                     None => msg,
                 };
+                let msg = sent_prompts_write.tag(&msg);
                 if let Err(e) = stdin.write_all(msg.as_bytes()).await {
                     tracing::warn!("persistent stdin write error: {}", e);
                     break;
@@ -814,6 +818,7 @@ impl PersistentSubprocessController {
             segment_read,
             relocated_copy_read,
             forked_from_read,
+            sent_prompts,
         }));
 
         self.spawn_status_heartbeat();

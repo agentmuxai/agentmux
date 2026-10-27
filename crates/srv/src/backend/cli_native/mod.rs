@@ -8,11 +8,11 @@
 //! The receiving CLI starts a turn on its own and writes nothing about the
 //! message to the stream srv reads, unless it is launched with
 //! `--replay-user-messages`. With it, the message arrives as a `user` frame
-//! carrying `origin.kind == "peer"`, and the same flag replays the human's own
-//! typed prompts as `isReplay` user frames, which srv and the pane already
-//! record themselves. [`reader::CliNativeReader`] therefore takes every
-//! replayed user frame out of the stream the pane sees (as before the flag) and
-//! audits the peer ones.
+//! carrying `origin.kind == "peer"`, and the same flag replays every user turn
+//! srv writes, as `isReplay` frames the pane already records itself.
+//! [`reader::CliNativeReader`] therefore takes those two kinds of frame out of
+//! the stream the pane sees, and audits the peer ones. The CLI's own `isReplay`
+//! frames (a local command's output) are none of those and stay ([`sent`]).
 //!
 //! Who sent a message is decided here, from the process id the CLI verified for
 //! the sender's connection ([`sender`]), never from the name the message gives.
@@ -22,3 +22,4 @@ pub mod live;
 pub mod pids;
 pub mod reader;
 pub mod sender;
+pub mod sent;
