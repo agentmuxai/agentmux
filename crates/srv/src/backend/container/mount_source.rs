@@ -4,7 +4,7 @@ use super::normalize_host_path;
 
 /// Canonical form of a mount source for comparison.
 ///
-/// Only Windows is folded, deliberately (codex P2 on PR #2933): Docker on Windows can report a
+/// Only Windows is folded, deliberately (#2933): Docker on Windows can report a
 /// differently-cased drive letter than we asked for, and a case-sensitive compare there
 /// produces phantom drift and a needless recreate. Folding unconditionally is the opposite bug:
 /// on a case-sensitive host, switching an agent's workspace from `/work/Foo` to the genuinely
