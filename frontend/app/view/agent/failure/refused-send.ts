@@ -26,13 +26,13 @@ const [refused, setRefused] = createSignal<ReadonlyMap<string, RefusedSend>>(new
 
 export function rememberRefusedSend(blockId: string, send: RefusedSend): void {
     setRefused((prev) => {
-        // A second refusal adds to the first: neither message is dropped.
+        // A second refusal adds to the first, so neither message is dropped; the kept message
+        // resent and refused again stays as it is.
         const kept = prev.get(blockId);
-        const merged = kept
-            ? { text: `${kept.text}
-
-${send.text}`, attachments: [...kept.attachments, ...send.attachments] }
-            : send;
+        const merged =
+            !kept || kept.text === send.text
+                ? send
+                : { text: [kept.text, send.text].join("\n\n"), attachments: [...kept.attachments, ...send.attachments] };
         return new Map(prev).set(blockId, merged);
     });
 }

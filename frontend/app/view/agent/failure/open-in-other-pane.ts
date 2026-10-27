@@ -13,7 +13,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { revealBlock } from "@/app/util/reveal-block";
 import type { AttachmentRef } from "@/types/rpc/AttachmentRef";
-import { forgetRefusedSend, refusedSendOf } from "./refused-send";
+import { refusedSendOf } from "./refused-send";
 
 /** srv waits up to 25 s for the other pane's agent to let go. */
 const MOVE_HERE_TIMEOUT_MS = 60_000;
@@ -32,9 +32,10 @@ export function openInOtherPaneActions(opts: {
             opts.log("agent", "Move here — asking the other pane to let this agent go");
             const r = await RpcApi.AgentMoveHereCommand(TabRpcClient, { block_id: opts.blockId }, { timeout: MOVE_HERE_TIMEOUT_MS });
             opts.log("agent", r.from_block ? `Move here — released by ${r.from_block}` : "Move here — nobody else was running it");
+            // The kept message stays until this pane's send is accepted (`sendMessage` forgets it
+            // then); a resend that fails leaves it in the row, so Move here can be tried again.
             const refused = refusedSendOf(opts.blockId);
-            forgetRefusedSend(opts.blockId);
-            if (refused) void opts.send(refused.text, refused.attachments);
+            if (refused) await opts.send(refused.text, refused.attachments);
         },
     };
 }

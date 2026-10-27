@@ -1279,6 +1279,8 @@ impl PersistentSubprocessController {
             if inner.agent_lease.is_none() {
                 return false;
             }
+            // A deferred runtime-config restart must not respawn the agent this hands away.
+            inner.config_restart_generation = None;
             inner.kill_tx.take()
         };
         tracing::info!(block_id = %self.block_id, "agent_admission.takeover: handing this agent to another instance");

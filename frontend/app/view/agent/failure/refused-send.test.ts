@@ -15,6 +15,12 @@ describe("refused sends", () => {
         expect(refusedSendOf("b1")).toEqual({ text: "first\n\nsecond", attachments: [att] });
     });
 
+    it("does not repeat the kept message when its resend is refused again", () => {
+        rememberRefusedSend("b1", { text: "first", attachments: [] });
+        rememberRefusedSend("b1", { text: "first", attachments: [] });
+        expect(refusedSendOf("b1")?.text).toBe("first");
+    });
+
     it("forgets a kept message", () => {
         rememberRefusedSend("b1", { text: "x", attachments: [] });
         forgetRefusedSend("b1");
