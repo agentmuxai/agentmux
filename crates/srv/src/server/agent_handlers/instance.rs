@@ -70,6 +70,19 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             let mstore = mstore.clone();
             let broker = broker.clone();
             async move {
+                // A fresh launch of a template would put a pane on the template's own transcript
+                // zone (`agent:<templateId>:current`, shared by every launch of it), with a row
+                // of its own: two keys for one conversation. Templates are cloned into a user
+                // agent first (the picker does; `agent.open` refuses them). A continuation of an
+                // existing launch folds into its row and stays allowed.
+                if cmd.parent_instance_id.is_empty()
+                    && mstore.agent_def_get(&cmd.definition_id).ok().flatten().is_some_and(|d| d.is_seeded == 1)
+                {
+                    return Err(format!(
+                        "TEMPLATE_NOT_LAUNCHABLE: '{}' is a template; create an agent from it first",
+                        cmd.definition_id
+                    ));
+                }
                 let now = agentmux_common::time::now_ms();
                 let inst = AgentInstance {
                     id: uuid::Uuid::new_v4().to_string(),
@@ -372,6 +385,40 @@ mod tests {
                 "{cmd} is migrated and must appear in the schema",
             );
         }
+    }
+
+    /// `createagentinstance` refuses a fresh launch of a template and records a user
+    /// agent's, so no pane is put on a template's shared transcript zone.
+    #[tokio::test]
+    async fn createagentinstance_refuses_a_fresh_template_launch() {
+        let state = crate::server::tests::test_state();
+        for (id, seeded) in [("tpl-x", 1), ("mine-x", 0)] {
+            let mut def: crate::backend::storage::AgentDefinition = serde_json::from_value(serde_json::json!({
+                "id": id, "name": id, "icon": "wand-magic-sparkles", "provider": "claude",
+                "description": "", "created_at": 1, "is_seeded": seeded,
+            }))
+            .unwrap();
+            state.mstore.agent_def_insert(&mut def).unwrap();
+        }
+        let (engine, mut rx) = WshRpcEngine::new();
+        register(&engine, &state);
+        let mut call = |n: u32, id: &str| {
+            engine.handle_message(crate::backend::rpc_types::RpcMessage {
+                command: COMMAND_CREATE_AGENT_INSTANCE.to_string(),
+                reqid: format!("r{n}"),
+                data: Some(serde_json::json!({ "definition_id": id })),
+                ..Default::default()
+            });
+        };
+
+        call(1, "tpl-x");
+        let r = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv()).await.unwrap().unwrap();
+        assert!(r.error.starts_with("TEMPLATE_NOT_LAUNCHABLE"), "{:?}", r.error);
+        assert!(state.mstore.instance_list(Some("tpl-x"), None).unwrap().is_empty(), "no row was made");
+
+        call(2, "mine-x");
+        let r = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv()).await.unwrap().unwrap();
+        assert!(r.error.is_empty(), "{:?}", r.error);
     }
 
     /// `agentlastruntime`: read / replace / forget the remembered runtime, and
