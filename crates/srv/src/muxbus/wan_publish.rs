@@ -641,6 +641,42 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_rotation_done_offline_is_revoked_after_a_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("wan.db");
+        let old_fp;
+        let instance_id;
+        {
+            // Rotated while the relay cannot be reached: nothing is delivered.
+            let url = {
+                let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+                format!("http://{}", l.local_addr().unwrap())
+            };
+            let wan = WanIdentityStore::open(&path).unwrap();
+            let instance = wan.instance_ensure("narko").unwrap();
+            instance_id = instance.instance_id.clone();
+            old_fp = replaced_after_publishing(&wan);
+            let offline = publish_pending(&wan, &instance, "stable", &url, &reqwest::Client::new(), "tok", DIR).await;
+            assert_eq!(offline.revoked, 0);
+        } // the process ends: the store is closed
+
+        let wan = WanIdentityStore::open(&path).unwrap();
+        let instance = wan.instance_ensure("narko").unwrap();
+        assert_eq!(instance.instance_id, instance_id, "the same install");
+        let owed = wan.retirements_pending(DIR).unwrap();
+        assert_eq!(owed.len(), 1, "still owed after the restart");
+        assert_eq!(owed[0].key_fp, old_fp);
+
+        let stub = stub_directory(axum::http::StatusCode::OK).await;
+        let result = publish_pending(&wan, &instance, "stable", &stub.url, &reqwest::Client::new(), "tok", DIR).await;
+        assert_eq!(result.revoked, 1);
+        let sent = stub.revoked.lock().unwrap().clone();
+        let revocation: WanKeyRevocation = serde_json::from_value(sent[0].2.clone()).unwrap();
+        assert!(revocation.verify() && revocation.names(&instance_id, "camper", "stable", &old_fp));
+        assert!(wan.retirements_pending(DIR).unwrap().is_empty(), "cleared only once the directory has it");
+    }
+
+    #[tokio::test]
     async fn a_cloud_without_the_revocation_route_still_gets_the_keys_and_is_asked_again_later() {
         let stub = stub_with_revocations(axum::http::StatusCode::OK, axum::http::StatusCode::NOT_FOUND).await;
         let (_dir, wan, instance) = temp_wan();
