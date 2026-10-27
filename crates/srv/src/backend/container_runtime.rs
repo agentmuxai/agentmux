@@ -107,6 +107,9 @@ pub struct Env {
     pub tls_verify: bool,
     pub xdg_runtime_dir: Option<PathBuf>,
     pub home: Option<PathBuf>,
+    /// Where `key.pem`, `cert.pem` and `ca.pem` are for a TLS connection: `DOCKER_CERT_PATH`,
+    /// else `$DOCKER_CONFIG`, else `~/.docker`.
+    pub cert_dir: Option<PathBuf>,
     pub os: Os,
     /// The effective user, for the ownership check on sockets under their own directories.
     pub uid: Option<u32>,
@@ -123,6 +126,10 @@ impl Env {
             tls_verify: var("DOCKER_TLS_VERIFY").is_some(),
             xdg_runtime_dir: var("XDG_RUNTIME_DIR").map(PathBuf::from).filter(|p| p.is_absolute()),
             home: dirs::home_dir(),
+            cert_dir: var("DOCKER_CERT_PATH")
+                .or_else(|| var("DOCKER_CONFIG"))
+                .map(PathBuf::from)
+                .or_else(|| dirs::home_dir().map(|h| h.join(".docker"))),
             os: if cfg!(windows) {
                 Os::Windows
             } else if cfg!(target_os = "macos") {
@@ -356,20 +363,50 @@ async fn try_candidate(c: &Candidate, env: &Env) -> Result<Docker, String> {
             #[cfg(not(unix))]
             Err("unix sockets are not available on this system".to_string())
         }
-        Endpoint::Tcp { .. } | Endpoint::Pipe(_) => {
-            // bollard reads `DOCKER_HOST` and the TLS variables itself.
-            let docker = if env.docker_host.is_some() {
-                Docker::connect_with_defaults()
+        // From here on the address is the one parsed above, never `DOCKER_HOST` read again by
+        // bollard: what was checked is what is connected to.
+        Endpoint::Tcp { host, tls } => {
+            let addr = format!("tcp://{host}");
+            let docker = if *tls {
+                let dir = env.cert_dir.as_deref().ok_or_else(|| {
+                    "TLS needs key.pem, cert.pem and ca.pem, and neither DOCKER_CERT_PATH nor ~/.docker is known".to_string()
+                })?;
+                Docker::connect_with_ssl(
+                    &addr,
+                    &dir.join("key.pem"),
+                    &dir.join("cert.pem"),
+                    &dir.join("ca.pem"),
+                    API_TIMEOUT_SECS,
+                    bollard::API_DEFAULT_VERSION,
+                )
             } else {
-                Docker::connect_with_local_defaults()
+                Docker::connect_with_http(&addr, API_TIMEOUT_SECS, bollard::API_DEFAULT_VERSION)
             }
             .map_err(|e| connection_error(&e.to_string()))?;
-            match tokio::time::timeout(env.ping_timeout, docker.ping()).await {
-                Ok(Ok(_)) => Ok(docker),
-                Ok(Err(e)) => Err(connection_error(&e.to_string())),
-                Err(_) => Err(format!("no answer within {}s", env.ping_timeout.as_secs_f32().ceil())),
+            ping_docker(docker, env.ping_timeout).await
+        }
+        Endpoint::Pipe(pipe) => {
+            #[cfg(windows)]
+            {
+                let docker = Docker::connect_with_named_pipe(pipe, API_TIMEOUT_SECS, bollard::API_DEFAULT_VERSION)
+                    .map_err(|e| connection_error(&e.to_string()))?;
+                return ping_docker(docker, env.ping_timeout).await;
+            }
+            #[cfg(not(windows))]
+            {
+                let _ = pipe;
+                Err("named pipes are only on Windows".to_string())
             }
         }
+    }
+}
+
+/// `docker` if it answers a ping in time.
+async fn ping_docker(docker: Docker, timeout: Duration) -> Result<Docker, String> {
+    match tokio::time::timeout(timeout, docker.ping()).await {
+        Ok(Ok(_)) => Ok(docker),
+        Ok(Err(e)) => Err(connection_error(&e.to_string())),
+        Err(_) => Err(format!("no answer within {}s", timeout.as_secs_f32().ceil())),
     }
 }
 
@@ -666,6 +703,7 @@ mod tests {
             tls_verify: false,
             xdg_runtime_dir: Some(dir.join("run-user")),
             home: Some(dir.join("home")),
+            cert_dir: None,
             os,
             uid: Some(unsafe { libc::geteuid() }),
             root: dir.join("root"),
@@ -827,6 +865,30 @@ mod tests {
         assert!(got.label().ends_with("/run-user/podman/podman.sock"));
         podman.abort();
         system.abort();
+    }
+
+    /// A tcp:// DOCKER_HOST is connected to at the address that was parsed, whatever the
+    /// process environment says.
+    #[tokio::test]
+    async fn a_tcp_docker_host_is_connected_at_the_parsed_address() {
+        use tokio::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(async move {
+            while let Ok((mut s, _)) = listener.accept().await {
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 1024];
+                    let _ = s.read(&mut buf).await;
+                    let _ = s.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nOK").await;
+                });
+            }
+        });
+        let t = tempfile::TempDir::new().unwrap();
+        let e = Env { docker_host: Some(format!("tcp://127.0.0.1:{port}")), ..env(t.path(), Os::Linux) };
+        let got = connect(&e).await.ok().expect("the tcp runtime answers");
+        assert_eq!(got.kind, Kind::Configured);
+        assert_eq!(got.endpoint, Endpoint::Tcp { host: format!("127.0.0.1:{port}"), tls: false });
+        server.abort();
     }
 
     /// Docker Desktop for Linux keeps its socket in `~/.docker/desktop/`, not `run/`.
