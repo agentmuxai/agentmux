@@ -107,19 +107,49 @@ pub(super) async fn handle_availability(State(state): State<AppState>, Query(q):
     let after_ms = crate::backend::cold_hold::cold_after_ms(&state.config_watcher.get_full_config().settings.extra)
         .and_then(|ms| u64::try_from(ms).ok());
     let now_ms = agentmux_common::time::now_ms_u64();
-    let view = tokio::task::spawn_blocking(move || {
-        if block_id.is_none() && super::reactive::defined_here(&mstore, &agent_owned).is_none() {
-            return None;
+    let known = tokio::task::spawn_blocking(move || {
+        if block_id.is_some() {
+            return Known::Live(describe_block(&mstore, block_id.as_deref(), after_ms, now_ms));
         }
-        Some(describe_block(&mstore, block_id.as_deref(), after_ms, now_ms))
+        let defined = super::reactive::defined_here(&mstore, &agent_owned).is_some();
+        let matches = mstore.agents_matching_name(&agent_owned).map_or(0, |rows| rows.len());
+        match classify_stopped(defined, matches) {
+            Stopped::Defined => Known::Live(describe_block(&mstore, None, after_ms, now_ms)),
+            Stopped::Ambiguous => Known::Ambiguous,
+            Stopped::Unknown => Known::Unknown,
+        }
     })
     .await
-    .ok()
-    .flatten();
-    match view {
-        Some(view) => Json(view).into_response(),
-        None => (StatusCode::NOT_FOUND, Json(json!({ "error": format!("no agent named {agent} here") }))).into_response(),
+    .unwrap_or(Known::Unknown);
+    match known {
+        Known::Live(view) => Json(view).into_response(),
+        Known::Ambiguous => (StatusCode::CONFLICT, Json(json!({ "error": format!("{agent} names more than one agent here") }))).into_response(),
+        Known::Unknown => (StatusCode::NOT_FOUND, Json(json!({ "error": format!("no agent named {agent} here") }))).into_response(),
     }
+}
+
+/// How a name that no live pane answers to stands in the directory.
+#[derive(Debug, PartialEq, Eq)]
+enum Stopped {
+    /// Exactly one defined agent: it has no process.
+    Defined,
+    /// Several defined agents answer to it.
+    Ambiguous,
+    Unknown,
+}
+
+fn classify_stopped(defined_here: bool, matching: usize) -> Stopped {
+    match (defined_here, matching) {
+        (true, _) => Stopped::Defined,
+        (false, 0) => Stopped::Unknown,
+        (false, _) => Stopped::Ambiguous,
+    }
+}
+
+enum Known {
+    Live(Value),
+    Ambiguous,
+    Unknown,
 }
 
 #[cfg(test)]
@@ -171,6 +201,13 @@ mod tests {
         let v = view(Availability::Idle { quiet_for_ms: Some(AFTER + 1) });
         assert_eq!((v["state"].as_str(), v["would"].as_str(), v["reason"].as_str()), (Some("idle"), Some("hold"), Some("idle")));
         assert_eq!(v["retry_when"], "session_active");
+    }
+
+    #[test]
+    fn a_name_no_pane_answers_to_is_defined_ambiguous_or_unknown() {
+        assert_eq!(classify_stopped(true, 1), Stopped::Defined);
+        assert_eq!(classify_stopped(false, 2), Stopped::Ambiguous);
+        assert_eq!(classify_stopped(false, 0), Stopped::Unknown);
     }
 
     #[test]
