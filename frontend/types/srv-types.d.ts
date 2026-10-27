@@ -845,6 +845,10 @@ declare global {
         "agent:historySourceBlockId"?: string;
         /** Last classified agent failure; set on error exit, cleared on clean exit. */
         "agent:last_failure"?: import("@/types/rpc/AgentFailure").AgentFailure;
+        /** The pane's launch stopped at "needs sign-in" and has not registered a controller since; srv reports
+         *  such an agent as signed out (agent_state.rs). Cleared (null) once the controller registers. */
+        "agent:launch_blocked"?: "sign_in";
+        "agent:launch_blocked_at_ms"?: number;
         /** A switch of the agent's account asked for mid-turn, applied by srv when no pane of the agent is in a
          *  turn (agent.account.switch, `after_turn`): the account id, and who asked. */
         "agent:pending_account"?: string;
