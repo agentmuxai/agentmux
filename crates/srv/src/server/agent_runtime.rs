@@ -9,6 +9,10 @@
 //! asks), mapped onto the states a viewer sees. An agent with no live pane is `stopped`; its row
 //! comes from its definition. A viewer (the Swarm) lists the rows once, then follows the event.
 //!
+//! Two things a viewer must not wait for until the always-available agents build lands: `starting`
+//! is never produced (a controller just created, with no process yet, reads as `idle`), and no event
+//! says an agent was deleted (`changed_rows` only forgets it), so a viewer relists on `agents:changed`.
+//!
 //! `desired` is `running` while a process is alive and `stopped` otherwise, until the agent record
 //! keeps its own desired state (the always-available agents build's P1 PR C).
 
