@@ -15,6 +15,7 @@ vi.mock("@/app/store/rpc-api", () => ({ RpcApi: { SetConfigCommand: h.setConfig 
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 vi.mock("@/app/store/global", () => ({ settingsAtom: () => h.settings.current() }));
 
+import { requestSupervisorSettingsOpen, resetSupervisorSettingsRequest } from "@/app/store/supervisor-settings-request";
 import { SUPERVISOR_LIMITS, SupervisorSettingsBar } from "./swarm-supervisor-settings";
 
 afterEach(() => {
@@ -27,6 +28,35 @@ function withSettings(initial: Record<string, unknown>) {
     h.settings.current = settings;
     return setSettings;
 }
+
+describe("SupervisorSettingsBar: asked to open from the Settings search", () => {
+    it("opens its panel on mount when the ask came first", () => {
+        resetSupervisorSettingsRequest();
+        withSettings({});
+        requestSupervisorSettingsOpen();
+        const { container } = render(() => <SupervisorSettingsBar />);
+        expect(container.querySelector(".swarm-supervisor-settings-panel")).not.toBeNull();
+    });
+
+    it("opens a mounted panel at once, and one ask opens one panel", () => {
+        resetSupervisorSettingsRequest();
+        withSettings({});
+        const first = render(() => <SupervisorSettingsBar />);
+        expect(first.container.querySelector(".swarm-supervisor-settings-panel")).toBeNull();
+        requestSupervisorSettingsOpen();
+        expect(first.container.querySelector(".swarm-supervisor-settings-panel")).not.toBeNull();
+        // The ask is spent: a bar that mounts later stays closed.
+        const second = render(() => <SupervisorSettingsBar />);
+        expect(second.container.querySelector(".swarm-supervisor-settings-panel")).toBeNull();
+    });
+
+    it("stays closed when nobody asked", () => {
+        resetSupervisorSettingsRequest();
+        withSettings({});
+        const { container } = render(() => <SupervisorSettingsBar />);
+        expect(container.querySelector(".swarm-supervisor-settings-panel")).toBeNull();
+    });
+});
 
 describe("SupervisorSettingsBar", () => {
     it("says the Supervisor is off, and turning it on writes the master switch", () => {

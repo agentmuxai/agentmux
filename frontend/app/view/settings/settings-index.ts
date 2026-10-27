@@ -21,6 +21,7 @@ import { WIDGETS_SETTINGS } from "./sections/widgets-section";
 import { WIDGET_BAR_SETTINGS } from "./sections/widget-bar-settings";
 import { AGENTS_SETTINGS } from "./sections/agents-section";
 import { ADVANCED_SETTINGS } from "./sections/advanced-section";
+import { SUPERVISOR_SETTINGS } from "./sections/supervisor-link";
 
 export const SETTINGS_INDEX: SettingsIndexEntry[] = [
     ...Object.values(APPEARANCE_SETTINGS),
@@ -34,6 +35,7 @@ export const SETTINGS_INDEX: SettingsIndexEntry[] = [
     ...Object.values(WIDGET_BAR_SETTINGS),
     ...Object.values(WIDGETS_SETTINGS),
     ...Object.values(AGENTS_SETTINGS),
+    ...Object.values(SUPERVISOR_SETTINGS),
     ...Object.values(ADVANCED_SETTINGS),
 ];
 

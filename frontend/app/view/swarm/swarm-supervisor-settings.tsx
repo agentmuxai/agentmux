@@ -5,10 +5,11 @@
 // switch (the Supervisor is off until the operator turns it on), and a panel with its limits.
 // docs/specs/SPEC_SWARM_SECTIONS_SUPERVISOR_SETTINGS_AND_KANBAN_2026_10_24.md §6.2.
 
-import { createSignal, For, Show, type JSX } from "solid-js";
+import { createEffect, createSignal, For, on as onChange, onMount, Show, type JSX } from "solid-js";
 import { Button, Switch } from "@/app/element/ui";
 import { settingsAtom } from "@/app/store/global";
 import { supervisorEnabled } from "@/app/store/supervisor";
+import { supervisorSettingsRequests, takeSupervisorSettingsRequest } from "@/app/store/supervisor-settings-request";
 import { NumberControl, set, SettingRow, ToggleControl } from "@/app/view/settings/settings-controls";
 
 export interface LimitSetting {
@@ -127,6 +128,12 @@ export function SupervisorSettingsBar(): JSX.Element {
     const settings = () => settingsAtom() as Record<string, unknown> | null | undefined;
     const on = () => supervisorEnabled(settings());
     const [open, setOpen] = createSignal(false);
+    // Asked to open from the Settings pane's search: at once if this is showing, else on mount.
+    const answerRequest = () => {
+        if (takeSupervisorSettingsRequest()) setOpen(true);
+    };
+    onMount(answerRequest);
+    createEffect(onChange(supervisorSettingsRequests, answerRequest, { defer: true }));
     return (
         <div class="swarm-supervisor-settings" classList={{ "swarm-supervisor-settings--off": !on() }}>
             <div class="swarm-supervisor-settings-line">

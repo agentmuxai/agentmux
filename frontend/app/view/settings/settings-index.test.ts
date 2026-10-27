@@ -61,6 +61,15 @@ describe("searchSettings", () => {
         }
     });
 
+    it("finds the Supervisor's one entry by its settings' words, and it opens the Swarm", () => {
+        for (const q of ["supervisor", "steady", "wait before continuing", "fleet budget", "cooldown", "supervisor:hourly"]) {
+            expect(labels(q)).toContain("Swarm Supervisor");
+        }
+        const entry = SETTINGS_INDEX.find((e) => e.id === "agents.supervisor")!;
+        expect(typeof entry.opens).toBe("function");
+        expect(SETTINGS_INDEX.filter((e) => e.label.toLowerCase().includes("supervisor"))).toHaveLength(1);
+    });
+
     it("finds the Kanban reminder switch by kanban, backlog and reminder", () => {
         for (const q of ["kanban", "backlog", "reminder"]) {
             expect(labels(q)).toContain("Remind idle agents of their backlog");
