@@ -467,8 +467,8 @@ pub struct CommandAgentSetSeatData {
 #[derive(Debug, Clone, Default, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct SeatInput {
-    /// One of `leader`, `worker`, `specialist`, `platform_tester`, `analyst`.
-    #[ts(type = r#""leader" | "worker" | "specialist" | "platform_tester" | "analyst""#)]
+    /// One of `leader`, `worker`, `specialist`, `platform_tester`, `analyst`, `super`.
+    #[ts(type = r#""leader" | "worker" | "specialist" | "platform_tester" | "analyst" | "super""#)]
     pub role: String,
     /// At most 40 characters; blank means none.
     #[serde(default)]
@@ -540,7 +540,7 @@ pub struct AgentSetSeatResult {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct SeatSummary {
-    #[ts(type = r#""leader" | "worker" | "specialist" | "platform_tester" | "analyst""#)]
+    #[ts(type = r#""leader" | "worker" | "specialist" | "platform_tester" | "analyst" | "super""#)]
     pub role: String,
     pub qualifier: Option<String>,
     /// `null`: the agent reports to the operator.

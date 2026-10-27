@@ -6,7 +6,7 @@ import type { SeatLead } from "./SeatLead";
  * MuxAPI's `Agents list`, a LAN peer's agent list and a My Agents row
  * (`RecentSessionRow.seat`). `set_at_ms` and `lane` stay on the definition.
  */
-export type SeatSummary = { role: "leader" | "worker" | "specialist" | "platform_tester" | "analyst", qualifier: string | null, 
+export type SeatSummary = { role: "leader" | "worker" | "specialist" | "platform_tester" | "analyst" | "super", qualifier: string | null, 
 /**
  * `null`: the agent reports to the operator.
  */

@@ -20,7 +20,10 @@ use crate::backend::storage::AgentDefinition;
 use crate::registry::AgentSeat;
 
 /// The roles a seat may name, as stored.
-pub const ROLES: [&str; 5] = ["leader", "worker", "specialist", "platform_tester", "analyst"];
+pub const ROLES: [&str; 6] = ["leader", "worker", "specialist", "platform_tester", "analyst", SUPER_ROLE];
+/// The role of the one agent that reviews sensitive operations
+/// (`SPEC_SUPER_AGENT_2026_10_25.md`): at most one per AgentMux instance.
+pub const SUPER_ROLE: &str = "super";
 pub const MAX_QUALIFIER_CHARS: usize = 40;
 pub const MAX_AREA_CHARS: usize = 120;
 /// The spec gives `lane` no limit; it's a short name, like the qualifier.
@@ -91,7 +94,7 @@ pub fn validate(
         }
         no_cycle(agent_id, lead, lead_of)?;
     }
-    Ok(AgentSeat { role: role.to_string(), qualifier, lead, area, lane, set_at_ms: now_ms })
+    Ok(AgentSeat { role: role.to_string(), qualifier, lead, area, lane, prior_role: None, set_at_ms: now_ms })
 }
 
 /// Refuse `lead` as `agent_id`'s lead when following leads from it comes
@@ -144,6 +147,14 @@ pub fn effective_seat_by_id(mstore: &Store, id: &str) -> Option<AgentSeat> {
     mstore
         .agent_seat_get(id)
         .or_else(|| spawned_seat(crate::server::app_api::agent_spawn::worker_of(mstore, id)))
+}
+
+/// The uid of the agent whose stored seat is the super agent's, if any.
+pub fn super_holder(mstore: &Store, defs: &[AgentDefinition]) -> Option<String> {
+    defs.iter()
+        .filter(|d| d.is_seeded == 0)
+        .find(|d| mstore.agent_seat_get(&d.id).is_some_and(|s| s.role == SUPER_ROLE))
+        .map(|d| d.id.clone())
 }
 
 /// Give every definition in `defs` (as `agent_def_list` returns them) its
