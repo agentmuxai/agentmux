@@ -55,7 +55,7 @@ vi.mock("@/app/store/services", () => ({
     BlockService: { GetControllerStatus: vi.fn().mockResolvedValue(undefined) },
 }));
 vi.mock("@/app/store/mos", () => ({ makeORef: () => ({}) }));
-vi.mock("../flows/launch-flow", () => ({ runLaunchFlow: vi.fn() }));
+vi.mock("../flows/launch-flow", () => ({ runLaunchFlow: vi.fn(), prestartContainerAgent: vi.fn() }));
 vi.mock("../flows/run-provider-login", () => ({
     persistAndLinkAccount: vi.fn(),
     runProviderLogin: (...args: unknown[]) => hub.runProviderLogin(...args),
@@ -63,6 +63,7 @@ vi.mock("../flows/run-provider-login", () => ({
 
 import { useAgentControllerStatus } from "./useAgentControllerStatus";
 import { RpcApi } from "@/app/store/rpc-api";
+import { prestartContainerAgent } from "../flows/launch-flow";
 
 const claude = { id: "claude" } as any; // no authConfigDirEnvVar — skips the link-env sub-path
 
@@ -83,6 +84,33 @@ describe("useAgentControllerStatus — binding an account answers the transcript
             const status = useAgentControllerStatus({ blockId: "block-1", provider: () => claude, log: () => {}, onAccountBound });
             await status.bindExistingAccount(account);
             expect(onAccountBound).toHaveBeenCalledWith("Work (me@example.com)");
+            dispose();
+        });
+    });
+
+    it("starts a container agent's container once the account is bound, and no other agent's", async () => {
+        hub.agentDefinitionId = "def-1";
+        hub.agentMode = "container";
+        await createRoot(async (dispose) => {
+            const status = useAgentControllerStatus({ blockId: "block-1", provider: () => claude, log: () => {} });
+            await status.bindExistingAccount(account);
+            expect(prestartContainerAgent).toHaveBeenCalledTimes(1);
+            expect(vi.mocked(prestartContainerAgent).mock.calls[0][0]).toBe("block-1");
+            hub.agentMode = "host";
+            await status.bindExistingAccount(account);
+            expect(prestartContainerAgent).toHaveBeenCalledTimes(1);
+            dispose();
+        });
+    });
+
+    it("starts nothing when a pane did not restart on the account", async () => {
+        hub.agentDefinitionId = "def-1";
+        hub.agentMode = "container";
+        vi.mocked(RpcApi.AgentAccountSwitchCommand).mockResolvedValueOnce({ failed: ["could not restart"], status: "done", account_label: "work" } as any);
+        await createRoot(async (dispose) => {
+            const status = useAgentControllerStatus({ blockId: "block-1", provider: () => claude, log: () => {} });
+            await status.bindExistingAccount(account);
+            expect(prestartContainerAgent).not.toHaveBeenCalled();
             dispose();
         });
     });

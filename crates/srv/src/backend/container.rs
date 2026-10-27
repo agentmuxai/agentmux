@@ -18,6 +18,7 @@
 //! Docker best practices here were researched independently.
 
 pub(crate) mod drift;
+mod mount_source;
 mod mounts;
 mod pull;
 mod reap;
@@ -32,6 +33,7 @@ use futures_util::StreamExt as _;
 use bollard::Docker;
 
 use crate::backend::container_runtime;
+use self::mount_source::fold_mount_source;
 use self::mounts::agent_home_mounts;
 use bollard::container::{
     Config, CreateContainerOptions, ListContainersOptions, StartContainerOptions,
@@ -93,24 +95,6 @@ pub struct ContainerMountSpec {
 /// a bind source, so `C:\Users\x` has to travel as `C:/Users/x`.
 fn normalize_host_path(path: &str) -> String {
     path.replace('\\', "/")
-}
-
-/// Canonical form of a mount source for comparison.
-///
-/// Case folding is Windows-only, deliberately (codex P2 on PR #2933). Docker on
-/// Windows can report a differently-cased drive letter than we asked for, so a
-/// case-sensitive compare there produces phantom drift and a needless recreate.
-/// Folding UNCONDITIONALLY is the opposite bug: on a case-sensitive host,
-/// switching an agent's workspace from `/work/Foo` to the genuinely different
-/// `/work/foo` would look like a match, `ensure_running` would skip the
-/// recreate, and `/workspace` would keep serving the old directory.
-fn fold_mount_source(source: &str) -> String {
-    let normalized = normalize_host_path(source);
-    if cfg!(windows) {
-        normalized.to_lowercase()
-    } else {
-        normalized
-    }
 }
 
 /// The credentials file inside the account's config dir, and inside the image.
@@ -1709,22 +1693,6 @@ mod tests {
             Some(dir.to_string_lossy().as_ref()),
         );
         let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    /// Case folding must be Windows-only: on a case-sensitive host `/work/Foo`
-    /// and `/work/foo` are different directories, and folding them together
-    /// would hide real drift and leave /workspace on the stale one.
-    #[test]
-    fn mount_source_case_is_folded_only_where_the_filesystem_is_case_insensitive() {
-        let a = fold_mount_source("/work/Foo");
-        let b = fold_mount_source("/work/foo");
-        if cfg!(windows) {
-            assert_eq!(a, b, "windows paths are case-insensitive");
-        } else {
-            assert_ne!(a, b, "a case-sensitive host must see these as different mounts");
-        }
-        // Slash normalization is unconditional either way.
-        assert_eq!(fold_mount_source(r"C:\a\b"), fold_mount_source("C:/a/b"));
     }
 
     #[test]
