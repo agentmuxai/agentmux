@@ -41,6 +41,14 @@ async fn itest_container_listener_serves_the_agents_network_only() {
     let _ = cm.remove(name, true).await;
     cm.ensure_running(name, "nginx:alpine", &[], &[], &ContainerMountSpec::default()).await.expect("ensure_running");
 
+    // A second start with the same network reuses the listener (it once deadlocked here).
+    let first = container_listener::url();
+    tokio::time::timeout(std::time::Duration::from_secs(30), cm.ensure_running(name, "nginx:alpine", &[], &[], &ContainerMountSpec::default()))
+        .await
+        .expect("a second ensure_running must not hang")
+        .expect("ensure_running (reuse)");
+    assert_eq!(container_listener::url(), first, "the listener is reused, not rebound");
+
     let base = container_listener::url().expect("the listener binds the agents network's gateway on a Linux Docker host");
     let token = token_for_block(name, None);
     let got = [

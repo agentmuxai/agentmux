@@ -112,6 +112,8 @@ struct Binding {
 
 static ROUTER: OnceLock<Router> = OnceLock::new();
 static BOUND: Mutex<Option<Binding>> = Mutex::new(None);
+#[cfg(target_os = "linux")]
+static BINDING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// Hands over the container router (`SrvRouters::container`). Called once at boot.
 pub fn set_router(router: Router) {
@@ -171,10 +173,11 @@ pub async fn ensure_bound(docker: &bollard::Docker) -> Option<String> {
             tracing::debug!(%gateway, "container listener: the gateway is not a private address of this host; not binding");
             return None;
         }
-        if let Some(b) = BOUND.lock().unwrap().as_ref() {
-            if b.gateway == gateway && b.subnet == subnet {
-                return url();
-            }
+        // One binder at a time, so two containers starting together bind once.
+        let _binding = BINDING.lock().await;
+        let unchanged = BOUND.lock().unwrap().as_ref().is_some_and(|b| b.gateway == gateway && b.subnet == subnet);
+        if unchanged {
+            return url();
         }
         let router = ROUTER.get()?.clone();
         let listener = match tokio::net::TcpListener::bind((gateway, 0)).await {
@@ -317,6 +320,72 @@ mod tests {
         // Not from loopback, not from another network.
         assert_eq!(call(&router, "127.0.0.1", Some(&token), "/agentmux/discovery").await, StatusCode::FORBIDDEN);
         assert_eq!(call(&router, &d("10_1_2_3"), Some(&token), "/agentmux/discovery").await, StatusCode::FORBIDDEN);
+    }
+
+    /// What the real HTTP parser and router make of a request line: the status the listener
+    /// answers with, over a TCP connection.
+    async fn raw_status(addr: SocketAddr, target: &str, key: &str) -> String {
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+        let mut conn = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let request = format!("GET {target} HTTP/1.1\r\nHost: x\r\nX-AuthKey: {key}\r\nConnection: close\r\n\r\n");
+        conn.write_all(request.as_bytes()).await.unwrap();
+        let mut answer = String::new();
+        let _ = conn.read_to_string(&mut answer).await;
+        answer.lines().next().unwrap_or("").split_whitespace().nth(1).unwrap_or("none").to_string()
+    }
+
+    /// Paths that look like an allowed route, or climb out of one, never reach an operator route:
+    /// the allowlist matches the raw path exactly as the router does, so every one is refused
+    /// before the app sees it.
+    #[tokio::test]
+    async fn path_tricks_do_not_reach_an_operator_route() {
+        let state = crate::server::tests::test_state();
+        let router = layer(crate::server::build_routers(state).full, || Subnet::parse("127.0.0.0/8"));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, router.into_make_service_with_connect_info::<SocketAddr>()).await.unwrap();
+        });
+        let token = crate::backend::container_credential::token_for_block("cl-block-paths", Some("agent-tok"));
+
+        let tricks = [
+            "//agentmux/service",
+            "//agentmux/discovery",
+            "/agentmux/service/",
+            "/agentmux/service.",
+            "/agentmux/service/.",
+            "/agentmux/service?/agentmux/discovery",
+            "/agentmux/discovery/",
+            "/agentmux/discovery/.",
+            "/agentmux/discovery/../service",
+            "/agentmux/discovery/%2e%2e/service",
+            "/agentmux/discovery%2F..%2Fservice",
+            "/agentmux%2Fservice",
+            "/agentmux/%73ervice",
+            "/AGENTMUX/service",
+            "/api/v1/agent/../../agentmux/service",
+            "/api/v1/agent/%2e%2e/%2e%2e/agentmux/service",
+            "/api/v1/agent/%2E%2E/%2E%2E/agentmux/service",
+            "/api/v1/agent/memory/list/../../../../agentmux/service",
+            "/api/v1/agent/memory/list/%2e%2e/%2e%2e/%2e%2e/%2e%2e/agentmux/service",
+            "/api/v1/agent/shutdown/..%2F..%2F..%2Fagentmux/service",
+            "/api/v1/agent/shutdown/x/../../../../ws",
+            "/agentmux/work/x/../../service",
+            "/agentmux/work/%2e%2e/service",
+            "/agentmux/work/a%2Fb",
+            "/agentmux/work/x/heartbeat/../../../service",
+            "/agentmux/work/x\\..\\service",
+            "/%2e%2e/agentmux/service",
+            "/ws/",
+            "/ws/.",
+        ];
+        for target in tricks {
+            let got = raw_status(addr, target, &token).await;
+            assert!(got == "403" || got == "400", "{target} answered {got}");
+        }
+        // The guard is not simply refusing everything.
+        let got = raw_status(addr, "/agentmux/discovery", &token).await;
+        assert!(got != "401" && got != "403" && got != "400", "discovery answered {got}");
     }
 
     #[tokio::test]
