@@ -79,7 +79,7 @@ fn the_operators_order_in_the_backlog_decides_between_an_agents_own_tasks() {
         s.work_card_create(id, &NewCard::default(), at).unwrap();
     }
     // Dragged above "first".
-    s.work_card_edit("second", Some(500.0), None, None, 3000).unwrap();
+    s.work_card_edit("second", Some(500.0), None, None, None, 3000).unwrap();
     let waiting = s.work_board_waiting_for("Loap-3", "uid-l", 10, 5000).unwrap();
     assert_eq!(waiting.iter().map(|t| t.item.id.as_str()).collect::<Vec<_>>(), ["second", "first"]);
     assert_eq!(claim(&s, "Loap-3", "uid-l").unwrap().id, "second");

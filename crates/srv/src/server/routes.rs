@@ -210,6 +210,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/agentmux/work/:id/submit", post(work_tasks::handle_work_submit))
         .route("/agentmux/work/:id/hold", post(work_tasks::handle_work_hold))
         .route("/agentmux/work/:id/unhold", post(work_tasks::handle_work_unhold))
+        .route("/agentmux/work/act", post(work_act::handle_work_act))
         // Presence claims and posts to a repository's coordination channel
         // (SPEC_AGENT_COORDINATION_CHANNEL_2026_10_15.md); reading is open.
         .route("/api/v1/work-claims", post(work_claims_handlers::handle_claim_work))
@@ -603,7 +604,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
             get(agent_self_keys::handle_agent_self_keys),
         )
         .route("/agentmux/work", get(work_queue::handle_work_list))
-        // Kanban: a leader's decision on a task in review (signed, not a token).
+        // Kanban: an agent's decision on a task in review (signed, not a token).
         .route("/agentmux/work/:id/accept", post(work_delegate::handle_work_accept))
         .route("/agentmux/work/:id/send_back", post(work_delegate::handle_work_send_back))
         .merge(bus_routes)
