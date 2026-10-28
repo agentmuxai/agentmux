@@ -278,6 +278,7 @@ jobs:
     if: needs.check-macos.outputs.available == 'true'
     permissions:
       contents: write
+      id-token: write   # build-macos.yml gets the Apple signing secrets with it
     uses: agentmuxai/agentmux/.github/workflows/build-macos.yml@main
     with:
       ref: ${{ github.sha }}

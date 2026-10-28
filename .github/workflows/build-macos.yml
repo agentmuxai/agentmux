@@ -4,13 +4,15 @@ name: build-macos
 # Builds a signed + notarized Developer ID DMG (arm64) and uploads it to the
 # corresponding GitHub release.
 #
-# Required repo secrets (Settings → Secrets → Actions):
-#   APPLE_CERTIFICATE            Base64-encoded Developer ID Application .p12
-#   APPLE_CERTIFICATE_PASSWORD   .p12 export password
-#   APPLE_ID                     Apple ID email for notarytool
-#   APPLE_PASSWORD               App-specific password (appleid.apple.com)
-#   APPLE_TEAM_ID                10-char Team ID
-#   (release upload uses GITHUB_TOKEN with contents:write — no extra PAT needed)
+# The Apple signing secrets (Developer ID certificate and its password, the Apple ID
+# and app-specific password for notarytool, the team id) are not repository secrets.
+# They are one AWS secret that a role hands out only to a job of THIS file at
+# refs/heads/main, for a run on main or for a gated release tag. A workflow on any
+# other branch, or a tag's own copy of a workflow, cannot get them. The two checks
+# below run before the code or the credentials are used:
+#   - the code that gets built and signed is main's (or the gated release commit);
+#   - the identity token this job holds names build-macos.yml on main.
+# (release upload uses GITHUB_TOKEN with contents:write — no extra PAT needed)
 #
 # See docs/specs/SPEC_BUILDER_MACOS_LINUX_CI_2026_06_24.md for full design notes.
 
@@ -55,6 +57,7 @@ on:
 
 permissions:
   contents: write   # needed to upload release assets via GITHUB_TOKEN
+  id-token: write   # the OIDC token the role for the Apple secrets accepts
 
 jobs:
   build:
@@ -108,6 +111,48 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+
+      # Before any step runs code from the checkout (npm scripts, build scripts): they
+      # could ask for this job's identity token and so for the Apple secrets. Only main's
+      # code, or the gated release commit of a tag run, gets this far. A `workflow_dispatch`
+      # or `repository_dispatch` can name any ref to build, and a tag's own workflow can
+      # call this file on main with a tag of its own making: neither is main's code.
+      - name: The code to be signed is main's
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          RUN_REF: ${{ github.ref }}
+          EVENT: ${{ github.event_name }}
+          RUN_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          HEAD_SHA="$(git rev-parse HEAD)"
+          STATUS="$(gh api "repos/${REPO}/compare/main...${HEAD_SHA}" --jq .status)"
+          case "$STATUS" in
+            identical|behind) ;;
+            *) echo "::error::the commit to build ($HEAD_SHA) is not on main (compare main...sha says '$STATUS'): not signing it with the Apple certificate"; exit 1 ;;
+          esac
+          if [ "$REF_TYPE" = "tag" ]; then
+            # A release: the same gate release-core.yml runs, from main's copy of the script, and the
+            # checkout must be the tagged commit itself.
+            gate="$RUNNER_TEMP/release-gate.mjs"
+            gh api -H "Accept: application/vnd.github.raw+json" "repos/${REPO}/contents/scripts/release-gate.mjs?ref=main" > "$gate"
+            node "$gate" --ref-type "$REF_TYPE" --ref-name "$REF_NAME" --sha "$RUN_SHA" --repo "$REPO"
+            if [ "$HEAD_SHA" != "$RUN_SHA" ]; then
+              echo "::error::the checkout ($HEAD_SHA) is not the tagged commit ($RUN_SHA)"; exit 1
+            fi
+          else
+            case "$EVENT" in
+              schedule|workflow_dispatch|repository_dispatch) ;;
+              *) echo "::error::event '$EVENT' does not get the Apple secrets"; exit 1 ;;
+            esac
+            if [ "$RUN_REF" != "refs/heads/main" ]; then
+              echo "::error::a run on '$RUN_REF' does not get the Apple secrets: only main and release tags do"; exit 1
+            fi
+          fi
 
       - name: Install frontend dependencies
         run: npm install
@@ -179,11 +224,59 @@ jobs:
       # Creates a short-lived keychain that is torn down in the cleanup step.
       # Keeps the signing identity off the default login keychain so it
       # doesn't persist between runs.
-      - name: Import Developer ID certificate into temp keychain
-        env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      # The identity token names this file on main, checked here with a clear message
+      # before AWS is asked (the role checks the same and refuses anything else).
+      - name: The identity token names build-macos.yml on main
+        shell: bash
         run: |
+          TOKEN=$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | jq -r .value)
+          echo "::add-mask::$TOKEN"
+          CLAIMS=$(echo "$TOKEN" | jq -R 'split(".")[1] | @base64d | fromjson')
+          echo "$CLAIMS" | jq '{sub, job_workflow_ref, job_workflow_sha, workflow_ref, ref, event_name}'
+          WANT="${GITHUB_REPOSITORY}/.github/workflows/build-macos.yml@refs/heads/main"
+          GOT=$(echo "$CLAIMS" | jq -r .job_workflow_ref)
+          SUB=$(echo "$CLAIMS" | jq -r .sub)
+          if [ "$GOT" != "$WANT" ]; then
+            echo "::error::the identity token's job_workflow_ref is '$GOT', not '$WANT'; the Apple signing role accepts only the latter. Is the caller using build-macos.yml@main?"
+            exit 1
+          fi
+          case "$SUB" in
+            "repo:${GITHUB_REPOSITORY}:ref:refs/heads/main"|"repo:${GITHUB_REPOSITORY}:ref:refs/tags/v"*) ;;
+            *) echo "::error::the identity token's sub is '$SUB': the Apple signing role accepts only main and v* tags"; exit 1 ;;
+          esac
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.APPLE_SIGNING_ROLE }}
+          aws-region: us-east-1
+          role-session-name: apple-signing-${{ github.run_id }}
+          role-duration-seconds: 900
+
+      # The secret goes to a file only the next two steps read, and is deleted in the
+      # cleanup step: it is not put in the environment of the build, which runs the
+      # repository's own scripts.
+      - name: Fetch the Apple signing secrets
+        shell: bash
+        env:
+          # A repository variable, like the role: where the secret lives is not published here.
+          SECRET_ID: ${{ vars.APPLE_SIGNING_SECRET_ID }}
+        run: |
+          set -euo pipefail
+          FILE="$RUNNER_TEMP/apple-signing.json"
+          umask 077
+          aws secretsmanager get-secret-value --secret-id "$SECRET_ID" --query SecretString --output text > "$FILE"
+          for k in certificate certificate_password apple_id app_password team_id; do
+            v="$(jq -r --arg k "$k" '.[$k] // empty' "$FILE")"
+            if [ -z "$v" ]; then echo "::error::the Apple signing secret has no '$k'"; exit 1; fi
+            case "$v" in *$'\n'*) echo "::error::'$k' in the Apple signing secret has a line break"; exit 1 ;; esac
+            echo "::add-mask::$v"
+          done
+          echo "APPLE_SIGNING_FILE=$FILE" >> "$GITHUB_ENV"
+
+      - name: Import Developer ID certificate into temp keychain
+        run: |
+          APPLE_CERTIFICATE="$(jq -r .certificate "$APPLE_SIGNING_FILE")"
+          APPLE_CERTIFICATE_PASSWORD="$(jq -r .certificate_password "$APPLE_SIGNING_FILE")"
           # Use a full absolute path so security(1) and notarytool agree on the
           # file location — passing just a name causes a -db suffix mismatch on
           # modern macOS (the file lands at ~/Library/Keychains/<name>-db but
@@ -219,11 +312,10 @@ jobs:
       # can submit without interactive prompts. package-macos.sh defaults to
       # NOTARY_PROFILE=notarytool.
       - name: Store notarytool credentials
-        env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
+          APPLE_ID="$(jq -r .apple_id "$APPLE_SIGNING_FILE")"
+          APPLE_PASSWORD="$(jq -r .app_password "$APPLE_SIGNING_FILE")"
+          APPLE_TEAM_ID="$(jq -r .team_id "$APPLE_SIGNING_FILE")"
           # --no-validate skips the live Apple credential check so a pending
           # Developer Program agreement doesn't block credential storage.
           # package-macos.sh handles a 403 from notarytool submit gracefully
@@ -296,4 +388,5 @@ jobs:
       - name: Delete temp keychain
         if: always()
         run: |
+          rm -f "$RUNNER_TEMP/apple-signing.json"
           security delete-keychain "$KEYCHAIN_PATH" 2>/dev/null || true
