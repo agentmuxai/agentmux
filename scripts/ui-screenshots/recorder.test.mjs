@@ -9,7 +9,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { concatList, filterFor, findFfmpeg } from "./lib/recorder.mjs";
 import { liveRedactExpression, stopLiveRedactionExpression } from "./redact.mjs";
-import { STASH_TABS, recordings, setup } from "./recordings.mjs";
+import { recordings, setup } from "./recordings.mjs";
 
 afterEach(() => {
     (0, eval)(stopLiveRedactionExpression);
@@ -123,6 +123,5 @@ describe("recordings suite", () => {
             expect(typeof r.cleanup, r.id).toBe("function");
         }
         expect(typeof setup).toBe("function");
-        expect(STASH_TABS[0]).toBe("Accounts");
     });
 });

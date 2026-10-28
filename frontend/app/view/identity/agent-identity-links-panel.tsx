@@ -303,10 +303,10 @@ export const AgentIdentityLinksPanel = (props: AgentIdentityLinksPanelProps): JS
             </div>
 
             <Show when={claudePanelOpen()}>
-                {/* AgentStashModal (this panel's host) is itself inside
-                    agent-view.tsx's ModalLayer scope="pane" — "pane" here
-                    stacks this dialog correctly over the Stash modal instead
-                    of both competing for the same window-level backdrop. */}
+                {/* This panel can be hosted inside a pane's ModalLayer
+                    scope="pane" — "pane" here stacks this dialog correctly
+                    over that modal instead of both competing for the same
+                    window-level backdrop. */}
                 <ClaudeLoginPanel
                     onClose={() => setClaudePanelOpen(false)}
                     existingAccountId={claudeRefreshAccountId()}

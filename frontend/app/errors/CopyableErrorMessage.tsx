@@ -10,7 +10,7 @@ import { redactSecrets } from "./redact";
  * that wraps + scrolls instead of blowing up the panel, and lets the user
  * hand the exact text to support/an issue without retyping it. `class`
  * names the container; `-text` / `-copy-btn` suffixes get their own rules
- * alongside it (see `_identity-panel.scss` / `_form-overlay.scss`).
+ * alongside it (see `_form-overlay.scss`).
  *
  * Moved here from `view/accounts/AgentMuxConnectPanel.tsx` and exported
  * (`SPEC_ERROR_COPY_EVERYWHERE_2026_09_24.md` §3, §5) so any surface can use

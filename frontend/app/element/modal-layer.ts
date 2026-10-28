@@ -9,7 +9,7 @@
  */
 
 import { createContext, useContext, type Accessor } from "solid-js";
-import type { AgentDefinition, BundleImportCommitResponse, BundleImportPreviewResponse } from "@/app/store/rpc-api";
+import type { BundleImportCommitResponse, BundleImportPreviewResponse } from "@/app/store/rpc-api";
 
 // ── Request shape ────────────────────────────────────────────────────────────
 //
@@ -18,8 +18,6 @@ import type { AgentDefinition, BundleImportCommitResponse, BundleImportPreviewRe
 
 export type ModalLayerRequest =
     | BrowserAuthRequest
-    | AgentIdentityRequest
-    | AgentMemoryRequest
     | AgentSeatRequest
     | AgentEnvRequest
     | AgentBundlesRequest
@@ -61,39 +59,8 @@ export interface BrowserAuthRequest {
 }
 
 /**
- * Agent pane identity modal — formerly opened by the id-card icon in the
- * agent pane header. Superseded by agent-stash (the unified tabbed modal
- * now hosts this panel as the "Accounts" tab); kept for the dispatch case
- * and any future direct callers. Spec:
- * SPEC_AGENT_PANE_MEMORY_IDENTITY_MODALS_2026_06_19.md.
- */
-export interface AgentIdentityRequest {
-    kind: "agent-identity";
-    /** Agent definition to show/edit accounts for. */
-    agent: AgentDefinition;
-    /** Block id of the pane — used to construct the IdentityViewModel. */
-    blockId: string;
-}
-
-/**
- * Agent pane memory modal — formerly opened by the brain icon in the
- * agent pane header. Shows the native memory folder for the agent.
- * Superseded by agent-stash (the unified tabbed modal now hosts this
- * panel as the "Memory" tab); kept for the dispatch case and any future
- * direct callers. Spec: SPEC_AGENT_PANE_MEMORY_IDENTITY_MODALS_2026_06_19.md.
- */
-export interface AgentMemoryRequest {
-    kind: "agent-memory";
-    agentId: string;
-    agentName: string;
-    /** Agent's working directory — used to compute the memory folder path. */
-    workingDirectory: string;
-}
-
-/**
  * An agent's seat (role, lead, area), opened by "Seat…" in My Agents' row
- * menu: the Stash drawer's Seat tab lives in the agent's own pane, which the
- * picker's row may not have open. Same panel as that tab (AgentSeatPanel).
+ * menu and the agent pane's right-click menu (AgentSeatPanel).
  * SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md §3.
  */
 export interface AgentSeatRequest {
@@ -104,8 +71,7 @@ export interface AgentSeatRequest {
 
 /**
  * An agent's extra environment variables, opened by "Environment…" in My
- * Agents' row menu. Same panel as the Stash drawer's Environment tab
- * (AgentEnvPanel).
+ * Agents' row menu (AgentEnvPanel).
  */
 export interface AgentEnvRequest {
     kind: "agent-env";
@@ -115,29 +81,13 @@ export interface AgentEnvRequest {
 
 /**
  * An existing agent's ordered bundle list, opened by "Bundles…" in My Agents'
- * row menu and the agent pane's right-click menu. Same editor as the Stash
- * drawer's Bundles tab (AgentBundlesTab).
+ * row menu and the agent pane's right-click menu (AgentBundlesTab).
  */
 export interface AgentBundlesRequest {
     kind: "agent-bundles";
     agentId: string;
     agentName: string;
 }
-
-/*
- * `AgentStashRequest` (kind: "agent-stash") used to live here — the unified
- * tabbed Accounts/Memory/MCP/Skills/Startup/Registration modal opened by the
- * backpack icon in the agent pane header.
- *
- * DELETED, not deprecated-in-place, by
- * SPEC_AGENT_STASH_PANE_MIGRATION_2026_09_22.md §3.5: Stash is a
- * top-anchored drawer now (agent-view.tsx), so there is no modal request to
- * make. This deliberately breaks with the pattern set by the two dead-but-
- * declared kinds just above (`agent-identity` / `agent-memory`, both kept
- * "for any future direct callers" when Stash superseded them) — the spec
- * calls for decommissioning the overlay, and a request kind nothing can
- * render is worse than no kind at all.
- */
 
 /**
  * Armory Bundle Format (ABF) import — Phase 3

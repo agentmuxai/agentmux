@@ -4,10 +4,8 @@
 /**
  * NativeMemoryManager — the Memory pane's Personal section (Personal Memory): a grid of agent
  * cards that drills into a file's full view (NativeMemoryFileView), built
- * from the same MemoryHistory/MemoryContent pieces a Stash pane's own Memory
- * tab uses. Both read the identical agent:memory:{list,history,diff,
- * revert} RPCs — one source of truth, two entry points (per-agent Stash,
- * cross-agent Memory pane) — no copy or migration step between them. See
+ * from the MemoryHistory/MemoryContent pieces, reading the agent:memory:{list,
+ * history,diff,revert} RPCs. See
  * docs/specs/SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md §4.3.
  *
  * The agent picker was a `<select>` until 2026-09-01; it's now a card grid

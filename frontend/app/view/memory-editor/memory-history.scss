@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Styles for MemoryHistory — the shared version history/diff/revert list,
-// mounted from the Stash memory tab and Memory → Personal and
+// mounted from Memory → Personal and
 // Memory → Global full views. Was the NativeMemoryHistoryPanel stylesheet; the class names keep
 // their `native-memory-history-*` prefix so nothing that targets them moves.
 // The panel's "current content" rules went with it — content now renders in

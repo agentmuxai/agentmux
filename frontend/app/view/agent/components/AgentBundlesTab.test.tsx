@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Tests for AgentBundlesTab — the Stash's Bundles tab: the agent's own bundle
+ * Tests for AgentBundlesTab — the Bundles… modal: the agent's own bundle
  * first and fixed, then its picks, saved on each change
  * (SPEC_RENAME_KNOWLEDGE_TO_MEMORY_2026_10_06.md §3.6).
  */

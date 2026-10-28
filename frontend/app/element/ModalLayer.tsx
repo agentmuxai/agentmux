@@ -10,7 +10,7 @@
  * ESC is blocked while a submit RPC is in-flight (`safeClose` guard).
  */
 
-import { createEffect, createMemo, createSignal, onCleanup, Show, type Component, type JSX } from "solid-js";
+import { createMemo, createSignal, Show, type Component, type JSX } from "solid-js";
 
 import { Modal, PaneModalScope, TabModalScope } from "@/element/modal";
 import { initialFocusTarget } from "./modal-focus-trap";
@@ -52,80 +52,10 @@ export const ModalLayer: Component<ModalLayerProps> = (props) => {
     // `closeOnBackdropClick={false}` already prevents backdrop dismissal
     // outright; this additionally gates ESC. No current kind sets
     // `submitting` (the launch / add-account / new-bundle modals that did
-    // are gone); kept for the next form-like kind, like the set below.
+    // are gone); kept for the next form-like kind.
     const safeClose = () => {
         if (!submitting()) setCurrent(null);
     };
-
-    // Pure browse/view modals have no in-flight submit or form input a
-    // backdrop click could destroy, unlike the form-like kinds this guard
-    // exists for — so clicking outside should just close
-    // them, like any other dismissible overlay.
-    //
-    // CURRENTLY EMPTY. Its only member was "agent-stash" (the per-agent
-    // Accounts/Memories/MCP Servers/Skills modal), which no longer exists as
-    // a modal at all — it became a top-anchored drawer in
-    // SPEC_AGENT_STASH_PANE_MIGRATION_2026_09_22.md §3.5, and a drawer has no
-    // backdrop to click. Kept (rather than deleted along with the
-    // `hasOpenForm` guard below) so the next kind that wants
-    // click-outside-to-close doesn't have to rebuild the guard from scratch;
-    // it costs one always-false memo read until then. Deliberately NOT
-    // folded into this PR: `ModalLayer` is shared by every modal in the app,
-    // and ripping out working machinery is a bigger blast radius than the
-    // Stash migration itself warrants.
-    const BACKDROP_DISMISSIBLE_KINDS = new Set<ModalLayerRequest["kind"]>([]);
-
-    // The note below is retained because it is the REASON this guard exists
-    // at all, and applies to whatever kind is added to the set next — the
-    // failure it documents was not specific to Stash's markup in the end.
-    //
-    // "agent-stash" was only SOMETIMES pure browse/view — its own
-    // Skills/MCP Servers tabs (AgentSkillsModal/AgentMcpModal) can be
-    // showing a "+ New"/edit draft form, and its Memory tab
-    // (AgentNativeMemoryModal) an in-place edit textarea — all local
-    // draft state never tracked by the `submitting` guard (reagentx P1
-    // x2, PR #2315: an accidental backdrop click while composing a new
-    // entry, or editing a memory file, silently discarded it — the
-    // second finding specifically because the first fix's detector only
-    // matched the `agent-primitive-modal-form` class the Skills/MCP forms
-    // share, which the older Memory tab's edit view predates and doesn't
-    // use). Rather than keep chasing one component's specific markup at a
-    // time, key off what every one of these editable surfaces actually
-    // *is* regardless of which primitive owns it: a `<textarea>` — the
-    // only editable-surface kind in this whole modal that can hold
-    // enough free text for losing it to matter (Accounts/Startup are
-    // read-only/selection-only; Skills/MCP/Memory's name/trigger fields
-    // are plain `<input>`s not worth guarding, but their multi-line
-    // content fields, and Memory's whole edit view, are all textareas).
-    //
-    // Scoped to `.modal-root`'s own subtree via `<Modal>`'s `rootRef`
-    // callback below — NOT `mountEl`, which also wraps `props.children`
-    // (the underlying pane's own live content, e.g. a streaming agent
-    // chat mutating constantly); a subtree-wide observer on `mountEl`
-    // would re-scan on every token of unrelated pane activity. `rootRef`
-    // gives the exact node `<Portal>` renders `.modal-root` into (not
-    // necessarily `mountEl`'s direct child — confirmed live it isn't),
-    // so this bounds the scan to just the modal panel's own size and
-    // needs no DOM-structure guessing.
-    const [modalRootEl, setModalRootEl] = createSignal<HTMLDivElement | null>(null);
-    const [hasOpenForm, setHasOpenForm] = createSignal(false);
-    createEffect(() => {
-        const root = modalRootEl();
-        if (!root) {
-            setHasOpenForm(false);
-            return;
-        }
-        const recompute = () => setHasOpenForm(root.querySelector("textarea:not([readonly]):not([disabled])") != null);
-        recompute();
-        const observer = new MutationObserver(recompute);
-        observer.observe(root, { childList: true, subtree: true });
-        onCleanup(() => observer.disconnect());
-    });
-
-    const closeOnBackdropClick = createMemo(() => {
-        const kind = current()?.kind;
-        return kind != null && BACKDROP_DISMISSIBLE_KINDS.has(kind) && !hasOpenForm();
-    });
 
     // Set by `replace` so the next content mount also moves focus —
     // `<Modal>` only resolves initial focus when it opens, and a replace
@@ -206,8 +136,7 @@ export const ModalLayer: Component<ModalLayerProps> = (props) => {
                         open={current() != null}
                         scope={props.scope}
                         onClose={safeClose}
-                        closeOnBackdropClick={closeOnBackdropClick()}
-                        rootRef={setModalRootEl}
+                        closeOnBackdropClick={false}
                         size="fit"
                         // Per-kind hook for panel-level layout, e.g. the
                         // install dialog's fixed header and footer.
