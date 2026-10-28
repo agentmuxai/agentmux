@@ -513,6 +513,25 @@
     }
   },
   {
+    "command": "agent.start",
+    "request": "agentmux_srv::server::agent_runtime::CommandAgentStartData",
+    "requestName": "CommandAgentStartData",
+    "requestTs": {
+      "imports": [
+        "CommandAgentStartData"
+      ],
+      "name": "CommandAgentStartData"
+    },
+    "response": "agentmux_srv::server::agent_runtime::AgentStartResult",
+    "responseName": "AgentStartResult",
+    "responseTs": {
+      "imports": [
+        "AgentStartResult"
+      ],
+      "name": "AgentStartResult"
+    }
+  },
+  {
     "command": "agent.status",
     "request": "agentmux_srv::backend::rpc_types::agent::CommandAgentStatusData",
     "requestName": "CommandAgentStatusData",
@@ -1015,6 +1034,25 @@
         "AgentLastRuntime"
       ],
       "name": "AgentLastRuntime"
+    }
+  },
+  {
+    "command": "agentruntime.list",
+    "request": "serde_json::value::Value",
+    "requestName": "Value",
+    "requestTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    },
+    "response": "alloc::vec::Vec<agentmux_srv::server::agent_runtime::AgentRuntime>",
+    "responseName": "alloc::vec::Vec<agentmux_srv::server::agent_runtime::AgentRuntime>",
+    "responseTs": {
+      "imports": [
+        "AgentRuntime"
+      ],
+      "name": "Array<AgentRuntime>"
     }
   },
   {
