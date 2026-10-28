@@ -189,6 +189,20 @@ async fn a_withdrawal_in_the_last_moment_is_still_caught_before_the_run() {
 }
 
 #[tokio::test]
+async fn a_runner_that_panics_before_returning_its_future_is_settled_as_failed() {
+    let state = test_state();
+    register_runner("quit_agentmux", Arc::new(|_, _| panic!("boom while building")));
+    let reg = requests::registry();
+    let id = reg.request("u-asker", "asker", "quit_agentmux", &BTreeMap::new(), "", now_ms()).unwrap().id;
+    reg.approve(&id, "super", now_ms()).unwrap();
+    open(&state, &id, Duration::from_millis(10)).unwrap();
+    let done = settled(&id).await;
+    assert_eq!(done.status, "failed");
+    assert!(done.error.unwrap().contains("stopped unexpectedly"));
+    assert_eq!(reg.get(&id).unwrap().status, Status::Failed, "it does not stay under way");
+}
+
+#[tokio::test]
 async fn an_operation_that_panics_is_settled_as_failed() {
     let state = test_state();
     register_runner("upgrade", Arc::new(|_, _| Box::pin(async { panic!("boom") })));

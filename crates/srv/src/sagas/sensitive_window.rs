@@ -199,7 +199,9 @@ fn set_status(request_id: &str, status: &'static str, error: Option<String>) {
 /// window as failed instead of leaving it counted as under way.
 async fn run(state: &AppState, request: Request) -> Result<(), String> {
     let runner = runner_for(&request.op).ok_or_else(|| format!("nothing runs {} yet", request.op))?;
-    match tokio::spawn(runner(state.clone(), request)).await {
+    let state = state.clone();
+    // The runner is called inside the task too: one that panics before it hands back a future is caught the same way.
+    match tokio::spawn(async move { runner(state, request).await }).await {
         Ok(result) => result,
         Err(e) => Err(format!("the operation stopped unexpectedly: {e}")),
     }
