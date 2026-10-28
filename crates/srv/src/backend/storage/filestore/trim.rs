@@ -23,6 +23,19 @@ pub(crate) fn first_live_part(size: i64, maxsize: i64) -> i32 {
     ((size - maxsize) / PART_DATA_SIZE as i64) as i32
 }
 
+/// What an append of `len` bytes at `start` adds to the write-ahead log: every
+/// part it touches is written whole (a part is one row, and a write replaces the
+/// row), so a 4 KB batch costs a 64 KB part. The log's growth follows this, not
+/// the bytes appended.
+pub(crate) fn append_log_cost(start: i64, len: usize) -> i64 {
+    if len == 0 {
+        return 0;
+    }
+    let part = PART_DATA_SIZE as i64;
+    let (first, last) = (start.max(0) / part, (start.max(0) + len as i64 - 1) / part);
+    (last - first + 1) * part
+}
+
 /// `name`'s row as the database holds it now, for a reader that holds the
 /// connection until it has loaded the parts the row says to load.
 pub(super) fn file_row(conn: &rusqlite::Connection, zone_id: &str, name: &str) -> Result<Option<super::types::MuxFile>, StoreError> {

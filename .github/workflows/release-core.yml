@@ -39,6 +39,11 @@ name: Release (core)
 on:
   workflow_call:
 
+# Read-only by default; a job that needs more says so itself (job-level permissions replace this
+# block). A job added later gets nothing it did not ask for.
+permissions:
+  contents: read
+
 jobs:
   # ── Phase 1: The gate ────────────────────────────────────────────────────
   # Refuses anything that is not a `chore: release vX.Y.Z` commit on main for the
@@ -307,8 +312,18 @@ jobs:
   #     refs/heads/main (checked below first, with a clear message, then by the role).
   sign-release:
     name: Sign the release manifest
-    needs: [gate, check-macos, cef-runtime-pins, build-windows, build-linux, build-macos]
-    if: ${{ vars.RELEASE_SIGNING_ENABLED == 'true' && !failure() && !cancelled() && (needs.build-macos.result == 'success' || (needs.build-macos.result == 'skipped' && needs.check-macos.outputs.available != 'true')) }}
+    # container-image is needed for its digest, not for the release: a failed image job
+    # leaves the manifest without an image (the app then uses its versioned tag, as before),
+    # so the other jobs are checked one by one instead of by `!failure()`.
+    needs: [gate, check-macos, cef-runtime-pins, build-windows, build-linux, build-macos, container-image]
+    if: >-
+      ${{ vars.RELEASE_SIGNING_ENABLED == 'true' && !cancelled()
+      && contains(fromJSON('["success","skipped"]'), needs.gate.result)
+      && contains(fromJSON('["success","skipped"]'), needs.check-macos.result)
+      && contains(fromJSON('["success","skipped"]'), needs.cef-runtime-pins.result)
+      && contains(fromJSON('["success","skipped"]'), needs.build-windows.result)
+      && contains(fromJSON('["success","skipped"]'), needs.build-linux.result)
+      && (needs.build-macos.result == 'success' || (needs.build-macos.result == 'skipped' && needs.check-macos.outputs.available != 'true')) }}
     runs-on: ubuntu-latest
     environment: release-signing
     permissions:
@@ -368,8 +383,20 @@ jobs:
           find release-artifacts -type f \( -name "*.7z" -o -name "*.exe" -o -name "*.msix" -o -name "*.AppImage" -o -name "*.dmg" -o -name "*.deb" -o -name "*.rpm" -o -name "*.tar.xz" \) -exec cp {} dist-flat/ \;
           ls -l dist-flat/
 
+      # The agent image this release pushed, by the digest of what was pushed: the app pulls
+      # it by that digest, so a tag someone pushes later changes nothing for it. No digest
+      # (the image job failed) is a manifest without an image; the app then uses its tag.
       - name: Build the manifest and the envelope
-        run: node scripts/release-manifest.mjs build --dir dist-flat --tag "$TAG" --out release-manifest
+        env:
+          IMAGE_DIGEST: ${{ needs.container-image.outputs.digest }}
+        run: |
+          images=()
+          if [ -n "$IMAGE_DIGEST" ]; then
+            images+=(--image "agent-base=ghcr.io/agentmuxai/agent-base@${IMAGE_DIGEST}")
+          else
+            echo "::warning::the agent image job reported no digest: the manifest will not name an image"
+          fi
+          node scripts/release-manifest.mjs build --dir dist-flat --tag "$TAG" --out release-manifest "${images[@]}"
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -404,19 +431,17 @@ jobs:
   # serves them from agentmux.ai — so this job must NOT touch S3 or AWS. Its only handoff is the
   # GitHub Release plus a repository_dispatch to redeploy the landing page.
   #
-  # `if: !failure() && !cancelled()` rather than plain `success()` is
-  # deliberate: build-macos is legitimately SKIPPED (not failed) whenever
-  # APPLE_CEF_AVAILABLE isn't set, and `success()` would treat that skip as
-  # not-a-success and block publish even though a Windows/Linux-only release
-  # is fine. `failure()`/`cancelled()` only inspect jobs THIS job directly
-  # `needs` — they do not look at the whole transitive graph (GitHub Actions'
-  # documented behaviour: an `if:` that references one of these functions
-  # gets no implicit "all needs succeeded" check at all, unlike a plain
-  # output-only `if:` such as build-macos's own) — so cef-runtime-pins MUST
-  # be listed here explicitly, or its failure (a milestone mismatch) would
-  # cascade to skip every build job (invisible to failure()) while publish's
-  # condition stayed true, ran anyway, downloaded zero artifacts, and failed
-  # confusingly later instead of being cleanly blocked at the real point of
+  # Each job this one needs is checked by its result (success or skipped), not by
+  # `!failure()`, and not by plain `success()`. build-macos is legitimately SKIPPED
+  # (not failed) whenever APPLE_CEF_AVAILABLE isn't set, and `success()` would treat
+  # that skip as not-a-success and block publish even though a Windows/Linux-only
+  # release is fine. `failure()` is no use here: it is true when ANY ancestor job
+  # failed (GitHub's documented behaviour), and the agent image job is an ancestor
+  # (through sign-release) whose failure must not stop a release: it only leaves the
+  # signed manifest without an image. cef-runtime-pins MUST stay in the list, or its
+  # failure (a milestone mismatch) would cascade to skip every build job while
+  # publish's condition stayed true, ran anyway, downloaded zero artifacts, and
+  # failed confusingly later instead of being cleanly blocked at the real point of
   # failure.
   #
   # build-macos is checked by its result as well: a job killed by a time limit
@@ -427,7 +452,15 @@ jobs:
   publish:
     name: Publish release
     needs: [gate, check-macos, cef-runtime-pins, build-windows, build-linux, build-macos, sign-release]
-    if: ${{ !failure() && !cancelled() && (needs.build-macos.result == 'success' || (needs.build-macos.result == 'skipped' && needs.check-macos.outputs.available != 'true')) }}
+    if: >-
+      ${{ !cancelled()
+      && contains(fromJSON('["success","skipped"]'), needs.gate.result)
+      && contains(fromJSON('["success","skipped"]'), needs.check-macos.result)
+      && contains(fromJSON('["success","skipped"]'), needs.cef-runtime-pins.result)
+      && contains(fromJSON('["success","skipped"]'), needs.build-windows.result)
+      && contains(fromJSON('["success","skipped"]'), needs.build-linux.result)
+      && contains(fromJSON('["success","skipped"]'), needs.sign-release.result)
+      && (needs.build-macos.result == 'success' || (needs.build-macos.result == 'skipped' && needs.check-macos.outputs.available != 'true')) }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
