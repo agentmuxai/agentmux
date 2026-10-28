@@ -396,6 +396,8 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
         }
         disarmTakeover();
         setTakingOver(true);
+        // A resend inside `run` starts a turn, which clears the failure; keep it to bring the row back.
+        const before = opts.failure();
         run().then(
             () => {
                 setTakingOver(false);
@@ -403,7 +405,7 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
             },
             (err: unknown) => {
                 setTakingOver(false);
-                const pf = opts.failure();
+                const pf = opts.failure() ?? before;
                 if (!pf) return;
                 // Keep the row, but say why it failed.
                 opts.model.dispatchPane({
