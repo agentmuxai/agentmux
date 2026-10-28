@@ -307,8 +307,18 @@ jobs:
   #     refs/heads/main (checked below first, with a clear message, then by the role).
   sign-release:
     name: Sign the release manifest
-    needs: [gate, check-macos, cef-runtime-pins, build-windows, build-linux, build-macos]
-    if: ${{ vars.RELEASE_SIGNING_ENABLED == 'true' && !failure() && !cancelled() && (needs.build-macos.result == 'success' || (needs.build-macos.result == 'skipped' && needs.check-macos.outputs.available != 'true')) }}
+    # container-image is needed for its digest, not for the release: a failed image job
+    # leaves the manifest without an image (the app then uses its versioned tag, as before),
+    # so the other jobs are checked one by one instead of by `!failure()`.
+    needs: [gate, check-macos, cef-runtime-pins, build-windows, build-linux, build-macos, container-image]
+    if: >-
+      ${{ vars.RELEASE_SIGNING_ENABLED == 'true' && !cancelled()
+      && contains(fromJSON('["success","skipped"]'), needs.gate.result)
+      && contains(fromJSON('["success","skipped"]'), needs.check-macos.result)
+      && contains(fromJSON('["success","skipped"]'), needs.cef-runtime-pins.result)
+      && contains(fromJSON('["success","skipped"]'), needs.build-windows.result)
+      && contains(fromJSON('["success","skipped"]'), needs.build-linux.result)
+      && (needs.build-macos.result == 'success' || (needs.build-macos.result == 'skipped' && needs.check-macos.outputs.available != 'true')) }}
     runs-on: ubuntu-latest
     environment: release-signing
     permissions:
@@ -368,8 +378,20 @@ jobs:
           find release-artifacts -type f \( -name "*.7z" -o -name "*.exe" -o -name "*.msix" -o -name "*.AppImage" -o -name "*.dmg" -o -name "*.deb" -o -name "*.rpm" -o -name "*.tar.xz" \) -exec cp {} dist-flat/ \;
           ls -l dist-flat/
 
+      # The agent image this release pushed, by the digest of what was pushed: the app pulls
+      # it by that digest, so a tag someone pushes later changes nothing for it. No digest
+      # (the image job failed) is a manifest without an image; the app then uses its tag.
       - name: Build the manifest and the envelope
-        run: node scripts/release-manifest.mjs build --dir dist-flat --tag "$TAG" --out release-manifest
+        env:
+          IMAGE_DIGEST: ${{ needs.container-image.outputs.digest }}
+        run: |
+          images=()
+          if [ -n "$IMAGE_DIGEST" ]; then
+            images+=(--image "agent-base=ghcr.io/agentmuxai/agent-base@${IMAGE_DIGEST}")
+          else
+            echo "::warning::the agent image job reported no digest: the manifest will not name an image"
+          fi
+          node scripts/release-manifest.mjs build --dir dist-flat --tag "$TAG" --out release-manifest "${images[@]}"
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:

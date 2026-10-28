@@ -6,9 +6,12 @@
 // workflow (docs/specs/SPEC_SIGNED_UPDATE_CHECKSUMS_2026_10_25.md).
 //
 //   build  --dir <files> --tag vX.Y.Z --out <dir> [--created-at <iso>]
+//          [--image <name>=<registry path>@sha256:<64 hex>]...
 //       writes AgentMux-<v>-manifest.json (every file in <files>, with its size
-//       and SHA-256) and AgentMux-<v>-envelope.json (the release's tag and the
-//       manifest's SHA-256: the small document that is signed) into <dir>.
+//       and SHA-256; with --image, also the container images the release
+//       published, each by the digest of the pushed image) and
+//       AgentMux-<v>-envelope.json (the release's tag and the manifest's
+//       SHA-256: the small document that is signed) into <dir>.
 //   sign-kms --envelope <file> --key-id <alias|arn> --id <k1> --out <file>
 //       signs the envelope's exact bytes with an Ed25519 key held by a signing
 //       service (`aws kms sign`, raw message), and writes the signature line
@@ -85,9 +88,49 @@ export function listFiles(dir) {
     return files;
 }
 
-/** The manifest and envelope texts for a release's files. */
-export function buildRelease({ files, tag, createdAt }) {
-    const manifest = JSON.stringify({ format: MANIFEST_FORMAT, version: versionOfTag(tag), tag, files }, null, 2) + "\n";
+// The images a release names (SPEC_AGENT_IMAGE_DIGEST_IN_SIGNED_MANIFEST). The app
+// (crates/common/src/update_manifest.rs) enforces the same rules.
+export const MAX_IMAGES = 16;
+const IMAGE_NAME_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+const IMAGE_REF_HOST_RE = /^[a-z0-9._-]+(?::\d+)?$/;
+const IMAGE_REF_COMPONENT_RE = /^[a-z0-9._-]+$/;
+const IMAGE_DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
+
+/** `name=host/path@sha256:<hex>` -> `{ name, ref, digest }`. */
+export function parseImageArg(text) {
+    const m = /^([^=@]+)=([^@]+)@(.+)$/.exec(text ?? "");
+    if (!m) throw new Error(`--image ${JSON.stringify(text)} isn't <name>=<registry path>@sha256:<64 hex>`);
+    return { name: m[1], ref: m[2], digest: m[3] };
+}
+
+/** Throws unless `images` is a list of well-formed, distinct image entries. */
+export function checkImages(images) {
+    if (!Array.isArray(images)) throw new Error("images isn't a list");
+    if (images.length > MAX_IMAGES) throw new Error(`the manifest lists more than ${MAX_IMAGES} images`);
+    const seen = new Set();
+    for (const img of images) {
+        const { name, ref, digest } = img ?? {};
+        if (typeof name !== "string" || !IMAGE_NAME_RE.test(name)) throw new Error(`${JSON.stringify(name)} isn't a plain image name`);
+        if (typeof ref !== "string" || ref.length > 255) throw new Error(`${name}: ref isn't a registry path`);
+        // host[:port]/path/...: no scheme, tag or digest, lowercase components, none empty.
+        const parts = ref.split("/");
+        if (parts.length < 2 || !IMAGE_REF_HOST_RE.test(parts[0]) || !parts.slice(1).every((c) => IMAGE_REF_COMPONENT_RE.test(c))) {
+            throw new Error(`${name}: ${JSON.stringify(ref)} isn't a registry repository path (host/path, no scheme, tag or digest)`);
+        }
+        if (typeof digest !== "string" || !IMAGE_DIGEST_RE.test(digest)) throw new Error(`${name}: digest isn't sha256:<64 lowercase hex>`);
+        if (seen.has(name)) throw new Error(`image ${name} is listed twice`);
+        seen.add(name);
+    }
+}
+
+/** The manifest and envelope texts for a release's files (and images, when it published any). */
+export function buildRelease({ files, tag, createdAt, images }) {
+    const body = { format: MANIFEST_FORMAT, version: versionOfTag(tag), tag, files };
+    if (images?.length) {
+        checkImages(images);
+        body.images = images.map(({ name, ref, digest }) => ({ name, ref, digest }));
+    }
+    const manifest = JSON.stringify(body, null, 2) + "\n";
     if (Buffer.byteLength(manifest) > MAX_MANIFEST_BYTES) throw new Error("the manifest is too large");
     const envelope =
         JSON.stringify(
@@ -165,6 +208,7 @@ export function verifyRelease({ envelope, signatures, manifest, tag, publicKeyB6
         if (seen.has(f.name)) throw new Error(`${f.name} is listed twice`);
         seen.add(f.name);
     }
+    if (m.images !== undefined) checkImages(m.images);
     if (files) {
         const real = new Map(files.map((f) => [f.name, f]));
         for (const f of m.files) {
@@ -183,7 +227,9 @@ function parseArgs(argv) {
         if (!argv[i].startsWith("--")) throw new Error(`unexpected argument ${argv[i]}`);
         const key = argv[i].slice(2);
         if (i + 1 >= argv.length) throw new Error(`--${key} needs a value`);
-        out[key] = argv[++i];
+        // --image may be repeated; every other option is given once.
+        if (key === "image") (out.images ??= []).push(argv[++i]);
+        else out[key] = argv[++i];
     }
     return out;
 }
@@ -198,7 +244,12 @@ function main(argv) {
     switch (command) {
         case "build": {
             need(args, "dir", "tag", "out");
-            const { manifest, envelope } = buildRelease({ files: listFiles(args.dir), tag: args.tag, createdAt: args["created-at"] });
+            const { manifest, envelope } = buildRelease({
+                files: listFiles(args.dir),
+                tag: args.tag,
+                createdAt: args["created-at"],
+                images: (args.images ?? []).map(parseImageArg),
+            });
             mkdirSync(args.out, { recursive: true });
             writeFileSync(join(args.out, manifestName(args.tag)), manifest);
             writeFileSync(join(args.out, envelopeName(args.tag)), envelope);
@@ -235,7 +286,7 @@ function main(argv) {
                 id: args.id,
                 files: args.files ? listFiles(args.files) : undefined,
             });
-            console.log(`verified ${args.tag}: ${m.files.length} files`);
+            console.log(`verified ${args.tag}: ${m.files.length} files${m.images?.length ? `, ${m.images.length} image(s)` : ""}`);
             return;
         }
         case "self-check": {
