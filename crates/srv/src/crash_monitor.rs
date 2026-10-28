@@ -360,6 +360,9 @@ mod tests {
 
     #[test]
     fn without_relaxing_a_hardened_process_could_not_be_dumped() {
+        if agentmux_common::debug_privilege::refusal_cannot_be_observed("without_relaxing_a_hardened_process_could_not_be_dumped") {
+            return;
+        }
         assert_eq!(dump_size(true), 0, "the control: hardening alone refuses the monitor");
     }
 }
