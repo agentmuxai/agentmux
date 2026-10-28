@@ -52,15 +52,12 @@ fn service_names(body: &[u8]) -> Option<String> {
     Some(format!("{}.{}", name("service")?, name("method")?))
 }
 
-/// Why a service reply says the call failed: its `error`, or a bare failure when it gives none.
-/// (`success` is left out of a failed reply, so a reply without it failed.)
+/// Whether a service reply says the call failed. The reply's own `error` text is not kept: it can
+/// quote the request's values. (`success` is left out of a failed reply, so a reply without it failed.)
 fn service_failure(reply: &[u8]) -> Option<String> {
     let serde_json::Value::Object(fields) = serde_json::from_slice(reply).ok()? else { return None };
-    if fields.get("success").and_then(|v| v.as_bool()).unwrap_or(false) {
-        return None;
-    }
-    let why = fields.get("error").and_then(|v| v.as_str()).unwrap_or("failed");
-    Some(why.chars().take(MAX_FIELD).collect())
+    let ok = fields.get("success").and_then(|v| v.as_bool()).unwrap_or(false);
+    (!ok).then(|| "service call failed".to_string())
 }
 
 fn is_write(method: &Method) -> bool {
@@ -162,9 +159,10 @@ mod tests {
     }
 
     #[test]
-    fn a_service_reply_without_success_is_a_failure_with_its_reason() {
-        assert_eq!(service_failure(br#"{"error":"no such window"}"#).as_deref(), Some("no such window"));
-        assert_eq!(service_failure(br#"{"success":false}"#).as_deref(), Some("failed"));
+    fn a_service_reply_without_success_is_a_failure_and_its_text_is_not_kept() {
+        let failed = service_failure(br#"{"error":"invalid type: string \"s3cret\""}"#).unwrap();
+        assert!(!failed.contains("s3cret"), "{failed}");
+        assert!(service_failure(br#"{"success":false}"#).is_some());
         assert_eq!(service_failure(br#"{"success":true,"data":1}"#), None);
         assert_eq!(service_failure(b"not json"), None);
     }

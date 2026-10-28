@@ -190,7 +190,10 @@ async fn a_service_call_that_fails_is_recorded_as_failed_though_the_reply_is_200
     assert_eq!(status, 200);
     let line = recorded(&id).await;
     assert!(!line.success, "{line:?}");
-    assert!(line.error_message.as_deref().unwrap_or_default().contains("invalid request body"), "{line:?}");
+    assert_eq!(line.error_message.as_deref(), Some("service call failed"));
+    let (_, id) = send(&state, Method::POST, "/agentmux/service", Some(&token), r#"{"service":"window","method":"CloseWindow","args":"s3cret"}"#).await;
+    let line = recorded(&id).await;
+    assert!(!serde_json::to_string(&line).unwrap().contains("s3cret"), "a service error is not kept: {line:?}");
 }
 
 #[tokio::test]
