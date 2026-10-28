@@ -10,6 +10,7 @@ pub(crate) mod account_episodes;
 pub mod agent_resources;
 pub mod agent_handlers;
 mod agent_only;
+pub(crate) mod agent_move_here;
 pub(crate) mod agent_takeover;
 mod pane_binding;
 mod pane_commands;
