@@ -75,9 +75,7 @@ use std::time::{Duration, Instant};
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use tokio::sync::mpsc;
-use tokio_tungstenite::{
-    connect_async_tls_with_config, tungstenite::Message, MaybeTlsStream, WebSocketStream,
-};
+use tokio_tungstenite::{tungstenite::Message, MaybeTlsStream, WebSocketStream};
 
 use crate::backend::reactive::types::InjectionRequest;
 use crate::messaging::{BridgeHealth, BridgeStatus, OutboundMsg};
@@ -216,7 +214,7 @@ async fn open_and_await_hello(app_token: &str, http: &reqwest::Client) -> Result
         .body(())
         .map_err(|e| format!("slack_bridge: build ws request: {e}"))?;
 
-    let (ws_stream, _) = connect_async_tls_with_config(request, None, false, None)
+    let (ws_stream, _) = crate::muxbus::ws_connect::connect(request)
         .await
         .map_err(|e| format!("slack_bridge: ws connect: {e}"))?;
 

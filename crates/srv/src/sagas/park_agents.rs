@@ -20,7 +20,7 @@ pub(crate) fn enabled(state: &AppState) -> bool {
 
 /// The agent a block belongs to: the instance bound to the block (a block launched from a template
 /// keeps the template's id in `agentId` and binds its agent that way), else the agent `agentId` names.
-fn agent_of_block(state: &AppState, block_id: &str, block: &Block) -> Option<crate::backend::storage::agents::AgentInstance> {
+pub(crate) fn agent_of_block(state: &AppState, block_id: &str, block: &Block) -> Option<crate::backend::storage::agents::AgentInstance> {
     if let Ok(Some(bound)) = state.mstore.instance_get_by_block_id(block_id) {
         return Some(bound);
     }
@@ -47,8 +47,9 @@ pub(crate) fn keeps_block(state: &AppState, block_id: &str) -> bool {
 
 /// Park the agent blocks among `block_ids` (each in the tab the reducer has it in) and return the ids
 /// parked. A park the reducer refuses leaves that block to the close, which deletes it as before.
-pub(crate) async fn park_agent_blocks(ctx: &SagaCtx<'_>, block_ids: &[String]) -> Vec<String> {
-    if !enabled(ctx.state) {
+/// `force` parks with the setting off too: an explicit detach.
+pub(crate) async fn park_agent_blocks(ctx: &SagaCtx<'_>, block_ids: &[String], force: bool) -> Vec<String> {
+    if !force && !enabled(ctx.state) {
         return Vec::new();
     }
     let mut parked = Vec::new();

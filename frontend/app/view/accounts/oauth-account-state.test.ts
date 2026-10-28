@@ -10,7 +10,10 @@ import type { Account } from "@/app/view/identity/identity-model";
 import {
     canReconnect,
     clientModeTag,
+    githubConnectedAs,
+    githubGrantIsGone,
     isBlockedError,
+    isBrokeredGithub,
     isServiceOAuthAccount,
     oauthNote,
     partlyGrantedLine,
@@ -109,5 +112,30 @@ describe("service-OAuth accounts", () => {
         expect(takeReconnectRequest("other")).toBe(false);
         expect(takeReconnectRequest("g1")).toBe(true);
         expect(takeReconnectRequest("g1")).toBe(false);
+    });
+});
+
+describe("a GitHub account made through the broker", () => {
+    const gh = (context: Record<string, unknown>) => ({ provider: "github" as const, context });
+
+    it("reads as who is connected", () => {
+        expect(githubConnectedAs(gh({ github_login: "octo", github_user_id: 42 }))).toBe("@octo (id 42)");
+        expect(githubConnectedAs(gh({ github_login: "octo" }))).toBe("@octo");
+        expect(githubConnectedAs(gh({}))).toBeNull();
+        expect(githubConnectedAs({ provider: "google", context: { github_login: "octo" } })).toBeNull();
+    });
+
+    it("is the broker's only when its context says so", () => {
+        expect(isBrokeredGithub(gh({ broker: true }))).toBe(true);
+        expect(isBrokeredGithub(gh({}))).toBe(false);
+        expect(isBrokeredGithub({ provider: "google", context: { broker: true } })).toBe(false);
+    });
+
+    it("is gone only on a clear answer: revoked, blocked or never made", () => {
+        for (const status of ["revoked", "blocked", "none"]) expect(githubGrantIsGone({ signedIn: true, status })).toBe(true);
+        expect(githubGrantIsGone({ signedIn: true, status: "active" })).toBe(false);
+        // A failure to ask says nothing, and nothing was asked when signed out.
+        expect(githubGrantIsGone({ signedIn: true, error: "unavailable" })).toBe(false);
+        expect(githubGrantIsGone({ signedIn: false, status: "revoked" })).toBe(false);
     });
 });

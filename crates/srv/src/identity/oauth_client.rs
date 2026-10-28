@@ -254,11 +254,14 @@ pub enum OAuthStatus {
         email: Option<String>,
     },
     Failed { error: String },
+    /// A brokered connect for another GitHub user than the account is connected as:
+    /// the flow stopped, and the frontend asks, then starts again with `replace_user`.
+    ConfirmUser { current_login: String, current_id: u64, new_login: String, new_id: u64 },
 }
 
 impl OAuthStatus {
     pub fn is_terminal(&self) -> bool {
-        matches!(self, OAuthStatus::Success { .. } | OAuthStatus::Failed { .. })
+        matches!(self, OAuthStatus::Success { .. } | OAuthStatus::Failed { .. } | OAuthStatus::ConfirmUser { .. })
     }
 }
 
@@ -352,6 +355,19 @@ impl std::fmt::Debug for ResolvedClient {
     }
 }
 
+/// AgentMux's own client id for a provider: the shipped one, or (GitHub) the one a
+/// developer's build was given.
+fn builtin_client_id(cfg: &ServiceOAuthConfig) -> Option<String> {
+    cfg.client_id.map(str::to_string).or_else(|| {
+        (cfg.provider == github_connect::PROVIDER).then(github_connect::client_id_override).flatten()
+    })
+}
+
+/// Whether the build has a client of its own for the provider.
+pub fn builtin_client_available(cfg: &ServiceOAuthConfig) -> bool {
+    builtin_client_id(cfg).is_some()
+}
+
 /// Resolve the client a flow runs with: credentials passed with the request,
 /// else the user's client saved for this provider, else the built-in one.
 /// Returns an error string when none is available (the "not configured"
@@ -365,8 +381,8 @@ pub fn resolve_client(
         ResolvedClient { client_id: b.client_id.clone(), client_secret: b.client_secret.clone(), mode: b.mode }
     } else if let Some(s) = saved {
         ResolvedClient { client_id: s.client_id.clone(), client_secret: s.client_secret.clone(), mode: s.mode }
-    } else if let Some(id) = cfg.client_id {
-        ResolvedClient { client_id: id.to_string(), client_secret: None, mode: ClientMode::Builtin }
+    } else if let Some(id) = builtin_client_id(cfg) {
+        ResolvedClient { client_id: id, client_secret: None, mode: ClientMode::Builtin }
     } else {
         return Err(format!(
             "{} OAuth is not configured yet — no client id available. \
@@ -389,6 +405,7 @@ pub fn resolve_client(
 // ── Flow execution ──────────────────────────────────────────────────────────
 
 use crate::backend::storage::store::{IdentityAccount, SecretRef, Store};
+use crate::identity::github_connect;
 use crate::util::open_browser;
 
 pub(crate) fn http() -> &'static reqwest::Client {
@@ -422,6 +439,12 @@ pub struct StartOptions {
     pub extra_scopes: Vec<String>,
     /// Save `byo` for this provider once the flow succeeds.
     pub save_client: bool,
+    /// Signed in to AgentMux Cloud. GitHub's grant is made through the broker then, and
+    /// by the device flow otherwise (the broker is where the App's secret is).
+    pub cloud_signed_in: bool,
+    /// A brokered connect for another GitHub user than the account's, which the person
+    /// agreed to (spec §6.2).
+    pub replace_user: bool,
 }
 
 /// Refuse to re-authorize `account` as `provider` unless it is a keychain
@@ -533,7 +556,13 @@ async fn finish<S: TokenSecrets>(ctx: &FlowCtx, secrets: &S, json: &serde_json::
     )?;
     secrets.put(&account_id, &blob.to_json()).await?;
 
-    let context = oauth_context(existing.map(|a| &a.context), &granted, claims.as_ref(), &ctx.client);
+    let mut context = oauth_context(existing.map(|a| &a.context), &granted, claims.as_ref(), &ctx.client);
+    // GitHub: who is connected, and whether the broker refreshes it.
+    let github = ctx.cfg.provider == github_connect::PROVIDER;
+    if github {
+        github_connect::stamp_context(&mut context, json);
+    }
+    let label = if github { github_connect::display_name_for(json) } else { None };
     let email = claims.as_ref().and_then(|c| c.email.clone());
     let now_ms = chrono::Utc::now().timestamp_millis();
     let account = match &ctx.target {
@@ -542,7 +571,7 @@ async fn finish<S: TokenSecrets>(ctx: &FlowCtx, secrets: &S, json: &serde_json::
             name: if name.trim().is_empty() { ctx.cfg.provider.to_string() } else { name.clone() },
             provider: ctx.cfg.provider.to_string(),
             kind: "oauth".to_string(),
-            display_name: email.clone().unwrap_or_default(),
+            display_name: label.clone().or_else(|| email.clone()).unwrap_or_default(),
             secret_ref: SecretRef::Keychain {
                 service: crate::identity::secret_store::SERVICE.to_string(),
                 account: crate::identity::secret_store::account_key(&account_id),
@@ -553,7 +582,8 @@ async fn finish<S: TokenSecrets>(ctx: &FlowCtx, secrets: &S, json: &serde_json::
             updated_at: now_ms,
         },
         FlowTarget::Existing(acct) => IdentityAccount {
-            display_name: email.clone().unwrap_or_else(|| acct.display_name.clone()),
+            // A GitHub grant that couldn't say who it is doesn't keep the previous user's name.
+            display_name: label.clone().or_else(|| email.clone()).unwrap_or_else(|| if github { String::new() } else { acct.display_name.clone() }),
             context,
             status: "valid".to_string(),
             updated_at: now_ms,
@@ -574,6 +604,23 @@ async fn finish<S: TokenSecrets>(ctx: &FlowCtx, secrets: &S, json: &serde_json::
 /// request (D8) so the next connect doesn't ask for it again. Saving is
 /// best-effort: the account is already connected.
 async fn complete(ctx: &FlowCtx, json: &serde_json::Value) -> OAuthStatus {
+    // A GitHub grant the device flow made says nothing of who it is: ask GitHub, so the
+    // account reads "@login". Best effort: the grant works without it.
+    let mut named;
+    let mut json = json;
+    if ctx.cfg.provider == github_connect::PROVIDER && github_connect::identity_in(json).is_none() {
+        if let Some(token) = json.get("access_token").and_then(|v| v.as_str()) {
+            match github_connect::user_of_token(token).await {
+                Ok((id, login)) => {
+                    named = json.clone();
+                    named["github_user_id"] = serde_json::json!(id);
+                    named["login"] = serde_json::json!(login);
+                    json = &named;
+                }
+                Err(e) => tracing::warn!(target: "identity", error = %e, "identity.github: couldn't tell who the new grant is"),
+            }
+        }
+    }
     let status = match finish(ctx, &oauth_tokens::KeychainSecrets, json).await {
         Ok(s) => s,
         Err(error) => return OAuthStatus::Failed { error },
@@ -634,13 +681,49 @@ pub fn start(
         mstore,
         identity_store,
     };
+    let brokered = runs_through_broker(ctx.cfg.provider, opts.cloud_signed_in, &ctx.client);
     match ctx.cfg.flow {
-        OAuthFlow::AuthCodePkce => start_code_flow(ctx),
+        OAuthFlow::AuthCodePkce => start_code_flow(ctx, None),
+        OAuthFlow::Device if brokered => start_code_flow(ctx, Some(BrokerLeg { replace: opts.replace_user })),
         OAuthFlow::Device => start_device_flow(ctx),
     }
 }
 
-fn start_code_flow(ctx: FlowCtx) -> Result<(String, OAuthStatus), String> {
+/// Whether a GitHub connect goes through AgentMux Cloud's broker: the person is signed in to
+/// AgentMux Cloud, and the flow runs with AgentMux's own App. The broker exchanges the code with
+/// that App's secret, so a client the person brought or saved (their own app) can't be used with
+/// it: that connect stays a device flow with their app.
+fn runs_through_broker(provider: &str, cloud_signed_in: bool, client: &ResolvedClient) -> bool {
+    provider == github_connect::PROVIDER && cloud_signed_in && client.mode == ClientMode::Builtin
+}
+
+/// A code flow whose exchange goes through the broker instead of the provider's token
+/// endpoint.
+struct BrokerLeg {
+    replace: bool,
+}
+
+/// The broker's leg of a connect: the code and its PKCE verifier become the person's
+/// grant, or the question of whether another GitHub user may replace the account's.
+async fn broker_exchange(ctx: &FlowCtx, code: &str, verifier: &str, redirect_uri: &str, replace: bool) -> OAuthStatus {
+    use crate::muxbus::github_broker::{self, BrokerError};
+    let who = match github_broker::caller(&ctx.mstore).await {
+        Ok(who) => who,
+        Err(e) => return OAuthStatus::Failed { error: e.to_string() },
+    };
+    match github_broker::exchange_code(http(), &who, code, verifier, redirect_uri, replace).await {
+        Ok(grant) => complete(ctx, &github_connect::grant_json(&grant, chrono::Utc::now().timestamp_millis())).await,
+        Err(BrokerError::UserMismatch { current, new }) => OAuthStatus::ConfirmUser {
+            current_login: current.login,
+            current_id: current.github_user_id,
+            new_login: new.login,
+            new_id: new.github_user_id,
+        },
+        Err(e) => OAuthStatus::Failed { error: e.to_string() },
+    }
+}
+
+fn start_code_flow(ctx: FlowCtx, broker: Option<BrokerLeg>) -> Result<(String, OAuthStatus), String> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 
@@ -703,6 +786,12 @@ fn start_code_flow(ctx: FlowCtx) -> Result<(String, OAuthStatus), String> {
             }
         };
 
+        // Through the broker, which holds the App's client secret.
+        if let Some(leg) = broker {
+            let status = broker_exchange(&ctx, &code, &pkce.verifier, &redirect_uri, leg.replace).await;
+            manager().set_status(&sid, status);
+            return;
+        }
         // Exchange the code (+ PKCE verifier) for tokens.
         let mut params = vec![
             ("grant_type", "authorization_code".to_string()),

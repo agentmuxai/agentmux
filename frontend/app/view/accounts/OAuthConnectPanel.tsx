@@ -82,7 +82,7 @@ export function OAuthConnectPanel(props: OAuthConnectPanelProps): JSX.Element {
 
     const isRunning = (): boolean => {
         const s = status();
-        return s != null && s.status !== "success" && s.status !== "failed";
+        return s != null && s.status !== "success" && s.status !== "failed" && s.status !== "confirm-user";
     };
 
     onCleanup(() => {
@@ -110,6 +110,10 @@ export function OAuthConnectPanel(props: OAuthConnectPanelProps): JSX.Element {
             void finishSuccess(s);
             return;
         }
+        if (s.status === "confirm-user") {
+            stopPolling();
+            return;
+        }
         if (s.status === "failed") {
             stopPolling();
             // A reconnect its organization blocks shows on the account's card.
@@ -132,7 +136,7 @@ export function OAuthConnectPanel(props: OAuthConnectPanelProps): JSX.Element {
         }
     }
 
-    const connect = async () => {
+    const connect = async (opts?: { replaceGithubUser?: boolean }) => {
         const n = props.name?.().trim() ?? "";
         if (!n && !props.accountId && !info.namedBySignIn) {
             setLocalError("Enter a name first");
@@ -154,6 +158,7 @@ export function OAuthConnectPanel(props: OAuthConnectPanelProps): JSX.Element {
                 name: props.accountId ? undefined : n || undefined,
                 accountId: props.accountId,
                 scopes: scopes.length > 0 ? scopes : undefined,
+                replaceGithubUser: opts?.replaceGithubUser || undefined,
                 ...picked.fields,
             });
             // srv holds the secret now; the input doesn't need it any more.
@@ -182,6 +187,14 @@ export function OAuthConnectPanel(props: OAuthConnectPanelProps): JSX.Element {
             void connect();
         }),
     );
+
+    // The person agreed to replace the GitHub user this account is connected as.
+    const replaceUser = () => {
+        stopPolling();
+        setSessionId(null);
+        setStatus(null);
+        void connect({ replaceGithubUser: true });
+    };
 
     const reset = () => {
         stopPolling();
@@ -273,20 +286,30 @@ export function OAuthConnectPanel(props: OAuthConnectPanelProps): JSX.Element {
                             <FlowError error={(s() as { error: string }).error} />
                         </Show>
 
-                        <div class="identity-key-actions">
-                            <Show
-                                when={s().status === "failed"}
-                                fallback={
+                        <Show when={s().status === "confirm-user"}>
+                            <ConfirmUser
+                                status={s() as Extract<OAuthFlowStatus, { status: "confirm-user" }>}
+                                onReplace={replaceUser}
+                                onKeep={reset}
+                            />
+                        </Show>
+
+                        <Show when={s().status !== "confirm-user"}>
+                            <div class="identity-key-actions">
+                                <Show
+                                    when={s().status === "failed"}
+                                    fallback={
+                                        <Button class="identity-btn identity-btn-secondary" onClick={reset}>
+                                            Cancel
+                                        </Button>
+                                    }
+                                >
                                     <Button class="identity-btn identity-btn-secondary" onClick={reset}>
-                                        Cancel
+                                        Try again
                                     </Button>
-                                }
-                            >
-                                <Button class="identity-btn identity-btn-secondary" onClick={reset}>
-                                    Try again
-                                </Button>
-                            </Show>
-                        </div>
+                                </Show>
+                            </div>
+                        </Show>
                     </div>
                 )}
             </Show>
@@ -295,6 +318,32 @@ export function OAuthConnectPanel(props: OAuthConnectPanelProps): JSX.Element {
 }
 
 OAuthConnectPanel.displayName = "OAuthConnectPanel";
+
+/** GitHub: the person authorized as someone other than the user this AgentMux account is connected as. */
+function ConfirmUser(props: {
+    status: Extract<OAuthFlowStatus, { status: "confirm-user" }>;
+    onReplace: () => void;
+    onKeep: () => void;
+}): JSX.Element {
+    return (
+        <div class="oauth-confirm-user" role="alert">
+            <div class="oauth-error-title">Connect a different GitHub account?</div>
+            <div>
+                This AgentMux account is connected to GitHub as <b>@{props.status.currentLogin}</b>, and you just
+                authorized <b>@{props.status.newLogin}</b>. Replacing it ends the repositories shared as @
+                {props.status.currentLogin}; you can install on the new account's repositories afterwards.
+            </div>
+            <div class="identity-key-actions">
+                <Button tone="accent" class="identity-btn identity-btn-primary" onClick={props.onReplace}>
+                    Replace with @{props.status.newLogin}
+                </Button>
+                <Button class="identity-btn identity-btn-secondary" onClick={props.onKeep}>
+                    Keep @{props.status.currentLogin}
+                </Button>
+            </div>
+        </div>
+    );
+}
 
 /** A flow's error; an organization's block gets its own heading (spec §7). */
 function FlowError(props: { error: string }): JSX.Element {

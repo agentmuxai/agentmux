@@ -33,8 +33,8 @@ name: Nightly Release — Auto-Publish Pending Version Bump (manual fallback)
 # GitHub does not allow a push/tag event made by the default
 # GITHUB_TOKEN to trigger *other* workflows' `on: push` listeners (the
 # anti-recursion guard) — if this workflow pushed the tag using
-# GITHUB_TOKEN, release.yml and container-image.yml would silently never
-# fire.
+# GITHUB_TOKEN, release.yml (which publishes the container image through
+# release-core.yml) would silently never fire.
 
 on:
   workflow_dispatch: {}
@@ -61,7 +61,7 @@ jobs:
       # Replaces NIGHTLY_TAG_PAT. An App installation token works in the
       # x-access-token position of a git remote exactly as a PAT does, and
       # -- the reason a PAT was needed at all -- a tag pushed with it DOES
-      # trigger release.yml and container-image.yml. GitHub's anti-recursion
+      # trigger release.yml (and with it the container image). GitHub's anti-recursion
       # rule is scoped to GITHUB_TOKEN's identity, not to "any token".
       # Proven by ci-app-token-smoke.yml (since removed): a real ref was created and deleted
       # with this token before this swap.
@@ -146,7 +146,7 @@ jobs:
           fi
 
           if [ -z "${TAG_TOKEN:-}" ]; then
-            echo "::error::Found untagged pending release ${version} (${sha:0:9}), but no tag-push token was minted — cannot push a tag that will trigger release.yml/container-image.yml (the default GITHUB_TOKEN cannot: its pushes do not trigger workflows)." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "::error::Found untagged pending release ${version} (${sha:0:9}), but no tag-push token was minted — cannot push a tag that will trigger release.yml (the default GITHUB_TOKEN cannot: its pushes do not trigger workflows)." | tee -a "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
 
@@ -158,4 +158,4 @@ jobs:
           # empty-check above already exited if it weren't set.
           git push "$remote" "$version"
 
-          echo "Pushed tag \`${version}\` — release.yml and container-image.yml should start momentarily." | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "Pushed tag \`${version}\` — release.yml (which also publishes the container image) should start momentarily." | tee -a "$GITHUB_STEP_SUMMARY"

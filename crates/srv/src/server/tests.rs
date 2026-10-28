@@ -3579,7 +3579,7 @@ async fn shutdown_status_route_reaches_its_handler() {
         "Korp",
         "FleetBulkStop",
         "",
-        crate::sagas::pending_shutdown::Action::Stop { signal: None },
+        crate::sagas::pending_shutdown::Action::Stop { signal: None, stop_background: None },
     );
     let app = build_router(state.clone());
     let req = Request::builder()

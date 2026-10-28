@@ -35,6 +35,8 @@ pub const MAX_ENVELOPE_BYTES: usize = 4096;
 pub const MAX_MANIFEST_BYTES: usize = 1024 * 1024;
 /// The most files a manifest may list.
 const MAX_FILES: usize = 1000;
+/// The most images a manifest may list.
+const MAX_IMAGES: usize = 16;
 
 /// A public key the app trusts to sign releases, with the id signature lines
 /// name it by.
@@ -76,19 +78,40 @@ pub struct ManifestFile {
     pub sha256: String,
 }
 
-/// A release's files.
+/// A container image the release built, named by the digest of its content: whatever a
+/// registry serves under a tag, the image at this digest is the one the pipeline made.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct ManifestImage {
+    /// What the release calls it, e.g. `agent-base`.
+    pub name: String,
+    /// The repository, without a tag or digest, e.g. `ghcr.io/agentmuxai/agent-base`.
+    #[serde(rename = "ref")]
+    pub reference: String,
+    /// `sha256:` and lowercase hex: the digest of the image (a multi-platform image's index).
+    pub digest: String,
+}
+
+/// A release's files, and the images it built. Older manifests have no `images`, and an app
+/// older than the field ignores it.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct Manifest {
     pub format: u32,
     pub version: String,
     pub tag: String,
     pub files: Vec<ManifestFile>,
+    #[serde(default)]
+    pub images: Vec<ManifestImage>,
 }
 
 impl Manifest {
     /// The release file called `name`, if the manifest lists it.
     pub fn file(&self, name: &str) -> Option<&ManifestFile> {
         self.files.iter().find(|f| f.name == name)
+    }
+
+    /// The image the release lists as `name`, if it does.
+    pub fn image(&self, name: &str) -> Option<&ManifestImage> {
+        self.images.iter().find(|i| i.name == name)
     }
 }
 
@@ -139,6 +162,33 @@ fn is_sha256_hex(s: &str) -> bool {
     s.len() == 64 && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
 }
 
+fn is_sha256_digest(s: &str) -> bool {
+    s.strip_prefix("sha256:").is_some_and(is_sha256_hex)
+}
+
+/// A name for an image: lowercase letters, digits, `.`, `-` and `_`, starting with a letter or digit.
+fn is_image_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 64
+        && name.starts_with(|c: char| c.is_ascii_lowercase() || c.is_ascii_digit())
+        && name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '-' | '_'))
+}
+
+/// A registry repository path, `host[:port]/path/...`, with no tag, digest or scheme.
+fn is_image_repository(reference: &str) -> bool {
+    let mut parts = reference.split('/');
+    let host = parts.next().unwrap_or_default();
+    let path: Vec<&str> = parts.collect();
+    let component = |c: &str| {
+        !c.is_empty() && c.starts_with(|ch: char| ch.is_ascii_lowercase() || ch.is_ascii_digit()) && c.chars().all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || matches!(ch, '.' | '-' | '_'))
+    };
+    let host_ok = match host.split_once(':') {
+        Some((h, port)) => component(h) && !port.is_empty() && port.len() <= 5 && port.bytes().all(|b| b.is_ascii_digit()),
+        None => component(host),
+    };
+    reference.len() <= 255 && host_ok && !path.is_empty() && path.iter().all(|c| component(c))
+}
+
 /// A plain release file name: no path, nothing hidden, nothing a shell or
 /// Windows would treat specially.
 fn is_plain_file_name(name: &str) -> bool {
@@ -183,7 +233,8 @@ fn check_signature(keys: &[UpdateKey], envelope: &[u8], signatures: &str) -> Res
 ///    can't be replayed under a newer tag);
 /// 3. the manifest's SHA-256 is the envelope's `manifest_sha256`;
 /// 4. the manifest's format, tag and version agree with the envelope, and each
-///    file in it has a plain name, a SHA-256 and a size.
+///    file in it has a plain name, a SHA-256 and a size; each image, if it lists
+///    any, has a plain name, a repository and a `sha256:` digest, and no name twice.
 pub fn verify_release(
     keys: &[UpdateKey],
     tag: &str,
@@ -234,6 +285,24 @@ pub fn verify_release(
         }
         if !seen.insert(f.name.as_str()) {
             return Err(VerifyError::Manifest(format!("{} is listed twice", f.name)));
+        }
+    }
+    if parsed.images.len() > MAX_IMAGES {
+        return Err(VerifyError::Manifest("the number of images is out of range".into()));
+    }
+    let mut seen_images = std::collections::HashSet::new();
+    for i in &parsed.images {
+        if !is_image_name(&i.name) {
+            return Err(VerifyError::Manifest(format!("{:?} isn't a plain image name", i.name)));
+        }
+        if !is_image_repository(&i.reference) {
+            return Err(VerifyError::Manifest(format!("{}: ref isn't an image repository", i.name)));
+        }
+        if !is_sha256_digest(&i.digest) {
+            return Err(VerifyError::Manifest(format!("{}: digest isn't sha256: and 64 hex digits", i.name)));
+        }
+        if !seen_images.insert(i.name.as_str()) {
+            return Err(VerifyError::Manifest(format!("image {} is listed twice", i.name)));
         }
     }
     Ok(parsed)
@@ -381,6 +450,57 @@ mod tests {
         assert!(matches!(check("not json".into()), Err(VerifyError::Manifest(_))));
     }
 
+    const D1: &str = "sha256:1111111111111111111111111111111111111111111111111111111111111111";
+    const BASE: &str = "ghcr.io/agentmuxai/agent-base";
+
+    fn with_images(images: &str) -> String {
+        manifest_json(&[("a.exe", 1, H1)]).replace(r#""files":"#, &format!(r#""images":{images},"files":"#))
+    }
+
+    fn verify_with_images(images: &str) -> Result<Manifest, VerifyError> {
+        let manifest = with_images(images);
+        let env = envelope_json(TAG, &manifest);
+        verify_release(&[key("k1", 1)], TAG, env.as_bytes(), &sig_line("k1", 1, &env), manifest.as_bytes())
+    }
+
+    #[test]
+    fn a_release_may_list_the_images_it_built() {
+        let m = verify_with_images(&format!(r#"[{{"name":"agent-base","ref":"{BASE}","digest":"{D1}"}}]"#)).unwrap();
+        assert_eq!(m.image("agent-base").map(|i| (i.reference.as_str(), i.digest.as_str())), Some((BASE, D1)));
+        assert_eq!(m.image("other"), None);
+        // Releases without the field, and with it empty, have none.
+        assert!(release_manifest().images.is_empty());
+        assert!(verify_with_images("[]").unwrap().images.is_empty());
+        // A registry on a port is a repository too.
+        assert!(verify_with_images(&format!(r#"[{{"name":"b","ref":"localhost:5000/team/base","digest":"{D1}"}}]"#)).is_ok());
+    }
+
+    fn release_manifest() -> Manifest {
+        let (env, man) = release();
+        verify_release(&[key("k1", 1)], TAG, env.as_bytes(), &sig_line("k1", 1, &env), man.as_bytes()).unwrap()
+    }
+
+    #[test]
+    fn an_image_that_breaks_the_format_is_refused_even_when_signed() {
+        let bad = |name: &str, reference: &str, digest: &str| {
+            let r = verify_with_images(&format!(r#"[{{"name":"{name}","ref":"{reference}","digest":"{digest}"}}]"#));
+            assert!(matches!(r, Err(VerifyError::Manifest(_))), "{name} {reference} {digest}: {r:?}");
+        };
+        for digest in ["", "sha256:abc", "md5:1111111111111111111111111111111111111111111111111111111111111111", &D1.replace("sha256:", ""), &format!("{D1}0"), &D1.replace('1', "A")] {
+            bad("agent-base", BASE, digest);
+        }
+        for name in ["", "Agent-Base", "agent base", "../x", "-x", &"a".repeat(65)] {
+            bad(name, BASE, D1);
+        }
+        for reference in ["", "agent-base", "https://ghcr.io/x/y", "ghcr.io/x/y:1.0", "ghcr.io/x/y@sha256:abc", "ghcr.io//y", "ghcr.io/X/y", "ghcr.io/x/y/", "ghcr.io:/x/y", "ghcr.io:99999999/x/y", "ghcr.io/../y"] {
+            bad("agent-base", reference, D1);
+        }
+        let twice = format!(r#"[{{"name":"agent-base","ref":"{BASE}","digest":"{D1}"}},{{"name":"agent-base","ref":"{BASE}","digest":"{D1}"}}]"#);
+        assert!(matches!(verify_with_images(&twice), Err(VerifyError::Manifest(_))), "twice");
+        let many: Vec<String> = (0..17).map(|i| format!(r#"{{"name":"i{i}","ref":"{BASE}","digest":"{D1}"}}"#)).collect();
+        assert!(matches!(verify_with_images(&format!("[{}]", many.join(","))), Err(VerifyError::Manifest(_))), "too many");
+    }
+
     #[test]
     fn an_envelope_that_breaks_the_format_is_refused_even_when_signed() {
         let keys = [key("k1", 1)];
@@ -439,6 +559,55 @@ mod tests {
         // One flipped byte anywhere is refused.
         let flipped = MANIFEST.replace("\"size\": 50", "\"size\": 51");
         assert_eq!(verify_release(&keys, "v0.60.1", ENVELOPE.as_bytes(), SIGNATURES, flipped.as_bytes()), Err(VerifyError::ManifestMismatch));
+    }
+
+    // A release that lists an image, as `scripts/release-manifest.mjs build --image` makes it and
+    // signs it with the same seed-7 test key, copied byte for byte.
+    #[test]
+    fn a_release_with_an_image_made_by_the_script_verifies() {
+        const PUBLIC_KEY_B64: &str = "6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=";
+        const SIGNATURES: &str = "k1 VQMuETqO/U3nRMhmcdyeH7AWC+QHUDbC8fRLumEwsmfzvQepLBcKX9J75BFw4V9p1/EowJDUvkHpZjQTTSpXCw==
+";
+        const ENVELOPE: &str = "{
+  \"format\": 1,
+  \"tag\": \"v0.60.1\",
+  \"manifest_sha256\": \"56cea05f9aa7276f353e91c7748af2ad7a6631873d07a2a7d637e6f646883449\",
+  \"created_at\": \"2026-10-25T12:00:00Z\"
+}
+";
+        const MANIFEST: &str = "{
+  \"format\": 1,
+  \"version\": \"0.60.1\",
+  \"tag\": \"v0.60.1\",
+  \"files\": [
+    {
+      \"name\": \"AgentMux-0.60.1-x64-setup.exe\",
+      \"size\": 5,
+      \"sha256\": \"8fb6d5f37e8055ce720bd0b1d56587f88c0071f285966ba17e72b2b12672aa73\"
+    },
+    {
+      \"name\": \"agentmux-0.60.1-x64-portable.7z\",
+      \"size\": 8,
+      \"sha256\": \"01e782826ae5182220bd6158f883d01ceb1bce659dc020e7c511f802a9aa7737\"
+    }
+  ],
+  \"images\": [
+    {
+      \"name\": \"agent-base\",
+      \"ref\": \"ghcr.io/agentmuxai/agent-base\",
+      \"digest\": \"sha256:abababababababababababababababababababababababababababababababab\"
+    }
+  ]
+}
+";
+        let public: [u8; 32] = BASE64.decode(PUBLIC_KEY_B64).unwrap().try_into().unwrap();
+        let keys = [UpdateKey { id: "k1", public }];
+        let m = verify_release(&keys, "v0.60.1", ENVELOPE.as_bytes(), SIGNATURES, MANIFEST.as_bytes()).unwrap();
+        assert_eq!(m.files.len(), 2);
+        assert_eq!(m.image("agent-base").map(|i| (i.reference.as_str(), i.digest.as_str())), Some((BASE, &*format!("sha256:{}", "ab".repeat(32)))));
+        // The digest is covered: one byte changed after signing is refused.
+        let swapped = MANIFEST.replace("abab", "abac");
+        assert_eq!(verify_release(&keys, "v0.60.1", ENVELOPE.as_bytes(), SIGNATURES, swapped.as_bytes()), Err(VerifyError::ManifestMismatch));
     }
 
     // The release workflow reads `update-keys.json` to check what it signed; the app

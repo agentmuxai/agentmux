@@ -42,6 +42,7 @@ import { caretAtSelectionEdge } from "./composer-caret";
 import { InputHistorySearch } from "./InputHistorySearch";
 import { AttachmentTray } from "../attachments/AttachmentTray";
 import { getAttachmentDraft } from "../attachments/attachment-draft";
+import { useComposerRestore } from "../composer-restore";
 import { getComposerDraft, getSentHistory, saveSentHistory, SENT_HISTORY_MAX, setComposerDraft } from "../reload-persistence";
 import { agentDraft, agentHistory, historyAgentId, loadOlderAgentHistory, movedCursor, rememberSent, saveAgentDraft, watchAgentHistory } from "../agent-input-history";
 import { attachmentNoun, fileKind } from "../attachments/file-kind";
@@ -936,6 +937,7 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
     onMount(() => {
         props.isComposerEmptyRef?.(() => (textareaRef?.value.length ?? 0) === 0);
     });
+    useComposerRestore(draftBlockId, () => textareaRef, setComposerValue);
 
     // Restore a draft left behind by a prior mount of this same block (a
     // tab switch away and back — see the composer draft note above). Direct .value

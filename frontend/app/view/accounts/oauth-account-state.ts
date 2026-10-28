@@ -25,6 +25,25 @@ export function clientModeTag(a: Pick<Account, "context">): string | null {
     return null;
 }
 
+/** Who a GitHub account is connected as ("@octo (id 42)"), or null when srv doesn't know. */
+export function githubConnectedAs(a: Pick<Account, "provider" | "context">): string | null {
+    const login = a.context?.github_login;
+    if (a.provider !== "github" || !login) return null;
+    const id = a.context?.github_user_id;
+    return id ? `@${login} (id ${id})` : `@${login}`;
+}
+
+/** A GitHub grant made through AgentMux Cloud's broker, which the broker can say is gone. */
+export function isBrokeredGithub(a: Pick<Account, "provider" | "context">): boolean {
+    return a.provider === "github" && a.context?.broker === true;
+}
+
+/** Whether `github.connection`'s answer says the grant is gone (revoked on GitHub, blocked, or ended
+ *  elsewhere): only a clear answer counts, never a failure to ask. */
+export function githubGrantIsGone(c: { signedIn: boolean; error?: string; status?: string }): boolean {
+    return c.signedIn && !c.error && (c.status === "revoked" || c.status === "blocked" || c.status === "none");
+}
+
 /** The label for a client mode `account.oauth.client.get` reports. */
 export function clientModeLabel(mode: "byo" | "workspace" | undefined): string {
     return mode === "workspace" ? "Workspace internal" : "Your own client";

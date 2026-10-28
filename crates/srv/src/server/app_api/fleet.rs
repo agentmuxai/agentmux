@@ -755,8 +755,8 @@ async fn forward_stop_pending(
 
 /// Stop agents and KEEP their panes, behind the user's 30 s override. Internal
 /// only, since `Stop agents` closes the tab (`fleet_close_agents_with_override`):
-/// the fork slug migration, which restarts the agents in the same panes, is its
-/// one caller. Every target running on
+/// the fork slug migration, which restarts the agents in the same panes, and
+/// `Agents stop` of another agent are its callers. Every target running on
 /// this instance waits for its user's 30 s override, all windows in parallel
 /// (docs/specs/SPEC_AGENT_SELF_QUIT_2026_09_24.md §6.5). A target running on
 /// another instance on this machine is asked there, in that instance's own
@@ -767,6 +767,19 @@ pub(crate) async fn fleet_stop_keep_pane_with_override(
     by: &str,
     targets: Vec<String>,
     signal: Option<&str>,
+    staged: Option<StagePlanInput>,
+) -> (FleetActionResult, Vec<crate::sagas::pending_shutdown::PendingView>) {
+    fleet_stop_keep_pane_with_override_opts(state, by, targets, signal, None, staged).await
+}
+
+/// [`fleet_stop_keep_pane_with_override`] with the caller's explicit `stop_background`
+/// (`None`: the user's setting), carried through the window to the stop.
+pub(crate) async fn fleet_stop_keep_pane_with_override_opts(
+    state: &AppState,
+    by: &str,
+    targets: Vec<String>,
+    signal: Option<&str>,
+    stop_background: Option<bool>,
     staged: Option<StagePlanInput>,
 ) -> (FleetActionResult, Vec<crate::sagas::pending_shutdown::PendingView>) {
     let (local, other): (Vec<String>, Vec<String>) = targets
@@ -781,7 +794,7 @@ pub(crate) async fn fleet_stop_keep_pane_with_override(
                 by,
                 "FleetBulkStop",
                 "",
-                crate::sagas::pending_shutdown::Action::Stop { signal: signal.map(str::to_string) },
+                crate::sagas::pending_shutdown::Action::Stop { signal: signal.map(str::to_string), stop_background },
             );
             // A target can join a request opened for another block (its
             // pane's close, via a sibling tab): audit and report it under the

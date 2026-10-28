@@ -351,7 +351,7 @@ pub(super) async fn verify_lan_signature(state: &AppState, req: &mut InjectionRe
     let Some(claimed) = req.source_agent.clone().filter(|s| !s.is_empty()) else {
         return;
     };
-    let observed_key = match state.lan_discovery.find_agent_lan_pubkey(&claimed, &state.http_client).await {
+    let observed_key = match state.lan_discovery.find_agent_lan_pubkey_asking_again(&claimed, &state.http_client).await {
         crate::backend::lan_discovery::LanPubkeyLookup::Found(key) => key,
         // Genuinely unknown sender — nothing to check against, not a red
         // flag on its own (same treatment self-declared senders get
@@ -707,6 +707,7 @@ pub(crate) async fn deliver(
     verify_reagent_signature(&mut req, now_unix_secs());
     verify_lan_signature(&state, &mut req).await;
     verify_cross_channel_signature(&state, &mut req);
+    lan_v2::log_receipt(&req);
     let mut replay = replay::reserve(&mut req, now_unix_secs());
     req.route_unsigned_target();
     resolve_transcript_request_tier_fields(&state.mstore, &mut req);
@@ -957,10 +958,11 @@ pub(crate) async fn deliver(
             None => None,
         };
         if let Some((peer_url, peer_auth_key)) = lan_peer {
+            let lan_forwarded = lan_v2::sign_and_log(&state.mstore, caller_uid, forwarded_req.clone(), &peer_url);
             match forward_inject_to_peer(
                 &state,
                 &req,
-                &lan_v2::sign_at_origin(&state.mstore, caller_uid, forwarded_req.clone()),
+                &lan_forwarded,
                 ForwardPeer {
                     url: &peer_url,
                     auth_key: &peer_auth_key,

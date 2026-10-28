@@ -10,6 +10,8 @@
  */
 
 import { cleanup, render } from "@solidjs/testing-library";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { isOverChrome } from "@/app/store/chrome-zoom-target";
@@ -83,6 +85,17 @@ describe("BrowserNavBar layout structure", () => {
         const profile = bar.querySelector(".browser-nav-group--profile")!;
         expect(profile.children).toHaveLength(1);
         expect(profile.querySelector(".browser-profile-btn")).toBeTruthy();
+    });
+});
+
+describe("the toolbar's grid areas", () => {
+    const scss = readFileSync(resolve(process.cwd(), "frontend/app/view/browser/browser-view.scss"), "utf8");
+
+    it("keeps Bookmarks just left of Profile, at the right end, in the wide row and the thin one", () => {
+        const wide = scss.match(/grid-template-areas:\s*"([^"]+)";/)![1].split(/\s+/);
+        expect(wide).toEqual(["nav", "address", "bookmarks", "profile"]);
+        const thin = scss.match(/@container[^{]*\{[\s\S]*?grid-template-areas:\s*"([^"]+)"/)![1].split(/\s+/);
+        expect(thin.slice(-2)).toEqual(["bookmarks", "profile"]);
     });
 });
 

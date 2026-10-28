@@ -20,6 +20,9 @@ let models: Record<string, any>;
 /** Slow-path doubles: srv's block.reveal, the host window API, legacy fallback. */
 let blockReveal: (d: { block_id: string }) => Promise<{ found: boolean; window_id?: string }>;
 let otherWorkspaces: any[];
+/** The window tab the window shows, and the notices the selection machine pushed. */
+const win = vi.hoisted(() => ({ activeTab: "t1", commitDelayMs: 0 }));
+const notices: { title: string; message: string }[] = [];
 const windowInstances = [
     { label: "main", windowId: "win-here" },
     { label: "second", windowId: "win-other" },
@@ -40,7 +43,14 @@ vi.mock("@/app/store/global", () => ({
             );
         },
     },
-    setActiveTab: async (tabId: string) => calls.push(`setActiveTab:${tabId}`),
+    setActiveTab: async (tabId: string) => {
+        calls.push(`setActiveTab:${tabId}`);
+        // The workspace push that commits the tab can land after the RPC replies.
+        if (win.commitDelayMs) setTimeout(() => (win.activeTab = tabId), win.commitDelayMs);
+        else win.activeTab = tabId;
+    },
+    atoms: { activeTabId: () => win.activeTab },
+    pushNotification: (n: { title: string; message: string }) => notices.push(n),
     getApi: () => ({
         listWindowInstances: async () => windowInstances,
         focusWindow: async (label: string) => calls.push(`focusWindow:${label}`),
@@ -82,6 +92,7 @@ import { revealBlock, revealBlockLocally, showBlockInPane, showBlockWithoutFocus
 function modelWithPane(nodeId: string, members: string[], magnified?: string, minimized = false) {
     return {
         magnifiedNodeId: magnified,
+        treeState: { focusedNodeId: nodeId },
         getNodeByBlockId: (b: string) =>
             members.includes(b) ? { id: nodeId, ...(minimized ? { minimized: true } : {}) } : null,
         focusNode: (id: string) => calls.push(`focusNode:${id}`),
@@ -94,6 +105,9 @@ function modelWithPane(nodeId: string, members: string[], magnified?: string, mi
 beforeEach(() => {
     calls.length = 0;
     located.length = 0;
+    notices.length = 0;
+    win.activeTab = "t1";
+    win.commitDelayMs = 0;
     ws = { oid: "ws", pinnedtabids: [], tabids: ["t1", "t2"] };
     tabs = { t1: { blockids: ["a"] }, t2: { blockids: ["agentA", "agentB"] } };
     models = { t1: modelWithPane("n1", ["a"]), t2: modelWithPane("pane", ["agentA", "agentB"]) };
@@ -243,6 +257,36 @@ describe("revealBlock — a block in another window (spec §4.3)", () => {
     it("a block in this window never reaches srv", async () => {
         await revealBlock("agentB");
         expect(calls.some((c) => c.startsWith("block.reveal"))).toBe(false);
+    });
+
+    it("resolves settled for a block it showed, in order, and flashes it once it is read back", async () => {
+        expect(await revealBlock("agentB", { source: "swarm" })).toEqual({ ok: true });
+        expect(calls).toEqual(["setActiveTab:t2", "stack:pane:agentB", "focusNode:pane", "caret:agentB"]);
+        expect(located.map((l) => l.blockId)).toEqual(["agentB"]);
+        expect(notices).toEqual([]);
+    });
+
+    it("waits for a tab whose commit lands after the switch replied, instead of reading it back too early", async () => {
+        win.commitDelayMs = 150;
+        expect(await revealBlock("agentB")).toEqual({ ok: true });
+        expect(win.activeTab).toBe("t2");
+        expect(notices).toEqual([]);
+    });
+
+    it("resolves with the reason, and says it quietly, for a block that is nowhere", async () => {
+        const result = await revealBlock("nowhere", { source: "swarm" });
+        expect(result).toMatchObject({ ok: false, reason: "not-found" });
+        expect(notices).toEqual([{ title: "Couldn't show that pane", message: "it is no longer open", icon: "fa-triangle-exclamation", timestamp: expect.any(String), type: "info", expiration: expect.any(Number) }]);
+        expect(located).toEqual([]);
+    });
+
+    it("a pane that does not come to the front is shown once more, then reported", async () => {
+        models.t2 = { ...modelWithPane("pane", ["agentA", "agentB"]), treeState: { focusedNodeId: "another" } };
+        const result = await revealBlock("agentB");
+        expect(result).toMatchObject({ ok: false, reason: "mismatch", detail: "the pane is not the focused one" });
+        expect(calls.filter((c) => c === "stack:pane:agentB").length).toBe(2);
+        expect(located).toEqual([]);
+        expect(notices[0]?.message).toBe("it did not come to the front");
     });
 
     it("not found: falls back to activating its tab in the other workspace and raising that window", async () => {
