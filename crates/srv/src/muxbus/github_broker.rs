@@ -276,7 +276,12 @@ pub async fn caller(mstore: &std::sync::Arc<crate::backend::storage::store::Stor
     let bearer = crate::muxbus::cloud_subscriber::load_valid_token(mstore, &scheduler)
         .await
         .ok_or_else(|| BrokerError::NotSignedIn("no valid sign-in".to_string()))?;
-    let wan = mstore.wan_identity().ok_or_else(|| BrokerError::NotSignedIn("this install has no identity yet".to_string()))?;
+    // The install's identity is attached to the channel's own store, and installed process-wide;
+    // `mstore` is often the shared account store, which doesn't carry it.
+    let wan = mstore
+        .wan_identity()
+        .or_else(crate::backend::storage::wan_identity::global)
+        .ok_or_else(|| BrokerError::NotSignedIn("this install has no identity yet".to_string()))?;
     let instance = wan
         .instance_ensure(&crate::backend::reactive::registry::local_host_label())
         .map_err(|e| BrokerError::NotSignedIn(format!("this install's key can't be read: {e}")))?;
