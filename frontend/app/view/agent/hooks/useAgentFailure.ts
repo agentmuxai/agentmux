@@ -55,7 +55,7 @@ import type { AgentPaneModel } from "@/app/store/agent-pane-model";
 import type { PaneFailure } from "@/app/store/agent-pane-state/types";
 import type { FailedTurnRecovery } from "../offline/failed-turn";
 import { failureToRow, isTransient, type FailureRow } from "../failure/failure-accessory";
-import { refusedSendOf } from "../failure/refused-send";
+import { forgetRefusedSend, refusedSendOf } from "../failure/refused-send";
 import { restoreRefusedSend } from "../failure/refused-send-restore";
 import { registerRecycleBlocker } from "@/app/store/recycle-blockers";
 import { copyErrorReport } from "@/app/errors/CopyErrorButton";
@@ -475,8 +475,10 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
                     // Before the row clears: a clear the recovery didn't hear
                     // about first reads as the operator's send, not a dismiss.
                     opts.reconnect?.failureDismissed();
-                    // A message this pane refused for another pane has nobody to send it now.
-                    restoreRefusedSend(opts.blockId);
+                    // A message this pane refused for another pane has nobody to send it now: it goes
+                    // back to the composer. Any other row is not about it, so a kept one is stale.
+                    if (f.code === "open_in_other_pane") restoreRefusedSend(opts.blockId);
+                    else forgetRefusedSend(opts.blockId);
                     endEpisode();
                 },
                 takeOver: opts.onTakeOver ? () => takeOver(pf.turnAttempted ?? true) : undefined,

@@ -31,6 +31,7 @@ import type { PaneFailure } from "@/app/store/agent-pane-state/types";
 import type { AgentPaneEvent } from "@/app/store/agent-pane-state-store";
 import { __resetListeners, fireEvent } from "@/app/store/agent-pane-state-store";
 import { recycleBlockers } from "@/app/store/recycle-blockers";
+import { forgetRefusedSend, refusedSendOf, rememberRefusedSend } from "../failure/refused-send";
 
 const hub = vi.hoisted(() => ({
     handlers: new Map<string, (e: unknown) => void>(),
@@ -812,6 +813,21 @@ describe("useAgentFailure — a network failure that waits for its API", () => {
             ui.row()!.actions.find((a) => a.title === "Dismiss")!.onClick();
             expect(restoreRefusedSendMock).toHaveBeenCalledWith(BLOCK_ID);
             expect(ui.row()).toBeNull();
+            dispose();
+        });
+    });
+
+    it("dismissing any other row drops a stale kept message and does not put it in the composer", async () => {
+        await createRoot(async (dispose) => {
+            restoreRefusedSendMock.mockClear();
+            rememberRefusedSend(BLOCK_ID, { text: "old", attachments: [] });
+            const { ui } = mkUI(vi.fn());
+            await Promise.resolve();
+            fire("agentfailure", transient());
+            ui.row()!.actions.find((a) => a.title === "Dismiss")!.onClick();
+            expect(restoreRefusedSendMock).not.toHaveBeenCalled();
+            expect(refusedSendOf(BLOCK_ID)).toBeUndefined();
+            forgetRefusedSend(BLOCK_ID);
             dispose();
         });
     });
