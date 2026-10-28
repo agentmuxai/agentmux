@@ -30,8 +30,7 @@
 // this component and for legacy blocks with no agent context at all.
 //
 // `view: "identity"` blocks are themselves legacy — no live UI flow creates
-// them anymore (superseded by the agent pane's "Stash" modal,
-// `AgentStashModal.tsx`). The old `view: "memory"` bundle-summary pane is
+// them anymore (superseded by Connectors → Accounts). The old `view: "memory"` bundle-summary pane is
 // gone: that id is the Memory pane now
 // (SPEC_RENAME_KNOWLEDGE_TO_MEMORY_2026_10_06.md §3.3).
 

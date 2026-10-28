@@ -1,6 +1,6 @@
 # Spec: drop the agent Stash, and give each of its tabs a home it already half has
 
-**Status:** active — approved by the operator on 2026-10-25 with D1-D7 as recommended. Phase 1 (the new homes) is in progress: part A (unbind in Connectors and Memory › Skills) ships with this spec; parts B and C follow; phase 2 (removing the Stash) is not started. The starter skills (§5b) shipped in #5459. Decisions in §6 were marked for the operator, each with a recommendation. Verified 2026-10-25.
+**Status:** active — approved by the operator on 2026-10-25 with D1-D7 as recommended. Phase 1 (the new homes) is merged (#5540, #5541, #5542); Phase 2 (removing the Stash drawer and its header button) is built in the PR that commits this change (#8099). The starter skills (§5b) shipped in #5459. Decisions in §6 were marked for the operator, each with a recommendation. Verified 2026-10-25.
 **Date:** 2026-10-24
 **Author:** AgentX@narko
 **Task:** Spec #2850; the build is #2851 and starts after this is approved

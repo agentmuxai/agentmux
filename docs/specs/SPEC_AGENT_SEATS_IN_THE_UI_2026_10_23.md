@@ -56,6 +56,8 @@ seat: {
 
 ## 3. Who writes it
 
+> The Stash drawer named below is removed by [SPEC_DROP_THE_AGENT_STASH_2026_10_24.md](SPEC_DROP_THE_AGENT_STASH_2026_10_24.md). The Seat editor stays: it opens from My Agents' row menu (Seat…) and from the agent pane's right-click menu.
+
 - **The operator, and (since #4477) agents.**
   - **Writes from the window go through the RPC `agent.setSeat {agent_id, seat | null}`.** It's allowed only for the operator's own client (the app's renderer), refused for any `Caller::Agent` (MuxAPI, MCP, jekt), and audited. An agent uses `Agents set_seat` (`POST /api/v1/agent/seats`) instead, with the same validation, audited under the calling agent.
   - **`agent.define` and `updateagent` don't touch `seat`.** A caller that omits it keeps the stored value, using the "None = keep" pattern `model_vendor_base_url` uses, so an identity or rename save never wipes a seat.

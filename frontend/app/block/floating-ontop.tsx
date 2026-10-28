@@ -53,14 +53,14 @@ export function useReapplyFloatingOnTop(label: () => string, blockId: () => stri
     });
 }
 
-/** Header tack for a floating pane: a `toggleiconbutton` like the agent pane's
- *  Stash, highlighted in the theme accent color while on (iconbutton.scss
+/** Header tack for a floating pane: a `toggleiconbutton`,
+ *  highlighted in the theme accent color while on (iconbutton.scss
  *  `.toggle.active`), placed with the window controls before Maximize. */
 export function FloatingAlwaysOnTopButton(props: { label: string; blockId: string }): JSX.Element {
     const onTop = createMemo(() =>
         isFloatingOnTop(MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", props.blockId))()?.meta)
     );
-    // A fake SignalAtom, as Stash does: the read tracks the block meta; the
+    // A fake SignalAtom: the read tracks the block meta; the
     // write asks the host, whose meta write-through flips the read.
     const active = (() => onTop()) as SignalAtom<boolean>;
     active._set = (next: boolean | ((prev: boolean) => boolean)) => {

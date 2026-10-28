@@ -625,8 +625,8 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
         document.removeEventListener("keydown", onDocumentKeyDown);
     });
 
-    // "Seat…" opens the Seat editor over the picker; the Stash drawer's
-    // Seat tab needs the agent's own pane (SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md §3).
+    // "Seat…" opens the Seat editor over the picker, whether or not the
+    // agent has a pane open (SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md §3).
     // No modal layer (a bare test render): no item.
     const modalLayer = useContext(ModalLayerContext);
     const handleSeatOpen = (row: RecentSessionRow): void => {
