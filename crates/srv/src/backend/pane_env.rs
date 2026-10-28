@@ -402,6 +402,8 @@ mod spawn_site_coverage {
          "test: disposable `sleep 60` the launcher-watcher test waits on through a pidfd, to prove a signal doesn't end the wait"),
         ("src/backend/claude_layout.rs", "\"git\"", 1,
          "test: builds a throwaway repository with a linked worktree in a temp dir, to check the CLI's memory-folder rule"),
+        ("src/backend/container/mounts/credential_mode.rs", "\"sh\"", 1,
+         "test: Unix only; runs the container's credential-tightening script against a temp dir, to prove what it changes and what it leaves"),
         ("src/backend/container_cli.rs", "\"sh\"", 2,
          "test: Unix only; runs the container CLI install and check scripts against a stub npm in a temp dir, to prove they are idempotent and write no marker on failure"),
         ("src/backend/lsp/supervisor.rs", "&resolved", 1,

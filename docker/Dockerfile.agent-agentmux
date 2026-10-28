@@ -116,8 +116,9 @@ ENV LANG=C.UTF-8
 
 # Pre-create ~/.claude with agent ownership before switching to the non-root user.
 # Docker initialises a fresh named volume as root:root; without this the agent
-# user cannot write its config/session state on first mount.
-RUN mkdir -p /home/agent/.claude && chown agent:agent /home/agent/.claude
+# user cannot write its config/session state on first mount. 700: it holds the
+# sign-in, and a fresh volume takes its mode from here.
+RUN mkdir -p /home/agent/.claude && chown agent:agent /home/agent/.claude && chmod 700 /home/agent/.claude
 
 # Where AgentMux installs the provider CLI on first start. A named volume mounted
 # here is initialised from this directory, so it is writable by `agent`.
