@@ -426,19 +426,17 @@ jobs:
   # serves them from agentmux.ai — so this job must NOT touch S3 or AWS. Its only handoff is the
   # GitHub Release plus a repository_dispatch to redeploy the landing page.
   #
-  # `if: !failure() && !cancelled()` rather than plain `success()` is
-  # deliberate: build-macos is legitimately SKIPPED (not failed) whenever
-  # APPLE_CEF_AVAILABLE isn't set, and `success()` would treat that skip as
-  # not-a-success and block publish even though a Windows/Linux-only release
-  # is fine. `failure()`/`cancelled()` only inspect jobs THIS job directly
-  # `needs` — they do not look at the whole transitive graph (GitHub Actions'
-  # documented behaviour: an `if:` that references one of these functions
-  # gets no implicit "all needs succeeded" check at all, unlike a plain
-  # output-only `if:` such as build-macos's own) — so cef-runtime-pins MUST
-  # be listed here explicitly, or its failure (a milestone mismatch) would
-  # cascade to skip every build job (invisible to failure()) while publish's
-  # condition stayed true, ran anyway, downloaded zero artifacts, and failed
-  # confusingly later instead of being cleanly blocked at the real point of
+  # Each job this one needs is checked by its result (success or skipped), not by
+  # `!failure()`, and not by plain `success()`. build-macos is legitimately SKIPPED
+  # (not failed) whenever APPLE_CEF_AVAILABLE isn't set, and `success()` would treat
+  # that skip as not-a-success and block publish even though a Windows/Linux-only
+  # release is fine. `failure()` is no use here: it is true when ANY ancestor job
+  # failed (GitHub's documented behaviour), and the agent image job is an ancestor
+  # (through sign-release) whose failure must not stop a release: it only leaves the
+  # signed manifest without an image. cef-runtime-pins MUST stay in the list, or its
+  # failure (a milestone mismatch) would cascade to skip every build job while
+  # publish's condition stayed true, ran anyway, downloaded zero artifacts, and
+  # failed confusingly later instead of being cleanly blocked at the real point of
   # failure.
   #
   # build-macos is checked by its result as well: a job killed by a time limit
@@ -449,7 +447,15 @@ jobs:
   publish:
     name: Publish release
     needs: [gate, check-macos, cef-runtime-pins, build-windows, build-linux, build-macos, sign-release]
-    if: ${{ !failure() && !cancelled() && (needs.build-macos.result == 'success' || (needs.build-macos.result == 'skipped' && needs.check-macos.outputs.available != 'true')) }}
+    if: >-
+      ${{ !cancelled()
+      && contains(fromJSON('["success","skipped"]'), needs.gate.result)
+      && contains(fromJSON('["success","skipped"]'), needs.check-macos.result)
+      && contains(fromJSON('["success","skipped"]'), needs.cef-runtime-pins.result)
+      && contains(fromJSON('["success","skipped"]'), needs.build-windows.result)
+      && contains(fromJSON('["success","skipped"]'), needs.build-linux.result)
+      && contains(fromJSON('["success","skipped"]'), needs.sign-release.result)
+      && (needs.build-macos.result == 'success' || (needs.build-macos.result == 'skipped' && needs.check-macos.outputs.available != 'true')) }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
