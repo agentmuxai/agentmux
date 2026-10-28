@@ -80,7 +80,7 @@ fn ensure_controller(
     meta_update.insert("agentProvider".to_string(), json!(&agent.provider));
     let _ = crate::server::service::update_object_meta(mstore, &format!("block:{block_id}"), &meta_update);
     // The launch is recorded before the resync: a controller can report its session id during it,
-    // and that capture finds the row by block (Codex P2 on #3584).
+    // and that capture finds the row by block (#3584).
     record_agent_open_launch(mstore, &agent.id, block_id)?;
     let block = mstore.must_get::<Block>(block_id).map_err(|e| format!("agent.open: reload block: {e}"))?;
     let _ = blockcontroller::resync_controller(
