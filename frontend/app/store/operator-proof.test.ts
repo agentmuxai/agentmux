@@ -161,6 +161,7 @@ describe("operator proof", () => {
             "fleet.broadcast",
             "agent.pane.unregister",
             "agent.takeover",
+            "agent.move-here",
         ]) {
             expect(isOperatorCommand(c)).toBe(true);
         }
