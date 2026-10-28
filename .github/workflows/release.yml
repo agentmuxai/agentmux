@@ -30,9 +30,10 @@ jobs:
   release:
     name: Release
     # The core's jobs get at most what is granted here: contents for the builds
-    # and the publish, id-token for the signing job.
+    # and the publish, id-token for the signing job, packages for the container image.
     permissions:
       contents: write
       id-token: write
+      packages: write
     uses: agentmuxai/agentmux/.github/workflows/release-core.yml@main
     secrets: inherit
