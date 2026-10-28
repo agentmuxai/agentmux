@@ -125,10 +125,22 @@ pub(super) fn write_in_place(conn: &Connection, zone_id: &str, name: &str, idx: 
         return Ok(false);
     }
     let mut blob = conn.blob_open(rusqlite::MAIN_DB, "db_file_data", "data", rowid, false)?;
-    let io = |e: std::io::Error| StoreError::Other(format!("in-place write of part {idx} of {zone_id}/{name}: {e}"));
+    let io = |e: std::io::Error| blob_io_error(e, || format!("in-place write of part {idx} of {zone_id}/{name}"));
     blob.seek(SeekFrom::Start(offset as u64)).map_err(io)?;
     blob.write_all(bytes).map_err(io)?;
     Ok(true)
+}
+
+/// A blob read or write reports SQLite's own error wrapped in an `io::Error`. Hand that error back as
+/// it was, so a corrupt page still reads as `SQLITE_CORRUPT` to `transcript::damage::is_corrupt`
+/// (which marks the zone damaged and starts the per-channel fallback); any other io error is
+/// described by `what`.
+fn blob_io_error(e: std::io::Error, what: impl FnOnce() -> String) -> StoreError {
+    let text = e.to_string();
+    match e.into_inner().map(|inner| inner.downcast::<rusqlite::Error>()) {
+        Some(Ok(sqlite)) => StoreError::Sqlite(*sqlite),
+        _ => StoreError::Other(format!("{}: {text}", what())),
+    }
 }
 
 /// Whether a part missing inside `name`'s size is lost content, to read as
@@ -275,6 +287,15 @@ fn load_each(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_blob_write_that_hits_a_corrupt_page_stays_a_sqlite_corruption_error() {
+        let corrupt = rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CORRUPT), None);
+        let e = blob_io_error(std::io::Error::other(corrupt), || "write".into());
+        assert!(crate::backend::transcript::damage::is_corrupt(&e), "{e:?}");
+        let other = blob_io_error(std::io::Error::new(std::io::ErrorKind::InvalidInput, "seek"), || "write".into());
+        assert!(matches!(&other, StoreError::Other(m) if m.contains("write") && m.contains("seek")), "{other:?}");
+    }
 
     fn store() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
