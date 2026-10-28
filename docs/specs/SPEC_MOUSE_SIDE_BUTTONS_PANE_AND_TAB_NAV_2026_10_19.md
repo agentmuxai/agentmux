@@ -249,7 +249,9 @@ second limit below.
   for each attached frame's session, adds the binding, then the world and the listener in each of its frames. A frame attaching
   (`Target.attachedToTarget`) runs the setup again, because the host's commit callback can come before the attach. Checked on
   Linux X11 and Wayland against the released build (§10.2). Every browser pane now has auto-attach on from its first load, not only when an
-  agent reads a form.
+  agent reads a form. An iframe's session gets no `Runtime.enable` (the binding is added after the world exists, which Chromium
+  accepts and still reports), and a page with more than nine frames gets no injection into the ones in other processes (a press over
+  one acts as the page's own).
 - **Earlier page listeners:** the listener is added after the document commits, a few milliseconds after it starts, so a page
   listener registered in its first scripts runs before ours. The press is still claimed (Chromium doesn't navigate, the window
   gets the event) but the page sees it as well; a page that acts on side buttons itself would act in addition. The Windows route
@@ -271,6 +273,14 @@ whose link is clicked for real, so the history entries count; a host page with a
 - **Wayland** (a private headless GNOME Shell on its own socket and session bus, real `BTN_SIDE` / `BTN_EXTRA` through its mutter
   RemoteDesktop session; the live session was not used): the same results, plus a press over the app's own UI (the page listener,
   `back via dom`) and Ctrl + Forward. The released build shows the same cross-site-iframe fault there.
+- **Cost, 15 cross-site iframes that each log to the console 50 times a second, 45 s windows interleaved with the released build:**
+  about 0.4 s more host CPU and 0.5 to 1.1 s more in all (about 1% to 2% of a core), memory the same; with 4 iframes no difference;
+  an outside DevTools client attached to all 15 iframes of the released build changed nothing measurable, so auto-attach itself is
+  cheap. The first run of this comparison, not interleaved, showed a difference of several seconds that was machine load.
+- **Frozen pane** (`browser_pane_set_frozen`, which marks the page frozen in the host; the automatic freeze after 5 minutes hidden
+  did not fire in this local build, whose engine isn't the fork build the window asks for): while it is frozen, `ensure` returns
+  without a CDP call (each frame commit of a navigation logged the skip, and no "thawing a frozen page for a call" line appeared);
+  on thaw (`note_frozen(false)`, or any other call that thaws it) the listener is added, and a press over a cross-site iframe works.
 - **Order:** a history entry made without a user gesture is skipped by Chromium on Back, so a test page has to be reached by a real click.
 
 ## Sources
