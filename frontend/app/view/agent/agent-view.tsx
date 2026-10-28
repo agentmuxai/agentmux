@@ -1106,7 +1106,8 @@ export const AgentPresentationView = ({
                 RpcApi.GetAgentContentCommand(TabRpcClient, { agent_id: agentId, content_type: contentType }),
             listIdentities: () => RpcApi.ListAgentIdentitiesCommand(TabRpcClient, { agent_id: agentId }),
             loadAccounts,
-            send: handleSendMessage, isBusy: () => workingFromPhase(paneSnapshot(model.blockId)?.turnPhase ?? { kind: "Idle" }),
+            send: handleSendMessage,
+            isBusy: () => workingFromPhase(paneSnapshot(model.blockId)?.turnPhase ?? { kind: "Idle" }),
             log,
         });
 
