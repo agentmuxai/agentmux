@@ -79,7 +79,7 @@ async fn calendar_read_with<G: GoogleHttp, O: OAuthHttp, S: TokenSecrets>(
         ));
     }
     let req = calendar::plan(action, args, now)?;
-    let token = access_token_for(deps.oauth, deps.secrets, deps.id_store, deps.identity_store, &access.account).await?;
+    let token = access_token_for(deps.oauth, deps.secrets, deps.id_store, deps.identity_store, &access.account, None).await?;
     let reply = deps.google.send(&req, &token).await?;
     if !(200..300).contains(&reply.status) {
         return Err(google_error(&reply));
