@@ -3,17 +3,37 @@
 
 //! The git hooks directory of an agent whose GitHub access goes through AgentMux.
 //!
-//! srv writes two hooks, `pre-push` (the secret scan) and `prepare-commit-msg` (the `Agent:` and
-//! owner trailers), and points the agent's `core.hooksPath` at the directory
-//! (`identity::github_tokens::apply_agent_git_in`). Each only starts `agentmux-bashwrap git-hook`,
-//! which runs the repository's own hook of the same name first and then does AgentMux's part, so
-//! the logic is Rust (`crates/bashwrap/src/git_hooks.rs`) and the scripts never need to change.
+//! srv writes a script for every client-side hook and points the agent's `core.hooksPath` at the
+//! directory (`identity::github_tokens::apply_agent_git_in`). Git looks for each hook there and
+//! nowhere else, so the directory has to stand in for the repository's own (husky, the
+//! pre-commit framework, commitlint, git-lfs): every script only starts `agentmux-bashwrap
+//! git-hook`, which runs the repository's own hook of the same name and, for `pre-push` (the
+//! secret scan) and `prepare-commit-msg` (the `Agent:` and owner trailers), does AgentMux's part.
+//! The logic is Rust (`crates/bashwrap/src/git_hooks.rs`), so the scripts never need to change.
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-/// The hooks AgentMux installs.
-pub const HOOK_NAMES: &[&str] = &["pre-push", "prepare-commit-msg"];
+/// The hooks AgentMux installs: the client-side ones git runs, each forwarded to the repository's own.
+pub const HOOK_NAMES: &[&str] = &[
+    "applypatch-msg",
+    "pre-applypatch",
+    "post-applypatch",
+    "pre-commit",
+    "pre-merge-commit",
+    "prepare-commit-msg",
+    "commit-msg",
+    "post-commit",
+    "pre-rebase",
+    "post-checkout",
+    "post-merge",
+    "pre-push",
+    "pre-auto-gc",
+    "post-rewrite",
+    "reference-transaction",
+    "post-index-change",
+    "sendemail-validate",
+];
 
 /// What the directory is called under the AgentMux root.
 const DIR_NAME: &str = "github-hooks";
@@ -64,6 +84,10 @@ mod tests {
 
     #[test]
     fn the_hooks_are_written_once_and_start_bashwrap_with_their_own_name() {
+        // The ones a repository's tooling relies on are there, not only the two AgentMux has work in.
+        for name in ["pre-commit", "commit-msg", "post-checkout", "post-merge", "post-commit", "pre-push", "prepare-commit-msg"] {
+            assert!(HOOK_NAMES.contains(&name), "{name}");
+        }
         let root = tempfile::tempdir().unwrap();
         let dir = ensure_hooks_dir(root.path()).unwrap();
         for name in HOOK_NAMES {

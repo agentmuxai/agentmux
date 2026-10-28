@@ -45,7 +45,7 @@ pub const GIT_FUNCTION_BODY: &str = r#"() {  if [ -n "${AGENTMUX_GITHUB_BROKER:-
         _amx_e="$(agentmux-bashwrap git-env -- "$@")" || return $?;
         if [ -n "$_amx_e" ]; then
           IFS=$'\n' read -r -d '' -a _amx_v <<< "$_amx_e" || true;
-          env "${_amx_v[@]}" git "$@";
+          ( export "${_amx_v[@]}"; command git "$@" );
           return $?;
         fi;;
     esac;

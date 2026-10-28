@@ -80,12 +80,22 @@ pub fn scan_diff(diff: &str) -> Vec<Finding> {
     let mut found = Vec::new();
     let mut file = String::new();
     let mut line_no: u32 = 0;
+    // Lines the current hunk still has: a line that begins `+++ ` inside one is an added line
+    // (its text begins `++ `), not the next file's header.
+    let (mut old_left, mut new_left) = (0u32, 0u32);
     for line in diff.lines() {
-        if let Some(path) = line.strip_prefix("+++ ") {
-            file = path.strip_prefix("b/").unwrap_or(path).trim_matches('"').to_string();
-        } else if let Some(hunk) = line.strip_prefix("@@") {
-            // `@@ -old,count +new,count @@`
-            line_no = hunk.split(" +").nth(1).and_then(|r| r.split([',', ' ']).next()).and_then(|n| n.parse().ok()).unwrap_or(0);
+        let in_hunk = old_left > 0 || new_left > 0;
+        if !in_hunk {
+            if let Some(path) = line.strip_prefix("+++ ") {
+                file = path.strip_prefix("b/").unwrap_or(path).trim_matches('"').to_string();
+                continue;
+            }
+        }
+        if let Some(hunk) = line.strip_prefix("@@") {
+            // `@@ -old[,count] +new[,count] @@`
+            let (old, new) = hunk_counts(hunk);
+            (old_left, new_left) = (old.1, new.1);
+            line_no = new.0;
         } else if let Some(added) = line.strip_prefix('+') {
             if let Some(category) = credential_in(added) {
                 found.push(Finding { file: file.clone(), line: line_no, category });
@@ -94,11 +104,32 @@ pub fn scan_diff(diff: &str) -> Vec<Finding> {
                 }
             }
             line_no += 1;
+            new_left = new_left.saturating_sub(1);
+        } else if line.starts_with('-') {
+            old_left = old_left.saturating_sub(1);
         } else if line.starts_with(' ') {
             line_no += 1;
+            old_left = old_left.saturating_sub(1);
+            new_left = new_left.saturating_sub(1);
         }
     }
     found
+}
+
+/// `(start, count)` of the old and the new side of a hunk header's `-a[,b] +c[,d] @@`; a missing
+/// count is 1.
+fn hunk_counts(header: &str) -> ((u32, u32), (u32, u32)) {
+    let side = |part: &str| {
+        let mut n = part.trim_start_matches(['-', '+', ' ']).split(',');
+        let start = n.next().and_then(|v| v.trim().parse().ok()).unwrap_or(0);
+        let count = n.next().and_then(|v| v.trim().parse().ok()).unwrap_or(1);
+        (start, count)
+    };
+    let ranges = header.split("@@").next().unwrap_or(header).trim();
+    let mut parts = ranges.split(" +");
+    let old = side(parts.next().unwrap_or(""));
+    let new = side(parts.next().unwrap_or(""));
+    (old, new)
 }
 
 /// What a refusal says: where and what, never the text.
@@ -107,10 +138,7 @@ pub fn refusal_text(findings: &[Finding]) -> String {
     for f in findings {
         out.push_str(&format!("  {}:{}  {}\n", f.file, f.line, f.category));
     }
-    out.push_str(
-        "The text is not shown here. Take it out of the commits (and rotate it if it was real), then push again.\n\
-         Only the person can allow an exception, in Connectors > Accounts.\n",
-    );
+    out.push_str("The text is not shown here. Take it out of the commits (and rotate it if it was real), then push again.\n");
     out
 }
 
@@ -170,6 +198,24 @@ mod tests {
             ],
             "a removed line is not a finding"
         );
+    }
+
+    #[test]
+    fn an_added_line_that_looks_like_a_file_header_is_still_scanned() {
+        // The added line `++ <key>` shows in the diff as `+++ <key>`.
+        let diff = format!(
+            "--- a/x\n+++ b/x\n@@ -0,0 +1,2 @@\n+first\n+++ {}\n@@ -5,1 +5,0 @@\n-gone\n+++ b/next\n@@ -0,0 +1,1 @@\n+{}\n",
+            gh(),
+            aws()
+        );
+        assert_eq!(
+            scan_diff(&diff),
+            vec![
+                Finding { file: "x".into(), line: 2, category: "GitHub token" },
+                Finding { file: "next".into(), line: 1, category: "AWS access key id" },
+            ]
+        );
+        assert_eq!(hunk_counts(" -3,2 +4 @@ fn x"), ((3, 2), (4, 1)));
     }
 
     #[test]

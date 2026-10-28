@@ -286,9 +286,10 @@ fn with_tag(body: &str, tag: &str) -> String {
 }
 
 /// `gh pr create` / `gh pr edit` arguments with `tag` added to the PR's body: `--body`/`-b` text,
-/// or a `--body-file`/`-F` file (copied with the tag, by `file_with_tag`; stdin can't be). Arguments
-/// that give no body (`--fill`, a prompt) are left alone.
-pub fn rewrite_pr_body(args: &[String], tag: &str, file_with_tag: impl Fn(&str) -> Option<String>) -> Vec<String> {
+/// or a `--body-file`/`-F` file, whose text (read by `read_file`) becomes the `--body` (stdin can't
+/// be read twice, and a file too big to pass stays as it is). Arguments that give no body
+/// (`--fill`, a prompt) are left alone.
+pub fn rewrite_pr_body(args: &[String], tag: &str, read_file: impl Fn(&str) -> Option<String>) -> Vec<String> {
     let mut out = Vec::with_capacity(args.len());
     let mut i = 0;
     while i < args.len() {
@@ -300,15 +301,20 @@ pub fn rewrite_pr_body(args: &[String], tag: &str, file_with_tag: impl Fn(&str) 
                 i += 2;
             }
             ("--body-file" | "-F", Some(v)) => {
-                let file = if v == "-" { v.clone() } else { file_with_tag(v).unwrap_or_else(|| v.clone()) };
-                out.extend([a.to_string(), file]);
+                match (v != "-").then(|| read_file(v)).flatten() {
+                    Some(text) => out.extend(["--body".to_string(), with_tag(&text, tag)]),
+                    None => out.extend([a.to_string(), v.clone()]),
+                }
                 i += 2;
             }
             _ => {
                 if let Some(v) = a.strip_prefix("--body=") {
                     out.push(format!("--body={}", with_tag(v, tag)));
                 } else if let Some(v) = a.strip_prefix("--body-file=") {
-                    out.push(format!("--body-file={}", file_with_tag(v).unwrap_or_else(|| v.to_string())));
+                    match read_file(v) {
+                        Some(text) => out.push(format!("--body={}", with_tag(&text, tag))),
+                        None => out.push(a.to_string()),
+                    }
                 } else {
                     out.push(a.to_string());
                 }
@@ -319,14 +325,11 @@ pub fn rewrite_pr_body(args: &[String], tag: &str, file_with_tag: impl Fn(&str) 
     out
 }
 
-/// A copy of the body file at `path` with `tag` added, in the temp directory.
-fn body_file_with_tag(path: &str, tag: &str) -> Option<String> {
-    let body = std::fs::read_to_string(path).ok()?;
-    let text = with_tag(&body, tag);
-    let name = format!("agentmux-pr-body-{}-{:x}.md", std::process::id(), text.len());
-    let copy = std::env::temp_dir().join(name);
-    std::fs::write(&copy, text).ok()?;
-    Some(copy.to_string_lossy().into_owned())
+/// The text of a PR body file, if it is small enough to go on a command line.
+fn read_body_file(path: &str) -> Option<String> {
+    const MAX_BYTES: u64 = 24_000;
+    let meta = std::fs::metadata(path).ok()?;
+    (meta.is_file() && meta.len() <= MAX_BYTES).then(|| std::fs::read_to_string(path).ok()).flatten()
 }
 
 /// `github-owner-tag -- <gh args>`: the arguments of a `gh pr create` or `gh pr edit` with the owner
@@ -337,7 +340,7 @@ pub fn run_github_owner_tag(gh_args: &[String]) -> i32 {
     if let Some((owner, repo)) = repo_of_command_here(gh_args) {
         if let Answer::Token(Granted { owner_github_id: Some(id), .. }) = ask(&owner, &repo) {
             let tag = owner_tag(id);
-            args = rewrite_pr_body(gh_args, &tag, |path| body_file_with_tag(path, &tag));
+            args = rewrite_pr_body(gh_args, &tag, read_body_file);
         }
     }
     let mut out = std::io::stdout();
@@ -444,7 +447,7 @@ mod tests {
     fn the_owner_tag_goes_into_the_body_however_it_is_given() {
         let tag = owner_tag(42);
         assert_eq!(tag, "<!-- agentmux:owner_github_id=42 -->");
-        let copy = |p: &str| Some(format!("{p}.tagged"));
+        let copy = |p: &str| (p != "missing.md").then(|| format!("text of {p}"));
         let got = rewrite_pr_body(&args(&["pr", "create", "--title", "t", "--body", "Text\n"]), &tag, copy);
         assert_eq!(got[5], format!("Text\n\n{tag}\n"));
         let got = rewrite_pr_body(&args(&["pr", "edit", "-b", "x", "--body=y", "--body-file", "f.md", "-F", "-", "--body-file=g.md"]), &tag, copy);
@@ -455,9 +458,12 @@ mod tests {
 
 {tag}
 "));
-        assert_eq!(&got[5..7], &["--body-file".to_string(), "f.md.tagged".to_string()]);
-        assert_eq!(&got[7..9], &["-F".to_string(), "-".to_string()], "stdin can't be copied");
-        assert_eq!(got[9], "--body-file=g.md.tagged");
+        // A body file's text goes in as the body.
+        assert_eq!(&got[5..7], &["--body".to_string(), format!("text of f.md\n\n{tag}\n")]);
+        assert_eq!(&got[7..9], &["-F".to_string(), "-".to_string()], "stdin can't be read twice");
+        assert_eq!(got[9], format!("--body=text of g.md\n\n{tag}\n"));
+        let gone = rewrite_pr_body(&args(&["pr", "edit", "-F", "missing.md"]), &tag, copy);
+        assert_eq!(gone, args(&["pr", "edit", "-F", "missing.md"]), "a file that can't be read stays as it is");
         // Already there: not twice. No body: nothing to add it to.
         let again = rewrite_pr_body(&args(&["pr", "create", "-b", &format!("x\n{tag}")]), &tag, copy);
         assert_eq!(again[3], format!("x\n{tag}"));

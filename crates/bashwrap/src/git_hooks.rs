@@ -70,7 +70,7 @@ pub fn plan_for(args: &[String]) -> Result<Plan, String> {
         }
     }
     if sub == "push" {
-        if rest.iter().any(|a| a == "--no-verify" || a.starts_with("--no-verify=")) {
+        if rest.iter().any(|a| is_no_verify(a)) {
             return Err("agentmux: git push --no-verify is not allowed for agents: the push scan has to run".to_string());
         }
         return Ok(Plan::Push);
@@ -79,6 +79,13 @@ pub fn plan_for(args: &[String]) -> Result<Plan, String> {
         return Ok(Plan::Commit { cwd });
     }
     Ok(Plan::Plain)
+}
+
+/// Whether `arg` is `--no-verify`, or an abbreviation git accepts for it (`--no-verif`, `--no-v`:
+/// long options may be shortened while they stay unambiguous).
+fn is_no_verify(arg: &str) -> bool {
+    let name = arg.split('=').next().unwrap_or(arg);
+    name.len() >= "--no-v".len() && "--no-verify".starts_with(name)
 }
 
 /// The environment a commit made for `granted` needs: the App's bot as author and committer, the
@@ -144,7 +151,21 @@ fn repo_own_hook(name: &str) -> Option<PathBuf> {
         .map(PathBuf::from)
         .or_else(|| git_output(&["rev-parse", "--git-common-dir"]).map(|d| Path::new(&d).join("hooks")))?;
     let hook = dir.join(name);
-    hook.is_file().then_some(hook)
+    (hook.is_file() && is_executable(&hook)).then_some(hook)
+}
+
+/// Git skips a hook that isn't executable; so does this.
+fn is_executable(path: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::metadata(path).map(|m| m.permissions().mode() & 0o111 != 0).unwrap_or(false)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        true
+    }
 }
 
 fn run_script(path: &Path, args: &[String], stdin: &[u8]) -> i32 {
@@ -261,12 +282,34 @@ fn prepare_commit_msg(args: &[String]) -> i32 {
     0
 }
 
+/// Any other hook: the repository's own, with git's arguments and standard input as they came. The
+/// hooks directory stands in for the repository's, so each hook the repository has must still run.
+fn forward_to_repo_hook(name: &str, args: &[String]) -> i32 {
+    let Some(own) = repo_own_hook(name) else { return 0 };
+    let mut cmd = if cfg!(windows) {
+        let mut c = Command::new("sh");
+        c.arg(own.to_string_lossy().replace('\\', "/"));
+        c
+    } else {
+        Command::new(&own)
+    };
+    cmd.args(args).stdin(Stdio::inherit()).stdout(Stdio::inherit()).stderr(Stdio::inherit());
+    cmd.no_window();
+    match cmd.status() {
+        Ok(status) => status.code().unwrap_or(1),
+        Err(_) => {
+            eprintln!("agentmux: couldn't run the repository's {name} hook");
+            1
+        }
+    }
+}
+
 /// `git-hook <name> <git's arguments>`.
 pub fn run_git_hook(name: &str, args: &[String]) -> i32 {
     match name {
         "pre-push" => pre_push(args),
         "prepare-commit-msg" => prepare_commit_msg(args),
-        _ => 0,
+        other => forward_to_repo_hook(other, args),
     }
 }
 
@@ -283,6 +326,14 @@ mod tests {
         assert_eq!(plan_for(&args(&["push", "origin", "main"])), Ok(Plan::Push));
         assert!(plan_for(&args(&["push", "--no-verify"])).unwrap_err().contains("--no-verify"));
         assert!(plan_for(&args(&["-C", "repo", "push", "origin", "--no-verify=1"])).is_err());
+        // Git accepts a long option shortened while it is unambiguous.
+        for a in ["--no-verif", "--no-ver", "--no-v"] {
+            assert!(plan_for(&args(&["push", a])).is_err(), "{a}");
+        }
+        // Other `--no-` options are fine.
+        for a in ["--no-thin", "--no-force-with-lease", "--no-", "--verify"] {
+            assert_eq!(plan_for(&args(&["push", a])), Ok(Plan::Push), "{a}");
+        }
         assert!(plan_for(&args(&["-c", "core.hooksPath=/dev/null", "push"])).unwrap_err().contains("core.hooksPath"));
         assert!(plan_for(&args(&["-c", "Core.HooksPath=x", "commit", "-m", "x"])).is_err());
         // Another option with a value is not mistaken for the subcommand.
