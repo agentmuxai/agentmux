@@ -149,11 +149,17 @@ pub(crate) async fn handle_google_drive(
 /// `pick_files` calls can't fill the person's browser with tabs.
 const PICK_GAP: std::time::Duration = std::time::Duration::from_secs(60);
 
-fn pick_throttle(account_id: &str, now: std::time::Instant) -> Result<(), String> {
-    use std::collections::HashMap;
+fn last_picks() -> std::sync::MutexGuard<'static, std::collections::HashMap<String, std::time::Instant>> {
     use std::sync::{Mutex, OnceLock};
-    static LAST: OnceLock<Mutex<HashMap<String, std::time::Instant>>> = OnceLock::new();
-    let mut last = LAST.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner());
+    static LAST: OnceLock<Mutex<std::collections::HashMap<String, std::time::Instant>>> = OnceLock::new();
+    LAST.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Take the account's picker slot, or say it was taken a moment ago. The slot is held
+/// from the check, so two calls at once can't both open a picker; [`pick_release`] gives it
+/// back when the picker didn't open.
+fn pick_throttle(account_id: &str, now: std::time::Instant) -> Result<(), String> {
+    let mut last = last_picks();
     if let Some(at) = last.get(account_id) {
         if now.saturating_duration_since(*at) < PICK_GAP {
             return Err("a file picker was opened for this account a moment ago: wait for the person to pick, then search_files".to_string());
@@ -161,6 +167,11 @@ fn pick_throttle(account_id: &str, now: std::time::Instant) -> Result<(), String
     }
     last.insert(account_id.to_string(), now);
     Ok(())
+}
+
+/// A picker that failed to open doesn't count against the account.
+fn pick_release(account_id: &str) {
+    last_picks().remove(account_id);
 }
 
 /// `pick_files`: open Google's file picker in the person's browser. The agent gets no ids
@@ -178,12 +189,18 @@ where
 {
     let acc = access::access_for(&state.mstore, &state.id_store, &state.identity_store, def, Service::Drive, account)?;
     let result = match pick_throttle(&acc.account.id, std::time::Instant::now()) {
-        Ok(()) => start_picker_for(state, &acc.account).await.map(|_| {
-            json!({
-                "started": true,
-                "note": "A Google file picker is open in the person's browser. Nothing to wait for here: once they have picked, search_files lists what they gave you."
+        Ok(()) => {
+            let started = start_picker_for(state, &acc.account).await;
+            if started.is_err() {
+                pick_release(&acc.account.id);
+            }
+            started.map(|_| {
+                json!({
+                    "started": true,
+                    "note": "A Google file picker is open in the person's browser. Nothing to wait for here: once they have picked, search_files lists what they gave you."
+                })
             })
-        }),
+        }
         Err(e) => Err(e),
     };
     log_call(deps, &acc, def, Service::Drive, "pick_files", String::new(), &result, chrono::Utc::now());

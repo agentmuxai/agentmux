@@ -120,6 +120,14 @@ fn an_agent_can_open_the_picker_once_a_minute_per_account() {
     assert!(pick_throttle("throttle-a", t0 + std::time::Duration::from_secs(61)).is_ok());
 }
 
+#[test]
+fn a_picker_that_did_not_open_does_not_use_up_the_slot() {
+    let t0 = std::time::Instant::now();
+    assert!(pick_throttle("throttle-c", t0).is_ok());
+    pick_release("throttle-c");
+    assert!(pick_throttle("throttle-c", t0 + std::time::Duration::from_secs(1)).is_ok(), "a retry right after a failed start is allowed");
+}
+
 #[tokio::test]
 async fn pick_files_needs_a_drive_grant_and_the_drive_route_needs_an_agent_token() {
     let state = state_with_agent().await;
