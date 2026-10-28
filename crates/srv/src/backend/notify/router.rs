@@ -848,6 +848,20 @@ impl Router {
         }));
     }
 
+    /// A sensitive operation counting down: the toast names what will happen and offers Veto.
+    /// `block_id` is the countdown's own group (there is no pane); `what` and `body` are app
+    /// wording and cleaned names, never the requester's words. Not blocking: nothing is read.
+    pub fn emit_sensitive(&self, block_id: &str, what: &str, body: Option<String>, info: ShutdownInfo) {
+        self.step(Input::Emit(Request {
+            kind: NotifyKind::ShutdownPending,
+            block_id: block_id.to_string(),
+            agent_name: sanitize_name(what),
+            body,
+            summary: None,
+            shutdown: Some(info),
+        }));
+    }
+
     /// What a press on the live notification `id` is about: its kind, block
     /// and (for a shutdown) request, from this router's own record.
     pub fn live_by_id(&self, id: &str) -> Option<(NotifyKind, String, Option<String>)> {

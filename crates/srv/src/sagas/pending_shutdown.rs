@@ -493,7 +493,7 @@ const BY_MAX: usize = 64;
 /// The asker as the user knows them: the display name of the agent whose id `by`
 /// is (`QTest`, not `qtest`), else `by` as given (a fixed app string, a name
 /// another AgentMux claims, or an agent that is not running).
-fn asker_name(state: &AppState, by: &str) -> String {
+pub(crate) fn asker_name(state: &AppState, by: &str) -> String {
     state
         .reactive_handler
         .get_agent(by)

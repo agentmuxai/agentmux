@@ -300,3 +300,15 @@ mod decide {
         assert!(err.contains("INVALID_ARG"), "{err}");
     }
 }
+
+#[test]
+fn the_toast_names_what_happens_and_who_asked_but_never_a_fact() {
+    let (title, body) = toast_text("Parlo", Some("Camper"), "widget_install");
+    assert_eq!(title, "Install a widget");
+    assert_eq!(body, "Parlo asked. Approved by Camper. It happens when the countdown ends unless you veto it.");
+    let (title, body) = toast_text("Parlo", None, "quit_agentmux");
+    assert_eq!(title, "Close this AgentMux");
+    assert!(body.contains("No super agent reviewed this."), "{body}");
+    // An operation the table does not know still gets a plain title.
+    assert_eq!(toast_text("x", None, "mystery").0, "A sensitive operation");
+}

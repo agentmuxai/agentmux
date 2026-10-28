@@ -82,7 +82,7 @@ One audit row per step, through `log_fleet_action_audit` (shown in Warden's Audi
 3. The countdown (`sagas/sensitive_window.rs`): the window, the person's veto and approve-now, the runner each operation registers, the two events, the audit rows for the veto and the run (built).
 4. The person's RPC, `sensitive.decide` (veto or approve-now), accepted only from the proven AgentMux window and never from an agent (built).
 5. The banner and the chime in the agent pane (built).
-6. The OS toast (it shares the notify router with the stop and close toasts, whose wording rules it follows).
+6. The OS toast (it shares the notify router with the stop and close toasts, whose wording rules it follows) (built).
 7. The routes and the tool, then the wrappers:
    a. HTTP routes under `/api/v1/sensitive/` and the `Sensitive` MCP tool: request, approve and deny (the super agent only), cancel, status, list (built).
    b. Wrap `App upgrade`, `Stop` quit, `Widget install`, `Desktop`, `Vault` to file requests, each registering its runner. They go live after step 8, so a request with no super agent has its fallback.

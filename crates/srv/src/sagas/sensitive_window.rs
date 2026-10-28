@@ -29,6 +29,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 use crate::backend::rpc::engine::WshRpcEngine;
+use crate::backend::sensitive_ops;
 use crate::backend::sensitive_requests::{self as requests, Request, Status};
 use crate::server::AppState;
 use agentmux_common::time::now_ms;
@@ -195,6 +196,7 @@ pub fn open(state: &AppState, request_id: &str, window: Duration) -> Result<Sens
         view
     };
     state.broker.publish_event::<crate::backend::mps_events::SensitivePending>(&view, vec![], REPLAY_EVENTS);
+    raise_toast(state, &view);
     tracing::info!(request_id, op = %view.op, requester = %view.requester, "sensitive request: the person has {} s to veto it", window.as_secs());
 
     let wake = entries().get(request_id).map(|e| e.wake.clone());
@@ -322,8 +324,49 @@ pub fn approve_now(request_id: &str) -> &'static str {
 }
 
 fn cleared(state: &AppState, request_id: &str, outcome: &str) {
+    if let Some(router) = crate::backend::notify::router::get(&state.broker) {
+        router.resolve_nonblocking(&toast_group(request_id), crate::backend::notify::policy::Family::Shutdown);
+    }
     let data = SensitiveClearedEvent { request_id: request_id.to_string(), outcome: outcome.to_string() };
     state.broker.publish_event::<crate::backend::mps_events::SensitiveCleared>(&data, vec![], REPLAY_EVENTS);
+}
+
+/// The notification group of a countdown's toast: there is no pane, so the request is its own.
+pub const TOAST_GROUP_PREFIX: &str = "sensitive:";
+
+fn toast_group(request_id: &str) -> String {
+    format!("{TOAST_GROUP_PREFIX}{request_id}")
+}
+
+/// What the OS notification says: the title (what will happen, from the operation's table, not
+/// from any request text) and the body (who asked and who approved, by display name). The
+/// request's facts are left out on purpose: a toast also lands in the Action Center and on a
+/// lock screen, and a fact can be a path or an address. The banner in AgentMux shows them.
+fn toast_text(requester: &str, approver: Option<&str>, op: &str) -> (String, String) {
+    let label = sensitive_ops::spec(op).map_or("A sensitive operation", |s| s.label);
+    let mut title = label.to_string();
+    if let Some(first) = title.get_mut(0..1) {
+        first.make_ascii_uppercase();
+    }
+    let reviewed = match approver {
+        Some(a) => format!("Approved by {a}."),
+        None => "No super agent reviewed this.".to_string(),
+    };
+    (title, format!("{requester} asked. {reviewed} It happens when the countdown ends unless you veto it."))
+}
+
+/// The OS notification for a countdown: what will happen, the seconds left, and Veto.
+fn raise_toast(state: &AppState, view: &SensitiveView) {
+    let Some(router) = crate::backend::notify::router::get(&state.broker) else { return };
+    let name = |slug: &str| crate::sagas::pending_shutdown::asker_name(state, slug);
+    let (title, body) = toast_text(&name(&view.requester), view.approver.as_deref().map(name).as_deref(), &view.op);
+    let info = crate::backend::notify::policy::ShutdownInfo {
+        deadline_ms: view.deadline_ms,
+        effect: crate::backend::notify::policy::SENSITIVE_EFFECT,
+        running: true,
+        request_id: view.request_id.clone(),
+    };
+    router.emit_sensitive(&toast_group(&view.request_id), &title, Some(body), info);
 }
 
 /// One audit row for a step of the window: the person's veto, or the run.

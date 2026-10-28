@@ -228,10 +228,22 @@ async fn activate_in_stored_layout(state: &AppState, tab_id: &str, block_id: &st
 /// `None` when the id is no live shutdown notification.
 fn keep_from_toast(state: &AppState, r: &Arc<router::Router>, notification_id: &str) -> Option<String> {
     let (kind, block_id, request_id) = r.live_by_id(notification_id)?;
+    keep_for(state, kind, &block_id, &request_id?)
+}
+
+/// The press on a pending toast's button: Keep running for a shutdown, Veto for a sensitive
+/// operation's countdown (which answers as a keep does: the person stopped it, or too late).
+fn keep_for(state: &AppState, kind: crate::backend::notify::policy::NotifyKind, block_id: &str, request_id: &str) -> Option<String> {
     if kind != crate::backend::notify::policy::NotifyKind::ShutdownPending {
         return None;
     }
-    Some(crate::sagas::pending_shutdown::keep(state, &block_id, &request_id?).to_string())
+    if block_id.starts_with(crate::sagas::sensitive_window::TOAST_GROUP_PREFIX) {
+        return Some(match crate::sagas::sensitive_window::veto(state, request_id) {
+            "vetoed" => "kept_by_user",
+            _ => "too_late",
+        }.to_string());
+    }
+    Some(crate::sagas::pending_shutdown::keep(state, block_id, request_id).to_string())
 }
 
 pub fn register_notify_handlers(engine: &Arc<WshRpcEngine>, state: &AppState, conn_id: String) {
@@ -966,5 +978,32 @@ mod live_tests {
             assert_eq!(v.by, by.replace("qtest", "QTest"), "the banner and status name the asker the same way");
             keep(&st, block, &v.request_id);
         }
+    }
+}
+
+#[cfg(test)]
+mod toast_press_tests {
+    use super::*;
+    use crate::backend::notify::policy::NotifyKind;
+    use crate::backend::sensitive_requests as requests;
+    use crate::sagas::sensitive_window as window;
+    use crate::server::tests::test_state;
+    use agentmux_common::time::now_ms;
+
+    #[tokio::test]
+    async fn the_veto_button_on_a_sensitive_toast_stops_that_countdown_once() {
+        let state = test_state();
+        let facts: std::collections::BTreeMap<String, String> =
+            [("template".to_string(), format!("t-{}", uuid::Uuid::new_v4().simple())), ("publisher".to_string(), "p".to_string())].into_iter().collect();
+        let id = requests::registry().request("u-asker", "asker", "job_template_approve", &facts, "", now_ms()).unwrap().id;
+        requests::registry().approve(&id, "boss", now_ms()).unwrap();
+        window::open(&state, &id, std::time::Duration::from_secs(60)).unwrap();
+        let group = format!("{}{id}", window::TOAST_GROUP_PREFIX);
+
+        // Another kind of notification is not this button's.
+        assert_eq!(keep_for(&state, NotifyKind::InputWaiting, &group, &id), None);
+        assert_eq!(keep_for(&state, NotifyKind::ShutdownPending, &group, &id).as_deref(), Some("kept_by_user"));
+        assert_eq!(window::status(&id).unwrap().status, "vetoed");
+        assert_eq!(keep_for(&state, NotifyKind::ShutdownPending, &group, &id).as_deref(), Some("too_late"), "a second press finds it over");
     }
 }
