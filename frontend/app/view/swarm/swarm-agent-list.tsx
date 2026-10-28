@@ -187,7 +187,7 @@ export function SwarmAgentList(props: {
             <StoppedAgents
                 agents={props.agents.stopped}
                 hasLive={() => tree().length > 0 || remote().length > 0}
-                onOpen={(agent) => void openStoppedAgent(agent)}
+                onOpen={openStoppedAgent}
             />
         </>
     );
