@@ -64,6 +64,8 @@ pub async fn token_for(slug: &str, owner: &str, repo: &str) -> Result<HostToken,
     }
     let exe = installed().ok_or_else(|| "gh-agent isn't installed on this machine".to_string())?;
     let mut cmd = tokio::process::Command::new(&exe);
+    // No instance identity or key reaches it; the agent id below is the one thing it is told.
+    crate::backend::pane_env::sanitize_external_command(&mut cmd);
     cmd.args(["token", "--repo", &format!("{owner}/{repo}"), "--json"])
         .env("AGENTMUX_AGENT_ID", slug)
         .stdin(std::process::Stdio::null())
