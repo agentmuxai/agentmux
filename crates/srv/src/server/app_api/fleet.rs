@@ -900,8 +900,9 @@ async fn ask_other_instances(
 /// `Stop agents`, from an agent: close each target agent's tab, as the user's
 /// tab × does, after the same 30 s override window as any other shutdown the
 /// user didn't ask for (docs/specs/SPEC_STOP_AN_AGENT_ONE_WAY_AND_SHUTDOWN_TOAST_2026_10_23.md
-/// §3.1). One window per target, all in parallel; only that agent's tab
-/// closes, so an agent stacked in the same pane keeps running.
+/// §3.1). The targets no request covers yet share one window, with one notification and one audit
+/// entry (`request_batch`), and the user can keep any one of them; a target that already has a window
+/// joins it. Only that agent's tab closes, so an agent stacked in the same pane keeps running.
 ///
 /// Refused up front, as `failed` with a pointer: the caller's own block (that
 /// is `Stop self`), and a block that is not an agent's (that is `Stop pane`).
