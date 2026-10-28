@@ -204,12 +204,10 @@ pub fn compose_items_tail(
     let mut wrote_section = push_sections(&mut b, entries, &global, &personal, &mut spans);
     if let Some(tail) = tail.filter(|t| !t.trim().is_empty()) {
         if wrote_section {
-            b.push("
-");
+            b.push("\n");
         }
         b.push(tail);
-        b.push("
-");
+        b.push("\n");
         wrote_section = true;
     }
     if let Some(summary) = summary {

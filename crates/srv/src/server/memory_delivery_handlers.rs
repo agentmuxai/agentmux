@@ -1111,7 +1111,7 @@ fn personal_entries_in(dir: &std::path::Path) -> Vec<Entry> {
         .collect();
     // Most recently modified first (the sort is stable, so equal times keep name order), so what a cut
     // delivery drops is the oldest, not whatever sorts last by name.
-    entries.sort_by_key(|e| std::cmp::Reverse(modified_ms_of(e).unwrap_or(0)));
+    entries.sort_by_cached_key(|e| std::cmp::Reverse(modified_ms_of(e).unwrap_or(0)));
     entries
 }
 

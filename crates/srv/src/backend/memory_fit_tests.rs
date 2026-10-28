@@ -75,6 +75,7 @@ fn what_does_not_fit_is_left_out_whole_and_named_with_its_description() {
     let fitted = fit(entries, 0, false, &|_| None);
     assert!(!fitted.skipped.is_empty() && fitted.skipped.len() < 12, "{}", fitted.skipped.len());
     let first_skipped = &fitted.skipped[0].name;
+    assert!(fitted.skipped.iter().all(|e| !e.text.contains("[cut:")), "a file left out is returned at its real size, for the card");
     assert!(fitted.kept.iter().all(|e| e.name < *first_skipped || e.tier == Tier::Global), "the newest (earliest in the list) are the ones kept");
     let tail = fitted.tail.clone().unwrap();
     for e in &fitted.skipped {

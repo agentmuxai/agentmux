@@ -156,19 +156,20 @@ pub fn fit(entries: Vec<Entry>, reserve_chars: usize, hygiene: bool, age_days: &
         .filter(|e| e.tier == Tier::Personal)
         .map(|e| Seen { name: e.name.clone(), chars: e.text.chars().count(), kind: frontmatter_value(&e.text, "type"), age_days: age_days(e) })
         .collect();
-    let capped: Vec<Entry> = entries.into_iter().map(cap_entry).collect();
+    // Each file is judged at its capped size, but a file left out is handed back as it was, so the card shows its real size.
+    let capped: Vec<(Entry, Entry)> = entries.into_iter().map(|e| (cap_entry(e.clone()), e)).collect();
     // Leave room for the two notes before counting: each skipped name costs a line.
     let notes_room = 1_200 + MAX_LISTED * (MAX_DESCRIPTION_CHARS + 40);
     let budget = (HOOK_PARTS * MAX_PART_CHARS).saturating_sub(OVERHEAD_CHARS + reserve_chars + notes_room);
     let mut used = 0usize;
     let (mut kept, mut skipped) = (Vec::new(), Vec::new());
-    for e in capped {
+    for (e, original) in capped {
         let n = e.text.chars().count() + 5;
         if e.tier == Tier::Global || used + n <= budget {
             used += n;
             kept.push(e);
         } else {
-            skipped.push(e);
+            skipped.push(original);
         }
     }
     let mut tail: Vec<String> = Vec::new();
