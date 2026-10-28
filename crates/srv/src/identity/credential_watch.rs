@@ -95,13 +95,14 @@ fn set_status(id_store: &Store, identity_store: &Store, broker: Option<&Broker>,
 /// Look at every Claude account once and act on the ones whose sign-in was lost or came back.
 /// BLOCKING (file and store reads). Returns the ids it marked, for tests.
 pub fn check(id_store: &Store, identity_store: &Store, broker: Option<&Broker>) -> Vec<String> {
-    check_at(id_store, identity_store, broker, agentmux_common::time::now_ms())
+    check_in(last_seen(), id_store, identity_store, broker, agentmux_common::time::now_ms())
 }
 
-fn check_at(id_store: &Store, identity_store: &Store, broker: Option<&Broker>, now_ms: i64) -> Vec<String> {
+/// [`check`] over the given history and clock, so a test keeps its own.
+fn check_in(seen: &Mutex<HashMap<String, Seen>>, id_store: &Store, identity_store: &Store, broker: Option<&Broker>, now_ms: i64) -> Vec<String> {
     let accounts = id_store.identity_list(None).unwrap_or_default();
     let mut marked = Vec::new();
-    let mut seen = last_seen().lock().unwrap_or_else(|e| e.into_inner());
+    let mut seen = seen.lock().unwrap_or_else(|e| e.into_inner());
     seen.retain(|id, _| accounts.iter().any(|a| &a.id == id));
     for account in &accounts {
         let Some(status) = probe(account, now_ms) else { continue };
@@ -190,26 +191,27 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().to_str().unwrap().to_string();
         write(tmp.path(), r#"{"claudeAiOauth":{"accessToken":"a","refreshToken":"r","expiresAt":4102444800000}}"#);
+        let seen = Mutex::default();
         let store = Store::open_in_memory().unwrap();
         let other = Store::open_in_memory().unwrap();
         let acct = account("watch-acct-1", &dir);
         store.identity_upsert(&acct).unwrap();
         other.identity_upsert(&acct).unwrap();
 
-        assert!(check_at(&store, &other, None, T).is_empty(), "signed in: nothing to say");
+        assert!(check_in(&seen, &store, &other, None, T).is_empty(), "signed in: nothing to say");
 
         write(tmp.path(), r#"{"claudeAiOauth":{}}"#);
-        assert!(check_at(&store, &other, None, T + TICK).is_empty(), "the first signed-out look waits for a second");
+        assert!(check_in(&seen, &store, &other, None, T + TICK).is_empty(), "the first signed-out look waits for a second");
         assert_eq!(store.identity_list(None).unwrap()[0].status, "ok");
-        assert_eq!(check_at(&store, &other, None, T + 2 * TICK), vec!["watch-acct-1".to_string()]);
+        assert_eq!(check_in(&seen, &store, &other, None, T + 2 * TICK), vec!["watch-acct-1".to_string()]);
         assert_eq!(store.identity_list(None).unwrap()[0].status, oauth_status::NEEDS_REAUTH);
         assert_eq!(other.identity_list(None).unwrap()[0].status, oauth_status::NEEDS_REAUTH);
 
-        assert!(check_at(&store, &other, None, T + 3 * TICK).is_empty(), "said once, not at every tick");
+        assert!(check_in(&seen, &store, &other, None, T + 3 * TICK).is_empty(), "said once, not at every tick");
 
         // The sign-in comes back (the user signed in again): the status is put back.
         write(tmp.path(), r#"{"claudeAiOauth":{"accessToken":"a","refreshToken":"r","expiresAt":4102444800000}}"#);
-        assert!(check_at(&store, &other, None, T + 4 * TICK).is_empty());
+        assert!(check_in(&seen, &store, &other, None, T + 4 * TICK).is_empty());
         assert_eq!(store.identity_list(None).unwrap()[0].status, oauth_status::VALID);
     }
 
@@ -219,16 +221,17 @@ mod tests {
         let dir = tmp.path().to_str().unwrap().to_string();
         let good = r#"{"claudeAiOauth":{"accessToken":"a","refreshToken":"r","expiresAt":4102444800000}}"#;
         write(tmp.path(), good);
+        let seen = Mutex::default();
         let store = Store::open_in_memory().unwrap();
         store.identity_upsert(&account("watch-acct-3", &dir)).unwrap();
-        assert!(check_at(&store, &store, None, T).is_empty());
+        assert!(check_in(&seen, &store, &store, None, T).is_empty());
 
         write(tmp.path(), "{ half written");
-        assert!(check_at(&store, &store, None, T + TICK).is_empty());
+        assert!(check_in(&seen, &store, &store, None, T + TICK).is_empty());
         write(tmp.path(), good);
-        assert!(check_at(&store, &store, None, T + 2 * TICK).is_empty());
+        assert!(check_in(&seen, &store, &store, None, T + 2 * TICK).is_empty());
         write(tmp.path(), "{ half written");
-        assert!(check_at(&store, &store, None, T + 3 * TICK).is_empty(), "two bad reads that are not in a row are not a wipe");
+        assert!(check_in(&seen, &store, &store, None, T + 3 * TICK).is_empty(), "two bad reads that are not in a row are not a wipe");
         assert_eq!(store.identity_list(None).unwrap()[0].status, "ok");
     }
 
@@ -236,11 +239,12 @@ mod tests {
     fn an_account_that_was_never_signed_in_is_not_reported() {
         let tmp = tempfile::tempdir().unwrap();
         write(tmp.path(), r#"{}"#);
+        let seen = Mutex::default();
         let store = Store::open_in_memory().unwrap();
         let acct = account("watch-acct-2", tmp.path().to_str().unwrap());
         store.identity_upsert(&acct).unwrap();
         for i in 0..3 {
-            assert!(check_at(&store, &store, None, T + i * TICK).is_empty());
+            assert!(check_in(&seen, &store, &store, None, T + i * TICK).is_empty());
         }
     }
 }
