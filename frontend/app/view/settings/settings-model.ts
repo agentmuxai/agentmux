@@ -34,6 +34,8 @@ export interface SettingsIndexEntry {
     keywords: string[];
     /** An entry whose settings live in another pane: choosing it runs this instead of showing a row. */
     opens?: () => void;
+    /** A developer option: the row, and so the search result, exist only while dev mode is on. */
+    devOnly?: boolean;
 }
 
 // Label text only, hoisted here so viewName can read it without importing

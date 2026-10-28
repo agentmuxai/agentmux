@@ -18,6 +18,8 @@ vi.mock("@/app/store/global", () => ({
     getApi: () => ({ inspectElementAt: vi.fn() }),
 }));
 vi.mock("@/util/clipboard", () => ({ readText: vi.fn(), writeText: vi.fn() }));
+const devMode = vi.hoisted(() => ({ on: true }));
+vi.mock("@/app/store/dev-mode", () => ({ devModeOn: () => devMode.on }));
 
 import { buildPaneContextMenu, type PaneMenuSection } from "./pane-actions";
 import { registerPaneTab } from "./pane-tab-registry";
@@ -57,6 +59,18 @@ describe("buildPaneContextMenu — baseline (no omit)", () => {
             "-",
             "Inspect Element",
         ]);
+    });
+
+    it("dev mode off: no Inspect Element, and no separator left over for it", () => {
+        devMode.on = false;
+        try {
+            const menu = buildPaneContextMenu(termBlock, opts({ inspectAt: { x: 1, y: 2 } }));
+            expect(shape(menu)).toEqual(["Copy", "Paste", "-", "Split Down", "Split Right", "-", "Magnify Pane", "Close Pane"]);
+            const only = buildPaneContextMenu(termBlock, opts({ inspectAt: { x: 1, y: 2 }, omit: new Set<PaneMenuSection>(["clipboard", "split", "magnify", "close"]) }));
+            expect(shape(only)).toEqual([]);
+        } finally {
+            devMode.on = true;
+        }
     });
 
     it("agent pane has no Paste; magnified pane offers Un-Magnify; no inspectAt means no Inspect", () => {

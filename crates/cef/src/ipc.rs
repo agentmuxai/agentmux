@@ -693,6 +693,7 @@ async fn route_command(
             Ok(serde_json::json!(true))
         }
         "browser_pane_inspect_element" => {
+            crate::dev_mode::require()?;
             let block_id = args.get("block_id").and_then(|v| v.as_str()).unwrap_or("");
             let x = args.get("x").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
             let y = args.get("y").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
