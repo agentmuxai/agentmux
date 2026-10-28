@@ -485,13 +485,13 @@ pub fn seconds_left(remaining_ms: i64) -> i64 {
     (remaining_ms.max(0) + 999) / 1000
 }
 
-/// The two button labels (spec §3.1): "Keep running" for an agent whose
-/// session is running, "Keep open" for one that is already stopped.
 /// The label of a pending toast's one button: Veto for a sensitive operation, else Keep running or Keep open.
 pub fn button_label(info: &ShutdownInfo) -> &'static str {
     if info.effect == SENSITIVE_EFFECT { "Veto" } else { keep_label(info.running) }
 }
 
+/// The two button labels (spec §3.1): "Keep running" for an agent whose
+/// session is running, "Keep open" for one that is already stopped.
 pub fn keep_label(running: bool) -> &'static str {
     if running { "Keep running" } else { "Keep open" }
 }

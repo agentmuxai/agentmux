@@ -358,7 +358,7 @@ fn toast_text(requester: &str, approver: Option<&str>, op: &str) -> (String, Str
 /// The OS notification for a countdown: what will happen, the seconds left, and Veto.
 fn raise_toast(state: &AppState, view: &SensitiveView) {
     let Some(router) = crate::backend::notify::router::get(&state.broker) else { return };
-    let name = |slug: &str| crate::sagas::pending_shutdown::asker_name(state, slug);
+    let name = |slug: &str| crate::sagas::pending_shutdown::clean_by(&crate::sagas::pending_shutdown::asker_name(state, slug));
     let (title, body) = toast_text(&name(&view.requester), view.approver.as_deref().map(name).as_deref(), &view.op);
     let info = crate::backend::notify::policy::ShutdownInfo {
         deadline_ms: view.deadline_ms,

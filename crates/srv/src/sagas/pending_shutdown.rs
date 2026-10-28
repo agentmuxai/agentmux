@@ -506,7 +506,7 @@ pub(crate) fn asker_name(state: &AppState, by: &str) -> String {
 /// The asker's name, cleaned for display. Normally a verified agent id; the
 /// only other sources are fixed app strings and a name another AgentMux on
 /// this machine claims (cross-channel), so it gets the same treatment.
-fn clean_by(raw: &str) -> String {
+pub(crate) fn clean_by(raw: &str) -> String {
     let line = clean_line(raw, BY_MAX);
     if line.is_empty() { "An agent".to_string() } else { line }
 }
