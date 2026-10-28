@@ -830,6 +830,20 @@ async fn route_command(
                 .await
                 .map_err(|e| format!("vault_op: {e}"))?
         }
+        "google_op" => {
+            // A Google account panel's operations (who may use which
+            // service), relayed to srv as the host: srv refuses them without
+            // this host's IPC token, so an agent can't grant itself access.
+            let body = args.clone();
+            let op = body.get("op").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let web_endpoint = state.backend_endpoints.lock().web_endpoint.clone();
+            let auth_key = state.auth_key.lock().clone();
+            let ipc_token = state.ipc_token.clone();
+            tracing::info!("[ipc] google_op op={op}");
+            tokio::task::spawn_blocking(move || crate::client::backend_google(&web_endpoint, &auth_key, &ipc_token, &body))
+                .await
+                .map_err(|e| format!("google_op: {e}"))?
+        }
         "app_update_action" => {
             // Download, Upgrade & restart (or Restart now) and Cancel in the
             // version panel, relayed to srv as the host: an agent holding the

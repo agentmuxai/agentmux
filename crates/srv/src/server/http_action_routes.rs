@@ -46,6 +46,7 @@ pub(super) const ALWAYS: &[&str] = &[
     "POST /api/v1/agent/self/compact", "POST /api/v1/agent/self/fresh", "POST /api/v1/agent/self/mcp-heal",
     "POST /api/v1/agent/self/quit", "POST /api/v1/agent/self/upgrade", "POST /api/v1/agent/spawn",
     "POST /api/v1/agent/takeover", "POST /api/v1/coord/posts", "POST /api/v1/fleet/bulk-stop", "POST /api/v1/github/token",
+    "POST /api/v1/google/calendar",
     "POST /api/v1/muxspect/dock/clear", "POST /api/v1/pane/open", "POST /api/v1/pane/title",
     "POST /api/v1/ptyshell/create", "POST /api/v1/ptyshell/input", "POST /api/v1/ptyshell/resize",
     "POST /api/v1/ptyshell/stop", "POST /api/v1/sensitive/:action", "POST /api/v1/shell/create",
@@ -68,7 +69,7 @@ pub(super) const PLUMBING: &[&str] = &[
     "POST /api/v1/host/browser_attention", "POST /api/v1/host/browser_bypass", "POST /api/v1/host/browser_dialog",
     "POST /api/v1/host/browser_navigation", "POST /api/v1/host/browser_pause", "POST /api/v1/host/browser_popup",
     "POST /api/v1/host/browser_popup_window", "POST /api/v1/host/desktop_request", "POST /api/v1/host/desktop_stop",
-    "POST /api/v1/host/job_templates", "POST /api/v1/host/jobs", "POST /api/v1/host/operator_attest",
+    "POST /api/v1/host/google", "POST /api/v1/host/job_templates", "POST /api/v1/host/jobs", "POST /api/v1/host/operator_attest",
     "POST /api/v1/host/upgrade_request", "POST /api/v1/host/vault", "POST /api/v1/host/widget_approval",
     "POST /api/v1/voice/transcribe",
 ];

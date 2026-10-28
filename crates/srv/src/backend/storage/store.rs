@@ -194,7 +194,8 @@ impl Store {
         super::job_runs::apply_schema(&conn)?;
         conn.execute_batch(super::work_deps::SCHEMA)?;
         conn.execute_batch(super::work_prs::SCHEMA)?;
-        Ok(conn.execute_batch(super::work_media::SCHEMA)?)
+        conn.execute_batch(super::work_media::SCHEMA)?;
+        Ok(conn.execute_batch(super::google_grants::SCHEMA)?)
     }
 
     /// Open the GLOBAL shared store at `path` (`~/.agentmux/shared/store.db`).
@@ -265,6 +266,7 @@ impl Store {
         conn.execute_batch(super::work_prs::SCHEMA)?;
         conn.execute_batch(super::work_media::SCHEMA)?;
         super::job_runs::apply_schema(&conn)?;
+        conn.execute_batch(super::google_grants::SCHEMA)?;
         stamp_version(&conn, IDENTITY_STORE_SCHEMA_VERSION)?;
         Ok(Self {
             conn: Mutex::new(conn),

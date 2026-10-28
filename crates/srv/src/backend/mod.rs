@@ -216,6 +216,8 @@ pub mod sensitive_ops;
 pub mod sensitive_requests;
 /// Holding a routine message for an agent whose session has gone cold (SPEC_JEKT_HOLD_FOR_COLD_SESSIONS_2026_10_25.md).
 pub mod cold_hold;
+/// Google connectors: Calendar, Drive and Gmail for agents, called by srv.
+pub mod google;
 /// A leader hears when its workers end a turn without reporting, fail or stop.
 pub mod worker_notes;
 
