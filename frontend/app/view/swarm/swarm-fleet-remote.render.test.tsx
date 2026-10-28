@@ -54,6 +54,7 @@ function modelStub(selectedKeys: string[]) {
     return {
         selectedBlockIdsAtom: selected,
         otherInstancesAtom: () => others,
+        agentRuntime: { rows: () => [] },
         fleetTargets: () => known,
         fleetActionInFlightAtom: () => false,
         selectAll: vi.fn(),

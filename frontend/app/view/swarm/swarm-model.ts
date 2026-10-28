@@ -16,7 +16,7 @@ import {
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
-import { MOS } from "@/app/store/global";
+import { MOS, atoms } from "@/app/store/global";
 import { callBackendService } from "@/store/mos";
 import { BlockService } from "@/app/store/services";
 import { readSwarmSummary } from "@/app/store/activitySummary";
@@ -31,6 +31,8 @@ import { groupBackgroundTasks, type AgentBackgroundTasks } from "./swarm-backgro
 import { toolDetail } from "@/app/view/agent/tool-meta/tool-descriptors";
 import { onSubagentNamed, withSubagentName } from "./subagent-naming";
 import { withAgentProgress, withAgentStatus } from "./swarm-updates";
+import { createAgentRuntimeStore } from "./swarm-runtime";
+import type { AgentRuntime } from "@/types/rpc/AgentRuntime";
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -1029,6 +1031,13 @@ export class SwarmViewModel {
     // Other instances' agents, for the sections below this instance's tree
     // (swarm-remote.ts). Null until the first answer; refreshed with the tracked
     // blocks' poll, since the source (the host-global registry) has no event.
+    /** Every created agent's runtime state: what lists the agents that have no pane (swarm-runtime.ts). */
+    readonly agentRuntime = createAgentRuntimeStore({
+        list: () => RpcApi.AgentRuntimeListCommand(TabRpcClient, {}),
+        subscribe: (agentId, handler) => onMuxEvent(`agentruntime:changed:${agentId}`, handler),
+        onAgentsChanged: (handler) => onMuxEvent(WpsEvent.AgentsChanged, () => handler()),
+    });
+
     private _otherInstances = createSignal<SwarmOtherInstances | null>(null);
     otherInstancesAtom: Accessor<SwarmOtherInstances | null> = this._otherInstances[0];
     private _expandedAgentIds = createSignal<Set<string>>(new Set());
@@ -1311,6 +1320,7 @@ export class SwarmViewModel {
                 this.loadCrons(),
                 this.loadBackgroundTasks(),
                 this.loadOtherInstances(),
+                this.agentRuntime.load(),
             ]);
             // codex P2 on PR #2677: a transient ListActive/ListDispatches
             // failure is swallowed by its own loader (silent catch below),
@@ -1547,6 +1557,15 @@ export class SwarmViewModel {
             this._otherInstances[1](result ?? null);
         } catch {
             // Older srv without the command, or a transient failure.
+        }
+    };
+
+    /** Open an agent that has no pane, in the active tab (it starts, as opening one does). */
+    openStoppedAgent = async (row: AgentRuntime): Promise<void> => {
+        try {
+            await RpcApi.AgentOpenCommand(TabRpcClient, { agent_id: row.agent_id, tab_id: atoms.activeTabId(), focus: true });
+        } catch (e) {
+            console.warn(`[swarm] opening ${row.name} failed`, e);
         }
     };
 
@@ -2061,6 +2080,7 @@ export class SwarmViewModel {
     }
 
     dispose(): void {
+        this.agentRuntime.dispose();
         for (const unsub of [...this.unsubs, ...this.blockUnsubs]) unsub();
         this.unsubs = [];
         this.blockUnsubs = [];

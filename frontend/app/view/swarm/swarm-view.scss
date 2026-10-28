@@ -1363,3 +1363,45 @@
     color: var(--secondary-text-color);
     font-size: var(--text-sm);
 }
+
+// ── Stopped agents: created agents with no pane and no process (swarm-stopped-agents.tsx) ──
+
+.swarm-stopped {
+    display: flex;
+    flex-direction: column;
+    padding: 0 0 var(--space-2);
+}
+
+.swarm-stopped__heading {
+    align-self: flex-start;
+    margin: 4px 6px;
+}
+
+.swarm-stopped__count {
+    font-weight: 400;
+}
+
+.swarm-stopped__row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: 4px 10px;
+}
+
+.swarm-stopped__name {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.swarm-stopped__state {
+    flex: none;
+    font-size: var(--text-xs);
+    color: var(--secondary-text-color);
+
+    &--error {
+        color: var(--error-text-color);
+    }
+}
