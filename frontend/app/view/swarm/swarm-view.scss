@@ -1396,16 +1396,6 @@
     white-space: nowrap;
 }
 
-.swarm-stopped__state {
-    flex: none;
-    font-size: var(--text-xs);
-    color: var(--secondary-text-color);
-
-    &--error {
-        color: var(--error-text-color);
-    }
-}
-
 .swarm-stopped__error {
     padding: 0 10px 4px 36px;
     font-size: var(--text-xs);

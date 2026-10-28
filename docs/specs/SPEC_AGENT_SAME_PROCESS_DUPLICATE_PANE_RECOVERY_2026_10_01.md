@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-01
 **Status:** active — Phase 0 (an instance-wide open-agent map for My agents, §4.0) shipped in PR #4127; see §11.
-Phases 0.5–3 are not yet built. §8's decisions are proposed at their recommended option and await the repo owner.
+G1, G2 and a confirmed Move here (a manual form of Phase 2) are built; see §12. Phase 3 and the auto-move are not yet built. §8's decisions are proposed at their recommended option and await the repo owner.
 **Author:** Agent3 (UID `fb3e692d-caf9-48e3-b20a-e659361aa057`)
 **Trigger:** Repo owner, 2026-10-01: Korp's pane accepted typed messages and did nothing. Asked for a permanent fix so
 that *"if the same conditions arise it recovers"*.
@@ -272,3 +272,19 @@ always logs the `persist_last_failure` it produced, which is the line missing in
   left for a follow-up with its own review.
 - **Not live-verified in this PR:** the floating-window case is covered by the srv unit test and the merge tests. The §7.8
   live check (tear off an agent, open My agents in the main window) is still to do on a dev build.
+
+## 12. G1, G2 and the manual move as built (task #5417, after the 2026-10-27 recurrence)
+
+- **G1:** `check_admission` asks first whether another pane of this process holds the agent
+  (`local_holder_of`, from the controller registry) and refuses with the held-elsewhere text before any
+  spawn-env write. The lease-store read still decides for other instances.
+- **G2:** a refusal of that text from the spawn-time claim or the early check is persisted and published like
+  every other spawn refusal (it was dropped: its wording carries none of the admission markers). It
+  classifies as `open_in_other_pane` and carries `holderBlockId`. A refused send's text is kept
+  (`refused-send.ts`) and shown in the row as "not sent".
+- **G4:** the row offers **Go there** (`revealBlock` on the holder, across windows) and **Move here**
+  (`agent.move-here`, the window's own socket): the holder's CLI is stopped gracefully (turn in flight finishes,
+  killed after 10 s), srv waits for its lease to drop, the holder pane is left with the same row pointing back,
+  and the refused message is sent from this pane. Two clicks, like Take over.
+- **Not built:** the auto-move of an idle holder (R3), reachability and the sweep (R5), the `agentpanes:changed`
+  event, and moving the holder's session id across (the resume gate redirects a stale id to the chain head).

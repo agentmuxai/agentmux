@@ -446,9 +446,17 @@ pub fn title_for(kind: NotifyKind, agent_name: &str) -> String {
     }
 }
 
+/// `ShutdownInfo::effect` of a sensitive operation's countdown
+/// (`SPEC_SUPER_AGENT_2026_10_25.md` §5): it shares the shutdown toast, without its button.
+pub const SENSITIVE_EFFECT: &str = "sensitive";
+
 /// A pending shutdown's title with `{n}` for the seconds left
 /// (spec §3.8): "Closing QTimer in {n} s". The name arrives pre-sanitized.
 pub fn shutdown_title_template(effect: &str, agent_name: &str) -> String {
+    // A sensitive operation counting down: `agent_name` is what will happen ("Upgrade AgentMux").
+    if effect == SENSITIVE_EFFECT {
+        return format!("{agent_name} in {{n}} s");
+    }
     let verb = if effect == "stop" { "Stopping" } else { "Closing" };
     format!("{verb} {agent_name} in {{n}} s")
 }
@@ -611,7 +619,9 @@ impl PolicyState {
                         let template = shutdown_title_template(info.effect, &req.agent_name);
                         (
                             fill_seconds(&template, seconds_left(remaining_ms)),
-                            Some(vec![NotifyAction { id: "keep".to_string(), label: keep_label(info.running).to_string() }]),
+                            // A sensitive operation's countdown has no button: only the AgentMux
+                            // window, proven, may veto it, so the toast opens the window instead.
+                            (info.effect != SENSITIVE_EFFECT).then(|| vec![NotifyAction { id: "keep".to_string(), label: keep_label(info.running).to_string() }]),
                             Some(Countdown { remaining_ms, title_template: template }),
                         )
                     }
@@ -1374,6 +1384,25 @@ mod tests {
         assert_eq!(n.title, "Closing lark in 15 s");
         assert_eq!(n.actions, Some(vec![NotifyAction { id: "keep".into(), label: "Keep running".into() }]));
         assert_eq!(n.countdown, Some(Countdown { remaining_ms: 15_000, title_template: "Closing lark in {n} s".into() }));
+    }
+
+    #[test]
+    fn a_sensitive_operation_counts_down_with_its_name_and_no_button() {
+        let s = Settings::default();
+        let mut p = PolicyState::new();
+        let sensitive = Request {
+            shutdown: Some(ShutdownInfo { deadline_ms: 31_000, effect: SENSITIVE_EFFECT, running: true, request_id: "r9".into() }),
+            agent_name: "Upgrade AgentMux".into(),
+            block_id: "sensitive:r9".into(),
+            ..req(NotifyKind::ShutdownPending, "sensitive:r9")
+        };
+        p.step(Input::Emit(sensitive), 1_000, &s);
+        let a = p.step(Input::Tick, 1_000, &s);
+        let n = &shows(&a)[0];
+        assert_eq!(n.title, "Upgrade AgentMux in 30 s");
+        assert_eq!(n.actions, None, "only the AgentMux window, proven, may veto: the notification opens it");
+        assert_eq!(n.countdown, Some(Countdown { remaining_ms: 30_000, title_template: "Upgrade AgentMux in {n} s".into() }));
+        assert_eq!(p.live_by_id(&n.id), Some((NotifyKind::ShutdownPending, "sensitive:r9".to_string(), Some("r9".to_string()))));
     }
 
     #[test]
