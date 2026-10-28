@@ -15,8 +15,8 @@
 //! is never produced (a controller just created, with no process yet, reads as `idle`), and no event
 //! says an agent was deleted (`changed_rows` only forgets it), so a viewer relists on `agents:changed`.
 //!
-//! `desired` is `running` while a process is alive and `stopped` otherwise, until the agent record
-//! keeps its own desired state (the always-available agents build's P1 PR C).
+//! `desired` is the agent's own desired state when its block records one (`agent:desired`, set by an
+//! open, a start and a stop), and otherwise `running` while a process is alive and `stopped` if not.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -25,6 +25,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::backend::agent_availability::{Availability, WaitReason};
 use crate::backend::obj::Block;
+use crate::server::app_api::agent_attach::{self, DESIRED_RUNNING, DESIRED_STOPPED};
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::{COMMAND_AGENTRUNTIME_LIST, COMMAND_AGENT_START};
 use crate::backend::storage::store::Store;
@@ -135,6 +136,16 @@ pub fn desired_of(state: AgentRuntimeState) -> AgentDesiredState {
     }
 }
 
+/// What the agent's block says it should be doing, when it says: a stop sets `stopped`, an open or a
+/// start `running`. An agent whose block records nothing is wanted as its state says.
+pub fn desired_from(recorded: Option<&str>, state: AgentRuntimeState) -> AgentDesiredState {
+    match recorded {
+        Some(DESIRED_RUNNING) => AgentDesiredState::Running,
+        Some(DESIRED_STOPPED) => AgentDesiredState::Stopped,
+        _ => desired_of(state),
+    }
+}
+
 /// The runtime state of every created agent, as of `now_ms`. Blocking: reads the store.
 pub(crate) fn list(state: &AppState, now_ms: u64) -> Vec<AgentRuntime> {
     let mstore = &state.mstore;
@@ -152,14 +163,15 @@ pub(crate) fn list(state: &AppState, now_ms: u64) -> Vec<AgentRuntime> {
             // block: a viewer needs its id to open or stop it. Its state is `stopped`.
             let block_id = live.clone().or_else(|| panes.get(&d.id).cloned());
             let (runtime_state, detail, resets_at) = state_of(&availability_of_block(mstore, live.as_deref(), now_ms));
+            let (color, recorded) = block_id.as_deref().map(|b| block_facts(mstore, b)).unwrap_or_default();
             AgentRuntime {
-                color: block_id.as_deref().and_then(|b| color_of_block(mstore, b)),
+                color,
                 agent_id: d.id,
                 state: runtime_state,
                 detail,
                 resets_at,
                 block_id,
-                desired: desired_of(runtime_state),
+                desired: desired_from(recorded.as_deref(), runtime_state),
                 name: d.name,
                 provider: d.provider,
                 icon: d.icon,
@@ -185,11 +197,12 @@ fn pane_blocks_by_agent(mstore: &Store) -> HashMap<String, String> {
     by_agent
 }
 
-/// The colour the agent's pane shows (its border colour, `frame:activebordercolor`, set when it opens).
-fn color_of_block(mstore: &Store, block_id: &str) -> Option<String> {
-    let block = mstore.get::<Block>(block_id).ok()??;
+/// What the agent's block holds that a viewer shows: the colour its pane shows (its border colour,
+/// `frame:activebordercolor`, set when it opens) and the desired state it records.
+fn block_facts(mstore: &Store, block_id: &str) -> (Option<String>, Option<String>) {
+    let Some(block) = mstore.get::<Block>(block_id).ok().flatten() else { return (None, None) };
     let color = crate::backend::obj::meta_get_string(&block.meta, "frame:activebordercolor", "");
-    (!color.is_empty()).then_some(color)
+    ((!color.is_empty()).then_some(color), agent_attach::desired_of(&block))
 }
 
 /// The rows that differ from what was last sent, and what to remember now: an agent that is gone
@@ -239,13 +252,17 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 .map_err(|e| format!("agentruntime.list: {e}"))
         }
     });
-    engine.register_typed(COMMAND_AGENT_START, move |cmd: CommandAgentStartData, _ctx| async move {
-        // The headless start comes with the agent's own desired state (the always-available agents
-        // build, P1 PR C and P2b); until then an agent without a pane is started by opening it.
-        Err::<AgentStartResult, String>(format!(
-            "agent.start: not available yet: an agent without a pane is started by opening it ({})",
-            cmd.agent_id
-        ))
+    // Not behind `agents:always_available`: a start is an explicit action and changes nothing for
+    // anyone who does not call it; only closing a pane parking its block depends on the setting.
+    let start_state = state.clone();
+    engine.register_typed(COMMAND_AGENT_START, move |cmd: CommandAgentStartData, _ctx| {
+        let state = start_state.clone();
+        async move {
+            let block_id = agent_attach::start_agent(&state, &cmd.agent_id)
+                .await
+                .map_err(|e| format!("agent.start: {e}"))?;
+            Ok::<AgentStartResult, String>(AgentStartResult { agent_id: cmd.agent_id, block_id })
+        }
     });
 }
 
@@ -278,6 +295,19 @@ mod tests {
         assert_eq!(s(Availability::Running { waiting_on_user: true }), AgentRuntimeState::WaitingOnUser);
         assert_eq!(s(Availability::SignedOut { since_ms: 1 }), AgentRuntimeState::SignedOut);
         assert_eq!(s(Availability::Unknown), AgentRuntimeState::Idle);
+    }
+
+    #[test]
+    fn the_blocks_own_desired_state_wins_over_the_state_it_is_in() {
+        use AgentRuntimeState as S;
+        // Stopped by the user while the process is still ending, or left wanted after a crash.
+        assert_eq!(desired_from(Some("stopped"), S::Working), AgentDesiredState::Stopped);
+        assert_eq!(desired_from(Some("running"), S::Stopped), AgentDesiredState::Running);
+        assert_eq!(desired_from(Some("running"), S::Error), AgentDesiredState::Running);
+        // Nothing recorded, or something this build does not know: as the state says.
+        assert_eq!(desired_from(None, S::Idle), AgentDesiredState::Running);
+        assert_eq!(desired_from(None, S::Stopped), AgentDesiredState::Stopped);
+        assert_eq!(desired_from(Some("later"), S::Stopped), AgentDesiredState::Stopped);
     }
 
     #[test]
