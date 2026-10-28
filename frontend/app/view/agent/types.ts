@@ -704,13 +704,13 @@ export interface SessionOutcomeNode {
 export interface CliNoticeNode {
     type: "cli_notice";
     id: string;
-    kind: "install" | "version_changed" | "compaction_failed" | "mcp_health" | "container_start" | "container_image";
+    kind: "install" | "version_changed" | "compaction_failed" | "mcp_health" | "container_start" | "container_image" | "agent_ready";
     /** Provider id, e.g. `"claude"`. */
     provider: string;
     /** `install`: the version being installed. */
     version?: string;
     state?: "installing" | "installed" | "failed";
-    /** `install`, once installed: how long it took. */
+    /** `install`, once installed, and `agent_ready`: how long it took. */
     seconds?: number;
     /** `install` or `compaction_failed`: why it failed, when known. */
     error?: string;

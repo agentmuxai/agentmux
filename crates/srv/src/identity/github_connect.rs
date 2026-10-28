@@ -37,6 +37,28 @@ pub fn is_brokered(account: &IdentityAccount) -> bool {
     account.provider == PROVIDER && account.context.get("broker").and_then(Value::as_bool) == Some(true)
 }
 
+/// Who a brokered account is: the GitHub user's numeric id and login, as recorded at connect.
+pub fn owner_of(account: &IdentityAccount) -> Option<(u64, String)> {
+    owner_in(&account.context)
+}
+
+fn owner_in(context: &Value) -> Option<(u64, String)> {
+    Some((context.get("github_user_id")?.as_u64()?, context.get("github_login")?.as_str()?.to_string()))
+}
+
+/// Whether the person let `agent` change CI workflows: the account's per-agent opt-in
+/// (`workflows_agents`, a list of agent slugs). Off for every agent until it is set.
+pub fn workflows_allowed(account: &IdentityAccount, agent: &str) -> bool {
+    workflows_allowed_in(&account.context, agent)
+}
+
+fn workflows_allowed_in(context: &Value, agent: &str) -> bool {
+    context
+        .get("workflows_agents")
+        .and_then(Value::as_array)
+        .is_some_and(|list| list.iter().any(|a| a.as_str().is_some_and(|a| a.eq_ignore_ascii_case(agent))))
+}
+
 /// A grant as a GitHub-shaped token response, so the flow's last step stores it
 /// like any other: the expiry in seconds from now, the numeric id and login, and the
 /// marker that the account is brokered. A grant already expired (or about to) is one second
@@ -288,6 +310,17 @@ mod tests {
         assert!(!grant_is_gone(&c(true, None, Some("active"))));
         assert!(!grant_is_gone(&c(true, Some("unavailable"), None)), "a failure to ask says nothing");
         assert!(!grant_is_gone(&c(false, None, Some("revoked"))), "signed out: nothing was asked");
+    }
+
+    #[test]
+    fn the_owner_is_the_recorded_github_user_and_workflows_are_off_unless_the_agent_is_listed() {
+        let ctx = json!({ "github_user_id": 42, "github_login": "octo", "broker": true, "workflows_agents": ["Korp", "agenty"] });
+        assert_eq!(owner_in(&ctx), Some((42, "octo".to_string())));
+        assert_eq!(owner_in(&json!({ "github_login": "octo" })), None);
+        assert!(workflows_allowed_in(&ctx, "korp"), "slugs compare without case");
+        assert!(!workflows_allowed_in(&ctx, "agentx"));
+        assert!(!workflows_allowed_in(&json!({ "broker": true }), "korp"));
+        assert!(!workflows_allowed_in(&json!({ "workflows_agents": "korp" }), "korp"), "a list, not a string");
     }
 
     #[test]
