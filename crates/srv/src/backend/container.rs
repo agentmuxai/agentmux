@@ -319,6 +319,9 @@ pub enum ContainerError {
     /// The provider CLI could not be installed in the container.
     #[error("could not install {command} in the container: {detail}")]
     CliInstall { command: String, detail: String },
+    /// A `container_volumes` entry whose source is the host's CLI session folder.
+    #[error("the volume source {source} is a host folder the container may not mount")]
+    VolumeRefused { source: String },
 }
 
 impl ContainerError {
@@ -339,6 +342,9 @@ impl ContainerError {
             Self::NoRuntime(message) => message.clone(),
             Self::NoId { .. } => docker_error_message("the container was created without an id"),
             Self::CliInstall { command, detail } => cli_install_failure_message(command, detail),
+            Self::VolumeRefused { source } => format!(
+                "This agent's volumes list a host folder a container may not mount ({source}): remove it from the agent's volumes."
+            ),
         }
     }
 }
@@ -1241,6 +1247,9 @@ impl ContainerManager {
         // place a name starts pointing at a new container.
         self.inner.exec_identities.lock().await.remove(container_name);
         self.forget_cli_ready(container_name).await;
+        if let Some(source) = volumes.iter().filter_map(|v| parse_volume_spec(v)).map(|(s, _, _)| s).find(|s| is_cli_session_dir(s)) {
+            return Err(ContainerError::VolumeRefused { source: source.to_string() });
+        }
 
         let env: Vec<String> = env_vars.iter()
             .map(|(k, v)| format!("{k}={v}"))
@@ -1432,6 +1441,16 @@ fn agent_id_from_container_name(container_name: &str) -> Option<&str> {
     container_name.strip_prefix("agentmux-").filter(|s| !s.is_empty())
 }
 
+/// Whether a volume source is a host folder the CLI keeps its sessions' sockets in, or inside one:
+/// `/tmp/cc-socks`, the user's runtime folder (`$XDG_RUNTIME_DIR`, `/run/user/*`).
+fn is_cli_session_dir(source: &str) -> bool {
+    let path = source.trim().replace('', "/");
+    let path = path.trim_end_matches('/');
+    let xdg = std::env::var("XDG_RUNTIME_DIR").ok().map(|d| d.trim_end_matches('/').to_string()).filter(|d| !d.is_empty());
+    let inside = |dir: &str| path == dir || path.starts_with(&format!("{dir}/"));
+    inside("/tmp/cc-socks") || inside("/run/user") || xdg.is_some_and(|d| inside(&d))
+}
+
 /// Parse a Docker volume spec into `(source, target, read_only)`.
 ///
 /// Format: `source:target` or `source:target:options`.
@@ -1474,6 +1493,18 @@ fn parse_volume_spec(spec: &str) -> Option<(&str, &str, bool)> {
 mod tests {
     use super::*;
     use {super::pull::pull_error, crate::backend::container_image::DEFAULT_AGENT_IMAGE};
+
+    #[test]
+    fn a_volume_from_the_cli_session_folders_is_refused_and_an_ordinary_one_is_not() {
+        for spec in ["/tmp/cc-socks:/socks", "/tmp/cc-socks/abc:/s:ro", "/run/user/1000:/run", "/run/user/1000/cc:/x", "/run/user:/x"] {
+            let (source, _, _) = parse_volume_spec(spec).unwrap();
+            assert!(is_cli_session_dir(source), "{spec}");
+        }
+        for spec in ["/tmp/cc-socks-other:/x", "/home/me/repo:/workspace", "/tmp:/t", "data:/data", "C:\\Users\\me\\repo:/w"] {
+            let (source, _, _) = parse_volume_spec(spec).unwrap();
+            assert!(!is_cli_session_dir(source), "{spec}");
+        }
+    }
 
     #[test]
     fn test_container_name_for_slug() {
