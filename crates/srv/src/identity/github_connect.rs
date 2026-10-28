@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Connect with GitHub, desktop side (SPEC_CONNECT_WITH_GITHUB_2026_10_04.md §4.1, §7).
+//! Connect with GitHub, desktop side.
 //!
 //! The person's grant to the AgentMux App is made, refreshed and ended through the
 //! broker (`muxbus::github_broker`), which holds the App's client secret. This module
@@ -122,7 +122,7 @@ pub async fn refresh_blob(mstore: &Arc<Store>, blob: &TokenBlob, now: i64) -> Re
 }
 
 /// Before a brokered account is deleted: end its grant through the broker, so it
-/// doesn't live on at GitHub (spec §4.1 item 4). `{ outcome: "revoked" | "failed", detail? }`
+/// doesn't live on at GitHub. `{ outcome: "revoked" | "failed", detail? }`
 /// for the delete's result, or `None` when this isn't a brokered account.
 pub async fn revoke_before_delete<S: TokenSecrets>(mstore: &Arc<Store>, secrets: &S, account: &IdentityAccount) -> Option<Value> {
     if !is_brokered(account) {
@@ -149,23 +149,71 @@ pub async fn revoke_before_delete<S: TokenSecrets>(mstore: &Arc<Store>, secrets:
     }
 }
 
+/// What the broker says about this AgentMux account's GitHub connection (`github.connection`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+#[serde(rename_all = "camelCase")]
+pub struct GithubConnection {
+    /// Signed in to AgentMux Cloud. Without it there is nothing to ask.
+    pub signed_in: bool,
+    /// Why the broker couldn't be asked, when it couldn't.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// The broker was asked and answered with a failure.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(default)]
+    pub connected: bool,
+    /// `none`, `active`, `revoked` or `blocked`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    /// GitHub's numeric user id, as text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub github_user_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub login: Option<String>,
+}
+
 /// The broker's word on this account's GitHub connection, for Connectors.
-pub async fn connection_of(mstore: &Arc<Store>) -> Value {
+pub async fn connection_of(mstore: &Arc<Store>) -> GithubConnection {
     let who = match github_broker::caller(mstore).await {
         Ok(who) => who,
-        Err(BrokerError::NotSignedIn(why)) => return json!({ "signedIn": false, "reason": why }),
-        Err(e) => return json!({ "signedIn": false, "reason": e.to_string() }),
+        Err(e) => return GithubConnection { signed_in: false, reason: Some(e.to_string()), ..Default::default() },
     };
     match github_broker::connection(crate::identity::oauth_client::http(), &who).await {
-        Ok(c) => json!({
-            "signedIn": true,
-            "connected": c.connected,
-            "status": c.status,
-            "githubUserId": c.github_user_id,
-            "login": c.login,
-        }),
-        Err(e) => json!({ "signedIn": true, "error": e.to_string() }),
+        Ok(c) => GithubConnection {
+            signed_in: true,
+            connected: c.connected,
+            status: Some(c.status),
+            github_user_id: c.github_user_id.map(|id| id.to_string()),
+            login: c.login,
+            ..Default::default()
+        },
+        Err(e) => GithubConnection { signed_in: true, error: Some(e.to_string()), ..Default::default() },
     }
+}
+
+/// Whether a connection answer says the grant is gone: revoked on GitHub, blocked, or never made
+/// (or ended from another install). Only a clear answer counts; a failure to ask says nothing.
+pub fn grant_is_gone(c: &GithubConnection) -> bool {
+    c.signed_in && c.error.is_none() && matches!(c.status.as_deref(), Some("revoked" | "blocked" | "none"))
+}
+
+/// [`connection_of`], and the brokered accounts whose grant is gone ask to be connected again
+/// (the account's card shows "Reconnect needed"): a grant revoked on GitHub shows as revoked.
+/// Nothing is cleared here: an account that works again is made valid by the
+/// refresh that proves it.
+pub async fn sync_connection(mstore: &Arc<Store>, identity_store: &Arc<Store>) -> GithubConnection {
+    let answer = connection_of(mstore).await;
+    if grant_is_gone(&answer) {
+        for account in mstore.identity_list(Some(PROVIDER)).unwrap_or_default().into_iter().filter(is_brokered) {
+            if account.status != crate::identity::oauth_tokens::STATUS_NEEDS_REAUTH {
+                tracing::info!(target: "identity", account_id = %account.id, status = ?answer.status, "identity.github: the grant is gone, the account asks to be connected again");
+                crate::identity::oauth_tokens::set_status(mstore, identity_store, &account.id, crate::identity::oauth_tokens::STATUS_NEEDS_REAUTH);
+            }
+        }
+    }
+    answer
 }
 
 #[cfg(test)]
@@ -208,6 +256,22 @@ mod tests {
         stamp_context(&mut c, &device);
         assert!(c.get("broker").is_none());
         assert_eq!(c["github_login"], "octo");
+    }
+
+    #[test]
+    fn only_a_clear_answer_says_the_grant_is_gone() {
+        let c = |signed_in, error: Option<&str>, status: Option<&str>| GithubConnection {
+            signed_in,
+            error: error.map(String::from),
+            status: status.map(String::from),
+            ..Default::default()
+        };
+        for gone in ["revoked", "blocked", "none"] {
+            assert!(grant_is_gone(&c(true, None, Some(gone))), "{gone}");
+        }
+        assert!(!grant_is_gone(&c(true, None, Some("active"))));
+        assert!(!grant_is_gone(&c(true, Some("unavailable"), None)), "a failure to ask says nothing");
+        assert!(!grant_is_gone(&c(false, None, Some("revoked"))), "signed out: nothing was asked");
     }
 
     #[test]

@@ -497,7 +497,7 @@ fn refresh_lock(account_id: &str) -> Arc<tokio::sync::Mutex<()>> {
 }
 
 /// Set an account's status in the account store and its global mirror.
-fn set_status(id_store: &Store, identity_store: &Store, account_id: &str, status: &str) {
+pub(crate) fn set_status(id_store: &Store, identity_store: &Store, account_id: &str, status: &str) {
     for store in [id_store, identity_store] {
         if let Err(e) = store.identity_set_status(account_id, status) {
             tracing::warn!(target: "identity", account_id = %account_id, error = %e, "identity.oauth: status write failed");

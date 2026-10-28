@@ -7,13 +7,18 @@
 // (docs/specs/SPEC_GOOGLE_CONNECTORS_GMAIL_CALENDAR_DRIVE_2026_10_14.md §7
 // "Status on the card"). Per-service switches come with G1.
 
-import { createEffect, createSignal, Show, type JSX } from "solid-js";
+import { createEffect, createSignal, on, Show, type JSX } from "solid-js";
 
 import { Button } from "@/app/element/ui";
-import { PROVIDER_LABELS, type Account } from "@/app/view/identity/identity-model";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
+import { PROVIDER_LABELS, refreshAccountCache, type Account } from "@/app/view/identity/identity-model";
 import {
     canReconnect,
     clientModeTag,
+    githubConnectedAs,
+    githubGrantIsGone,
+    isBrokeredGithub,
     isServiceOAuthAccount,
     oauthNote,
     partlyGrantedLine,
@@ -41,11 +46,29 @@ function SignInDetails(props: { account: Account }): JSX.Element {
         if (pendingReconnectRequest() === a().id && takeReconnectRequest(a().id)) setReconnecting(true);
     });
     const note = () => oauthNote(a().id);
+    // A GitHub grant that was revoked on GitHub shows here as needing a reconnect: ask the broker
+    // once when the details open, and srv marks the account if it is gone.
+    createEffect(
+        on(
+            () => a().id,
+            () => {
+                if (!isBrokeredGithub(a()) || a().status === "needs_reauth") return;
+                void RpcApi.GithubConnectionCommand(TabRpcClient, {})
+                    .then((c) => {
+                        if (githubGrantIsGone(c)) return refreshAccountCache();
+                    })
+                    .catch(() => {});
+            },
+        ),
+    );
     const granted = () => [...new Set((a().context.granted_scopes ?? []).map(scopeLabel))];
 
     return (
         <>
             <div class="identity-detail-section">{provider()} sign-in</div>
+            <Show when={githubConnectedAs(a())}>
+                {(who) => <Field label="Connected as" value={who()} />}
+            </Show>
             <Field label="Client" value={clientModeTag(a()) ?? "AgentMux"} />
             <Show when={a().context.oauth_client?.client_id}>
                 {(id) => <Field label="Client ID" value={id()} />}

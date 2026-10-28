@@ -12,7 +12,7 @@ use crate::backend::rpc_types::{
     COMMAND_UPSERT_IDENTITY_ACCOUNT, COMMAND_DELETE_IDENTITY_ACCOUNT,
     COMMAND_ACCOUNT_KEY_VERIFY,
     COMMAND_ACCOUNT_OAUTH_START, COMMAND_ACCOUNT_OAUTH_POLL, COMMAND_ACCOUNT_OAUTH_CANCEL,
-    COMMAND_ACCOUNT_OAUTH_CLIENT_GET, COMMAND_ACCOUNT_OAUTH_CLIENT_CLEAR,
+    COMMAND_ACCOUNT_OAUTH_CLIENT_GET, COMMAND_ACCOUNT_OAUTH_CLIENT_CLEAR, COMMAND_GITHUB_CONNECTION,
     COMMAND_LINK_AGENT_IDENTITY, COMMAND_UNLINK_AGENT_IDENTITY,
     COMMAND_LIST_AGENT_IDENTITIES, COMMAND_LIST_ALL_AGENT_IDENTITIES,
     COMMAND_LIST_NAMED_AGENTS, COMMAND_HIDE_NAMED_AGENT,
@@ -132,6 +132,12 @@ struct OAuthStartReq {
 pub struct OAuthSessionReq {
     pub session_id: String,
 }
+
+/// Request for `github.connection`: nothing.
+#[derive(Default, serde::Deserialize, serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+#[serde(rename_all = "camelCase")]
+pub struct GithubConnectionReq {}
 
 /// Request for `account.oauth.client.get` / `account.oauth.client.clear`.
 #[derive(serde::Deserialize, serde::Serialize, ts_rs::TS)]
@@ -694,6 +700,16 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             .map_err(|e| format!("account.oauth.client.clear: {e}"))?;
         tracing::info!(target: "identity", provider = %req.provider, cleared, "account.oauth.client.clear: saved OAuth client forgotten");
         Ok(AccountOAuthClientClearResult { cleared })
+    });
+
+    // What the broker says about the GitHub connection; a grant it says is gone marks the
+    // brokered account as needing to be connected again (spec §5.7).
+    let github_mstore = state.id_store.clone();
+    let github_identity_store = state.identity_store.clone();
+    engine.register_typed(COMMAND_GITHUB_CONNECTION, move |_req: GithubConnectionReq, _ctx| {
+        let mstore = github_mstore.clone();
+        let identity_store = github_identity_store.clone();
+        async move { Ok(crate::identity::github_connect::sync_connection(&mstore, &identity_store).await) }
     });
 
     // The response stays `Value`: oauth_status_wire builds it, and the frontend
