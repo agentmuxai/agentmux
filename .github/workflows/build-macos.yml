@@ -284,18 +284,16 @@ jobs:
           FILE="$RUNNER_TEMP/apple-signing.json"
           umask 077
           aws secretsmanager get-secret-value --secret-id "$SECRET_ID" --query SecretString --output text > "$FILE"
-          for k in certificate certificate_password apple_id app_password team_id; do
-            v="$(jq -r --arg k "$k" '.[$k] // empty' "$FILE")"
-            if [ -z "$v" ]; then echo "::error::the Apple signing secret has no '$k'"; exit 1; fi
-            case "$v" in *$'\n'*) echo "::error::'$k' in the Apple signing secret has a line break"; exit 1 ;; esac
-            echo "::add-mask::$v"
-          done
+          # Every field is a non-empty single-line string, and each one is masked in the logs.
+          jq -e 'type == "object" and length > 0 and all(.[]; type == "string" and length > 0 and (contains("\n") | not))' "$FILE" > /dev/null \
+            || { echo "::error::the Apple signing secret is not a flat object of non-empty single-line strings"; exit 1; }
+          jq -r '.[]' "$FILE" | while IFS= read -r v; do echo "::add-mask::$v"; done
           echo "APPLE_SIGNING_FILE=$FILE" >> "$GITHUB_ENV"
 
       - name: Import Developer ID certificate into temp keychain
         run: |
-          APPLE_CERTIFICATE="$(jq -r .certificate "$APPLE_SIGNING_FILE")"
-          APPLE_CERTIFICATE_PASSWORD="$(jq -r .certificate_password "$APPLE_SIGNING_FILE")"
+          APPLE_CERTIFICATE="$(jq -er .APPLE_CERTIFICATE "$APPLE_SIGNING_FILE")"
+          APPLE_CERTIFICATE_PASSWORD="$(jq -er .APPLE_CERTIFICATE_PASSWORD "$APPLE_SIGNING_FILE")"
           # Use a full absolute path so security(1) and notarytool agree on the
           # file location — passing just a name causes a -db suffix mismatch on
           # modern macOS (the file lands at ~/Library/Keychains/<name>-db but
@@ -332,9 +330,9 @@ jobs:
       # NOTARY_PROFILE=notarytool.
       - name: Store notarytool credentials
         run: |
-          APPLE_ID="$(jq -r .apple_id "$APPLE_SIGNING_FILE")"
-          APPLE_PASSWORD="$(jq -r .app_password "$APPLE_SIGNING_FILE")"
-          APPLE_TEAM_ID="$(jq -r .team_id "$APPLE_SIGNING_FILE")"
+          APPLE_ID="$(jq -er .APPLE_ID "$APPLE_SIGNING_FILE")"
+          APPLE_PASSWORD="$(jq -er .APPLE_PASSWORD "$APPLE_SIGNING_FILE")"
+          APPLE_TEAM_ID="$(jq -er .APPLE_TEAM_ID "$APPLE_SIGNING_FILE")"
           # --no-validate skips the live Apple credential check so a pending
           # Developer Program agreement doesn't block credential storage.
           # package-macos.sh handles a 403 from notarytool submit gracefully
