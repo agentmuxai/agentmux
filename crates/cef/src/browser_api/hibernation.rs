@@ -122,7 +122,8 @@ pub async fn set_frozen(state: &Arc<AppState>, block_id: &str, frozen: bool) -> 
 async fn has_beforeunload(cdp: &mut CdpSession) -> bool {
     let (frames, targets) = super::frames::current_frames(cdp).await;
     let roots: HashSet<&str> = targets.iter().map(|t| t.target_id.as_str()).collect();
-    if has_unreadable_frame(&frames, &roots) {
+    // Discovery stopped at its depth limit with frames left unexplored.
+    if cdp.frames_may_be_missing() || has_unreadable_frame(&frames, &roots) {
         return true;
     }
     // The page's own process, then each frame running in a process of its own.
