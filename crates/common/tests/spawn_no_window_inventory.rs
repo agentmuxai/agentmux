@@ -28,11 +28,13 @@
 //! # Classifications
 //!
 //! - `no-window:` the file calls `no_window()` or `creation_flags(`; checked against the file.
-//! - `mixed:` as above, and the count also includes test fixtures in the same file.
+//! - `mixed:` as above, and the count also includes test fixtures in the same file. Not for `git`, `sh`
+//!   or `bash`: a test that starts those opens a console on the machine it runs on too, so its helper
+//!   hides it like any other spawn.
 //! - `gui-program:` the child is a GUI-subsystem program, so no console can appear.
 //! - `pty:` a `portable-pty` `CommandBuilder`, which runs on a ConPTY pseudoconsole.
 //! - `not-windows:` the spawn is in a macOS/Linux/unix-only code path.
-//! - `test:` test code only.
+//! - `test:` test code only; not for `git`, `sh` or `bash` (see `mixed:`).
 //!
 //! What this does not prove: that the flag is on *that* spawn rather than a neighbour. It
 //! proves a human classified every spawn, and that the file calls the helper at least once.
@@ -62,16 +64,24 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
      "no-window: calls no_window()/creation_flags in this file"),
     ("crates/bashwrap/src/github.rs", "\"git\"", 1,
      "no-window: calls no_window()/creation_flags in this file"),
+    ("crates/bashwrap/src/git_hooks.rs", "\"git\"", 4,
+     "no-window: calls no_window()/creation_flags in this file"),
+    ("crates/bashwrap/src/git_hooks.rs", "\"sh\"", 2,
+     "no-window: calls no_window()/creation_flags in this file"),
+    ("crates/bashwrap/src/git_hooks.rs", "path", 1,
+     "no-window: calls no_window()/creation_flags in this file"),
+    ("crates/bashwrap/src/git_hooks.rs", "&own", 1,
+     "no-window: calls no_window()/creation_flags in this file"),
     ("crates/bashwrap/src/prefix.rs", "&bash", 1,
      "no-window: calls no_window()/creation_flags in this file"),
     ("crates/bashwrap/src/prefix.rs", "program", 1,
      "not-windows: macOS/Linux/unix-only code path"),
     ("crates/bashwrap/src/prefix.rs", "resolved", 1,
      "no-window: calls no_window()/creation_flags in this file"),
-    ("crates/bashwrap/src/shim_functions.rs", "&bash", 1,
-     "test: the gh function test starts a bash to run it against stand-in programs"),
+    ("crates/bashwrap/src/shim_functions.rs", "&bash", 2,
+     "no-window: a test helper, hidden with no_window() like the production spawns; calls it in this file"),
     ("crates/bashwrap/src/shim_functions.rs", "bash", 1,
-     "test: the exported-function probe starts a bash to read the variable back"),
+     "no-window: a test helper, hidden with no_window() like the production spawns; calls it in this file"),
     ("crates/cef/src/lib.rs", "&exe", 1,
      "not-windows: Linux-only (zenity/kdialog dialogs) or the unix exec() self-relaunch"),
     ("crates/cef/src/lib.rs", "\"zenity\"", 1,
@@ -145,13 +155,13 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
     ("crates/common/src/process.rs", "\"sleep\"", 3,
      "test: the unix-only kill and start-time tests' children"),
     ("crates/common/src/process.rs", "\"sh\"", 4,
-     "test: the unix-only group-kill tests' agent stand-ins"),
+     "not-windows: the unix-only group-kill tests' agent stand-ins"),
     ("crates/common/src/secret_env.rs", "std::env::current_exe(", 1,
      "test: the unix-only test re-runs the test binary to read its real environment block"),
     ("crates/common/src/agent_roots.rs", "\"sleep\"", 1,
      "test: the unix-only orphan-cleanup test's stand-in CLIs"),
     ("crates/common/src/agent_roots.rs", "\"sh\"", 1,
-     "test: the unix-only leaderless-group cleanup test's stand-in CLI"),
+     "not-windows: the unix-only leaderless-group cleanup test's stand-in CLI"),
     ("crates/srv/src/backend/file_icons/pool.rs", "exe", 1,
      "no-window: calls no_window()/creation_flags in this file"),
     ("crates/srv/src/backend/process_tracker/roots_file.rs", "\"sleep\"", 1,
@@ -193,9 +203,9 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
     ("crates/srv/src/backend/process_tracker/cgroup_linux.rs", "&argv[0]", 1,
      "test: unit-test or fixture code, never on a user machine"),
     ("crates/srv/src/backend/process_tracker/scan.rs", "\"sh\"", 1,
-     "test: unit-test or fixture code, never on a user machine"),
+     "not-windows: a unix-only test (cfg(unix), target_os, or a branch cfg!(windows) skips)"),
     ("crates/srv/src/backend/process_tracker/cgroup_linux.rs", "\"sh\"", 2,
-     "test: unit-test or fixture code, never on a user machine"),
+     "not-windows: a unix-only test (cfg(unix), target_os, or a branch cfg!(windows) skips)"),
     ("crates/launcher/src/supervisor/unix.rs", "\"sleep\"", 3,
      "test: sleeps killed with SIGKILL, for how srv's exit by signal is logged and for ending the CLIs a reaped srv left"),
     ("crates/launcher/src/upgrade.rs", "\"sleep\"", 1,
@@ -203,7 +213,7 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
     ("crates/launcher/src/upgrade.rs", "\"cmd\"", 1,
      "test: unit-test or fixture code, never on a user machine"),
     ("crates/launcher/src/upgrade.rs", "\"sh\"", 3,
-     "test: unit-test or fixture code, never on a user machine"),
+     "not-windows: a unix-only test (cfg(unix), target_os, or a branch cfg!(windows) skips)"),
     ("crates/launcher/src/upgrade.rs", "if cfg!(windows", 1,
      "test: unit-test or fixture code, never on a user machine"),
     ("crates/launcher/src/upgrade_linux.rs", "program", 2,
@@ -241,9 +251,9 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
     ("crates/srv/src/backend/remote/ssh.rs", "ssh", 1,
      "no-window: calls no_window()/creation_flags in this file"),
     ("crates/srv/src/backend/claude_layout.rs", "\"git\"", 1,
-     "test: unit-test or fixture code, never on a user machine"),
+     "no-window: a test helper, hidden with no_window() like the production spawns; calls it in this file"),
     ("crates/srv/src/backend/container_cli.rs", "\"sh\"", 2,
-     "test: unit-test or fixture code, never on a user machine"),
+     "not-windows: a unix-only test (cfg(unix), target_os, or a branch cfg!(windows) skips)"),
     ("crates/srv/src/backend/cli_prune.rs", "\"ps\"", 1,
      "not-windows: returns None on Windows before it spawns `ps`"),
     ("crates/srv/src/backend/cli_install.rs", "\"cmd\"", 1,
@@ -253,7 +263,7 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
     ("crates/srv/src/backend/mcp_probe.rs", "command", 1,
      "no-window: calls no_window()/creation_flags in this file"),
     ("crates/srv/src/backend/remote/helper_install.rs", "\"sh\"", 2,
-     "test: unit-test or fixture code, never on a user machine"),
+     "not-windows: a unix-only test (cfg(unix), target_os, or a branch cfg!(windows) skips)"),
     ("crates/srv/src/backend/fs_ops/host_jobs.rs", "\"mkfifo\"", 1,
      "test: unit-test or fixture code, never on a user machine"),
     ("crates/srv/src/backend/tower_remote.rs", "\"wsl.exe\"", 1,
@@ -317,7 +327,7 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
     ("crates/srv/src/backend/fs_ops/git.rs", "\"git\"", 5,
      "no-window: calls no_window()/creation_flags in this file"),
     ("crates/srv/src/backend/work_facts/git.rs", "\"git\"", 1,
-     "test: unit-test or fixture code, never on a user machine (production git runs through fs_ops/git.rs)"),
+     "no-window: a test helper, hidden with no_window() like the production spawns; calls it in this file"),
     ("crates/srv/src/backend/fs_ops/platform.rs", "\"explorer.exe\"", 2,
      "gui-program: explorer.exe is GUI-subsystem, on user action only (Files pane open/reveal)"),
     ("crates/srv/src/backend/fs_ops/platform.rs", "\"open\"", 2,
@@ -331,7 +341,7 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
     ("crates/srv/src/backend/process_tracker/registry.rs", "\"cmd\"", 5,
      "test: unit-test or fixture code, never on a user machine"),
     ("crates/srv/src/backend/process_tracker/registry.rs", "\"sh\"", 3,
-     "test: unit-test or fixture code, never on a user machine"),
+     "not-windows: a unix-only test (cfg(unix), target_os, or a branch cfg!(windows) skips)"),
     ("crates/srv/src/backend/process_tracker/registry.rs", "&argv[0]", 1,
      "test: unit-test or fixture code, never on a user machine"),
     ("crates/srv/src/backend/process_tracker/windows.rs", "\"cmd\"", 2,
@@ -343,11 +353,11 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
     ("crates/srv/src/sagas/close_pane.rs", "\"cmd\"", 2,
      "test: unit-test or fixture code, never on a user machine"),
     ("crates/srv/src/sagas/close_pane.rs", "\"sh\"", 2,
-     "test: unit-test or fixture code, never on a user machine"),
+     "not-windows: a unix-only test (cfg(unix), target_os, or a branch cfg!(windows) skips)"),
     ("crates/srv/src/server/agent_resources.rs", "\"cmd\"", 2,
      "test: unit-test or fixture code, never on a user machine"),
     ("crates/srv/src/server/agent_resources.rs", "\"sh\"", 2,
-     "test: unit-test or fixture code, never on a user machine"),
+     "not-windows: a unix-only test (cfg(unix), target_os, or a branch cfg!(windows) skips)"),
     ("crates/srv/src/server/cli_handlers.rs", "\"where\"", 2,
      "no-window: calls no_window()/creation_flags in this file"),
     ("crates/srv/src/server/cli_handlers.rs", "\"which\"", 2,
@@ -496,6 +506,16 @@ fn every_row_is_classified_and_the_no_window_ones_hold_up() {
             CLASSES.iter().any(|c| reason.starts_with(c)),
             "{file} -> {program}: reason must start with one of {CLASSES:?}, got {reason:?}"
         );
+        // A console program started by a test on a person's machine opens a window there too:
+        // Windows Terminal is the default console, and one that exits with an error stays open.
+        // So `git`, `sh` and `bash` get no `test:` or `mixed:` exemption; hide them or say they never run
+        // on Windows.
+        if matches!(program.trim_matches('"'), "git" | "sh" | "bash" | "&bash") {
+            assert!(
+                !reason.starts_with("test:") && !reason.starts_with("mixed:"),
+                "{file} -> {program}: a git, sh or bash spawn is `no-window:` (a test helper hides it too) or                  `not-windows:`, never `test:` or `mixed:`; got {reason:?}"
+            );
+        }
         if reason.starts_with("no-window:") || reason.starts_with("mixed:") {
             let src = std::fs::read_to_string(root.join(file)).unwrap_or_default();
             assert!(

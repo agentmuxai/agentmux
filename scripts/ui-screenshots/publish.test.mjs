@@ -22,7 +22,7 @@ describe("runImages", () => {
                     { id: "widget-toolchain", size: "small", file: "widget-toolchain-small.png", containsWorkspaceData: true },
                     { id: "agent-picker", file: "04-agent-picker.png" },
                 ],
-                recordings: [{ id: "stash-tour", files: ["stash-tour.gif", "stash-tour.mp4"] }],
+                recordings: [{ id: "swarm-follows-agent", files: ["swarm-follows-agent.gif", "swarm-follows-agent.mp4"] }],
             },
             "/run"
         );
@@ -32,8 +32,8 @@ describe("runImages", () => {
             ["widget-toolchain-small.png", true],
             // Not marked either way (the first run's manual suite): not publishable.
             ["agent-picker.png", true],
-            ["stash-tour.gif", false],
-            ["stash-tour.mp4", false],
+            ["swarm-follows-agent.gif", false],
+            ["swarm-follows-agent.mp4", false],
         ]);
     });
 });

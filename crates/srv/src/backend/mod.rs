@@ -127,6 +127,8 @@ pub mod global_memory_record;
 pub mod agent_bundle_sidecar;
 pub mod continuity_state;
 pub mod memory_delivery;
+/// What of Personal Memory fits in a delivery, and what the agent is told about the rest.
+pub mod memory_fit;
 pub mod shellexec;
 pub mod transcript;
 pub mod transcript_backfill;

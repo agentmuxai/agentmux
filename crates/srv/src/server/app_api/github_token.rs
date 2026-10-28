@@ -7,8 +7,9 @@
 //! before each wrapped command. Who is asking is the agent its `X-Agent-Token` was minted for,
 //! never a name in the request; the request says only which repository. The token is the AgentMux
 //! GitHub App's installation token, narrowed to that repository by AgentMux Cloud's broker
-//! (`identity::github_tokens`). When there is none, the answer says why, in words an agent can
-//! show; nothing here falls back to another credential.
+//! (`identity::github_tokens`). The answer also says who the agent works for (the GitHub account's id
+//! and login) and who the App's bot is, for the PR tag and the commit's author. When there is no
+//! token, the answer says why, in words an agent can show; nothing here falls back to another credential.
 
 use axum::extract::{Extension, State};
 use axum::http::StatusCode;
@@ -18,6 +19,7 @@ use serde::Deserialize;
 use serde_json::json;
 
 use super::AppState;
+use crate::identity::github_connect;
 use crate::identity::github_tokens::{self, TokenError, Want};
 use crate::muxbus::github_broker::BrokerError;
 use crate::server::caller::Caller;
@@ -56,13 +58,25 @@ pub(crate) async fn handle_github_token(
         _ => return refuse(StatusCode::INTERNAL_SERVER_ERROR, "couldn't read the agent".to_string()),
     };
     let backend = github_tokens::Live { mstore: state.id_store.clone(), identity_store: state.identity_store.clone() };
-    let want = Want { agent: slug, owner: req.owner, repo: req.repo, workflows: false };
+    // The person's GitHub account: who the agent works for, and whether this agent may change CI workflows.
+    let accounts = state.id_store.clone();
+    let account = tokio::task::spawn_blocking(move || {
+        accounts.identity_list(Some(github_connect::PROVIDER)).unwrap_or_default().into_iter().find(github_connect::is_brokered)
+    })
+    .await
+    .ok()
+    .flatten();
+    let owner = account.as_ref().and_then(github_connect::owner_of);
+    let workflows = account.as_ref().is_some_and(|a| github_connect::workflows_allowed(a, &slug));
+    let want = Want { agent: slug, owner: req.owner, repo: req.repo, workflows };
     match github_tokens::global().token_for(&backend, &want, chrono::Utc::now().timestamp()).await {
         Ok(minted) => Json(json!({
             "token": minted.token.as_str(),
             "expiresAt": minted.expires_at,
             "botSlug": minted.bot.slug,
             "botUserId": minted.bot.bot_user_id,
+            "ownerGithubId": owner.as_ref().map(|(id, _)| *id),
+            "ownerLogin": owner.as_ref().map(|(_, login)| login.as_str()),
         }))
         .into_response(),
         Err(e) => {

@@ -34,14 +34,14 @@ export interface TabsProps<T extends string> {
     items: TabItem<T>[];
     value: T;
     onChange: (id: T) => void;
-    /** Default `horizontal` (the Stash look); `vertical` is a rail. */
+    /** Default `horizontal` (the default look); `vertical` is a rail. */
     orientation?: "horizontal" | "vertical";
     /** Hide labels; each tab keeps its label as its name and gets a tooltip. */
     iconOnly?: boolean;
     /**
      * When tabs show their tooltip: `icon-only` (default) only while `iconOnly`
      * hides the labels; `always` for a consumer that hides labels itself, e.g.
-     * with a container query, as the Stash does.
+     * with a container query.
      */
     tooltips?: "icon-only" | "always";
     density?: UiDensity;
@@ -145,7 +145,7 @@ export interface TabbedPaneProps<T extends string> {
 
 /**
  * A pane with section navigation and one panel. The tabs run along the top
- * at every width, Stash-style: icon-only with tooltips while narrow, with
+ * at every width: icon-only with tooltips while narrow, with
  * labels once each tab has room. They share the width up to a cap, so in a
  * wide pane they sit at the left instead of stretching (ui.scss).
  */

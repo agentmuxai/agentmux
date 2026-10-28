@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * AgentEnvPanel — the "Environment" tab inside AgentStashModal, also opened
- * from My Agents' row menu ("Environment…"): the extra environment variables
+ * AgentEnvPanel — the "Environment…" modal, opened from My Agents' row
+ * menu: the extra environment variables
  * a definition launches with, one `NAME=VALUE` per line. Stored as the
  * definition's `env` content (`getagentcontent` / `setagentcontent`) and read
  * at launch by the same parser the editor shows its ignored lines with
