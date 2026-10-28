@@ -178,6 +178,19 @@ async fn closing_parks_an_agents_block_and_nothing_else_with_the_setting_on() {
     assert!(state.mstore.get::<crate::backend::obj::Block>(&agent).unwrap().is_some());
 }
 
+/// A detach that cannot park a block does not close it: no stop, no delete.
+#[tokio::test]
+async fn an_explicit_park_that_cannot_park_closes_nothing() {
+    let state = test_state();
+    let (_ws, tabs) = seed_workspace(&state, 1).await;
+    let term = seed_block(&state, &tabs[0], serde_json::json!({ "view": "term" })).await;
+    let opts = crate::sagas::close_pane::CloseOpts { frontend_waits: true, park_agents: true };
+    let err = crate::sagas::close_pane::run_with(&state, vec![term.clone()], opts).await.unwrap_err();
+    assert!(err.contains("could not park"), "{err}");
+    assert_eq!(in_tab(&state, &term).await.as_deref(), Some(tabs[0].as_str()), "still in its pane");
+    assert!(state.mstore.get::<crate::backend::obj::Block>(&term).unwrap().is_some());
+}
+
 /// An explicit detach parks the agent's block with the setting off, and still only an agent's.
 #[tokio::test]
 async fn a_forced_park_keeps_an_agents_block_with_the_setting_off() {

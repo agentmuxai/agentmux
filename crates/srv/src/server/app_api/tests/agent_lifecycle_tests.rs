@@ -75,6 +75,26 @@ async fn detach_parks_the_agents_block_whatever_the_setting_says_and_a_second_on
     assert_eq!(audited("lc-caller-b").iter().filter(|e| e.success).count(), 2, "both calls are recorded");
 }
 
+/// A block with an agent's id that is not an agent pane cannot be parked: the detach refuses and closes nothing.
+#[tokio::test]
+async fn detach_refuses_a_block_it_cannot_park_and_leaves_it_alone() {
+    let state = test_state();
+    let (_ws, tabs) = seed_workspace(&state, 1).await;
+    seed_agent_block(&state, &tabs[0], "lc-caller-g").await;
+    let odd = crate::sagas::park_agents_tests::seed_block(&state, &tabs[0], json!({ "view": "term", "agentId": "lc-odd" })).await;
+    let mut def: crate::backend::storage::AgentDefinition = serde_json::from_value(json!({
+        "id": "lc-odd", "slug": "lc-odd", "name": "Odd", "icon": "robot", "provider": "claude",
+        "description": "", "created_at": 1,
+    }))
+    .unwrap();
+    state.mstore.agent_def_insert(&mut def).unwrap();
+    let (status, body) = call(&state, "detach", Some("lc-caller-g"), "lc-odd").await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert!(body["error"].as_str().unwrap().contains("left as it is"), "{body}");
+    assert_eq!(in_tab(&state, &odd).await.as_deref(), Some(tabs[0].as_str()), "still in its pane");
+    assert!(state.mstore.get::<crate::backend::obj::Block>(&odd).unwrap().is_some());
+}
+
 #[tokio::test]
 async fn detach_of_an_agent_with_no_block_says_how_to_run_it() {
     let state = test_state();

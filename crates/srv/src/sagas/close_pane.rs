@@ -157,6 +157,13 @@ async fn run_inner(
     // An agent's block outlives its pane when `agents:always_available` is on: parked, not stopped
     // or deleted. Its pane leaves the layout below like any other member's.
     let parked = super::park_agents::park_agent_blocks(&ctx, &block_ids, opts.park_agents).await;
+    // An explicit park never falls through to a stop and a delete: what could not be parked stays as it is.
+    if opts.park_agents {
+        let left = super::park_agents::not_parked(&block_ids, &parked);
+        if !left.is_empty() {
+            return Err(format!("ClosePane: could not park {}: it is left running and in its pane", left.join(", ")));
+        }
+    }
     let closing = super::park_agents::not_parked(&block_ids, &parked);
     super::agent_teardown::run_many(ctx.state, &closing, super::agent_teardown::Policy::close()).await;
     for block_id in &closing {

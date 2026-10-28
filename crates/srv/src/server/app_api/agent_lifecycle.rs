@@ -31,22 +31,22 @@ pub(crate) struct LifecycleRequest {
     agent: String,
 }
 
-struct Refusal {
-    status: StatusCode,
-    message: String,
+pub(super) struct Refusal {
+    pub(super) status: StatusCode,
+    pub(super) message: String,
 }
 
-fn refuse(status: StatusCode, message: impl Into<String>) -> Refusal {
+pub(super) fn refuse(status: StatusCode, message: impl Into<String>) -> Refusal {
     Refusal { status, message: message.into() }
 }
 
 /// The agent making the request.
-struct Actor {
+pub(super) struct Actor {
     uid: String,
     slug: String,
 }
 
-fn actor_of(state: &AppState, caller: Option<&Caller>, action: &str) -> Result<Actor, Refusal> {
+pub(super) fn actor_of(state: &AppState, caller: Option<&Caller>, action: &str) -> Result<Actor, Refusal> {
     let Some(uid) = caller.and_then(Caller::uid) else {
         return Err(refuse(
             StatusCode::UNAUTHORIZED,
@@ -63,7 +63,7 @@ fn actor_of(state: &AppState, caller: Option<&Caller>, action: &str) -> Result<A
 
 /// The agent named, as its runtime row: an id, slug or name of an agent created on this machine.
 /// A template is not an agent.
-fn target_of(state: &AppState, named: &str) -> Result<AgentRuntime, Refusal> {
+pub(super) fn target_of(state: &AppState, named: &str) -> Result<AgentRuntime, Refusal> {
     let named = named.trim();
     if named.is_empty() {
         return Err(refuse(StatusCode::BAD_REQUEST, "INVALID_ARG: agent is empty; give an agent's id or slug (Agents list)"));
@@ -169,17 +169,25 @@ async fn detach(state: &AppState, req: &LifecycleRequest) -> Result<Value, Refus
     if found.tab_id.is_none() {
         return Ok(json!({ "agent": target.name, "agent_id": target.agent_id, "detached": false, "block_id": block_id, "note": "already detached: no pane shows it" }));
     }
+    // Detach parks or it does nothing: a block that cannot be parked is left running, never closed.
+    if !crate::sagas::park_agents::is_parkable(state, &block_id) {
+        return Err(refuse(
+            StatusCode::CONFLICT,
+            format!("Agents detach {}: its block is not an agent pane that can be parked; it is left as it is", target.name),
+        ));
+    }
     // This agent's block alone: a pane that stacks other tabs keeps them.
     let opts = crate::sagas::close_pane::CloseOpts { frontend_waits: true, park_agents: true };
     crate::sagas::close_pane::run_with(state, vec![block_id.clone()], opts)
         .await
         .map_err(|e| refuse(StatusCode::CONFLICT, format!("Agents detach {}: {e}", target.name)))?;
-    let still_shown = crate::server::app_api::agent_block::find_agent_block_by_uid(&state.mstore, &target.agent_id)
+    // Parked means the agent's block exists, in no tab. Anything else is not a detach, whatever the saga said.
+    let parked = crate::server::app_api::agent_block::find_agent_block_by_uid(&state.mstore, &target.agent_id)
         .ok()
         .flatten()
-        .is_some_and(|b| b.tab_id.is_some());
-    if still_shown {
-        return Err(refuse(StatusCode::CONFLICT, format!("Agents detach {}: the pane closed but the block was not parked", target.name)));
+        .is_some_and(|b| b.tab_id.is_none());
+    if !parked {
+        return Err(refuse(StatusCode::CONFLICT, format!("Agents detach {}: its block is not parked", target.name)));
     }
     Ok(json!({
         "agent": target.name, "agent_id": target.agent_id, "detached": true, "block_id": block_id,
