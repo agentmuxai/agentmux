@@ -15,8 +15,9 @@
 //! never from an agent. The banner, toast and chime that tell the person arrive
 //! with the next steps of the spec's §9; the events here carry what they show.
 //!
-//! Nothing starts a countdown yet: the routes that file and approve requests,
-//! and the runners, arrive with the later steps of that spec's §9.
+//! The `Sensitive` routes start a countdown when the super agent approves. The
+//! runners, the code that does each operation, arrive with the later steps of
+//! that spec's §9; an operation with none is not approved.
 #![allow(dead_code)]
 
 use std::collections::HashMap;
@@ -118,6 +119,17 @@ static RUNNERS: LazyLock<Mutex<HashMap<&'static str, Runner>>> = LazyLock::new(D
 /// Say what runs `op` when its window runs out.
 pub fn register_runner(op: &'static str, runner: Runner) {
     RUNNERS.lock().unwrap_or_else(|e| e.into_inner()).insert(op, runner);
+}
+
+/// Take back what `register_runner` said, for a test of an operation nothing runs.
+#[cfg(test)]
+pub fn unregister_runner(op: &str) {
+    RUNNERS.lock().unwrap_or_else(|e| e.into_inner()).remove(op);
+}
+
+/// Whether something runs `op` when its window runs out.
+pub fn has_runner(op: &str) -> bool {
+    runner_for(op).is_some()
 }
 
 fn runner_for(op: &str) -> Option<Runner> {
