@@ -1232,6 +1232,7 @@ mod tests {
         assert!(plain_cut_off(r#"{"type":"result","is_error":false,"result":"done"}"#).is_none());
     }
 }
+
 /// The one line of `text` that carries a single-live-instance refusal, with
 /// any `[AgentMux] ` prefix removed — the row's detail. Falls back to the
 /// whole trimmed text.
@@ -1240,4 +1241,4 @@ fn frame_or_stderr_line(text: &str) -> &str {
         .find(|l| crate::backend::agent_admission::is_admission_refusal(l))
         .map(|l| l.trim().trim_start_matches("[AgentMux]").trim())
         .unwrap_or_else(|| text.trim())
-    }
+}

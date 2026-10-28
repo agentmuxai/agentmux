@@ -205,7 +205,7 @@ fn at_text(ms: i64) -> String {
 /// the agent loaded before the upgrade (a deferred tool's schema is a message
 /// in it), while the tool itself is the new version's: the list of actions it
 /// read can be missing new ones (browser driver roadblocks, R8).
-const TOOLS_MAY_HAVE_CHANGED: &str = "Its tools may have changed: a tool description you loaded before the upgrade can be out of date, so      load it again before relying on the actions it lists.";
+const TOOLS_MAY_HAVE_CHANGED: &str = "Its tools may have changed: a tool description you loaded before the upgrade can be out of date, so load it again before relying on the actions it lists.";
 
 /// The note, with the upgrade's local time.
 pub fn note_text(u: &Upgraded) -> String {
@@ -223,13 +223,13 @@ pub fn note_text(u: &Upgraded) -> String {
 pub fn continue_text(upgrade: Option<&Upgraded>, quit_ms: i64) -> String {
     match upgrade {
         Some(u) => format!(
-            "[AgentMux] AgentMux was upgraded from {} to {}{} while you were working; your last turn was cut off mid-tool.              {TOOLS_MAY_HAVE_CHANGED} Check the state of what you were doing and carry on.",
+            "[AgentMux] AgentMux was upgraded from {} to {}{} while you were working; your last turn was cut off mid-tool. {TOOLS_MAY_HAVE_CHANGED} Check the state of what you were doing and carry on.",
             u.from,
             u.to,
             at_text(u.at_ms)
         ),
         None => format!(
-            "[AgentMux] AgentMux restarted{} while you were working; your last turn was cut off mid-tool.              Check the state of what you were doing and carry on.",
+            "[AgentMux] AgentMux restarted{} while you were working; your last turn was cut off mid-tool. Check the state of what you were doing and carry on.",
             at_text(quit_ms)
         ),
     }
@@ -572,6 +572,10 @@ mod tests {
         assert!(after_restart.starts_with("[AgentMux] AgentMux restarted at "), "{after_restart}");
         assert!(after_restart.ends_with("Check the state of what you were doing and carry on."), "{after_restart}");
         assert!(!after_restart.contains("upgraded"), "{after_restart}");
+        // Read by the agent as written: one space between words.
+        for text in [&after_upgrade, &after_restart, &note_text(&upgraded)] {
+            assert!(!text.contains("  "), "{text}");
+        }
     }
 
     #[tokio::test]
