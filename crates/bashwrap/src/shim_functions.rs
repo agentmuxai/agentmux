@@ -110,6 +110,8 @@ esac"#,
                 .env_remove("AGENTMUX_OWNER_GITHUB_ID")
                 .output()
                 .unwrap();
+            // Shown when an assertion below fails.
+            eprintln!("`{command}` (broker {broker:?}) exited {:?}, stderr: {}", out.status.code(), String::from_utf8_lossy(&out.stderr));
             (String::from_utf8_lossy(&out.stdout).trim().to_string(), out.status.code())
         };
         // A commit with the switch runs with what git-env printed.

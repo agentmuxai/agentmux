@@ -149,7 +149,7 @@ fn git_output(args: &[&str]) -> Option<String> {
 fn configured_hooks_dir() -> Option<PathBuf> {
     ["--local", "--global", "--system"]
         .iter()
-        .filter_map(|scope| git_output(&["config", scope, "--get", "core.hooksPath"]))
+        .filter_map(|scope| git_output(&["config", scope, "--type=path", "--get", "core.hooksPath"]))
         .filter(|d| !d.is_empty())
         .map(PathBuf::from)
         .find(|d| !d.ends_with(AGENTMUX_HOOKS_DIR))
@@ -201,8 +201,8 @@ fn run_script(path: &Path, args: &[String], stdin: &[u8]) -> i32 {
     child.wait().ok().and_then(|s| s.code()).unwrap_or(1)
 }
 
-/// The diff of what pushing `local` over `remote_sha` adds, `-U0`.
-fn push_diff(dir: Option<&Path>, remote: &str, local: &str, remote_sha: &str) -> String {
+/// The diff of what pushing `local` over `remote_sha` adds, `-U0`; `None` when git can't produce it.
+fn push_diff(dir: Option<&Path>, remote: &str, local: &str, remote_sha: &str) -> Option<String> {
     let log = |range: Vec<String>| {
         let mut cmd = Command::new("git");
         if let Some(dir) = dir {
@@ -219,10 +219,10 @@ fn push_diff(dir: Option<&Path>, remote: &str, local: &str, remote_sha: &str) ->
         log(vec![local.to_string(), "--not".to_string(), seen])
     };
     if remote_sha.chars().all(|c| c == '0') {
-        return whole_branch().unwrap_or_default();
+        return whole_branch();
     }
     // An old commit this clone doesn't have (a force push over unfetched work): scan the whole branch.
-    log(vec![format!("{remote_sha}..{local}")]).or_else(whole_branch).unwrap_or_default()
+    log(vec![format!("{remote_sha}..{local}")]).or_else(whole_branch)
 }
 
 /// `pre-push <remote> <url>`, the refs on stdin.
@@ -244,7 +244,12 @@ fn pre_push(args: &[String]) -> i32 {
         if local.chars().all(|c| c == '0') {
             continue;
         }
-        for found in scan_diff(&push_diff(None, remote, local, remote_sha)) {
+        // A push that can't be read is refused: the scan doesn't fail open.
+        let Some(diff) = push_diff(None, remote, local, remote_sha) else {
+            eprintln!("agentmux: this push is refused: git couldn't list what it adds, so it can't be scanned.");
+            return 1;
+        };
+        for found in scan_diff(&diff) {
             if !findings.contains(&found) {
                 findings.push(found);
             }
@@ -410,14 +415,16 @@ key = {token}
         let second = git(repo, &["rev-parse", "HEAD"]);
         let zeros = "0".repeat(40);
         // A new branch: the whole history is new to the remote.
-        let found = scan_diff(&push_diff(Some(repo), "origin", &second, &zeros));
+        let found = scan_diff(&push_diff(Some(repo), "origin", &second, &zeros).unwrap());
         assert_eq!(found.len(), 1);
         assert_eq!((found[0].file.as_str(), found[0].line, found[0].category), ("a.txt", 2, "GitHub token"));
         // An update over the first commit: the added line is found at its place.
-        let found = scan_diff(&push_diff(Some(repo), "origin", &second, &first));
+        let found = scan_diff(&push_diff(Some(repo), "origin", &second, &first).unwrap());
         assert_eq!((found[0].file.as_str(), found[0].line), ("a.txt", 2));
         // The remote already has it: nothing is added.
-        assert!(scan_diff(&push_diff(Some(repo), "origin", &second, &second)).is_empty());
+        assert!(scan_diff(&push_diff(Some(repo), "origin", &second, &second).unwrap()).is_empty());
+        // A directory that isn't a repository gives no diff, not an empty one.
+        assert!(push_diff(Some(&dir.join("nowhere")), "origin", &second, &first).is_none());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -447,7 +454,7 @@ key = {token}
         git(repo, &["add", "."]);
         git(repo, &["commit", "-q", "--no-edit"]);
         let head = git(repo, &["rev-parse", "HEAD"]);
-        let found = scan_diff(&push_diff(Some(repo), "origin", &head, &base));
+        let found = scan_diff(&push_diff(Some(repo), "origin", &head, &base).unwrap());
         assert!(found.iter().any(|f| f.file == "a.txt" && f.category == "GitHub token"), "{found:?}");
         let _ = std::fs::remove_dir_all(&dir);
     }
