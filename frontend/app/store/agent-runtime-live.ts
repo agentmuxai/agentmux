@@ -6,11 +6,11 @@
 // srv is asked once and each agent's event is followed once.
 
 import { atoms } from "@/app/store/global";
+import { noteOpenedByPerson } from "@/app/store/agent-open-note";
 import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { noteOpenedByPerson } from "@/app/view/agent/startup/opening-summary";
 import type { AgentRuntime } from "@/types/rpc/AgentRuntime";
 import { createRoot } from "solid-js";
 import { createAgentRuntimeStore, type AgentRuntimeStore } from "./agent-runtime";

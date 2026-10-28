@@ -6,7 +6,8 @@
 import type { AgentDefinition } from "@/app/store/rpc-api";
 import type { AgentAccounts } from "@/app/view/identity/identity-model";
 import { buildStartupPayload, resolveAccounts } from "./buildStartupPayload";
-import { OPENING_SUMMARY_PROMPT, takeOpenedByPerson } from "./opening-summary";
+import { takeOpenedByPerson } from "@/app/store/agent-open-note";
+import { OPENING_SUMMARY_PROMPT } from "./opening-summary";
 
 /**
  * Everything the startup sequence reads or does, injected so it runs without a

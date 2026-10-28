@@ -3,7 +3,8 @@
 
 import type { AgentDefinition } from "@/app/store/rpc-api";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { noteOpenedByPerson, OPENING_SUMMARY_PROMPT, OPEN_NOTE_TTL_MS, takeOpenedByPerson } from "./opening-summary";
+import { noteOpenedByPerson, OPEN_NOTE_TTL_MS, takeOpenedByPerson } from "@/app/store/agent-open-note";
+import { OPENING_SUMMARY_PROMPT } from "./opening-summary";
 import { sendStartupSequence, type StartupSequenceDeps } from "./sendStartupSequence";
 
 const agent = { id: "a1", name: "Ada", slug: "ada" } as unknown as AgentDefinition;

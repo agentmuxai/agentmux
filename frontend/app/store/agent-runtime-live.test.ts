@@ -17,7 +17,7 @@ vi.mock("@/app/store/rpc-api", () => ({
         },
     },
 }));
-vi.mock("@/app/view/agent/startup/opening-summary", () => ({
+vi.mock("@/app/store/agent-open-note", () => ({
     noteOpenedByPerson: (id: string) => order.push(`note:${id}`),
 }));
 
