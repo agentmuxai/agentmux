@@ -15,6 +15,10 @@ use crate::server::AppState;
 /// Say what runs each operation that has a runner. Idempotent: every connection calls it.
 pub fn register_all() {
     window::register_default_runner("upgrade", Arc::new(|state, request| Box::pin(upgrade(state, request))));
+    window::register_default_runner(
+        "desktop_control_grant",
+        Arc::new(|state, request| Box::pin(async move { crate::server::app_api::desktop::grant_after_countdown(&state, &request.id, request.decided_by.as_deref()) })),
+    );
     window::register_default_runner("widget_install", Arc::new(|state, request| Box::pin(widget_install(state, request))));
 }
 
