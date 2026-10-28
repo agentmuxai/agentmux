@@ -21,6 +21,10 @@ export const LAST_CALL_MS = 5_000;
 const REPLAY_EVENTS = 32;
 /** A countdown whose end was never announced is dropped this long after its deadline. */
 const STALE_MS = 5_000;
+/** A countdown's first chime waits this long, so a replayed one that was already cleared stays silent. */
+export const CHIME_DELAY_MS = 300;
+/** How long a live clear is remembered. */
+const KEEP_CLEARED_MS = 10 * 60 * 1000;
 
 export interface SensitiveCountdown {
     request_id: string;
@@ -88,18 +92,30 @@ let users = 0;
 let stop: (() => void) | null = null;
 
 function begin(): () => void {
-    // Cleared by a live event: a history replay that lands later must not bring these back.
-    const clearedLive = new Set<string>();
+    // Cleared by a live event, and when: a history replay that lands later must not bring these
+    // back. srv keeps a finished countdown ten minutes, so no id is remembered longer.
+    const clearedLive = new Map<string, number>();
     const lastCalled = new Set<string>();
+    const chimes = new Set<ReturnType<typeof setTimeout>>();
+    // The broker replays its kept events through these same handlers when this connection
+    // subscribes: an expired one is ignored, and the chime waits a moment so a countdown that was
+    // vetoed or finished a while ago (its clear arrives right behind it) never sounds.
     const unsubPending = onMuxEvent(WpsEvent.SensitivePending, (view) => {
         const c = parseCountdown(view);
-        if (!c) return;
+        if (!c || c.deadline_ms <= Date.now() || clearedLive.has(c.request_id)) return;
+        const known = open().some((x) => x.request_id === c.request_id);
         setOpen((list) => withCountdown(list, c));
-        playShutdownPendingTone();
+        if (known) return;
+        const t = setTimeout(() => {
+            chimes.delete(t);
+            if (open().some((x) => x.request_id === c.request_id)) playShutdownPendingTone();
+        }, CHIME_DELAY_MS);
+        chimes.add(t);
     });
     const unsubCleared = onMuxEvent(WpsEvent.SensitiveCleared, (cleared) => {
         if (typeof cleared.request_id !== "string") return;
-        clearedLive.add(cleared.request_id);
+        clearedLive.set(cleared.request_id, Date.now());
+        lastCalled.delete(cleared.request_id);
         setOpen((list) => withoutCountdown(list, cleared.request_id));
     });
     void Promise.all([
@@ -119,11 +135,14 @@ function begin(): () => void {
             }
         }
         setOpen((list) => (list.some((c) => now - c.deadline_ms > STALE_MS) ? list.filter((c) => now - c.deadline_ms <= STALE_MS) : list));
+        for (const [id, at] of clearedLive) if (now - at > KEEP_CLEARED_MS) clearedLive.delete(id);
+        for (const id of lastCalled) if (!open().some((c) => c.request_id === id)) lastCalled.delete(id);
     }, 250);
     return () => {
         unsubPending();
         unsubCleared();
         clearInterval(timer);
+        chimes.forEach(clearTimeout);
         setOpen([]);
     };
 }

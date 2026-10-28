@@ -27,9 +27,11 @@ const tone = vi.fn();
 vi.mock("@/app/notification/sound/sound-service", () => ({ playShutdownPendingTone: () => tone() }));
 
 import { SensitiveBanner } from "./SensitiveBanner";
+import { CHIME_DELAY_MS } from "./sensitive-pending";
 import type { MuxEvent } from "@/types/rpc/MuxEvent";
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
+const afterChimeDelay = () => new Promise((r) => setTimeout(r, CHIME_DELAY_MS + 100));
 
 const pending = (id: string, over: Record<string, unknown> = {}) =>
     ({
@@ -55,7 +57,7 @@ describe("SensitiveBanner (SPEC_SUPER_AGENT §5)", () => {
     });
     afterEach(cleanup);
 
-    it("shows the countdown with who asked and who approved, and chimes once for two panes", () => {
+    it("shows the countdown with who asked and who approved, and chimes once for two panes", async () => {
         render(() => (
             <>
                 <SensitiveBanner />
@@ -64,6 +66,7 @@ describe("SensitiveBanner (SPEC_SUPER_AGENT §5)", () => {
         ));
         handlers.get("sensitive:pending")!(pending("r1"));
         expect(screen.getAllByText(/Parlo asked: upgrade AgentMux \(version 0\.61\.0\)\. Approved by Camper\. Starts in (29|30|31) s\./)).toHaveLength(2);
+        await afterChimeDelay();
         expect(tone).toHaveBeenCalledTimes(1);
     });
 
@@ -78,6 +81,29 @@ describe("SensitiveBanner (SPEC_SUPER_AGENT §5)", () => {
         render(() => <SensitiveBanner />);
         handlers.get("sensitive:pending")!(pending("r1", { approver: undefined }));
         expect(screen.getByText(/No super agent reviewed this\./)).toBeTruthy();
+    });
+
+    it("a countdown already past its deadline, replayed on connect, is not shown or sounded", async () => {
+        render(() => <SensitiveBanner />);
+        handlers.get("sensitive:pending")!(pending("old", { deadline_ms: Date.now() - 1000 }));
+        await afterChimeDelay();
+        expect(screen.queryByText(/Parlo asked/)).toBeNull();
+        expect(tone).not.toHaveBeenCalled();
+    });
+
+    it("a replayed countdown whose clear follows right behind it stays silent", async () => {
+        render(() => <SensitiveBanner />);
+        handlers.get("sensitive:pending")!(pending("r1"));
+        handlers.get("sensitive:cleared")!(cleared("r1"));
+        await afterChimeDelay();
+        expect(tone).not.toHaveBeenCalled();
+    });
+
+    it("a clear that arrives first keeps its countdown from showing", () => {
+        render(() => <SensitiveBanner />);
+        handlers.get("sensitive:cleared")!(cleared("r1"));
+        handlers.get("sensitive:pending")!(pending("r1"));
+        expect(screen.queryByText(/Parlo asked/)).toBeNull();
     });
 
     it("a cleared countdown goes away", () => {
