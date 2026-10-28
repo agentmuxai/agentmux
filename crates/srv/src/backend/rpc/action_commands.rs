@@ -24,7 +24,7 @@ pub enum Policy {
 pub const ALWAYS: &[&str] = &[
     "account.key.verify", "account.oauth.cancel", "account.oauth.client.clear", "account.oauth.start", "agent.account.switch",
     "agent.define", "agent.kill-process", "agent.kill-tree", "agent.open", "agent.pane.unregister", "agent.send",
-    "agent.setSeat", "agent.stop", "agent.takeover", "agent:memory:revert", "agent:memory:write_file",
+    "agent.setSeat", "agent.start", "agent.stop", "agent.takeover", "agent:memory:revert", "agent:memory:write_file",
     "agent:session:append_output", "agent:session:archive", "agent:session:write_state", "agentanswer", "agentcancel",
     "agentdefcreatefromtemplate", "agentdefhide", "agentdefunhide", "agentinput", "agentlastruntime",
     "agents.migrateForkSlugs", "agentshutdownkeep", "agentstop", "app.desktop", "app.upgrade-requests",
@@ -85,7 +85,7 @@ pub const READ_ONLY: &[&str] = &[
     "agent.input-history-search", "agent.list", "agent.open-panes", "agent.output", "agent.process-list",
     "agent.project_instructions", "agent.status", "agent.tracked-blocks", "agent:memory:adoption_list",
     "agent:memory:claims", "agent:memory:diff", "agent:memory:history", "agent:memory:list", "agent:memory:read_file",
-    "agent:session:list_archives", "agent:session:read", "agentapiretry", "agentdeflisthiddentemplates",
+    "agent:session:list_archives", "agent:session:read", "agentapiretry", "agentdeflisthiddentemplates", "agentruntime.list",
     "ambient.outcomes", "app.update-check", "app.update-status", "attachments.info", "auth.poll",
     "blockfile:line_count", "blockfile:read_range", "blockfile:read_state", "blockstats.detail", "bookmarks.list",
     "browser_profiles.list", "bundle.export", "bundle.export_for_agent", "bundle.export_for_agent_with_history",
