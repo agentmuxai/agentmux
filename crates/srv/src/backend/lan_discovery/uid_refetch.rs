@@ -5,11 +5,11 @@
 //! answer is gone or held none (identity M4d-6, `lan_v2::claim_uid`), and for a
 //! name key whose cached answer was a miss.
 
+use super::*;
+
 /// A cached miss younger than this was made by the lookup that just ran: asking
 /// again would repeat it.
 const MISS_RECHECK_AFTER: std::time::Duration = std::time::Duration::from_secs(5);
-
-use super::*;
 
 impl LanDiscoveryController {
     /// One token from the fan-out limiter ([`Self::find_agent_lan_pubkey`]).

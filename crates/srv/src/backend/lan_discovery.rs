@@ -1718,11 +1718,17 @@ impl LanDiscoveryController {
             let mut inflight = query_peers_concurrently(peers, agent_id, http);
             while let Some((peer_url, _auth_key, result)) = inflight.next().await {
                 let Ok(resp) = result else { continue };
-                answered |= !resp.status().is_server_error();
+                // "No such agent" is an answer; a refusal (401, 429), a server
+                // error or a body that is not JSON says nothing about the key.
+                if resp.status() == reqwest::StatusCode::NOT_FOUND {
+                    answered = true;
+                    continue;
+                }
                 if !resp.status().is_success() {
                     continue;
                 }
                 let Ok(body) = resp.json::<serde_json::Value>().await else { continue };
+                answered = true;
                 // A former slug: noted, and its key ignored. Another peer
                 // may still answer for the name itself.
                 if let Some(current) = renamed_to(agent_id, &body) {

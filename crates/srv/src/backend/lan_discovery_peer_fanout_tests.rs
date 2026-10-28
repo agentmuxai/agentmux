@@ -282,6 +282,14 @@ async fn a_miss_is_cached_only_when_a_peer_answered() {
     let dead = peer_at("127.0.0.1:1");
     assert!(matches!(c.pubkey_from_peers(&[dead], "agentx", &http).await, LanPubkeyLookup::NotFound));
     assert!(!cached(&c, "agentx"), "a peer that could not be reached: nothing learned");
+    for refusal in ["401 Unauthorized", "429 Too Many Requests", "503 Service Unavailable"] {
+        let addr = mock_peer(std::time::Duration::ZERO, refusal, "{}").await;
+        assert!(matches!(c.pubkey_from_peers(&[peer_at(&addr)], "agentx", &http).await, LanPubkeyLookup::NotFound));
+        assert!(!cached(&c, "agentx"), "{refusal}: the peer said nothing about the key");
+    }
+    let addr = mock_peer(std::time::Duration::ZERO, "200 OK", "not json").await;
+    assert!(matches!(c.pubkey_from_peers(&[peer_at(&addr)], "agentx", &http).await, LanPubkeyLookup::NotFound));
+    assert!(!cached(&c, "agentx"), "an answer that is not JSON");
     let (addr, _) = routed_peer(vec![]).await;
     assert!(matches!(c.pubkey_from_peers(&[peer_at(&addr)], "agentx", &http).await, LanPubkeyLookup::NotFound));
     assert!(cached(&c, "agentx"), "a peer said it has no such agent");
