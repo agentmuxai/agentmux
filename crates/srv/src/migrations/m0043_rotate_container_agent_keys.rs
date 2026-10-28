@@ -22,6 +22,7 @@
 
 use std::sync::Arc;
 
+use crate::backend::storage::agent_lan_keys::AgentLanKeypair;
 use crate::backend::storage::host_lan_keys::{HostKey, HostKeyKind, HostLanKeys};
 use crate::backend::storage::store::Store;
 use crate::backend::storage::wan_identity::{self, WanIdentityStore};
@@ -175,7 +176,17 @@ fn rotate_container_keys(store: &Store, wan: &Wan, host: Option<&HostLanKeys>) -
                     .map_err(|e| format!("rotate_container_agent_keys: host LAN key of {slug}: {e}"))?;
             }
             if let Some(old) = old_uid {
-                host.supersede(HostKeyKind::Uid, &id, &old, None)
+                // Replaced, not dropped: an empty slot would let a channel that still holds the exposed
+                // UID key publish it again.
+                let now = agentmux_common::time::now_secs();
+                let new = store
+                    .agent_uid_keys_ensure(&id)
+                    .map_err(|e| format!("rotate_container_agent_keys: UID keys of {slug}: {e}"))?
+                    .map(|(keys, _)| HostKey {
+                        pair: AgentLanKeypair { public_key: keys.lan.public_key, private_key: keys.lan.private_key },
+                        created_at: now,
+                    });
+                host.supersede(HostKeyKind::Uid, &id, &old, new.as_ref())
                     .map_err(|e| format!("rotate_container_agent_keys: host UID LAN key of {slug}: {e}"))?;
             }
         }
@@ -307,9 +318,10 @@ mod tests {
         let id = store.agent_def_list().unwrap().into_iter().find(|d| d.slug == boxed).unwrap().id;
         let exposed = store.agent_lan_key_ensure(&boxed).unwrap();
         let uid_key = store.agent_uid_keys_ensure(&id).unwrap().unwrap().0.lan;
+        let exposed_uid_public = uid_key.public_key.clone();
         let now = agentmux_common::time::now_secs();
         host.replace(HostKeyKind::Name, &boxed, &HostKey { pair: exposed.clone(), created_at: now }).unwrap();
-        let uid_pair = crate::backend::storage::agent_lan_keys::AgentLanKeypair { public_key: uid_key.public_key, private_key: uid_key.private_key };
+        let uid_pair = AgentLanKeypair { public_key: uid_key.public_key, private_key: uid_key.private_key };
         host.replace(HostKeyKind::Uid, &id, &HostKey { pair: uid_pair, created_at: now }).unwrap();
 
         assert_eq!(rotate_container_keys(&store, &Wan::Unavailable, Some(&host)).unwrap(), 1);
@@ -317,7 +329,10 @@ mod tests {
         let fresh = store.agent_lan_key_load(&boxed).unwrap().unwrap();
         assert_ne!(fresh, exposed);
         assert_eq!(host_key(&host, HostKeyKind::Name, &boxed).unwrap().pair, fresh, "the host's key is the new one");
-        assert!(host_key(&host, HostKeyKind::Uid, &id).is_none(), "the exposed UID key is off the host");
+        let fresh_uid = store.agent_uid_keys_ensure(&id).unwrap().unwrap().0.lan;
+        let on_host = host_key(&host, HostKeyKind::Uid, &id).expect("the slot is filled, not left empty for a stale channel to reclaim");
+        assert_eq!(on_host.pair.public_key, fresh_uid.public_key, "the host's UID key is the new one");
+        assert_ne!(on_host.pair.public_key, exposed_uid_public, "and not the exposed one");
     }
 
     #[test]
