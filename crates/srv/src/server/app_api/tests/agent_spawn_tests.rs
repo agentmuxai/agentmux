@@ -398,6 +398,20 @@ async fn a_leaders_workers_are_listed_with_their_last_report() {
     assert!(workers_of(&state.mstore, "").is_empty());
 }
 
+/// A worker whose pane was closed with `agents:always_available` on is parked, not gone: its leader still lists it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_parked_worker_is_still_listed_for_its_leader() {
+    let state = test_state();
+    let (lead, tab, lead_pane) = seed_leader(&state, "claude", "host", json!({})).await;
+    let worker = crate::server::agent_handlers::copy_definition(&state.mstore, &state.id_store, &state.identity_store, &lead.id, "Lead Helper C", false).unwrap();
+    let block = new_block(&state, &tab, json!({ "view": "agent", "agentId": worker.id, COACHED_BY_META_KEY: { "agent": lead.name, "id": lead.id, "block_id": lead_pane } })).await;
+    crate::sagas::park_agents_tests::dispatch_apply(&state, agentmux_common::ipc::Command::ParkBlock { tab_id: tab.clone(), block_id: block.clone() }).await;
+
+    let listed: Vec<String> = workers_of(&state.mstore, &lead.id).into_iter().map(|w| w.block_id).collect();
+
+    assert_eq!(listed, vec![block]);
+}
+
 /// The mark is srv's: a client can neither write it on an existing pane nor
 /// bring it into a new one.
 #[test]

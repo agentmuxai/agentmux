@@ -712,35 +712,19 @@ fn register_agent_list(engine: &Arc<WshRpcEngine>, state: &AppState) {
     engine.register_typed(COMMAND_AGENT_LIST, move |_data: serde_json::Value, _ctx| {
         let mstore = mstore.clone();
         async move {
-                let tabs: Vec<Tab> = mstore.get_all::<Tab>()
-                    .map_err(|e| format!("agent.list: {e}"))?;
-
                 let mut agents = Vec::new();
-                for tab in &tabs {
-                    for block_id in &tab.blockids {
-                        if let Ok(Some(block)) = mstore.get::<Block>(block_id) {
-                            let agent_id = obj::meta_get_string(&block.meta, "agentId", "");
-                            if agent_id.is_empty() {
-                                continue;
-                            }
-                            let provider = obj::meta_get_string(&block.meta, "agentProvider", "");
-                            let status = blockcontroller::get_block_controller_status(block_id)
-                                .map(|s| s.shellprocstatus)
-                                .unwrap_or_else(|| "init".to_string());
-                            let session_id = block.meta.get("agent:sessionid")
-                                .and_then(|v| v.as_str())
-                                .map(|s| s.to_string());
-
-                            agents.push(AgentListEntry {
-                                block_id: block_id.clone(),
-                                tab_id: tab.oid.clone(),
-                                agent_id,
-                                provider,
-                                status,
-                                session_id,
-                            });
-                        }
+                for (block, tab) in super::agent_block::blocks_in_tabs_or_parked(&mstore).map_err(|e| format!("agent.list: {e}"))? {
+                    let agent_id = obj::meta_get_string(&block.meta, "agentId", "");
+                    if agent_id.is_empty() {
+                        continue;
                     }
+                    let provider = obj::meta_get_string(&block.meta, "agentProvider", "");
+                    let status = blockcontroller::get_block_controller_status(&block.oid)
+                        .map(|s| s.shellprocstatus)
+                        .unwrap_or_else(|| "init".to_string());
+                    let session_id = block.meta.get("agent:sessionid").and_then(|v| v.as_str()).map(|s| s.to_string());
+                    // A parked agent has no tab: its `tab_id` is empty.
+                    agents.push(AgentListEntry { block_id: block.oid.clone(), tab_id: tab.unwrap_or_default(), agent_id, provider, status, session_id });
                 }
 
                 Ok(AgentListResult { agents })

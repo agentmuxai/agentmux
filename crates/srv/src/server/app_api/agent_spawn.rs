@@ -483,11 +483,10 @@ pub(crate) fn account_blocks_at(state: &AppState, accounts: &[IdentityAccount], 
             blocked.insert(a.id.clone(), "needs the user to sign in again".to_string());
         }
     }
-    let Ok(tabs) = state.mstore.get_all::<Tab>() else {
+    let Ok(blocks) = super::agent_block::blocks_in_tabs_or_parked(&state.mstore) else {
         return blocked;
     };
-    let blocks = tabs.iter().flat_map(|t| t.blockids.iter()).filter_map(|id| state.mstore.get::<Block>(id).ok().flatten());
-    for block in blocks {
+    for (block, _) in blocks {
         let failure = crate::backend::agent_state::failure_of_block(&block);
         let why = match failure.map(|f| (f.code, f.resets_at_ms)) {
             Some((FailureClass::UsageLimit, reset)) if reset.is_none_or(|r| r > now_ms) => {
@@ -621,17 +620,17 @@ pub(crate) async fn handle_agent_workers(
     Json(json!({ "workers": listed })).into_response()
 }
 
-/// `leader_def_id`'s workers open in a tab: panes marked as its (on the pane
+/// `leader_def_id`'s workers open in a tab or parked: panes marked as its (on the pane
 /// or on their definition), with their state and last report.
 pub(crate) fn workers_of(mstore: &Store, leader_def_id: &str) -> Vec<WorkerSummary> {
     if leader_def_id.is_empty() {
         return Vec::new();
     }
-    let Ok(tabs) = mstore.get_all::<Tab>() else {
+    let Ok(in_tabs_or_parked) = super::agent_block::blocks_in_tabs_or_parked(mstore) else {
         return Vec::new();
     };
     let defs = mstore.agent_def_list().unwrap_or_default();
-    let blocks: Vec<Block> = tabs.iter().flat_map(|t| t.blockids.iter()).filter_map(|id| mstore.get::<Block>(id).ok().flatten()).collect();
+    let blocks: Vec<Block> = in_tabs_or_parked.into_iter().map(|(b, _)| b).collect();
     let leader_panes: Vec<String> = blocks
         .iter()
         .filter(|b| obj::meta_get_string(&b.meta, "agentId", "") == leader_def_id)
