@@ -49,7 +49,7 @@ and ran in the same period without opening windows, so "no flag in a test helper
 the windows.
 
 A probe on a second Windows machine ran six spawns (Git for Windows' `cmd\git.exe` redirector and
-`mingw64in\git.exe`, each succeeding and failing, plus `cmd` and `bash` failing), without the flag, three
+`mingw64\bin\git.exe`, each succeeding and failing, plus `cmd` and `bash` failing), without the flag, three
 ways: through the build-slot shim, with the shim off, and from a PowerShell console. No window opened in any
 case, and the test process had a console each time. That machine's default terminal is the classic console
 host, not Windows Terminal, so it does not settle the mechanism on the machine where the windows appeared.
