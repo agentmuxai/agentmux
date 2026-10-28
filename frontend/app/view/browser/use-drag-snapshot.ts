@@ -81,17 +81,24 @@ export function useDragSnapshot(params: {
 }): { take: () => Promise<DragSnapshot | null> } {
     const { model, placeholderRef, paneRect, paneCreated, diag } = params;
     let failedUntil = 0;
+    let inflight: Promise<DragSnapshot | null> | null = null;
 
     const capture = async (): Promise<DragSnapshot | null> => {
         const pr = paneRect();
         if (!paneCreated() || model.closed || pr.width <= 0 || pr.height <= 0) return null;
         if (params.unavailable?.() || Date.now() < failedUntil) return null;
-        return captureGate(() => captureOnce());
+        // One capture per pane at a time, queued or running: a press while one is out shares it.
+        if (inflight) return inflight;
+        const mine = captureGate(() => captureOnce()).finally(() => {
+            if (inflight === mine) inflight = null;
+        });
+        inflight = mine;
+        return mine;
     };
 
     const captureOnce = async (): Promise<DragSnapshot | null> => {
-        // Waiting for a slot can take a while: the pane may have gone since.
-        if (!paneCreated() || model.closed || params.unavailable?.()) return null;
+        // Waiting for a slot can take a while: the pane may have gone since, or an earlier capture failed.
+        if (!paneCreated() || model.closed || params.unavailable?.() || Date.now() < failedUntil) return null;
         const abort = new AbortController();
         const timer = setTimeout(() => abort.abort(), CAPTURE_TIMEOUT_MS);
         try {

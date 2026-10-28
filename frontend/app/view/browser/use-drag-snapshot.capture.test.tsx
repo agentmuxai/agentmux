@@ -9,6 +9,14 @@ vi.mock("@/app/store/app-api", () => ({ getApi: () => ({ browserPanes: { screens
 
 import { useDragSnapshot } from "./use-drag-snapshot";
 
+/** A page that never paints: the request ends only when it is aborted, as a fetch's does. */
+function unansweredUntilAborted() {
+    screenshot.mockImplementation(
+        (_id: string, opts: { signal: AbortSignal }) =>
+            new Promise((_, reject) => opts.signal.addEventListener("abort", () => reject(new Error("aborted")))),
+    );
+}
+
 /** A press on a pane header, which is what starts a prewarm. */
 function press() {
     const header = document.createElement("div");
@@ -18,9 +26,9 @@ function press() {
     header.remove();
 }
 
-function mount(unavailable: () => boolean = () => false) {
+function mount(unavailable: () => boolean = () => false, blockId = "b1") {
     const diag = vi.fn();
-    const model = { blockId: "b1", closed: false } as never;
+    const model = { blockId, closed: false } as never;
     let dispose!: () => void;
     createRoot((d) => {
         dispose = d;
@@ -41,14 +49,15 @@ describe("useDragSnapshot — a capture that can't be answered must not hold the
         vi.useFakeTimers();
         screenshot.mockReset();
     });
-    afterEach(() => vi.useRealTimers());
+    afterEach(async () => {
+        // Let whatever is still waiting give up, so the next test starts with every slot free.
+        await vi.advanceTimersByTimeAsync(3000);
+        vi.useRealTimers();
+    });
 
     it("gives up on a capture after two seconds and takes none from this pane for ten more", async () => {
         // A page that never paints: the request ends only when it is aborted.
-        screenshot.mockImplementation(
-            (_id: string, opts: { signal: AbortSignal }) =>
-                new Promise((_, reject) => opts.signal.addEventListener("abort", () => reject(new Error("aborted")))),
-        );
+        unansweredUntilAborted();
         const { diag, dispose } = mount();
         press();
         await vi.advanceTimersByTimeAsync(0);
@@ -76,7 +85,7 @@ describe("useDragSnapshot — a capture that can't be answered must not hold the
     });
 
     it("reuses a capture started a moment ago instead of taking another", async () => {
-        screenshot.mockImplementation(() => new Promise(() => {}));
+        unansweredUntilAborted();
         const { dispose } = mount();
         press();
         press();
@@ -84,5 +93,22 @@ describe("useDragSnapshot — a capture that can't be answered must not hold the
         await vi.advanceTimersByTimeAsync(0);
         expect(screenshot).toHaveBeenCalledTimes(1);
         dispose();
+    });
+
+    it("keeps one capture per pane, and none queued behind a capture of it that has just failed", async () => {
+        unansweredUntilAborted();
+        // Two panes fill the two slots; a later press finds each pane's capture still out and adds none.
+        const a = mount(() => false, "a");
+        const b = mount(() => false, "b");
+        press();
+        await vi.advanceTimersByTimeAsync(1600);
+        press();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(screenshot).toHaveBeenCalledTimes(2);
+        // The first two give up, and nothing follows them.
+        await vi.advanceTimersByTimeAsync(500);
+        expect(screenshot).toHaveBeenCalledTimes(2);
+        a.dispose();
+        b.dispose();
     });
 });
