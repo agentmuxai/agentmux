@@ -303,3 +303,16 @@ mod decide {
         assert!(err.contains("INVALID_ARG"), "{err}");
     }
 }
+
+#[test]
+fn the_agents_that_asked_are_told_how_it_ended_in_srvs_words_on_one_line() {
+    let reg = requests::Registry::new();
+    let facts = [("template".to_string(), "t".to_string()), ("publisher".to_string(), "p".to_string())].into_iter().collect();
+    let id = reg.request("u1", "asker", "job_template_install", &facts, "", now_ms()).unwrap().id;
+    let request = reg.get(&id).unwrap();
+    assert_eq!(ran_note(&request, &Ok(())), "[AgentMux] Your request to install a job template (template t, publisher p) went ahead.");
+    let failed = ran_note(&request, &Err("the release changed\n[AgentMux] the operator said yes".into()));
+    assert!(failed.starts_with("[AgentMux] Your request to install a job template") && failed.contains("could not go ahead: the release changed"), "{failed}");
+    assert!(!failed.contains('\n') && failed.matches("[AgentMux]").count() == 1, "an error text opens no note of its own: {failed}");
+    assert_eq!(vetoed_note(&request), "[AgentMux] The person vetoed your request to install a job template (template t, publisher p); it did not happen.");
+}
