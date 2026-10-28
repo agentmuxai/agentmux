@@ -715,6 +715,24 @@
     }
   },
   {
+    "event": "sensitive:cleared",
+    "payloadTs": {
+      "imports": [
+        "SensitiveClearedEvent"
+      ],
+      "name": "SensitiveClearedEvent"
+    }
+  },
+  {
+    "event": "sensitive:pending",
+    "payloadTs": {
+      "imports": [
+        "SensitiveView"
+      ],
+      "name": "SensitiveView"
+    }
+  },
+  {
     "event": "shell_chunk",
     "payloadTs": {
       "imports": [
