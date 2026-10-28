@@ -95,6 +95,12 @@ pub enum BrokerError {
     BadRequest(String),
     /// The broker isn't set up to mint yet.
     NotConfigured,
+    /// The installation is suspended on GitHub.
+    InstallSuspended,
+    /// The installation hasn't accepted a permission the App asks for: its owner accepts it on GitHub.
+    PermissionNotGranted(String),
+    /// GitHub refused the broker's request for the token.
+    GithubRejected,
     /// Anything else: the status and the broker's error code.
     Other { status: u16, error: String },
 }
@@ -122,6 +128,12 @@ impl std::fmt::Display for BrokerError {
             Self::PermissionNotAllowed(permission) => write!(f, "the AgentMux GitHub App can't give the {permission} permission"),
             Self::BadRequest(why) => write!(f, "AgentMux Cloud refused a malformed GitHub request ({why})"),
             Self::NotConfigured => write!(f, "AgentMux Cloud can't mint GitHub tokens yet"),
+            Self::InstallSuspended => write!(f, "the AgentMux GitHub App is suspended on that account: unsuspend it on GitHub"),
+            Self::PermissionNotGranted(permission) => write!(
+                f,
+                "that installation hasn't accepted the {permission} permission yet: its owner accepts it in GitHub's settings for the AgentMux App"
+            ),
+            Self::GithubRejected => write!(f, "GitHub refused to give a token for that repository"),
             Self::Other { status, error } => write!(f, "AgentMux Cloud refused the GitHub request ({status} {error})"),
         }
     }
@@ -302,6 +314,9 @@ pub fn error_for(status: u16, body: &Value) -> BrokerError {
         (403, "permission_not_allowed") => BrokerError::PermissionNotAllowed(text("permission")),
         (400, "bad_request") => BrokerError::BadRequest(text("message")),
         (503, "github_not_configured") => BrokerError::NotConfigured,
+        (403, "install_suspended") => BrokerError::InstallSuspended,
+        (403, "permission_not_granted") => BrokerError::PermissionNotGranted(text("permission")),
+        (502, "github_rejected") => BrokerError::GithubRejected,
         (403, "blocked") => BrokerError::Blocked,
         (403, "not_connected") | (404, "not_connected") => BrokerError::NotConnected,
         (403, "revoked") => BrokerError::NotLive("revoked".to_string()),
@@ -604,6 +619,9 @@ mod tests {
         assert_eq!(e(403, json!({"error":"permission_not_allowed","permission":"workflows"})), BrokerError::PermissionNotAllowed("workflows".into()));
         assert_eq!(e(400, json!({"error":"bad_request","message":"x"})), BrokerError::BadRequest("x".into()));
         assert_eq!(e(503, json!({"error":"github_not_configured"})), BrokerError::NotConfigured);
+        assert_eq!(e(403, json!({"error":"install_suspended"})), BrokerError::InstallSuspended);
+        assert_eq!(e(403, json!({"error":"permission_not_granted","permission":"workflows"})), BrokerError::PermissionNotGranted("workflows".into()));
+        assert_eq!(e(502, json!({"error":"github_rejected"})), BrokerError::GithubRejected);
         // Still a brief outage, not "not configured".
         assert!(matches!(e(503, json!({"error":"github_unavailable"})), BrokerError::Unavailable(_)));
         assert!(matches!(e(429, json!({"error":"rate_limited"})), BrokerError::Unavailable(_)));
