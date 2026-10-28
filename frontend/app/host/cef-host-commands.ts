@@ -110,8 +110,10 @@ export const cefBrowserPanes: BrowserPaneHostApi = {
     inspectElement: async (blockId, x, y) => {
         await invokeCommand("browser_pane_inspect_element", { block_id: blockId, x, y });
     },
-    screenshot: (blockId, opts) =>
-        invokeBrowserApi<{ png_base64: string }>("screenshot", { block_id: blockId, ...opts }),
+    screenshot: (blockId, opts) => {
+        const { signal, ...body } = opts;
+        return invokeBrowserApi<{ png_base64: string }>("screenshot", { block_id: blockId, ...body }, { signal });
+    },
     authSubmit: async (requestId, username, password) => {
         await invokeCommand("browser_pane_auth_submit", { request_id: requestId, username, password });
     },

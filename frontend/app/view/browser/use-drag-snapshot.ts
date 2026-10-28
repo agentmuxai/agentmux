@@ -15,6 +15,44 @@ export interface DragSnapshot {
 // press that started it didn't become a drag, and the page has moved on.
 const PREWARM_MAX_AGE_MS = 3000;
 
+// A press this soon after another's prewarm reuses it: clicking around a pane
+// header is not a reason to capture every page again.
+const PREWARM_REUSE_MS = 1500;
+
+// A capture still unanswered after this is given up on. A healthy one takes
+// 50-90ms; a page that can't paint (hidden, busy, frozen) answers only when the
+// host's own timeouts run out, tens of seconds, holding one of the page's six
+// connections to the host the whole time. Every other host command (pane rects,
+// overlay clips, focus) queues behind those, so panes sat where the last rect
+// put them while the layout moved on.
+const CAPTURE_TIMEOUT_MS = 2000;
+
+// After a capture fails or times out, this pane takes no snapshot for this long.
+const FAILURE_BACKOFF_MS = 10_000;
+
+// Captures in flight at once across every pane in the window.
+const MAX_CONCURRENT_CAPTURES = 2;
+
+/** Runs at most `max` jobs at once; the rest wait their turn, in order. */
+export function createSlotGate(max: number): <T>(job: () => Promise<T>) => Promise<T> {
+    let active = 0;
+    const waiting: Array<() => void> = [];
+    return async (job) => {
+        if (active >= max) await new Promise<void>((go) => waiting.push(go));
+        else active++;
+        try {
+            return await job();
+        } finally {
+            // The slot goes straight to the next in line, or is freed.
+            const next = waiting.shift();
+            if (next) next();
+            else active--;
+        }
+    };
+}
+
+const captureGate = createSlotGate(MAX_CONCURRENT_CAPTURES);
+
 /**
  * True when a snapshot's pixel size is this pane's own (±2px for rounding).
  * The host picks the page to capture by URL, so with several panes on one
@@ -36,15 +74,33 @@ export function useDragSnapshot(params: {
     placeholderRef: () => HTMLDivElement | undefined;
     paneRect: () => PaneRect;
     paneCreated: () => boolean;
+    /** The page can't paint or answer a capture now: its tab is hidden, or it is asleep or frozen
+     *  (a capture would thaw a frozen page). No snapshot is taken. */
+    unavailable?: () => boolean;
     diag: (msg: string) => void;
 }): { take: () => Promise<DragSnapshot | null> } {
     const { model, placeholderRef, paneRect, paneCreated, diag } = params;
+    let failedUntil = 0;
 
     const capture = async (): Promise<DragSnapshot | null> => {
         const pr = paneRect();
         if (!paneCreated() || model.closed || pr.width <= 0 || pr.height <= 0) return null;
+        if (params.unavailable?.() || Date.now() < failedUntil) return null;
+        return captureGate(() => captureOnce());
+    };
+
+    const captureOnce = async (): Promise<DragSnapshot | null> => {
+        // Waiting for a slot can take a while: the pane may have gone since.
+        if (!paneCreated() || model.closed || params.unavailable?.()) return null;
+        const abort = new AbortController();
+        const timer = setTimeout(() => abort.abort(), CAPTURE_TIMEOUT_MS);
         try {
-            const data = await getApi().browserPanes.screenshot(model.blockId, { format: "jpeg", quality: 80 });
+            const data = await getApi().browserPanes.screenshot(model.blockId, {
+                format: "jpeg",
+                quality: 80,
+                signal: abort.signal,
+            });
+            clearTimeout(timer);
             if (!data?.png_base64) return null;
             const src = `data:image/jpeg;base64,${data.png_base64}`;
             const img = new Image();
@@ -70,6 +126,8 @@ export function useDragSnapshot(params: {
                 },
             };
         } catch (err) {
+            clearTimeout(timer);
+            failedUntil = Date.now() + FAILURE_BACKOFF_MS;
             diag(`[drag-snapshot] capture failed: ${err}`);
             return null;
         }
@@ -81,6 +139,7 @@ export function useDragSnapshot(params: {
         // pragmatic-dnd marks every draggable() element draggable="true":
         // pane headers, Pane Tab pills, Window Tabs.
         if (!(e.target instanceof Element) || !e.target.closest('[draggable="true"]')) return;
+        if (prewarmed && Date.now() - prewarmed.at < PREWARM_REUSE_MS) return;
         prewarmed = { at: Date.now(), snapshot: capture() };
     };
     document.addEventListener("pointerdown", onPointerDown, true);

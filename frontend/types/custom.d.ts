@@ -296,8 +296,11 @@ declare global {
         print(blockId: string): Promise<void>;
         viewSource(blockId: string): Promise<void>;
         inspectElement(blockId: string, x: number, y: number): Promise<void>;
-        /** A still of the page, e.g. to show while the native pane is hidden. */
-        screenshot(blockId: string, opts: { format: "jpeg" | "png"; quality?: number }): Promise<{ png_base64: string }>;
+        /** A still of the page, e.g. to show while the native pane is hidden. An aborted `signal` ends the request. */
+        screenshot(
+            blockId: string,
+            opts: { format: "jpeg" | "png"; quality?: number; signal?: AbortSignal },
+        ): Promise<{ png_base64: string }>;
         /** Answer an HTTP auth challenge (`browser-pane-auth-request`). */
         authSubmit(requestId: string, username: string, password: string): Promise<void>;
         authCancel(requestId: string): Promise<void>;

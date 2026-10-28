@@ -492,6 +492,7 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
         placeholderRef: () => placeholderRef,
         paneRect: rectSync.paneRect,
         paneCreated: rectSync.paneCreated,
+        unavailable: () => !visible() || sleeping() || freezer.isFrozen(),
         diag,
     });
     useBrowserAuth({ model, modalLayer, diag });
