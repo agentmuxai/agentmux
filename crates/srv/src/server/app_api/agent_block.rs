@@ -13,16 +13,18 @@ use crate::backend::storage::store::Store;
 use super::{resolve_tab_id, resolve_tab_id_for_block};
 
 /// An agent's block and the tab it is in. `tab_id` is `None` for a parked block.
-#[cfg_attr(not(test), allow(dead_code))] // until place_agent (#5838 PR C) calls it
 #[derive(Debug, Clone)]
 pub(crate) struct AgentBlock {
     pub block: Block,
     pub tab_id: Option<String>,
 }
 
-#[cfg_attr(not(test), allow(dead_code))] // until place_agent (#5838 PR C) calls it
-fn is_agent_block_of(block: &Block, agent_uid: &str) -> bool {
+/// A block launched from a template keeps the template's id in `agentId` and binds its agent through
+/// `agentInstanceId`, so the bound instance counts too.
+fn is_agent_block_of(mstore: &Store, block: &Block, agent_uid: &str) -> bool {
     ["agentId", "agent:id"].iter().any(|key| obj::meta_get_string(&block.meta, key, "") == agent_uid)
+        || (obj::meta_get_string(&block.meta, "view", "") == "agent"
+            && mstore.instance_get_by_block_id(&block.oid).ok().flatten().is_some_and(|i| i.id == agent_uid))
 }
 
 fn is_parked(block: &Block) -> bool {
@@ -42,7 +44,6 @@ fn controller_is_live(block_id: &str) -> bool {
 /// orphan boot drops (`persist.rs`), which `AttachBlock` could not attach. An agent should have
 /// one block. Where old layouts left several, the one with a live controller wins, then one in a
 /// tab over a parked one, then the lowest id (so the answer is stable).
-#[cfg_attr(not(test), allow(dead_code))] // until place_agent (#5838 PR C) calls it
 pub(crate) fn find_agent_block_by_uid(mstore: &Store, agent_uid: &str) -> Result<Option<AgentBlock>, String> {
     let agent_uid = agent_uid.trim();
     if agent_uid.is_empty() {
@@ -52,7 +53,7 @@ pub(crate) fn find_agent_block_by_uid(mstore: &Store, agent_uid: &str) -> Result
         .get_all::<Block>()
         .map_err(|e| format!("find_agent_block_by_uid: list blocks: {e}"))?
         .into_iter()
-        .filter(|b| is_agent_block_of(b, agent_uid))
+        .filter(|b| is_agent_block_of(mstore, b, agent_uid))
         .collect();
     if found.is_empty() {
         return Ok(None);
@@ -113,6 +114,48 @@ mod tests {
         assert_eq!((bob.block.oid.as_str(), bob.tab_id), (parked.as_str(), None));
         assert!(find_agent_block_by_uid(&store, "nobody").unwrap().is_none());
         assert!(find_agent_block_by_uid(&store, "  ").unwrap().is_none());
+    }
+
+    /// A block launched from a template keeps the template's id in `agentId`; its agent is the bound instance.
+    #[test]
+    fn a_template_launched_agents_block_is_found_through_its_binding() {
+        use crate::backend::storage::agents::{AgentInstance, InstanceStatus};
+        let store = Store::open_in_memory().unwrap();
+        let mut meta = MetaMapType::new();
+        meta.insert("view".to_string(), serde_json::json!("agent"));
+        meta.insert("agentId".to_string(), serde_json::json!("tmpl"));
+        meta.insert("agentInstanceId".to_string(), serde_json::json!("inst"));
+        let mut block = Block { oid: uuid::Uuid::new_v4().to_string(), meta, ..Default::default() };
+        store.insert(&mut block).unwrap();
+        let tab = insert_tab(&store, &[&block.oid]);
+        assert!(find_agent_block_by_uid(&store, "inst").unwrap().is_none(), "no agent is bound yet");
+
+        let mut def: crate::backend::storage::AgentDefinition = serde_json::from_value(serde_json::json!({
+            "id": "inst", "slug": "inst", "name": "inst", "icon": "robot", "provider": "claude", "description": "", "created_at": 1,
+        }))
+        .unwrap();
+        store.agent_def_insert(&mut def).unwrap();
+        store
+            .instance_create(&AgentInstance {
+                id: "inst".to_string(),
+                definition_id: "inst".to_string(),
+                parent_instance_id: String::new(),
+                block_id: block.oid.clone(),
+                session_id: "sess".to_string(),
+                status: InstanceStatus::Running.as_str().to_string(),
+                github_context: String::new(),
+                started_at: 1000,
+                ended_at: 0,
+                created_at: 1000,
+                identity_id: String::new(),
+                memory_id: String::new(),
+                instance_name: String::new(),
+                working_directory: String::new(),
+                display_hidden: false,
+            })
+            .unwrap();
+        let found = find_agent_block_by_uid(&store, "inst").unwrap().unwrap();
+        assert_eq!((found.block.oid.as_str(), found.tab_id.as_deref()), (block.oid.as_str(), Some(tab.as_str())));
     }
 
     #[test]

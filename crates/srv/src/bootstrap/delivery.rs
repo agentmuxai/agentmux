@@ -284,6 +284,10 @@ pub fn install_close_on_exit_handler(state: &AppState) {
     backend::blockcontroller::set_close_on_exit_handler(Arc::new(move |tab_id: String, block_id: String| {
         let state = state.clone();
         tokio::spawn(async move {
+            // An agent's process ending makes it stopped; its block stays (always-available agents).
+            if crate::sagas::park_agents::keeps_block(&state, &block_id) {
+                return;
+            }
             if let Err(e) = crate::sagas::delete_block::run(&state, tab_id.clone(), block_id.clone()).await {
                 // Best-effort, same posture as every other close-on-exit
                 // failure mode: the shell already exited and its PTY is

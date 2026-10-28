@@ -222,14 +222,18 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let broker = state.broker.clone();
     let identity_store_del = state.identity_store.clone();
     let id_store_del = state.id_store.clone();
+    let state_del = state.clone();
     engine.register_typed(
         COMMAND_DELETE_AGENT_INSTANCE,
         move |cmd: CommandDeleteAgentInstanceData, _ctx| {
+            let state = state_del.clone();
             let mstore = mstore.clone();
             let broker = broker.clone();
             let identity_store = identity_store_del.clone();
             let id_store = id_store_del.clone();
             async move {
+                // An agent's delete also deletes its parked block, and stops it (as `deleteagent` does).
+                crate::sagas::park_agents::delete_parked_blocks_of(&state, &cmd.id).await;
                 // Read the row first so we can emit a scoped event after.
                 let definition_id = mstore
                     .instance_get(&cmd.id)

@@ -1,6 +1,6 @@
 # Spec: always-available agents (an agent runs and is recorded whether or not a pane shows it)
 
-**Status:** active — the operator approved decisions D1 to D10 as recommended (relayed by AgentX, 2026-10-27). Kanban #5823 (spec); the build is #5838 (P1) and #5840 (P2b). P1 is three PRs: A (the park and attach commands, the by-uid lookup, the setting, off) in #5641.
+**Status:** active — the operator approved decisions D1 to D10 as recommended (relayed by AgentX, 2026-10-27). Kanban #5823 (spec); the build is #5838 (P1) and #5840 (P2b). P1 is three PRs: A (the park and attach commands, the by-uid lookup, the setting, off) in #5641; B (the close paths park an agent's block: close-pane, tab-close, workspace-delete; a process exit keeps it; deleting the agent deletes it) in #5657; C (agent.open attaches a parked block or focuses the pane that shows the agent, the per-agent desired state, the headless start) in #5661.
 **Date:** 2026-10-27
 **Author:** AgentX@narko, with Manoz@Area54 (lifecycle), Camper@narko (Swarm) and AgentA@Area54 (srv core) answering questions.
 **Verified against:** `agentmux` `main` @ `685c739a4` (2026-10-27), by reading code. Nothing here is built. Claims I could not check are listed in section 10.

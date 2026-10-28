@@ -25,6 +25,7 @@ use super::AppState;
 use crate::backend::reactive::sanitize::quote_in_system_note;
 use crate::backend::sensitive_ops;
 use crate::backend::sensitive_requests::{self as requests, Request};
+use crate::sagas::sensitive_fallback as fallback;
 use crate::sagas::sensitive_window as window;
 use agentmux_common::time::now_ms;
 
@@ -80,13 +81,37 @@ fn facts_of(body: &Value) -> Result<BTreeMap<String, String>, String> {
         .collect()
 }
 
+/// Do `action` for the agent, and leave an audit row for the steps of a request: the row names the
+/// agent that did it, a refused approval or denial included.
 async fn act(state: &AppState, uid: &str, slug: &str, action: &str, body: &Value) -> Result<Value, String> {
+    let result = act_inner(state, uid, slug, action, body).await;
+    if matches!(action, "request" | "approve" | "deny" | "cancel") {
+        let id = result.as_ref().ok().and_then(|v| v["id"].as_str()).map(str::to_string).unwrap_or_else(|| text(body, "id"));
+        // A request refused before it was filed has nothing to attach a row to.
+        if let Some(request) = requests::registry().get(&id) {
+            let outcome = match &result {
+                Ok(v) if action == "request" && v["joined"] == true => "joined".to_string(),
+                Ok(_) => serde_json::to_value(request.status).ok().and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default(),
+                Err(_) => "refused".to_string(),
+            };
+            window::audit_step(state, slug, &request, &format!("sensitive.{action}"), result.is_ok(), result.as_ref().err().map(String::as_str), &outcome);
+        }
+    }
+    result
+}
+
+async fn act_inner(state: &AppState, uid: &str, slug: &str, action: &str, body: &Value) -> Result<Value, String> {
     let id = text(body, "id");
     match action {
         "request" => {
             let filed = requests::registry().request(uid, slug, &text(body, "op"), &facts_of(body)?, &text(body, "reason"), now_ms())?;
             let request = requests::registry().get(&filed.id).ok_or("no request (it ended just now)")?;
-            let review = if filed.joined { "joined a request for the same thing that was already open".to_string() } else { ask_the_super_agent(state, &request) };
+            let review = if filed.joined {
+                "joined a request for the same thing that was already open".to_string()
+            } else {
+                fallback::watch(state, &filed.id);
+                ask_the_super_agent(state, &request)
+            };
             Ok(json!({ "id": filed.id, "joined": filed.joined, "status": request.status, "summary": request.summary, "review": review }))
         }
         "approve" => {
@@ -98,14 +123,14 @@ async fn act(state: &AppState, uid: &str, slug: &str, action: &str, body: &Value
             }
             requests::registry().approve(&id, slug, now_ms())?;
             let view = window::open(state, &id, Duration::from_secs(spec.window_secs))?;
-            tell_askers(&request, &approved_note(&request, slug, spec.window_secs));
+            window::tell_askers(&request, &approved_note(&request, slug, spec.window_secs));
             Ok(json!({ "id": id, "status": "pending", "deadline_ms": view.deadline_ms, "window_secs": spec.window_secs }))
         }
         "deny" => {
             require_super(state, uid)?;
             let request = must_get(&id)?;
             let denied = requests::registry().deny(&id, slug, &text(body, "reason"), now_ms())?;
-            tell_askers(&denied, &denied_note(&denied, slug));
+            window::tell_askers(&denied, &denied_note(&denied, slug));
             Ok(json!({ "id": id, "status": "denied", "requester": request.requester_slug }))
         }
         "cancel" => {
@@ -167,30 +192,18 @@ fn tell(uid: &str, note: &str) -> bool {
     }
 }
 
-/// The agents that asked for it: the first, then those that joined.
-fn askers(request: &Request) -> Vec<&str> {
-    std::iter::once(request.requester_uid.as_str()).chain(request.also_asked_by.iter().map(|a| a.uid.as_str())).collect()
-}
-
-/// Tell every agent that asked for it, those that joined included.
-fn tell_askers(request: &Request, note: &str) {
-    for uid in askers(request) {
-        tell(uid, note);
-    }
-}
-
 /// Send the super agent the request, and say to the requester what came of it.
 fn ask_the_super_agent(state: &AppState, request: &Request) -> String {
     let Some(holder) = super_uid(state) else {
-        return "no agent holds the super seat, so nobody can review this yet".to_string();
+        return "no agent holds the super seat. If none does shortly, the person gets a countdown twice as long, saying no super agent reviewed it, and can veto it".to_string();
     };
     if holder == request.requester_uid {
         return "you are the super agent: approve it yourself with action approve".to_string();
     }
     if tell(&holder, &request_note(request)) {
-        "the super agent has been asked".to_string()
+        "the super agent has been asked; if it doesn't answer in 2 minutes, the person gets a countdown twice as long, saying no super agent reviewed it".to_string()
     } else {
-        "the super agent isn't running here, so nobody can review this yet".to_string()
+        "the super agent isn't running here. If it doesn't answer in 2 minutes, the person gets a countdown twice as long, saying no super agent reviewed it, and can veto it".to_string()
     }
 }
 

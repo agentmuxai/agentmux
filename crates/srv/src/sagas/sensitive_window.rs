@@ -377,6 +377,28 @@ fn audit(state: &AppState, v: &SensitiveView, action: &str, ok: bool, error: Opt
     state.reactive_handler.log_fleet_action_audit(Some(source), &v.requester, "", action, ok, error, &v.request_id, Some(&note));
 }
 
+/// Tell every agent that asked for a request, those that joined included. An agent that isn't
+/// running is not an error.
+pub fn tell_askers(request: &Request, note: &str) {
+    for uid in request.askers() {
+        if let Err(e) = crate::backend::reactive::get_global_handler().deliver_system_note(uid, note) {
+            tracing::info!(error = %e, "sensitive request: note not delivered");
+        }
+    }
+}
+
+/// One audit row for a step of a request, done by `actor` (the agent that did it, or
+/// "no super agent" for the fallback): the request, the approval, the denial, the withdrawal.
+pub fn audit_step(state: &AppState, actor: &str, r: &Request, action: &str, ok: bool, error: Option<&str>, outcome: &str) {
+    let note = format!("{}: {} | requested by {} | {outcome}", r.op, r.summary, r.requester_slug);
+    state.reactive_handler.log_fleet_action_audit(Some(actor), &r.requester_slug, "", action, ok, error, &r.id, Some(&note));
+}
+
+/// The runner of an operation is one for the whole process, so the tests that need one (or none)
+/// of a shared operation take turns.
+#[cfg(test)]
+pub(crate) static TEST_RUNNER_TURN: Mutex<()> = Mutex::new(());
+
 #[cfg(test)]
 #[path = "sensitive_window_tests.rs"]
 mod tests;
