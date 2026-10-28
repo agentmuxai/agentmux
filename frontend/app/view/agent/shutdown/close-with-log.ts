@@ -21,7 +21,7 @@ export function closeWithShutdownLog(tabId: string, blockIds: string[], isAgent:
     // One close per block at a time: the agent takes a while to stop, and a second click on the
     // pane's × meanwhile asked srv to close blocks it was already closing, which came back as a
     // failure (a red notice) for a close that was working. The first one's log is the answer.
-    if (blockIds.some((id) => closing.has(id))) return Promise.resolve();
+    if (isClosingWithLog(blockIds)) return Promise.resolve();
     for (const id of blockIds) closing.add(id);
     const agentIds = blockIds.filter(isAgent);
     for (const id of agentIds) beginShutdownLog(id);
@@ -55,3 +55,8 @@ export function closeWithShutdownLog(tabId: string, blockIds: string[], isAgent:
 
 /** The blocks whose close (`ClosePane`) has not answered yet. */
 const closing = new Set<string>();
+
+/** Whether any of `blockIds` is being closed by `closeWithShutdownLog` right now. */
+export function isClosingWithLog(blockIds: string[]): boolean {
+    return blockIds.some((id) => closing.has(id));
+}

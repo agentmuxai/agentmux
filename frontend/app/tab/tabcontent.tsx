@@ -23,7 +23,7 @@ import {
     type BusyMember,
     type PaneCloseProbe,
 } from "@/app/tab/pane-close-guard";
-import { closeWithShutdownLog } from "@/app/view/agent/shutdown/close-with-log";
+import { closeWithShutdownLog, isClosingWithLog } from "@/app/view/agent/shutdown/close-with-log";
 import {
     describeLeave,
     leavePrompts,
@@ -172,6 +172,9 @@ function TabContent(props: { tabId: string }): JSX.Element {
         // from removing it now; srv removes it once its agents are down.
         async function beforeNodeDelete(data: TabLayoutData): Promise<boolean> {
             const blockIds = effectiveStack(data).filter(Boolean);
+            // Already closing (an agent winding down under its shutdown log): a second click
+            // neither probes srv again nor asks the prompts again.
+            if (isClosingWithLog(blockIds)) return false;
             const busy = await busyMembers(blockIds, paneCloseProbe);
             if (busy.length > 0) {
                 const confirmed = await new Promise<boolean>((resolve) =>

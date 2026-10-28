@@ -17,7 +17,7 @@ vi.mock("./shutdown-log", () => ({
     failShutdownLog: (id: string, m: string) => log.fail(id, m),
 }));
 
-import { closeWithShutdownLog } from "./close-with-log";
+import { closeWithShutdownLog, isClosingWithLog } from "./close-with-log";
 
 describe("closeWithShutdownLog (SPEC_AGENT_SELF_QUIT §5.5)", () => {
     beforeEach(() => {
@@ -36,11 +36,15 @@ describe("closeWithShutdownLog (SPEC_AGENT_SELF_QUIT §5.5)", () => {
         let done!: () => void;
         closePane.mockReturnValue(new Promise<void>((resolve) => (done = resolve)));
         const first = closeWithShutdownLog("t1", ["a", "term"], (id) => id === "a");
+        // What the pane's close asks first, so a second click does not probe or prompt again.
+        expect(isClosingWithLog(["term"])).toBe(true);
+        expect(isClosingWithLog(["other"])).toBe(false);
         await closeWithShutdownLog("t1", ["a", "term"], (id) => id === "a");
         expect(closePane).toHaveBeenCalledTimes(1);
         expect(flash).not.toHaveBeenCalled();
         done();
         await first;
+        expect(isClosingWithLog(["a", "term"])).toBe(false);
         // Once it has answered the pane can be closed again (Try again after a failure).
         closePane.mockResolvedValue({});
         await closeWithShutdownLog("t1", ["a", "term"], (id) => id === "a");
