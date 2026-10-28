@@ -42,6 +42,16 @@ pub async fn invoke_haiku(
     timeout: std::time::Duration,
 ) -> Result<(String, Option<crate::agents::TokenCounts>), String> {
     let auth_env = crate::backend::blockcontroller::cmd_env_of(meta);
+    // Not on an identity whose first spawn is still refreshing its token (#6081): held until that
+    // spawn's first turn has ended, and over this call's own run. Gives up on cancel, or when the
+    // wait alone uses up the call's time.
+    let _identity = tokio::select! {
+        biased;
+        _ = cancel.cancelled() => return Err("cancelled: superseded by a newer request".to_string()),
+        held = tokio::time::timeout(timeout, crate::identity::token_warmup::ambient_gate(auth_env.get("CLAUDE_CONFIG_DIR").map(String::as_str))) => {
+            held.map_err(|_| format!("ambient CLI waited {}s for its identity's first turn", timeout.as_secs()))?
+        }
+    };
 
     let mut cmd = crate::server::cli_handlers::make_cli_cmd(cli_path);
     // A bare text-generation call, not an agent session: no tools, one turn, no

@@ -192,6 +192,7 @@ impl PersistentSubprocessController {
                 // it kept running.
                 let is_current_generation = inner.spawn_generation == my_generation_wait;
                 if is_current_generation {
+                    crate::identity::token_warmup::release(&block_id_wait);
                     inner.proc_exit_code = exit_code;
                     if let Some(ended) = inner.current_pid.take() {
                         crate::backend::cli_native::pids::clear(&block_id_wait, ended);
