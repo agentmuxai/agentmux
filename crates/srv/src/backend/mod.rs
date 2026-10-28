@@ -197,6 +197,7 @@ pub mod registry_probe;
 pub mod cron;
 pub mod jobs;
 pub mod dev_proxy;
+pub mod dev_relay;
 pub mod shell_node;
 pub mod work_facts;
 /// The Kanban's reminders and PR links (SPEC_WARDEN_KANBAN_2026_10_20.md).

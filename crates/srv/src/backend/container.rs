@@ -2092,7 +2092,7 @@ mod tests {
         registry.register("itest-proj", "itest-devproxy", addr).await;
         assert_eq!(
             registry.lookup("itest-proj-itest-devproxy").await,
-            Some(addr),
+            Some(addr.into()),
             "registration must be visible via lookup before cleanup"
         );
 

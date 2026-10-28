@@ -12,19 +12,21 @@
 //!
 //! Deliberately NOT a general-purpose reverse proxy (spec §4): Host-header
 //! → backend address is the entire feature. No path routing, no TLS, no
-//! auth, no rate limiting, no websocket upgrade handling.
+//! auth, no rate limiting. WebSocket upgrades are passed through (a dev server's hot reload
+//! needs one), and a container whose address the host cannot reach (Docker Desktop) is reached
+//! through the relay in `dev_relay`.
+
+mod forward;
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use axum::body::Body;
 use axum::extract::{Request, State};
 use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::any;
 use axum::Router;
-use futures_util::TryStreamExt;
 use tokio::sync::RwLock;
 
 /// Fixed local port the proxy listens on. Chosen for this PR — nothing
@@ -38,8 +40,23 @@ pub const DEV_PROXY_PORT: u16 = 8090;
 /// plain string-suffix match on the routing key isn't safe).
 #[derive(Debug, Clone)]
 struct Route {
-    addr: SocketAddr,
+    target: Target,
     agent_id: String,
+}
+
+/// How to reach a registered dev server.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Target {
+    /// Straight to the container's address on the agents network.
+    Direct(SocketAddr),
+    /// Through the relay (`dev_relay`), to a container by name.
+    Relay { via: crate::backend::dev_relay::RelayEndpoint, container: String, port: u16 },
+}
+
+impl From<SocketAddr> for Target {
+    fn from(addr: SocketAddr) -> Self {
+        Target::Direct(addr)
+    }
 }
 
 /// `"<project>-<agent_id>"` → the container's internal `ip:port` its dev
@@ -68,12 +85,12 @@ impl DevProxyRegistry {
         format!("{}-{}", project.to_lowercase(), agent_id.to_lowercase())
     }
 
-    pub async fn register(&self, project: &str, agent_id: &str, addr: SocketAddr) {
+    pub async fn register(&self, project: &str, agent_id: &str, target: impl Into<Target>) {
         let key = Self::routing_key(project, agent_id);
         self.routes.write().await.insert(
             key,
             Route {
-                addr,
+                target: target.into(),
                 agent_id: agent_id.to_lowercase(),
             },
         );
@@ -96,8 +113,8 @@ impl DevProxyRegistry {
             .retain(|_, route| route.agent_id != agent_id);
     }
 
-    pub async fn lookup(&self, key: &str) -> Option<SocketAddr> {
-        self.routes.read().await.get(key).map(|r| r.addr)
+    pub async fn lookup(&self, key: &str) -> Option<Target> {
+        self.routes.read().await.get(key).map(|r| r.target.clone())
     }
 
     #[cfg(test)]
@@ -136,17 +153,13 @@ pub fn routing_key_from_host(host: &str) -> Option<String> {
 #[derive(Clone)]
 struct ProxyState {
     registry: DevProxyRegistry,
-    client: reqwest::Client,
 }
 
 /// Builds the proxy's axum router. Split out from [`serve`] so tests can
 /// drive it directly (via a real bound listener) without needing the fixed
 /// [`DEV_PROXY_PORT`] to be free.
 pub fn router(registry: DevProxyRegistry) -> Router {
-    let client = reqwest::Client::builder()
-        .build()
-        .unwrap_or_else(|_| reqwest::Client::new());
-    let state = ProxyState { registry, client };
+    let state = ProxyState { registry };
     // `.fallback` (not a path route): routing here is entirely by Host
     // header, so every path/method for every host is the same handler.
     Router::new()
@@ -189,10 +202,10 @@ fn not_found_response(key: &str) -> Response {
         .into_response()
 }
 
-/// The one handler this proxy has. Reads `Host`, looks up the backend,
-/// forwards the request (method/headers/body, streamed both ways so a
-/// large response body — or a long-lived one — isn't buffered whole in
-/// memory), and streams the response back unchanged.
+/// The one handler this proxy has. Reads `Host`, looks up the backend, opens a connection to it
+/// (direct, or through the relay) and forwards the request over it, streaming the body both ways so
+/// a large or long-lived response isn't buffered whole in memory. A WebSocket upgrade becomes a
+/// byte pipe between the two ends.
 async fn proxy_handler(State(state): State<ProxyState>, req: Request) -> Response {
     let host = req
         .headers()
@@ -205,75 +218,33 @@ async fn proxy_handler(State(state): State<ProxyState>, req: Request) -> Respons
         return not_found_response(&host);
     };
 
-    let Some(addr) = state.registry.lookup(&key).await else {
+    let Some(target) = state.registry.lookup(&key).await else {
         return not_found_response(&key);
     };
 
-    let (parts, body) = req.into_parts();
-    let path_and_query = parts
-        .uri
-        .path_and_query()
-        .map(|pq| pq.as_str())
-        .unwrap_or("/");
-    let target_url = format!("http://{addr}{path_and_query}");
-
-    let req_stream = body.into_data_stream().map_err(std::io::Error::other);
-    let outbound_body = reqwest::Body::wrap_stream(req_stream);
-
-    let mut builder = state.client.request(parts.method.clone(), &target_url);
-    for (name, value) in parts.headers.iter() {
-        // Same hop-by-hop exclusion as the response path below, applied to
-        // the request side: `Host` describes a connection to THIS proxy, not
-        // the backend, and `Transfer-Encoding`/`Connection` describe the
-        // client's connection to us. Forwarding `Transfer-Encoding: chunked`
-        // verbatim alongside the independently re-streamed
-        // `reqwest::Body::wrap_stream` body would assert a chunked encoding
-        // reqwest is not actually producing — a conflicting signal that can
-        // break the forwarded request. reagent P1, PR #3439.
-        if name == header::HOST
-            || name == header::TRANSFER_ENCODING
-            || name == header::CONNECTION
-        {
-            continue;
+    let (stream, backend_host) = match &target {
+        Target::Direct(addr) => (tokio::net::TcpStream::connect(addr).await, addr.to_string()),
+        Target::Relay { via, container, port } => {
+            (crate::backend::dev_relay::connect(via, container, *port).await, format!("localhost:{port}"))
         }
-        builder = builder.header(name.clone(), value.clone());
+    };
+    let stream = match stream {
+        Ok(s) => s,
+        Err(e) => return bad_gateway(&key, &target, &e.to_string()),
+    };
+    match forward::forward(req, stream, &backend_host).await {
+        Ok(response) => response,
+        Err(e) => bad_gateway(&key, &target, &e),
     }
-    let builder = builder.body(outbound_body);
+}
 
-    match builder.send().await {
-        Ok(resp) => {
-            let status = resp.status();
-            let headers = resp.headers().clone();
-            let resp_stream = resp.bytes_stream().map_err(std::io::Error::other);
-            let mut out = Response::builder().status(status);
-            for (name, value) in headers.iter() {
-                // Hop-by-hop headers describing reqwest's own connection to
-                // the backend — passing them through would describe a
-                // connection that doesn't exist between the real client
-                // and this proxy (e.g. a stale Content-Length next to a
-                // re-chunked stream).
-                if name == header::TRANSFER_ENCODING || name == header::CONNECTION {
-                    continue;
-                }
-                out = out.header(name.clone(), value.clone());
-            }
-            out.body(Body::from_stream(resp_stream))
-                .unwrap_or_else(|_| StatusCode::BAD_GATEWAY.into_response())
-        }
-        Err(e) => {
-            tracing::warn!(
-                key = %key,
-                target = %target_url,
-                error = %e,
-                "dev-proxy: upstream request failed"
-            );
-            (
-                StatusCode::BAD_GATEWAY,
-                format!("AgentMux dev proxy: could not reach dev server for \"{key}\": {e}"),
-            )
-                .into_response()
-        }
-    }
+fn bad_gateway(key: &str, target: &Target, why: &str) -> Response {
+    tracing::warn!(key = %key, ?target, error = %why, "dev-proxy: upstream request failed");
+    (
+        StatusCode::BAD_GATEWAY,
+        format!("AgentMux dev proxy: could not reach dev server for \"{key}\": {why}"),
+    )
+        .into_response()
 }
 
 #[cfg(test)]
@@ -331,7 +302,7 @@ mod tests {
             registry
                 .lookup(&DevProxyRegistry::routing_key("pulse", "korp"))
                 .await,
-            Some(addr(4000))
+            Some(Target::Direct(addr(4000)))
         );
     }
 
@@ -362,7 +333,7 @@ mod tests {
             registry
                 .lookup(&DevProxyRegistry::routing_key("app", "narko"))
                 .await,
-            Some(addr(4002))
+            Some(Target::Direct(addr(4002)))
         );
     }
 
@@ -382,7 +353,7 @@ mod tests {
             registry
                 .lookup(&DevProxyRegistry::routing_key("proj", "x-lib"))
                 .await,
-            Some(addr(4000)),
+            Some(Target::Direct(addr(4000))),
             "a different agent (\"x-lib\") whose id merely ends with \"lib\" must survive"
         );
         assert_eq!(
@@ -402,7 +373,7 @@ mod tests {
             registry
                 .lookup(&DevProxyRegistry::routing_key("pulse", "korp"))
                 .await,
-            Some(addr(5000))
+            Some(Target::Direct(addr(5000)))
         );
     }
 
@@ -516,5 +487,117 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
         let body = resp.text().await.expect("body");
         assert_eq!(body, "te=false conn=false");
+    }
+
+    /// A fake dev server that answers a WebSocket handshake and echoes frames.
+    async fn websocket_echo_backend() -> SocketAddr {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind ws backend");
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            while let Ok((stream, _)) = listener.accept().await {
+                tokio::spawn(async move {
+                    use futures_util::{SinkExt, StreamExt};
+                    let Ok(mut ws) = tokio_tungstenite::accept_async(stream).await else { return };
+                    while let Some(Ok(msg)) = ws.next().await {
+                        if msg.is_text() || msg.is_binary() {
+                            let _ = ws.send(msg).await;
+                        }
+                    }
+                });
+            }
+        });
+        addr
+    }
+
+    async fn serve_proxy(registry: DevProxyRegistry) -> SocketAddr {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind proxy");
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, router(registry)).await;
+        });
+        addr
+    }
+
+    /// Hot reload: a WebSocket opened through the proxy reaches the dev server and carries frames both ways.
+    #[tokio::test]
+    async fn a_websocket_upgrade_is_passed_through() {
+        use futures_util::{SinkExt, StreamExt};
+        use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+        use tokio_tungstenite::tungstenite::Message;
+
+        let registry = DevProxyRegistry::new();
+        registry.register("pulse", "korp", websocket_echo_backend().await).await;
+        let proxy = serve_proxy(registry).await;
+
+        let request = "ws://pulse-korp.localhost:8090/hmr".into_client_request().unwrap();
+        let stream = tokio::net::TcpStream::connect(proxy).await.unwrap();
+        let (mut ws, response) = tokio_tungstenite::client_async(request, stream).await.expect("handshake through the proxy");
+        assert_eq!(response.status(), StatusCode::SWITCHING_PROTOCOLS);
+        ws.send(Message::text("update")).await.unwrap();
+        let echoed = tokio::time::timeout(std::time::Duration::from_secs(5), ws.next()).await.expect("an answer").unwrap().unwrap();
+        assert_eq!(echoed, Message::text("update"));
+    }
+
+    /// The same request through a relay: the proxy opens the connection by the relay's line protocol.
+    #[tokio::test]
+    async fn a_dev_server_behind_the_relay_is_reached_through_it() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let backend_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let backend_addr = backend_listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let _ = axum::serve(backend_listener, Router::new().fallback(any(|req: Request| async move {
+                format!("host={}", req.headers().get(header::HOST).and_then(|v| v.to_str().ok()).unwrap_or(""))
+            }))).await;
+        });
+        // A relay that checks the request line and then joins the connection to the backend.
+        let relay_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let relay_addr = relay_listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            while let Ok((mut client, _)) = relay_listener.accept().await {
+                tokio::spawn(async move {
+                    let mut line = Vec::new();
+                    loop {
+                        let mut b = [0u8; 1];
+                        if client.read(&mut b).await.unwrap_or(0) == 0 { return; }
+                        if b[0] == b'\n' { break; }
+                        line.push(b[0]);
+                    }
+                    if String::from_utf8_lossy(&line) != "tok agentmux-korp 7000" {
+                        let _ = client.write_all(b"ERR refused\n").await;
+                        return;
+                    }
+                    let Ok(mut backend) = tokio::net::TcpStream::connect(backend_addr).await else { return };
+                    let _ = client.write_all(b"OK\n").await;
+                    let _ = tokio::io::copy_bidirectional(&mut client, &mut backend).await;
+                });
+            }
+        });
+
+        let registry = DevProxyRegistry::new();
+        let via = crate::backend::dev_relay::RelayEndpoint { addr: relay_addr, token: "tok".into() };
+        registry.register("pulse", "korp", Target::Relay { via, container: "agentmux-korp".into(), port: 7000 }).await;
+        let proxy = serve_proxy(registry).await;
+
+        let resp = reqwest::Client::new()
+            .get(format!("http://{proxy}/"))
+            .header(header::HOST, "pulse-korp.localhost:8090")
+            .send()
+            .await
+            .expect("through the proxy and the relay");
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(resp.text().await.unwrap(), "host=localhost:7000", "the dev server is asked for as localhost, which every dev server allows");
+    }
+
+    /// A relay that refuses is a 502 that says why, not a hang.
+    #[tokio::test]
+    async fn a_relay_that_cannot_be_reached_is_a_bad_gateway() {
+        let gone = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap().local_addr().unwrap();
+        let registry = DevProxyRegistry::new();
+        let via = crate::backend::dev_relay::RelayEndpoint { addr: gone, token: "tok".into() };
+        registry.register("pulse", "korp", Target::Relay { via, container: "agentmux-korp".into(), port: 7000 }).await;
+        let proxy = serve_proxy(registry).await;
+        let resp = reqwest::Client::new().get(format!("http://{proxy}/")).header(header::HOST, "pulse-korp.localhost:8090").send().await.unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_GATEWAY);
+        assert!(resp.text().await.unwrap().contains("could not reach dev server"));
     }
 }
