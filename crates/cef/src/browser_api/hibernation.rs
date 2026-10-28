@@ -35,7 +35,9 @@ const PAGE_CHECK: &str = r#"(() => {
   let edited = [...document.querySelectorAll("input, textarea")].some(typed);
   const active = document.activeElement;
   if (!edited && active && active.isContentEditable && (active.textContent || "").trim()) edited = true;
-  return { media, edited };
+  // Chrome shows "Leave site?" only to a page its person has interacted with.
+  const activated = navigator.userActivation ? navigator.userActivation.hasBeenActive : true;
+  return { media, edited, activated };
 })()"#;
 
 /// The page's state for the hibernation check. `live: false` when the pane has
@@ -55,12 +57,14 @@ pub async fn check(state: &Arc<AppState>, block_id: &str) -> Result<Value, Strin
         .await?;
     let facts = page.pointer("/result/value").cloned().unwrap_or(Value::Null);
     let beforeunload = has_beforeunload(&mut cdp).await;
+    let activated = facts.get("activated").and_then(Value::as_bool).unwrap_or(true);
     cdp.close().await;
     Ok(json!({
         "live": true,
         "media": facts.get("media").and_then(Value::as_bool).unwrap_or(false),
         "edited": facts.get("edited").and_then(Value::as_bool).unwrap_or(false),
         "beforeunload": beforeunload,
+        "leave_prompt": leave_prompt(beforeunload, activated),
         "devtools": devtools,
     }))
 }
@@ -131,6 +135,15 @@ async fn has_beforeunload(cdp: &mut CdpSession) -> bool {
     }
 }
 
+/// Whether closing the pane would show the page's "Leave site?": a
+/// `beforeunload` listener, and the interaction Chrome requires before it lets
+/// one prompt. The window asks the person first when it is true
+/// (`pane-close-guard.ts`). A page can still answer without a prompt, so this
+/// errs towards asking.
+fn leave_prompt(beforeunload: bool, activated: bool) -> bool {
+    beforeunload && activated
+}
+
 fn any_beforeunload(listeners: &Value) -> bool {
     listeners
         .get("listeners")
@@ -141,6 +154,14 @@ fn any_beforeunload(listeners: &Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_leave_prompt_needs_a_listener_and_an_interaction() {
+        assert!(leave_prompt(true, true));
+        assert!(!leave_prompt(true, false), "Chrome shows no prompt to a page nobody has touched");
+        assert!(!leave_prompt(false, true));
+        assert!(!leave_prompt(false, false));
+    }
 
     #[test]
     fn finds_a_beforeunload_listener_among_others() {
