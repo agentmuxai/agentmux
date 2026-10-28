@@ -237,6 +237,23 @@ fn begins_waiting(before: Option<AgentRuntimeState>, row: &AgentRuntime) -> bool
     row.state == AgentRuntimeState::WaitingOnUser && row.block_id.is_some() && before != Some(AgentRuntimeState::WaitingOnUser)
 }
 
+/// The block an agent was waiting in, when it just stopped waiting (answered, cancelled or ended): the
+/// block of the last look, which the row may no longer name.
+fn ends_waiting(before: Option<&(AgentRuntimeState, Option<String>)>, row: &AgentRuntime) -> Option<String> {
+    match before {
+        Some((AgentRuntimeState::WaitingOnUser, Some(block_id))) if row.state != AgentRuntimeState::WaitingOnUser => Some(block_id.clone()),
+        _ => None,
+    }
+}
+
+/// Take down the notice [`notify_waiting`] raised, so a wait that ended before it showed does not show
+/// a stale question, and the next wait on the block is a new notice and not coalesced into the old.
+fn resolve_waiting(state: &AppState, block_id: &str) {
+    if let Some(router) = crate::backend::notify::router::get(&state.broker) {
+        router.resolve_nonblocking(block_id, crate::backend::notify::policy::Family::Input);
+    }
+}
+
 /// "Waiting on you" as an OS notification, for an agent no pane need show (a headless or parked one):
 /// the router coalesces it with the question's own report for the same block, so it adds nothing
 /// when the question already notified, and covers a wait that had no such report (an App Server
@@ -255,10 +272,15 @@ pub(crate) fn spawn(state: AppState) {
         loop {
             let looked = state.clone();
             if let Ok(rows) = tokio::task::spawn_blocking(move || list(&looked, agentmux_common::time::now_ms_u64())).await {
-                let before: HashMap<String, AgentRuntimeState> = last.iter().map(|(id, r)| (id.clone(), r.state)).collect();
+                let before: HashMap<String, (AgentRuntimeState, Option<String>)> =
+                    last.iter().map(|(id, r)| (id.clone(), (r.state, r.block_id.clone()))).collect();
                 for row in changed_rows(&mut last, rows) {
-                    if begins_waiting(before.get(&row.agent_id).copied(), &row) {
+                    let was = before.get(&row.agent_id);
+                    if begins_waiting(was.map(|w| w.0), &row) {
                         notify_waiting(&state, &row);
+                    }
+                    if let Some(block_id) = ends_waiting(was, &row) {
+                        resolve_waiting(&state, &block_id);
                     }
                     state.broker.publish_event_for::<crate::backend::mps_events::AgentRuntimeChanged>(
                         &row.agent_id,
@@ -399,6 +421,18 @@ mod tests {
         waiting.block_id = None;
         assert!(!begins_waiting(Some(AgentRuntimeState::Working), &waiting), "no block, nothing to notify about");
         assert!(!begins_waiting(None, &row("b", AgentRuntimeState::Working)));
+    }
+
+    #[test]
+    fn a_wait_ends_in_the_block_it_began_in() {
+        let waiting = (AgentRuntimeState::WaitingOnUser, Some("blk".to_string()));
+        let mut now = row("a", AgentRuntimeState::Working);
+        assert_eq!(ends_waiting(Some(&waiting), &now).as_deref(), Some("blk"));
+        now.block_id = Some("other".into());
+        assert_eq!(ends_waiting(Some(&waiting), &now).as_deref(), Some("blk"), "the old block, not the row's");
+        assert_eq!(ends_waiting(Some(&waiting), &row("a", AgentRuntimeState::WaitingOnUser)), None, "still waiting");
+        assert_eq!(ends_waiting(Some(&(AgentRuntimeState::Working, Some("blk".into()))), &now), None, "was not waiting");
+        assert_eq!(ends_waiting(None, &now), None);
     }
 
     #[test]
