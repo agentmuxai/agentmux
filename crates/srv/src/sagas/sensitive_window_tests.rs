@@ -316,3 +316,25 @@ fn the_agents_that_asked_are_told_how_it_ended_in_srvs_words_on_one_line() {
     assert!(!failed.contains('\n') && failed.matches("[AgentMux]").count() == 1, "an error text opens no note of its own: {failed}");
     assert_eq!(vetoed_note(&request), "[AgentMux] The person vetoed your request to install a job template (template t, publisher p); it did not happen.");
 }
+
+#[tokio::test]
+async fn a_request_for_what_something_else_just_did_is_ended_and_its_countdown_stops() {
+    let state = test_state();
+    let reg = requests::registry();
+    let publisher = format!("pub-{}", uuid::Uuid::new_v4().simple());
+    let file = |template: &str, publisher: &str| {
+        let facts = [("template".to_string(), template.to_string()), ("publisher".to_string(), publisher.to_string())].into_iter().collect::<BTreeMap<_, _>>();
+        reg.request("u-a", "a", "job_template_install", &facts, "", now_ms()).unwrap().id
+    };
+    let asked = file("t1", &publisher);
+    let counting = file("t2", &publisher);
+    reg.approve(&counting, "boss", now_ms()).unwrap();
+    open(&state, &counting, Duration::from_secs(60)).unwrap();
+    let other = file("t3", "someone-else");
+
+    answered_by_another(&state, "job_template_install", "publisher", &publisher, "The person did it");
+    assert_eq!(reg.get(&asked).unwrap().status, Status::Done, "waiting for review: ended");
+    assert_eq!(reg.get(&counting).unwrap().status, Status::Done, "counting down: ended");
+    assert_eq!(status(&counting).unwrap().status, "cancelled", "and its countdown stopped");
+    assert_eq!(reg.get(&other).unwrap().status, Status::Asked, "a different one is left alone");
+}

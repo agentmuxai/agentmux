@@ -264,6 +264,11 @@ impl Registry {
         })
     }
 
+    /// The open requests for `op` whose fact `key` is `value`.
+    pub fn open_matching(&self, op: &str, key: &str, value: &str) -> Vec<Request> {
+        self.lock().iter().filter(|r| r.status.is_open() && r.status != Status::Running && r.op == op && r.facts.get(key).is_some_and(|v| v == value)).cloned().collect()
+    }
+
     pub fn get(&self, id: &str) -> Option<Request> {
         self.lock().iter().find(|r| r.id == id).cloned()
     }

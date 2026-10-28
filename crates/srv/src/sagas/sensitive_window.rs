@@ -259,6 +259,21 @@ fn set_status(request_id: &str, status: &'static str, error: Option<String>) {
     }
 }
 
+/// Something else did what the open requests for `op` (whose fact `key` is `value`) asked for, for
+/// example the person's own request started the same upgrade: end them, their countdowns included,
+/// so none runs it a second time, and tell the agents that asked.
+pub fn answered_by_another(state: &AppState, op: &str, key: &str, value: &str, how: &str) {
+    for request in requests::registry().open_matching(op, key, value) {
+        if request.status == Status::Pending {
+            cancelled(state, &request.id);
+        }
+        if requests::registry().finish(&request.id, Status::Done, now_ms()).is_ok() {
+            let what = crate::backend::reactive::sanitize::quote_in_system_note(&request.summary);
+            tell_askers(&request, &format!("[AgentMux] {how}, so your request to {what} is no longer needed."));
+        }
+    }
+}
+
 /// What the agents that asked are told when the countdown ended and the operation ran, or could not.
 fn ran_note(request: &Request, outcome: &Result<(), String>) -> String {
     let what = crate::backend::reactive::sanitize::quote_in_system_note(&request.summary);
