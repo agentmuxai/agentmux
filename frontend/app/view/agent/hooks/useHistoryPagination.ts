@@ -506,7 +506,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                         (tail.start_line > 0 ? ` (${tail.start_line} older lines to fill)` : ""),
                 );
                 markAgentOpen(opts.blockId, "first_screen");
-                opts.model.dispatchPane({ type: "InitReady", at: Date.now() });
+                opts.model.dispatchPane({ type: "InitReady", at: Date.now(), historyDamaged: tail.history_damaged });
                 opts.onHistoryReady?.();
 
                 const sliceBytes =
@@ -752,7 +752,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                             (clampedStart > 0 ? ` (${clampedStart} older lines available via load-older)` : "") +
                             (ds?.collapsedNodeIds?.length ? `, ${ds.collapsedNodeIds.length} collapsed` : ""),
                         );
-                        opts.model.dispatchPane({ type: "InitReady", at: Date.now() });
+                        opts.model.dispatchPane({ type: "InitReady", at: Date.now(), historyDamaged: rangeResp.history_damaged });
                         opts.onHistoryReady?.();
                         return;
                     }
@@ -835,6 +835,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                     opts.model.dispatchPane({
                         type: "InitReady",
                         at: Date.now(),
+                        historyDamaged: countResp?.history_damaged,
                     });
                     opts.onHistoryReady?.();
                     return;
@@ -875,6 +876,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                 opts.model.dispatchPane({
                     type: "InitReady",
                     at: Date.now(),
+                    historyDamaged: rangeResp.history_damaged || countResp?.history_damaged,
                 });
                 opts.onHistoryReady?.();
                 return;

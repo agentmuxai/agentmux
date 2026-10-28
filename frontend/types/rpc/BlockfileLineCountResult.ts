@@ -11,4 +11,9 @@ export type BlockfileLineCountResult = { count: number,
  * SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md §6.3.7).
  * Absent: not a counted transcript; addressing by line is unavailable.
  */
-stream?: string, gen?: string, };
+stream?: string, gen?: string, 
+/**
+ * The agent's saved history in the shared store was found damaged, so this count is of the
+ * block's own copy, which holds only what this block wrote: earlier history may be missing.
+ */
+history_damaged?: boolean, };

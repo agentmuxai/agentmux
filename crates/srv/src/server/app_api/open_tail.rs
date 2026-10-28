@@ -86,7 +86,17 @@ fn pick_source(
         return local();
     }
     let Some(zone) = crate::backend::agent_session::agent_zone_for_block_meta(&block.meta) else { return local() };
-    let size = gfs.read_snapshot(|r| Ok(r.file(&zone, "output")?.map(|f| f.size))).ok().flatten().unwrap_or(0);
+    // A zone found corrupt is not read again in this process: the block's own copy answers (`damage`).
+    if crate::backend::transcript::damage::is_damaged(&zone) {
+        return local();
+    }
+    let size = match gfs.read_snapshot(|r| Ok(r.file(&zone, "output")?.map(|f| f.size))) {
+        Ok(size) => size.unwrap_or(0),
+        Err(e) => {
+            crate::backend::transcript::damage::note_corrupt(&zone, "tail read", &e);
+            0
+        }
+    };
     if size > 0 {
         let stream = format!("g:{zone}");
         (gfs.clone(), zone, stream)
@@ -275,10 +285,16 @@ fn open_tail(
     if cmd.filename != crate::backend::agent_session::OUTPUT_FILE {
         return Err(format!("agent:open_tail: only `{}` has a tail", crate::backend::agent_session::OUTPUT_FILE));
     }
-    let (fs, zone, stream) = pick_source(filestore, global, mstore, &cmd.block_id);
-    let read = fs
-        .read_snapshot(|r| read_slice(r, &zone, &cmd))
-        .map_err(|e| format!("agent:open_tail: {e}"))?;
+    let (mut fs, mut zone, mut stream) = pick_source(filestore, global, mstore, &cmd.block_id);
+    let mut read = fs.read_snapshot(|r| read_slice(r, &zone, &cmd));
+    // The shared zone answered with a corrupt database: it is marked now, so the block's own copy answers instead.
+    if let Err(e) = &read {
+        if stream.starts_with("g:") && crate::backend::transcript::damage::note_corrupt(&zone, "tail read", e) {
+            (fs, zone, stream) = pick_source(filestore, global, mstore, &cmd.block_id);
+            read = fs.read_snapshot(|r| read_slice(r, &zone, &cmd));
+        }
+    }
+    let read = read.map_err(|e| format!("agent:open_tail: {e}"))?;
     let mut out = match read {
         Read::Mismatch(gen) => AgentOpenTailResult {
             stream: Some(stream),
@@ -307,6 +323,9 @@ fn open_tail(
             }
         }
     };
+    if super::history_damaged(mstore, &cmd.block_id) {
+        out.history_damaged = Some(true);
+    }
     if let Some(def_id) = cmd.definition_id.as_deref().filter(|d| !d.is_empty()) {
         if let Some((content, modts)) = read_overlay(filestore, global, def_id) {
             out.snapshot = Some(content);
