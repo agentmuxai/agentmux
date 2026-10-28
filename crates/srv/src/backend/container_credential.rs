@@ -104,10 +104,6 @@ fn accepted_without_identity(path: &str) -> bool {
         "/api/v1/agent/memory/session-start/part",
         "/api/v1/agent/memory/session-start/ack",
         "/api/v1/agent/tool-chunk",
-        // `RegisterDevServer`: the tool exists for container agents' dev servers. The handler takes
-        // the caller's own pane from the token and resolves the container's address itself, so a
-        // container can register a route to itself only (`app_api::dev_server`).
-        "/api/v1/agent/dev_server/register",
     ];
     let is_id = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
     EXACT.contains(&path)
@@ -243,8 +239,6 @@ mod tests {
             "/agentmux/jobs/stop-run",
             "/agentmux/agents/self/keys",
             "/api/v1/agent/self/mcp-beat",
-            "/api/v1/agent/dev_server/register/",
-            "/api/v1/agent/dev_server",
         ] {
             assert!(!container_route_allowed(denied), "{denied} should be refused");
         }

@@ -37,7 +37,7 @@
 2108 crates/srv/src/server/muxspect_handlers.rs
 1558 crates/srv/src/server/native_memory_handlers.rs
 2399 crates/srv/src/server/reactive.rs
-1520 crates/srv/src/server/ui_handlers.rs
+1518 crates/srv/src/server/ui_handlers.rs
 2233 crates/srv/src/server/websocket.rs
 1976 frontend/app/store/agent-pane-state/reducer.ts
 1566 frontend/app/view/agent/components/AgentComposerStrip.tsx
