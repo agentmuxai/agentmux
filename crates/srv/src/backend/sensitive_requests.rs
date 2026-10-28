@@ -181,6 +181,20 @@ impl Registry {
         })
     }
 
+    /// Nobody reviewed it in time: `asked` becomes `pending` with no approver, and the person's
+    /// veto is the only check.
+    pub fn fallback(&self, id: &str, now_ms: i64) -> Result<Request, String> {
+        self.change(id, |r| {
+            if r.status != Status::Asked {
+                return Err(not_asked(r));
+            }
+            r.status = Status::Pending;
+            r.decided_by = None;
+            r.decided_ms = Some(now_ms);
+            Ok(())
+        })
+    }
+
     /// The super agent denies: `asked` ends, with its reason for the requester.
     pub fn deny(&self, id: &str, approver_slug: &str, reason: &str, now_ms: i64) -> Result<Request, String> {
         self.change(id, |r| {

@@ -7,12 +7,8 @@ use super::*;
 use crate::registry::{AgentSeat, DefinitionStore};
 use crate::server::tests::test_state;
 
-/// The runner of an operation is one for the whole process, so the tests that approve one (or
-/// need none) take turns.
-static RUNNER_TURN: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
 fn turn() -> std::sync::MutexGuard<'static, ()> {
-    RUNNER_TURN.lock().unwrap_or_else(|e| e.into_inner())
+    window::TEST_RUNNER_TURN.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 fn run_nothing() {
@@ -173,6 +169,24 @@ async fn a_request_can_be_withdrawn_by_who_asked_and_a_list_shows_each_their_own
     assert_eq!(f.call(&asker, "cancel", json!({ "id": id })).await.unwrap()["status"], "cancelled");
     let err = f.call(&boss, "approve", json!({ "id": id })).await.unwrap_err();
     assert!(err.contains("not waiting for an answer"), "{err}");
+}
+
+#[tokio::test]
+async fn each_step_leaves_an_audit_row_naming_who_did_it() {
+    let _turn = turn();
+    let f = fixture();
+    let (asker, boss, other) = (f.agent("asker"), f.agent("boss"), f.agent("other"));
+    f.make_super(&boss.0);
+    run_nothing();
+    let id = f.call(&asker, "request", repin("f")).await.unwrap()["id"].as_str().unwrap().to_string();
+    f.call(&other, "approve", json!({ "id": id })).await.unwrap_err();
+    f.call(&asker, "cancel", json!({ "id": id })).await.unwrap();
+    let rows: Vec<_> = f.state.reactive_handler.get_audit_log(1000).into_iter().filter(|e| e.request_id == id).collect();
+    let row = |source: &str, ok: bool, outcome: &str| rows.iter().any(|e| e.source_agent.as_deref() == Some(source) && e.success == ok && e.reason.as_deref().is_some_and(|r| r.ends_with(outcome)));
+    assert!(row("asker", true, "| asked"), "{rows:?}");
+    assert!(row("other", false, "| refused"), "a refused approval is recorded as the agent that tried it: {rows:?}");
+    assert!(row("asker", true, "| cancelled"), "{rows:?}");
+    assert_eq!(rows.len(), 3, "{rows:?}");
 }
 
 #[tokio::test]
