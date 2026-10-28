@@ -144,6 +144,8 @@ fn spawn_backend_with_data_dir(data_dir: &std::path::Path) -> (SrvGuard, String,
     let child = Command::new(binary)
         .env("AGENTMUX_AUTH_KEY", auth_key)
         .env("AGENTMUX_DATA_DIR", data_dir)
+        // Shared data stays with the data folder, never in the real home (srv refuses to start otherwise).
+        .env("AGENTMUX_SHARED_DIR", data_dir.join("shared"))
         .env("AGENTMUX_DISABLE_CLOUD_SUBSCRIBER", "1")
         .stdin(Stdio::piped())
         .stderr(Stdio::piped())
@@ -412,4 +414,73 @@ fn sigterm_exits_process() {
             Err(e) => panic!("try_wait error: {}", e),
         }
     }
+}
+
+/// A srv given only a data folder outside the AgentMux home (nothing says where shared data goes)
+/// must not start: its shared folder would be the real one.
+#[test]
+fn a_data_dir_outside_the_home_without_a_shared_dir_does_not_start() {
+    let data_dir = tempfile::tempdir().expect("temp data dir");
+    let child = Command::new(env!("CARGO_BIN_EXE_agentmux-srv"))
+        .env("AGENTMUX_AUTH_KEY", "integration-test-key-12345")
+        .env("AGENTMUX_DATA_DIR", data_dir.path())
+        .env("AGENTMUX_DISABLE_CLOUD_SUBSCRIBER", "1")
+        .env_remove("AGENTMUX_HOME_OVERRIDE")
+        .env_remove("AGENTMUX_SHARED_DIR")
+        .stdin(Stdio::null())
+        .stderr(Stdio::piped())
+        .stdout(Stdio::null())
+        .spawn()
+        .expect("failed to spawn agentmux-srv");
+    let mut guard = SrvGuard {
+        child,
+        #[cfg(windows)]
+        _job: None,
+        _data_dir: None,
+    };
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let status = loop {
+        if let Some(status) = guard.child.try_wait().expect("try_wait") {
+            break status;
+        }
+        assert!(std::time::Instant::now() < deadline, "srv kept running instead of refusing");
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    };
+    assert_eq!(status.code(), Some(1));
+    let mut stderr = String::new();
+    std::io::Read::read_to_string(guard.child.stderr.as_mut().unwrap(), &mut stderr).unwrap();
+    assert!(stderr.contains("AGENTMUX_SHARED_DIR") && stderr.contains("AGENTMUX_HOME_OVERRIDE"), "{stderr}");
+}
+
+/// A dev build on the real home (`AGENTMUX_DEV_HOME_MODE=real`) started without a supervisor must
+/// refuse before anything opens the shared store: opening it would bring its schema up to date.
+/// Runs on a throwaway home, never the real one.
+#[test]
+fn a_dev_build_on_the_real_home_leaves_an_older_shared_store_alone() {
+    let home = tempfile::tempdir().expect("temp home");
+    let shared = home.path().join("shared").join("store.db");
+    std::fs::create_dir_all(shared.parent().unwrap()).unwrap();
+    let schema = |path: &std::path::Path| -> i64 {
+        rusqlite::Connection::open(path).unwrap().query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap()
+    };
+    {
+        let conn = rusqlite::Connection::open(&shared).unwrap();
+        conn.execute_batch("CREATE TABLE db_migrations (id TEXT PRIMARY KEY, scope TEXT, applied_at INTEGER, duration_ms INTEGER); PRAGMA user_version = 1;").unwrap();
+    }
+    let output = Command::new(env!("CARGO_BIN_EXE_agentmux-srv"))
+        .env("AGENTMUX_AUTH_KEY", "integration-test-key-12345")
+        .env("AGENTMUX_HOME_OVERRIDE", home.path())
+        .env("AGENTMUX_DATA_DIR", home.path().join("data"))
+        .env("AGENTMUX_DEV_HOME_MODE", "real")
+        .env("AGENTMUX_DISABLE_CLOUD_SUBSCRIBER", "1")
+        .env_remove("AGENTMUX_SHARED_DIR")
+        .env_remove("AGENTMUX_SUPERVISOR_PREPARES")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .output()
+        .expect("failed to run agentmux-srv");
+    assert_eq!(output.status.code(), Some(1), "{}", String::from_utf8_lossy(&output.stderr));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("MIGRATION-FAILED") && stderr.contains("installed AgentMux build"), "{stderr}");
+    assert_eq!(schema(&shared), 1, "the shared store must not have been touched");
 }

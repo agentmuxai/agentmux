@@ -99,6 +99,7 @@ mod runner;
 mod phase5_tests;
 
 pub use gate::data_needs_preparing;
+pub use gate::refuse_if_real_home_would_move;
 pub use runner::count_pending_migrations;
 pub use runner::doctor_report_for_instance;
 pub use runner::run_migrate_command;
