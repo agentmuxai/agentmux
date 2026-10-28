@@ -1456,6 +1456,8 @@ pub struct LanDiscoveryController {
     /// per-id cache) bounds the damage regardless of how many distinct
     /// identities are probed.
     pubkey_lookup_limiter: std::sync::Mutex<LookupRateLimiter>,
+    #[cfg(test)]
+    peers_for_test: std::sync::Mutex<Vec<LanInstance>>,
 }
 
 struct LanPubkeyCacheEntry {
@@ -1570,6 +1572,8 @@ impl LanDiscoveryController {
             event_bus,
             agent_cache: std::sync::RwLock::new(HashMap::new()),
             pubkey_cache: std::sync::RwLock::new(HashMap::new()),
+            #[cfg(test)]
+            peers_for_test: Default::default(),
             pubkey_lookup_limiter: std::sync::Mutex::new(LookupRateLimiter::new(LAN_PUBKEY_LOOKUP_RATE_LIMIT)),
         }
     }
@@ -1708,15 +1712,23 @@ impl LanDiscoveryController {
     /// ever cached under the name asked for.
     async fn pubkey_from_peers(&self, peers: &[LanInstance], agent_id: &str, http: &reqwest::Client) -> LanPubkeyLookup {
         let mut renamed = None;
+        let mut answered = false;
         {
             use futures_util::StreamExt as _;
             let mut inflight = query_peers_concurrently(peers, agent_id, http);
             while let Some((peer_url, _auth_key, result)) = inflight.next().await {
                 let Ok(resp) = result else { continue };
+                // "No such agent" is an answer; a refusal (401, 429), a server
+                // error or a body that is not JSON says nothing about the key.
+                if resp.status() == reqwest::StatusCode::NOT_FOUND {
+                    answered = true;
+                    continue;
+                }
                 if !resp.status().is_success() {
                     continue;
                 }
                 let Ok(body) = resp.json::<serde_json::Value>().await else { continue };
+                answered = true;
                 // A former slug: noted, and its key ignored. Another peer
                 // may still answer for the name itself.
                 if let Some(current) = renamed_to(agent_id, &body) {
@@ -1750,7 +1762,9 @@ impl LanDiscoveryController {
         if let Some(current) = renamed {
             return LanPubkeyLookup::Renamed(current);
         }
-        if let Ok(mut cache) = self.pubkey_cache.write() {
+        // Peers that could not be reached say nothing about the key: only an
+        // answered miss is cached.
+        if let (true, Ok(mut cache)) = (answered, self.pubkey_cache.write()) {
             cache.insert(
                 agent_id.to_string(),
                 LanPubkeyCacheEntry {

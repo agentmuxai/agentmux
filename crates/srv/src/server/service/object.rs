@@ -206,7 +206,7 @@ pub(super) async fn handle_object_service(state: &AppState, call: &WebCallType) 
             // shutdown log (SPEC_AGENT_SELF_QUIT_2026_09_24.md §5.5), so srv
             // removes it member by member. Absent = the historical flow.
             let frontend_waits: bool = service::get_arg(args, 1).unwrap_or(false);
-            let opts = crate::sagas::close_pane::CloseOpts { frontend_waits };
+            let opts = crate::sagas::close_pane::CloseOpts { frontend_waits, ..Default::default() };
             if let Err(reason) = crate::sagas::close_pane::run_with(state, block_ids, opts).await {
                 return WebReturnType::error(reason);
             }
