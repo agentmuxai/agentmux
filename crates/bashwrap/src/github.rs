@@ -82,23 +82,34 @@ pub fn repo_of_gh_command(args: &[String], env_repo: Option<&str>, origin_url: i
             explicit = Some(v.to_string());
         }
     }
-    if let Some(r) = explicit.as_deref().or(env_repo).filter(|r| !r.is_empty()) {
+    if let Some(r) = explicit.as_deref().filter(|r| !r.is_empty()) {
         return repo_of_spec(r);
     }
-    // gh api repos/OWNER/REPO/…
+    let env_repo = env_repo.filter(|r| !r.is_empty());
+    // gh api repos/OWNER/REPO/…: a literal endpoint names its repository, whatever GH_REPO says.
     if args.first().map(String::as_str) == Some("api") {
         for a in &args[1..] {
             let p = a.trim_start_matches('/');
             if let Some(rest) = p.strip_prefix("repos/") {
-                // gh fills `{owner}/{repo}` from the working directory's repository.
+                // gh fills `{owner}/{repo}` from GH_REPO, else the working directory's repository.
                 if rest.starts_with("{owner}/{repo}") {
-                    return repo_of_default(&origin_url()?);
+                    return match env_repo {
+                        Some(r) => repo_of_spec(r),
+                        None => repo_of_default(&origin_url()?),
+                    };
                 }
                 if let Some(found) = owner_repo_of_path(rest) {
                     return Some(found);
                 }
             }
         }
+    }
+    // A pull request, issue or other page named by its URL, or a repository named on the command line.
+    if let Some(found) = args.iter().find_map(|a| url_repo(a)).or_else(|| positional_repo(args)) {
+        return Some(found);
+    }
+    if let Some(r) = env_repo {
+        return repo_of_spec(r);
     }
     // gh needs no repository for these.
     if matches!(args.first().map(String::as_str), None | Some("--version" | "--help" | "help" | "version" | "auth" | "config" | "completion" | "alias" | "extension" | "ext" | "gist" | "search")) {
@@ -126,6 +137,23 @@ pub fn resolved_default(config_lines: &str) -> Option<Result<String, String>> {
             repo => Some(Ok(repo.to_string())),
         }
     })
+}
+
+/// The repository of a `https://github.com/OWNER/REPO/…` argument (`gh pr view <url>`).
+fn url_repo(arg: &str) -> Option<(String, String)> {
+    let rest = arg.strip_prefix("https://github.com/").or_else(|| arg.strip_prefix("http://github.com/"))?;
+    owner_repo_of_path(rest)
+}
+
+/// The repository `gh repo <verb> OWNER/REPO` is about, when it takes one as an argument.
+fn positional_repo(args: &[String]) -> Option<(String, String)> {
+    if args.first().map(String::as_str) != Some("repo") {
+        return None;
+    }
+    if !matches!(args.get(1).map(String::as_str), Some("clone" | "view" | "fork" | "edit" | "delete" | "archive" | "rename" | "sync" | "set-default")) {
+        return None;
+    }
+    args[2..].iter().filter(|a| !a.starts_with('-')).find_map(|a| repo_of_spec(a))
 }
 
 /// `[HOST/]OWNER/REPO`; a host other than github.com is not ours.
@@ -368,6 +396,13 @@ mod tests {
         assert_eq!(repo_of_gh_command(&args(&["api", "repos/octo/hello/pulls"]), None, origin), repo("octo", "hello"));
         // gh fills the placeholders from the working directory's repository.
         assert_eq!(repo_of_gh_command(&args(&["api", "repos/{owner}/{repo}/issues"]), None, origin), repo("home", "checkout"));
+        // A literal endpoint beats GH_REPO; the placeholders follow it.
+        assert_eq!(repo_of_gh_command(&args(&["api", "repos/octo/second/issues"]), Some("octo/first"), origin), repo("octo", "second"));
+        assert_eq!(repo_of_gh_command(&args(&["api", "repos/{owner}/{repo}/issues"]), Some("octo/first"), origin), repo("octo", "first"));
+        // A URL or a repository on the command line is the target, not the checkout.
+        assert_eq!(repo_of_gh_command(&args(&["pr", "view", "https://github.com/other/private/pull/1"]), None, origin), repo("other", "private"));
+        assert_eq!(repo_of_gh_command(&args(&["repo", "clone", "other/private", "dir"]), None, || None), repo("other", "private"));
+        assert_eq!(repo_of_gh_command(&args(&["repo", "view", "--json", "name", "o/r"]), None, origin), repo("o", "r"));
         // The repository set with `gh repo set-default` is a spec, not a URL.
         assert_eq!(repo_of_gh_command(&args(&["pr", "create"]), None, || Some("up/stream".to_string())), repo("up", "stream"));
         assert_eq!(repo_of_gh_command(&args(&["api", "/repos/octo/hello/issues", "-f", "title=x"]), None, origin), repo("octo", "hello"));
