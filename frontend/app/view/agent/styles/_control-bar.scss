@@ -403,6 +403,28 @@
         50% { opacity: 1; transform: scale(1.3); }
     }
 
+    .agent-stopped-banner {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: var(--space-2);
+        padding: var(--space-1) var(--space-2);
+        background: var(--accent-bg);
+        border-bottom: 1px solid var(--accent-line);
+        font-size: var(--text-xs);
+        color: var(--main-text-color);
+
+        .agent-stopped-label {
+            flex: 1 1 auto;
+            min-width: 0;
+        }
+
+        .agent-stopped-refused {
+            flex: 1 1 100%;
+            color: var(--error-color);
+        }
+    }
+
     .agent-interrupted-banner {
         display: flex;
         align-items: center;

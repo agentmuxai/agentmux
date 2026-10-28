@@ -12,7 +12,7 @@ import { readZoom } from "@/app/store/zoom-factor";
 import { selectTrace } from "@/app/util/select-trace";
 import { getLayoutModelForTabById } from "@/layout/lib/layoutModelHooks";
 import type { AgentRuntime } from "@/types/rpc/AgentRuntime";
-import { Show, createEffect, createMemo, onCleanup, type Accessor, type JSX } from "solid-js";
+import { Show, createEffect, createMemo, type Accessor, type JSX } from "solid-js";
 import { phaseToDisplayStatus } from "./swarm-display-status";
 import { remoteAgentKey } from "./swarm-fleet-targets";
 import { lastActiveMs } from "./swarm-last-active";
@@ -21,7 +21,7 @@ import type { SwarmOrderItem } from "./swarm-order";
 import { useSwarmOrder } from "./swarm-order-hold";
 import { remoteChip, remoteRows, remoteSections, type RemoteRow } from "./swarm-remote";
 import { stoppedAgents } from "./swarm-runtime";
-import { createLiveAgentRuntimeStore, openStoppedAgent } from "./swarm-runtime-live";
+import { openAgentInActiveTab, sharedAgentRuntime } from "@/app/store/agent-runtime-live";
 import { SwarmGroupByControl, SwarmSeatList, useSwarmSeats } from "./swarm-seats";
 import type { SwarmDensity } from "./swarm-section";
 import { chipStatus } from "./swarm-status-chip";
@@ -40,7 +40,7 @@ export interface SwarmAgents {
     remoteByKey: Accessor<Map<string, RemoteRow>>;
     /** Completed rows "Clear completed" would dismiss. */
     clearableCount: Accessor<number>;
-    /** Created agents with no pane and no process (swarm-runtime.ts). */
+    /** Created agents with no pane and no process (store/agent-runtime.ts). */
     stopped: Accessor<AgentRuntime[]>;
     /** Everything a checkbox can select: this instance's agents, then the remote ones not gone
      *  stale. Select all and the selection both follow it. */
@@ -76,10 +76,8 @@ export function useSwarmAgents(model: SwarmViewModel, ctx: PaneTabHostContext): 
         () => new Map(remote().map((r) => [remoteAgentKey(r.section, r.agent), r] as const))
     );
     const localKeys = createMemo(() => tree().flatMap((n) => (n.blockId ? [n.blockId] : [])));
-    // Every created agent's runtime state, for the ones with no pane (swarm-runtime.ts).
-    const runtime = createLiveAgentRuntimeStore();
-    void runtime.load();
-    onCleanup(runtime.dispose);
+    // Every created agent's runtime state, for the ones with no pane (store/agent-runtime.ts).
+    const runtime = sharedAgentRuntime();
     const stopped = createMemo(() => stoppedAgents(runtime.rows(), new Set(localKeys())));
     const selectableKeys = createMemo(() => [
         ...localKeys(),
@@ -187,7 +185,7 @@ export function SwarmAgentList(props: {
             <StoppedAgents
                 agents={props.agents.stopped}
                 hasLive={() => tree().length > 0 || remote().length > 0}
-                onOpen={openStoppedAgent}
+                onOpen={openAgentInActiveTab}
             />
         </>
     );

@@ -29,7 +29,7 @@ describe("StoppedAgents", () => {
         ));
         expect(container.querySelectorAll(".swarm-stopped__row").length).toBe(2);
         expect(container.querySelector(".swarm-stopped__count")!.textContent).toBe("2");
-        expect(container.querySelector(".swarm-stopped__state--error")!.textContent).toBe("error");
+        expect(container.querySelector(".agent-runtime-chip--error")!.textContent).toBe("error");
     });
 
     it("starts folded under live agents, unfolds from its heading, and folds again", () => {
