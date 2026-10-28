@@ -112,6 +112,10 @@
             "method": "AgentSessionWriteStateCommand"
         },
         {
+            "command": "agent.move-here",
+            "method": "AgentMoveHereCommand"
+        },
+        {
             "command": "agent.pane.unregister",
             "method": "AgentPaneUnregisterCommand"
         },

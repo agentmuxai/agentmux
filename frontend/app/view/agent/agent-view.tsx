@@ -97,6 +97,7 @@ import { lastUserMessage, useOfflineInput } from "./offline/useOfflineInput";
 import { useAgentAccountBinding } from "./failure/useAgentAccountBinding";
 import { useAuthHealth, useSyntheticAuthRow } from "./failure/useAuthHealth";
 import { requestAgentTakeover } from "./failure/takeover";
+import { openInOtherPaneActions } from "./failure/open-in-other-pane";
 import { useAgentKeyboard } from "./hooks/useAgentKeyboard";
 import { useAgentQuestions } from "./hooks/useAgentQuestions";
 import { useBlockActivity } from "./hooks/useBlockActivity";
@@ -1047,15 +1048,15 @@ export const AgentPresentationView = ({
         failure: (() => paneModel.state.failure),
         onRetry: retryLastTurn,
         reconnect: offline.recovery,
-        // live_elsewhere — take the agent over from the other AgentMux
-        // instance running it, then re-run the refused turn if there was one
-        // (SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24.md §4.6).
+        // live_elsewhere — take the agent over from the other AgentMux instance running it, then
+        // re-run the refused turn if there was one (SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24.md §4.6).
         onTakeOver: async (turnAttempted: boolean) => {
             log("agent", "Take over — asking the other AgentMux instance to hand this agent over");
             const r = await requestAgentTakeover(model.blockId);
             log("agent", r.released ? `Take over — released by ${r.fromChannel ?? "the other instance"}` : "Take over — nobody else was running it");
             if (turnAttempted) retryLastTurn();
         },
+        ...openInOtherPaneActions({ blockId: model.blockId, log, send: handleSendMessage }), // open_in_other_pane
         onOpenAccounts: () => void openConnectors("accounts"),
         // context_exceeded recovery — archive the over-full session and return
         // to the picker for a clean relaunch (resuming would only re-fail).

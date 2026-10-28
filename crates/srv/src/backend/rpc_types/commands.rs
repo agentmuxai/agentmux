@@ -525,6 +525,10 @@ pub const COMMAND_AGENT_PANE_UNREGISTER: &str = "agent.pane.unregister";
 /// The operator's client only.
 pub const COMMAND_AGENT_TAKEOVER: &str = "agent.takeover";
 
+/// `agent.move-here`: the window moves a pane's agent here from another pane of this AgentMux
+/// that runs it (`CommandAgentMoveHereData`, `AgentMoveHereResult`). The operator's client only.
+pub const COMMAND_AGENT_MOVE_HERE: &str = "agent.move-here";
+
 // Fleet control — select/broadcast/bulk-act on many agents at once. See
 // docs/specs/SPEC_MULTI_AGENT_FLEET_CONTROL_2026_08_20.md. Both action
 // commands loop the existing single-target `agent.send`/`agent.stop`
