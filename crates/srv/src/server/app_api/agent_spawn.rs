@@ -662,17 +662,17 @@ pub(crate) fn workers_of(mstore: &Store, leader_def_id: &str) -> Vec<WorkerSumma
         .collect()
 }
 
-/// How many open panes `leader_def_id` coaches: workers in some tab.
+/// How many open panes `leader_def_id` coaches: workers in some tab, or parked (still running).
 pub(crate) fn live_workers_of(mstore: &Store, leader_def_id: &str) -> usize {
-    let Ok(tabs) = mstore.get_all::<Tab>() else {
+    let Ok(blocks) = super::agent_block::blocks_in_tabs_or_parked(mstore) else {
         return 0;
     };
     // A pane is the leader's worker by its mark, or by its definition's (a
     // worker reopened from My Agents).
     let mut leader_of_def: std::collections::HashMap<String, Option<String>> = std::collections::HashMap::new();
-    tabs.iter()
-        .flat_map(|t| t.blockids.iter())
-        .filter_map(|id| mstore.get::<Block>(id).ok().flatten())
+    blocks
+        .iter()
+        .map(|(b, _)| b)
         .filter(|b| {
             if coached_by_id(&b.meta) == Some(leader_def_id) {
                 return true;

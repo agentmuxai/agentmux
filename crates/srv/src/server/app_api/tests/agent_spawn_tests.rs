@@ -398,6 +398,48 @@ async fn a_leaders_workers_are_listed_with_their_last_report() {
     assert!(workers_of(&state.mstore, "").is_empty());
 }
 
+/// A parked worker still counts against the leader's cap, as it counts in the leader's list.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_parked_worker_counts_against_the_leaders_cap() {
+    let state = test_state();
+    let (lead, tab, lead_pane) = seed_leader(&state, "claude", "host", json!({})).await;
+    let worker = crate::server::agent_handlers::copy_definition(&state.mstore, &state.id_store, &state.identity_store, &lead.id, "Lead Helper D", false).unwrap();
+    let block = new_block(&state, &tab, json!({ "view": "agent", "agentId": worker.id, COACHED_BY_META_KEY: { "agent": lead.name, "id": lead.id, "block_id": lead_pane } })).await;
+    assert_eq!(live_workers_of(&state.mstore, &lead.id), 1);
+    crate::sagas::park_agents_tests::dispatch_apply(&state, agentmux_common::ipc::Command::ParkBlock { tab_id: tab.clone(), block_id: block }).await;
+    assert_eq!(live_workers_of(&state.mstore, &lead.id), 1, "parked, it still runs");
+}
+
+/// An account is blocked by a parked agent's usage limit as by a pane's.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_parked_agents_usage_limit_blocks_its_account() {
+    let state = test_state();
+    let (_, tab, _) = seed_leader(&state, "claude", "host", json!({})).await;
+    let accounts = [account("limited", "l@example.com", "valid")];
+    state.id_store.identity_upsert(&accounts[0]).unwrap();
+    let failure = json!({ "code": "usage_limit", "title": "t", "detail": "d", "retryable": false });
+    let block = new_block(&state, &tab, json!({ "view": "agent", "agentId": "a-parked", LAST_FAILURE_META_KEY: failure, RUN_ACCOUNT_META_KEY: "limited" })).await;
+    crate::sagas::park_agents_tests::dispatch_apply(&state, agentmux_common::ipc::Command::ParkBlock { tab_id: tab.clone(), block_id: block }).await;
+
+    let blocked = account_blocks_at(&state, &accounts, agentmux_common::time::now_ms_u64());
+
+    assert!(blocked.get("limited").is_some_and(|why| why.contains("out of quota")), "{blocked:?}");
+}
+
+/// `agent.list` lists a parked agent, with no tab.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn agent_list_includes_a_parked_agent_with_an_empty_tab() {
+    let state = test_state();
+    let (_, tab, _) = seed_leader(&state, "claude", "host", json!({})).await;
+    let block = new_block(&state, &tab, json!({ "view": "agent", "agentId": "a-listed", "agentProvider": "claude" })).await;
+    crate::sagas::park_agents_tests::dispatch_apply(&state, agentmux_common::ipc::Command::ParkBlock { tab_id: tab.clone(), block_id: block.clone() }).await;
+
+    let listed = crate::server::app_api::agent_io::agent_list_entries(&state.mstore).unwrap();
+
+    let entry = listed.iter().find(|e| e.block_id == block).expect("the parked agent is listed");
+    assert_eq!((entry.agent_id.as_str(), entry.tab_id.as_str()), ("a-listed", ""));
+}
+
 /// A worker whose pane was closed with `agents:always_available` on is parked, not gone: its leader still lists it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_parked_worker_is_still_listed_for_its_leader() {
