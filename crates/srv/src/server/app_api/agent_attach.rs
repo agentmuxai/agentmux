@@ -174,12 +174,15 @@ pub(super) async fn reuse_existing_pane(
         }
     };
 
-    if let Some(existing) = find_agent_block(mstore, tab_id, &agent.id)? {
-        ensure_controller(state, agent, provider, &existing.oid, tab_id, revive)?;
-        if revive {
-            set_desired(mstore, &existing.oid, DESIRED_RUNNING);
+    // No tab left (a start after the last workspace was deleted): only the by-agent lookup below applies.
+    if !tab_id.is_empty() {
+        if let Some(existing) = find_agent_block(mstore, tab_id, &agent.id)? {
+            ensure_controller(state, agent, provider, &existing.oid, tab_id, revive)?;
+            if revive {
+                set_desired(mstore, &existing.oid, DESIRED_RUNNING);
+            }
+            return Ok(Some(result(&existing.oid, tab_id, &agent.provider)));
         }
-        return Ok(Some(result(&existing.oid, tab_id, &agent.provider)));
     }
     // A pane being filled in (layout import) only ever reuses a pane of this tab.
     if !by_uid {
@@ -225,7 +228,8 @@ pub(super) async fn reuse_existing_pane(
 }
 
 /// The tab `agent.open` works in, or the agent's existing pane when it has one (`Err`: nothing more to
-/// do). A start needs no tab to run an agent that already has a block, so with no tab left it only
+/// do). A start of a terminal-tier CLI (aider, crush) is refused: its term view starts it, and a start
+/// has none. A start needs no tab to run an agent that already has a block, so with no tab left it only
 /// reuses that block; a first block still needs a tab.
 pub(super) async fn tab_or_reuse(
     state: &AppState,
@@ -235,6 +239,9 @@ pub(super) async fn tab_or_reuse(
     headless: bool,
     by_uid: bool,
 ) -> Result<Result<String, AgentOpenResult>, String> {
+    if headless && provider.controller_type == providers::ControllerType::Terminal {
+        return Err(format!("agent.start: {} runs in a terminal pane and has no headless mode", agent.provider));
+    }
     let tab_id = match super::resolve_tab_id(&state.mstore, cmd.tab_id.as_deref()) {
         Ok(tab_id) => tab_id,
         Err(e) if headless => return reuse_existing_pane(state, agent, provider, cmd, "", true, by_uid).await?.map(Err).ok_or(e),

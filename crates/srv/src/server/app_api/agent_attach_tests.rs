@@ -112,7 +112,14 @@ async fn a_start_runs_a_parked_agent_when_no_workspace_is_left() {
     let block = seed_agent_block(&state, &tabs[0], "ag-nows").await;
     crate::sagas::delete_workspace::run(&state, ws).await.unwrap();
     assert_eq!(in_tab(&state, &block).await.as_deref(), Some(""));
-    assert!(state.srv_state.lock().await.tabs.is_empty(), "no tab is left");
+    // The store keeps no workspace or tab either, as after the delete persists.
+    for ws in state.mstore.get_all::<crate::backend::obj::Workspace>().unwrap() {
+        state.mstore.delete::<crate::backend::obj::Workspace>(&ws.oid).unwrap();
+    }
+    for tab in state.mstore.get_all::<crate::backend::obj::Tab>().unwrap() {
+        state.mstore.delete::<crate::backend::obj::Tab>(&tab.oid).unwrap();
+    }
+    assert!(super::resolve_tab_id(&state.mstore, None).is_err(), "no tab is left");
 
     let started = agent_attach::start_agent(&state, "ag-nows").await.unwrap();
 
@@ -120,4 +127,21 @@ async fn a_start_runs_a_parked_agent_when_no_workspace_is_left() {
     let stored = state.mstore.get::<Block>(&block).unwrap().unwrap();
     assert_eq!(agent_attach::desired_of(&stored).as_deref(), Some("running"));
     assert!(agent_attach::start_agent(&state, "no-such-agent").await.is_err());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_start_of_a_terminal_tier_cli_is_refused_and_leaves_no_block() {
+    let state = crate::server::tests::test_state();
+    let (_ws, tabs) = seed_workspace(&state, 1).await;
+    let mut def: crate::backend::storage::AgentDefinition = serde_json::from_value(serde_json::json!({
+        "id": "ag-term", "slug": "ag-term", "name": "ag-term", "icon": "robot", "provider": "aider", "description": "", "created_at": 1,
+    }))
+    .unwrap();
+    state.mstore.agent_def_insert(&mut def).unwrap();
+    assert!(!tabs.is_empty());
+
+    let err = agent_attach::start_agent(&state, "ag-term").await.unwrap_err();
+
+    assert!(err.contains("no headless mode"), "{err}");
+    assert!(blocks_of(&state, "ag-term").is_empty(), "no block was made");
 }
