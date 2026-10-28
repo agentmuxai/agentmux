@@ -87,10 +87,14 @@ const MAX_TARGETS: usize = 64;
 
 pub(crate) fn remember_target(request_id: &str, target: InstallTarget) {
     let mut t = targets();
+    // A request that ended without running (denied, vetoed, withdrawn) leaves no use for its entry.
+    t.retain(|id, _| crate::backend::sensitive_requests::registry().get(id).is_some_and(|r| r.status.is_open()));
     if t.len() >= MAX_TARGETS {
         t.clear();
     }
-    t.insert(request_id.to_string(), target);
+    // The content is part of what the request shows, so a request joined is for the same content;
+    // the first target stands in any case.
+    t.entry(request_id.to_string()).or_insert(target);
 }
 
 pub(crate) fn take_target(request_id: &str) -> Option<InstallTarget> {
@@ -113,7 +117,9 @@ pub(crate) fn install_facts(pkg: &WidgetPackageInfo) -> std::collections::BTreeM
     } else {
         pkg.permissions.join(", ")
     };
-    [("widget", format!("{name} ({} {})", pkg.id, pkg.version)), ("publisher", publisher), ("permissions", permissions)]
+    // The start of the content's hash: different files are a different request, never a join.
+    let content: String = pkg.hash.chars().take(12).collect();
+    [("widget", format!("{name} ({} {}, content {content})", pkg.id, pkg.version)), ("publisher", publisher), ("permissions", permissions)]
         .into_iter()
         .map(|(k, v)| (k.to_string(), v))
         .collect()

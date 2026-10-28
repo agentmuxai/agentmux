@@ -112,6 +112,22 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_request_that_ended_is_forgotten_and_a_second_target_never_replaces_the_first() {
+        let state = crate::server::tests::test_state();
+        let pkg = installed(&state, "acme.runner-forget", "sandboxed", json!([])).await;
+        let open = filed(&pkg);
+        let target = |hash: &str| crate::server::widget_agent_handlers::InstallTarget { id: pkg.id.clone(), hash: hash.into(), signer: String::new() };
+        crate::server::widget_agent_handlers::remember_target(&open.id, target("first"));
+        crate::server::widget_agent_handlers::remember_target(&open.id, target("second"));
+        let ended = filed(&pkg);
+        crate::server::widget_agent_handlers::remember_target(&ended.id, target("ended"));
+        crate::backend::sensitive_requests::registry().deny(&ended.id, "boss", "no", agentmux_common::time::now_ms()).unwrap();
+        crate::server::widget_agent_handlers::remember_target("some-later-request", target("later"));
+        assert_eq!(crate::server::widget_agent_handlers::take_target(&ended.id), None, "denied: forgotten");
+        assert_eq!(crate::server::widget_agent_handlers::take_target(&open.id).unwrap().hash, "first");
+    }
+
+    #[tokio::test]
     async fn a_package_changed_after_the_request_is_not_approved() {
         let state = crate::server::tests::test_state();
         let pkg = installed(&state, "acme.runner-changed", "sandboxed", json!([])).await;
@@ -132,7 +148,8 @@ mod tests {
         let plain = installed(&state, "acme.facts-plain", "sandboxed", json!(["storage", "net:https://a.example"])).await;
         let facts = crate::server::widget_agent_handlers::install_facts(&plain);
         assert_eq!(facts["permissions"], "storage, net:https://a.example");
-        assert!(facts["widget"].contains("acme.facts-plain 1.0.0") && facts["publisher"].contains("unsigned"), "{facts:?}");
+        assert!(facts["widget"].contains("acme.facts-plain 1.0.0, content ") && facts["publisher"].contains("unsigned"), "{facts:?}");
+        assert!(facts["widget"].contains(&plain.hash[..12]), "different files are a different request: {facts:?}");
         assert!(crate::backend::sensitive_ops::spec("widget_install").unwrap().check_facts(&facts).is_ok(), "the table takes them as they are");
         let none = installed(&state, "acme.facts-none", "sandboxed", json!([])).await;
         assert_eq!(crate::server::widget_agent_handlers::install_facts(&none)["permissions"], "none");
