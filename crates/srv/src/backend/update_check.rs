@@ -223,20 +223,7 @@ fn find_asset(release: &Release, name: &str) -> Option<ReleaseAsset> {
     Some(ReleaseAsset { name: a.name.clone(), size: a.size, url: a.browser_download_url.clone(), sha256 })
 }
 
-/// `major.minor.patch` out of a version or tag (`v0.59.27`, `0.59.27+g1a2b`),
-/// or `None` when it doesn't start with three integers.
-pub(crate) fn version_core(v: &str) -> Option<(u64, u64, u64)> {
-    let v = v.trim().trim_start_matches('v');
-    let core = v.split(['+', '-']).next().unwrap_or(v);
-    let mut parts = core.split('.');
-    let major = parts.next()?.parse().ok()?;
-    let minor = parts.next()?.parse().ok()?;
-    let patch = parts.next()?.parse().ok()?;
-    if parts.next().is_some() {
-        return None;
-    }
-    Some((major, minor, patch))
-}
+pub(crate) use agentmux_common::update_manifest::version_core;
 
 /// The hidden line a release's notes carry with the oldest version it
 /// upgrades from in place (`scripts/extract-changelog.sh`, the repo's

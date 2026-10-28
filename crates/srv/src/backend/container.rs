@@ -319,6 +319,9 @@ pub enum ContainerError {
     /// The provider CLI could not be installed in the container.
     #[error("could not install {command} in the container: {detail}")]
     CliInstall { command: String, detail: String },
+    /// A `container_volumes` entry whose source is the host's CLI session folder.
+    #[error("the volume source {path} is a host folder the container may not mount")]
+    VolumeRefused { path: String },
 }
 
 impl ContainerError {
@@ -339,6 +342,9 @@ impl ContainerError {
             Self::NoRuntime(message) => message.clone(),
             Self::NoId { .. } => docker_error_message("the container was created without an id"),
             Self::CliInstall { command, detail } => cli_install_failure_message(command, detail),
+            Self::VolumeRefused { path } => format!(
+                "This agent's volumes list a host folder a container may not mount ({path}): remove it from the agent's volumes."
+            ),
         }
     }
 }
@@ -490,6 +496,10 @@ impl ContainerManager {
         spec: &ContainerMountSpec,
         observe: StartObserver<'_>,
     ) -> Result<(), ContainerError> {
+        // Before the container is reused or made: an existing one is refused as well.
+        if let Some(path) = crate::backend::cli_messaging::refused_volume_source(volumes.iter().filter_map(|v| parse_volume_spec(v)).map(|(s, _, _)| s)) {
+            return Err(ContainerError::VolumeRefused { path });
+        }
         // Always query Docker — do not rely on an in-memory cache. The container
         // can be stopped or removed externally (e.g. `docker rm -f`), and a
         // stale cache entry would cause ensure_running to silently no-op while

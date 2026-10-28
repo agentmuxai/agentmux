@@ -1,0 +1,47 @@
+{
+  "format": 1,
+  "version": "0.60.4",
+  "tag": "v0.60.4",
+  "files": [
+    {
+      "name": "AgentMux-0.60.4-1.x86_64.rpm",
+      "size": 142193073,
+      "sha256": "8a26834e0fe3dce24c8306cb45acfb1de06be7f4fc104b3b0cca28d93baa8b74"
+    },
+    {
+      "name": "AgentMux-0.60.4-x64-setup.exe",
+      "size": 152662040,
+      "sha256": "da69028bbc9e625a6fedd7a27afae8300062acaf936d00d2b5f3bcb4bf842a86"
+    },
+    {
+      "name": "AgentMux_0.60.4_amd64-portable.tar.xz",
+      "size": 142144664,
+      "sha256": "2ddaf7d06c8a1942e904104a514d2ef88885e3c26c5181a8d7c178d80c13f224"
+    },
+    {
+      "name": "AgentMux_0.60.4_amd64.AppImage",
+      "size": 184166904,
+      "sha256": "fac8da6249b426df529ab0ec997a1e69b8a3f76de59bb5dd000e4009928a8e62"
+    },
+    {
+      "name": "AgentMux_0.60.4_amd64.deb",
+      "size": 141899468,
+      "sha256": "f673000915122856691d6945de5a0b2e0be169051bcab2483f23dbc392f46142"
+    },
+    {
+      "name": "AgentMux_0.60.4_arm64.dmg",
+      "size": 225993905,
+      "sha256": "fe448a0e34643e56073b912e7e2f9424587be91cf2d8df458342ad9693d8bf0e"
+    },
+    {
+      "name": "AgentMux_0.60.4_x64.msix",
+      "size": 215295799,
+      "sha256": "79ad37940b5e0a72c45af2e5a4d97321890161fea0a6e092c60c5f464b2dee70"
+    },
+    {
+      "name": "agentmux-0.60.4-x64-portable.7z",
+      "size": 130517934,
+      "sha256": "34239715eedff98acf7a1ab429dfb508a78e555837d38dfd31a32f46469df94f"
+    }
+  ]
+}
