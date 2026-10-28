@@ -13,7 +13,7 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { createFilestore, PART } from "./fixture.mjs";
 import { allDamage, findDamage } from "./lib/analyze.mjs";
-import { slackOnly } from "./lib/frames.mjs";
+import { slackBytes, slackOnly } from "./lib/frames.mjs";
 
 const dir = mkdtempSync(join(tmpdir(), "recover-slack-"));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
@@ -50,6 +50,15 @@ describe("slack after the content of the last part", () => {
     it("is not damage for the stamp file either", () => {
         const stamps = Buffer.from('{"off":0,"ms":1}\n{"off":120,"ms":2}\n');
         expect(kinds(store("tsidx", stamps.length, [pad(stamps, 4096)], "output.tsidx"))).toEqual([]);
+    });
+
+    it("slackBytes counts the trailing spaces past the content, also in a damaged file", () => {
+        expect(slackBytes(store("sb-small", tail.length, [pad(tail, 4096)]), "z", "output", tail.length)).toBe(4096 - tail.length);
+        expect(slackBytes(store("sb-whole", PART, [part0]), "z", "output", PART), "no slack").toBe(0);
+        const row = pad(tail, 4096);
+        row[tail.length + 100] = 0; // a NUL in the slack: only the spaces after it count
+        expect(slackBytes(store("sb-nul", tail.length, [row]), "z", "output", tail.length)).toBe(4096 - tail.length - 101);
+        expect(slackBytes(store("sb-none", 0, []), "z", "output", 0)).toBe(0);
     });
 
     it("is damage: NUL bytes inside the slack", () => {

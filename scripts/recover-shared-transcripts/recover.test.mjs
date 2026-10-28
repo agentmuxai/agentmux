@@ -33,7 +33,10 @@ const text = {
     ddd: transcript("ddd", 4 * PART + 9), // damaged; the only copy is shorter
     fff: transcript("fff", 6 * PART + 33), // pages corrupted on disk; a copy under the legacy meta key
     ggg: transcript("ggg", 3 * PART + 1), // right sizes, but a zero-filled hole in the middle; a whole copy in a channel
+    hhh: transcript("hhh", PART + 100), // a zero-filled hole, and the tail row padded with spaces as srv stores it; a copy of exactly its size
 };
+const holeyPadded = Buffer.from(text.hhh);
+holeyPadded.fill(0, 500, 900);
 const holey = Buffer.from(text.ggg);
 holey.fill(0, PART + 100, PART + 600);
 
@@ -60,6 +63,9 @@ beforeAll(() => {
     putFile(db, "agent:eee:current", "output.idx", Buffer.alloc(3 * PART, 7), { dropParts: [1] });
     putFile(db, "agent:fff:current", "output", text.fff);
     putFile(db, "agent:ggg:current", "output", holey);
+    putFile(db, "agent:hhh:current", "output", holeyPadded);
+    // srv keeps the tail row longer than the content (spaces): the recorded size stays the content's.
+    db.prepare("UPDATE db_file_data SET data = ? WHERE zoneid = 'agent:hhh:current' AND name = 'output' AND partidx = 1").run(Buffer.concat([holeyPadded.subarray(PART), Buffer.alloc(4096 - 100, 0x20)]));
     db.exec("PRAGMA user_version = 2");
     db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
     db.close();
@@ -74,6 +80,7 @@ beforeAll(() => {
         { oid: "blk-aaa", meta: { agentId: "aaa" }, output: text.aaa },
         { oid: "blk-fff", meta: { "agent:id": "fff" }, output: text.fff },
         { oid: "blk-ggg", meta: { agentId: "ggg" }, output: text.ggg },
+        { oid: "blk-hhh", meta: { agentId: "hhh" }, output: text.hhh },
         // Larger, and the sizes add up, but a lost page reads back as zeros: not a usable source.
         { oid: "blk-ggg-holey", meta: { agentId: "ggg" }, output: Buffer.concat([holey, transcript("tail", PART)]) },
     ]);
@@ -125,10 +132,11 @@ suite("the offline recovery tool", () => {
         for (const [p, size, mtime] of originals) expect([statSync(p).size, statSync(p).mtimeMs]).toEqual([size, mtime]);
 
         const byZone = Object.fromEntries(r.plan.filter((p) => p.name === "output").map((p) => [p.zone, p]));
-        expect(Object.keys(byZone).sort()).toEqual(["agent:aaa:current", "agent:ccc:current", "agent:ddd:current", "agent:fff:current", "agent:ggg:current"]);
+        expect(Object.keys(byZone).sort()).toEqual(["agent:aaa:current", "agent:ccc:current", "agent:ddd:current", "agent:fff:current", "agent:ggg:current", "agent:hhh:current"]);
         expect(r.damage.find((d) => d.zone === "agent:ggg:current").kind, "sizes add up, only the zeros give it away").toBe("nul-bytes");
         expect(byZone["agent:ggg:current"].action).toBe("rebuild");
         expect(byZone["agent:ggg:current"].source.blockOid, "the larger copy with a zero-filled hole is passed over").toBe("blk-ggg");
+        expect(byZone["agent:hhh:current"].action, "the tail row's slack is not content: a copy of the recorded size is whole").toBe("rebuild");
         expect(byZone["agent:aaa:current"].action).toBe("rebuild");
         expect(byZone["agent:aaa:current"].source.blockOid, "the largest whole copy, not the larger one with a gap").toBe("blk-aaa");
         expect(byZone["agent:ccc:current"].action).toBe("no-source");
@@ -155,6 +163,7 @@ suite("the offline recovery tool", () => {
             expect(reassemble(db, "agent:aaa:current", "output").equals(text.aaa)).toBe(true);
             expect(reassemble(db, "agent:fff:current", "output").equals(text.fff)).toBe(true);
             expect(reassemble(db, "agent:ggg:current", "output").equals(text.ggg), "the hole is filled from the copy").toBe(true);
+            expect(reassemble(db, "agent:hhh:current", "output").equals(text.hhh)).toBe(true);
             expect(reassemble(db, "agent:bbb:current", "output").equals(text.bbb), "a healthy zone is untouched").toBe(true);
             expect(db.prepare("SELECT COUNT(*) n FROM db_wave_file WHERE zoneid = 'agent:aaa:current' AND name IN ('output.tsidx','output.idx')").get().n).toBe(0);
             const overlay = JSON.parse(reassemble(db, "agent:aaa:current", "output.state.json").toString());

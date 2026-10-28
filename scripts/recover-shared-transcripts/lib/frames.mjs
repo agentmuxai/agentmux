@@ -191,6 +191,26 @@ export function slackOnly(db, zone, name, size) {
 }
 
 /**
+ * How many bytes of a file's stored rows are slack: the run of spaces at the end of the last
+ * row, past `size` (see [`slackOnly`]). 0 when the last part is framed, holds no content byte
+ * or ends in content. Unlike `slackOnly` it does not judge the rest of the file, so a damaged
+ * file's content size is `stored bytes - slackBytes`.
+ */
+export function slackBytes(db, zone, name, size) {
+    const parts = partIndex(db, zone, name);
+    if (parts.length === 0) return 0;
+    const last = parts[parts.length - 1];
+    if (last.framed) return 0;
+    const content = size - last.partidx * PART;
+    if (content <= 0 || content >= last.len) return 0;
+    const row = db.prepare("SELECT data FROM db_file_data WHERE zoneid = ? AND name = ? AND partidx = ?").get(zone, name, last.partidx);
+    const data = Buffer.from(row.data);
+    let end = data.length;
+    while (end > content && data[end - 1] === 0x20) end--;
+    return data.length - end;
+}
+
+/**
  * A file's bytes: every part it has, in order, a row where there is one and otherwise its
  * frame, decoded. A frame that doesn't decode throws.
  */
