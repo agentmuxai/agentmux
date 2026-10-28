@@ -15,17 +15,9 @@ pub(crate) fn export() {
     for (name, body) in agentmux_common::build_slot::shim_function_env_for_current_user() {
         std::env::set_var(name, body);
     }
-    std::env::set_var(GH_FUNCTION_NAME, GH_FUNCTION_BODY);
 }
 
-/// The name bash gives an exported `gh` function.
-const GH_FUNCTION_NAME: &str = "BASH_FUNC_gh%%";
 
-/// `gh`, for an agent whose person connected GitHub through AgentMux Cloud (srv sets
-/// `AGENTMUX_GITHUB_BROKER` for those): the command runs with the GitHub App's token for the
-/// repository it is about, or with no token at all, never with one the environment happened to
-/// carry. Without the variable it is plain `gh`.
-const GH_FUNCTION_BODY: &str = "() {  if [ -n \"${AGENTMUX_GITHUB_BROKER:-}\" ]; then\n    local _amx_t;\n    _amx_t=\"$(agentmux-bashwrap github-token -- \"$@\")\";\n    if [ -n \"$_amx_t\" ]; then\n      GH_TOKEN=\"$_amx_t\" GITHUB_TOKEN=\"$_amx_t\" command gh \"$@\";\n    else\n      GH_TOKEN= GITHUB_TOKEN= command gh \"$@\";\n    fi;\n  else\n    command gh \"$@\";\n  fi\n}";
 
 #[cfg(test)]
 mod tests {
@@ -52,7 +44,7 @@ mod tests {
             let path = std::env::join_paths(std::iter::once(dir.clone()).chain(std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()))).unwrap();
             let out = std::process::Command::new(&bash)
                 .args(["-c", "gh pr list"])
-                .env(super::GH_FUNCTION_NAME, super::GH_FUNCTION_BODY)
+                .env(agentmux_common::github_broker_shim::GH_FUNCTION_NAME, agentmux_common::github_broker_shim::GH_FUNCTION_BODY)
                 .env("PATH", path)
                 .env("AGENTMUX_GITHUB_BROKER", broker)
                 .env("GH_TOKEN", inherited)

@@ -299,6 +299,7 @@ impl Tokens {
 /// Set in the environment of an agent whose `git` and `gh` use the broker's tokens; the `gh`
 /// function `agentmux-bashwrap` exports reads it.
 pub const BROKER_ENV: &str = "AGENTMUX_GITHUB_BROKER";
+use agentmux_common::github_broker_shim::{GH_FUNCTION_BODY, GH_FUNCTION_NAME};
 const HELPER_KEY: &str = "credential.https://github.com.helper";
 const HELPER: &str = "!agentmux-bashwrap git-credential";
 const HTTP_PATH_KEY: &str = "credential.https://github.com.useHttpPath";
@@ -320,11 +321,14 @@ pub fn apply_agent_git_in(env: &mut HashMap<String, String>, process: impl Fn(&s
         set_git_config_list(env, process, REWRITE_KEY, &["git@github.com:", "ssh://git@github.com/"]);
         env.insert("GIT_TERMINAL_PROMPT".to_string(), "0".to_string());
         env.insert(BROKER_ENV.to_string(), "1".to_string());
+        // `gh` goes through the broker too, in every bash the agent runs, whichever CLI started it.
+        env.insert(GH_FUNCTION_NAME.to_string(), GH_FUNCTION_BODY.to_string());
     } else if env.contains_key(BROKER_ENV) {
         for key in [HELPER_KEY, HTTP_PATH_KEY, REWRITE_KEY] {
             set_git_config_list(env, process, key, &[]);
         }
         env.remove(BROKER_ENV);
+        env.remove(GH_FUNCTION_NAME);
         // Set with the rest, and only ever set by it: prompts come back with the connection gone.
         env.remove("GIT_TERMINAL_PROMPT");
     }
@@ -339,6 +343,7 @@ pub fn without_agent_git(env: &HashMap<String, String>) -> HashMap<String, Strin
     }
     let mut out = [HELPER_KEY, HTTP_PATH_KEY, REWRITE_KEY].iter().fold(env.clone(), |e, key| without_git_config_key(&e, key));
     out.remove(BROKER_ENV);
+    out.remove(GH_FUNCTION_NAME);
     out.remove("GIT_TERMINAL_PROMPT");
     out
 }
@@ -551,6 +556,7 @@ mod tests {
         assert!(got.contains(&(REWRITE_KEY.to_string(), "git@github.com:".to_string())), "ssh remotes use the token too");
         assert!(got.contains(&("user.name".to_string(), "x".to_string())), "other settings stay");
         assert_eq!((e["GIT_TERMINAL_PROMPT"].as_str(), e[BROKER_ENV].as_str()), ("0", "1"));
+        assert_eq!(e[GH_FUNCTION_NAME], GH_FUNCTION_BODY, "gh reaches the broker in every provider's shell");
         // Applied again (a persisted cmd:env): the same, not twice.
         let before = e.clone();
         apply_agent_git_in(&mut e, |_| None, true);
@@ -568,7 +574,7 @@ mod tests {
         apply_agent_git_in(&mut e, |_| None, true);
         apply_agent_git_in(&mut e, |_| None, false);
         assert_eq!(entries(&e), vec![("user.name".to_string(), "x".to_string())]);
-        assert!(!e.contains_key(BROKER_ENV) && !e.contains_key("GIT_TERMINAL_PROMPT"), "prompts are back too");
+        assert!(!e.contains_key(BROKER_ENV) && !e.contains_key("GIT_TERMINAL_PROMPT") && !e.contains_key(GH_FUNCTION_NAME), "prompts and plain gh are back too");
     }
 
     #[tokio::test]
@@ -652,7 +658,7 @@ mod tests {
         apply_agent_git_in(&mut e, |_| None, true);
         let out = without_agent_git(&e);
         assert_eq!(entries(&out), vec![("user.name".to_string(), "x".to_string())]);
-        assert!(!out.contains_key(BROKER_ENV) && !out.contains_key("GIT_TERMINAL_PROMPT"));
+        assert!(!out.contains_key(BROKER_ENV) && !out.contains_key("GIT_TERMINAL_PROMPT") && !out.contains_key(GH_FUNCTION_NAME));
         assert_eq!(out["OTHER"], "kept");
         // An env that never had it is returned as it was.
         let plain = env(&[("A", "b")]);

@@ -104,8 +104,8 @@ pub fn repo_of_gh_command(args: &[String], env_repo: Option<&str>, origin_url: i
             }
         }
     }
-    // A pull request, issue or other page named by its URL, or a repository named on the command line.
-    if let Some(found) = args.iter().find_map(|a| url_repo(a)).or_else(|| positional_repo(args)) {
+    // A pull request or issue named by its URL (`gh pr view <url>`), or a repository named on the command line.
+    if let Some(found) = args.get(2).filter(|_| args[0] != "api").and_then(|a| url_repo(a)).or_else(|| positional_repo(args)) {
         return Some(found);
     }
     if let Some(r) = env_repo {
@@ -399,6 +399,8 @@ mod tests {
         // A literal endpoint beats GH_REPO; the placeholders follow it.
         assert_eq!(repo_of_gh_command(&args(&["api", "repos/octo/second/issues"]), Some("octo/first"), origin), repo("octo", "second"));
         assert_eq!(repo_of_gh_command(&args(&["api", "repos/{owner}/{repo}/issues"]), Some("octo/first"), origin), repo("octo", "first"));
+        // A URL in a flag's value (a body that links elsewhere) is not the target.
+        assert_eq!(repo_of_gh_command(&args(&["pr", "create", "--body", "https://github.com/other/private/issues/1"]), None, origin), repo("home", "checkout"));
         // A URL or a repository on the command line is the target, not the checkout.
         assert_eq!(repo_of_gh_command(&args(&["pr", "view", "https://github.com/other/private/pull/1"]), None, origin), repo("other", "private"));
         assert_eq!(repo_of_gh_command(&args(&["repo", "clone", "other/private", "dir"]), None, || None), repo("other", "private"));
