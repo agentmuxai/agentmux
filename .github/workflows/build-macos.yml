@@ -109,7 +109,9 @@ jobs:
             REF="$I_REF"; RELEASE_TAG="$I_RELEASE_TAG"; CEF_TAG="$I_CEF_TAG"
           fi
           for v in "$REF" "$RELEASE_TAG" "$CEF_TAG"; do
-            if ! printf '%s' "$v" | grep -Eq '^[A-Za-z0-9._/+-]*$'; then
+            # bash's own match covers the whole string (grep checks line by line, so a value
+            # with a line break could carry extra `name=value` lines into the outputs file)
+            if ! [[ "$v" =~ ^[A-Za-z0-9._/+-]*$ ]]; then
               echo "::error::an input has characters a ref or tag does not"; exit 1
             fi
           done
