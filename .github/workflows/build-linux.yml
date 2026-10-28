@@ -92,7 +92,7 @@ jobs:
           set -euo pipefail
           # The broker masked every value it returned; this only moves the token to
           # an output for the steps below. A grant without one fails the job.
-          token="$(python3 -c 'import json,os; print(json.load(open(os.environ["GRANT_FILE"]))["github"]["token"])')"
+          token="$(jq -r '.github.token // empty' "$GRANT_FILE")"
           [ -n "$token" ]
           echo "::add-mask::$token"
           echo "token=$token" >> "$GITHUB_OUTPUT"
