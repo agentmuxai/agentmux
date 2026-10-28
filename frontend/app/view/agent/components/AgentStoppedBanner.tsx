@@ -10,6 +10,7 @@
  */
 
 import { createSignal, Show, type JSX } from "solid-js";
+import { Button } from "@/app/element/ui";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 
@@ -64,14 +65,15 @@ export const AgentStoppedBanner = (props: AgentStoppedBannerProps): JSX.Element 
                         {refused()}
                     </span>
                 </Show>
-                <button
-                    class="agent-session-btn agent-session-btn-start"
-                    disabled={busy()}
+                <Button
+                    tone="accent"
+                    density="compact"
+                    busy={busy()}
                     onClick={() => void onStart()}
                     title="Start this agent and resume its session"
                 >
-                    {busy() ? "Starting…" : "Start"}
-                </button>
+                    Start
+                </Button>
             </div>
         </Show>
     );
