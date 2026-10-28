@@ -1,6 +1,6 @@
 # Spec: the super agent, one place for sensitive operations
 
-**Status:** active — approved by the operator, 2026-10-25 ("looks good", relayed by AgentY), with the answers to the open questions in section 10. Built in steps (section 9); step 1 (the `super` seat) is built in #5634.
+**Status:** active — approved by the operator, 2026-10-25 ("looks good", relayed by AgentY), with the answers to the open questions in section 10. Built in steps (section 9); steps 1–5 are built (#5634 for the `super` seat, #5654 for the person's RPC, the banner in this one).
 **Date:** 2026-10-25
 **Author:** Parlo@charlie
 **Changes:** who may trigger the sensitive operations in section 2, and how the Keep running window (`sagas/pending_shutdown.rs`) generalises to them.
@@ -81,7 +81,7 @@ One audit row per step, through `log_fleet_action_audit` (shown in Warden's Audi
 2. `sensitive_ops.rs` (table) and the `sensitive` request registry (built).
 3. The countdown (`sagas/sensitive_window.rs`): the window, the person's veto and approve-now, the runner each operation registers, the two events, the audit rows for the veto and the run (built).
 4. The person's RPC, `sensitive.decide` (veto or approve-now), accepted only from the proven AgentMux window and never from an agent (built).
-5. The banner and the chime.
+5. The banner and the chime in the agent pane (built).
 6. The OS toast (it shares the notify router with the stop and close toasts, whose wording rules it follows).
 7. HTTP routes and the `Sensitive` MCP tool; wrap `App upgrade`, `Stop` quit, `Widget install`, `Desktop`, `Vault` to file requests, each registering its runner.
 8. Fallback timer (no super agent) and the audit rows for the request, approval and denial.
