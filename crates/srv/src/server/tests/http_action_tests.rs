@@ -171,3 +171,14 @@ async fn reads_streams_and_handler_recorded_routes_are_not_recorded_again() {
         not_recorded(&id).await;
     }
 }
+
+#[tokio::test]
+async fn an_oversized_service_call_is_refused_and_the_refusal_is_recorded() {
+    let state = test_state();
+    let token = token_for(&state, "uid-http-act-d");
+    let huge = format!(r#"{{"service":"object","method":"x","args":["{}"]}}"#, "a".repeat(3 * 1024 * 1024));
+    let (status, id) = send(&state, Method::POST, "/agentmux/service", Some(&token), &huge).await;
+    assert_eq!(status, 413);
+    let line = recorded(&id).await;
+    assert_eq!((line.source_agent.as_deref(), line.success, line.error_message.as_deref()), (Some("agent:uid-http-act-d"), false, Some("HTTP 413")));
+}

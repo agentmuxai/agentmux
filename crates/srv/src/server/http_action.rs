@@ -27,7 +27,8 @@ use crate::backend::rpc::actor::Actor;
 
 /// The generic service call: its `service` and `method` say what it does.
 const SERVICE_ROUTE: &str = "/agentmux/service";
-/// The largest service call read for its two names; a bigger one is passed on unread.
+/// The largest service call read for its two names; a bigger one is refused with 413, as the
+/// route's own body limit would, and the refusal is recorded.
 const SERVICE_BODY_MAX: usize = 2 * 1024 * 1024;
 const MAX_FIELD: usize = 200;
 
@@ -73,6 +74,7 @@ pub(super) async fn record_action(State(state): State<AppState>, mut req: Reques
         return next.run(req).await;
     }
     let mut subject = path_params(&template, req.uri().path());
+    let mut refused = None;
     if template == SERVICE_ROUTE {
         let (parts, body) = req.into_parts();
         match axum::body::to_bytes(body, SERVICE_BODY_MAX).await {
@@ -80,11 +82,17 @@ pub(super) async fn record_action(State(state): State<AppState>, mut req: Reques
                 subject.extend(service_names(&bytes));
                 req = Request::from_parts(parts, Body::from(bytes));
             }
-            Err(_) => return (StatusCode::PAYLOAD_TOO_LARGE, "request body too large").into_response(),
+            Err(_) => {
+                refused = Some((StatusCode::PAYLOAD_TOO_LARGE, "request body too large").into_response());
+                req = Request::from_parts(parts, Body::empty());
+            }
         }
     }
     let request_id = req.headers().get("x-request-id").and_then(|v| v.to_str().ok()).unwrap_or_default().to_string();
-    let response = next.run(req).await;
+    let response = match refused {
+        Some(r) => r,
+        None => next.run(req).await,
+    };
     let status = response.status();
     let error = (status.as_u16() >= 400).then(|| format!("HTTP {}", status.as_u16()));
     let store = state.mstore.clone();
