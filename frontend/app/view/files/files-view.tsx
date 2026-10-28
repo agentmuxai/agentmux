@@ -30,6 +30,7 @@ import { FilesPreview } from "./files-preview";
 import { paneWorkdir } from "@/app/drag/file-drop-actions";
 import { isContainerPane, spliceComposerTokens } from "../agent/hooks/useAgentDropAttach";
 import { cachedThumbnail, hasThumbnail, thumbnail } from "./files-thumbs";
+import { TypeIcon } from "./files-type-icon";
 import { clipboard, opProgressText } from "./files-ops";
 import {
     beginPathDrag,
@@ -85,20 +86,6 @@ function kindOf(e: FsEntry): string {
     const ext = extensionOf(e.name);
     const base = ext ? `${ext.toUpperCase()} file` : "File";
     return e.is_symlink ? `${base} link` : base;
-}
-
-function iconOf(e: FsEntry): string {
-    if (e.is_dir) return "folder";
-    const n = e.name.toLowerCase();
-    if (/\.(ts|tsx|js|jsx|mjs|cjs|py|rs|go|java|kt|swift|c|cpp|h|hpp|cs|rb|php|lua|sh|bash|zsh|ps1)$/.test(n)) return "file-code";
-    if (/\.(html|htm|css|scss|sass|less|svg|xml|json|toml|yaml|yml|ini|env|conf)$/.test(n)) return "file-code";
-    if (/\.(md|markdown|txt|rst|adoc|log)$/.test(n)) return "file-lines";
-    if (/\.(png|jpe?g|gif|webp|bmp|ico|heic|tiff?)$/.test(n)) return "file-image";
-    if (/\.(mp4|webm|mov|mkv|avi)$/.test(n)) return "file-video";
-    if (/\.(wav|mp3|flac|ogg|m4a)$/.test(n)) return "file-audio";
-    if (/\.pdf$/.test(n)) return "file-pdf";
-    if (/\.(zip|tar|gz|7z|rar|bz2|xz)$/.test(n)) return "file-zipper";
-    return "file";
 }
 
 /** The agent pane the user last worked in, for Alt+K: Hangar has the focus
@@ -1283,7 +1270,7 @@ function FileRow(props: {
             title={props.entry.error ?? (props.entry.link_target ? `→ ${props.entry.link_target}` : undefined)}
         >
             <div class="files-cell files-col-name" role="gridcell">
-                <i class={`fa fa-${iconOf(props.entry)} files-icon`} classList={{ "files-icon-dir": props.entry.is_dir }} aria-hidden="true" />
+                <span class="files-icon-box"><TypeIcon model={props.model} entry={props.entry} cssPx={16} glyphClass="files-icon" /></span>
                 <Show when={props.entry.is_symlink}>
                     <i class="fa fa-share files-link-mark" aria-label="link" />
                 </Show>
@@ -1397,7 +1384,7 @@ function GridTile(props: {
             <div class="files-tile-art">
                 <Show
                     when={thumb()}
-                    fallback={<i class={`fa fa-${iconOf(props.entry)} files-tile-icon`} classList={{ "files-icon-dir": props.entry.is_dir }} aria-hidden="true" />}
+                    fallback={<TypeIcon model={props.model} entry={props.entry} cssPx={48} glyphClass="files-tile-icon" />}
                 >
                     {(src) => <img class="files-tile-thumb" src={src()} alt="" draggable={false} />}
                 </Show>

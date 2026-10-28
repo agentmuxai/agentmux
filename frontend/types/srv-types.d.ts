@@ -1192,6 +1192,7 @@ declare global {
         "agent:overlapnotes"?: boolean;
         "agent:retryonreconnect"?: boolean;
         "kanban:reminders"?: boolean;
+        "files:icons"?: string;
         "supervisor:enabled"?: boolean;
         "supervisor:steady:continuations"?: number;
         "supervisor:steady:minutes"?: number;

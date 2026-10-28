@@ -184,6 +184,14 @@ windows = { version = "0.61", features = [
     "Win32_System_Variant",
     "Win32_NetworkManagement_WindowsFirewall",
     "Win32_Networking_NetworkListManager",
+    # The system's own file icons for the Hangar (backend/file_icons): the shell's image
+    # lists by file type, their bitmaps, and the registry's file associations.
+    "Win32_UI_Shell",
+    "Win32_UI_Controls",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_Graphics_Gdi",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Registry",
 ] }
 # Out-of-process crash dump capture via VEH + named-pipe IPC.
 # Catches AV, heap corruption, and non-__fastfail aborts.

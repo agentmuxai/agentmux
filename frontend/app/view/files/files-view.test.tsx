@@ -104,6 +104,19 @@ vi.mock("@/app/element/local-media", async (orig) => ({
     fetchMediaRange: media.range,
     fetchMediaBlob: media.blob,
 }));
+// The system's own icons (files-icons.ts): the fake makes whatever `icons.url` says, or none.
+const icons = vi.hoisted(() => ({ url: null as string | null, asked: [] as string[], settings: {} as Record<string, unknown> }));
+vi.mock("./files-icons", async (orig) => ({
+    ...(await orig<typeof import("./files-icons")>()),
+    systemIcon: async (t: { kind: string; ext: string }, px: number) => {
+        icons.asked.push(`${t.kind}:${t.ext}:${px}`);
+        return icons.url;
+    },
+}));
+vi.mock("@/app/store/block-atom-cache", async (orig) => ({
+    ...(await orig<typeof import("@/app/store/block-atom-cache")>()),
+    getSettingsKeyAtom: (key: string) => () => icons.settings[key],
+}));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: { rpcCall: h.rpcCall } }));
 vi.mock("@/app/store/mps", () => {
     const mock = {
@@ -185,6 +198,9 @@ beforeEach(() => {
     h.state.handlers = [];
     h.state.byType = new Map();
     setClipboard(null);
+    icons.url = null;
+    icons.asked = [];
+    icons.settings = {};
     h.state.dirs.set(HOME, [f("b.txt"), d("src"), f(".env", { hidden: true }), f("a10.md"), f("a2.md")]);
     h.state.dirs.set(`${HOME}\\src`, [f("main.rs")]);
     for (const fn of Object.values(h.rpc)) fn.mockClear();
@@ -264,6 +280,50 @@ describe("the Files pane: zoom", () => {
         expect(root().style.zoom).toBe("1.5");
         await v.ctx.setMeta({ "term:zoom": null });
         expect(root().style.zoom).toBe("1");
+    });
+});
+
+describe("the Files pane: system icons", () => {
+    const glyphs = (v: ReturnType<typeof mount>) => v.container.querySelectorAll(".files-rows .files-row i.fa.files-icon, .files-rows .files-row i.fa-folder");
+    const pictures = (v: ReturnType<typeof mount>) => [...v.container.querySelectorAll<HTMLImageElement>(".files-rows .files-row img.files-sys-icon")];
+
+    it("keeps the built-in glyph, in the same 16 px box, while there is no system icon", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toContain("b.txt"));
+        expect(pictures(v)).toHaveLength(0);
+        const boxes = [...v.container.querySelectorAll(".files-rows .files-row .files-icon-box")];
+        expect(boxes).toHaveLength(4);
+        for (const box of boxes) expect(box.querySelector("i.fa")).not.toBeNull();
+    });
+
+    it("shows the system's picture for each entry in the same box, asking by file type and size, never by path", async () => {
+        icons.url = "blob:sys-icon";
+        const v = mount();
+        await waitFor(() => expect(pictures(v)).toHaveLength(4));
+        expect(glyphs(v)).toHaveLength(0);
+        for (const img of pictures(v)) {
+            expect(img.parentElement?.className).toContain("files-icon-box");
+            expect([img.width, img.height]).toEqual([16, 16]);
+            expect(img.getAttribute("src")).toBe("blob:sys-icon");
+        }
+        expect([...new Set(icons.asked)].sort()).toEqual(["dir::16", "file:md:16", "file:txt:16"]);
+    });
+
+    it("asks for a bigger picture when the pane is zoomed, so it stays sharp", async () => {
+        icons.url = "blob:sys-icon";
+        const v = mount({ "term:zoom": 1.5 });
+        await waitFor(() => expect(pictures(v)).toHaveLength(4));
+        expect(new Set(icons.asked.map((a) => a.split(":")[2]))).toEqual(new Set(["24"]));
+    });
+
+    it("keeps the glyphs and asks for nothing when the setting is app", async () => {
+        icons.url = "blob:sys-icon";
+        icons.settings["files:icons"] = "app";
+        const v = mount();
+        await waitFor(() => expect(v.names()).toContain("b.txt"));
+        expect(icons.asked).toEqual([]);
+        expect(pictures(v)).toHaveLength(0);
+        expect(v.container.querySelectorAll(".files-rows .files-row .files-icon-box i.fa")).toHaveLength(4);
     });
 });
 
