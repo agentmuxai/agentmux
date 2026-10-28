@@ -91,3 +91,21 @@ async fn a_calendar_call_without_an_agent_token_is_refused() {
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     assert!(body["error"].as_str().unwrap().contains("Bind to agent"), "{body}");
 }
+
+#[tokio::test]
+async fn the_panel_lists_an_agent_whose_account_comes_from_its_template_parent() {
+    let state = state_with_agent().await;
+    let mut tpl = crate::backend::storage::agents::test_agent_def("tpl-1", "Template", "claude", "host", 1, "");
+    tpl.is_seeded = 1;
+    state.mstore.agent_def_insert(&mut tpl).unwrap();
+    let mut child = crate::backend::storage::agents::test_agent_def("child-1", "Child", "claude", "host", 1, "");
+    child.parent_id = "tpl-1".into();
+    state.mstore.agent_def_insert(&mut child).unwrap();
+    state.identity_store.agent_identity_link("tpl-1", "acc-1", "google").unwrap();
+    let (status, body) = host(&state, HOST_TOKEN, json!({ "op": "set", "account_id": "acc-1", "agent_id": "child-1", "service": "calendar", "level": "read" })).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (_, body) = host(&state, HOST_TOKEN, json!({ "op": "account", "account_id": "acc-1" })).await;
+    let agents = body["data"]["agents"].as_array().unwrap();
+    let child = agents.iter().find(|a| a["agentId"] == "child-1").expect("the child is listed");
+    assert_eq!(child["levels"]["calendar"], "read");
+}

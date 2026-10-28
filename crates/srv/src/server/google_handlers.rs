@@ -139,17 +139,20 @@ pub(crate) async fn handle_host_google(
 
 fn account_panel(state: &AppState, account_id: &str) -> Result<serde_json::Value, String> {
     let grants = state.identity_store.google_grants_for_account(account_id).map_err(|e| e.to_string())?;
-    let links = state.identity_store.agent_identity_list_all().map_err(|e| e.to_string())?;
-    let agents: Vec<_> = links
-        .into_iter()
-        .filter(|l| l.account_id == account_id)
-        .map(|l| {
-            let name = state.mstore.agent_def_get(&l.agent_id).ok().flatten().map(|d| d.name).unwrap_or_default();
-            let levels: serde_json::Map<String, serde_json::Value> =
-                grants.iter().filter(|g| g.agent_id == l.agent_id).map(|g| (g.service.clone(), json!(g.level))).collect();
-            json!({ "agentId": l.agent_id, "name": name, "levels": levels })
-        })
-        .collect();
+    // The same resolution `bound_account` uses, so an agent that gets this account only from its
+    // template parent's links is listed here and can be granted.
+    let defs = state.mstore.agent_def_list().map_err(|e| e.to_string())?;
+    let mut agents = Vec::new();
+    for def in defs {
+        let links = crate::identity::resolver::effective_identity_links(&state.mstore, &state.identity_store, &def)
+            .map_err(|e| e.to_string())?;
+        if links.iter().find(|l| l.provider == "google").map(|l| l.account_id.as_str()) != Some(account_id) {
+            continue;
+        }
+        let levels: serde_json::Map<String, serde_json::Value> =
+            grants.iter().filter(|g| g.agent_id == def.id).map(|g| (g.service.clone(), json!(g.level))).collect();
+        agents.push(json!({ "agentId": def.id, "name": def.name, "levels": levels }));
+    }
     let calls = state.identity_store.google_calls(account_id, PANEL_CALLS).map_err(|e| e.to_string())?;
     Ok(json!({ "agents": agents, "calls": calls, "services": BUILT_SERVICES }))
 }
