@@ -9,14 +9,14 @@
 //! asks), mapped onto the states a viewer sees. An agent with no live pane is `stopped`; its row
 //! comes from its definition. A viewer (the Swarm) lists the rows once, then follows the event.
 //!
-//! A pane whose process ended, or a parked block, keeps its `block_id` (found by the block's agent id); one with no process reads `stopped`.
+//! A pane whose process ended keeps its `block_id` (found by the block's agent id) and reads `stopped`.
 //!
 //! Two things a viewer must not wait for until the always-available agents build lands: `starting`
 //! is never produced (a controller just created, with no process yet, reads as `idle`), and no event
 //! says an agent was deleted (`changed_rows` only forgets it), so a viewer relists on `agents:changed`.
 //!
-//! `desired` is `running` while a process is alive and `stopped` otherwise, until the agent record
-//! keeps its own desired state (the always-available agents build's P1 PR C).
+//! `desired` is the agent's own desired state when its block records one (`agent:desired`, set by an
+//! open, a start and a stop), and otherwise `running` while a process is alive and `stopped` if not.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -25,6 +25,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::backend::agent_availability::{Availability, WaitReason};
 use crate::backend::obj::Block;
+use crate::server::app_api::agent_attach::{self, DESIRED_RUNNING, DESIRED_STOPPED};
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::{COMMAND_AGENTRUNTIME_LIST, COMMAND_AGENT_START};
 use crate::backend::storage::store::Store;
@@ -80,7 +81,7 @@ pub struct AgentRuntime {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional, type = "number")]
     pub resets_at: Option<u64>,
-    /// The block the agent runs in; absent for an agent that has no live pane.
+    /// The block the agent runs in, shown in a pane or parked; absent for an agent that has never had one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub block_id: Option<String>,
@@ -135,6 +136,16 @@ pub fn desired_of(state: AgentRuntimeState) -> AgentDesiredState {
     }
 }
 
+/// What the agent's block says it should be doing, when it says: a stop sets `stopped`, an open or a
+/// start `running`. An agent whose block records nothing is wanted as its state says.
+pub fn desired_from(recorded: Option<&str>, state: AgentRuntimeState) -> AgentDesiredState {
+    match recorded {
+        Some(DESIRED_RUNNING) => AgentDesiredState::Running,
+        Some(DESIRED_STOPPED) => AgentDesiredState::Stopped,
+        _ => desired_of(state),
+    }
+}
+
 /// The runtime state of every created agent, as of `now_ms`. Blocking: reads the store.
 pub(crate) fn list(state: &AppState, now_ms: u64) -> Vec<AgentRuntime> {
     let mstore = &state.mstore;
@@ -148,18 +159,20 @@ pub(crate) fn list(state: &AppState, now_ms: u64) -> Vec<AgentRuntime> {
         .map(|d| {
             // By the agent's UID, not its name: two agents can share a display name.
             let live = block_of_uid(state.reactive_handler, &d.id);
-            // A pane whose process ended is no longer registered, but it is still the agent's
-            // block: a viewer needs its id to open or stop it. Its state is `stopped`.
+            // A pane whose process ended is no longer registered, and a headless agent's block is in no
+            // tab, but each is still the agent's block: a viewer needs its id to open or stop it, and
+            // it holds the desired state. The state is `stopped`.
             let block_id = live.clone().or_else(|| panes.get(&d.id).cloned());
             let (runtime_state, detail, resets_at) = state_of(&availability_of_block(mstore, live.as_deref(), now_ms));
+            let (color, recorded) = block_id.as_deref().map(|b| block_facts(mstore, b)).unwrap_or_default();
             AgentRuntime {
-                color: block_id.as_deref().and_then(|b| color_of_block(mstore, b)),
+                color,
                 agent_id: d.id,
                 state: runtime_state,
                 detail,
                 resets_at,
                 block_id,
-                desired: desired_of(runtime_state),
+                desired: desired_from(recorded.as_deref(), runtime_state),
                 name: d.name,
                 provider: d.provider,
                 icon: d.icon,
@@ -168,40 +181,39 @@ pub(crate) fn list(state: &AppState, now_ms: u64) -> Vec<AgentRuntime> {
         .collect()
 }
 
-/// The block of each agent that has one, in a pane or parked (one block when it has several: the
-/// first by id). One pass over the blocks for the whole list.
+/// The agent a block belongs to, by the id its meta carries.
+fn agent_of_block(block: &Block) -> Option<String> {
+    ["agentId", "agent:id"]
+        .iter()
+        .map(|k| crate::backend::obj::meta_get_string(&block.meta, k, ""))
+        .find(|v| !v.is_empty())
+}
+
+/// The block of each agent that has one, by agent id: the one in a pane (the first by id when it has
+/// several), else the one parked in no tab, which holds the agent's desired state while it has no
+/// process. One pass over the blocks for the whole list.
 fn pane_blocks_by_agent(mstore: &Store) -> HashMap<String, String> {
-    let blocks: Vec<Block> = mstore
-        .get_all::<Block>()
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|b| ["agentId", "agent:id"].iter().any(|k| !crate::backend::obj::meta_get_string(&b.meta, k, "").is_empty()))
-        .collect();
-    let ids: Vec<String> = blocks.iter().map(|b| b.oid.clone()).collect();
+    let blocks = mstore.get_all::<Block>().unwrap_or_default();
+    let agent_blocks: Vec<String> = blocks.iter().filter(|b| agent_of_block(b).is_some()).map(|b| b.oid.clone()).collect();
     let mut by_agent: HashMap<String, String> = HashMap::new();
-    for pane in super::app_api::agent_io::open_agent_panes(mstore, &ids) {
+    for pane in super::app_api::agent_io::open_agent_panes(mstore, &agent_blocks) {
         by_agent.entry(pane.agent_id).or_insert(pane.block_id);
     }
-    // A parked block is in no tab, so no pane lists it; it is still the agent's block, running or not.
-    for block in blocks.iter().filter(|b| crate::backend::obj::meta_get_bool(&b.meta, crate::persist_subscriber::parked::PARKED_META_KEY, false)) {
-        let agent_id = mstore
-            .instance_get_by_block_id(&block.oid)
-            .ok()
-            .flatten()
-            .map(|i| i.id)
-            .or_else(|| ["agentId", "agent:id"].iter().map(|k| crate::backend::obj::meta_get_string(&block.meta, k, "")).find(|v| !v.is_empty()));
-        if let Some(agent_id) = agent_id {
-            by_agent.entry(agent_id).or_insert_with(|| block.oid.clone());
+    for block in &blocks {
+        let parked = crate::backend::obj::meta_get_bool(&block.meta, crate::persist_subscriber::parked::PARKED_META_KEY, false);
+        if let (true, Some(agent)) = (parked, agent_of_block(block)) {
+            by_agent.entry(agent).or_insert_with(|| block.oid.clone());
         }
     }
     by_agent
 }
 
-/// The colour the agent's pane shows (its border colour, `frame:activebordercolor`, set when it opens).
-fn color_of_block(mstore: &Store, block_id: &str) -> Option<String> {
-    let block = mstore.get::<Block>(block_id).ok()??;
+/// What the agent's block holds that a viewer shows: the colour its pane shows (its border colour,
+/// `frame:activebordercolor`, set when it opens) and the desired state it records.
+fn block_facts(mstore: &Store, block_id: &str) -> (Option<String>, Option<String>) {
+    let Some(block) = mstore.get::<Block>(block_id).ok().flatten() else { return (None, None) };
     let color = crate::backend::obj::meta_get_string(&block.meta, "frame:activebordercolor", "");
-    (!color.is_empty()).then_some(color)
+    ((!color.is_empty()).then_some(color), agent_attach::desired_of(&block))
 }
 
 /// The rows that differ from what was last sent, and what to remember now: an agent that is gone
@@ -251,13 +263,17 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 .map_err(|e| format!("agentruntime.list: {e}"))
         }
     });
-    engine.register_typed(COMMAND_AGENT_START, move |cmd: CommandAgentStartData, _ctx| async move {
-        // The headless start comes with the agent's own desired state (the always-available agents
-        // build, P1 PR C and P2b); until then an agent without a pane is started by opening it.
-        Err::<AgentStartResult, String>(format!(
-            "agent.start: not available yet: an agent without a pane is started by opening it ({})",
-            cmd.agent_id
-        ))
+    // Not behind `agents:always_available`: a start is an explicit action and changes nothing for
+    // anyone who does not call it; only closing a pane parking its block depends on the setting.
+    let start_state = state.clone();
+    engine.register_typed(COMMAND_AGENT_START, move |cmd: CommandAgentStartData, _ctx| {
+        let state = start_state.clone();
+        async move {
+            let block_id = agent_attach::start_agent(&state, &cmd.agent_id)
+                .await
+                .map_err(|e| format!("agent.start: {e}"))?;
+            Ok::<AgentStartResult, String>(AgentStartResult { agent_id: cmd.agent_id, block_id })
+        }
     });
 }
 
@@ -290,6 +306,42 @@ mod tests {
         assert_eq!(s(Availability::Running { waiting_on_user: true }), AgentRuntimeState::WaitingOnUser);
         assert_eq!(s(Availability::SignedOut { since_ms: 1 }), AgentRuntimeState::SignedOut);
         assert_eq!(s(Availability::Unknown), AgentRuntimeState::Idle);
+    }
+
+    #[test]
+    fn the_blocks_own_desired_state_wins_over_the_state_it_is_in() {
+        use AgentRuntimeState as S;
+        // Stopped by the user while the process is still ending, or left wanted after a crash.
+        assert_eq!(desired_from(Some("stopped"), S::Working), AgentDesiredState::Stopped);
+        assert_eq!(desired_from(Some("running"), S::Stopped), AgentDesiredState::Running);
+        assert_eq!(desired_from(Some("running"), S::Error), AgentDesiredState::Running);
+        // Nothing recorded, or something this build does not know: as the state says.
+        assert_eq!(desired_from(None, S::Idle), AgentDesiredState::Running);
+        assert_eq!(desired_from(None, S::Stopped), AgentDesiredState::Stopped);
+        assert_eq!(desired_from(Some("later"), S::Stopped), AgentDesiredState::Stopped);
+    }
+
+    /// A headless agent whose process ended without a stop: its parked block is in no tab, still records
+    /// that it should run, and is the block a viewer opens.
+    #[tokio::test]
+    async fn a_parked_block_keeps_its_agent_wanted_running_after_the_process_ended() {
+        let state = crate::server::tests::test_state();
+        let mut def: crate::backend::storage::AgentDefinition = serde_json::from_value(serde_json::json!({
+            "id": "def-rt-2", "slug": "rt-two", "name": "Rt Two", "icon": "robot", "provider": "claude",
+            "description": "", "created_at": 1,
+        }))
+        .unwrap();
+        state.mstore.agent_def_insert(&mut def).unwrap();
+        let mut meta = crate::backend::obj::MetaMapType::new();
+        meta.insert("agentId".to_string(), serde_json::json!("def-rt-2"));
+        meta.insert(crate::persist_subscriber::parked::PARKED_META_KEY.to_string(), serde_json::json!(true));
+        meta.insert(agent_attach::META_DESIRED.to_string(), serde_json::json!("running"));
+        let mut block = Block { oid: uuid::Uuid::new_v4().to_string(), meta, ..Default::default() };
+        state.mstore.insert(&mut block).unwrap();
+        let rows = list(&state, 10_000);
+        let one = rows.iter().find(|r| r.agent_id == "def-rt-2").expect("the agent is listed");
+        assert_eq!((one.state, one.desired), (AgentRuntimeState::Stopped, AgentDesiredState::Running));
+        assert_eq!(one.block_id.as_deref(), Some(block.oid.as_str()));
     }
 
     #[test]

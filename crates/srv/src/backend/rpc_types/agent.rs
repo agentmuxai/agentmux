@@ -527,6 +527,24 @@ pub struct AgentTakeoverResult {
     pub from_channel: Option<String>,
 }
 
+/// Request for `agent.move-here`: move the agent in `block_id` here from the other pane of this
+/// AgentMux that is running it. The operator's own client only.
+#[derive(Debug, Clone, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandAgentMoveHereData {
+    pub block_id: String,
+}
+
+/// Response for `agent.move-here`.
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct AgentMoveHereResult {
+    /// The pane the agent was moved from; absent when no other pane was running it any more.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub from_block: Option<String>,
+}
+
 /// Response for `agent.setSeat`: the seat as stored, `null` once cleared.
 #[derive(Debug, Clone, Serialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]

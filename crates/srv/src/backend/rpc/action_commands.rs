@@ -23,7 +23,7 @@ pub enum Policy {
 /// changes who may do what. Recorded whoever calls.
 pub const ALWAYS: &[&str] = &[
     "account.key.verify", "account.oauth.cancel", "account.oauth.client.clear", "account.oauth.start", "agent.account.switch",
-    "agent.define", "agent.kill-process", "agent.kill-tree", "agent.open", "agent.pane.unregister", "agent.send",
+    "agent.define", "agent.kill-process", "agent.kill-tree", "agent.move-here", "agent.open", "agent.pane.unregister", "agent.send",
     "agent.setSeat", "agent.start", "agent.stop", "agent.takeover", "agent:memory:revert", "agent:memory:write_file",
     "agent:session:append_output", "agent:session:archive", "agent:session:write_state", "agentanswer", "agentcancel",
     "agentdefcreatefromtemplate", "agentdefhide", "agentdefunhide", "agentinput", "agentlastruntime",
