@@ -120,3 +120,107 @@ fn claude_and_untracked_providers_are_left_to_their_own_reporting() {
     assert!(provider_turn_outcome("aider", None).is_none());
     assert!(provider_turn_outcome("", None).is_none());
 }
+
+fn env(pairs: &[(&str, &str)]) -> std::collections::HashMap<String, String> {
+    pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+}
+
+#[test]
+fn a_pane_with_no_address_of_its_own_or_srvs_address_uses_the_providers_service() {
+    let own = Service::ModelApi(&ANTHROPIC).probe_url();
+    assert_eq!(service_for(&ANTHROPIC, None), Service::ModelApi(&ANTHROPIC));
+    assert_eq!(service_for(&ANTHROPIC, Some("  ")), Service::ModelApi(&ANTHROPIC));
+    assert_eq!(service_for(&ANTHROPIC, Some(&format!("{own}/"))), Service::ModelApi(&ANTHROPIC), "the same address, written another way");
+    assert_eq!(service_for_env(&ANTHROPIC, &env(&[("PATH", "x")])), Service::ModelApi(&ANTHROPIC));
+}
+
+#[test]
+fn a_pane_pointed_at_a_proxy_is_its_own_service_probed_at_the_proxy() {
+    let service = service_for_env(&ANTHROPIC, &env(&[("ANTHROPIC_BASE_URL", "https://user:secret@proxy.example.com:8443/v1/?key=abc")]));
+    assert_eq!(service, Service::ModelApiAt(&ANTHROPIC, "https://proxy.example.com:8443/v1".to_string()));
+    assert_eq!(service.id(), "model_api:anthropic@proxy.example.com:8443/v1");
+    assert_eq!(service.label(), "Anthropic API (proxy.example.com:8443/v1)");
+    assert_eq!(service.probe_url(), "https://proxy.example.com:8443/v1");
+    let shown = format!("{} {}", service.id(), service.label());
+    assert!(!shown.contains("secret") && !shown.contains("abc"), "no credential in what the status shows: {shown}");
+}
+
+#[test]
+fn only_the_variable_the_provider_reads_sets_its_address() {
+    let service = service_for_env(&OPENAI, &env(&[("ANTHROPIC_BASE_URL", "https://proxy.example.com")]));
+    assert_eq!(service, Service::ModelApi(&OPENAI));
+    let service = service_for_env(&GOOGLE, &env(&[("GOOGLE_GEMINI_BASE_URL", "https://gw.example.com")]));
+    assert_eq!(service.id(), "model_api:google@gw.example.com");
+}
+
+#[test]
+fn the_pane_is_told_its_service_only_when_it_is_not_the_default() {
+    let at = service_for(&ANTHROPIC, Some("https://proxy.example.com"));
+    assert_eq!(endpoint_meta(&at), Some(json!({ "service": "model_api:anthropic@proxy.example.com", "url": "https://proxy.example.com" })));
+    assert_eq!(endpoint_meta(&Service::ModelApi(&ANTHROPIC)), None);
+    assert_eq!(endpoint_meta(&Service::Muxbus), None);
+}
+
+#[test]
+fn a_proxy_and_the_default_api_have_their_own_rows_and_states() {
+    let shared = Shared::new(0);
+    let proxy = service_for(&ANTHROPIC, Some("https://proxy.example.com"));
+    shared.report_at(Service::ModelApi(&ANTHROPIC), Outcome::Answered, 1);
+    for at in 2..5 {
+        shared.report_at(proxy.clone(), Outcome::Unreachable("refused".into()), at);
+    }
+    let rows: Vec<(String, Reachability)> = shared.tracker().status().services.into_iter().map(|s| (s.service, s.state)).collect();
+    assert!(rows.contains(&("model_api:anthropic".to_string(), Reachability::Online)), "{rows:?}");
+    assert!(rows.contains(&("model_api:anthropic@proxy.example.com".to_string(), Reachability::Offline)), "{rows:?}");
+}
+
+#[test]
+fn tracking_a_panes_address_lists_it_as_not_checked_yet_without_touching_one_that_reported() {
+    let shared = Shared::new(0);
+    let proxy = service_for(&ANTHROPIC, Some("https://proxy.example.com"));
+    shared.track_at(proxy.clone(), 1);
+    let state = |id: &str| shared.tracker().status().services.into_iter().find(|s| s.service == id).map(|s| s.state);
+    assert_eq!(state("model_api:anthropic@proxy.example.com"), Some(Reachability::Unknown));
+    shared.report_at(proxy.clone(), Outcome::Answered, 2);
+    shared.track_at(proxy, 3);
+    assert_eq!(state("model_api:anthropic@proxy.example.com"), Some(Reachability::Online), "a second spawn does not forget what is known");
+}
+
+#[test]
+fn a_providers_model_api_is_found_from_its_first_vendor() {
+    assert_eq!(model_api_of("claude"), Some(&ANTHROPIC));
+    assert_eq!(model_api_of("codex"), Some(&OPENAI));
+    assert_eq!(model_api_of("gemini"), Some(&GOOGLE));
+    assert_eq!(model_api_of("no-such-provider"), None);
+}
+
+#[test]
+fn an_address_that_cannot_be_read_is_no_address_and_none_of_it_is_kept() {
+    for raw in ["user:secret@proxy.example.com:8080", "gw.example.com/v1?key=abc", "not a url"] {
+        let service = service_for(&ANTHROPIC, Some(raw));
+        assert_eq!(service, Service::ModelApi(&ANTHROPIC), "{raw}");
+        assert_eq!(endpoint_meta(&service), None);
+    }
+}
+
+#[test]
+fn two_routes_of_one_gateway_are_two_services_with_two_ids() {
+    let a = service_for(&ANTHROPIC, Some("https://gateway.example/team-a"));
+    let b = service_for(&ANTHROPIC, Some("https://gateway.example/team-b"));
+    assert_ne!(a, b);
+    assert_ne!(a.id(), b.id(), "the pane finds its row by id");
+}
+
+#[test]
+fn a_pane_with_a_proxy_of_its_own_has_no_address_of_its_own() {
+    let proxied = env(&[("ANTHROPIC_BASE_URL", "https://gw.example.com"), ("HTTPS_PROXY", "http://corp-proxy.invalid:3128")]);
+    assert_eq!(service_for_env(&ANTHROPIC, &proxied), Service::ModelApi(&ANTHROPIC), "srv's probe can't follow that proxy");
+    let blank = env(&[("ANTHROPIC_BASE_URL", "https://gw.example.com"), ("HTTPS_PROXY", "  ")]);
+    assert_eq!(service_for_env(&ANTHROPIC, &blank).id(), "model_api:anthropic@gw.example.com", "an empty proxy variable is none");
+}
+
+#[test]
+fn a_pane_that_bypasses_the_proxy_for_its_gateway_has_no_address_of_its_own() {
+    let bypass = env(&[("ANTHROPIC_BASE_URL", "https://gw.example.com"), ("NO_PROXY", "gw.example.com")]);
+    assert_eq!(service_for_env(&ANTHROPIC, &bypass), Service::ModelApi(&ANTHROPIC));
+}

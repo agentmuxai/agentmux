@@ -21,6 +21,9 @@ pub(super) const DEGRADED_MIN_FAILURES: usize = 2;
 pub(super) const PROBE_FIRST_MS: i64 = 5_000;
 pub(super) const PROBE_MAX_MS: i64 = 60_000;
 
+/// How many panes' own model API addresses are tracked at once. Past it, the oldest one that is online or
+/// not checked yet is dropped to make room; if every one is in trouble, a new one is not tracked.
+pub(super) const MAX_PANE_ADDRESSES: usize = 8;
 /// A probe that is scheduled or running: while its service isn't `Online`, or once after the OS reported a
 /// network change.
 #[derive(Debug, Clone, PartialEq)]
@@ -137,7 +140,7 @@ impl Tracker {
     /// Lists `service` as not checked yet, with a probe due now, unless it
     /// has already reported. Returns the new status when it was added.
     pub(super) fn seed(&mut self, service: Service, now_ms: i64) -> Option<ConnectivityStatus> {
-        if self.services.contains_key(&service) {
+        if self.services.contains_key(&service) || !self.make_room(&service) {
             return None;
         }
         self.services.insert(service, Entry::unchecked(now_ms));
@@ -147,10 +150,37 @@ impl Tracker {
     /// An outcome from a request a subsystem made. Returns the new status
     /// when a state changed; a new error text alone waits for the next one.
     pub(super) fn report(&mut self, service: Service, outcome: Outcome, now_ms: i64) -> Option<ConnectivityStatus> {
+        if !self.make_room(&service) {
+            return None;
+        }
         let entry = self.services.entry(service).or_insert_with(|| Entry::new(now_ms));
         let next = entry.apply(outcome, false, now_ms);
         let changed = entry.enter(next, now_ms);
         self.changed(changed, now_ms)
+    }
+
+    /// Whether `service` can be added: a pane's own address counts against [`MAX_PANE_ADDRESSES`], and the
+    /// oldest one that is fine (or never checked) goes when the list is full.
+    fn make_room(&mut self, service: &Service) -> bool {
+        if !matches!(service, Service::ModelApiAt(..)) || self.services.contains_key(service) {
+            return true;
+        }
+        let at: Vec<(&Service, &Entry)> = self.services.iter().filter(|(s, _)| matches!(s, Service::ModelApiAt(..))).collect();
+        if at.len() < MAX_PANE_ADDRESSES {
+            return true;
+        }
+        let oldest = at
+            .iter()
+            .filter(|(_, e)| matches!(e.state, Reachability::Online | Reachability::Unknown))
+            .min_by_key(|(_, e)| e.since_ms)
+            .map(|(s, _)| (*s).clone());
+        match oldest {
+            Some(old) => {
+                self.services.remove(&old);
+                true
+            }
+            None => false,
+        }
     }
 
     /// The probes due at `now_ms`, each with the ticket its result must

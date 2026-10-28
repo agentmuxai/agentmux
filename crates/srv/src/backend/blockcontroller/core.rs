@@ -27,6 +27,9 @@ pub(crate) const META_SESSION_ID: &str = "agent:sessionid";
 pub(crate) const META_LAST_FAILURE: &str = "agent:last_failure";
 /// The field of the stored failure that says when it was recorded (unix ms).
 pub(crate) const META_FAILURE_AT_MS: &str = "atMs";
+/// Where a pane's model API calls go when that is not srv's own address: `{service, url}`
+/// (`connectivity::endpoint_meta`). Absent for a pane that calls the default.
+pub(crate) const META_API_ENDPOINT: &str = "agent:api_endpoint";
 
 /// Expand the working directory, create it if missing, set it on `cmd`, and
 /// apply all env-var overrides from `env_vars`.
@@ -201,8 +204,44 @@ pub(crate) fn report_provider_turn(
     let Some(store) = mstore else { return };
     if let Ok(block) = store.must_get::<crate::backend::obj::Block>(block_id) {
         let provider = crate::backend::obj::meta_get_string(&block.meta, "agentProvider", "");
-        crate::connectivity::observe_provider_turn(&provider, failure);
+        let url = block.meta.get(META_API_ENDPOINT).and_then(|v| v.get("url")).and_then(|v| v.as_str());
+        crate::connectivity::observe_provider_turn(&provider, failure, url);
     }
+}
+
+/// Works out, as a pane's CLI starts, which model API address it was given (`env` is what the process
+/// gets), tracks that address as its own service when it is not srv's, and keeps it in the block's meta
+/// for the pane and for the turn reports. Returns the service the pane's calls go to, or `None` for a
+/// provider srv doesn't track.
+pub(crate) fn attach_model_api(
+    block_id: &str,
+    env: &HashMap<String, String>,
+    mstore: &Option<Arc<Store>>,
+    event_bus: &Option<Arc<EventBus>>,
+) -> Option<crate::connectivity::Service> {
+    let store = mstore.as_ref()?;
+    let block = store.must_get::<crate::backend::obj::Block>(block_id).ok()?;
+    let provider = crate::backend::obj::meta_get_string(&block.meta, "agentProvider", "");
+    let api = crate::connectivity::model_api_of(&provider)?;
+    let service = crate::connectivity::service_for_env(api, env);
+    let endpoint = crate::connectivity::endpoint_meta(&service);
+    let stored = block.meta.get(META_API_ENDPOINT).filter(|v| !v.is_null());
+    if endpoint.as_ref() != stored {
+        let mut update = crate::backend::obj::MetaMapType::new();
+        update.insert(META_API_ENDPOINT.to_string(), endpoint.unwrap_or(serde_json::Value::Null));
+        match crate::server::service::update_object_meta(store, &format!("block:{block_id}"), &update) {
+            Ok(_) => {
+                if let Some(bus) = event_bus {
+                    broadcast_block_update(store, bus, block_id);
+                }
+            }
+            Err(e) => tracing::warn!(block_id = %block_id, error = %e, "failed to persist agent:api_endpoint"),
+        }
+    }
+    if matches!(service, crate::connectivity::Service::ModelApiAt(..)) {
+        crate::connectivity::track(service.clone());
+    }
+    Some(service)
 }
 
 /// Persist or clear the last agent failure in block metadata.
@@ -385,6 +424,58 @@ mod tests {
             model_vendor_base_url: String::new(),
             memory_id: String::new(),
         }
+    }
+
+    /// A block for `provider` with the given extra meta, in a fresh store.
+    fn pane_of(provider: &str, extra: serde_json::Value) -> (Arc<Store>, String) {
+        let store = Arc::new(Store::open_in_memory().unwrap());
+        let block_id = "66666666-6666-6666-6666-666666666666".to_string();
+        let mut meta = MetaMapType::new();
+        meta.insert("view".to_string(), serde_json::json!("agent"));
+        meta.insert("agentProvider".to_string(), serde_json::json!(provider));
+        for (k, v) in extra.as_object().cloned().unwrap_or_default() {
+            meta.insert(k, v);
+        }
+        let mut block = Block { oid: block_id.clone(), parentoref: String::new(), version: 1, runtimeopts: None, stickers: None, meta, subblockids: None };
+        store.insert(&mut block).unwrap();
+        (store, block_id)
+    }
+
+    fn env(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+        pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+    }
+
+    #[test]
+    fn a_pane_pointed_at_a_proxy_keeps_its_service_in_its_meta_and_is_tracked() {
+        let (store, block_id) = pane_of("claude", serde_json::json!({}));
+        let mstore = Some(store.clone());
+        let service = attach_model_api(&block_id, &env(&[("ANTHROPIC_BASE_URL", "https://proxy.example.com")]), &mstore, &None).unwrap();
+        assert_eq!(service.id(), "model_api:anthropic@proxy.example.com");
+        let block: Block = store.get(&block_id).unwrap().unwrap();
+        assert_eq!(
+            block.meta.get(META_API_ENDPOINT),
+            Some(&serde_json::json!({ "service": "model_api:anthropic@proxy.example.com", "url": "https://proxy.example.com" }))
+        );
+        assert!(
+            crate::connectivity::status().services.iter().any(|s| s.service == "model_api:anthropic@proxy.example.com"),
+            "its address is listed from the start, not only after a request"
+        );
+    }
+
+    #[test]
+    fn a_pane_moved_back_to_the_default_address_loses_the_entry() {
+        let (store, block_id) = pane_of("claude", serde_json::json!({ META_API_ENDPOINT: { "service": "model_api:anthropic@old.example.com", "url": "https://old.example.com" } }));
+        let mstore = Some(store.clone());
+        let service = attach_model_api(&block_id, &env(&[]), &mstore, &None).unwrap();
+        assert_eq!(service, crate::connectivity::Service::ModelApi(&crate::connectivity::ANTHROPIC));
+        let block: Block = store.get(&block_id).unwrap().unwrap();
+        assert!(block.meta.get(META_API_ENDPOINT).is_none_or(|v| v.is_null()));
+    }
+
+    #[test]
+    fn a_provider_srv_does_not_track_has_no_service() {
+        let (store, block_id) = pane_of("aider", serde_json::json!({}));
+        assert!(attach_model_api(&block_id, &env(&[("ANTHROPIC_BASE_URL", "https://proxy.example.com")]), &Some(store), &None).is_none());
     }
 
     /// SPEC_PANE_CLOSE_REOPEN_CONTINUITY_GUARANTEE_2026_07_27.md §4.1: this
