@@ -13,7 +13,7 @@ export async function fetchMuxFile(
     zoneId: string,
     fileName: string,
     offset?: number
-): Promise<{ data: Uint8Array; fileInfo: MuxFile }> {
+): Promise<{ data: Uint8Array; fileInfo: MuxFile; dataOffset?: number }> {
     const usp = new URLSearchParams();
     usp.set("zoneid", zoneId);
     usp.set("name", fileName);
@@ -32,5 +32,9 @@ export async function fetchMuxFile(
     if (fileInfo64 == null) throw new Error(`missing zone file info for ${zoneId}:${fileName}`);
     const fileInfo = JSON.parse(atob(fileInfo64));
     const data = await resp.arrayBuffer();
-    return { data: new Uint8Array(data), fileInfo };
+    // Where the body starts in the file: later than `offset` when a circular
+    // file (a terminal's output) has dropped its head. Absent from an older srv.
+    const startHeader = resp.headers.get("X-ZoneFileOffset");
+    const dataOffset = startHeader == null || startHeader === "" || isNaN(Number(startHeader)) ? undefined : Number(startHeader);
+    return { data: new Uint8Array(data), fileInfo, dataOffset };
 }

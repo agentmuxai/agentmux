@@ -12,6 +12,8 @@ use crate::backend::storage::filestore::FileStore;
 use crate::backend::mps;
 use crate::backend::transcript::append::{append_transcript, mirror_append_to_global};
 
+use super::term_cap;
+
 /// Current unix time in ms, or 0 if the clock is before the epoch (never in
 /// practice; 0 reads as "unknown" on the consumer side, same as no stamp).
 fn unix_ms_now() -> i64 {
@@ -152,7 +154,7 @@ pub fn handle_append_block_file(
                 block_id,
                 filename,
                 std::collections::HashMap::new(),
-                crate::backend::storage::filestore::FileOpts::default(),
+                if filename == term_cap::TERM_FILE { term_cap::term_opts() } else { Default::default() },
             ) {
                 // AlreadyExists is benign (race between two appends); anything
                 // else is worth warning about.
@@ -183,6 +185,9 @@ pub fn handle_append_block_file(
                 // reconcile-only consumer, unchanged here.)
                 if global_output_zone.is_some() {
                     append_tsidx_entry(fs, block_id, actual_start.max(0) as u64, unix_ms_now());
+                }
+                if filename == term_cap::TERM_FILE && term_cap::after_append(fs, block_id, actual_start, data) {
+                    handle_append_block_file(broker, block_id, filename, term_cap::TRIMMED_NOTICE, filestore, None);
                 }
             }
             Err(e) => {

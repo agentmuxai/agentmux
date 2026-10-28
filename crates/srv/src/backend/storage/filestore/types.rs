@@ -46,22 +46,25 @@ pub struct MuxFile {
     pub meta: FileMeta,
 }
 
+/// The meta key holding the first offset still stored once rows below it were
+/// deleted (`trim.rs`): it holds when the window is later widened or lifted.
+pub(crate) const RETAINED_FROM_KEY: &str = "retainedfrom";
+
 impl MuxFile {
     /// Effective data length, accounting for circular files.
     pub fn data_length(&self) -> i64 {
-        if self.opts.circular && self.opts.maxsize > 0 && self.size > self.opts.maxsize {
-            self.opts.maxsize
-        } else {
-            self.size
-        }
+        self.size - self.data_start_idx()
     }
 
-    /// Start index of data for circular files.
+    /// Start index of data: for circular files the window's start, and never
+    /// before the part rows a trim left (the window may have been widened since).
     pub fn data_start_idx(&self) -> i64 {
-        if self.opts.circular && self.opts.maxsize > 0 && self.size > self.opts.maxsize {
+        let window = if self.opts.circular && self.opts.maxsize > 0 && self.size > self.opts.maxsize {
             self.size - self.opts.maxsize
         } else {
             0
-        }
+        };
+        let retained = self.meta.get(RETAINED_FROM_KEY).and_then(serde_json::Value::as_i64).unwrap_or(0);
+        window.max(retained.min(self.size))
     }
 }
