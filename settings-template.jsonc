@@ -193,6 +193,12 @@
     // agent on this computer is also changing, so it can message them first.
     // "agent:overlapnotes":        true,
 
+    // -- Hangar (Files pane) --
+    // The Hangar (Files pane) icons: "system" shows the picture the operating
+    // system shows for each file type (the same as Explorer on Windows);
+    // "app" keeps AgentMux's own glyphs.
+    // "files:icons":                       "system",
+
     // -- Swarm Supervisor --
     // The Supervisor judges each finished turn of a supervised Claude agent and
     // sends it a continuation or stops and tells you. It is off until you turn

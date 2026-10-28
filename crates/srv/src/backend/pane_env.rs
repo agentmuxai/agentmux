@@ -352,6 +352,8 @@ mod spawn_site_coverage {
          "sanitized: agent CLI subprocess, sanitize_process_command"),
         ("src/backend/attachments/extract.rs", "exe", 1,
          "sanitized: our own binary re-run as `__extract` to parse one attachment in isolation; it needs no instance identity, so sanitize_external_std_command"),
+        ("src/backend/file_icons/pool.rs", "exe", 1,
+         "sanitized: our own binary re-run as `__file_icons` to ask the system for a file type's icon in isolation; it needs no instance identity, so sanitize_external_std_command"),
         ("src/backend/attachments/extract.rs", "harness", 1,
          "test: re-runs the test harness as a child that sleeps, to prove the extraction deadline kills it"),
         ("src/backend/storage/muxbus.rs", "std::env::current_exe(", 1,

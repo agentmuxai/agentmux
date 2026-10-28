@@ -707,6 +707,12 @@
           "default": true,
           "description": "When an agent edits a file another agent on this computer has uncommitted or edited in the last two hours (same repository and path, in any clone), AgentMux sends the editing agent a short [AgentMux] note naming the other agent, so it can message them first. Rate-limited: one note per other agent and file every two hours, three per agent per ten minutes. Set false to turn the notes off. See docs/specs/SPEC_AGENT_OVERLAP_AWARENESS_2026_10_10.md §3.3."
         },
+        "files:icons": {
+          "type": "string",
+          "enum": ["system", "app"],
+          "default": "system",
+          "description": "Which icons the Hangar (Files pane) shows for files and folders: \"system\" is the picture the operating system shows for each type (the same as Windows Explorer), made by srv; \"app\" is AgentMux's own monochrome glyphs. Where the system has no source yet, or an icon can't be made, the glyph shows. See docs/specs/SPEC_HANGAR_SYSTEM_FILE_ICONS_2026_10_27.md."
+        },
         "supervisor:enabled": {
           "type": "boolean",
           "default": false,

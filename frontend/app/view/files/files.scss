@@ -300,6 +300,21 @@
     }
 }
 
+.files-icon-box {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+}
+
+.files-sys-icon {
+    display: block;
+    object-fit: contain;
+    pointer-events: none;
+}
+
 .files-icon {
     width: 14px;
     flex-shrink: 0;
