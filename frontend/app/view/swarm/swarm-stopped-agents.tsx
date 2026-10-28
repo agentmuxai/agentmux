@@ -4,7 +4,7 @@
 // The Swarm's agents that have no pane and no process: one row each, from the agent's definition
 // (name, provider) and its runtime state (store/agent-runtime.ts). They are listed apart from the live
 // agents' rows: those are keyed by block and carry a Supervisor, a selection and a stream of
-// activity, none of which a stopped agent has. Open starts the agent in a pane, as opening it does.
+// activity, none of which a stopped agent has. Start runs it with no pane and Open starts it in one.
 
 import { Button } from "@/app/element/ui/Button";
 import { AgentRuntimeChip } from "@/app/view/agent/components/AgentRuntimeChip";
@@ -18,13 +18,27 @@ export function StoppedAgents(props: {
     hasLive: Accessor<boolean>;
     /** Resolves to why srv refused, shown under the row. */
     onOpen: (agent: AgentRuntime) => Promise<string | undefined> | void;
+    /** Runs the agent with no pane; resolves to why srv refused, shown under the row. */
+    onStart: (agent: AgentRuntime) => Promise<string | undefined> | void;
 }): JSX.Element {
     const [folded, setFolded] = createSignal<boolean | null>(null);
     const [refused, setRefused] = createSignal<Record<string, string>>({});
-    const open = async (agent: AgentRuntime) => {
+    // The agents with a start or an open out: the row says so, and a second press waits for the first.
+    const [busy, setBusy] = createSignal<ReadonlySet<string>>(new Set());
+    const run = async (agent: AgentRuntime, action: (a: AgentRuntime) => Promise<string | undefined> | void) => {
+        if (busy().has(agent.agent_id)) return;
         setRefused((prev) => ({ ...prev, [agent.agent_id]: "" }));
-        const why = await props.onOpen(agent);
-        if (why) setRefused((prev) => ({ ...prev, [agent.agent_id]: why }));
+        setBusy((prev) => new Set(prev).add(agent.agent_id));
+        try {
+            const why = await action(agent);
+            if (why) setRefused((prev) => ({ ...prev, [agent.agent_id]: why }));
+        } finally {
+            setBusy((prev) => {
+                const next = new Set(prev);
+                next.delete(agent.agent_id);
+                return next;
+            });
+        }
     };
     const isFolded = () => folded() ?? props.hasLive();
     return (
@@ -56,9 +70,19 @@ export function StoppedAgents(props: {
                                     <AgentRuntimeChip state={agent.state} detail={agent.detail} />
                                     <Button
                                         density="compact"
+                                        aria-label={`Start ${agent.name}`}
+                                        title="Run it with no pane, resuming its session"
+                                        disabled={busy().has(agent.agent_id)}
+                                        onClick={() => void run(agent, props.onStart)}
+                                    >
+                                        {busy().has(agent.agent_id) ? "Starting…" : "Start"}
+                                    </Button>
+                                    <Button
+                                        density="compact"
                                         aria-label={`Open ${agent.name}`}
                                         title="Open it in a pane (starts it)"
-                                        onClick={() => void open(agent)}
+                                        disabled={busy().has(agent.agent_id)}
+                                        onClick={() => void run(agent, props.onOpen)}
                                     >
                                         Open
                                     </Button>
