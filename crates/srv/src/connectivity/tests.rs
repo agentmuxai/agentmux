@@ -138,8 +138,8 @@ fn a_pane_with_no_address_of_its_own_or_srvs_address_uses_the_providers_service(
 fn a_pane_pointed_at_a_proxy_is_its_own_service_probed_at_the_proxy() {
     let service = service_for_env(&ANTHROPIC, &env(&[("ANTHROPIC_BASE_URL", "https://user:secret@proxy.example.com:8443/v1/?key=abc")]));
     assert_eq!(service, Service::ModelApiAt(&ANTHROPIC, "https://proxy.example.com:8443/v1".to_string()));
-    assert_eq!(service.id(), "model_api:anthropic@proxy.example.com:8443");
-    assert_eq!(service.label(), "Anthropic API (proxy.example.com:8443)");
+    assert_eq!(service.id(), "model_api:anthropic@proxy.example.com:8443/v1");
+    assert_eq!(service.label(), "Anthropic API (proxy.example.com:8443/v1)");
     assert_eq!(service.probe_url(), "https://proxy.example.com:8443/v1");
     let shown = format!("{} {}", service.id(), service.label());
     assert!(!shown.contains("secret") && !shown.contains("abc"), "no credential in what the status shows: {shown}");
@@ -201,4 +201,12 @@ fn an_address_that_cannot_be_read_is_no_address_and_none_of_it_is_kept() {
         assert_eq!(service, Service::ModelApi(&ANTHROPIC), "{raw}");
         assert_eq!(endpoint_meta(&service), None);
     }
+}
+
+#[test]
+fn two_routes_of_one_gateway_are_two_services_with_two_ids() {
+    let a = service_for(&ANTHROPIC, Some("https://gateway.example/team-a"));
+    let b = service_for(&ANTHROPIC, Some("https://gateway.example/team-b"));
+    assert_ne!(a, b);
+    assert_ne!(a.id(), b.id(), "the pane finds its row by id");
 }

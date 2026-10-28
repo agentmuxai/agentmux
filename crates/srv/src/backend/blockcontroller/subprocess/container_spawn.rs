@@ -255,8 +255,10 @@ impl SubprocessController {
             crate::backend::identity_spawn::SpawnPath::Container,
             &container_env.iter().cloned().collect(),
         );
-        // Which model API address this turn's CLI is given, for the connectivity status.
-        core::attach_model_api(&self.block_id, &container_env.iter().cloned().collect(), &self.mstore, &self.event_bus);
+        // A container's CLI reaches its API from the container's network (a Docker-only name, `host.docker.internal`),
+        // which a probe from srv can't judge, so a container pane has no address of its own in the status: this
+        // clears any recorded by an earlier run on the host.
+        core::attach_model_api(&self.block_id, &std::collections::HashMap::new(), &self.mstore, &self.event_bus);
 
         // Snapshot container params for the queue-drain path before base_cmd is consumed.
         let cm_for_drain = cm.clone();

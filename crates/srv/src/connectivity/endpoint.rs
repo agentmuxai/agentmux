@@ -17,14 +17,16 @@ pub(super) fn normalise(url: &str) -> Option<String> {
     Some(parsed.as_str().trim_end_matches('/').to_string())
 }
 
-/// `host` or `host:port` of a [`normalise`]d address, for the id and the label.
+/// What tells a [`normalise`]d address apart in an id and a label: `host`, `host:port` when the port is
+/// not the scheme's default, the path when there is one (two routes of one gateway are two services),
+/// and the scheme when it is not `https`.
 pub(super) fn host_of(url: &str) -> String {
-    let parsed = reqwest::Url::parse(url).ok();
-    match parsed.as_ref().and_then(|u| u.host_str().map(|h| (h, u.port()))) {
-        Some((host, Some(port))) => format!("{host}:{port}"),
-        Some((host, None)) => host.to_string(),
-        None => "unknown address".to_string(),
-    }
+    let Some(parsed) = reqwest::Url::parse(url).ok() else { return "unknown address".to_string() };
+    let Some(host) = parsed.host_str() else { return "unknown address".to_string() };
+    let scheme = if parsed.scheme() == "https" { String::new() } else { format!("{}://", parsed.scheme()) };
+    let port = parsed.port().map(|p| format!(":{p}")).unwrap_or_default();
+    let path = parsed.path().trim_end_matches('/');
+    format!("{scheme}{host}{port}{path}")
 }
 
 #[cfg(test)]
@@ -62,7 +64,15 @@ mod tests {
     fn the_host_has_its_port_only_when_it_is_not_the_scheme_default() {
         assert_eq!(host_of("https://proxy.example.com"), "proxy.example.com");
         assert_eq!(host_of("https://proxy.example.com:443"), "proxy.example.com");
-        assert_eq!(host_of("http://localhost:4000"), "localhost:4000");
+        assert_eq!(host_of("http://localhost:4000"), "http://localhost:4000", "a scheme other than https is part of the identity");
         assert_eq!(host_of("user:secret@proxy"), "unknown address", "never echoes what it can't read");
+    }
+
+    #[test]
+    fn two_routes_of_one_gateway_are_two_identities() {
+        let a = host_of("https://gateway.example/team-a");
+        let b = host_of("https://gateway.example/team-b");
+        assert_eq!((a.as_str(), b.as_str()), ("gateway.example/team-a", "gateway.example/team-b"));
+        assert_ne!(host_of("http://gateway.example"), host_of("https://gateway.example"));
     }
 }
