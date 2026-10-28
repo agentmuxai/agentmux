@@ -299,9 +299,11 @@ pub async fn app_exit(state: &AppState) -> usize {
     ids.len()
 }
 
-/// Keep which agents have a turn running among the panes in `ids`, for the next
-/// start (`upgrade_notice::record_interrupted`). None running removes an older
-/// list. Nothing here can fail the exit.
+/// Add the agents with a turn running among the panes in `ids` to the list the
+/// next start tells to carry on (`upgrade_notice::record_interrupted`). A GUI
+/// quit has closed most of them already (`note_turn_cut_off_by_quit`), so this
+/// catches what is left when srv exits on its own. It only adds: none running
+/// leaves the list as it is. Nothing here can fail the exit.
 async fn record_turns_in_flight(state: &AppState, ids: &[String]) {
     let controllers = blockcontroller::get_all_controllers();
     let busy: Vec<String> = ids
