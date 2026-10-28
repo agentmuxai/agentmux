@@ -72,10 +72,14 @@ jobs:
       - if: steps.version.outputs.publish == 'true'
         run: npm publish --access public
       # The tag marks the commit that was published; nothing listens to it.
+      # The marker is not the release: a failure here (it runs after the publish) must not fail the run.
       - name: Tag the published commit
         if: steps.version.outputs.publish == 'true'
+        continue-on-error: true
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
+          git config user.name "agentmux-widget-sdk-publish"
+          git config user.email "widget-sdk-publish@agentmux.ai"
           git tag -a "widget-sdk-v$VERSION" -m "@agentmuxai/widget-sdk $VERSION" "$GITHUB_SHA"
           git push origin "widget-sdk-v$VERSION"
