@@ -149,7 +149,7 @@ pub async fn run(
     // Not the agents' blocks that stay: with `agents:always_available` on they are parked first, so
     // neither this stop nor the tab's delete reaches them.
     let ctx = SagaCtx::new(state, saga_id);
-    let parked = super::park_agents::park_agent_blocks(&ctx, &block_ids_to_cleanup).await;
+    let parked = super::park_agents::park_agent_blocks(&ctx, &block_ids_to_cleanup, false).await;
     super::agent_teardown::run_many(
         state,
         &super::park_agents::not_parked(&block_ids_to_cleanup, &parked),
