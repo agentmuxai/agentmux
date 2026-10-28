@@ -181,7 +181,6 @@ pub fn run_github_token(gh_args: &[String]) -> i32 {
         let mut cmd = std::process::Command::new("git");
         cmd.args(["config", "--get", "remote.origin.url"]).stdin(std::process::Stdio::null()).stderr(std::process::Stdio::null());
         // Windows: git is a console program, and this process has no console of its own.
-        #[cfg(windows)]
         cmd.no_window();
         let out = cmd.output().ok()?;
         out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())

@@ -175,6 +175,11 @@ impl Tokens {
                 st.refused.remove(&want);
                 st.cache.insert(want.clone(), minted.clone());
             }
+            // A bad moment at the broker doesn't take back a token that still works.
+            Err(TokenError::Broker(BrokerError::Unavailable(_))) if st.cache.get(&want).is_some_and(|m| m.expires_at > now) => {
+                let kept = st.cache[&want].clone();
+                return Ok(kept);
+            }
             Err(error) => {
                 st.cache.remove(&want);
                 st.refused.insert(want.clone(), (now + REFUSAL_TTL_SECS, error.clone()));
@@ -615,6 +620,19 @@ mod tests {
         assert_eq!(first, again);
         assert_eq!(fake.asked.lock().unwrap().len(), 1);
         assert!(tokens.token_for(&fake, &w, NOW + 25).await.is_ok(), "asked again after the refusal expires");
+    }
+
+    #[tokio::test]
+    async fn a_brief_outage_keeps_serving_a_token_that_still_works() {
+        let fake = Fake::new(vec![vec![link(5, "o", "active", "active")]], vec![Ok(ok_for(3600)), Err(BrokerError::Unavailable("503".into()))]);
+        let tokens = Tokens::default();
+        let w = want("o", "r");
+        tokens.token_for(&fake, &w, NOW).await.unwrap();
+        // 200 s left: due for renewal, the broker is down, the token still works.
+        let served = tokens.token_for(&fake, &w, NOW + 3400).await.unwrap();
+        assert_eq!(served.expires_at, NOW + 3600);
+        // Once it has run out, it is an error, and a remembered one.
+        assert!(tokens.token_for(&fake, &w, NOW + 3601).await.is_err());
     }
 
     #[tokio::test]
