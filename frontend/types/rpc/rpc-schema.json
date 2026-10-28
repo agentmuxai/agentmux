@@ -5911,6 +5911,25 @@
     }
   },
   {
+    "command": "sensitive.decide",
+    "request": "agentmux_srv::sagas::sensitive_window::CommandSensitiveDecideData",
+    "requestName": "CommandSensitiveDecideData",
+    "requestTs": {
+      "imports": [
+        "CommandSensitiveDecideData"
+      ],
+      "name": "CommandSensitiveDecideData"
+    },
+    "response": "agentmux_srv::sagas::sensitive_window::SensitiveDecideResult",
+    "responseName": "SensitiveDecideResult",
+    "responseTs": {
+      "imports": [
+        "SensitiveDecideResult"
+      ],
+      "name": "SensitiveDecideResult"
+    }
+  },
+  {
     "command": "session:activity_summary",
     "request": "agentmux_srv::backend::rpc_types::session::CommandActivitySummaryData",
     "requestName": "CommandActivitySummaryData",

@@ -10,14 +10,13 @@
 //! own code path runs unchanged, so no new power is added; only who may trigger
 //! it changes.
 //!
-//! A veto or an approve-now is the person's, and only the person's: the caller
-//! of [`veto`] and [`approve_now`] has already proven the AgentMux window (the
-//! RPC checks `operator_only`). The banner, toast and chime that tell the
-//! person arrive with the next step of the spec's §9; the events here carry
-//! what they show.
+//! A veto or an approve-now is the person's, and only the person's: the RPC
+//! below accepts them only from the proven AgentMux window (`operator_only`),
+//! never from an agent. The banner, toast and chime that tell the person arrive
+//! with the next steps of the spec's §9; the events here carry what they show.
 //!
-//! Nothing outside the tests calls this yet: the RPC for the person and the
-//! runners arrive with the later steps of that spec's §9.
+//! Nothing starts a countdown yet: the routes that file and approve requests,
+//! and the runners, arrive with the later steps of that spec's §9.
 #![allow(dead_code)]
 
 use std::collections::HashMap;
@@ -26,14 +25,17 @@ use std::pin::Pin;
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
+use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::sensitive_requests::{self as requests, Request, Status};
 use crate::server::AppState;
 use agentmux_common::time::now_ms;
 
 pub const EVENT_SENSITIVE_PENDING: &str = "sensitive:pending";
 pub const EVENT_SENSITIVE_CLEARED: &str = "sensitive:cleared";
+/// The person's veto or approve-now of a countdown.
+pub const COMMAND_SENSITIVE_DECIDE: &str = "sensitive.decide";
 /// A settled window stays answerable this long, then is dropped.
 const KEEP_FINISHED_MS: i64 = 10 * 60 * 1000;
 
@@ -69,6 +71,23 @@ pub struct SensitiveClearedEvent {
     pub outcome: String,
 }
 
+/// Data for `sensitive.decide`: the countdown's `request_id` (from `sensitive:pending`).
+#[derive(Debug, Clone, Serialize, Deserialize, Default, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandSensitiveDecideData {
+    pub request_id: String,
+    #[ts(type = r#""veto" | "approve_now""#)]
+    pub decision: String,
+}
+
+/// How the person's decision came out: `too_late` when the countdown had begun or ended.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct SensitiveDecideResult {
+    #[ts(type = r#""vetoed" | "approved_now" | "too_late""#)]
+    pub outcome: String,
+}
+
 struct Entry {
     view: SensitiveView,
     wake: Arc<tokio::sync::Notify>,
@@ -100,6 +119,24 @@ fn runner_for(op: &str) -> Option<Runner> {
 
 pub fn status(request_id: &str) -> Option<SensitiveView> {
     entries().get(request_id).map(|e| e.view.clone())
+}
+
+/// `sensitive.decide`: only the AgentMux window, proven, may veto or approve a
+/// countdown now. An agent's connection is refused whatever it holds.
+pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let state = state.clone();
+    engine.register_typed(COMMAND_SENSITIVE_DECIDE, move |cmd: CommandSensitiveDecideData, ctx| {
+        let state = state.clone();
+        async move {
+            ctx.operator_only("only the person can veto or approve a sensitive request")?;
+            let outcome = match cmd.decision.as_str() {
+                "veto" => veto(&state, &cmd.request_id),
+                "approve_now" => approve_now(&cmd.request_id),
+                other => return Err(format!("INVALID_ARG: decision is 'veto' or 'approve_now', not '{}'", other.chars().take(20).collect::<String>())),
+            };
+            Ok(SensitiveDecideResult { outcome: outcome.to_string() })
+        }
+    });
 }
 
 /// The countdowns still running, for a window that opens during one.
