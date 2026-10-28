@@ -11,8 +11,11 @@
 # process running as the user:
 #   - the file is copied (not followed through a symlink) into a root-only
 #     directory and only the copy is used, so it can't change after it is checked;
-#   - the checksum comes from GitHub's own release listing, fetched here, never from
-#     the caller, so naming a hash can't get a file of one's own installed as root;
+#   - the file is checked against the release's signed manifest, fetched here from the
+#     release's own address and verified by this install's launcher with the key it
+#     pins, never against anything the caller names, so a hash of one's own can't get a
+#     file of one's own installed as root (a release from before signing, which has no
+#     manifest, is checked against the checksum GitHub lists for it);
 #   - the package must be `agentmux`, exactly <version>, for this architecture, and
 #     newer than the installed one;
 #   - nothing may run from /opt/agentmux (any user's AgentMux) once the launcher has
@@ -22,7 +25,7 @@
 # /var/lib/agentmux/last-upgrade, written by this script), once, and only while the
 # version that upgrade installed is still the installed one. There is no file from the
 # user then: the script downloads the release's package itself, from GitHub over
-# HTTPS, and checks it against GitHub's listing the same way.
+# HTTPS, and checks it against the signed manifest the same way.
 #
 # On stdout it prints READY once everything is checked and it is waiting for the
 # launcher to quit; the launcher reads that to know the password was accepted and
@@ -151,20 +154,74 @@ else
     chmod 600 "$COPY"
 fi
 
-# --- the checksum, from GitHub itself ---
-LISTING=$(fetch "$REPO_API/v$VERSION") || die "can't read GitHub's listing of AgentMux $VERSION to check the file (no network, or GitHub is limiting requests); try again later"
-# The release listing is pretty-printed JSON: an asset's "name" line is followed by
-# its "digest" line ("sha256:<hex>").
-EXPECTED=$(printf '%s\n' "$LISTING" | awk -v n="\"name\": \"$NAME\"" '
-    index($0, n) { found = 1; next }
-    found && /"digest"/ { sub(/.*"sha256:/, ""); sub(/".*/, ""); print; exit }
-    found && /"name"/ { exit }')
-case "$EXPECTED" in
-'' | *[!0-9a-f]*) die "GitHub lists no checksum for $NAME" ;;
+# --- the signed manifest ---
+# The release's envelope, its signature and its manifest come from the release's own
+# address (never from the caller), over HTTPS. The launcher of this install checks them
+# against the key it pins and the file against the manifest: the same decision the app
+# makes before it downloads (docs/specs/SPEC_SIGNED_UPDATE_CHECKSUMS_2026_10_25.md), so
+# this script holds neither the key nor the rules.
+SIGNED_DIR="$WORK/signed"
+mkdir "$SIGNED_DIR" || die "can't make a work folder"
+UNREACHABLE=
+# get_release_file <name>: into $SIGNED_DIR. A release without the file (HTTP 404) leaves
+# it out; any other failure is "unreachable" (the launcher refuses, never falls back).
+get_release_file() {
+    code=
+    if command -v curl >/dev/null 2>&1; then
+        code=$(curl -sS -L --proto '=https' --proto-redir '=https' --tlsv1.2 --max-time 30 --max-filesize 1048576 \
+            -o "$SIGNED_DIR/$1" -w '%{http_code}' "$DOWNLOAD_BASE/v$VERSION/$1" 2>/dev/null) || code=
+    elif command -v wget >/dev/null 2>&1; then
+        if wget -q -O "$SIGNED_DIR/$1" --https-only --secure-protocol=TLSv1_2 --timeout=30 "$DOWNLOAD_BASE/v$VERSION/$1" 2>/dev/null; then
+            code=200
+        elif wget -S -O /dev/null --https-only --timeout=30 "$DOWNLOAD_BASE/v$VERSION/$1" 2>&1 | grep -q 'HTTP/[0-9.]* 404'; then
+            code=404
+        fi
+    fi
+    case "$code" in
+    200) ;;
+    404) rm -f "$SIGNED_DIR/$1" ;;
+    *)
+        rm -f "$SIGNED_DIR/$1"
+        UNREACHABLE="GitHub didn't answer"
+        return 1
+        ;;
+    esac
+}
+case "$DOWNLOAD_BASE" in
+https://github.com/agentmuxai/agentmux/releases/download) ;;
+*) { [ -n "${AGENTMUX_HELPER_TEST:-}" ] && [ -z "${AGENTMUX_HELPER_STRICT_BASE:-}" ]; } || die "the release address isn't AgentMux's GitHub releases" ;;
 esac
-[ "${#EXPECTED}" -eq 64 ] || die "GitHub lists no checksum for $NAME"
-ACTUAL=$(sha256sum <"$COPY" | awk '{print $1}')
-[ "$ACTUAL" = "$EXPECTED" ] || die "$NAME doesn't match the checksum GitHub lists for it"
+get_release_file "AgentMux-$VERSION-envelope.json" \
+    && { [ ! -f "$SIGNED_DIR/AgentMux-$VERSION-envelope.json" ] || { get_release_file "AgentMux-$VERSION-envelope.json.sig" && get_release_file "AgentMux-$VERSION-manifest.json"; }; }
+[ -x "$LAUNCHER" ] || die "can't check the signature: $LAUNCHER is missing"
+# One argument for the reason, quoted, so its words stay together.
+if [ -n "$UNREACHABLE" ]; then
+    VERIFY_MSG=$(env -i PATH="$PATH" LC_ALL=C "$LAUNCHER" --verify-update "$VERSION" "$SIGNED_DIR" "$COPY" "unreachable:$UNREACHABLE" 2>&1 >/dev/null)
+else
+    VERIFY_MSG=$(env -i PATH="$PATH" LC_ALL=C "$LAUNCHER" --verify-update "$VERSION" "$SIGNED_DIR" "$COPY" 2>&1 >/dev/null)
+fi
+VERIFY_RC=$?
+case "$VERIFY_RC" in
+0) ;;
+10)
+    # A release made before signing existed (before 0.60.4) has no manifest: its file
+    # is checked against the checksum GitHub lists for it, as the app does.
+    LISTING=$(fetch "$REPO_API/v$VERSION") || die "can't read GitHub's listing of AgentMux $VERSION to check the file (no network, or GitHub is limiting requests); try again later"
+    # The release listing is pretty-printed JSON: an asset's "name" line is followed by
+    # its "digest" line ("sha256:<hex>").
+    EXPECTED=$(printf '%s\n' "$LISTING" | awk -v n="\"name\": \"$NAME\"" '
+        index($0, n) { found = 1; next }
+        found && /"digest"/ { sub(/.*"sha256:/, ""); sub(/".*/, ""); print; exit }
+        found && /"name"/ { exit }')
+    case "$EXPECTED" in
+    '' | *[!0-9a-f]*) die "GitHub lists no checksum for $NAME" ;;
+    esac
+    [ "${#EXPECTED}" -eq 64 ] || die "GitHub lists no checksum for $NAME"
+    ACTUAL=$(sha256sum <"$COPY" | awk '{print $1}')
+    [ "$ACTUAL" = "$EXPECTED" ] || die "$NAME doesn't match the checksum GitHub lists for it"
+    ;;
+*) die "${VERIFY_MSG:-can't check the signature of AgentMux $VERSION}" ;;
+esac
 
 [ "$OWNER" = "$KIND" ] || die "AgentMux was installed from a .$OWNER, not a .$KIND"
 
