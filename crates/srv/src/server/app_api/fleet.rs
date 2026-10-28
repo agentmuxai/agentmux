@@ -755,8 +755,8 @@ async fn forward_stop_pending(
 
 /// Stop agents and KEEP their panes, behind the user's 30 s override. Internal
 /// only, since `Stop agents` closes the tab (`fleet_close_agents_with_override`):
-/// the fork slug migration, which restarts the agents in the same panes, is its
-/// one caller. Every target running on
+/// the fork slug migration, which restarts the agents in the same panes, and
+/// `Agents stop` of another agent are its callers. Every target running on
 /// this instance waits for its user's 30 s override, all windows in parallel
 /// (docs/specs/SPEC_AGENT_SELF_QUIT_2026_09_24.md §6.5). A target running on
 /// another instance on this machine is asked there, in that instance's own

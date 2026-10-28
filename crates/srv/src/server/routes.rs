@@ -327,7 +327,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/api/v1/agent/container/update", post(app_api::container_update::handle_update_container))
         // A leader's own workers and how each is doing (§3.4).
         .route("/api/v1/agent/workers", post(app_api::agent_spawn::handle_agent_workers))
-        // Start, stop or detach an agent with no window of the operator (`Agents start`, `stop`, `detach`).
+        // Start, stop or detach an agent (`Agents start`, `stop`, `detach`); a stop of another agent waits for the person's override window.
         .route("/api/v1/agent/start", post(app_api::agent_lifecycle::handle_agent_start))
         .route("/api/v1/agent/stop", post(app_api::agent_lifecycle::handle_agent_stop))
         .route("/api/v1/agent/detach", post(app_api::agent_lifecycle::handle_agent_detach))
