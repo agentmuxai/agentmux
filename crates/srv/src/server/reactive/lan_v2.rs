@@ -144,6 +144,7 @@ async fn uid_key_owed(state: &AppState, claimed: &str, name_key: &[u8]) -> Optio
 /// the sender carried no UID of its own, the same two signatures the MCP makes.
 /// The receiver checks exactly what it checked before; nothing there changes.
 /// Any unmet condition, or a missing key, returns the request as it came.
+#[cfg(test)]
 pub(super) fn sign_at_origin(
     mstore: &crate::backend::storage::store::Store,
     caller_uid: &str,
