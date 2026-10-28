@@ -936,6 +936,11 @@ pub struct BlockfileLineCountResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub gen: Option<String>,
+    /// The agent's saved history in the shared store was found damaged, so this count is of the
+    /// block's own copy, which holds only what this block wrote: earlier history may be missing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub history_damaged: Option<bool>,
 }
 
 /// Request for blockfile:read_range — read a range of lines from a blockfile.
@@ -1017,6 +1022,11 @@ pub struct BlockfileReadRangeResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional, type = "number")]
     pub offset: Option<u64>,
+    /// The agent's saved history in the shared store was found damaged, so this read came from
+    /// the block's own copy, which holds only what this block wrote: earlier history may be missing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub history_damaged: Option<bool>,
 }
 
 /// Request for blockfile:read_state — read a sidecar JSON file
