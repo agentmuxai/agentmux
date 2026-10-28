@@ -114,11 +114,11 @@ export function createAgentRuntimeStore(deps: AgentRuntimeDeps): AgentRuntimeSto
     };
 }
 
-/** An agent has a process from its start until it stops: starting, idle, working, or waiting on the
- *  user. (One held by a limit or a sign-in it can't pass has none to count.) */
-const RUNNING: ReadonlySet<AgentRuntime["state"]> = new Set(["starting", "idle", "working", "waiting_on_user"]);
+/** An agent has a process in every state but stopped and error (srv's `desired_of`): one held by a
+ *  limit or a sign-in is alive and waiting, and costs when it resumes. */
+const NO_PROCESS: ReadonlySet<AgentRuntime["state"]> = new Set(["stopped", "error"]);
 
-export const hasProcess = (state: AgentRuntime["state"]): boolean => RUNNING.has(state);
+export const hasProcess = (state: AgentRuntime["state"]): boolean => !NO_PROCESS.has(state);
 
 export interface AgentRuntimeCounts {
     /** Agents with a process, which is what costs: closing a pane no longer stops one. */

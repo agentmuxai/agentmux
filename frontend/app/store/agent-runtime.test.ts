@@ -144,7 +144,7 @@ describe("the agent runtime store", () => {
 });
 
 describe("runtimeCounts", () => {
-    it("counts the agents with a process, and the ones waiting on the user among them", () => {
+    it("counts the agents with a process (a limit or a sign-in holds one, it does not end it), and the ones waiting on the user among them", () => {
         const rows = [
             row("a", "stopped"),
             row("b", "error"),
@@ -156,7 +156,7 @@ describe("runtimeCounts", () => {
             row("h", "waiting_on_user"),
             row("i", "waiting_on_user"),
         ];
-        expect(runtimeCounts(rows)).toEqual({ running: 5, waiting: 2 });
+        expect(runtimeCounts(rows)).toEqual({ running: 7, waiting: 2 });
         expect(runtimeCounts([])).toEqual({ running: 0, waiting: 0 });
     });
 });
