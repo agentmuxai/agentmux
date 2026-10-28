@@ -238,12 +238,16 @@ fn signature(f: &agent_state::StoredFailure) -> String {
     format!("{:?}|{:?}|{}", f.code, f.resets_at_ms, f.title)
 }
 
-/// Every pane in a tab.
+/// Every pane in a tab, and every parked agent block: one in no tab whose agent keeps running with
+/// no pane showing it. Its limit or sign-in refusal is as much an episode as a shown pane's.
 fn tab_blocks(mstore: &Store) -> Vec<Block> {
     let Ok(tabs) = mstore.get_all::<Tab>() else {
         return Vec::new();
     };
-    tabs.iter().flat_map(|t| t.blockids.iter()).filter_map(|id| mstore.get::<Block>(id).ok().flatten()).collect()
+    let mut out: Vec<Block> = tabs.iter().flat_map(|t| t.blockids.iter()).filter_map(|id| mstore.get::<Block>(id).ok().flatten()).collect();
+    let parked = mstore.get_all::<Block>().unwrap_or_default().into_iter().filter(|b| obj::meta_get_bool(&b.meta, crate::persist_subscriber::parked::PARKED_META_KEY, false));
+    out.extend(parked);
+    out
 }
 
 /// The failures already stored when srv starts, whether or not their panes
