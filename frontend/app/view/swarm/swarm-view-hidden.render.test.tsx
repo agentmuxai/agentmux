@@ -37,7 +37,6 @@ function setup(initial: "active" | "windowHidden" | "dormant") {
             return [];
         },
         otherInstancesAtom: () => null,
-        agentRuntime: { rows: () => [] },
         pruneSelection: () => {},
         selectedBlockIdsAtom: () => new Set<string>(),
         isSelected: () => false,

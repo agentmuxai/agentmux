@@ -118,7 +118,6 @@ function setup(groupBy: "lead" | null, others: SwarmOtherInstances = OTHERS) {
         loadingAtom: () => false,
         buildTree: () => [node("w1", "W1"), node("free", "Free"), node("camper", "Camper"), node("opaz", "Opaz")],
         otherInstancesAtom: () => others,
-        agentRuntime: { rows: () => [] },
         pruneSelection: () => {},
         selectedBlockIdsAtom: () => new Set<string>(),
         isSelected: () => false,

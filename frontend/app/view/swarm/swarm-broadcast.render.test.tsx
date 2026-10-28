@@ -21,7 +21,6 @@ function modelStub(selectedKeys: string[], result = { succeeded: selectedKeys, f
     return {
         selectedBlockIdsAtom: selected,
         otherInstancesAtom: () => null,
-        agentRuntime: { rows: () => [] },
         fleetTargets: () => {
             throw new Error("the dock must not rebuild the agent tree");
         },

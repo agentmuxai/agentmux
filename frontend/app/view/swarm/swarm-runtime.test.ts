@@ -20,6 +20,8 @@ function fakeDeps(initial: AgentRuntime[]) {
     let rows = initial;
     const handlers = new Map<string, (r: AgentRuntime) => void>();
     let agentsChanged: () => void = () => {};
+    let tick: () => void = () => {};
+    let ticking = false;
     const unsubscribed: string[] = [];
     const deps = {
         list: vi.fn(async () => rows),
@@ -34,6 +36,13 @@ function fakeDeps(initial: AgentRuntime[]) {
             agentsChanged = h;
             return () => {};
         }),
+        every: vi.fn((_ms: number, t: () => void) => {
+            tick = t;
+            ticking = true;
+            return () => {
+                ticking = false;
+            };
+        }),
     };
     return {
         deps,
@@ -41,6 +50,8 @@ function fakeDeps(initial: AgentRuntime[]) {
         unsubscribed,
         setRows: (next: AgentRuntime[]) => (rows = next),
         changeAgents: () => agentsChanged(),
+        tick: () => tick(),
+        isTicking: () => ticking,
     };
 }
 
@@ -69,6 +80,38 @@ describe("the agent runtime store", () => {
             expect(store.rows().map((r) => r.agent_id)).toEqual(["b", "c"]);
             expect(f.unsubscribed).toEqual(["a"]);
             expect(f.deps.subscribe).toHaveBeenCalledTimes(3);
+            dispose();
+        });
+    });
+
+    it("reads the list again on its interval, for an agent created or deleted with no agents:changed", async () => {
+        const f = fakeDeps([row("a", "stopped")]);
+        await createRoot(async (dispose) => {
+            const store = createAgentRuntimeStore(f.deps);
+            await store.load();
+            f.setRows([row("a", "stopped"), row("n", "stopped")]);
+            f.tick();
+            await store.load();
+            expect(store.rows().map((r) => r.agent_id)).toEqual(["a", "n"]);
+            store.dispose();
+            expect(f.isTicking()).toBe(false);
+            dispose();
+        });
+    });
+
+    it("keeps what an event said while a read was out, which is newer than the list", async () => {
+        const f = fakeDeps([row("a", "idle")]);
+        await createRoot(async (dispose) => {
+            const store = createAgentRuntimeStore(f.deps);
+            await store.load();
+            // The next read answers with a snapshot taken before the agent stopped.
+            let release: (rows: AgentRuntime[]) => void = () => {};
+            f.deps.list.mockImplementationOnce(() => new Promise<AgentRuntime[]>((resolve) => (release = resolve)));
+            const reading = store.load();
+            f.handlers.get("a")!(row("a", "stopped"));
+            release([row("a", "idle")]);
+            await reading;
+            expect(store.rows().find((r) => r.agent_id === "a")!.state).toBe("stopped");
             dispose();
         });
     });

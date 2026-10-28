@@ -31,7 +31,6 @@ function modelStub(initialSelected: string[] = []) {
     const model = {
         selectedBlockIdsAtom: selected,
         otherInstancesAtom: () => null,
-        agentRuntime: { rows: () => [] },
         fleetActionInFlightAtom: inFlight,
         selectAll: vi.fn((ids: string[]) => setSelected(new Set(ids))),
         clearSelection: vi.fn(() => setSelected(new Set<string>())),

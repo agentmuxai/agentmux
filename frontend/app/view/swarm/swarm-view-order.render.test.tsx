@@ -71,7 +71,6 @@ function setup(initial: Record<string, RemoteAgentState>) {
         loadingAtom: () => false,
         buildTree: () => [],
         otherInstancesAtom: data,
-        agentRuntime: { rows: () => [] },
         pruneSelection: () => {},
         selectedBlockIdsAtom: () => new Set<string>(),
         isSelected: () => false,

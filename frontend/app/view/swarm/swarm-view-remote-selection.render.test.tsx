@@ -49,7 +49,6 @@ function setup() {
         loadingAtom: () => false,
         buildTree: () => [],
         otherInstancesAtom: () => others,
-        agentRuntime: { rows: () => [] },
         pruneSelection,
         selectedBlockIdsAtom: selected,
         isSelected: (k: string) => selected().has(k),

@@ -94,7 +94,6 @@ function setup(initial: Record<string, unknown> = {}, local = false, onKanbanNee
         isAgentCollapsed: () => true,
         toggleAgentCollapsed: () => {},
         otherInstancesAtom: () => others,
-        agentRuntime: { rows: () => [] },
         pruneSelection: () => {},
         selectedBlockIdsAtom: selected,
         isSelected: (k: string) => selected().has(k),
