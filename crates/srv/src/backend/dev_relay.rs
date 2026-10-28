@@ -28,8 +28,9 @@ use tokio::net::TcpStream;
 
 use crate::backend::container::{ContainerManager, AGENTMUX_DOCKER_NETWORK};
 
-/// The relay container's name.
-pub const RELAY_NAME: &str = "agentmux-dev-relay";
+/// The relay container's name. Not under `agentmux-`: that is the namespace of agent containers
+/// (`container_name_for_slug`), and an agent called `dev-relay` must not be the relay's neighbour.
+pub const RELAY_NAME: &str = "amx-dev-relay";
 /// Marks the relay container, so nothing else is taken for it.
 const LABEL: &str = "ai.agentmux.dev-relay";
 /// The port the relay listens on inside its container.
@@ -115,7 +116,10 @@ async fn ensure_named(manager: &ContainerManager, image: &str, name: &str) -> Re
                 }
             }
         }
-        // Not ours, or broken: replace it.
+        if !ours {
+            return Err(format!("a container called {name} exists and is not the dev relay; not touching it"));
+        }
+        // Ours but broken: replace it.
         let _ = docker
             .remove_container(name, Some(bollard::container::RemoveContainerOptions { force: true, ..Default::default() }))
             .await;
@@ -286,7 +290,7 @@ mod tests {
         cm.check_available().await.expect("docker daemon must be reachable");
         let docker = cm.docker();
         let image = "ghcr.io/agentmuxai/agent-base:0.60.3";
-        let relay_name = "agentmux-itest-dev-relay";
+        let relay_name = "amx-itest-dev-relay";
         let target = "agentmux-itest-relay-target";
         async fn rm(docker: &bollard::Docker, name: &str) {
             let _ = docker.remove_container(name, Some(RemoveContainerOptions { force: true, ..Default::default() })).await;
@@ -310,6 +314,18 @@ mod tests {
             .expect("create target");
         docker.start_container(target, None::<StartContainerOptions<String>>).await.expect("start target");
         tokio::time::sleep(Duration::from_secs(2)).await;
+
+        // A container that is not the relay, under the relay's name, is left alone and reported.
+        let foreign = "amx-itest-foreign";
+        rm(docker, foreign).await;
+        docker
+            .create_container(Some(CreateContainerOptions { name: foreign, platform: None }), Config { image: Some(image.to_string()), cmd: Some(vec!["sleep".into(), "60".into()]), ..Default::default() })
+            .await
+            .expect("create foreign");
+        let refused = ensure_named(&cm, image, foreign).await.expect_err("not the relay's to replace");
+        let still_there = docker.inspect_container(foreign, None).await.is_ok();
+        rm(docker, foreign).await;
+        assert!(refused.contains("not touching it") && still_there, "{refused}");
 
         let first = ensure_named(&cm, image, relay_name).await.expect("relay");
         let again = ensure_named(&cm, image, relay_name).await.expect("adopted");
