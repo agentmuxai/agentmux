@@ -1267,7 +1267,6 @@ impl PersistentSubprocessController {
         Ok(())
     }
 
-
     /// Kill the current CLI process after its lease was lost — the holder
     /// stops rather than racing the new one (spec §4.3).
     fn stop_after_lease_loss(inner: &Arc<Mutex<PersistentInner>>, block_id: &str, why: &str) {
