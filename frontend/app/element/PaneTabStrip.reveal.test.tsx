@@ -94,13 +94,18 @@ class StripModel {
         const left = (i * this.geo.tabW - this.value) * this.geo.zoom;
         return { left, right: left + this.geo.tabW * this.geo.zoom };
     }
-    /** Whether the tab is whole, inside the strip and clear of the fades that show. */
+    /** Whether the tab is whole, inside the strip and clear of the fades that show (flush left it needs none: the strip drops the left fade there). */
     isRevealed(id: string): boolean {
         const r = this.rect(this.tab(id));
         const z = this.geo.zoom;
         const left = this.value > 1 ? FADE : 0;
         const right = this.value < this.max - 1 ? FADE : 0;
-        return r.left >= left * z - 0.01 && r.right <= (this.geo.client - right) * z + 0.01;
+        const flush = Math.abs(r.left) < 0.01;
+        return (flush || r.left >= left * z - 0.01) && r.right <= (this.geo.client - right) * z + 0.01;
+    }
+    /** The scroll that puts tab number `i` flush left, clamped at the end. */
+    flush(i: number): number {
+        return Math.min(this.max, i * this.geo.tabW);
     }
     get calls(): number {
         return this.scrollTos.length + this.writes.length;
@@ -300,21 +305,21 @@ function userScroll(m: Mounted, kind: Kind, dy: number): void {
 const KEY_TARGET = (m: Mounted) => m.content;
 
 describe.each<Kind>(["pane", "doc"])("the %s tab strip reveals its selected tab", (kind) => {
-    it("on mount, instantly and clear of the fade", () => {
+    it("on mount, instantly and flush with the left edge", () => {
         const m = mountPane();
         const s = m.strips[kind];
         expect(s.isRevealed("t10")).toBe(true);
-        expect(s.value).toBe(10 * TAB_W + TAB_W - CLIENT_W + FADE);
+        expect(s.value).toBe(s.flush(10));
         expect(s.scrollTos).toEqual([]);
     });
 
-    it("when the selected tab changes, smoothly, to just clear of the fade", () => {
+    it("when the selected tab changes, smoothly, to flush with the left edge", () => {
         const m = mountPane({ active: "t0" });
         const s = m.strips[kind];
         expect(s.value).toBe(0);
         m.setActive[kind]("t6");
         flush();
-        expect(s.scrollTos).toEqual([{ left: 6 * TAB_W + TAB_W - CLIENT_W + FADE, behavior: "smooth" }]);
+        expect(s.scrollTos).toEqual([{ left: s.flush(6), behavior: "smooth" }]);
         s.finish();
         expect(s.isRevealed("t6")).toBe(true);
     });
@@ -332,15 +337,60 @@ describe.each<Kind>(["pane", "doc"])("the %s tab strip reveals its selected tab"
         expect(s.value).toBe(0);
     });
 
-    it("leaves a selected tab that is already fully visible alone", () => {
+    it("aligns a selected tab that is already fully visible, and a key in the pane then leaves it alone", () => {
         const m = mountPane({ active: "t3" });
         const s = m.strips[kind];
         const before = s.calls;
-        m.setActive[kind]("t2");
+        m.setActive[kind]("t4");
         flush();
+        s.finish();
+        // t4 was in view beside t3; a selection still puts it flush left.
+        expect(s.calls).toBe(before + 1);
+        expect(s.value).toBe(s.flush(4));
+        const after = s.calls;
         fireEvent.keyDown(KEY_TARGET(m), { key: "a" });
+        fireEvent.pointerDown(m.content);
         flush();
-        expect(s.calls).toBe(before);
+        expect(s.calls).toBe(after);
+        expect(s.value).toBe(s.flush(4));
+    });
+
+    it("drops the left fade while the selected tab is flush, and brings it back when the strip moves off it", () => {
+        const m = mountPane();
+        const s = m.strips[kind];
+        expect(s.value).toBe(s.flush(10));
+        expect(s.el.classList.contains("has-more-left")).toBe(true);
+        expect(s.el.classList.contains("pane-tab-strip--flush-left")).toBe(true);
+        // The user wheels it a little: the tab is no longer at the edge, so the fade returns.
+        userScroll(m, kind, 60);
+        expect(s.value).toBe(s.flush(10) + 60);
+        expect(s.el.classList.contains("pane-tab-strip--flush-left")).toBe(false);
+        // Selecting another tab that is already flush keeps the fade off, with no scroll to say so.
+        m.setActive[kind]("t11");
+        flush();
+        s.finish();
+        settle(m);
+        expect(s.value).toBe(s.flush(11));
+        expect(s.el.classList.contains("pane-tab-strip--flush-left")).toBe(true);
+        // At the very start there is nothing to the left to fade, flush or not.
+        m.setActive[kind]("t0");
+        flush();
+        s.finish();
+        settle(m);
+        expect(s.el.classList.contains("has-more-left")).toBe(false);
+        expect(s.el.classList.contains("pane-tab-strip--flush-left")).toBe(false);
+    });
+
+    it("selecting the last tabs clamps at the end, so they stay whole and the add button shows", () => {
+        const m = mountPane({ active: "t0" });
+        const s = m.strips[kind];
+        for (const id of ["t17", "t18", "t19"]) {
+            m.setActive[kind](id);
+            flush();
+            s.finish();
+            expect(s.value).toBe(s.max);
+            expect(s.isRevealed(id)).toBe(true);
+        }
     });
 
     it.each([
@@ -363,7 +413,7 @@ describe.each<Kind>(["pane", "doc"])("the %s tab strip reveals its selected tab"
         s.scrollTos.length = 0;
         act(m);
         flush();
-        expect(s.scrollTos).toEqual([{ left: 728, behavior: "smooth" }]);
+        expect(s.scrollTos).toEqual([{ left: s.flush(10), behavior: "smooth" }]);
         s.finish();
         expect(s.isRevealed("t10")).toBe(true);
     });
@@ -412,7 +462,7 @@ describe.each<Kind>(["pane", "doc"])("the %s tab strip reveals its selected tab"
         flush();
         expect(s.isRevealed("t10")).toBe(true);
         expect(s.scrollTos).toEqual([]);
-        expect(s.value).toBe(10 * TAB_W + TAB_W - 300 + FADE);
+        expect(s.value).toBe(s.flush(10));
     });
 
     it("a wheel while a smooth reveal is travelling stops it", () => {
@@ -492,15 +542,16 @@ describe.each<Kind>(["pane", "doc"])("the %s tab strip reveals its selected tab"
         reduceTransition = false;
         m.setActive[kind]("t2");
         flush();
-        expect(s.scrollTos).toEqual([{ left: 2 * TAB_W - FADE, behavior: "smooth" }]);
+        expect(s.scrollTos).toEqual([{ left: s.flush(2), behavior: "smooth" }]);
     });
 
     it("a smooth reveal that finds the selected tab already in view holds off nothing", () => {
         const m = mountPane({ active: "t2" });
         const s = m.strips[kind];
+        const mounted = s.calls;
         fireEvent.keyDown(m.content, { key: "a" });
         flush();
-        expect(s.calls).toBe(0);
+        expect(s.calls).toBe(mounted);
         // Narrower now: the selected tab is out of view, and nothing the user did.
         m.geo[kind].client = 250;
         resizeAll();
@@ -697,6 +748,6 @@ describe("zoom", () => {
         flush();
         s.finish();
         expect(s.isRevealed("t9")).toBe(true);
-        expect(s.value).toBe(9 * TAB_W + TAB_W - CLIENT_W + FADE);
+        expect(s.value).toBe(s.flush(9));
     });
 });

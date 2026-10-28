@@ -20,6 +20,8 @@ const ANIMATION_SETTLE_MS = 420;
 const SMOOTH_FALLBACK_MS = 800;
 
 const SMOOTH_REASONS: readonly StripRevealReason[] = ["selected", "focus", "interaction"];
+/** A selection, a mount and a resize align the selected tab flush left even when it is in view; a click or key in the pane only does when it is out of view. */
+const ALIGN_REASONS: readonly StripRevealReason[] = ["selected", "visible", "layout"];
 
 export interface StripRevealInput {
     strip: Accessor<HTMLElement | undefined>;
@@ -54,6 +56,7 @@ export function createStripReveal(input: StripRevealInput): StripReveal {
     let settleTimer: ReturnType<typeof setTimeout> | undefined;
     let smoothTimer: ReturnType<typeof setTimeout> | undefined;
     let wantSmooth = false;
+    let wantAlign = false;
     let userScrolled = false;
     let pointerDown = false;
     let smoothing = false;
@@ -90,12 +93,15 @@ export function createStripReveal(input: StripRevealInput): StripReveal {
         const strip = input.strip();
         const id = input.activeId();
         const smooth = wantSmooth && !shouldReduceMotion("transition");
+        const align = wantAlign;
         wantSmooth = false;
+        wantAlign = false;
         if (!strip || id == null || !input.shown()) return;
         // A just-landed or dragged tab is mid-animation: measure after it.
         if (!waited && strip.querySelector(".pane-tab--landing, .pane-tab--dragging")) {
             waited = true;
             wantSmooth = smooth;
+            wantAlign = align;
             settleTimer = setTimeout(() => schedule(), ANIMATION_SETTLE_MS);
             return;
         }
@@ -106,6 +112,8 @@ export function createStripReveal(input: StripRevealInput): StripReveal {
         const scrolled = revealInStrip(strip, item, ids[ids.length - 1] === id, {
             isFirst: ids[0] === id,
             edgeClearance: STRIP_EDGE_FADE_PX,
+            alignStart: true,
+            force: align,
             behavior: smooth ? "smooth" : "instant",
         });
         // Only a scroll that started is in flight: a tab already in view holds nothing off.
@@ -133,6 +141,7 @@ export function createStripReveal(input: StripRevealInput): StripReveal {
             if ((reason === "interaction" || reason === "focus") && !input.overflows()) return;
         }
         if (SMOOTH_REASONS.includes(reason)) wantSmooth = true;
+        if (ALIGN_REASONS.includes(reason)) wantAlign = true;
         schedule();
     };
 
@@ -204,6 +213,7 @@ export function createStripReveal(input: StripRevealInput): StripReveal {
                 if (userScrolled || !input.shown()) return;
                 // A smooth reveal still travelling aims at the settled widths too.
                 wantSmooth = smoothing;
+                wantAlign = true;
                 schedule();
             }
         },
