@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/app/store/auth-headers", () => ({ authHeaders: () => ({}) }));
 vi.mock("@/util/endpoints", () => ({ getWebServerEndpoint: () => "http://srv" }));
 
-import { fetchWardenAudit } from "./warden-audit-shared";
+import { actionCommand, fetchWardenAudit, type AuditEntry } from "./warden-audit-shared";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -30,5 +30,17 @@ describe("fetchWardenAudit", () => {
     it("throws on a failed request", async () => {
         vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 500 }));
         await expect(fetchWardenAudit()).rejects.toThrow("500");
+    });
+});
+
+describe("actionCommand", () => {
+    const row = (extra: Partial<AuditEntry>): AuditEntry => ({
+        timestamp: 1, target_agent: "t", block_id: "", message_hash: "", message_length: 0, success: true, request_id: "r", ...extra,
+    });
+
+    it("is the command of an action row and nothing for any other row", () => {
+        expect(actionCommand(row({ event_kind: "action", outcome: "agent.kill-tree", source_agent: "agent:opaz" }))).toBe("agent.kill-tree");
+        expect(actionCommand(row({ event_kind: "delivery", outcome: "held_retry" }))).toBeUndefined();
+        expect(actionCommand(row({ outcome: "system_note" }))).toBeUndefined();
     });
 });

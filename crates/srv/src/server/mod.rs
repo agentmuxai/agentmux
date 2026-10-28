@@ -31,8 +31,11 @@ pub(crate) mod reactive;
 mod name_resolution;
 pub(crate) mod caller;
 pub(crate) mod agent_self_keys;
+mod container_tool_chunk;
 pub(crate) mod jekt_held;
 mod jekt_hold;
+mod availability_view;
+pub(crate) mod agent_runtime;
 mod jekt_cold;
 mod limit_probe;
 pub(crate) mod jekt_files;
@@ -106,6 +109,9 @@ mod sender_claims_tests;
 #[cfg(test)]
 #[path = "tests/peer_veto_tests.rs"]
 mod peer_veto_tests;
+#[cfg(test)]
+#[path = "tests/rpc_attribution_tests.rs"]
+mod rpc_attribution_tests;
 #[cfg(test)]
 mod rpc_schema_export;
 

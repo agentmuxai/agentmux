@@ -5,12 +5,13 @@ import { Block, resolveEffectiveViewType } from "@/app/block/block";
 import { getPaneTab, isKeepAliveView } from "@/app/block/pane-tab-registry";
 import { renderPaneChromeShell } from "@/app/element/PaneChrome";
 import { setKeepAliveBlockDormant } from "@/app/store/block-component-registry";
+import { agentMountForgotten, agentMountSettled, expectAgentMount } from "@/app/tab/agent-mount-watch";
 import { PaneStackMemberActiveProvider, usePaneStackMemberActive } from "@/app/tab/pane-stack-member";
 import { MOS } from "@/app/store/global";
 import type { NodeModel } from "@/layout/index";
 import { paneStackIds } from "@/layout/lib/layoutNodeModels";
 import { Key } from "@/util/keyed";
-import { createEffect, createMemo, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, For, onCleanup, Show, untrack, type JSX } from "solid-js";
 
 /**
  * Router `tabcontent.tsx` renders instead of `<Block>` directly — the
@@ -324,6 +325,31 @@ export function PaneLeafChrome(props: { nodeModel: NodeModel }): JSX.Element {
     const mountedBlockIds = createMemo<string[]>(() => {
         const active = activeBlockId();
         return stackBlockIds().filter((id) => id === active || isKeepAliveView(viewTypeOf(id)));
+    });
+
+    // Names the step that did not happen if an agent member's view never mounts
+    // (agent-mount-watch.ts). A member whose data has not loaded yet is watched too:
+    // an agent that never loads is the same silence.
+    // Keyed on each member's view type alone, so a meta update to a block does not re-run it.
+    const memberViews = createMemo(() => stackBlockIds().map((id) => `${id}:${viewTypeOf(id)}`).join("|"));
+    createEffect(() => {
+        memberViews();
+        for (const id of untrack(stackBlockIds)) {
+            const view = untrack(() => viewTypeOf(id));
+            if (view === "agent" || view === "") {
+                expectAgentMount(
+                    id,
+                    () =>
+                        `view=${viewTypeOf(id) || "not loaded"} active=${id === activeBlockId()} ` +
+                        `mounted=${mountedBlockIds().includes(id)} minimized=${nodeModel.isMinimized()} stack=${stackBlockIds().length}`,
+                );
+            } else {
+                agentMountSettled(id);
+            }
+        }
+    });
+    onCleanup(() => {
+        for (const id of stackBlockIds()) agentMountForgotten(id);
     });
 
     // The NodeModel chrome itself renders with — plain passthrough when not

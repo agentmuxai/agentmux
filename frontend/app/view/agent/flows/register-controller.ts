@@ -6,6 +6,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { BlockService } from "@/app/store/services";
 import { staticTabId } from "@/app/store/global";
 import type { BlockControllerRuntimeStatus } from "@/types/rpc/BlockControllerRuntimeStatus";
+import { clearLaunchBlocked } from "./launch-blocked";
 
 /** Register this pane's controller (or, with `forceRestart`, kill and
  *  respawn it onto a new credential), then read its runtime status. Shared
@@ -23,5 +24,6 @@ export async function registerController(
         forcerestart: opts.forceRestart,
         ...(opts.termSize ? { rtopts: { termsize: opts.termSize } } : {}),
     });
+    await clearLaunchBlocked(blockId);
     return (await BlockService.GetControllerStatus(blockId)) ?? null;
 }

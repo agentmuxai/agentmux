@@ -78,6 +78,10 @@ export function SettingsView(props: { model: SettingsViewModel }): JSX.Element {
     const openRaw = () => getApi().openSettingsFileInEditor();
 
     function handleSelectResult(entry: SettingsIndexEntry) {
+        if (entry.opens) {
+            entry.opens();
+            return;
+        }
         props.model.setSection(entry.section);
         // The target section's row only exists in the DOM once its <Match>
         // arm has (re-)rendered for the new section — queueMicrotask, not a

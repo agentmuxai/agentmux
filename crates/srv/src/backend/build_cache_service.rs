@@ -32,6 +32,9 @@ const WARN_EVERY: Duration = Duration::from_secs(3600);
 const RETRY_AFTER: Duration = Duration::from_secs(30 * 60);
 /// Unix seconds before which no warning is tried.
 static NEXT_TRY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// How long a finished task's cleanup waits for another srv's pass, and how often it looks.
+const TASK_LOCK_WAIT: Duration = Duration::from_secs(15 * 60);
+const LOCK_POLL: Duration = Duration::from_millis(500);
 /// How many agents with the largest build folders hear of a warning.
 const WARN_AGENTS: usize = 3;
 
@@ -58,14 +61,78 @@ struct Start<'a> {
     /// The data channel (`AGENTMUX_CHANNEL`): `stable` for a release, `local-<branch>` for a local
     /// package, `dev-<branch>` for `task dev`.
     channel: Option<&'a str>,
+    /// `AGENTMUX_BUILD_CACHE_CLEAN`: `Some(false)` never cleans, `Some(true)` cleans.
+    forced: Option<bool>,
 }
 
-/// Whether this srv may clean the real agents' folder: only the installed release (channel
-/// `stable`, started by its launcher). A `task dev` build, a headless srv, a local package, or an
-/// instance with a home of its own shares `~/.agentmux/agents` with the real instance but is not
-/// the one that should prune it (Kanban #4534). Decided from how srv was started, not from a setting.
+/// What `AGENTMUX_BUILD_CACHE_CLEAN` says: `1`/`true`/`on` or `0`/`false`/`off`; anything else, or
+/// nothing, leaves the decision to how srv was started.
+fn forced_by(value: Option<&str>) -> Option<bool> {
+    match value?.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "on" => Some(true),
+        "0" | "false" | "off" => Some(false),
+        _ => None,
+    }
+}
+
+/// Whether this srv may clean the real agents' folder: one started by its launcher on the real
+/// home, whatever its channel is called (the installed release, or a local package on a host that
+/// runs one: on such a host nothing else would ever clean). A `task dev` build, a headless srv, a
+/// binary run from a source tree, or an instance with a home of its own shares
+/// `~/.agentmux/agents` with the real instance but is not the one that should prune it (Kanban
+/// #4534). Decided from how srv was started; `AGENTMUX_BUILD_CACHE_CLEAN` overrides it: `0` never
+/// cleans, `1` cleans (except an instance with a home of its own, whose cleaning of the real
+/// folder is never wanted). Which one srv of several cleans at a time is [`host_lock`].
 fn may_clean(s: &Start) -> bool {
-    !s.own_home && !s.headless && !s.built_in_tree && !s.dev_mode && s.channel == Some("stable")
+    match s.forced {
+        Some(false) => false,
+        Some(true) => !s.own_home,
+        None => {
+            !s.own_home
+                && !s.headless
+                && !s.built_in_tree
+                && !s.dev_mode
+                && s.channel.is_some_and(|c| !c.starts_with("dev-"))
+        }
+    }
+}
+
+/// The lock that lets one srv on the host clean at a time, whatever channels are running. Held
+/// for the length of a pass; `None` when another srv holds it (its pass covers the same folders),
+/// when the file can't be opened, or when there is no home.
+fn host_lock() -> Option<std::fs::File> {
+    let path = dirs::home_dir()?.join(".agentmux").join("shared").join("locks").join("build-cache-clean.lock");
+    try_lock_file(&path)
+}
+
+/// [`host_lock`], waiting up to `wait` for the srv that holds it: for work only this pass does
+/// (an agent's finished task), which the holder's pass does not cover and nothing repeats.
+fn host_lock_within(wait: Duration) -> Option<std::fs::File> {
+    let path = dirs::home_dir()?.join(".agentmux").join("shared").join("locks").join("build-cache-clean.lock");
+    lock_file_within(&path, wait)
+}
+
+fn lock_file_within(path: &Path, wait: Duration) -> Option<std::fs::File> {
+    let deadline = std::time::Instant::now() + wait;
+    loop {
+        if let Some(file) = try_lock_file(path) {
+            return Some(file);
+        }
+        if std::time::Instant::now() >= deadline {
+            return None;
+        }
+        std::thread::sleep(LOCK_POLL);
+    }
+}
+
+fn try_lock_file(path: &Path) -> Option<std::fs::File> {
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    #[allow(clippy::suspicious_open_options)]
+    let file = std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(false).open(path).ok()?;
+    file.try_lock().ok()?;
+    Some(file)
 }
 
 /// [`may_clean`] for this process.
@@ -77,6 +144,7 @@ fn this_srv_may_clean() -> bool {
         built_in_tree: agentmux_common::is_dev_self(),
         dev_mode: matches!(agentmux_common::RuntimeMode::from_env(), Some(agentmux_common::RuntimeMode::Dev { .. })),
         channel: channel.as_deref(),
+        forced: forced_by(std::env::var("AGENTMUX_BUILD_CACHE_CLEAN").ok().as_deref()),
     })
 }
 
@@ -226,6 +294,10 @@ fn policy(config: &ConfigState) -> Policy {
 fn all_workspaces_pass(why: Why, policy: &Policy) -> bc::Report {
     let mut total = bc::Report::default();
     let Some(root) = agents_root() else { return total };
+    let Some(_one_at_a_time) = host_lock() else {
+        tracing::debug!(why = ?why, "build cache: another srv on this host is cleaning");
+        return total;
+    };
     let log = bc::log_path();
     let busy = fresh_busy_check;
     for ws in workspaces(&root) {
@@ -318,6 +390,10 @@ pub fn agent_task_done(mstore: Arc<Store>, config: Arc<ConfigState>, agent: Stri
         if mine.is_empty() {
             return;
         }
+        let Some(_one_at_a_time) = host_lock_within(TASK_LOCK_WAIT) else {
+            tracing::warn!(agent = %agent, "build cache: task cleanup skipped, another srv kept the host lock for too long");
+            return;
+        };
         let log = bc::log_path();
         let busy = fresh_busy_check;
         let mut seen: Vec<PathBuf> = Vec::new();
@@ -336,10 +412,10 @@ pub fn agent_task_done(mstore: Arc<Store>, config: Arc<ConfigState>, agent: Stri
 
 /// Starts the schedule. Safe to call once at boot.
 pub fn install(mstore: Arc<Store>, config: Arc<ConfigState>) {
-    // Only the installed release cleans the real workspaces: not a dev, headless, local-package or
-    // test instance (see `may_clean`).
+    // Only an srv started by its launcher on the real home cleans the real workspaces: not a dev,
+    // headless or test instance (see `may_clean`).
     if !this_srv_may_clean() {
-        tracing::debug!("build cache: not the installed release; no cleanup or disk warning from this srv");
+        tracing::debug!("build cache: not an srv that cleans; no cleanup or disk warning from this srv");
         return;
     }
     tokio::spawn(async move {
@@ -437,22 +513,63 @@ mod tests {
     }
 
     #[test]
-    fn only_the_installed_release_may_clean_the_real_agents_folder() {
-        let installed = || Start { channel: Some("stable"), ..Default::default() };
-        assert!(may_clean(&installed()), "the installed release cleans");
-        // Each way of not being it, alone:
-        assert!(!may_clean(&Start { own_home: true, ..installed() }), "an instance with a home of its own");
-        assert!(!may_clean(&Start { headless: true, ..installed() }), "a headless srv");
-        assert!(!may_clean(&Start { built_in_tree: true, ..installed() }), "a binary from target/debug or target/release");
-        assert!(!may_clean(&Start { dev_mode: true, ..installed() }), "a task dev build");
-        assert!(!may_clean(&Start { channel: Some("local-loap-3-x"), ..installed() }), "a local package");
-        assert!(!may_clean(&Start { channel: Some("dev-main-0123456789abcdef"), ..installed() }), "a dev channel");
-        assert!(!may_clean(&Start { channel: None, ..installed() }), "no channel at all: not started by a launcher");
-        assert!(!may_clean(&Start::default()));
+    fn a_launcher_started_srv_on_the_real_home_may_clean_whatever_its_channel_is_called() {
+        let started = |channel| Start { channel: Some(channel), ..Default::default() };
+        assert!(may_clean(&started("stable")), "the installed release cleans");
+        assert!(may_clean(&started("local-HEAD-7138a5-bd7e7fdf")), "a local package on a host that runs one");
+        assert!(may_clean(&started("local-loap-3-x")));
+        // Each way of not being one, alone:
+        assert!(!may_clean(&Start { own_home: true, ..started("stable") }), "an instance with a home of its own");
+        assert!(!may_clean(&Start { headless: true, ..started("stable") }), "a headless srv");
+        assert!(!may_clean(&Start { built_in_tree: true, ..started("stable") }), "a binary from target/debug or target/release");
+        assert!(!may_clean(&Start { dev_mode: true, ..started("local-x") }), "a task dev build");
+        assert!(!may_clean(&started("dev-main-0123456789abcdef")), "a dev channel");
+        assert!(!may_clean(&Start::default()), "no channel at all: not started by a launcher");
     }
 
     #[test]
-    fn this_test_binary_is_not_the_installed_release() {
+    fn the_override_turns_cleaning_off_or_on_but_never_for_an_instance_with_its_own_home() {
+        let local = || Start { channel: Some("local-x"), ..Default::default() };
+        assert!(!may_clean(&Start { forced: Some(false), channel: Some("stable"), ..Default::default() }), "0 stops the installed release");
+        assert!(!may_clean(&Start { forced: Some(false), ..local() }));
+        assert!(may_clean(&Start { forced: Some(true), headless: true, ..Default::default() }), "1 lets a headless host clean");
+        assert!(may_clean(&Start { forced: Some(true), dev_mode: true, ..local() }));
+        assert!(!may_clean(&Start { forced: Some(true), own_home: true, ..local() }), "a home of its own never cleans the real folder");
+        assert_eq!(forced_by(None), None);
+        assert_eq!(forced_by(Some("1")), Some(true));
+        assert_eq!(forced_by(Some(" On ")), Some(true));
+        assert_eq!(forced_by(Some("0")), Some(false));
+        assert_eq!(forced_by(Some("FALSE")), Some(false));
+        assert_eq!(forced_by(Some("")), None, "empty: left to how srv was started");
+        assert_eq!(forced_by(Some("maybe")), None);
+    }
+
+    #[test]
+    fn one_srv_on_the_host_cleans_at_a_time() {
+        let t = tempfile::tempdir().unwrap();
+        let path = t.path().join("locks").join("build-cache-clean.lock");
+        let first = try_lock_file(&path).expect("the first srv takes the lock");
+        assert!(try_lock_file(&path).is_none(), "a second srv waits for the next pass");
+        drop(first);
+        assert!(try_lock_file(&path).is_some(), "free again once the pass is done");
+    }
+
+    #[test]
+    fn a_finished_tasks_cleanup_waits_for_the_pass_that_holds_the_lock() {
+        let t = tempfile::tempdir().unwrap();
+        let path = t.path().join("build-cache-clean.lock");
+        let held = try_lock_file(&path).unwrap();
+        assert!(lock_file_within(&path, Duration::from_millis(50)).is_none(), "gives up when the pass outlasts the wait");
+        let releaser = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(200));
+            drop(held);
+        });
+        assert!(lock_file_within(&path, Duration::from_secs(10)).is_some(), "takes the lock once the pass is done");
+        releaser.join().unwrap();
+    }
+
+    #[test]
+    fn this_test_binary_does_not_clean() {
         // It runs from target/debug (or release), with no launcher: the real check refuses it.
         assert!(!this_srv_may_clean());
     }

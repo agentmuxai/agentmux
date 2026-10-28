@@ -659,6 +659,37 @@ pub struct AuditLogEntry {
     /// W3-S: the WAN verdict for a cloud-delivered jekt, when there was one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wan: Option<WanAudit>,
+    /// For a `cli_native` event: the details of a message two agents sent each
+    /// other through the CLI's own messaging (`backend::cli_native`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cli_native: Option<CliNativeAudit>,
+}
+
+/// What a `cli_native` audit line adds to the ordinary entry. The entry's
+/// `outcome` is the message's state (`sent`, `read`, `done`), its `request_id`
+/// the CLI's message id, its `message_hash` and `message_length` those of the
+/// text; the text itself is in the agent's transcript, not here.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CliNativeAudit {
+    /// Which end of the message this line was seen from: `sender` or `receiver`.
+    pub seen_by: String,
+    /// How the sender was identified: `agent` (AgentMux mapped the verified pid to
+    /// one of its agents), `outside` (a process outside every agent) or `unverified`.
+    pub identity: String,
+    /// The name the sender's message claimed. A claim, never used as the sender.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claimed_name: Option<String>,
+    /// The name the sender addressed (a CLI session name), when seen from the sender.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cli_to_name: Option<String>,
+    /// The process id the CLI verified for the sender's connection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sender_pid: Option<u32>,
+    /// The sender's permission mode as the sender stated it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from_mode: Option<String>,
+    /// The first line of the text, cut to a short length.
+    pub preview: String,
 }
 
 fn default_event_kind() -> String {

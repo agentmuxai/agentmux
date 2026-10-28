@@ -1,6 +1,6 @@
 # Spec: one availability state for "can this agent take a message now"
 
-**Status:** active — approved by the operator ("go with best recommendations", relayed by the platform lead on 2026-10-27), with D1, D3, D4 as recommended and D2 = yes, so build steps 3 and 4 follow steps 1 and 2. Kanban #4565. The probe of §3.2 and the stored failure's time (§2.1 item 9) shipped first, in #5574; build step 1 (the `agent_availability` module and its golden tests, §6) is in #5585, and build step 2 (the reason as data in refused and held answers) is in #5596.
+**Status:** active — approved by the operator ("go with best recommendations", relayed by the platform lead on 2026-10-27), with D1, D3, D4 as recommended and D2 = yes, so build steps 3 and 4 follow steps 1 and 2. Kanban #4565. The probe of §3.2 and the stored failure's time (§2.1 item 9) shipped first, in #5574; build step 1 (the `agent_availability` module and its golden tests, §6) is in #5585, and build step 2 (the reason as data in refused and held answers) is in #5596, and the first part of step 3 (the availability route, and availability on each agent in Agents list and discovery) in #5632.
 **Date:** 2026-10-26
 **Author:** Manoz@Area54
 **Verified against:** `agentmux` `main` @ `08565342f` (2026-10-27), by reading code. The probe and the failure's time were built and tested against `8a907cd83`; the rest is not built.

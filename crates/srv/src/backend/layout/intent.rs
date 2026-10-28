@@ -141,7 +141,7 @@ fn apply_unbalanced(
             set_minimized(tree_mut(root)?, &node_id, true)?;
             effect.unmagnify = Some(node_id);
         }
-        LayoutIntent::Restore { node_id } => set_minimized(tree_mut(root)?, &node_id, false)?,
+        LayoutIntent::Restore { node_id } => restore_node(root, &node_id, ids)?,
         LayoutIntent::Clear => {
             *root = None;
             effect.clear = true;
@@ -549,6 +549,107 @@ fn set_minimized(tree: &mut LayoutNode, node_id: &str, minimized: bool) -> Resul
         return Err(LayoutError::Refused(format!("{node_id} is the last pane showing content")));
     }
     node.minimized = minimized;
+    Ok(())
+}
+
+/// `restoreNode`: show a minimized leaf again. A chip docked onto a pane of its Row (it has no
+/// column of its own: `resolveRowSlipTargets`, layoutSlip.ts) grows in that pane's column rather
+/// than in the column it was minimized from: the chips docked onto the same pane move into the
+/// pane's column in the order they were stacked, where chips render in place, and the restored one
+/// grows vertically in its own spot (`moveStackIntoDockColumn`, layoutRestore.ts).
+fn restore_node(root: &mut Option<LayoutNode>, node_id: &str, ids: &mut NodeIds) -> Result<(), LayoutError> {
+    let tree = tree_mut(root)?;
+    let stack = docked_stack_of(tree, node_id);
+    set_minimized(tree, node_id, false)?;
+    if let Some((row_id, dock_id, item_ids)) = stack {
+        move_stack_into_dock_column(tree, &row_id, &dock_id, &item_ids, ids)?;
+    }
+    Ok(())
+}
+
+/// The index of the sibling a child of a Row docks onto: the nearest expanded one, right-preferred,
+/// else left (`resolveRowSlipTargets`). None for an expanded child, or when every sibling is a chip.
+fn slip_dock_index(children: &[LayoutNode], i: usize) -> Option<usize> {
+    if !is_effectively_minimized(&children[i]) {
+        return None;
+    }
+    let expanded = |j: &usize| !is_effectively_minimized(&children[*j]);
+    ((i + 1)..children.len()).find(expanded).or_else(|| (0..i).rev().find(expanded))
+}
+
+/// The Row, the pane and the chips (in stacking order) a restore of `node_id` involves, when that
+/// pane is a chip docked onto a sibling in its Row (`dockedStackOf`, layoutRestore.ts).
+fn docked_stack_of(tree: &LayoutNode, node_id: &str) -> Option<(String, String, Vec<String>)> {
+    let node = find_node_by_id(tree, node_id)?;
+    if !node.children.is_empty() || !node.minimized {
+        return None;
+    }
+    let mut top = node_id.to_string();
+    let mut parent = find_node_by_id(tree, &find_parent_id(tree, &top)?)?;
+    while is_effectively_minimized(parent) {
+        top = parent.id.clone();
+        parent = find_node_by_id(tree, &find_parent_id(tree, &top)?)?;
+    }
+    if parent.flex_direction != FlexDirection::Row {
+        return None;
+    }
+    let at = parent.children.iter().position(|c| c.id == top)?;
+    let dock = &parent.children[slip_dock_index(&parent.children, at)?];
+    let items = (0..parent.children.len())
+        .filter(|i| slip_dock_index(&parent.children, *i).is_some_and(|j| parent.children[j].id == dock.id))
+        .map(|i| parent.children[i].id.clone())
+        .collect();
+    Some((parent.id.clone(), dock.id.clone(), items))
+}
+
+/// `moveStackIntoDockColumn` (layoutRestore.ts): the chips docked onto `dock_id` go into its column,
+/// in front of its panes. A pane that is not a column yet becomes one, with the chips above it.
+fn move_stack_into_dock_column(
+    tree: &mut LayoutNode,
+    row_id: &str,
+    dock_id: &str,
+    item_ids: &[String],
+    ids: &mut NodeIds,
+) -> Result<(), LayoutError> {
+    let row = find_node_by_id_mut(tree, row_id).ok_or_else(|| not_found(row_id))?;
+    let dock_index = row.children.iter().position(|c| c.id == dock_id).ok_or_else(|| not_found(dock_id))?;
+    let dock = &row.children[dock_index];
+    let column = !dock.children.is_empty() && dock.flex_direction == FlexDirection::Column;
+    // Each moved pane gets a share the column's own panes have, in the column's units.
+    let share = if column {
+        let sizes: Vec<f64> = dock.children.iter().map(|c| f64::from(c.size)).filter(|s| *s > 0.0).collect();
+        if sizes.is_empty() { DEFAULT_NODE_SIZE } else { (sizes.iter().sum::<f64>() / sizes.len() as f64) as f32 }
+    } else {
+        dock.size
+    };
+    let (items, rest): (Vec<LayoutNode>, Vec<LayoutNode>) =
+        std::mem::take(&mut row.children).into_iter().partition(|c| item_ids.contains(&c.id));
+    row.children = rest;
+    // A stack of chips that is itself a column gives its panes to the column.
+    let mut moved: Vec<LayoutNode> = items
+        .into_iter()
+        .flat_map(|item| {
+            if !item.children.is_empty() && item.flex_direction == FlexDirection::Column {
+                item.children
+            } else {
+                vec![item]
+            }
+        })
+        .collect();
+    for leaf in moved.iter_mut().filter(|n| n.children.is_empty()) {
+        leaf.size = share;
+    }
+    let dock_index = row.children.iter().position(|c| c.id == dock_id).ok_or_else(|| not_found(dock_id))?;
+    if column {
+        let dock = &mut row.children[dock_index];
+        moved.append(&mut dock.children);
+        dock.children = moved;
+    } else {
+        let dock = row.children.remove(dock_index);
+        let size = dock.size;
+        moved.push(dock);
+        row.children.insert(dock_index, new_node_group(FlexDirection::Column, size, moved, ids));
+    }
     Ok(())
 }
 

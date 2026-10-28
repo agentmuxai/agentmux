@@ -5,5 +5,8 @@
 //! RPC communication layer: message routing and request/response engine.
 //! Port of Go's pkg/wshutil/wshrouter.go and pkg/wshutil/wshrpc.go.
 
+pub mod action_commands;
+pub mod action_record;
+pub mod actor;
 pub mod engine;
 pub mod schema;
