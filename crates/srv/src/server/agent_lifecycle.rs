@@ -261,8 +261,12 @@ fn over_limit(policy: &Policy, running: usize, commit_pct: Option<f64>) -> Optio
 const PENDING_FOR: Duration = Duration::from_secs(90);
 
 /// Starts admitted but not yet seen running, so a burst of starts counts each other.
-fn pending() -> &'static std::sync::Mutex<HashMap<String, std::time::Instant>> {
-    static PENDING: std::sync::OnceLock<std::sync::Mutex<HashMap<String, std::time::Instant>>> = std::sync::OnceLock::new();
+/// Each entry holds a `Weak` to its instance's store: that keeps the store's address from being reused
+/// while the entry exists, and an entry whose store is gone (a test's) is dropped.
+type Reservation = (std::sync::Weak<crate::backend::storage::store::Store>, std::time::Instant);
+
+fn pending() -> &'static std::sync::Mutex<HashMap<String, Reservation>> {
+    static PENDING: std::sync::OnceLock<std::sync::Mutex<HashMap<String, Reservation>>> = std::sync::OnceLock::new();
     PENDING.get_or_init(Default::default)
 }
 
@@ -277,8 +281,8 @@ fn pending_key(state: &AppState, agent_id: &str) -> String {
 fn pending_not_running(state: &AppState, live: &[Live]) -> usize {
     let prefix = pending_key(state, "");
     let mut pending = pending().lock().unwrap_or_else(|e| e.into_inner());
-    pending.retain(|key, at| {
-        if at.elapsed() >= PENDING_FOR {
+    pending.retain(|key, (store, at)| {
+        if at.elapsed() >= PENDING_FOR || store.strong_count() == 0 {
             return false;
         }
         match key.strip_prefix(prefix.as_str()) {
@@ -324,7 +328,8 @@ pub(crate) async fn admit_start_with(state: &AppState, agent_id: &str, commit_pc
     let mut stopped_for_commit = None;
     loop {
         let Some(over) = over_limit(&policy, live.len() + pending_not_running(state, &live), commit_pct()) else {
-            pending().lock().unwrap_or_else(|e| e.into_inner()).insert(pending_key(state, agent_id), std::time::Instant::now());
+            let reservation = (std::sync::Arc::downgrade(&state.mstore), std::time::Instant::now());
+            pending().lock().unwrap_or_else(|e| e.into_inner()).insert(pending_key(state, agent_id), reservation);
             return Ok(());
         };
         // The commit figure may not fall until a stopped process has fully exited: one stop per start,
