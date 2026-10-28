@@ -71,6 +71,12 @@ describe("SensitiveBanner (SPEC_SUPER_AGENT §5)", () => {
         expect(tone).toHaveBeenCalledTimes(1);
     });
 
+    it("marks itself for the person, so an agent's UI click, query and key presses leave it alone", () => {
+        const { container } = render(() => <SensitiveBanner />);
+        handlers.get("sensitive:pending")!(pending("r1"));
+        expect(container.querySelector(".pane-row")?.hasAttribute("data-operator-only")).toBe(true);
+    });
+
     it("shows srv's words as text: markup in them creates no element", () => {
         const { container } = render(() => <SensitiveBanner />);
         handlers.get("sensitive:pending")!(pending("r1", { summary: "x <b>y</b><img src=x onerror=alert(1)>" }));

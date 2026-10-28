@@ -24,7 +24,7 @@ async fn a_start_for_a_stopped_agent_runs_its_parked_block() {
     let block = seed_agent_block(&state, &tabs[0], "ag-msg").await;
     dispatch_apply(&state, Command::ParkBlock { tab_id: tabs[0].clone(), block_id: block.clone() }).await;
 
-    start_once(&state, "ag-msg").await.unwrap();
+    start_once(&state, "ag-msg", "sender-msg").await.unwrap();
 
     let stored = state.mstore.get::<crate::backend::obj::Block>(&block).unwrap().unwrap();
     assert_eq!(crate::server::app_api::agent_attach::desired_of(&stored).as_deref(), Some("running"));
@@ -117,11 +117,47 @@ async fn a_fire_starts_a_stopped_local_agent_and_leaves_a_running_one_alone() {
     }
     state.reactive_handler.register_agent_full("ag-cron-running", &running, None, 0, None, Some("ag-cron-running"), "test").unwrap();
 
-    start_stopped_local_target(&state, "ag-cron-stopped").await;
-    start_stopped_local_target(&state, "ag-cron-running").await;
-    start_stopped_local_target(&state, "no-such-agent").await;
+    start_stopped_local_target(&state, "ag-cron-stopped", "job:t1").await;
+    start_stopped_local_target(&state, "ag-cron-running", "job:t1").await;
+    start_stopped_local_target(&state, "no-such-agent", "job:t1").await;
 
     assert_eq!(desired_of(&state, &stopped).await.as_deref(), Some("running"));
     assert!(state.reactive_handler.has_uid_registration("ag-cron-stopped"));
     assert_eq!(desired_of(&state, &running).await, None, "an agent that is running is not started again");
+}
+
+/// One sender gets its starts per minute; the next is refused and nothing starts, and a start that is not
+/// needed (the agent already runs) spends none.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_sender_over_its_starts_per_minute_starts_nothing_more() {
+    let state = test_state();
+    state.config_watcher.update_settings(serde_json::from_value(serde_json::json!({ "agents:start_per_minute": 1 })).unwrap());
+    let (_ws, tabs) = seed_workspace(&state, 1).await;
+    let first = seed_agent_block(&state, &tabs[0], "ag-rate-1").await;
+    let second = seed_agent_block(&state, &tabs[0], "ag-rate-2").await;
+    for b in [&first, &second] {
+        dispatch_apply(&state, Command::ParkBlock { tab_id: tabs[0].clone(), block_id: b.clone() }).await;
+    }
+
+    start_once(&state, "ag-rate-1", "rate-sender").await.unwrap();
+    start_once(&state, "ag-rate-1", "rate-sender").await.expect("it already runs: a no-op, not a second start");
+    let err = start_once(&state, "ag-rate-2", "rate-sender").await.unwrap_err();
+
+    assert!(err.starts_with("START_RATE_LIMIT:"), "{err}");
+    assert_eq!(desired_of(&state, &second).await, None, "the refused start started nothing");
+    start_once(&state, "ag-rate-2", "another-sender").await.expect("another sender has its own minute");
+}
+
+/// A message counts against the sender's uid when its token attributed one (as `Agents start` does), else
+/// the name it sent as.
+#[test]
+fn a_message_start_counts_against_the_senders_uid_not_its_name() {
+    let mut req = InjectionRequest::default();
+    req.source_agent = Some("qtest".into());
+    assert_eq!(sender_key(&req), "qtest", "no attributed uid: the name it sent as");
+    req.audit_source_uid = "uid-qtest".into();
+    assert_eq!(sender_key(&req), "uid-qtest");
+    req.source_agent = None;
+    req.audit_source_uid.clear();
+    assert_eq!(sender_key(&req), "unknown");
 }
