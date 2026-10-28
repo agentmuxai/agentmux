@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { TextInput } from "@/app/element/ui";
-import { type JSX } from "solid-js";
+import { Show, type JSX } from "solid-js";
 
+import { devModeOn } from "@/app/store/dev-mode";
 import { settingsAtom } from "@/app/store/global";
 import type { SettingsIndexEntry } from "../settings-model";
 import { set, SettingRow, ToggleControl } from "../settings-controls";
@@ -16,6 +17,7 @@ export const WINDOW_SETTINGS = {
         label: "Show block IDs",
         description: "Show each pane's internal block ID in its header (debugging aid)",
         section: "window",
+        devOnly: true,
         keywords: ["pane id", "block id", "debug pane", "blockheader:showblockids"],
     },
     defaultNewBlock: {
@@ -71,17 +73,19 @@ export function WindowPanesSection(): JSX.Element {
 
     return (
         <div class="settings-section-body">
-            <SettingRow
-                id={WINDOW_SETTINGS.showBlockIds.id}
-                label={WINDOW_SETTINGS.showBlockIds.label}
-                description={WINDOW_SETTINGS.showBlockIds.description}
-                control={
-                    <ToggleControl
-                        checked={!!(s()["blockheader:showblockids"] as boolean)}
-                        onChange={(v) => set("blockheader:showblockids", v)}
-                    />
-                }
-            />
+            <Show when={devModeOn()}>
+                <SettingRow
+                    id={WINDOW_SETTINGS.showBlockIds.id}
+                    label={WINDOW_SETTINGS.showBlockIds.label}
+                    description={WINDOW_SETTINGS.showBlockIds.description}
+                    control={
+                        <ToggleControl
+                            checked={!!(s()["blockheader:showblockids"] as boolean)}
+                            onChange={(v) => set("blockheader:showblockids", v)}
+                        />
+                    }
+                />
+            </Show>
             <SettingRow
                 id={WINDOW_SETTINGS.defaultNewBlock.id}
                 label={WINDOW_SETTINGS.defaultNewBlock.label}
