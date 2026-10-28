@@ -100,10 +100,7 @@ export function update(
                 return { state, events: [] };
             }
             return {
-                state: {
-                    ...state,
-                    initPhase: { kind: "InitReady", at: command.at, ...(command.historyDamaged ? { historyDamaged: true as const } : {}) },
-                },
+                state: { ...state, initPhase: { kind: "InitReady", at: command.at, ...(command.historyDamaged && { historyDamaged: true as const }) } },
                 events: [{ type: "init-ready" }],
             };
         }
