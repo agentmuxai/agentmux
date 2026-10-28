@@ -45,7 +45,8 @@ fn has_run(text: &str, prefix: &str, min: usize, class: fn(char) -> bool) -> boo
 
 /// A category if `text` holds a credential of a format whose shape is certain.
 pub fn credential_in(text: &str) -> Option<&'static str> {
-    if text.contains("-----BEGIN ") && text.contains("PRIVATE KEY-----") {
+    // The markers are built from pieces, so this file doesn't hold what it looks for.
+    if text.contains(&["-----BE", "GIN "].concat()) && text.contains(&["PRIVATE", " KEY-----"].concat()) {
         return Some("private key");
     }
     if ["ghp_", "gho_", "ghu_", "ghs_", "ghr_"].iter().any(|p| has_run(text, p, 36, is_alnum)) || has_run(text, "github_pat_", 22, is_key_char) {
@@ -162,7 +163,7 @@ mod tests {
         assert_eq!(credential_in(&format!("token = \"{}\"", gh())), Some("GitHub token"));
         assert_eq!(credential_in(&format!("AWS_KEY={}", aws())), Some("AWS access key id"));
         assert_eq!(credential_in(&format!("k: {}", anthropic())), Some("Anthropic API key"));
-        assert_eq!(credential_in(&format!("{}{}", "-----BEGIN RSA ", "PRIVATE KEY-----")), Some("private key"));
+        assert_eq!(credential_in(&["-----BE", "GIN RSA PRIV", "ATE KEY-----"].concat()), Some("private key"));
         assert_eq!(credential_in(&format!("{}{}", "github_pat_", "11ABCDEFG0abcdefghijkl_mnopqrstuvwxyz")), Some("GitHub token"));
         assert_eq!(credential_in(&format!("{}{}", "xoxb-", "1234567890-abcdefghijklmnop")), Some("Slack token"));
     }

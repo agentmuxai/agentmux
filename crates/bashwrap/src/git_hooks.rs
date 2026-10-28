@@ -142,14 +142,26 @@ fn git_output(args: &[&str]) -> Option<String> {
     out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
-/// The repository's own hook `name`, if it has one: from its own `core.hooksPath` (husky), else
-/// `.git/hooks`. The environment's `core.hooksPath` (AgentMux's directory) is not consulted:
-/// `--local` reads only the repository's own configuration.
-fn repo_own_hook(name: &str) -> Option<PathBuf> {
-    let dir = git_output(&["config", "--local", "--get", "core.hooksPath"])
+/// The hooks directory the person or the repository configured: `core.hooksPath` from the
+/// repository (husky), else the person's global or system configuration. The environment's own
+/// `core.hooksPath` (AgentMux's directory, set through `GIT_CONFIG_*`) is not consulted: each
+/// scope is read on its own, and an AgentMux directory found in a file is passed over.
+fn configured_hooks_dir() -> Option<PathBuf> {
+    ["--local", "--global", "--system"]
+        .iter()
+        .filter_map(|scope| git_output(&["config", scope, "--get", "core.hooksPath"]))
         .filter(|d| !d.is_empty())
         .map(PathBuf::from)
-        .or_else(|| git_output(&["rev-parse", "--git-common-dir"]).map(|d| Path::new(&d).join("hooks")))?;
+        .find(|d| !d.ends_with(AGENTMUX_HOOKS_DIR))
+}
+
+/// What srv calls its hooks directory (`identity/github_hooks.rs`).
+pub const AGENTMUX_HOOKS_DIR: &str = "github-hooks";
+
+/// The repository's own hook `name`, if it has one: from the configured hooks directory, else
+/// `.git/hooks`.
+fn repo_own_hook(name: &str) -> Option<PathBuf> {
+    let dir = configured_hooks_dir().or_else(|| git_output(&["rev-parse", "--git-common-dir"]).map(|d| Path::new(&d).join("hooks")))?;
     let hook = dir.join(name);
     (hook.is_file() && is_executable(&hook)).then_some(hook)
 }
