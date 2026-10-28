@@ -13,6 +13,7 @@
  * rather than an RPC mock.
  */
 
+import { takeSupervisorSettingsRequest } from "@/app/store/supervisor-settings-request";
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -21,6 +22,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 // §3.2) that settings-index.ts aggregates and SettingsSearchBar reads — a
 // bare `{ AppearanceSection: ... }` mock would strip that export out from
 // under settings-index.ts too, since it replaces the whole module.
+const opened = vi.hoisted(() => ({ openOrFocusPaneIdByView: vi.fn(async () => "swarm-block" as string | undefined) }));
+vi.mock("@/app/store/block-component-registry", async (importOriginal) => ({
+    ...(await importOriginal<object>()),
+    openOrFocusPaneIdByView: opened.openOrFocusPaneIdByView,
+}));
 vi.mock("./sections/appearance-section", async (importOriginal) => ({
     ...(await importOriginal<object>()),
     AppearanceSection: () => <div data-testid="appearance-section" />,
@@ -218,6 +224,25 @@ describe("SettingsView search bar", () => {
         expect(model.activeSection()).toBe("terminal");
         expect(model.query()).toBe("");
         expect(screen.queryByTestId("settings-search-results")).not.toBeInTheDocument();
+    });
+
+    it("opens the Swarm's Supervisor settings for a Supervisor result, and stays in this section", async () => {
+        const { model } = renderSettings();
+        const input = screen.getByTestId("settings-search-input");
+        fireEvent.input(input, { target: { value: "supervisor" } });
+        const result = screen.getAllByTestId("settings-search-result")[0];
+        expect(result).toHaveTextContent("Swarm Supervisor");
+        fireEvent.click(result);
+        expect(opened.openOrFocusPaneIdByView).toHaveBeenCalledWith(
+            "swarm",
+            { meta: { view: "swarm", "swarm:section": "supervisor" } },
+            { "swarm:section": "supervisor" }
+        );
+        // The ask names the pane that was focused or created, so only that Swarm opens its panel.
+        await vi.waitFor(() => expect(takeSupervisorSettingsRequest("swarm-block")).toBe(true));
+        expect(takeSupervisorSettingsRequest("another-swarm")).toBe(false);
+        expect(model.activeSection()).toBe("appearance");
+        expect(model.query()).toBe("");
     });
 
     it("lists an exact setting name alone, not the settings that only look like it", () => {

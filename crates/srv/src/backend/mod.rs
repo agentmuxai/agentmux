@@ -204,6 +204,12 @@ pub mod limit_wake;
 pub mod subagent_model;
 /// An agent accepting or sending back a task in Review.
 pub mod kanban_delegate;
+/// The `agents:always_available` setting (SPEC_ALWAYS_AVAILABLE_AGENTS_2026_10_27.md).
+pub mod always_available;
+/// The operations the super agent reviews (SPEC_SUPER_AGENT_2026_10_25.md).
+pub mod sensitive_ops;
+/// The requests for those operations and what became of them.
+pub mod sensitive_requests;
 /// Holding a routine message for an agent whose session has gone cold (SPEC_JEKT_HOLD_FOR_COLD_SESSIONS_2026_10_25.md).
 pub mod cold_hold;
 /// A leader hears when its workers end a turn without reporting, fail or stop.

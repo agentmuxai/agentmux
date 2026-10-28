@@ -252,6 +252,10 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
             dst_tab_id,
             dst_index,
         } => block::handle_move_block(state, block_id, src_tab_id, dst_tab_id, dst_index),
+        Command::ParkBlock { tab_id, block_id } => block::handle_park_block(state, tab_id, block_id),
+        Command::AttachBlock { block_id, dst_tab_id, dst_index } => {
+            block::handle_attach_block(state, block_id, dst_tab_id, dst_index)
+        }
         // Anything else (launcher-domain commands, unimplemented layout
         // ops) is a non-fatal protocol error that changes no state.
         other => invalid_command(state, format!("srv reducer does not accept: {:?}", other)),

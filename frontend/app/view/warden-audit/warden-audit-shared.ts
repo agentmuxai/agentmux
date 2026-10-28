@@ -27,7 +27,9 @@ export interface AuditEntry {
     /** A caller's free-text note on a fleet or pane action (e.g. ClosePane's
      *  `reason`). */
     reason?: string;
-    /** "delivery" (default) | "register" | "unregister" | "swept". The latter two are
+    /** "delivery" (default) | "action" | "register" | "unregister" | "swept". "action" is a
+     *  state-changing RPC call (its `outcome` is the command, `source_agent` who made it:
+     *  `agent:<id>`, `operator` or `unproven`). The registration kinds are
      *  agent registration and eviction bookkeeping (issue #2694): no message
      *  moved, so the feed words them as a registration, not a delivery. */
     event_kind?: string;
@@ -38,6 +40,10 @@ export interface AuditEntry {
      *  registered to, if registering evicted an existing mapping. */
     evicted_agent?: string;
 }
+
+/** The command an "action" row records; `undefined` for any other row. */
+export const actionCommand = (entry: AuditEntry): string | undefined =>
+    entry.event_kind === "action" ? entry.outcome : undefined;
 
 export async function fetchWardenAudit(): Promise<AuditEntry[]> {
     const resp = await fetch(

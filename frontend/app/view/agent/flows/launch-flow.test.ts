@@ -136,6 +136,11 @@ describe("runLaunchFlow — no auto-login on Phase 2", () => {
         expect(phases).not.toContain("waiting-for-login-completion");
         expect(notices[0].style).toBe("info");
         expect(notices[0].text).toMatch(/sign in/i);
+        // srv is told the launch is waiting for a sign-in (a message to the agent is held, not "no controller").
+        expect(hub.setMeta).toHaveBeenCalledWith(
+            expect.anything(),
+            expect.objectContaining({ oref: "block:block-1", meta: expect.objectContaining({ "agent:launch_blocked": "sign_in" }) }),
+        );
     });
 
     it("returns auth_failed with auth-expired (not first-login) when a real account link already exists for this agent+provider", async () => {
@@ -578,6 +583,10 @@ describe("runLaunchFlow — a container agent has no host CLI", () => {
         expect(kinds[0]).toBe("sign-in");
         expect(hub.resolveCli).not.toHaveBeenCalled();
         expect(hub.checkCliAuth).not.toHaveBeenCalled();
+        expect(hub.setMeta).toHaveBeenCalledWith(
+            expect.anything(),
+            expect.objectContaining({ oref: "block:block-1", meta: expect.objectContaining({ "agent:launch_blocked": "sign_in" }) }),
+        );
     });
 
     it("still stops when no container runtime is available", async () => {

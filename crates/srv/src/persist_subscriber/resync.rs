@@ -155,9 +155,17 @@ fn resync_block_parent(mstore: &Store, rec: &BlockRecord) -> ResyncResult {
     let Some(mut block) = mstore.get::<Block>(&rec.block_id)? else {
         return Ok(());
     };
-    let parent = format!("tab:{}", rec.tab_id);
-    if block.parentoref != parent {
+    // A parked block is in no tab: no parent, and the mark boot reads.
+    let parked = rec.tab_id.is_empty();
+    let parent = if parked { String::new() } else { format!("tab:{}", rec.tab_id) };
+    let marked = block.meta.contains_key(super::parked::PARKED_META_KEY);
+    if block.parentoref != parent || marked != parked {
         block.parentoref = parent;
+        if parked {
+            block.meta.insert(super::parked::PARKED_META_KEY.to_string(), serde_json::json!(true));
+        } else {
+            block.meta.remove(super::parked::PARKED_META_KEY);
+        }
         mstore.update(&mut block)?;
     }
     Ok(())

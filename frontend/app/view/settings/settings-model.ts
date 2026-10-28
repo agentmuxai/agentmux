@@ -32,6 +32,8 @@ export interface SettingsIndexEntry {
     description?: string;
     section: SettingsSection;
     keywords: string[];
+    /** An entry whose settings live in another pane: choosing it runs this instead of showing a row. */
+    opens?: () => void;
 }
 
 // Label text only, hoisted here so viewName can read it without importing

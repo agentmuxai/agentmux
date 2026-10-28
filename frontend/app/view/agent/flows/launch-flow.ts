@@ -54,6 +54,7 @@ import { blockEnv } from "@/app/store/block-meta";
 import type { LaunchPhase } from "./launch-phase";
 import { checkCliAuth, linkedAccountFor, resolveProviderCli } from "./login-and-confirm";
 import { registerController } from "./register-controller";
+import { markLaunchBlockedOnSignIn } from "./launch-blocked";
 import type { ProviderDefinition } from "../providers";
 
 import type { LogFn } from "../types";
@@ -221,6 +222,7 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
             setPhase({ kind: "first-login" });
             notify(`${provider.displayName} needs you to sign in before this agent can start. Click "Log in" to continue.`, "info", "sign-in");
             log("auth", "no account linked: waiting for the user to start a login");
+            await markLaunchBlockedOnSignIn(blockId);
             return "auth_failed";
         }
         opts.onAuthCheckResult?.(false);
@@ -346,6 +348,7 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
             notify(`${provider.displayName} needs you to sign in before this agent can start. Click "Log in" to continue.`, "info", "sign-in");
         }
         log("auth", "not authenticated — waiting for the user to start a login");
+        await markLaunchBlockedOnSignIn(blockId);
         return "auth_failed";
     }
 
