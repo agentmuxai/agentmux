@@ -12,6 +12,7 @@ const rpc = vi.hoisted(() => ({
     ListAgentDefinitionsCommand: vi.fn(),
     SkillCatalogListForAgentCommand: vi.fn(),
     SkillCatalogUnbindCommand: vi.fn(),
+    SkillCatalogSetReachCommand: vi.fn(),
 }));
 vi.mock("@/app/store/rpc-api", () => ({ RpcApi: rpc }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
@@ -33,6 +34,8 @@ function skill(over: Record<string, unknown> = {}) {
         created_at: 1,
         updated_at: 1,
         bound_count: 2,
+        all_agents: false,
+        new_agents: false,
         ...over,
     };
 }
@@ -93,6 +96,49 @@ describe("SkillManager", () => {
         fireEvent.click(unbind);
         expect(await screen.findByText("Unbind failed: nope")).toBeTruthy();
         expect(screen.getByRole("button", { name: "Unbind Korp" })).toBeTruthy();
+    });
+
+    it("says a skill used by every agent, and its list badge says so", async () => {
+        rpc.SkillCatalogListCommand.mockResolvedValue([skill({ all_agents: true, new_agents: true })]);
+        render(() => <SkillManager />);
+        expect(await screen.findByText("all agents")).toBeTruthy();
+        fireEvent.click(screen.getByText("pdf-extraction"));
+        await screen.findByText("Used by every agent");
+    });
+
+    it("the switches say who gets the skill without a bind, and change it through srv", async () => {
+        rpc.SkillCatalogListCommand.mockResolvedValue([skill({ new_agents: true })]);
+        rpc.SkillCatalogSetReachCommand.mockResolvedValue({ bound: true });
+        render(() => <SkillManager />);
+        fireEvent.click(await screen.findByText("pdf-extraction"));
+        const every = await screen.findByRole("switch", { name: "Every agent gets this skill" });
+        const fresh = screen.getByRole("switch", { name: "New agents get this skill" });
+        expect(every.getAttribute("aria-checked")).toBe("false");
+        expect(fresh.getAttribute("aria-checked")).toBe("true");
+        fireEvent.click(every);
+        await waitFor(() =>
+            expect(rpc.SkillCatalogSetReachCommand).toHaveBeenCalledWith(
+                {},
+                { skill_id: "k1", all_agents: true, new_agents: true },
+            ),
+        );
+        // Opting out for new agents.
+        fireEvent.click(fresh);
+        await waitFor(() =>
+            expect(rpc.SkillCatalogSetReachCommand).toHaveBeenLastCalledWith(
+                {},
+                { skill_id: "k1", all_agents: false, new_agents: false },
+            ),
+        );
+    });
+
+    it("the new-agents switch is on and locked while every agent gets the skill", async () => {
+        rpc.SkillCatalogListCommand.mockResolvedValue([skill({ all_agents: true })]);
+        render(() => <SkillManager />);
+        fireEvent.click(await screen.findByText("pdf-extraction"));
+        const fresh = await screen.findByRole("switch", { name: "New agents get this skill" });
+        expect(fresh.getAttribute("aria-checked")).toBe("true");
+        expect((fresh as HTMLButtonElement).disabled).toBe(true);
     });
 
     it("lists nobody for a skill no agent is bound to", async () => {
