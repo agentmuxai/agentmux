@@ -12,14 +12,27 @@ name: Container Agent Image
 #
 # docs/specs/SPEC_CONTAINER_AGENTS_WORK_FOR_EVERYONE_2026_10_07.md
 
+# When it runs: after a Release run completes successfully for a release tag, and by hand.
+# It used to run on any pushed `v*` tag, with the tag's own copy of this file, so a stray or
+# forged tag published the image (and :latest). Now the file that runs is main's (a
+# workflow_run run always uses the default branch's definition), the first job is the release
+# gate (scripts/release-gate.mjs: the commit must be the `chore: release` commit on main for
+# that tag), and the image is built from that commit, not from the tag name. The publish job
+# is in the `container-image` Environment, which deploys from main only.
+#
+# What this does NOT do: stop a branch workflow from pushing to the package. GITHUB_TOKEN with
+# `packages: write` reaches the package from any workflow in this repository; GHCR has no
+# per-workflow or per-environment access. The package's "Manage Actions access" setting is the
+# only knob (repository-wide). The gate: docs/specs/SPEC_SIGNED_UPDATE_CHECKSUMS_2026_10_25.md §4.1.
+
 on:
-  push:
-    tags:
-      - 'v*'
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
   workflow_dispatch:
     inputs:
       tag_latest:
-        description: 'Also publish :latest (a release tag push always does)'
+        description: 'Also publish :latest (a release does so on its own). Run from main.'
         type: boolean
         required: false
         default: false
@@ -29,8 +42,44 @@ env:
   IMAGE_NAME: agentmuxai/agent-base
 
 jobs:
-  build-and-push:
+  # Only for a Release run: refuse anything but the release commit on main for its tag.
+  gate:
+    name: Release gate (a release commit on main)
+    if: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.gate.outputs.version }}
+      sha: ${{ steps.gate.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          sparse-checkout: scripts/release-gate.mjs
+          sparse-checkout-cone-mode: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Check the tag and its commit
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF_NAME: ${{ github.event.workflow_run.head_branch }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          REPO: ${{ github.repository }}
+        run: node scripts/release-gate.mjs --ref-type tag --ref-name "$REF_NAME" --sha "$SHA" --repo "$REPO" --github-output "$GITHUB_OUTPUT"
+
+  build-and-push:
+    # A release (the gate passed), or a manual run from main. A Release run that failed, or
+    # that was not for a release commit, publishes nothing: the gate is skipped or fails and
+    # this job does not run.
+    needs: gate
+    if: ${{ always() && (needs.gate.result == 'success' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')) }}
+    runs-on: ubuntu-latest
+    environment: container-image
     permissions:
       contents: read
       packages: write
@@ -38,6 +87,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # The release commit the gate checked, never the tag name; main's tip for a manual run.
+          ref: ${{ needs.gate.outputs.sha || github.sha }}
 
       - name: Set up QEMU (arm64 cross-compilation)
         uses: docker/setup-qemu-action@v3
@@ -57,21 +109,31 @@ jobs:
           # built-in GITHUB_TOKEN is sufficient and expires with the job.
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Image tags
+        id: tags
+        env:
+          VERSION: ${{ needs.gate.outputs.version }}
+          SHA: ${{ github.sha }}
+          TAG_LATEST: ${{ inputs.tag_latest }}
+        run: |
+          {
+            echo "list<<EOF"
+            if [ -n "$VERSION" ]; then
+              echo "${REGISTRY}/${IMAGE_NAME}:${VERSION}"
+              echo "${REGISTRY}/${IMAGE_NAME}:${VERSION%.*}"
+              echo "${REGISTRY}/${IMAGE_NAME}:latest"
+            else
+              echo "${REGISTRY}/${IMAGE_NAME}:dispatch-${SHA::7}"
+              if [ "$TAG_LATEST" = "true" ]; then echo "${REGISTRY}/${IMAGE_NAME}:latest"; fi
+            fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Extract image metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            # publish :latest on every version-tag push (github.ref is always
-            # refs/tags/vX.Y.Z here; the previous refs/heads/main check was
-            # never true in this workflow and suppressed :latest entirely)
-            type=raw,value=latest,enable=${{ github.ref_type == 'tag' || (github.event_name == 'workflow_dispatch' && inputs.tag_latest) }}
-            # workflow_dispatch does not push a semver tag so type=semver emits nothing;
-            # produce a dispatch-<sha> tag so manual runs actually push an image.
-            type=raw,value=dispatch-{{sha}},enable=${{ github.event_name == 'workflow_dispatch' }}
 
       - name: Build and push
         uses: docker/build-push-action@v5
@@ -87,7 +149,7 @@ jobs:
           # amd64 + arm64: native performance on Apple Silicon (OrbStack/Colima/Docker Desktop)
           # without arm64 the image runs under qemu on M-series Macs.
           platforms: linux/amd64,linux/arm64
-          tags: ${{ steps.meta.outputs.tags }}
+          tags: ${{ steps.tags.outputs.list }}
           labels: ${{ steps.meta.outputs.labels }}
 
       # Anonymous, like the daemon's own pull: no login in this step. Fails with
@@ -95,7 +157,7 @@ jobs:
       # this run pushed.
       - name: Anonymous pull must work (the package must be public)
         env:
-          PUSHED_TAGS: ${{ steps.meta.outputs.tags }}
+          PUSHED_TAGS: ${{ steps.tags.outputs.list }}
         run: |
           docker logout "$REGISTRY" >/dev/null 2>&1 || true
           image="$(printf '%s\n' "$PUSHED_TAGS" | head -n 1)"
