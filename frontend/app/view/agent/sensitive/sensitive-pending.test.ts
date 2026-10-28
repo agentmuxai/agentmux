@@ -9,7 +9,7 @@ vi.mock("@/app/notification/sound/sound-service", () => ({ playShutdownPendingTo
 import {
     countdownText,
     parseCountdown,
-    replayCountdown,
+    replayCountdowns,
     secondsLeft,
     withCountdown,
     withoutCountdown,
@@ -51,11 +51,15 @@ describe("sensitive countdowns", () => {
         expect(withoutCountdown(both, "r1").map((c) => c.request_id)).toEqual(["r2"]);
     });
 
-    it("a replay shows the last pending unless cleared or past its deadline", () => {
-        expect(replayCountdown(view(), null, 50_000)?.request_id).toBe("r1");
-        expect(replayCountdown(view(), { request_id: "r1", outcome: "vetoed" }, 50_000)).toBeNull();
-        expect(replayCountdown(view(), { request_id: "other", outcome: "done" }, 50_000)?.request_id).toBe("r1");
-        expect(replayCountdown(view(), null, 100_000)).toBeNull();
+    it("a replay shows every pending one not cleared since or past its deadline", () => {
+        const a = view({ request_id: "a" });
+        const b = view({ request_id: "b" });
+        const old = view({ request_id: "old", deadline_ms: 10_000 });
+        const ids = (list: SensitiveCountdown[]) => list.map((c) => c.request_id);
+        expect(ids(replayCountdowns([a, b, old], [], 50_000))).toEqual(["a", "b"]);
+        expect(ids(replayCountdowns([a, b], [{ request_id: "b", outcome: "vetoed" }], 50_000))).toEqual(["a"]);
+        expect(ids(replayCountdowns([a], [{ request_id: "other", outcome: "done" }], 50_000))).toEqual(["a"]);
+        expect(replayCountdowns([a], [], 100_000)).toEqual([]);
     });
 
     it("counts whole seconds and never below zero", () => {

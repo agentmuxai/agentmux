@@ -87,23 +87,25 @@ describe("SensitiveBanner (SPEC_SUPER_AGENT §5)", () => {
         expect(screen.queryByText(/Parlo asked/)).toBeNull();
     });
 
-    it("a pane opened mid-countdown shows it from history, without a chime", async () => {
+    it("a pane opened mid-countdown shows every open countdown from history, without a chime", async () => {
         render(() => <SensitiveBanner />);
-        resolveHistory[0]([pending("r1")]);
-        resolveHistory[1]([]);
+        resolveHistory[0]([pending("r1", { summary: "first thing" }), pending("r2", { summary: "second thing" })]);
+        resolveHistory[1]([cleared("r2")]);
         await flush();
-        expect(screen.queryByText(/Parlo asked/)).toBeTruthy();
+        expect(screen.queryByText(/first thing/)).toBeTruthy();
+        expect(screen.queryByText(/second thing/)).toBeNull();
         expect(tone).not.toHaveBeenCalled();
     });
 
-    it("a history replay that lands after a live clear doesn't bring it back", async () => {
+    it("a live event while history loads doesn't cost the countdowns it didn't mention", async () => {
         render(() => <SensitiveBanner />);
-        handlers.get("sensitive:pending")!(pending("r1"));
-        handlers.get("sensitive:cleared")!(cleared("r1"));
-        resolveHistory[0]([pending("r1")]);
+        handlers.get("sensitive:pending")!(pending("r2", { summary: "second thing" }));
+        handlers.get("sensitive:cleared")!(cleared("r2"));
+        resolveHistory[0]([pending("r1", { summary: "first thing" }), pending("r2", { summary: "second thing" })]);
         resolveHistory[1]([]);
         await flush();
-        expect(screen.queryByText(/Parlo asked/)).toBeNull();
+        expect(screen.queryByText(/first thing/)).toBeTruthy();
+        expect(screen.queryByText(/second thing/), "cleared live, not brought back by the replay").toBeNull();
     });
 
     it("Veto asks srv once and hides the banner", async () => {

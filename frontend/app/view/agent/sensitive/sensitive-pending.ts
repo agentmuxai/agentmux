@@ -17,6 +17,8 @@ import type { SensitiveView } from "@/types/rpc/SensitiveView";
 
 /** The second chime, this long before the deadline. */
 export const LAST_CALL_MS = 5_000;
+/** How many of each event srv keeps for a pane that opens mid-countdown. */
+const REPLAY_EVENTS = 32;
 /** A countdown whose end was never announced is dropped this long after its deadline. */
 const STALE_MS = 5_000;
 
@@ -55,14 +57,18 @@ export function withoutCountdown(list: SensitiveCountdown[], requestId: string):
 }
 
 /**
- * What a pane that opens mid-countdown should show, from the persisted last `pending` and
- * last `cleared` events: the pending one, unless it was cleared or its deadline has passed.
+ * What a pane that opens mid-countdown should show, from the persisted `pending` and `cleared`
+ * events: every pending one not cleared since and not past its deadline. Several countdowns can
+ * overlap, so this is a set, not the latest event.
  */
-export function replayCountdown(pending: unknown, cleared: unknown, now: number): SensitiveCountdown | null {
-    const p = parseCountdown(pending);
-    if (!p || p.deadline_ms <= now) return null;
-    const clearedId = (cleared as { request_id?: unknown } | null)?.request_id;
-    return clearedId === p.request_id ? null : p;
+export function replayCountdowns(pending: unknown[], cleared: unknown[], now: number): SensitiveCountdown[] {
+    const clearedIds = new Set(cleared.map((c) => (c as { request_id?: unknown } | null)?.request_id));
+    let list: SensitiveCountdown[] = [];
+    for (const p of pending) {
+        const c = parseCountdown(p);
+        if (c && c.deadline_ms > now && !clearedIds.has(c.request_id)) list = withCountdown(list, c);
+    }
+    return list;
 }
 
 /** Whole seconds left, never negative. */
@@ -82,28 +88,27 @@ let users = 0;
 let stop: (() => void) | null = null;
 
 function begin(): () => void {
-    // Set by any live event: from then on it, not the history replay, is the truth.
-    let sawLive = false;
+    // Cleared by a live event: a history replay that lands later must not bring these back.
+    const clearedLive = new Set<string>();
     const lastCalled = new Set<string>();
     const unsubPending = onMuxEvent(WpsEvent.SensitivePending, (view) => {
-        sawLive = true;
         const c = parseCountdown(view);
         if (!c) return;
         setOpen((list) => withCountdown(list, c));
         playShutdownPendingTone();
     });
     const unsubCleared = onMuxEvent(WpsEvent.SensitiveCleared, (cleared) => {
-        sawLive = true;
-        if (typeof cleared.request_id === "string") setOpen((list) => withoutCountdown(list, cleared.request_id));
+        if (typeof cleared.request_id !== "string") return;
+        clearedLive.add(cleared.request_id);
+        setOpen((list) => withoutCountdown(list, cleared.request_id));
     });
-    const last = <T,>(items: T[]): T | null => items[items.length - 1] ?? null;
     void Promise.all([
-        readMuxEventHistory(WpsEvent.SensitivePending, "", 1).then(last).catch(() => null),
-        readMuxEventHistory(WpsEvent.SensitiveCleared, "", 1).then(last).catch(() => null),
-    ]).then(([p, cleared]) => {
-        if (sawLive) return;
-        const replayed = replayCountdown(p, cleared, Date.now());
-        if (replayed) setOpen((list) => withCountdown(list, replayed));
+        readMuxEventHistory(WpsEvent.SensitivePending, "", REPLAY_EVENTS).catch(() => []),
+        readMuxEventHistory(WpsEvent.SensitiveCleared, "", REPLAY_EVENTS).catch(() => []),
+    ]).then(([pending, cleared]) => {
+        // Merged by request: what the live events already said stands, the rest is added.
+        const replayed = replayCountdowns(pending, cleared, Date.now()).filter((c) => !clearedLive.has(c.request_id));
+        setOpen((list) => replayed.reduce((l, c) => (l.some((x) => x.request_id === c.request_id) ? l : withCountdown(l, c)), list));
     });
     const timer = setInterval(() => {
         const now = Date.now();
