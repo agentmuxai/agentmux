@@ -13,11 +13,13 @@
  */
 
 import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
+import { getSettingsKeyAtom } from "@/app/store/block-atom-cache";
 import { makeORef } from "@/app/store/mos";
 import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { readZoom } from "@/app/store/zoom-factor";
 import type { FsEntry } from "@/types/rpc/FsEntry";
 import type { FsError } from "@/types/rpc/FsError";
 import type { FsOpResult } from "@/types/rpc/FsOpResult";
@@ -35,6 +37,7 @@ import { batch, createMemo, createSignal } from "solid-js";
 import { baseName, isWithin, joinPath, normalizePath, parentOf, samePath } from "./files-path";
 import { EMPTY_SELECTION, pruneSelection, type Selection } from "./files-selection";
 import { clipboard, FilesOps, opFinishedText, sameVolume, setClipboard } from "./files-ops";
+import { systemIconsAvailable } from "./files-icons";
 import { sortEntries, type SortDir, type SortKey } from "./files-sort";
 
 // In files-path.ts, so the pane's manifest (files.tsx) needn't load the model.
@@ -181,6 +184,10 @@ async function loadAgentColor(definitionId: string): Promise<string | undefined>
 export class FilesModel {
     readonly blockId: string;
     private readonly ctx: PaneTabHostContext;
+    /** Whether rows show the system's own icons: setting `files:icons` (default "system") and a source on this computer. */
+    readonly systemIcons = (): boolean => (getSettingsKeyAtom("files:icons")() ?? "system") === "system" && systemIconsAvailable();
+    /** Display scale times this pane's zoom: an icon's CSS size times this picks its pixel size. */
+    readonly iconScale = (): number => (globalThis.window?.devicePixelRatio || 1) * readZoom(this.ctx.meta());
 
     readonly path: () => string;
     readonly setPath: (p: string) => void;

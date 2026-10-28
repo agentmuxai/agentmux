@@ -250,6 +250,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/agentmux/stream-file", get(stub_501))
         .route("/agentmux/stream-file/*path", get(stub_501))
         .route("/agentmux/stream-local-file", get(files::handle_stream_local_file))
+        .route("/agentmux/file-icon", get(super::file_icons::handle_file_icon))
         .route("/api/post-chat-message", get(stub_501).post(stub_501))
         .route("/docsite/*path", get(files::handle_docsite))
         .route("/schema/*path", get(files::handle_schema))

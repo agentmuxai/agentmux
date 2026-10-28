@@ -22,6 +22,10 @@ pub const MAIN: &str = "agentmux-srv";
 /// (`backend::attachments::extract`).
 pub const DOC_CHILD: &str = "agentmux-srvdoc";
 
+/// The child srv re-runs itself as to ask the system for file icons
+/// (`backend::file_icons`).
+pub const ICON_CHILD: &str = "agentmux-srvico";
+
 /// Set this thread's name. Longer than 15 bytes is cut by the kernel.
 pub fn set(name: &str) {
     #[cfg(target_os = "linux")]
@@ -50,7 +54,7 @@ mod tests {
     #[test]
     fn sets_the_names_srv_uses() {
         std::thread::spawn(|| {
-            for name in [MAIN, DOC_CHILD] {
+            for name in [MAIN, DOC_CHILD, ICON_CHILD] {
                 assert!(name.len() <= 15, "{name} would be cut by the kernel");
                 set(name);
                 assert_eq!(own_thread_name(), name);
