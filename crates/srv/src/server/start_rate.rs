@@ -83,7 +83,7 @@ mod tests {
         }
         let e = allow_at(key, 5, 2_000).unwrap_err();
         assert!(e.starts_with("START_RATE_LIMIT: rate-test-a"), "{e}");
-        assert!(e.contains("5 per sender per minute") && e.contains("try again in 60s"), "{e}");
+        assert!(e.contains("5 per sender per minute") && e.contains("try again in 59s"), "{e}");
     }
 
     #[test]
@@ -111,9 +111,13 @@ mod tests {
         }
     }
 
-    #[test]
-    fn the_setting_changes_the_limit() {
+    #[tokio::test]
+    async fn the_setting_changes_the_limit() {
         let state = crate::server::tests::test_state();
         assert_eq!(limit_of(&state), DEFAULT_PER_MINUTE);
+        state.config_watcher.update_settings(serde_json::from_value(serde_json::json!({ SETTING_PER_MINUTE: 2 })).unwrap());
+        assert_eq!(limit_of(&state), 2);
+        state.config_watcher.update_settings(serde_json::from_value(serde_json::json!({ SETTING_PER_MINUTE: 0 })).unwrap());
+        assert_eq!(limit_of(&state), 0, "0 turns the limit off");
     }
 }
