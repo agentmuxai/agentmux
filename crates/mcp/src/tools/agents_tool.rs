@@ -27,6 +27,7 @@ pub(super) const ACTS: &[Act] = &[
     Act { action: "start", tool: "AgentStart", rename: &[] },
     Act { action: "stop", tool: "AgentStop", rename: &[] },
     Act { action: "detach", tool: "AgentDetach", rename: &[] },
+    Act { action: "watch", tool: "AgentWatch", rename: &[] },
     Act { action: "search_history", tool: "SearchHistory", rename: &[] },
     Act { action: "context", tool: "AgentContext", rename: &[] },
     Act { action: "compact", tool: "AgentCompact", rename: &[] },
@@ -57,6 +58,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 "AgentStart" => lifecycle(cx, "start", &args).await,
                 "AgentStop" => lifecycle(cx, "stop", &args).await,
                 "AgentDetach" => lifecycle(cx, "detach", &args).await,
+                "AgentWatch" => watch(cx, &args).await,
                 "AgentContext" => own_context(cx, "context", None).await,
                 "AgentCompact" => own_context(cx, "compact", str_arg(&args, "keep")).await,
                 "AgentFresh" => match str_arg(&args, "handoff") {
@@ -301,6 +303,35 @@ async fn lifecycle(cx: &ToolCtx<'_>, action: &str, args: &Value) -> Result<Strin
     Ok(serde_json::to_string_pretty(&body)?)
 }
 
+/// `watch`: the recent transcript of an agent, then what it wrote since `after` (`/api/v1/agent/watch`).
+/// With `wait_seconds` srv holds the call until a line arrives, so the client waits a little longer.
+async fn watch(cx: &ToolCtx<'_>, args: &Value) -> Result<String> {
+    require_agent_env(cx.local_url, cx.auth_key, cx.block_id)?;
+    let agent = str_arg(args, "agent").ok_or_else(|| anyhow::anyhow!("missing required parameter: agent"))?;
+    let wait = args.get("wait_seconds").and_then(Value::as_u64).unwrap_or(0).min(25);
+    let url = format!("{}/api/v1/agent/watch", cx.local_url.trim_end_matches('/'));
+    let resp = cx
+        .client
+        .post(&url)
+        .timeout(std::time::Duration::from_secs(wait + 15))
+        .header(AUTH_KEY_HEADER, cx.auth_key)
+        .json(&json!({
+            "agent": agent,
+            "max_lines": args.get("max_lines").and_then(Value::as_u64),
+            "after": args.get("after").and_then(Value::as_u64),
+            "wait_seconds": wait,
+        }))
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+    let status = resp.status();
+    let body: Value = resp.json().await.unwrap_or(Value::Null);
+    if !status.is_success() {
+        anyhow::bail!("AgentWatch: {}", body["error"].as_str().map(str::to_string).unwrap_or_else(|| format!("srv answered {status}: {body}")));
+    }
+    Ok(serde_json::to_string_pretty(&body)?)
+}
+
 fn capitalised(word: &str) -> String {
     let mut chars = word.chars();
     chars.next().map(|c| c.to_uppercase().collect::<String>() + chars.as_str()).unwrap_or_default()
@@ -355,6 +386,12 @@ mod tests {
             assert_eq!((act.tool, args), (tool, json!({ "agent": "korp" })));
         }
         assert_eq!(capitalised("start"), "Start");
+    }
+
+    #[test]
+    fn watch_passes_its_cursor_and_wait_to_its_handler() {
+        let (act, args) = pick("Agents", ACTS, &json!({ "action": "watch", "agent": "korp", "after": 42, "wait_seconds": 10 })).unwrap();
+        assert_eq!((act.tool, args), ("AgentWatch", json!({ "agent": "korp", "after": 42, "wait_seconds": 10 })));
     }
 
     #[tokio::test]
