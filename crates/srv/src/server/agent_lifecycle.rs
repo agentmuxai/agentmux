@@ -12,7 +12,7 @@
 //!   resumes its session (`jekt_start`). Never stopped: an agent in a turn, one waiting on the user, one
 //!   that holds a claimed Kanban task or has a held message, or one that holds the build slot.
 //! - **Cap (D6).** A start (`agent_attach::start_agent`: `agent.start`, a message, a Job) is admitted
-//!   while fewer than `agents:max_running` (default 12, 0 = no cap) agent processes run and, on Windows,
+//!   while fewer than `agents:max_running` (default 24, 0 = no cap) agent processes run and, on Windows,
 //!   commit use is under `agents:commit_limit_pct` (default 85, 0 = off). Over either, the agent idle
 //!   longest with no view is stopped to make room; when none can be, the start is refused with
 //!   `capacity:` and a message stays held.
@@ -34,7 +34,7 @@ pub const SETTING_COMMIT_LIMIT_PCT: &str = "agents:commit_limit_pct";
 pub const META_IDLE_STOP_MINUTES: &str = "agent:idle_stop_minutes";
 
 const DEFAULT_IDLE_STOP_MINUTES: f64 = 60.0;
-const DEFAULT_MAX_RUNNING: f64 = 12.0;
+const DEFAULT_MAX_RUNNING: f64 = 24.0;
 const DEFAULT_COMMIT_LIMIT_PCT: f64 = 85.0;
 /// How often the idle sweep runs.
 const SWEEP_EVERY: Duration = Duration::from_secs(60);
