@@ -48,12 +48,12 @@ The existing tools that perform these operations (`App upgrade`, `Widget install
 
 ## 5. The countdown and the human's override
 
-On `approve`, srv opens a window per op (table in section 2). It reuses `pending_shutdown` (generalising `Action` with a `Sensitive { id, op }` variant and an `effect` the banner words as "will <do op> unless you keep it as it is"):
+On `approve`, srv opens a window per op (table in section 2). It is a sibling of `pending_shutdown`'s window, in `sagas/sensitive_window.rs`: that one is tied to an agent pane, while these operations (quit, install, grant) are not. It publishes `sensitive:pending` and `sensitive:cleared` for the banner:
 
 - banner on every visible agent pane and the Warden bar, OS toast with the same wording, chime. It names the requester, the super agent that approved, the op and its structured summary (section 2).
-- The human can Veto (the existing Keep running button, relabelled for these ops) or, for ops that can wait, Approve now to skip the countdown. No click is required to let it proceed.
+- The human can Veto (a button like Keep running, worded for these ops) or Approve now to skip the countdown. No click is required to let it proceed.
 - At the deadline the operation runs as the super agent's approved act on behalf of the requester. Each action's own code path runs unchanged (the install, the upgrade, the grant), so no new power is added; only who may trigger it changes.
-- A second request for the same op and target while one is pending joins it (the clock never restarts), as `pending_shutdown::request` already does.
+- A second request for the same op and target while one is pending joins it (the clock never restarts), as `pending_shutdown::request` does for its window.
 
 ## 6. No super agent running
 
@@ -79,10 +79,11 @@ One audit row per step, through `log_fleet_action_audit` (shown in Warden's Audi
 
 1. Seat role `super` and the at-most-one rule (built).
 2. `sensitive_ops.rs` (table) and the `sensitive` request registry (built).
-3. `pending_shutdown` `Action::Sensitive`, banner and toast wording, human veto / approve-now (frontend: relabel the Keep button per effect).
-4. HTTP routes and the `Sensitive` MCP tool; wrap `App upgrade`, `Stop` quit, `Widget install`, `Desktop`, `Vault` to file requests.
-5. Fallback timer and audit rows.
-6. Remove the `user_instruction` gates they replace.
+3. The countdown (`sagas/sensitive_window.rs`): the window, the person's veto and approve-now, the runner each operation registers, the two events, the audit rows for the veto and the run (built).
+4. The person's side: the RPC for veto and approve-now (window-proven only), the banner, the OS toast and the chime.
+5. HTTP routes and the `Sensitive` MCP tool; wrap `App upgrade`, `Stop` quit, `Widget install`, `Desktop`, `Vault` to file requests, each registering its runner.
+6. Fallback timer (no super agent) and the audit rows for the request, approval and denial.
+7. Remove the `user_instruction` gates they replace.
 
 One PR per step, each behaviour-only text.
 

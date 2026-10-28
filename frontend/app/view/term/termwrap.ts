@@ -31,6 +31,7 @@ import * as wedge from "./parser-wedge";
 import { PredictiveEcho } from "./predictive-echo";
 import { resolveTermScrollSensitivity } from "./termscrollsensitivity";
 import { paintRows, resizeAndPaint } from "./term-paint";
+import { resumeOffsetAfterTrim } from "./term-resume-offset";
 import { claimTermRenderer, forgetTermRenderer, setTermRendererOf } from "@/app/store/term-renderer";
 import type { WSFileEventData } from "@/types/rpc/WSFileEventData";
 
@@ -1115,7 +1116,7 @@ export class TermWrap {
                 }
             }
         }
-        const { data: mainData, fileInfo: mainFile } = await fetchMuxFile(this.blockId, TermFileName, ptyOffset);
+        const { data: mainData, fileInfo: mainFile, dataOffset: mainOffset } = await fetchMuxFile(this.blockId, TermFileName, ptyOffset);
         console.log(
             `terminal loaded cachefile:${cacheData?.byteLength ?? 0} main:${mainData?.byteLength ?? 0} bytes, ${Date.now() - startTs}ms`
         );
@@ -1124,7 +1125,9 @@ export class TermWrap {
             // the terminal's current geometry. init() now fits the terminal BEFORE
             // calling this, so "current" is the real container size rather than
             // xterm's 80x24 default — see the ordering comment in init().
-            await this.doTerminalWrite(mainData, null);
+            // The stored output is capped: when its head was dropped the body starts
+            // past the offset asked for, and the end it reaches is still absolute.
+            await this.doTerminalWrite(mainData, resumeOffsetAfterTrim(ptyOffset, mainOffset, mainData.byteLength));
         }
     }
 

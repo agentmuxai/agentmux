@@ -364,6 +364,11 @@ async fn cors_exposes_zonefileinfo_header_to_cross_origin_callers() {
         "expected X-ZoneFileInfo in Access-Control-Expose-Headers, got {:?}",
         expose
     );
+    assert!(
+        expose.to_lowercase().contains("x-zonefileoffset"),
+        "expected X-ZoneFileOffset in Access-Control-Expose-Headers, got {:?}",
+        expose
+    );
 }
 
 // SPEC_AGENT_PANE_RICH_OUTPUT_2026_09_27.md §5: a video poster reads its file's

@@ -69,6 +69,7 @@ impl ConfigState {
         let mut current = self.config.write().unwrap();
         let mut new_config = (**current).clone();
         new_config.connections = settings.connections.clone();
+        crate::backend::blockcontroller::shell::term_cap::apply_setting(settings.extra.get(crate::backend::blockcontroller::shell::term_cap::SETTING));
         new_config.settings = settings;
         *current = Arc::new(new_config);
     }

@@ -90,7 +90,10 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // `Content-Range` carries a ranged stream-local-file response's
         // total size, which inline video/audio read before play (Codex P2 on
         // #4073).
-        .expose_headers(vec!["X-ZoneFileInfo".parse().unwrap(), header::CONTENT_RANGE]);
+        // `X-ZoneFileOffset` says where that response's body starts in the
+        // file (later than asked once a terminal's output was trimmed);
+        // `fetchMuxFile` reads it to resume at the file's absolute end.
+        .expose_headers(vec!["X-ZoneFileInfo".parse().unwrap(), "X-ZoneFileOffset".parse().unwrap(), header::CONTENT_RANGE]);
 
     // The routes an LAN peer actually calls when forwarding a jekt or
     // looking up which agents this instance hosts
