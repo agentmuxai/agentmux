@@ -1073,7 +1073,7 @@ describe("MemoryFileCard — label helpers", () => {
 });
 
 // New file and Create MEMORY.md moved here from the agent pane's own memory
-// view, ahead of the Stash drawer's removal.
+// view, before the Stash drawer was removed.
 describe("NativeMemoryManager — create actions", () => {
     function meta(filename: string, over: Partial<NativeMemoryFileMeta> = {}): NativeMemoryFileMeta {
         return {

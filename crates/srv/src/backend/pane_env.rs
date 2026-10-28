@@ -348,6 +348,10 @@ mod spawn_site_coverage {
     /// `program` is the literal text between `new(` and the first `,` or `)`,
     /// which is stable across edits in a way line numbers are not.
     const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
+        ("src/identity/gh_agent_token.rs", "&exe", 1,
+         "sanitized: the host's `gh-agent token` for a container agent's repository, sanitize_external_command (it is told only the agent id)"),
+        ("src/backend/blockcontroller/subprocess/container_spawn.rs", "&argv[0]", 1,
+         "test: Unix only; runs the container turn launcher on the host to prove an exported function reaches the provider"),
         ("src/agents/runner.rs", "bin", 1,
          "sanitized: agent CLI subprocess, sanitize_process_command"),
         ("src/backend/attachments/extract.rs", "exe", 1,

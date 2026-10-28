@@ -1,8 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// The agent suite: the agent pane mid-conversation, its question panel, the
-// Stash, signing in, and the picker — Part 3 of
+// The agent suite: the agent pane mid-conversation, its question panel,
+// signing in, and the picker — Part 3 of
 // docs/reports/REPORT_DOCS_SCREENSHOT_COVERAGE_PLAN_2026_10_10.md, spec §10.
 // Run with the capture instance's data folder in the environment:
 //
@@ -503,17 +503,5 @@ export const shots = [
             await waitFor(session, `!!document.querySelector(${JSON.stringify(`${pane} .agent-question-panel`)})`, "the question panel", 30000);
         },
         verify: ".agent-question-panel",
-    }),
-    conversationShot({
-        id: "agent-stash",
-        title: "The Stash",
-        description: "The agent's Stash, from the backpack in its header.",
-        inPane: async (session, pane) => {
-            const stash = await session.evaluate(visibleCenter(`${pane} [title="Stash"]`));
-            if (!stash) throw new Error("no Stash button in the pane's header");
-            await session.clickAt(stash);
-            await waitFor(session, `!!document.querySelector(".agent-stash-modal-panel")`, "the Stash");
-        },
-        verify: ".agent-stash-modal-panel",
     }),
 ];

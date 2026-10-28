@@ -299,7 +299,7 @@ impl Tokens {
 /// Set in the environment of an agent whose `git` and `gh` use the broker's tokens; the `gh`
 /// function `agentmux-bashwrap` exports reads it.
 pub const BROKER_ENV: &str = "AGENTMUX_GITHUB_BROKER";
-use agentmux_common::github_broker_shim::{GH_FUNCTION_BODY, GH_FUNCTION_NAME};
+use agentmux_common::github_broker_shim::{GH_FUNCTION_BODY, GH_FUNCTION_NAME, GIT_FUNCTION_BODY, GIT_FUNCTION_NAME};
 const HELPER_KEY: &str = "credential.https://github.com.helper";
 const HELPER: &str = "!agentmux-bashwrap git-credential";
 const HTTP_PATH_KEY: &str = "credential.https://github.com.useHttpPath";
@@ -313,9 +313,19 @@ const REWRITE_KEY: &str = "url.https://github.com/.insteadOf";
 /// to GitHub are rewritten to https, because an ssh key is the person's own credential. Prompts
 /// are off, so a refusal ends the command with the reason instead of waiting at a prompt no one
 /// sees. Without `enabled`, any of this left in the environment from an earlier start is removed.
-pub fn apply_agent_git_in(env: &mut HashMap<String, String>, process: impl Fn(&str) -> Option<String> + Copy, enabled: bool) {
-    use crate::backend::publish_guard::set_git_config_list;
+pub fn apply_agent_git_in(
+    env: &mut HashMap<String, String>,
+    process: impl Fn(&str) -> Option<String> + Copy,
+    enabled: bool,
+    hooks_dir: Option<&std::path::Path>,
+) {
+    use crate::backend::publish_guard::{set_git_config_list, HOOKS_PATH_KEY};
     if enabled {
+        // AgentMux's own hooks: the push scan and the commit trailers.
+        if let Some(dir) = hooks_dir {
+            let dir = dir.to_string_lossy().into_owned();
+            set_git_config_list(env, process, HOOKS_PATH_KEY, &[dir.as_str()]);
+        }
         set_git_config_list(env, process, HELPER_KEY, &["", HELPER]);
         set_git_config_list(env, process, HTTP_PATH_KEY, &["true"]);
         set_git_config_list(env, process, REWRITE_KEY, &["git@github.com:", "ssh://git@github.com/"]);
@@ -323,27 +333,31 @@ pub fn apply_agent_git_in(env: &mut HashMap<String, String>, process: impl Fn(&s
         env.insert(BROKER_ENV.to_string(), "1".to_string());
         // `gh` goes through the broker too, in every bash the agent runs, whichever CLI started it.
         env.insert(GH_FUNCTION_NAME.to_string(), GH_FUNCTION_BODY.to_string());
+        // `git` too: a push can't skip the hooks, and a commit is the bot's.
+        env.insert(GIT_FUNCTION_NAME.to_string(), GIT_FUNCTION_BODY.to_string());
     } else if env.contains_key(BROKER_ENV) {
-        for key in [HELPER_KEY, HTTP_PATH_KEY, REWRITE_KEY] {
+        for key in [HELPER_KEY, HTTP_PATH_KEY, REWRITE_KEY, HOOKS_PATH_KEY] {
             set_git_config_list(env, process, key, &[]);
         }
         env.remove(BROKER_ENV);
         env.remove(GH_FUNCTION_NAME);
+        env.remove(GIT_FUNCTION_NAME);
         // Set with the rest, and only ever set by it: prompts come back with the connection gone.
         env.remove("GIT_TERMINAL_PROMPT");
     }
 }
 
-/// `env` without what [`apply_agent_git_in`] sets: for a container, whose image has its own git and
-/// `gh` setup, and which the host's tokens are never given to.
+/// `env` without what [`apply_agent_git_in`] sets: for a container, which gets its own setup
+/// ([`apply_container_git`]) or none.
 pub fn without_agent_git(env: &HashMap<String, String>) -> HashMap<String, String> {
-    use crate::backend::publish_guard::without_git_config_key;
+    use crate::backend::publish_guard::{without_git_config_key, HOOKS_PATH_KEY};
     if !env.contains_key(BROKER_ENV) {
         return env.clone();
     }
-    let mut out = [HELPER_KEY, HTTP_PATH_KEY, REWRITE_KEY].iter().fold(env.clone(), |e, key| without_git_config_key(&e, key));
+    let mut out = [HELPER_KEY, HTTP_PATH_KEY, REWRITE_KEY, HOOKS_PATH_KEY].iter().fold(env.clone(), |e, key| without_git_config_key(&e, key));
     out.remove(BROKER_ENV);
     out.remove(GH_FUNCTION_NAME);
+    out.remove(GIT_FUNCTION_NAME);
     out.remove("GIT_TERMINAL_PROMPT");
     out
 }
@@ -358,13 +372,18 @@ pub fn attach_store(store: Arc<Store>) {
 /// Whether agents on this machine get the broker's GitHub tokens: the person connected GitHub
 /// through AgentMux Cloud (a brokered account that still works), and this isn't a fleet host,
 /// where `gh-agent` already gives agents their GitHub identity.
-fn agents_use_broker(env: &HashMap<String, String>) -> bool {
-    use std::sync::Mutex;
-    use std::time::{Duration, Instant};
-    static CACHE: Mutex<Option<(Instant, bool)>> = Mutex::new(None);
+pub(crate) fn agents_use_broker(env: &HashMap<String, String>) -> bool {
     if crate::backend::publish_guard::hooks_dir_for(env, |k| std::env::var(k).ok()).is_some() {
         return false;
     }
+    broker_account_connected()
+}
+
+/// Whether the person connected GitHub through AgentMux Cloud and the account still works.
+fn broker_account_connected() -> bool {
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
+    static CACHE: Mutex<Option<(Instant, bool)>> = Mutex::new(None);
     let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
     if let Some((at, answer)) = *cache {
         if at.elapsed() < Duration::from_secs(5) {
@@ -382,12 +401,41 @@ fn agents_use_broker(env: &HashMap<String, String>) -> bool {
     answer
 }
 
+/// Where AgentMux's git hooks are mounted, read-only, in a container agent's image. Ends in the
+/// directory's own name, which `agentmux-bashwrap` knows its hooks by.
+pub const CONTAINER_HOOKS_DIR: &str = "/opt/agentmux/github-hooks";
+
+/// The host's hooks directory when container agents get git and `gh` through AgentMux: a token
+/// source exists (the host's `gh-agent`, or the person's connected GitHub account) and the hooks
+/// can be written. Without the hooks there is no setup at all, so a container never gets a token
+/// whose pushes aren't scanned.
+pub fn container_git_hooks() -> Option<std::path::PathBuf> {
+    // The machine running the tests has its own answer; the tests give theirs.
+    if cfg!(test) {
+        return None;
+    }
+    if crate::identity::gh_agent_token::installed().is_none() && !broker_account_connected() {
+        return None;
+    }
+    crate::identity::github_hooks::hooks_dir()
+}
+
+/// A container agent's exec environment with its git and `gh` set up like a host agent's: the
+/// credential helper, the `git` and `gh` functions and the hooks, which `agentmux-bashwrap` in the
+/// image runs from [`CONTAINER_HOOKS_DIR`].
+pub fn apply_container_git(env: &mut HashMap<String, String>) {
+    apply_agent_git_in(env, |_| None, true, Some(std::path::Path::new(CONTAINER_HOOKS_DIR)));
+    // The workspace is a bind mount owned by the host's user: without this git stops at "dubious ownership".
+    crate::backend::publish_guard::set_git_config_list(env, |_| None, "safe.directory", &["/workspace"]);
+}
+
 /// [`apply_agent_git_in`] for a spawn: every path that starts an agent process or runs a command for
 /// one comes through `gh_guard::apply_gh_guard`, which calls this.
 #[cfg_attr(test, allow(dead_code))]
 pub fn apply_agent_git(env: &mut HashMap<String, String>) {
     let enabled = agents_use_broker(env);
-    apply_agent_git_in(env, |k| std::env::var(k).ok(), enabled);
+    let hooks = enabled.then(crate::identity::github_hooks::hooks_dir).flatten();
+    apply_agent_git_in(env, |k| std::env::var(k).ok(), enabled, hooks.as_deref());
 }
 
 /// srv's tokens: one cache for the process.
@@ -547,7 +595,7 @@ mod tests {
     #[test]
     fn an_agent_with_the_broker_gets_only_its_credential_helper_for_github() {
         let mut e = env(&[("GIT_CONFIG_COUNT", "1"), ("GIT_CONFIG_KEY_0", "user.name"), ("GIT_CONFIG_VALUE_0", "x")]);
-        apply_agent_git_in(&mut e, |_| None, true);
+        apply_agent_git_in(&mut e, |_| None, true, None);
         let got = entries(&e);
         // The reset comes right before ours: whatever helper was configured before is not asked.
         let at = got.iter().position(|(k, v)| k == HELPER_KEY && v.is_empty()).expect("the reset");
@@ -559,20 +607,42 @@ mod tests {
         assert_eq!(e[GH_FUNCTION_NAME], GH_FUNCTION_BODY, "gh reaches the broker in every provider's shell");
         // Applied again (a persisted cmd:env): the same, not twice.
         let before = e.clone();
-        apply_agent_git_in(&mut e, |_| None, true);
+        apply_agent_git_in(&mut e, |_| None, true, None);
         assert_eq!(e, before);
+    }
+
+    #[test]
+    fn an_agent_with_the_broker_gets_the_agentmux_hooks_and_git_function_and_loses_them_when_disconnected() {
+        let hooks = std::path::Path::new("/agentmux/github-hooks");
+        let mut e = env(&[("GIT_CONFIG_COUNT", "1"), ("GIT_CONFIG_KEY_0", "user.name"), ("GIT_CONFIG_VALUE_0", "x")]);
+        apply_agent_git_in(&mut e, |_| None, true, Some(hooks));
+        assert!(entries(&e).contains(&("core.hooksPath".to_string(), hooks.to_string_lossy().into_owned())));
+        assert_eq!(e[GIT_FUNCTION_NAME], GIT_FUNCTION_BODY);
+        // Applied again: the same, not twice.
+        let before = e.clone();
+        apply_agent_git_in(&mut e, |_| None, true, Some(hooks));
+        assert_eq!(e, before);
+        // Disconnected since: the hooks, the function and the rest are taken out; other settings stay.
+        apply_agent_git_in(&mut e, |_| None, false, None);
+        assert_eq!(entries(&e), vec![("user.name".to_string(), "x".to_string())]);
+        assert!(!e.contains_key(GIT_FUNCTION_NAME));
+        // A container gets neither.
+        let mut c = env(&[]);
+        apply_agent_git_in(&mut c, |_| None, true, Some(hooks));
+        let out = without_agent_git(&c);
+        assert!(!out.contains_key(GIT_FUNCTION_NAME) && !out.contains_key(GH_FUNCTION_NAME));
     }
 
     #[test]
     fn an_agent_without_the_broker_keeps_its_own_git_and_loses_a_stale_setup() {
         let mut plain = env(&[("GIT_CONFIG_COUNT", "1"), ("GIT_CONFIG_KEY_0", "user.name"), ("GIT_CONFIG_VALUE_0", "x")]);
         let before = plain.clone();
-        apply_agent_git_in(&mut plain, |_| None, false);
+        apply_agent_git_in(&mut plain, |_| None, false, None);
         assert_eq!(plain, before, "nothing added when GitHub isn't connected");
         // Disconnected since the last start: what was set is taken out, the rest stays.
         let mut e = before.clone();
-        apply_agent_git_in(&mut e, |_| None, true);
-        apply_agent_git_in(&mut e, |_| None, false);
+        apply_agent_git_in(&mut e, |_| None, true, None);
+        apply_agent_git_in(&mut e, |_| None, false, None);
         assert_eq!(entries(&e), vec![("user.name".to_string(), "x".to_string())]);
         assert!(!e.contains_key(BROKER_ENV) && !e.contains_key("GIT_TERMINAL_PROMPT") && !e.contains_key(GH_FUNCTION_NAME), "prompts and plain gh are back too");
     }
@@ -655,7 +725,7 @@ mod tests {
     #[tokio::test]
     async fn a_container_gets_none_of_the_agent_git_setup() {
         let mut e = env(&[("GIT_CONFIG_COUNT", "1"), ("GIT_CONFIG_KEY_0", "user.name"), ("GIT_CONFIG_VALUE_0", "x"), ("OTHER", "kept")]);
-        apply_agent_git_in(&mut e, |_| None, true);
+        apply_agent_git_in(&mut e, |_| None, true, None);
         let out = without_agent_git(&e);
         assert_eq!(entries(&out), vec![("user.name".to_string(), "x".to_string())]);
         assert!(!out.contains_key(BROKER_ENV) && !out.contains_key("GIT_TERMINAL_PROMPT") && !out.contains_key(GH_FUNCTION_NAME));
@@ -663,6 +733,23 @@ mod tests {
         // An env that never had it is returned as it was.
         let plain = env(&[("A", "b")]);
         assert_eq!(without_agent_git(&plain), plain);
+    }
+
+    #[test]
+    fn a_container_gets_the_helper_the_functions_and_the_hooks_where_the_image_finds_them() {
+        let mut e = env(&[("OTHER", "kept")]);
+        apply_container_git(&mut e);
+        assert_eq!(e[BROKER_ENV], "1");
+        assert!(e.contains_key(GH_FUNCTION_NAME) && e.contains_key(GIT_FUNCTION_NAME));
+        let config = entries(&e);
+        assert!(config.contains(&("core.hooksPath".to_string(), CONTAINER_HOOKS_DIR.to_string())), "{config:?}");
+        assert!(config.iter().any(|(k, v)| k == HELPER_KEY && v == HELPER));
+        assert!(config.contains(&("safe.directory".to_string(), "/workspace".to_string())), "{config:?}");
+        // The directory is named like the host's, which the hook forwarding knows it by.
+        assert!(CONTAINER_HOOKS_DIR.ends_with("/github-hooks"));
+        assert_eq!(e["OTHER"], "kept");
+        // And a host path never reaches a container's config.
+        assert!(!config.iter().any(|(_, v)| v.contains(":\\") || v.contains(".agentmux")));
     }
 
     #[tokio::test]

@@ -32,6 +32,7 @@
 import { PaneLoadingCover } from "@/app/element/PaneLoadingCover";
 import { CopyErrorButton } from "@/app/errors/CopyErrorButton";
 import { formatErrorReport } from "@/app/errors/error-report";
+import { noteOpenedByPerson } from "@/app/store/agent-open-note";
 import { subscribeToPaneLifecycle } from "@/app/store/agent-pane-registration";
 import { getOpenDefinitionMap } from "@/app/store/agent-pane-state-store";
 import { ContextMenuModel } from "@/app/store/contextmenu";
@@ -437,6 +438,8 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
         setLaunching(def.id);
         const openBlockId = props.model.blockId;
         beginAgentOpen(openBlockId, def.name, "my-agents");
+        // The person opened it from My Agents: the resumed agent opens with its update.
+        noteOpenedByPerson(def.id);
         try {
             const launched = await props.model.launchAgentDefinition(def, {
                 instanceName: row.instance_name,

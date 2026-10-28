@@ -108,7 +108,7 @@ pub struct NativeMemoryWriteProvenance {
     // ts-rs cannot derive TS for `serde_json::Value` (no impl), and the
     // frontend has always typed this `detail?: unknown`. `optional` is
     // load-bearing, not cosmetic: every caller constructs provenance as
-    // `{ source: "human" }` with no detail (agent-native-memory-model.ts),
+    // `{ source: "human" }` with no detail (the frontend's memory models),
     // so a required field would fail to compile on the frontend.
     #[serde(default = "default_detail")]
     pub detail: serde_json::Value,

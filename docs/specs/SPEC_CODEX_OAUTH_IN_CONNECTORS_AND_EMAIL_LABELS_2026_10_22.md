@@ -64,6 +64,8 @@ Coddy's turns failed with `The 'gpt-5.5' model is not supported when using Codex
 
 ## 6. Part C: sign in to Codex from Connectors
 
+> The Stash's Connect and Re-login buttons named below are removed with the Stash drawer ([SPEC_DROP_THE_AGENT_STASH_2026_10_24.md](SPEC_DROP_THE_AGENT_STASH_2026_10_24.md)); Connect and Re-login for every provider, Codex included, are in Connectors → Accounts.
+
 ### 6.1 Today
 
 - The OpenAI tile in Connectors offers an API key only (`accounts/accounts-catalog.ts`).

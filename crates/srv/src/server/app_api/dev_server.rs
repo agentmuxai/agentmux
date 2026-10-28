@@ -107,18 +107,36 @@ pub(crate) async fn handle_register_dev_server(
             .into_response();
     };
 
-    let addr: std::net::SocketAddr = match format!("{ip}:{}", req.port).parse() {
-        Ok(a) => a,
-        Err(e) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({ "error": format!("invalid address {ip}:{}: {e}", req.port) })),
-            )
-                .into_response();
+    // Where the proxy reaches it. On Linux the container's own address; where the daemon runs in a VM
+    // (Docker Desktop) that address is not routable from here, so the dev relay joins the two.
+    let target: crate::backend::dev_proxy::Target = if crate::backend::dev_relay::needed(&cm).await {
+        let image = cm
+            .docker()
+            .inspect_container(&container_name, None)
+            .await
+            .ok()
+            .and_then(|c| c.config?.image)
+            .unwrap_or_default();
+        match crate::backend::dev_relay::ensure(&cm, &image).await {
+            Ok(via) => crate::backend::dev_proxy::Target::Relay { via, container: container_name, port: req.port },
+            Err(e) => {
+                return (StatusCode::BAD_GATEWAY, Json(json!({ "error": format!("the dev proxy's relay is not available: {e}") }))).into_response();
+            }
+        }
+    } else {
+        match format!("{ip}:{}", req.port).parse::<std::net::SocketAddr>() {
+            Ok(a) => a.into(),
+            Err(e) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({ "error": format!("invalid address {ip}:{}: {e}", req.port) })),
+                )
+                    .into_response();
+            }
         }
     };
 
-    state.dev_proxy.register(&project, &agent_id, addr).await;
+    state.dev_proxy.register(&project, &agent_id, target).await;
 
     // Lowercased to match the actual routing key (`DevProxyRegistry::routing_key`
     // lowercases both halves) — this is what a browser should actually be

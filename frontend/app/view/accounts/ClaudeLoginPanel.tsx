@@ -4,7 +4,7 @@
 /**
  * ClaudeLoginPanel — the in-app Claude/Anthropic login session, driven from
  * a context that has no agent block: Connectors → Accounts' "Connect"
- * (fresh account, no `linkTarget`) and the Agent Stash's per-binding
+ * (fresh account, no `linkTarget`) and a per-binding
  * "Connect / Re-login" action (`linkTarget` + `existingAccountId`, refresh
  * not mint). Both reuse the exact same session logic and UI
  * (`InAppLoginPanel`) as the agent pane's own login — see
@@ -36,11 +36,11 @@ const CLAUDE_PROVIDER = PROVIDERS["claude"];
 
 export function ClaudeLoginPanel(props: {
     onClose: () => void;
-    /** Set for the Stash's per-binding re-login: refreshes THIS account's
+    /** Set for a per-binding re-login: refreshes THIS account's
      *  isolated dir instead of minting a new one, and links the result back
      *  to the agent. Omit for Connectors' bare Connect (fresh account, no
      *  agent to link yet — the account just needs to exist for a later
-     *  launch/Stash bind). */
+     *  launch or a bind in Connectors). */
     existingAccountId?: string;
     linkTarget?: { blockId?: string; agentDefinitionId: string };
     /** Called with the new account's id once it is saved and the sign-in succeeded (the composer's
@@ -62,10 +62,10 @@ export function ClaudeLoginPanel(props: {
      *  agent so only the canonical row remains. */
     staleAliasProvider?: string;
     /** Which region the dialog locks — see `Modal`'s `scope` prop. Connectors
-     *  (no ModalLayer ancestor) passes "tab"; the Agent Stash (already
-     *  inside agent-view.tsx's `ModalLayer scope="pane"`) passes "pane" so
-     *  this stacks correctly over the Stash modal instead of both
-     *  competing for the same window-level backdrop. */
+     *  (no ModalLayer ancestor) passes "tab"; a caller already inside a
+     *  pane's `ModalLayer scope="pane"` passes "pane" so this stacks
+     *  correctly over that modal instead of both competing for the same
+     *  window-level backdrop. */
     scope?: ModalScope;
 }): JSX.Element {
     const [phase, setPhase] = createSignal<InAppLoginPhase>("starting");
@@ -206,7 +206,7 @@ export function ClaudeLoginPanel(props: {
                         // failed LinkAgentIdentityCommand, so
                         // onAccountRegistered firing only proves the ACCOUNT
                         // was persisted, not that it's actually linked to
-                        // this agent. For a Stash flow (linkTarget set),
+                        // this agent. For a linkTarget flow,
                         // that's the whole point of the click — confirm the
                         // link is really there before showing success,
                         // instead of "Signed in" for an agent whose next
@@ -222,7 +222,7 @@ export function ClaudeLoginPanel(props: {
                                 // the CANONICAL "claude" provider specifically,
                                 // not just account_id. finalizeAccount only
                                 // warns/swallows a failed link insert (never
-                                // rethrows) — for a Stash re-login on a
+                                // rethrows) — for a re-login on a
                                 // legacy-aliased row, registeredAccountId
                                 // equals that SAME alias row's own account_id
                                 // (it's a refresh, not a fresh mint), so a bare
@@ -360,7 +360,7 @@ export function ClaudeLoginPanel(props: {
                         // "Anthropic" (the account/brand), not
                         // CLAUDE_PROVIDER.displayName ("Claude Code", the
                         // internal CLI tool AgentMux runs under the hood) —
-                        // this panel is Connectors/Stash-facing, where the CLI
+                        // this panel is Connectors-facing, where the CLI
                         // implementation detail shouldn't surface. Contrast
                         // the agent pane's login (AgentDocumentView), a
                         // different call site of this same shared component,

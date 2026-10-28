@@ -602,6 +602,36 @@ pub(crate) fn first_cli_error(frame: &Value) -> Option<&str> {
     frame.get("errors")?.as_array()?.iter().find_map(|e| e.as_str().filter(|s| !s.is_empty()))
 }
 
+/// What a turn that ended with a tool call still pending reads as.
+pub(crate) const CUT_OFF_TEXT: &str = "This turn was cut off mid-tool, so it didn't finish.";
+
+/// A `result` line the CLI wrote for a turn it found cut off with a tool call
+/// pending (a restart or an upgrade interrupted it): `Error [ede_diagnostic]
+/// result_type=user last_content_type=n/a stop_reason=tool_use`. It is not a
+/// failure of the agent, so it is returned as an ordinary end of turn saying
+/// so, with the CLI's own text beside it for the log. `None` for any other line.
+pub(crate) fn plain_cut_off(line: &str) -> Option<(String, String)> {
+    if !line.contains("[ede_diagnostic]") {
+        return None;
+    }
+    let mut frame: Value = serde_json::from_str(line).ok()?;
+    // An error result only: a turn that finished and quotes the diagnostic is left as it is.
+    if frame.get("type").and_then(|v| v.as_str()) != Some("result") || !is_error_result_frame(&frame) {
+        return None;
+    }
+    let diagnostic = frame_error_text(&frame);
+    if !(diagnostic.contains("[ede_diagnostic]") && diagnostic.contains("stop_reason=tool_use")) {
+        return None;
+    }
+    let object = frame.as_object_mut()?;
+    object.insert("is_error".into(), Value::Bool(false));
+    object.insert("subtype".into(), Value::String("success".into()));
+    object.insert("result".into(), Value::String(CUT_OFF_TEXT.into()));
+    object.remove("errors");
+    object.remove("error");
+    Some((diagnostic, frame.to_string()))
+}
+
 /// True if a terminal `result` frame represents a failure.
 pub(crate) fn is_error_result_frame(frame: &Value) -> bool {
     frame.get("is_error").and_then(|v| v.as_bool()).unwrap_or(false)
@@ -1173,6 +1203,36 @@ mod tests {
         assert_eq!(v["code"], json!("rate_limited"));
         assert_eq!(v["retryable"], json!(true));
         assert!(v.get("stderrTail").is_some(), "camelCase stderrTail expected: {v}");
+    }
+
+    #[test]
+    fn a_turn_the_cli_found_cut_off_is_an_ordinary_end_of_turn_with_a_plain_text() {
+        let raw = r#"{"type":"result","subtype":"error_during_execution","is_error":true,"session_id":"s1","errors":["Error [ede_diagnostic] result_type=user last_content_type=n/a stop_reason=tool_use"]}"#;
+        let (diagnostic, plain) = plain_cut_off(raw).expect("a cut-off turn");
+        assert!(diagnostic.starts_with("Error [ede_diagnostic] result_type=user"), "{diagnostic}");
+        let frame: Value = serde_json::from_str(&plain).unwrap();
+        assert_eq!(frame["is_error"], Value::Bool(false));
+        assert_eq!(frame["result"], CUT_OFF_TEXT);
+        assert_eq!(frame["session_id"], "s1", "the rest of the line is kept");
+        assert!(frame.get("errors").is_none(), "{plain}");
+        assert!(!plain.contains("ede_diagnostic"), "{plain}");
+        // The text can be in `result` too.
+        let in_result = r#"{"type":"result","is_error":true,"result":"Error [ede_diagnostic] result_type=user last_content_type=n/a stop_reason=tool_use"}"#;
+        assert!(plain_cut_off(in_result).is_some());
+    }
+
+    #[test]
+    fn only_that_diagnostic_on_a_result_line_is_rewritten() {
+        // A real failure stays a failure.
+        assert!(plain_cut_off(r#"{"type":"result","is_error":true,"result":"API Error: 529 overloaded"}"#).is_none());
+        // Another diagnostic (not a pending tool call) stays as it is.
+        assert!(plain_cut_off(r#"{"type":"result","is_error":true,"result":"Error [ede_diagnostic] result_type=assistant stop_reason=end_turn"}"#).is_none());
+        // Not a result line: an assistant that quotes it is left alone.
+        assert!(plain_cut_off(r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Error [ede_diagnostic] stop_reason=tool_use"}]}}"#).is_none());
+        assert!(plain_cut_off("not json [ede_diagnostic]").is_none());
+        assert!(plain_cut_off(r#"{"type":"result","is_error":false,"result":"done"}"#).is_none());
+        // A turn that finished and quotes the diagnostic in its answer is not one that was cut off.
+        assert!(plain_cut_off(r#"{"type":"result","subtype":"success","is_error":false,"result":"The CLI said Error [ede_diagnostic] result_type=user stop_reason=tool_use"}"#).is_none());
     }
 }
 

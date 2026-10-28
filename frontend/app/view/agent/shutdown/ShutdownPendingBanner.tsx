@@ -58,7 +58,9 @@ export const ShutdownPendingBanner = (props: ShutdownPendingBannerProps): JSX.El
     const scope = `block:${props.blockId}`;
     const unsubPending = onMuxEvent(EVENT_SHUTDOWN_PENDING, (view) => {
         sawLive = true;
-        show(parsePending(view), true);
+        const next = parsePending(view, props.blockId);
+        // The same request again (another agent of its batch was kept) updates the line, without a chime.
+        show(next, next?.request_id !== pending()?.request_id);
     }, scope);
     const unsubCleared = onMuxEvent(EVENT_SHUTDOWN_PENDING_CLEARED, (cleared) => {
         sawLive = true;
@@ -77,7 +79,7 @@ export const ShutdownPendingBanner = (props: ShutdownPendingBannerProps): JSX.El
     ]).then(
         ([p, cleared]) => {
             if (sawLive) return;
-            const replayed = replayPending(p, cleared, Date.now());
+            const replayed = replayPending(p, cleared, Date.now(), props.blockId);
             if (replayed) show(replayed, false);
         },
     );
@@ -135,14 +137,14 @@ export const ShutdownPendingBanner = (props: ShutdownPendingBannerProps): JSX.El
                     actions={[
                         {
                             label: keeping() ? "Keeping…" : "Keep running",
-                            title: "Cancel this shutdown and keep the agent running",
+                            title: p().others > 0 ? "Keep this agent running; the others still close" : "Cancel this shutdown and keep the agent running",
                             primary: true,
                             disabled: keeping() || closing(),
                             onClick: keep,
                         },
                         {
                             label: closing() ? "Closing…" : p().effect === "stop" ? "Stop now" : "Close now",
-                            title: "Don't wait for the countdown: do it now",
+                            title: p().others > 0 ? "Don't wait for the countdown: close all of them now" : "Don't wait for the countdown: do it now",
                             disabled: keeping() || closing(),
                             onClick: closeNow,
                         },

@@ -6,4 +6,9 @@
  * `McpServerListItem` — see its doc comment for why `is_global` alone isn't
  * enough to render bind/unbind as a stateful toggle (tracked in #1960).
  */
-export type SkillListItem = { bound_to_agent: boolean, id: string, name: string, trigger: string, skill_type: string, description: string, content: string, is_global: boolean, created_at: number, updated_at: number, };
+export type SkillListItem = { bound_to_agent: boolean, 
+/**
+ * This agent gets the skill without a bind, through its reach (`skill_reach::SkillReach`). Only the
+ * catalog-tier list for an agent (`skill_list_global_for_agent`) says so; false elsewhere.
+ */
+reached: boolean, id: string, name: string, trigger: string, skill_type: string, description: string, content: string, is_global: boolean, created_at: number, updated_at: number, };

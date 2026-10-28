@@ -298,6 +298,10 @@ pub struct SkillListItem {
     #[serde(flatten)]
     pub skill: Skill,
     pub bound_to_agent: bool,
+    /// This agent gets the skill without a bind, through its reach (`skill_reach::SkillReach`). Only the
+    /// catalog-tier list for an agent (`skill_list_global_for_agent`) says so; false elsewhere.
+    #[serde(default)]
+    pub reached: bool,
 }
 
 /// `skill_list_global`'s response shape: the skill plus how many agents
@@ -310,6 +314,10 @@ pub struct SkillCatalogItem {
     pub skill: Skill,
     #[ts(type = "number")]
     pub bound_count: i64,
+    /// Reaches every agent, not only the bound ones (`skill_reach::SkillReach`).
+    pub all_agents: bool,
+    /// Reaches every agent created from now on (`skill_reach::SkillReach`).
+    pub new_agents: bool,
 }
 
 /// `bundle_skill_list`'s response shape — mirrors `SkillListItem`, but
@@ -333,7 +341,7 @@ impl Store {
         Ok(self
             .managed_list::<Skill>(catalog, Owner::Agent, agent_id)?
             .into_iter()
-            .map(|(skill, bound_to_agent)| SkillListItem { skill, bound_to_agent })
+            .map(|(skill, bound_to_agent)| SkillListItem { skill, bound_to_agent, reached: false })
             .collect())
     }
 
@@ -362,11 +370,17 @@ impl Store {
     /// standalone Skill primitive via the RPC layer at all).
     pub fn effective_skills(&self, catalog: &Store, agent_id: &str) -> Vec<AgentSkill> {
         let legacy_skills = self.agent_skill_list(agent_id).unwrap_or_default();
+        let reach = catalog.skill_reach_map().unwrap_or_default();
+        let agent_created_at = self.agent_def_get(agent_id).ok().flatten().map_or(0, |d| d.created_at);
         let mut visible_skills: Vec<Skill> = self
             .skill_list(catalog, agent_id)
             .unwrap_or_default()
             .into_iter()
-            .filter(|item| item.bound_to_agent || !item.skill.is_global)
+            .filter(|item| {
+                item.bound_to_agent
+                    || !item.skill.is_global
+                    || reach.get(&item.skill.id).is_some_and(|r| r.reaches(agent_created_at))
+            })
             .map(|item| item.skill)
             .collect();
         // reagentx P1 on PR #2639: `has_own_skill_refs` must be decided
@@ -407,10 +421,14 @@ impl Store {
     /// SPEC_V1_MCP_SKILLS_PRIMITIVES_2026_06_30.md §8 ("used by N agents"),
     /// tracked as gap #2 of #1960.
     pub fn skill_list_global(&self, catalog: &Store) -> Result<Vec<SkillCatalogItem>, StoreError> {
+        let reach = catalog.skill_reach_map()?;
         Ok(self
             .managed_list_global::<Skill>(catalog)?
             .into_iter()
-            .map(|(skill, bound_count)| SkillCatalogItem { skill, bound_count })
+            .map(|(skill, bound_count)| {
+                let r = reach.get(&skill.id).copied().unwrap_or_default();
+                SkillCatalogItem { skill, bound_count, all_agents: r.all_agents, new_agents: r.new_agents_since > 0 }
+            })
             .collect())
     }
 
@@ -427,10 +445,15 @@ impl Store {
     /// Skills) — so exposing them alongside a caller-chosen agent's bind
     /// status is safe. reagentx P0 on PR #2329.
     pub fn skill_list_global_for_agent(&self, catalog: &Store, agent_id: &str) -> Result<Vec<SkillListItem>, StoreError> {
+        let reach = catalog.skill_reach_map()?;
+        let agent_created_at = self.agent_def_get(agent_id).ok().flatten().map_or(0, |d| d.created_at);
         Ok(self
             .managed_list_global_for_agent::<Skill>(catalog, agent_id)?
             .into_iter()
-            .map(|(skill, bound_to_agent)| SkillListItem { skill, bound_to_agent })
+            .map(|(skill, bound_to_agent)| {
+                let reached = reach.get(&skill.id).is_some_and(|r| r.reaches(agent_created_at));
+                SkillListItem { skill, bound_to_agent, reached }
+            })
             .collect())
     }
 
@@ -442,7 +465,10 @@ impl Store {
     /// Delete a standalone skill and purge its ref rows (both agent- and
     /// bundle-level). Returns true if deleted.
     pub fn skill_delete(&self, catalog: &Store, id: &str) -> Result<bool, StoreError> {
-        self.managed_delete::<Skill>(catalog, id)
+        let deleted = self.managed_delete::<Skill>(catalog, id)?;
+        // Its reach goes with it.
+        catalog.skill_reach_forget(id)?;
+        Ok(deleted)
     }
 
     /// Bind a skill to an agent (insert ref row). Idempotent — binding an

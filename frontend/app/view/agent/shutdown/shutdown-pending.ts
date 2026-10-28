@@ -29,10 +29,12 @@ export interface PendingShutdown {
     reason: string;
     effect: ShutdownEffect;
     deadline_ms: number;
+    /** The other agents closing in the same request (`Stop agents` over several); 0 for one. */
+    others: number;
 }
 
-export function parsePending(data: unknown): PendingShutdown | null {
-    const d = data as Partial<PendingShutdown> | null;
+export function parsePending(data: unknown, block = ""): PendingShutdown | null {
+    const d = data as (Partial<PendingShutdown> & { blocks?: unknown }) | null;
     if (!d || typeof d.request_id !== "string" || typeof d.deadline_ms !== "number") return null;
     return {
         request_id: d.request_id,
@@ -42,7 +44,15 @@ export function parsePending(data: unknown): PendingShutdown | null {
         reason: typeof d.reason === "string" ? d.reason : "",
         effect: d.effect === "stop" || d.effect === "close_pane" ? d.effect : "close_tab",
         deadline_ms: d.deadline_ms,
+        others: othersOf(d, block),
     };
+}
+
+/** How many agents besides the one in `block` the request is closing: its `blocks` list less this pane's. */
+function othersOf(d: { blocks?: unknown }, block: string): number {
+    if (!Array.isArray(d.blocks)) return 0;
+    const ids = d.blocks.map((b) => (b as { block_id?: unknown } | null)?.block_id);
+    return ids.filter((id) => typeof id === "string" && id !== block).length;
 }
 
 /** The request id a `-cleared` event is for. */
@@ -56,8 +66,8 @@ export function clearedRequestId(data: unknown): string | null {
  * `pending` and last `cleared` events: the pending one, unless it was
  * cleared or its deadline has passed.
  */
-export function replayPending(pending: unknown, cleared: unknown, now: number): PendingShutdown | null {
-    const p = parsePending(pending);
+export function replayPending(pending: unknown, cleared: unknown, now: number, block = ""): PendingShutdown | null {
+    const p = parsePending(pending, block);
     if (!p || p.deadline_ms <= now) return null;
     return clearedRequestId(cleared) === p.request_id ? null : p;
 }
@@ -76,7 +86,8 @@ export function secondsLeft(p: PendingShutdown, now: number): number {
 export function pendingTitle(p: PendingShutdown, agentId: string, agentName: string): string {
     const self = p.by.toLowerCase() === agentId.toLowerCase() || p.by.toLowerCase() === agentName.toLowerCase();
     const verb = p.effect === "stop" ? "stop" : "close";
-    const who = self ? `${agentName} asked to ${verb} itself` : `${p.by || "Something"} asked to ${verb} ${agentName}`;
+    const also = p.others > 0 ? ` and ${p.others} other${p.others === 1 ? "" : "s"}` : "";
+    const who = self && !also ? `${agentName} asked to ${verb} itself` : `${p.by || "Something"} asked to ${verb} ${agentName}${also}`;
     return p.reason ? `${who}: ${p.reason}` : who;
 }
 

@@ -116,6 +116,13 @@ pub fn container_route_allowed(path: &str) -> bool {
         // `agentmux-bashwrap`'s live output into the grant's own pane, as a typed `tool_chunk` only
         // (`server::container_tool_chunk`); the generic `/agentmux/wps/publish` relay stays refused.
         "/api/v1/agent/tool-chunk",
+        // `RegisterDevServer`: the tool exists for container agents' dev servers. The handler takes
+        // the caller's own pane from the token and resolves the container's address itself, so a
+        // container can register a route to itself only (`app_api::dev_server`).
+        "/api/v1/agent/dev_server/register",
+        // The GitHub token for the caller's own git and `gh`. The handler takes the agent from the token
+        // and answers only where the container's git setup is on (`github_tokens::container_git_hooks`).
+        "/api/v1/github/token",
     ];
     if EXACT.contains(&path) {
         return true;
@@ -138,7 +145,7 @@ pub fn container_route_allowed(path: &str) -> bool {
 /// container token that carries no agent identity rather than falling back to
 /// an agent named in the request body.
 pub fn route_needs_identity(path: &str) -> bool {
-    path.starts_with("/api/v1/agent/memory/")
+    path.starts_with("/api/v1/agent/memory/") || path == "/api/v1/agent/dev_server/register" || path == "/api/v1/github/token"
 }
 
 /// A container turn's `docker exec` env: the container denylist applied, and
@@ -148,8 +155,12 @@ pub fn container_exec_env(block_id: &str, env_vars: &HashMap<String, String>) ->
     // The publish guard's hooks directory is a host path; the agent's other
     // GIT_CONFIG_* settings still apply inside the container.
     let env_vars = crate::backend::publish_guard::without_hooks_path(env_vars);
-    // The host's GitHub tokens are for host agents: the image has its own git and gh setup.
-    let env_vars = crate::identity::github_tokens::without_agent_git(&env_vars);
+    // A host agent's git setup is for the host; a container gets its own where tokens can be given
+    // (`github_tokens::container_git_hooks`), with the hooks where the image finds them.
+    let mut env_vars = crate::identity::github_tokens::without_agent_git(&env_vars);
+    if crate::identity::github_tokens::container_git_hooks().is_some() {
+        crate::identity::github_tokens::apply_container_git(&mut env_vars);
+    }
     let build_info = crate::backend::pane_env::build_info();
     let is_build_info = |k: &str| build_info.iter().any(|(b, _)| *b == k);
     let mut out: Vec<(String, String)> = env_vars
@@ -223,6 +234,7 @@ mod tests {
             "/api/v1/agent/pane/close",
             "/api/v1/agent/shutdown/req-12",
             "/api/v1/agent/tool-chunk",
+            "/api/v1/agent/dev_server/register",
         ] {
             assert!(container_route_allowed(ok), "{ok} should be allowed");
         }
@@ -251,9 +263,27 @@ mod tests {
             "/agentmux/agents/self/keys",
             // MCP health beats belong to persistent controllers; a container's turns are per-exec.
             "/api/v1/agent/self/mcp-beat",
+            "/api/v1/agent/dev_server/register/",
+            "/api/v1/agent/dev_server",
         ] {
             assert!(!container_route_allowed(denied), "{denied} should be refused");
         }
+    }
+
+    #[test]
+    fn the_github_token_route_is_open_to_a_container_and_needs_its_agent() {
+        assert!(container_route_allowed("/api/v1/github/token"));
+        assert!(!container_route_allowed("/api/v1/github/token/"));
+        assert!(!container_route_allowed("/api/v1/github/connect"));
+        // Without an agent behind the token there is nothing to take the request's word for.
+        assert!(route_needs_identity("/api/v1/github/token"));
+    }
+
+    #[test]
+    fn registering_a_dev_server_needs_the_agents_identity() {
+        // Without one the route would fall back to an agent named in the body.
+        assert!(route_needs_identity("/api/v1/agent/dev_server/register"));
+        assert!(!route_needs_identity("/api/v1/agent/dev_server/registers"));
     }
 
     #[test]

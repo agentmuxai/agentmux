@@ -9,9 +9,7 @@
  * session — NOT a pluralizable IdentityAccount — so it never goes through the
  * generic service-OAuth path (`oauth_client.rs` / `account.oauth.*`).
  *
- * Two consumers share this module so there is exactly one implementation:
- *   - `MuxBusConnectSection` — the per-agent identity panel (AgentIdentityPanel).
- *   - `AgentMuxConnectPanel` — the Connectors → Accounts gallery tile.
+ * `AgentMuxConnectPanel` is the Connectors → Accounts gallery tile.
  *
  * The gallery additionally projects the signed-in session into the connected
  * list as a read-only row; that projection lives in `accounts-manager.tsx` and
@@ -21,7 +19,7 @@
  * See docs/specs/archive/SPEC_TRUST_CENTER_2026_06_15.md and muxbus/pkce.rs.
  */
 
-import { createSignal, getOwner, onCleanup, onMount, Show, type Accessor, type JSX } from "solid-js";
+import { createSignal, getOwner, onCleanup, Show, type Accessor, type JSX } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { ProviderLogo } from "@/element/ProviderLogo";
@@ -214,85 +212,9 @@ export function useMuxBusStatus(): MuxBusController {
     };
 }
 
-/** Human-readable local expiry, or null when not connected. */
-function expiryLabel(status: MuxBusStatus | null): string | null {
-    if (!status?.connected) return null;
-    return new Date(status.expiresAt * 1000).toLocaleString();
-}
-
 // CopyableErrorMessage moved to frontend/app/errors/CopyableErrorMessage.tsx
 // and exported (SPEC_ERROR_COPY_EVERYWHERE_2026_09_24.md §3, §5) so any
 // surface can use it, not just this one — imported above.
-
-/**
- * Per-agent identity panel section (unchanged UI). Owns its own controller so
- * the agent panel keeps working independently of Connectors → Accounts.
- */
-export const MuxBusConnectSection = (): JSX.Element => {
-    const muxbus = useMuxBusStatus();
-    onMount(() => void muxbus.refresh());
-    const { status, loading, error } = muxbus;
-
-    return (
-        <div class="agent-identity-muxbus">
-            <div class="agent-identity-section-title">AgentMux Cloud</div>
-            <Show
-                when={status()?.connected}
-                fallback={
-                    <div class="agent-identity-muxbus-row">
-                        <span class="agent-identity-none">Not connected</span>
-                        <button
-                            class="agent-identity-new-btn"
-                            onClick={() => void (loading() ? muxbus.cancel() : muxbus.connect())}
-                        >
-                            {loading() ? "Connecting… (Cancel)" : "Connect"}
-                        </button>
-                    </div>
-                }
-            >
-                <div class="agent-identity-muxbus-row">
-                    <div class="agent-identity-muxbus-info">
-                        <span class="agent-identity-account-name">{status()!.email}</span>
-                        <Show
-                            when={muxbusNeedsSignInAgain(status())}
-                            fallback={
-                                <>
-                                    <Show when={!status()!.valid}>
-                                        <span class="agent-identity-muxbus-expired"> (token expired)</span>
-                                    </Show>
-                                    <Show when={expiryLabel(status())}>
-                                        <span class="agent-identity-muxbus-expiry"> · expires {expiryLabel(status())}</span>
-                                    </Show>
-                                </>
-                            }
-                        >
-                            <span class="agent-identity-muxbus-expired"> (sign-in no longer works)</span>
-                        </Show>
-                    </div>
-                    <Show when={muxbusNeedsSignInAgain(status())}>
-                        <button
-                            class="agent-identity-new-btn"
-                            onClick={() => void (loading() ? muxbus.cancel() : muxbus.connect())}
-                        >
-                            {loading() ? "Connecting… (Cancel)" : "Sign in again"}
-                        </button>
-                    </Show>
-                    <MuxBusSignOutButton
-                        muxbus={muxbus}
-                        class="agent-identity-unassign-btn"
-                        title="Disconnect from AgentMux Cloud"
-                        label="Disconnect"
-                    />
-                </div>
-            </Show>
-            <Show when={error()}>
-                <CopyableErrorMessage class="agent-identity-error" message={error()!} />
-            </Show>
-        </div>
-    );
-};
-
-MuxBusConnectSection.displayName = "MuxBusConnectSection";
 
 /**
  * Connectors → Accounts gallery connect panel. Renders in the existing
