@@ -391,3 +391,47 @@ async fn closing_the_pane_of_a_running_agent_records_it_as_wanted_running() {
     assert_eq!(get(&exited), None);
     crate::backend::blockcontroller::delete_controller(&running);
 }
+
+fn pair(block: &str, agent: &str) -> (String, String) {
+    (block.to_string(), agent.to_string())
+}
+
+/// One close covering both blocks of an agent keeps one of them; with a sibling outside the close, the
+/// running block of the two is the survivor.
+#[test]
+fn a_close_keeps_one_block_of_each_agent() {
+    let none_runs = |_: &str| false;
+    let all = vec![pair("a1", "A"), pair("a2", "A"), pair("b1", "B")];
+
+    let both = vec![pair("a1", "A"), pair("a2", "A"), pair("b1", "B")];
+    assert_eq!(extras_to_close(&both, &all, &none_runs), ["a2".to_string()].into(), "neither runs: the first is kept");
+
+    let a2_runs = |id: &str| id == "a2";
+    assert_eq!(extras_to_close(&both, &all, &a2_runs), ["a1".to_string()].into(), "the running one is kept");
+
+    let both_run = |id: &str| id == "a1" || id == "a2";
+    assert_eq!(extras_to_close(&both, &all, &both_run), ["a2".to_string()].into(), "both run: one is kept");
+
+    let only_a1 = vec![pair("a1", "A")];
+    assert_eq!(extras_to_close(&only_a1, &all, &none_runs), ["a1".to_string()].into(), "a sibling outside stays: this one is extra");
+    assert_eq!(extras_to_close(&only_a1, &all, &|id: &str| id == "a1"), Default::default(), "unless it runs and the sibling does not");
+    assert_eq!(extras_to_close(&only_a1, &all, &a2_runs), ["a1".to_string()].into(), "the sibling that runs stays");
+
+    let alone = vec![pair("b1", "B")];
+    assert_eq!(extras_to_close(&alone, &all, &none_runs), Default::default(), "an agent's only block is parked");
+}
+
+/// A tab or workspace close that covers both blocks of an agent parks exactly one.
+#[tokio::test]
+async fn closing_both_blocks_of_an_agent_in_one_go_parks_one() {
+    let state = test_state();
+    let (_ws, tabs) = seed_workspace(&state, 1).await;
+    set_always_available(&state, true);
+    let first = seed_agent_block(&state, &tabs[0], "ag-both").await;
+    let second = seed_block(&state, &tabs[0], serde_json::json!({ "view": "agent", "agentId": "ag-both" })).await;
+    let ctx = SagaCtx::new(&state, crate::sagas::alloc_saga_id(&state));
+
+    let parked = park_agent_blocks(&ctx, &[first.clone(), second.clone()], false).await;
+
+    assert_eq!(parked.len(), 1, "one block of the agent survives the close: {parked:?}");
+}
