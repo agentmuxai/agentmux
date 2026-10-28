@@ -330,6 +330,30 @@ async fn the_move_relinks_idle_agents_and_queues_busy_ones() {
     cleanup(&[&idle, &busy, &tired]);
 }
 
+/// An agent that runs with no pane is moved like a shown one: relinked and restarted, not left on
+/// the old account and reported as failed.
+#[tokio::test]
+async fn the_move_restarts_a_parked_agent_too() {
+    let state = test_state();
+    for a in [account("old-p", "claude", "valid"), account("spare-p", "claude", "valid")] {
+        state.id_store.identity_upsert(&a).unwrap();
+    }
+    let tab = new_tab(&state).await;
+    agent_def(&state, "parked-mv");
+    state.identity_store.agent_identity_link("parked-mv", "old-p", "claude").unwrap();
+    let block = pane(&state, &tab, "parked-mv", "Parked", "old-p", Some(failure("usage_limit", None, None)), false).await;
+    dispatch_apply(&state, Command::ParkBlock { tab_id: tab.clone(), block_id: block.clone() }).await;
+    let parked = state.mstore.get::<Block>(&block).unwrap().unwrap();
+    assert!(parked.parentoref.is_empty(), "parked: no tab");
+
+    let req = IdentityAccountMoveAgentsReq { from: "old-p".into(), to: "spare-p".into(), block_ids: vec![block.clone()] };
+    let r = moves::move_agents(&state, &req).unwrap();
+    assert!(r.failed.is_empty(), "{:?}", r.failed);
+    assert_eq!(r.moved.iter().map(|a| a.block_id.as_str()).collect::<Vec<_>>(), [block.as_str()]);
+    assert_eq!(state.identity_store.agent_identity_list_for_agent("parked-mv").unwrap()[0].account_id, "spare-p");
+    cleanup(&[&block]);
+}
+
 /// The per-pane toasts an episode replaces: its own failure toast and its
 /// "finished" (spec §6.2). A pane with no account keeps them.
 #[tokio::test]
