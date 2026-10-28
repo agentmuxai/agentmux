@@ -47,6 +47,11 @@ concurrency:
   group: ci-nightly-build
   cancel-in-progress: false
 
+# Read-only by default; a job that needs more says so itself (job-level permissions replace this
+# block). A job added later gets nothing it did not ask for.
+permissions:
+  contents: read
+
 jobs:
   build-and-test:
     name: cargo ${{ matrix.mode }} (${{ matrix.os }})
