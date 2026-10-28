@@ -413,11 +413,19 @@ impl ContainerStartup {
         }
     }
 
-    /// A pre-start that finished with no message on its way: the pane would sit silent, so say it is ready
+    /// A pre-start of a fresh pane that finished with no message on its way: the pane would sit silent, so say it is ready
     /// and waiting for the user. Nothing is said when a turn has begun (its own rows speak) or the pane has closed.
     fn note_waiting_for_message(&self, seconds: f64) {
         let status = crate::backend::blockcontroller::get_controller(&self.block_id).map(|c| c.get_runtime_status().shellprocstatus);
         if !prestart_applies("container", status.as_deref().unwrap_or("")) {
+            return;
+        }
+        // A resumed pane has its history and composer on screen, and is not "starting": it gets no row at each reopen.
+        let resumed = match self.mstore.get::<crate::backend::obj::Block>(&self.block_id) {
+            Ok(Some(block)) => !crate::backend::obj::meta_get_string(&block.meta, "agent:sessionid", "").is_empty(),
+            _ => true,
+        };
+        if resumed {
             return;
         }
         let frame = cli_notice::agent_ready_frame(&uuid::Uuid::new_v4().to_string(), &self.provider_id, seconds);
