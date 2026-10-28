@@ -267,7 +267,7 @@ jobs:
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.APPLE_SIGNING_ROLE }}
-          aws-region: us-east-1
+          aws-region: ${{ vars.APPLE_SIGNING_REGION }}
           # Explicit: this repository's logs are public. The account id stays masked.
           mask-aws-account-id: true
           role-session-name: apple-signing-${{ github.run_id }}
