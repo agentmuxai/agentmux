@@ -204,7 +204,17 @@ pub(crate) async fn prestart(deps: &super::input::AgentTurnDeps, block_id: Strin
         return Ok(());
     }
     let Some(slot) = PrestartSlot::take(&block_id) else { return Ok(()) };
-    let cm = deps.container_manager.get_or_explain().await?;
+    let began = Instant::now();
+    let cm = match deps.container_manager.get_or_explain().await {
+        Ok(cm) => cm,
+        Err(e) => {
+            // Nobody asked for this start, so no turn ends with the reason: the pane's start row says it.
+            let provider = crate::backend::obj::meta_get_string(&block.meta, "agentProvider", "claude");
+            let frame = cli_notice::container_start_frame(&uuid::Uuid::new_v4().to_string(), &provider, "", ContainerStartState::Failed, None, None, Some(&e));
+            cli_notice::append_to_pane(&deps.broker, &deps.filestore_gate, &deps.mstore, &block_id, &frame);
+            return Err(e);
+        }
+    };
     let working_dir = crate::backend::obj::meta_get_string(&block.meta, "cmd:cwd", "");
     let mut env_vars = match super::input::build_persistent_spawn_env(
         deps.mstore.clone(),
@@ -243,8 +253,9 @@ pub(crate) async fn prestart(deps: &super::input::AgentTurnDeps, block_id: Strin
         let slot_block = block_id.clone();
         async move {
             // A failure is on the pane as the start row's Failed state; the first message tries again.
-            if let Err(e) = startup.run_quietly().await {
-                tracing::info!(block_id = %slot_block, error = %e, "container pre-start did not finish");
+            match startup.run_quietly().await {
+                Ok(()) => startup.note_waiting_for_message(began.elapsed().as_secs_f64()),
+                Err(e) => tracing::info!(block_id = %slot_block, error = %e, "container pre-start did not finish"),
             }
         }
     });
@@ -400,6 +411,17 @@ impl ContainerStartup {
                 Err(self.fail(&e, report_failure))
             }
         }
+    }
+
+    /// A pre-start that finished with no message on its way: the pane would sit silent, so say it is ready
+    /// and waiting for the user. Nothing is said when a turn has begun (its own rows speak) or the pane has closed.
+    fn note_waiting_for_message(&self, seconds: f64) {
+        let status = crate::backend::blockcontroller::get_controller(&self.block_id).map(|c| c.get_runtime_status().shellprocstatus);
+        if !prestart_applies("container", status.as_deref().unwrap_or("")) {
+            return;
+        }
+        let frame = cli_notice::agent_ready_frame(&uuid::Uuid::new_v4().to_string(), &self.provider_id, seconds);
+        cli_notice::append_to_pane(&self.broker, &self.filestore, &self.mstore, &self.block_id, &frame);
     }
 
     /// Log `e`, write its plain-language message to the pane, and return it.

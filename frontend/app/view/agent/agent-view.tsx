@@ -562,26 +562,36 @@ export const AgentPresentationView = ({
     // terminal channel (see docs/specs/SPEC_AGENT_PANE_AUTH_NOTIFICATIONS_2026_07_26.md
     // \u00a71). "success"/"warning" get a symbol prefix; "info" doesn't (used for
     // neutral narration like "Signing in..." or "Ready...").
-    const postSystemNotification = (text: string, style: "info" | "warning" | "success" = "info"): void => {
+    const postSystemNotification = (
+        text: string,
+        style: "info" | "warning" | "success" = "info",
+        id = `system_notification_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        replaces = false,
+    ): void => {
         const prefix = style === "success" ? "\u2713 " : style === "warning" ? "\u26a0 " : "";
         const node: import("./types").MarkdownNode = {
             type: "markdown",
-            id: `system_notification_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            id,
             content: `${prefix}${text}`,
         } as import("./types").MarkdownNode;
-        paneModel.dispatchDoc({ type: "StreamFlush", newNodes: [node], updatedNodes: [] });
+        // A line that is no longer in the pane (a reload) is posted again, not updated into nothing.
+        const inPane = replaces && paneModel.document().some((n) => n.id === id);
+        paneModel.dispatchDoc(
+            inPane
+                ? { type: "StreamFlush", newNodes: [], updatedNodes: [node] }
+                : { type: "StreamFlush", newNodes: [node], updatedNodes: [] },
+        );
     };
 
-    const signIn = createSignInNotice((text, style) => postSystemNotification(text, style));
+    const signIn = createSignInNotice(postSystemNotification);
     const status = useAgentControllerStatus({
         blockId: model.blockId,
         provider,
         log,
         onLoginSuccess: (email) => {
-            signIn.answered();
-            postSystemNotification(email ? `Logged in as **${email}**` : "Login successful", "success");
+            signIn.answered(email ? `Logged in as **${email}**` : "Login successful");
         },
-        onNotify: (text, style, kind) => { signIn.seen(kind); postSystemNotification(text, style); },
+        onNotify: (text, style, kind) => (kind === "sign-in" ? signIn.needed(text, style) : postSystemNotification(text, style)),
         onAccountBound: signIn.bound,
         onReady: () => onReadyFn?.(),
         // A successful recovery (relogin / terminal login) refreshed
