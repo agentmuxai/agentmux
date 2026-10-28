@@ -30,6 +30,7 @@ fn srv_exits_on_stdin_eof_after_its_stderr_reader_is_gone() {
     let mut child = Command::new(env!("CARGO_BIN_EXE_agentmux-srv"))
         .env("AGENTMUX_AUTH_KEY", "launcher-gone-test-key")
         .env("AGENTMUX_DATA_DIR", data_dir.path())
+        .env("AGENTMUX_SHARED_DIR", data_dir.path().join("shared"))
         .env("AGENTMUX_DISABLE_CLOUD_SUBSCRIBER", "1")
         .stdin(Stdio::piped())
         .stderr(Stdio::piped())

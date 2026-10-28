@@ -26,6 +26,11 @@ pub fn data_needs_preparing(data_dir: &Path, version: &str) -> Option<String> {
     // `run_pending_migrations`.
     let shared = crate::registry::resolve_shared_store_path()?;
     let identity = crate::registry::resolve_identity_store_path()?;
+    // A dev build on the real home says why it won't touch the shared stores, ahead of the generic
+    // reason: `migrate --prepare` refuses with the same words.
+    if let Err(why) = refuse_on_real_home(REGISTRY, &shared, &identity) {
+        return Some(why);
+    }
     pending_reason(REGISTRY, &shared, &db_dir.join("objects.db"), &identity)
 }
 
@@ -81,6 +86,90 @@ pub(super) fn pending_reason(
         .collect();
     let first = pending.first()?;
     Some(format!("{} migration(s) pending, starting with {first}", pending.len()))
+}
+
+/// `task dev` sets this to `real` when it runs on the person's own `~/.agentmux`
+/// (`AGENTMUX_DEV_USE_REAL_HOME=1`), `isolated` otherwise.
+const DEV_HOME_MODE_ENV: &str = "AGENTMUX_DEV_HOME_MODE";
+
+/// How many pending migration ids the refusal names; the rest are counted.
+const MAX_IDS_SHOWN: usize = 5;
+
+#[cfg(test)]
+thread_local! {
+    /// Lets a test act as a dev build on the real home without touching the process environment.
+    pub(super) static FORCE_REAL_HOME: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Is this a dev build running on the real home?
+pub(super) fn dev_on_real_home() -> bool {
+    #[cfg(test)]
+    if FORCE_REAL_HOME.with(|f| f.get()) {
+        return true;
+    }
+    std::env::var(DEV_HOME_MODE_ENV).as_deref() == Ok("real")
+}
+
+/// Refuses, before anything is locked, backed up or opened, when a dev build on
+/// the real home would move the stores every installed build shares ahead of
+/// them. Opening a store runs its schema setup and a Global migration rewrites
+/// the shared store, and the installed build can't read a store that is ahead of
+/// it. A channel-scoped migration only touches the dev build's own data, so it is
+/// no reason to refuse. Read-only; a no-op for any other build.
+pub(super) fn refuse_on_real_home(
+    regs: &[&(dyn super::Migration + Sync)],
+    shared_store: &Path,
+    identity_store: &Path,
+) -> Result<(), String> {
+    if !dev_on_real_home() {
+        return Ok(());
+    }
+    match real_home_would_move(regs, shared_store, identity_store) {
+        Some(what) => Err(format!(
+            "this dev build runs on your real AgentMux home and would move the shared stores ahead of the installed build: {what}. \
+             Either run it on an isolated home (`task dev` without AGENTMUX_DEV_USE_REAL_HOME=1), \
+             or start the installed AgentMux build first and let it migrate the shared stores."
+        )),
+        None => Ok(()),
+    }
+}
+
+/// What a build of this version would change in the shared stores, or `None`.
+/// A store that doesn't exist yet has nobody to move ahead of.
+pub(super) fn real_home_would_move(
+    regs: &[&(dyn super::Migration + Sync)],
+    shared_store: &Path,
+    identity_store: &Path,
+) -> Option<String> {
+    use crate::backend::storage::migrations::{IDENTITY_STORE_SCHEMA_VERSION, SHARED_STORE_SCHEMA_VERSION};
+    let mut what = Vec::new();
+    for (path, current) in [(shared_store, SHARED_STORE_SCHEMA_VERSION), (identity_store, IDENTITY_STORE_SCHEMA_VERSION)] {
+        match schema_version(path) {
+            Ok(Some(found)) if found < current => {
+                what.push(format!("{} is at schema {found}, this build uses {current}", path.display()))
+            }
+            Err(e) => what.push(format!("{}'s schema version can't be read: {e}", path.display())),
+            _ => {}
+        }
+    }
+    if shared_store.exists() {
+        match read_applied_ids(shared_store) {
+            Ok(applied) => {
+                let ids: Vec<&str> = regs
+                    .iter()
+                    .filter(|m| m.scope() == MigrationScope::Global && !applied.contains(m.id()))
+                    .map(|m| m.id())
+                    .collect();
+                if !ids.is_empty() {
+                    let more = ids.len().saturating_sub(MAX_IDS_SHOWN);
+                    let more = if more > 0 { format!(" and {more} more") } else { String::new() };
+                    what.push(format!("shared-store migration(s) pending: {}{more}", ids[..ids.len().min(MAX_IDS_SHOWN)].join(", ")));
+                }
+            }
+            Err(e) => what.push(format!("the shared store's migrations can't be read: {e}")),
+        }
+    }
+    (!what.is_empty()).then(|| what.join("; "))
 }
 
 /// `PRAGMA user_version` of the database at `path`, read-only; `None` when
@@ -191,5 +280,121 @@ mod tests {
         drop(Store::open(&old.join("objects.db")).unwrap());
         let reason = data_needs_preparing(&versions.join("0.2.0").join("data"), "0.2.0").unwrap();
         assert!(reason.contains("copy forward"), "{reason}");
+    }
+
+    // ---- A dev build on the real home must not move the shared stores ahead ----
+
+    use crate::migrations::{Migration, MigrationContext, MigrationError};
+
+    struct Fake {
+        id: &'static str,
+        scope: MigrationScope,
+    }
+    impl Migration for Fake {
+        fn id(&self) -> &'static str { self.id }
+        fn scope(&self) -> MigrationScope { self.scope }
+        fn description(&self) -> &'static str { "fake" }
+        fn up(&self, _ctx: &MigrationContext) -> Result<(), MigrationError> { Ok(()) }
+    }
+
+    /// Acts as a dev build on the real home for the length of the test.
+    struct OnRealHome;
+    impl OnRealHome {
+        fn enter() -> Self {
+            FORCE_REAL_HOME.with(|f| f.set(true));
+            Self
+        }
+    }
+    impl Drop for OnRealHome {
+        fn drop(&mut self) {
+            FORCE_REAL_HOME.with(|f| f.set(false));
+        }
+    }
+
+    /// A real home's shared and identity stores, current and with nothing pending.
+    fn real_home(dir: &Path) -> (std::path::PathBuf, std::path::PathBuf) {
+        let (shared, identity) = (dir.join("store.db"), dir.join("identity-store.db"));
+        drop(Store::open_shared(&shared).unwrap());
+        drop(Store::open_identity_store(&identity).unwrap());
+        (shared, identity)
+    }
+
+    /// The files in `dir` and their sizes, without the `-shm` and `-wal` files a read-only open of a WAL database leaves.
+    fn files(dir: &Path) -> Vec<(std::ffi::OsString, u64)> {
+        let mut v: Vec<_> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap())
+            .filter(|e| !e.file_name().to_string_lossy().ends_with("-shm") && !e.file_name().to_string_lossy().ends_with("-wal"))
+            .map(|e| (e.file_name(), e.metadata().unwrap().len()))
+            .collect();
+        v.sort();
+        v
+    }
+
+    #[test]
+    fn a_dev_build_on_the_real_home_refuses_a_pending_global_migration_and_names_the_ways_out() {
+        let dir = tempfile::tempdir().unwrap();
+        let (shared, identity) = real_home(dir.path());
+        let global = Fake { id: "9001_global_new", scope: MigrationScope::Global };
+        let regs: Vec<&(dyn Migration + Sync)> = vec![&global];
+        let _real = OnRealHome::enter();
+        let why = refuse_on_real_home(&regs, &shared, &identity).unwrap_err();
+        assert!(why.contains("9001_global_new"), "{why}");
+        assert!(why.contains("isolated home") && why.contains("installed AgentMux build"), "{why}");
+    }
+
+    #[test]
+    fn a_pending_channel_migration_is_no_reason_to_refuse() {
+        let dir = tempfile::tempdir().unwrap();
+        let (shared, identity) = real_home(dir.path());
+        let channel = Fake { id: "9002_channel_new", scope: MigrationScope::Channel };
+        let regs: Vec<&(dyn Migration + Sync)> = vec![&channel];
+        let _real = OnRealHome::enter();
+        assert_eq!(refuse_on_real_home(&regs, &shared, &identity), Ok(()));
+    }
+
+    #[test]
+    fn a_shared_or_identity_store_behind_this_builds_schema_is_refused() {
+        let _real = OnRealHome::enter();
+        let dir = tempfile::tempdir().unwrap();
+        let (shared, identity) = real_home(dir.path());
+        assert_eq!(refuse_on_real_home(&[], &shared, &identity), Ok(()));
+        rusqlite::Connection::open(&shared).unwrap().pragma_update(None, "user_version", 1).unwrap();
+        assert!(refuse_on_real_home(&[], &shared, &identity).unwrap_err().contains("store.db is at schema 1"));
+
+        let dir = tempfile::tempdir().unwrap();
+        let (shared, identity) = real_home(dir.path());
+        rusqlite::Connection::open(&identity).unwrap().pragma_update(None, "user_version", 1).unwrap();
+        assert!(refuse_on_real_home(&[], &shared, &identity).unwrap_err().contains("identity-store.db is at schema 1"));
+    }
+
+    #[test]
+    fn any_other_build_is_not_held_back_and_a_home_with_no_stores_yet_has_nobody_to_move_ahead_of() {
+        let dir = tempfile::tempdir().unwrap();
+        let (shared, identity) = real_home(dir.path());
+        let global = Fake { id: "9001_global_new", scope: MigrationScope::Global };
+        let regs: Vec<&(dyn Migration + Sync)> = vec![&global];
+        assert_eq!(refuse_on_real_home(&regs, &shared, &identity), Ok(()), "not a dev build on the real home");
+        let _real = OnRealHome::enter();
+        let none = tempfile::tempdir().unwrap();
+        assert_eq!(refuse_on_real_home(&regs, &none.path().join("store.db"), &none.path().join("identity-store.db")), Ok(()));
+    }
+
+    #[test]
+    fn the_boot_gate_and_the_migration_batch_refuse_before_touching_anything() {
+        let home = tempfile::tempdir().unwrap();
+        let shared_dir = home.path().join("shared");
+        std::fs::create_dir_all(&shared_dir).unwrap();
+        let (shared, _identity) = real_home(&shared_dir);
+        let data_dir = home.path().join("data");
+        let global = Fake { id: "9001_global_new", scope: MigrationScope::Global };
+        let regs: Vec<&(dyn Migration + Sync)> = vec![&global];
+        let before = (files(&shared_dir), data_dir.exists());
+        let _real = OnRealHome::enter();
+        let err = crate::migrations::runner::apply_pending(&regs, home.path(), &shared, &data_dir, None).unwrap_err();
+        assert!(err.contains("9001_global_new"), "{err}");
+        assert_eq!((files(&shared_dir), data_dir.exists()), before, "no lock, no backup, no store opened, nothing migrated");
+        let reason = pending_reason(&regs, &shared, &data_dir.join("db").join("objects.db"), &shared_dir.join("identity-store.db"));
+        assert!(reason.is_some(), "the gate still sends the launcher to prepare, which then refuses");
     }
 }

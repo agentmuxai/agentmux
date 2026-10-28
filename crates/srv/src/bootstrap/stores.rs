@@ -108,6 +108,9 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     base::set_version(version);
     base::set_build_time(build_time);
 
+    // Before anything is created: a data folder of its own must not mean the real shared folder.
+    super::shared_root::refuse_unlisted_shared_root(&config.data_home);
+
     // Set up data directory (uses AGENTMUX_DATA_HOME or default)
     if !config.data_home.as_os_str().is_empty() {
         std::env::set_var("AGENTMUX_DATA_HOME", &config.data_home);
