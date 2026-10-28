@@ -17,7 +17,7 @@ fn run_nothing() {
 fn asked() -> String {
     let u = uuid::Uuid::new_v4().simple().to_string();
     let facts = [("agent", format!("a-{u}")), ("old_fingerprint", "aa".to_string()), ("new_fingerprint", "bb".to_string())];
-    requests::registry().request("u-asker", "asker", "sender_key_repin", &facts.into_iter().map(|(k, v)| (k.to_string(), v)).collect(), "because", now_ms()).unwrap().id
+    requests::registry().request(&format!("u-{}", uuid::Uuid::new_v4().simple()), "asker", "sender_key_repin", &facts.into_iter().map(|(k, v)| (k.to_string(), v)).collect(), "because", now_ms()).unwrap().id
 }
 
 fn turn() -> std::sync::MutexGuard<'static, ()> {
@@ -101,7 +101,8 @@ async fn a_brief_absence_is_waited_out() {
     };
     tokio::time::sleep(Duration::from_millis(150)).await;
     assert_eq!(requests::registry().get(&id).unwrap().status, requests::Status::Asked, "{:?}", started.elapsed());
-    requests::registry().cancel(&id, "u-asker", now_ms()).unwrap();
+    let asker = requests::registry().get(&id).unwrap().requester_uid;
+    requests::registry().cancel(&id, &asker, now_ms()).unwrap();
     tokio::time::timeout(Duration::from_secs(5), watcher).await.unwrap().unwrap();
 }
 
@@ -121,7 +122,7 @@ async fn the_longer_countdown_never_passes_the_operators_cap_of_two_minutes() {
     let _turn = turn();
     window::register_runner("quit_agentmux", Arc::new(|_, _| Box::pin(async { Ok(()) })));
     let state = test_state();
-    let id = requests::registry().request("u-asker", "asker", "quit_agentmux", &Default::default(), "", now_ms()).unwrap().id;
+    let id = requests::registry().request(&format!("u-{}", uuid::Uuid::new_v4().simple()), "asker", "quit_agentmux", &Default::default(), "", now_ms()).unwrap().id;
     let before = now_ms();
     watch_with(&state, &id, FAST, |_| false).await;
     let view = window::status(&id).expect("a countdown");
