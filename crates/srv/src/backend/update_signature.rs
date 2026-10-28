@@ -1,17 +1,19 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Step 2 of signed update checksums (`docs/specs/SPEC_SIGNED_UPDATE_CHECKSUMS_2026_10_25.md` §8):
-//! **verify and log, never gate.** When a download starts, this fetches the
-//! release's signed manifest (envelope, signature, manifest: a few KB), checks
-//! it against the key this build pins (`agentmux_common::update_manifest`), and
-//! logs what it found next to the digest the download will use. Nothing here
-//! changes what is downloaded, offered or shown; a release made before signing
-//! reads as `unsigned`. The log is how one signed release proves the key, the
-//! workflow and the app agree before step 3 makes the signed values the only
-//! ones used.
+//! Signed update checksums (`docs/specs/SPEC_SIGNED_UPDATE_CHECKSUMS_2026_10_25.md` §5, §7, §8).
+//! When a download starts, this fetches the release's signed manifest (envelope,
+//! signature, manifest: a few KB), checks it against the key this build pins
+//! (`agentmux_common::update_manifest`) and compares it with the file about to be
+//! downloaded. Step 3, **enforce**: a release from the first signed one on is
+//! downloaded only when its manifest verifies and agrees; one that doesn't verify,
+//! disagrees, lacks the file or isn't signed is refused with the message the person
+//! reads (§7). A release made before signing existed (`FIRST_SIGNED`) still reads as
+//! `unsigned` and is downloaded as before, so nobody on an old release is stranded.
 
 use agentmux_common::update_manifest::{verify_release, Manifest, UpdateKey, MAX_ENVELOPE_BYTES, MAX_MANIFEST_BYTES, UPDATE_KEYS};
+
+use crate::backend::update_check::version_core;
 
 use crate::backend::update_check::ReleaseAsset;
 use crate::backend::update_download::RELEASE_DOWNLOAD_PREFIX;
@@ -23,11 +25,19 @@ pub(crate) enum Outcome {
     Unsigned,
     /// Signed and valid; the file is listed and matches the digest the download uses.
     Verified,
-    /// Signed and valid, but the file isn't listed, or its size or hash differ from the digest the download uses.
+    /// Signed and valid, but the file isn't listed in it.
+    NotListed(String),
+    /// Signed and valid, but the file's size or hash differ from the digest the download uses.
     Disagrees(String),
-    /// A manifest is there but doesn't verify (or couldn't be read).
+    /// A manifest is there but doesn't verify (or isn't what the envelope signed).
     Failed(String),
+    /// The signed files couldn't be fetched (GitHub didn't answer, an error status): nothing is known.
+    Unreachable(String),
 }
+
+/// The first release the pipeline signs (v0.60.4). From it on, a release without a
+/// verified signed manifest is not downloaded; an older one never had one.
+pub(crate) const FIRST_SIGNED: (u64, u64, u64) = (0, 60, 4);
 
 /// The three files of a signed release, as published next to its other files.
 pub(crate) fn file_names(version: &str) -> (String, String, String) {
@@ -49,7 +59,7 @@ pub(crate) fn judge(keys: &[UpdateKey], tag: &str, fetched: Option<(&[u8], &str,
         Err(e) => return Outcome::Failed(e.to_string()),
     };
     match manifest.file(&asset.name) {
-        None => Outcome::Disagrees(format!("{} isn't in the signed manifest", asset.name)),
+        None => Outcome::NotListed(format!("{} isn't in the signed manifest", asset.name)),
         Some(f) if f.size != asset.size => Outcome::Disagrees(format!("size {} in the manifest, {} in the download's listing", f.size, asset.size)),
         Some(f) if !f.sha256.eq_ignore_ascii_case(&asset.sha256) => {
             Outcome::Disagrees("the manifest's SHA-256 differs from the digest the download uses".into())
@@ -99,35 +109,56 @@ pub(crate) async fn check(version: &str, asset: &ReleaseAsset) -> Outcome {
         .build()
     {
         Ok(c) => c,
-        Err(e) => return Outcome::Failed(e.to_string()),
+        Err(e) => return Outcome::Unreachable(e.to_string()),
     };
     let (envelope_name, signature_name, manifest_name) = file_names(version);
     let envelope = match fetch_small(&client, &format!("{dir}{envelope_name}"), MAX_ENVELOPE_BYTES).await {
         Ok(Some(b)) => b,
         Ok(None) => return Outcome::Unsigned,
-        Err(e) => return Outcome::Failed(format!("couldn't fetch the envelope: {e}")),
+        Err(e) => return Outcome::Unreachable(format!("couldn't fetch the envelope: {e}")),
     };
     let signatures = match fetch_small(&client, &format!("{dir}{signature_name}"), MAX_ENVELOPE_BYTES).await {
         Ok(Some(b)) => String::from_utf8_lossy(&b).into_owned(),
         Ok(None) => return Outcome::Failed("the envelope has no signature file".into()),
-        Err(e) => return Outcome::Failed(format!("couldn't fetch the signature: {e}")),
+        Err(e) => return Outcome::Unreachable(format!("couldn't fetch the signature: {e}")),
     };
     let manifest = match fetch_small(&client, &format!("{dir}{manifest_name}"), MAX_MANIFEST_BYTES).await {
         Ok(Some(b)) => b,
         Ok(None) => return Outcome::Failed("the envelope has no manifest".into()),
-        Err(e) => return Outcome::Failed(format!("couldn't fetch the manifest: {e}")),
+        Err(e) => return Outcome::Unreachable(format!("couldn't fetch the manifest: {e}")),
     };
     judge(UPDATE_KEYS, &tag, Some((&envelope, &signatures, &manifest)), asset)
 }
 
-/// Check and log; the download goes on regardless.
-pub(crate) async fn check_and_log(version: String, asset: ReleaseAsset) {
-    match check(&version, &asset).await {
-        Outcome::Unsigned => tracing::info!(%version, file = %asset.name, "update signature: the release has no signed manifest"),
-        Outcome::Verified => tracing::info!(%version, file = %asset.name, "update signature: verified; the signed manifest matches the digest in use"),
-        Outcome::Disagrees(why) => tracing::warn!(%version, file = %asset.name, %why, "update signature: verified, but it disagrees with the digest in use"),
-        Outcome::Failed(why) => tracing::warn!(%version, file = %asset.name, %why, "update signature: the signed manifest did not verify"),
+/// What to do about `outcome` for `version`: `Ok` to download, or the message to show (§7).
+pub(crate) fn decide(version: &str, outcome: &Outcome) -> Result<(), String> {
+    let v = format!("v{}", version.trim_start_matches('v'));
+    let signature_wrong = format!("The signature on {v} doesn't match, so AgentMux won't download it. Don't install it; tell the AgentMux team.");
+    match outcome {
+        Outcome::Verified => Ok(()),
+        Outcome::Unsigned => match version_core(version) {
+            // Made before signing existed: downloaded as before.
+            Some(core) if core < FIRST_SIGNED => Ok(()),
+            _ => Err(format!("{v} wasn't signed, so AgentMux won't download it itself. Get it from the release page.")),
+        },
+        Outcome::NotListed(_) => Err(format!("{v} has no file for this kind of install.")),
+        Outcome::Disagrees(_) | Outcome::Failed(_) => Err(signature_wrong),
+        Outcome::Unreachable(why) => Err(format!("Couldn't check the signature of {v} ({why}). Try again.")),
     }
+}
+
+/// Check the release's signed manifest, log what was found, and say whether the download may start.
+pub(crate) async fn gate(version: &str, asset: &ReleaseAsset) -> Result<(), String> {
+    let outcome = check(version, asset).await;
+    let file = &asset.name;
+    match &outcome {
+        Outcome::Unsigned => tracing::info!(%version, %file, "update signature: the release has no signed manifest"),
+        Outcome::Verified => tracing::info!(%version, %file, "update signature: verified; the signed manifest matches the digest in use"),
+        Outcome::NotListed(why) | Outcome::Disagrees(why) => tracing::error!(%version, %file, %why, "update signature: verified, but it disagrees with the file offered"),
+        Outcome::Failed(why) => tracing::error!(%version, %file, %why, "update signature: the signed manifest did not verify"),
+        Outcome::Unreachable(why) => tracing::warn!(%version, %file, %why, "update signature: couldn't fetch the signed manifest"),
+    }
+    decide(version, &outcome)
 }
 
 #[cfg(test)]
@@ -172,7 +203,7 @@ mod tests {
     fn a_file_the_manifest_does_not_describe_that_way_is_a_disagreement_not_a_failure() {
         assert!(matches!(judged(&asset("AgentMux-0.60.1-x64-setup.exe", 101, SETUP_SHA)), Outcome::Disagrees(w) if w.contains("size")));
         assert!(matches!(judged(&asset("AgentMux-0.60.1-x64-setup.exe", 100, &"0".repeat(64))), Outcome::Disagrees(w) if w.contains("SHA-256")));
-        assert!(matches!(judged(&asset("AgentMux-0.60.1-other.exe", 100, SETUP_SHA)), Outcome::Disagrees(w) if w.contains("isn't in the signed manifest")));
+        assert!(matches!(judged(&asset("AgentMux-0.60.1-other.exe", 100, SETUP_SHA)), Outcome::NotListed(w) if w.contains("isn't in the signed manifest")));
     }
 
     #[test]
@@ -193,10 +224,53 @@ mod tests {
         assert_eq!((e.as_str(), s.as_str(), m.as_str()), ("AgentMux-0.60.1-envelope.json", "AgentMux-0.60.1-envelope.json.sig", "AgentMux-0.60.1-manifest.json"));
     }
 
+    #[test]
+    fn a_verified_release_is_downloaded() {
+        assert_eq!(decide("0.60.4", &Outcome::Verified), Ok(()));
+    }
+
+    #[test]
+    fn an_unsigned_release_before_the_first_signed_one_is_downloaded_as_before() {
+        assert_eq!(decide("0.59.40", &Outcome::Unsigned), Ok(()));
+        assert_eq!(decide("v0.60.3", &Outcome::Unsigned), Ok(()));
+    }
+
+    #[test]
+    fn an_unsigned_release_from_the_first_signed_one_on_is_refused() {
+        for v in ["0.60.4", "0.60.5", "0.61.0", "1.0.0"] {
+            let e = decide(v, &Outcome::Unsigned).unwrap_err();
+            assert!(e.contains("wasn't signed") && e.contains("release page"), "{v}: {e}");
+        }
+        // A version that can't be read is not trusted to be an old one.
+        assert!(decide("nightly", &Outcome::Unsigned).is_err());
+    }
+
+    #[test]
+    fn a_bad_signature_or_a_disagreement_is_refused_with_the_signature_message() {
+        for o in [Outcome::Failed("x".into()), Outcome::Disagrees("y".into())] {
+            let e = decide("0.60.4", &o).unwrap_err();
+            assert!(e.contains("The signature on v0.60.4 doesn't match") && e.contains("tell the AgentMux team"), "{e}");
+        }
+    }
+
+    #[test]
+    fn a_release_without_a_file_for_this_install_and_an_unreachable_check_are_refused_plainly() {
+        assert_eq!(decide("0.60.4", &Outcome::NotListed("z".into())).unwrap_err(), "v0.60.4 has no file for this kind of install.");
+        let e = decide("0.60.4", &Outcome::Unreachable("GitHub didn't answer".into())).unwrap_err();
+        assert!(e.contains("Couldn't check the signature of v0.60.4") && e.contains("GitHub didn't answer") && e.contains("Try again"), "{e}");
+    }
+
+    #[test]
+    fn the_first_signed_release_is_the_one_the_pipeline_first_signed() {
+        assert_eq!(FIRST_SIGNED, (0, 60, 4));
+    }
+
     #[tokio::test]
     async fn an_address_off_the_releases_is_not_fetched() {
         let mut a = asset("AgentMux-0.60.1-x64-setup.exe", 100, SETUP_SHA);
         a.url = "https://example.com/AgentMux-0.60.1-x64-setup.exe".into();
         assert!(matches!(check("0.60.1", &a).await, Outcome::Failed(w) if w.contains("isn't on AgentMux's GitHub releases")));
+        // ...and that is a refusal for a signed-era release, never a download.
+        assert!(gate("0.60.4", &a).await.is_err());
     }
 }
