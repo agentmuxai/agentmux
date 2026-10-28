@@ -370,6 +370,7 @@ pub(super) fn apply_pending(
     data_dir: &Path,
     progress: Option<&ApplyProgress<'_>>,
 ) -> Result<ApplyOutcome, String> {
+    super::gate::refuse_on_real_home(regs, shared_store_path, &home.join("shared").join("identity-store.db"))?;
     if let Some(parent) = shared_store_path.parent() {
         if let Err(e) = std::fs::create_dir_all(parent) {
             return Err(format!("run_pending_migrations: create shared dir: {}", e));

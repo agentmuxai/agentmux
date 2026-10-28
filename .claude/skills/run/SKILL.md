@@ -139,7 +139,17 @@ last prompts, lists the live instance's agents in its Swarm, and what it does th
 broadcast, delete, a migration of a shared store) is done to the operator's data. **If your dev build
 shows your real agents, that is a bug: stop it, check the `[dev] home:` line, and report it.**
 
-- Opt out, on purpose only: `AGENTMUX_DEV_USE_REAL_HOME=1 task dev` (the banner then says REAL).
+- Opt out, on purpose only: `AGENTMUX_DEV_USE_REAL_HOME=1 task dev` (the banner then says REAL). A newer
+  dev build must not move the shared stores ahead of the installed build, which can't read a store from
+  a newer schema. When one is pending (a shared-store migration, or a shared or identity store older than
+  this build's schema), srv and `migrate` refuse before they lock, back up or open anything, and name the
+  migrations. Two ways out: use an isolated home (`task dev` without the variable), or start the installed
+  AgentMux build first and let it migrate the shared stores. A migration of the build's own data doesn't
+  count.
+- A bare `agentmux-srv` given only a data folder (`AGENTMUX_DATA_DIR`, `--wavedata`) outside the home also
+  refuses to start: its shared folder would be the real one. Give it `AGENTMUX_HOME_OVERRIDE=<dir>`, or
+  `AGENTMUX_SHARED_DIR` to say where shared data goes. It does not move `HOME`: an agent's workspace
+  (`~/.agentmux/agents/<slug>`) still follows it, so set `HOME` to a temporary folder too.
 - A home of your own choosing: `AGENTMUX_HOME_OVERRIDE=<dir> task dev`. The real home named that way is
   refused unless you also set `AGENTMUX_DEV_USE_REAL_HOME=1`.
 - Not isolated by the home: the OS keychain (an API key added in Connectors is stored there), the

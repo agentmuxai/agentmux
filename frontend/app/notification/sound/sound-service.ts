@@ -341,7 +341,7 @@ function stopWaitingFlash(blockId: string): void {
 
 /**
  * The falling shutdown chime: someone other than the user asked to shut an
- * agent down and the user has 15 s to keep it (SPEC_AGENT_SELF_QUIT §6.5).
+ * agent down and the user has 30 s to keep it (SPEC_AGENT_SELF_QUIT §6.5).
  * Under the master switch and its own `notify:sound:agent.shutdown.pending`;
  * not suppressed for a focused pane — the countdown is running either way.
  */
