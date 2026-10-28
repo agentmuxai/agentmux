@@ -34,5 +34,10 @@ async fn an_agent_pane_with_no_controller_is_registered_and_the_rest_are_left_al
     seed_block(&state, &tabs[0], serde_json::json!({ "view": "term" })).await;
     seed_block(&state, &tabs[0], serde_json::json!({ "view": "agent", "agentId": "deleted-agent" })).await;
 
-    assert_eq!(candidates(&state), vec![(wanted, tabs[0].clone())]);
+    let got: Vec<String> = candidates(&state).into_iter().map(|(b, _)| b).collect();
+    assert!(got.contains(&wanted), "the pane with no controller is registered");
+    assert!(!got.contains(&stopped), "a stopped agent stays stopped");
+    assert!(!got.contains(&signed_out), "a signed-out account is not resumed");
+    assert!(!got.contains(&in_terminal), "a terminal view starts its own");
+    assert_eq!(got.len(), 1, "{got:?}");
 }

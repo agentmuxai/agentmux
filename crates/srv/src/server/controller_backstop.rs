@@ -50,10 +50,22 @@ fn candidates(state: &AppState) -> Vec<(String, String)> {
                 && blockcontroller::get_controller(&block.oid).is_none()
                 && super::app_api::agent_attach::desired_of(block).as_deref() != Some(super::app_api::agent_attach::DESIRED_STOPPED)
                 && !runs_in_a_terminal_view(block)
-                && super::jekt_hold::holding_unavailable(&state.mstore, &block.oid).is_none()
+                && !failed_on_its_account(block)
         })
         .map(|(block, tab)| (block.oid, tab))
         .collect()
+}
+
+/// The pane's last turn failed because its account is signed out, or out of quota until a reset not yet
+/// reached: starting it would only fail again. (`agent_state::unavailable_of_block` reads this only from a
+/// pane with a controller, which these have not.)
+fn failed_on_its_account(block: &obj::Block) -> bool {
+    use crate::agents::failure::FailureClass;
+    match crate::backend::agent_state::failure_of_block(block) {
+        Some(f) if f.code == FailureClass::Auth => true,
+        Some(f) if f.code == FailureClass::UsageLimit => f.resets_at_ms.is_none_or(|at| at > agentmux_common::time::now_ms_u64()),
+        _ => false,
+    }
 }
 
 /// A terminal-tier CLI (aider, crush) is started by its term view once attached.
