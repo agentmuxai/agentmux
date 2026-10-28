@@ -24,7 +24,7 @@ const mkView = (overrides: Partial<FailureViewState> = {}): FailureViewState => 
 const mkActions = (): FailureActions & { _calls: Record<keyof FailureActions, number> } => {
     const _calls = {
         retry: 0, loginAgain: 0, loginViaTerminal: 0, openAccounts: 0, bindAccount: 0, newSession: 0, toggleDetails: 0,
-        copyError: 0, dismiss: 0, takeOver: 0,
+        copyError: 0, dismiss: 0, takeOver: 0, goThere: 0, moveHere: 0,
     };
     return {
         _calls,
@@ -252,6 +252,33 @@ describe("failureToRow", () => {
         expect(action(row, "Take over")).toBeUndefined();
         expect(action(row, "Retry")).toBeUndefined();
         expect(action(row, "×")).toBeDefined();
+    });
+
+    // The agent is open in another pane of this AgentMux: Retry is refused identically, so the row
+    // offers Go there, and Move here behind the same two-step confirmation as Take over.
+    it("open_in_other_pane offers Go there and a confirmed Move here, not Retry, and says what was not sent", () => {
+        const goThere = vi.fn();
+        const moveHere = vi.fn();
+        const f = mkFailure({ code: "open_in_other_pane", title: "Open in another pane", retryable: false, holderBlockId: "96a441d2" });
+        const on = { ...mkActions(), goThere, moveHere };
+        const row = failureToRow(f, mkView({ notSent: "hello there" }), on);
+        expect(row.sigil).toBe("⇄");
+        expect(action(row, "Retry")).toBeUndefined();
+        expect(action(row, "Retry now")).toBeUndefined();
+        expect(row.meta).toContain('not sent: "hello there"');
+        action(row, "Go there")!.onClick!(undefined as unknown as MouseEvent);
+        expect(goThere).toHaveBeenCalledTimes(1);
+        const move = action(row, "Move here");
+        expect(move?.primary).toBe(true);
+        expect(move?.danger).toBe(false);
+        move!.onClick!(undefined as unknown as MouseEvent);
+        expect(moveHere).toHaveBeenCalledTimes(1);
+
+        expect(action(failureToRow(f, mkView({ takeoverArmed: true }), on), "Confirm move here")?.danger).toBe(true);
+        expect(action(failureToRow(f, mkView({ takingOver: true }), on), "Moving…")?.disabled).toBe(true);
+        // A long message is cut, not dumped into the row.
+        const long = failureToRow(f, mkView({ notSent: "x".repeat(200) }), on);
+        expect(long.meta.length).toBeLessThan(160);
     });
 
     it("falls back to a generic Retry for unclassified non-zero exits", () => {

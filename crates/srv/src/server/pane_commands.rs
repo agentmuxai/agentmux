@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! The window's own calls on agent panes: `agent.pane.unregister` and `agent.takeover`.
+//! The window's own calls on agent panes: `agent.pane.unregister`, `agent.takeover` and `agent.move-here`.
 //! Over HTTP an agent can do both for its own panes with its token (`pane_binding`); the
 //! window has no token, so it asks over its socket, and srv answers only a connection the
 //! host has proven is the AgentMux window.
@@ -14,10 +14,12 @@ use serde_json::Value;
 
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::{
-    AgentPaneUnregisterResult, AgentTakeoverResult, CommandAgentPaneUnregisterData, CommandAgentTakeoverData,
-    COMMAND_AGENT_PANE_UNREGISTER, COMMAND_AGENT_TAKEOVER,
+    AgentPaneUnregisterResult, AgentTakeoverResult, CommandAgentMoveHereData,
+    CommandAgentPaneUnregisterData, CommandAgentTakeoverData, COMMAND_AGENT_MOVE_HERE, COMMAND_AGENT_PANE_UNREGISTER,
+    COMMAND_AGENT_TAKEOVER,
 };
 
+use super::agent_move_here::move_here;
 use super::agent_takeover::{take_over, TakeoverRequest};
 use super::reactive::{unregister_pane, UnregisterRequest};
 use super::AppState;
@@ -57,6 +59,14 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             })
         }
     });
+    let move_state = state.clone();
+    engine.register_typed(COMMAND_AGENT_MOVE_HERE, move |cmd: CommandAgentMoveHereData, ctx| {
+        let state = move_state.clone();
+        async move {
+            ctx.operator_only("only the operator's window moves an agent between panes")?;
+            move_here(&state, &cmd.block_id).await
+        }
+    });
 }
 
 #[cfg(test)]
@@ -88,6 +98,7 @@ mod tests {
         for (command, data) in [
             ("agent.pane.unregister", json!({ "agent_id": "pc-x", "block_id": "pc-block" })),
             ("agent.takeover", json!({ "block_id": "pc-block" })),
+            ("agent.move-here", json!({ "block_id": "pc-block" })),
         ] {
             for ctx in [agent.clone(), RpcContext::default()] {
                 let e = call(ctx, command, data.clone()).await.unwrap_err();

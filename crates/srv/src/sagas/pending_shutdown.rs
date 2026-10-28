@@ -493,7 +493,7 @@ const BY_MAX: usize = 64;
 /// The asker as the user knows them: the display name of the agent whose id `by`
 /// is (`QTest`, not `qtest`), else `by` as given (a fixed app string, a name
 /// another AgentMux claims, or an agent that is not running).
-fn asker_name(state: &AppState, by: &str) -> String {
+pub(crate) fn asker_name(state: &AppState, by: &str) -> String {
     state
         .reactive_handler
         .get_agent(by)
@@ -506,7 +506,7 @@ fn asker_name(state: &AppState, by: &str) -> String {
 /// The asker's name, cleaned for display. Normally a verified agent id; the
 /// only other sources are fixed app strings and a name another AgentMux on
 /// this machine claims (cross-channel), so it gets the same treatment.
-fn clean_by(raw: &str) -> String {
+pub(crate) fn clean_by(raw: &str) -> String {
     let line = clean_line(raw, BY_MAX);
     if line.is_empty() { "An agent".to_string() } else { line }
 }
