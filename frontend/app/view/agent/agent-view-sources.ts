@@ -15,6 +15,7 @@
 export const AGENT_VIEW_SOURCES: readonly string[] = [
     "agent-view.tsx",
     "agent-block-content.tsx",
+    "system-notification.ts",
     "agent-pane-chrome-model.ts",
     "hooks/useShellLogBridge.ts",
     "hooks/useWorkingIndicator.ts",

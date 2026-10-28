@@ -299,7 +299,7 @@ impl Tokens {
 /// Set in the environment of an agent whose `git` and `gh` use the broker's tokens; the `gh`
 /// function `agentmux-bashwrap` exports reads it.
 pub const BROKER_ENV: &str = "AGENTMUX_GITHUB_BROKER";
-use agentmux_common::github_broker_shim::{GH_FUNCTION_BODY, GH_FUNCTION_NAME};
+use agentmux_common::github_broker_shim::{GH_FUNCTION_BODY, GH_FUNCTION_NAME, GIT_FUNCTION_BODY, GIT_FUNCTION_NAME};
 const HELPER_KEY: &str = "credential.https://github.com.helper";
 const HELPER: &str = "!agentmux-bashwrap git-credential";
 const HTTP_PATH_KEY: &str = "credential.https://github.com.useHttpPath";
@@ -313,9 +313,19 @@ const REWRITE_KEY: &str = "url.https://github.com/.insteadOf";
 /// to GitHub are rewritten to https, because an ssh key is the person's own credential. Prompts
 /// are off, so a refusal ends the command with the reason instead of waiting at a prompt no one
 /// sees. Without `enabled`, any of this left in the environment from an earlier start is removed.
-pub fn apply_agent_git_in(env: &mut HashMap<String, String>, process: impl Fn(&str) -> Option<String> + Copy, enabled: bool) {
-    use crate::backend::publish_guard::set_git_config_list;
+pub fn apply_agent_git_in(
+    env: &mut HashMap<String, String>,
+    process: impl Fn(&str) -> Option<String> + Copy,
+    enabled: bool,
+    hooks_dir: Option<&std::path::Path>,
+) {
+    use crate::backend::publish_guard::{set_git_config_list, HOOKS_PATH_KEY};
     if enabled {
+        // AgentMux's own hooks: the push scan and the commit trailers.
+        if let Some(dir) = hooks_dir {
+            let dir = dir.to_string_lossy().into_owned();
+            set_git_config_list(env, process, HOOKS_PATH_KEY, &[dir.as_str()]);
+        }
         set_git_config_list(env, process, HELPER_KEY, &["", HELPER]);
         set_git_config_list(env, process, HTTP_PATH_KEY, &["true"]);
         set_git_config_list(env, process, REWRITE_KEY, &["git@github.com:", "ssh://git@github.com/"]);
@@ -323,12 +333,15 @@ pub fn apply_agent_git_in(env: &mut HashMap<String, String>, process: impl Fn(&s
         env.insert(BROKER_ENV.to_string(), "1".to_string());
         // `gh` goes through the broker too, in every bash the agent runs, whichever CLI started it.
         env.insert(GH_FUNCTION_NAME.to_string(), GH_FUNCTION_BODY.to_string());
+        // `git` too: a push can't skip the hooks, and a commit is the bot's.
+        env.insert(GIT_FUNCTION_NAME.to_string(), GIT_FUNCTION_BODY.to_string());
     } else if env.contains_key(BROKER_ENV) {
-        for key in [HELPER_KEY, HTTP_PATH_KEY, REWRITE_KEY] {
+        for key in [HELPER_KEY, HTTP_PATH_KEY, REWRITE_KEY, HOOKS_PATH_KEY] {
             set_git_config_list(env, process, key, &[]);
         }
         env.remove(BROKER_ENV);
         env.remove(GH_FUNCTION_NAME);
+        env.remove(GIT_FUNCTION_NAME);
         // Set with the rest, and only ever set by it: prompts come back with the connection gone.
         env.remove("GIT_TERMINAL_PROMPT");
     }
@@ -337,13 +350,14 @@ pub fn apply_agent_git_in(env: &mut HashMap<String, String>, process: impl Fn(&s
 /// `env` without what [`apply_agent_git_in`] sets: for a container, whose image has its own git and
 /// `gh` setup, and which the host's tokens are never given to.
 pub fn without_agent_git(env: &HashMap<String, String>) -> HashMap<String, String> {
-    use crate::backend::publish_guard::without_git_config_key;
+    use crate::backend::publish_guard::{without_git_config_key, HOOKS_PATH_KEY};
     if !env.contains_key(BROKER_ENV) {
         return env.clone();
     }
-    let mut out = [HELPER_KEY, HTTP_PATH_KEY, REWRITE_KEY].iter().fold(env.clone(), |e, key| without_git_config_key(&e, key));
+    let mut out = [HELPER_KEY, HTTP_PATH_KEY, REWRITE_KEY, HOOKS_PATH_KEY].iter().fold(env.clone(), |e, key| without_git_config_key(&e, key));
     out.remove(BROKER_ENV);
     out.remove(GH_FUNCTION_NAME);
+    out.remove(GIT_FUNCTION_NAME);
     out.remove("GIT_TERMINAL_PROMPT");
     out
 }
@@ -387,7 +401,8 @@ fn agents_use_broker(env: &HashMap<String, String>) -> bool {
 #[cfg_attr(test, allow(dead_code))]
 pub fn apply_agent_git(env: &mut HashMap<String, String>) {
     let enabled = agents_use_broker(env);
-    apply_agent_git_in(env, |k| std::env::var(k).ok(), enabled);
+    let hooks = enabled.then(crate::identity::github_hooks::hooks_dir).flatten();
+    apply_agent_git_in(env, |k| std::env::var(k).ok(), enabled, hooks.as_deref());
 }
 
 /// srv's tokens: one cache for the process.
@@ -547,7 +562,7 @@ mod tests {
     #[test]
     fn an_agent_with_the_broker_gets_only_its_credential_helper_for_github() {
         let mut e = env(&[("GIT_CONFIG_COUNT", "1"), ("GIT_CONFIG_KEY_0", "user.name"), ("GIT_CONFIG_VALUE_0", "x")]);
-        apply_agent_git_in(&mut e, |_| None, true);
+        apply_agent_git_in(&mut e, |_| None, true, None);
         let got = entries(&e);
         // The reset comes right before ours: whatever helper was configured before is not asked.
         let at = got.iter().position(|(k, v)| k == HELPER_KEY && v.is_empty()).expect("the reset");
@@ -559,20 +574,42 @@ mod tests {
         assert_eq!(e[GH_FUNCTION_NAME], GH_FUNCTION_BODY, "gh reaches the broker in every provider's shell");
         // Applied again (a persisted cmd:env): the same, not twice.
         let before = e.clone();
-        apply_agent_git_in(&mut e, |_| None, true);
+        apply_agent_git_in(&mut e, |_| None, true, None);
         assert_eq!(e, before);
+    }
+
+    #[test]
+    fn an_agent_with_the_broker_gets_the_agentmux_hooks_and_git_function_and_loses_them_when_disconnected() {
+        let hooks = std::path::Path::new("/agentmux/github-hooks");
+        let mut e = env(&[("GIT_CONFIG_COUNT", "1"), ("GIT_CONFIG_KEY_0", "user.name"), ("GIT_CONFIG_VALUE_0", "x")]);
+        apply_agent_git_in(&mut e, |_| None, true, Some(hooks));
+        assert!(entries(&e).contains(&("core.hooksPath".to_string(), hooks.to_string_lossy().into_owned())));
+        assert_eq!(e[GIT_FUNCTION_NAME], GIT_FUNCTION_BODY);
+        // Applied again: the same, not twice.
+        let before = e.clone();
+        apply_agent_git_in(&mut e, |_| None, true, Some(hooks));
+        assert_eq!(e, before);
+        // Disconnected since: the hooks, the function and the rest are taken out; other settings stay.
+        apply_agent_git_in(&mut e, |_| None, false, None);
+        assert_eq!(entries(&e), vec![("user.name".to_string(), "x".to_string())]);
+        assert!(!e.contains_key(GIT_FUNCTION_NAME));
+        // A container gets neither.
+        let mut c = env(&[]);
+        apply_agent_git_in(&mut c, |_| None, true, Some(hooks));
+        let out = without_agent_git(&c);
+        assert!(!out.contains_key(GIT_FUNCTION_NAME) && !out.contains_key(GH_FUNCTION_NAME));
     }
 
     #[test]
     fn an_agent_without_the_broker_keeps_its_own_git_and_loses_a_stale_setup() {
         let mut plain = env(&[("GIT_CONFIG_COUNT", "1"), ("GIT_CONFIG_KEY_0", "user.name"), ("GIT_CONFIG_VALUE_0", "x")]);
         let before = plain.clone();
-        apply_agent_git_in(&mut plain, |_| None, false);
+        apply_agent_git_in(&mut plain, |_| None, false, None);
         assert_eq!(plain, before, "nothing added when GitHub isn't connected");
         // Disconnected since the last start: what was set is taken out, the rest stays.
         let mut e = before.clone();
-        apply_agent_git_in(&mut e, |_| None, true);
-        apply_agent_git_in(&mut e, |_| None, false);
+        apply_agent_git_in(&mut e, |_| None, true, None);
+        apply_agent_git_in(&mut e, |_| None, false, None);
         assert_eq!(entries(&e), vec![("user.name".to_string(), "x".to_string())]);
         assert!(!e.contains_key(BROKER_ENV) && !e.contains_key("GIT_TERMINAL_PROMPT") && !e.contains_key(GH_FUNCTION_NAME), "prompts and plain gh are back too");
     }
@@ -655,7 +692,7 @@ mod tests {
     #[tokio::test]
     async fn a_container_gets_none_of_the_agent_git_setup() {
         let mut e = env(&[("GIT_CONFIG_COUNT", "1"), ("GIT_CONFIG_KEY_0", "user.name"), ("GIT_CONFIG_VALUE_0", "x"), ("OTHER", "kept")]);
-        apply_agent_git_in(&mut e, |_| None, true);
+        apply_agent_git_in(&mut e, |_| None, true, None);
         let out = without_agent_git(&e);
         assert_eq!(entries(&out), vec![("user.name".to_string(), "x".to_string())]);
         assert!(!out.contains_key(BROKER_ENV) && !out.contains_key("GIT_TERMINAL_PROMPT") && !out.contains_key(GH_FUNCTION_NAME));

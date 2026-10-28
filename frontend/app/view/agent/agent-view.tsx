@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createSignInNotice } from "./sign-in-notice";
+import { createSystemNotifier } from "./system-notification";
 import type { AttachmentRef } from "@/types/rpc/AttachmentRef";
 import {
     snapshot as layoutSnapshot,
@@ -540,31 +541,17 @@ export const AgentPresentationView = ({
         })
     );
 
-    // Posts a permanent, visible line into the pane's own conversation \u2014
-    // distinct from `log()`, which routes to the hidden activity-log/shell-
-    // terminal channel (see docs/specs/SPEC_AGENT_PANE_AUTH_NOTIFICATIONS_2026_07_26.md
-    // \u00a71). "success"/"warning" get a symbol prefix; "info" doesn't (used for
-    // neutral narration like "Signing in..." or "Ready...").
-    const postSystemNotification = (text: string, style: "info" | "warning" | "success" = "info"): void => {
-        const prefix = style === "success" ? "\u2713 " : style === "warning" ? "\u26a0 " : "";
-        const node: import("./types").MarkdownNode = {
-            type: "markdown",
-            id: `system_notification_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-            content: `${prefix}${text}`,
-        } as import("./types").MarkdownNode;
-        paneModel.dispatchDoc({ type: "StreamFlush", newNodes: [node], updatedNodes: [] });
-    };
+    const postSystemNotification = createSystemNotifier(paneModel.document, (action) => paneModel.dispatchDoc(action));
 
-    const signIn = createSignInNotice((text, style) => postSystemNotification(text, style));
+    const signIn = createSignInNotice(postSystemNotification);
     const status = useAgentControllerStatus({
         blockId: model.blockId,
         provider,
         log,
         onLoginSuccess: (email) => {
-            signIn.answered();
-            postSystemNotification(email ? `Logged in as **${email}**` : "Login successful", "success");
+            signIn.answered(email ? `Logged in as **${email}**` : "Login successful");
         },
-        onNotify: (text, style, kind) => { signIn.seen(kind); postSystemNotification(text, style); },
+        onNotify: (text, style, kind) => (kind === "sign-in" ? signIn.needed(text, style) : postSystemNotification(text, style)),
         onAccountBound: signIn.bound,
         onReady: () => onReadyFn?.(),
         // A successful recovery (relogin / terminal login) refreshed
