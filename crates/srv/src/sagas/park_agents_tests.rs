@@ -248,6 +248,53 @@ async fn deleting_the_agent_deletes_its_parked_block_and_only_that() {
     assert_eq!(in_tab(&state, &shown).await.as_deref(), Some(tabs[0].as_str()));
 }
 
+/// Deleting a template must not take the parked blocks of the agents launched from it: they keep the
+/// template's id in `agentId`, and only the bound instance names the agent.
+#[tokio::test]
+async fn deleting_a_template_leaves_the_parked_blocks_of_agents_launched_from_it() {
+    let state = test_state();
+    let (_ws, tabs) = seed_workspace(&state, 1).await;
+    set_always_available(&state, true);
+    let block = seed_block(
+        &state,
+        &tabs[0],
+        serde_json::json!({ "view": "agent", "agentId": "tmpl-2", "agentInstanceId": "inst-2" }),
+    )
+    .await;
+    let mut def: crate::backend::storage::AgentDefinition = serde_json::from_value(serde_json::json!({
+        "id": "inst-2", "slug": "inst-2", "name": "inst-2", "icon": "robot", "provider": "claude", "description": "", "created_at": 1,
+    }))
+    .unwrap();
+    state.mstore.agent_def_insert(&mut def).unwrap();
+    state
+        .mstore
+        .instance_create(&AgentInstance {
+            id: "inst-2".to_string(),
+            definition_id: "inst-2".to_string(),
+            parent_instance_id: String::new(),
+            block_id: block.clone(),
+            session_id: "sess".to_string(),
+            status: InstanceStatus::Running.as_str().to_string(),
+            github_context: String::new(),
+            started_at: 1000,
+            ended_at: 0,
+            created_at: 1000,
+            identity_id: String::new(),
+            memory_id: String::new(),
+            instance_name: String::new(),
+            working_directory: String::new(),
+            display_hidden: false,
+        })
+        .unwrap();
+    crate::sagas::close_pane::run(&state, vec![block.clone()]).await.unwrap();
+    assert_eq!(in_tab(&state, &block).await.as_deref(), Some(""), "parked");
+
+    assert_eq!(delete_parked_blocks_of(&state, "tmpl-2").await, 0, "the template's id does not name the agent");
+    assert_eq!(in_tab(&state, &block).await.as_deref(), Some(""));
+    assert_eq!(delete_parked_blocks_of(&state, "inst-2").await, 1);
+    assert_eq!(in_tab(&state, &block).await, None);
+}
+
 #[tokio::test]
 async fn a_process_that_exits_keeps_its_agents_block_with_the_setting_on() {
     let state = test_state();

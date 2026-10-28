@@ -74,7 +74,8 @@ pub(crate) async fn park_agent_blocks(ctx: &SagaCtx<'_>, block_ids: &[String]) -
 }
 
 /// Delete every parked block of the agent `agent_id`, stopping its process first: deleting the agent
-/// is the one thing that deletes its block. Returns how many went. A block that is shown in a tab is
+/// is the one thing that deletes its block. A block is the agent's through `agent_of_block`, so
+/// deleting a template leaves the blocks of the agents launched from it. Returns how many went. A block that is shown in a tab is
 /// not touched, as before.
 pub(crate) async fn delete_parked_blocks_of(state: &AppState, agent_id: &str) -> usize {
     let parked: Vec<String> = match state.mstore.get_all::<Block>() {
@@ -82,8 +83,7 @@ pub(crate) async fn delete_parked_blocks_of(state: &AppState, agent_id: &str) ->
             .into_iter()
             .filter(|b| {
                 obj::meta_get_bool(&b.meta, crate::persist_subscriber::parked::PARKED_META_KEY, false)
-                    && (obj::meta_get_string(&b.meta, "agentId", "") == agent_id
-                        || state.mstore.instance_get_by_block_id(&b.oid).ok().flatten().is_some_and(|i| i.id == agent_id))
+                    && agent_of_block(state, &b.oid, b).is_some_and(|i| i.id == agent_id)
             })
             .map(|b| b.oid)
             .collect(),
