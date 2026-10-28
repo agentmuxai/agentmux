@@ -106,7 +106,7 @@ async fn a_release_the_user_keeps_is_reported_as_kept() {
 #[tokio::test]
 async fn a_release_joining_a_pending_stop_takes_it_over() {
     let state = test_state();
-    let stop = ps::request(&state, "blk-peer-rel-c", "an agent", "FleetBulkStop", "", ps::Action::Stop { signal: None });
+    let stop = ps::request(&state, "blk-peer-rel-c", "an agent", "FleetBulkStop", "", ps::Action::Stop { signal: None, stop_background: None });
     let release = ps::request(&state, "blk-peer-rel-c", "AgentMux", "Takeover", "", ps::Action::Release { to: "channel y".into() });
     assert!(release.joined && release.request_id == stop.request_id);
     assert_eq!(ps::keep(&state, "blk-peer-rel-c", &stop.request_id), "kept_by_user");

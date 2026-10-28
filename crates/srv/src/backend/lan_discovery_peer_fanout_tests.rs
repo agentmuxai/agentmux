@@ -269,3 +269,64 @@ async fn a_refetch_that_shows_nothing_leaves_the_cached_answer_as_it_was() {
     assert!(c.refetch_lan_uid_key_from(&[], "agenty", b"key", &http).await.is_none());
     assert!(!cached(&c, "agenty"));
 }
+
+/// Peers that could not be reached say nothing about the key: no miss is
+/// cached for them, so the next lookup asks again. A peer that answered "not
+/// here" is an answer, and is cached.
+#[tokio::test]
+async fn a_miss_is_cached_only_when_a_peer_answered() {
+    let http = reqwest::Client::new();
+    let c = controller();
+    assert!(matches!(c.pubkey_from_peers(&[], "agentx", &http).await, LanPubkeyLookup::NotFound));
+    assert!(!cached(&c, "agentx"), "no peers: nothing learned");
+    let dead = peer_at("127.0.0.1:1");
+    assert!(matches!(c.pubkey_from_peers(&[dead], "agentx", &http).await, LanPubkeyLookup::NotFound));
+    assert!(!cached(&c, "agentx"), "a peer that could not be reached: nothing learned");
+    for refusal in ["401 Unauthorized", "429 Too Many Requests", "503 Service Unavailable"] {
+        let addr = mock_peer(std::time::Duration::ZERO, refusal, "{}").await;
+        assert!(matches!(c.pubkey_from_peers(&[peer_at(&addr)], "agentx", &http).await, LanPubkeyLookup::NotFound));
+        assert!(!cached(&c, "agentx"), "{refusal}: the peer said nothing about the key");
+    }
+    let addr = mock_peer(std::time::Duration::ZERO, "200 OK", "not json").await;
+    assert!(matches!(c.pubkey_from_peers(&[peer_at(&addr)], "agentx", &http).await, LanPubkeyLookup::NotFound));
+    assert!(!cached(&c, "agentx"), "an answer that is not JSON");
+    let (addr, _) = routed_peer(vec![]).await;
+    assert!(matches!(c.pubkey_from_peers(&[peer_at(&addr)], "agentx", &http).await, LanPubkeyLookup::NotFound));
+    assert!(cached(&c, "agentx"), "a peer said it has no such agent");
+}
+
+/// A miss served from the cache is asked again once; a miss the lookup just
+/// made is not repeated, and a limiter refusal reads as a miss.
+#[tokio::test]
+async fn an_old_cached_miss_is_asked_again_and_a_fresh_one_is_not() {
+    let (addr, hits) = routed_peer(vec![("agentx", r#"{"lan_public_key":"a2V5"}"#)]).await;
+    let http = reqwest::Client::new();
+    let peers = vec![peer_at(&addr)];
+    let c = controller();
+    let asked = || hits.load(std::sync::atomic::Ordering::SeqCst);
+
+    assert!(matches!(c.find_agent_lan_pubkey_again_from(&peers, "agentx", &http).await, LanPubkeyLookup::NotFound), "no cached miss");
+    c.seed_lan_pubkey_miss_for_test("agentx", 1);
+    assert!(matches!(c.find_agent_lan_pubkey_again_from(&peers, "agentx", &http).await, LanPubkeyLookup::NotFound), "a miss made a second ago");
+    assert_eq!(asked(), 0, "neither asked the network");
+
+    c.seed_lan_pubkey_miss_for_test("agentx", 10_000);
+    assert!(matches!(c.find_agent_lan_pubkey_again_from(&peers, "agentx", &http).await, LanPubkeyLookup::NotFound), "an expired miss");
+    assert_eq!(asked(), 0, "was not served from the cache, so not asked again");
+
+    c.seed_lan_pubkey_miss_for_test("agentx", 30);
+    assert!(matches!(c.find_agent_lan_pubkey_again_from(&peers, "agentx", &http).await, LanPubkeyLookup::Found(k) if k == b"key"));
+    assert_eq!(asked(), 1);
+    assert!(matches!(c.find_agent_lan_pubkey("agentx", &http).await, LanPubkeyLookup::Found(_)), "and the key is cached");
+}
+
+/// An old miss that the peers still confirm stays a miss.
+#[tokio::test]
+async fn an_old_miss_that_is_still_a_miss_stays_one() {
+    let (addr, hits) = routed_peer(vec![]).await;
+    let http = reqwest::Client::new();
+    let c = controller();
+    c.seed_lan_pubkey_miss_for_test("agentx", 30);
+    assert!(matches!(c.find_agent_lan_pubkey_again_from(&[peer_at(&addr)], "agentx", &http).await, LanPubkeyLookup::NotFound));
+    assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 1, "asked once");
+}

@@ -10,6 +10,8 @@ pub(crate) mod account_episodes;
 pub mod agent_resources;
 pub mod agent_handlers;
 mod agent_only;
+mod http_action;
+mod http_action_routes;
 pub(crate) mod agent_move_here;
 pub(crate) mod agent_takeover;
 mod pane_binding;
@@ -39,6 +41,7 @@ pub(crate) mod jekt_start;
 pub(crate) mod controller_backstop;
 mod availability_view;
 pub(crate) mod agent_runtime;
+pub(crate) mod start_rate;
 mod jekt_cold;
 mod limit_probe;
 pub(crate) mod jekt_files;
@@ -116,6 +119,9 @@ mod peer_veto_tests;
 #[cfg(test)]
 #[path = "tests/rpc_attribution_tests.rs"]
 mod rpc_attribution_tests;
+#[cfg(test)]
+#[path = "tests/http_action_tests.rs"]
+mod http_action_tests;
 #[cfg(test)]
 mod rpc_schema_export;
 

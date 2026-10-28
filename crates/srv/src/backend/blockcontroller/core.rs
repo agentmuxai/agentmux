@@ -190,6 +190,21 @@ fn sync_instance_session_id(store: &Arc<Store>, block_id: &str, sid: &str) {
     }
 }
 
+/// What a finished turn says about its provider's model API (`connectivity`). Called where a turn ends, not from
+/// [`persist_last_failure`], which is also called to clear a stored failure when no request was made. Claude's own
+/// frames report theirs.
+pub(crate) fn report_provider_turn(
+    block_id: &str,
+    failure: Option<&crate::agents::failure::AgentFailure>,
+    mstore: &Option<Arc<Store>>,
+) {
+    let Some(store) = mstore else { return };
+    if let Ok(block) = store.must_get::<crate::backend::obj::Block>(block_id) {
+        let provider = crate::backend::obj::meta_get_string(&block.meta, "agentProvider", "");
+        crate::connectivity::observe_provider_turn(&provider, failure);
+    }
+}
+
 /// Persist or clear the last agent failure in block metadata.
 ///
 /// Pass `Some(failure)` on a failed exit to write `agent:last_failure` into the

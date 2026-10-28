@@ -21,11 +21,18 @@
 
 use serde_json::Value;
 
-/// Settings keys whose values must never reach a renderer connection.
-/// Extend this list as more secret-shaped fields get a Settings UI (e.g. the
-/// messaging-bridge bot tokens proposed in
-/// docs/specs/SPEC_SETTINGS_MESSAGING_BRIDGES_SECTION_2026_08_22.md).
-const REDACTED_SETTINGS_KEYS: &[&str] = &["voice:groqApiKey"];
+/// Settings keys whose values must never reach a connection that reads the config: the
+/// renderer's, an agent's. srv itself reads them from its own copy.
+const REDACTED_SETTINGS_KEYS: &[&str] = &[
+    "voice:groqApiKey",
+    "messaging:discord:token",
+    "messaging:telegram:token",
+    "messaging:slack:bot_token",
+    "messaging:slack:app_token",
+    "messaging:whatsapp:access_token",
+    "messaging:whatsapp:app_secret",
+    "messaging:whatsapp:webhook_verify_token",
+];
 
 /// Placeholder written in place of a redacted value. Any renderer code that
 /// merely checks "is a key set" (e.g. `MaskedKeyField`'s locked-state gate)
@@ -66,6 +73,24 @@ mod tests {
         redact_full_config_for_renderer(&mut v);
         assert_eq!(v["settings"]["voice:groqApiKey"], REDACTED_PLACEHOLDER);
         assert_ne!(v["settings"]["voice:groqApiKey"], "sk-real-secret-value");
+    }
+
+    #[test]
+    fn redacts_every_messaging_secret() {
+        let secrets: Vec<&str> = REDACTED_SETTINGS_KEYS.iter().copied().filter(|k| k.starts_with("messaging:")).collect();
+        assert_eq!(secrets.len(), 7);
+        let mut settings = serde_json::Map::new();
+        for key in &secrets {
+            settings.insert((*key).to_string(), json!("real-secret-value"));
+        }
+        settings.insert("messaging:discord:channel".to_string(), json!("12345"));
+        let mut v = json!({ "settings": settings });
+        redact_full_config_for_renderer(&mut v);
+        for key in &secrets {
+            assert_eq!(v["settings"][*key], REDACTED_PLACEHOLDER, "{key}");
+        }
+        assert_eq!(v["settings"]["messaging:discord:channel"], "12345", "a channel id is not a secret");
+        assert!(!v.to_string().contains("real-secret-value"));
     }
 
     #[test]

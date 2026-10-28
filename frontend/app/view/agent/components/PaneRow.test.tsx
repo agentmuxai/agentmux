@@ -33,6 +33,18 @@ describe("PaneRow", () => {
         expect(container.querySelector(".pane-row-tail")).toBeNull();
     });
 
+    it("marks a row addressed to the person, and no other", () => {
+        const { container } = render(() => (
+            <>
+                <PaneRow sigil="⏻" title="veto" operatorOnly />
+                <PaneRow sigil="⟩" title="build" />
+            </>
+        ));
+        const rows = container.querySelectorAll(".pane-row");
+        expect(rows[0].hasAttribute("data-operator-only")).toBe(true);
+        expect(rows[1].hasAttribute("data-operator-only")).toBe(false);
+    });
+
     it("applies the status accent modifier class", () => {
         const { container } = render(() => (
             <PaneRow sigil="⟩" title="build" accent="error" />
