@@ -370,3 +370,55 @@ fn only_agentmuxs_own_github_app_runs_through_the_broker() {
     assert!(!runs_through_broker("github", false, &client(ClientMode::Builtin)));
     assert!(!runs_through_broker("google", true, &client(ClientMode::Builtin)));
 }
+
+
+#[test]
+fn the_pickers_url_asks_for_drive_file_alone_and_opens_the_picker() {
+    let cfg = config_for("google").unwrap();
+    let url = build_picker_url(&cfg, "cid", "http://127.0.0.1:5555/callback", "st", "ch");
+    let q = query(&url);
+    let get = |k: &str| q.iter().find(|(n, _)| n == k).map(|(_, v)| v.as_str());
+    assert!(url.starts_with("https://accounts.google.com/o/oauth2/v2/auth?"));
+    assert_eq!(get("scope"), Some("https://www.googleapis.com/auth/drive.file"), "no other scope may ride along");
+    assert_eq!(get("trigger_onepick"), Some("true"));
+    assert_eq!(get("prompt"), Some("consent"));
+    assert_eq!(get("allow_multiple"), Some("true"));
+    assert_eq!(get("state"), Some("st"));
+    assert_eq!(get("code_challenge_method"), Some("S256"));
+    for k in ["include_granted_scopes", "access_type"] {
+        assert_eq!(get(k), None, "{k} would combine the picker with other grants");
+    }
+}
+
+#[test]
+fn the_pickers_files_come_from_the_callback_and_only_real_ids_survive() {
+    let cb = parse_callback("GET /callback?code=c&state=s&picked_file_ids=1AbC_d-9%2Cfile2,../x,%3Cscript%3E,, HTTP/1.1\r\n\r\n");
+    assert_eq!(picked_ids(cb.picked_file_ids.as_deref()), ["1AbC_d-9", "file2"]);
+    assert!(picked_ids(None).is_empty());
+    let many: String = (0..150).map(|i| format!("id{i}")).collect::<Vec<_>>().join(",");
+    assert_eq!(picked_ids(Some(&many)).len(), MAX_PICKED);
+    // The picker's callback with no files (closed without choosing) is not an error.
+    assert!(picked_ids(parse_callback("GET /callback?code=c&state=s HTTP/1.1\r\n\r\n").picked_file_ids.as_deref()).is_empty());
+}
+
+#[test]
+fn the_picker_needs_drive_turned_on_and_the_account_s_own_client() {
+    let store = Arc::new(Store::open_in_memory().unwrap());
+    store.apply_identity_schema_for_tests().unwrap();
+    let mut acct = oauth_account("acc-1", "google", "cid");
+    acct.context["granted_scopes"] = serde_json::json!(["https://www.googleapis.com/auth/calendar.events.readonly"]);
+    let client = ResolvedClient { client_id: "cid".into(), client_secret: Some("csec".into()), mode: ClientMode::Byo };
+    let e = start_picker(acct, client, store.clone(), store).unwrap_err();
+    assert!(e.contains("turn Drive on"), "{e}");
+}
+
+#[tokio::test]
+async fn the_picker_runs_as_the_client_the_account_was_made_with() {
+    let mut acct = oauth_account("acc-1", "google", "cid-9");
+    acct.context["oauth_client"] = serde_json::json!({ "mode": "byo", "client_id": "cid-9" });
+    let secrets = MemSecrets::with("acc-1", &serde_json::json!({ "access_token": "a", "refresh_token": "r", "client_secret": "csec-9" }).to_string());
+    let c = picker_client(&secrets, &acct).await.unwrap();
+    assert_eq!((c.client_id.as_str(), c.client_secret.as_deref(), c.mode), ("cid-9", Some("csec-9"), ClientMode::Byo));
+    acct.context.as_object_mut().unwrap().remove("oauth_client");
+    assert!(picker_client(&secrets, &acct).await.unwrap_err().contains("connect it again"));
+}

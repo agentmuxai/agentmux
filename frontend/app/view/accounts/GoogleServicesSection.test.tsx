@@ -10,11 +10,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const google = vi.hoisted(() => vi.fn());
 const api = vi.hoisted(() => ({ value: { approvals: { google } } as Record<string, unknown> }));
 vi.mock("@/app/store/app-api", () => ({ getApi: () => api.value }));
-vi.mock("@/app/store/rpc-api", () => ({ RpcApi: {} }));
+const rpc = vi.hoisted(() => ({ poll: vi.fn(), cancel: vi.fn() }));
+vi.mock("@/app/store/rpc-api", () => ({
+    RpcApi: { AccountOAuthPollCommand: rpc.poll, AccountOAuthCancelCommand: rpc.cancel },
+}));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 
 import type { Account } from "@/app/view/identity/identity-model";
-import { callLine, SERVICES, serviceState } from "./google-services";
+import { callLine, pickDriveFiles, SERVICES, serviceState } from "./google-services";
 import { GoogleServicesSection } from "./GoogleServicesSection";
 
 const P = "https://www.googleapis.com/auth/";
@@ -35,6 +38,7 @@ function account(scopes: string[]): Account {
 }
 
 const READ = ["calendar.calendarlist.readonly", "calendar.events.readonly", "calendar.events.freebusy"];
+const DRIVE = ["drive.file"];
 
 let panel: Record<string, unknown>;
 
@@ -43,7 +47,7 @@ beforeEach(() => {
     panel = {
         agents: [{ agentId: "def-1", name: "Naki", levels: {} }],
         calls: [{ at: 1_700_000_000_000, agent_id: "def-1", agent_name: "Naki", service: "calendar", action: "list_events", ids: "primary", outcome: "ok" }],
-        services: ["calendar"],
+        services: ["calendar", "drive"],
     };
     google.mockImplementation(async (op: string) => (op === "account" ? panel : true));
 });
@@ -51,6 +55,8 @@ beforeEach(() => {
 afterEach(() => {
     cleanup();
     google.mockReset();
+    rpc.poll.mockReset();
+    rpc.cancel.mockReset();
 });
 
 describe("google-services", () => {
@@ -71,20 +77,38 @@ describe("google-services", () => {
     });
 });
 
+describe("pickDriveFiles", () => {
+    it("reports a refusal from Google and stops asking", async () => {
+        google.mockResolvedValue({ session_id: "oauth-2" });
+        rpc.poll.mockResolvedValue({ status: "failed", error: "access denied: the consent screen was cancelled or declined" });
+        await expect(pickDriveFiles("g1")).rejects.toThrow("access denied");
+        expect(rpc.poll).toHaveBeenCalledTimes(1);
+    });
+
+    it("cancels the session when the person cancels", async () => {
+        google.mockResolvedValue({ session_id: "oauth-3" });
+        expect(await pickDriveFiles("g1", () => true)).toEqual([]);
+        expect(rpc.cancel).toHaveBeenCalledWith(expect.anything(), { sessionId: "oauth-3" });
+        expect(rpc.poll).not.toHaveBeenCalled();
+    });
+});
+
 describe("GoogleServicesSection", () => {
     it("lists the bound agents and sets a level through the host", async () => {
         render(() => <GoogleServicesSection account={account(READ)} />);
         expect(await screen.findByText("Naki: Calendar")).toBeTruthy();
         expect(screen.getByText("On")).toBeTruthy();
         expect(screen.getByText("Naki: list_events (primary)")).toBeTruthy();
-        fireEvent.click(screen.getByRole("radio", { name: "Read" }));
+        expect(screen.getByText("Naki: Drive")).toBeTruthy();
+        fireEvent.click(screen.getAllByRole("radio", { name: "Read" })[0]);
         await waitFor(() => expect(google).toHaveBeenCalledWith("set", { account_id: "g1", agent_id: "def-1", service: "calendar", level: "read" }));
     });
 
     it("offers Turn on for a service the account hasn't granted", async () => {
         render(() => <GoogleServicesSection account={account([])} />);
         expect(await screen.findByRole("button", { name: "Turn on Calendar" })).toBeTruthy();
-        expect(screen.getByText("Off")).toBeTruthy();
+        expect(screen.getByRole("button", { name: "Turn on Drive" })).toBeTruthy();
+        expect(screen.getAllByText("Off").length).toBe(2);
     });
 
     it("shows srv's refusal", async () => {
@@ -93,7 +117,7 @@ describe("GoogleServicesSection", () => {
             throw new Error("Naki isn't bound to this account: bind it first");
         });
         render(() => <GoogleServicesSection account={account(READ)} />);
-        fireEvent.click(await screen.findByRole("radio", { name: "Read" }));
+        fireEvent.click((await screen.findAllByRole("radio", { name: "Read" }))[0]);
         expect((await screen.findByRole("alert")).textContent).toContain("bind it first");
     });
 
@@ -105,6 +129,35 @@ describe("GoogleServicesSection", () => {
         expect((await screen.findByRole("alert")).textContent).toContain("only the AgentMux host");
         expect(screen.queryByText(/No agent is bound/)).toBeNull();
         expect(screen.getByText("Services")).toBeTruthy();
+    });
+
+    it("offers the Drive picker only once Drive is on", async () => {
+        const { unmount } = render(() => <GoogleServicesSection account={account(READ)} />);
+        expect(await screen.findByText("Naki: Drive")).toBeTruthy();
+        expect(screen.queryByRole("button", { name: /Give agents files from Drive/ })).toBeNull();
+        unmount();
+        render(() => <GoogleServicesSection account={account([...READ, ...DRIVE])} />);
+        expect(await screen.findByRole("button", { name: /Give agents files from Drive/ })).toBeTruthy();
+    });
+
+    it("opens the picker and says how many files the person gave", async () => {
+        google.mockImplementation(async (op: string) => (op === "account" ? panel : op === "pick" ? { session_id: "oauth-1" } : true));
+        rpc.poll.mockResolvedValue({ status: "picked", accountId: "g1", fileIds: ["a", "b"] });
+        render(() => <GoogleServicesSection account={account([...READ, ...DRIVE])} />);
+        fireEvent.click(await screen.findByRole("button", { name: /Give agents files from Drive/ }));
+        expect(await screen.findByText(/Gave agents 2 files/)).toBeTruthy();
+        expect(google).toHaveBeenCalledWith("pick", { account_id: "g1" });
+        expect(rpc.poll).toHaveBeenCalledWith(expect.anything(), { sessionId: "oauth-1" });
+    });
+
+    it("shows why the picker failed", async () => {
+        google.mockImplementation(async (op: string) => {
+            if (op === "account") return panel;
+            throw new Error("turn Drive on for this account first");
+        });
+        render(() => <GoogleServicesSection account={account([...READ, ...DRIVE])} />);
+        fireEvent.click(await screen.findByRole("button", { name: /Give agents files from Drive/ }));
+        expect((await screen.findByRole("alert")).textContent).toContain("turn Drive on");
     });
 
     it("asks for the desktop app where there is no host", async () => {
