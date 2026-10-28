@@ -132,10 +132,15 @@ pub trait Backend {
     fn mint(&self, request: MintRequest) -> impl Future<Output = Result<github_broker::InstallationToken, BrokerError>> + Send;
     /// Present the person's own fresh GitHub token so the broker re-reads what they can see.
     fn revalidate(&self) -> impl Future<Output = Result<(), TokenError>> + Send;
+    /// Who the tokens are minted for: the person's brokered GitHub account, while AgentMux Cloud is
+    /// signed in. Another answer than the last one (or none) means what was cached is not theirs.
+    fn connection(&self) -> impl Future<Output = Result<String, TokenError>> + Send;
 }
 
 #[derive(Default)]
 struct State {
+    /// The connection every entry below was obtained under.
+    connection: Option<String>,
     cache: HashMap<Want, Minted>,
     installations: Option<(i64, Vec<LinkedInstallation>)>,
     refused: HashMap<Want, (i64, TokenError)>,
@@ -162,6 +167,10 @@ impl Tokens {
             }
         }
         let want = want.normalized();
+        // A disconnect, a sign-out or another account takes back what was minted before it.
+        let connection = backend.connection().await;
+        self.bind(connection.as_ref().ok());
+        let connection = connection?;
         // One at a time for this token: an agent's many commands at once must not each mint.
         let lock = self.st().locks.entry(want.clone()).or_default().clone();
         let _one = lock.lock().await;
@@ -170,6 +179,10 @@ impl Tokens {
         }
         let result = self.mint(backend, &want, now).await;
         let mut st = self.st();
+        // Not kept if the connection changed while the broker was answering.
+        if st.connection.as_ref() != Some(&connection) {
+            return result;
+        }
         match &result {
             Ok(minted) => {
                 st.refused.remove(&want);
@@ -191,6 +204,17 @@ impl Tokens {
         let keep: Vec<Want> = st.cache.keys().chain(st.refused.keys()).cloned().collect();
         st.locks.retain(|k, l| Arc::strong_count(l) > 1 || keep.contains(k) || *k == want);
         result
+    }
+
+    /// Forget everything held when `connection` is not the one it was obtained under.
+    fn bind(&self, connection: Option<&String>) {
+        let mut st = self.st();
+        if st.connection.as_ref() != connection {
+            st.cache.clear();
+            st.refused.clear();
+            st.installations = None;
+            st.connection = connection.cloned();
+        }
     }
 
     /// The answer already known for `want`: a token with time left, or a refusal not yet expired.
@@ -395,6 +419,18 @@ impl Backend for Live {
         .await
     }
 
+    async fn connection(&self) -> Result<String, TokenError> {
+        let account = self
+            .mstore
+            .identity_list(Some(crate::identity::github_connect::PROVIDER))
+            .unwrap_or_default()
+            .into_iter()
+            .find(crate::identity::github_connect::is_brokered)
+            .ok_or(TokenError::NoGithubAccount)?;
+        github_broker::caller(&self.mstore).await?;
+        Ok(format!("{}/{}", account.id, account.context.get("id").map(|v| v.to_string()).unwrap_or_default()))
+    }
+
     async fn revalidate(&self) -> Result<(), TokenError> {
         let account = self
             .mstore
@@ -454,11 +490,12 @@ mod tests {
         listed: Mutex<u32>,
         revalidated: Mutex<u32>,
         revalidate_ok: bool,
+        connection: Mutex<Result<String, TokenError>>,
     }
 
     impl Fake {
         fn new(installs: Vec<Vec<LinkedInstallation>>, mints: Vec<Result<InstallationToken, BrokerError>>) -> Self {
-            Self { installs: Mutex::new(installs), mints: Mutex::new(mints), asked: Mutex::default(), listed: Mutex::new(0), revalidated: Mutex::new(0), revalidate_ok: true }
+            Self { installs: Mutex::new(installs), mints: Mutex::new(mints), asked: Mutex::default(), listed: Mutex::new(0), revalidated: Mutex::new(0), revalidate_ok: true, connection: Mutex::new(Ok("acct-1".to_string())) }
         }
     }
 
@@ -472,6 +509,9 @@ mod tests {
             self.asked.lock().unwrap().push(request);
             let mut m = self.mints.lock().unwrap();
             if m.len() > 1 { m.remove(0) } else { m[0].clone().map_err(|e| e) }
+        }
+        async fn connection(&self) -> Result<String, TokenError> {
+            self.connection.lock().unwrap().clone()
         }
         async fn revalidate(&self) -> Result<(), TokenError> {
             *self.revalidated.lock().unwrap() += 1;
@@ -569,6 +609,28 @@ mod tests {
         tokens.token_for(&fake, &Want { workflows: true, ..w.clone() }, NOW).await.unwrap();
         assert_eq!(fake.asked.lock().unwrap().len(), 4);
         assert_eq!(tokens.cached(), 3);
+    }
+
+    #[tokio::test]
+    async fn a_disconnect_or_another_account_takes_back_the_cached_tokens() {
+        let fake = Fake::new(vec![vec![link(5, "o", "active", "active")]], vec![Ok(ok_for(3600))]);
+        let tokens = Tokens::default();
+        let w = want("o", "r");
+        tokens.token_for(&fake, &w, NOW).await.unwrap();
+        tokens.token_for(&fake, &w, NOW + 10).await.unwrap();
+        assert_eq!(fake.asked.lock().unwrap().len(), 1);
+        // Disconnected (or signed out): no token, though the cached one has most of its hour left.
+        *fake.connection.lock().unwrap() = Err(TokenError::NoGithubAccount);
+        assert_eq!(tokens.token_for(&fake, &w, NOW + 20).await.unwrap_err(), TokenError::NoGithubAccount);
+        assert_eq!(tokens.cached(), 0);
+        // Connected again as the same account: asked afresh, not served from before.
+        *fake.connection.lock().unwrap() = Ok("acct-1".to_string());
+        tokens.token_for(&fake, &w, NOW + 30).await.unwrap();
+        assert_eq!(fake.asked.lock().unwrap().len(), 2);
+        // Another account: asked afresh too.
+        *fake.connection.lock().unwrap() = Ok("acct-2".to_string());
+        tokens.token_for(&fake, &w, NOW + 40).await.unwrap();
+        assert_eq!(fake.asked.lock().unwrap().len(), 3);
     }
 
     #[tokio::test]

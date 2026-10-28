@@ -90,6 +90,10 @@ pub fn repo_of_gh_command(args: &[String], env_repo: Option<&str>, origin_url: i
         for a in &args[1..] {
             let p = a.trim_start_matches('/');
             if let Some(rest) = p.strip_prefix("repos/") {
+                // gh fills `{owner}/{repo}` from the working directory's repository.
+                if rest.starts_with("{owner}/{repo}") {
+                    return repo_of_default(&origin_url()?);
+                }
                 if let Some(found) = owner_repo_of_path(rest) {
                     return Some(found);
                 }
@@ -100,7 +104,28 @@ pub fn repo_of_gh_command(args: &[String], env_repo: Option<&str>, origin_url: i
     if matches!(args.first().map(String::as_str), None | Some("--version" | "--help" | "help" | "version" | "auth" | "config" | "completion" | "alias" | "extension" | "ext" | "gist" | "search")) {
         return None;
     }
-    repo_of_remote(&origin_url()?)
+    repo_of_default(&origin_url()?)
+}
+
+/// The repository for what [`default_repo_source`] found: a remote's URL, or an `OWNER/REPO` set with
+/// `gh repo set-default`.
+fn repo_of_default(source: &str) -> Option<(String, String)> {
+    repo_of_remote(source).or_else(|| repo_of_spec(source))
+}
+
+/// What `gh` takes as the default repository, from the lines of
+/// `git config --get-regexp '^remote\..*\.gh-resolved$'` (`gh repo set-default`, and a fork cloned
+/// with `gh repo clone`): `Ok(OWNER/REPO)` as set, `Err(remote)` for "the repository of that remote".
+pub fn resolved_default(config_lines: &str) -> Option<Result<String, String>> {
+    config_lines.lines().find_map(|line| {
+        let (key, value) = line.trim().split_once(char::is_whitespace)?;
+        let remote = key.strip_prefix("remote.")?.strip_suffix(".gh-resolved")?;
+        match value.trim() {
+            "" | "other" => None,
+            "base" => Some(Err(remote.to_string())),
+            repo => Some(Ok(repo.to_string())),
+        }
+    })
 }
 
 /// `[HOST/]OWNER/REPO`; a host other than github.com is not ours.
@@ -177,15 +202,21 @@ pub fn run_git_credential(op: &str) -> i32 {
 /// none, say why on stderr (when there is a repository) and print nothing.
 pub fn run_github_token(gh_args: &[String]) -> i32 {
     let env_repo = std::env::var("GH_REPO").ok();
-    let origin = || {
+    let git_config = |args: &[&str]| {
         let mut cmd = std::process::Command::new("git");
-        cmd.args(["config", "--get", "remote.origin.url"]).stdin(std::process::Stdio::null()).stderr(std::process::Stdio::null());
+        cmd.arg("config").args(args).stdin(std::process::Stdio::null()).stderr(std::process::Stdio::null());
         // Windows: git is a console program, and this process has no console of its own.
         cmd.no_window();
         let out = cmd.output().ok()?;
         out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
     };
-    let Some((owner, repo)) = repo_of_gh_command(gh_args, env_repo.as_deref(), origin) else {
+    // The repository `gh` itself would act on: the one it was told (set-default, a cloned fork's parent), else `origin`.
+    let default_repo = || match resolved_default(&git_config(&["--get-regexp", r"^remote\..*\.gh-resolved$"]).unwrap_or_default()) {
+        Some(Ok(spec)) => Some(spec),
+        Some(Err(remote)) => git_config(&["--get", &format!("remote.{remote}.url")]),
+        None => git_config(&["--get", "remote.origin.url"]),
+    };
+    let Some((owner, repo)) = repo_of_gh_command(gh_args, env_repo.as_deref(), default_repo) else {
         return 0;
     };
     match ask(&owner, &repo) {
@@ -274,6 +305,14 @@ mod tests {
     }
 
     #[test]
+    fn gh_resolved_names_the_default_repository() {
+        assert_eq!(resolved_default("remote.upstream.gh-resolved base\nremote.origin.gh-resolved other"), Some(Err("upstream".to_string())));
+        assert_eq!(resolved_default("remote.origin.gh-resolved octo/hello"), Some(Ok("octo/hello".to_string())));
+        assert_eq!(resolved_default("remote.origin.gh-resolved other"), None);
+        assert_eq!(resolved_default(""), None);
+    }
+
+    #[test]
     fn git_asks_with_key_value_lines_and_a_path() {
         let input = "protocol=https\nhost=github.com\npath=octo/hello.git\n\nignored=after-blank\n";
         let r = parse_request(input);
@@ -327,6 +366,10 @@ mod tests {
         assert_eq!(repo_of_gh_command(&args(&["pr", "list", "--repo=octo/hello"]), None, origin), repo("octo", "hello"));
         assert_eq!(repo_of_gh_command(&args(&["pr", "list"]), Some("env/repo"), origin), repo("env", "repo"));
         assert_eq!(repo_of_gh_command(&args(&["api", "repos/octo/hello/pulls"]), None, origin), repo("octo", "hello"));
+        // gh fills the placeholders from the working directory's repository.
+        assert_eq!(repo_of_gh_command(&args(&["api", "repos/{owner}/{repo}/issues"]), None, origin), repo("home", "checkout"));
+        // The repository set with `gh repo set-default` is a spec, not a URL.
+        assert_eq!(repo_of_gh_command(&args(&["pr", "create"]), None, || Some("up/stream".to_string())), repo("up", "stream"));
         assert_eq!(repo_of_gh_command(&args(&["api", "/repos/octo/hello/issues", "-f", "title=x"]), None, origin), repo("octo", "hello"));
         // A repository on another host isn't ours to give a token for.
         assert_eq!(repo_of_gh_command(&args(&["pr", "list", "-R", "ghe.example.com/octo/hello"]), None, origin), None);
