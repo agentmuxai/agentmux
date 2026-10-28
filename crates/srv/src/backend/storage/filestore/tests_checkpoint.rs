@@ -87,12 +87,14 @@ fn a_checkpoint_still_runs_promptly_when_writes_resume_after_a_long_quiet_stretc
     std::thread::sleep(Duration::from_millis(700));
     assert_eq!(checkpointer.runs(), 0);
 
-    let resumed = Instant::now();
     write_until(&conn, &shm, FRAMES_THRESHOLD);
+    // From the end of the burst: the burst itself is a few MB of writes, which a slow disk (a CI runner's)
+    // takes seconds over, and the checkpointer may have run during it.
+    let resumed = Instant::now();
     wait_for("a checkpoint after the writes resumed", || checkpointer.runs() >= 1);
     assert!(
         resumed.elapsed() < Duration::from_secs(2),
-        "took {:?}: the slowest wait is 80 ms, so a few looks at most",
+        "took {:?} after the writes: the slowest wait is 80 ms, so a few looks at most",
         resumed.elapsed()
     );
     wait_for("the backlog to be copied back", || wal_backlog(&shm) == Some(0));
