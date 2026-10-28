@@ -181,6 +181,20 @@ impl Registry {
         })
     }
 
+    /// Nobody reviewed it in time: `asked` becomes `pending` with no approver, and the person's
+    /// veto is the only check.
+    pub fn fallback(&self, id: &str, now_ms: i64) -> Result<Request, String> {
+        self.change(id, |r| {
+            if r.status != Status::Asked {
+                return Err(not_asked(r));
+            }
+            r.status = Status::Pending;
+            r.decided_by = None;
+            r.decided_ms = Some(now_ms);
+            Ok(())
+        })
+    }
+
     /// The super agent denies: `asked` ends, with its reason for the requester.
     pub fn deny(&self, id: &str, approver_slug: &str, reason: &str, now_ms: i64) -> Result<Request, String> {
         self.change(id, |r| {
@@ -268,6 +282,11 @@ impl Registry {
 }
 
 impl Request {
+    /// The agents that asked for this: the first, then those that joined.
+    pub fn askers(&self) -> Vec<&str> {
+        std::iter::once(self.requester_uid.as_str()).chain(self.also_asked_by.iter().map(|a| a.uid.as_str())).collect()
+    }
+
     /// Whether `uid` asked for this, first or by joining.
     pub fn asked_by(&self, uid: &str) -> bool {
         self.requester_uid == uid || self.also_asked_by.iter().any(|a| a.uid == uid)
