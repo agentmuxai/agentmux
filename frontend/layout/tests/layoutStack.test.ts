@@ -651,6 +651,38 @@ describe("layoutStack", () => {
             expect(onNodeDelete).toHaveBeenCalledWith(expect.objectContaining({ blockId: "b1" }));
         });
 
+        it("closes a pane once at a time: a second close while the first is asking does nothing", async () => {
+            const model = createLayoutModel();
+            const nodeId = insertRootBlock(model, "b1");
+            const onNodeDelete = vi.fn().mockResolvedValue(undefined);
+            model.onNodeDelete = onNodeDelete;
+            let answer!: (close: boolean) => void;
+            const beforeNodeDelete = vi.fn(() => new Promise<boolean>((resolve) => (answer = resolve)));
+            model.beforeNodeDelete = beforeNodeDelete;
+
+            const first = closeNode(model, nodeId);
+            await closeNode(model, nodeId); // the second click: returns at once
+            expect(beforeNodeDelete).toHaveBeenCalledTimes(1);
+
+            answer(true);
+            await first;
+            expect(onNodeDelete).toHaveBeenCalledTimes(1);
+        });
+
+        it("a close that was kept can be tried again", async () => {
+            const model = createLayoutModel();
+            const nodeId = insertRootBlock(model, "b1");
+            const onNodeDelete = vi.fn().mockResolvedValue(undefined);
+            model.onNodeDelete = onNodeDelete;
+            model.beforeNodeDelete = vi.fn().mockResolvedValueOnce(false).mockResolvedValue(true);
+
+            await closeNode(model, nodeId); // answered No: the pane stays
+            expect(model.treeState.rootNode).toBeDefined();
+            await closeNode(model, nodeId);
+            expect(model.treeState.rootNode).toBeUndefined();
+            expect(onNodeDelete).toHaveBeenCalledTimes(1);
+        });
+
         it("is a no-op — does NOT close the pane — when blockId doesn't match a non-stacked leaf's block", async () => {
             // Review finding: the stack.length<=1 branch used to delegate to
             // closeNode(nodeId) unconditionally, without checking blockId

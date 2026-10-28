@@ -18,6 +18,11 @@ import { beginShutdownLog, endShutdownLog, failShutdownLog } from "./shutdown-lo
  * rejection (ReAgent P1 on #3784).
  */
 export function closeWithShutdownLog(tabId: string, blockIds: string[], isAgent: (blockId: string) => boolean): Promise<void> {
+    // One close per block at a time: the agent takes a while to stop, and a second click on the
+    // pane's × meanwhile asked srv to close blocks it was already closing, which came back as a
+    // failure (a red notice) for a close that was working. The first one's log is the answer.
+    if (blockIds.some((id) => closing.has(id))) return Promise.resolve();
+    for (const id of blockIds) closing.add(id);
     const agentIds = blockIds.filter(isAgent);
     for (const id of agentIds) beginShutdownLog(id);
     return services.ObjectService.ClosePane(blockIds, true).then(
@@ -43,5 +48,10 @@ export function closeWithShutdownLog(tabId: string, blockIds: string[], isAgent:
                 expiration: Date.now() + 10_000,
             });
         },
-    );
+    ).finally(() => {
+        for (const id of blockIds) closing.delete(id);
+    });
 }
+
+/** The blocks whose close (`ClosePane`) has not answered yet. */
+const closing = new Set<string>();
