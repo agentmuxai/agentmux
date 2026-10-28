@@ -89,6 +89,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     libdbus-1-3 \
     libxcb1 \
+    python3 \
+    && rm -rf /var/lib/apt/lists/*
+
+# The GitHub CLI, from GitHub's own apt repository (the keyring is fetched over HTTPS and pinned by
+# apt's signed-by). It is free software; agents use it for issues and PRs from inside the sandbox.
+# The host's GitHub tokens are not passed in (container_exec_env), so `gh auth login` is the agent's own.
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list \
+    && apt-get update && apt-get install -y --no-install-recommends gh \
     && rm -rf /var/lib/apt/lists/*
 
 # node:24-slim ships a 'node' user at UID 1000. Rename it to 'agent' for clarity
