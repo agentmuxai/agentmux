@@ -118,13 +118,16 @@ pub struct AgentStartResult {
 pub const STARTS_ON_FIRST_MESSAGE: &str = "starts_on_first_message";
 
 /// What a viewer sees of an agent that the availability view calls stopped but its block says should
-/// run: it is waiting for a message to start it, which is `idle`. Anything else is as it was.
+/// run and a controller holds: it is waiting for a message to start it, which is `idle`. With no
+/// controller (the server restarted and nothing resumed it yet) it stays `stopped`: the Swarm lists
+/// only controller-backed agents as live, so an idle row there would be listed nowhere, with no Start.
 pub fn wanted_running_is_idle(
     state: AgentRuntimeState,
     detail: Option<String>,
     desired: AgentDesiredState,
+    has_controller: bool,
 ) -> (AgentRuntimeState, Option<String>) {
-    if state == AgentRuntimeState::Stopped && desired == AgentDesiredState::Running {
+    if state == AgentRuntimeState::Stopped && desired == AgentDesiredState::Running && has_controller {
         (AgentRuntimeState::Idle, Some(STARTS_ON_FIRST_MESSAGE.to_string()))
     } else {
         (state, detail)
@@ -187,7 +190,8 @@ pub(crate) fn list(state: &AppState, now_ms: u64) -> Vec<AgentRuntime> {
             let (runtime_state, detail, resets_at) = state_of(&availability_of_block(mstore, live.as_deref(), now_ms));
             let (color, recorded) = block_id.as_deref().map(|b| block_facts(mstore, b)).unwrap_or_default();
             let desired = desired_from(recorded.as_deref(), runtime_state);
-            let (runtime_state, detail) = wanted_running_is_idle(runtime_state, detail, desired);
+            let has_controller = block_id.as_deref().is_some_and(|b| crate::backend::blockcontroller::get_controller(b).is_some());
+            let (runtime_state, detail) = wanted_running_is_idle(runtime_state, detail, desired, has_controller);
             AgentRuntime {
                 color,
                 agent_id: d.id,
@@ -347,7 +351,7 @@ mod tests {
     /// A headless agent whose process ended without a stop: its parked block is in no tab, still records
     /// that it should run, and is the block a viewer opens.
     #[tokio::test]
-    async fn a_parked_block_keeps_its_agent_wanted_running_after_the_process_ended() {
+    async fn a_parked_block_with_no_controller_keeps_its_agent_wanted_running_but_stopped() {
         let state = crate::server::tests::test_state();
         let mut def: crate::backend::storage::AgentDefinition = serde_json::from_value(serde_json::json!({
             "id": "def-rt-2", "slug": "rt-two", "name": "Rt Two", "icon": "robot", "provider": "claude",
@@ -363,21 +367,24 @@ mod tests {
         state.mstore.insert(&mut block).unwrap();
         let rows = list(&state, 10_000);
         let one = rows.iter().find(|r| r.agent_id == "def-rt-2").expect("the agent is listed");
-        assert_eq!((one.state, one.desired), (AgentRuntimeState::Idle, AgentDesiredState::Running));
-        assert_eq!(one.detail.as_deref(), Some("starts_on_first_message"));
+        // No controller holds it (a restart): stopped, still wanted running, so the Swarm offers Start.
+        assert_eq!((one.state, one.desired), (AgentRuntimeState::Stopped, AgentDesiredState::Running));
+        assert!(one.detail.is_none());
         assert_eq!(one.block_id.as_deref(), Some(block.oid.as_str()));
     }
 
     #[test]
     fn an_agent_wanted_running_with_no_process_is_idle_and_says_it_starts_on_its_first_message() {
         use AgentRuntimeState as S;
-        let (state, detail) = wanted_running_is_idle(S::Stopped, None, AgentDesiredState::Running);
+        let (state, detail) = wanted_running_is_idle(S::Stopped, None, AgentDesiredState::Running, true);
         assert_eq!((state, detail.as_deref()), (S::Idle, Some("starts_on_first_message")));
         // Stopped on purpose, or with nothing said (a block from before the feature): as it was.
-        assert_eq!(wanted_running_is_idle(S::Stopped, None, AgentDesiredState::Stopped), (S::Stopped, None));
+        assert_eq!(wanted_running_is_idle(S::Stopped, None, AgentDesiredState::Stopped, true), (S::Stopped, None));
+        // Wanted running with no controller (after a restart): still stopped, so the Swarm lists it with Start.
+        assert_eq!(wanted_running_is_idle(S::Stopped, None, AgentDesiredState::Running, false), (S::Stopped, None));
         // The other states keep their place, and their reason.
         for kept in [S::Error, S::Limited, S::SignedOut, S::WaitingOnUser, S::Working, S::Idle] {
-            let (state, detail) = wanted_running_is_idle(kept, Some("why".into()), AgentDesiredState::Running);
+            let (state, detail) = wanted_running_is_idle(kept, Some("why".into()), AgentDesiredState::Running, true);
             assert_eq!((state, detail.as_deref()), (kept, Some("why")));
         }
     }
