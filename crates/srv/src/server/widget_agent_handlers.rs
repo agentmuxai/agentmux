@@ -186,7 +186,16 @@ pub(super) async fn handle_widgets_install(State(state): State<AppState>, Json(b
     // so the person is asked, as before.
     if let Some(uid) = pane.as_ref().and_then(|_| crate::backend::reactive::get_global_handler().get_agent(&agent)).and_then(|r| r.uid) {
         let reason = format!("install the widget {} for the user", pkg.name);
-        return match super::sensitive_handlers::file_request(&state, &uid, &agent, "widget_install", &install_facts(&pkg), &reason).await {
+        let facts = install_facts(&pkg);
+        // The person is shown every permission, never a shortened list: too many to show whole is
+        // refused, and the agent is told what to do.
+        if facts["permissions"].chars().count() > crate::backend::sensitive_ops::VALUE_MAX {
+            return error(
+                StatusCode::BAD_REQUEST,
+                format!("{id} asks for too many permissions to show the person whole ({} characters, at most {}); ask for fewer and install again", facts["permissions"].chars().count(), crate::backend::sensitive_ops::VALUE_MAX),
+            );
+        }
+        return match super::sensitive_handlers::file_request(&state, &uid, &agent, "widget_install", &facts, &reason).await {
             Ok(filed) => {
                 let request_id = filed["id"].as_str().unwrap_or_default().to_string();
                 remember_target(&request_id, InstallTarget { id: id.clone(), hash: pkg.hash.clone(), signer: pkg.signature.fingerprint.clone().unwrap_or_default() });
