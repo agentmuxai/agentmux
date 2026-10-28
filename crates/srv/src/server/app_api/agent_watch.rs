@@ -193,8 +193,10 @@ fn read_lines(state: &AppState, block_id: &str, after: Option<u64>, max: usize) 
                     reset = true;
                     break;
                 }
-                let lines = lines_of(&data, at as u64, false, false, max);
+                let mut lines = lines_of(&data, at as u64, false, false, max);
                 if !lines.lines.is_empty() || lines.next > after as u64 || after + len >= size {
+                    // Bytes past this window are still to read, even when it held few lines.
+                    lines.more |= at + (data.len() as i64) < size;
                     return Ok(Read { lines, reset: false, archived });
                 }
                 if len >= MAX_SCAN_BYTES {

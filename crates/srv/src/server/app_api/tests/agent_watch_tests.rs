@@ -204,3 +204,22 @@ after
     let (_, body) = call(&state, Some("wl-caller"), json!({ "agent": "wl-huge", "after": next })).await;
     assert_eq!(lines(&body), ["after"]);
 }
+
+/// `more` counts the bytes past the window too: a watcher that drains while it is true reaches the end.
+#[tokio::test]
+async fn more_is_true_while_unread_bytes_remain_past_the_window() {
+    let state = test_state();
+    let (_ws, tabs) = seed_workspace(&state, 1).await;
+    seed_agent_block(&state, &tabs[0], "wm-caller").await;
+    let block = seed_agent_block(&state, &tabs[0], "wm-target").await;
+    append(&state, &block, &format!("short
+{}
+last
+", "x".repeat(600 * 1024)));
+    let (_, first) = call(&state, Some("wm-caller"), json!({ "agent": "wm-target", "after": 0 })).await;
+    assert_eq!(lines(&first), ["short"]);
+    assert_eq!(first["more"], true, "two lines remain");
+    let (_, second) = call(&state, Some("wm-caller"), json!({ "agent": "wm-target", "after": first["next"] })).await;
+    assert_eq!(lines(&second).len(), 2);
+    assert_eq!(second["more"], false);
+}
