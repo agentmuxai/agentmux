@@ -196,6 +196,9 @@ async fn app_main() {
     // Idle agents with no view are stopped after the window (agents:always_available).
     server::agent_lifecycle::install(&state);
 
+    // Parked agents that were running when srv stopped are resumed, a few seconds apart (agents:always_available).
+    server::restart_resume::install(&state);
+
     // The helper install asks first (SPEC_REMOTES_PANE_2026_10_05.md §4.9).
     server::app_api::connections::install_helper_consent(&state);
 

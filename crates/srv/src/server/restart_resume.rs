@@ -1,0 +1,120 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+//! Restart resume (SPEC_ALWAYS_AVAILABLE_AGENTS_2026_10_27.md D7). An agent that is running when srv stops
+//! has a process only while srv lives. A pane in a tab is brought back by the window that shows it
+//! (`controller_backstop` covers the ones no window opens); an agent with no pane has no window at all, so
+//! this resumes it: the parked blocks whose agent was wanted running and was active within its idle window.
+//!
+//! It resumes the most recently active first, one start at a time with a pause between, through
+//! `start_agent`: the same spawn gate, per-account warm-up slot and start limit as any other start. It
+//! stops at the cap instead of making room (`agent_lifecycle::has_room`), so a long list does not stop the
+//! agents it just resumed. Left stopped, and started by their first message or by being opened: an agent
+//! with no session to resume (it starts lazily anyway), one the user stopped, one that was idle past its
+//! window, one signed out or out of quota, and one a terminal view starts.
+
+use std::time::Duration;
+
+use crate::backend::agent_session::{agent_current_zone, is_valid_definition_id, OUTPUT_FILE};
+use crate::backend::blockcontroller;
+use crate::backend::obj;
+
+use super::app_api::agent_attach::{desired_of, DESIRED_RUNNING};
+use super::AppState;
+
+/// How long after startup the resume runs: after the windows reconnect and `controller_backstop` ran.
+const DELAY: Duration = Duration::from_secs(90);
+/// Between two starts, so a long list does not start in one burst.
+const GAP: Duration = Duration::from_secs(3);
+
+/// Resume once, [`DELAY`] after startup.
+pub(crate) fn install(state: &AppState) {
+    let state = state.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(DELAY).await;
+        let n = run_once(&state).await;
+        if n > 0 {
+            tracing::info!(resumed = n, "restart resume: started the parked agents that were running");
+        }
+    });
+}
+
+/// A parked agent that should come back: its definition id and its block.
+#[derive(Debug, PartialEq)]
+struct Candidate {
+    uid: String,
+    block_id: String,
+    last_active_ms: u64,
+}
+
+/// Whether an agent last active at `last_active_ms` is within `window` of `now` (`None`: no window, so
+/// any agent that ran is).
+fn active_within(last_active_ms: u64, now_ms: u64, window_ms: Option<u64>) -> bool {
+    window_ms.is_none_or(|w| now_ms.saturating_sub(last_active_ms) <= w)
+}
+
+/// When the agent's transcript was last written (ms): its last turn. `None` when it has none.
+fn last_active_ms(state: &AppState, uid: &str) -> Option<u64> {
+    if !is_valid_definition_id(uid) {
+        return None;
+    }
+    let file = state.filestore.stat(&agent_current_zone(uid), OUTPUT_FILE).ok().flatten()?;
+    Some(file.modts.max(0) as u64)
+}
+
+/// The parked agent blocks to resume, most recently active first.
+fn candidates(state: &AppState) -> Vec<Candidate> {
+    let Ok(blocks) = super::app_api::agent_block::blocks_in_tabs_or_parked(&state.mstore) else {
+        return Vec::new();
+    };
+    let now = agentmux_common::time::now_ms_u64();
+    let mut found: Vec<Candidate> = blocks
+        .into_iter()
+        .filter(|(_, tab)| tab.is_none())
+        .filter_map(|(block, _)| {
+            let wanted = crate::sagas::park_agents::is_parkable(state, &block.oid)
+                && desired_of(&block).as_deref() == Some(DESIRED_RUNNING)
+                && !obj::meta_get_string(&block.meta, "agent:sessionid", "").is_empty()
+                && blockcontroller::get_controller(&block.oid).is_none()
+                && !super::controller_backstop::runs_in_a_terminal_view(&block)
+                && !super::controller_backstop::failed_on_its_account(&block);
+            if !wanted {
+                return None;
+            }
+            let uid = crate::sagas::park_agents::agent_of_block(state, &block.oid, &block)?.id;
+            let last_active_ms = last_active_ms(state, &uid)?;
+            let window = super::agent_lifecycle::idle_window_of(state, &block);
+            active_within(last_active_ms, now, window).then_some(Candidate { uid, block_id: block.oid, last_active_ms })
+        })
+        .collect();
+    found.sort_by(|a, b| b.last_active_ms.cmp(&a.last_active_ms).then_with(|| a.uid.cmp(&b.uid)));
+    found.dedup_by(|a, b| a.uid == b.uid);
+    found
+}
+
+/// Resume the agents [`candidates`] names. Returns how many started.
+pub(crate) async fn run_once(state: &AppState) -> usize {
+    if !crate::sagas::park_agents::enabled(state) {
+        return 0;
+    }
+    let mut started = 0;
+    for c in candidates(state) {
+        if !super::agent_lifecycle::has_room(state) {
+            tracing::info!("restart resume: at the cap or the commit limit; the rest stay stopped and start on their first message");
+            break;
+        }
+        // A message or a window may have started it while this ran.
+        if blockcontroller::get_controller(&c.block_id).is_some() {
+            continue;
+        }
+        match super::app_api::agent_attach::start_agent(state, &c.uid).await {
+            Ok(_) => started += 1,
+            Err(e) => tracing::warn!(agent = %c.uid, "restart resume: could not start it: {e}"),
+        }
+        tokio::time::sleep(GAP).await;
+    }
+    started
+}
+
+#[cfg(test)]
+mod tests;

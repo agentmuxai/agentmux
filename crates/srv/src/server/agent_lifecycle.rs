@@ -108,6 +108,22 @@ fn idle_from_view_lost(lost: &mut HashMap<String, u64>, lives: &mut [Live], now:
     }
 }
 
+/// The block's own idle window: `Some(None)` never stop it, `Some(Some(ms))` its own window.
+pub(crate) fn idle_override_of(block: &obj::Block) -> Option<Option<u64>> {
+    block.meta.get(META_IDLE_STOP_MINUTES).and_then(|v| v.as_f64()).map(|m| (m > 0.0).then(|| (m * 60_000.0) as u64))
+}
+
+/// The idle window that applies to `block`: its own, else the default (`None`: no window).
+pub(crate) fn idle_window_of(state: &AppState, block: &obj::Block) -> Option<u64> {
+    idle_override_of(block).unwrap_or(policy(state).idle_stop_ms)
+}
+
+/// Whether one more agent fits under the cap and the commit limit as things are, without stopping any.
+pub(crate) fn has_room(state: &AppState) -> bool {
+    let live = live_agents(state);
+    over_limit(&policy(state), live.len() + pending_not_running(state, &live), commit_used_pct()).is_none()
+}
+
 /// The agent processes running now, one per agent block that has a live controller.
 pub(crate) fn live_agents(state: &AppState) -> Vec<Live> {
     let mstore = &state.mstore;
@@ -125,7 +141,7 @@ pub(crate) fn live_agents(state: &AppState) -> Vec<Live> {
             let agent = crate::sagas::park_agents::agent_of_block(state, &block.oid, &block)?;
             let slug = mstore.agent_def_get(&agent.id).ok().flatten().map(|d| d.slug).filter(|s| !s.is_empty());
             let status = agent_status_of_block(mstore, &block.oid);
-            let idle_override = block.meta.get(META_IDLE_STOP_MINUTES).and_then(|v| v.as_f64()).map(|m| (m > 0.0).then(|| (m * 60_000.0) as u64));
+            let idle_override = idle_override_of(&block);
             Some(Live {
                 block_id: block.oid.clone(),
                 agent_id: slug.unwrap_or_else(|| agent.id.clone()),
