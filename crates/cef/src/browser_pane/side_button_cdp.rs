@@ -31,10 +31,16 @@
 //! domain takes over the page's JavaScript dialogs from the host's own handler
 //! (`client::jsdialog`). Enabling `Runtime` has no such effect.
 //!
+//! An iframe from another site runs in its own process and is its own CDP
+//! target, which the page's session can't create a world in. `ensure` therefore
+//! also turns on auto-attach (`CdpSession::attach_frames`, the way the forms
+//! snapshot reaches such frames), and does for each attached frame's session
+//! what it does for the page's: the binding, then the world and the listener in
+//! each of its frames. A new frame attaching (`Target.attachedToTarget`, seen by
+//! [`note_event`]) runs `ensure` again, because the host's commit callback can
+//! come before the attach.
+//!
 //! Limits, as recorded in the spec's P3 (each one tried on Linux, X11):
-//! - a frame in another process (a cross-site iframe) is its own CDP target,
-//!   which this page-target session can't create a world in: a press over one
-//!   acts as the page's own (Chromium navigates back, no event);
 //! - the listener is added once a document has committed, a few milliseconds
 //!   after it starts, so a page listener registered in that window runs first:
 //!   the press is still claimed (Chromium doesn't navigate and the window gets
@@ -74,9 +80,13 @@ struct Pane {
 struct Inner {
     /// `Runtime.enable` and the binding are in place on the current DevTools session.
     ready: bool,
+    /// The attached frame sessions (cross-site iframes) that have the binding.
+    sessions_ready: HashSet<String>,
     /// `(frame id, loader id)` of the documents the listener was already added to.
     injected: HashSet<(String, String)>,
 }
+
+type Key = (String, String);
 
 /// The panes with the route, by browser id.
 static PANES: LazyLock<Mutex<HashMap<i32, Arc<Pane>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
@@ -138,43 +148,84 @@ fn spawn_ensure(pane: Arc<Pane>) {
 fn spawn_ensure_after_reset(pane: Arc<Pane>) {
     let Some(rt) = super::auth::runtime() else { return };
     rt.spawn(async move {
-        pane.inner.lock().await.ready = false;
+        {
+            let mut inner = pane.inner.lock().await;
+            inner.ready = false;
+            inner.sessions_ready.clear();
+        }
         ensure(&pane).await
     });
 }
 
 /// Make sure the session is set up, then add the listener to every frame of
-/// the page that doesn't have it for its current document.
+/// the page that doesn't have it for its current document, in the page's own
+/// process and in the processes of its cross-site iframes.
 async fn ensure(pane: &Pane) {
-    let mut inner = pane.inner.lock().await;
+    let mut guard = pane.inner.lock().await;
+    let inner = &mut *guard;
     let mut cdp = CdpSession::attach(&pane.state, &pane.label);
     if !inner.ready {
-        let setup = [
-            ("Runtime.enable", json!({})),
-            ("Runtime.addBinding", json!({ "name": BINDING, "executionContextName": WORLD })),
-        ];
-        for (method, params) in setup {
-            if let Err(e) = cdp.call(method, params).await {
-                tracing::warn!(label = %pane.label, error = %e, "[side-button] couldn't set up the pane ({method})");
-                return;
-            }
+        if !bind(&pane.label, &mut cdp).await {
+            return;
         }
         inner.ready = true;
     }
+    // Before the page's own frames: the ones this finds are reached through
+    // their own sessions, not the page's.
+    let targets = cdp.attach_frames().await;
+    let remote: HashSet<String> = targets.iter().map(|t| t.target_id.clone()).collect();
+    let mut live = HashSet::new();
+    inject_frames(&pane.label, &mut cdp, &mut inner.injected, &mut live, &remote).await;
+    inner.sessions_ready.retain(|s| targets.iter().any(|t| &t.session_id == s));
+    for target in &targets {
+        let mut on = cdp.in_session(Some(&target.session_id));
+        if !inner.sessions_ready.contains(&target.session_id) {
+            if !bind(&pane.label, &mut on).await {
+                continue;
+            }
+            inner.sessions_ready.insert(target.session_id.clone());
+        }
+        inject_frames(&pane.label, &mut on, &mut inner.injected, &mut live, &HashSet::new()).await;
+    }
+    inner.injected.retain(|k| live.contains(k));
+}
+
+/// `Runtime.enable` and the binding on `cdp`'s session: every session has its
+/// own. False when it couldn't be set up.
+async fn bind(label: &str, cdp: &mut CdpSession) -> bool {
+    let setup = [
+        ("Runtime.enable", json!({})),
+        ("Runtime.addBinding", json!({ "name": BINDING, "executionContextName": WORLD })),
+    ];
+    for (method, params) in setup {
+        if let Err(e) = cdp.call(method, params).await {
+            tracing::warn!(label = %label, error = %e, "[side-button] couldn't set up the pane ({method})");
+            return false;
+        }
+    }
+    true
+}
+
+/// Add the listener to each frame in `cdp`'s session's tree that isn't in
+/// `injected` for its current document, except the ids in `skip` (frames
+/// reached through another session). Every frame seen goes into `live`.
+async fn inject_frames(label: &str, cdp: &mut CdpSession, injected: &mut HashSet<Key>, live: &mut HashSet<Key>, skip: &HashSet<String>) {
     let Ok(tree) = cdp.call("Page.getFrameTree", json!({})).await else { return };
-    let frames = frames_of(&tree);
-    inner.injected.retain(|k| frames.contains(k));
-    for key in frames {
-        // Marked first: a frame this session can't reach (another process) would fail again each time.
-        if !inner.injected.insert(key.clone()) {
+    for key in frames_of(&tree) {
+        if skip.contains(&key.0) {
+            continue;
+        }
+        live.insert(key.clone());
+        // Marked first: a frame this session can't reach would fail again each time.
+        if !injected.insert(key.clone()) {
             continue;
         }
         let world = cdp.call("Page.createIsolatedWorld", json!({ "frameId": key.0, "worldName": WORLD })).await;
         let Some(context) = world.ok().and_then(|w| w.get("executionContextId").and_then(Value::as_i64)) else { continue };
         let params = json!({ "contextId": context, "expression": SCRIPT, "returnByValue": true });
         match cdp.call("Runtime.evaluate", params).await {
-            Ok(_) => tracing::debug!(label = %pane.label, frame = %key.0, "[side-button] listener added"),
-            Err(e) => tracing::warn!(label = %pane.label, error = %e, "[side-button] couldn't add the listener to a frame"),
+            Ok(_) => tracing::debug!(label = %label, frame = %key.0, "[side-button] listener added"),
+            Err(e) => tracing::warn!(label = %label, error = %e, "[side-button] couldn't add the listener to a frame"),
         }
     }
 }
@@ -201,11 +252,20 @@ fn frames_of(tree: &Value) -> Vec<(String, String)> {
 }
 
 /// A raw DevTools message the observer for `browser_id` saw: act on our
-/// binding's call, ignore the rest. Cheap for the common case (a substring
-/// test) because every CDP event of every pane passes through here.
+/// binding's call, ignore the rest, except a frame attaching, which means a
+/// cross-site iframe to add the listener to. Cheap for the common case (a
+/// substring test) because every CDP event of every pane passes through here.
 pub fn note_event(browser_id: i32, message: &[u8]) {
-    const MARK: &[u8] = b"Runtime.bindingCalled";
-    if !message.windows(MARK.len()).any(|w| w == MARK) {
+    const BINDING_CALLED: &[u8] = b"Runtime.bindingCalled";
+    const ATTACHED: &[u8] = b"Target.attachedToTarget";
+    let has = |mark: &[u8]| message.windows(mark.len()).any(|w| w == mark);
+    if has(ATTACHED) {
+        if is_event(message, "Target.attachedToTarget") {
+            on_frame_attached(browser_id);
+        }
+        return;
+    }
+    if !has(BINDING_CALLED) {
         return;
     }
     let Ok(msg) = serde_json::from_slice::<Value>(message) else { return };
@@ -220,6 +280,20 @@ pub fn note_event(browser_id: i32, message: &[u8]) {
     let Some(press) = parse_press(payload) else { return };
     let Some(pane) = PANES.lock().get(&browser_id).cloned() else { return };
     act(&pane, press);
+}
+
+/// Whether `message` is the DevTools event `method`.
+fn is_event(message: &[u8], method: &str) -> bool {
+    serde_json::from_slice::<Value>(message).ok().and_then(|m| m.get("method").and_then(Value::as_str).map(|m| m == method)) == Some(true)
+}
+
+/// A frame in its own process attached to the pane's page: it has no listener
+/// yet.
+fn on_frame_attached(browser_id: i32) {
+    let pane = PANES.lock().get(&browser_id).cloned();
+    if let Some(pane) = pane {
+        spawn_ensure(pane);
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -330,6 +404,18 @@ mod tests {
             [("main", "L1"), ("a", "L2"), ("a1", "L3"), ("b", "")].map(|(f, l)| (f.to_string(), l.to_string()))
         );
         assert!(frames_of(&json!({})).is_empty());
+    }
+
+    #[test]
+    fn a_frame_attaching_is_told_from_text_that_only_mentions_it() {
+        let attached = br#"{"method":"Target.attachedToTarget","params":{"sessionId":"S","targetInfo":{"targetId":"T","type":"iframe"}}}"#;
+        assert!(is_event(attached, "Target.attachedToTarget"));
+        let mention = br#"{"method":"Runtime.consoleAPICalled","params":{"args":[{"value":"Target.attachedToTarget"}]}}"#;
+        assert!(!is_event(mention, "Target.attachedToTarget"));
+        assert!(!is_event(b"Target.attachedToTarget but not json", "Target.attachedToTarget"));
+        // Neither of these has a pane registered for the browser: nothing to start.
+        note_event(987_655, attached);
+        note_event(987_655, mention);
     }
 
     #[test]

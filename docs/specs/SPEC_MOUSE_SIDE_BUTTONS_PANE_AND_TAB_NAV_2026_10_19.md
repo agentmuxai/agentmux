@@ -244,9 +244,12 @@ second limit below.
   navigation of the pane (a new process) gets a new world and works; the host's own error page works; a same-site iframe works.
 
 **Limits** (each one tried):
-- **Cross-site iframes:** they run in their own process and CDP target, which the page target's session can't create a world in.
-  A press over one acts as the page's own: Chromium navigates the page back and the window gets no event. Reaching them means the
-  same injection in every attached frame session (`CdpSession::attach_frames`), which is not built.
+- **Cross-site iframes** (built after the first P3): they run in their own process and CDP target, which the page target's session
+  can't create a world in. The route now also turns on auto-attach (`CdpSession::attach_frames`, as the forms snapshot does) and,
+  for each attached frame's session, adds the binding, then the world and the listener in each of its frames. A frame attaching
+  (`Target.attachedToTarget`) runs the setup again, because the host's commit callback can come before the attach. Checked on
+  Linux X11 and Wayland against the released build (§10.2). Every browser pane now has auto-attach on from its first load, not only when an
+  agent reads a form.
 - **Earlier page listeners:** the listener is added after the document commits, a few milliseconds after it starts, so a page
   listener registered in its first scripts runs before ours. The press is still claimed (Chromium doesn't navigate, the window
   gets the event) but the page sees it as well; a page that acts on side buttons itself would act in addition. The Windows route
@@ -254,6 +257,21 @@ second limit below.
 - **DevTools agent detach:** the binding goes with the session; the route is set up again on the detach event. Until then a plain
   press is claimed but not reported.
 - **macOS:** built for it (nothing in the route is Linux-specific) and not yet checked on a Mac.
+
+### 10.2 Cross-site iframes and Wayland, checked (2026-10-28)
+
+Linux, a packaged build of `origin/main` plus the iframe change, against the released v0.60.4 on the same pages (a start page
+whose link is clicked for real, so the history entries count; a host page with a same-site and a cross-site iframe, the sites
+`127.0.0.1` and `localhost`).
+
+- **X11** (private Xvfb, real buttons through XTest): over the cross-site iframe a plain Back moves the selection history and the page
+  stays; the released build navigated the page back and the window heard nothing. Ctrl + Back over it is the page's own back (no window
+  event), and so are Ctrl + Back over the same-site iframe and the page. A cross-site iframe added after the load, and one under a
+  top page that navigated cross-site, are claimed too.
+- **Wayland** (a private headless GNOME Shell on its own socket and session bus, real `BTN_SIDE` / `BTN_EXTRA` through its mutter
+  RemoteDesktop session; the live session was not used): the same results, plus a press over the app's own UI (the page listener,
+  `back via dom`) and Ctrl + Forward. The released build shows the same cross-site-iframe fault there.
+- **Order:** a history entry made without a user gesture is skipped by Chromium on Back, so a test page has to be reached by a real click.
 
 ## Sources
 
