@@ -1673,7 +1673,8 @@ mod tests {
         assert!(owned.contains(&CONTAINER_CLAUDE_DIR.to_string()));
         assert!(owned.contains(&CONTAINER_WORKSPACE_DIR.to_string()));
         assert!(owned.contains(&format!("{CONTAINER_CLAUDE_DIR}/{CLAUDE_CREDENTIALS_FILE}")));
-        assert_eq!(owned.len(), 3, "a user volume target must never appear here");
+        assert!(owned.contains(&crate::identity::github_tokens::CONTAINER_HOOKS_DIR.to_string()));
+        assert_eq!(owned.len(), 4, "a user volume target must never appear here");
     }
 
     /// macOS keeps OAuth credentials in the Keychain and never writes this file
