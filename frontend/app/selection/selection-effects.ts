@@ -68,6 +68,12 @@ export function createRequestedTabs(now: () => number = Date.now, keepMs = 5000)
         isOurs(tabId: string): boolean {
             return (until.get(tabId) ?? 0) > now();
         },
+        /** Whether a switch to some tab other than `tabId` may still be on its way, so `tabId` being
+         *  the committed active tab does not mean it will stay that. */
+        pendingElsewhere(tabId: string): boolean {
+            for (const [tab, expires] of until) if (tab !== tabId && expires > now()) return true;
+            return false;
+        },
     };
 }
 

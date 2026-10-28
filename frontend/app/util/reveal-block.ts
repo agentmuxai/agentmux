@@ -172,7 +172,9 @@ const liveDeps: SelectionDeps = {
         const tabId = await findTabHolding(intent.blockId, intent.tabHint);
         // Not in this window's tabs: another window may show it (the handoff asks srv).
         if (!tabId) return { where: "other" };
-        return { where: "here", tabId, active: atoms.activeTabId() === tabId };
+        // The active tab is the committed one: an earlier request's switch to another tab may still be
+        // on its way and would take the window off this one, so this request switches too.
+        return { where: "here", tabId, active: atoms.activeTabId() === tabId && !requestedTabs.pendingElsewhere(tabId) };
     },
     switchTab(tabId) {
         requestedTabs.asked(tabId);

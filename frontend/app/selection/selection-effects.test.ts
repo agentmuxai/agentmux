@@ -259,9 +259,15 @@ describe("the tabs the runner asked for", () => {
         tabs.asked("t2");
         expect(tabs.isOurs("t2")).toBe(true);
         expect(tabs.isOurs("t9")).toBe(false);
+        // t2 is the committed tab, yet a switch to t3 may still land: t2 cannot be relied on to stay.
+        tabs.asked("t3");
+        expect(tabs.pendingElsewhere("t2")).toBe(true);
+        expect(tabs.pendingElsewhere("t3")).toBe(true);
+        expect(createRequestedTabs(() => t).pendingElsewhere("t2")).toBe(false);
         t += 4999;
         expect(tabs.isOurs("t2")).toBe(true);
         t += 2;
         expect(tabs.isOurs("t2")).toBe(false);
+        expect(tabs.pendingElsewhere("t2")).toBe(false);
     });
 });
