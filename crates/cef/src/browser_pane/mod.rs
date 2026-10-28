@@ -10,6 +10,7 @@
 pub mod auth;
 pub mod callbacks;
 pub mod creation;
+pub mod leaving;
 pub mod page_close;
 pub mod identity;
 pub mod profile_carry;
