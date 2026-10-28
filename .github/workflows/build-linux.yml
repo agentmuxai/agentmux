@@ -14,9 +14,9 @@ name: build-linux
 # See docs/specs/SPEC_BUILDER_MACOS_LINUX_CI_2026_06_24.md for full design notes.
 #
 # Required repo secrets (Settings → Secrets → Actions):
-#   CI_APP_ID / CI_APP_PRIVATE_KEY   GitHub App creds (org secrets); a
-#                                   short-lived token for agentmuxai/cef is
-#                                   minted per run, replacing CEF_RUNTIME_TOKEN
+#   ACTIONS_BROKER_URL   the actions broker; a short-lived token that can read
+#                        agentmuxai/cef is requested per run (entry ci-cef-linux,
+#                        proved by this job's OIDC token), replacing CEF_RUNTIME_TOKEN
 #   (release upload uses GITHUB_TOKEN with contents:write — no extra PAT needed)
 
 on:
@@ -60,6 +60,7 @@ on:
 
 permissions:
   contents: write   # needed to upload release assets via GITHUB_TOKEN
+  id-token: write   # the OIDC token the actions broker checks
 
 jobs:
   build:
@@ -71,18 +72,30 @@ jobs:
 
     steps:
       # Replaces CEF_RUNTIME_TOKEN, a long-lived PAT, with an installation
-      # token that expires in an hour. Scoped to agentmuxai/cef only -- the
-      # private key can mint broader tokens, but this job only reads one
-      # repo's releases, so that is all it gets.
-      # Proven equivalent before this swap by ci-app-token-smoke.yml (since removed).
-      - name: Mint a short-lived token for agentmuxai/cef
-        id: cef_token
-        uses: actions/create-github-app-token@v1
+      # token that expires in an hour. The broker gives this job a token that can
+      # only read agentmuxai/cef, and only to this workflow file as it is on main
+      # (a copy on a branch or in a pull request is refused).
+      - name: Ask the actions broker for a token that reads agentmuxai/cef
+        id: cef_token_grant
+        uses: agentmuxai/agentmux/.github/actions/actions-broker@main
         with:
-          app-id: ${{ secrets.CI_APP_ID }}
-          private-key: ${{ secrets.CI_APP_PRIVATE_KEY }}
-          owner: agentmuxai
-          repositories: cef
+          broker-url: ${{ secrets.ACTIONS_BROKER_URL }}
+          entry: ci-cef-linux
+          mode: grant
+
+      - name: Read the token from the grant
+        id: cef_token
+        shell: bash
+        env:
+          GRANT_FILE: ${{ steps.cef_token_grant.outputs.grant-file }}
+        run: |
+          set -euo pipefail
+          # The broker masked every value it returned; this only moves the token to
+          # an output for the steps below. A grant without one fails the job.
+          token="$(jq -r '.github.token // empty' "$GRANT_FILE")"
+          [ -n "$token" ]
+          echo "::add-mask::$token"
+          echo "token=$token" >> "$GITHUB_OUTPUT"
 
       - name: Resolve inputs
         id: in
