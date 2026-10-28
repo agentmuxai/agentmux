@@ -129,7 +129,8 @@ async fn run_inner_with_policy(
             }
             _ => {}
         }
-        if !s.tabs.contains_key(&tab_id) {
+        // A parked block (an agent's, delete-agent only) is in no tab: `tab_id` is empty.
+        if !tab_id.is_empty() && !s.tabs.contains_key(&tab_id) {
             return Err(format!("DeleteBlock: tab not found: {}", tab_id));
         }
     }
@@ -248,6 +249,10 @@ async fn run_inner(
     // dangling reference instead of converging it away. Step 2b below
     // closes that gap via the same `pendingbackendactions` channel
     // tear-off/redock already use for exactly this reason.
+    // A parked block has no tab, so no layout to prune.
+    if tab_id.is_empty() {
+        return Ok(json!({ "tab_id": tab_id, "block_id": block_id }));
+    }
     if let Err(reason) = ctx
         .dispatch(Command::LayoutDeleteNodeByBlock {
             tab_id: tab_id.clone(),

@@ -24,6 +24,10 @@ use crate::backend::storage::bundles::Bundle;
 
 use super::AppState;
 
+pub(crate) mod agent_attach;
+#[cfg(test)]
+mod agent_attach_tests;
+pub(crate) mod agent_block;
 pub(crate) mod agent_open;
 /// Re-exported for `server/mod.rs`'s `POST /api/v1/agent/open` handler (the
 /// `OpenAgent` MCP tool's backing route) — the HTTP surface must share the

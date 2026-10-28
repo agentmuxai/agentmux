@@ -161,7 +161,7 @@ pub struct BlockRevealResult {
     pub window_id: Option<String>,
 }
 
-fn router_for(state: &AppState) -> Arc<router::Router> {
+pub(crate) fn router_for(state: &AppState) -> Arc<router::Router> {
     router::init(state.broker.clone(), state.config_watcher.clone(), state.mstore.clone(), state.reactive_handler)
 }
 
@@ -228,10 +228,17 @@ async fn activate_in_stored_layout(state: &AppState, tab_id: &str, block_id: &st
 /// `None` when the id is no live shutdown notification.
 fn keep_from_toast(state: &AppState, r: &Arc<router::Router>, notification_id: &str) -> Option<String> {
     let (kind, block_id, request_id) = r.live_by_id(notification_id)?;
-    if kind != crate::backend::notify::policy::NotifyKind::ShutdownPending {
+    keep_for(state, kind, &block_id, &request_id?)
+}
+
+/// The press on a pending shutdown toast's Keep running button. A sensitive operation's
+/// countdown has no button: its veto is the AgentMux window's alone, proven, and this
+/// connection is not (any client holding the instance key can send an ack).
+fn keep_for(state: &AppState, kind: crate::backend::notify::policy::NotifyKind, block_id: &str, request_id: &str) -> Option<String> {
+    if kind != crate::backend::notify::policy::NotifyKind::ShutdownPending || block_id.starts_with(crate::sagas::sensitive_window::TOAST_GROUP_PREFIX) {
         return None;
     }
-    Some(crate::sagas::pending_shutdown::keep(state, &block_id, &request_id?).to_string())
+    Some(crate::sagas::pending_shutdown::keep(state, block_id, request_id).to_string())
 }
 
 pub fn register_notify_handlers(engine: &Arc<WshRpcEngine>, state: &AppState, conn_id: String) {
@@ -699,12 +706,12 @@ mod live_tests {
         );
         let n = next_event(&mut rx, "notification").await;
         assert_eq!(n["kind"], "shutdown_pending");
-        assert_eq!(n["title"], "Closing An agent in 15 s");
+        assert_eq!(n["title"], "Closing agent pane in 30 s");
         assert_eq!(n["body"], "AgentY asked to close it. It stays in My Agents, with its conversation.");
         assert_eq!(n["actions"], serde_json::json!([{ "id": "keep", "label": "Keep open" }]), "no session runs here");
-        assert_eq!(n["countdown"]["title_template"], "Closing An agent in {n} s");
+        assert_eq!(n["countdown"]["title_template"], "Closing agent pane in {n} s");
         let left = n["countdown"]["remaining_ms"].as_i64().unwrap();
-        assert!((13_000..=15_000).contains(&left), "{left}");
+        assert!((28_000..=30_000).contains(&left), "{left}");
         assert!(!n.to_string().contains("abc123") && !n.to_string().contains("tidying"), "the reason is not in the toast: {n}");
         let (id, tag) = (n["id"].as_str().unwrap().to_string(), n["tag"].as_str().unwrap().to_string());
 
@@ -869,7 +876,7 @@ mod live_tests {
             crate::sagas::pending_shutdown::Action::Stop { signal: None },
         );
         let first = next_event(&mut rx, "notification").await;
-        assert_eq!(first["title"], "Stopping An agent in 15 s");
+        assert_eq!(first["title"], "Stopping agent pane in 30 s");
 
         let close = crate::sagas::pending_shutdown::request(
             &st,
@@ -881,10 +888,117 @@ mod live_tests {
         );
         assert_eq!(close.request_id, stop.request_id, "the same request and deadline");
         let second = next_event(&mut rx, "notification").await;
-        assert!(second["title"].as_str().unwrap().starts_with("Closing An agent in "), "{second}");
+        assert!(second["title"].as_str().unwrap().starts_with("Closing agent pane in "), "{second}");
         assert!(second["body"].as_str().unwrap().contains("asked to close it"), "{second}");
         assert_eq!(second["tag"], first["tag"], "replaces the toast in place");
         assert!(second["countdown"]["remaining_ms"].as_i64().unwrap() <= first["countdown"]["remaining_ms"].as_i64().unwrap(), "the deadline did not restart");
         crate::sagas::pending_shutdown::keep(&st, &block.oid, &stop.request_id);
+    }
+
+    /// The close countdown names what is closing, by kind and title, and who asked by
+    /// display name: a browser pane is not "An agent" (#5847). Over the real wire, for
+    /// a titled browser pane, an editor, an untitled browser pane and an agent.
+    #[tokio::test]
+    async fn the_close_toast_names_the_pane_and_the_asker() {
+        use crate::backend::obj::{Block, MetaMapType};
+        use crate::sagas::pending_shutdown::{keep, request, Action};
+        let state = crate::server::tests::test_state();
+        state
+            .broker
+            .set_client(Box::new(crate::backend::eventbus::EventBusBridge::new(state.event_bus.clone())));
+        crate::backend::wcore::ensure_initial_data(&state.mstore).unwrap();
+        let add = |id: &str, pairs: &[(&str, &str)]| {
+            let meta: MetaMapType = pairs.iter().map(|(k, v)| (k.to_string(), serde_json::json!(v))).collect();
+            let mut block = Block { oid: id.to_string(), parentoref: String::new(), version: 1, runtimeopts: None, stickers: None, meta, subblockids: None };
+            state.mstore.insert(&mut block).unwrap();
+        };
+        add("toast-browser", &[("view", "browser"), ("url", "https://portal.azure.com/x"), ("frame:title", "Azure: subscriptions")]);
+        add("toast-editor", &[("view", "editor"), ("file", "C:\\work\\private\\notes.md")]);
+        add("toast-bare-browser", &[("view", "browser"), ("url", "https://example.com:8443/a?token=x")]);
+        add("toast-agent", &[("view", "agent"), ("agentName", "Lark"), ("agentId", "lark")]);
+        add("toast-asker", &[("view", "agent"), ("agentName", "QTest"), ("agentId", "qtest")]);
+        state.reactive_handler.register_agent("qtest", "toast-asker", None).unwrap();
+        let (broker, auth) = (state.broker.clone(), state.auth_key.clone());
+        let st = state.clone();
+        let app = crate::server::build_router(state);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app.into_make_service_with_connect_info::<std::net::SocketAddr>())
+                .await
+                .unwrap();
+        });
+        let uri: tokio_tungstenite::tungstenite::http::Uri = format!("ws://{addr}/ws").parse().unwrap();
+        let (ws, _) = tokio_tungstenite::connect_async(ClientRequestBuilder::new(uri).with_header("X-AuthKey", auth))
+            .await
+            .unwrap();
+        let (mut tx, mut rx) = ws.split();
+        let send = |cmd: &str, reqid: &str, data: serde_json::Value| {
+            serde_json::json!({"wscommand":"rpc","message":{"command":cmd,"reqid":reqid,"data":data}}).to_string()
+        };
+        tx.send(Message::Text(send("eventsub", "s0", serde_json::json!({"event":"notification","scopes":[],"allscopes":true})).into()))
+            .await
+            .unwrap();
+        tx.send(Message::Text(send("notify.focus", "f1", serde_json::json!({"window_focused": false})).into()))
+            .await
+            .unwrap();
+        loop {
+            let msg = tokio::time::timeout(std::time::Duration::from_secs(5), rx.next()).await.expect("focus answered").unwrap().unwrap();
+            let Ok(v) = serde_json::from_str::<serde_json::Value>(msg.to_text().unwrap_or("")) else { continue };
+            if v["data"]["resid"] == "f1" {
+                break;
+            }
+        }
+        assert!(crate::backend::notify::router::get(&broker).is_some(), "router created by the connection");
+
+        let close_pane = |id: &str| Action::ClosePane { block_ids: vec![id.to_string()] };
+        let cases: [(&str, Action, &str, &str, &str); 4] = [
+            ("toast-browser", close_pane("toast-browser"), "Closing browser pane: Azure: subscriptions in 30 s", "qtest", "QTest asked to close it."),
+            ("toast-editor", close_pane("toast-editor"), "Closing editor: notes.md in 30 s", "qtest", "QTest asked to close it."),
+            ("toast-bare-browser", close_pane("toast-bare-browser"), "Closing browser pane: example.com in 30 s", "Settings", "Settings asked to close it."),
+            (
+                "toast-agent",
+                Action::CloseTab { detail: "test".into() },
+                "Closing Lark in 30 s",
+                "qtest",
+                "QTest asked to close it. It stays in My Agents, with its conversation.",
+            ),
+        ];
+        for (block, action, title, by, body) in cases {
+            let v = request(&st, block, by, "ClosePane", "", action);
+            let n = next_event(&mut rx, "notification").await;
+            assert_eq!(n["title"], title, "{n}");
+            assert_eq!(n["body"], body, "{n}");
+            assert!(!n["title"].as_str().unwrap().contains("An agent"), "{n}");
+            assert_eq!(v.by, by.replace("qtest", "QTest"), "the banner and status name the asker the same way");
+            keep(&st, block, &v.request_id);
+        }
+    }
+}
+
+#[cfg(test)]
+mod toast_press_tests {
+    use super::*;
+    use crate::backend::notify::policy::NotifyKind;
+    use crate::backend::sensitive_requests as requests;
+    use crate::sagas::sensitive_window as window;
+    use crate::server::tests::test_state;
+    use agentmux_common::time::now_ms;
+
+    #[tokio::test]
+    async fn a_press_on_a_sensitive_toast_vetoes_nothing() {
+        let state = test_state();
+        let facts: std::collections::BTreeMap<String, String> =
+            [("template".to_string(), format!("t-{}", uuid::Uuid::new_v4().simple())), ("publisher".to_string(), "p".to_string())].into_iter().collect();
+        let id = requests::registry().request("u-asker", "asker", "job_template_approve", &facts, "", now_ms()).unwrap().id;
+        requests::registry().approve(&id, "boss", now_ms()).unwrap();
+        window::open(&state, &id, std::time::Duration::from_secs(60)).unwrap();
+        let group = format!("{}{id}", window::TOAST_GROUP_PREFIX);
+
+        // An ack that says "keep" on this toast is not the person's veto, whoever sends it.
+        assert_eq!(keep_for(&state, NotifyKind::ShutdownPending, &group, &id), None);
+        assert_eq!(window::status(&id).unwrap().status, "pending", "the countdown goes on");
+        // Only the window's `sensitive.decide` vetoes, and it is proven.
+        assert_eq!(window::veto(&state, &id), "vetoed");
     }
 }

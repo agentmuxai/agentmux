@@ -361,6 +361,25 @@
     }
   },
   {
+    "command": "agent.move-here",
+    "request": "agentmux_srv::backend::rpc_types::agent::CommandAgentMoveHereData",
+    "requestName": "CommandAgentMoveHereData",
+    "requestTs": {
+      "imports": [
+        "CommandAgentMoveHereData"
+      ],
+      "name": "CommandAgentMoveHereData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::agent::AgentMoveHereResult",
+    "responseName": "AgentMoveHereResult",
+    "responseTs": {
+      "imports": [
+        "AgentMoveHereResult"
+      ],
+      "name": "AgentMoveHereResult"
+    }
+  },
+  {
     "command": "agent.open",
     "request": "agentmux_srv::backend::rpc_types::agent::CommandAgentOpenData",
     "requestName": "CommandAgentOpenData",
@@ -5908,6 +5927,25 @@
         "AgentHistory"
       ],
       "name": "Array<AgentHistory>"
+    }
+  },
+  {
+    "command": "sensitive.decide",
+    "request": "agentmux_srv::sagas::sensitive_window::CommandSensitiveDecideData",
+    "requestName": "CommandSensitiveDecideData",
+    "requestTs": {
+      "imports": [
+        "CommandSensitiveDecideData"
+      ],
+      "name": "CommandSensitiveDecideData"
+    },
+    "response": "agentmux_srv::sagas::sensitive_window::SensitiveDecideResult",
+    "responseName": "SensitiveDecideResult",
+    "responseTs": {
+      "imports": [
+        "SensitiveDecideResult"
+      ],
+      "name": "SensitiveDecideResult"
     }
   },
   {

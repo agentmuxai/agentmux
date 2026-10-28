@@ -112,6 +112,10 @@
             "method": "AgentSessionWriteStateCommand"
         },
         {
+            "command": "agent.move-here",
+            "method": "AgentMoveHereCommand"
+        },
+        {
             "command": "agent.pane.unregister",
             "method": "AgentPaneUnregisterCommand"
         },
@@ -128,8 +132,16 @@
             "method": "AgentShutdownKeepCommand"
         },
         {
+            "command": "sensitive.decide",
+            "method": "SensitiveDecideCommand"
+        },
+        {
             "command": "agentstop",
             "method": "AgentStopCommand"
+        },
+        {
+            "command": "agent.open",
+            "method": "AgentOpenCommand"
         },
         {
             "command": "agent.start",

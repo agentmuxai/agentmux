@@ -538,7 +538,7 @@ pub(crate) async fn build_persistent_spawn_env(
     // Kept for the identity-M0 slug lookup below; `mstore` itself moves into
     // the identity injector.
     let mstore_for_slug = mstore.clone();
-    let mut env_vars = crate::identity::resolver::inject_identity_env_async(
+    let mut env_vars = crate::identity::token_warmup::inject_after_warmup(
         mstore,
         id_store.clone(),
         identity_store.clone(),
@@ -1012,10 +1012,9 @@ pub async fn run_agent_turn_joining(
         };
         let input = crate::backend::blockcontroller::health::TurnInput { origin, text: message.clone(), joins_turn };
         if let Err(e) = persistent_ctrl.send_message_with_images_from(message, inline_images, config, Some(input)) {
-            // A single-live-instance refusal from inside the controller (the
-            // spawn-time claim losing to another instance, or the pre-turn
-            // fence) gets the same pane treatment as the early check above.
-            if crate::backend::agent_admission::is_admission_refusal(&e) {
+            // A single-live-instance refusal from inside the controller (the spawn-time claim losing
+            // to another instance or pane, or the pre-turn fence) gets the early check's pane treatment.
+            if crate::backend::agent_admission::is_admission_refusal(&e) || blockcontroller::persistent::is_held_elsewhere_error(&e) {
                 surface_refusal(&e);
             }
             return Err(e);

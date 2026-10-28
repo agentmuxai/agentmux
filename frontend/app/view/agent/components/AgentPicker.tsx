@@ -62,7 +62,8 @@ import { mergeOpenDefinitions, openAgentLocations, type OpenAgentLocation } from
 import { openOrFocusHistoryTab } from "../open-history-tab";
 import { beginAgentOpen, finishAgentOpen } from "../open-trace";
 import { getProvider, getProviderList } from "../providers";
-import { getApi } from "@/app/store/global";
+import { openAgentInActiveTab, sharedAgentRuntime } from "@/app/store/agent-runtime-live";
+import { getApi, pushNotification } from "@/app/store/global";
 import { needsProbe, prereqShortfall, shortfallLabel, type PrereqProbe } from "../providers/prereq-check";
 import { resolveDrift, type PinDrift } from "../providers/version-drift";
 import { AgentCard } from "./AgentCard";
@@ -478,6 +479,27 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
         }
     };
 
+    // Each agent's runtime state, shared with the status bar and the Swarm.
+    const runtimeRows = sharedAgentRuntime().rows;
+    const runtimeById = createMemo(() => new Map(runtimeRows().map((r) => [r.agent_id, r] as const)));
+    // An agent that runs with no pane: attach to it rather than start another process.
+    const handleAttach = async (row: RecentSessionRow): Promise<void> => {
+        const why = await openAgentInActiveTab({
+            agent_id: row.definition_id,
+            name: row.instance_name || row.definition_name,
+        });
+        if (why) {
+            pushNotification({
+                icon: "fa-triangle-exclamation",
+                title: `Couldn't open ${row.instance_name || row.definition_name}`,
+                message: why,
+                timestamp: new Date().toISOString(),
+                type: "error",
+                expiration: Date.now() + 8000,
+            });
+        }
+    };
+
     const handleFork = async (row: RecentSessionRow, branchLabel: string): Promise<void> => {
         const def = agents().find((a) => a.id === row.definition_id);
         if (!def) return;
@@ -877,6 +899,8 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                             nameFilter={filterQuery}
                             sortBy={sortBy}
                             onReattach={handleReattach}
+                            runtimeOf={(id) => runtimeById().get(id)}
+                            onAttach={handleAttach}
                             openDefinitions={openDefinitions}
                             openLocations={openLocations}
                             resolveOpenDefinitions={resolveOpenDefinitions}

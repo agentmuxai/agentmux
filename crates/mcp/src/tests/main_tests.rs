@@ -80,9 +80,9 @@ fn bulk_stop_folds_each_users_answer_into_succeeded_and_failed() {
 }
 
 #[test]
-fn stop_warns_it_can_take_15_seconds() {
+fn stop_warns_it_can_take_30_seconds() {
     let v: Value = serde_json::from_str(STOP_TOOL).unwrap();
-    assert!(v["description"].as_str().unwrap().contains("at least 15 seconds"));
+    assert!(v["description"].as_str().unwrap().contains("at least 30 seconds"));
 }
 
 

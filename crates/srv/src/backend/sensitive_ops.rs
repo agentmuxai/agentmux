@@ -9,8 +9,9 @@
 //! A banner's words are built here from the request's structured facts, never
 //! from the requester's own words.
 //!
-//! The callers (the `Sensitive` routes and the countdown) arrive with the later
-//! steps of that spec's §9, so nothing outside the tests calls this yet.
+//! The `Sensitive` routes and the request registry call this. The countdown a
+//! request nobody reviewed gets (`fallback_window_secs`) arrives with a later
+//! step of that spec's §9.
 #![allow(dead_code)]
 
 use std::collections::BTreeMap;

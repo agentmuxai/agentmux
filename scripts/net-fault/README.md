@@ -125,24 +125,24 @@ Limits, said plainly:
   request through the proxy as a CONNECT on startup. Many
   clients are built once and kept, so set the variables before the instance
   starts; switching the proxy's mode afterwards is what changes behaviour.
-- **srv's WebSockets: no.** `tokio-tungstenite` connects directly and ignores
-  proxy variables. That covers MuxBus's live connection
-  (`muxbus/cloud_subscriber.rs`), Slack Socket Mode and the Discord gateway. In
-  the proxy's `refuse` mode MuxBus's token refresh fails but an already open
-  MuxBus WebSocket stays up, and a reconnect still reaches the internet. "MuxBus
-  down" therefore cannot be produced by this proxy alone today.
+- **srv's WebSockets: yes.** MuxBus's live connection
+  (`muxbus/cloud_subscriber.rs`), Slack Socket Mode and the Discord gateway all
+  connect through `muxbus/ws_connect.rs`: when `HTTPS_PROXY` (`ALL_PROXY`) names an
+  `http://` proxy and `NO_PROXY` does not exempt the host, it sends `CONNECT
+  host:443` and runs the TLS handshake over the tunnel. This is the same in a
+  release build (it is also what makes them work behind a corporate proxy), and
+  it fails closed: a proxy that cannot be used fails the connect, it never goes
+  direct. A switch to `refuse` or `dns` resets the open tunnel, so an open
+  MuxBus WebSocket drops and its reconnects follow the mode, which makes "MuxBus
+  down, API up" a `refuse --host <the MuxBus host>` (run in `pass` and read the
+  log for the name).
 - **The window (CEF/Chromium): not checked.** On Windows Chromium takes its
   proxy from the system settings, not from these variables. The window talks to
   the local srv, which is not affected.
 
-Proposed dev-only switch for the WebSockets (not part of this change): when
-`HTTPS_PROXY` is set and the target is not in `NO_PROXY`, open the TCP stream to
-the proxy, send `CONNECT host:443`, wait for the `200`, and hand that stream to
-`tokio_tungstenite::client_async_tls_with_config` instead of calling
-`connect_async_tls_with_config`. About thirty lines in one helper used by the
-three call sites; it would also make MuxBus work behind a real corporate proxy.
-Until then, `AGENTMUX_MUXBUS_WS_URL=wss://127.0.0.1:9/` at launch makes the
-MuxBus WebSocket fail to connect (connection refused) for the whole session.
+`AGENTMUX_MUXBUS_WS_URL=wss://127.0.0.1:9/` at launch still makes the MuxBus
+WebSocket fail to connect (connection refused) for the whole session, when you
+want that without the proxy.
 
 ## An isolated dev instance behind the proxy
 
@@ -200,7 +200,7 @@ the proxy in `pass`.
 | G2 status bar | **Offline** within 10 s, for the model API | E |
 | G3 | a message typed into a retrying pane is shown as held, with Send now and Cancel | E |
 | G4 | no agent starts a turn that you did not send; `[AgentMux]` notes about MuxBus wait for the next turn | Now (B) |
-| G5 | MuxBus shows Offline, not "needs sign-in"; after `pass` it reconnects without a sign-in | Now (A); see the WebSocket caveat above |
+| G5 | MuxBus shows Offline, not "needs sign-in"; after `pass` it reconnects without a sign-in | Now (A) |
 | G6 | after `pass`: held messages are sent in order, turns that failed only on the network are retried once, one "back online" note per agent | E |
 | G6 MuxBus | every live agent is subscribed again, under every name | F |
 | End of a failed turn | the turn ends as a network error with Retry, not an unknown failure | Now (C), but see below |
@@ -235,11 +235,10 @@ rather than close. **Now** for G1, G2 pane, G4, G5; the rest as in 1.
 
 | Check | Expect | When |
 |---|---|---|
-| MuxBus stays connected | delivery status Connected; a review notice still arrives | Now (the WebSocket does not use the proxy, so this holds either way) |
+| MuxBus stays connected | delivery status Connected; a review notice still arrives | Now (the MuxBus tunnel is to another host, so the rule leaves it alone) |
 | only the API is Offline | the status bar names the API, not MuxBus | E |
 
-The reverse (MuxBus down, API up) needs the WebSocket switch proposed above,
-or the launch-time `AGENTMUX_MUXBUS_WS_URL` workaround.
+The reverse (MuxBus down, API up) is `ctl.mjs refuse --host <the MuxBus host>`.
 
 ### 5. Sign out while `refuse`
 

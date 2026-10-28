@@ -54,10 +54,15 @@ impl Fixture {
     }
 
     fn controller(&self, boot: &str) -> Arc<PersistentSubprocessController> {
+        self.controller_in(boot, format!("block-{}", uuid::Uuid::new_v4()))
+    }
+
+    /// A controller for a block id the store can address (`ORef` wants a bare UUID).
+    fn controller_in(&self, boot: &str, block_id: String) -> Arc<PersistentSubprocessController> {
         Arc::new(
             PersistentSubprocessController::new(
                 "tab".to_string(),
-                format!("block-{}", uuid::Uuid::new_v4()),
+                block_id,
                 None,
                 None,
                 None,
@@ -164,4 +169,88 @@ async fn the_early_admission_check_refuses_while_the_agent_is_live_elsewhere() {
     let err = f.controller("this-srv").check_admission(&f.uid, "Agent3").await.unwrap_err();
     assert!(err.contains("already running"), "got: {err}");
     assert!(f.controller("other-srv").check_admission(&f.uid, "Agent3").await.is_ok());
+}
+
+/// The 2026-10-27 incident: the agent's live pane is in THIS process (same boot id), so the lease
+/// store's "other instance" read does not see it. The early check names the pane instead, and does
+/// so before the spawn env is built.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_early_admission_check_refuses_while_another_pane_of_this_process_holds_the_agent() {
+    let f = Fixture::new();
+    let live = f.controller("this-srv");
+    let held = crate::backend::agent_admission::acquire(
+        &f.store(), &f.uid, "Agent3", &Arc::from("this-srv"), &live.block_id, None, |_| {},
+    )
+    .unwrap();
+    live.inner.lock().unwrap().agent_lease = Some(Arc::new(held));
+    crate::backend::blockcontroller::register_controller(&live.block_id, live.clone());
+
+    let duplicate = f.controller("this-srv");
+    let err = duplicate.check_admission(&f.uid, "Agent3").await.unwrap_err();
+    let holder = crate::agents::failure::open_in_other_pane_holder(&err);
+    // The holder pane itself, and an agent nobody holds, pass.
+    let own = live.check_admission(&f.uid, "Agent3").await;
+    let free = duplicate.check_admission("uid-nobody-holds", "Agent3").await;
+    crate::backend::blockcontroller::delete_controller(&live.block_id);
+
+    assert!(is_held_elsewhere_error(&err), "got: {err}");
+    assert_eq!(holder.as_deref(), Some(live.block_id.as_str()), "names the live pane: {err}");
+    assert!(own.is_ok(), "the holder is not refused by itself");
+    assert!(free.is_ok());
+}
+
+/// Move here: the holder pane is told to stop (gracefully), the claimant waits until the agent is
+/// free, and the holder pane is left with the same notice, pointing back at the claimant.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn moving_the_agent_here_stops_the_holder_pane_and_waits_for_its_lease() {
+    let f = Fixture::new();
+    let state = crate::server::tests::test_state();
+    let holder = f.controller_in("this-srv", uuid::Uuid::new_v4().to_string());
+    let claimant = f.controller_in("this-srv", uuid::Uuid::new_v4().to_string());
+    let held = crate::backend::agent_admission::acquire(
+        &f.store(), &f.uid, "Agent3", &Arc::from("this-srv"), &holder.block_id, None, |_| {},
+    )
+    .unwrap();
+    let (kill_tx, kill_rx) = tokio::sync::oneshot::channel::<KillRequest>();
+    {
+        let mut g = holder.inner.lock().unwrap();
+        g.agent_lease = Some(Arc::new(held));
+        g.kill_tx = Some(kill_tx);
+    }
+    crate::backend::blockcontroller::register_controller(&holder.block_id, holder.clone());
+    for (block_id, uid) in [(&holder.block_id, &f.uid), (&claimant.block_id, &f.uid)] {
+        let mut pane = crate::backend::obj::Block { oid: block_id.clone(), ..Default::default() };
+        pane.meta.insert("agentId".to_string(), serde_json::json!(uid));
+        state.mstore.insert(&mut pane).unwrap();
+    }
+    // The holder's process exits when told to stop; its lease drops with it.
+    let exiting = Arc::clone(&holder);
+    let stopped = tokio::spawn(async move {
+        let request = kill_rx.await;
+        exiting.inner.lock().unwrap().agent_lease = None;
+        request
+    });
+
+    let moved = crate::server::agent_move_here::move_here(&state, &claimant.block_id).await;
+    let request = stopped.await.unwrap();
+    let notice = state.mstore.get::<crate::backend::obj::Block>(&holder.block_id).unwrap().unwrap();
+    crate::backend::blockcontroller::delete_controller(&holder.block_id);
+
+    assert_eq!(moved.unwrap().from_block.as_deref(), Some(holder.block_id.as_str()));
+    assert!(matches!(request, Ok(KillRequest::Graceful(_))), "a graceful stop, not a kill");
+    let failure = notice.meta.get("agent:last_failure").map(|v| v.to_string()).unwrap_or_else(|| format!("no failure in {:?}", notice.meta));
+    assert!(failure.contains("open_in_other_pane") && failure.contains(&claimant.block_id), "got: {failure}");
+}
+
+/// Nobody else holds the agent: nothing to move, and the caller just retries.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn moving_an_agent_nobody_else_holds_is_a_no_op() {
+    let f = Fixture::new();
+    let state = crate::server::tests::test_state();
+    let claimant = f.controller("this-srv");
+    let mut pane = crate::backend::obj::Block { oid: claimant.block_id.clone(), ..Default::default() };
+    pane.meta.insert("agentId".to_string(), serde_json::json!(f.uid));
+    state.mstore.insert(&mut pane).unwrap();
+    let moved = crate::server::agent_move_here::move_here(&state, &claimant.block_id).await.unwrap();
+    assert_eq!(moved.from_block, None);
 }

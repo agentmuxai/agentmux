@@ -7,9 +7,11 @@
 //! are the ways it ends. Kept in memory: a request is a minutes-long exchange,
 //! and an AgentMux that restarts mid-way has the requester ask again.
 //!
-//! This holds the state and its rules only. Who may approve, the countdown and
-//! the messages arrive with the later steps of that spec's §9, so nothing
-//! outside the tests calls this yet.
+//! This holds the state and its rules only. The `Sensitive` routes
+//! (`server/sensitive_handlers.rs`) decide who may file, approve or deny, and the
+//! countdown is `sagas/sensitive_window.rs`. Not every way a request ends has a
+//! caller yet (a request nobody reviewed arrives with a later step of that
+//! spec's §9).
 #![allow(dead_code)]
 
 use std::collections::BTreeMap;
@@ -179,6 +181,20 @@ impl Registry {
         })
     }
 
+    /// Nobody reviewed it in time: `asked` becomes `pending` with no approver, and the person's
+    /// veto is the only check.
+    pub fn fallback(&self, id: &str, now_ms: i64) -> Result<Request, String> {
+        self.change(id, |r| {
+            if r.status != Status::Asked {
+                return Err(not_asked(r));
+            }
+            r.status = Status::Pending;
+            r.decided_by = None;
+            r.decided_ms = Some(now_ms);
+            Ok(())
+        })
+    }
+
     /// The super agent denies: `asked` ends, with its reason for the requester.
     pub fn deny(&self, id: &str, approver_slug: &str, reason: &str, now_ms: i64) -> Result<Request, String> {
         self.change(id, |r| {
@@ -248,6 +264,11 @@ impl Registry {
         })
     }
 
+    /// The open requests for `op` whose fact `key` is `value`.
+    pub fn open_matching(&self, op: &str, key: &str, value: &str) -> Vec<Request> {
+        self.lock().iter().filter(|r| r.status.is_open() && r.status != Status::Running && r.op == op && r.facts.get(key).is_some_and(|v| v == value)).cloned().collect()
+    }
+
     pub fn get(&self, id: &str) -> Option<Request> {
         self.lock().iter().find(|r| r.id == id).cloned()
     }
@@ -266,6 +287,11 @@ impl Registry {
 }
 
 impl Request {
+    /// The agents that asked for this: the first, then those that joined.
+    pub fn askers(&self) -> Vec<&str> {
+        std::iter::once(self.requester_uid.as_str()).chain(self.also_asked_by.iter().map(|a| a.uid.as_str())).collect()
+    }
+
     /// Whether `uid` asked for this, first or by joining.
     pub fn asked_by(&self, uid: &str) -> bool {
         self.requester_uid == uid || self.also_asked_by.iter().any(|a| a.uid == uid)

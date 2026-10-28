@@ -146,8 +146,16 @@ pub async fn run(
     // before its records go (pane-close spec §9.5). The persist step's
     // `delete_tab_inner` still calls `delete_controller` per block; it finds
     // nothing left to stop.
-    super::agent_teardown::run_many(state, &block_ids_to_cleanup, super::agent_teardown::Policy::close()).await;
+    // Not the agents' blocks that stay: with `agents:always_available` on they are parked first, so
+    // neither this stop nor the tab's delete reaches them.
     let ctx = SagaCtx::new(state, saga_id);
+    let parked = super::park_agents::park_agent_blocks(&ctx, &block_ids_to_cleanup).await;
+    super::agent_teardown::run_many(
+        state,
+        &super::park_agents::not_parked(&block_ids_to_cleanup, &parked),
+        super::agent_teardown::Policy::close(),
+    )
+    .await;
     let result = run_saga("delete_tab", run_inner(ctx, workspace_id, tab_id.clone())).await;
     // If the tab is gone from reducer state, the reducer dispatched
     // (whether or not SQLite apply succeeded). Kill controllers for
@@ -157,8 +165,8 @@ pub async fn run(
     {
         let tab_still_in_reducer = state.srv_state.lock().await.tabs.contains_key(&tab_id);
         if !tab_still_in_reducer {
-            for block_id in &block_ids_to_cleanup {
-                crate::sagas::agent_teardown::discard(block_id);
+            for block_id in super::park_agents::not_parked(&block_ids_to_cleanup, &parked) {
+                crate::sagas::agent_teardown::discard(&block_id);
             }
         }
     }

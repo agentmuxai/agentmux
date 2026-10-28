@@ -17,4 +17,8 @@ resetsAtMs?: number,
  * The provider's name for the limit's window, such as `five_hour` or
  * `seven_day`.
  */
-limitWindow?: string, };
+limitWindow?: string, 
+/**
+ * For `OpenInOtherPane`: the block of the pane that holds the agent.
+ */
+holderBlockId?: string, };

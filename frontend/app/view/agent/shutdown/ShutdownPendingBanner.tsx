@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The pane's "shutting down in 15 s — Keep running" banner
+ * The pane's "shutting down in N s — Keep running" banner
  * (docs/specs/SPEC_AGENT_SELF_QUIT_2026_09_24.md §6.5): shown when something
  * other than the user asked to shut this agent down. Counts down live, chimes
  * the falling shutdown tone at the start and with 5 s left, and "Keep

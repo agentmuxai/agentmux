@@ -27,7 +27,9 @@ import type { AgentKillProcessCommand } from "@/types/rpc/AgentKillProcessComman
 import type { AgentKillResult } from "@/types/rpc/AgentKillResult";
 import type { AgentKillTreeCommand } from "@/types/rpc/AgentKillTreeCommand";
 import type { AgentLastRuntime } from "@/types/rpc/AgentLastRuntime";
+import type { AgentMoveHereResult } from "@/types/rpc/AgentMoveHereResult";
 import type { AgentOpenPanesResult } from "@/types/rpc/AgentOpenPanesResult";
+import type { AgentOpenResult } from "@/types/rpc/AgentOpenResult";
 import type { AgentOpenTailResult } from "@/types/rpc/AgentOpenTailResult";
 import type { AgentPaneUnregisterResult } from "@/types/rpc/AgentPaneUnregisterResult";
 import type { AgentProcessListCommand } from "@/types/rpc/AgentProcessListCommand";
@@ -76,6 +78,8 @@ import type { CommandAgentDefCreateFromTemplateData } from "@/types/rpc/CommandA
 import type { CommandAgentDefHideData } from "@/types/rpc/CommandAgentDefHideData";
 import type { CommandAgentInputData } from "@/types/rpc/CommandAgentInputData";
 import type { CommandAgentLastRuntimeData } from "@/types/rpc/CommandAgentLastRuntimeData";
+import type { CommandAgentMoveHereData } from "@/types/rpc/CommandAgentMoveHereData";
+import type { CommandAgentOpenData } from "@/types/rpc/CommandAgentOpenData";
 import type { CommandAgentOpenTailData } from "@/types/rpc/CommandAgentOpenTailData";
 import type { CommandAgentPaneUnregisterData } from "@/types/rpc/CommandAgentPaneUnregisterData";
 import type { CommandAgentSessionAppendOutputData } from "@/types/rpc/CommandAgentSessionAppendOutputData";
@@ -208,6 +212,7 @@ import type { CommandResolveCliData } from "@/types/rpc/CommandResolveCliData";
 import type { CommandRestoreOtherBuildLayoutData } from "@/types/rpc/CommandRestoreOtherBuildLayoutData";
 import type { CommandRunCliLoginData } from "@/types/rpc/CommandRunCliLoginData";
 import type { CommandSearchAgentHistoryData } from "@/types/rpc/CommandSearchAgentHistoryData";
+import type { CommandSensitiveDecideData } from "@/types/rpc/CommandSensitiveDecideData";
 import type { CommandSessionArchiveData } from "@/types/rpc/CommandSessionArchiveData";
 import type { CommandSessionExportData } from "@/types/rpc/CommandSessionExportData";
 import type { CommandSessionRestoreData } from "@/types/rpc/CommandSessionRestoreData";
@@ -444,6 +449,7 @@ import type { RestoreOtherBuildLayoutResult } from "@/types/rpc/RestoreOtherBuil
 import type { RunCliLoginResult } from "@/types/rpc/RunCliLoginResult";
 import type { RunDroneReq } from "@/types/rpc/RunDroneReq";
 import type { RunDroneResp } from "@/types/rpc/RunDroneResp";
+import type { SensitiveDecideResult } from "@/types/rpc/SensitiveDecideResult";
 import type { SessionArchiveResult } from "@/types/rpc/SessionArchiveResult";
 import type { SessionExportResult } from "@/types/rpc/SessionExportResult";
 import type { SessionRestoreResult } from "@/types/rpc/SessionRestoreResult";
@@ -704,6 +710,14 @@ export const GeneratedApi = {
   ): Promise<AgentSessionWriteStateResult> {
     return client.rpcCall("agent:session:write_state", data, opts);
   },
+  // command "agent.move-here"
+  AgentMoveHereCommand(
+    client: RpcClient,
+    data: CommandAgentMoveHereData,
+    opts?: RpcOpts
+  ): Promise<AgentMoveHereResult> {
+    return client.rpcCall("agent.move-here", data, opts);
+  },
   // command "agent.pane.unregister"
   AgentPaneUnregisterCommand(
     client: RpcClient,
@@ -732,9 +746,21 @@ export const GeneratedApi = {
   ): Promise<AgentShutdownKeepResult> {
     return client.rpcCall("agentshutdownkeep", data, opts);
   },
+  // command "sensitive.decide"
+  SensitiveDecideCommand(
+    client: RpcClient,
+    data: CommandSensitiveDecideData,
+    opts?: RpcOpts
+  ): Promise<SensitiveDecideResult> {
+    return client.rpcCall("sensitive.decide", data, opts);
+  },
   // command "agentstop"
   AgentStopCommand(client: RpcClient, data: CommandAgentStopData, opts?: RpcOpts): Promise<void> {
     return client.rpcCall("agentstop", data, opts);
+  },
+  // command "agent.open"
+  AgentOpenCommand(client: RpcClient, data: CommandAgentOpenData, opts?: RpcOpts): Promise<AgentOpenResult> {
+    return client.rpcCall("agent.open", data, opts);
   },
   // command "agent.start"
   AgentStartCommand(client: RpcClient, data: CommandAgentStartData, opts?: RpcOpts): Promise<AgentStartResult> {

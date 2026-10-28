@@ -112,7 +112,7 @@ export const SOUNDS_SETTINGS = {
     shutdownToneEnabled: {
         id: "sounds.shutdown_tone_enabled",
         label: "Shutdown warning chime",
-        description: "Play a falling chime when something other than you asks to shut an agent down, at the start of the 15-second window to keep it and again with 5 seconds left",
+        description: "Play a falling chime when something other than you asks to shut an agent down, at the start of the window to keep it and again with 5 seconds left",
         section: "sounds",
         keywords: ["shutdown sound", "quit warning", "keep running", "notify:sound:agent.shutdown.pending"],
     },

@@ -492,7 +492,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 let body: Value = resp.json().await.unwrap_or(Value::Null);
                 let request_id = body["request_id"].as_str().unwrap_or_default();
                 return match target_block_id.as_deref() {
-                    // Another agent's pane: its user had 15 s to keep it (§6.5).
+                    // Another agent's pane: its user had 30 s to keep it (§6.5).
                     Some(b) => {
                         let now = await_shutdown(client, local_url, auth_key, request_id, true).await;
                         close_pane_outcome(b, &now)

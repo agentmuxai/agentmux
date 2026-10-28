@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 pub enum ForkSlugMigrationMode {
     /// Work out what would change, and change nothing.
     Plan,
-    /// Stop the panes the plan finds running, each with its user's 15 s
+    /// Stop the panes the plan finds running, each with its user's 30 s
     /// override; nothing is migrated.
     Stop,
     /// Migrate every agent the plan can, or resume a run that stopped.

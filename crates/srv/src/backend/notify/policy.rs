@@ -30,7 +30,7 @@ pub enum NotifyKind {
     /// (`ESCALATE=required`). Body is fixed text — never message content.
     MessageNeedsReview,
     /// Something other than the user asked to shut the agent down; the user
-    /// has 15 s to keep it (SPEC_AGENT_SELF_QUIT_2026_09_24.md §6.5).
+    /// has 30 s to keep it (SPEC_AGENT_SELF_QUIT_2026_09_24.md §6.5).
     ShutdownPending,
     /// Rate-limit overflow digest (§5.1 step 6).
     Summary,
@@ -78,7 +78,7 @@ impl NotifyKind {
             // Same window as TurnErrored so the two coalesce into one toast.
             NotifyKind::TurnCompleted | NotifyKind::TurnErrored | NotifyKind::AgentCrashed => 10_000,
             NotifyKind::MessageNeedsReview => 2_000,
-            // The window is only 15 s: tell the user at once.
+            // The window is short: tell the user at once.
             // The episode's scan already waited for the failure to settle.
             NotifyKind::ShutdownPending | NotifyKind::CloudSignedOut | NotifyKind::AccountUnavailable | NotifyKind::JobFailed => 0,
             NotifyKind::Summary | NotifyKind::Test => 0,
@@ -436,7 +436,7 @@ pub fn title_for(kind: NotifyKind, agent_name: &str) -> String {
         NotifyKind::TurnErrored => format!("{agent_name} stopped with an error"),
         NotifyKind::AgentCrashed => format!("{agent_name} stopped unexpectedly"),
         NotifyKind::MessageNeedsReview => format!("A message for {agent_name} needs your review"),
-        NotifyKind::ShutdownPending => format!("{agent_name} will shut down in 15 s"),
+        NotifyKind::ShutdownPending => format!("{agent_name} will shut down soon"),
         // Count-bearing; see `summary_title`.
         NotifyKind::Summary => "More agent updates".to_string(),
         NotifyKind::Test => "AgentMux notifications are working".to_string(),
@@ -446,9 +446,17 @@ pub fn title_for(kind: NotifyKind, agent_name: &str) -> String {
     }
 }
 
+/// `ShutdownInfo::effect` of a sensitive operation's countdown
+/// (`SPEC_SUPER_AGENT_2026_10_25.md` §5): it shares the shutdown toast, without its button.
+pub const SENSITIVE_EFFECT: &str = "sensitive";
+
 /// A pending shutdown's title with `{n}` for the seconds left
 /// (spec §3.8): "Closing QTimer in {n} s". The name arrives pre-sanitized.
 pub fn shutdown_title_template(effect: &str, agent_name: &str) -> String {
+    // A sensitive operation counting down: `agent_name` is what will happen ("Upgrade AgentMux").
+    if effect == SENSITIVE_EFFECT {
+        return format!("{agent_name} in {{n}} s");
+    }
     let verb = if effect == "stop" { "Stopping" } else { "Closing" };
     format!("{verb} {agent_name} in {{n}} s")
 }
@@ -611,7 +619,9 @@ impl PolicyState {
                         let template = shutdown_title_template(info.effect, &req.agent_name);
                         (
                             fill_seconds(&template, seconds_left(remaining_ms)),
-                            Some(vec![NotifyAction { id: "keep".to_string(), label: keep_label(info.running).to_string() }]),
+                            // A sensitive operation's countdown has no button: only the AgentMux
+                            // window, proven, may veto it, so the toast opens the window instead.
+                            (info.effect != SENSITIVE_EFFECT).then(|| vec![NotifyAction { id: "keep".to_string(), label: keep_label(info.running).to_string() }]),
                             Some(Countdown { remaining_ms, title_template: template }),
                         )
                     }
@@ -748,7 +758,7 @@ impl PolicyState {
     }
 
     /// A pending shutdown is never paused or rate-limited: it is the only
-    /// warning that an agent stops in 15 s, so holding it back lets the agent
+    /// warning that an agent stops in 30 s, so holding it back lets the agent
     /// stop unannounced. Only the master switch silences it.
     fn paused(&self, n: &Notification, now_ms: i64, s: &Settings) -> bool {
         !matches!(n.kind, NotifyKind::Test | NotifyKind::ShutdownPending)
@@ -845,10 +855,10 @@ mod tests {
     fn shutdown_pending_is_immediate_attention_and_not_silenceable_per_kind() {
         let k = NotifyKind::ShutdownPending;
         assert_eq!(k.setting_suffix(), None, "only the master switch can silence it");
-        assert_eq!(k.delay_ms(), 0, "the window is only 15 s");
+        assert_eq!(k.delay_ms(), 0, "the window is short");
         assert!(matches!(k.priority(), Priority::Attention));
         assert_eq!(k.group_key("b1"), "shutdown:b1");
-        assert_eq!(title_for(k, "Camper"), "Camper will shut down in 15 s");
+        assert_eq!(title_for(k, "Camper"), "Camper will shut down soon");
     }
 
     fn req(kind: NotifyKind, block: &str) -> Request {
@@ -1377,6 +1387,25 @@ mod tests {
     }
 
     #[test]
+    fn a_sensitive_operation_counts_down_with_its_name_and_no_button() {
+        let s = Settings::default();
+        let mut p = PolicyState::new();
+        let sensitive = Request {
+            shutdown: Some(ShutdownInfo { deadline_ms: 31_000, effect: SENSITIVE_EFFECT, running: true, request_id: "r9".into() }),
+            agent_name: "Upgrade AgentMux".into(),
+            block_id: "sensitive:r9".into(),
+            ..req(NotifyKind::ShutdownPending, "sensitive:r9")
+        };
+        p.step(Input::Emit(sensitive), 1_000, &s);
+        let a = p.step(Input::Tick, 1_000, &s);
+        let n = &shows(&a)[0];
+        assert_eq!(n.title, "Upgrade AgentMux in 30 s");
+        assert_eq!(n.actions, None, "only the AgentMux window, proven, may veto: the notification opens it");
+        assert_eq!(n.countdown, Some(Countdown { remaining_ms: 30_000, title_template: "Upgrade AgentMux in {n} s".into() }));
+        assert_eq!(p.live_by_id(&n.id), Some((NotifyKind::ShutdownPending, "sensitive:r9".to_string(), Some("r9".to_string()))));
+    }
+
+    #[test]
     fn the_button_and_the_verb_follow_the_agent_and_the_effect() {
         let s = Settings::default();
         let mut p = PolicyState::new();
@@ -1445,7 +1474,7 @@ mod tests {
         p.step(Input::Emit(req(NotifyKind::ShutdownPending, "b4")), 0, &s);
         let a = p.step(Input::Tick, 0, &s);
         let n = &shows(&a)[0];
-        assert_eq!(n.title, "lark will shut down in 15 s");
+        assert_eq!(n.title, "lark will shut down soon");
         assert!(n.actions.is_none() && n.countdown.is_none());
     }
 
