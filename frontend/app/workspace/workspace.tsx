@@ -10,6 +10,7 @@ import { StatusBar } from "@/app/statusbar/StatusBar";
 import { statusBarVisible } from "@/app/statusbar/status-bar-visibility";
 import { WindowHeader } from "@/app/window/window-header";
 import { TabContent } from "@/app/tab/tabcontent";
+import { runInViewTransition } from "@/app/util/view-transition";
 import { shouldReduceMotion } from "@/app/motion/motion";
 import { atoms, getApi } from "@/store/global";
 import {
@@ -125,8 +126,8 @@ function WorkspaceElem(): JSX.Element {
             setDisplayTabId(next);
             if (tabSwitching()) scheduleRevealLift();
         };
-        if (!instant && !shouldReduceMotion("transition") && typeof document.startViewTransition === "function") {
-            document.startViewTransition(apply);
+        if (!instant && !shouldReduceMotion("transition")) {
+            runInViewTransition(apply);
         } else {
             apply();
         }
