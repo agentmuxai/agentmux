@@ -10,6 +10,7 @@ import type { AgentContextUsageEvent } from "@/types/rpc/AgentContextUsageEvent"
 import type { AgentEvent } from "@/types/rpc/AgentEvent";
 import type { AgentFailure } from "@/types/rpc/AgentFailure";
 import type { AgentProgressEvent } from "@/types/rpc/AgentProgressEvent";
+import type { AgentRuntime } from "@/types/rpc/AgentRuntime";
 import type { AgentRuntimeEvent } from "@/types/rpc/AgentRuntimeEvent";
 import type { AgentTurnEvent } from "@/types/rpc/AgentTurnEvent";
 import type { AmbientNarrationEvent } from "@/types/rpc/AmbientNarrationEvent";
@@ -196,6 +197,7 @@ export type MuxEventPayloads = {
   [event: `agentcredentials:revoked:${string}`]: CredentialsRevokedEvent;
   [event: `agentidentities:changed:${string}`]: null;
   [event: `agentinstances:changed:${string}`]: null;
+  [event: `agentruntime:changed:${string}`]: AgentRuntime;
   [event: `dronerun:${string}`]: RunEvent;
 };
 

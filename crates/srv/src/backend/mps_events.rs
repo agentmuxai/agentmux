@@ -272,6 +272,8 @@ per_id_events! {
     AgentMemoryChanged: "agent:memory:changed:" => (),
     /// An agent's identity links changed (`agentidentities:changed:<agent id>`).
     AgentIdentitiesChanged: "agentidentities:changed:" => (),
+    /// An agent's runtime state changed (`agentruntime:changed:<agent id>`), the whole row.
+    AgentRuntimeChanged: "agentruntime:changed:" => crate::server::agent_runtime::AgentRuntime,
     /// A definition's instances changed (`agentinstances:changed:<definition id>`).
     AgentInstancesChanged: "agentinstances:changed:" => (),
     /// An agent's provider login was unlinked (`agentcredentials:revoked:<agent id>`).
