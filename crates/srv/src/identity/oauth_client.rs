@@ -198,6 +198,14 @@ pub fn build_auth_url(
     url
 }
 
+/// The email of the account a flow is for, when it already has one.
+fn account_email(ctx: &FlowCtx) -> Option<String> {
+    match &ctx.target {
+        FlowTarget::Existing(a) => a.context.get("email").and_then(|v| v.as_str()).map(str::to_string),
+        FlowTarget::New { .. } => None,
+    }
+}
+
 /// The scope Google's desktop picker takes, and the only one it takes: the request
 /// can't be combined with other scopes (spec §3.3).
 pub const PICKER_SCOPE: &str = "https://www.googleapis.com/auth/drive.file";
@@ -206,8 +214,15 @@ pub const PICKER_SCOPE: &str = "https://www.googleapis.com/auth/drive.file";
 /// `drive.file` alone, `trigger_onepick` and `prompt=consent`, no refresh
 /// token and no earlier scopes asked for (spec §3.3, Google's "Picker for
 /// desktop and mobile apps").
-pub fn build_picker_url(cfg: &ServiceOAuthConfig, client_id: &str, redirect_uri: &str, state: &str, code_challenge: &str) -> String {
-    format!(
+pub fn build_picker_url(
+    cfg: &ServiceOAuthConfig,
+    client_id: &str,
+    redirect_uri: &str,
+    state: &str,
+    code_challenge: &str,
+    login_hint: Option<&str>,
+) -> String {
+    let mut url = format!(
         "{}?response_type=code&client_id={}&redirect_uri={}&scope={}&state={}&code_challenge={}&code_challenge_method=S256&prompt=consent&trigger_onepick=true&allow_multiple=true",
         cfg.auth_url,
         enc(client_id),
@@ -215,8 +230,61 @@ pub fn build_picker_url(cfg: &ServiceOAuthConfig, client_id: &str, redirect_uri:
         enc(PICKER_SCOPE),
         enc(state),
         enc(code_challenge),
-    )
+    );
+    // The account the files are for, so Google offers that one first.
+    if let Some(hint) = login_hint.map(str::trim).filter(|h| !h.is_empty()) {
+        url.push_str(&format!("&login_hint={}", enc(hint)));
+    }
+    url
 }
+
+/// The Google user a picker's token belongs to, from Drive's `about` (answered to `drive.file`).
+/// None when Google doesn't say; the check then can't run.
+async fn picker_user(access_token: &str) -> Option<String> {
+    let reply = http()
+        .get("https://www.googleapis.com/drive/v3/about")
+        .query(&[("fields", "user(emailAddress)")])
+        .bearer_auth(access_token)
+        .send()
+        .await
+        .ok()?;
+    if !reply.status().is_success() {
+        return None;
+    }
+    let body: serde_json::Value = reply.json().await.ok()?;
+    body.pointer("/user/emailAddress")?.as_str().map(str::to_string)
+}
+
+/// A sentence when the picker was used as another Google user than the account's, so the
+/// files are not the account's to read. Nothing when they agree or either is unknown.
+fn picker_user_mismatch(expected: Option<&str>, got: Option<&str>) -> Option<String> {
+    match (expected.map(str::trim).filter(|s| !s.is_empty()), got) {
+        (Some(want), Some(got)) if !want.eq_ignore_ascii_case(got) => Some(format!(
+            "the file picker was used as {got}, but this AgentMux account is {want}: pick again, signed in to Google as {want}"
+        )),
+        _ => None,
+    }
+}
+
+/// The request line of an HTTP request read from `r`: everything up to the first line end,
+/// at most [`MAX_REQUEST_LINE`] bytes. The picker's callback carries every picked file id in
+/// its query, which a single small read can cut off.
+async fn read_request_line<R: tokio::io::AsyncRead + Unpin>(r: &mut R) -> String {
+    use tokio::io::AsyncReadExt;
+    let mut buf: Vec<u8> = Vec::with_capacity(4096);
+    let mut chunk = [0u8; 4096];
+    while buf.len() < MAX_REQUEST_LINE && !buf.contains(&b'\n') {
+        match r.read(&mut chunk).await {
+            Ok(0) | Err(_) => break,
+            Ok(n) => buf.extend_from_slice(&chunk[..n]),
+        }
+    }
+    String::from_utf8_lossy(&buf).into_owned()
+}
+
+/// The longest callback request line read: room for [`MAX_PICKED`] file ids with the code and
+/// the state.
+const MAX_REQUEST_LINE: usize = 32 * 1024;
 
 // ── PKCE + state helpers (RFC 7636 §4, RFC 8252 §8.9) ───────────────────────
 
@@ -787,7 +855,7 @@ async fn broker_exchange(ctx: &FlowCtx, code: &str, verifier: &str, redirect_uri
 }
 
 fn start_code_flow(ctx: FlowCtx, broker: Option<BrokerLeg>, picker: bool) -> Result<(String, OAuthStatus), String> {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::io::AsyncWriteExt;
     use tokio::net::TcpListener;
 
     let pkce = pkce_pair();
@@ -810,7 +878,7 @@ fn start_code_flow(ctx: FlowCtx, broker: Option<BrokerLeg>, picker: bool) -> Res
         let redirect_uri = format!("http://127.0.0.1:{port}/callback");
 
         let auth_url = if picker {
-            build_picker_url(&ctx.cfg, &ctx.client.client_id, &redirect_uri, &state, &pkce.challenge)
+            build_picker_url(&ctx.cfg, &ctx.client.client_id, &redirect_uri, &state, &pkce.challenge, account_email(&ctx).as_deref())
         } else {
             build_auth_url(&ctx.cfg, &ctx.client.client_id, &redirect_uri, &ctx.requested, &state, &pkce.challenge)
         };
@@ -827,9 +895,7 @@ fn start_code_flow(ctx: FlowCtx, broker: Option<BrokerLeg>, picker: bool) -> Res
                 return;
             }
         };
-        let mut buf = [0u8; 4096];
-        let n = stream.read(&mut buf).await.unwrap_or(0);
-        let req = String::from_utf8_lossy(&buf[..n]);
+        let req = read_request_line(&mut stream).await;
         let callback = parse_callback(&req);
         let _ = stream
             .write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n<html><body>You can close this tab and return to AgentMux.</body></html>")
@@ -859,8 +925,20 @@ fn start_code_flow(ctx: FlowCtx, broker: Option<BrokerLeg>, picker: bool) -> Res
                 if let Some(secret) = ctx.client.client_secret.as_ref() {
                     params.push(("client_secret", secret.clone()));
                 }
-                if let Err(e) = exchange(ctx.cfg.token_url, &params).await {
-                    tracing::warn!(target: "identity", error = %e, "identity.oauth: the picker's code wasn't exchanged; the picked files may still be usable");
+                match exchange(ctx.cfg.token_url, &params).await {
+                    Ok(tokens) => {
+                        let user = match tokens.get("access_token").and_then(|v| v.as_str()) {
+                            Some(t) => picker_user(t).await,
+                            None => None,
+                        };
+                        if let Some(error) = picker_user_mismatch(account_email(&ctx).as_deref(), user.as_deref()) {
+                            manager().set_status(&sid, OAuthStatus::Failed { error });
+                            return;
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(target: "identity", error = %e, "identity.oauth: the picker's code wasn't exchanged; the picked files may still be usable");
+                    }
                 }
             }
             let account_id = match &ctx.target {

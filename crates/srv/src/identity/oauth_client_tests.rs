@@ -375,7 +375,7 @@ fn only_agentmuxs_own_github_app_runs_through_the_broker() {
 #[test]
 fn the_pickers_url_asks_for_drive_file_alone_and_opens_the_picker() {
     let cfg = config_for("google").unwrap();
-    let url = build_picker_url(&cfg, "cid", "http://127.0.0.1:5555/callback", "st", "ch");
+    let url = build_picker_url(&cfg, "cid", "http://127.0.0.1:5555/callback", "st", "ch", Some("me@example.com"));
     let q = query(&url);
     let get = |k: &str| q.iter().find(|(n, _)| n == k).map(|(_, v)| v.as_str());
     assert!(url.starts_with("https://accounts.google.com/o/oauth2/v2/auth?"));
@@ -383,6 +383,7 @@ fn the_pickers_url_asks_for_drive_file_alone_and_opens_the_picker() {
     assert_eq!(get("trigger_onepick"), Some("true"));
     assert_eq!(get("prompt"), Some("consent"));
     assert_eq!(get("allow_multiple"), Some("true"));
+    assert_eq!(get("login_hint"), Some("me@example.com"), "the account's own Google user is offered first");
     assert_eq!(get("state"), Some("st"));
     assert_eq!(get("code_challenge_method"), Some("S256"));
     for k in ["include_granted_scopes", "access_type"] {
@@ -421,4 +422,45 @@ async fn the_picker_runs_as_the_client_the_account_was_made_with() {
     assert_eq!((c.client_id.as_str(), c.client_secret.as_deref(), c.mode), ("cid-9", Some("csec-9"), ClientMode::Byo));
     acct.context.as_object_mut().unwrap().remove("oauth_client");
     assert!(picker_client(&secrets, &acct).await.unwrap_err().contains("connect it again"));
+}
+
+
+#[test]
+fn a_picker_used_as_another_google_user_is_refused_and_an_unknown_user_is_not() {
+    let e = picker_user_mismatch(Some("me@example.com"), Some("other@example.com")).unwrap();
+    assert!(e.contains("other@example.com") && e.contains("me@example.com") && e.contains("pick again"), "{e}");
+    assert!(picker_user_mismatch(Some("Me@Example.com"), Some("me@example.com")).is_none());
+    assert!(picker_user_mismatch(Some("me@example.com"), None).is_none(), "Google didn't say: the check can't run");
+    assert!(picker_user_mismatch(None, Some("x@example.com")).is_none());
+    let hintless = build_picker_url(&config_for("google").unwrap(), "cid", "http://127.0.0.1:1/callback", "s", "c", None);
+    assert!(!hintless.contains("login_hint"));
+}
+
+#[tokio::test]
+async fn a_callback_with_a_hundred_picked_files_is_read_whole() {
+    use tokio::io::AsyncWriteExt;
+    let ids: Vec<String> = (0..100).map(|i| format!("{:0>44}", i)).collect();
+    let line = format!("GET /callback?picked_file_ids={}&code=the-code&state=the-state HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n", ids.join(","));
+    assert!(line.len() > 4096, "longer than the old single read");
+    let (mut tx, mut rx) = tokio::io::duplex(512);
+    let sent = line.clone();
+    let writer = tokio::spawn(async move {
+        for part in sent.as_bytes().chunks(700) {
+            tx.write_all(part).await.unwrap();
+        }
+    });
+    let req = read_request_line(&mut rx).await;
+    writer.await.unwrap();
+    let cb = parse_callback(&req);
+    assert_eq!(cb.code.as_deref(), Some("the-code"));
+    assert_eq!(cb.state.as_deref(), Some("the-state"));
+    assert_eq!(picked_ids(cb.picked_file_ids.as_deref()).len(), 100);
+}
+
+#[tokio::test]
+async fn a_request_that_never_ends_its_line_is_cut_at_the_limit() {
+    let endless = vec![b'a'; MAX_REQUEST_LINE * 2];
+    let mut r = &endless[..];
+    let got = read_request_line(&mut r).await;
+    assert!(got.len() >= MAX_REQUEST_LINE && got.len() < MAX_REQUEST_LINE + 4096);
 }
