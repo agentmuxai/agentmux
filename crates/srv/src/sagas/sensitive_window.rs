@@ -113,6 +113,17 @@ pub fn register_runner(op: &'static str, runner: Runner) {
     RUNNERS.lock().unwrap_or_else(|e| e.into_inner()).insert(op, runner);
 }
 
+/// Take back what `register_runner` said, for a test of an operation nothing runs.
+#[cfg(test)]
+pub fn unregister_runner(op: &str) {
+    RUNNERS.lock().unwrap_or_else(|e| e.into_inner()).remove(op);
+}
+
+/// Whether something runs `op` when its window runs out.
+pub fn has_runner(op: &str) -> bool {
+    runner_for(op).is_some()
+}
+
 fn runner_for(op: &str) -> Option<Runner> {
     RUNNERS.lock().unwrap_or_else(|e| e.into_inner()).get(op).cloned()
 }

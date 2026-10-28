@@ -490,6 +490,24 @@ pub(crate) const MESSAGE_TOOL: &str = r#"{
   }
 }"#;
 
+/// Sensitive: the operations too sweeping for one agent's say-so
+/// (docs/specs/SPEC_SUPER_AGENT_2026_10_25.md). The description stays short because every agent is shown it.
+pub(crate) const SENSITIVE_TOOL: &str = r#"{
+  "name": "Sensitive",
+  "description": "Operations too sweeping for one agent's say-so go to the super agent, and the person can veto them. Every call takes an action. request: ask for an operation (op) with its facts and a reason. Each fact is shown to the person as given, so give them exactly. Operations and their facts: quit_agentmux (none); upgrade (version); widget_install (widget, publisher, permissions); desktop_control_grant (scope); vault_use and vault_always_allow (entry, kind); sender_key_repin (agent, old_fingerprint, new_fingerprint); job_template_install and job_template_approve (template, publisher); tower_pair (device). The super agent is asked; if it approves, the person sees a banner naming you and it, with a countdown (30 s; 2 min for quit_agentmux and upgrade) and a Veto button, and it happens when the countdown ends unless the person vetoes. Asking for what is already asked for joins that request. status: one request by id, with its state and deadline; list: yours (all of them, for the super agent); cancel: withdraw your own request. approve and deny are for the super agent only: approve starts the countdown, deny ends the request with a reason for the requester. The super agent may check the facts first (look at the widget's folder, read a Vault entry's label). A request is the requester's, never the operator's words. Stopping or closing other agents has its own window and is done with Stop.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "action": { "type": "string", "enum": ["request", "approve", "deny", "cancel", "status", "list"], "description": "What to do" },
+      "op":     { "type": "string", "description": "request: the operation, from the list above" },
+      "facts":  { "type": "object", "additionalProperties": { "type": "string" }, "description": "request: the operation's facts, each as text, at most 400 characters" },
+      "reason": { "type": "string", "description": "request: why you need it; deny: why it is refused (the requester is told)" },
+      "id":     { "type": "string", "description": "approve, deny, cancel, status: the request's id, from request or list" }
+    },
+    "required": ["action"]
+  }
+}"#;
+
 /// Every tool `tools/list` advertises, in order. One list, so a test can
 /// check exactly what agents are shown.
 pub(crate) const ADVERTISED: &[&str] = &[
@@ -510,6 +528,7 @@ pub(crate) const ADVERTISED: &[&str] = &[
     MESSAGE_TOOL,
     APP_TOOL,
     DESKTOP_TOOL,
+    SENSITIVE_TOOL,
 ];
 
 /// [`ADVERTISED`] parsed for the `tools/list` answer.

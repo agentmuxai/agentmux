@@ -218,6 +218,9 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/agentmux/work/:id/hold", post(work_tasks::handle_work_hold))
         .route("/agentmux/work/:id/unhold", post(work_tasks::handle_work_unhold))
         .route("/agentmux/work/act", post(work_act::handle_work_act))
+        // A sensitive operation: the agent asks, the super agent decides, the person can veto
+        // (SPEC_SUPER_AGENT_2026_10_25.md).
+        .route("/api/v1/sensitive/:action", post(sensitive_handlers::handle_sensitive))
         // Presence claims and posts to a repository's coordination channel
         // (SPEC_AGENT_COORDINATION_CHANNEL_2026_10_15.md); reading is open.
         .route("/api/v1/work-claims", post(work_claims_handlers::handle_claim_work))
