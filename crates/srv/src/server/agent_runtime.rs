@@ -15,6 +15,10 @@
 //! is never produced (a controller just created, with no process yet, reads as `idle`), and no event
 //! says an agent was deleted (`changed_rows` only forgets it), so a viewer relists on `agents:changed`.
 //!
+//! An agent wanted running with no process reads `idle`, not `stopped`: a persistent agent with no
+//! session on file starts on its first message, and an agent that has only ended its process is
+//! started by the next one. The failure states (limited, signed out, waiting) keep their place.
+//!
 //! `desired` is the agent's own desired state when its block records one (`agent:desired`, set by an
 //! open, a start and a stop), and otherwise `running` while a process is alive and `stopped` if not.
 
@@ -73,7 +77,7 @@ pub struct AgentRuntime {
     /// The agent's UID, the id of `agentidentities:changed:<agent id>`.
     pub agent_id: String,
     pub state: AgentRuntimeState,
-    /// Why, for a state that has a reason: `usage_limit` or `needs_login`.
+    /// Why, for a state that has a reason: `usage_limit`, `needs_login` or `starts_on_first_message`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub detail: Option<String>,
@@ -108,6 +112,23 @@ pub struct CommandAgentStartData {
 pub struct AgentStartResult {
     pub agent_id: String,
     pub block_id: String,
+}
+
+/// Why an agent wanted running with no process reads `idle` (`state_of`'s reasons are codes too).
+pub const STARTS_ON_FIRST_MESSAGE: &str = "starts_on_first_message";
+
+/// What a viewer sees of an agent that the availability view calls stopped but its block says should
+/// run: it is waiting for a message to start it, which is `idle`. Anything else is as it was.
+pub fn wanted_running_is_idle(
+    state: AgentRuntimeState,
+    detail: Option<String>,
+    desired: AgentDesiredState,
+) -> (AgentRuntimeState, Option<String>) {
+    if state == AgentRuntimeState::Stopped && desired == AgentDesiredState::Running {
+        (AgentRuntimeState::Idle, Some(STARTS_ON_FIRST_MESSAGE.to_string()))
+    } else {
+        (state, detail)
+    }
 }
 
 /// The state, its reason and its reset, from what the availability view says.
@@ -165,6 +186,8 @@ pub(crate) fn list(state: &AppState, now_ms: u64) -> Vec<AgentRuntime> {
             let block_id = live.clone().or_else(|| panes.get(&d.id).cloned());
             let (runtime_state, detail, resets_at) = state_of(&availability_of_block(mstore, live.as_deref(), now_ms));
             let (color, recorded) = block_id.as_deref().map(|b| block_facts(mstore, b)).unwrap_or_default();
+            let desired = desired_from(recorded.as_deref(), runtime_state);
+            let (runtime_state, detail) = wanted_running_is_idle(runtime_state, detail, desired);
             AgentRuntime {
                 color,
                 agent_id: d.id,
@@ -172,7 +195,7 @@ pub(crate) fn list(state: &AppState, now_ms: u64) -> Vec<AgentRuntime> {
                 detail,
                 resets_at,
                 block_id,
-                desired: desired_from(recorded.as_deref(), runtime_state),
+                desired,
                 name: d.name,
                 provider: d.provider,
                 icon: d.icon,
@@ -340,8 +363,23 @@ mod tests {
         state.mstore.insert(&mut block).unwrap();
         let rows = list(&state, 10_000);
         let one = rows.iter().find(|r| r.agent_id == "def-rt-2").expect("the agent is listed");
-        assert_eq!((one.state, one.desired), (AgentRuntimeState::Stopped, AgentDesiredState::Running));
+        assert_eq!((one.state, one.desired), (AgentRuntimeState::Idle, AgentDesiredState::Running));
+        assert_eq!(one.detail.as_deref(), Some("starts_on_first_message"));
         assert_eq!(one.block_id.as_deref(), Some(block.oid.as_str()));
+    }
+
+    #[test]
+    fn an_agent_wanted_running_with_no_process_is_idle_and_says_it_starts_on_its_first_message() {
+        use AgentRuntimeState as S;
+        let (state, detail) = wanted_running_is_idle(S::Stopped, None, AgentDesiredState::Running);
+        assert_eq!((state, detail.as_deref()), (S::Idle, Some("starts_on_first_message")));
+        // Stopped on purpose, or with nothing said (a block from before the feature): as it was.
+        assert_eq!(wanted_running_is_idle(S::Stopped, None, AgentDesiredState::Stopped), (S::Stopped, None));
+        // The other states keep their place, and their reason.
+        for kept in [S::Error, S::Limited, S::SignedOut, S::WaitingOnUser, S::Working, S::Idle] {
+            let (state, detail) = wanted_running_is_idle(kept, Some("why".into()), AgentDesiredState::Running);
+            assert_eq!((state, detail.as_deref()), (kept, Some("why")));
+        }
     }
 
     #[test]
