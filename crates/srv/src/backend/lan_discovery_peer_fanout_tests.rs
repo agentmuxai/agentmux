@@ -310,6 +310,10 @@ async fn an_old_cached_miss_is_asked_again_and_a_fresh_one_is_not() {
     assert!(matches!(c.find_agent_lan_pubkey_again_from(&peers, "agentx", &http).await, LanPubkeyLookup::NotFound), "a miss made a second ago");
     assert_eq!(asked(), 0, "neither asked the network");
 
+    c.seed_lan_pubkey_miss_for_test("agentx", 10_000);
+    assert!(matches!(c.find_agent_lan_pubkey_again_from(&peers, "agentx", &http).await, LanPubkeyLookup::NotFound), "an expired miss");
+    assert_eq!(asked(), 0, "was not served from the cache, so not asked again");
+
     c.seed_lan_pubkey_miss_for_test("agentx", 30);
     assert!(matches!(c.find_agent_lan_pubkey_again_from(&peers, "agentx", &http).await, LanPubkeyLookup::Found(k) if k == b"key"));
     assert_eq!(asked(), 1);

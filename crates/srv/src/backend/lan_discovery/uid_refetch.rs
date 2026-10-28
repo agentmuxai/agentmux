@@ -57,8 +57,11 @@ impl LanDiscoveryController {
     pub(super) async fn find_agent_lan_pubkey_again_from(&self, peers: &[LanInstance], agent_id: &str, http: &reqwest::Client) -> LanPubkeyLookup {
         let old_miss = self.pubkey_cache.read().ok().is_some_and(|cache| {
             cache.get(agent_id).is_some_and(|e| {
-                let age = std::time::Duration::from_secs(LAN_AGENT_CACHE_TTL_SECS).saturating_sub(e.expires.saturating_duration_since(std::time::Instant::now()));
-                e.public_key.is_none() && age >= MISS_RECHECK_AFTER
+                // A miss past its TTL was not served from the cache: the lookup that
+                // just ran asked the peers itself.
+                let left = e.expires.saturating_duration_since(std::time::Instant::now());
+                let age = std::time::Duration::from_secs(LAN_AGENT_CACHE_TTL_SECS).saturating_sub(left);
+                e.public_key.is_none() && !left.is_zero() && age >= MISS_RECHECK_AFTER
             })
         });
         if !old_miss || !self.pubkey_lookup_allowed() {
