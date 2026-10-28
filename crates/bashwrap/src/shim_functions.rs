@@ -15,12 +15,62 @@ pub(crate) fn export() {
     for (name, body) in agentmux_common::build_slot::shim_function_env_for_current_user() {
         std::env::set_var(name, body);
     }
+    std::env::set_var(GH_FUNCTION_NAME, GH_FUNCTION_BODY);
 }
+
+/// The name bash gives an exported `gh` function.
+const GH_FUNCTION_NAME: &str = "BASH_FUNC_gh%%";
+
+/// `gh`, for an agent whose person connected GitHub through AgentMux Cloud (srv sets
+/// `AGENTMUX_GITHUB_BROKER` for those): the command runs with the GitHub App's token for the
+/// repository it is about, or with no token at all, never with one the environment happened to
+/// carry. Without the variable it is plain `gh`.
+const GH_FUNCTION_BODY: &str = "() {  if [ -n \"${AGENTMUX_GITHUB_BROKER:-}\" ]; then\n    local _amx_t;\n    _amx_t=\"$(agentmux-bashwrap github-token -- \"$@\")\";\n    if [ -n \"$_amx_t\" ]; then\n      GH_TOKEN=\"$_amx_t\" GITHUB_TOKEN=\"$_amx_t\" command gh \"$@\";\n    else\n      GH_TOKEN= GITHUB_TOKEN= command gh \"$@\";\n    fi;\n  else\n    command gh \"$@\";\n  fi\n}";
 
 #[cfg(test)]
 mod tests {
     /// A variable set with `std::env::set_var` under the name bash uses for exported functions
     /// reaches a bash started afterwards as a function (the mechanism `export` relies on).
+    /// The `gh` function runs plain `gh` without the switch, and with the broker's token (or none)
+    /// with it. A fake `agentmux-bashwrap` and `gh` on PATH stand in for the real ones.
+    #[test]
+    fn the_gh_function_uses_the_brokers_token_or_none() {
+        let _guard = crate::test_env_lock::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let Ok(bash) = crate::bash_wrap::locate_bash() else { return };
+        let dir = std::env::temp_dir().join(format!("amx-gh-fn-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = |name: &str, body: &str| {
+            let p = dir.join(name);
+            std::fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+            }
+        };
+        script("gh", "echo \"gh GH_TOKEN=[$GH_TOKEN] GITHUB_TOKEN=[$GITHUB_TOKEN] args=$*\"");
+        let run = |broker: &str, bashwrap_prints: &str, inherited: &str| {
+            script("agentmux-bashwrap", &format!("[ \"$1\" = github-token ] && printf '%s' '{bashwrap_prints}'"));
+            let path = std::env::join_paths(std::iter::once(dir.clone()).chain(std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()))).unwrap();
+            let out = std::process::Command::new(&bash)
+                .args(["-c", "gh pr list"])
+                .env(super::GH_FUNCTION_NAME, super::GH_FUNCTION_BODY)
+                .env("PATH", path)
+                .env("AGENTMUX_GITHUB_BROKER", broker)
+                .env("GH_TOKEN", inherited)
+                .output()
+                .unwrap();
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        };
+        // No switch: plain gh, with whatever the environment has.
+        assert_eq!(run("", "ghs_X", "mine"), "gh GH_TOKEN=[mine] GITHUB_TOKEN=[] args=pr list");
+        // The switch and a token: that token, for both names.
+        assert_eq!(run("1", "ghs_X", "mine"), "gh GH_TOKEN=[ghs_X] GITHUB_TOKEN=[ghs_X] args=pr list");
+        // The switch and no token: none, not the one the environment carried.
+        assert_eq!(run("1", "", "mine"), "gh GH_TOKEN=[] GITHUB_TOKEN=[] args=pr list");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn an_exported_function_variable_reaches_a_child_bash() {
         let _guard = crate::test_env_lock::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());

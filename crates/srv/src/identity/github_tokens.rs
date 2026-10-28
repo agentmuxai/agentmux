@@ -241,6 +241,80 @@ impl Tokens {
     }
 }
 
+/// Set in the environment of an agent whose `git` and `gh` use the broker's tokens; the `gh`
+/// function `agentmux-bashwrap` exports reads it.
+pub const BROKER_ENV: &str = "AGENTMUX_GITHUB_BROKER";
+const HELPER_KEY: &str = "credential.https://github.com.helper";
+const HELPER: &str = "!agentmux-bashwrap git-credential";
+const HTTP_PATH_KEY: &str = "credential.https://github.com.useHttpPath";
+const REWRITE_KEY: &str = "url.https://github.com/.insteadOf";
+
+/// Point an agent's `git` at the broker's tokens, or take that out again.
+///
+/// With `enabled`, GitHub over https asks `agentmux-bashwrap git-credential` and nothing else:
+/// an empty helper before it clears every other (the person's stored login, a token cache), and
+/// the repository's path goes with the request so the token can be narrowed to it. `ssh` remotes
+/// to GitHub are rewritten to https, because an ssh key is the person's own credential. Prompts
+/// are off, so a refusal ends the command with the reason instead of waiting at a prompt no one
+/// sees. Without `enabled`, any of this left in the environment from an earlier start is removed.
+pub fn apply_agent_git_in(env: &mut HashMap<String, String>, process: impl Fn(&str) -> Option<String> + Copy, enabled: bool) {
+    use crate::backend::publish_guard::set_git_config_list;
+    if enabled {
+        set_git_config_list(env, process, HELPER_KEY, &["", HELPER]);
+        set_git_config_list(env, process, HTTP_PATH_KEY, &["true"]);
+        set_git_config_list(env, process, REWRITE_KEY, &["git@github.com:", "ssh://git@github.com/"]);
+        env.insert("GIT_TERMINAL_PROMPT".to_string(), "0".to_string());
+        env.insert(BROKER_ENV.to_string(), "1".to_string());
+    } else if env.contains_key(BROKER_ENV) {
+        for key in [HELPER_KEY, HTTP_PATH_KEY, REWRITE_KEY] {
+            set_git_config_list(env, process, key, &[]);
+        }
+        env.remove(BROKER_ENV);
+    }
+}
+
+static STORE: OnceLock<Arc<Store>> = OnceLock::new();
+
+/// The account store, whose GitHub accounts decide whether agents use the broker.
+pub fn attach_store(store: Arc<Store>) {
+    let _ = STORE.set(store);
+}
+
+/// Whether agents on this machine get the broker's GitHub tokens: the person connected GitHub
+/// through AgentMux Cloud (a brokered account that still works), and this isn't a fleet host,
+/// where `gh-agent` already gives agents their GitHub identity.
+fn agents_use_broker(env: &HashMap<String, String>) -> bool {
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
+    static CACHE: Mutex<Option<(Instant, bool)>> = Mutex::new(None);
+    if crate::backend::publish_guard::hooks_dir_for(env, |k| std::env::var(k).ok()).is_some() {
+        return false;
+    }
+    let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((at, answer)) = *cache {
+        if at.elapsed() < Duration::from_secs(5) {
+            return answer;
+        }
+    }
+    let answer = STORE.get().is_some_and(|store| {
+        store
+            .identity_list(Some(crate::identity::github_connect::PROVIDER))
+            .unwrap_or_default()
+            .iter()
+            .any(|a| crate::identity::github_connect::is_brokered(a) && a.status != crate::identity::oauth_tokens::STATUS_NEEDS_REAUTH)
+    });
+    *cache = Some((Instant::now(), answer));
+    answer
+}
+
+/// [`apply_agent_git_in`] for a spawn: every path that starts an agent process or runs a command for
+/// one comes through `gh_guard::apply_gh_guard`, which calls this.
+#[cfg_attr(test, allow(dead_code))]
+pub fn apply_agent_git(env: &mut HashMap<String, String>) {
+    let enabled = agents_use_broker(env);
+    apply_agent_git_in(env, |k| std::env::var(k).ok(), enabled);
+}
+
 /// srv's tokens: one cache for the process.
 pub fn global() -> &'static Tokens {
     static TOKENS: OnceLock<Tokens> = OnceLock::new();
@@ -368,6 +442,47 @@ mod tests {
     fn ok_for(secs: i64) -> InstallationToken {
         let at = chrono::DateTime::from_timestamp(NOW + secs, 0).unwrap().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
         token(&at)
+    }
+
+    fn env(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+        pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+    }
+
+    fn entries(e: &HashMap<String, String>) -> Vec<(String, String)> {
+        let n: usize = e.get("GIT_CONFIG_COUNT").and_then(|c| c.parse().ok()).unwrap_or(0);
+        (0..n).map(|i| (e[&format!("GIT_CONFIG_KEY_{i}")].clone(), e[&format!("GIT_CONFIG_VALUE_{i}")].clone())).collect()
+    }
+
+    #[test]
+    fn an_agent_with_the_broker_gets_only_its_credential_helper_for_github() {
+        let mut e = env(&[("GIT_CONFIG_COUNT", "1"), ("GIT_CONFIG_KEY_0", "user.name"), ("GIT_CONFIG_VALUE_0", "x")]);
+        apply_agent_git_in(&mut e, |_| None, true);
+        let got = entries(&e);
+        // The reset comes right before ours: whatever helper was configured before is not asked.
+        let at = got.iter().position(|(k, v)| k == HELPER_KEY && v.is_empty()).expect("the reset");
+        assert_eq!(got[at + 1], (HELPER_KEY.to_string(), HELPER.to_string()));
+        assert!(got.contains(&(HTTP_PATH_KEY.to_string(), "true".to_string())));
+        assert!(got.contains(&(REWRITE_KEY.to_string(), "git@github.com:".to_string())), "ssh remotes use the token too");
+        assert!(got.contains(&("user.name".to_string(), "x".to_string())), "other settings stay");
+        assert_eq!((e["GIT_TERMINAL_PROMPT"].as_str(), e[BROKER_ENV].as_str()), ("0", "1"));
+        // Applied again (a persisted cmd:env): the same, not twice.
+        let before = e.clone();
+        apply_agent_git_in(&mut e, |_| None, true);
+        assert_eq!(e, before);
+    }
+
+    #[test]
+    fn an_agent_without_the_broker_keeps_its_own_git_and_loses_a_stale_setup() {
+        let mut plain = env(&[("GIT_CONFIG_COUNT", "1"), ("GIT_CONFIG_KEY_0", "user.name"), ("GIT_CONFIG_VALUE_0", "x")]);
+        let before = plain.clone();
+        apply_agent_git_in(&mut plain, |_| None, false);
+        assert_eq!(plain, before, "nothing added when GitHub isn't connected");
+        // Disconnected since the last start: what was set is taken out, the rest stays.
+        let mut e = before.clone();
+        apply_agent_git_in(&mut e, |_| None, true);
+        apply_agent_git_in(&mut e, |_| None, false);
+        assert_eq!(entries(&e), vec![("user.name".to_string(), "x".to_string())]);
+        assert!(!e.contains_key(BROKER_ENV));
     }
 
     #[tokio::test]
