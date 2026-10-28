@@ -467,6 +467,8 @@ fn srv_event_kind_name(e: &Event) -> &'static str {
         Event::BlockCreated { .. } => "BlockCreated",
         Event::BlockDeleted { .. } => "BlockDeleted",
         Event::BlockMoved { .. } => "BlockMoved",
+        Event::BlockParked { .. } => "BlockParked",
+        Event::BlockAttached { .. } => "BlockAttached",
         Event::BlockMetaUpdated { .. } => "BlockMetaUpdated",
         Event::SrvWindowOpened { .. } => "SrvWindowOpened",
         Event::SrvWindowClosed { .. } => "SrvWindowClosed",

@@ -505,6 +505,18 @@ pub enum Command {
         #[serde(default)]
         meta: serde_json::Value,
     },
+    /// Take an agent's block out of `tab_id` and keep it, in no tab. No-op when it isn't in that
+    /// tab. The layout node goes separately (`LayoutDeleteNodeByBlock`).
+    ParkBlock {
+        tab_id: String,
+        block_id: String,
+    },
+    /// Put a parked block into `dst_tab_id` at `dst_index` (clamped); errors when it is in a tab.
+    AttachBlock {
+        block_id: String,
+        dst_tab_id: String,
+        dst_index: u32,
+    },
     /// Phase E.3 — delete a block from a tab. Idempotent silent no-op
     /// on missing tab or missing block.
     DeleteBlock {
@@ -1463,6 +1475,19 @@ pub enum Event {
     BlockMoved {
         block_id: String,
         src_tab_id: String,
+        dst_tab_id: String,
+        dst_index: u32,
+        version: u64,
+    },
+    /// A block left a tab and was kept (`Command::ParkBlock`); nothing was deleted.
+    BlockParked {
+        tab_id: String,
+        block_id: String,
+        version: u64,
+    },
+    /// A parked block went into a tab (`Command::AttachBlock`).
+    BlockAttached {
+        block_id: String,
         dst_tab_id: String,
         dst_index: u32,
         version: u64,

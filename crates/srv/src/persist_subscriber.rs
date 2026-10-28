@@ -33,6 +33,7 @@ use crate::backend::wcore;
 use crate::state::State;
 
 mod layout_queue;
+pub(crate) mod parked;
 mod resync;
 
 use layout_queue::apply_layout_backend_actions_queued;
@@ -146,6 +147,8 @@ pub(crate) fn apply_event_to_mstore(
         Event::BlockDeleted {
             tab_id, block_id, ..
         } => apply_block_deleted(mstore, tab_id, block_id),
+        Event::BlockParked { tab_id, block_id, .. } => parked::apply_block_parked(mstore, tab_id, block_id),
+        Event::BlockAttached { block_id, dst_tab_id, dst_index, .. } => parked::apply_block_attached(mstore, block_id, dst_tab_id, *dst_index),
         Event::SrvWindowOpened {
             window_id,
             workspace_id,

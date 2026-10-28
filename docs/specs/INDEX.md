@@ -634,6 +634,7 @@ partial list.
 | [`SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13`](SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13.md) | Spec: Modularize `frontend/app/view/agent/agent-view.tsx` |
 | [`SPEC_AGENT_WORKERS_2026_10_15`](SPEC_AGENT_WORKERS_2026_10_15.md) | Spec: an agent launches and coaches worker agents in panes |
 | [`SPEC_AGENT_WORKING_STATE_UNIFICATION_2026_09_04`](SPEC_AGENT_WORKING_STATE_UNIFICATION_2026_09_04.md) | Spec: unify the Working/Worked label with the long-running-process axis, and close the two live desync bugs |
+| [`SPEC_ALWAYS_AVAILABLE_AGENTS_2026_10_27`](SPEC_ALWAYS_AVAILABLE_AGENTS_2026_10_27.md) | Spec: always-available agents (an agent runs and is recorded whether or not a pane shows it) |
 | [`SPEC_AMBIENT_SWARM_SUMMARY_HARDENING_2026_10_02`](SPEC_AMBIENT_SWARM_SUMMARY_HARDENING_2026_10_02.md) | SPEC: The swarm always shows a useful line for every agent — hardening the ambient summary |
 | [`SPEC_ARMORY_NAMING_CONSOLIDATION_2026_09_09`](SPEC_ARMORY_NAMING_CONSOLIDATION_2026_09_09.md) | Spec: Armory Naming Consolidation — Bundle vs Memory |
 | [`SPEC_ASK_USER_QUESTION_2026_06_15`](SPEC_ASK_USER_QUESTION_2026_06_15.md) | SPEC: AskUserQuestion — interactive agent questions in the agent pane |

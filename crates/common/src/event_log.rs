@@ -311,6 +311,8 @@ pub fn event_version(e: &Event) -> u64 {
         | Event::BlockMetaUpdated { version, .. }
         | Event::TabMoved { version, .. }
         | Event::BlockMoved { version, .. }
+        | Event::BlockParked { version, .. }
+        | Event::BlockAttached { version, .. }
         | Event::BlockCreated { version, .. }
         | Event::BlockDeleted { version, .. }
         | Event::FocusedNodeChanged { version, .. }

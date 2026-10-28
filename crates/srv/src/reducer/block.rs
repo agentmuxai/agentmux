@@ -134,6 +134,49 @@ pub(super) fn handle_move_block(
     }]
 }
 
+/// Take a block out of `tab_id` and keep it: it leaves the tab's `block_ids`, stays in
+/// `state.blocks` with an empty `tab_id` (parked), and nothing is deleted. Idempotent: a
+/// missing tab, or a block that is not in that tab, is a silent no-op.
+pub(super) fn handle_park_block(state: &mut State, tab_id: String, block_id: String) -> Vec<Event> {
+    let Some(tab) = state.tabs.get_mut(&tab_id) else {
+        return Vec::new();
+    };
+    let Some(pos) = tab.block_ids.iter().position(|b| b == &block_id) else {
+        return Vec::new();
+    };
+    tab.block_ids.remove(pos);
+    if let Some(block) = state.blocks.get_mut(&block_id) {
+        block.tab_id = String::new();
+    }
+    let v = state.bump_version();
+    vec![Event::BlockParked { tab_id, block_id, version: v }]
+}
+
+/// Put a parked block into `dst_tab_id` at `dst_index` (clamped). Errors when the tab or the
+/// block is missing, or the block is in a tab already (move it with `MoveBlock`).
+pub(super) fn handle_attach_block(state: &mut State, block_id: String, dst_tab_id: String, dst_index: u32) -> Vec<Event> {
+    let error = if !state.tabs.contains_key(&dst_tab_id) {
+        Some(format!("AttachBlock: dst tab not found: {}", dst_tab_id))
+    } else {
+        match state.blocks.get(&block_id) {
+            None => Some(format!("AttachBlock: block not found: {}", block_id)),
+            Some(block) if !block.tab_id.is_empty() => {
+                Some(format!("AttachBlock: block {} is in tab {}, not parked", block_id, block.tab_id))
+            }
+            _ => None,
+        }
+    };
+    if let Some(message) = error {
+        return invalid_command(state, message);
+    }
+    let dst = state.tabs.get_mut(&dst_tab_id).expect("checked");
+    let at = (dst_index as usize).min(dst.block_ids.len());
+    dst.block_ids.insert(at, block_id.clone());
+    state.blocks.get_mut(&block_id).expect("checked").tab_id = dst_tab_id.clone();
+    let v = state.bump_version();
+    vec![Event::BlockAttached { block_id, dst_tab_id, dst_index: at as u32, version: v }]
+}
+
 /// Phase E.5.3 — pass-through for block meta updates. Same shape.
 pub(super) fn handle_update_block_meta(
     state: &mut State,
@@ -253,6 +296,54 @@ mod tests {
         assert_eq!(state.tabs[&src_tab].block_ids, Vec::<String>::new());
         assert_eq!(state.tabs[&dst_tab].block_ids, vec![block.clone(), dst_existing]);
         assert_eq!(state.blocks[&block].tab_id, dst_tab);
+    }
+
+    #[test]
+    fn park_keeps_the_block_in_state_but_in_no_tab() {
+        let mut state = State::default();
+        let ws = create_workspace(&mut state, "w");
+        let tab = create_tab(&mut state, &ws, "t");
+        let (keep, parked) = (create_block(&mut state, &tab), create_block(&mut state, &tab));
+        let events = update(&mut state, Command::ParkBlock { tab_id: tab.clone(), block_id: parked.clone() }, &ctx(2));
+        assert!(matches!(&events[0], Event::BlockParked { .. }));
+        assert_eq!(state.tabs[&tab].block_ids, vec![keep]);
+        assert_eq!(state.blocks[&parked].tab_id, "");
+        // Again, and for a block or tab that is not there: nothing happens.
+        assert!(update(&mut state, Command::ParkBlock { tab_id: tab.clone(), block_id: parked.clone() }, &ctx(3)).is_empty());
+        assert!(update(&mut state, Command::ParkBlock { tab_id: "ghost".into(), block_id: parked }, &ctx(4)).is_empty());
+    }
+
+    #[test]
+    fn attach_puts_a_parked_block_into_any_tab_at_a_clamped_index() {
+        let mut state = State::default();
+        let ws = create_workspace(&mut state, "w");
+        let (src, dst) = (create_tab(&mut state, &ws, "src"), create_tab(&mut state, &ws, "dst"));
+        let block = create_block(&mut state, &src);
+        let first = create_block(&mut state, &dst);
+        update(&mut state, Command::ParkBlock { tab_id: src.clone(), block_id: block.clone() }, &ctx(2));
+        let events = update(&mut state, Command::AttachBlock { block_id: block.clone(), dst_tab_id: dst.clone(), dst_index: 99 }, &ctx(3));
+        match &events[0] {
+            Event::BlockAttached { dst_index, .. } => assert_eq!(*dst_index, 1),
+            other => panic!("expected BlockAttached, got {:?}", other),
+        }
+        assert_eq!(state.tabs[&dst].block_ids, vec![first, block.clone()]);
+        assert_eq!(state.blocks[&block].tab_id, dst);
+        assert!(state.tabs[&src].block_ids.is_empty());
+    }
+
+    #[test]
+    fn attach_refuses_a_block_that_is_in_a_tab_and_unknown_ids() {
+        let mut state = State::default();
+        let ws = create_workspace(&mut state, "w");
+        let (a, b) = (create_tab(&mut state, &ws, "a"), create_tab(&mut state, &ws, "b"));
+        let block = create_block(&mut state, &a);
+        let attach = |block_id: &str, tab: &str| Command::AttachBlock { block_id: block_id.into(), dst_tab_id: tab.into(), dst_index: 0 };
+        let events = update(&mut state, attach(&block, &b), &ctx(2));
+        assert!(matches!(&events[0], Event::Error { message, .. } if message.contains("not parked")), "{events:?}");
+        assert!(matches!(&update(&mut state, attach("ghost", &b), &ctx(3))[0], Event::Error { .. }));
+        assert!(matches!(&update(&mut state, attach(&block, "ghost"), &ctx(4))[0], Event::Error { .. }));
+        assert_eq!(state.tabs[&a].block_ids, vec![block]);
+        assert!(state.tabs[&b].block_ids.is_empty());
     }
 
     #[test]
