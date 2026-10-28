@@ -215,3 +215,88 @@ async fn an_operation_that_panics_is_settled_as_failed() {
     assert_eq!(r.status, Status::Failed, "it no longer counts as open");
     assert!(!r.status.is_open());
 }
+
+mod decide {
+    use super::*;
+    use crate::backend::rpc_types::{RpcContext, RpcMessage};
+
+    struct Harness {
+        engine: Arc<WshRpcEngine>,
+        rx: tokio::sync::mpsc::UnboundedReceiver<RpcMessage>,
+        state: AppState,
+    }
+
+    fn harness(ctx: RpcContext) -> Harness {
+        let state = test_state();
+        let (engine, rx) = WshRpcEngine::new();
+        register(&engine, &state);
+        engine.set_rpc_context(ctx);
+        Harness { engine, rx, state }
+    }
+
+    impl Harness {
+        async fn decide(&mut self, id: &str, decision: &str) -> Result<serde_json::Value, String> {
+            self.engine.handle_message(RpcMessage {
+                command: COMMAND_SENSITIVE_DECIDE.to_string(),
+                reqid: "req-1".to_string(),
+                data: Some(serde_json::json!({ "request_id": id, "decision": decision })),
+                ..Default::default()
+            });
+            let resp = tokio::time::timeout(Duration::from_secs(10), self.rx.recv()).await.unwrap().unwrap();
+            if resp.error.is_empty() {
+                Ok(resp.data.unwrap_or_default())
+            } else {
+                Err(resp.error)
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn the_proven_window_vetoes_and_approves_now() {
+        let mut h = harness(RpcContext::operator_for_tests());
+        // No runner is registered for this operation by any test, so what runs
+        // is not what is checked here: only that the decision is taken and settles.
+        let make = || approved("sender_key_repin", &[("agent", "a"), ("old_fingerprint", "aa"), ("new_fingerprint", "bb")]);
+        let id = make();
+        open(&h.state, &id, Duration::from_secs(600)).unwrap();
+        assert_eq!(h.decide(&id, "veto").await.unwrap()["outcome"], "vetoed");
+        assert_eq!(status(&id).unwrap().status, "vetoed");
+        assert_eq!(h.decide(&id, "veto").await.unwrap()["outcome"], "too_late");
+
+        let id = make();
+        open(&h.state, &id, Duration::from_secs(600)).unwrap();
+        assert_eq!(h.decide(&id, "approve_now").await.unwrap()["outcome"], "approved_now");
+        assert!(matches!(settled(&id).await.status, "done" | "failed"), "it ran without waiting 10 minutes");
+    }
+
+    #[tokio::test]
+    async fn an_agent_connection_is_refused_and_the_countdown_is_untouched() {
+        let mut h = harness(RpcContext { agent_id: "super".to_string(), ..Default::default() });
+        let id = approved("job_template_install", &[("template", "t"), ("publisher", "p")]);
+        open(&h.state, &id, Duration::from_secs(600)).unwrap();
+        for decision in ["veto", "approve_now"] {
+            let err = h.decide(&id, decision).await.unwrap_err();
+            assert!(err.contains("FORBIDDEN"), "{err}");
+        }
+        assert_eq!(status(&id).unwrap().status, "pending", "an agent can neither stop nor hurry it");
+        veto(&h.state, &id);
+    }
+
+    #[tokio::test]
+    async fn a_connection_the_host_never_proved_is_refused() {
+        let mut h = harness(RpcContext::default());
+        let id = approved("tower_pair", &[("device", "watch")]);
+        open(&h.state, &id, Duration::from_secs(600)).unwrap();
+        let err = h.decide(&id, "veto").await.unwrap_err();
+        assert!(err.contains("FORBIDDEN") && err.contains("isn't the AgentMux window"), "{err}");
+        assert_eq!(status(&id).unwrap().status, "pending");
+        veto(&h.state, &id);
+    }
+
+    #[tokio::test]
+    async fn an_unknown_decision_is_refused() {
+        let mut h = harness(RpcContext::operator_for_tests());
+        let err = h.decide("whatever", "maybe").await.unwrap_err();
+        assert!(err.contains("INVALID_ARG"), "{err}");
+    }
+}

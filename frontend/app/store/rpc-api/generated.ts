@@ -208,6 +208,7 @@ import type { CommandResolveCliData } from "@/types/rpc/CommandResolveCliData";
 import type { CommandRestoreOtherBuildLayoutData } from "@/types/rpc/CommandRestoreOtherBuildLayoutData";
 import type { CommandRunCliLoginData } from "@/types/rpc/CommandRunCliLoginData";
 import type { CommandSearchAgentHistoryData } from "@/types/rpc/CommandSearchAgentHistoryData";
+import type { CommandSensitiveDecideData } from "@/types/rpc/CommandSensitiveDecideData";
 import type { CommandSessionArchiveData } from "@/types/rpc/CommandSessionArchiveData";
 import type { CommandSessionExportData } from "@/types/rpc/CommandSessionExportData";
 import type { CommandSessionRestoreData } from "@/types/rpc/CommandSessionRestoreData";
@@ -444,6 +445,7 @@ import type { RestoreOtherBuildLayoutResult } from "@/types/rpc/RestoreOtherBuil
 import type { RunCliLoginResult } from "@/types/rpc/RunCliLoginResult";
 import type { RunDroneReq } from "@/types/rpc/RunDroneReq";
 import type { RunDroneResp } from "@/types/rpc/RunDroneResp";
+import type { SensitiveDecideResult } from "@/types/rpc/SensitiveDecideResult";
 import type { SessionArchiveResult } from "@/types/rpc/SessionArchiveResult";
 import type { SessionExportResult } from "@/types/rpc/SessionExportResult";
 import type { SessionRestoreResult } from "@/types/rpc/SessionRestoreResult";
@@ -731,6 +733,14 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<AgentShutdownKeepResult> {
     return client.rpcCall("agentshutdownkeep", data, opts);
+  },
+  // command "sensitive.decide"
+  SensitiveDecideCommand(
+    client: RpcClient,
+    data: CommandSensitiveDecideData,
+    opts?: RpcOpts
+  ): Promise<SensitiveDecideResult> {
+    return client.rpcCall("sensitive.decide", data, opts);
   },
   // command "agentstop"
   AgentStopCommand(client: RpcClient, data: CommandAgentStopData, opts?: RpcOpts): Promise<void> {
