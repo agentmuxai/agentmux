@@ -15,7 +15,9 @@
 //! one account doesn't start at the same second. One wake per `resets_at_ms`
 //! per pane: a limit hit again records a new failure, with a new reset. The
 //! schedule is rebuilt from block meta at start ([`install`]); one already due
-//! runs at once.
+//! runs at once. The failure is cleared at the wake whatever the agent is doing;
+//! the note waits up to [`NUDGE_PENDING_MS`] for the agent to register (a pane
+//! with no process yet, or one srv's restart resume hasn't reached).
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -30,6 +32,10 @@ use crate::backend::storage::store::Store;
 pub const AFTER_RESET_MS: u64 = 60_000;
 /// The most jitter added.
 pub const JITTER_MS: u64 = 120_000;
+/// How often a due note looks for its agent to have registered.
+const NUDGE_POLL_MS: u64 = 5_000;
+/// How long a due note waits for its agent to register before it is dropped.
+pub const NUDGE_PENDING_MS: u64 = 600_000;
 /// The most claimed tasks the note names.
 const MAX_NAMED: usize = 3;
 
@@ -127,18 +133,29 @@ async fn wake(block_id: &str, resets_at_ms: u64) {
     let Some(ctx) = CONTEXT.get() else { return };
     let (mstore, identity, event_bus) = (ctx.mstore.clone(), ctx.identity.clone(), ctx.event_bus.clone());
     let block = block_id.to_string();
-    let agent = crate::backend::reactive::get_global_handler()
-        .list_agents()
-        .into_iter()
-        .find(|r| r.block_id == block)
-        .map(|r| {
-            let uid = r.uid.clone().unwrap_or_default();
-            Agent { target: if uid.is_empty() { r.agent_id.clone() } else { uid.clone() }, agent_id: r.agent_id, uid }
-        });
-    let note = tokio::task::spawn_blocking(move || clear_and_note(&mstore, &identity, &event_bus, &block, resets_at_ms, agent.as_ref()))
-        .await
-        .ok()
-        .flatten();
+    let cleared = {
+        let (mstore, block) = (mstore.clone(), block.clone());
+        tokio::task::spawn_blocking(move || clear_failure(&mstore, &event_bus, &block, resets_at_ms)).await.unwrap_or(false)
+    };
+    if !cleared {
+        return;
+    }
+    // The agent may not be registered yet (srv just started and its resume is staggered, or it is slow to
+    // start): the note waits for it instead of being dropped.
+    let found = until_registered(
+        || registered_agent(&block),
+        std::time::Duration::from_millis(NUDGE_POLL_MS),
+        std::time::Duration::from_millis(NUDGE_PENDING_MS),
+    )
+    .await;
+    let Some(agent) = found else {
+        tracing::info!(block_id = %block_id, "limit wake: the agent didn't start within {} min; no note", NUDGE_PENDING_MS / 60_000);
+        return;
+    };
+    let note = {
+        let block = block.clone();
+        tokio::task::spawn_blocking(move || nudge_for(&mstore, &identity, &block, &agent)).await.ok().flatten()
+    };
     let Some((target, text)) = note else { return };
     match crate::backend::reactive::get_global_handler().deliver_system_note(&target, &text) {
         Ok(()) => tracing::info!(block_id = %block_id, "limit wake: told the agent to continue"),
@@ -146,35 +163,51 @@ async fn wake(block_id: &str, resets_at_ms: u64) {
     }
 }
 
-/// The wake, if the pane is still limited for `resets_at_ms`: clear the
-/// failure and wake the replay. The note to send (target, text) when nothing
-/// is held for the agent and it holds claimed tasks. Blocking.
-fn clear_and_note(
-    mstore: &Arc<Store>,
-    identity: &Store,
-    event_bus: &Arc<EventBus>,
-    block_id: &str,
-    resets_at_ms: u64,
-    agent: Option<&Agent>,
-) -> Option<(String, String)> {
-    let block = mstore.get::<Block>(block_id).ok().flatten()?;
-    let stored = failure_of_block(&block)?;
+/// The pane's agent, once the reactive handler has it registered (it has a live process).
+fn registered_agent(block_id: &str) -> Option<Agent> {
+    crate::backend::reactive::get_global_handler().list_agents().into_iter().find(|r| r.block_id == block_id).map(|r| {
+        let uid = r.uid.clone().unwrap_or_default();
+        Agent { target: if uid.is_empty() { r.agent_id.clone() } else { uid.clone() }, agent_id: r.agent_id, uid }
+    })
+}
+
+/// `find` until it answers, checking every `poll`, for at most `limit`.
+async fn until_registered<T>(mut find: impl FnMut() -> Option<T>, poll: std::time::Duration, limit: std::time::Duration) -> Option<T> {
+    let started = std::time::Instant::now();
+    loop {
+        if let Some(found) = find() {
+            return Some(found);
+        }
+        if started.elapsed() >= limit {
+            return None;
+        }
+        tokio::time::sleep(poll).await;
+    }
+}
+
+/// The wake, if the pane is still limited for `resets_at_ms`: clear the failure and wake the replay.
+/// `false` when it is gone already or the limit was hit again with another reset. Blocking.
+fn clear_failure(mstore: &Arc<Store>, event_bus: &Arc<EventBus>, block_id: &str, resets_at_ms: u64) -> bool {
+    let Some(block) = mstore.get::<Block>(block_id).ok().flatten() else { return false };
+    let Some(stored) = failure_of_block(&block) else { return false };
     // Gone already: a clean turn, an account move or a sign-in cleared it, or
     // the limit was hit again with a later reset.
     if stored.code != FailureClass::UsageLimit || stored.resets_at_ms != Some(resets_at_ms) {
-        return None;
+        return false;
     }
-    crate::backend::blockcontroller::core::persist_last_failure(
-        block_id,
-        None,
-        &Some(mstore.clone()),
-        &Some(event_bus.clone()),
-    );
+    crate::backend::blockcontroller::core::persist_last_failure(block_id, None, &Some(mstore.clone()), &Some(event_bus.clone()));
     tracing::info!(block_id = %block_id, resets_at_ms, "limit wake: the reset has passed; failure cleared");
     crate::backend::reactive::held_jekt_wake().notify_one();
+    true
+}
 
-    let agent = agent?;
-    // A held message replays into a turn of its own, which is the nudge.
+/// The note to send (target, text) to the registered agent: none when a message is held for it (it
+/// replays into a turn of its own), when it holds no claimed task, or when the limit was hit again
+/// since the wake. Blocking.
+fn nudge_for(mstore: &Arc<Store>, identity: &Store, block_id: &str, agent: &Agent) -> Option<(String, String)> {
+    if mstore.get::<Block>(block_id).ok().flatten().is_some_and(|b| failure_of_block(&b).is_some()) {
+        return None;
+    }
     let held = mstore.jekt_held_targets().unwrap_or_default();
     if !agent.uid.is_empty() && held.iter().any(|t| *t == agent.uid) {
         return None;
@@ -240,16 +273,50 @@ mod tests {
     #[test]
     fn the_wake_clears_the_failure_only_for_the_reset_it_was_scheduled_for() {
         let store = Arc::new(Store::open_in_memory().unwrap());
-        let identity = Store::open_in_memory().unwrap();
         let bus = Arc::new(EventBus::new());
         let hit_again = block_with(&store, limit(Some(9_000)));
-        assert_eq!(clear_and_note(&store, &identity, &bus, &hit_again, 5_000, None), None);
+        assert!(!clear_failure(&store, &bus, &hit_again, 5_000));
         assert!(store.get::<Block>(&hit_again).unwrap().unwrap().meta.contains_key("agent:last_failure"), "a later reset keeps it");
 
         let due = block_with(&store, limit(Some(5_000)));
-        assert_eq!(clear_and_note(&store, &identity, &bus, &due, 5_000, None), None, "no agent registered: no note");
+        assert!(clear_failure(&store, &bus, &due, 5_000));
         assert!(!store.get::<Block>(&due).unwrap().unwrap().meta.contains_key("agent:last_failure"));
-        assert_eq!(clear_and_note(&store, &identity, &bus, &due, 5_000, None), None, "already clear");
+        assert!(!clear_failure(&store, &bus, &due, 5_000), "already clear");
+    }
+
+    fn agent() -> Agent {
+        Agent { target: "uid-1".into(), agent_id: "a-1".into(), uid: "uid-1".into() }
+    }
+
+    #[test]
+    fn no_note_when_the_agent_holds_no_claimed_task_or_hit_the_limit_again() {
+        let store = Arc::new(Store::open_in_memory().unwrap());
+        let identity = Store::open_in_memory().unwrap();
+        let bus = Arc::new(EventBus::new());
+        let block = block_with(&store, limit(Some(5_000)));
+        assert!(clear_failure(&store, &bus, &block, 5_000));
+        assert_eq!(nudge_for(&store, &identity, &block, &agent()), None, "no claimed task");
+        // The limit comes back while the note waited for the agent: nothing is said.
+        let again = block_with(&store, limit(Some(99_000)));
+        assert_eq!(nudge_for(&store, &identity, &again, &agent()), None);
+    }
+
+    #[tokio::test]
+    async fn a_note_waits_for_an_agent_that_registers_late_and_gives_up_on_one_that_never_does() {
+        let (poll, limit) = (std::time::Duration::from_millis(2), std::time::Duration::from_millis(500));
+        let mut calls = 0;
+        let found = until_registered(
+            || {
+                calls += 1;
+                (calls >= 5).then_some("registered")
+            },
+            poll,
+            limit,
+        )
+        .await;
+        assert_eq!((found, calls), (Some("registered"), 5));
+        let never: Option<()> = until_registered(|| None, poll, std::time::Duration::from_millis(30)).await;
+        assert_eq!(never, None);
     }
 
     #[test]
