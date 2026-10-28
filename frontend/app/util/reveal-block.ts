@@ -231,15 +231,22 @@ const selection = createSelectionRunner(liveDeps, selectionTrace);
 (globalThis as { __selectionTrace?: () => string[] }).__selectionTrace = () =>
     selectionTrace.entries().map((e) => `${new Date(e.at).toISOString()} ${e.line}`);
 
-// The user switched window tab on their own while a request was in flight: that request ends, not retried.
-createRoot(() => {
-    createEffect(() => {
-        const active = atoms.activeTabId();
-        const state = selection.state();
-        // A tab this runner asked for (an earlier request's, committed late) is not the user moving.
-        if ("tabId" in state && state.tabId !== active && !requestedTabs.isOurs(active)) selection.userMoved();
+// The user switched window tab on their own while a request was in flight: that request ends, not
+// retried. Started with the first request, not at import: this module is loaded early, inside import
+// cycles, where the window's atoms are not yet there to read.
+let watchingUserMoves = false;
+function watchUserMoves(): void {
+    if (watchingUserMoves) return;
+    watchingUserMoves = true;
+    createRoot(() => {
+        createEffect(() => {
+            const active = atoms.activeTabId();
+            const state = selection.state();
+            // A tab this runner asked for (an earlier request's, committed late) is not the user moving.
+            if ("tabId" in state && state.tabId !== active && !requestedTabs.isOurs(active)) selection.userMoved();
+        });
     });
-});
+}
 
 /**
  * Show `blockId` wherever it is, and resolve with whether it was shown: in this window if it's here,
@@ -251,6 +258,7 @@ createRoot(() => {
  * that window. Spec §4.3.
  */
 export async function revealBlock(blockId: string, opts: RevealOptions = {}): Promise<SelectionResult> {
+    watchUserMoves();
     const done = selectTrace.revealStarted(opts.source ?? "unknown", blockId);
     const result = await selection.select({
         blockId,
