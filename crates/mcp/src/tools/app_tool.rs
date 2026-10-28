@@ -16,9 +16,75 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
         "App" => match str_arg(arguments, "action").as_deref() {
             Some("version") => version(cx).await,
             Some("upgrade") => upgrade(arguments, cx).await,
-            other => anyhow::bail!("App: unknown action {other:?}; use \"version\" or \"upgrade\""),
+            Some("network") => network(cx).await,
+            other => anyhow::bail!("App: unknown action {other:?}; use \"version\", \"upgrade\" or \"network\""),
         },
         _ => Err(not_in_family()),
+    }
+}
+
+async fn network(cx: &ToolCtx<'_>) -> Result<String> {
+    let url = format!("{}/api/v1/app/connectivity", cx.local_url.trim_end_matches('/'));
+    let resp = cx
+        .client
+        .get(&url)
+        .header(AUTH_KEY_HEADER, cx.auth_key)
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+    let status = resp.status();
+    let body: Value = resp.json().await.unwrap_or(Value::Null);
+    if !status.is_success() {
+        anyhow::bail!("App network: srv answered {status}: {body}");
+    }
+    Ok(describe_network(&body, agentmux_common::time::now_ms()))
+}
+
+/// `network`'s answer, from srv's `ConnectivityStatus`: one line per service, then what to make of it.
+fn describe_network(status: &Value, now_ms: i64) -> String {
+    let services = status["services"].as_array().map(Vec::as_slice).unwrap_or_default();
+    if services.is_empty() {
+        return "AgentMux hasn't checked the network yet.".to_string();
+    }
+    let mut out = String::from("What AgentMux can reach right now (its own checks, not your shell's):");
+    let mut down = Vec::new();
+    for svc in services {
+        let label = s(svc, "label");
+        let line = match s(svc, "state") {
+            "online" => "online".to_string(),
+            "unknown" => "not checked yet".to_string(),
+            state => {
+                down.push(label);
+                let error = s(svc, "last_error");
+                let why = if error.is_empty() { String::new() } else { format!(" ({error})") };
+                format!("{} for {}{why}", if state == "degraded" { "degraded" } else { "OFFLINE" }, ago(now_ms, &svc["since_ms"]))
+            }
+        };
+        out.push_str(&format!("\n- {label}: {line}"));
+    }
+    if down.is_empty() {
+        out.push_str(
+            "\nNothing AgentMux has checked is down. It tracks only the services listed, and an online service is not re-probed; \
+             \"not checked yet\" and any service not listed are unknown, so this does not rule the network out.",
+        );
+    } else {
+        out.push_str(&format!(
+            "\nDown or failing: {}. A turn that stalls or retries on one of these may be the network; AgentMux keeps checking it and \
+             this changes when it answers. A service not listed here is not tracked.",
+            down.join(", ")
+        ));
+    }
+    out
+}
+
+/// "5 min" or "2 h 10 min" for the time from `since_ms` to `now_ms`.
+fn ago(now_ms: i64, since_ms: &Value) -> String {
+    let Some(since) = since_ms.as_i64() else { return "an unknown time".to_string() };
+    let secs = ((now_ms - since) / 1000).max(0);
+    match secs {
+        0..=89 => format!("{secs} s"),
+        90..=5399 => format!("{} min", (secs + 30) / 60),
+        _ => format!("{} h {} min", secs / 3600, (secs % 3600) / 60),
     }
 }
 
@@ -183,6 +249,31 @@ mod tests {
         let text = describe_status(&old);
         assert!(text.contains("older than 0.60.0 upgrades from: the user installs 0.58.0 first"), "{text}");
         assert!(!text.contains("action \"upgrade\""), "{text}");
+    }
+
+    #[test]
+    fn network_names_each_service_and_what_is_down() {
+        let now = 10_000_000;
+        let all_up = json!({ "revision": 1, "services": [
+            { "service": "internet", "label": "Internet", "state": "online", "since_ms": 1, "last_error": null },
+            { "service": "model_api:anthropic", "label": "Anthropic API", "state": "unknown", "since_ms": 1, "last_error": null },
+        ] });
+        let text = describe_network(&all_up, now);
+        assert!(text.contains("- Internet: online") && text.contains("- Anthropic API: not checked yet"), "{text}");
+        assert!(text.contains("Nothing AgentMux has checked is down") && text.contains("does not rule the network out"), "{text}");
+
+        let down = json!({ "revision": 2, "services": [
+            { "service": "internet", "label": "Internet", "state": "online", "since_ms": 1, "last_error": null },
+            { "service": "muxbus", "label": "MuxBus", "state": "offline", "since_ms": now - 7_500_000, "last_error": "connection reset" },
+            { "service": "model_api:anthropic", "label": "Anthropic API", "state": "degraded", "since_ms": now - 30_000, "last_error": null },
+        ] });
+        let text = describe_network(&down, now);
+        assert!(text.contains("- MuxBus: OFFLINE for 2 h 5 min (connection reset)"), "{text}");
+        assert!(text.contains("- Anthropic API: degraded for 30 s"), "{text}");
+        assert!(text.contains("Down or failing: MuxBus, Anthropic API"), "{text}");
+        assert!(!text.contains("Nothing AgentMux has checked is down") && text.contains("may be the network"), "{text}");
+
+        assert_eq!(describe_network(&json!({ "services": [] }), now), "AgentMux hasn't checked the network yet.");
     }
 
     #[test]

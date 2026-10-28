@@ -1048,6 +1048,12 @@ pub(super) fn park_tool_permission_request(
         .insert(tool_use_id, (request_id, tool_name, input));
 }
 
+/// A new process is not waiting on what the last one asked: drop the requests parked for the user.
+pub(super) fn forget_parked_requests(inner: &mut PersistentInner) {
+    inner.pending_questions.clear();
+    inner.pending_permissions.clear();
+}
+
 impl PersistentSubprocessController {
     /// Whether an AskUserQuestion or a tool-permission request is parked
     /// waiting for the user (`Controller::awaiting_user_reply`).

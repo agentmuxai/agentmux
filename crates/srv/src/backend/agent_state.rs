@@ -172,7 +172,9 @@ pub fn current_state_at(mstore: &Store, block_id: &str, now_ms: u64) -> Option<A
         turn_active: status.turn_active,
         process_status: &status.shellprocstatus,
         exit_code: status.shellprocexitcode,
-        awaiting_user: crate::backend::obj::meta_get_bool(&block.meta, META_AWAITING_USER, false),
+        // The pane's flag, or srv's own record of a request parked for the user: the second holds
+        // with no window showing the agent (a headless or parked one).
+        awaiting_user: crate::backend::obj::meta_get_bool(&block.meta, META_AWAITING_USER, false) || controller.awaiting_user_reply(),
         failure: failure_of_block(&block).map(|f| (f.code, f.resets_at_ms)),
         now_ms,
     })
@@ -349,6 +351,8 @@ pub(crate) mod test_support {
         pub provenance: Option<crate::backend::blockcontroller::health::TurnProvenance>,
         /// Its turn tracker, for a test of something that reads when it last wrote output.
         pub tracker: Option<Arc<crate::backend::blockcontroller::health::TurnActivityTracker>>,
+        /// A request parked for the user's answer (`Controller::awaiting_user_reply`).
+        pub awaiting_reply: bool,
     }
 
     impl Controller for StubController {
@@ -376,6 +380,9 @@ pub(crate) mod test_support {
         fn turn_tracker(&self) -> Option<Arc<crate::backend::blockcontroller::health::TurnActivityTracker>> {
             self.tracker.clone()
         }
+        fn awaiting_user_reply(&self) -> bool {
+            self.awaiting_reply
+        }
         fn as_any(&self) -> &dyn Any {
             self
         }
@@ -397,6 +404,28 @@ pub(crate) mod test_support {
                 },
                 provenance: None,
                 tracker: None,
+                awaiting_reply: false,
+            }),
+        );
+    }
+
+    /// [`register_stub`] on a running persistent agent in a turn that has a request parked for the user.
+    pub fn register_awaiting(block_id: &str) {
+        use crate::backend::blockcontroller::{BLOCK_CONTROLLER_PERSISTENT, STATUS_RUNNING};
+        crate::backend::blockcontroller::register_controller(
+            block_id,
+            Arc::new(StubController {
+                block_id: block_id.to_string(),
+                controller_type: BLOCK_CONTROLLER_PERSISTENT.to_string(),
+                status: BlockControllerRuntimeStatus {
+                    blockid: block_id.to_string(),
+                    shellprocstatus: STATUS_RUNNING.to_string(),
+                    turn_active: true,
+                    ..Default::default()
+                },
+                provenance: None,
+                tracker: None,
+                awaiting_reply: true,
             }),
         );
     }
@@ -422,6 +451,7 @@ pub(crate) mod test_support {
                 },
                 provenance: None,
                 tracker: Some(Arc::new(tracker)),
+                awaiting_reply: false,
             }),
         );
     }
@@ -443,6 +473,7 @@ pub(crate) mod test_support {
                 },
                 provenance: Some(provenance),
                 tracker: None,
+                awaiting_reply: false,
             }),
         );
     }
@@ -804,6 +835,17 @@ mod tests {
         for b in [&asking, &quiet, &terminal, &unreadable] {
             blockcontroller::delete_controller(b);
         }
+    }
+
+    /// A request parked for the user is srv's own record: the agent reads `waiting` with no pane having
+    /// written its flag (a headless or parked agent), and not outside a turn.
+    #[test]
+    fn a_request_parked_for_the_user_is_waiting_with_no_pane_flag() {
+        let store = store();
+        let parked = insert_block(&store, &[]);
+        test_support::register_awaiting(&parked);
+        assert_eq!(current_state(&store, &parked), Some(AgentState::Waiting));
+        blockcontroller::delete_controller(&parked);
     }
 
     /// The rows `frontend/app/store/pane-tab-progress.test.ts` reads too: the pill's rule in the

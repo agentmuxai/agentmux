@@ -40,6 +40,7 @@ pub(crate) mod controller_backstop;
 pub(crate) mod agent_lifecycle;
 mod availability_view;
 pub(crate) mod agent_runtime;
+pub(crate) mod start_rate;
 mod jekt_cold;
 mod limit_probe;
 pub(crate) mod jekt_files;

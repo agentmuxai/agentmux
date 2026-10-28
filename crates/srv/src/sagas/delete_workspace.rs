@@ -128,7 +128,7 @@ pub async fn run(state: &AppState, workspace_id: String) -> Result<Value, String
     // An agent's block stays when `agents:always_available` is on: parked first, so neither this
     // stop nor a tab's delete reaches it.
     let ctx = SagaCtx::new(state, saga_id);
-    let parked = super::park_agents::park_agent_blocks(&ctx, &block_ids).await;
+    let parked = super::park_agents::park_agent_blocks(&ctx, &block_ids, false).await;
     super::agent_teardown::run_many(
         state,
         &super::park_agents::not_parked(&block_ids, &parked),

@@ -29,6 +29,10 @@ name: Container Agent Image
 
 on:
   workflow_call:
+    outputs:
+      digest:
+        description: 'The digest of the multi-arch index just pushed (sha256:<64 hex>). release-core.yml puts it in the signed manifest.'
+        value: ${{ jobs.build-and-push.outputs.digest }}
   workflow_dispatch:
     inputs:
       tag_latest:
@@ -40,6 +44,11 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: agentmuxai/agent-base
+
+# Read-only by default; a job that needs more says so itself (job-level permissions replace this
+# block). A job added later gets nothing it did not ask for.
+permissions:
+  contents: read
 
 jobs:
   # For any run on a tag: a release, or a rerun of one (gh workflow run release.yml --ref <tag>).
@@ -82,6 +91,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
 
     steps:
       - name: Checkout
@@ -130,6 +141,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Build and push
+        id: build
         uses: docker/build-push-action@v5
         with:
           # Repo root, not docker/ — the mcp-builder stage in
@@ -148,6 +160,18 @@ jobs:
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.version=${{ needs.gate.outputs.version || format('dispatch-{0}', github.sha) }}
+
+      # The digest of what was just pushed is what the signed manifest names, so it must
+      # be there and be the index digest (the one reference that selects the platform).
+      - name: The pushed digest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          if ! printf '%s' "$DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$'; then
+            echo "::error::the push did not report an image digest ('$DIGEST')"
+            exit 1
+          fi
+          echo "pushed $REGISTRY/$IMAGE_NAME@$DIGEST"
 
       # Anonymous, like the daemon's own pull: no login in this step. Fails with
       # the exact UI step when the package is still private. Checks the first tag

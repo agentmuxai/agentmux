@@ -47,8 +47,9 @@ pub(crate) fn keeps_block(state: &AppState, block_id: &str) -> bool {
 
 /// Park the agent blocks among `block_ids` (each in the tab the reducer has it in) and return the ids
 /// parked. A park the reducer refuses leaves that block to the close, which deletes it as before.
-pub(crate) async fn park_agent_blocks(ctx: &SagaCtx<'_>, block_ids: &[String]) -> Vec<String> {
-    if !enabled(ctx.state) {
+/// `force` parks with the setting off too: an explicit detach.
+pub(crate) async fn park_agent_blocks(ctx: &SagaCtx<'_>, block_ids: &[String], force: bool) -> Vec<String> {
+    if !force && !enabled(ctx.state) {
         return Vec::new();
     }
     let mut parked = Vec::new();

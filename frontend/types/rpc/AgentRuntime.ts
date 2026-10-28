@@ -12,7 +12,7 @@ export type AgentRuntime = {
  */
 agent_id: string, state: AgentRuntimeState, 
 /**
- * Why, for a state that has a reason: `usage_limit` or `needs_login`.
+ * Why, for a state that has a reason: `usage_limit`, `needs_login` or `starts_on_first_message`.
  */
 detail?: string, 
 /**

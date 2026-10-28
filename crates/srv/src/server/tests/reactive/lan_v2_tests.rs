@@ -178,7 +178,7 @@ async fn the_claimed_uid_reaches_its_delivery_s_audit_entries_and_never_the_wire
 mod origin {
     use super::*;
     use crate::backend::storage::store::Store;
-    use crate::server::reactive::lan_v2::sign_at_origin;
+    use crate::server::reactive::lan_v2::{receipt_note, sign_at_origin, sign_at_origin_why};
     use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 
     fn store_with_coddy() -> Store {
@@ -212,6 +212,40 @@ mod origin {
         let uid_key = BASE64.decode(uid_keys.lan.public_key).unwrap();
         state.lan_discovery.seed_lan_pubkey_for_test("coddy", name_key, Some(("uid-coddy".into(), uid_key)));
         state
+    }
+
+    #[test]
+    fn the_receipt_line_says_whether_nothing_was_signed_or_nothing_could_be_checked() {
+        let lan = |sig: Option<&str>, source: Option<&str>, verified: Option<bool>| InjectionRequest {
+            delivery_tier: Some("lan".into()),
+            lan_sig: sig.map(Into::into),
+            source_agent: source.map(Into::into),
+            lan_verified: verified,
+            ..Default::default()
+        };
+        assert_eq!(receipt_note(&unsigned()), None, "not a LAN request: no line");
+        assert_eq!(receipt_note(&lan(Some("s"), Some("korp"), Some(true))), Some("signature verified"));
+        assert_eq!(receipt_note(&lan(Some("s"), Some("korp"), Some(false))), Some("signature failed verification"));
+        assert!(receipt_note(&lan(None, Some("korp"), None)).unwrap().contains("no signature came with it"));
+        assert!(receipt_note(&lan(Some("s"), None, None)).unwrap().contains("names no sender"));
+        assert!(receipt_note(&lan(Some("s"), Some("korp"), None)).unwrap().contains("no key for the sender"));
+    }
+
+    #[test]
+    fn the_log_line_says_what_became_of_the_signature_and_why() {
+        let store = store_with_coddy();
+        let why = |caller: &str, req: InjectionRequest| sign_at_origin_why(&store, caller, req).1;
+        assert_eq!(why("uid-coddy", unsigned()), "signed by srv at the origin");
+        let mut own = unsigned();
+        own.lan_sig = Some("the agent's".into());
+        assert!(why("uid-coddy", own).starts_with("signed by the agent"));
+        let mut hop = unsigned();
+        hop.delivery_tier = Some("lan".into());
+        assert!(why("uid-coddy", hop).contains("not the origin"));
+        assert!(why("", unsigned()).contains("no agent token"), "a hop carries no caller");
+        assert!(why("uid-someone-else", unsigned()).contains("no agent token"), "a token that doesn't own the name");
+        // The request itself is the same one `sign_at_origin` returns.
+        assert_eq!(sign_at_origin_why(&store, "uid-coddy", unsigned()).0.lan_sig.is_some(), sign_at_origin(&store, "uid-coddy", unsigned()).lan_sig.is_some());
     }
 
     #[tokio::test]
@@ -358,5 +392,74 @@ mod channel_origin {
         for tier in ["lan", "wan", "channel"] {
             assert!(!signed(InjectionRequest { delivery_tier: Some(tier.into()), ..unsigned() }, "uid-coddy"), "{tier}");
         }
+    }
+}
+
+// A signed jekt whose sender's key a cached miss hid: asked for again, once.
+mod refetch {
+    use super::*;
+    use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    /// A peer that answers every key lookup with `body`.
+    async fn peer_saying(body: String) -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut stream, _)) = listener.accept().await else { return };
+                let body = body.clone();
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 2048];
+                    let _ = stream.read(&mut buf).await;
+                    let resp = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                    let _ = stream.write_all(resp.as_bytes()).await;
+                });
+            }
+        });
+        format!("127.0.0.1:{}", addr.port())
+    }
+
+    fn answer_with(public: &[u8; 32]) -> String {
+        format!(r#"{{"lan_public_key":"{}"}}"#, BASE64.encode(public))
+    }
+
+    #[tokio::test]
+    async fn a_key_found_on_the_second_ask_verifies_the_jekt() {
+        let state = test_state();
+        let (public, private) = generate_lan_keypair([1u8; 32]);
+        state.lan_discovery.seed_peer_at_for_test(&peer_saying(answer_with(&public)).await);
+        state.lan_discovery.seed_lan_pubkey_miss_for_test("korp", 30);
+        let mut req = signed(&private, None);
+        verify_lan_signature(&state, &mut req).await;
+        assert_eq!(req.lan_verified, Some(true));
+    }
+
+    #[tokio::test]
+    async fn a_sender_still_not_found_stays_unverified_not_failed() {
+        let state = test_state();
+        let (_, private) = generate_lan_keypair([1u8; 32]);
+        state.lan_discovery.seed_peer_at_for_test(&peer_saying("{}".into()).await);
+        state.lan_discovery.seed_lan_pubkey_miss_for_test("korp", 30);
+        let mut req = signed(&private, None);
+        verify_lan_signature(&state, &mut req).await;
+        assert_eq!(req.lan_verified, None);
+    }
+
+    #[tokio::test]
+    async fn a_key_that_differs_from_the_pin_is_never_upgraded() {
+        let state = test_state();
+        let (pinned_public, _) = generate_lan_keypair([9u8; 32]);
+        state.mstore.lan_peer_pubkey_pin_get_or_set("korp", &BASE64.encode(pinned_public)).unwrap();
+        // The peer now gives another key, and the jekt is signed with it.
+        let (other_public, other_private) = generate_lan_keypair([1u8; 32]);
+        state.lan_discovery.seed_peer_at_for_test(&peer_saying(answer_with(&other_public)).await);
+        state.lan_discovery.seed_lan_pubkey_miss_for_test("korp", 30);
+        let mut req = signed(&other_private, None);
+        verify_lan_signature(&state, &mut req).await;
+        assert_eq!(req.lan_verified, Some(false), "the pin holds the first key");
     }
 }

@@ -642,6 +642,21 @@ async fn parking_then_deciding_allow_sends_the_original_input_back_unmodified() 
     assert!(c.decide_tool_permission("tu-1".to_string(), "allow", None).is_err());
 }
 
+/// A question left unanswered when the process went away is not the next process's: it must not make
+/// the agent read as waiting on the user (`awaiting_user_reply`) in a later turn.
+#[test]
+fn a_new_process_forgets_what_the_last_one_parked_for_the_user() {
+    let c = controller();
+    {
+        let mut inner = c.inner.lock().unwrap();
+        inner.pending_questions.insert("tu-q".to_string(), ("req-q".to_string(), serde_json::json!([])));
+    }
+    park_tool_permission_request(&c.inner, "tu-p".to_string(), "req-p".to_string(), "Bash".to_string(), serde_json::json!({}));
+    assert!(c.has_parked_request());
+    super::super::input::forget_parked_requests(&mut c.inner.lock().unwrap());
+    assert!(!c.has_parked_request());
+}
+
 #[tokio::test]
 async fn parking_then_deciding_deny_carries_user_feedback_verbatim() {
     // SPEC_DECISION_PROMPT_2026_04_24.md G6: "Denials carry user-typed
