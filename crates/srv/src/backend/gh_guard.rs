@@ -113,7 +113,10 @@ pub fn apply_gh_guard_in(env_vars: &mut HashMap<String, String>, config_home: &P
 pub fn apply_gh_guard(env_vars: &mut HashMap<String, String>) {
     apply_gh_guard_in(env_vars, &guard_config_home());
     #[cfg(not(test))]
-    crate::backend::publish_guard::apply_publish_guard(env_vars);
+    {
+        crate::backend::publish_guard::apply_publish_guard(env_vars);
+        crate::identity::github_tokens::apply_agent_git(env_vars);
+    }
 }
 
 /// Where guard dirs live. Under test, a per-process temp dir: every test that

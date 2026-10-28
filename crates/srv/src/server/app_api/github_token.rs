@@ -1,0 +1,87 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+//! `POST /api/v1/github/token`: the GitHub token an agent's `git` and `gh` use.
+//!
+//! `agentmux-bashwrap` asks here, from the agent's own shell, as git's credential helper and
+//! before each wrapped command. Who is asking is the agent its `X-Agent-Token` was minted for,
+//! never a name in the request; the request says only which repository. The token is the AgentMux
+//! GitHub App's installation token, narrowed to that repository by AgentMux Cloud's broker
+//! (`identity::github_tokens`). When there is none, the answer says why, in words an agent can
+//! show; nothing here falls back to another credential.
+
+use axum::extract::{Extension, State};
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
+use axum::Json;
+use serde::Deserialize;
+use serde_json::json;
+
+use super::AppState;
+use crate::identity::github_tokens::{self, TokenError, Want};
+use crate::muxbus::github_broker::BrokerError;
+use crate::server::caller::Caller;
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct GithubTokenRequest {
+    owner: String,
+    repo: String,
+}
+
+/// The status a refusal is answered with: the request's fault (4xx) or a bad moment (503).
+fn status_for(e: &TokenError) -> StatusCode {
+    match e {
+        TokenError::BadTarget(_) => StatusCode::BAD_REQUEST,
+        TokenError::NoInstallation { .. } | TokenError::NoGithubAccount => StatusCode::FORBIDDEN,
+        TokenError::Broker(BrokerError::Unavailable(_)) => StatusCode::SERVICE_UNAVAILABLE,
+        TokenError::Broker(_) => StatusCode::FORBIDDEN,
+    }
+}
+
+/// `POST /api/v1/github/token`
+pub(crate) async fn handle_github_token(
+    State(state): State<AppState>,
+    caller: Option<Extension<Caller>>,
+    Json(req): Json<GithubTokenRequest>,
+) -> Response {
+    let refuse = |status: StatusCode, message: String| (status, Json(json!({ "error": message }))).into_response();
+    let Some(uid) = caller.as_ref().and_then(|Extension(c)| c.uid()).map(str::to_string) else {
+        return refuse(StatusCode::UNAUTHORIZED, "no agent token: GitHub tokens are for an agent's own commands".to_string());
+    };
+    let mstore = state.mstore.clone();
+    let slug = match tokio::task::spawn_blocking(move || mstore.agent_def_get(&uid)).await {
+        Ok(Ok(Some(def))) if def.agent_type != "container" => def.slug,
+        Ok(Ok(Some(_))) => return refuse(StatusCode::FORBIDDEN, "a container agent has no GitHub token from the host".to_string()),
+        Ok(Ok(None)) => return refuse(StatusCode::UNAUTHORIZED, "the agent token names no agent on this machine".to_string()),
+        _ => return refuse(StatusCode::INTERNAL_SERVER_ERROR, "couldn't read the agent".to_string()),
+    };
+    let backend = github_tokens::Live { mstore: state.id_store.clone(), identity_store: state.identity_store.clone() };
+    let want = Want { agent: slug, owner: req.owner, repo: req.repo, workflows: false };
+    match github_tokens::global().token_for(&backend, &want, chrono::Utc::now().timestamp()).await {
+        Ok(minted) => Json(json!({
+            "token": minted.token.as_str(),
+            "expiresAt": minted.expires_at,
+            "botSlug": minted.bot.slug,
+            "botUserId": minted.bot.bot_user_id,
+        }))
+        .into_response(),
+        Err(e) => {
+            tracing::info!(target: "identity", agent = %want.agent, owner = %want.owner, repo = %want.repo, error = %e, "identity.github: no agent token");
+            refuse(status_for(&e), e.to_string())
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_refusal_is_the_requests_fault_unless_it_was_only_a_bad_moment() {
+        assert_eq!(status_for(&TokenError::BadTarget("x".into())), StatusCode::BAD_REQUEST);
+        assert_eq!(status_for(&TokenError::NoInstallation { owner: "o".into() }), StatusCode::FORBIDDEN);
+        assert_eq!(status_for(&TokenError::NoGithubAccount), StatusCode::FORBIDDEN);
+        assert_eq!(status_for(&TokenError::Broker(BrokerError::NotConnected)), StatusCode::FORBIDDEN);
+        assert_eq!(status_for(&TokenError::Broker(BrokerError::Unavailable("x".into()))), StatusCode::SERVICE_UNAVAILABLE);
+    }
+}

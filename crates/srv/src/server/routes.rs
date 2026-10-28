@@ -578,6 +578,9 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/api/v1/agent/self/fresh", post(app_api::agent_context::handle_fresh_self))
         // An agent reading and editing a definition's extra environment variables.
         .route("/api/v1/agent/env", post(app_api::agent_env::handle_agent_env))
+        // The GitHub App's installation token for an agent's git and gh, through
+        // agentmux-bashwrap (identity::github_tokens).
+        .route("/api/v1/github/token", post(app_api::github_token::handle_github_token))
         // An agent sets or clears seats, several at once; recorded under its name.
         .route("/api/v1/agent/seats", post(app_api::agent_seats::handle_agent_seats))
         // The outcome of a shutdown waiting on the user's override (§6.5):

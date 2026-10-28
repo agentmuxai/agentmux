@@ -12,6 +12,7 @@ pub mod copy_into_dir;
 pub mod data_paths;
 mod data_home;
 pub mod disk_space;
+pub mod github_broker_shim;
 pub mod errors;
 pub mod event_log;
 pub mod install_presence;

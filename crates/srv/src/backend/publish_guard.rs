@@ -91,11 +91,16 @@ pub fn git_config_entries(get: impl Fn(&str) -> Option<String>, key: &str, value
 /// container, where the host's hooks directory means nothing, but any other
 /// `GIT_CONFIG_*` setting the agent's env carries must still work.
 pub fn without_hooks_path(env: &HashMap<String, String>) -> HashMap<String, String> {
+    without_git_config_key(env, HOOKS_PATH_KEY)
+}
+
+/// `env` without the `GIT_CONFIG_*` entries for `key` (matched without case), the others renumbered.
+pub fn without_git_config_key(env: &HashMap<String, String>, key: &str) -> HashMap<String, String> {
     let get = |k: &str| env.get(k).cloned();
     let count = parse_count(&get);
     let kept: Vec<(String, String)> = (0..count)
         .filter_map(|i| Some((get(&format!("GIT_CONFIG_KEY_{i}"))?, get(&format!("GIT_CONFIG_VALUE_{i}")).unwrap_or_default())))
-        .filter(|(k, _)| !k.eq_ignore_ascii_case(HOOKS_PATH_KEY))
+        .filter(|(k, _)| !k.eq_ignore_ascii_case(key))
         .collect();
     if kept.len() == count {
         return env.clone();
@@ -113,6 +118,38 @@ pub fn without_hooks_path(env: &HashMap<String, String>) -> HashMap<String, Stri
         out.insert(COUNT.to_string(), kept.len().to_string());
     }
     out
+}
+
+/// Make `key` have exactly `values`, in order, in the `GIT_CONFIG_*` entries of `env` (an overlay on
+/// `process`): its other slots go, the others are renumbered, and the values are appended. For a
+/// setting that is a list in git (`credential.helper`, `url.<base>.insteadOf`), where order
+/// matters and an empty value clears what came before.
+pub fn set_git_config_list(env: &mut HashMap<String, String>, process: impl Fn(&str) -> Option<String>, key: &str, values: &[&str]) {
+    // What the process env contributes joins the overlay first, so renumbering sees all of it.
+    let count = parse_count(&|k: &str| env.get(k).cloned().or_else(|| process(k)));
+    for i in 0..count {
+        for prefix in ["GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_"] {
+            let name = format!("{prefix}{i}");
+            if !env.contains_key(&name) {
+                if let Some(v) = process(&name) {
+                    env.insert(name, v);
+                }
+            }
+        }
+    }
+    if count > 0 && !env.contains_key(COUNT) {
+        env.insert(COUNT.to_string(), count.to_string());
+    }
+    let mut out = without_git_config_key(env, key);
+    let at = parse_count(&|k: &str| out.get(k).cloned());
+    for (i, v) in values.iter().enumerate() {
+        out.insert(format!("GIT_CONFIG_KEY_{}", at + i), key.to_string());
+        out.insert(format!("GIT_CONFIG_VALUE_{}", at + i), v.to_string());
+    }
+    if at + values.len() > 0 {
+        out.insert(COUNT.to_string(), (at + values.len()).to_string());
+    }
+    *env = out;
 }
 
 /// `key` from `env`; on Windows, where variable names ignore case, in any casing.
@@ -313,6 +350,48 @@ mod tests {
         assert!(without_hooks_path(&only).is_empty(), "nothing left: no count either");
         let untouched = env(&[("A", "b")]);
         assert_eq!(without_hooks_path(&untouched), untouched);
+    }
+
+    #[test]
+    fn a_list_setting_is_replaced_in_order_and_the_others_kept() {
+        let mut e = env(&[
+            (COUNT, "3"),
+            ("GIT_CONFIG_KEY_0", "credential.https://github.com.helper"),
+            ("GIT_CONFIG_VALUE_0", "old"),
+            ("GIT_CONFIG_KEY_1", "user.name"),
+            ("GIT_CONFIG_VALUE_1", "x"),
+            ("GIT_CONFIG_KEY_2", "Credential.https://github.com.Helper"),
+            ("GIT_CONFIG_VALUE_2", "older"),
+        ]);
+        set_git_config_list(&mut e, no_process, "credential.https://github.com.helper", &["", "!agentmux-bashwrap git-credential"]);
+        assert_eq!(e[COUNT], "3");
+        assert_eq!((e["GIT_CONFIG_KEY_0"].as_str(), e["GIT_CONFIG_VALUE_0"].as_str()), ("user.name", "x"));
+        assert_eq!((e["GIT_CONFIG_KEY_1"].as_str(), e["GIT_CONFIG_VALUE_1"].as_str()), ("credential.https://github.com.helper", ""));
+        assert_eq!(e["GIT_CONFIG_VALUE_2"], "!agentmux-bashwrap git-credential");
+        // Again: same result, no growth.
+        let before = e.clone();
+        set_git_config_list(&mut e, no_process, "credential.https://github.com.helper", &["", "!agentmux-bashwrap git-credential"]);
+        assert_eq!(e, before);
+        // No values: the setting is gone.
+        set_git_config_list(&mut e, no_process, "credential.https://github.com.helper", &[]);
+        assert_eq!(e[COUNT], "1");
+        assert_eq!(e["GIT_CONFIG_KEY_0"], "user.name");
+        assert!(!e.contains_key("GIT_CONFIG_KEY_1"));
+    }
+
+    #[test]
+    fn a_list_setting_builds_on_the_process_envs_entries() {
+        let mut e = HashMap::new();
+        let process = |k: &str| match k {
+            "GIT_CONFIG_COUNT" => Some("1".to_string()),
+            "GIT_CONFIG_KEY_0" => Some("user.name".to_string()),
+            "GIT_CONFIG_VALUE_0" => Some("y".to_string()),
+            _ => None,
+        };
+        set_git_config_list(&mut e, process, "core.x", &["1"]);
+        assert_eq!(e[COUNT], "2");
+        assert_eq!((e["GIT_CONFIG_KEY_0"].as_str(), e["GIT_CONFIG_VALUE_0"].as_str()), ("user.name", "y"));
+        assert_eq!((e["GIT_CONFIG_KEY_1"].as_str(), e["GIT_CONFIG_VALUE_1"].as_str()), ("core.x", "1"));
     }
 
     #[test]

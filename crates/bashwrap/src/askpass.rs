@@ -26,6 +26,8 @@ const SUBCOMMANDS: &[&str] = &[
     "hook",
     "precompact",
     "sessionstart",
+    "git-credential",
+    "github-token",
     "help",
     "--help",
     "-h",
