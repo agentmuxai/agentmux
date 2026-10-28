@@ -320,8 +320,8 @@ pub enum ContainerError {
     #[error("could not install {command} in the container: {detail}")]
     CliInstall { command: String, detail: String },
     /// A `container_volumes` entry whose source is the host's CLI session folder.
-    #[error("the volume source {source} is a host folder the container may not mount")]
-    VolumeRefused { source: String },
+    #[error("the volume source {path} is a host folder the container may not mount")]
+    VolumeRefused { path: String },
 }
 
 impl ContainerError {
@@ -342,8 +342,8 @@ impl ContainerError {
             Self::NoRuntime(message) => message.clone(),
             Self::NoId { .. } => docker_error_message("the container was created without an id"),
             Self::CliInstall { command, detail } => cli_install_failure_message(command, detail),
-            Self::VolumeRefused { source } => format!(
-                "This agent's volumes list a host folder a container may not mount ({source}): remove it from the agent's volumes."
+            Self::VolumeRefused { path } => format!(
+                "This agent's volumes list a host folder a container may not mount ({path}): remove it from the agent's volumes."
             ),
         }
     }
@@ -1248,7 +1248,7 @@ impl ContainerManager {
         self.inner.exec_identities.lock().await.remove(container_name);
         self.forget_cli_ready(container_name).await;
         if let Some(source) = volumes.iter().filter_map(|v| parse_volume_spec(v)).map(|(s, _, _)| s).find(|s| is_cli_session_dir(s)) {
-            return Err(ContainerError::VolumeRefused { source: source.to_string() });
+            return Err(ContainerError::VolumeRefused { path: source.to_string() });
         }
 
         let env: Vec<String> = env_vars.iter()
@@ -1444,7 +1444,7 @@ fn agent_id_from_container_name(container_name: &str) -> Option<&str> {
 /// Whether a volume source is a host folder the CLI keeps its sessions' sockets in, or inside one:
 /// `/tmp/cc-socks`, the user's runtime folder (`$XDG_RUNTIME_DIR`, `/run/user/*`).
 fn is_cli_session_dir(source: &str) -> bool {
-    let path = source.trim().replace('', "/");
+    let path = source.trim().replace('\\', "/");
     let path = path.trim_end_matches('/');
     let xdg = std::env::var("XDG_RUNTIME_DIR").ok().map(|d| d.trim_end_matches('/').to_string()).filter(|d| !d.is_empty());
     let inside = |dir: &str| path == dir || path.starts_with(&format!("{dir}/"));
