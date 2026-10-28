@@ -44,6 +44,7 @@ fn reader_lines(fs: &FileStore) -> Vec<String> {
 /// counter columns.
 fn old_build_append(fs: &FileStore, data: &[u8]) {
     let conn = fs.conn().lock().unwrap();
+    super::parts::strip_slack(&conn, ZONE, NAME);
     let size: i64 = conn
         .query_row("SELECT size FROM db_wave_file WHERE zoneid = ?1 AND name = ?2", params![ZONE, NAME], |r| r.get(0))
         .unwrap();
@@ -66,6 +67,7 @@ fn old_build_append(fs: &FileStore, data: &[u8]) {
 fn old_build_append_parts(fs: &FileStore, data: &[u8]) {
     const PART: usize = 64 * 1024;
     let conn = fs.conn().lock().unwrap();
+    super::parts::strip_slack(&conn, ZONE, NAME);
     let size: i64 = conn
         .query_row("SELECT size FROM db_wave_file WHERE zoneid = ?1 AND name = ?2", params![ZONE, NAME], |r| r.get(0))
         .unwrap();

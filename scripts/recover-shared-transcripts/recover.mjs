@@ -11,6 +11,7 @@ import { copyFileSync, existsSync, mkdirSync, openSync, readSync, closeSync, sta
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { agentOfZone, allDamage, DERIVED, lostAndFound } from "./lib/analyze.mjs";
+import { slackBytes } from "./lib/frames.mjs";
 import { checkWorkDir, copyNames, freeBytes, homeOf, locateStore, requiredBytes, runningInstances as listRunning, workPath } from "./lib/preflight.mjs";
 import { dropFile, outputTemplate, rebuildZone } from "./lib/rebuild.mjs";
 import { writeReport } from "./lib/report.mjs";
@@ -182,7 +183,7 @@ export async function main(argv, { runningInstances = listRunning, readSource = 
             const defId = d.name === "output" ? agentOfZone(d.zone) : null;
             if (defId) {
                 const best = sources.byAgent.get(defId)?.best ?? null;
-                const zoneBytes = Math.max(d.size ?? 0, d.partsBytes);
+                const zoneBytes = Math.max(d.size ?? 0, d.partsBytes - slackBytes(db, d.zone, d.name, d.size ?? 0)); // the content, not the tail row's slack
                 item.source = best;
                 if (!best) item.action = "no-source";
                 else if (best.size < zoneBytes && !args.allowShorter) {

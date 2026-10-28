@@ -21,7 +21,9 @@ result in place is a manual step (see "Putting the result in place").
 4. `sqlite3 copy.db .recover | sqlite3 recovered.db`, then an integrity check of the
    result. The `user_version` of the original is kept.
 5. Looks for damaged files in the recovered database. A file is damaged when its
-   64 KB parts are not 0..N without a gap, do not add up to the recorded size, have
+   64 KB parts are not 0..N without a gap, do not add up to the recorded size (the last part of
+   a line-oriented file may be longer: srv leaves spaces after the content so a line is appended in
+   place; spaces only, in the last part only, anything else there is damage), have
    no file row (or a file row has no parts), or, for transcripts, contain NUL bytes
    (a lost page read back as zeros; `--skip-content-scan` skips that read). Parts may be
    compressed frames (see "Compressed frames" below): a frame's parts count as parts, and

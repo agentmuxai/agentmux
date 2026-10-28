@@ -56,6 +56,8 @@ mod tests_checkpoint;
 mod tests_global_version;
 #[cfg(test)]
 mod tests_reclaim;
+#[cfg(test)]
+mod tests_tail_slack;
 
 #[allow(unused_imports)]
 pub use core::{FileStore, DEFAULT_FLUSH_SECS, MAX_CACHE_BYTES};
@@ -64,6 +66,8 @@ pub use types::{FileMeta, FileOpts, MuxFile};
 #[allow(unused_imports)] // the memory record (SPEC_MEMORY_FOLLOWS_THE_AGENT M3)
 pub use zone_txn::ZoneTxn;
 pub(crate) use lines::is_blank_line;
+#[cfg(test)]
+pub(crate) use parts::strip_slack as strip_slack_for_test;
 pub(crate) use trim::{append_log_cost, first_live_part};
 pub(crate) use types::RETAINED_FROM_KEY;
 pub(crate) use frames::{FrameOutcome, CODEC_DELTAS, CODEC_ZSTD, FRAME_PARTS};

@@ -358,6 +358,8 @@ mod spawn_site_coverage {
          "test: re-runs the test harness as children that save and read one keychain sign-in at once (ignored; real keychain)"),
         ("src/backend/storage/filestore/tests_checkpoint.rs", "std::env::current_exe(", 1,
          "test: Unix only; re-runs the test harness as a child that tries the database's write lock, to prove reading the WAL index leaves a transaction's lock in place"),
+        ("src/backend/storage/filestore/tests_tail_slack.rs", "std::env::current_exe(", 1,
+         "test: re-runs the test harness as a child that appends lines in a loop until the test kills it, to prove a transcript reads back whole after a kill mid-append"),
         ("src/backend/transcript/framer_tests.rs", "&exe", 1,
          "test: re-runs the test harness as writer, framer and reader children on one scratch store (ignored; the multi-process stress)"),
         ("src/backend/blockcontroller/app_server.rs", "fake_server_binary(", 1,

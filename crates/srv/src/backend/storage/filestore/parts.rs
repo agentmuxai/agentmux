@@ -23,7 +23,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::{LazyLock, Mutex};
 
-use rusqlite::{params, Connection, ErrorCode};
+use rusqlite::{params, Connection, ErrorCode, OptionalExtension};
 
 use super::core::{GLOBAL_TRANSCRIPT_STORE_VERSION, PART_DATA_SIZE};
 use crate::backend::storage::error::StoreError;
@@ -52,6 +52,95 @@ pub(super) fn put_part(conn: &Connection, zone_id: &str, name: &str, idx: i32, d
             .execute(params![zone_id, name, idx, data])?;
     }
     Ok(())
+}
+
+/// How many bytes a line-oriented file's tail row is stored with when it holds
+/// `content` bytes: `content` rounded up to a power of two, between 4 KB and a
+/// whole part. The tail row is written once at that size and appended to in
+/// place ([`write_in_place`]); only when it fills up is it rewritten, at twice
+/// the size, so the cost of a line no longer grows with the part. Bytes of the
+/// row past the file's `size` are slack: spaces (blank under the line rule, so a
+/// reader that ignores `size` sees a blank line), never content.
+pub(super) fn tail_capacity(content: usize) -> usize {
+    content.max(4096).next_power_of_two().min(PART_DATA_SIZE)
+}
+
+/// Test helper: the state an older build leaves, or finds after its first append: the file's last
+/// row cut to its content, `rev` not moved. The tests that simulate an older build's append do
+/// this first so they test what they are about (counter catch-up), not the one thing an older
+/// append does to a padded row, which is to bump `rev` (its `REPLACE` writes a row shorter than
+/// the old one, which the revision trigger reads as a rewrite): a new generation, once, when a
+/// file's writer goes from the new build to an older one (tests_tail_slack.rs).
+#[cfg(test)]
+pub(crate) fn strip_slack(conn: &Connection, zone_id: &str, name: &str) {
+    let row: Option<(i64, Option<i64>)> = conn
+        .query_row("SELECT size, rev FROM db_wave_file WHERE zoneid = ?1 AND name = ?2", params![zone_id, name], |r| Ok((r.get(0)?, r.get(1)?)))
+        .optional()
+        .unwrap();
+    let Some((size, rev)) = row else { return };
+    if size <= 0 {
+        return;
+    }
+    let pds = PART_DATA_SIZE as i64;
+    let (idx, content) = ((size - 1) / pds, size - (size - 1) / pds * pds);
+    conn.execute(
+        "UPDATE db_file_data SET data = substr(data, 1, ?4) WHERE zoneid = ?1 AND name = ?2 AND partidx = ?3 AND length(data) > ?4",
+        params![zone_id, name, idx, content],
+    )
+    .unwrap();
+    conn.execute("UPDATE db_wave_file SET rev = ?3 WHERE zoneid = ?1 AND name = ?2 AND rev IS NOT ?3", params![zone_id, name, rev]).unwrap();
+}
+
+/// [`put_part`] for the tail row of an append: the file's bytes before its old
+/// size are unchanged, so `rev` must not move. The `UPDATE OF data` trigger sees
+/// the old row's slack replaced by content and bumps it, because it compares the
+/// whole old row (slack included) with the start of the new one; the bump is
+/// undone here, in the same transaction.
+pub(super) fn put_tail_part(conn: &Connection, zone_id: &str, name: &str, idx: i32, data: &[u8]) -> Result<(), StoreError> {
+    let rev: Option<Option<i64>> = conn
+        .query_row("SELECT rev FROM db_wave_file WHERE zoneid = ?1 AND name = ?2", params![zone_id, name], |r| r.get(0))
+        .optional()?;
+    put_part(conn, zone_id, name, idx, data)?;
+    if let Some(before) = rev {
+        conn.execute("UPDATE db_wave_file SET rev = ?3 WHERE zoneid = ?1 AND name = ?2 AND rev IS NOT ?3", params![zone_id, name, before])?;
+    }
+    Ok(())
+}
+
+/// Write `bytes` into part `idx` at `offset`, in the stored row, when the row
+/// is already long enough to hold them (the slack of [`tail_capacity`]):
+/// SQLite's incremental blob write touches only the pages those bytes lie on,
+/// where [`put_part`] writes the whole part. `false` when the row is missing or
+/// too short, for the caller to rewrite it. Only for an append: the bytes
+/// before `offset` are not changed, so the revision triggers (which an
+/// incremental write does not fire) would not have bumped `rev` either.
+pub(super) fn write_in_place(conn: &Connection, zone_id: &str, name: &str, idx: i32, offset: usize, bytes: &[u8]) -> Result<bool, StoreError> {
+    use std::io::{Seek, SeekFrom, Write};
+    let row: Option<(i64, i64)> = conn
+        .prepare_cached("SELECT rowid, length(data) FROM db_file_data WHERE zoneid = ?1 AND name = ?2 AND partidx = ?3")?
+        .query_row(params![zone_id, name, idx], |r| Ok((r.get(0)?, r.get(1)?)))
+        .optional()?;
+    let Some((rowid, len)) = row else { return Ok(false) };
+    if (len as usize) < offset + bytes.len() {
+        return Ok(false);
+    }
+    let mut blob = conn.blob_open(rusqlite::MAIN_DB, "db_file_data", "data", rowid, false)?;
+    let io = |e: std::io::Error| blob_io_error(e, || format!("in-place write of part {idx} of {zone_id}/{name}"));
+    blob.seek(SeekFrom::Start(offset as u64)).map_err(io)?;
+    blob.write_all(bytes).map_err(io)?;
+    Ok(true)
+}
+
+/// A blob read or write reports SQLite's own error wrapped in an `io::Error`. Hand that error back as
+/// it was, so a corrupt page still reads as `SQLITE_CORRUPT` to `transcript::damage::is_corrupt`
+/// (which marks the zone damaged and starts the per-channel fallback); any other io error is
+/// described by `what`.
+fn blob_io_error(e: std::io::Error, what: impl FnOnce() -> String) -> StoreError {
+    let text = e.to_string();
+    match e.into_inner().map(|inner| inner.downcast::<rusqlite::Error>()) {
+        Some(Ok(sqlite)) => StoreError::Sqlite(*sqlite),
+        _ => StoreError::Other(format!("{}: {text}", what())),
+    }
 }
 
 /// Whether a part missing inside `name`'s size is lost content, to read as
@@ -198,6 +287,15 @@ fn load_each(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_blob_write_that_hits_a_corrupt_page_stays_a_sqlite_corruption_error() {
+        let corrupt = rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CORRUPT), None);
+        let e = blob_io_error(std::io::Error::other(corrupt), || "write".into());
+        assert!(crate::backend::transcript::damage::is_corrupt(&e), "{e:?}");
+        let other = blob_io_error(std::io::Error::new(std::io::ErrorKind::InvalidInput, "seek"), || "write".into());
+        assert!(matches!(&other, StoreError::Other(m) if m.contains("write") && m.contains("seek")), "{other:?}");
+    }
 
     fn store() -> Connection {
         let conn = Connection::open_in_memory().unwrap();

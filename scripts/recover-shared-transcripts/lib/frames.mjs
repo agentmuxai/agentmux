@@ -170,6 +170,47 @@ export function partIndex(db, zone, name) {
 }
 
 /**
+ * Whether a file's parts hold more bytes than its recorded `size` only because its last part's
+ * row is longer than the content: the slack srv leaves in a line-oriented file's tail row so a
+ * line is appended in place (`tail_capacity` in crates/srv/src/backend/storage/filestore/parts.rs).
+ * True when the parts run 0..N, every part before the last is a whole part, the last holds at
+ * least one content byte and has bytes past it, and every byte past `size` is a space. Anything
+ * else (an extra byte in an earlier part, a whole part past the size, a NUL or text in the slack)
+ * is damage, not slack.
+ */
+export function slackOnly(db, zone, name, size) {
+    const parts = partIndex(db, zone, name);
+    if (parts.length === 0) return false;
+    const last = parts[parts.length - 1];
+    if (last.framed || last.partidx !== parts.length - 1) return false;
+    if (!parts.slice(0, -1).every((p, i) => p.partidx === i && p.len === PART)) return false;
+    const content = size - last.partidx * PART;
+    if (content <= 0 || content >= last.len) return false;
+    const row = db.prepare("SELECT data FROM db_file_data WHERE zoneid = ? AND name = ? AND partidx = ?").get(zone, name, last.partidx);
+    return Buffer.from(row.data).subarray(content).every((b) => b === 0x20);
+}
+
+/**
+ * How many bytes of a file's stored rows are slack: the run of spaces at the end of the last
+ * row, past `size` (see [`slackOnly`]). 0 when the last part is framed, holds no content byte
+ * or ends in content. Unlike `slackOnly` it does not judge the rest of the file, so a damaged
+ * file's content size is `stored bytes - slackBytes`.
+ */
+export function slackBytes(db, zone, name, size) {
+    const parts = partIndex(db, zone, name);
+    if (parts.length === 0) return 0;
+    const last = parts[parts.length - 1];
+    if (last.framed) return 0;
+    const content = size - last.partidx * PART;
+    if (content <= 0 || content >= last.len) return 0;
+    const row = db.prepare("SELECT data FROM db_file_data WHERE zoneid = ? AND name = ? AND partidx = ?").get(zone, name, last.partidx);
+    const data = Buffer.from(row.data);
+    let end = data.length;
+    while (end > content && data[end - 1] === 0x20) end--;
+    return data.length - end;
+}
+
+/**
  * A file's bytes: every part it has, in order, a row where there is one and otherwise its
  * frame, decoded. A frame that doesn't decode throws.
  */

@@ -2,11 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // What is wrong with a (recovered) filestore: for every file, its parts must run
-// 0..N with no gap and add up to the recorded size. The parts are 64 KB each
+// 0..N with no gap and add up to the recorded size (a line-oriented file's last part may be
+// longer, with spaces after the content: `slackOnly`). The parts are 64 KB each
 // (`PART_DATA_SIZE` in crates/srv/src/backend/storage/filestore/core.rs). A part
 // is a row of `db_file_data` or a part of a compressed frame (lib/frames.mjs).
 
-import { hasFrames, partIndex, scanFrames, wellShaped } from "./frames.mjs";
+import { hasFrames, partIndex, scanFrames, slackOnly, wellShaped } from "./frames.mjs";
 
 export const PART = 64 * 1024;
 
@@ -64,7 +65,8 @@ function partMap(db, zone, name) {
  * Every damaged file: { zone, name, kind, detail, size, partsBytes, prefixBytes }.
  * Kinds: orphan-parts (no file row), no-parts (a size but no parts), gap (a part
  * is missing), tail-missing (the parts end before the recorded size) and
- * size-mismatch (more bytes than the recorded size), and bad-frame for a compressed frame of a
+ * size-mismatch (more bytes than the recorded size, other than spaces after the content of the
+ * last part), and bad-frame for a compressed frame of a
  * shape srv never writes. A frame that doesn't decode is found by [`allDamage`]'s content scan.
  */
 export function findDamage(db) {
@@ -87,7 +89,8 @@ export function findDamage(db) {
             damage.push({ ...base, kind: "gap", detail: `part(s) ${shown || `0-${r.lo - 1}`} missing of ${r.hi + 1}`, prefixBytes });
         } else if (partsBytes < size) {
             damage.push({ ...base, kind: "tail-missing", detail: `parts hold ${partsBytes} of ${size} bytes`, prefixBytes: partsBytes });
-        } else if (partsBytes > size) {
+        } else if (partsBytes > size && !slackOnly(db, r.zoneid, r.name, size)) {
+            // More bytes than the size is fine only as spaces after the content of the last part (slackOnly).
             damage.push({ ...base, kind: "size-mismatch", detail: `parts hold ${partsBytes} bytes, size says ${size}`, prefixBytes: partsBytes });
         }
     }

@@ -526,6 +526,9 @@ impl FileStore {
         };
 
         let new_size = size + data.len() as i64;
+        // Only line-oriented appends (a transcript, its stamps, a jsonl log) keep
+        // slack in the tail row; a raw append stores exactly what it was given.
+        let slack = matches!(mode, AppendMode::Lines);
         let start_part = (size / PART_DATA_SIZE as i64) as i32;
         let offset_in_part = (size % PART_DATA_SIZE as i64) as usize;
         let mut data_offset = 0usize;
@@ -534,6 +537,14 @@ impl FileStore {
             // The last part is never framed (frames.rs), but a file's tail
             // must be a row before it is extended, whatever left it otherwise.
             super::frames::unframe(tx, zone_id, name, start_part, start_part)?;
+            let to_copy = (PART_DATA_SIZE - offset_in_part).min(data.len());
+            // A line-oriented file keeps its tail row longer than its content
+            // (parts.rs `tail_capacity`) and takes the new bytes in place: the
+            // pages those bytes lie on are written, not the whole part.
+            if slack && super::parts::write_in_place(tx, zone_id, name, start_part, offset_in_part, &data[..to_copy])? {
+                data_offset = to_copy;
+                current_part += 1;
+            } else {
             // Keep only the bytes the size covers: anything past it (a
             // torn append by a build without transactions) is not content.
             let mut scratch = TAIL_SCRATCH.lock().unwrap_or_else(|e| e.into_inner());
@@ -555,20 +566,32 @@ impl FileStore {
             // reads as one long garbage line).
             let pad = if part.len() < offset_in_part && super::parts::lost_reads_blank(tx, name)? { b' ' } else { 0 };
             part.resize(offset_in_part, pad);
-            let to_copy = (PART_DATA_SIZE - offset_in_part).min(data.len());
             part.extend_from_slice(&data[..to_copy]);
             data_offset = to_copy;
-            super::parts::put_part(tx, zone_id, name, current_part, &part[..])?;
+            if slack && part.len() < PART_DATA_SIZE {
+                // Room for the next appends, in place.
+                part.resize(super::parts::tail_capacity(part.len()), b' ');
+            }
+            super::parts::put_tail_part(tx, zone_id, name, current_part, &part[..])?;
             // A part that was stored longer than a part (a torn append) must not
             // leave a big buffer behind.
             if part.capacity() > 2 * PART_DATA_SIZE {
                 part.shrink_to(PART_DATA_SIZE);
             }
             current_part += 1;
+            }
         }
         while data_offset < data.len() {
             let end = (data_offset + PART_DATA_SIZE).min(data.len());
-            super::parts::put_part(tx, zone_id, name, current_part, &data[data_offset..end])?;
+            if slack && end - data_offset < PART_DATA_SIZE {
+                // The new tail of a line-oriented file, with room to grow.
+                let mut tail = Vec::with_capacity(super::parts::tail_capacity(end - data_offset));
+                tail.extend_from_slice(&data[data_offset..end]);
+                tail.resize(tail.capacity(), b' ');
+                super::parts::put_part(tx, zone_id, name, current_part, &tail)?;
+            } else {
+                super::parts::put_part(tx, zone_id, name, current_part, &data[data_offset..end])?;
+            }
             data_offset = end;
             current_part += 1;
         }

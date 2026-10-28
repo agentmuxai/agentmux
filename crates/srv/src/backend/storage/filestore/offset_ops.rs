@@ -236,7 +236,9 @@ impl FileStore {
                     0
                 };
                 let remaining = actual_size as usize - result.len();
-                let take = remaining.min(part_data.len().saturating_sub(skip));
+                // Not past the file's size (a tail row's slack, parts.rs `tail_capacity`).
+                let content = part_data.len().min((file.size - part_start).max(0) as usize);
+                let take = remaining.min(content.saturating_sub(skip));
                 if take > 0 {
                     result.extend_from_slice(&part_data[skip..skip + take]);
                 }

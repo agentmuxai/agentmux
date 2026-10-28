@@ -10,7 +10,7 @@
 
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { partIndex, readFileBytes, scanFrames } from "./frames.mjs";
+import { partIndex, readFileBytes, scanFrames, slackOnly } from "./frames.mjs";
 import { open } from "./sqlite.mjs";
 
 const subdirs = (dir) => {
@@ -69,7 +69,7 @@ function outputState(db, zone, contentScan) {
     if (!f || Number(f.size) <= 0) return null;
     const parts = partIndex(db, zone, "output");
     const bytes = parts.reduce((sum, p) => sum + p.len, 0);
-    let whole = parts.length > 0 && parts.every((p, i) => p.partidx === i) && bytes === Number(f.size);
+    let whole = parts.length > 0 && parts.every((p, i) => p.partidx === i) && (bytes === Number(f.size) || (bytes > Number(f.size) && slackOnly(db, zone, "output", Number(f.size))));
     if (whole && contentScan) {
         whole = db.prepare("SELECT COUNT(*) AS n FROM db_file_data WHERE zoneid = ? AND name = 'output' AND instr(data, x'00') > 0").get(zone).n === 0;
         if (whole) {
@@ -127,7 +127,10 @@ export function findSources(home, want, { contentScan = true } = {}) {
 export function readSource(cand) {
     const db = open(join(cand.dataDir, "db", "filestore.db"));
     try {
-        return readFileBytes(db, cand.blockOid, "output");
+        const bytes = readFileBytes(db, cand.blockOid, "output");
+        // The last part's row can be longer than the file (spaces, `slackOnly`): the copy is the content only.
+        const size = Number(db.prepare("SELECT size FROM db_wave_file WHERE zoneid = ? AND name = 'output'").get(cand.blockOid)?.size ?? bytes.length);
+        return bytes.length > size && slackOnly(db, cand.blockOid, "output", size) ? bytes.subarray(0, size) : bytes;
     } finally {
         db.close();
     }

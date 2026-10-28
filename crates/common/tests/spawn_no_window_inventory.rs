@@ -272,6 +272,8 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
      "test: unit-test or fixture code, never on a user machine"),
     ("crates/srv/src/backend/storage/filestore/tests_checkpoint.rs", "std::env::current_exe(", 1,
      "test: unit-test or fixture code, never on a user machine"),
+    ("crates/srv/src/backend/storage/filestore/tests_tail_slack.rs", "std::env::current_exe(", 1,
+     "test: unit-test or fixture code, never on a user machine"),
     ("crates/srv/src/backend/transcript/framer_tests.rs", "&exe", 1,
      "test: unit-test or fixture code, never on a user machine"),
     ("crates/srv/src/backend/update_download.rs", "tar_exe(", 2,
