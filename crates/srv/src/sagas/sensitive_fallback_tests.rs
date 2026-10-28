@@ -115,3 +115,21 @@ async fn nothing_is_counted_down_that_nothing_can_run() {
     assert_eq!(requests::registry().get(&id).unwrap().status, requests::Status::Expired);
     assert!(window::status(&id).is_none());
 }
+
+#[tokio::test]
+async fn the_longer_countdown_never_passes_the_operators_cap_of_two_minutes() {
+    let _turn = turn();
+    window::register_runner("quit_agentmux", Arc::new(|_, _| Box::pin(async { Ok(()) })));
+    let state = test_state();
+    let id = requests::registry().request("u-asker", "asker", "quit_agentmux", &Default::default(), "", now_ms()).unwrap().id;
+    let before = now_ms();
+    watch_with(&state, &id, FAST, |_| false).await;
+    let view = window::status(&id).expect("a countdown");
+    let secs = (view.deadline_ms - before) / 1000;
+    assert!((119..=120).contains(&secs), "a quit is already 2 min, so it stays 2 min, got {secs}");
+    assert_eq!(window::veto(&state, &id), "vetoed");
+    // And an operation of 30 s doubles, as the other test checks, and nothing goes above the cap.
+    for op in sensitive_ops::OPS.iter() {
+        assert!(op.fallback_window_secs() <= sensitive_ops::MAX_WINDOW_SECS, "{}", op.op);
+    }
+}
