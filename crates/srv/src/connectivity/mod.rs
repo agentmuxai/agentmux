@@ -181,11 +181,11 @@ pub fn service_for(api: &'static ModelApi, configured: Option<&str>) -> Service 
     }
 }
 
-/// The variables that route a CLI's requests through a proxy.
-const PROXY_VARS: [&str; 6] = ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy"];
+/// The variables that route a CLI's requests through a proxy, or around it.
+const PROXY_VARS: [&str; 8] = ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy", "NO_PROXY", "no_proxy"];
 
-/// Whether `env` sends a CLI's requests a way srv's own probe doesn't go: a proxy variable that srv's own environment
-/// doesn't have, or has with another value.
+/// Whether `env` sends a CLI's requests a way srv's own probe doesn't go: a proxy or bypass variable that srv's own
+/// environment doesn't have, or has with another value.
 fn own_proxy(env: &std::collections::HashMap<String, String>) -> bool {
     PROXY_VARS.iter().any(|var| {
         let theirs = env.get(*var).map(|v| v.trim()).filter(|v| !v.is_empty());

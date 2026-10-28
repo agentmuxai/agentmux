@@ -218,3 +218,9 @@ fn a_pane_with_a_proxy_of_its_own_has_no_address_of_its_own() {
     let blank = env(&[("ANTHROPIC_BASE_URL", "https://gw.example.com"), ("HTTPS_PROXY", "  ")]);
     assert_eq!(service_for_env(&ANTHROPIC, &blank).id(), "model_api:anthropic@gw.example.com", "an empty proxy variable is none");
 }
+
+#[test]
+fn a_pane_that_bypasses_the_proxy_for_its_gateway_has_no_address_of_its_own() {
+    let bypass = env(&[("ANTHROPIC_BASE_URL", "https://gw.example.com"), ("NO_PROXY", "gw.example.com")]);
+    assert_eq!(service_for_env(&ANTHROPIC, &bypass), Service::ModelApi(&ANTHROPIC));
+}
