@@ -30,6 +30,7 @@ import { findTabHolding } from "@/app/util/reveal-block";
 import { getLayoutModelForStaticTab, getLayoutModelForTabById } from "@/layout/lib/layoutModelHooks";
 import { closeBlockInStack, effectiveStack } from "@/layout/lib/layoutStack";
 import { MENU_ICON } from "@/app/util/menu-icons";
+import { devModeOn } from "@/app/store/dev-mode";
 import {
     KEEPAWAKE_META_KEY,
     LOADMS_META_KEY,
@@ -911,23 +912,28 @@ export class BrowserViewModel {
                 icon: MENU_ICON.print,
                 click: () => { getApi().browserPanes.print(this.blockId).catch(() => {}); },
             },
-            {
-                label: "View Page Source",
-                icon: MENU_ICON.viewSource,
-                click: () => {
-                    getApi().browserPanes.viewSource(this.blockId).catch(() => {});
-                },
-            },
-            {
-                label: "Inspect Element",
-                icon: MENU_ICON.inspect,
-                click: () => {
-                    getApi()
-                        .browserPanes.inspectElement(this.blockId, browserCtx?.x ?? 0, browserCtx?.y ?? 0)
-                        .catch(() => {});
-                },
-            },
         );
+        // Developer items: only in dev mode (app:devmode).
+        if (devModeOn()) {
+            items.push(
+                {
+                    label: "View Page Source",
+                    icon: MENU_ICON.viewSource,
+                    click: () => {
+                        getApi().browserPanes.viewSource(this.blockId).catch(() => {});
+                    },
+                },
+                {
+                    label: "Inspect Element",
+                    icon: MENU_ICON.inspect,
+                    click: () => {
+                        getApi()
+                            .browserPanes.inspectElement(this.blockId, browserCtx?.x ?? 0, browserCtx?.y ?? 0)
+                            .catch(() => {});
+                    },
+                },
+            );
+        }
         return items;
     }
 

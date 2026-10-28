@@ -18,6 +18,17 @@ use cef::*;
 
 use super::AgentMuxHandler;
 
+/// The answer when no frontend menu will show for this right-click. CEF's own
+/// menu has an Inspect item, so with dev mode off the click shows no menu at
+/// all instead (0 = let CEF show its menu, 1 = handled).
+fn native_menu_unless_it_inspects(cb: &mut RunContextMenuCallback) -> ::std::os::raw::c_int {
+    if crate::dev_mode::dev_mode_on() {
+        return 0;
+    }
+    cb.cancel();
+    1
+}
+
 impl AgentMuxHandler {
     /// Runs on CEF's `run_context_menu`. Suppresses CEF's native menu for a
     /// browser pane — returns 1 (handled) and calls `callback.cancel()` —
@@ -26,7 +37,8 @@ impl AgentMuxHandler {
     /// the pane's owning window can't be determined, falls through to CEF's
     /// own native menu (return 0) instead: suppressing unconditionally in
     /// that case would show NO menu at all (reagentx P1 on PR #2599) — worse
-    /// than Chromium's native one.
+    /// than Chromium's native one. Except with dev mode off: CEF's menu has an
+    /// Inspect item, so then that click shows no menu (`native_menu_unless_it_inspects`).
     ///
     /// `cancel()`, never `cont()`: `cont()` tells CEF a specific native menu
     /// command was chosen (by id) and to execute it — we're not running any
@@ -43,11 +55,11 @@ impl AgentMuxHandler {
         callback: Option<&mut RunContextMenuCallback>,
     ) -> ::std::os::raw::c_int {
         let Some(cb) = callback else { return 0 };
-        let Some(b) = browser.as_deref() else { return 0 };
+        let Some(b) = browser.as_deref() else { return native_menu_unless_it_inspects(cb) };
         let Some(block_id) = crate::browser_pane::callbacks::resolve_pane_block_id(&self.state, b) else {
-            return 0;
+            return native_menu_unless_it_inspects(cb);
         };
-        let Some(p) = params else { return 0 };
+        let Some(p) = params else { return native_menu_unless_it_inspects(cb) };
 
         // Route to the pane's ACTUAL owning window, not just "main" — a pane
         // torn off into its own floating window has its own JS context, and
@@ -59,7 +71,7 @@ impl AgentMuxHandler {
                 "[browser-pane-context-menu] no owning window label for block_id={}, falling back to CEF's native menu",
                 block_id
             );
-            return 0;
+            return native_menu_unless_it_inspects(cb);
         };
 
         // Stash the ACTUAL frame that was right-clicked (not necessarily
@@ -115,7 +127,7 @@ impl AgentMuxHandler {
             }),
         );
         if !delivered {
-            return 0;
+            return native_menu_unless_it_inspects(cb);
         }
 
         cb.cancel();

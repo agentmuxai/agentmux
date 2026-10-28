@@ -27,6 +27,7 @@ import {
 } from "@/app/store/window-appearance";
 import { liveWindowOpacity, setWindowOpacityFor } from "@/app/store/window-opacity-store";
 import { windowId } from "@/app/store/window-identity";
+import { devModeOn } from "@/app/store/dev-mode";
 import { THEME_OPTIONS } from "@/app/menu/base-menus";
 import { shortcutFor } from "@/app/keybindings";
 import { refreshWorkspaceList, workspaceList, workspaceName } from "@/app/store/user-workspace";
@@ -210,11 +211,17 @@ export function HamburgerMenu(props: HamburgerMenuProps): JSX.Element {
                 shortcut: shortcutFor("view:command-palette"),
                 onClick: () => openModal(CommandPaletteModal),
             },
-            {
-                label: "DevTools",
-                icon: "code",
-                onClick: () => getApi().toggleDevtools(),
-            },
+            // Only in dev mode. Reading it here makes this memo rebuild once
+            // when the setting changes, which never happens with the menu open.
+            ...(devModeOn()
+                ? [
+                      {
+                          label: "DevTools",
+                          icon: "code",
+                          onClick: () => getApi().toggleDevtools(),
+                      },
+                  ]
+                : []),
             {
                 label: "Online Docs",
                 icon: "book",

@@ -207,6 +207,21 @@ impl Gate {
         rx
     }
 
+    /// Let `agent` in pane `block_id` control `app`: for `minutes`, or (`None`) until its session ends.
+    /// It replaces any grant that agent already has for the app.
+    pub fn grant(&mut self, agent: &str, block_id: &str, app: &str, minutes: Option<u64>, now: u64) {
+        self.grants.retain(|g| !(g.agent == agent && g.app == app && g.block_id == block_id));
+        self.grants.push(Grant {
+            id: uuid::Uuid::new_v4().to_string(),
+            agent: agent.to_string(),
+            app: app.to_string(),
+            block_id: block_id.to_string(),
+            until_ms: minutes.map(|m| now + m.max(1) * 60_000),
+            actions: 0,
+            last_action_ms: 0,
+        });
+    }
+
     /// The user's answer to prompt `id`.
     pub fn answer(&mut self, id: &str, choice: Choice, now: u64, grant_minutes: u64) -> Result<(), String> {
         let Some(pos) = self.pending.iter().position(|p| p.request.id == id) else {
@@ -219,17 +234,7 @@ impl Gate {
                 self.denied.insert((r.agent.clone(), r.app.clone()));
             }
             Choice::Timed | Choice::Session => {
-                let until_ms = (choice == Choice::Timed).then(|| now + grant_minutes.max(1) * 60_000);
-                self.grants.retain(|g| !(g.agent == r.agent && g.app == r.app && g.block_id == r.block_id));
-                self.grants.push(Grant {
-                    id: uuid::Uuid::new_v4().to_string(),
-                    agent: r.agent.clone(),
-                    app: r.app.clone(),
-                    block_id: r.block_id.clone(),
-                    until_ms,
-                    actions: 0,
-                    last_action_ms: 0,
-                });
+                self.grant(&r.agent, &r.block_id, &r.app, (choice == Choice::Timed).then_some(grant_minutes), now);
             }
         }
         for tx in p.waiters {
@@ -447,6 +452,17 @@ mod tests {
         assert!(!g.asking("naki", "b2", "notepad"), "another pane is its own prompt");
         g.answer("r1", Choice::Deny, 1_000, 30).unwrap();
         assert!(!g.asking("naki", "b1", "notepad"));
+    }
+
+    #[test]
+    fn a_direct_grant_allows_for_its_minutes_and_replaces_the_one_before() {
+        let mut g = Gate::default();
+        g.grant("naki", "b1", "notepad", Some(5), 0);
+        assert!(matches!(g.check("naki", "b1", "notepad", 1_000), Check::Allow { .. }));
+        g.grant("naki", "b1", "notepad", Some(1), 0);
+        assert_eq!(g.check("naki", "b1", "notepad", 61_000), Check::Ask, "the later grant replaced the longer one");
+        g.grant("naki", "b1", "notepad", None, 0);
+        assert!(matches!(g.check("naki", "b1", "notepad", 999_999_999), Check::Allow { .. }), "no minutes: until the session ends");
     }
 
     #[test]

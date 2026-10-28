@@ -59,6 +59,8 @@ export interface OpenTailResult {
     /** `agent:session:read`'s content and modts, when `definition_id` was given. */
     snapshot?: string;
     snapshot_modts?: number;
+    /** The saved history in the shared store is damaged: this slice is the block's own copy, so earlier history may be missing. */
+    history_damaged?: boolean;
 }
 
 /** An open tail with the line positions the pane needs, checked. */

@@ -22,7 +22,7 @@ use agentmux_common::api_types::{
     DesktopAuthorizeRequest, DesktopPolicyRequest, DesktopRecordRequest, DesktopReleaseRequest, DesktopWindowRef,
 };
 
-use crate::backend::desktop_gate::{self as gate, Check, Choice, DesktopEvent, DesktopRequest};
+use crate::backend::desktop_gate::{self as gate, Check, DesktopEvent};
 use crate::backend::rpc_types::*;
 use crate::backend::wconfig::SettingsType;
 use crate::server::AppState;
@@ -33,6 +33,100 @@ use super::*;
 const ACTIONS: &[&str] = &["look", "click", "scroll", "type", "key", "wait"];
 
 static ASKING: Mutex<Option<crate::backend::user_attention::Asking>> = Mutex::new(None);
+
+/// What a desktop-control request was filed for, by the request's id: the agent, its pane, the app
+/// and the minutes, which the countdown's end turns into the grant.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct GrantTarget {
+    /// The asking agent's uid, to leave out one that withdrew its ask.
+    pub uid: String,
+    pub agent: String,
+    pub block_id: String,
+    pub app: String,
+    pub minutes: u64,
+}
+
+static TARGETS: Mutex<Vec<(String, GrantTarget)>> = Mutex::new(Vec::new());
+
+/// The most targets remembered at once.
+const MAX_TARGETS: usize = 64;
+
+/// Remember that `request_id` was asked for by this agent in this pane. Agents that join the
+/// request each leave their own, so each gets its grant when the countdown ends.
+pub(crate) fn remember_target(request_id: &str, target: GrantTarget) {
+    let mut t = TARGETS.lock().unwrap_or_else(|e| e.into_inner());
+    // A request that ended without running (denied, vetoed, withdrawn) leaves no use for its entries.
+    t.retain(|(id, _)| crate::backend::sensitive_requests::registry().get(id).is_some_and(|r| r.status.is_open()));
+    if t.iter().any(|(id, x)| id == request_id && x.agent == target.agent && x.block_id == target.block_id) {
+        return;
+    }
+    if t.len() >= MAX_TARGETS {
+        t.remove(0);
+    }
+    t.push((request_id.to_string(), target));
+}
+
+/// The person pressed Stop on the agent in `block_id`: nothing already asked for may bring its
+/// access back.
+fn forget_pane(block_id: &str) {
+    TARGETS.lock().unwrap_or_else(|e| e.into_inner()).retain(|(_, t)| t.block_id != block_id);
+}
+
+/// Everything remembered for `request_id`, taken.
+pub(crate) fn take_targets(request_id: &str) -> Vec<GrantTarget> {
+    let mut t = TARGETS.lock().unwrap_or_else(|e| e.into_inner());
+    let (mine, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut *t).into_iter().partition(|(id, _)| id == request_id);
+    *t = rest;
+    mine.into_iter().map(|(_, x)| x).collect()
+}
+
+/// The open request this agent already asked for to control `app` from this pane, if it still waits.
+/// Asking again while it does answers the same, without a new audit row for each call.
+fn open_ask(uid: &str, agent: &str, block_id: &str, app: &str) -> Option<String> {
+    let t = TARGETS.lock().unwrap_or_else(|e| e.into_inner());
+    t.iter()
+        .filter(|(_, x)| x.uid == uid && x.agent == agent && x.block_id == block_id && x.app == app)
+        .map(|(id, _)| id)
+        .find(|id| crate::backend::sensitive_requests::registry().get(id).is_some_and(|r| r.status.is_open() && r.asked_by(uid)))
+        .cloned()
+}
+
+/// The targets of agents that still ask: one that withdrew while the others' request went on is
+/// left out.
+fn still_asking(targets: Vec<GrantTarget>, request: Option<&crate::backend::sensitive_requests::Request>) -> Vec<GrantTarget> {
+    let askers = request.map(|r| r.askers()).unwrap_or_default();
+    targets.into_iter().filter(|t| askers.contains(&t.uid.as_str())).collect()
+}
+
+/// The grants a countdown that ended unvetoed makes (one for each agent that asked), and the audit
+/// lines saying who approved them.
+pub(crate) fn grant_after_countdown(state: &AppState, request_id: &str, approver: Option<&str>) -> Result<(), String> {
+    let targets = take_targets(request_id);
+    if targets.is_empty() {
+        return Err("the app this request was for is no longer known; ask again".to_string());
+    }
+    // The person's master switch and their Stop still win: nothing is granted while it is off.
+    if !policy(state).enabled {
+        return Err(OFF.to_string());
+    }
+    let targets = still_asking(targets, crate::backend::sensitive_requests::registry().get(request_id).as_ref());
+    if targets.is_empty() {
+        return Err("everyone who asked has withdrawn or been stopped".to_string());
+    }
+    for t in targets {
+        gate::with_gate(|g| g.grant(&t.agent, &t.block_id, &t.app, Some(t.minutes), now_ms_u64()));
+        gate::audit(&json!({
+            "ts_ms": now_ms_u64(),
+            "agent": t.agent,
+            "app": t.app,
+            "action": "grant",
+            "decision": "granted",
+            "details": { "by": approver.unwrap_or("no super agent"), "minutes": t.minutes, "request": request_id },
+        }));
+    }
+    publish(state);
+    Ok(())
+}
 
 pub fn register(engine: &Arc<WshRpcEngine>, _state: &AppState) {
     engine.register_typed(COMMAND_APP_DESKTOP, move |_req: Option<NoArgsReq>, _ctx| async move {
@@ -203,61 +297,47 @@ pub(crate) async fn handle_authorize(
             }
             Check::TooFast { wait_ms } => tokio::time::sleep(std::time::Duration::from_millis(wait_ms)).await,
             Check::Ask => {
-                if gate::with_gate(|g| g.asking(&agent, &block_id, &app)) {
-                    return reply("pending", &pending_message(&app));
+                // Asked for like any sensitive operation: the super agent decides and the person
+                // can veto the countdown. Asking again for the same thing joins the open request.
+                let uid = caller
+                    .as_deref()
+                    .and_then(crate::server::caller::Caller::uid)
+                    .map(str::to_string)
+                    .or_else(|| crate::backend::reactive::get_global_handler().get_agent(&agent).and_then(|r| r.uid))
+                    .unwrap_or_default();
+                if uid.is_empty() {
+                    return reply("refused", "This needs the agent's own token to ask for.");
                 }
-                let id = uuid::Uuid::new_v4().to_string();
-                let request = DesktopRequest {
-                    id: id.clone(),
-                    agent: agent.clone(),
-                    app: app.clone(),
-                    title: w.title.chars().take(120).collect(),
-                    asked_ms: now_ms_u64(),
-                    block_id: block_id.clone(),
-                    grant_minutes: p.grant_minutes,
+                // The grant is for the app, not a window, so the request is too: asking again for
+                // another window, or after its title changed, joins it. The title is only context.
+                if open_ask(&uid, &agent, &block_id, &app).is_some() {
+                    return reply("pending", &pending_message(&app, "it is already asked for"));
+                }
+                let title: String = w.title.chars().take(80).collect();
+                let scope = format!("{app} for {} minutes", p.grant_minutes);
+                let facts = std::collections::BTreeMap::from([("scope".to_string(), scope)]);
+                let reason = format!("control {app} (window: {title}) for the user");
+                return match crate::server::sensitive_handlers::file_request(&state, &uid, &agent, "desktop_control_grant", &facts, &reason).await {
+                    Ok(filed) => {
+                        let id = filed["id"].as_str().unwrap_or_default().to_string();
+                        remember_target(&id, GrantTarget { uid: uid.clone(), agent: agent.clone(), block_id: block_id.clone(), app: app.clone(), minutes: p.grant_minutes });
+                        audit_line(&agent, w, &req.action, "asked", json!({ "request": id }));
+                        reply("pending", &pending_message(&app, filed["review"].as_str().unwrap_or("")))
+                    }
+                    Err(e) => reply("refused", &e),
                 };
-                let rx = gate::with_gate(|g| g.ask(request));
-                publish(&state);
-                let message = pending_message(&app);
-                let (state, w, action) = (state.clone(), w.clone(), req.action.clone());
-                tokio::spawn(async move {
-                    let note = match tokio::time::timeout(gate::ANSWER_WAIT, rx).await {
-                        Ok(Ok(Choice::Deny)) => {
-                            audit_line(&agent, &w, &action, "denied", json!({ "by": "user" }));
-                            format!("[AgentMux] The user said no to you controlling {app}. Don't ask again this session.")
-                        }
-                        Ok(Ok(choice)) => {
-                            audit_line(&agent, &w, &action, "granted", json!({ "choice": choice }));
-                            let how_long = if choice == Choice::Timed {
-                                format!("for {} minutes", p.grant_minutes)
-                            } else {
-                                "for this session".to_string()
-                            };
-                            format!("[AgentMux] The user allowed you to control {app} {how_long}. Call Desktop again to carry on: look first, since the window may have changed.")
-                        }
-                        // The prompt was dropped without an answer: Stop.
-                        Ok(Err(_)) => format!("[AgentMux] The user pressed Stop on {app}. Don't carry on with it; ask them what they want."),
-                        Err(_) => {
-                            gate::with_gate(|g| g.abandon(&id));
-                            audit_line(&agent, &w, &action, "no_answer", Value::Null);
-                            format!("[AgentMux] The user didn't answer your request to control {app} in 10 minutes, so nothing was done. Ask them in chat before asking again.")
-                        }
-                    };
-                    publish(&state);
-                    tell(&block_id, &note);
-                });
-                return reply("pending", &message);
             }
         }
     }
     reply("refused", "Couldn't get a slot to act; try again.")
 }
 
-/// What a call that asked the user (or found them already asked) answers.
-fn pending_message(app: &str) -> String {
+/// What a call that asked answers.
+fn pending_message(app: &str, review: &str) -> String {
     format!(
-        "Asked the user to let you control {app}; nothing was done yet. Don't wait for it: carry on with \
-         other work or end your turn. An [AgentMux] note brings their answer, then call Desktop again."
+        "Asked for permission to control {app} as a sensitive operation ({review}); nothing was done yet. If the \
+         super agent approves, the person sees a countdown and can veto it. Don't wait for it: carry on with other \
+         work or end your turn. An [AgentMux] note brings the answer, then call Desktop again."
     )
 }
 
@@ -352,6 +432,7 @@ pub(crate) async fn handle_host_stop(
         return host_only();
     }
     let revoked = gate::with_gate(|g| g.stop(&body.block_id));
+    forget_pane(&body.block_id);
     publish(&state);
     gate::audit(&json!({ "ts_ms": now_ms_u64(), "action": "stop", "decision": "stopped", "block": body.block_id, "revoked": revoked }));
     tell(&body.block_id, "[AgentMux] The user pressed Stop on your desktop control. Your grants are gone; ask them before controlling an app again.");
@@ -384,6 +465,84 @@ mod tests {
         let state = crate::server::tests::test_state();
         *state.host_ipc.lock().await = Some(crate::server::state::HostIpc { port: 1, token: "host-ipc-token".into() });
         crate::server::build_router(state)
+    }
+
+    #[test]
+    fn a_request_remembers_each_asker_once_and_forgets_requests_that_ended() {
+        use crate::backend::sensitive_requests::registry;
+        let now = agentmux_common::time::now_ms();
+        let scope = |name: &str| -> std::collections::BTreeMap<String, String> { [("scope".to_string(), format!("{name}-{}", uuid::Uuid::new_v4().simple()))].into_iter().collect() };
+        let open = registry().request("u-d", "d", "desktop_control_grant", &scope("notepad"), "", now).unwrap().id;
+        let t = super::GrantTarget { uid: "u-d".into(), agent: "a".into(), block_id: "b".into(), app: "notepad".into(), minutes: 30 };
+        super::remember_target(&open, t.clone());
+        super::remember_target(&open, t.clone());
+        // An agent in another pane that joined the request is remembered too.
+        let joiner = super::GrantTarget { uid: "u-j".into(), agent: "c".into(), block_id: "b2".into(), ..t.clone() };
+        super::remember_target(&open, joiner.clone());
+        let ended = registry().request("u-d", "d", "desktop_control_grant", &scope("word"), "", now).unwrap().id;
+        super::remember_target(&ended, t.clone());
+        registry().deny(&ended, "boss", "no", now).unwrap();
+        super::remember_target("a-later-request", t.clone());
+        assert_eq!(super::take_targets(&ended), vec![], "ended without running: forgotten");
+        assert_eq!(super::take_targets(&open), vec![t, joiner], "each asker once, in order");
+        assert_eq!(super::take_targets(&open), vec![], "used once");
+    }
+
+    #[test]
+    fn an_agent_that_asks_again_while_its_request_waits_is_recognised() {
+        use crate::backend::sensitive_requests::registry;
+        let now = agentmux_common::time::now_ms();
+        let scope = [("scope".to_string(), format!("notepad-{}", uuid::Uuid::new_v4().simple()))].into_iter().collect();
+        let id = registry().request("u-r", "r", "desktop_control_grant", &scope, "", now).unwrap().id;
+        let t = super::GrantTarget { uid: "u-r".into(), agent: "r".into(), block_id: "repeat-pane".into(), app: "notepad".into(), minutes: 30 };
+        assert_eq!(super::open_ask("u-r", "r", "repeat-pane", "notepad"), None, "nothing asked yet");
+        super::remember_target(&id, t);
+        assert_eq!(super::open_ask("u-r", "r", "repeat-pane", "notepad"), Some(id.clone()));
+        assert_eq!(super::open_ask("u-r", "r", "repeat-pane", "word"), None, "another app is a new ask");
+        assert_eq!(super::open_ask("u-r", "r", "other-pane", "notepad"), None, "another pane is a new ask");
+        registry().deny(&id, "boss", "no", now).unwrap();
+        assert_eq!(super::open_ask("u-r", "r", "repeat-pane", "notepad"), None, "an ended request is asked afresh");
+    }
+
+    #[test]
+    fn pressing_stop_on_a_pane_forgets_what_was_asked_for_it() {
+        use crate::backend::sensitive_requests::registry;
+        let scope = [("scope".to_string(), format!("notepad-{}", uuid::Uuid::new_v4().simple()))].into_iter().collect();
+        let id = registry().request("u-d", "d", "desktop_control_grant", &scope, "", agentmux_common::time::now_ms()).unwrap().id;
+        let t = super::GrantTarget { uid: "u-d".into(), agent: "a".into(), block_id: "stopped-pane".into(), app: "notepad".into(), minutes: 30 };
+        let other = super::GrantTarget { uid: "u-d".into(), agent: "c".into(), block_id: "other-pane".into(), ..t.clone() };
+        super::remember_target(&id, t);
+        super::remember_target(&id, other.clone());
+        super::forget_pane("stopped-pane");
+        assert_eq!(super::take_targets(&id), vec![other], "only the stopped pane's ask is gone");
+    }
+
+    #[test]
+    fn an_agent_that_withdrew_is_left_out_of_the_grant() {
+        use crate::backend::sensitive_requests::registry;
+        let now = agentmux_common::time::now_ms();
+        let scope = [("scope".to_string(), format!("notepad-{}", uuid::Uuid::new_v4().simple()))].into_iter().collect();
+        let id = registry().request("u-first", "first", "desktop_control_grant", &scope, "", now).unwrap().id;
+        registry().request("u-second", "second", "desktop_control_grant", &scope, "", now).unwrap();
+        let mk = |uid: &str, block: &str| super::GrantTarget { uid: uid.into(), agent: uid.into(), block_id: block.into(), app: "notepad".into(), minutes: 30 };
+        let both = vec![mk("u-first", "b1"), mk("u-second", "b2")];
+        assert_eq!(super::still_asking(both.clone(), registry().get(&id).as_ref()), both, "both still ask");
+        registry().cancel(&id, "u-first", now).unwrap();
+        assert_eq!(super::still_asking(both.clone(), registry().get(&id).as_ref()), vec![mk("u-second", "b2")], "the one that withdrew is left out");
+        assert_eq!(super::still_asking(both, None), vec![], "no request, no grant");
+    }
+
+    #[tokio::test]
+    async fn nothing_is_granted_while_desktop_driving_is_off() {
+        let state = crate::server::tests::test_state();
+        let scope = [("scope".to_string(), format!("notepad-{}", uuid::Uuid::new_v4().simple()))].into_iter().collect();
+        let id = crate::backend::sensitive_requests::registry().request("u-d", "d", "desktop_control_grant", &scope, "", agentmux_common::time::now_ms()).unwrap().id;
+        super::remember_target(&id, super::GrantTarget { uid: "u-d".into(), agent: "a".into(), block_id: "b".into(), app: "notepad".into(), minutes: 30 });
+        let err = super::grant_after_countdown(&state, &id, Some("boss")).unwrap_err();
+        assert!(err.contains("Desktop driving is off"), "{err}");
+        assert!(!crate::backend::desktop_gate::with_gate(|g| g.has_grant("a", "b", "notepad", agentmux_common::time::now_ms_u64())));
+        let gone = super::grant_after_countdown(&state, &id, None).unwrap_err();
+        assert!(gone.contains("no longer known"), "the targets were taken: {gone}");
     }
 
     // §5.4: the user's answer and Stop come only through the host. The

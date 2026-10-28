@@ -313,6 +313,11 @@ pub struct AgentOpenTailResult {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub gen_mismatch: Option<bool>,
+    /// The agent's saved history in the shared store was found damaged, so this read came from
+    /// the block's own copy, which holds only what this block wrote: earlier history may be missing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub history_damaged: Option<bool>,
 }
 
 /// Request for `agent:session:write_state`. Writes `output.state.json`

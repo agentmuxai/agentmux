@@ -27,4 +27,9 @@ gen_mismatch?: boolean,
  * With `tail_turns` or `tail_bytes`: the line number of `lines[0]` — the request's
  * `offset` when nothing was trimmed. `lines` is contiguous from here.
  */
-offset?: number, };
+offset?: number, 
+/**
+ * The agent's saved history in the shared store was found damaged, so this read came from
+ * the block's own copy, which holds only what this block wrote: earlier history may be missing.
+ */
+history_damaged?: boolean, };

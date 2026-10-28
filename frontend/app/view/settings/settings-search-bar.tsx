@@ -10,6 +10,7 @@
 import { createMemo, createSignal, For, Show, type Accessor, type JSX } from "solid-js";
 
 import { IconButton } from "@/app/element/ui";
+import { devModeOn } from "@/app/store/dev-mode";
 import { SETTINGS_INDEX, searchSettings } from "./settings-index";
 import type { SettingsIndexEntry } from "./settings-model";
 import "./settings-search-bar.scss";
@@ -29,7 +30,8 @@ export function SettingsSearchBar(props: SettingsSearchBarProps): JSX.Element {
     const results = createMemo(() => {
         const q = props.query().trim();
         if (!q) return [];
-        return searchSettings(SETTINGS_INDEX, q).slice(0, MAX_RESULTS);
+        const shown = devModeOn() ? SETTINGS_INDEX : SETTINGS_INDEX.filter((e) => !e.devOnly);
+        return searchSettings(shown, q).slice(0, MAX_RESULTS);
     });
 
     const isOpen = () => props.query().trim().length > 0;
