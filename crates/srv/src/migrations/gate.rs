@@ -134,6 +134,15 @@ pub(super) fn refuse_on_real_home(
     }
 }
 
+/// [`refuse_on_real_home`] for the stores this process would open. Called before the startup
+/// count of pending migrations, which opens the shared store like any other writer.
+pub fn refuse_if_real_home_would_move() -> Result<(), String> {
+    let (Some(shared), Some(identity)) = (crate::registry::resolve_shared_store_path(), crate::registry::resolve_identity_store_path()) else {
+        return Ok(());
+    };
+    refuse_on_real_home(REGISTRY, &shared, &identity)
+}
+
 /// What a build of this version would change in the shared stores, or `None`.
 /// A store that doesn't exist yet has nobody to move ahead of.
 pub(super) fn real_home_would_move(

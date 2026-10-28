@@ -707,6 +707,12 @@ fn open_work_store(
 /// version's data forward, snapshot, and run pending migrations (the same
 /// work `agentmux-srv migrate --prepare` does for the launcher).
 fn prepare_in_process(mux_data_dir: &std::path::Path, db_dir: &std::path::Path, code_version: &str) {
+    // Before the pending-migration count below, which opens the shared store and so runs its schema setup.
+    if let Err(e) = migrations::refuse_if_real_home_would_move() {
+        tracing::error!("startup: refusing to start: {}", e);
+        eprintln!("{}", agentmux_common::srv_stderr::migration_failed_line(&e));
+        std::process::exit(1);
+    }
     // Pre-migration snapshot (Increment B.2 lean cut from
     // SPEC_DATA_CHANNELS §3.4). Run BEFORE Store::open AND before
     // count_pending_migrations/run_pending_migrations — both open
