@@ -80,6 +80,17 @@ pub(crate) fn take_targets(request_id: &str) -> Vec<GrantTarget> {
     mine.into_iter().map(|(_, x)| x).collect()
 }
 
+/// The open request this agent already asked for to control `app` from this pane, if it still waits.
+/// Asking again while it does answers the same, without a new audit row for each call.
+fn open_ask(uid: &str, agent: &str, block_id: &str, app: &str) -> Option<String> {
+    let t = TARGETS.lock().unwrap_or_else(|e| e.into_inner());
+    t.iter()
+        .filter(|(_, x)| x.uid == uid && x.agent == agent && x.block_id == block_id && x.app == app)
+        .map(|(id, _)| id)
+        .find(|id| crate::backend::sensitive_requests::registry().get(id).is_some_and(|r| r.status.is_open() && r.asked_by(uid)))
+        .cloned()
+}
+
 /// The targets of agents that still ask: one that withdrew while the others' request went on is
 /// left out.
 fn still_asking(targets: Vec<GrantTarget>, request: Option<&crate::backend::sensitive_requests::Request>) -> Vec<GrantTarget> {
@@ -299,6 +310,9 @@ pub(crate) async fn handle_authorize(
                 }
                 // The grant is for the app, not a window, so the request is too: asking again for
                 // another window, or after its title changed, joins it. The title is only context.
+                if open_ask(&uid, &agent, &block_id, &app).is_some() {
+                    return reply("pending", &pending_message(&app, "it is already asked for"));
+                }
                 let title: String = w.title.chars().take(80).collect();
                 let scope = format!("{app} for {} minutes", p.grant_minutes);
                 let facts = std::collections::BTreeMap::from([("scope".to_string(), scope)]);
@@ -472,6 +486,22 @@ mod tests {
         assert_eq!(super::take_targets(&ended), vec![], "ended without running: forgotten");
         assert_eq!(super::take_targets(&open), vec![t, joiner], "each asker once, in order");
         assert_eq!(super::take_targets(&open), vec![], "used once");
+    }
+
+    #[test]
+    fn an_agent_that_asks_again_while_its_request_waits_is_recognised() {
+        use crate::backend::sensitive_requests::registry;
+        let now = agentmux_common::time::now_ms();
+        let scope = [("scope".to_string(), format!("notepad-{}", uuid::Uuid::new_v4().simple()))].into_iter().collect();
+        let id = registry().request("u-r", "r", "desktop_control_grant", &scope, "", now).unwrap().id;
+        let t = super::GrantTarget { uid: "u-r".into(), agent: "r".into(), block_id: "repeat-pane".into(), app: "notepad".into(), minutes: 30 };
+        assert_eq!(super::open_ask("u-r", "r", "repeat-pane", "notepad"), None, "nothing asked yet");
+        super::remember_target(&id, t);
+        assert_eq!(super::open_ask("u-r", "r", "repeat-pane", "notepad"), Some(id.clone()));
+        assert_eq!(super::open_ask("u-r", "r", "repeat-pane", "word"), None, "another app is a new ask");
+        assert_eq!(super::open_ask("u-r", "r", "other-pane", "notepad"), None, "another pane is a new ask");
+        registry().deny(&id, "boss", "no", now).unwrap();
+        assert_eq!(super::open_ask("u-r", "r", "repeat-pane", "notepad"), None, "an ended request is asked afresh");
     }
 
     #[test]
