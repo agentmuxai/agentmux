@@ -146,6 +146,32 @@ impl HostLanKeys {
         })
     }
 
+    /// Replace (with `None`, drop) the host's key for `subject`, but only while it is still the key with
+    /// public half `old_public`: a key exposed to a container is taken off the host, and a key another
+    /// channel has since put there is left alone. `true` when the host's key was changed.
+    pub fn supersede(
+        &self,
+        kind: HostKeyKind,
+        subject: &str,
+        old_public: &str,
+        new: Option<&HostKey>,
+    ) -> Result<bool, StoreError> {
+        self.with(|conn| {
+            let changed = match new {
+                Some(k) => conn.execute(
+                    "UPDATE db_host_lan_keys SET public_key = ?4, private_key = ?5, created_at = ?6 \
+                     WHERE kind = ?1 AND subject = ?2 AND public_key = ?3",
+                    params![kind.as_str(), subject, old_public, k.pair.public_key, k.pair.private_key, k.created_at],
+                )?,
+                None => conn.execute(
+                    "DELETE FROM db_host_lan_keys WHERE kind = ?1 AND subject = ?2 AND public_key = ?3",
+                    params![kind.as_str(), subject, old_public],
+                )?,
+            };
+            Ok(changed > 0)
+        })
+    }
+
     /// Drop the host's keys for `subjects`: an agent that was deleted. A channel that still has the agent
     /// publishes its own key again the next time it asks.
     pub fn forget(&self, kind: HostKeyKind, subjects: &[String]) -> Result<usize, StoreError> {
