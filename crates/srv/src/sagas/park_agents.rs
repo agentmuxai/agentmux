@@ -40,6 +40,66 @@ pub(crate) fn is_parkable(state: &AppState, block_id: &str) -> bool {
     obj::meta_get_string(&block.meta, "view", "") == "agent" && agent_of_block(state, block_id, &block).is_some()
 }
 
+/// Of the blocks being closed, the ones that are extra blocks of their agent and so are closed, not
+/// parked. `batch` is each closing parkable block with its agent; `all` every agent block in a tab or
+/// parked with its agent; `runs` says whether a block has the agent's live process.
+///
+/// Layouts from before one block per agent can hold two blocks for an agent, and parking both would
+/// leave it two parked blocks. One block per agent survives the close: the one that runs the agent's
+/// process, else the first of them. A block of the agent outside this close stays, so when one runs it
+/// is the survivor and every closing block of that agent is extra, and when none runs the closing block
+/// that runs is parked beside it. Decided once for the whole close, so a tab or workspace close that
+/// covers both blocks keeps one of them.
+pub(super) fn extras_to_close(batch: &[(String, String)], all: &[(String, String)], runs: &dyn Fn(&str) -> bool) -> std::collections::HashSet<String> {
+    let mut extras = std::collections::HashSet::new();
+    let mut decided = std::collections::HashSet::new();
+    for (_, agent) in batch {
+        if !decided.insert(agent.as_str()) {
+            continue;
+        }
+        let closing: Vec<&str> = batch.iter().filter(|(_, a)| a == agent).map(|(b, _)| b.as_str()).collect();
+        let outside: Vec<&str> = all.iter().filter(|(b, a)| a == agent && !closing.contains(&b.as_str())).map(|(b, _)| b.as_str()).collect();
+        let keeper = if outside.is_empty() {
+            closing.iter().copied().find(|b| runs(b)).or_else(|| closing.first().copied())
+        } else if outside.iter().any(|b| runs(b)) {
+            None
+        } else {
+            closing.iter().copied().find(|b| runs(b))
+        };
+        extras.extend(closing.into_iter().filter(|b| Some(*b) != keeper).map(str::to_string));
+    }
+    extras
+}
+
+/// The closing blocks among `block_ids` that [`extras_to_close`] drops.
+fn extra_blocks(state: &AppState, block_ids: &[String]) -> std::collections::HashSet<String> {
+    let Ok(all_blocks) = crate::server::app_api::agent_block::blocks_in_tabs_or_parked(&state.mstore) else {
+        return std::collections::HashSet::new();
+    };
+    let agent_of = |block: &Block| agent_of_block(state, &block.oid, block).map(|i| i.id);
+    let all: Vec<(String, String)> = all_blocks.iter().filter_map(|(b, _)| Some((b.oid.clone(), agent_of(b)?))).collect();
+    let batch: Vec<(String, String)> = block_ids.iter().filter(|id| is_parkable(state, id)).filter_map(|id| all.iter().find(|(b, _)| b == id).cloned()).collect();
+    let runs = |id: &str| {
+        crate::backend::blockcontroller::get_controller(id)
+            .is_some_and(|c| c.get_runtime_status().shellprocstatus == crate::backend::blockcontroller::STATUS_RUNNING)
+    };
+    extras_to_close(&batch, &all, &runs)
+}
+
+/// An agent that is running when its pane closes is wanted running, so a restart brings it back
+/// (`restart_resume`); a block from before desired states has no record of it.
+fn record_running_as_desired(state: &AppState, block_id: &str) {
+    use crate::server::app_api::agent_attach::{desired_of, set_desired, DESIRED_RUNNING};
+    let Ok(Some(block)) = state.mstore.get::<Block>(block_id) else {
+        return;
+    };
+    let running = crate::backend::blockcontroller::get_controller(block_id)
+        .is_some_and(|c| c.get_runtime_status().shellprocstatus == crate::backend::blockcontroller::STATUS_RUNNING);
+    if running && desired_of(&block).is_none() {
+        set_desired(&state.mstore, block_id, DESIRED_RUNNING);
+    }
+}
+
 /// Whether a block that is closing now is kept: parkable, with the setting on.
 pub(crate) fn keeps_block(state: &AppState, block_id: &str) -> bool {
     enabled(state) && is_parkable(state, block_id)
@@ -52,11 +112,18 @@ pub(crate) async fn park_agent_blocks(ctx: &SagaCtx<'_>, block_ids: &[String], f
     if !force && !enabled(ctx.state) {
         return Vec::new();
     }
+    let extras = if force { Default::default() } else { extra_blocks(ctx.state, block_ids) };
     let mut parked = Vec::new();
     for block_id in block_ids {
         if !is_parkable(ctx.state, block_id) {
             continue;
         }
+        // An explicit detach parks whatever it is asked to; a close drops the extra block of an agent.
+        if extras.contains(block_id) {
+            tracing::info!(block_id = %block_id, "closing a second block of the same agent: it is closed, not parked");
+            continue;
+        }
+        record_running_as_desired(ctx.state, block_id);
         let tab_id = match ctx.state.srv_state.lock().await.blocks.get(block_id) {
             Some(b) if !b.tab_id.is_empty() => b.tab_id.clone(),
             _ => continue,

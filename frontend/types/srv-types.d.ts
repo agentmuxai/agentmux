@@ -853,6 +853,10 @@ declare global {
          *  turn (agent.account.switch, `after_turn`): the account id, and who asked. */
         "agent:pending_account"?: string;
         "agent:pending_account_by"?: string;
+        /** Where this pane's model API is when its CLI was started pointed at an address other than the
+         *  default (a proxy or gateway): the connectivity service id, and the address. Written by srv at
+         *  each start (blockcontroller/core.rs `attach_model_api`), cleared when the default is back. */
+        "agent:api_endpoint"?: { service: string; url: string } | null;
         /** Messages typed while the agent's model API was unreachable, not yet
          *  sent, and the agent they were typed to. Frontend-only
          *  (view/agent/offline/useOfflineInput.ts). */
@@ -1078,6 +1082,7 @@ declare global {
         "app:runinbackground"?: boolean;
         "app:showtray"?: boolean;
         "app:startatlogin"?: boolean;
+        "app:devmode"?: boolean;
         "widget:*"?: boolean;
         "widget:icononly"?: boolean;
         /** Pinned widget-bar icons, in order: a built-in's short name (`agent` for `defwidget@agent`), or an installed package widget's full key (`ext@<id>/<pane>`). */

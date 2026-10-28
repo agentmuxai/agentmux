@@ -805,6 +805,8 @@ impl PersistentSubprocessController {
         // the state already `NotTracking` and persist the error line
         // immediately, reproducing the exact bubble this PR exists to
         // suppress.
+        let model_api = core::attach_model_api(&self.block_id, &config.env_vars, &self.mstore, &self.event_bus)
+            .unwrap_or(crate::connectivity::Service::ModelApi(&crate::connectivity::ANTHROPIC));
         let stdout_reader_handle: tokio::task::JoinHandle<()> = tokio::spawn(Self::run_stdout_reader(StdoutReaderCtx {
             stdout,
             block_id_read,
@@ -825,6 +827,7 @@ impl PersistentSubprocessController {
             relocated_copy_read,
             forked_from_read,
             sent_prompts,
+            model_api,
         }));
 
         self.spawn_status_heartbeat();

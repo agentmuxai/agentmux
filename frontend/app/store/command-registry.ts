@@ -28,6 +28,7 @@ import { userInThisWindow } from "@/app/store/input-owner";
 import { openConnectors, openMemory } from "@/app/view/section-pane/panes";
 import { openOrFocusPaneByView } from "@/app/store/block-component-registry";
 import { toggleStatusBar } from "@/app/statusbar/status-bar-visibility";
+import { devModeOn, toggleDevMode } from "@/app/store/dev-mode";
 import { paneHistoryBack, paneHistoryForward } from "@/app/store/pane-history";
 
 // ---------------------------------------------------------------------------
@@ -47,13 +48,16 @@ export interface CommandEntry {
     /** A host capability the command needs. Without it the command is left
      *  out of the palette and `run` declines it (docs/specs/SPEC_HOST_API_SEAM_2026_09_26.md). */
     requires?: keyof HostCaps;
+    /** A condition that must hold, read each time the palette lists commands
+     *  and each time `run` is asked (dev mode, for the developer commands). */
+    when?: () => boolean;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     execute: () => void | Promise<any>;
 }
 
 /** Can `entry` run on this host? */
 export function isCommandAvailable(entry: CommandEntry): boolean {
-    return entry.requires == null || hostHas(entry.requires);
+    return (entry.requires == null || hostHas(entry.requires)) && (entry.when == null || entry.when());
 }
 
 // ---------------------------------------------------------------------------
@@ -449,19 +453,20 @@ export function registerDefaultCommands(): void {
         label: "Toggle DevTools",
         category: "Dev",
         icon: "code",
+        when: devModeOn,
         execute: () => getApi().toggleDevtools(),
     });
     commandRegistry.register({
         id: "dev:restart_backend",
         label: "Restart Backend",
-        category: "Dev",
+        category: "Window",
         icon: "rotate",
         execute: () => getApi().restartBackend().catch(console.error),
     });
     commandRegistry.register({
         id: "dev:open_settings",
         label: "Open Settings File",
-        category: "Dev",
+        category: "Window",
         icon: "cog",
         execute: async () => {
             try {
@@ -489,6 +494,14 @@ export function registerDefaultCommands(): void {
         icon: "window-minimize",
         keywords: "hide show status bar footer window:showstatusbar",
         execute: () => toggleStatusBar(),
+    });
+    commandRegistry.register({
+        id: "view:devmode:toggle",
+        label: "Toggle Dev Mode",
+        category: "View",
+        icon: "code",
+        keywords: "developer devtools inspect element app:devmode task dev debug build",
+        execute: () => toggleDevMode(),
     });
     commandRegistry.register({
         id: "view:zoom:in",

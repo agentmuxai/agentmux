@@ -4,6 +4,7 @@
 import { TextInput } from "@/app/element/ui";
 import { type JSX } from "solid-js";
 
+import { DEV_MODE_KEY, devModeOn, setDevMode } from "@/app/store/dev-mode";
 import { settingsAtom } from "@/app/store/global";
 import {
     KANBAN_REMINDERS_DESCRIPTION,
@@ -16,6 +17,14 @@ import { KeyValueEditor, NumberControl, SectionHeader, set, SettingRow, ToggleCo
 // ── Search index — see appearance-section.tsx's header comment for the pattern. ──
 
 export const ADVANCED_SETTINGS = {
+    devMode: {
+        id: "advanced.dev_mode",
+        label: "Dev mode",
+        description:
+            "Shows DevTools in the menu, Inspect Element and View Page Source in right-click menus, and other developer tools. Off by default in the installed app; on by default in a task dev or debug build",
+        section: "advanced",
+        keywords: ["developer", "devtools", "inspect element", "view source", "task dev", "debug build", DEV_MODE_KEY],
+    },
     disableWebgl: {
         id: "advanced.disable_webgl",
         label: "Disable WebGL rendering",
@@ -332,6 +341,13 @@ export function AdvancedSection(): JSX.Element {
                         onChange={(v) => set("cmd:env", v)}
                     />
                 }
+            />
+            <SectionHeader label="Developer" />
+            <SettingRow
+                id={ADVANCED_SETTINGS.devMode.id}
+                label={ADVANCED_SETTINGS.devMode.label}
+                description={ADVANCED_SETTINGS.devMode.description}
+                control={<ToggleControl checked={devModeOn()} onChange={setDevMode} />}
             />
         </div>
     );

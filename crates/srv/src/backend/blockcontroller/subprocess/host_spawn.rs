@@ -183,6 +183,8 @@ impl SubprocessController {
             crate::backend::identity_spawn::SpawnPath::Subprocess,
             &config.env_vars,
         );
+        // Which model API address this turn's CLI is given, for the connectivity status.
+        core::attach_model_api(&self.block_id, &config.env_vars, &self.mstore, &self.event_bus);
         cmd.stdin(std::process::Stdio::piped());
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());

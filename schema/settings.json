@@ -626,6 +626,10 @@
           "default": false,
           "description": "Start AgentMux when you log in. Off by default. The Settings toggle and the tray menu's 'Start at login' item both set this; agentmux-launcher applies it to the OS login entry (XDG autostart / LaunchAgent / Scheduled Task). See docs/specs/SPEC_START_WITH_OS_2026_09_25.md §3.9."
         },
+        "app:devmode": {
+          "type": "boolean",
+          "description": "Show the developer-only parts of the UI: DevTools in the menu, Inspect Element and View Page Source in right-click menus, the DevTools port in the host popover and the block ID option. Off by default in the installed app; when unset, a task dev or debug build has it on. Takes effect at once in every window (the macOS menu bar item at the next start)."
+        },
         "splash:disabled": {
           "type": "boolean",
           "default": false,

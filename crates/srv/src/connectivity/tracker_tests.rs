@@ -291,3 +291,50 @@ fn a_network_change_while_a_down_services_probe_runs_has_it_repeated_even_when_i
     t.probe_finished(&api(), ticket, Outcome::Answered, 7_100);
     assert_eq!(t.next_probe_due(), None);
 }
+
+fn at(n: usize) -> Service {
+    Service::ModelApiAt(&ANTHROPIC, format!("https://proxy{n}.example.com"))
+}
+
+fn has(t: &Tracker, service: &Service) -> bool {
+    t.status().services.iter().any(|s| s.service == service.id())
+}
+
+#[test]
+fn pane_addresses_are_bounded_and_the_oldest_fine_one_makes_room() {
+    let mut t = Tracker::new(0, 0);
+    for n in 0..MAX_PANE_ADDRESSES {
+        t.seed(at(n), n as i64);
+    }
+    t.report(at(0), Outcome::Answered, 100);
+    assert!(t.seed(at(99), 200).is_some());
+    let rows = t.status().services.iter().filter(|s| s.service.contains('@')).count();
+    assert_eq!(rows, MAX_PANE_ADDRESSES, "never more than the cap");
+    assert!(has(&t, &at(99)));
+    assert!(!has(&t, &at(1)), "the one fine for longest, not checked since 1 ms, went");
+    assert!(has(&t, &at(0)), "one that answered later is newer than that");
+}
+
+#[test]
+fn when_every_pane_address_is_in_trouble_a_new_one_is_not_tracked() {
+    let mut t = Tracker::new(0, 0);
+    for n in 0..MAX_PANE_ADDRESSES {
+        for _ in 0..3 {
+            t.report(at(n), down("refused"), n as i64);
+        }
+    }
+    assert!(t.seed(at(99), 500).is_none());
+    assert!(t.report(at(99), Outcome::Answered, 501).is_none());
+    assert!(!has(&t, &at(99)));
+    assert!(has(&t, &at(0)));
+}
+
+#[test]
+fn the_providers_own_service_is_never_counted_against_the_cap() {
+    let mut t = Tracker::new(0, 0);
+    for n in 0..MAX_PANE_ADDRESSES {
+        t.seed(at(n), 0);
+    }
+    assert!(t.seed(api(), 1).is_some());
+    assert!(t.report(Service::Muxbus, Outcome::Answered, 2).is_some() || has(&t, &Service::Muxbus));
+}
