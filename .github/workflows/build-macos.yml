@@ -86,27 +86,39 @@ jobs:
           owner: agentmuxai
           repositories: cef
 
+      # The inputs reach the shell through env, never interpolated into the script, and are
+      # checked for shape: a dispatch input (or a repository_dispatch payload) is text anyone
+      # who can dispatch controls, and this job can ask for the identity token the Apple
+      # signing role accepts.
       - name: Resolve inputs
         id: in
         shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          P_REF: ${{ github.event.client_payload.ref }}
+          P_RELEASE_TAG: ${{ github.event.client_payload.release_tag }}
+          P_CEF_TAG: ${{ github.event.client_payload.cef_runtime_tag }}
+          I_REF: ${{ inputs.ref }}
+          I_RELEASE_TAG: ${{ inputs.release-tag }}
+          I_CEF_TAG: ${{ inputs.cef-runtime-tag }}
         run: |
-          if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
-            echo "ref=${{ github.event.client_payload.ref }}"                 >> "$GITHUB_OUTPUT"
-            echo "release_tag=${{ github.event.client_payload.release_tag }}" >> "$GITHUB_OUTPUT"
-            echo "cef_tag=${{ github.event.client_payload.cef_runtime_tag }}" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          if [ "$EVENT" = "repository_dispatch" ]; then
+            REF="$P_REF"; RELEASE_TAG="$P_RELEASE_TAG"; CEF_TAG="$P_CEF_TAG"
           else
-            echo "ref=${{ inputs.ref }}"                 >> "$GITHUB_OUTPUT"
-            echo "release_tag=${{ inputs.release-tag }}" >> "$GITHUB_OUTPUT"
-            echo "cef_tag=${{ inputs.cef-runtime-tag }}" >> "$GITHUB_OUTPUT"
+            REF="$I_REF"; RELEASE_TAG="$I_RELEASE_TAG"; CEF_TAG="$I_CEF_TAG"
           fi
+          for v in "$REF" "$RELEASE_TAG" "$CEF_TAG"; do
+            if ! printf '%s' "$v" | grep -Eq '^[A-Za-z0-9._/+-]*$'; then
+              echo "::error::an input has characters a ref or tag does not"; exit 1
+            fi
+          done
+          printf 'ref=%s\nrelease_tag=%s\ncef_tag=%s\n' "$REF" "$RELEASE_TAG" "$CEF_TAG" >> "$GITHUB_OUTPUT"
 
       - name: Checkout agentmux source
         uses: actions/checkout@v4
         with:
           ref: ${{ steps.in.outputs.ref }}
-
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
 
       - uses: actions/setup-node@v4
         with:
@@ -154,6 +166,9 @@ jobs:
             fi
           fi
 
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
       - name: Install frontend dependencies
         run: npm install
 
@@ -172,8 +187,9 @@ jobs:
         id: cef
         env:
           GH_TOKEN: ${{ steps.cef_token.outputs.token }}
+          CEF_TAG_INPUT: ${{ steps.in.outputs.cef_tag }}
         run: |
-          TAG="${{ steps.in.outputs.cef_tag }}"
+          TAG="$CEF_TAG_INPUT"
           if [ -z "$TAG" ]; then
             # Blank = this ref's committed pin, never "latest published":
             # a nightly or a direct dispatch must not pair a newly published
@@ -202,9 +218,10 @@ jobs:
         if: steps.cef-cache.outputs.cache-hit != 'true'
         env:
           GH_TOKEN: ${{ steps.cef_token.outputs.token }}
+          CEF_TAG: ${{ steps.cef.outputs.tag }}
         run: |
           mkdir -p /tmp/cef-extract "$CEF_RUNTIME_DIR_DARWIN"
-          gh release download "${{ steps.cef.outputs.tag }}" \
+          gh release download "$CEF_TAG" \
             --repo agentmuxai/cef \
             --pattern "*.tar.gz" \
             --dir /tmp/cef-extract \
@@ -381,9 +398,11 @@ jobs:
         if: steps.in.outputs.release_tag != ''
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.in.outputs.release_tag }}
+          DMG_PATH: ${{ steps.dmg.outputs.path }}
         run: |
-          gh release upload "${{ steps.in.outputs.release_tag }}" \
-            "${{ steps.dmg.outputs.path }}" \
+          gh release upload "$RELEASE_TAG" \
+            "$DMG_PATH" \
             --repo agentmuxai/agentmux --clobber
 
       # ── Cleanup: always delete the temp keychain ───────────────────────────
