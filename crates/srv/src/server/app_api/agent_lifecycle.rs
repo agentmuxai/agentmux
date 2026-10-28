@@ -76,11 +76,24 @@ pub(super) fn target_of(state: &AppState, named: &str) -> Result<AgentRuntime, R
         .ok_or_else(|| refuse(StatusCode::NOT_FOUND, format!("TEMPLATE_NOT_OPENABLE: '{named}' is not an agent created on this machine")))
 }
 
-/// Running: the agent is in a state with a process and is not wanted stopped. The state alone does
-/// not say: a subprocess agent that was stopped reads `idle` (its process exits between turns), and a
-/// stored sign-in or limit failure shows over an ended process. An explicit stop is what settles it.
-fn is_alive(row: &AgentRuntime) -> bool {
-    !matches!(row.state, AgentRuntimeState::Stopped | AgentRuntimeState::Error) && row.desired == agent_runtime::AgentDesiredState::Running
+/// Whether a start has nothing to do. A turn in flight is a process, whatever was recorded. In the states
+/// that do not say (idle, and limited or signed out, which show over an ended process) the explicit
+/// stop settles it: a subprocess agent that was stopped reads `idle` because its process exits between
+/// turns, and a stop is not undone until a start or a message sets it running again.
+fn is_running(row: &AgentRuntime) -> bool {
+    match row.state {
+        AgentRuntimeState::Stopped | AgentRuntimeState::Error => false,
+        AgentRuntimeState::Starting | AgentRuntimeState::Working | AgentRuntimeState::WaitingOnUser => true,
+        AgentRuntimeState::Idle | AgentRuntimeState::Limited | AgentRuntimeState::SignedOut => {
+            row.desired == agent_runtime::AgentDesiredState::Running
+        }
+    }
+}
+
+/// Whether a stop has anything to stop: any state with a process may be one, so the teardown decides,
+/// not the recorded intent (a message to a stopped agent can run it again without clearing that).
+fn may_have_process(row: &AgentRuntime) -> bool {
+    !matches!(row.state, AgentRuntimeState::Stopped | AgentRuntimeState::Error)
 }
 
 fn audit(state: &AppState, actor: &Actor, action: &str, target: &str, block_id: &str, ok: bool, error: Option<&str>, note: &str) -> String {
@@ -107,7 +120,7 @@ async fn start(state: &AppState, actor: &Actor, req: &LifecycleRequest) -> Resul
         .await
         .map_err(|e| refuse(StatusCode::INTERNAL_SERVER_ERROR, format!("Agents start: {e}")))??;
     // Running already is not a start: it costs nothing, so it does not use the sender's minute.
-    if is_alive(&target) {
+    if is_running(&target) {
         return Ok(json!({
             "agent": target.name, "agent_id": target.agent_id, "started": false,
             "note": "already running", "runtime": { "state": target.state, "desired": target.desired, "block_id": target.block_id },
@@ -139,7 +152,7 @@ async fn stop(state: &AppState, actor: &Actor, req: &LifecycleRequest) -> Result
     let Some(block_id) = target.block_id.clone() else {
         return Ok(json!({ "agent": target.name, "agent_id": target.agent_id, "stopped": false, "note": "already stopped: it has no process" }));
     };
-    if !is_alive(&target) {
+    if !may_have_process(&target) {
         crate::server::app_api::agent_attach::set_desired(&state.mstore, &block_id, crate::server::app_api::agent_attach::DESIRED_STOPPED);
         return Ok(json!({ "agent": target.name, "agent_id": target.agent_id, "stopped": false, "block_id": block_id, "note": "already stopped" }));
     }

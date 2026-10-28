@@ -164,35 +164,53 @@ async fn the_sixth_start_in_a_minute_is_refused_naming_the_limit() {
     assert_ne!(status, StatusCode::TOO_MANY_REQUESTS);
 }
 
-#[test]
-fn a_process_runs_in_every_state_but_stopped_and_error() {
-    let mut row = AgentRuntime {
+fn row_in(state: AgentRuntimeState, desired: agent_runtime::AgentDesiredState) -> AgentRuntime {
+    AgentRuntime {
         agent_id: "a".into(),
-        state: AgentRuntimeState::Idle,
+        state,
         detail: None,
         resets_at: None,
         block_id: None,
-        desired: agent_runtime::desired_of(AgentRuntimeState::Idle),
+        desired,
         name: "a".into(),
         provider: "claude".into(),
         icon: String::new(),
         color: None,
-    };
-    for (state, alive) in [
-        (AgentRuntimeState::Stopped, false),
-        (AgentRuntimeState::Error, false),
-        (AgentRuntimeState::Idle, true),
-        (AgentRuntimeState::Working, true),
-        (AgentRuntimeState::WaitingOnUser, true),
-        (AgentRuntimeState::Limited, true),
-        (AgentRuntimeState::SignedOut, true),
-    ] {
-        row.state = state;
-        row.desired = agent_runtime::desired_of(state);
-        assert_eq!(is_alive(&row), alive, "{state:?}");
     }
-    // Stopped by `Agents stop`: the block says so, whatever state the controller reads as.
-    row.state = AgentRuntimeState::Idle;
-    row.desired = agent_runtime::AgentDesiredState::Stopped;
-    assert!(!is_alive(&row), "an idle subprocess agent that was stopped is not running");
+}
+
+#[test]
+fn a_start_has_nothing_to_do_only_when_a_process_runs_and_a_stop_did_not_end_it() {
+    use agent_runtime::AgentDesiredState::{Running, Stopped};
+    for (state, desired, running) in [
+        (AgentRuntimeState::Stopped, Running, false),
+        (AgentRuntimeState::Error, Running, false),
+        (AgentRuntimeState::Idle, Running, true),
+        (AgentRuntimeState::Working, Running, true),
+        (AgentRuntimeState::WaitingOnUser, Running, true),
+        (AgentRuntimeState::Limited, Running, true),
+        (AgentRuntimeState::SignedOut, Running, true),
+        // Stopped with `Agents stop`: a subprocess agent reads idle, and a start runs it.
+        (AgentRuntimeState::Idle, Stopped, false),
+        (AgentRuntimeState::Limited, Stopped, false),
+        // A message ran it again without clearing the stop: a turn in flight is a process.
+        (AgentRuntimeState::Working, Stopped, true),
+        (AgentRuntimeState::WaitingOnUser, Stopped, true),
+    ] {
+        assert_eq!(is_running(&row_in(state, desired)), running, "{state:?} {desired:?}");
+    }
+}
+
+#[test]
+fn a_stop_has_something_to_stop_in_every_state_with_a_process_whatever_was_recorded() {
+    use agent_runtime::AgentDesiredState::{Running, Stopped};
+    for (state, desired, stoppable) in [
+        (AgentRuntimeState::Stopped, Stopped, false),
+        (AgentRuntimeState::Error, Stopped, false),
+        (AgentRuntimeState::Working, Stopped, true),
+        (AgentRuntimeState::Idle, Stopped, true),
+        (AgentRuntimeState::Idle, Running, true),
+    ] {
+        assert_eq!(may_have_process(&row_in(state, desired)), stoppable, "{state:?} {desired:?}");
+    }
 }
