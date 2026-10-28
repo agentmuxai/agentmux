@@ -98,7 +98,9 @@ pub(crate) async fn run_once(state: &AppState) -> usize {
         return 0;
     }
     let mut started = 0;
-    for c in candidates(state) {
+    let all = candidates(state);
+    let last = all.len().saturating_sub(1);
+    for (i, c) in all.into_iter().enumerate() {
         if !super::agent_lifecycle::has_room(state) {
             tracing::info!("restart resume: at the cap or the commit limit; the rest stay stopped and start on their first message");
             break;
@@ -111,7 +113,9 @@ pub(crate) async fn run_once(state: &AppState) -> usize {
             Ok(_) => started += 1,
             Err(e) => tracing::warn!(agent = %c.uid, "restart resume: could not start it: {e}"),
         }
-        tokio::time::sleep(GAP).await;
+        if i < last {
+            tokio::time::sleep(GAP).await;
+        }
     }
     started
 }
