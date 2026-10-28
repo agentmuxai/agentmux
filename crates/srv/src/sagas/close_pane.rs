@@ -151,8 +151,12 @@ async fn run_inner(
 ) -> Result<Value, String> {
     let mut failures = Vec::new();
     let mut failed_ids: Vec<&String> = Vec::new();
-    super::agent_teardown::run_many(ctx.state, &block_ids, super::agent_teardown::Policy::close()).await;
-    for block_id in &block_ids {
+    // An agent's block outlives its pane when `agents:always_available` is on: parked, not stopped
+    // or deleted. Its pane leaves the layout below like any other member's.
+    let parked = super::park_agents::park_agent_blocks(&ctx, &block_ids).await;
+    let closing = super::park_agents::not_parked(&block_ids, &parked);
+    super::agent_teardown::run_many(ctx.state, &closing, super::agent_teardown::Policy::close()).await;
+    for block_id in &closing {
         if let Err(reason) = ctx
             .dispatch(Command::DeleteBlock {
                 tab_id: tab_id.clone(),
