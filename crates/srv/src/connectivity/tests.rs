@@ -193,3 +193,12 @@ fn a_providers_model_api_is_found_from_its_first_vendor() {
     assert_eq!(model_api_of("gemini"), Some(&GOOGLE));
     assert_eq!(model_api_of("no-such-provider"), None);
 }
+
+#[test]
+fn an_address_that_cannot_be_read_is_no_address_and_none_of_it_is_kept() {
+    for raw in ["user:secret@proxy.example.com:8080", "gw.example.com/v1?key=abc", "not a url"] {
+        let service = service_for(&ANTHROPIC, Some(raw));
+        assert_eq!(service, Service::ModelApi(&ANTHROPIC), "{raw}");
+        assert_eq!(endpoint_meta(&service), None);
+    }
+}

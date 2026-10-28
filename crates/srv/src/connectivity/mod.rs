@@ -169,16 +169,15 @@ impl Service {
 }
 
 /// The service a pane's calls to `api` go to, given the address its CLI was started with
-/// (`None` or empty: the CLI's default). The same address srv itself would call is just `api`.
+/// (`None`, empty or unreadable: the CLI's default). The same address srv itself would call is just `api`.
 pub fn service_for(api: &'static ModelApi, configured: Option<&str>) -> Service {
     let Some(url) = configured.map(str::trim).filter(|u| !u.is_empty()) else {
         return Service::ModelApi(api);
     };
-    let url = endpoint::normalise(url);
-    if url == endpoint::normalise(&Service::ModelApi(api).probe_url()) {
-        Service::ModelApi(api)
-    } else {
-        Service::ModelApiAt(api, url)
+    // An address that can't be read is no address: the CLI will fail on it by itself, and nothing from it is kept.
+    match endpoint::normalise(url) {
+        Some(url) if Some(&url) != endpoint::normalise(&Service::ModelApi(api).probe_url()).as_ref() => Service::ModelApiAt(api, url),
+        _ => Service::ModelApi(api),
     }
 }
 
