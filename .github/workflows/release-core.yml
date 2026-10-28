@@ -75,6 +75,17 @@ jobs:
           REPO: ${{ github.repository }}
         run: node scripts/release-gate.mjs --ref-type "$REF_TYPE" --ref-name "$REF_NAME" --sha "$SHA" --repo "$REPO" --github-output "$GITHUB_OUTPUT"
 
+  # ── The agent container image ───────────────────────────────────────────
+  # Published for each release, after the gate, by main's container-image.yml (which
+  # re-runs the gate from this run's own context). Independent of the builds below.
+  container-image:
+    name: Container agent image
+    needs: gate
+    permissions:
+      contents: read
+      packages: write
+    uses: agentmuxai/agentmux/.github/workflows/container-image.yml@main
+
   # ── Phase 1b: Single source of truth for the three pinned CEF runtime tags ──
   # PR #3086 pinned each build-*.yml call's cef-runtime-tag to a literal
   # string, fixing release-to-release reproducibility: a blank tag used to

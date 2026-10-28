@@ -12,13 +12,15 @@ name: Container Agent Image
 #
 # docs/specs/SPEC_CONTAINER_AGENTS_WORK_FOR_EVERYONE_2026_10_07.md
 
-# When it runs: after a Release run completes successfully for a release tag, and by hand.
-# It used to run on any pushed `v*` tag, with the tag's own copy of this file, so a stray or
-# forged tag published the image (and :latest). Now the file that runs is main's (a
-# workflow_run run always uses the default branch's definition), the first job is the release
-# gate (scripts/release-gate.mjs: the commit must be the `chore: release` commit on main for
-# that tag), and the image is built from that commit, not from the tag name. The publish job
-# is in the `container-image` Environment, which deploys from main only.
+# When it runs: as a job of release-core.yml, after the release gate, for each release;
+# and by hand from main. It used to run on any pushed `v*` tag with the tag's own copy of
+# this file, so a stray or forged tag published the image (and :latest). Now the tag trigger
+# is gone, the file that runs is main's (release-core.yml calls it as
+# `container-image.yml@main`), and its first job re-runs the release gate
+# (scripts/release-gate.mjs: the commit must be the `chore: release` commit on main for that
+# tag) from GitHub's own context for the run, so a workflow that calls this file directly
+# with a tag of its choosing is refused too. The image is built from that commit, not from
+# the tag name.
 #
 # What this does NOT do: stop a branch workflow from pushing to the package. GITHUB_TOKEN with
 # `packages: write` reaches the package from any workflow in this repository; GHCR has no
@@ -26,9 +28,7 @@ name: Container Agent Image
 # only knob (repository-wide). The gate: docs/specs/SPEC_SIGNED_UPDATE_CHECKSUMS_2026_10_25.md §4.1.
 
 on:
-  workflow_run:
-    workflows: ["Release"]
-    types: [completed]
+  workflow_call:
   workflow_dispatch:
     inputs:
       tag_latest:
@@ -42,16 +42,15 @@ env:
   IMAGE_NAME: agentmuxai/agent-base
 
 jobs:
-  # Only for a Release run: refuse anything but the release commit on main for its tag.
+  # Not for a manual run (that one must be on main, see build-and-push).
   gate:
     name: Release gate (a release commit on main)
-    if: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository }}
+    if: ${{ github.event_name != 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
     outputs:
       version: ${{ steps.gate.outputs.version }}
-      sha: ${{ steps.gate.outputs.sha }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -67,19 +66,17 @@ jobs:
         id: gate
         env:
           GH_TOKEN: ${{ github.token }}
-          REF_NAME: ${{ github.event.workflow_run.head_branch }}
-          SHA: ${{ github.event.workflow_run.head_sha }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
           REPO: ${{ github.repository }}
-        run: node scripts/release-gate.mjs --ref-type tag --ref-name "$REF_NAME" --sha "$SHA" --repo "$REPO" --github-output "$GITHUB_OUTPUT"
+        run: node scripts/release-gate.mjs --ref-type "$REF_TYPE" --ref-name "$REF_NAME" --sha "$SHA" --repo "$REPO" --github-output "$GITHUB_OUTPUT"
 
   build-and-push:
-    # A release (the gate passed), or a manual run from main. A Release run that failed, or
-    # that was not for a release commit, publishes nothing: the gate is skipped or fails and
-    # this job does not run.
+    # A release (the gate passed), or a manual run from main.
     needs: gate
     if: ${{ always() && (needs.gate.result == 'success' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')) }}
     runs-on: ubuntu-latest
-    environment: container-image
     permissions:
       contents: read
       packages: write
@@ -88,8 +85,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          # The release commit the gate checked, never the tag name; main's tip for a manual run.
-          ref: ${{ needs.gate.outputs.sha || github.sha }}
+          # The commit the run was created for (the gated release commit; main's tip for a
+          # manual run), never the tag name.
+          ref: ${{ github.sha }}
 
       - name: Set up QEMU (arm64 cross-compilation)
         uses: docker/setup-qemu-action@v3
@@ -129,12 +127,6 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Extract image metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-
       - name: Build and push
         uses: docker/build-push-action@v5
         with:
@@ -150,7 +142,10 @@ jobs:
           # without arm64 the image runs under qemu on M-series Macs.
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.tags.outputs.list }}
-          labels: ${{ steps.meta.outputs.labels }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ needs.gate.outputs.version || format('dispatch-{0}', github.sha) }}
 
       # Anonymous, like the daemon's own pull: no login in this step. Fails with
       # the exact UI step when the package is still private. Checks the first tag
