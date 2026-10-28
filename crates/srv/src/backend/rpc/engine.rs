@@ -317,6 +317,14 @@ impl WshRpcEngine {
         self.lock_inner().schema.to_json()
     }
 
+    /// Every command with a handler, typed or not, sorted.
+    #[cfg(test)]
+    pub fn command_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self.lock_inner().handlers.keys().cloned().collect();
+        names.sort();
+        names
+    }
+
     /// Number of commands registered through the typed path.
     #[cfg(test)]
     pub fn typed_command_count(&self) -> usize {
@@ -585,6 +593,14 @@ impl WshRpcEngine {
                 total_elapsed.as_secs_f64() * 1000.0,
             );
 
+            // Who did what, recorded here so no handler can leave it out (`action_record`).
+            let outcome = match &result {
+                Ok(Ok(resp)) => super::action_record::outcome_of_response(&command, resp.as_ref()),
+                Ok(Err(err)) => Err(err.clone()),
+                Err(_) => Err(format!("EC-TIME: timeout ({}ms)", timeout_ms)),
+            };
+            super::action_record::after_call(&command, &data, &rpc_context, &msg.reqid, &outcome);
+
             match result {
                 Ok(Ok(resp_data)) => handler.send_response(resp_data, true),
                 Ok(Err(err)) => handler.send_error(&err),
@@ -600,6 +616,12 @@ impl WshRpcEngine {
                 }
             };
             let stream_result = tokio::time::timeout(timeout_dur, fut).await;
+            let outcome = match &stream_result {
+                Ok(Ok(_)) => Ok(()),
+                Ok(Err(err)) => Err(err.clone()),
+                Err(_) => Err(format!("EC-TIME: timeout ({}ms)", timeout_ms)),
+            };
+            super::action_record::after_call(&command, &data, &rpc_context, &msg.reqid, &outcome);
 
             match stream_result {
                 Ok(Ok(mut rx)) => {

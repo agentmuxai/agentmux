@@ -109,6 +109,9 @@ mod sender_claims_tests;
 #[path = "tests/peer_veto_tests.rs"]
 mod peer_veto_tests;
 #[cfg(test)]
+#[path = "tests/rpc_attribution_tests.rs"]
+mod rpc_attribution_tests;
+#[cfg(test)]
 mod rpc_schema_export;
 
 use std::sync::Arc;
