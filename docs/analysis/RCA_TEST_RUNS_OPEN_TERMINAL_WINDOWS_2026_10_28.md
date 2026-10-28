@@ -1,6 +1,8 @@
 # RCA: running the tests of a PR opened terminal windows on a person's desktop
 
-Date: 2026-10-28. Status: the test helpers are fixed and the inventory is tightened (this PR). One part of the mechanism is still unexplained (section 5).
+**Status:** retro. The test helpers are fixed and the inventory is tightened (this PR). One part of the mechanism is still unexplained (section 5).
+
+Date: 2026-10-28.
 
 ## 1. What happened
 
