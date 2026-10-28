@@ -680,12 +680,20 @@ pub fn start(
         mstore,
         identity_store,
     };
-    let brokered = ctx.cfg.provider == github_connect::PROVIDER && opts.cloud_signed_in;
+    let brokered = runs_through_broker(ctx.cfg.provider, opts.cloud_signed_in, &ctx.client);
     match ctx.cfg.flow {
         OAuthFlow::AuthCodePkce => start_code_flow(ctx, None),
         OAuthFlow::Device if brokered => start_code_flow(ctx, Some(BrokerLeg { replace: opts.replace_user })),
         OAuthFlow::Device => start_device_flow(ctx),
     }
+}
+
+/// Whether a GitHub connect goes through AgentMux Cloud's broker: the person is signed in to
+/// AgentMux Cloud, and the flow runs with AgentMux's own App. The broker exchanges the code with
+/// that App's secret, so a client the person brought or saved (their own app) can't be used with
+/// it: that connect stays a device flow with their app.
+fn runs_through_broker(provider: &str, cloud_signed_in: bool, client: &ResolvedClient) -> bool {
+    provider == github_connect::PROVIDER && cloud_signed_in && client.mode == ClientMode::Builtin
 }
 
 /// A code flow whose exchange goes through the broker instead of the provider's token

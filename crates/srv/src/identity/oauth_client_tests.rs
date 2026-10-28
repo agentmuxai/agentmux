@@ -358,3 +358,15 @@ fn a_user_mismatch_ends_the_flow_so_the_person_can_be_asked() {
     let s = OAuthStatus::ConfirmUser { current_login: "old".into(), current_id: 1, new_login: "new".into(), new_id: 2 };
     assert!(s.is_terminal());
 }
+
+#[test]
+fn only_agentmuxs_own_github_app_runs_through_the_broker() {
+    let client = |mode| ResolvedClient { client_id: "id".into(), client_secret: None, mode };
+    assert!(runs_through_broker("github", true, &client(ClientMode::Builtin)));
+    // The broker exchanges the code with AgentMux's App secret: the person's own app can't use it.
+    assert!(!runs_through_broker("github", true, &client(ClientMode::Byo)));
+    assert!(!runs_through_broker("github", true, &client(ClientMode::Workspace)));
+    // Signed out of AgentMux Cloud: the device flow; other providers never use the broker.
+    assert!(!runs_through_broker("github", false, &client(ClientMode::Builtin)));
+    assert!(!runs_through_broker("google", true, &client(ClientMode::Builtin)));
+}
