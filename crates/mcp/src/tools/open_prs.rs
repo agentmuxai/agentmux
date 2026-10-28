@@ -124,10 +124,36 @@ pub(super) async fn open_prs(repo: &str) -> Result<Vec<OpenPr>, String> {
 
 /// `gh-agent <args>`'s output, or `gh <args>`'s on a machine without `gh-agent`, killed after [`GH_TIMEOUT`].
 fn run_gh_agent(args: &[&str]) -> Result<String, String> {
-    match run_cli(GH_AGENT, "gh-agent", args) {
-        Err(CliError::NotInstalled) => run_cli(GH, "gh", args).map_err(CliError::into_message),
+    match run_cli(GH_AGENT, "gh-agent", args, &[]) {
+        Err(CliError::NotInstalled) => run_cli(GH, "gh", args, &broker_env(args)).map_err(CliError::into_message),
         other => other.map_err(CliError::into_message),
     }
+}
+
+/// The token `gh` is given where the AgentMux GitHub connection is on. In a shell that is a function
+/// (`github_broker_shim`); run directly, `gh` has to be given the same token. Empty where the
+/// connection is off, so `gh` uses whatever login the machine has, as in the shell.
+fn broker_env(args: &[&str]) -> Vec<(&'static str, String)> {
+    use std::process::{Command, Stdio};
+    if std::env::var_os("AGENTMUX_GITHUB_BROKER").is_none() {
+        return Vec::new();
+    }
+    let token = Command::new("agentmux-bashwrap")
+        .args(["github-token", "--"])
+        .args(args)
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_default();
+    token_env(&token)
+}
+
+/// `GH_TOKEN` and `GITHUB_TOKEN` for `token`; both empty (so no other login is used) when there is none.
+fn token_env(token: &str) -> Vec<(&'static str, String)> {
+    vec![("GH_TOKEN", token.to_string()), ("GITHUB_TOKEN", token.to_string())]
 }
 
 enum CliError {
@@ -145,12 +171,13 @@ impl CliError {
 }
 
 /// `program <args>`'s output, which `name` calls itself in what it says.
-fn run_cli(program: &str, name: &str, args: &[&str]) -> Result<String, CliError> {
+fn run_cli(program: &str, name: &str, args: &[&str], envs: &[(&str, String)]) -> Result<String, CliError> {
     use std::io::Read;
     use std::process::{Command, Stdio};
     let failed = |m: String| CliError::Failed(m);
     let mut cmd = Command::new(program);
     cmd.args(args)
+        .envs(envs.iter().map(|(k, v)| (*k, v.as_str())))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -338,6 +365,13 @@ mod tests {
     fn pr(number: u64, title: &str, branch: &str, files: &[&str]) -> OpenPr {
         let (agent, host) = title_author(title).map(|(a, h)| (a, Some(h))).unwrap_or(("someone".into(), None));
         OpenPr { number, title: title.into(), branch: branch.into(), files: files.iter().map(|f| f.to_string()).collect(), agent, host }
+    }
+
+    #[test]
+    fn gh_is_given_the_connections_token_or_none() {
+        assert_eq!(token_env("t0k"), vec![("GH_TOKEN", "t0k".to_string()), ("GITHUB_TOKEN", "t0k".to_string())]);
+        // No token: both empty, so no other login is used, as the shell's function does.
+        assert!(token_env("").iter().all(|(_, v)| v.is_empty()));
     }
 
     #[test]
