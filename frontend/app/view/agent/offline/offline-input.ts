@@ -152,6 +152,17 @@ export function modelApiService(supportedVendors: readonly string[] | undefined)
 }
 
 /**
+ * The service a pane's calls go to: the provider's, or the one srv recorded in the pane's meta
+ * (`agent:api_endpoint`) when its CLI was started pointed at another address (a proxy, a gateway).
+ * The recorded one counts only for the same vendor, so a stale entry after a provider change is ignored.
+ */
+export function paneModelApiService(supportedVendors: readonly string[] | undefined, endpoint: unknown): string | null {
+    const base = modelApiService(supportedVendors);
+    const own = (endpoint as { service?: unknown } | null | undefined)?.service;
+    return base && typeof own === "string" && own.startsWith(`${base}@`) ? own : base;
+}
+
+/**
  * That service's state; `unknown` for one srv tracks but the pane has no
  * word on yet (no status, or a status without it); null when srv doesn't
  * track it.
