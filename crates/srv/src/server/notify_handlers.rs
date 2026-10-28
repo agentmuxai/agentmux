@@ -161,7 +161,7 @@ pub struct BlockRevealResult {
     pub window_id: Option<String>,
 }
 
-fn router_for(state: &AppState) -> Arc<router::Router> {
+pub(crate) fn router_for(state: &AppState) -> Arc<router::Router> {
     router::init(state.broker.clone(), state.config_watcher.clone(), state.mstore.clone(), state.reactive_handler)
 }
 
@@ -228,10 +228,17 @@ async fn activate_in_stored_layout(state: &AppState, tab_id: &str, block_id: &st
 /// `None` when the id is no live shutdown notification.
 fn keep_from_toast(state: &AppState, r: &Arc<router::Router>, notification_id: &str) -> Option<String> {
     let (kind, block_id, request_id) = r.live_by_id(notification_id)?;
-    if kind != crate::backend::notify::policy::NotifyKind::ShutdownPending {
+    keep_for(state, kind, &block_id, &request_id?)
+}
+
+/// The press on a pending shutdown toast's Keep running button. A sensitive operation's
+/// countdown has no button: its veto is the AgentMux window's alone, proven, and this
+/// connection is not (any client holding the instance key can send an ack).
+fn keep_for(state: &AppState, kind: crate::backend::notify::policy::NotifyKind, block_id: &str, request_id: &str) -> Option<String> {
+    if kind != crate::backend::notify::policy::NotifyKind::ShutdownPending || block_id.starts_with(crate::sagas::sensitive_window::TOAST_GROUP_PREFIX) {
         return None;
     }
-    Some(crate::sagas::pending_shutdown::keep(state, &block_id, &request_id?).to_string())
+    Some(crate::sagas::pending_shutdown::keep(state, block_id, request_id).to_string())
 }
 
 pub fn register_notify_handlers(engine: &Arc<WshRpcEngine>, state: &AppState, conn_id: String) {
@@ -966,5 +973,32 @@ mod live_tests {
             assert_eq!(v.by, by.replace("qtest", "QTest"), "the banner and status name the asker the same way");
             keep(&st, block, &v.request_id);
         }
+    }
+}
+
+#[cfg(test)]
+mod toast_press_tests {
+    use super::*;
+    use crate::backend::notify::policy::NotifyKind;
+    use crate::backend::sensitive_requests as requests;
+    use crate::sagas::sensitive_window as window;
+    use crate::server::tests::test_state;
+    use agentmux_common::time::now_ms;
+
+    #[tokio::test]
+    async fn a_press_on_a_sensitive_toast_vetoes_nothing() {
+        let state = test_state();
+        let facts: std::collections::BTreeMap<String, String> =
+            [("template".to_string(), format!("t-{}", uuid::Uuid::new_v4().simple())), ("publisher".to_string(), "p".to_string())].into_iter().collect();
+        let id = requests::registry().request("u-asker", "asker", "job_template_approve", &facts, "", now_ms()).unwrap().id;
+        requests::registry().approve(&id, "boss", now_ms()).unwrap();
+        window::open(&state, &id, std::time::Duration::from_secs(60)).unwrap();
+        let group = format!("{}{id}", window::TOAST_GROUP_PREFIX);
+
+        // An ack that says "keep" on this toast is not the person's veto, whoever sends it.
+        assert_eq!(keep_for(&state, NotifyKind::ShutdownPending, &group, &id), None);
+        assert_eq!(window::status(&id).unwrap().status, "pending", "the countdown goes on");
+        // Only the window's `sensitive.decide` vetoes, and it is proven.
+        assert_eq!(window::veto(&state, &id), "vetoed");
     }
 }

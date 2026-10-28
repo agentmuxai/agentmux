@@ -97,9 +97,10 @@ pub(super) fn relink(state: &AppState, agent_id: &str, to: &str, provider: &str)
 }
 
 /// Restart `block`'s process on the new link, keeping its conversation
-/// (`ControllerResync` with `forcerestart`).
+/// (`ControllerResync` with `forcerestart`). A parked block, one in no tab, restarts with no tab
+/// (an empty id, as everywhere a block is parked): its agent runs with no pane showing it.
 pub(super) fn restart(state: &AppState, block: &Block) -> Result<(), String> {
-    let tab_id = block.parentoref.strip_prefix("tab:").ok_or("the pane is in no tab")?;
+    let tab_id = block.parentoref.strip_prefix("tab:").unwrap_or("");
     blockcontroller::resync_controller(
         block,
         tab_id,

@@ -4,4 +4,4 @@
  * Stable failure taxonomy. Wire format is snake_case to match the rest
  * of the agent event surface (`frontend/types/srv-types.d.ts`).
  */
-export type FailureClass = "rate_limited" | "overloaded" | "usage_limit" | "auth" | "context_exceeded" | "max_turns" | "network" | "killed" | "no_output" | "spawn_failure" | "unknown_non_zero" | "agent_deleted" | "live_elsewhere";
+export type FailureClass = "rate_limited" | "overloaded" | "usage_limit" | "auth" | "context_exceeded" | "max_turns" | "network" | "killed" | "no_output" | "spawn_failure" | "unknown_non_zero" | "agent_deleted" | "live_elsewhere" | "open_in_other_pane";

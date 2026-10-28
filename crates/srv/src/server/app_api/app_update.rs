@@ -150,6 +150,7 @@ pub(crate) async fn handle_request_upgrade(
             // Prompts other agents raised for this release are answered by it;
             // they and this agent hear if the upgrade stops short.
             let mut askers = upgrade_request::resolve_started(&state, &version);
+            crate::sagas::sensitive_window::answered_by_another(&state, "upgrade", "version", &version, "The person's own request started this upgrade");
             askers.push(block_id.clone());
             upgrade_request::start_upgrade(version.clone(), askers);
             Outcome::Started { version, stopping: crate::backend::update_restart::stopping_now().await }

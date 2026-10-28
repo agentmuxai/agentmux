@@ -58,7 +58,7 @@ pub mod log;
 pub mod orphan_reaper;
 pub mod park_agents;
 #[cfg(test)]
-mod park_agents_tests;
+pub(crate) mod park_agents_tests;
 pub mod promote_block_to_tab;
 pub mod recovery;
 pub mod pending_shutdown;

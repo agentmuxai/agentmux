@@ -29,6 +29,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 use crate::backend::rpc::engine::WshRpcEngine;
+use crate::backend::sensitive_ops;
 use crate::backend::sensitive_requests::{self as requests, Request, Status};
 use crate::server::AppState;
 use agentmux_common::time::now_ms;
@@ -201,6 +202,7 @@ pub fn open(state: &AppState, request_id: &str, window: Duration) -> Result<Sens
         view
     };
     state.broker.publish_event::<crate::backend::mps_events::SensitivePending>(&view, vec![], REPLAY_EVENTS);
+    raise_toast(state, &view);
     tracing::info!(request_id, op = %view.op, requester = %view.requester, "sensitive request: the person has {} s to veto it", window.as_secs());
 
     let wake = entries().get(request_id).map(|e| e.wake.clone());
@@ -226,7 +228,8 @@ pub fn open(state: &AppState, request_id: &str, window: Duration) -> Result<Sens
             }
         };
         cleared(&state, &v.request_id, "proceeding");
-        let outcome = run(&state, request).await;
+        let outcome = run(&state, request.clone()).await;
+        tell_askers(&request, &ran_note(&request, &outcome));
         let (status, error, end) = match outcome {
             Ok(()) => ("done", None, Status::Done),
             Err(e) => ("failed", Some(e), Status::Failed),
@@ -256,6 +259,35 @@ fn set_status(request_id: &str, status: &'static str, error: Option<String>) {
         e.view.error = error;
         e.finished_at_ms = Some(now_ms());
     }
+}
+
+/// Something else did what the open requests for `op` (whose fact `key` is `value`) asked for, for
+/// example the person's own request started the same upgrade: end them, their countdowns included,
+/// so none runs it a second time, and tell the agents that asked.
+pub fn answered_by_another(state: &AppState, op: &str, key: &str, value: &str, how: &str) {
+    for request in requests::registry().open_matching(op, key, value) {
+        if request.status == Status::Pending {
+            cancelled(state, &request.id);
+        }
+        if requests::registry().finish(&request.id, Status::Done, now_ms()).is_ok() {
+            let what = crate::backend::reactive::sanitize::quote_in_system_note(&request.summary);
+            tell_askers(&request, &format!("[AgentMux] {how}, so your request to {what} is no longer needed."));
+        }
+    }
+}
+
+/// What the agents that asked are told when the countdown ended and the operation ran, or could not.
+fn ran_note(request: &Request, outcome: &Result<(), String>) -> String {
+    let what = crate::backend::reactive::sanitize::quote_in_system_note(&request.summary);
+    match outcome {
+        Ok(()) => format!("[AgentMux] Your request to {what} went ahead."),
+        Err(e) => format!("[AgentMux] Your request to {what} could not go ahead: {}", crate::backend::reactive::sanitize::quote_in_system_note(e)),
+    }
+}
+
+/// What they are told when the person vetoed it.
+fn vetoed_note(request: &Request) -> String {
+    format!("[AgentMux] The person vetoed your request to {}; it did not happen.", crate::backend::reactive::sanitize::quote_in_system_note(&request.summary))
 }
 
 /// Run the operation in a task of its own, so one that panics settles the
@@ -288,6 +320,9 @@ pub fn veto(state: &AppState, request_id: &str) -> &'static str {
         }
     };
     let _ = requests::registry().finish(request_id, Status::Vetoed, now_ms());
+    if let Some(request) = requests::registry().get(request_id) {
+        tell_askers(&request, &vetoed_note(&request));
+    }
     cleared(state, request_id, "vetoed");
     audit(state, &view, "sensitive.veto", true, None, "vetoed");
     tracing::info!(request_id, "sensitive request: vetoed by the person");
@@ -328,8 +363,55 @@ pub fn approve_now(request_id: &str) -> &'static str {
 }
 
 fn cleared(state: &AppState, request_id: &str, outcome: &str) {
+    if let Some(router) = crate::backend::notify::router::get(&state.broker) {
+        router.resolve_nonblocking(&toast_group(request_id), crate::backend::notify::policy::Family::Shutdown);
+    }
     let data = SensitiveClearedEvent { request_id: request_id.to_string(), outcome: outcome.to_string() };
     state.broker.publish_event::<crate::backend::mps_events::SensitiveCleared>(&data, vec![], REPLAY_EVENTS);
+}
+
+/// The notification group of a countdown's toast: there is no pane, so the request is its own.
+pub const TOAST_GROUP_PREFIX: &str = "sensitive:";
+
+fn toast_group(request_id: &str) -> String {
+    format!("{TOAST_GROUP_PREFIX}{request_id}")
+}
+
+/// What the OS notification says: the title (what will happen, from the operation's table, not
+/// from any request text) and the body (who asked and who approved, by display name). The
+/// request's facts are left out on purpose: a toast also lands in the Action Center and on a
+/// lock screen, and a fact can be a path or an address. The banner in AgentMux shows them.
+fn toast_text(requester: &str, approver: Option<&str>, op: &str) -> (String, String) {
+    let label = sensitive_ops::spec(op).map_or("A sensitive operation", |s| s.label);
+    let mut title = label.to_string();
+    if let Some(first) = title.get_mut(0..1) {
+        first.make_ascii_uppercase();
+    }
+    let reviewed = match approver {
+        Some(a) => format!("Approved by {a}."),
+        None => "No super agent reviewed this.".to_string(),
+    };
+    (title, format!("{requester} asked. {reviewed} It happens when the countdown ends unless you veto it in AgentMux."))
+}
+
+/// The OS notification for a countdown: what will happen and the seconds left. It has no button:
+/// clicking it opens AgentMux, where the banner's Veto is the window's (proven) alone.
+fn raise_toast(state: &AppState, view: &SensitiveView) {
+    let Some(router) = crate::backend::notify::router::get(&state.broker) else { return };
+    let name = |slug: &str| crate::sagas::pending_shutdown::clean_by(&crate::sagas::pending_shutdown::asker_name(state, slug));
+    let (title, body) = toast_text(&name(&view.requester), view.approver.as_deref().map(name).as_deref(), &view.op);
+    let info = crate::backend::notify::policy::ShutdownInfo {
+        deadline_ms: view.deadline_ms,
+        effect: crate::backend::notify::policy::SENSITIVE_EFFECT,
+        running: true,
+        request_id: view.request_id.clone(),
+    };
+    router.emit_sensitive(&toast_group(&view.request_id), &title, Some(body), info);
+    // A withdrawal or veto that settled the countdown while this was being raised asked the router
+    // to retract the toast before it existed: look again now it does, and retract it.
+    if status(&view.request_id).is_none_or(|v| v.status != "pending") {
+        router.resolve_nonblocking(&toast_group(&view.request_id), crate::backend::notify::policy::Family::Shutdown);
+    }
 }
 
 /// One audit row for a step of the window: the person's veto, or the run.
