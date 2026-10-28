@@ -34,6 +34,21 @@ describe("HistoryLoadFailedBanner", () => {
         expect(banner.textContent).toContain("reopen the pane");
     });
 
+    it("says the saved copy is damaged when the history loaded from the block's own copy of one", () => {
+        const [phase, setPhase] = createSignal<InitPhase>({ kind: "InitPending" });
+        render(() => <HistoryLoadFailedBanner phase={phase} />);
+        setPhase({ kind: "InitReady", at: 1, historyDamaged: true });
+        const banner = screen.getByRole("status");
+        expect(banner.textContent).toContain("Earlier history couldn't be loaded: the saved copy is damaged");
+        expect(banner.textContent).toContain("The agent's own conversation is intact");
+    });
+
+    it("says nothing for a history that loaded whole", () => {
+        const [phase] = createSignal<InitPhase>({ kind: "InitReady", at: 1 });
+        render(() => <HistoryLoadFailedBanner phase={phase} />);
+        expect(screen.queryByRole("status")).toBeNull();
+    });
+
     it("appears when a load that was pending fails", () => {
         const [phase, setPhase] = createSignal<InitPhase>({ kind: "InitPending" });
         render(() => <HistoryLoadFailedBanner phase={phase} />);
