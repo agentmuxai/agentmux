@@ -259,6 +259,18 @@ pub(super) async fn tab_or_reuse(
 pub(crate) async fn start_agent(state: &AppState, agent_id: &str) -> Result<String, String> {
     // A start over the cap (or the host's commit limit) stops an idle agent with no view, or is refused.
     crate::server::agent_lifecycle::admit_start(state, agent_id).await?;
+    start_admitted(state, agent_id).await
+}
+
+/// [`start_agent`] that never stops another agent to make room: over the cap or the commit limit it is
+/// refused (`Err("capacity: ...")`). Restart resume starts the agents that were running this way.
+pub(crate) async fn start_agent_without_eviction(state: &AppState, agent_id: &str) -> Result<String, String> {
+    crate::server::agent_lifecycle::admit_start_without_eviction(state, agent_id).await?;
+    start_admitted(state, agent_id).await
+}
+
+/// The start itself, once admitted: a failure gives the admission's room back.
+async fn start_admitted(state: &AppState, agent_id: &str) -> Result<String, String> {
     let mut marker = obj::MetaMapType::new();
     marker.insert(START_PARKED.to_string(), json!(true));
     let opened = super::agent_open::open_agent_inner(

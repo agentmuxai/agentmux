@@ -40,6 +40,7 @@ mod jekt_hold;
 pub(crate) mod jekt_start;
 pub(crate) mod controller_backstop;
 pub(crate) mod agent_lifecycle;
+pub(crate) mod restart_resume;
 mod availability_view;
 pub(crate) mod agent_runtime;
 pub(crate) mod start_rate;

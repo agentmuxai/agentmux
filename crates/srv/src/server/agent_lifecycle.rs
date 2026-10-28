@@ -108,6 +108,16 @@ fn idle_from_view_lost(lost: &mut HashMap<String, u64>, lives: &mut [Live], now:
     }
 }
 
+/// The block's own idle window: `Some(None)` never stop it, `Some(Some(ms))` its own window.
+pub(crate) fn idle_override_of(block: &obj::Block) -> Option<Option<u64>> {
+    block.meta.get(META_IDLE_STOP_MINUTES).and_then(|v| v.as_f64()).map(|m| (m > 0.0).then(|| (m * 60_000.0) as u64))
+}
+
+/// The idle window that applies to `block`: its own, else the default (`None`: no window).
+pub(crate) fn idle_window_of(state: &AppState, block: &obj::Block) -> Option<u64> {
+    idle_override_of(block).unwrap_or(policy(state).idle_stop_ms)
+}
+
 /// The agent processes running now, one per agent block that has a live controller.
 pub(crate) fn live_agents(state: &AppState) -> Vec<Live> {
     let mstore = &state.mstore;
@@ -125,7 +135,7 @@ pub(crate) fn live_agents(state: &AppState) -> Vec<Live> {
             let agent = crate::sagas::park_agents::agent_of_block(state, &block.oid, &block)?;
             let slug = mstore.agent_def_get(&agent.id).ok().flatten().map(|d| d.slug).filter(|s| !s.is_empty());
             let status = agent_status_of_block(mstore, &block.oid);
-            let idle_override = block.meta.get(META_IDLE_STOP_MINUTES).and_then(|v| v.as_f64()).map(|m| (m > 0.0).then(|| (m * 60_000.0) as u64));
+            let idle_override = idle_override_of(&block);
             Some(Live {
                 block_id: block.oid.clone(),
                 agent_id: slug.unwrap_or_else(|| agent.id.clone()),
@@ -311,6 +321,17 @@ pub(crate) async fn admit_start(state: &AppState, agent_id: &str) -> Result<(), 
 }
 
 pub(crate) async fn admit_start_with(state: &AppState, agent_id: &str, commit_pct: impl Fn() -> Option<f64>) -> Result<(), String> {
+    admit(state, agent_id, commit_pct, true).await
+}
+
+/// [`admit_start`] for a start that must not cost another agent its process (restart resume): over a limit
+/// it is refused with `Err("capacity: ...")` where `admit_start` would stop an idle agent to make room.
+/// The check and the claim of the room are one step under the admission lock.
+pub(crate) async fn admit_start_without_eviction(state: &AppState, agent_id: &str) -> Result<(), String> {
+    admit(state, agent_id, commit_used_pct, false).await
+}
+
+async fn admit(state: &AppState, agent_id: &str, commit_pct: impl Fn() -> Option<f64>, evict: bool) -> Result<(), String> {
     if !crate::sagas::park_agents::enabled(state) {
         return Ok(());
     }
@@ -331,6 +352,9 @@ pub(crate) async fn admit_start_with(state: &AppState, agent_id: &str, commit_pc
             pending().lock().unwrap_or_else(|e| e.into_inner()).insert(pending_key(state, agent_id), reservation);
             return Ok(());
         };
+        if !evict {
+            return Err(format!("capacity: {}, and this start does not stop other agents", over.why()));
+        }
         // The commit figure may not fall until a stopped process has fully exited: one stop per start,
         // not every idle agent for a figure that is slow to move (or held up by something else).
         if let (Over::Commit(_), Some(stopped)) = (&over, &stopped_for_commit) {

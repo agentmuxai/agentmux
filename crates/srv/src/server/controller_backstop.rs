@@ -59,7 +59,7 @@ fn candidates(state: &AppState) -> Vec<(String, String)> {
 /// The pane's last turn failed because its account is signed out, or out of quota until a reset not yet
 /// reached: starting it would only fail again. (`agent_state::unavailable_of_block` reads this only from a
 /// pane with a controller, which these have not.)
-fn failed_on_its_account(block: &obj::Block) -> bool {
+pub(super) fn failed_on_its_account(block: &obj::Block) -> bool {
     use crate::agents::failure::FailureClass;
     match crate::backend::agent_state::failure_of_block(block) {
         Some(f) if f.code == FailureClass::Auth => true,
@@ -69,7 +69,7 @@ fn failed_on_its_account(block: &obj::Block) -> bool {
 }
 
 /// A terminal-tier CLI (aider, crush) is started by its term view once attached.
-fn runs_in_a_terminal_view(block: &obj::Block) -> bool {
+pub(super) fn runs_in_a_terminal_view(block: &obj::Block) -> bool {
     crate::backend::providers::get_provider(&obj::meta_get_string(&block.meta, "agentProvider", ""))
         .is_some_and(|p| p.controller_type == crate::backend::providers::ControllerType::Terminal)
 }
