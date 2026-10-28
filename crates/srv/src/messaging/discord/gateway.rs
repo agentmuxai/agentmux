@@ -21,7 +21,7 @@ use std::time::Duration;
 use futures_util::{SinkExt, StreamExt};
 use serde_json::Value;
 use tokio::sync::mpsc;
-use tokio_tungstenite::{connect_async_tls_with_config, tungstenite::Message};
+use tokio_tungstenite::tungstenite::Message;
 
 use crate::backend::reactive::types::InjectionRequest;
 use crate::messaging::{BridgeHealth, BridgeStatus, OutboundMsg};
@@ -142,7 +142,7 @@ async fn run_session(
         .body(())
         .map_err(|e| format!("build ws request: {e}"))?;
 
-    let (ws_stream, _) = connect_async_tls_with_config(request, None, false, None)
+    let (ws_stream, _) = crate::muxbus::ws_connect::connect(request)
         .await
         .map_err(|e| format!("ws connect: {e}"))?;
 
