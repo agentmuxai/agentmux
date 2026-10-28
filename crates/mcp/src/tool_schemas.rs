@@ -407,6 +407,28 @@ pub(crate) const IDENTITY_TOOL: &str = r#"{
   }
 }"#;
 
+/// Skills: the skill catalog, for an agent that manages it.
+pub(crate) const SKILLS_TOOL: &str = r#"{
+  "name": "Skills",
+  "description": "The skill catalog (what Memory > Skills shows a person). Every call takes an action. list: every catalog skill without its text: id, name, skill_type, trigger, description, bound_count and who gets it. get: one skill in full (skill_id). upsert: create a skill (name, and content, description, skill_type: agent-skill, the default, is a SKILL.md an agent loads when it fits; prompt is a slash command with a trigger) or edit one (skill_id; what you leave out stays). A new skill reaches the agents created after it. delete: remove a skill (skill_id). bind and unbind: give a skill to an agent or take it away (skill_id, and target, an agent's id from Agents list; yourself when absent). reach: who gets a skill without a bind: all_agents (every agent, the ones to come too) and new_agents (every agent created from now on). A change reaches an agent's files at its next launch. Changes are recorded as you; a skill is guidance every agent it reaches will follow, so write what you would be glad for them to follow. Only catalog skills; an agent's private skills are not here.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "action":      { "type": "string", "enum": ["list", "get", "upsert", "delete", "bind", "unbind", "reach"], "description": "What to do" },
+      "skill_id":    { "type": "string", "description": "get, delete, bind, unbind, reach: the skill's id, from list; upsert: the skill to edit (absent: a new one)" },
+      "name":        { "type": "string", "description": "upsert: the skill's name (required for a new one)" },
+      "description": { "type": "string", "description": "upsert: when an agent should use it (the line a model reads to decide)" },
+      "content":     { "type": "string", "description": "upsert: the skill's text" },
+      "skill_type":  { "type": "string", "enum": ["agent-skill", "prompt"], "description": "upsert: agent-skill (default) or prompt (a slash command)" },
+      "trigger":     { "type": "string", "description": "upsert, prompt skills: the slash command" },
+      "target":      { "type": "string", "description": "bind, unbind: the agent's id from Agents list; yourself when absent" },
+      "all_agents":  { "type": "boolean", "description": "reach: every agent gets it, the ones to come too" },
+      "new_agents":  { "type": "boolean", "description": "reach: every agent created from now on gets it" }
+    },
+    "required": ["action"]
+  }
+}"#;
+
 /// Agents: the other agents, what they are doing, opening them, and the
 /// caller's own history (docs/specs/SPEC_MUXAPI_TOOL_CONSOLIDATION_2026_10_15.md
 /// §4.2, slice S4).
@@ -551,6 +573,7 @@ pub(crate) const ADVERTISED: &[&str] = &[
     WIDGET_TOOL,
     VAULT_TOOL,
     IDENTITY_TOOL,
+    SKILLS_TOOL,
     AGENTS_TOOL,
     MESSAGE_TOOL,
     APP_TOOL,
