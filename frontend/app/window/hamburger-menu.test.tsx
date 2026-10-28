@@ -69,7 +69,7 @@ const h = vi.hoisted(() => {
     };
     // Dev mode (store/dev-mode.ts); a test can swap in a reactive source.
     const dev = { read: (): boolean => false };
-    return { dev, workspaces, actions, createTab, openNewWindow, openModal, CommandPaletteModal, store, settings, caps, win, menu: { items: [] as MenuItem[], close: vi.fn() } };
+    return { dev, workspaces, actions, createTab, openNewWindow, openModal, CommandPaletteModal, store, settings, caps, win, menu: { items: [] as MenuItem[], live: (): MenuItem[] => [], close: vi.fn() } };
 });
 
 // keymodel.ts imports the store as "@/app/store/global", the menu as "@/store/global".
@@ -134,6 +134,7 @@ vi.mock("@/app/store/keymodel-nav", () => ({
 vi.mock("@/app/element/flyoutmenu", () => ({
     FlyoutMenu: (props: { items: MenuItem[]; closeRef?: (close: () => void) => void; children?: unknown }) => {
         h.menu.items = props.items;
+        h.menu.live = () => props.items;
         props.closeRef?.(h.menu.close);
         return props.children;
     },
@@ -520,11 +521,12 @@ describe("DevTools follows dev mode", () => {
         createRoot((dispose) => {
             render(() => <HamburgerMenu />);
             expect(labels()).not.toContain("DevTools");
-            const before = h.menu.items;
+            const before = h.menu.live();
             setTheme("__none__");
-            expect(h.menu.items).toBe(before);
+            expect(h.menu.live()).toBe(before);
             setOn(true);
-            expect(labels()).toContain("DevTools");
+            expect(h.menu.live()).not.toBe(before);
+            expect(h.menu.live().map((item) => item.label)).toContain("DevTools");
             dispose();
         });
         h.win.theme = () => "default";
