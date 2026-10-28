@@ -210,3 +210,11 @@ fn two_routes_of_one_gateway_are_two_services_with_two_ids() {
     assert_ne!(a, b);
     assert_ne!(a.id(), b.id(), "the pane finds its row by id");
 }
+
+#[test]
+fn a_pane_with_a_proxy_of_its_own_has_no_address_of_its_own() {
+    let proxied = env(&[("ANTHROPIC_BASE_URL", "https://gw.example.com"), ("HTTPS_PROXY", "http://corp-proxy.invalid:3128")]);
+    assert_eq!(service_for_env(&ANTHROPIC, &proxied), Service::ModelApi(&ANTHROPIC), "srv's probe can't follow that proxy");
+    let blank = env(&[("ANTHROPIC_BASE_URL", "https://gw.example.com"), ("HTTPS_PROXY", "  ")]);
+    assert_eq!(service_for_env(&ANTHROPIC, &blank).id(), "model_api:anthropic@gw.example.com", "an empty proxy variable is none");
+}

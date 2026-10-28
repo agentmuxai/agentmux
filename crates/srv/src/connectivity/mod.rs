@@ -181,8 +181,25 @@ pub fn service_for(api: &'static ModelApi, configured: Option<&str>) -> Service 
     }
 }
 
-/// [`service_for`] with the address read from the environment a pane's CLI was started with.
+/// The variables that route a CLI's requests through a proxy.
+const PROXY_VARS: [&str; 6] = ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy"];
+
+/// Whether `env` sends a CLI's requests a way srv's own probe doesn't go: a proxy variable that srv's own environment
+/// doesn't have, or has with another value.
+fn own_proxy(env: &std::collections::HashMap<String, String>) -> bool {
+    PROXY_VARS.iter().any(|var| {
+        let theirs = env.get(*var).map(|v| v.trim()).filter(|v| !v.is_empty());
+        theirs.is_some() && theirs != std::env::var(var).ok().as_deref().map(str::trim)
+    })
+}
+
+/// [`service_for`] with the address read from the environment a pane's CLI was started with. A pane with a proxy of
+/// its own has no address of its own in the status: the probe goes out the way srv does, which may not be the way
+/// that CLI does, so it could call a working address offline.
 pub fn service_for_env(api: &'static ModelApi, env: &std::collections::HashMap<String, String>) -> Service {
+    if own_proxy(env) {
+        return Service::ModelApi(api);
+    }
     service_for(api, api.base_url_env.and_then(|var| env.get(var)).map(String::as_str))
 }
 
