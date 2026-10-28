@@ -310,7 +310,7 @@ fn open_forwarded_window(state: &AppState, block_id: &str, signal: Option<String
         true,
         None,
         &v.request_id,
-        Some(&format!("{} (forwarded from another channel)", crate::sagas::pending_shutdown::audit_note(&v, by, "FleetBulkStop"))),
+        Some(&format!("{} (forwarded from another channel)", crate::sagas::pending_shutdown::audit_note(state, &v, by, "FleetBulkStop"))),
     );
     let mut pending = serde_json::to_value(&v).unwrap_or_default();
     pending["joined"] = json!(v.joined);

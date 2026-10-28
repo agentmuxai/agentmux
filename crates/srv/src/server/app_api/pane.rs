@@ -618,7 +618,7 @@ fn quit_self(
             true,
             Some(refusal.as_str()),
             &pending.request_id,
-            Some(&format!("{} ({via}): {detail}", crate::sagas::pending_shutdown::audit_note(&pending, agent, via))),
+            Some(&format!("{} ({via}): {detail}", crate::sagas::pending_shutdown::audit_note(state, &pending, agent, via))),
         );
         return (StatusCode::ACCEPTED, Json(pending_body(&pending))).into_response();
     }
@@ -799,7 +799,7 @@ pub(crate) async fn close_pane_as(
         true,
         None,
         &pending.request_id,
-        Some(&format!("{}: {reason}", crate::sagas::pending_shutdown::audit_note(&pending, &caller_agent_id, via))),
+        Some(&format!("{}: {reason}", crate::sagas::pending_shutdown::audit_note(state, &pending, &caller_agent_id, via))),
     );
     (StatusCode::ACCEPTED, pending_body(&pending))
 }

@@ -794,7 +794,7 @@ pub(crate) async fn fleet_stop_keep_pane_with_override(
                 .unwrap_or_else(|| block_id.clone());
             state.reactive_handler.log_fleet_action_audit(
                 Some(by), &target, block_id, FLEET_BULK_STOP_AUDIT_ACTION,
-                true, None, &v.request_id, Some(&crate::sagas::pending_shutdown::audit_note(&v, by, "FleetBulkStop")),
+                true, None, &v.request_id, Some(&crate::sagas::pending_shutdown::audit_note(state, &v, by, "FleetBulkStop")),
             );
             v.block_id = block_id.clone();
             v.target = target;
@@ -944,7 +944,7 @@ pub(crate) async fn fleet_close_agents_with_override(
         );
         state.reactive_handler.log_fleet_action_audit(
             Some(by), &target, &block_id, FLEET_BULK_STOP_AUDIT_ACTION,
-            true, None, &v.request_id, Some(&crate::sagas::pending_shutdown::audit_note(&v, by, "FleetBulkStop")),
+            true, None, &v.request_id, Some(&crate::sagas::pending_shutdown::audit_note(state, &v, by, "FleetBulkStop")),
         );
         // A target can join a request opened for another block (its pane's
         // close, via a sibling tab): report it under the block named.

@@ -555,8 +555,9 @@ fn settled_note(outcome: &str, v: &PendingView, via: &str, reason: &str) -> Stri
 
 /// The request-time audit note: whether this caller opened the window or
 /// joined someone else's.
-pub fn audit_note(v: &PendingView, by: &str, via: &str) -> String {
-    let shown_by = clean_by(by);
+pub fn audit_note(state: &AppState, v: &PendingView, by: &str, via: &str) -> String {
+    // `v.by` is the name `request_within` showed, so the raw `by` is resolved the same way.
+    let shown_by = clean_by(&asker_name(state, by));
     if !v.joined {
         "pending user override".to_string()
     } else if v.by == shown_by && v.via == via {
@@ -712,7 +713,7 @@ mod tests {
         assert!(!a.joined);
         let b = request(&state, "blk-p6", "Korp", "FleetBulkStop", "", Action::Stop { signal: Some("SIGKILL".into()) });
         assert!(b.joined && b.request_id == a.request_id);
-        assert_eq!(audit_note(&b, "Korp", "FleetBulkStop"), format!("joined its own pending request {}", a.request_id));
+        assert_eq!(audit_note(&state, &b, "Korp", "FleetBulkStop"), format!("joined its own pending request {}", a.request_id));
         assert!(matches!(begin(&a.request_id), Some(Action::Stop { signal: Some(s) }) if s == "SIGKILL"), "the forceful stop wins");
 
         let c = request(&state, "blk-p7", "Korp", "ClosePane", "", Action::ClosePane { block_ids: vec!["x".into()] });
@@ -956,12 +957,30 @@ mod tests {
         keep(&state, "ct-audit", &v.request_id);
     }
 
+    /// `by` is the agent's id, the view shows its display name; a repeat request from the same
+    /// agent is still "its own".
+    #[tokio::test]
+    async fn a_registered_agent_that_asks_twice_joins_its_own_request() {
+        let state = test_state();
+        let mut block = crate::backend::obj::Block { oid: "ct-reg-asker".into(), parentoref: String::new(), version: 1, runtimeopts: None, stickers: None, meta: Default::default(), subblockids: None };
+        block.meta.insert("agentName".into(), serde_json::json!("QTest"));
+        state.mstore.insert(&mut block).unwrap();
+        state.reactive_handler.register_agent("qtest", "ct-reg-asker", None).unwrap();
+        let a = request(&state, "ct-reg-target", "qtest", "FleetBulkStop", "", close_tab());
+        assert_eq!(a.by, "QTest");
+        let b = request(&state, "ct-reg-target", "qtest", "FleetBulkStop", "", close_tab());
+        assert!(b.joined);
+        assert_eq!(audit_note(&state, &b, "qtest", "FleetBulkStop"), format!("joined its own pending request {}", a.request_id));
+        assert!(audit_note(&state, &b, "someone-else", "FleetBulkStop").contains("by QTest's pending request"));
+        keep(&state, "ct-reg-target", &a.request_id);
+    }
+
     #[tokio::test]
     async fn the_asker_s_name_is_cleaned_for_display() {
         let state = test_state();
         let v = request(&state, "ct-by", "Ev\u{202E}il\u{0007}", "FleetBulkStop", "", close_tab());
         assert_eq!(v.by, "Evil");
-        assert_eq!(audit_note(&PendingView { joined: true, ..v.clone() }, "Ev\u{202E}il\u{0007}", "FleetBulkStop"), format!("joined its own pending request {}", v.request_id));
+        assert_eq!(audit_note(&state, &PendingView { joined: true, ..v.clone() }, "Ev\u{202E}il\u{0007}", "FleetBulkStop"), format!("joined its own pending request {}", v.request_id));
         keep(&state, "ct-by", &v.request_id);
     }
 
