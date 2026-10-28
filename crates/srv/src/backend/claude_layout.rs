@@ -282,12 +282,11 @@ pub(crate) mod tests {
         let (repo, wt) = (base.join("repo"), base.join("wt"));
         std::fs::create_dir_all(repo.join("sub")).unwrap();
         let git = |args: &[&str]| {
-            let out = std::process::Command::new("git")
-                .args(["-c", "user.email=a@b", "-c", "user.name=a"])
-                .args(args)
-                .current_dir(&repo)
-                .output()
-                .unwrap();
+            use agentmux_common::win32::NoWindow;
+            let mut cmd = std::process::Command::new("git");
+            cmd.args(["-c", "user.email=a@b", "-c", "user.name=a"]).args(args).current_dir(&repo);
+            cmd.no_window();
+            let out = cmd.output().unwrap();
             assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
         };
         git(&["init", "-q"]);
