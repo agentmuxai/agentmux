@@ -3,9 +3,11 @@
 
 //! `POST /api/v1/agent/open_many`, the `Agents` tool's `open` with `agents`
 //! (`SPEC_COUNTDOWN_BUTTONS_AND_BATCH_AGENT_ACTIONS_2026_10_28.md` §5): several agents opened at once,
-//! all or none. Opening asks the user nothing, as for one. The agents that are not running must be
+//! with everything checked first. Opening asks the user nothing, as for one. The agents that are not running must be
 //! able to start together (room under the agent cap, without stopping anyone; the sender's starts per
-//! minute) or the call is refused whole; a failed open closes the panes this call made.
+//! minute) or the call is refused whole; an open that still fails closes the panes this call made. An agent
+//! that was already open or parked is not put back as it was, and a pane the failing open itself
+//! half made is left to the ordinary close.
 
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -101,7 +103,7 @@ async fn open_many(state: &AppState, sender: &str, asked: Vec<CommandAgentOpenDa
                 release_batch(state, &wanted);
                 return Err(refuse(
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("agent {} of {total} ({}) could not be opened, so none were opened ({} panes made by this call were closed): {e}", i + 1, defs[i].name, made.len()),
+                    format!("agent {} of {total} ({}) could not be opened ({} panes made by this call were closed; agents that were already open or parked were left as they were): {e}", i + 1, defs[i].name, made.len()),
                 ));
             }
         }
