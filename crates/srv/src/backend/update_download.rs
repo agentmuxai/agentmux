@@ -166,10 +166,16 @@ pub fn start() -> Result<AppUpdateStatus, String> {
         RUNNING.store(false, Ordering::SeqCst);
         return Err(format!("a newer release than {version} was found just now; download that one"));
     }
-    // Step 2 of signed checksums: check the release's signed manifest and log
-    // what it says; the download below goes on whatever it finds.
-    tokio::spawn(crate::backend::update_signature::check_and_log(version.clone(), asset.clone()));
     tokio::spawn(async move {
+        // Step 3 of signed checksums: nothing is downloaded unless the release's
+        // signed manifest verifies and agrees (an unsigned release from before
+        // signing is the one exception). `docs/specs/SPEC_SIGNED_UPDATE_CHECKSUMS_2026_10_25.md` §7.
+        if let Err(message) = crate::backend::update_signature::gate(&version, &asset).await {
+            RUNNING.store(false, Ordering::SeqCst);
+            tracing::warn!(error = %message, "update: not downloading {version}");
+            set(&version, "failed", 0, asset.size, Some(message), Staged::None);
+            return;
+        }
         let result = match &job {
             Job::Portable(root) => run(&asset, &version, root).await.map(|f| (f, true)),
             Job::Installer => run_installer(&asset, &version).await.map(|i| (i, false)),

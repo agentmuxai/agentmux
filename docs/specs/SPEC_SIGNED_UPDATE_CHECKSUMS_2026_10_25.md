@@ -1,9 +1,16 @@
 # Signed checksums for update downloads
 
 **Status:** active. Approved by the operator on 2026-10-25 (decisions of §11 included). Task #99.
-Build step 1 (§8) is in progress: the manifest script, the release workflow's signing
-job (off until the key exists) and the app's verification module, which nothing calls
-yet.
+Build steps 1 and 2 (§8) are done (v0.60.4 is the first release signed through the
+pipeline). Step 3 is built in `update_signature.rs` / `update_download.rs`: when a
+download starts, a release from v0.60.4 on is downloaded only if its signed manifest
+verifies and lists the file with the same size and hash the download uses (a mismatch
+is refused, so the signed values are the ones in force); a release before v0.60.4 with no
+manifest is downloaded as before. Differences from §5.2 and §7 as first written: the
+refusal is made when Download is pressed (the update shows `failed` with §7's message)
+and not at check time as "available, no download", and the asset's name, size and
+hash still come from the release listing and are required to equal the signed ones.
+Showing the §7 states at check time is a follow-up.
 Builds on `SPEC_UPGRADE_FOR_USERS_AND_AGENTS_2026_10_15.md` §4.3 ("a `SHA256SUMS`
 signed with a key the app pins is phase 5") and on the update check of #5468
 (the latest tag comes from the `releases/latest` redirect, not the API).
