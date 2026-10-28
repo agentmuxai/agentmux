@@ -143,16 +143,24 @@ fn git_output(args: &[&str]) -> Option<String> {
 }
 
 /// The hooks directory the person or the repository configured: `core.hooksPath` from the
-/// repository (husky), else the person's global or system configuration. The environment's own
-/// `core.hooksPath` (AgentMux's directory, set through `GIT_CONFIG_*`) is not consulted: each
-/// scope is read on its own, and an AgentMux directory found in a file is passed over.
+/// repository (husky), else the person's global or system configuration. One `git config` call lists
+/// every scope; the environment's own value (`command` scope: AgentMux's directory, set through
+/// `GIT_CONFIG_*`) is not consulted, and an AgentMux directory found in a file is passed over.
 fn configured_hooks_dir() -> Option<PathBuf> {
-    ["--local", "--global", "--system"]
-        .iter()
-        .filter_map(|scope| git_output(&["config", scope, "--type=path", "--get", "core.hooksPath"]))
-        .filter(|d| !d.is_empty())
-        .map(PathBuf::from)
-        .find(|d| !d.ends_with(AGENTMUX_HOOKS_DIR))
+    hooks_dir_from(&git_output(&["config", "--type=path", "--show-scope", "--get-regexp", r"^core\.hookspath$"])?)
+}
+
+/// The winning `core.hooksPath` in `git config --show-scope --get-regexp` output
+/// (`<scope>\t<key> <value>` per line, the lowest-precedence scope first).
+fn hooks_dir_from(listing: &str) -> Option<PathBuf> {
+    listing
+        .lines()
+        .filter_map(|line| {
+            let (scope, rest) = line.split_once('\t')?;
+            let (_, value) = rest.split_once(' ')?;
+            (scope != "command" && !value.is_empty() && !value.ends_with(AGENTMUX_HOOKS_DIR)).then(|| PathBuf::from(value))
+        })
+        .last()
 }
 
 /// What srv calls its hooks directory (`identity/github_hooks.rs`).
@@ -460,6 +468,17 @@ key = {token}
         let found = scan_diff(&push_diff(Some(repo), "origin", &head, &base).unwrap());
         assert!(found.iter().any(|f| f.file == "a.txt" && f.category == "GitHub token"), "{found:?}");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_hooks_directory_is_the_most_specific_one_that_is_not_agentmuxs() {
+        let listing = "system\tcore.hookspath /etc/hooks\nglobal\tcore.hookspath /home/a/.githooks\nlocal\tcore.hookspath .husky/_\ncommand\tcore.hookspath /x/github-hooks\n";
+        assert_eq!(hooks_dir_from(listing), Some(PathBuf::from(".husky/_")));
+        // A directory with a space in it; AgentMux's own directory in a file is passed over.
+        let spaced = "global\tcore.hookspath /home/a b/hooks\nlocal\tcore.hookspath /r/github-hooks\n";
+        assert_eq!(hooks_dir_from(spaced), Some(PathBuf::from("/home/a b/hooks")));
+        assert_eq!(hooks_dir_from("command\tcore.hookspath /x/github-hooks\n"), None);
+        assert_eq!(hooks_dir_from(""), None);
     }
 
     #[test]
