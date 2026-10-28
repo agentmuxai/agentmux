@@ -451,6 +451,53 @@ fn personal_entries_skip_the_index_empty_files_and_non_markdown() {
     assert!(personal_entries_in(&dir.path().join("missing")).is_empty());
 }
 
+#[test]
+fn personal_entries_go_newest_first_by_modified_frontmatter_else_mtime() {
+    let dir = tempfile::tempdir().unwrap();
+    let front = |when: &str| format!("---
+name: n
+metadata:
+  modified: {when}
+---
+body
+");
+    // By name this is a, b, c, d; by modified it is c (newest), a, then b; d has no `modified`, so its
+    // mtime (just now, the newest of all) decides.
+    std::fs::write(dir.path().join("a.md"), front("2026-10-20T10:00:00.000Z")).unwrap();
+    std::fs::write(dir.path().join("b.md"), front("2026-10-01T10:00:00.000Z")).unwrap();
+    std::fs::write(dir.path().join("c.md"), front("2026-10-27T10:00:00.000Z")).unwrap();
+    std::fs::write(dir.path().join("d.md"), "no frontmatter").unwrap();
+    let names: Vec<String> = personal_entries_in(dir.path()).into_iter().map(|e| e.name).collect();
+    assert_eq!(names, ["d.md", "c.md", "a.md", "b.md"]);
+}
+
+#[test]
+fn a_cut_delivery_names_the_files_it_left_out_and_still_carries_the_newest() {
+    let dir = tempfile::tempdir().unwrap();
+    let write = |name: &str, when: &str, body: usize| {
+        std::fs::write(dir.path().join(name), format!("---
+description: about {name}
+metadata:
+  type: project
+  modified: {when}
+---
+{}", "x".repeat(body))).unwrap();
+    };
+    write("aaa-oldest-big.md", "2026-10-01T00:00:00.000Z", 50_000);
+    for i in 0..10 {
+        write(&format!("m{i}.md"), &format!("2026-10-1{i}T00:00:00.000Z"), 8_000);
+    }
+    write("zzz-newest.md", "2026-10-28T00:00:00.000Z", 2_000);
+    let fitted = memory_fit::fit(personal_entries_in(dir.path()), 0, true, &|_| Some(3));
+    assert_eq!(fitted.kept[0].name, "zzz-newest.md", "sorted by modified, not by name");
+    assert!(!fitted.skipped.is_empty());
+    assert!(fitted.skipped.iter().any(|e| e.name == "aaa-oldest-big.md"), "the oldest is what a full delivery drops");
+    assert!(fitted.skipped.iter().all(|e| e.name != "zzz-newest.md"));
+    assert!(fitted.tail.unwrap().contains("aaa-oldest-big.md — about aaa-oldest-big.md"));
+    let row = not_sent_item(&fitted.skipped[0]);
+    assert_eq!((row.delivered, row.size_bytes, row.kind), ("omitted", 0, "personal_memory"));
+}
+
 fn item(label: &str, tier: Tier, text: &str) -> Entry {
     Entry {
         label: label.into(),

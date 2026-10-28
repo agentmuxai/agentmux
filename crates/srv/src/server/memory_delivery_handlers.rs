@@ -33,6 +33,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::backend::container_credential::ContainerGrant;
 use crate::backend::memory_delivery::{self, Entry, Reason, Tier};
+use crate::backend::memory_fit;
 
 use super::caller::Caller;
 use super::AppState;
@@ -1018,16 +1019,25 @@ fn compose_delivery(
     let summary = (reason == Reason::Compact)
         .then(|| crate::backend::continuity_state::running_summary_section(&state.mstore, block_id))
         .flatten();
+    // The files that fit one delivery, newest first and capped; the rest are named, not dropped silently.
+    let fitted = memory_fit::fit(
+        entries,
+        summary.as_deref().map_or(0, |s| s.chars().count()),
+        reason == Reason::Compact,
+        &|e| modified_ms_of(e).map(|m| ((now - m).max(0)) / 86_400_000),
+    );
+    let (entries, skipped, tail) = (fitted.kept, fitted.skipped, fitted.tail);
     // Nothing left for the hook to carry is still a delivery when there are
     // startup items to show: it has no parts, and its card goes out at once.
-    let (parts, delivered) = match memory_delivery::compose_items_with(&entries, reason, summary.as_deref(), global_in_file) {
+    let (parts, delivered) = match memory_delivery::compose_items_tail(&entries, reason, summary.as_deref(), global_in_file, tail.as_deref()) {
         Some(composed) => {
             let (parts, delivered_chars) = memory_delivery::split_into_parts_counted(
                 &composed.text,
                 memory_delivery::MAX_PART_CHARS,
                 memory_delivery::HOOK_PARTS,
             );
-            let delivered = delivery_items(&entries, &composed, delivered_chars);
+            let mut delivered = delivery_items(&entries, &composed, delivered_chars);
+            delivered.extend(skipped.iter().map(not_sent_item));
             (parts, delivered)
         }
         None if !items.is_empty() => (Vec::new(), Vec::new()),
@@ -1084,7 +1094,7 @@ fn personal_entries_in(dir: &std::path::Path) -> Vec<Entry> {
         .filter(|(name, _)| name.ends_with(".md") && name != "MEMORY.md")
         .collect();
     files.sort();
-    files
+    let mut entries: Vec<Entry> = files
         .into_iter()
         .filter_map(|(name, path)| {
             let text = std::fs::read_to_string(&path).ok()?;
@@ -1098,7 +1108,43 @@ fn personal_entries_in(dir: &std::path::Path) -> Vec<Entry> {
                 path: Some(path.to_string_lossy().into_owned()),
             })
         })
-        .collect()
+        .collect();
+    // Most recently modified first (the sort is stable, so equal times keep name order), so what a cut
+    // delivery drops is the oldest, not whatever sorts last by name.
+    entries.sort_by_key(|e| std::cmp::Reverse(modified_ms_of(e).unwrap_or(0)));
+    entries
+}
+
+/// When a Personal Memory file was last modified, in Unix ms: its `modified` frontmatter when it has one that
+/// parses, else the file's mtime.
+fn modified_ms_of(e: &Entry) -> Option<i64> {
+    if let Some(v) = memory_fit::frontmatter_value(&e.text, "modified") {
+        if let Ok(t) = chrono::DateTime::parse_from_rfc3339(&v) {
+            return Some(t.timestamp_millis());
+        }
+    }
+    let mtime = std::fs::metadata(e.path.as_deref()?).ok()?.modified().ok()?;
+    i64::try_from(mtime.duration_since(std::time::UNIX_EPOCH).ok()?.as_millis()).ok()
+}
+
+/// The card's row for a file left out of the delivery whole.
+fn not_sent_item(e: &Entry) -> EntrySize {
+    EntrySize {
+        label: e.label.clone(),
+        source: e.tier.as_str(),
+        size_bytes: 0,
+        tokens: 0,
+        kind: "personal_memory",
+        name: e.name.clone(),
+        tier: None,
+        bundle_id: e.bundle_id.clone(),
+        path: e.path.clone(),
+        delivered: memory_delivery::Delivered::Omitted.as_str(),
+        source_size_bytes: e.text.len(),
+        source_tokens: estimate_tokens(&e.text) as usize,
+        startup: None,
+        via: None,
+    }
 }
 
 /// The notice's items, in delivery order, sized by what the parts carried.
