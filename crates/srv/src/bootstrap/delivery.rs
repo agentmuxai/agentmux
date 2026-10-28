@@ -12,19 +12,14 @@ use super::*;
 /// cross-channel, LAN, cloud) and audits the job's creator UID here only.
 ///
 /// Must run AFTER `build_app_state` and BEFORE `cron_scheduler.start()`, so
-/// no fire takes the HTTP fallback.
+/// no fire takes the HTTP fallback. A fire to a stopped agent starts it with `agents:always_available`
+/// on (`server::jekt_start`).
 pub fn install_cron_delivery(state: &AppState) {
     let st = state.clone();
     state.cron_scheduler.install_delivery(Arc::new(move |req, creator_uid| {
         let st = st.clone();
         Box::pin(async move {
-            crate::server::reactive::deliver(
-                &st,
-                crate::server::ReactiveAuthVia::FullAuthKey,
-                &creator_uid,
-                req,
-            )
-            .await
+            crate::server::jekt_start::deliver_cron(&st, &creator_uid, req).await
         })
     }));
     // A pending fire (catch-up `latest`) waits until its agent is back,
