@@ -214,3 +214,27 @@ fn a_stop_has_something_to_stop_in_every_state_with_a_process_whatever_was_recor
         assert_eq!(may_have_process(&row_in(state, desired)), stoppable, "{state:?} {desired:?}");
     }
 }
+
+#[tokio::test]
+async fn only_itself_and_a_worker_it_opened_are_stopped_without_the_override_window() {
+    let state = test_state();
+    assert!(!needs_window(&state.mstore, "leader", "leader"));
+    assert!(needs_window(&state.mstore, "leader", "stranger"), "another agent waits for the person");
+    let mut worker: crate::backend::storage::AgentDefinition = serde_json::from_value(json!({
+        "id": "worker-w", "slug": "worker-w", "name": "Worker W", "icon": "robot", "provider": "claude",
+        "description": "", "created_at": 1,
+    }))
+    .unwrap();
+    state.mstore.agent_def_insert(&mut worker).unwrap();
+    state
+        .mstore
+        .agent_content_set(&crate::backend::storage::content::AgentContent {
+            agent_id: "worker-w".to_string(),
+            content_type: crate::server::app_api::agent_spawn::WORKER_OF_CONTENT.to_string(),
+            content: json!({ "agent": "Leader", "id": "leader" }).to_string(),
+            updated_at: 1,
+        })
+        .unwrap();
+    assert!(!needs_window(&state.mstore, "leader", "worker-w"), "its own worker is its to end");
+    assert!(needs_window(&state.mstore, "someone-else", "worker-w"), "another agent's worker is not");
+}
