@@ -26,6 +26,7 @@ use super::AppState;
 
 pub(crate) mod agent_attach;
 pub(crate) mod agent_lifecycle;
+pub(crate) mod agent_watch;
 #[cfg(test)]
 mod agent_attach_tests;
 pub(crate) mod agent_block;
