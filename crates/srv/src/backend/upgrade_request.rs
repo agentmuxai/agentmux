@@ -75,8 +75,6 @@ pub enum Outcome {
         #[serde(skip_serializing_if = "Vec::is_empty")]
         stopping: Vec<String>,
     },
-    /// Every window asks the user; the agent hears the answer as a note.
-    PendingUser { version: String, id: String },
     /// Asked for like any sensitive operation (`Sensitive`): the super agent decides, the person
     /// can veto the countdown. `review` says whom it went to; the agent hears the rest as notes.
     Requested { version: String, id: String, review: String },
@@ -189,26 +187,6 @@ fn tell(block_id: &str, text: &str) {
     if let Err(e) = handler.deliver_system_note(&target, text) {
         tracing::info!(block_id, error = %e, "upgrade request: note not delivered");
     }
-}
-
-/// Ask the user on the agent's behalf. One request per agent: asking again
-/// replaces its earlier one.
-pub fn ask_user(state: &crate::server::AppState, block_id: &str, agent: &str, reason: &str, version: &str) -> String {
-    let id = uuid::Uuid::new_v4().to_string();
-    {
-        let mut p = pending();
-        p.retain(|r| r.block_id != block_id);
-        p.push(UpgradeRequest {
-            id: id.clone(),
-            agent: agent.to_string(),
-            reason: reason.chars().take(300).collect(),
-            version: version.to_string(),
-            asked_ms: agentmux_common::time::now_ms_u64(),
-            block_id: block_id.to_string(),
-        });
-    }
-    publish(state);
-    id
 }
 
 /// The user's answer to request `id`, for the release the prompt showed
@@ -411,8 +389,6 @@ mod tests {
 
     #[test]
     fn outcomes_read_as_the_tool_expects() {
-        let v = serde_json::to_value(Outcome::PendingUser { version: "0.59.27".into(), id: "r1".into() }).unwrap();
-        assert_eq!(v, serde_json::json!({ "status": "pending_user", "version": "0.59.27", "id": "r1" }));
         let r = serde_json::to_value(Outcome::Requested { version: "0.59.27".into(), id: "r2".into(), review: "the super agent has been asked".into() }).unwrap();
         assert_eq!(r, serde_json::json!({ "status": "requested", "version": "0.59.27", "id": "r2", "review": "the super agent has been asked" }));
         let v = serde_json::to_value(Outcome::Unavailable { message: "m".into(), url: None }).unwrap();
