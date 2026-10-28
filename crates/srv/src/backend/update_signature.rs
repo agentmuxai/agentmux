@@ -60,7 +60,7 @@ pub(crate) fn judge(keys: &[UpdateKey], tag: &str, fetched: Option<(&[u8], &str,
 
 /// Fetch one small release file: `None` when the release has no such file (404),
 /// an error for anything else, and never more than `cap` bytes.
-async fn fetch_small(client: &reqwest::Client, url: &str, cap: usize) -> Result<Option<Vec<u8>>, String> {
+pub(crate) async fn fetch_small(client: &reqwest::Client, url: &str, cap: usize) -> Result<Option<Vec<u8>>, String> {
     let mut resp = tokio::time::timeout(std::time::Duration::from_secs(20), client.get(url).send())
         .await
         .map_err(|_| "GitHub didn't answer".to_string())?
