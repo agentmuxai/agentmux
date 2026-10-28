@@ -484,13 +484,22 @@ jobs:
   # merge until its wall time and flake rate are measured (same stance as
   # `rust-macos`). Not in `CI required`'s `needs` for the same reason.
   rust-windows:
-    name: nextest (windows-latest)
+    name: nextest (windows-latest, ${{ matrix.scope }})
     needs: changes
     # Same condition as `rust`, for the same reasons (see its comment).
     if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' && needs.changes.outputs.queue != 'true' }}
     runs-on: windows-latest
     continue-on-error: true
     timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - scope: all
+            packages: -p agentmux-common -p agentmux-srv -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats
+          # Everything but srv, the crate that takes most of the build.
+          - scope: host
+            packages: -p agentmux-common -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats
     env:
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
       CARGO_PROFILE_TEST_DEBUG: line-tables-only
@@ -509,14 +518,15 @@ jobs:
           }
       - uses: Swatinem/rust-cache@v2
         with:
+          key: ${{ matrix.scope }}
           # While tests fail the job is red; without this the cache would never
           # be saved and every run would build cold (~10 min).
           cache-on-failure: true
       - name: Install cargo-nextest
         uses: taiki-e/install-action@nextest
-      # Keep this crate list identical to the `rust` job's.
+      # The `all` scope's list is identical to the `rust` job's.
       - name: cargo nextest (CEF-free crates)
-        run: cargo nextest run --profile ci -p agentmux-common -p agentmux-srv -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats
+        run: cargo nextest run --profile ci ${{ matrix.packages }}
 
   docs:
     name: doc status + grep gates
