@@ -207,6 +207,67 @@ mod tests {
         Some((o.to_string(), r.to_string()))
     }
 
+    /// srv, as a one-shot stub: answers one request with `status` and `body`, and returns what it was sent.
+    fn stub_srv(status: u16, body: &'static str) -> (String, std::thread::JoinHandle<String>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut data = Vec::new();
+            let mut buf = [0u8; 4096];
+            loop {
+                let n = stream.read(&mut buf).unwrap();
+                data.extend_from_slice(&buf[..n]);
+                let text = String::from_utf8_lossy(&data).to_string();
+                if let Some(end) = text.find("\r\n\r\n") {
+                    let len = text
+                        .lines()
+                        .find_map(|l| l.to_ascii_lowercase().strip_prefix("content-length:").map(|v| v.trim().parse::<usize>().unwrap_or(0)))
+                        .unwrap_or(0);
+                    if data.len() >= end + 4 + len {
+                        break;
+                    }
+                }
+                if n == 0 {
+                    break;
+                }
+            }
+            let reply = format!("HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+            stream.write_all(reply.as_bytes()).unwrap();
+            String::from_utf8_lossy(&data).to_string()
+        });
+        (url, handle)
+    }
+
+    #[test]
+    fn a_token_comes_from_srv_for_the_repository_as_the_calling_agent() {
+        let _guard = crate::test_env_lock::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let (url, srv) = stub_srv(200, r#"{"token":"ghs_FROM_SRV","expiresAt":1,"botSlug":"muxagent","botUserId":7}"#);
+        std::env::set_var("AGENTMUX_LOCAL_URL", &url);
+        std::env::set_var("AGENTMUX_AUTH_KEY", "key");
+        std::env::set_var("AGENTMUX_AGENT_TOKEN", "agent-token-1");
+        let answer = ask("octo", "hello");
+        let seen = srv.join().unwrap();
+        assert!(matches!(&answer, Answer::Token(t) if t == "ghs_FROM_SRV"));
+        assert!(seen.starts_with("POST /api/v1/github/token "), "{seen}");
+        let lower = seen.to_ascii_lowercase();
+        assert!(lower.contains("x-agent-token: agent-token-1"), "who is asking is the agent's own token: {seen}");
+        assert!(seen.contains(r#""owner":"octo""#) && seen.contains(r#""repo":"hello""#), "{seen}");
+        assert!(!seen.contains("agent_id"), "no name in the request: srv decides who is asking");
+    }
+
+    #[test]
+    fn a_refusal_is_srvs_own_sentence_never_a_token() {
+        let _guard = crate::test_env_lock::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let (url, srv) = stub_srv(403, r#"{"error":"the AgentMux GitHub App isn't installed on octo"}"#);
+        std::env::set_var("AGENTMUX_LOCAL_URL", &url);
+        std::env::set_var("AGENTMUX_AUTH_KEY", "key");
+        std::env::remove_var("AGENTMUX_AGENT_TOKEN");
+        let answer = ask("octo", "hello");
+        srv.join().unwrap();
+        assert!(matches!(&answer, Answer::Refused(why) if why == "the AgentMux GitHub App isn't installed on octo"), "refused with srv's words");
+    }
+
     #[test]
     fn git_asks_with_key_value_lines_and_a_path() {
         let input = "protocol=https\nhost=github.com\npath=octo/hello.git\n\nignored=after-blank\n";
