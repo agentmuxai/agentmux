@@ -155,3 +155,52 @@ async fn an_agent_that_never_ran_has_nothing_to_watch_and_says_how_to_run_it() {
     assert!(body["note"].as_str().unwrap().contains("Agents start"), "{body}");
     assert_eq!(lines(&body).len(), 0);
 }
+
+/// A line longer than one read: the tail widens its read to reach the line's end, a replay widens its
+/// window to start on a line, and a line past the scan limit is skipped with a marker; the cursor never
+/// stops in front of a line or lands inside one.
+#[tokio::test]
+async fn a_line_longer_than_a_read_neither_stalls_a_tail_nor_splits_a_replay() {
+    let state = test_state();
+    let (_ws, tabs) = seed_workspace(&state, 1).await;
+    seed_agent_block(&state, &tabs[0], "wl-caller").await;
+
+    // A tail: a 600 KiB line, then a short one.
+    let tail = seed_agent_block(&state, &tabs[0], "wl-tail").await;
+    append(&state, &tail, &format!("{}
+after
+", "x".repeat(600 * 1024)));
+    let (_, body) = call(&state, Some("wl-caller"), json!({ "agent": "wl-tail", "after": 0 })).await;
+    let got = lines(&body);
+    assert_eq!(got.len(), 2, "{} lines", got.len());
+    assert!(got[0].starts_with("xxx") && got[0].ends_with("more characters]"));
+    assert_eq!(got[1], "after");
+    assert_eq!(body["next"].as_u64().unwrap(), (600 * 1024 + 1 + "after
+".len()) as u64);
+
+    // A replay whose last line is longer than the window: it starts on a line and next is the end.
+    let replay = seed_agent_block(&state, &tabs[0], "wl-replay").await;
+    append(&state, &replay, &format!("small
+{}
+", "y".repeat(300 * 1024)));
+    let (_, body) = call(&state, Some("wl-caller"), json!({ "agent": "wl-replay" })).await;
+    let got = lines(&body);
+    assert_eq!(got[0], "small");
+    assert!(got[1].starts_with("yyy"));
+    let next = body["next"].as_u64().unwrap();
+    append(&state, &replay, "more
+");
+    let (_, body) = call(&state, Some("wl-caller"), json!({ "agent": "wl-replay", "after": next })).await;
+    assert_eq!(lines(&body), ["more"], "the follow-up does not return a fragment of the long line");
+
+    // A line past the scan limit is skipped with a marker, and the next call is on the line after it.
+    let huge = seed_agent_block(&state, &tabs[0], "wl-huge").await;
+    append(&state, &huge, &format!("{}
+after
+", "z".repeat(2 * 1024 * 1024)));
+    let (_, body) = call(&state, Some("wl-caller"), json!({ "agent": "wl-huge", "after": 0 })).await;
+    assert!(lines(&body)[0].contains("too long to show and was skipped"), "{body}");
+    let next = body["next"].as_u64().unwrap();
+    let (_, body) = call(&state, Some("wl-caller"), json!({ "agent": "wl-huge", "after": next })).await;
+    assert_eq!(lines(&body), ["after"]);
+}

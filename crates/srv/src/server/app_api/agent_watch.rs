@@ -32,6 +32,8 @@ const OUTPUT_FILE: &str = "output";
 const REPLAY_BYTES: i64 = 256 * 1024;
 /// The most one tail read takes.
 const CHUNK_BYTES: i64 = 512 * 1024;
+/// The most searched for the end of one line before it is given up on.
+const MAX_SCAN_BYTES: i64 = if cfg!(test) { 1024 * 1024 } else { 16 * 1024 * 1024 };
 const DEFAULT_LINES: usize = 100;
 const MAX_LINES: usize = 500;
 /// The longest a line is shown; a tool result can be much larger.
@@ -108,52 +110,130 @@ fn lines_of(data: &[u8], from: u64, mid_line: bool, from_end: bool, max: usize) 
     Lines { lines: kept.into_iter().map(|(_, t)| t).collect(), next: from + next_at as u64, more: more_than_max }
 }
 
-/// What one read of the file gave.
-struct Window {
-    /// The file's size now.
-    size: u64,
-    /// Where `data` starts.
-    from: u64,
-    data: Vec<u8>,
-    /// The cursor asked for bytes the file no longer holds, or is past its end.
-    reset: bool,
+/// The transcript, whole in memory (an archived session) or read in spans from the file store.
+struct Source<'a> {
+    state: &'a AppState,
+    block_id: &'a str,
+    whole: Option<Vec<u8>>,
+    size: i64,
 }
 
-/// Read the new bytes after `after`, or the last [`REPLAY_BYTES`] of the file.
-fn read_window(state: &AppState, block_id: &str, after: Option<u64>) -> Result<Window, String> {
-    let archived = state
-        .mstore
-        .get::<crate::backend::obj::Block>(block_id)
-        .ok()
-        .flatten()
-        .and_then(|b| b.meta.get(crate::backend::session_archive::META_SESSION_ARCHIVED_AT).and_then(|v| v.as_i64()))
-        .is_some_and(|at| at > 0);
-    let (size, whole): (i64, Option<Vec<u8>>) = if archived {
-        let (bytes, _) = crate::backend::session_archive::read_session_output(&state.mstore, &state.filestore, block_id)?;
-        (bytes.len() as i64, Some(bytes))
-    } else {
-        match state.filestore.stat(block_id, OUTPUT_FILE).map_err(|e| format!("filestore stat: {e}"))? {
-            Some(f) => (f.size, None),
-            None => return Ok(Window { size: 0, from: 0, data: Vec::new(), reset: after.is_some_and(|a| a > 0) }),
+impl Source<'_> {
+    fn open<'a>(state: &'a AppState, block_id: &'a str) -> Result<Option<Source<'a>>, String> {
+        let archived = state
+            .mstore
+            .get::<crate::backend::obj::Block>(block_id)
+            .ok()
+            .flatten()
+            .and_then(|b| b.meta.get(crate::backend::session_archive::META_SESSION_ARCHIVED_AT).and_then(|v| v.as_i64()))
+            .is_some_and(|at| at > 0);
+        if archived {
+            let (bytes, _) = crate::backend::session_archive::read_session_output(&state.mstore, &state.filestore, block_id)?;
+            return Ok(Some(Source { state, block_id, size: bytes.len() as i64, whole: Some(bytes) }));
         }
-    };
-    let (want_from, reset) = match after {
-        Some(a) if (a as i64) <= size => (a as i64, false),
-        Some(_) => ((size - REPLAY_BYTES).max(0), true),
-        None => ((size - REPLAY_BYTES).max(0), false),
-    };
-    let want_len = if after.is_some() && !reset { (size - want_from).min(CHUNK_BYTES) } else { size - want_from };
-    let (from, data) = match whole {
-        Some(bytes) => {
-            let end = (want_from + want_len) as usize;
-            (want_from, bytes[want_from as usize..end.min(bytes.len())].to_vec())
+        let stat = state.filestore.stat(block_id, OUTPUT_FILE).map_err(|e| format!("filestore stat: {e}"))?;
+        Ok(stat.map(|f| Source { state, block_id, whole: None, size: f.size }))
+    }
+
+    /// `len` bytes from `from`, and where they really start (a circular file may have dropped the front).
+    fn span(&self, from: i64, len: i64) -> Result<(i64, Vec<u8>), String> {
+        match &self.whole {
+            Some(bytes) => {
+                let end = ((from + len) as usize).min(bytes.len());
+                Ok((from, bytes[(from as usize).min(end)..end].to_vec()))
+            }
+            None if len <= 0 => Ok((from, Vec::new())),
+            None => self.state.filestore.read_at(self.block_id, OUTPUT_FILE, from, len).map_err(|e| format!("filestore read: {e}")),
         }
-        None if want_len <= 0 => (want_from, Vec::new()),
-        None => state.filestore.read_at(block_id, OUTPUT_FILE, want_from, want_len).map_err(|e| format!("filestore read: {e}"))?,
+    }
+
+    /// The position of the first line break at or after `from`, reading on in spans.
+    fn find_newline(&self, mut from: i64) -> Result<Option<i64>, String> {
+        while from < self.size {
+            let (at, data) = self.span(from, CHUNK_BYTES)?;
+            if let Some(i) = data.iter().position(|&b| b == b'\n') {
+                return Ok(Some(at + i as i64));
+            }
+            if data.is_empty() {
+                break;
+            }
+            from = at + data.len() as i64;
+        }
+        Ok(None)
+    }
+}
+
+/// What one read of the transcript gave.
+struct Read {
+    lines: Lines,
+    /// The cursor asked for bytes the file no longer holds, or is past its end: this is a replay.
+    reset: bool,
+    /// A session that ended: its file never grows, so waiting for a line is pointless.
+    archived: bool,
+}
+
+/// The lines after `after`, or the tail of the transcript when `after` is `None` or no longer valid.
+/// A line longer than a read is searched for its end, up to [`MAX_SCAN_BYTES`], and a longer one is
+/// skipped with a marker line, so a cursor never stops in front of a line or lands inside one.
+fn read_lines(state: &AppState, block_id: &str, after: Option<u64>, max: usize) -> Result<Read, String> {
+    let Some(src) = Source::open(state, block_id)? else {
+        let lines = Lines { lines: Vec::new(), next: 0, more: false };
+        return Ok(Read { lines, reset: after.is_some_and(|a| a > 0), archived: false });
     };
-    // The window start moved up: a circular file dropped what the cursor pointed at.
-    let reset = reset || after.is_some_and(|a| from > a as i64);
-    Ok(Window { size: size as u64, from: from as u64, data, reset })
+    let archived = src.whole.is_some();
+    let size = src.size;
+    let mut reset = false;
+    if let Some(after) = after.map(|a| a as i64) {
+        if after <= size {
+            let mut len = (size - after).min(CHUNK_BYTES);
+            loop {
+                let (at, data) = src.span(after, len)?;
+                if at > after {
+                    // A circular file dropped what the cursor pointed at.
+                    reset = true;
+                    break;
+                }
+                let lines = lines_of(&data, at as u64, false, false, max);
+                if !lines.lines.is_empty() || lines.next > after as u64 || after + len >= size {
+                    return Ok(Read { lines, reset: false, archived });
+                }
+                if len >= MAX_SCAN_BYTES {
+                    let lines = match src.find_newline(after + len)? {
+                        Some(end) => Lines {
+                            lines: vec![format!("[a line of {} bytes is too long to show and was skipped]", end + 1 - after)],
+                            next: (end + 1) as u64,
+                            more: true,
+                        },
+                        // Still being written: nothing to move past yet.
+                        None => Lines { lines: Vec::new(), next: after as u64, more: false },
+                    };
+                    return Ok(Read { lines, reset: false, archived });
+                }
+                len = (len * 2).min(size - after);
+            }
+        } else {
+            reset = true;
+        }
+    }
+    // The replay: the last lines, from a window that grows until it holds a whole line.
+    let mut window = REPLAY_BYTES;
+    loop {
+        let start = (size - window).max(0);
+        let (at, data) = src.span(start, size - start)?;
+        let lines = lines_of(&data, at as u64, at > 0, true, max);
+        if !lines.lines.is_empty() || at == 0 {
+            return Ok(Read { lines, reset, archived });
+        }
+        if window >= MAX_SCAN_BYTES {
+            let skipped = Lines {
+                lines: vec![format!("[no line break in the last {} bytes: older output was skipped]", size - at)],
+                next: size as u64,
+                more: true,
+            };
+            return Ok(Read { lines: skipped, reset, archived });
+        }
+        window *= 2;
+    }
 }
 
 async fn watch(state: &AppState, req: &WatchRequest) -> Result<Value, Refusal> {
@@ -173,21 +253,24 @@ async fn watch(state: &AppState, req: &WatchRequest) -> Result<Value, Refusal> {
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(req.wait_seconds.unwrap_or(0).min(MAX_WAIT_SECONDS));
     loop {
         let (reader, block) = (state.clone(), block_id.clone());
-        let after = req.after;
-        let window = tokio::task::spawn_blocking(move || read_window(&reader, &block, after))
+        let (after, max_lines) = (req.after, max);
+        let read = tokio::task::spawn_blocking(move || read_lines(&reader, &block, after, max_lines))
             .await
             .map_err(|e| refuse(StatusCode::INTERNAL_SERVER_ERROR, format!("Agents watch: {e}")))?
             .map_err(|e| refuse(StatusCode::INTERNAL_SERVER_ERROR, format!("Agents watch {}: {e}", target.name)))?;
-        // A replay starts mid-line unless it starts the file; a tail starts where a line ended.
-        let replay = req.after.is_none() || window.reset;
-        let read = lines_of(&window.data, window.from, replay && window.from > 0, replay, max);
-        if !read.lines.is_empty() || read.more || window.reset || tokio::time::Instant::now() >= deadline || req.after.is_none() {
+        if !read.lines.lines.is_empty()
+            || read.lines.more
+            || read.reset
+            || read.archived
+            || tokio::time::Instant::now() >= deadline
+            || req.after.is_none()
+        {
             let turn_active = crate::backend::blockcontroller::get_block_controller_status(&block_id).is_some_and(|s| s.turn_active);
             let now = agentmux_common::time::now_ms_u64();
             let runtime = crate::server::agent_runtime::list(state, now).into_iter().find(|r| r.agent_id == target.agent_id);
             return Ok(json!({
                 "agent": target.name, "agent_id": target.agent_id, "block_id": block_id,
-                "lines": read.lines, "next": read.next, "more": read.more, "reset": window.reset,
+                "lines": read.lines.lines, "next": read.lines.next, "more": read.lines.more, "reset": read.reset,
                 "turn_active": turn_active,
                 "runtime": runtime.map(|r| json!({ "state": r.state, "desired": r.desired })),
             }));
