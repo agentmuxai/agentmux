@@ -14,11 +14,12 @@
 //! `{"ok":true,"len":N}` followed by N bytes of PNG, or `{"ok":false,"err":"..."}`.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
-use tokio::process::{Child, ChildStdin, ChildStdout};
+use tokio::process::Child;
 
 use super::request::IconRequest;
 use super::IconError;
@@ -96,10 +97,15 @@ where
     tokio::time::timeout(deadline, exchange(to, from, req)).await.unwrap_or(Err(IconError::Timeout))
 }
 
+type Writer = Box<dyn AsyncWrite + Send + Unpin>;
+type Reader = BufReader<Box<dyn AsyncRead + Send + Unpin>>;
+
+/// One helper process and its pipes.
 struct Worker {
-    child: Child,
-    stdin: ChildStdin,
-    stdout: BufReader<ChildStdout>,
+    /// `None` for a stand-in in tests.
+    child: Option<Child>,
+    stdin: Writer,
+    stdout: Reader,
 }
 
 impl Worker {
@@ -121,65 +127,84 @@ impl Worker {
         let mut child = cmd.spawn()?;
         let stdin = child.stdin.take().ok_or_else(|| std::io::Error::other("no stdin"))?;
         let stdout = child.stdout.take().ok_or_else(|| std::io::Error::other("no stdout"))?;
-        Ok(Worker { child, stdin, stdout: BufReader::new(stdout) })
+        let stdout: Box<dyn AsyncRead + Send + Unpin> = Box::new(stdout);
+        Ok(Worker { child: Some(child), stdin: Box::new(stdin), stdout: BufReader::new(stdout) })
     }
 }
 
+type Slot = Arc<tokio::sync::Mutex<Option<Worker>>>;
+
 /// The helpers and the line of requests waiting for one.
 pub struct Pool {
-    slots: Vec<tokio::sync::Mutex<Option<Worker>>>,
-    waiting: tokio::sync::Semaphore,
+    slots: Vec<Slot>,
+    waiting: Arc<tokio::sync::Semaphore>,
     next: AtomicUsize,
+    /// Starts a helper when a slot has none (a test swaps it).
+    start: fn() -> std::io::Result<Worker>,
 }
 
 impl Pool {
     pub fn new() -> Self {
+        Self::with_slots((0..WORKERS).map(|_| None).collect(), Worker::spawn)
+    }
+
+    fn with_slots(workers: Vec<Option<Worker>>, start: fn() -> std::io::Result<Worker>) -> Self {
         Pool {
-            slots: (0..WORKERS).map(|_| tokio::sync::Mutex::new(None)).collect(),
-            waiting: tokio::sync::Semaphore::new(QUEUE_MAX),
+            slots: workers.into_iter().map(|w| Arc::new(tokio::sync::Mutex::new(w))).collect(),
+            waiting: Arc::new(tokio::sync::Semaphore::new(QUEUE_MAX)),
             next: AtomicUsize::new(0),
+            start,
         }
     }
 
     /// Ask a helper for `req`'s picture. A helper that doesn't answer in [`DEADLINE`]
     /// is killed, the next request starts a new one, and this one is a timeout.
+    ///
+    /// The exchange runs in its own task, not in the caller's future: a page that
+    /// scrolls on aborts its request, which drops the HTTP handler, and a helper
+    /// dropped mid-exchange would keep its answer unread in the pipe and give the
+    /// next request the previous one's picture. The task finishes the exchange and
+    /// frees the slot whether or not anyone is still waiting for the result.
     pub async fn render(&self, req: &IconRequest) -> Result<Vec<u8>, IconError> {
-        let _place = self.waiting.try_acquire().map_err(|_| IconError::Busy)?;
-        let mut slot = None;
-        for s in &self.slots {
-            if let Ok(g) = s.try_lock() {
-                slot = Some(g);
-                break;
+        let place = self.waiting.clone().try_acquire_owned().map_err(|_| IconError::Busy)?;
+        let free = self.slots.iter().find_map(|s| s.clone().try_lock_owned().ok());
+        let queued = self.slots[self.next.fetch_add(1, Ordering::Relaxed) % self.slots.len()].clone();
+        let (req, start) = (req.clone(), self.start);
+        tokio::spawn(async move {
+            let _place = place;
+            let mut slot = match free {
+                Some(g) => g,
+                None => queued.lock_owned().await,
+            };
+            if slot.is_none() {
+                *slot = Some(start().map_err(|e| {
+                    tracing::warn!(error = %e, "file icons: could not start the helper");
+                    IconError::Failed
+                })?);
             }
-        }
-        let mut slot = match slot {
-            Some(g) => g,
-            None => self.slots[self.next.fetch_add(1, Ordering::Relaxed) % self.slots.len()].lock().await,
-        };
-        if slot.is_none() {
-            *slot = Some(Worker::spawn().map_err(|e| {
-                tracing::warn!(error = %e, "file icons: could not start the helper");
-                IconError::Failed
-            })?);
-        }
-        let worker = slot.as_mut().expect("just started");
-        match exchange_within(&mut worker.stdin, &mut worker.stdout, req, DEADLINE).await {
-            Ok(png) => Ok(png),
-            Err(e @ IconError::NoIcon) => Err(e),
-            Err(e) => {
-                // Timed out or broke mid-answer: its pipes may hold half an answer, so it goes.
-                if let Some(mut dead) = slot.take() {
-                    let _ = dead.child.start_kill();
-                    tokio::spawn(async move {
-                        let _ = dead.child.wait().await;
-                    });
+            let worker = slot.as_mut().expect("just started");
+            match exchange_within(&mut worker.stdin, &mut worker.stdout, &req, DEADLINE).await {
+                Ok(png) => Ok(png),
+                Err(e @ IconError::NoIcon) => Err(e),
+                Err(e) => {
+                    // Timed out or broke mid-answer: its pipes may hold half an answer, so it goes.
+                    if let Some(mut dead) = slot.take() {
+                        if let Some(mut child) = dead.child.take() {
+                            let _ = child.start_kill();
+                            tokio::spawn(async move {
+                                let _ = child.wait().await;
+                            });
+                        }
+                    }
+                    if e == IconError::Timeout {
+                        tracing::warn!(kind = req.kind.as_str(), ext = %req.ext, "file icons: the helper did not answer in time and was stopped");
+                    }
+                    Err(e)
                 }
-                if e == IconError::Timeout {
-                    tracing::warn!(kind = req.kind.as_str(), ext = %req.ext, "file icons: the helper did not answer in time and was stopped");
-                }
-                Err(e)
             }
-        }
+        })
+        .await
+        .unwrap_or(Err(IconError::Failed))
     }
 }
 
@@ -271,5 +296,61 @@ mod tests {
         .await;
         assert_eq!(got, Err(IconError::Timeout));
         assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    /// A stand-in helper: answers each request after `delay_ms[n]` with the PNG magic and the request's ext.
+    fn fake_worker(delay_ms: Vec<u64>) -> Worker {
+        let (srv_w, helper_r) = duplex(4096);
+        let (helper_w, srv_r) = duplex(4096);
+        tokio::spawn(async move {
+            let mut helper_r = BufReader::new(helper_r);
+            let mut helper_w = helper_w;
+            for delay in delay_ms {
+                let mut line = String::new();
+                if helper_r.read_line(&mut line).await.unwrap_or(0) == 0 {
+                    return;
+                }
+                let ext = serde_json::from_str::<serde_json::Value>(&line).unwrap()["ext"].as_str().unwrap().to_string();
+                tokio::time::sleep(Duration::from_millis(delay)).await;
+                let body = [b"\x89PNG".as_slice(), ext.as_bytes()].concat();
+                helper_w.write_all(format!("{{\"ok\":true,\"len\":{}}}\n", body.len()).as_bytes()).await.unwrap();
+                helper_w.write_all(&body).await.unwrap();
+            }
+        });
+        let reader: Box<dyn AsyncRead + Send + Unpin> = Box::new(srv_r);
+        Worker { child: None, stdin: Box::new(srv_w), stdout: BufReader::new(reader) }
+    }
+
+    fn no_helper() -> std::io::Result<Worker> {
+        Err(std::io::Error::other("tests start no process"))
+    }
+
+    fn req_ext(ext: &str) -> IconRequest {
+        IconRequest { kind: Kind::File, ext: ext.into(), px: 16 }
+    }
+
+    #[tokio::test]
+    async fn a_request_dropped_mid_exchange_does_not_give_the_next_one_its_picture() {
+        let pool = Arc::new(Pool::with_slots(vec![Some(fake_worker(vec![150, 0]))], no_helper));
+        // The page scrolled on: the handler future is dropped while the helper is still working.
+        let first = tokio::spawn({
+            let pool = pool.clone();
+            async move { pool.render(&req_ext("aa")).await }
+        });
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        first.abort();
+        let second = pool.render(&req_ext("bb")).await.unwrap();
+        assert_eq!(second, b"\x89PNGbb".to_vec(), "the second request gets its own answer");
+    }
+
+    #[tokio::test]
+    async fn requests_beyond_the_queue_are_refused_and_a_finished_one_gives_its_place_back() {
+        let pool = Pool::with_slots(vec![Some(fake_worker(vec![0, 0]))], no_helper);
+        assert_eq!(pool.render(&req_ext("aa")).await.unwrap(), b"\x89PNGaa".to_vec());
+        assert_eq!(pool.waiting.available_permits(), QUEUE_MAX);
+        assert_eq!(pool.render(&req_ext("bb")).await.unwrap(), b"\x89PNGbb".to_vec());
+        let held = pool.waiting.clone().try_acquire_many_owned(QUEUE_MAX as u32).unwrap();
+        assert_eq!(pool.render(&req_ext("cc")).await, Err(IconError::Busy));
+        drop(held);
     }
 }

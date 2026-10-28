@@ -152,6 +152,8 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
      "test: the unix-only orphan-cleanup test's stand-in CLIs"),
     ("crates/common/src/agent_roots.rs", "\"sh\"", 1,
      "test: the unix-only leaderless-group cleanup test's stand-in CLI"),
+    ("crates/srv/src/backend/file_icons/pool.rs", "exe", 1,
+     "no-window: calls no_window()/creation_flags in this file"),
     ("crates/srv/src/backend/process_tracker/roots_file.rs", "\"sleep\"", 1,
      "test: the unix-only prune test's stand-in CLI"),
     ("crates/common/src/runtime_mode.rs", "\"git\"", 1,
