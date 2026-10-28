@@ -8,6 +8,7 @@
  * writer, and with none the text goes into the stored draft, which the footer reads when it mounts.
  */
 
+import { onCleanup } from "solid-js";
 import { getComposerDraft, setComposerDraft } from "./reload-persistence";
 
 /** What is already in the composer, then the restored text after a blank line. */
@@ -23,6 +24,26 @@ export function registerComposerRestore(blockId: string, write: (restored: strin
     return () => {
         if (writers.get(blockId) === write) writers.delete(blockId);
     };
+}
+
+/**
+ * For the composer's footer: accept restored text while it is mounted. `textarea` is read when text
+ * arrives, and `set` writes the composer the way the footer's own programmatic edits do.
+ */
+export function useComposerRestore(
+    blockId: string | undefined,
+    textarea: () => HTMLTextAreaElement | undefined,
+    set: (text: string) => void
+): void {
+    if (!blockId) return;
+    onCleanup(
+        registerComposerRestore(blockId, (restored) => {
+            const el = textarea();
+            if (!el) return;
+            set(joinDraft(el.value, restored));
+            el.focus();
+        })
+    );
 }
 
 export function restoreToComposer(blockId: string, restored: string): void {
