@@ -44,6 +44,7 @@ pub mod bundle_versions;
 pub mod migrations;
 pub mod muxbus;
 pub mod registry_mirror;
+pub mod skill_reach;
 pub mod skills;
 pub mod snapshot;
 pub mod store;

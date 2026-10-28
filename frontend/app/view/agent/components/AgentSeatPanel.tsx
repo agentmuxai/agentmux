@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * AgentSeatPanel — the "Seat" tab inside AgentStashModal, also opened from
- * My Agents' row menu ("Seat…"): the agent's role, qualifier, lead and area,
+ * AgentSeatPanel — the "Seat…" modal, opened from My Agents' row menu and
+ * the agent pane's right-click menu: the agent's role, qualifier, lead and area,
  * set only by the operator through `agent.setSeat`
  * (docs/specs/SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md §3). Also hosts
  * "Import roster…" (SeatRosterImport).

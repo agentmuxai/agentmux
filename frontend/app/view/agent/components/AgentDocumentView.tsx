@@ -272,7 +272,7 @@ export interface AgentAuthPanelProps {
  * transcript, which the bottom-docked AgentQuestionPanel/AgentDecisionPanel
  * pattern deliberately avoids — chosen over the modal for consistency).
  *
- * Renders the same InAppLoginPanel the Connectors/Stash surfaces use (Fix 3a,
+ * Renders the same InAppLoginPanel the Connectors surface uses (Fix 3a,
  * PR #2423) instead of a hand-rolled copy — one fewer auth UI in the
  * codebase — just without the Modal wrapper those surfaces use.
  */
@@ -283,7 +283,7 @@ export function AgentAuthPanel(props: AgentAuthPanelProps): JSX.Element {
                 {(url) => (
                     // AgentQuestionPanel-style card chrome (border/bg/shadow) —
                     // InAppLoginPanel itself ships with none, since its other
-                    // caller (ClaudeLoginPanel, in Connectors and the Stash)
+                    // caller (ClaudeLoginPanel, in Connectors)
                     // already provides its own box. This is the one context
                     // that renders it bare in normal document flow, so it
                     // needs its own card here to read as a distinct prompt

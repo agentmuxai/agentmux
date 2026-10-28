@@ -137,6 +137,21 @@ export class SkillCatalogModel {
         }
     }
 
+    /** Who a skill reaches beyond its binds: every agent, and/or every agent created from now on. */
+    async setReach(skillId: string, allAgents: boolean, newAgents: boolean): Promise<void> {
+        this.setError(null);
+        try {
+            await RpcApi.SkillCatalogSetReachCommand(TabRpcClient, {
+                skill_id: skillId,
+                all_agents: allAgents,
+                new_agents: newAgents,
+            });
+            await this.refresh();
+        } catch (e) {
+            this.setError(`Couldn't change who gets this skill: ${(e as Error).message ?? e}`);
+        }
+    }
+
     async unbindFromAgent(skillId: string, agentId: string): Promise<void> {
         this.setError(null);
         try {

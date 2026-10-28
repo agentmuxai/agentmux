@@ -8,7 +8,7 @@
  *
  * Extracted from the launch modal's sign-in panel (spec §3.3 surface 1;
  * both since removed) so the agent pane (§3.3 surface 2) and the
- * Connectors/Stash surface (§3.3 surface 3) share one UI instead of
+ * Connectors surface (§3.3 surface 3) share one UI instead of
  * hand-rolled copies. Callers pass `authUrl` directly.
  *
  * See docs/specs/SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md.

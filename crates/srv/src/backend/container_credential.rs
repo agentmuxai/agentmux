@@ -116,6 +116,10 @@ pub fn container_route_allowed(path: &str) -> bool {
         // `agentmux-bashwrap`'s live output into the grant's own pane, as a typed `tool_chunk` only
         // (`server::container_tool_chunk`); the generic `/agentmux/wps/publish` relay stays refused.
         "/api/v1/agent/tool-chunk",
+        // `RegisterDevServer`: the tool exists for container agents' dev servers. The handler takes
+        // the caller's own pane from the token and resolves the container's address itself, so a
+        // container can register a route to itself only (`app_api::dev_server`).
+        "/api/v1/agent/dev_server/register",
     ];
     if EXACT.contains(&path) {
         return true;
@@ -138,7 +142,7 @@ pub fn container_route_allowed(path: &str) -> bool {
 /// container token that carries no agent identity rather than falling back to
 /// an agent named in the request body.
 pub fn route_needs_identity(path: &str) -> bool {
-    path.starts_with("/api/v1/agent/memory/")
+    path.starts_with("/api/v1/agent/memory/") || path == "/api/v1/agent/dev_server/register"
 }
 
 /// A container turn's `docker exec` env: the container denylist applied, and
@@ -223,6 +227,7 @@ mod tests {
             "/api/v1/agent/pane/close",
             "/api/v1/agent/shutdown/req-12",
             "/api/v1/agent/tool-chunk",
+            "/api/v1/agent/dev_server/register",
         ] {
             assert!(container_route_allowed(ok), "{ok} should be allowed");
         }
@@ -251,9 +256,18 @@ mod tests {
             "/agentmux/agents/self/keys",
             // MCP health beats belong to persistent controllers; a container's turns are per-exec.
             "/api/v1/agent/self/mcp-beat",
+            "/api/v1/agent/dev_server/register/",
+            "/api/v1/agent/dev_server",
         ] {
             assert!(!container_route_allowed(denied), "{denied} should be refused");
         }
+    }
+
+    #[test]
+    fn registering_a_dev_server_needs_the_agents_identity() {
+        // Without one the route would fall back to an agent named in the body.
+        assert!(route_needs_identity("/api/v1/agent/dev_server/register"));
+        assert!(!route_needs_identity("/api/v1/agent/dev_server/registers"));
     }
 
     #[test]

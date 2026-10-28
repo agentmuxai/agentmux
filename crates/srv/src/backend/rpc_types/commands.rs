@@ -762,6 +762,8 @@ pub const COMMAND_SKILL_CATALOG_BIND: &str = "skill.catalog.bind";
 // See docs/reports/REPORT_ARMORY_ARCHITECTURE_AND_NAMING_REVIEW_2026_07_23.md §2.2.
 pub const COMMAND_SKILL_CATALOG_LIST_FOR_AGENT: &str = "skill.catalog.list_for_agent";
 pub const COMMAND_SKILL_CATALOG_UNBIND: &str = "skill.catalog.unbind";
+pub const COMMAND_SKILL_CATALOG_SET_REACH: &str = "skill.catalog.set_reach";
+pub const COMMAND_SKILL_CATALOG_BIND_ALL: &str = "skill.catalog.bind_all";
 
 // Bundle-scoped siblings of the three above (composable model v2,
 // docs/specs/SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md, GH issue #2024 item

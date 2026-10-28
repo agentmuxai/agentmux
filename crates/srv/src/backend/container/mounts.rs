@@ -49,6 +49,11 @@ impl ContainerMountSpec {
 }
 
 impl ContainerManager {
+    /// The daemon connection, for services that sit beside the container manager (the dev relay).
+    pub(crate) fn docker(&self) -> &bollard::Docker {
+        &self.inner.docker
+    }
+
     /// Hands the folders above the memory mount to the user the container runs turns as.
     /// Docker creates them as root inside the per-agent volume, and Claude could not then
     /// write its session files into `projects/<workspace>/`. Best-effort: a failure, or a

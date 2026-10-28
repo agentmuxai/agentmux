@@ -13,9 +13,6 @@ import { closeTab, openNewTab } from "./widget-shots.mjs";
 
 export const setup = agentSetup;
 
-/** The Stash's tabs, in order (frontend/app/view/agent/components/AgentStashModal.tsx). */
-export const STASH_TABS = ["Accounts", "Personal Memory", "MCP Servers", "Skills", "Bundles", "Registration", "Devices"];
-
 /** Types `text` a character at a time, as a person would, into the focused field. */
 async function typeSlowly(session, text, msPerChar = 28) {
     for (const ch of text) {
@@ -69,22 +66,6 @@ export const recordings = [
             await session.pressKey("Enter");
             await waitFor(session, `!!document.querySelector(${JSON.stringify(pane)})?.innerText.includes("To show the total in the header")`, "the reply to stream", 30000);
             await session.wait(2500);
-        },
-    }),
-    agentClip({
-        id: "stash-tour",
-        title: "The Stash",
-        description: "Opening an agent's Stash from the backpack in its header, and going through its tabs.",
-        run: async (session, cursor, pane) => {
-            await cursor.clickSelector(`${pane} [title="Stash"]`);
-            await waitFor(session, `!!document.querySelector(".agent-stash-modal-panel")`, "the Stash");
-            await session.wait(1400);
-            for (const label of STASH_TABS.slice(1)) {
-                await cursor.clickSelector(`${pane} .agent-stash-modal-tabs button`, label);
-                await session.wait(1300);
-            }
-            await cursor.clickSelector(`${pane} .agent-stash-modal-tabs button`, STASH_TABS[0]);
-            await session.wait(1000);
         },
     }),
 ];
