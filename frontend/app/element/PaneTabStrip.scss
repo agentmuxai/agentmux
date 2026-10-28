@@ -140,7 +140,8 @@
 
     // Edge fades while the tabs overflow (createScrollEdges, PaneTabStrip.tsx).
     @include mixins.scroll-edge-fade(28px);
-    // The selected tab sits flush at the left edge (strip-reveal.ts `alignStart`): no left fade over it.
+    // The selected tab sits flush at the left edge (strip-reveal.ts `alignStart`), or inside the fade where
+    // the end of the strip stops it short of flush: no left fade over it.
     &.has-more-left.pane-tab-strip--flush-left {
         mask-image: none;
     }

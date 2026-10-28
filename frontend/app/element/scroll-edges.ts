@@ -13,12 +13,14 @@
  * forces it on every frame of a window drag. Call during component setup.
  *
  * With `flushItem` (the selected tab), `flushLeft` says whether that item's left
- * edge sits at the box's left edge while content lies beyond it: the strip drops
+ * edge sits at the box's left edge, or inside the left fade where a strip scrolled
+ * to its end cannot bring it further, while content lies beyond it: the strip drops
  * its left fade there, so the item is not dimmed. `remeasure` asks for a measure
  * when the item changes without a scroll.
  */
 
 import { createSignal, onCleanup, onMount, type Accessor } from "solid-js";
+import { STRIP_EDGE_FADE_PX } from "./strip-reveal";
 
 export function createScrollEdges(
     el: () => HTMLElement | undefined,
@@ -40,8 +42,15 @@ export function createScrollEdges(
             setMoreLeft(box.scrollLeft > 1);
             setMoreRight(box.scrollLeft + box.clientWidth < box.scrollWidth - 1);
             const item = box.scrollLeft > 1 ? flushItem?.() : undefined;
-            // Rects are in viewport pixels, so a zoomed strip tolerates a little more than a pixel.
-            setFlushLeft(!!item && Math.abs(item.getBoundingClientRect().left - box.getBoundingClientRect().left) <= 1.5);
+            let atLeft = false;
+            if (item) {
+                // Rects are in viewport pixels, scrollLeft and the fade in the box's own: divide by the zoom.
+                const boxRect = box.getBoundingClientRect();
+                const zoom = box.offsetWidth > 0 ? boxRect.width / box.offsetWidth : 1;
+                const offset = (item.getBoundingClientRect().left - boxRect.left) / zoom;
+                atLeft = offset >= -1.5 && offset < STRIP_EDGE_FADE_PX;
+            }
+            setFlushLeft(atLeft);
         };
         let frame: number | undefined;
         const schedule = () => {

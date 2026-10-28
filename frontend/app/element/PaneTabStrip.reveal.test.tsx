@@ -365,6 +365,9 @@ describe.each<Kind>(["pane", "doc"])("the %s tab strip reveals its selected tab"
         userScroll(m, kind, 60);
         expect(s.value).toBe(s.flush(10) + 60);
         expect(s.el.classList.contains("pane-tab-strip--flush-left")).toBe(false);
+        // A little short of the edge is still inside the fade: it stays off the selected tab.
+        userScroll(m, kind, -70); // 10px short of the edge
+        expect(s.el.classList.contains("pane-tab-strip--flush-left")).toBe(true);
         // Selecting another tab that is already flush keeps the fade off, with no scroll to say so.
         m.setActive[kind]("t11");
         flush();
@@ -379,6 +382,22 @@ describe.each<Kind>(["pane", "doc"])("the %s tab strip reveals its selected tab"
         settle(m);
         expect(s.el.classList.contains("has-more-left")).toBe(false);
         expect(s.el.classList.contains("pane-tab-strip--flush-left")).toBe(false);
+    });
+
+    it("a selection the end of the strip stops short of the edge keeps the left fade off it", () => {
+        const m = mountPane({ active: "t0" });
+        const s = m.strips[kind];
+        // 250px of strip: the penultimate tab cannot reach the edge (max 1790, the tab at 1800) and sits 10px in.
+        m.geo[kind].client = 250;
+        resizeAll();
+        flush();
+        m.setActive[kind]("t18");
+        flush();
+        s.finish();
+        settle(m);
+        expect(s.value).toBe(s.max);
+        expect(s.rect(s.tab("t18")).left).toBe(10);
+        expect(s.el.classList.contains("pane-tab-strip--flush-left")).toBe(true);
     });
 
     it("selecting the last tabs clamps at the end, so they stay whole and the add button shows", () => {
