@@ -171,7 +171,7 @@ async fn spawn_with(
         Some(n) => n.to_string(),
         None => next_worker_name(&state.mstore, &leader.def.name),
     };
-    let (worker, opened) = launch(state, &leader, &name, &tab_id, &runtime, &account).await?;
+    let (worker, opened) = launch(state, &leader, &name, &tab_id, &runtime, &account, None).await?;
     tracing::info!(
         leader = %leader.def.name,
         worker = %worker.name,
@@ -209,6 +209,9 @@ async fn launch(
     tab_id: &str,
     runtime: &WorkerRuntime,
     account: &WorkerAccount,
+    // The stand-in key a batch holds this worker's room under: it becomes the worker's own as soon as
+    // the worker exists, so its start is the one that room is for.
+    reserved: Option<&str>,
 ) -> Result<(AgentDefinition, AgentOpenResult), SpawnError> {
     let worker = crate::server::agent_handlers::copy_definition(
         &state.mstore,
@@ -223,6 +226,9 @@ async fn launch(
         refuse(status, e)
     })?;
     state.broker.publish_event::<crate::backend::mps_events::AgentsChanged>(&(), vec![], 0);
+    if let Some(stand_in) = reserved {
+        crate::server::agent_lifecycle::rekey_reservation(state, stand_in, &worker.id);
+    }
     let marked = state
         .mstore
         .agent_content_set(&crate::backend::storage::store::AgentContent {
@@ -246,6 +252,7 @@ async fn launch(
         Ok(opened) => Ok((worker, opened)),
         Err(e) => {
             discard_worker(state, tab_id, &worker.id).await;
+            crate::server::agent_lifecycle::release_start(state, &worker.id);
             Err(refuse(StatusCode::INTERNAL_SERVER_ERROR, format!("the worker couldn't be opened, and was removed: {e}")))
         }
     }

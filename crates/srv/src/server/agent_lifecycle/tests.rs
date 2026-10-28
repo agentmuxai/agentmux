@@ -337,6 +337,21 @@ async fn a_reserved_agent_starts_on_its_reservation_and_a_running_one_needs_no_r
     blockcontroller::delete_controller(&running);
 }
 
+/// A batch that makes its agents as it goes holds their room under stand-ins; once an agent exists the
+/// room is its own, so its start is not counted against the stand-ins still waiting.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_spawned_workers_start_uses_its_own_room_not_the_stand_ins() {
+    let state = test_state();
+    set_limits(&state, 2);
+    admit_batch_with(&state, &wanted(&["stand-in-0", "stand-in-1"]), true, || None).await.expect("two fit");
+    assert!(admit_start_without_eviction(&state, "worker-0").await.is_err(), "before the swap the stand-ins fill the room");
+    rekey_reservation(&state, "stand-in-0", "worker-0");
+    admit_start_without_eviction(&state, "worker-0").await.expect("its room is its own now");
+    rekey_reservation(&state, "stand-in-1", "worker-1");
+    admit_start_without_eviction(&state, "worker-1").await.expect("and so is the second's");
+    release_batch(&state, &wanted(&["stand-in-0", "stand-in-1", "worker-0", "worker-1"]));
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_batch_is_refused_whole_over_the_commit_limit_and_off_it_is_admitted() {
     let state = test_state();

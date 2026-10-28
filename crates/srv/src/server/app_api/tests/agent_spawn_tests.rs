@@ -272,7 +272,7 @@ async fn a_worker_that_does_not_open_leaves_no_definition_behind() {
     let own = account_of(&leader_account(&def));
     let leader = Leader { block_id, def };
     let before = definitions(&state);
-    let err = launch(&state, &leader, "Lead 4", &tab, &WorkerRuntime::default(), &own).await.unwrap_err();
+    let err = launch(&state, &leader, "Lead 4", &tab, &WorkerRuntime::default(), &own, None).await.unwrap_err();
     assert_eq!(err.status, StatusCode::INTERNAL_SERVER_ERROR);
     assert!(err.message.starts_with("the worker couldn't be opened, and was removed"), "{}", err.message);
     assert_eq!(definitions(&state), before);

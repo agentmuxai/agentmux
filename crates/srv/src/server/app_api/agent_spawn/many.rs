@@ -154,12 +154,13 @@ pub(super) async fn spawn_many(
     let mut launched: Vec<(AgentDefinition, AgentOpenResult)> = Vec::with_capacity(n);
     for (i, p) in planned.iter().enumerate() {
         let name = p.name.clone().unwrap_or_else(|| next_worker_name(&state.mstore, &leader.def.name));
-        match launch(state, &leader, &name, &tab_id, &p.runtime, &p.account).await {
+        match launch(state, &leader, &name, &tab_id, &p.runtime, &p.account, Some(wanted[i].key.as_str())).await {
             Ok(done) => launched.push(done),
             Err(e) => {
                 // `launch` removed the one that failed; take the others back too.
                 for (worker, _) in launched.iter().rev() {
                     discard_worker(state, &tab_id, &worker.id).await;
+                    crate::server::agent_lifecycle::release_start(state, &worker.id);
                 }
                 crate::server::agent_lifecycle::release_batch(state, &wanted);
                 let removed = launched.len();

@@ -313,6 +313,16 @@ pub(crate) fn release_start(state: &AppState, agent_id: &str) {
     pending().lock().unwrap_or_else(|e| e.into_inner()).remove(&pending_key(state, agent_id));
 }
 
+/// The room [`admit_batch`] claimed under the stand-in key `from` is now the agent `to`'s, in one step:
+/// a batch that makes its agents as it goes (spawn) keeps its room under stand-ins until each exists,
+/// and the agent's own start must find its room reserved, not count it against itself.
+pub(crate) fn rekey_reservation(state: &AppState, from: &str, to: &str) {
+    let mut pending = pending().lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(reservation) = pending.remove(&pending_key(state, from)) {
+        pending.insert(pending_key(state, to), reservation);
+    }
+}
+
 /// One admission at a time: the count, the stop that makes room and the claim of the room are one step.
 fn admission() -> &'static tokio::sync::Mutex<()> {
     static LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
