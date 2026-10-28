@@ -182,8 +182,8 @@ pub(super) async fn handle_fleet_bulk_stop(
         return (StatusCode::OK, Json(out)).into_response();
     }
     out["status"] = json!("pending_user_override");
-    out["wait_at_least_ms"] = json!(crate::sagas::pending_shutdown::OVERRIDE_WINDOW.as_millis() as u64);
     out["deadline_ms"] = json!(pending.iter().map(|p| p.deadline_ms).max());
+    out["wait_at_least_ms"] = json!(crate::sagas::pending_shutdown::wait_at_least_ms(pending.iter().map(|p| p.deadline_ms).max().unwrap_or(0)));
     out["pending"] = json!(pending
         .iter()
         .map(|p| json!({ "block_id": p.block_id, "request_id": p.request_id, "effect": p.effect }))
@@ -310,7 +310,7 @@ fn open_forwarded_window(state: &AppState, block_id: &str, signal: Option<String
         true,
         None,
         &v.request_id,
-        Some(&format!("{} (forwarded from another channel)", crate::sagas::pending_shutdown::audit_note(&v, by, "FleetBulkStop"))),
+        Some(&format!("{} (forwarded from another channel)", crate::sagas::pending_shutdown::audit_note(state, &v, by, "FleetBulkStop"))),
     );
     let mut pending = serde_json::to_value(&v).unwrap_or_default();
     pending["joined"] = json!(v.joined);
@@ -321,7 +321,7 @@ fn open_forwarded_window(state: &AppState, block_id: &str, signal: Option<String
 /// target. See `fleet_bulk_stop_impl`'s doc comment for the caller side. The
 /// request names its asker itself and cannot be checked, so it goes through this
 /// instance's own override window (banner, chime, Keep running) like
-/// `/agentmux/agent/stop-pending`: the stop happens after 15 s unless the user
+/// `/agentmux/agent/stop-pending`: the stop happens after 30 s unless the user
 /// keeps the agent running.
 pub(super) async fn handle_agent_stop_forward(
     State(state): State<AppState>,

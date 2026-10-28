@@ -66,6 +66,7 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     instance::register(engine, state);
     session::register(engine, state);
     seat::register(engine, state);
+    crate::sagas::sensitive_window::register(engine, state);
     crate::server::pane_commands::register(engine, state);
     bundle::register(engine, state);
 }

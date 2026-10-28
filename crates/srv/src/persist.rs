@@ -27,6 +27,11 @@ use crate::backend::obj::{Block, Tab, Window, Workspace};
 use crate::backend::storage::store::Store;
 use crate::state::{BlockRecord, State, TabRecord, WindowRecord, WorkspaceRecord};
 
+/// A block `Command::ParkBlock` left in no tab, which boot keeps (see `PARKED_META_KEY`).
+fn is_parked(block: &Block) -> bool {
+    crate::backend::obj::meta_get_bool(&block.meta, crate::persist_subscriber::parked::PARKED_META_KEY, false)
+}
+
 /// Phase E.2 / E.2b — load workspaces and their tabs from SQLite
 /// into the reducer state. Called once at srv startup before the
 /// IPC server starts accepting commands. Async because we're inside
@@ -198,6 +203,7 @@ pub async fn bootstrap_state_from_mstore(state: &Arc<Mutex<State>>, mstore: &Sto
             .values()
             .find(|t| t.block_ids.iter().any(|bid| bid == &block.oid))
             .map(|t| t.tab_id.clone())
+            .or_else(|| is_parked(block).then(String::new))
         else {
             tracing::warn!(
                 target: "srv-persist",
@@ -260,4 +266,39 @@ pub async fn bootstrap_state_from_mstore(state: &Arc<Mutex<State>>, mstore: &Sto
         state.blocks.len(),
         state.windows.len()
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn block(store: &Store, parent: &str, parked: bool) -> String {
+        let mut meta = crate::backend::obj::MetaMapType::new();
+        if parked {
+            meta.insert(crate::persist_subscriber::parked::PARKED_META_KEY.to_string(), serde_json::json!(true));
+        }
+        let mut b = Block { oid: uuid::Uuid::new_v4().to_string(), parentoref: parent.to_string(), meta, ..Default::default() };
+        store.insert(&mut b).unwrap();
+        b.oid
+    }
+
+    /// A parked block survives a restart in the reducer's state with no tab; a block that belongs to
+    /// no tab and is not marked is still dropped as the orphan it is.
+    #[tokio::test]
+    async fn boot_keeps_a_parked_block_and_still_drops_an_orphan() {
+        let store = Store::open_in_memory().unwrap();
+        let (shown, parked, orphan) = (block(&store, "tab:t1", false), block(&store, "", true), block(&store, "tab:gone", false));
+        let mut tab = Tab { oid: "t1".into(), name: "Tab".into(), blockids: vec![shown.clone()], ..Default::default() };
+        store.insert(&mut tab).unwrap();
+        let mut ws = Workspace { oid: "w1".into(), tabids: vec!["t1".into()], ..Default::default() };
+        store.insert(&mut ws).unwrap();
+
+        let state = Arc::new(Mutex::new(State::default()));
+        bootstrap_state_from_mstore(&state, &store).await;
+        let s = state.lock().await;
+        assert_eq!(s.blocks.get(&shown).map(|b| b.tab_id.as_str()), Some("t1"));
+        assert_eq!(s.blocks.get(&parked).map(|b| b.tab_id.as_str()), Some(""));
+        assert!(!s.blocks.contains_key(&orphan));
+        assert_eq!(s.tabs["t1"].block_ids, vec![shown]);
+    }
 }

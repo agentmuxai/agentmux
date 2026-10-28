@@ -35,6 +35,7 @@ mod container_tool_chunk;
 pub(crate) mod jekt_held;
 mod jekt_hold;
 mod availability_view;
+pub(crate) mod agent_runtime;
 mod jekt_cold;
 mod limit_probe;
 pub(crate) mod jekt_files;
@@ -62,6 +63,7 @@ mod work_media;
 mod work_tasks;
 mod work_delegate;
 mod work_act;
+mod sensitive_handlers;
 mod messaging_handlers;
 mod muxbus_handlers;
 mod muxspect_handlers;
@@ -108,6 +110,9 @@ mod sender_claims_tests;
 #[cfg(test)]
 #[path = "tests/peer_veto_tests.rs"]
 mod peer_veto_tests;
+#[cfg(test)]
+#[path = "tests/rpc_attribution_tests.rs"]
+mod rpc_attribution_tests;
 #[cfg(test)]
 mod rpc_schema_export;
 

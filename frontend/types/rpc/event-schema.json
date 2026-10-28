@@ -202,6 +202,16 @@
     }
   },
   {
+    "event": "agentruntime:changed:",
+    "payloadTs": {
+      "imports": [
+        "AgentRuntime"
+      ],
+      "name": "AgentRuntime"
+    },
+    "perId": true
+  },
+  {
     "event": "agents:changed",
     "payloadTs": {
       "imports": [],
@@ -702,6 +712,24 @@
     "payloadTs": {
       "imports": [],
       "name": "null"
+    }
+  },
+  {
+    "event": "sensitive:cleared",
+    "payloadTs": {
+      "imports": [
+        "SensitiveClearedEvent"
+      ],
+      "name": "SensitiveClearedEvent"
+    }
+  },
+  {
+    "event": "sensitive:pending",
+    "payloadTs": {
+      "imports": [
+        "SensitiveView"
+      ],
+      "name": "SensitiveView"
     }
   },
   {

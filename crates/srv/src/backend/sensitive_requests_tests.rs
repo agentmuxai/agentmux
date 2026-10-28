@@ -179,3 +179,30 @@ fn when_the_first_asker_withdraws_the_next_one_keeps_the_request() {
     assert!(reg.list("u1", false).is_empty() && reg.list("u2", false).len() == 1);
     assert_eq!(reg.cancel(&id, "u2", 3).unwrap().status, Status::Cancelled);
 }
+
+#[test]
+fn a_running_request_cannot_be_withdrawn_and_still_counts_as_open() {
+    let reg = Registry::new();
+    let id = upgrade(&reg, "u1", "1", 0).unwrap().id;
+    assert!(reg.start(&id).unwrap_err().contains("not approved"), "only an approved request starts");
+    reg.approve(&id, "super", 1).unwrap();
+    assert_eq!(reg.start(&id).unwrap().status, Status::Running);
+    assert!(reg.start(&id).is_err(), "it starts once");
+    assert!(reg.cancel(&id, "u1", 2).unwrap_err().contains("already under way"));
+    assert!(Status::Running.is_open());
+    assert!(upgrade(&reg, "u2", "1", 3).unwrap().joined, "asking for the same thing meanwhile joins it");
+    assert_eq!(reg.finish(&id, Status::Done, 4).unwrap().status, Status::Done);
+}
+
+#[test]
+fn a_request_withdrawn_or_vetoed_does_not_start() {
+    let reg = Registry::new();
+    let a = upgrade(&reg, "u1", "1", 0).unwrap().id;
+    reg.approve(&a, "super", 1).unwrap();
+    reg.cancel(&a, "u1", 2).unwrap();
+    assert!(reg.start(&a).unwrap_err().contains("cancelled"));
+    let b = upgrade(&reg, "u1", "2", 0).unwrap().id;
+    reg.approve(&b, "super", 1).unwrap();
+    reg.finish(&b, Status::Vetoed, 2).unwrap();
+    assert!(reg.start(&b).unwrap_err().contains("vetoed"));
+}

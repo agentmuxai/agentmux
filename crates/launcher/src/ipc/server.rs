@@ -1062,6 +1062,14 @@ async fn enforce_register_first(
             "MoveBlock is a srv-pipe command; sent to launcher pipe by mistake".to_string(),
             false,
         ),
+        Command::ParkBlock { .. } => (
+            "ParkBlock is a srv-pipe command; sent to launcher pipe by mistake".to_string(),
+            false,
+        ),
+        Command::AttachBlock { .. } => (
+            "AttachBlock is a srv-pipe command; sent to launcher pipe by mistake".to_string(),
+            false,
+        ),
         // Phase E.4 (Option A) — layout focused/magnified setters are srv-pipe.
         Command::SetFocusedNode { .. } => (
             "SetFocusedNode is a srv-pipe command; sent to launcher pipe by mistake".to_string(),

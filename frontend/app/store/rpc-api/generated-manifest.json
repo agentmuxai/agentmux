@@ -128,12 +128,29 @@
             "method": "AgentShutdownKeepCommand"
         },
         {
+            "command": "sensitive.decide",
+            "method": "SensitiveDecideCommand"
+        },
+        {
             "command": "agentstop",
             "method": "AgentStopCommand"
         },
         {
+            "command": "agent.open",
+            "method": "AgentOpenCommand"
+        },
+        {
+            "command": "agent.start",
+            "method": "AgentStartCommand"
+        },
+        {
             "command": "agent.tracked-blocks",
             "method": "AgentTrackedBlocksCommand",
+            "dataType": "Record<string, never>"
+        },
+        {
+            "command": "agentruntime.list",
+            "method": "AgentRuntimeListCommand",
             "dataType": "Record<string, never>"
         },
         {

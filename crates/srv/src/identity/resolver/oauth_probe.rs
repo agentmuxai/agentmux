@@ -194,6 +194,21 @@ pub fn probe_oauth_status(
             .map(|s| !s.is_empty())
             .unwrap_or(false);
 
+    // A Claude file that holds neither an access nor a refresh token is signed out, whatever else
+    // it says: a refresh that two CLIs raced for can leave exactly this (#6080). Without this it
+    // read as `Valid` (no expiry to parse), so nothing showed until the next spawn failed.
+    if provider == "claude" {
+        let has_access = json
+            .get("claudeAiOauth")
+            .and_then(|o| o.get("accessToken"))
+            .and_then(|v| v.as_str())
+            .map(|s| !s.is_empty())
+            .unwrap_or(false);
+        if !has_access && !has_refresh {
+            return Some(OAuthProbeStatus::NeedsReauth);
+        }
+    }
+
     match expires_at_ms {
         Some(exp) if exp <= now_ms => {
             // Past expiry. If a refresh token is present, the next
@@ -381,5 +396,30 @@ mod tests {
         .unwrap();
         let r = probe_oauth_status("openclaw", tmp.path().to_str().unwrap(), 0);
         assert_eq!(r, Some(OAuthProbeStatus::Valid));
+    }
+    /// A refresh that two CLIs raced for can leave a file with no tokens in it (#6080). It has no
+    /// expiry to parse, which used to read as `Valid` and showed nothing until a spawn failed.
+    #[test]
+    fn probe_oauth_status_claude_file_with_no_tokens_is_needs_reauth() {
+        for body in [r#"{}"#, r#"{"claudeAiOauth":{}}"#, r#"{"claudeAiOauth":{"accessToken":"","refreshToken":""}}"#] {
+            let tmp = tempfile::tempdir().unwrap();
+            std::fs::write(tmp.path().join(".credentials.json"), body).unwrap();
+            let r = probe_oauth_status("claude", tmp.path().to_str().unwrap(), 0);
+            assert_eq!(r, Some(OAuthProbeStatus::NeedsReauth), "{body}");
+        }
+    }
+
+    /// Only Claude's file is held to that: a refresh token alone (the access token lapsed away) is
+    /// still a sign-in the CLI can renew.
+    #[test]
+    fn probe_oauth_status_claude_with_only_a_refresh_token_is_not_signed_out() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join(".credentials.json"),
+            r#"{"claudeAiOauth":{"refreshToken":"rt","expiresAt":1}}"#,
+        )
+        .unwrap();
+        let r = probe_oauth_status("claude", tmp.path().to_str().unwrap(), 1_700_000_000_000);
+        assert_eq!(r, Some(OAuthProbeStatus::Expired));
     }
 }

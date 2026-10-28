@@ -90,7 +90,10 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // `Content-Range` carries a ranged stream-local-file response's
         // total size, which inline video/audio read before play (Codex P2 on
         // #4073).
-        .expose_headers(vec!["X-ZoneFileInfo".parse().unwrap(), header::CONTENT_RANGE]);
+        // `X-ZoneFileOffset` says where that response's body starts in the
+        // file (later than asked once a terminal's output was trimmed);
+        // `fetchMuxFile` reads it to resume at the file's absolute end.
+        .expose_headers(vec!["X-ZoneFileInfo".parse().unwrap(), "X-ZoneFileOffset".parse().unwrap(), header::CONTENT_RANGE]);
 
     // The routes an LAN peer actually calls when forwarding a jekt or
     // looking up which agents this instance hosts
@@ -215,6 +218,9 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/agentmux/work/:id/hold", post(work_tasks::handle_work_hold))
         .route("/agentmux/work/:id/unhold", post(work_tasks::handle_work_unhold))
         .route("/agentmux/work/act", post(work_act::handle_work_act))
+        // A sensitive operation: the agent asks, the super agent decides, the person can veto
+        // (SPEC_SUPER_AGENT_2026_10_25.md).
+        .route("/api/v1/sensitive/:action", post(sensitive_handlers::handle_sensitive))
         // Presence claims and posts to a repository's coordination channel
         // (SPEC_AGENT_COORDINATION_CHANNEL_2026_10_15.md); reading is open.
         .route("/api/v1/work-claims", post(work_claims_handlers::handle_claim_work))
@@ -606,7 +612,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // body; this instance writes the header.
         .route("/agentmux/agent/broadcast", post(handle_agent_broadcast_forward))
         // The same forward, for an agent's FleetBulkStop: this instance's
-        // user gets the 15 s override window (SPEC_AGENT_SELF_QUIT §6.5).
+        // user gets the 30 s override window (SPEC_AGENT_SELF_QUIT §6.5).
         .route("/agentmux/agent/stop-pending", post(handle_agent_stop_pending_forward))
         .route("/api/messaging/status", get(messaging_handlers::handle_status))
         .route("/api/messaging/discord/send", post(messaging_handlers::handle_discord_send))

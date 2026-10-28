@@ -35,11 +35,13 @@ pub mod auth_patterns;
 pub mod auth_session;
 pub mod browser_credential_store;
 pub mod cleanup;
+pub mod credential_watch;
 pub mod key_validator;
 pub mod oauth_client;
 pub mod oauth_tokens;
 pub mod resolver;
 pub mod secret_store;
+pub mod token_warmup;
 
 // Legacy convenience re-export — newer call sites use
 // `resolver::inject_identity_env_with_broker` directly so the OAuth

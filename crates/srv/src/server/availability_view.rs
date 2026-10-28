@@ -71,9 +71,9 @@ pub(super) fn block_of_uid(handler: &crate::backend::reactive::handler::Reactive
     }
 }
 
-/// [`describe`] for the agent on `block_id`, or for a defined agent with no live pane (`None`).
-pub(super) fn describe_block(mstore: &Store, block_id: Option<&str>, cold_after_ms: Option<u64>, now_ms: u64) -> Value {
-    let av = match block_id {
+/// What can be said about the agent on `block_id` now, or about a defined agent with no live pane (`None`).
+pub(super) fn availability_of_block(mstore: &Store, block_id: Option<&str>, now_ms: u64) -> Availability {
+    match block_id {
         None => Availability::NotRunning { exited_with_error: false },
         Some(block_id) => match unavailable_of_block(mstore, None, block_id, now_ms)
             .or_else(|| super::limit_probe::unavailable_while_probing(mstore, block_id, now_ms))
@@ -88,7 +88,12 @@ pub(super) fn describe_block(mstore: &Store, block_id: Option<&str>, cold_after_
                 availability(state, None, quiet)
             }
         },
-    };
+    }
+}
+
+/// [`describe`] for the agent on `block_id`, or for a defined agent with no live pane (`None`).
+pub(super) fn describe_block(mstore: &Store, block_id: Option<&str>, cold_after_ms: Option<u64>, now_ms: u64) -> Value {
+    let av = availability_of_block(mstore, block_id, now_ms);
     describe(&av, &verdict(&av, false, true, cold_after_ms, || false))
 }
 

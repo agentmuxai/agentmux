@@ -56,11 +56,16 @@ pub mod delete_tab;
 pub mod delete_workspace;
 pub mod log;
 pub mod orphan_reaper;
+pub mod park_agents;
+#[cfg(test)]
+pub(crate) mod park_agents_tests;
 pub mod promote_block_to_tab;
 pub mod recovery;
 pub mod pending_shutdown;
 pub mod redock_floating_pane;
 pub mod self_quit;
+pub mod sensitive_fallback;
+pub mod sensitive_window;
 pub mod restore_torn_off_tab;
 pub mod tear_off_block;
 pub mod tear_off_tab;

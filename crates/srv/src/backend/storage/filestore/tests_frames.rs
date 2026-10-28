@@ -317,6 +317,8 @@ fn only_known_code_reads_the_part_table_directly() {
         "backend/storage/filestore/offset_ops.rs",
         "backend/storage/filestore/parts.rs",
         "backend/storage/filestore/replace.rs",
+        // Deletes the rows (and frames) wholly below a circular file's window.
+        "backend/storage/filestore/trim.rs",
         "backend/storage/migrations.rs",
         "backend/transcript/damage.rs",
         // Reads per-channel stores, which are never framed.
