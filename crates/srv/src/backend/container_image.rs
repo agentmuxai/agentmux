@@ -20,7 +20,7 @@ use crate::backend::rpc_types::ContainerImageAccess;
 pub const DEFAULT_AGENT_IMAGE: &str = "ghcr.io/agentmuxai/agent-base:latest";
 
 /// The base image's repository, without a tag.
-const AGENT_BASE_REPO: &str = "ghcr.io/agentmuxai/agent-base";
+pub(crate) const AGENT_BASE_REPO: &str = "ghcr.io/agentmuxai/agent-base";
 
 /// The base image for this AgentMux version. The release workflow tags the image with the
 /// release version, so the `agentmux-mcp` and `agentmux-bashwrap` inside match this srv.
@@ -89,6 +89,9 @@ pub enum PullFailure {
     Stalled,
     /// The download kept going but did not finish within [`PULL_TOTAL_SECS`].
     TooSlow,
+    /// The release's signed manifest is there and isn't trusted, so the image isn't pulled
+    /// (`agent_image_digest`).
+    Unverified,
     Other,
 }
 
@@ -174,6 +177,11 @@ pub fn pull_failure_message(image: &str, kind: PullFailure, detail: &str) -> Str
              Check your internet connection, then send your message again, \
              or create the agent to run on this computer (host).",
             PULL_TOTAL_SECS / 60
+        ),
+        PullFailure::Unverified => format!(
+            "Couldn't start the container for this agent: the signed manifest of this AgentMux release isn't trusted ({}), \
+             so {image} was not downloaded. Update AgentMux, or create the agent to run on this computer (host).",
+            truncate(detail.trim(), 200)
         ),
         PullFailure::Other => format!(
             "Couldn't start the container for this agent: couldn't download {image}: {}. \
