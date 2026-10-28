@@ -260,7 +260,7 @@ fn set(h: &Harness, id: &str, role: &str) {
     let change = SeatChange { agent_id: id.to_string(), seat: Some(SeatInput { role: role.to_string(), qualifier: Some("q".into()), lead: None, area: None, lane: None }) };
     let _seats = h.state.mstore.agent_seat_lock().unwrap();
     let defs = h.state.mstore.agent_def_list().unwrap();
-    let planned = plan_seats(&h.state.mstore, &defs, std::slice::from_ref(&change), "").unwrap();
+    let planned = plan_seats(&h.state.mstore, &defs, std::slice::from_ref(&change), "", &[]).unwrap();
     write_seats(&h.state.mstore, &planned, &SeatActor::Operator).unwrap();
 }
 
@@ -314,7 +314,7 @@ async fn two_super_agents_in_one_call_are_refused_and_nothing_is_written() {
     let changes = [SeatChange { agent_id: "a-1".into(), seat: input() }, SeatChange { agent_id: "a-2".into(), seat: input() }];
     let _seats = h.state.mstore.agent_seat_lock().unwrap();
     let defs = h.state.mstore.agent_def_list().unwrap();
-    let err = plan_seats(&h.state.mstore, &defs, &changes, "").unwrap_err();
+    let err = plan_seats(&h.state.mstore, &defs, &changes, "", &[]).unwrap_err();
     assert!(err.contains("only one agent can be the super agent"), "{err}");
     assert!(h.state.mstore.agent_seat_get("a-1").is_none() && h.state.mstore.agent_seat_get("a-2").is_none());
 }
