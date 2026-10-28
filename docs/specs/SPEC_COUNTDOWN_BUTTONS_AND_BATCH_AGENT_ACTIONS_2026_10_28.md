@@ -1,6 +1,6 @@
 # Spec: two buttons on every countdown, and agents stopped, opened and spawned as a batch
 
-**Status:** active: approved by the operator on 2026-10-28 ("yes, good for all 4"). S1 (part 1) is built in #5733; S2, S3 and S4 are not.
+**Status:** active: approved by the operator on 2026-10-28 ("yes, good for all 4"). S1 (part 1) is built in #5733 and S2 (part 2) in #5735; S3 and S4 are not.
 **Date:** 2026-10-28
 **Author:** Manoz@Area54 (agent-pane lifecycle), for AgentY, from the operator's own asks of 2026-10-28.
 **Verified against:** `origin/main` @ `bd2aa677f`, by reading code. Not checked: the macOS toast (the launcher has no macOS notify module yet; it is #1267) and a run of any of this.
@@ -56,6 +56,7 @@ A `Stop agents` call is one request over all its local targets.
 - **`pending_shutdown`:** a new action `CloseTabs { block_ids, detail }` (the model `ClosePane { block_ids }` already has: `covers` returns every block). One request id, one deadline, one `PendingView` with a `blocks` list (block id and agent name) and, when it settles, an `outcomes` list per block (`shut_down`, `kept_by_user`, `superseded`, `failed`). `Stop agents` answers with the same request id on each target's entry, so a caller that polls per target still works.
 - **Toast and banner:** one OS toast, "Closing 5 agents: A, B, C and 2 more in 30 s", with **Keep running** (all) and **Close now** (all). Each target's own pane keeps its banner and its **Keep running** keeps **that** agent only (`keep_one`: the block leaves `covers`; the others and the clock are untouched; when none is left the request is `kept_by_user`). This is the "keep just one". The toast does not list a button per agent.
 - **Audit:** one `FleetBulkStop` entry with the target list (`audit_note` names them), and the per-block outcomes added when it settles. Today there is one row per target.
+- **Built as:** `pending_shutdown/batch.rs` (`request_batch`, `Action::CloseTabs`). The toast is the request's own group (`batch:<id>`), not one agent's block, so its Keep running (all) and Close now (all) name the request. Only the blocks no request covers yet go in the new one: a block that already has a window joins it as before, and with fewer than two free blocks `Stop agents` opens the ordinary request per block. A batch is never upgraded by a pane close (a pane that holds an agent is refused). The MCP `Stop agents` reads each target's answer from its own entry in `outcomes`.
 - **Not changed:** a target on another AgentMux on this machine is asked there (`ask_other_instances`) and has that instance's own window and toast. A batch is per instance. A block that already has an active request joins it as today.
 
 ## 5. Part 3: spawn and open many

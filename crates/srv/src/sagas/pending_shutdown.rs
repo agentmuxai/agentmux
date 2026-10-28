@@ -18,6 +18,9 @@ use serde::Serialize;
 
 use crate::server::AppState;
 
+mod batch;
+pub use batch::{request_batch, BatchBlock, BlockOutcome};
+
 /// How long the user has to keep what another agent asked to stop or close: 30 s, the
 /// default for a human override.
 pub const OVERRIDE_WINDOW: std::time::Duration = std::time::Duration::from_secs(30);
@@ -40,6 +43,9 @@ pub enum Action {
     /// its turn to end: it is stopped from outside, mid-turn or not
     /// (docs/specs/SPEC_STOP_AN_AGENT_ONE_WAY_AND_SHUTDOWN_TOAST_2026_10_23.md §3.1).
     CloseTab { detail: String },
+    /// Another agent's `Stop agents` over several agents at once: one window for all of them, each
+    /// closed as a `CloseTab` is. The user can keep one of them (`batch::keep_member`) or all.
+    CloseTabs { block_ids: Vec<String>, detail: String },
     /// Another agent's `ClosePane block_id=`: close the whole pane.
     ClosePane { block_ids: Vec<String> },
     /// Stop the controller and keep the block, as `agent.stop` does. Internal
@@ -57,7 +63,7 @@ impl Action {
     fn rank(&self) -> u8 {
         match self {
             Action::Stop { .. } | Action::Release { .. } => 0,
-            Action::SelfQuit { .. } | Action::CloseTab { .. } => 1,
+            Action::SelfQuit { .. } | Action::CloseTab { .. } | Action::CloseTabs { .. } => 1,
             Action::ClosePane { .. } => 2,
         }
     }
@@ -74,7 +80,7 @@ impl Action {
     fn effect(&self) -> &'static str {
         match self {
             Action::Stop { .. } | Action::Release { .. } => "stop",
-            Action::SelfQuit { .. } | Action::CloseTab { .. } => "close_tab",
+            Action::SelfQuit { .. } | Action::CloseTab { .. } | Action::CloseTabs { .. } => "close_tab",
             Action::ClosePane { .. } => "close_pane",
         }
     }
@@ -82,7 +88,7 @@ impl Action {
     /// Every block this shuts down: the whole pane for a close, else the one.
     fn covers(&self, block_id: &str) -> Vec<String> {
         let mut blocks = vec![block_id.to_string()];
-        if let Action::ClosePane { block_ids } = self {
+        if let Action::ClosePane { block_ids } | Action::CloseTabs { block_ids, .. } = self {
             blocks.extend(block_ids.iter().filter(|b| b.as_str() != block_id).cloned());
         }
         blocks
@@ -151,6 +157,15 @@ pub struct PendingView {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub error: Option<String>,
+    /// A request for several agents at once (`Stop agents`): the ones still waiting. Absent for one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub blocks: Option<Vec<BatchBlock>>,
+    /// What became of each agent of such a request: kept by the user, or how its close ended. Filled as
+    /// the user keeps one, and once the request settles.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub outcomes: Option<Vec<BlockOutcome>>,
     /// This caller joined a request already open for the block rather than
     /// opening one. Never stored; set on the view `request` returns.
     #[serde(skip)]
@@ -383,6 +398,8 @@ fn request_within(
             deadline_ms: now_ms() + window.as_millis() as i64,
             status: "pending",
             error: None,
+            blocks: None,
+            outcomes: None,
             joined: false,
         };
         map.insert(
@@ -407,8 +424,14 @@ fn request_within(
     raise_toast(state, &view);
     tracing::info!(block_id, by, via, request_id = %view.request_id, window_s = window.as_secs(), "shutdown pending: the user can keep it");
 
-    let kept = entries().get(&view.request_id).map(|e| e.kept.clone());
-    let (state, v) = (state.clone(), view.clone());
+    spawn_window(state, view.clone(), window);
+    view
+}
+
+/// Wait out the window (or the user's Keep running / Close now), then run what was asked and settle.
+fn spawn_window(state: &AppState, v: PendingView, window: std::time::Duration) {
+    let kept = entries().get(&v.request_id).map(|e| e.kept.clone());
+    let state = state.clone();
     tokio::spawn(async move {
         if let Some(kept) = kept {
             tokio::select! {
@@ -420,17 +443,21 @@ fn request_within(
             return; // kept by the user
         };
         cleared(&state, &v, "proceeding");
-        let outcome = run_action(&state, &v.block_id, action).await;
-        let (status, error) = match outcome {
-            Ok(()) => ("shut_down", None),
-            // Already gone: the user closed or stopped it meanwhile.
-            Err(e) if e.contains("block not found") || e.starts_with("NOT_RUNNING") => ("superseded", None),
-            Err(e) => ("failed", Some(e)),
+        let (status, error, shown) = match action {
+            Action::CloseTabs { block_ids, detail } => batch::run(&state, &v, block_ids, detail).await,
+            action => {
+                let (status, error) = match run_action(&state, &v.block_id, action).await {
+                    Ok(()) => ("shut_down", None),
+                    // Already gone: the user closed or stopped it meanwhile.
+                    Err(e) if e.contains("block not found") || e.starts_with("NOT_RUNNING") => ("superseded", None),
+                    Err(e) => ("failed", Some(e)),
+                };
+                (status, error, status.to_string())
+            }
         };
-        audit(&state, &v.request_id, status, error.as_deref());
+        audit(&state, &v.request_id, &shown, error.as_deref());
         set_status(&v.request_id, status, error);
     });
-    view
 }
 
 /// Whether the block's session is running, not merely registered: a stopped
@@ -446,6 +473,9 @@ fn session_running(block_id: &str) -> bool {
 /// when a stronger request takes it over (the same toast is replaced in place,
 /// since both share the block's notification group).
 fn raise_toast(state: &AppState, view: &PendingView) {
+    if view.blocks.is_some() {
+        return batch::raise_toast(state, view);
+    }
     let Some(router) = notify_router(state) else { return };
     // Fixed wording and the asker's cleaned name; never the reason, which is
     // the asker's own text (spec §3.11). An OS toast also lands in the Action
@@ -583,8 +613,18 @@ fn cleared(state: &AppState, v: &PendingView, outcome: &str) {
         state.broker.publish_event::<crate::backend::mps_events::AgentShutdownPendingCleared>(&data, vec![format!("block:{b}")], 1);
     }
     if let Some(router) = notify_router(state) {
-        router.resolve_nonblocking(&v.block_id, crate::backend::notify::policy::Family::Shutdown);
+        router.resolve_nonblocking(&toast_block(v), crate::backend::notify::policy::Family::Shutdown);
     }
+}
+
+/// The block (or, for a request over several agents, the group) its OS notification belongs to.
+fn toast_block(v: &PendingView) -> String {
+    if v.blocks.is_some() { batch::group(&v.request_id) } else { v.block_id.clone() }
+}
+
+/// Whether a press or banner naming `block_id` is about this request: one of its blocks, or its toast's group.
+fn names(e: &Entry, block_id: &str) -> bool {
+    e.covers.iter().any(|b| b == block_id) || (e.view.blocks.is_some() && block_id == batch::group(&e.view.request_id))
 }
 
 async fn run_action(state: &AppState, block_id: &str, action: Action) -> Result<(), String> {
@@ -610,6 +650,7 @@ async fn run_action(state: &AppState, block_id: &str, action: Action) -> Result<
                 .await
                 .map(|_| ())
         }
+        Action::CloseTabs { .. } => Err("a batch closes through batch::run".to_string()),
         Action::ClosePane { block_ids } => super::close_pane::run(state, block_ids).await.map(|_| ()),
         Action::Stop { signal, stop_background } => {
             crate::server::app_api::agent_io::stop_one_agent_block(state, block_id, signal.as_deref(), stop_background)
@@ -644,12 +685,17 @@ pub async fn settled(request_id: &str) -> PendingView {
 /// "Keep running" (§12.3). `kept_by_user` if the request was still pending,
 /// `too_late` if the shutdown had already begun (or it isn't this block's).
 pub fn keep(state: &AppState, block_id: &str, request_id: &str) -> &'static str {
+    // On one agent's banner of a request over several, keeping keeps that agent only.
+    if let Some(outcome) = batch::keep_member(state, block_id, request_id) {
+        return outcome;
+    }
     let view = {
         let mut map = entries();
         match map.get_mut(request_id) {
-            Some(e) if e.covers.iter().any(|b| b == block_id) && e.view.status == "pending" && !e.closing => {
+            Some(e) if names(e, block_id) && e.view.status == "pending" && !e.closing => {
                 // Decided here, under the lock; the window task only wakes to
                 // find it no longer pending.
+                batch::mark_all_kept(e);
                 e.view.status = "kept_by_user";
                 e.finished_at_ms = Some(now_ms());
                 e.kept.notify_one();
@@ -672,7 +718,7 @@ pub fn close_now(state: &AppState, block_id: &str, request_id: &str) -> &'static
     {
         let mut map = entries();
         match map.get_mut(request_id) {
-            Some(e) if e.covers.iter().any(|b| b == block_id) && e.view.status == "pending" && !e.closing => {
+            Some(e) if names(e, block_id) && e.view.status == "pending" && !e.closing => {
                 // The window task is waiting on this: it wakes, finds the request still pending and begins.
                 e.closing = true;
                 e.kept.notify_one();
@@ -1059,6 +1105,8 @@ mod tests {
             deadline_ms: 0,
             status: "pending",
             error: None,
+            blocks: None,
+            outcomes: None,
             joined: false,
         };
         assert_eq!(toast_body(&stop), "Settings asked to stop it. Open it to keep it running.");
