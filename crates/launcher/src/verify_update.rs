@@ -102,7 +102,9 @@ pub fn run_if_requested(args: &[String]) -> Option<i32> {
         eprintln!("usage: agentmux-launcher --verify-update <version> <dir> <file> [unreachable:<why>]");
         return Some(2);
     };
-    let unreachable = rest.get(3).and_then(|a| a.strip_prefix("unreachable:"));
+    // The reason is one argument; words that were split apart are put back together.
+    let reason = rest[3..].join(" ");
+    let unreachable = reason.strip_prefix("unreachable:");
     Some(match verify(UPDATE_KEYS, version, Path::new(dir), Path::new(file), unreachable) {
         Ok(Verdict::Verified) => 0,
         Ok(Verdict::UnsignedOld) => EXIT_UNSIGNED_OLD,

@@ -193,11 +193,13 @@ https://github.com/agentmuxai/agentmux/releases/download) ;;
 esac
 get_release_file "AgentMux-$VERSION-envelope.json" \
     && { [ ! -f "$SIGNED_DIR/AgentMux-$VERSION-envelope.json" ] || { get_release_file "AgentMux-$VERSION-envelope.json.sig" && get_release_file "AgentMux-$VERSION-manifest.json"; }; }
-VERIFY_ARGS=
-[ -n "$UNREACHABLE" ] && VERIFY_ARGS="unreachable:$UNREACHABLE"
 [ -x "$LAUNCHER" ] || die "can't check the signature: $LAUNCHER is missing"
-# shellcheck disable=SC2086
-VERIFY_MSG=$(env -i PATH="$PATH" LC_ALL=C "$LAUNCHER" --verify-update "$VERSION" "$SIGNED_DIR" "$COPY" $VERIFY_ARGS 2>&1 >/dev/null)
+# One argument for the reason, quoted, so its words stay together.
+if [ -n "$UNREACHABLE" ]; then
+    VERIFY_MSG=$(env -i PATH="$PATH" LC_ALL=C "$LAUNCHER" --verify-update "$VERSION" "$SIGNED_DIR" "$COPY" "unreachable:$UNREACHABLE" 2>&1 >/dev/null)
+else
+    VERIFY_MSG=$(env -i PATH="$PATH" LC_ALL=C "$LAUNCHER" --verify-update "$VERSION" "$SIGNED_DIR" "$COPY" 2>&1 >/dev/null)
+fi
 VERIFY_RC=$?
 case "$VERIFY_RC" in
 0) ;;

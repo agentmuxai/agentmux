@@ -78,7 +78,7 @@ mkdir -p "$TMP/proc" "$TMP/opt/bin" "$TMP/signed"
 # Rust, crates/launcher/src/verify_update.rs). Here it only answers as told: 10 = the release predates signing.
 cat > "$TMP/opt/bin/agentmux-launcher" <<LAUNCHER
 #!/bin/sh
-echo "\$*" > "$TMP/verify.args"
+printf "%s|" "\$@" > "$TMP/verify.args"
 cat "$TMP/verify.msg" >&2
 exit \$(cat "$TMP/verify.rc")
 LAUNCHER
@@ -126,19 +126,19 @@ verify 0
 FAKE_OWNER=deb run "$deb" 0.60.2 $dead_pid; st=$?
 if [ $st = 0 ] && grep -q '^READY$' "$TMP/out" && grep -q 'apt-get install' "$TMP/log" && ! grep -q 'api\|releases/tags' "$TMP/curl.log" \
     && grep -q "download/v0.60.2/AgentMux-0.60.2-envelope.json\$" "$TMP/curl.log" && grep -q "download/v0.60.2/AgentMux-0.60.2-manifest.json\$" "$TMP/curl.log" \
-    && grep -q -e "^--verify-update 0.60.2 .*/signed .*/AgentMux_0.60.2_amd64.deb\$" "$TMP/verify.args"; then
+    && grep -q -e "^--verify-update|0.60.2|.*/signed|.*/AgentMux_0.60.2_amd64.deb|\$" "$TMP/verify.args"; then
     ok "a signed release: its files are fetched, the launcher verifies, GitHub's listing is not read, installed"
 else bad "a signed release" "status $st: $(cat "$TMP/out" "$TMP/err" "$TMP/log" "$TMP/verify.args") curl: $(cat "$TMP/curl.log")"; fi
 verify 1 "The signature on v0.60.2 doesn't match, so AgentMux won't download it. Don't install it; tell the AgentMux team."
 FAKE_OWNER=deb run "$deb" 0.60.2 $dead_pid; st=$?; refused "a file the signed manifest refuses"
 grep -q "signature on v0.60.2 doesn't match" "$TMP/err" && ok "...and the person reads the launcher's own words" || bad "the refusal's message" "$(cat "$TMP/err")"
 FAKE_SIGNED_FAIL=1 FAKE_OWNER=deb run "$deb" 0.60.2 $dead_pid; st=$?; refused "a release whose files GitHub won't serve"
-grep -q "unreachable:GitHub didn't answer\$" "$TMP/verify.args" && ok "...which the launcher is told is unreachable, not unsigned" || bad "the unreachable hand-over" "$(cat "$TMP/verify.args")"
+grep -q "|unreachable:GitHub didn't answer|\$" "$TMP/verify.args" && ok "...which the launcher is told is unreachable, not unsigned" || bad "the unreachable hand-over" "$(cat "$TMP/verify.args")"
 rm -f "$TMP/opt/bin/agentmux-launcher"
 FAKE_OWNER=deb run "$deb" 0.60.2 $dead_pid; st=$?; refused "an install without its launcher to check the signature"
 cat > "$TMP/opt/bin/agentmux-launcher" <<LAUNCHER
 #!/bin/sh
-echo "\$*" > "$TMP/verify.args"
+printf "%s|" "\$@" > "$TMP/verify.args"
 cat "$TMP/verify.msg" >&2
 exit \$(cat "$TMP/verify.rc")
 LAUNCHER
