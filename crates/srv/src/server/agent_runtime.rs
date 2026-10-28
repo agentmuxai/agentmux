@@ -81,7 +81,7 @@ pub struct AgentRuntime {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional, type = "number")]
     pub resets_at: Option<u64>,
-    /// The block the agent runs in; absent for an agent that has no live pane.
+    /// The block the agent runs in, shown in a pane or parked; absent for an agent that has never had one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub block_id: Option<String>,
@@ -159,8 +159,9 @@ pub(crate) fn list(state: &AppState, now_ms: u64) -> Vec<AgentRuntime> {
         .map(|d| {
             // By the agent's UID, not its name: two agents can share a display name.
             let live = block_of_uid(state.reactive_handler, &d.id);
-            // A pane whose process ended is no longer registered, but it is still the agent's
-            // block: a viewer needs its id to open or stop it. Its state is `stopped`.
+            // A pane whose process ended is no longer registered, and a headless agent's block is in no
+            // tab, but each is still the agent's block: a viewer needs its id to open or stop it, and
+            // it holds the desired state. The state is `stopped`.
             let block_id = live.clone().or_else(|| panes.get(&d.id).cloned());
             let (runtime_state, detail, resets_at) = state_of(&availability_of_block(mstore, live.as_deref(), now_ms));
             let (color, recorded) = block_id.as_deref().map(|b| block_facts(mstore, b)).unwrap_or_default();
@@ -180,19 +181,29 @@ pub(crate) fn list(state: &AppState, now_ms: u64) -> Vec<AgentRuntime> {
         .collect()
 }
 
-/// The block of each agent that has a pane, by agent id (one block when it has several: the first by
-/// id). One pass over the blocks for the whole list.
+/// The agent a block belongs to, by the id its meta carries.
+fn agent_of_block(block: &Block) -> Option<String> {
+    ["agentId", "agent:id"]
+        .iter()
+        .map(|k| crate::backend::obj::meta_get_string(&block.meta, k, ""))
+        .find(|v| !v.is_empty())
+}
+
+/// The block of each agent that has one, by agent id: the one in a pane (the first by id when it has
+/// several), else the one parked in no tab, which holds the agent's desired state while it has no
+/// process. One pass over the blocks for the whole list.
 fn pane_blocks_by_agent(mstore: &Store) -> HashMap<String, String> {
-    let agent_blocks: Vec<String> = mstore
-        .get_all::<Block>()
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|b| ["agentId", "agent:id"].iter().any(|k| !crate::backend::obj::meta_get_string(&b.meta, k, "").is_empty()))
-        .map(|b| b.oid)
-        .collect();
+    let blocks = mstore.get_all::<Block>().unwrap_or_default();
+    let agent_blocks: Vec<String> = blocks.iter().filter(|b| agent_of_block(b).is_some()).map(|b| b.oid.clone()).collect();
     let mut by_agent: HashMap<String, String> = HashMap::new();
     for pane in super::app_api::agent_io::open_agent_panes(mstore, &agent_blocks) {
         by_agent.entry(pane.agent_id).or_insert(pane.block_id);
+    }
+    for block in &blocks {
+        let parked = crate::backend::obj::meta_get_bool(&block.meta, crate::persist_subscriber::parked::PARKED_META_KEY, false);
+        if let (true, Some(agent)) = (parked, agent_of_block(block)) {
+            by_agent.entry(agent).or_insert_with(|| block.oid.clone());
+        }
     }
     by_agent
 }
@@ -308,6 +319,29 @@ mod tests {
         assert_eq!(desired_from(None, S::Idle), AgentDesiredState::Running);
         assert_eq!(desired_from(None, S::Stopped), AgentDesiredState::Stopped);
         assert_eq!(desired_from(Some("later"), S::Stopped), AgentDesiredState::Stopped);
+    }
+
+    /// A headless agent whose process ended without a stop: its parked block is in no tab, still records
+    /// that it should run, and is the block a viewer opens.
+    #[tokio::test]
+    async fn a_parked_block_keeps_its_agent_wanted_running_after_the_process_ended() {
+        let state = crate::server::tests::test_state();
+        let mut def: crate::backend::storage::AgentDefinition = serde_json::from_value(serde_json::json!({
+            "id": "def-rt-2", "slug": "rt-two", "name": "Rt Two", "icon": "robot", "provider": "claude",
+            "description": "", "created_at": 1,
+        }))
+        .unwrap();
+        state.mstore.agent_def_insert(&mut def).unwrap();
+        let mut meta = crate::backend::obj::MetaMapType::new();
+        meta.insert("agentId".to_string(), serde_json::json!("def-rt-2"));
+        meta.insert(crate::persist_subscriber::parked::PARKED_META_KEY.to_string(), serde_json::json!(true));
+        meta.insert(agent_attach::META_DESIRED.to_string(), serde_json::json!("running"));
+        let mut block = Block { oid: uuid::Uuid::new_v4().to_string(), meta, ..Default::default() };
+        state.mstore.insert(&mut block).unwrap();
+        let rows = list(&state, 10_000);
+        let one = rows.iter().find(|r| r.agent_id == "def-rt-2").expect("the agent is listed");
+        assert_eq!((one.state, one.desired), (AgentRuntimeState::Stopped, AgentDesiredState::Running));
+        assert_eq!(one.block_id.as_deref(), Some(block.oid.as_str()));
     }
 
     #[test]
