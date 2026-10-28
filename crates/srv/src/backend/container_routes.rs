@@ -53,6 +53,17 @@ const REFUSED: &[(Match, &str)] = &[
     (Match::Prefix("/api/v1/agent/desktop/"), DESKTOP),
     // The app's own plumbing
     (Match::Prefix("/api/v1/host/"), APP_ONLY),
+    // The app's and the relay's own controls: no agent tool calls them and the handlers don't check who asks
+    (Match::Prefix("/agentmux/reactive/poller/"), APP_ONLY),
+    (Match::Exact("/agentmux/reactive/unregister"), APP_ONLY),
+    (Match::Exact("/agentmux/reactive/ensure-signing-key"), APP_ONLY),
+    (Match::Exact("/agentmux/reactive/agents"), APP_ONLY),
+    (Match::Exact("/agentmux/reactive/audit"), APP_ONLY),
+    (Match::Exact("/agentmux/agent/holding"), APP_ONLY),
+    (Match::Exact("/agentmux/diag/sagas"), APP_ONLY),
+    (Match::Prefix("/api/messaging/"), APP_ONLY),
+    (Match::Exact("/api/post-chat-message"), APP_ONLY),
+    (Match::Prefix("/webhook/"), APP_ONLY),
     // Generic gateways
     (Match::Exact("/agentmux/service"), GATEWAY),
     (Match::Exact("/ws"), GATEWAY),
@@ -108,16 +119,14 @@ mod tests {
     /// A refusal that names a route srv does not have is a typo, or stale.
     #[test]
     fn every_refused_route_is_one_srv_serves() {
+        // A few are registered elsewhere: the viewer, the peers' stop, the discovery file, the WebSocket, srv's own signing.
+        let elsewhere = ["/agentmux/jobs/stop-run", "/.well-known/", "/agentmux/viewer/", "/ws", "/agentmux/agents/self/keys"];
         for (m, _) in REFUSED {
-            let (path, prefix) = match m {
-                Match::Exact(p) => (*p, false),
-                Match::Prefix(p) => (*p, true),
+            let path = match m {
+                Match::Exact(p) | Match::Prefix(p) => *p,
             };
-            let served = ROUTES.lines().filter_map(|l| l.split_once(".route(\"")).map(|(_, r)| r.split('"').next().unwrap_or(""));
-            let known = |r: &str| if prefix { r.starts_with(path) } else { r == path };
-            // A few are registered elsewhere: the viewer, the peers' stop, the discovery file, the WebSocket.
-            let elsewhere = ["/agentmux/jobs/stop-run", "/.well-known/", "/agentmux/viewer/", "/ws"];
-            assert!(served.clone().any(|r| known(r)) || elsewhere.contains(&path) || path == "/agentmux/agents/self/keys", "{path} is not a route srv serves");
+            // A route literal in the router starts with the path (exactly, or as the prefix's start).
+            assert!(ROUTES.contains(&format!("\"{path}")) || elsewhere.contains(&path), "{path} is not a route srv serves");
         }
     }
 
@@ -129,6 +138,8 @@ mod tests {
             ("/api/v1/conn/list", "can't run commands on the host"),
             ("/api/v1/agent/desktop/authorize", "launch programs"),
             ("/api/v1/host/vault", "for the AgentMux app itself"),
+            ("/agentmux/reactive/poller/config", "for the AgentMux app itself"),
+            ("/api/messaging/discord/send", "for the AgentMux app itself"),
             ("/agentmux/service", "generic gateway"),
             ("/agentmux/stream-local-file", "outside their own workspace"),
             ("/api/v1/agent/self/upgrade", "replaces the app"),

@@ -241,7 +241,7 @@ container agents: <why, and what to do instead>`.
 | `/api/v1/shell/*`, `/api/v1/ptyshell/*` (Terminal, Shell) | no | runs commands on the host |
 | `/api/v1/conn/*`, `/api/v1/askpass` (connections: WSL, SSH as the user) | no | the same, on other machines as the user |
 | `/api/v1/agent/desktop/*` (Desktop control) | no | drives the OS and can launch programs (borderline; left to the operator) |
-| `/api/v1/host/*` | no | the app's own plumbing: approvals and state the windows report |
+| `/api/v1/host/*`, `/agentmux/reactive/{poller/*,unregister,ensure-signing-key,agents,audit}`, `/agentmux/agent/holding`, `/agentmux/diag/sagas`, `/api/messaging/*`, `/api/post-chat-message`, `/webhook/*` | no | the app's own plumbing: approvals, state the windows report, controls no agent tool calls and whose handlers don't check who asks |
 | `/agentmux/service`, `/ws`, `/agentmux/wps/publish` | no | generic gateways to everything else |
 | `/agentmux/stream-local-file`, `/agentmux/file`, `/agentmux/file-icon`, `/api/v1/attachments/upload`, `/agentmux/work/media`, `/api/v1/ui/browser/set_files`, `/api/v1/pane/open` | no, for now | take a host path; they open to a path inside the container's own mounts once the path is checked against them (a host path outside would let a sandbox read `~/.ssh`, `~/.aws`) |
 | `/api/v1/agent/globalmemory/{write,remove,revert}` | no | Global Memory is composed into every native agent's context at launch; a container reads it, a native agent writes it |
