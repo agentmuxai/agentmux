@@ -20,27 +20,39 @@ afterEach(() => {
 const att: AttachmentRef = { id: "a1", name: "plan.md" };
 
 describe("restoreRefusedSend", () => {
-    it("puts the refused text back in the composer and its attachments back in the tray, and forgets it", () => {
+    it("puts the refused text back in the composer and its attachments back in the tray, and forgets it", async () => {
         rememberRefusedSend("b1", { text: "are you there", attachments: [att] });
-        restoreRefusedSend("b1");
+        await restoreRefusedSend("b1");
         expect(restoreToComposer).toHaveBeenCalledWith("b1", "are you there");
         expect(restoreRefs).toHaveBeenCalledWith([att]);
         expect(refusedSendOf("b1")).toBeUndefined();
     });
 
-    it("leaves the tray alone for a message with no attachments", () => {
+    it("gives the text back only once the tray holds the files, so a quick send takes them along", async () => {
+        let filled: () => void = () => {};
+        restoreRefs.mockImplementationOnce(() => new Promise<void>((resolve) => (filled = resolve)));
+        rememberRefusedSend("b1", { text: "see the plan", attachments: [att] });
+        const restoring = restoreRefusedSend("b1");
+        await Promise.resolve();
+        expect(restoreToComposer).not.toHaveBeenCalled();
+        expect(refusedSendOf("b1")).toBeUndefined();
+        filled();
+        await restoring;
+        expect(restoreToComposer).toHaveBeenCalledWith("b1", "see the plan");
+    });
+
+    it("leaves the tray alone for a message with no attachments", async () => {
         rememberRefusedSend("b1", { text: "hello", attachments: [] });
-        restoreRefusedSend("b1");
+        await restoreRefusedSend("b1");
         expect(restoreToComposer).toHaveBeenCalledWith("b1", "hello");
         expect(restoreRefs).not.toHaveBeenCalled();
     });
 
-    it("does nothing when no message was refused, and restores a message only once", () => {
-        restoreRefusedSend("b1");
+    it("does nothing when no message was refused, and restores a message only once", async () => {
+        await restoreRefusedSend("b1");
         expect(restoreToComposer).not.toHaveBeenCalled();
         rememberRefusedSend("b1", { text: "hello", attachments: [] });
-        restoreRefusedSend("b1");
-        restoreRefusedSend("b1");
+        await Promise.all([restoreRefusedSend("b1"), restoreRefusedSend("b1")]);
         expect(restoreToComposer).toHaveBeenCalledTimes(1);
     });
 });

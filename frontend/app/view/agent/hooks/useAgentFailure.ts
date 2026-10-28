@@ -477,7 +477,7 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
                     opts.reconnect?.failureDismissed();
                     // A message this pane refused for another pane has nobody to send it now: it goes
                     // back to the composer. Any other row is not about it, so a kept one is stale.
-                    if (f.code === "open_in_other_pane") restoreRefusedSend(opts.blockId);
+                    if (f.code === "open_in_other_pane") void restoreRefusedSend(opts.blockId);
                     else forgetRefusedSend(opts.blockId);
                     endEpisode();
                 },
