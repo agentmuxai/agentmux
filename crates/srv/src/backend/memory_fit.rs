@@ -141,7 +141,7 @@ pub fn hygiene_note(files: &[Seen]) -> Option<String> {
         return None;
     }
     let mut lines = vec![format!(
-        "[AgentMux] Your Personal Memory is {} KB ({} files; a delivery carries about {} KB of it).",
+        "[AgentMux] Your Personal Memory is {} KB ({} files; over about {} KB it is worth trimming).",
         total.div_ceil(1024),
         files.len(),
         PERSONAL_BUDGET_CHARS / 1024
