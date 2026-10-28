@@ -61,6 +61,85 @@ async fn widget_install(state: AppState, request: Request) -> Result<(), String>
 mod tests {
     use super::*;
 
+    use serde_json::json;
+
+    /// A package copied in and listed, as `WidgetInstall` leaves it.
+    async fn installed(state: &AppState, id: &str, kind: &str, permissions: serde_json::Value) -> crate::backend::widget_packages::WidgetPackageInfo {
+        crate::backend::widget_packages::WidgetPackages::for_tests();
+        let tmp = tempfile::tempdir().unwrap();
+        let src = tmp.path().join(id);
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(
+            src.join("widget.json"),
+            json!({ "manifestVersion": 1, "id": id, "name": "Made by an agent", "version": "1.0.0", "kind": kind, "entry": "index.html",
+                    "permissions": permissions, "contributes": { "panes": [{ "name": "main" }] } })
+            .to_string(),
+        )
+        .unwrap();
+        std::fs::write(src.join("index.html"), "<p>hi</p>").unwrap();
+        let svc = crate::backend::widget_packages::service().unwrap();
+        crate::backend::widget_packages::install(&svc.widgets_dir, &src, true).unwrap();
+        crate::backend::widget_packages::refresh_off_thread(&state.config_watcher, &state.event_bus, &state.broker)
+            .await
+            .into_iter()
+            .find(|p| p.id == id)
+            .unwrap()
+    }
+
+    fn filed(pkg: &crate::backend::widget_packages::WidgetPackageInfo) -> Request {
+        let reg = crate::backend::sensitive_requests::registry();
+        let mut facts = crate::server::widget_agent_handlers::install_facts(pkg);
+        facts.insert("widget".into(), format!("{} {}", facts["widget"], uuid::Uuid::new_v4().simple()));
+        let id = reg.request("u-asker", "asker", "widget_install", &facts, "", agentmux_common::time::now_ms()).unwrap().id;
+        reg.get(&id).unwrap()
+    }
+
+    #[tokio::test]
+    async fn the_countdown_ending_approves_exactly_the_package_that_was_asked_for() {
+        let state = crate::server::tests::test_state();
+        let pkg = installed(&state, "acme.runner-ok", "sandboxed", json!(["storage"])).await;
+        assert_eq!(pkg.state, crate::backend::widget_packages::WidgetState::NeedsApproval);
+        let request = filed(&pkg);
+        crate::server::widget_agent_handlers::remember_target(
+            &request.id,
+            crate::server::widget_agent_handlers::InstallTarget { id: pkg.id.clone(), hash: pkg.hash.clone(), signer: String::new() },
+        );
+        widget_install(state.clone(), request.clone()).await.unwrap();
+        let after = crate::backend::widget_packages::service().unwrap().list().into_iter().find(|p| p.id == pkg.id).unwrap();
+        assert_eq!(after.state, crate::backend::widget_packages::WidgetState::Approved);
+        // The target is used once: running it again finds nothing to approve.
+        assert!(widget_install(state, request).await.unwrap_err().contains("no longer known"));
+    }
+
+    #[tokio::test]
+    async fn a_package_changed_after_the_request_is_not_approved() {
+        let state = crate::server::tests::test_state();
+        let pkg = installed(&state, "acme.runner-changed", "sandboxed", json!([])).await;
+        let request = filed(&pkg);
+        crate::server::widget_agent_handlers::remember_target(
+            &request.id,
+            crate::server::widget_agent_handlers::InstallTarget { id: pkg.id.clone(), hash: "not-the-hash".into(), signer: String::new() },
+        );
+        let err = widget_install(state, request).await.unwrap_err();
+        assert!(err.contains("changed since"), "{err}");
+        let after = crate::backend::widget_packages::service().unwrap().list().into_iter().find(|p| p.id == pkg.id).unwrap();
+        assert_ne!(after.state, crate::backend::widget_packages::WidgetState::Approved);
+    }
+
+    #[tokio::test]
+    async fn what_the_person_is_shown_names_every_permission_and_says_when_it_is_trusted() {
+        let state = crate::server::tests::test_state();
+        let plain = installed(&state, "acme.facts-plain", "sandboxed", json!(["storage", "net:https://a.example"])).await;
+        let facts = crate::server::widget_agent_handlers::install_facts(&plain);
+        assert_eq!(facts["permissions"], "storage, net:https://a.example");
+        assert!(facts["widget"].contains("acme.facts-plain 1.0.0") && facts["publisher"].contains("unsigned"), "{facts:?}");
+        assert!(crate::backend::sensitive_ops::spec("widget_install").unwrap().check_facts(&facts).is_ok(), "the table takes them as they are");
+        let none = installed(&state, "acme.facts-none", "sandboxed", json!([])).await;
+        assert_eq!(crate::server::widget_agent_handlers::install_facts(&none)["permissions"], "none");
+        let trusted = installed(&state, "acme.facts-trusted", "trusted", json!([])).await;
+        assert_eq!(crate::server::widget_agent_handlers::install_facts(&trusted)["permissions"], "TRUSTED: full access to AgentMux");
+    }
+
     #[test]
     fn upgrade_has_a_runner_and_a_refusal_says_why() {
         register_all();
