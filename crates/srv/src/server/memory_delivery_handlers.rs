@@ -1019,25 +1019,14 @@ fn compose_delivery(
     let summary = (reason == Reason::Compact)
         .then(|| crate::backend::continuity_state::running_summary_section(&state.mstore, block_id))
         .flatten();
-    // The files that fit one delivery, newest first and capped; the rest are named, not dropped silently.
-    let fitted = memory_fit::fit(
-        entries,
-        summary.as_deref().map_or(0, |s| s.chars().count()),
-        reason == Reason::Compact,
-        &|e| modified_ms_of(e).map(|m| ((now - m).max(0)) / 86_400_000),
-    );
-    let (entries, skipped, tail) = (fitted.kept, fitted.skipped, fitted.tail);
     // Nothing left for the hook to carry is still a delivery when there are
     // startup items to show: it has no parts, and its card goes out at once.
-    let (parts, delivered) = match memory_delivery::compose_items_tail(&entries, reason, summary.as_deref(), global_in_file, tail.as_deref()) {
-        Some(composed) => {
-            let (parts, delivered_chars) = memory_delivery::split_into_parts_counted(
-                &composed.text,
-                memory_delivery::MAX_PART_CHARS,
-                memory_delivery::HOOK_PARTS,
-            );
-            let mut delivered = delivery_items(&entries, &composed, delivered_chars);
-            delivered.extend(skipped.iter().map(not_sent_item));
+    let age_days = |e: &Entry| modified_ms_of(e).map(|m| ((now - m).max(0)) / 86_400_000);
+    let (parts, delivered) = match fit_and_compose(entries, summary.as_deref(), reason, global_in_file, &age_days) {
+        Some((fitted, composed, parts, delivered_chars)) => {
+            let mut delivered = delivery_items(&fitted.kept, &composed, delivered_chars);
+            apply_capped(&mut delivered, &fitted.capped);
+            delivered.extend(fitted.skipped.iter().map(not_sent_item));
             (parts, delivered)
         }
         None if !items.is_empty() => (Vec::new(), Vec::new()),
@@ -1113,6 +1102,44 @@ fn personal_entries_in(dir: &std::path::Path) -> Vec<Entry> {
     // delivery drops is the oldest, not whatever sorts last by name.
     entries.sort_by_cached_key(|e| std::cmp::Reverse(modified_ms_of(e).unwrap_or(0)));
     entries
+}
+
+/// The files that fit one delivery (newest first and capped, the rest named, not dropped silently), composed and
+/// split the way the hooks will carry them. The character budget is only a guess at how the parts break at line
+/// ends, so when the real split still cuts (the notes at the end are what can tip it), a little more room is
+/// kept back and the fit is redone, so the reserved summary and the notes are never the part that is lost.
+fn fit_and_compose(
+    entries: Vec<Entry>,
+    summary: Option<&str>,
+    reason: Reason,
+    global_in_file: bool,
+    age_days: &dyn Fn(&Entry) -> Option<i64>,
+) -> Option<(memory_fit::Fitted, memory_delivery::Composed, Vec<String>, usize)> {
+    const STEP: usize = 2_000;
+    const LAST: usize = 40_000;
+    let reserve = summary.map_or(0, |s| s.chars().count());
+    let mut slack = 0;
+    loop {
+        let fitted = memory_fit::fit(entries.clone(), reserve + slack, reason == Reason::Compact, age_days);
+        let composed = memory_delivery::compose_items_tail(&fitted.kept, reason, summary, global_in_file, fitted.tail.as_deref())?;
+        let (parts, delivered_chars) = memory_delivery::split_into_parts_counted(&composed.text, memory_delivery::MAX_PART_CHARS, memory_delivery::HOOK_PARTS);
+        if delivered_chars >= composed.text.chars().count() || slack >= LAST {
+            return Some((fitted, composed, parts, delivered_chars));
+        }
+        slack += STEP;
+    }
+}
+
+/// A file the cap cut shows on the card with its real size, as partly delivered.
+fn apply_capped(rows: &mut [EntrySize], capped: &[memory_fit::Capped]) {
+    for row in rows.iter_mut().filter(|r| r.kind == "personal_memory") {
+        let Some(c) = capped.iter().find(|c| c.name == row.name) else { continue };
+        row.source_size_bytes = c.source_bytes;
+        row.source_tokens = tokens_for_chars(c.source_chars as u64) as usize;
+        if row.delivered == memory_delivery::Delivered::Full.as_str() {
+            row.delivered = memory_delivery::Delivered::Partial(0).as_str();
+        }
+    }
 }
 
 /// When a Personal Memory file was last modified, in Unix ms: its `modified` frontmatter when it has one that

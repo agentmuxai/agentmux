@@ -498,6 +498,35 @@ metadata:
     assert_eq!((row.delivered, row.size_bytes, row.kind), ("omitted", 0, "personal_memory"));
 }
 
+#[test]
+fn the_notes_at_the_end_never_push_the_reserved_summary_out_of_the_parts() {
+    // Eight 7,900-character files of 100-character lines and a 1,000-character summary: the character count fits,
+    // but the parts break at line ends and the pruning note used to tip the summary into a ninth, dropped part.
+    let line = format!("{}\n", "w".repeat(99));
+    let body = line.repeat(79);
+    let entries: Vec<Entry> = (0..8)
+        .map(|i| Entry { label: format!("f{i}.md"), tier: Tier::Personal, text: format!("---\nmetadata:\n  type: project\n---\n{body}"), name: format!("f{i}.md"), system: false, bundle_id: None, path: None })
+        .collect();
+    let summary = "S".repeat(1_000);
+    let (fitted, composed, parts, delivered_chars) = fit_and_compose(entries, Some(&summary), Reason::Compact, false, &|_| Some(30)).unwrap();
+    assert_eq!(delivered_chars, composed.text.chars().count(), "nothing is cut");
+    assert!(parts.join("").contains(&summary), "the summary is in the parts");
+    assert!(composed.text.contains("Your Personal Memory is"), "the nudge rides along");
+    assert!(!fitted.kept.is_empty());
+}
+
+#[test]
+fn a_capped_file_shows_its_real_size_and_as_partly_delivered() {
+    let big = format!("---\nmetadata:\n  type: feedback\n---\n{}", "x".repeat(50_000));
+    let entry = Entry { label: "big.md".into(), tier: Tier::Personal, text: big.clone(), name: "big.md".into(), system: false, bundle_id: None, path: None };
+    let (fitted, composed, _parts, delivered_chars) = fit_and_compose(vec![entry], None, Reason::Startup, false, &|_| None).unwrap();
+    let mut rows = delivery_items(&fitted.kept, &composed, delivered_chars);
+    assert_eq!(rows[0].delivered, "full", "as the span alone sees it");
+    apply_capped(&mut rows, &fitted.capped);
+    assert_eq!((rows[0].delivered, rows[0].source_size_bytes), ("partial", big.len()));
+    assert!(rows[0].size_bytes < 9_000);
+}
+
 fn item(label: &str, tier: Tier, text: &str) -> Entry {
     Entry {
         label: label.into(),

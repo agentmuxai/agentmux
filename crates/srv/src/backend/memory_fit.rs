@@ -36,8 +36,18 @@ const MAX_DESCRIPTION_CHARS: usize = 110;
 pub struct Fitted {
     pub kept: Vec<Entry>,
     pub skipped: Vec<Entry>,
+    /// The kept files that went in cut at the cap, with what they were before it.
+    pub capped: Vec<Capped>,
     /// The not-sent list and the hygiene note, joined; `None` when there is nothing to say.
     pub tail: Option<String>,
+}
+
+/// A kept file the cap cut: its size before.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Capped {
+    pub name: String,
+    pub source_chars: usize,
+    pub source_bytes: usize,
 }
 
 /// The value of `key` in the frontmatter block at the top of `text` (`---` … `---`), at any indent so a
@@ -162,11 +172,14 @@ pub fn fit(entries: Vec<Entry>, reserve_chars: usize, hygiene: bool, age_days: &
     let notes_room = 1_200 + MAX_LISTED * (MAX_DESCRIPTION_CHARS + 40);
     let budget = (HOOK_PARTS * MAX_PART_CHARS).saturating_sub(OVERHEAD_CHARS + reserve_chars + notes_room);
     let mut used = 0usize;
-    let (mut kept, mut skipped) = (Vec::new(), Vec::new());
+    let (mut kept, mut skipped, mut cut) = (Vec::new(), Vec::new(), Vec::new());
     for (e, original) in capped {
         let n = e.text.chars().count() + 5;
         if e.tier == Tier::Global || used + n <= budget {
             used += n;
+            if e.text != original.text {
+                cut.push(Capped { name: e.name.clone(), source_chars: original.text.chars().count(), source_bytes: original.text.len() });
+            }
             kept.push(e);
         } else {
             skipped.push(original);
@@ -177,7 +190,7 @@ pub fn fit(entries: Vec<Entry>, reserve_chars: usize, hygiene: bool, age_days: &
     if hygiene {
         tail.extend(hygiene_note(&seen));
     }
-    Fitted { kept, skipped, tail: (!tail.is_empty()).then(|| tail.join("\n")) }
+    Fitted { kept, skipped, capped: cut, tail: (!tail.is_empty()).then(|| tail.join("\n")) }
 }
 
 #[cfg(test)]
