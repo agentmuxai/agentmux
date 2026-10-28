@@ -19,7 +19,7 @@
 //! the note waits up to [`NUDGE_PENDING_MS`] for the agent to register (a pane
 //! with no process yet, or one srv's restart resume hasn't reached).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::agents::failure::{AgentFailure, FailureClass};
@@ -142,8 +142,14 @@ async fn wake(block_id: &str, resets_at_ms: u64) {
     }
     // The agent may not be registered yet (srv just started and its resume is staggered, or it is slow to
     // start): the note waits for it instead of being dropped.
+    // A message held for the agent replays the moment it registers and deletes its row, so what is held is
+    // noted at every look: a replay is the nudge and the note is not sent on top of it.
+    let mut held_while_waiting: HashSet<String> = HashSet::new();
     let found = until_registered(
-        || registered_agent(&block),
+        || {
+            held_while_waiting.extend(mstore.jekt_held_targets().unwrap_or_default());
+            registered_agent(&block)
+        },
         std::time::Duration::from_millis(NUDGE_POLL_MS),
         std::time::Duration::from_millis(NUDGE_PENDING_MS),
     )
@@ -154,7 +160,7 @@ async fn wake(block_id: &str, resets_at_ms: u64) {
     };
     let note = {
         let block = block.clone();
-        tokio::task::spawn_blocking(move || nudge_for(&mstore, &identity, &block, &agent)).await.ok().flatten()
+        tokio::task::spawn_blocking(move || nudge_for(&mstore, &identity, &block, &agent, &held_while_waiting)).await.ok().flatten()
     };
     let Some((target, text)) = note else { return };
     match crate::backend::reactive::get_global_handler().deliver_system_note(&target, &text) {
@@ -202,14 +208,14 @@ fn clear_failure(mstore: &Arc<Store>, event_bus: &Arc<EventBus>, block_id: &str,
 }
 
 /// The note to send (target, text) to the registered agent: none when a message is held for it (it
-/// replays into a turn of its own), when it holds no claimed task, or when the limit was hit again
-/// since the wake. Blocking.
-fn nudge_for(mstore: &Arc<Store>, identity: &Store, block_id: &str, agent: &Agent) -> Option<(String, String)> {
+/// replays into a turn of its own, now or at any look while the note waited), when it holds no
+/// claimed task, or when the limit was hit again since the wake. Blocking.
+fn nudge_for(mstore: &Arc<Store>, identity: &Store, block_id: &str, agent: &Agent, held_while_waiting: &HashSet<String>) -> Option<(String, String)> {
     if mstore.get::<Block>(block_id).ok().flatten().is_some_and(|b| failure_of_block(&b).is_some()) {
         return None;
     }
     let held = mstore.jekt_held_targets().unwrap_or_default();
-    if !agent.uid.is_empty() && held.iter().any(|t| *t == agent.uid) {
+    if !agent.uid.is_empty() && (held_while_waiting.contains(&agent.uid) || held.iter().any(|t| *t == agent.uid)) {
         return None;
     }
     let claimed = identity.work_queue_claimed_by(&agent.agent_id, &agent.uid).unwrap_or_default();
@@ -295,10 +301,55 @@ mod tests {
         let bus = Arc::new(EventBus::new());
         let block = block_with(&store, limit(Some(5_000)));
         assert!(clear_failure(&store, &bus, &block, 5_000));
-        assert_eq!(nudge_for(&store, &identity, &block, &agent()), None, "no claimed task");
+        assert_eq!(nudge_for(&store, &identity, &block, &agent(), &HashSet::new()), None, "no claimed task");
         // The limit comes back while the note waited for the agent: nothing is said.
         let again = block_with(&store, limit(Some(99_000)));
-        assert_eq!(nudge_for(&store, &identity, &again, &agent()), None);
+        assert_eq!(nudge_for(&store, &identity, &again, &agent(), &HashSet::new()), None);
+    }
+
+    /// A message held while the note waited for the agent has replayed by the time it registers (its row is
+    /// gone): that turn was the nudge, so the note isn't sent on top of it.
+    #[test]
+    fn a_replay_that_ran_while_the_note_waited_is_the_nudge() {
+        use crate::backend::storage::work_queue::{work_state, ClaimFilter, WorkItem};
+        let dir = tempfile::tempdir().unwrap();
+        let identity = Store::open_identity_store(&dir.path().join("identity-store.db")).unwrap();
+        let item = WorkItem {
+            id: "w1".into(),
+            title: "Fix the thing".into(),
+            payload: "p".into(),
+            kind: String::new(),
+            target_agent: String::new(),
+            target_group: String::new(),
+            priority: 0,
+            state: work_state::OPEN.into(),
+            claimed_by: String::new(),
+            target_agent_uid: String::new(),
+            claimed_by_uid: String::new(),
+            claim_expires: None,
+            attempts: 0,
+            max_attempts: 3,
+            created_by: "tester".into(),
+            created_by_uid: String::new(),
+            created_at: 1000,
+            updated_at: 1000,
+            not_before: None,
+            result: String::new(),
+        };
+        identity.work_queue_enqueue(&item).unwrap();
+        let filter = ClaimFilter { kind: None, agent_id: "a-1".into(), agent_uid: "uid-1".into(), groups: vec![] };
+        identity.work_queue_claim(&filter, 2000, 120_000).unwrap().expect("an open item");
+        identity.work_card_ensure("w1", 2000).unwrap();
+
+        let store = Arc::new(Store::open_in_memory().unwrap());
+        let mut b = Block { oid: uuid::Uuid::new_v4().to_string(), ..Default::default() };
+        store.insert(&mut b).unwrap();
+        let block = b.oid;
+        let (target, text) = nudge_for(&store, &identity, &block, &agent(), &HashSet::new()).expect("a claimed task and nothing held");
+        assert_eq!(target, "uid-1");
+        assert!(text.contains("Fix the thing"), "{text}");
+        let replayed = HashSet::from(["uid-1".to_string()]);
+        assert_eq!(nudge_for(&store, &identity, &block, &agent(), &replayed), None, "a replay already nudged it");
     }
 
     #[tokio::test]
