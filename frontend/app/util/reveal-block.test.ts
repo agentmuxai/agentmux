@@ -21,7 +21,7 @@ let models: Record<string, any>;
 let blockReveal: (d: { block_id: string }) => Promise<{ found: boolean; window_id?: string }>;
 let otherWorkspaces: any[];
 /** The window tab the window shows, and the notices the selection machine pushed. */
-const win = vi.hoisted(() => ({ activeTab: "t1" }));
+const win = vi.hoisted(() => ({ activeTab: "t1", commitDelayMs: 0 }));
 const notices: { title: string; message: string }[] = [];
 const windowInstances = [
     { label: "main", windowId: "win-here" },
@@ -45,7 +45,9 @@ vi.mock("@/app/store/global", () => ({
     },
     setActiveTab: async (tabId: string) => {
         calls.push(`setActiveTab:${tabId}`);
-        win.activeTab = tabId;
+        // The workspace push that commits the tab can land after the RPC replies.
+        if (win.commitDelayMs) setTimeout(() => (win.activeTab = tabId), win.commitDelayMs);
+        else win.activeTab = tabId;
     },
     atoms: { activeTabId: () => win.activeTab },
     pushNotification: (n: { title: string; message: string }) => notices.push(n),
@@ -105,6 +107,7 @@ beforeEach(() => {
     located.length = 0;
     notices.length = 0;
     win.activeTab = "t1";
+    win.commitDelayMs = 0;
     ws = { oid: "ws", pinnedtabids: [], tabids: ["t1", "t2"] };
     tabs = { t1: { blockids: ["a"] }, t2: { blockids: ["agentA", "agentB"] } };
     models = { t1: modelWithPane("n1", ["a"]), t2: modelWithPane("pane", ["agentA", "agentB"]) };
@@ -260,6 +263,13 @@ describe("revealBlock — a block in another window (spec §4.3)", () => {
         expect(await revealBlock("agentB", { source: "swarm" })).toEqual({ ok: true });
         expect(calls).toEqual(["setActiveTab:t2", "stack:pane:agentB", "focusNode:pane", "caret:agentB"]);
         expect(located.map((l) => l.blockId)).toEqual(["agentB"]);
+        expect(notices).toEqual([]);
+    });
+
+    it("waits for a tab whose commit lands after the switch replied, instead of reading it back too early", async () => {
+        win.commitDelayMs = 150;
+        expect(await revealBlock("agentB")).toEqual({ ok: true });
+        expect(win.activeTab).toBe("t2");
         expect(notices).toEqual([]);
     });
 

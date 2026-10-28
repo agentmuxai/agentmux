@@ -180,7 +180,10 @@ const liveDeps: SelectionDeps = {
         requestedTabs.asked(tabId);
         return setActiveTab(tabId); // no-op when already active
     },
-    layoutHas: (tabId, blockId) => getLayoutModelForTabById(tabId)?.getNodeByBlockId(blockId)?.id != null,
+    // The tab must be the committed active one as well: a kept-alive layout is already there when the
+    // switch replies, and the workspace push that makes the tab active can land after that reply.
+    layoutHas: (tabId, blockId) =>
+        atoms.activeTabId() === tabId && getLayoutModelForTabById(tabId)?.getNodeByBlockId(blockId)?.id != null,
     show(tabId, blockId) {
         const model = getLayoutModelForTabById(tabId);
         const node = model?.getNodeByBlockId(blockId);
