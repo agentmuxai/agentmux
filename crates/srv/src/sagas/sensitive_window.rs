@@ -15,6 +15,10 @@
 //! RPC checks `operator_only`). The banner, toast and chime that tell the
 //! person arrive with the next step of the spec's §9; the events here carry
 //! what they show.
+//!
+//! Nothing outside the tests calls this yet: the RPC for the person and the
+//! runners arrive with the later steps of that spec's §9.
+#![allow(dead_code)]
 
 use std::collections::HashMap;
 use std::future::Future;
