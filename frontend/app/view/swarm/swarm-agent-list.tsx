@@ -21,7 +21,7 @@ import type { SwarmOrderItem } from "./swarm-order";
 import { useSwarmOrder } from "./swarm-order-hold";
 import { remoteChip, remoteRows, remoteSections, type RemoteRow } from "./swarm-remote";
 import { stoppedAgents } from "./swarm-runtime";
-import { openAgentInActiveTab, sharedAgentRuntime } from "@/app/store/agent-runtime-live";
+import { openAgentInActiveTab, sharedAgentRuntime, startAgent } from "@/app/store/agent-runtime-live";
 import { SwarmGroupByControl, SwarmSeatList, useSwarmSeats } from "./swarm-seats";
 import type { SwarmDensity } from "./swarm-section";
 import { chipStatus } from "./swarm-status-chip";
@@ -186,6 +186,7 @@ export function SwarmAgentList(props: {
                 agents={props.agents.stopped}
                 hasLive={() => tree().length > 0 || remote().length > 0}
                 onOpen={openAgentInActiveTab}
+                onStart={startAgent}
             />
         </>
     );
