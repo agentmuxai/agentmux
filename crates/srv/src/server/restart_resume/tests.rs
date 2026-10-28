@@ -16,10 +16,14 @@ fn set_meta(state: &AppState, block_id: &str, meta: serde_json::Value) {
     crate::server::service::update_object_meta(&state.mstore, &format!("block:{block_id}"), &map).unwrap();
 }
 
-fn wrote_a_turn(state: &AppState, uid: &str) {
-    let zone = agent_current_zone(uid);
-    state.filestore.make_file(&zone, OUTPUT_FILE, FileMeta::new(), FileOpts::default()).unwrap();
-    state.filestore.write_file(&zone, OUTPUT_FILE, b"{}\n").unwrap();
+fn write_turn(store: &FileStore, zone: &str) {
+    store.make_file(zone, OUTPUT_FILE, FileMeta::new(), FileOpts::default()).unwrap();
+    store.write_file(zone, OUTPUT_FILE, b"{}\n").unwrap();
+}
+
+/// A turn as the controller writes it: into the block's own zone of this channel's store.
+fn wrote_a_turn(state: &AppState, block_id: &str) {
+    write_turn(&state.filestore, block_id);
 }
 
 /// A parked agent that was wanted running, has a session and wrote a turn just now.
@@ -28,7 +32,7 @@ async fn resumable(state: &AppState, tab: &str, agent: &str) -> String {
     dispatch_apply(state, Command::ParkBlock { tab_id: tab.to_string(), block_id: block.clone() }).await;
     set_desired(&state.mstore, &block, DESIRED_RUNNING);
     set_meta(state, &block, serde_json::json!({ "agent:sessionid": "sess-1" }));
-    wrote_a_turn(state, agent);
+    wrote_a_turn(state, &block);
     block
 }
 
@@ -71,7 +75,7 @@ async fn only_a_parked_agent_wanted_running_with_a_session_and_a_recent_turn_com
     let shown = seed_agent_block(&state, &tabs[0], "ag-shown").await;
     set_desired(&state.mstore, &shown, DESIRED_RUNNING);
     set_meta(&state, &shown, serde_json::json!({ "agent:sessionid": "sess-3" }));
-    wrote_a_turn(&state, "ag-shown");
+    wrote_a_turn(&state, &shown);
 
     let got: Vec<String> = candidates(&state).into_iter().map(|c| c.block_id).collect();
     assert_eq!(got, vec![back], "{got:?}");
@@ -126,4 +130,36 @@ async fn with_room_the_parked_agent_is_started_and_gets_no_pane() {
     assert_eq!(crate::sagas::park_agents_tests::in_tab(&state, &block).await.as_deref(), Some(""), "it stays parked");
     assert!(blockcontroller::get_controller(&block).is_some(), "its process was started");
     blockcontroller::delete_controller(&block);
+}
+
+/// The newest write of a turn counts wherever it was kept: the global transcript store holds the agent's
+/// zone, the channel's store the block's, and an older layout the agent's zone there too.
+#[test]
+fn the_last_turn_is_the_newest_write_in_any_of_the_stores() {
+    let global = FileStore::open_in_memory().unwrap();
+    let local = FileStore::open_in_memory().unwrap();
+    assert_eq!(latest_write_ms(&[(&local, "block-1"), (&global, "agent:a:current")]), None, "nothing written");
+
+    write_turn(&global, "agent:a:current");
+    let from_global = latest_write_ms(&[(&local, "block-1"), (&global, "agent:a:current")]).expect("the global store counts");
+
+    std::thread::sleep(Duration::from_millis(20));
+    write_turn(&local, "block-1");
+    let newest = latest_write_ms(&[(&local, "block-1"), (&global, "agent:a:current")]).expect("both");
+    assert!(newest > from_global, "the block's zone is newer: {newest} vs {from_global}");
+}
+
+/// An agent whose only transcript is the agent's zone in this channel's store (an older layout) still counts.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_older_layouts_agent_zone_in_the_channel_store_still_counts() {
+    let state = test_state();
+    let (_ws, tabs) = seed_workspace(&state, 1).await;
+    let block = seed_agent_block(&state, &tabs[0], "ag-legacy").await;
+    dispatch_apply(&state, Command::ParkBlock { tab_id: tabs[0].clone(), block_id: block.clone() }).await;
+    set_desired(&state.mstore, &block, DESIRED_RUNNING);
+    set_meta(&state, &block, serde_json::json!({ "agent:sessionid": "sess-1" }));
+    write_turn(&state.filestore, &agent_current_zone("ag-legacy"));
+
+    let got: Vec<String> = candidates(&state).into_iter().map(|c| c.block_id).collect();
+    assert_eq!(got, vec![block]);
 }

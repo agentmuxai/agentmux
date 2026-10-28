@@ -15,7 +15,8 @@
 
 use std::time::Duration;
 
-use crate::backend::agent_session::{agent_current_zone, is_valid_definition_id, OUTPUT_FILE};
+use crate::backend::agent_session::{agent_current_zone, global_transcript_store, is_valid_definition_id, OUTPUT_FILE};
+use crate::backend::storage::filestore::FileStore;
 use crate::backend::blockcontroller;
 use crate::backend::obj;
 
@@ -53,13 +54,25 @@ fn active_within(last_active_ms: u64, now_ms: u64, window_ms: Option<u64>) -> bo
     window_ms.is_none_or(|w| now_ms.saturating_sub(last_active_ms) <= w)
 }
 
-/// When the agent's transcript was last written (ms): its last turn. `None` when it has none.
-fn last_active_ms(state: &AppState, uid: &str) -> Option<u64> {
+/// The latest write time (ms) of the transcript files `sources` name (a store and a zone each).
+fn latest_write_ms(sources: &[(&FileStore, &str)]) -> Option<u64> {
+    sources.iter().filter_map(|(store, zone)| store.stat(zone, OUTPUT_FILE).ok().flatten()).map(|f| f.modts.max(0) as u64).max()
+}
+
+/// When the agent's transcript was last written (ms): its last turn. `None` when it has none. A turn is
+/// appended to the agent's zone in the global transcript store and, unless that took it, to the block's
+/// own zone in this channel's store (an older layout kept the agent's zone there too): the newest of the
+/// three.
+fn last_active_ms(state: &AppState, uid: &str, block_id: &str) -> Option<u64> {
     if !is_valid_definition_id(uid) {
         return None;
     }
-    let file = state.filestore.stat(&agent_current_zone(uid), OUTPUT_FILE).ok().flatten()?;
-    Some(file.modts.max(0) as u64)
+    let agent_zone = agent_current_zone(uid);
+    let mut sources: Vec<(&FileStore, &str)> = vec![(state.filestore.as_ref(), block_id), (state.filestore.as_ref(), agent_zone.as_str())];
+    if let Some(global) = global_transcript_store() {
+        sources.push((global.as_ref(), agent_zone.as_str()));
+    }
+    latest_write_ms(&sources)
 }
 
 /// The parked agent blocks to resume, most recently active first.
@@ -82,7 +95,7 @@ fn candidates(state: &AppState) -> Vec<Candidate> {
                 return None;
             }
             let uid = crate::sagas::park_agents::agent_of_block(state, &block.oid, &block)?.id;
-            let last_active_ms = last_active_ms(state, &uid)?;
+            let last_active_ms = last_active_ms(state, &uid, &block.oid)?;
             let window = super::agent_lifecycle::idle_window_of(state, &block);
             active_within(last_active_ms, now, window).then_some(Candidate { uid, block_id: block.oid, last_active_ms })
         })
