@@ -51,13 +51,11 @@ pub(crate) async fn handle_github_token(
         return refuse(StatusCode::UNAUTHORIZED, "no agent token: GitHub tokens are for an agent's own commands".to_string());
     };
     let mstore = state.mstore.clone();
-    let slug = match tokio::task::spawn_blocking(move || mstore.agent_def_get(&uid)).await {
-        Ok(Ok(Some(def))) if def.agent_type != "container" => def.slug,
-        Ok(Ok(Some(_))) => return refuse(StatusCode::FORBIDDEN, "a container agent has no GitHub token from the host".to_string()),
+    let (slug, in_container) = match tokio::task::spawn_blocking(move || mstore.agent_def_get(&uid)).await {
+        Ok(Ok(Some(def))) => (def.slug, def.agent_type == "container"),
         Ok(Ok(None)) => return refuse(StatusCode::UNAUTHORIZED, "the agent token names no agent on this machine".to_string()),
         _ => return refuse(StatusCode::INTERNAL_SERVER_ERROR, "couldn't read the agent".to_string()),
     };
-    let backend = github_tokens::Live { mstore: state.id_store.clone(), identity_store: state.identity_store.clone() };
     // The person's GitHub account: who the agent works for, and whether this agent may change CI workflows.
     let accounts = state.id_store.clone();
     let account = tokio::task::spawn_blocking(move || {
@@ -67,6 +65,32 @@ pub(crate) async fn handle_github_token(
     .ok()
     .flatten();
     let owner = account.as_ref().and_then(github_connect::owner_of);
+    // A container agent is given a token only where its git setup was switched on (the hooks mounted,
+    // `github_tokens::container_git_hooks`), and from the host's `gh-agent` first.
+    let mut host_error = None;
+    if in_container {
+        if crate::identity::github_tokens::container_git_hooks().is_none() {
+            return refuse(StatusCode::FORBIDDEN, "no GitHub token for a container agent on this machine".to_string());
+        }
+        match crate::identity::gh_agent_token::token_for(&slug, &req.owner, &req.repo).await {
+            Ok(host) => {
+                let now = chrono::Utc::now().timestamp();
+                tracing::info!(target: "identity", agent = %slug, owner = %req.owner, repo = %req.repo, "identity.github: a container agent's token from the host's gh-agent");
+                return Json(json!({
+                    "token": host.token.as_str(),
+                    "expiresAt": if host.expires_at > now { host.expires_at } else { now + 300 },
+                    "botSlug": host.bot_slug,
+                    // gh-agent doesn't say the bot's user id, so commits keep their own author; the owner
+                    // is the connected account's, when there is one.
+                    "ownerGithubId": owner.as_ref().map(|(id, _)| *id),
+                    "ownerLogin": owner.as_ref().map(|(_, login)| login.as_str()),
+                }))
+                .into_response();
+            }
+            Err(e) => host_error = Some(e),
+        }
+    }
+    let backend = github_tokens::Live { mstore: state.id_store.clone(), identity_store: state.identity_store.clone() };
     let workflows = account.as_ref().is_some_and(|a| github_connect::workflows_allowed(a, &slug));
     let want = Want { agent: slug, owner: req.owner, repo: req.repo, workflows };
     match github_tokens::global().token_for(&backend, &want, chrono::Utc::now().timestamp()).await {
@@ -81,7 +105,11 @@ pub(crate) async fn handle_github_token(
         .into_response(),
         Err(e) => {
             tracing::info!(target: "identity", agent = %want.agent, owner = %want.owner, repo = %want.repo, error = %e, "identity.github: no agent token");
-            refuse(status_for(&e), e.to_string())
+            // A container agent was tried against gh-agent first: say both, in words it can show.
+            match host_error {
+                Some(host) => refuse(status_for(&e), format!("{host}; {e}")),
+                None => refuse(status_for(&e), e.to_string()),
+            }
         }
     }
 }
