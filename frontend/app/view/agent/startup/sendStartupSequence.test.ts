@@ -136,6 +136,21 @@ describe("the opening update", () => {
         expect(d.sent[0]).not.toContain("Opening update");
     });
 
+    it("is skipped while the agent is working, so it is never held into a running task", async () => {
+        noteOpenedByPerson("a1");
+        const d = deps({ sessionId: () => "s-1", isBusy: () => true });
+        await sendStartupSequence(d);
+        expect(d.sent).toEqual([]);
+        expect(d.logs.some((l) => l.includes("opening update skipped"))).toBe(true);
+    });
+
+    it("goes out when the agent is idle", async () => {
+        noteOpenedByPerson("a1");
+        const d = deps({ sessionId: () => "s-1", isBusy: () => false });
+        await sendStartupSequence(d);
+        expect(d.sent).toEqual([OPENING_SUMMARY_PROMPT]);
+    });
+
     it("a failed send is logged, not thrown", async () => {
         noteOpenedByPerson("a1");
         const d = deps({
