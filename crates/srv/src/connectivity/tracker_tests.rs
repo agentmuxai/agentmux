@@ -263,3 +263,17 @@ fn a_network_change_while_a_probe_runs_repeats_it_at_once() {
     t.probe_finished(&api(), ticket, down("refused"), 7_000);
     assert_eq!(t.next_probe_due(), Some(7_000));
 }
+
+#[test]
+fn a_network_change_while_an_online_services_probe_runs_has_it_repeated_even_when_it_answers() {
+    let mut t = Tracker::new(0, 0);
+    t.report(api(), Outcome::Answered, 0);
+    t.network_changed(1_000);
+    let (_, ticket) = t.take_due_probes(1_000).remove(0);
+    t.network_changed(2_000);
+    t.probe_finished(&api(), ticket, Outcome::Answered, 3_000);
+    assert_eq!(t.next_probe_due(), Some(3_000), "the answer was about the old network");
+    let (_, ticket) = t.take_due_probes(3_000).remove(0);
+    t.probe_finished(&api(), ticket, Outcome::Answered, 3_100);
+    assert_eq!(t.next_probe_due(), None, "and the repeat leaves nothing scheduled");
+}

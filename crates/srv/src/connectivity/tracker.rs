@@ -21,7 +21,8 @@ pub(super) const DEGRADED_MIN_FAILURES: usize = 2;
 pub(super) const PROBE_FIRST_MS: i64 = 5_000;
 pub(super) const PROBE_MAX_MS: i64 = 60_000;
 
-/// A probe that is scheduled or running, while its service isn't `Online`.
+/// A probe that is scheduled or running: while its service isn't `Online`, or once after the OS reported a
+/// network change.
 #[derive(Debug, Clone, PartialEq)]
 struct ProbeSchedule {
     due_ms: i64,
@@ -69,8 +70,8 @@ impl Entry {
         }
     }
 
-    /// Applies one outcome; `probed` says it came from a probe, which runs
-    /// only while the service is believed down, so its failure confirms it.
+    /// Applies one outcome; `probed` says it came from a probe of a service believed down,
+    /// so its failure confirms it.
     fn apply(&mut self, outcome: Outcome, probed: bool, now_ms: i64) -> Reachability {
         self.forget_old_failures(now_ms);
         match outcome {
@@ -186,7 +187,9 @@ impl Tracker {
         let probed = entry.state != Reachability::Online;
         let next = entry.apply(outcome, probed, now_ms);
         let changed = entry.enter(next, now_ms);
-        if entry.state == Reachability::Online {
+        // An online service keeps its probe only to be repeated: the network changed again while this one ran.
+        let repeat = entry.probe.as_ref().is_some_and(|p| p.in_flight == Some(ticket) && p.again);
+        if entry.state == Reachability::Online && !repeat {
             entry.probe = None;
         }
         // Leaving `Online` has scheduled a fresh first probe; otherwise this one backs off.
