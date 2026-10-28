@@ -223,8 +223,13 @@ fn push_diff(dir: Option<&Path>, remote: &str, local: &str, remote_sha: &str) ->
     };
     let is_name = !remote.is_empty() && !remote.contains([':', '/', '\\']);
     let whole_branch = || {
-        let seen = if is_name { format!("--remotes={remote}") } else { "--remotes".to_string() };
-        log(vec![local.to_string(), "--not".to_string(), seen])
+        // Only that remote's own tracking refs say what it has; a URL maps to none, and the other
+        // remotes' history (another repository's) is not what this destination holds.
+        if is_name {
+            log(vec![local.to_string(), "--not".to_string(), format!("--remotes={remote}")])
+        } else {
+            log(vec![local.to_string()])
+        }
     };
     if remote_sha.chars().all(|c| c == '0') {
         return whole_branch();
@@ -434,6 +439,12 @@ key = {token}
         assert_eq!((found[0].file.as_str(), found[0].line), ("a.txt", 2));
         // The remote already has it: nothing is added.
         assert!(scan_diff(&push_diff(Some(repo), "origin", &second, &second).unwrap()).is_empty());
+        // A new branch on a named remote leaves out what that remote's tracking refs hold; a URL has none
+        // of its own, so history another remote holds is still scanned.
+        git(repo, &["update-ref", "refs/remotes/origin/main", &second]);
+        assert!(scan_diff(&push_diff(Some(repo), "origin", &second, &zeros).unwrap()).is_empty());
+        let by_url = push_diff(Some(repo), "https://example.com/x/y.git", &second, &zeros).unwrap();
+        assert_eq!(scan_diff(&by_url).len(), 1, "a push by URL is not excused by other remotes' history");
         // A directory that isn't a repository gives no diff, not an empty one.
         assert!(push_diff(Some(&dir.join("nowhere")), "origin", &second, &first).is_none());
         let _ = std::fs::remove_dir_all(&dir);
