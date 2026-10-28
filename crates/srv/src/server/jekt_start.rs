@@ -9,8 +9,8 @@
 //!   a host-tier, full-key sender gets that far (`hold_applies`), so a LAN or WAN peer or an
 //!   unverified sender never starts an agent. The start runs in the background; the replay delivers
 //!   the row when the agent registers (`jekt_held`).
-//! - An operator Job or cron fire, which is never held: [`deliver_cron`] starts the agent, waits for
-//!   it to register and delivers once.
+//! - An operator Job or cron fire, which is never held: [`deliver_cron`] starts the agent first, waits
+//!   for it to register and then delivers.
 //!
 //! Admission, the spawn gate and the lease apply as for `agent.open`; a start that fails leaves the
 //! message held (or the fire missed) exactly as before.
@@ -102,33 +102,37 @@ pub(super) fn start_for_held(state: &AppState, req: &InjectionRequest, target_ui
     });
 }
 
-/// Deliver a Job or cron fire. A fire to an agent that is stopped (`agent not found`) starts it, with
-/// the setting on, waits for it to register and delivers once more.
+/// Deliver a Job or cron fire. With the setting on, a target that is an agent of this instance and runs
+/// nowhere is started first and waited for, then the fire goes the normal way: before this, a signed-in
+/// instance would have queued the fire to the cloud as delivered while the local agent stayed stopped.
 pub(crate) async fn deliver_cron(state: &AppState, creator_uid: &str, req: InjectionRequest) -> serde_json::Value {
-    let first = super::reactive::deliver(state, super::ReactiveAuthVia::FullAuthKey, creator_uid, req.clone()).await;
-    if !enabled(state) || !is_stopped_answer(&first) {
-        return first;
-    }
-    let mstore = state.mstore.clone();
-    let target = req.target_agent.clone();
-    let uid = tokio::task::spawn_blocking(move || super::reactive::defined_here(&mstore, &target)).await.ok().flatten();
-    let Some((uid, _slug)) = uid else {
-        return first;
-    };
-    if let Err(e) = start_once(state, &uid).await {
-        tracing::warn!(target_uid = %uid, "cron: could not start the stopped agent: {e}");
-        return first;
-    }
-    if !wait_registered(state, &uid).await {
-        return first;
+    if enabled(state) {
+        start_stopped_local_target(state, &req.target_agent).await;
     }
     super::reactive::deliver(state, super::ReactiveAuthVia::FullAuthKey, creator_uid, req).await
 }
 
-/// Whether an inject answer says the target is not running here.
-fn is_stopped_answer(body: &serde_json::Value) -> bool {
-    body.get("success").and_then(|v| v.as_bool()) != Some(true)
-        && body.get("error").and_then(|v| v.as_str()).is_some_and(|e| e.starts_with("agent not found"))
+/// Start the agent `target` names when it is defined here and runs nowhere (not here, not in another
+/// channel on this computer, not by a lease held elsewhere), and wait for it to register.
+async fn start_stopped_local_target(state: &AppState, target: &str) {
+    let mstore = state.mstore.clone();
+    let name = target.to_string();
+    let Some((uid, slug)) = tokio::task::spawn_blocking(move || super::reactive::defined_here(&mstore, &name)).await.ok().flatten() else {
+        return;
+    };
+    let running_elsewhere = || {
+        crate::registry::resolve_shared_reactive_dir().is_some_and(|dir| {
+            crate::backend::jobs::registered_in_another_channel(&dir, &uid, &crate::backend::reactive::registry::local_channel_id())
+        }) || crate::muxbus::wan_lease::held_elsewhere(&slug).is_some()
+    };
+    if state.reactive_handler.has_uid_registration(&uid) || running_elsewhere() {
+        return;
+    }
+    if let Err(e) = start_once(state, &uid).await {
+        tracing::warn!(target_uid = %uid, "cron: could not start the stopped agent: {e}");
+        return;
+    }
+    wait_registered(state, &uid).await;
 }
 
 async fn wait_registered(state: &AppState, uid: &str) -> bool {

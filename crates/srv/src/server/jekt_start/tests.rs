@@ -17,14 +17,6 @@ fn one_start_per_agent_is_in_flight_and_the_slot_frees_on_drop() {
     assert!(StartSlot::claim("uid-slot").is_some());
 }
 
-#[test]
-fn only_an_agent_not_found_answer_means_stopped() {
-    assert!(is_stopped_answer(&serde_json::json!({ "success": false, "error": "agent not found: uid-t" })));
-    assert!(!is_stopped_answer(&serde_json::json!({ "success": true })));
-    assert!(!is_stopped_answer(&serde_json::json!({ "success": false, "error": "ambiguous agent name: 'x'" })));
-    assert!(!is_stopped_answer(&serde_json::json!({ "success": false, "held": true })));
-}
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_start_for_a_stopped_agent_runs_its_parked_block() {
     let state = test_state();
@@ -111,4 +103,25 @@ fn a_sender_whose_signature_failed_does_not_start_an_agent() {
     assert!(may_start(&req(None)), "a sender with no key on file is as before");
     assert!(may_start(&req(Some(true))));
     assert!(!may_start(&req(Some(false))));
+}
+
+/// A fire to an agent defined here that runs nowhere starts it first; one that is already registered is left alone.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_fire_starts_a_stopped_local_agent_and_leaves_a_running_one_alone() {
+    let state = test_state();
+    let (_ws, tabs) = seed_workspace(&state, 1).await;
+    let stopped = seed_agent_block(&state, &tabs[0], "ag-cron-stopped").await;
+    let running = seed_agent_block(&state, &tabs[0], "ag-cron-running").await;
+    for b in [&stopped, &running] {
+        dispatch_apply(&state, Command::ParkBlock { tab_id: tabs[0].clone(), block_id: b.clone() }).await;
+    }
+    state.reactive_handler.register_agent_full("ag-cron-running", &running, None, 0, None, Some("ag-cron-running"), "test").unwrap();
+
+    start_stopped_local_target(&state, "ag-cron-stopped").await;
+    start_stopped_local_target(&state, "ag-cron-running").await;
+    start_stopped_local_target(&state, "no-such-agent").await;
+
+    assert_eq!(desired_of(&state, &stopped).await.as_deref(), Some("running"));
+    assert!(state.reactive_handler.has_uid_registration("ag-cron-stopped"));
+    assert_eq!(desired_of(&state, &running).await, None, "an agent that is running is not started again");
 }
