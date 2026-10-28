@@ -136,6 +136,10 @@
             "method": "AgentStopCommand"
         },
         {
+            "command": "agent.open",
+            "method": "AgentOpenCommand"
+        },
+        {
             "command": "agent.start",
             "method": "AgentStartCommand"
         },

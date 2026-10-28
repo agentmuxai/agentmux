@@ -24,6 +24,14 @@ import {
     type PaneCloseProbe,
 } from "@/app/tab/pane-close-guard";
 import { closeWithShutdownLog } from "@/app/view/agent/shutdown/close-with-log";
+import {
+    describeLeave,
+    leavePrompts,
+    notePersonClose,
+    siteOf,
+    type LeavePrompt,
+    type LeaveProbe,
+} from "@/app/view/browser/leave-prompt";
 import { pushFlashError } from "@/app/store/flash-notifications";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -61,6 +69,19 @@ function isAgentBlock(blockId: string): boolean {
     return resolveEffectiveViewType(typeof view === "string" ? view : "") === "agent";
 }
 
+function isBrowserBlock(blockId: string): boolean {
+    const view = MOS.getObjectValue<MuxObj>(MOS.makeORef("block", blockId))?.meta?.["view"];
+    return resolveEffectiveViewType(typeof view === "string" ? view : "") === "browser";
+}
+
+/** Whether a browser pane's page would ask "Leave site?" (`leave-prompt.ts`). */
+const leaveProbe: LeaveProbe = {
+    isBrowser: isBrowserBlock,
+    asks: async (blockId) => (await getApi().browserPanes.hibernationCheck?.(blockId))?.leave_prompt === true,
+    site: (blockId) =>
+        siteOf(MOS.getObjectValue<MuxObj>(MOS.makeORef("block", blockId))?.meta?.["url"] as string | undefined),
+};
+
 function TabContent(props: { tabId: string }): JSX.Element {
     const oref = createMemo(() => MOS.makeORef("tab", props.tabId));
     const tabAtom = createMemo(() => MOS.getMuxObjectAtom<Tab>(oref()));
@@ -88,7 +109,20 @@ function TabContent(props: { tabId: string }): JSX.Element {
     // leaving their closes waiting forever.
     onCleanup(() => {
         for (const pending of pendingCloses()) pending.resolve(false);
+        for (const pending of pendingLeaves()) pending.resolve(false);
     });
+
+    // The same for a browser page that would ask "Leave site?" when its pane
+    // is closed by the person: AgentMux's own dialog, naming the site.
+    const [pendingLeaves, setPendingLeaves] = createSignal<
+        { leaving: LeavePrompt[]; resolve: (close: boolean) => void }[]
+    >([]);
+    const pendingLeave = () => pendingLeaves()[0] ?? null;
+    const answerPendingLeave = (close: boolean) => {
+        const [head, ...rest] = pendingLeaves();
+        setPendingLeaves(rest);
+        head?.resolve(close);
+    };
 
     const tileLayoutContents = createMemo<TileLayoutContents>(() => {
         const renderContent: ContentRenderer = (nodeModel: NodeModel) => {
@@ -145,10 +179,19 @@ function TabContent(props: { tabId: string }): JSX.Element {
                 );
                 if (!confirmed) return false;
             }
+            const leaving = await leavePrompts(blockIds, leaveProbe);
+            if (leaving.length > 0) {
+                const confirmed = await new Promise<boolean>((resolve) =>
+                    setPendingLeaves((q) => [...q, { leaving, resolve }])
+                );
+                if (!confirmed) return false;
+            }
             if (closesWithShutdownLog(blockIds, isAgentBlock)) {
                 void closeWithShutdownLog(props.tabId, blockIds, isAgentBlock);
                 return false;
             }
+            // The host's log says the person closed these panes.
+            notePersonClose(blockIds.filter(isBrowserBlock));
             return true;
         }
 
@@ -217,6 +260,20 @@ function TabContent(props: { tabId: string }): JSX.Element {
                             <For each={pending().busy}>{(m) => <li>{describeBusyMember(m)}</li>}</For>
                         </ul>
                     </ConfirmModal>
+                )}
+            </Show>
+            <Show when={pendingLeave()}>
+                {(pending) => (
+                    <ConfirmModal
+                        open={true}
+                        title="Close this pane?"
+                        description={describeLeave(pending().leaving)}
+                        confirmLabel="Close anyway"
+                        cancelLabel="Keep open"
+                        destructive
+                        onConfirm={() => answerPendingLeave(true)}
+                        onCancel={() => answerPendingLeave(false)}
+                    />
                 )}
             </Show>
         </div>

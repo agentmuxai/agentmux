@@ -515,6 +515,8 @@ impl PersistentSubprocessController {
             let mut inner = self.inner.lock().unwrap();
             inner.current_pid = Some(pid);
             crate::backend::cli_native::pids::set(&self.block_id, pid);
+            // Its first turn may now take a while: whoever waits on this identity's refresh waits for it.
+            crate::identity::token_warmup::started(&self.block_id);
             inner.kill_tx = Some(kill_tx);
             inner.stdin_tx = Some(msg_tx);
             // The same `Arc` when an earlier generation's lease was reused
