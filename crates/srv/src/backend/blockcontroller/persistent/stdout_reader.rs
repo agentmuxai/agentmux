@@ -94,6 +94,16 @@ impl PersistentSubprocessController {
             if line.trim().is_empty() {
                 continue;
             }
+            // A turn the CLI found cut off with a tool call pending (we
+            // interrupted it at a restart or an upgrade) is told plainly, not
+            // as the CLI's raw diagnostic; the diagnostic stays in the log.
+            let line = match crate::agents::failure::plain_cut_off(&line) {
+                Some((diagnostic, plain)) => {
+                    tracing::info!(block_id = %block_id_read, diagnostic = %diagnostic, "a turn was cut off mid-tool; shown as an interrupted turn");
+                    plain
+                }
+                None => line,
+            };
             // A replayed user turn is not output of the conversation: the echo of a turn srv wrote is
             // recorded by srv and the pane already, and a peer message is audited here instead. The
             // CLI's own replayed frames (a local command's output) stay.
