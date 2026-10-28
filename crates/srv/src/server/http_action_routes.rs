@@ -59,6 +59,7 @@ pub(super) const ALWAYS: &[&str] = &[
     "POST /api/v1/ui/shortcuts/run", "POST /api/v1/vault/request", "POST /api/v1/widgets/install",
     "POST /api/v1/window/focus", "POST /api/v1/window/name", "POST /api/v1/work-claims",
     "POST /api/v1/work-claims/release", "POST /api/v1/workspace/name",
+    "POST /api/v1/agent/detach", "POST /api/v1/agent/start", "POST /api/v1/agent/stop",
 ];
 
 /// Window and host plumbing, and the service call the window makes.
