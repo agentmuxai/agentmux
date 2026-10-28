@@ -72,7 +72,7 @@ export function needsReason(t: KanbanTask): string | null {
         case "claimed": {
             const h = t.holder;
             if (!h || h.state === "gone") return "agent closed";
-            if (h.state === "waiting") return "question waiting in its pane";
+            if (h.state === "waiting") return "waiting on you";
             if (h.state === "limited") return quotaReason(t.holder_unavailable?.resets_at_ms);
             if (h.state === "signed_out") return "needs sign-in";
             if (h.state === "error") return "agent errored";

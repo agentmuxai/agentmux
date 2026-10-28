@@ -231,6 +231,23 @@ pub fn changed_rows(last: &mut HashMap<String, AgentRuntime>, now: Vec<AgentRunt
     changed
 }
 
+/// Whether `row` just began waiting on the user: it is waiting now and was not at the last look. An
+/// agent with no block has nothing to notify about.
+fn begins_waiting(before: Option<AgentRuntimeState>, row: &AgentRuntime) -> bool {
+    row.state == AgentRuntimeState::WaitingOnUser && row.block_id.is_some() && before != Some(AgentRuntimeState::WaitingOnUser)
+}
+
+/// "Waiting on you" as an OS notification, for an agent no pane need show (a headless or parked one):
+/// the router coalesces it with the question's own report for the same block, so it adds nothing
+/// when the question already notified, and covers a wait that had no such report (an App Server
+/// approval).
+fn notify_waiting(state: &AppState, row: &AgentRuntime) {
+    let (Some(block_id), Some(router)) = (row.block_id.as_deref(), crate::backend::notify::router::get(&state.broker)) else {
+        return;
+    };
+    router.input_waiting_nonblocking(block_id, None, 0);
+}
+
 /// Look at the states on a short interval and publish each change to `agentruntime:changed:<id>`.
 pub(crate) fn spawn(state: AppState) {
     tokio::spawn(async move {
@@ -238,7 +255,11 @@ pub(crate) fn spawn(state: AppState) {
         loop {
             let looked = state.clone();
             if let Ok(rows) = tokio::task::spawn_blocking(move || list(&looked, agentmux_common::time::now_ms_u64())).await {
+                let before: HashMap<String, AgentRuntimeState> = last.iter().map(|(id, r)| (id.clone(), r.state)).collect();
                 for row in changed_rows(&mut last, rows) {
+                    if begins_waiting(before.get(&row.agent_id).copied(), &row) {
+                        notify_waiting(&state, &row);
+                    }
                     state.broker.publish_event_for::<crate::backend::mps_events::AgentRuntimeChanged>(
                         &row.agent_id,
                         &row,
@@ -366,6 +387,18 @@ mod tests {
         ] {
             assert_eq!(desired_of(state), AgentDesiredState::Running, "{state:?}");
         }
+    }
+
+    #[test]
+    fn an_agent_begins_waiting_once_and_only_with_a_block() {
+        let mut waiting = row("a", AgentRuntimeState::WaitingOnUser);
+        waiting.block_id = Some("blk".into());
+        assert!(begins_waiting(Some(AgentRuntimeState::Working), &waiting));
+        assert!(begins_waiting(None, &waiting), "first seen already waiting");
+        assert!(!begins_waiting(Some(AgentRuntimeState::WaitingOnUser), &waiting), "it was already waiting");
+        waiting.block_id = None;
+        assert!(!begins_waiting(Some(AgentRuntimeState::Working), &waiting), "no block, nothing to notify about");
+        assert!(!begins_waiting(None, &row("b", AgentRuntimeState::Working)));
     }
 
     #[test]
