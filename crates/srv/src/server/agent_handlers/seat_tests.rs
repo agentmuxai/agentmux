@@ -255,3 +255,66 @@ async fn define(h: &Harness, name: &str) -> String {
     .unwrap()
     .definition_id
 }
+
+fn set(h: &Harness, id: &str, role: &str) {
+    let change = SeatChange { agent_id: id.to_string(), seat: Some(SeatInput { role: role.to_string(), qualifier: Some("q".into()), lead: None, area: None, lane: None }) };
+    let _seats = h.state.mstore.agent_seat_lock().unwrap();
+    let defs = h.state.mstore.agent_def_list().unwrap();
+    let planned = plan_seats(&h.state.mstore, &defs, std::slice::from_ref(&change), "").unwrap();
+    write_seats(&h.state.mstore, &planned, &SeatActor::Operator).unwrap();
+}
+
+#[tokio::test]
+async fn a_second_super_agent_takes_the_seat_and_the_first_goes_back() {
+    let h = harness(None);
+    h.agent("a-1", "AgentX");
+    h.agent("a-2", "AgentY");
+    set(&h, "a-1", "leader");
+    set(&h, "a-1", "super");
+    let first = h.state.mstore.agent_seat_get("a-1").unwrap();
+    assert_eq!((first.role.as_str(), first.prior_role.as_deref()), ("super", Some("leader")));
+    let defs = h.state.mstore.agent_def_list().unwrap();
+    assert_eq!(crate::backend::agent_seat::super_holder(&h.state.mstore, &defs).as_deref(), Some("a-1"));
+
+    set(&h, "a-2", "super");
+    let back = h.state.mstore.agent_seat_get("a-1").unwrap();
+    assert_eq!((back.role.as_str(), back.prior_role.as_deref(), back.qualifier.as_deref()), ("leader", None, Some("q")), "back to what it was");
+    assert_eq!(h.state.mstore.agent_seat_get("a-2").unwrap().role, "super");
+    let defs = h.state.mstore.agent_def_list().unwrap();
+    assert_eq!(crate::backend::agent_seat::super_holder(&h.state.mstore, &defs).as_deref(), Some("a-2"));
+}
+
+#[tokio::test]
+async fn a_super_agent_that_had_no_seat_goes_back_to_worker() {
+    let h = harness(None);
+    h.agent("a-1", "AgentX");
+    h.agent("a-2", "AgentY");
+    set(&h, "a-1", "super");
+    assert_eq!(h.state.mstore.agent_seat_get("a-1").unwrap().prior_role, None);
+    set(&h, "a-2", "super");
+    assert_eq!(h.state.mstore.agent_seat_get("a-1").unwrap().role, "worker");
+}
+
+#[tokio::test]
+async fn setting_the_seat_again_keeps_the_role_to_go_back_to() {
+    let h = harness(None);
+    h.agent("a-1", "AgentX");
+    set(&h, "a-1", "specialist");
+    set(&h, "a-1", "super");
+    set(&h, "a-1", "super");
+    assert_eq!(h.state.mstore.agent_seat_get("a-1").unwrap().prior_role.as_deref(), Some("specialist"));
+}
+
+#[tokio::test]
+async fn two_super_agents_in_one_call_are_refused_and_nothing_is_written() {
+    let h = harness(None);
+    h.agent("a-1", "AgentX");
+    h.agent("a-2", "AgentY");
+    let input = || Some(SeatInput { role: "super".to_string(), qualifier: None, lead: None, area: None, lane: None });
+    let changes = [SeatChange { agent_id: "a-1".into(), seat: input() }, SeatChange { agent_id: "a-2".into(), seat: input() }];
+    let _seats = h.state.mstore.agent_seat_lock().unwrap();
+    let defs = h.state.mstore.agent_def_list().unwrap();
+    let err = plan_seats(&h.state.mstore, &defs, &changes, "").unwrap_err();
+    assert!(err.contains("only one agent can be the super agent"), "{err}");
+    assert!(h.state.mstore.agent_seat_get("a-1").is_none() && h.state.mstore.agent_seat_get("a-2").is_none());
+}

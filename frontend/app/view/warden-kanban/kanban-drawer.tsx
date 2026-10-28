@@ -12,6 +12,7 @@ import { openLink } from "@/app/store/misc-utils";
 import { formatAge } from "@/app/view/warden-shared/warden-shared";
 
 import { KanbanAfterSection } from "./kanban-after";
+import { DrawerMedia } from "./kanban-media";
 import { agentStateWords, AgentChip } from "./kanban-card";
 import { columnOf, isFinishedColumn, isResearchKind, needsReason, requestedBy } from "./kanban-columns";
 import type { KanbanModel } from "./kanban-model";
@@ -201,6 +202,7 @@ export function KanbanDrawer(props: {
 
             <KanbanAfterSection model={props.model} task={t()} onOpen={props.onOpenTask} />
 
+            <DrawerMedia task={t()} items={detail()?.media ?? []} now={props.now} busy={busy()} onAct={act} />
             <Show when={docs().length > 0}>
                 <section class="kanban-drawer__section">
                     <h4>Document</h4>
@@ -232,7 +234,7 @@ export function KanbanDrawer(props: {
                 </section>
             </Show>
 
-            <section class="kanban-drawer__actions">
+            <section class="kanban-drawer__actions" data-toast-avoid>
                 <Show when={heldByAgent()}>
                     <Show when={t().holder_unavailable}>
                         <p class="warden-manager-dim">

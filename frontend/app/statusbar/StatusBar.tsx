@@ -9,6 +9,7 @@ import { ConnectivityIndicator } from "./ConnectivityIndicator";
 import { GpuStatus } from "./GpuStatus";
 import { HostPopover } from "./HostPopover";
 import { InstancePanel } from "./InstancePanel";
+import { AgentCountsStatus } from "./AgentCountsStatus";
 import { MultiInputStatus } from "./MultiInputStatus";
 import { MuxBusIndicator } from "./MuxBusIndicator";
 import { registerStatusBarItem, statusBarItems } from "./status-bar-registry";
@@ -96,6 +97,7 @@ function registerBuiltinStatusBarItems(): void {
         ["backend", "left", () => <BackendStatus />],
         ["system-stats", "left", () => <SystemStats />],
         ["gpu", "left", () => <GpuStatus />],
+        ["agent-counts", "right", () => <AgentCountsStatus />],
         ["multi-input", "right", () => <MultiInputStatus />],
         ["history-usage", "right", () => <HistoryUsageIndicator />],
         ["token-usage", "right", () => <TokenUsageIndicator />],

@@ -247,6 +247,9 @@ pub const COMMAND_ACCOUNT_OAUTH_CANCEL: &str = "account.oauth.cancel";
 /// whether one is saved, and forgetting it. Never returns the secret.
 pub const COMMAND_ACCOUNT_OAUTH_CLIENT_GET: &str = "account.oauth.client.get";
 pub const COMMAND_ACCOUNT_OAUTH_CLIENT_CLEAR: &str = "account.oauth.client.clear";
+/// What the GitHub broker says about this AgentMux account's GitHub connection. A grant it
+/// says is gone marks the brokered GitHub account as needing to be connected again.
+pub const COMMAND_GITHUB_CONNECTION: &str = "github.connection";
 
 // Agent ↔ Identity junction
 pub const COMMAND_LINK_AGENT_IDENTITY: &str = "linkagentidentity";
@@ -377,6 +380,10 @@ pub const COMMAND_AGENT_DEF_CREATE_FROM_TEMPLATE: &str = "agentdefcreatefromtemp
 /// Response: `{ "available": bool }`.
 pub const COMMAND_CONTAINER_RUNTIME_AVAILABLE: &str = "containerruntimeavailable";
 
+/// Remove a container agent's container so its next message starts it from the current agent
+/// image (the pane row's "Update container"). Only between turns.
+pub const COMMAND_UPDATE_CONTAINER: &str = "updatecontainer";
+
 /// Whether a container image can be had on this machine: already in the
 /// Docker daemon, or readable from its registry without credentials. Lets the
 /// create modal avoid preselecting a container that cannot start.
@@ -414,6 +421,10 @@ pub const COMMAND_LIST_DRONE_RUNS: &str = "listdroneruns";
 pub const COMMAND_AGENT_OPEN: &str = "agent.open";
 pub const COMMAND_AGENT_SEND: &str = "agent.send";
 pub const COMMAND_AGENT_STOP_API: &str = "agent.stop";
+/// Start an agent that has no pane (always-available agents; not available yet).
+pub const COMMAND_AGENT_START: &str = "agent.start";
+/// Every created agent with its runtime state (`server::agent_runtime`).
+pub const COMMAND_AGENTRUNTIME_LIST: &str = "agentruntime.list";
 pub const COMMAND_AGENT_STATUS: &str = "agent.status";
 pub const COMMAND_AGENT_LIST: &str = "agent.list";
 pub const COMMAND_AGENT_OUTPUT: &str = "agent.output";
@@ -436,7 +447,7 @@ pub const COMMAND_AGENT_TRACKED_BLOCKS: &str = "agent.tracked-blocks";
 /// sections below its own tree. Returns `backend::swarm_remote::SwarmOtherInstancesResult`.
 /// docs/specs/SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02.md
 pub const COMMAND_SWARM_OTHER_INSTANCES: &str = "swarm.other-instances";
-/// The Warden Kanban (docs/specs/SPEC_WARDEN_KANBAN_2026_10_20.md §7.2): the
+/// The Kanban in the Swarm (docs/specs/SPEC_WARDEN_KANBAN_2026_10_20.md §7.2): the
 /// board, one task with its history, and the operator's moves.
 pub const COMMAND_KANBAN_LIST: &str = "kanban.list";
 pub const COMMAND_KANBAN_TASK: &str = "kanban.task";
@@ -516,6 +527,10 @@ pub const COMMAND_AGENT_PANE_UNREGISTER: &str = "agent.pane.unregister";
 /// instance on this host (`CommandAgentTakeoverData`, `AgentTakeoverResult`).
 /// The operator's client only.
 pub const COMMAND_AGENT_TAKEOVER: &str = "agent.takeover";
+
+/// `agent.move-here`: the window moves a pane's agent here from another pane of this AgentMux
+/// that runs it (`CommandAgentMoveHereData`, `AgentMoveHereResult`). The operator's client only.
+pub const COMMAND_AGENT_MOVE_HERE: &str = "agent.move-here";
 
 // Fleet control — select/broadcast/bulk-act on many agents at once. See
 // docs/specs/SPEC_MULTI_AGENT_FLEET_CONTROL_2026_08_20.md. Both action

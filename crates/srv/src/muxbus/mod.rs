@@ -5,12 +5,14 @@ pub mod agent_credentials;
 pub mod cloud_subscriber;
 pub mod delivery_status;
 pub mod discovery;
+pub mod github_broker;
 pub mod wan_lease;
 pub mod pkce;
 pub mod relay;
 pub mod wan_presence;
 pub mod wan_publish;
 pub mod wan_verify;
+pub(crate) mod ws_connect;
 
 use crate::backend::storage::muxbus::MuxBusCredentials;
 use crate::broker::CredentialState;

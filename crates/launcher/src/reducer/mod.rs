@@ -364,6 +364,8 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Reduced {
         // Phase E.5.5 — saga-driven move commands are srv-pipe.
         Command::MoveTab { .. } => srv_pipe_only(state, "MoveTab"),
         Command::MoveBlock { .. } => srv_pipe_only(state, "MoveBlock"),
+        Command::ParkBlock { .. } => srv_pipe_only(state, "ParkBlock"),
+        Command::AttachBlock { .. } => srv_pipe_only(state, "AttachBlock"),
         // Phase E.4 (Option A) — layout-focused/magnified setters are
         // srv-pipe commands. Misrouted to the launcher pipe, return
         // a non-fatal error so the client knows the dispatch was wrong.

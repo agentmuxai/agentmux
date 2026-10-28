@@ -1,9 +1,16 @@
 # Signed checksums for update downloads
 
 **Status:** active. Approved by the operator on 2026-10-25 (decisions of §11 included). Task #99.
-Build step 1 (§8) is in progress: the manifest script, the release workflow's signing
-job (off until the key exists) and the app's verification module, which nothing calls
-yet.
+Build steps 1 and 2 (§8) are done (v0.60.4 is the first release signed through the
+pipeline). Step 3 is built in `update_signature.rs` / `update_download.rs`: when a
+download starts, a release from v0.60.4 on is downloaded only if its signed manifest
+verifies and lists the file with the same size and hash the download uses (a mismatch
+is refused, so the signed values are the ones in force); a release before v0.60.4 with no
+manifest is downloaded as before. Differences from §5.2 and §7 as first written: the
+refusal is made when Download is pressed (the update shows `failed` with §7's message)
+and not at check time as "available, no download", and the asset's name, size and
+hash still come from the release listing and are required to equal the signed ones.
+Showing the §7 states at check time is a follow-up.
 Builds on `SPEC_UPGRADE_FOR_USERS_AND_AGENTS_2026_10_15.md` §4.3 ("a `SHA256SUMS`
 signed with a key the app pins is phase 5") and on the update check of #5468
 (the latest tag comes from the `releases/latest` redirect, not the API).
@@ -125,6 +132,28 @@ private infrastructure docs (this repository is public, so it names no resource,
 account or role). The repository carries the **public** key only. Re-running a publish for an existing tag
 re-signs the files it uploads (`--clobber`); the manifest is re-made from what is
 actually there, so the pair always matches.
+
+### 4.1 Who can start a signing run does not matter
+
+The release is a reusable workflow, `release-core.yml`, called from the thin
+`release.yml` on a `v*` tag as `release-core.yml@main`. The tag's own `release.yml`
+holds no logic, so whoever can create a tag cannot change what runs. The signing
+service accepts an identity token only from a job of `release-core.yml` at
+`refs/heads/main` (the token's `job_workflow_ref` claim): a tag's own workflow, a
+branch workflow or a job of any other workflow is refused, whatever its name or trigger.
+
+The first job of the core, the gate (`scripts/release-gate.mjs`, run from a checkout of
+`main`), refuses the run unless the tag points at a `chore: release vX.Y.Z` commit that is
+on `main`, that changes only the release files (the five version files, and deleted
+changesets), and whose five version locations equal the tag. Nothing is built, waits, or
+asks for a token otherwise. Every job checks out the commit the run was created for
+(`github.sha`), never the tag name, and the signing job runs the gate again after its
+environment wait, so a tag moved during the wait changes nothing. The signing job also
+checks, before it asks for credentials, that its token names `release-core.yml` on `main`.
+
+What this leaves to protect is `main` itself: a change to `release-core.yml`,
+`scripts/release-gate.mjs` or `scripts/release-manifest.mjs` is a pull request through the
+merge queue, a review and the required checks.
 
 ## 5. In the app
 

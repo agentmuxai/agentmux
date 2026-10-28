@@ -130,7 +130,7 @@ describe("which column a task is in", () => {
         const asked = task(1, "blocked", { card: { question: "which branch?" } as KanbanTask["card"] });
         expect([columnOf(asked), needsReason(asked)]).toEqual(["needs", "asks: which branch?"]);
         const waiting = task(2, "claimed", { holder: agent("Loap-3", "waiting") });
-        expect([columnOf(waiting), needsReason(waiting)]).toEqual(["needs", "question waiting in its pane"]);
+        expect([columnOf(waiting), needsReason(waiting)]).toEqual(["needs", "waiting on you"]);
         expect(needsReason(task(3, "claimed", { holder: agent("Loap-3", "error") }))).toBe("agent errored");
         expect(needsReason(task(4, "claimed", { holder: null }))).toBe("agent closed");
         expect(needsReason(task(5, "failed", { attempts: 3 }))).toBe("failed after 3 attempts");

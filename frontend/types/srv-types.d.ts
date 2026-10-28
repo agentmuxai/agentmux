@@ -845,6 +845,10 @@ declare global {
         "agent:historySourceBlockId"?: string;
         /** Last classified agent failure; set on error exit, cleared on clean exit. */
         "agent:last_failure"?: import("@/types/rpc/AgentFailure").AgentFailure;
+        /** The pane's launch stopped at "needs sign-in" and has not registered a controller since; srv reports
+         *  such an agent as signed out (agent_state.rs). Cleared (null) once the controller registers. */
+        "agent:launch_blocked"?: "sign_in";
+        "agent:launch_blocked_at_ms"?: number;
         /** A switch of the agent's account asked for mid-turn, applied by srv when no pane of the agent is in a
          *  turn (agent.account.switch, `after_turn`): the account id, and who asked. */
         "agent:pending_account"?: string;
@@ -906,11 +910,11 @@ declare global {
         // block remount and names the pane (section-pane.tsx, warden-model.ts).
         "connectors:section"?: "accounts" | "mcp" | "remotes";
         "memory:section"?: "global" | "personal" | "skills" | "bundles";
-        "swarm:section"?: "supervisor" | "broadcast";
-        "warden:section"?: "kanban" | "jobs" | "vault" | "host" | "lan" | "internet" | "audit" | "history" | "ambient";
-        /** A Kanban task to open in the drawer, set by a link from elsewhere (the Swarm) and cleared once opened. */
+        "swarm:section"?: "supervisor" | "broadcast" | "kanban";
+        "warden:section"?: "jobs" | "vault" | "host" | "lan" | "internet" | "audit" | "history" | "ambient";
+        /** A Kanban task to open in the drawer, set by a link from elsewhere (a Swarm row's task chip) and cleared once opened. Read by the Swarm. */
         "kanban:open"?: string | null;
-        /** The Kanban section shows one lane per repository. */
+        /** The Swarm's Kanban section shows one lane per repository. */
         "kanban:lanes"?: boolean;
         // The Vault's own section, within Warden's Vault section (vault-in-warden.ts).
         "vault:section"?: "personal" | "cards" | "api-keys" | "logins" | "notes" | "kept" | "activity";
@@ -1189,6 +1193,12 @@ declare global {
         "supervisor:drive:continuations"?: number;
         "supervisor:drive:minutes"?: number;
         "supervisor:noprogress"?: number;
+        "supervisor:cooldown"?: number;
+        "supervisor:hourly"?: number;
+        "supervisor:notify:needsyou"?: boolean;
+        "supervisor:notify:limit"?: boolean;
+        "supervisor:notify:failed"?: boolean;
+        "supervisor:notify:done"?: boolean;
         "agent:mcpselfheal"?: boolean;
         "agent:outdatedidsnotice"?: boolean;
         "agent:transcriptsinglecopy"?: boolean;

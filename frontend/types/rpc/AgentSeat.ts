@@ -7,7 +7,7 @@
  * `role` is optional, and `role` is kept as text, so a seat written by a
  * newer build with a role this one doesn't know still loads.
  */
-export type AgentSeat = { role: "leader" | "worker" | "specialist" | "platform_tester" | "analyst", 
+export type AgentSeat = { role: "leader" | "worker" | "specialist" | "platform_tester" | "analyst" | "super", 
 /**
  * Shown after the role, e.g. "product".
  */
@@ -24,6 +24,11 @@ area?: string,
  * Reserved for the organization's lanes; not shown yet.
  */
 lane?: string, 
+/**
+ * The role this agent had before it became the super agent: what it goes
+ * back to when another agent takes the seat. Absent otherwise.
+ */
+prior_role?: string, 
 /**
  * When the operator last set it (epoch ms). `0` on an effective seat,
  * one computed for a spawned worker and never stored.

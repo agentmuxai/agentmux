@@ -266,7 +266,7 @@ fn require_local_agent_row(mstore: &Store, agent_id: &str) -> Result<(), String>
 /// spawn would otherwise resolve to nothing, tokenless and past the
 /// credential gate (Codex P1 on #3584). A failed stamp is only logged — for a
 /// user agent the block's `agentId` already names its row.
-fn record_agent_open_launch(mstore: &Store, agent_id: &str, block_id: &str) -> Result<(), String> {
+pub(super) fn record_agent_open_launch(mstore: &Store, agent_id: &str, block_id: &str) -> Result<(), String> {
     let now = agentmux_common::time::now_ms();
     match mstore.instance_record_launch(agent_id, block_id, now) {
         Ok(true) => {
@@ -359,6 +359,8 @@ pub(super) async fn open_agent_inner(
     into_block: Option<&str>,
     extra_meta: MetaMapType,
 ) -> Result<AgentOpenResult, String> {
+    let mut extra_meta = extra_meta;
+    let headless = extra_meta.remove(super::agent_attach::START_PARKED).is_some(); // a start: no pane
     let mstore = state.mstore.clone();
     let broker = state.broker.clone();
     let event_bus = state.event_bus.clone();
@@ -411,59 +413,12 @@ pub(super) async fn open_agent_inner(
                 let provider = providers::get_provider(&agent.provider)
                     .ok_or_else(|| format!("INVALID_PROVIDER: unknown provider '{}'", agent.provider))?;
 
-                // 3. Determine tab
-                let tab_id = resolve_tab_id(&mstore, cmd.tab_id.as_deref())?;
-
-                // 4. Check for existing agent pane in this tab (idempotent)
-                // Use resolved agent.id (not raw user input which could be a name)
-                if let Some(existing) = find_agent_block(&mstore, &tab_id, &agent.id)? {
-                    // Ensure the controller is registered (may be missing if block
-                    // was created by the frontend without backend initialization)
-                    if blockcontroller::get_controller(&existing.oid).is_none() {
-                        let controller_type = if agent.agent_type == "container" {
-                            "subprocess"
-                        } else {
-                            provider.controller_type_str()
-                        };
-                        // Set essential metadata if missing
-                        let mut meta_update = obj::MetaMapType::new();
-                        meta_update.insert("controller".to_string(), json!(controller_type));
-                        meta_update.insert("agentProvider".to_string(), json!(&agent.provider));
-                        let _ = crate::server::service::update_object_meta(
-                            &mstore, &format!("block:{}", existing.oid), &meta_update,
-                        );
-                        // Identity M4b-4: record the launch before the
-                        // resync — a controller can report its session id
-                        // during it, and that capture finds the row by
-                        // block (Codex P2 on #3584). Only on this branch's
-                        // resync, never for a pane that is already live.
-                        record_agent_open_launch(&mstore, &agent.id, &existing.oid)?;
-                        // Register controller
-                        let block_for_resync = mstore.must_get::<Block>(&existing.oid)
-                            .map_err(|e| format!("agent.open: reload block: {e}"))?;
-                        let _ = blockcontroller::resync_controller(
-                            &block_for_resync, &tab_id, None, true, true,
-                            Some(broker.clone()), Some(event_bus.clone()), Some(mstore.clone()),
-                            Some(filestore.clone()),
-                            Some(app_state.id_store.clone()), Some(app_state.identity_store.clone()),
-                            mstore.shared_agent_registry(),
-                            app_state.boot_id.clone(), &app_state.auth_key,
-                            Some(app_state.config_watcher.clone()),
-                        );
-                    }
-                    let status = blockcontroller::get_block_controller_status(&existing.oid)
-                        .map(|s| s.shellprocstatus)
-                        .unwrap_or_else(|| "init".to_string());
-                    return Ok(AgentOpenResult {
-                        block_id: existing.oid,
-                        tab_id,
-                        agent_id: cmd.agent_id,
-                        provider: agent.provider,
-                        controller_type: provider.controller_type_str().to_string(),
-                        status,
-                        created: false,
-                    });
-                }
+                // 3-4. The tab, and the agent's own block when it has one: its pane in this tab, a
+                //      parked block attached here, or the pane that shows it elsewhere (`agent_attach`).
+                let tab_id = match super::agent_attach::tab_or_reuse(&app_state, &agent, provider, &cmd, headless, into_block.is_none()).await? {
+                    Ok(tab_id) => tab_id,
+                    Err(done) => return Ok(done),
+                };
 
                 // 5. Resolve CLI path.
                 //
@@ -905,9 +860,13 @@ pub(super) async fn open_agent_inner(
                 // window. Best-effort: a failure leaves the block unplaced,
                 // for the orphan reaper. `focus` defaults to true, as the UI
                 // flow does (#3032). A split of a named pane, as `pane.open`.
-                let placement = super::pane::resolve_placement(cmd.split_direction.as_deref(), cmd.split_reference_block_id.as_deref(), cmd.focus.unwrap_or(true));
-                if let Err(e) = crate::server::service::layout_intents::place_block(&app_state, &tab_id, &block_id, placement).await {
-                    tracing::warn!("agent.open: placing the pane failed: {e}");
+                if headless {
+                    super::agent_attach::park_new(&app_state, &tab_id, &block_id).await?; // a start: parked, no pane
+                } else {
+                    let placement = super::pane::resolve_placement(cmd.split_direction.as_deref(), cmd.split_reference_block_id.as_deref(), cmd.focus.unwrap_or(true));
+                    if let Err(e) = crate::server::service::layout_intents::place_block(&app_state, &tab_id, &block_id, placement).await {
+                        tracing::warn!("agent.open: placing the pane failed: {e}");
+                    }
                 }
                 block_id
                 };
@@ -936,9 +895,10 @@ pub(super) async fn open_agent_inner(
                 // 9. Register controller (resync). Not for a terminal-tier CLI: its term view starts it once attached.
                 let block_for_resync = mstore.must_get::<Block>(&block_id)
                     .map_err(|e| format!("agent.open: reload block: {e}"))?;
+                super::agent_attach::set_desired(&mstore, &block_id, super::agent_attach::DESIRED_RUNNING);
                 if provider.controller_type != providers::ControllerType::Terminal { blockcontroller::resync_controller(
                     &block_for_resync,
-                    &tab_id,
+                    if headless { "" } else { &tab_id },
                     None,
                     true,
                     true,
@@ -1115,23 +1075,8 @@ pub(super) fn write_agent_config_files(
     // `agent_config::inject_jekt_signing_keys_into_mcp_json` — see that
     // function's doc comment for why this must not be duplicated inline
     // again.
-    if let Some(pos) = config_files.iter().position(|f| f.filename == ".mcp.json") {
-        crate::server::agent_self_keys::record_config_id_drift("m4d.config_id_drift.agent_open", agent_slug, Some(&agent.slug));
-        match crate::backend::agent_config::inject_jekt_signing_keys_into_mcp_json(
-            &config_files[pos].content,
-            &mstore,
-            agent_slug,
-        ) {
-            Some(rewritten) => config_files[pos].content = rewritten,
-            None => {
-                tracing::warn!(
-                    agent_id = %agent.id,
-                    "agent_open: jekt/LAN signing keys not injected into .mcp.json — \
-                     this agent's jekts will render TRUST=self-declared / TRUST=network-claimed \
-                     instead of verified"
-                );
-            }
-        }
+    if let Some(file) = config_files.iter_mut().find(|f| f.filename == ".mcp.json") {
+        crate::backend::mcp_json_identity::keys_for_agent_open(&mut file.content, &mstore, agent_slug, &agent);
     }
 
     // Expand ~ in work_dir

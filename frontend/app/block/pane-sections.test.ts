@@ -12,6 +12,8 @@ import { WARDEN_SECTIONS } from "@/app/view/warden/warden-model";
 import { SWARM_SECTIONS } from "@/app/view/swarm/swarm-section";
 import {
     isSectionMeta,
+    movedMeta,
+    movedSection,
     sectionKeyOf,
     sectionKeysIn,
     sectionLabelOf,
@@ -36,7 +38,12 @@ const BOARD: PaneSections<"todo" | "done"> = {
 };
 
 let unregister: () => void = () => {};
+const unregisterReal: (() => void)[] = [];
 beforeAll(() => {
+    // Warden and the Swarm, as their manifests declare their sections.
+    for (const [view, sections] of [["warden", WARDEN_SECTIONS], ["swarm", SWARM_SECTIONS]] as const) {
+        unregisterReal.push(registerPaneTab({ apiVersion: 1, view, label: view, icon: "x", sections, create: () => ({ component: () => null }) }));
+    }
     unregister = registerPaneTab({
         apiVersion: 1,
         view: "test-board",
@@ -47,7 +54,10 @@ beforeAll(() => {
         create: () => ({ component: () => null }),
     });
 });
-afterAll(() => unregister());
+afterAll(() => {
+    unregister();
+    unregisterReal.forEach((u) => u());
+});
 
 describe("pane sections", () => {
     it("keeps the selected section under <view>:section, falling back to the default", () => {
@@ -83,6 +93,29 @@ describe("pane sections", () => {
             "vault:section": "cards",
         });
         expect(sectionKeysIn({ view: "warden" })).toBeUndefined();
+    });
+
+    it("sends a section that moved panes to where it lives now, and leaves everything else alone", () => {
+        // The Kanban left Warden for the Swarm.
+        expect(movedSection("warden", "kanban")).toEqual({ view: "swarm", section: "kanban" });
+        expect(movedSection("warden", "host")).toBeNull();
+        expect(movedSection("swarm", "kanban")).toBeNull();
+        expect(movedMeta({ view: "warden", "warden:section": "kanban", "kanban:open": "t1" })).toEqual({
+            view: "swarm",
+            "swarm:section": "kanban",
+            "kanban:open": "t1",
+        });
+        const same = { view: "warden", "warden:section": "host" };
+        expect(movedMeta(same)).toBe(same);
+        expect(movedMeta(undefined)).toBeUndefined();
+        expect(movedMeta({ view: "swarm", "swarm:section": "kanban" })).toEqual({ view: "swarm", "swarm:section": "kanban" });
+    });
+
+    it("does not flag a moved pair in Settings > Widgets", () => {
+        // Warden declares no Kanban section now, but an entry naming it still opens (MOVED_SECTIONS).
+        expect(sectionProblem("warden", "kanban")).toBeNull();
+        expect(sectionProblem("swarm", "kanban")).toBeNull();
+        expect(sectionProblem("warden", "nope")).toMatch(/no "nope" section/);
     });
 
     it("lists the same sections in the widget SDK as the panes declare", () => {

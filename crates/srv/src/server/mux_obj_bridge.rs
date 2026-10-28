@@ -406,10 +406,13 @@ async fn dispatch_event(event: Event, mstore: Arc<Store>, event_bus: Arc<EventBu
         Event::BlockDeleted {
             tab_id, block_id, ..
         } => {
-            emit_fetched::<Tab>(
-                &mstore, &event_bus, OTYPE_TAB, tab_id, "BlockDeleted parent",
-            )
-            .await;
+            // A parked block had no parent tab.
+            if !tab_id.is_empty() {
+                emit_fetched::<Tab>(
+                    &mstore, &event_bus, OTYPE_TAB, tab_id, "BlockDeleted parent",
+                )
+                .await;
+            }
             emit_delete(&event_bus, OTYPE_BLOCK, &block_id);
         }
         Event::BlockMetaUpdated { block_id, .. } => {
@@ -421,6 +424,15 @@ async fn dispatch_event(event: Event, mstore: Arc<Store>, event_bus: Arc<EventBu
                 "BlockMetaUpdated",
             )
             .await;
+        }
+        // A parked block keeps its row, so the block is updated (its mark) and not deleted.
+        Event::BlockParked { tab_id, block_id, .. } => {
+            emit_fetched::<Tab>(&mstore, &event_bus, OTYPE_TAB, tab_id, "BlockParked parent").await;
+            emit_fetched::<Block>(&mstore, &event_bus, OTYPE_BLOCK, block_id, "BlockParked").await;
+        }
+        Event::BlockAttached { block_id, dst_tab_id, .. } => {
+            emit_fetched::<Block>(&mstore, &event_bus, OTYPE_BLOCK, block_id, "BlockAttached").await;
+            emit_fetched::<Tab>(&mstore, &event_bus, OTYPE_TAB, dst_tab_id, "BlockAttached parent").await;
         }
         Event::BlockMoved {
             block_id,

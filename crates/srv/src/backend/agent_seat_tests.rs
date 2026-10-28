@@ -37,6 +37,7 @@ fn a_valid_seat_is_normalized_and_stamped() {
             lead: None,
             area: Some("agent pane, identity".into()),
             lane: None,
+            prior_role: None,
             set_at_ms: 42,
         }
     );

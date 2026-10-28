@@ -38,7 +38,7 @@ on:
     types: [build-linux]
     # client_payload: { ref: "vX.Y.Z", release_tag: "vX.Y.Z", cef_runtime_tag: "" }
   workflow_call:
-    # Lets release.yml invoke this as a reusable workflow instead of inlining
+    # Lets release-core.yml invoke this as a reusable workflow instead of inlining
     # a second copy of the CEF-provisioning steps. `inputs.*` below is
     # populated from the caller's `with:` block exactly like workflow_dispatch
     # — the "Resolve inputs" step needs no changes for this path.

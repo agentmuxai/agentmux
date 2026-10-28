@@ -15,7 +15,7 @@ cd "$REAL_ROOT"
 # Node's default V8 old-space limit (~2GB) is no longer enough headroom for
 # this frontend's production build — it started crashing with "JavaScript
 # heap out of memory" (exit 134) on the macOS CI runner, reproducing on both
-# ci-nightly-artifacts.yml and release.yml. CI runners across all three
+# ci-nightly-artifacts.yml and release-core.yml. CI runners across all three
 # platforms have well over 4GB free, Node just wasn't told it could use it.
 # Only apply the default if the caller hasn't already sized the heap
 # themselves — Node keeps the LAST --max-old-space-size when duplicated, so

@@ -414,6 +414,11 @@ pub struct CommandAgentInputData {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional, type = "number")]
     pub joins_turn: Option<u64>,
+    /// Not a message: begin a new container agent's start (image, container, CLI) in the background so its
+    /// first message finds it ready. Does nothing for any other agent, or for a pane that has run a turn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub prestart: Option<bool>,
 }
 
 /// Data for AskSideQuestionCommand — the `/btw` slash command's one-shot,

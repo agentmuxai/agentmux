@@ -18,6 +18,7 @@ const mockFetchWardenAudit = vi.fn<() => Promise<AuditEntry[]>>();
 
 vi.mock("./warden-audit-shared", () => ({
     WARDEN_AUDIT_LIMIT: 50,
+    actionCommand: (e: { event_kind?: string; outcome?: string }) => (e.event_kind === "action" ? e.outcome : undefined),
     fetchWardenAudit: () => mockFetchWardenAudit(),
 }));
 
@@ -85,6 +86,48 @@ describe("WardenAuditManager — fleet-action reason display", () => {
         await waitFor(() => {
             expect(screen.getByText("42b")).toBeInTheDocument();
             expect(screen.getByText("ok")).toBeInTheDocument();
+        });
+    });
+
+    it("shows an action row with its command and who made it, and no size", async () => {
+        mockFetchWardenAudit.mockResolvedValue([
+            entry({
+                event_kind: "action",
+                source_agent: "agent:opaz",
+                target_agent: "victim",
+                outcome: "agent.kill-tree",
+                message_length: 0,
+                success: false,
+                error_message: "FORBIDDEN",
+            }),
+        ]);
+        render(() => <WardenAuditManager />);
+
+        await waitFor(() => {
+            expect(screen.getByText("agent.kill-tree")).toBeInTheDocument();
+            expect(screen.getByText("agent:opaz")).toBeInTheDocument();
+            expect(screen.getByText("FORBIDDEN")).toBeInTheDocument();
+        });
+        expect(screen.queryByText("0b")).toBeNull();
+    });
+
+    it("shows why a failed action was refused next to the identifier it acted on", async () => {
+        mockFetchWardenAudit.mockResolvedValue([
+            entry({
+                event_kind: "action",
+                source_agent: "agent:opaz",
+                outcome: "widgets.setenabled",
+                message_length: 0,
+                success: false,
+                reason: "id=acme.missing",
+                error_message: "no such widget",
+            }),
+        ]);
+        render(() => <WardenAuditManager />);
+
+        await waitFor(() => {
+            expect(screen.getByText("id=acme.missing")).toBeInTheDocument();
+            expect(screen.getByText("no such widget")).toBeInTheDocument();
         });
     });
 

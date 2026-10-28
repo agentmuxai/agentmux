@@ -37,6 +37,8 @@ use macos as os;
 mod windows;
 #[cfg(windows)]
 use windows as os;
+#[cfg(windows)]
+pub use windows::{recent_parents, ParentTable};
 
 #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 mod os {

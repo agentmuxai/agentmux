@@ -210,3 +210,84 @@ fn a_service_that_already_reported_isnt_seeded_over() {
     assert_eq!(t.seed(api(), T0 + 1), None);
     assert_eq!(state_of(&t, "model_api:anthropic"), (Reachability::Online, T0));
 }
+
+#[test]
+fn a_network_change_makes_every_probe_due_at_once_and_starts_the_backoff_over() {
+    let mut t = Tracker::new(0, 0);
+    t.report(api(), down("refused"), 0);
+    let (_, ticket) = t.take_due_probes(5_000).remove(0);
+    t.probe_finished(&api(), ticket, down("refused"), 5_000);
+    assert_eq!(t.next_probe_due(), Some(15_000));
+    assert!(t.network_changed(6_000));
+    assert_eq!(t.next_probe_due(), Some(6_000));
+    let (_, ticket) = t.take_due_probes(6_000).remove(0);
+    t.probe_finished(&api(), ticket, down("refused"), 6_000);
+    assert_eq!(t.next_probe_due(), Some(16_000), "ten seconds, as after the first probe");
+}
+
+#[test]
+fn a_network_change_has_nothing_to_probe_before_any_service_is_known() {
+    assert!(!Tracker::new(0, 0).network_changed(1_000));
+}
+
+#[test]
+fn a_probe_of_an_online_service_that_answers_leaves_no_schedule() {
+    let mut t = Tracker::new(0, 0);
+    t.report(api(), Outcome::Answered, 0);
+    assert_eq!(t.next_probe_due(), None);
+    t.network_changed(1_000);
+    let (_, ticket) = t.take_due_probes(1_000).remove(0);
+    assert!(t.probe_finished(&api(), ticket, Outcome::Answered, 1_000).is_none(), "nothing changed");
+    assert_eq!(t.next_probe_due(), None);
+    assert_eq!(state_of(&t, "model_api:anthropic").0, Reachability::Online);
+}
+
+#[test]
+fn a_probe_of_an_online_service_that_fails_is_a_doubt_with_a_probe_five_seconds_on() {
+    let mut t = Tracker::new(0, 0);
+    t.report(api(), Outcome::Answered, 0);
+    t.network_changed(1_000);
+    let (_, ticket) = t.take_due_probes(1_000).remove(0);
+    assert!(t.probe_finished(&api(), ticket, down("no route"), 1_000).is_some());
+    assert_eq!(state_of(&t, "model_api:anthropic").0, Reachability::Degraded);
+    assert_eq!(t.next_probe_due(), Some(6_000));
+}
+
+#[test]
+fn a_network_change_while_a_probe_runs_repeats_it_at_once() {
+    let mut t = Tracker::new(0, 0);
+    t.report(api(), down("refused"), 0);
+    let (_, ticket) = t.take_due_probes(5_000).remove(0);
+    t.network_changed(6_000);
+    assert_eq!(t.next_probe_due(), None, "the running probe is not started a second time");
+    t.probe_finished(&api(), ticket, down("refused"), 7_000);
+    assert_eq!(t.next_probe_due(), Some(7_000));
+}
+
+#[test]
+fn a_network_change_while_an_online_services_probe_runs_has_it_repeated_even_when_it_answers() {
+    let mut t = Tracker::new(0, 0);
+    t.report(api(), Outcome::Answered, 0);
+    t.network_changed(1_000);
+    let (_, ticket) = t.take_due_probes(1_000).remove(0);
+    t.network_changed(2_000);
+    t.probe_finished(&api(), ticket, Outcome::Answered, 3_000);
+    assert_eq!(t.next_probe_due(), Some(3_000), "the answer was about the old network");
+    let (_, ticket) = t.take_due_probes(3_000).remove(0);
+    t.probe_finished(&api(), ticket, Outcome::Answered, 3_100);
+    assert_eq!(t.next_probe_due(), None, "and the repeat leaves nothing scheduled");
+}
+
+#[test]
+fn a_network_change_while_a_down_services_probe_runs_has_it_repeated_even_when_it_answers() {
+    let mut t = Tracker::new(0, 0);
+    t.report(api(), down("refused"), 0);
+    let (_, ticket) = t.take_due_probes(5_000).remove(0);
+    t.network_changed(6_000);
+    let changed = t.probe_finished(&api(), ticket, Outcome::Answered, 7_000);
+    assert!(changed.is_some(), "it is back, as far as that probe could tell");
+    assert_eq!(t.next_probe_due(), Some(7_000), "but the answer was about the old network");
+    let (_, ticket) = t.take_due_probes(7_000).remove(0);
+    t.probe_finished(&api(), ticket, Outcome::Answered, 7_100);
+    assert_eq!(t.next_probe_due(), None);
+}

@@ -26,7 +26,7 @@
         {
             "command": "account.oauth.start",
             "method": "AccountOAuthStartCommand",
-            "dataType": "{ provider: string; name?: string; clientId?: string; clientSecret?: string; clientMode?: \"byo\" | \"workspace\"; saveClient?: boolean; scopes?: string[]; accountId?: string }"
+            "dataType": "{ provider: string; name?: string; clientId?: string; clientSecret?: string; clientMode?: \"byo\" | \"workspace\"; saveClient?: boolean; scopes?: string[]; accountId?: string; replaceGithubUser?: boolean }"
         },
         {
             "command": "session:activity_summary",
@@ -112,6 +112,10 @@
             "method": "AgentSessionWriteStateCommand"
         },
         {
+            "command": "agent.move-here",
+            "method": "AgentMoveHereCommand"
+        },
+        {
             "command": "agent.pane.unregister",
             "method": "AgentPaneUnregisterCommand"
         },
@@ -128,12 +132,29 @@
             "method": "AgentShutdownKeepCommand"
         },
         {
+            "command": "sensitive.decide",
+            "method": "SensitiveDecideCommand"
+        },
+        {
             "command": "agentstop",
             "method": "AgentStopCommand"
         },
         {
+            "command": "agent.open",
+            "method": "AgentOpenCommand"
+        },
+        {
+            "command": "agent.start",
+            "method": "AgentStartCommand"
+        },
+        {
             "command": "agent.tracked-blocks",
             "method": "AgentTrackedBlocksCommand",
+            "dataType": "Record<string, never>"
+        },
+        {
+            "command": "agentruntime.list",
+            "method": "AgentRuntimeListCommand",
             "dataType": "Record<string, never>"
         },
         {
@@ -608,6 +629,10 @@
             "command": "gettoolstatus",
             "method": "GetToolStatusCommand",
             "send": "{}"
+        },
+        {
+            "command": "github.connection",
+            "method": "GithubConnectionCommand"
         },
         {
             "command": "globalmemory:diff",
@@ -1338,7 +1363,8 @@
         },
         {
             "command": "toolchain.install_system_tool",
-            "method": "ToolchainInstallSystemToolCommand"
+            "method": "ToolchainInstallSystemToolCommand",
+            "opts": "{ timeout: 150000, ...opts }"
         },
         {
             "command": "toolchain.prune",
@@ -1466,6 +1492,10 @@
                 "created_at",
                 "updated_at"
             ]
+        },
+        {
+            "command": "updatecontainer",
+            "method": "UpdateContainerCommand"
         },
         {
             "command": "upsertdrone",

@@ -14,6 +14,9 @@ export function useAgentAccountBinding(opts: {
     blockId: string;
     providerId: Accessor<string | undefined>;
     bindExistingAccount: (account: Account) => Promise<void>;
+    /** The agent is signed out, and the action its chip menu's "Log in" runs. */
+    signedOut?: Accessor<boolean>;
+    onLogin?: () => void;
 }) {
     const meta = (key: "agentId" | "agent:pending_account") => () =>
         getBlockMetaKeyAtom(opts.blockId, key)() as string | undefined;
@@ -22,5 +25,7 @@ export function useAgentAccountBinding(opts: {
         providerId: opts.providerId,
         bindExistingAccount: opts.bindExistingAccount,
         pendingAccountId: meta("agent:pending_account"),
+        signedOut: opts.signedOut,
+        onLogin: opts.onLogin,
     });
 }

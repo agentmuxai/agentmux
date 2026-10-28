@@ -217,6 +217,18 @@ wrap_jsdialog_handler! {
             callback: Option<&mut JsdialogCallback>,
         ) -> ::std::os::raw::c_int {
             let (Some(browser), Some(callback)) = (browser, callback) else { return 0 };
+            // A pane being closed, or AgentMux quitting: the close is decided, so the
+            // page's "Leave site?" is answered Leave, never shown (browser_pane/leaving.rs).
+            if let Some((pane, closed_by)) =
+                crate::browser_pane::leaving::leave_answer(browser.identifier(), self.state.is_quitting())
+            {
+                let origin = crate::browser_pane::leaving::origin_for_log(
+                    &crate::browser_pane::callbacks::main_frame_url(browser),
+                );
+                tracing::info!(pane = %pane, origin = %origin, closed_by, "browser pane: the page's \"Leave site?\" was answered Leave: it is being closed");
+                callback.cont(1, None);
+                return 1;
+            }
             let Some((_pane, target)) = driven(&self.state, browser) else { return 0 };
             let message = message_text.map(|s| s.to_string()).unwrap_or_default();
             let origin = crate::browser_pane::callbacks::main_frame_url(browser);

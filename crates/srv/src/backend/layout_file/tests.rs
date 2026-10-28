@@ -661,7 +661,7 @@ fn connectors_and_memory_are_written_with_their_section() {
         (json!({ "view": "knowledge", "memory:section": "bundles", "knowledge:section": "skills" }), "memory", "bundles"),
         // Remotes became a section of Connectors; a block saved before is written as that.
         (json!({ "view": "remotes", "remotes:expand": "db1" }), "connectors", "remotes"),
-        (json!({ "view": "warden", "warden:section": "kanban" }), "warden", "kanban"),
+        (json!({ "view": "warden", "warden:section": "host" }), "warden", "host"),
         (json!({ "view": "settings", "settings:section": "widgets" }), "settings", "widgets"),
         // The Vault became a section of Warden; a block saved before is written as that.
         (json!({ "view": "vault", "vault:section": "cards" }), "warden", "vault/cards"),
@@ -703,7 +703,7 @@ fn connectors_memory_and_old_armory_or_knowledge_entries_open_the_new_panes() {
         (json!({ "type": "armory" }), "connectors", "connectors:section", "accounts"),
         // Files saved before Remotes became a section of Connectors say "remotes".
         (json!({ "type": "remotes" }), "connectors", "connectors:section", "remotes"),
-        (json!({ "type": "warden", "config": { "section": "kanban" } }), "warden", "warden:section", "kanban"),
+        (json!({ "type": "warden", "config": { "section": "host" } }), "warden", "warden:section", "host"),
         (json!({ "type": "settings", "config": { "section": "browser" } }), "settings", "settings:section", "browser"),
         // Files saved before the Vault became a section of Warden say "vault".
         (json!({ "type": "vault" }), "warden", "warden:section", "vault"),

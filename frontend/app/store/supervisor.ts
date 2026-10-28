@@ -29,6 +29,14 @@ export const MODE_DESCRIPTIONS: Record<SupervisorMode, string> = {
 
 type Meta = Record<string, unknown> | undefined;
 
+/** The master switch (`supervisor:enabled`): off until the operator turns it on. */
+export function supervisorEnabled(settings: Record<string, unknown> | null | undefined): boolean {
+    return settings?.["supervisor:enabled"] === true;
+}
+
+/** Why Steady and Drive can't be chosen while the switch is off. */
+export const SUPERVISOR_OFF_REASON = "Switched off. Turn the Supervisor on in the Swarm's Supervisor settings.";
+
 /** The pane's mode; anything unset or unknown is Off, as srv reads it. */
 export function readSupervisorMode(meta: Meta): SupervisorMode {
     const v = meta?.[META_SUPERVISOR_MODE];
@@ -42,9 +50,16 @@ export function readSupervisorState(meta: Meta): SupervisorState | null {
     return v as SupervisorState;
 }
 
-/** Whether the Supervisor works on this pane: Claude agents only, for now. */
+/** The output formats srv can read a conversation from (`ambient::digest::reads_output_format`);
+ *  a pane from before the format was recorded has none, and was Claude's. */
+const READABLE_OUTPUT_FORMATS = ["", "claude-stream-json", "qwen-stream-json"];
+
+/** Whether the Supervisor works on this pane: a Claude agent whose output srv can read, as srv's
+ *  `supports` decides, so the chip is never offered where it would refuse. */
 export function supervisorSupported(meta: Meta): boolean {
-    return meta?.["agentProvider"] === "claude";
+    if (meta?.["agentProvider"] !== "claude") return false;
+    const format = meta["agentOutputFormat"];
+    return READABLE_OUTPUT_FORMATS.includes(typeof format === "string" ? format : "");
 }
 
 /**

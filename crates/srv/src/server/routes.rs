@@ -90,7 +90,10 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // `Content-Range` carries a ranged stream-local-file response's
         // total size, which inline video/audio read before play (Codex P2 on
         // #4073).
-        .expose_headers(vec!["X-ZoneFileInfo".parse().unwrap(), header::CONTENT_RANGE]);
+        // `X-ZoneFileOffset` says where that response's body starts in the
+        // file (later than asked once a terminal's output was trimmed);
+        // `fetchMuxFile` reads it to resume at the file's absolute end.
+        .expose_headers(vec!["X-ZoneFileInfo".parse().unwrap(), "X-ZoneFileOffset".parse().unwrap(), header::CONTENT_RANGE]);
 
     // The routes an LAN peer actually calls when forwarding a jekt or
     // looking up which agents this instance hosts
@@ -121,6 +124,8 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // follows changes without polling (SPEC_LAN_FLEET_FEED_2026_10_03.md).
         .route("/agentmux/fleet", get(handle_fleet))
         .route("/agentmux/fleet/events", get(handle_fleet_events))
+        // Who did what (`http_action`): inner to the caller layer, which names the caller.
+        .route_layer(middleware::from_fn_with_state(state.clone(), super::http_action::record_action))
         // Identity M4a: inner to the auth layer (route_layer order: the
         // last one added runs first), so it sees which key authenticated.
         .route_layer(middleware::from_fn_with_state(
@@ -215,6 +220,9 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/agentmux/work/:id/hold", post(work_tasks::handle_work_hold))
         .route("/agentmux/work/:id/unhold", post(work_tasks::handle_work_unhold))
         .route("/agentmux/work/act", post(work_act::handle_work_act))
+        // A sensitive operation: the agent asks, the super agent decides, the person can veto
+        // (SPEC_SUPER_AGENT_2026_10_25.md).
+        .route("/api/v1/sensitive/:action", post(sensitive_handlers::handle_sensitive))
         // Presence claims and posts to a repository's coordination channel
         // (SPEC_AGENT_COORDINATION_CHANNEL_2026_10_15.md); reading is open.
         .route("/api/v1/work-claims", post(work_claims_handlers::handle_claim_work))
@@ -247,6 +255,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/schema/*path", get(files::handle_schema))
         .route("/api/lan-instances", get(handle_lan_instances))
         .route("/agentmux/discovery", get(handle_discovery))
+        .route("/agentmux/reactive/availability", get(super::availability_view::handle_availability))
         .route("/agentmux/diag/sagas", get(handle_diag_sagas))
         // Streaming-bash wrapper publish endpoint
         // (SPEC_STREAMING_BASH_RUNNER_2026_05_11.md §4.3). agentmux-bashwrap
@@ -254,6 +263,13 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // Bash command is running; we forward to the in-process MPS broker.
         // Auth-gated like the other reactive routes (PR #801 pattern).
         .route("/agentmux/wps/publish", post(handle_wps_publish))
+        // A container agent's bashwrap: its own pane's `tool_chunk` only (the generic relay above
+        // is refused to a container token).
+        .route(
+            "/api/v1/agent/tool-chunk",
+            post(container_tool_chunk::handle_container_tool_chunk)
+                .layer(axum::extract::DefaultBodyLimit::max(container_tool_chunk::MAX_BODY_BYTES)),
+        )
         // Persistent shell launch endpoint
         // (SPEC_PERSISTENT_SHELL_NODE_2026_06_11.md §5.3). agentmux-mcp's
         // Shell tool POSTs here; we publish shell_node_create + spawn a
@@ -306,8 +322,17 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // definition (not a fork), in a pane next to its own
         // (SPEC_AGENT_WORKERS_2026_10_15.md §3.1).
         .route("/api/v1/agent/spawn", post(app_api::agent_spawn::handle_agent_spawn))
+        // Remove a container agent's container so its next message starts it from the current
+        // agent image (`Agents update_container`); only between turns.
+        .route("/api/v1/agent/container/update", post(app_api::container_update::handle_update_container))
         // A leader's own workers and how each is doing (§3.4).
         .route("/api/v1/agent/workers", post(app_api::agent_spawn::handle_agent_workers))
+        // Start, stop or detach an agent (`Agents start`, `stop`, `detach`); a stop of another agent waits for the person's override window.
+        .route("/api/v1/agent/start", post(app_api::agent_lifecycle::handle_agent_start))
+        .route("/api/v1/agent/stop", post(app_api::agent_lifecycle::handle_agent_stop))
+        .route("/api/v1/agent/detach", post(app_api::agent_lifecycle::handle_agent_detach))
+        // Replay an agent's recent transcript, then tail it (`Agents watch`).
+        .route("/api/v1/agent/watch", post(app_api::agent_watch::handle_agent_watch))
         // One live instance per agent, Phase 2 (SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24 §4.6).
         .route("/api/v1/agent/takeover", post(pane_binding::handle_takeover))
         // Voice speech-to-text: the renderer POSTs mic audio (one
@@ -320,6 +345,10 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md §6.2, §6.5.
         .route("/api/v1/attachments/upload", post(attachments::handle_attachment_upload))
         .route("/api/v1/attachments/:id/:kind", get(attachments::handle_attachment_file))
+        // A screenshot or recording for a Kanban task: streamed and hashed like the attachments upload (the agent-token
+        // layer above buffers whole bodies, so it is not behind it); the task call that names the file is.
+        // SPEC_KANBAN_TASK_MEDIA_2026_10_25.md §3.1.
+        .route("/agentmux/work/media", post(work_media::handle_work_media_upload))
         // First-class agent API (SPEC_AGENT_API_FIRST_CLASS_SURFACE_2026_06_17.md).
         // `GET /api/v1/self?block_id=` resolves the caller's place in the tree;
         // `POST /api/v1/window/name` sets the window display name (taskbar title).
@@ -531,6 +560,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // The App tool: what AgentMux runs and whether a newer release is out,
         // and asking to upgrade (SPEC_UPGRADE_FOR_USERS_AND_AGENTS §5.1).
         .route("/api/v1/app/update-status", get(app_api::app_update::handle_update_status))
+        .route("/api/v1/app/connectivity", get(app_api::connectivity::handle_status))
         .route("/api/v1/agent/self/upgrade", post(app_api::app_update::handle_request_upgrade))
         // The Desktop tool: the gate in front of looking at and controlling a
         // native app (SPEC_DESKTOP_DRIVING_2026_10_20.md §6).
@@ -582,13 +612,16 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // shared registry). Loopback-only by construction: the caller only
         // ever forwards to a `local_url` it already verified is loopback.
         .route("/agentmux/agent/stop", post(handle_agent_stop_forward))
+        // A Job run's timeout or cancel, forwarded to the AgentMux that follows it
+        // (same trust model as the stop forward above).
+        .route(super::jobs_remote_stop::STOP_RUN_PATH, post(super::jobs_remote_stop::handle_jobs_stop_run))
         // A Swarm broadcast's cross-channel forward target
         // (SPEC_SWARM_REMOTE_AGENTS_PLATFORM_TAG_AND_SELECTION_2026_10_03.md §5.2):
         // same trust model as the stop forward above. The caller sends only the
         // body; this instance writes the header.
         .route("/agentmux/agent/broadcast", post(handle_agent_broadcast_forward))
         // The same forward, for an agent's FleetBulkStop: this instance's
-        // user gets the 15 s override window (SPEC_AGENT_SELF_QUIT §6.5).
+        // user gets the 30 s override window (SPEC_AGENT_SELF_QUIT §6.5).
         .route("/agentmux/agent/stop-pending", post(handle_agent_stop_pending_forward))
         .route("/api/messaging/status", get(messaging_handlers::handle_status))
         .route("/api/messaging/discord/send", post(messaging_handlers::handle_discord_send))
@@ -615,6 +648,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .merge(bus_routes)
         .merge(agent_routes)
         .merge(reactive_routes)
+        .route_layer(middleware::from_fn_with_state(state.clone(), super::http_action::record_action))
         // Identity M4a: attribute the (already authenticated) request.
         .route_layer(middleware::from_fn_with_state(
             state.clone(),

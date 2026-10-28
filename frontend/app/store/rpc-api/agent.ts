@@ -177,6 +177,7 @@ export type { AgentDefinition } from "@/types/rpc/AgentDefinition";
 export type { AgentDefinitionImport } from "@/types/rpc/AgentDefinitionImport";
 export type { AgentSkillImport } from "@/types/rpc/AgentSkillImport";
 export type { CommandContainerImageCheckData } from "@/types/rpc/CommandContainerImageCheckData";
+export type { CommandUpdateContainerData } from "@/types/rpc/CommandUpdateContainerData";
 export type { CommandContainerRuntimeAvailableData } from "@/types/rpc/CommandContainerRuntimeAvailableData";
 export type { CommandCreateAgentDefinitionData } from "@/types/rpc/CommandCreateAgentDefinitionData";
 export type { CommandDeleteAgentDefinitionData } from "@/types/rpc/CommandDeleteAgentDefinitionData";
@@ -191,6 +192,7 @@ export type { CommandSetAgentContentData } from "@/types/rpc/CommandSetAgentCont
 export type { CommandUpdateAgentDefinitionData } from "@/types/rpc/CommandUpdateAgentDefinitionData";
 export type { ContainerImageAccess } from "@/types/rpc/ContainerImageAccess";
 export type { ContainerImageCheckResult } from "@/types/rpc/ContainerImageCheckResult";
+export type { UpdateContainerResult } from "@/types/rpc/UpdateContainerResult";
 export type { ContainerRuntimeAvailableResult } from "@/types/rpc/ContainerRuntimeAvailableResult";
 export type { ImportAgentDefinitionsResult } from "@/types/rpc/ImportAgentDefinitionsResult";
 export type { ReseedAgentsResult } from "@/types/rpc/ReseedAgentsResult";

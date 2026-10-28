@@ -361,6 +361,25 @@
     }
   },
   {
+    "command": "agent.move-here",
+    "request": "agentmux_srv::backend::rpc_types::agent::CommandAgentMoveHereData",
+    "requestName": "CommandAgentMoveHereData",
+    "requestTs": {
+      "imports": [
+        "CommandAgentMoveHereData"
+      ],
+      "name": "CommandAgentMoveHereData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::agent::AgentMoveHereResult",
+    "responseName": "AgentMoveHereResult",
+    "responseTs": {
+      "imports": [
+        "AgentMoveHereResult"
+      ],
+      "name": "AgentMoveHereResult"
+    }
+  },
+  {
     "command": "agent.open",
     "request": "agentmux_srv::backend::rpc_types::agent::CommandAgentOpenData",
     "requestName": "CommandAgentOpenData",
@@ -510,6 +529,25 @@
         "AgentSetSeatResult"
       ],
       "name": "AgentSetSeatResult"
+    }
+  },
+  {
+    "command": "agent.start",
+    "request": "agentmux_srv::server::agent_runtime::CommandAgentStartData",
+    "requestName": "CommandAgentStartData",
+    "requestTs": {
+      "imports": [
+        "CommandAgentStartData"
+      ],
+      "name": "CommandAgentStartData"
+    },
+    "response": "agentmux_srv::server::agent_runtime::AgentStartResult",
+    "responseName": "AgentStartResult",
+    "responseTs": {
+      "imports": [
+        "AgentStartResult"
+      ],
+      "name": "AgentStartResult"
     }
   },
   {
@@ -1015,6 +1053,25 @@
         "AgentLastRuntime"
       ],
       "name": "AgentLastRuntime"
+    }
+  },
+  {
+    "command": "agentruntime.list",
+    "request": "serde_json::value::Value",
+    "requestName": "Value",
+    "requestTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    },
+    "response": "alloc::vec::Vec<agentmux_srv::server::agent_runtime::AgentRuntime>",
+    "responseName": "alloc::vec::Vec<agentmux_srv::server::agent_runtime::AgentRuntime>",
+    "responseTs": {
+      "imports": [
+        "AgentRuntime"
+      ],
+      "name": "Array<AgentRuntime>"
     }
   },
   {
@@ -3291,6 +3348,25 @@
         "AiRateLimitResult"
       ],
       "name": "AiRateLimitResult"
+    }
+  },
+  {
+    "command": "github.connection",
+    "request": "agentmux_srv::server::agent_handlers::identity::GithubConnectionReq",
+    "requestName": "GithubConnectionReq",
+    "requestTs": {
+      "imports": [
+        "GithubConnectionReq"
+      ],
+      "name": "GithubConnectionReq"
+    },
+    "response": "agentmux_srv::identity::github_connect::GithubConnection",
+    "responseName": "GithubConnection",
+    "responseTs": {
+      "imports": [
+        "GithubConnection"
+      ],
+      "name": "GithubConnection"
     }
   },
   {
@@ -5873,6 +5949,25 @@
     }
   },
   {
+    "command": "sensitive.decide",
+    "request": "agentmux_srv::sagas::sensitive_window::CommandSensitiveDecideData",
+    "requestName": "CommandSensitiveDecideData",
+    "requestTs": {
+      "imports": [
+        "CommandSensitiveDecideData"
+      ],
+      "name": "CommandSensitiveDecideData"
+    },
+    "response": "agentmux_srv::sagas::sensitive_window::SensitiveDecideResult",
+    "responseName": "SensitiveDecideResult",
+    "responseTs": {
+      "imports": [
+        "SensitiveDecideResult"
+      ],
+      "name": "SensitiveDecideResult"
+    }
+  },
+  {
     "command": "session:activity_summary",
     "request": "agentmux_srv::backend::rpc_types::session::CommandActivitySummaryData",
     "requestName": "CommandActivitySummaryData",
@@ -6787,6 +6882,25 @@
         "AgentSkill"
       ],
       "name": "AgentSkill"
+    }
+  },
+  {
+    "command": "updatecontainer",
+    "request": "agentmux_srv::backend::rpc_types::agent::CommandUpdateContainerData",
+    "requestName": "CommandUpdateContainerData",
+    "requestTs": {
+      "imports": [
+        "CommandUpdateContainerData"
+      ],
+      "name": "CommandUpdateContainerData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::agent::UpdateContainerResult",
+    "responseName": "UpdateContainerResult",
+    "responseTs": {
+      "imports": [
+        "UpdateContainerResult"
+      ],
+      "name": "UpdateContainerResult"
     }
   },
   {

@@ -111,6 +111,11 @@ concurrency:
   group: ci-pr-${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
+# Read-only by default; a job that needs more says so itself (job-level permissions replace this
+# block). A job added later gets nothing it did not ask for.
+permissions:
+  contents: read
+
 jobs:
   # Decide which of the jobs below this PR's changed files actually require.
   # Spec: docs/specs/SPEC_CI_PATH_CONDITIONAL_CHECKS_2026_09_21.md.
@@ -470,6 +475,59 @@ jobs:
       - name: cargo check --tests (CEF-free crates)
         run: cargo check --tests -p agentmux-common -p agentmux-srv -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats
 
+  # Windows test EXECUTION on the PR (SPEC_CI_CHECK_PLACEMENT_PROTOCOL_2026_09_21.md
+  # §6 said to restore a targeted Windows subset if Windows-only runtime
+  # regressions reached main; #5556 and #5592 merged with tests that fail on
+  # windows-latest and were found by the next nightly). A job of its own, not a
+  # step of the `rust` matrix leg: it runs beside that leg's compile check
+  # instead of after it, and `continue-on-error` keeps a failure from blocking a
+  # merge until its wall time and flake rate are measured (same stance as
+  # `rust-macos`). Not in `CI required`'s `needs` for the same reason.
+  rust-windows:
+    name: nextest (windows-latest, ${{ matrix.scope }})
+    needs: changes
+    # Same condition as `rust`, for the same reasons (see its comment).
+    if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' && needs.changes.outputs.queue != 'true' }}
+    runs-on: windows-latest
+    continue-on-error: true
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - scope: all
+            packages: -p agentmux-common -p agentmux-srv -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats
+          # Everything but srv, the crate that takes most of the build.
+          - scope: host
+            packages: -p agentmux-common -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats
+    env:
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+      CARGO_PROFILE_TEST_DEBUG: line-tables-only
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      # The same exclusions as the `rust` job's step of this name.
+      - name: Exclude build paths + toolchain processes from Windows Defender
+        shell: powershell
+        run: |
+          foreach ($exe in @("node.exe", "cargo.exe", "rustc.exe", "link.exe")) {
+            try { Add-MpPreference -ExclusionProcess $exe -ErrorAction Stop } catch { Write-Warning "Defender exclusion failed ($exe): $_" }
+          }
+          foreach ($path in @("C:\Program Files\Microsoft Visual Studio", "C:\Program Files (x86)\Microsoft Visual Studio", $env:GITHUB_WORKSPACE, $env:RUNNER_TEMP, "$env:USERPROFILE\.cargo", "$env:USERPROFILE\.rustup")) {
+            try { Add-MpPreference -ExclusionPath $path -ErrorAction Stop } catch { Write-Warning "Defender exclusion failed ($path): $_" }
+          }
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.scope }}
+          # While tests fail the job is red; without this the cache would never
+          # be saved and every run would build cold (~10 min).
+          cache-on-failure: true
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+      # The `all` scope's list is identical to the `rust` job's.
+      - name: cargo nextest (CEF-free crates)
+        run: cargo nextest run --profile ci ${{ matrix.packages }}
+
   docs:
     name: doc status + grep gates
     # Intentionally has NO `needs: changes` / `if:`. Its gates (status
@@ -764,7 +822,7 @@ jobs:
           cache: npm
       - run: npm ci
       - name: generator and classifier tests
-        run: npx vitest run scripts/gen-docs-index.test.mjs scripts/ci-classify-changes.test.mjs scripts/cli-probe/fake-anthropic.test.mjs scripts/cli-probe/probe-safety.test.mjs scripts/release-manifest.test.mjs
+        run: npx vitest run scripts/gen-docs-index.test.mjs scripts/ci-classify-changes.test.mjs scripts/cli-probe/fake-anthropic.test.mjs scripts/cli-probe/probe-safety.test.mjs scripts/release-manifest.test.mjs scripts/release-gate.test.mjs
       - name: Specs index is current (changed specs only)
         run: node scripts/gen-docs-index.mjs --check
       - name: bash wrapper reaches the same generator

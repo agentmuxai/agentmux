@@ -212,6 +212,8 @@ windows-sys = { version = "0.59", features = [
     "Win32_System_IO",
     # Who holds UDP 5353 (backend/lan_mdns_diag.rs): GetExtendedUdpTable.
     "Win32_NetworkManagement_IpHelper",
+    # Interface byte counters without sysinfo's per-refresh address lookups (backend/net_counters.rs).
+    "Win32_NetworkManagement_Ndis",
     "Win32_Networking_WinSock",
 ] }
 

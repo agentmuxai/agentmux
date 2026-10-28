@@ -115,7 +115,22 @@ pub(super) async fn handle_discovery(State(state): State<AppState>) -> Json<serd
     // Each agent's seat, by its definition (SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md
     // §4): `null` when it has none.
     let defs = state.mstore.agent_def_list().unwrap_or_default();
-    let agents: Vec<serde_json::Value> = instances
+    // What a routine message to each would do now (`availability_view`).
+    let cold_after_ms = crate::backend::cold_hold::cold_after_ms(&state.config_watcher.get_full_config().settings.extra)
+        .and_then(|ms| u64::try_from(ms).ok());
+    let now_ms = agentmux_common::time::now_ms_u64();
+    // Every created agent's runtime state, with or without a pane (`agent_runtime::list`).
+    let runtime: std::collections::HashMap<String, crate::server::agent_runtime::AgentRuntime> = {
+        let looked = state.clone();
+        tokio::task::spawn_blocking(move || crate::server::agent_runtime::list(&looked, now_ms))
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .map(|r| (r.agent_id.clone(), r))
+            .collect()
+    };
+    let listed: std::collections::HashSet<String> = instances.iter().map(|i| i.id.clone()).collect();
+    let mut agents: Vec<serde_json::Value> = instances
         .into_iter()
         .map(|i| {
             let live_block = if i.instance_name.is_empty() {
@@ -124,6 +139,9 @@ pub(super) async fn handle_discovery(State(state): State<AppState>) -> Json<serd
                 reachable_block.get(&i.instance_name.to_lowercase()).cloned()
             };
             let seat = crate::backend::agent_seat::summary_in(&state.mstore, &defs, &i.definition_id);
+            // By the agent's UID, not its name: two agents can share a display name, and a name
+            // the registry normalised ("Loap #3") misses the name-keyed map above.
+            let availability_block = super::availability_view::block_of_uid(&state.reactive_handler, &i.id);
             json!({
                 "name": i.instance_name,
                 "id": i.id,
@@ -132,9 +150,27 @@ pub(super) async fn handle_discovery(State(state): State<AppState>) -> Json<serd
                 "addressable": live_block.is_some(),
                 "block_id": live_block,
                 "seat": seat,
+                "availability": super::availability_view::describe_block(&state.mstore, availability_block.as_deref(), cold_after_ms, now_ms),
+                "runtime": runtime.get(&i.id),
             })
         })
         .collect();
+    // An agent created on another channel of this host has a definition and no row here yet.
+    let mut elsewhere: Vec<&crate::server::agent_runtime::AgentRuntime> =
+        runtime.values().filter(|r| !listed.contains(&r.agent_id)).collect();
+    elsewhere.sort_by(|a, b| a.agent_id.cmp(&b.agent_id));
+    agents.extend(elsewhere.into_iter().map(|r| {
+        json!({
+            "name": r.name,
+            "id": r.agent_id,
+            "definition_id": r.agent_id,
+            "addressable": false,
+            "block_id": r.block_id,
+            "seat": crate::backend::agent_seat::summary_in(&state.mstore, &defs, &r.agent_id),
+            "availability": super::availability_view::describe_block(&state.mstore, None, cold_after_ms, now_ms),
+            "runtime": r,
+        })
+    }));
 
     let wan_agents = crate::muxbus::cloud_subscriber::get_global_subscriber()
         .map(|s| s.subscribed_agents())

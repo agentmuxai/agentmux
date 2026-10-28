@@ -15,6 +15,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/app/element/confirm-modal", () => ({ ConfirmModal: () => null }));
 
+import { BroadcastDock } from "./swarm-broadcast";
 import { FleetResultPanel, FleetToolbar, StopTargetRows } from "./swarm-fleet-toolbar";
 import { localFleetTargets, remoteFleetTargets } from "./swarm-fleet-targets";
 import type { FleetResultEntry, SwarmViewModel } from "./swarm-model";
@@ -67,6 +68,10 @@ function modelStub(selectedKeys: string[]) {
 }
 
 const toolbar = (model: SwarmViewModel) => render(() => <FleetToolbar model={model} allBlockIds={() => ["blk-korp"]} />);
+const dock = (model: SwarmViewModel) =>
+    render(() => <BroadcastDock model={model} agents={{ tree: () => [{ blockId: "blk-korp", agentName: "Korp" }] as never }} />);
+const type = (text: string) =>
+    fireEvent.input(document.querySelector<HTMLTextAreaElement>(".swarm-broadcast-input")!, { target: { value: text } });
 
 describe("FleetToolbar with agents of other instances selected", () => {
     it("says how many of the selected are on other machines, not counting this machine's other channels", () => {
@@ -94,33 +99,36 @@ describe("FleetToolbar with agents of other instances selected", () => {
     // A LAN peer's agent gets a signed message, but no stop
     // (docs/specs/SPEC_SWARM_REFINEMENTS_2026_10_17.md §4.2).
     it("can broadcast but not stop when everything selected is on a LAN peer, and says why", () => {
-        toolbar(modelStub([MANOZ]));
+        const model = modelStub([MANOZ]);
+        toolbar(model);
         const stop = screen.getByText(/Stop 0/).closest("button")!;
-        const broadcast = screen.getByText("Broadcast").closest("button")!;
         expect(stop.disabled).toBe(true);
-        expect(broadcast.disabled).toBe(false);
         expect(stop.title).toBe("Stopping agents on another machine isn't supported yet");
+        dock(model);
+        type("hello");
+        expect((screen.getByText(/Send to 1/).closest("button") as HTMLButtonElement).disabled).toBe(false);
     });
 
-    it("leaves Broadcast and Stop enabled when something selected can be reached", () => {
-        toolbar(modelStub([MANOZ, LOAP]));
-        expect((screen.getByText("Broadcast").closest("button") as HTMLButtonElement).disabled).toBe(false);
+    it("leaves Send and Stop enabled when something selected can be reached", () => {
+        const model = modelStub([MANOZ, LOAP]);
+        toolbar(model);
+        dock(model);
+        type("hello");
+        expect((screen.getByText(/Send to 2/).closest("button") as HTMLButtonElement).disabled).toBe(false);
         expect((screen.getByText(/Stop 1/).closest("button") as HTMLButtonElement).disabled).toBe(false);
     });
 
     // docs/specs/SPEC_SWARM_REFINEMENTS_2026_10_17.md §2.2: the two numbers never
     // differ without saying why.
     it("says in the composer why fewer agents get the message than are selected", () => {
-        toolbar(modelStub(["blk-korp", LOAP, MANOZ, "blk-gone"]));
-        fireEvent.click(screen.getByText("Broadcast").closest("button")!);
-        const input = document.querySelector<HTMLInputElement>(".swarm-fleet-broadcast-input")!;
+        dock(modelStub(["blk-korp", LOAP, MANOZ, "blk-gone"]));
+        const input = document.querySelector<HTMLTextAreaElement>(".swarm-broadcast-input")!;
         expect(input.placeholder).toBe("Message to send to 3 agents…");
         expect(document.querySelector(".swarm-fleet-broadcast-gap")!.textContent).toBe("1 of 4 can't be messaged: no longer listed");
     });
 
     it("says nothing extra when every selected agent gets the message", () => {
-        toolbar(modelStub(["blk-korp", LOAP]));
-        fireEvent.click(screen.getByText("Broadcast").closest("button")!);
+        dock(modelStub(["blk-korp", LOAP]));
         expect(document.querySelector(".swarm-fleet-broadcast-gap")).toBeNull();
     });
 });
@@ -175,6 +183,26 @@ describe("FleetResultPanel", () => {
         const model = { lastFleetResultAtom: () => entry, dismissFleetResult: () => {} } as unknown as SwarmViewModel;
         render(() => <FleetResultPanel model={model} />);
         expect(document.querySelector(".swarm-fleet-result-row")!.textContent).toContain("blk-x");
+    });
+
+    it("follows the section while it stays mounted: quiet for a clean result in Broadcast, shown for a failure", () => {
+        const clean: FleetResultEntry = {
+            action: "broadcast",
+            result: { succeeded: ["blk-x"], failed: [], aborted_early: false },
+            labels: {},
+        };
+        const [entry, setEntry] = createSignal<FleetResultEntry>(clean);
+        const [quiet, setQuiet] = createSignal(false);
+        const model = { lastFleetResultAtom: entry, dismissFleetResult: () => {} } as unknown as SwarmViewModel;
+        render(() => <FleetResultPanel model={model} quietWhenClean={quiet()} />);
+        expect(document.querySelector(".swarm-fleet-result-panel")).not.toBeNull();
+        setQuiet(true);
+        expect(document.querySelector(".swarm-fleet-result-panel")).toBeNull();
+        setEntry({ ...clean, result: { succeeded: [], failed: [{ id: "blk-y", error: "gone" }], aborted_early: false } });
+        expect(document.querySelector(".swarm-fleet-result-panel")).not.toBeNull();
+        setQuiet(false);
+        setEntry(clean);
+        expect(document.querySelector(".swarm-fleet-result-panel")).not.toBeNull();
     });
 
     it("is dismissed with its Dismiss button", () => {

@@ -211,7 +211,6 @@ const KNOWN_DECLARED_UNREGISTERED: string[] = [];
 const KNOWN_REGISTERED_UNDECLARED = [
     "agent.define",
     "agent.list",
-    "agent.open",
     "agent.output",
     "agent.project_instructions",
     "agent.send",

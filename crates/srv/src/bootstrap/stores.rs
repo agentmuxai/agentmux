@@ -108,6 +108,9 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     base::set_version(version);
     base::set_build_time(build_time);
 
+    // Before anything is created: a data folder of its own must not mean the real shared folder.
+    super::shared_root::refuse_unlisted_shared_root(&config.data_home);
+
     // Set up data directory (uses AGENTMUX_DATA_HOME or default)
     if !config.data_home.as_os_str().is_empty() {
         std::env::set_var("AGENTMUX_DATA_HOME", &config.data_home);
@@ -138,13 +141,19 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     // slug migration's precondition (`slug_migration::stamp`).
     crate::backend::slug_migration::stamp::write(&base::get_mux_data_dir());
 
-    // Startup diagnostics
+    // Startup diagnostics. `home` is the folder this instance's whole data lives under: the real
+    // ~/.agentmux unless `AGENTMUX_HOME_OVERRIDE` names another (`task dev` always does).
+    let home_override = std::env::var_os("AGENTMUX_HOME_OVERRIDE").filter(|v| !v.is_empty());
     tracing::info!(
         data_dir = %base::get_mux_data_dir().display(),
         db_dir = %base::get_mux_db_dir().display(),
         app_path = %config.app_path,
         instance_id = %config.instance_id,
         secret_store = crate::identity::secret_store::backend_name(),
+        home = %home_override.as_ref().map(|h| h.to_string_lossy().into_owned()).unwrap_or_else(|| {
+            agentmux_common::data_paths::agentmux_root().map(|p| p.display().to_string()).unwrap_or_default()
+        }),
+        home_isolated = home_override.is_some(),
         "backend directories initialized"
     );
 
@@ -698,6 +707,12 @@ fn open_work_store(
 /// version's data forward, snapshot, and run pending migrations (the same
 /// work `agentmux-srv migrate --prepare` does for the launcher).
 fn prepare_in_process(mux_data_dir: &std::path::Path, db_dir: &std::path::Path, code_version: &str) {
+    // Before the pending-migration count below, which opens the shared store and so runs its schema setup.
+    if let Err(e) = migrations::refuse_if_real_home_would_move() {
+        tracing::error!("startup: refusing to start: {}", e);
+        eprintln!("{}", agentmux_common::srv_stderr::migration_failed_line(&e));
+        std::process::exit(1);
+    }
     // Pre-migration snapshot (Increment B.2 lean cut from
     // SPEC_DATA_CHANNELS §3.4). Run BEFORE Store::open AND before
     // count_pending_migrations/run_pending_migrations — both open

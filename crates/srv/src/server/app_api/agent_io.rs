@@ -13,6 +13,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_agent_open_panes(engine, state);
     register_agent_kill_process(engine, state);
     register_agent_kill_tree(engine, state);
+    crate::server::agent_runtime::register(engine, state);
 }
 
 fn register_agent_process_list(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -491,8 +492,7 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // container branch's field is unused for now.
                     let instance_id = obj::meta_get_string(&block.meta, "agentId", "");
                     if agent_mode == "container" {
-                        let cm = container_manager.get().await
-                            .ok_or_else(|| "Docker not available on this host; cannot start container agent".to_string())?;
+                        let cm = container_manager.get_or_explain().await?;
                         let container_image = obj::meta_get_string(&block.meta, "agent:container_image", "");
                         // Use agentId (UUID) — always valid as a Docker name; display names can have spaces.
                         let agent_id = obj::meta_get_string(&block.meta, "agentId", "");
@@ -504,12 +504,7 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         // builds — see its comment. `CLAUDE_CONFIG_DIR` is a host
                         // path stripped by CONTAINER_ENV_DENYLIST, so mounting it
                         // is the only way the in-container CLI sees credentials.
-                        let mount_spec = crate::backend::container::ContainerMountSpec {
-                            claude_config_host_dir: env_vars
-                            .get("CLAUDE_CONFIG_DIR")
-                            .and_then(|d| crate::backend::container::credentials_dir_if_file_backed(d)),
-                            workspace_host_dir: Some(working_dir.clone()).filter(|d| !d.is_empty()),
-                        };
+                        let mount_spec = crate::backend::container::ContainerMountSpec::for_agent(&env_vars, &working_dir);
 
                         // Same AGENTMUX_LOCAL_URL rewrite the `agentinput` path
                         // does — see its comment (input.rs). Without this a
@@ -660,12 +655,40 @@ pub(crate) async fn stop_one_agent_block(
 
 fn register_agent_stop(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let state = state.clone();
-    engine.register_typed(COMMAND_AGENT_STOP_API, move |cmd: CommandAgentStopApiData, _ctx| {
+    engine.register_typed(COMMAND_AGENT_STOP_API, move |cmd: CommandAgentStopApiData, ctx| {
         let state = state.clone();
         async move {
-                stop_one_agent_block(&state, &cmd.block_id, cmd.signal.as_deref(), cmd.stop_background).await
+            // A connection registered as an agent that stops another agent waits for the person's
+            // override window, like `Agents stop`; the window's own connection stops at once.
+            if let Some(pending) = override_window_for(&state, &ctx.agent_id, &cmd).await {
+                return Ok(pending);
+            }
+            stop_one_agent_block(&state, &cmd.block_id, cmd.signal.as_deref(), cmd.stop_background).await
         }
     });
+}
+
+/// The answer when `agent.stop` on `cmd.block_id` opened an override window for the agent `caller`
+/// (a connection's registered agent, empty for the window), or `None` when the stop is immediate:
+/// the window's own, the agent's own block, or a worker it opened.
+async fn override_window_for(state: &AppState, caller: &str, cmd: &CommandAgentStopApiData) -> Option<AgentStopResult> {
+    if caller.trim().is_empty() {
+        return None;
+    }
+    let (store, block, name) = (state.mstore.clone(), cmd.block_id.clone(), caller.to_string());
+    let (caller_uid, target_uid) = tokio::task::spawn_blocking(move || {
+        (crate::backend::agent_resolve::resolve_agent_id(&store, &name).ok(), crate::backend::agent_resolve::uid_for_block(&store, &block))
+    })
+    .await
+    .ok()?;
+    if let (Some(c), Some(t)) = (&caller_uid, &target_uid) {
+        if !super::agent_lifecycle::needs_window(&state.mstore, c, t) {
+            return None;
+        }
+    }
+    let by = caller_uid.as_deref().unwrap_or(caller);
+    let (_, pending) = super::fleet::fleet_stop_keep_pane_with_override_opts(state, by, vec![cmd.block_id.clone()], cmd.signal.as_deref(), cmd.stop_background, None).await;
+    pending.into_iter().next().map(|_| AgentStopResult { block_id: cmd.block_id.clone(), status: "pending_override".to_string(), exit_code: None })
 }
 
 fn register_agent_status(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -710,6 +733,24 @@ fn register_agent_status(engine: &Arc<WshRpcEngine>, state: &AppState) {
     });
 }
 
+/// The agents of `agent.list`: every agent block in a tab or parked (a parked one has an empty `tab_id`).
+pub(crate) fn agent_list_entries(mstore: &Store) -> Result<Vec<AgentListEntry>, String> {
+    let mut agents = Vec::new();
+    for (block, tab) in super::agent_block::blocks_in_tabs_or_parked(mstore)? {
+        let agent_id = obj::meta_get_string(&block.meta, "agentId", "");
+        if agent_id.is_empty() {
+            continue;
+        }
+        let provider = obj::meta_get_string(&block.meta, "agentProvider", "");
+        let status = blockcontroller::get_block_controller_status(&block.oid)
+            .map(|s| s.shellprocstatus)
+            .unwrap_or_else(|| "init".to_string());
+        let session_id = block.meta.get("agent:sessionid").and_then(|v| v.as_str()).map(|s| s.to_string());
+        agents.push(AgentListEntry { block_id: block.oid.clone(), tab_id: tab.unwrap_or_default(), agent_id, provider, status, session_id });
+    }
+    Ok(agents)
+}
+
 fn register_agent_list(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let mstore = state.mstore.clone();
 
@@ -717,36 +758,7 @@ fn register_agent_list(engine: &Arc<WshRpcEngine>, state: &AppState) {
     engine.register_typed(COMMAND_AGENT_LIST, move |_data: serde_json::Value, _ctx| {
         let mstore = mstore.clone();
         async move {
-                let tabs: Vec<Tab> = mstore.get_all::<Tab>()
-                    .map_err(|e| format!("agent.list: {e}"))?;
-
-                let mut agents = Vec::new();
-                for tab in &tabs {
-                    for block_id in &tab.blockids {
-                        if let Ok(Some(block)) = mstore.get::<Block>(block_id) {
-                            let agent_id = obj::meta_get_string(&block.meta, "agentId", "");
-                            if agent_id.is_empty() {
-                                continue;
-                            }
-                            let provider = obj::meta_get_string(&block.meta, "agentProvider", "");
-                            let status = blockcontroller::get_block_controller_status(block_id)
-                                .map(|s| s.shellprocstatus)
-                                .unwrap_or_else(|| "init".to_string());
-                            let session_id = block.meta.get("agent:sessionid")
-                                .and_then(|v| v.as_str())
-                                .map(|s| s.to_string());
-
-                            agents.push(AgentListEntry {
-                                block_id: block_id.clone(),
-                                tab_id: tab.oid.clone(),
-                                agent_id,
-                                provider,
-                                status,
-                                session_id,
-                            });
-                        }
-                    }
-                }
+                let agents = agent_list_entries(&mstore).map_err(|e| format!("agent.list: {e}"))?;
 
                 Ok(AgentListResult { agents })
         }

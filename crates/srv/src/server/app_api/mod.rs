@@ -24,6 +24,12 @@ use crate::backend::storage::bundles::Bundle;
 
 use super::AppState;
 
+pub(crate) mod agent_attach;
+pub(crate) mod agent_lifecycle;
+pub(crate) mod agent_watch;
+#[cfg(test)]
+mod agent_attach_tests;
+pub(crate) mod agent_block;
 pub(crate) mod agent_open;
 /// Re-exported for `server/mod.rs`'s `POST /api/v1/agent/open` handler (the
 /// `OpenAgent` MCP tool's backing route) — the HTTP surface must share the
@@ -43,6 +49,7 @@ pub(crate) mod agent_context;
 pub(crate) mod agent_env;
 pub(crate) mod agent_io;
 mod agent_define;
+pub(crate) mod container_update;
 /// Re-exported so the human-facing creation/edit RPC handlers
 /// (`server::agent_handlers::template`/`core`) can reuse the same
 /// vendor-base-url validation `agent.define` already uses, instead of
@@ -108,7 +115,7 @@ mod shells;
 pub(crate) mod kanban;
 mod jobs;
 mod jobs_edit;
-mod connectivity;
+pub(crate) mod connectivity;
 pub(crate) mod layout_intent;
 
 /// Register all MuxAPI handlers on the RPC engine.

@@ -328,7 +328,7 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
      "test: unit-test or fixture code, never on a user machine"),
     ("crates/srv/src/backend/process_tracker/registry.rs", "&argv[0]", 1,
      "test: unit-test or fixture code, never on a user machine"),
-    ("crates/srv/src/backend/process_tracker/windows.rs", "\"cmd\"", 1,
+    ("crates/srv/src/backend/process_tracker/windows.rs", "\"cmd\"", 2,
      "test: unit-test or fixture code, never on a user machine"),
     ("crates/srv/src/server/app_api/blockstats.rs", "\"ping\"", 1,
      "test: unit-test or fixture code, never on a user machine"),

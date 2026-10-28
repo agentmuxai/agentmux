@@ -13,7 +13,7 @@ name: CI — nightly artifacts (all platforms)
 #
 # Each platform's build (CEF-runtime provisioning + packaging) is delegated
 # to that platform's own build-*.yml as a reusable workflow_call, the same
-# composition release.yml already uses (release-tag left blank here — nightly
+# composition release-core.yml already uses (release-tag left blank here — nightly
 # artifacts upload to Actions artifacts only, never to a GitHub Release).
 # This used to inline a full copy of each platform's CEF-provisioning block
 # (~100+ lines per platform, including CEF_RUNTIME_TOKEN handling and the
@@ -34,6 +34,11 @@ concurrency:
   group: ci-nightly-artifacts
   cancel-in-progress: false
 
+# Read-only by default; a job that needs more says so itself (job-level permissions replace this
+# block). A job added later gets nothing it did not ask for.
+permissions:
+  contents: read
+
 jobs:
   windows:
     name: Windows portable + installer + MSIX
@@ -50,6 +55,7 @@ jobs:
     name: macOS arm64 — sign + notarize DMG
     permissions:
       contents: write
+      id-token: write   # build-macos.yml gets the Apple signing secrets with it
     uses: ./.github/workflows/build-macos.yml
     with:
       ref: ${{ github.ref }}

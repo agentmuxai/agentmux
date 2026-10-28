@@ -634,6 +634,7 @@ partial list.
 | [`SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13`](SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13.md) | Spec: Modularize `frontend/app/view/agent/agent-view.tsx` |
 | [`SPEC_AGENT_WORKERS_2026_10_15`](SPEC_AGENT_WORKERS_2026_10_15.md) | Spec: an agent launches and coaches worker agents in panes |
 | [`SPEC_AGENT_WORKING_STATE_UNIFICATION_2026_09_04`](SPEC_AGENT_WORKING_STATE_UNIFICATION_2026_09_04.md) | Spec: unify the Working/Worked label with the long-running-process axis, and close the two live desync bugs |
+| [`SPEC_ALWAYS_AVAILABLE_AGENTS_2026_10_27`](SPEC_ALWAYS_AVAILABLE_AGENTS_2026_10_27.md) | Spec: always-available agents (an agent runs and is recorded whether or not a pane shows it) |
 | [`SPEC_AMBIENT_SWARM_SUMMARY_HARDENING_2026_10_02`](SPEC_AMBIENT_SWARM_SUMMARY_HARDENING_2026_10_02.md) | SPEC: The swarm always shows a useful line for every agent — hardening the ambient summary |
 | [`SPEC_ARMORY_NAMING_CONSOLIDATION_2026_09_09`](SPEC_ARMORY_NAMING_CONSOLIDATION_2026_09_09.md) | Spec: Armory Naming Consolidation — Bundle vs Memory |
 | [`SPEC_ASK_USER_QUESTION_2026_06_15`](SPEC_ASK_USER_QUESTION_2026_06_15.md) | SPEC: AskUserQuestion — interactive agent questions in the agent pane |
@@ -658,6 +659,7 @@ partial list.
 | [`SPEC_CANONICAL_AGENT_ID_MIGRATION_2026_09_21`](SPEC_CANONICAL_AGENT_ID_MIGRATION_2026_09_21.md) | SPEC: retire the agent slug as a lookup key — `db_agents.id` becomes canonical |
 | [`SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07`](SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md) | CEF milestone upgrade: 148 (7778) → 152 (7977), all three platforms |
 | [`SPEC_CLAUDE_CLI_PIN_CONTRACT_TESTS_2026_07_14`](SPEC_CLAUDE_CLI_PIN_CONTRACT_TESTS_2026_07_14.md) | SPEC — CLI pin consolidation + contract tests against the pinned Claude CLI |
+| [`SPEC_CLI_NATIVE_AGENT_MESSAGE_VISIBILITY_2026_10_26`](SPEC_CLI_NATIVE_AGENT_MESSAGE_VISIBILITY_2026_10_26.md) | SPEC: See what agents say to each other through the CLI's own messaging: one record, one container, live in the pane |
 | [`SPEC_CLOUD_SETTINGS_DISCOVERY_2026_09_27`](SPEC_CLOUD_SETTINGS_DISCOVERY_2026_09_27.md) | SPEC: AgentMux Cloud settings discovery, and recovering from a dead cloud sign-in |
 | [`SPEC_CODEX_OAUTH_IN_CONNECTORS_AND_EMAIL_LABELS_2026_10_22`](SPEC_CODEX_OAUTH_IN_CONNECTORS_AND_EMAIL_LABELS_2026_10_22.md) | Spec: Codex sign-in in Connectors, and every account labelled by its email |
 | [`SPEC_CODEX_PROVIDER_INTEGRATION_2026_08_08`](SPEC_CODEX_PROVIDER_INTEGRATION_2026_08_08.md) | Codex Provider Integration: Claude-Parity Lifecycle |
@@ -712,6 +714,7 @@ partial list.
 | [`SPEC_KANBAN_AGENTS_HOLD_AND_UNHOLD_2026_10_22`](SPEC_KANBAN_AGENTS_HOLD_AND_UNHOLD_2026_10_22.md) | Spec: agents put Kanban tasks on hold and take them off hold |
 | [`SPEC_KANBAN_REMINDER_OFF_BY_DEFAULT_2026_10_22`](SPEC_KANBAN_REMINDER_OFF_BY_DEFAULT_2026_10_22.md) | Spec: the Kanban's backlog reminder off by default, with a setting to turn it on |
 | [`SPEC_KANBAN_STAGES_COLOURS_AND_NARROW_VIEW_2026_10_23`](SPEC_KANBAN_STAGES_COLOURS_AND_NARROW_VIEW_2026_10_23.md) | Spec: the Kanban's stages (Backlog, In Research, Spec'd, In progress, Review, Merged, Released), its colours, and its narrow view |
+| [`SPEC_KANBAN_TASK_MEDIA_2026_10_25`](SPEC_KANBAN_TASK_MEDIA_2026_10_25.md) | Spec: Kanban tasks carry media; a UI change that needs the operator's OK comes with screenshots or a recording |
 | [`SPEC_KEYED_SLOT_RETENTION_FIX_2026_10_12`](SPEC_KEYED_SLOT_RETENTION_FIX_2026_10_12.md) | Spec: `<Key>` slots must not keep old rows alive |
 | [`SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30`](SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30.md) | SPEC: Large-file module analysis and DRY opportunities |
 | [`SPEC_LAUNCHER_TEARDOWN_BACKSTOP_2026_07_11`](SPEC_LAUNCHER_TEARDOWN_BACKSTOP_2026_07_11.md) | SPEC: Launcher-side teardown backstop (UI-thread liveness probe + armed J0 teardown) |
@@ -764,6 +767,7 @@ partial list.
 | [`SPEC_START_WITH_OS_2026_09_25`](SPEC_START_WITH_OS_2026_09_25.md) | SPEC: Start with OS — AgentMux starts quietly at login, on every platform, and keeps working after updates |
 | [`SPEC_STREAMING_BASH_RUNNER_2026_05_11`](SPEC_STREAMING_BASH_RUNNER_2026_05_11.md) | Streaming bash runner — PreToolUse command rewrite |
 | [`SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20`](SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20.md) | SPEC — live subagent reconciliation + Retire action (best-practices plan) |
+| [`SPEC_SUPER_AGENT_2026_10_25`](SPEC_SUPER_AGENT_2026_10_25.md) | Spec: the super agent, one place for sensitive operations |
 | [`SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02`](SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02.md) | SPEC: The Swarm shows the agents of every other instance this one knows about |
 | [`SPEC_SWARM_REFINEMENTS_2026_10_17`](SPEC_SWARM_REFINEMENTS_2026_10_17.md) | Spec: Swarm refinements — the selection count, provider icons on remote agents, broadcast to remote agents |
 | [`SPEC_SWARM_SECTIONS_SUPERVISOR_SETTINGS_AND_KANBAN_2026_10_24`](SPEC_SWARM_SECTIONS_SUPERVISOR_SETTINGS_AND_KANBAN_2026_10_24.md) | Spec: the Swarm as three sections (Supervisor, Broadcast, Kanban); the Supervisor switched off until the operator turns it on, with its settings in the Supervisor section |

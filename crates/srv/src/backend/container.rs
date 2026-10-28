@@ -17,6 +17,9 @@
 //! Independence boundary: this module has no dependency on a5af/claw.
 //! Docker best practices here were researched independently.
 
+pub(crate) mod drift;
+mod mount_source;
+mod mounts;
 mod pull;
 mod reap;
 pub use self::pull::{StartEvent, StartObserver};
@@ -30,6 +33,8 @@ use futures_util::StreamExt as _;
 use bollard::Docker;
 
 use crate::backend::container_runtime;
+use self::mount_source::fold_mount_source;
+use self::mounts::agent_home_mounts;
 use bollard::container::{
     Config, CreateContainerOptions, ListContainersOptions, StartContainerOptions,
     StopContainerOptions,
@@ -82,30 +87,14 @@ pub struct ContainerMountSpec {
     /// [`CONTAINER_WORKSPACE_DIR`]. `None`/empty leaves `/workspace` empty, which
     /// is what shipped before this existed.
     pub workspace_host_dir: Option<String>,
+    /// The agent's Personal Memory folder on the host, bind-mounted where Claude reads memory in the container.
+    pub memory_host_dir: Option<String>,
 }
 
 /// Normalize a host path for Docker's mount API: backslashes are not accepted in
 /// a bind source, so `C:\Users\x` has to travel as `C:/Users/x`.
 fn normalize_host_path(path: &str) -> String {
     path.replace('\\', "/")
-}
-
-/// Canonical form of a mount source for comparison.
-///
-/// Case folding is Windows-only, deliberately (codex P2 on PR #2933). Docker on
-/// Windows can report a differently-cased drive letter than we asked for, so a
-/// case-sensitive compare there produces phantom drift and a needless recreate.
-/// Folding UNCONDITIONALLY is the opposite bug: on a case-sensitive host,
-/// switching an agent's workspace from `/work/Foo` to the genuinely different
-/// `/work/foo` would look like a match, `ensure_running` would skip the
-/// recreate, and `/workspace` would keep serving the old directory.
-fn fold_mount_source(source: &str) -> String {
-    let normalized = normalize_host_path(source);
-    if cfg!(windows) {
-        normalized.to_lowercase()
-    } else {
-        normalized
-    }
 }
 
 /// The credentials file inside the account's config dir, and inside the image.
@@ -142,75 +131,6 @@ pub fn credentials_dir_if_file_backed(claude_config_host_dir: &str) -> Option<St
          Keychain). The agent will start but will not be authenticated."
     );
     None
-}
-
-/// The mounts that make up the agent's home dir inside the container.
-///
-/// The per-agent named volume stays mounted at [`CONTAINER_CLAUDE_DIR`] exactly
-/// as before, and a bound account contributes ONE extra mount: its
-/// `.credentials.json`, bind-mounted as a single file on top of that volume.
-///
-/// Binding the account's whole config dir over `…/.claude` would be the more
-/// obvious shape, and it does NOT work — both failures verified live on
-/// 2026-09-02 against `ghcr.io/agentmuxai/agent-claude:latest`:
-///
-///  1. That dir's `projects` entry is a symlink into the shared identities tree,
-///     which does not resolve in-container (`ls` → "No such file or directory").
-///  2. Shadowing it with a nested volume at `…/.claude/projects` SILENTLY does
-///     not mount — Docker will not mount over a path that is a symlink inside a
-///     bind mount. `mount` shows only the parent 9p bind, and the CLI is left
-///     writing session state through the broken link. Chowning does not help;
-///     there is nothing there to chown.
-///
-/// Keeping the volume and binding just the credential file avoids both, and
-/// preserves the existing ownership story: the volume is initialised from the
-/// image, so `projects`/`sessions` stay writable by uid 1000. Verified end to
-/// end — a container agent using this shape completed a real turn against the
-/// bound account (`"result":"AUTH_OK"`, `is_error: false`).
-///
-/// Known limitation — HOST UID PARITY. A bind preserves the host file's owner
-/// and mode (`.credentials.json` is typically 0600), while the image always
-/// execs as `agent`, uid 1000. On a host whose AgentMux user is not uid 1000,
-/// the container cannot read the token and authentication stays broken there.
-///
-/// That is deliberately NOT worked around here. It is the container design's
-/// pre-existing, documented assumption — "`agent` non-root user (UID 1000) …
-/// Host filesystem UID parity" (SPEC_CONTAINER_PANE_SUPPORT_2026_06_11.md §
-/// "What claw's containers provide"; the Dockerfile renames node:22-slim's
-/// uid-1000 user for exactly this) — and the `/workspace` bind below has the
-/// identical problem: at uid != 1000 the agent cannot write its own workspace
-/// either. Special-casing credentials would fix one symptom of that assumption
-/// and leave the other, while adding a second provisioning path to maintain.
-/// The real fix is to exec as the host uid/gid, which is an architectural change
-/// affecting every mount, and belongs in its own PR.
-///
-/// Known limitation: a single-file bind follows the inode. If the CLI ever
-/// replaces `.credentials.json` by atomic rename rather than writing in place, a
-/// refreshed token would land on the host but not be seen by the running
-/// container until it is recreated. Reads — the case that was totally broken —
-/// are unaffected.
-fn agent_home_mounts(container_name: &str, spec: &ContainerMountSpec) -> Vec<Mount> {
-    let mut mounts = vec![Mount {
-        target: Some(CONTAINER_CLAUDE_DIR.to_string()),
-        source: Some(format!("agentmux-claude-{container_name}")),
-        typ: Some(MountTypeEnum::VOLUME),
-        read_only: Some(false),
-        ..Default::default()
-    }];
-
-    if let Some(host_dir) = spec.claude_config_host_dir.as_deref().filter(|d| !d.is_empty()) {
-        let host_dir = normalize_host_path(host_dir);
-        mounts.push(Mount {
-            target: Some(format!("{CONTAINER_CLAUDE_DIR}/{CLAUDE_CREDENTIALS_FILE}")),
-            source: Some(format!("{}/{CLAUDE_CREDENTIALS_FILE}", host_dir.trim_end_matches('/'))),
-            typ: Some(MountTypeEnum::BIND),
-            // Writable: an in-place token refresh should reach the host copy
-            // rather than being silently confined to the container.
-            read_only: Some(false),
-            ..Default::default()
-        });
-    }
-    mounts
 }
 
 /// Rewrite a host-loopback `AGENTMUX_LOCAL_URL` (e.g. `http://127.0.0.1:PORT`)
@@ -615,6 +535,7 @@ impl ContainerManager {
                 // Create and start.
                 observe(StartEvent::Starting);
                 self.create_and_start(container_name, &image, volumes, env_vars, spec).await?;
+                self.own_memory_parents(container_name, spec).await;
                 tracing::info!(container = container_name, image = image, "created and started container");
             }
         }
@@ -1616,7 +1537,7 @@ mod tests {
     fn a_bound_accounts_credentials_file_is_bind_mounted_into_the_container() {
         let spec = ContainerMountSpec {
             claude_config_host_dir: Some(r"C:\Users\me\.agentmux\identities\acct\claude".into()),
-            workspace_host_dir: None,
+            workspace_host_dir: None, ..Default::default()
         };
         let mounts = agent_home_mounts("agentmux-x", &spec);
 
@@ -1640,7 +1561,7 @@ mod tests {
     fn the_claude_dir_itself_stays_the_per_agent_named_volume() {
         let spec = ContainerMountSpec {
             claude_config_host_dir: Some("/host/acct/claude".into()),
-            workspace_host_dir: None,
+            workspace_host_dir: None, ..Default::default()
         };
         let mounts = agent_home_mounts("agentmux-x", &spec);
 
@@ -1674,7 +1595,7 @@ mod tests {
     fn an_empty_config_dir_is_treated_as_no_bound_account() {
         let spec = ContainerMountSpec {
             claude_config_host_dir: Some(String::new()),
-            workspace_host_dir: None,
+            workspace_host_dir: None, ..Default::default()
         };
         assert_eq!(agent_home_mounts("agentmux-x", &spec).len(), 1);
     }
@@ -1693,7 +1614,7 @@ mod tests {
     fn unbinding_an_account_drops_the_credentials_mount_from_the_desired_set() {
         let bound = ContainerMountSpec {
             claude_config_host_dir: Some("/host/acct/claude".into()),
-            workspace_host_dir: None,
+            workspace_host_dir: None, ..Default::default()
         };
         let unbound = ContainerMountSpec::default();
         let creds_target = format!("{CONTAINER_CLAUDE_DIR}/{CLAUDE_CREDENTIALS_FILE}");
@@ -1721,7 +1642,7 @@ mod tests {
     fn clearing_the_working_directory_drops_the_workspace_from_the_desired_set() {
         let with_ws = ContainerMountSpec {
             claude_config_host_dir: None,
-            workspace_host_dir: Some(r"C:\repo".into()),
+            workspace_host_dir: Some(r"C:\repo".into()), ..Default::default()
         };
         let desired = ContainerManager::desired_owned_mounts("agentmux-x", &with_ws);
         assert_eq!(desired.get(CONTAINER_WORKSPACE_DIR).map(String::as_str), Some("C:/repo"));
@@ -1772,22 +1693,6 @@ mod tests {
             Some(dir.to_string_lossy().as_ref()),
         );
         let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    /// Case folding must be Windows-only: on a case-sensitive host `/work/Foo`
-    /// and `/work/foo` are different directories, and folding them together
-    /// would hide real drift and leave /workspace on the stale one.
-    #[test]
-    fn mount_source_case_is_folded_only_where_the_filesystem_is_case_insensitive() {
-        let a = fold_mount_source("/work/Foo");
-        let b = fold_mount_source("/work/foo");
-        if cfg!(windows) {
-            assert_eq!(a, b, "windows paths are case-insensitive");
-        } else {
-            assert_ne!(a, b, "a case-sensitive host must see these as different mounts");
-        }
-        // Slash normalization is unconditional either way.
-        assert_eq!(fold_mount_source(r"C:\a\b"), fold_mount_source("C:/a/b"));
     }
 
     #[test]

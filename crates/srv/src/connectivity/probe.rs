@@ -4,7 +4,8 @@
 //! The active probe: while a service is believed down, check it on a capped
 //! backoff (`tracker::PROBE_FIRST_MS` doubling to `tracker::PROBE_MAX_MS`),
 //! so its recovery shows even when nothing else is calling. An online
-//! service is never probed.
+//! service is never probed on a timer, only once when the OS reports a
+//! network change (`netchange`).
 
 use std::future::Future;
 use std::pin::Pin;

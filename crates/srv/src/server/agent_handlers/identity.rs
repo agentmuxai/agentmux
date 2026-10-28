@@ -12,7 +12,7 @@ use crate::backend::rpc_types::{
     COMMAND_UPSERT_IDENTITY_ACCOUNT, COMMAND_DELETE_IDENTITY_ACCOUNT,
     COMMAND_ACCOUNT_KEY_VERIFY,
     COMMAND_ACCOUNT_OAUTH_START, COMMAND_ACCOUNT_OAUTH_POLL, COMMAND_ACCOUNT_OAUTH_CANCEL,
-    COMMAND_ACCOUNT_OAUTH_CLIENT_GET, COMMAND_ACCOUNT_OAUTH_CLIENT_CLEAR,
+    COMMAND_ACCOUNT_OAUTH_CLIENT_GET, COMMAND_ACCOUNT_OAUTH_CLIENT_CLEAR, COMMAND_GITHUB_CONNECTION,
     COMMAND_LINK_AGENT_IDENTITY, COMMAND_UNLINK_AGENT_IDENTITY,
     COMMAND_LIST_AGENT_IDENTITIES, COMMAND_LIST_ALL_AGENT_IDENTITIES,
     COMMAND_LIST_NAMED_AGENTS, COMMAND_HIDE_NAMED_AGENT,
@@ -120,6 +120,10 @@ struct OAuthStartReq {
     /// reconnect) instead of creating a new one.
     #[serde(default)]
     account_id: Option<String>,
+    /// GitHub: the person agreed to replace the GitHub user this AgentMux account is
+    /// connected as with the one who just authorized.
+    #[serde(default)]
+    replace_github_user: bool,
 }
 
 #[derive(serde::Deserialize, serde::Serialize, ts_rs::TS)]
@@ -128,6 +132,12 @@ struct OAuthStartReq {
 pub struct OAuthSessionReq {
     pub session_id: String,
 }
+
+/// Request for `github.connection`: nothing.
+#[derive(Default, serde::Deserialize, serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+#[serde(rename_all = "camelCase")]
+pub struct GithubConnectionReq {}
 
 /// Request for `account.oauth.client.get` / `account.oauth.client.clear`.
 #[derive(serde::Deserialize, serde::Serialize, ts_rs::TS)]
@@ -199,6 +209,13 @@ fn oauth_status_wire(s: &crate::identity::oauth_client::OAuthStatus) -> serde_js
             "email": email,
         }),
         OAuthStatus::Failed { error } => serde_json::json!({ "status": "failed", "error": error }),
+        OAuthStatus::ConfirmUser { current_login, current_id, new_login, new_id } => serde_json::json!({
+            "status": "confirm-user",
+            "currentLogin": current_login,
+            "currentId": current_id,
+            "newLogin": new_login,
+            "newId": new_id,
+        }),
     }
 }
 
@@ -622,12 +639,21 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         }
                     }
                 };
+                // GitHub connects through the broker when signed in to AgentMux Cloud.
+                let cloud_signed_in = if req.provider == crate::identity::github_connect::PROVIDER {
+                    let store = mstore.clone();
+                    tokio::task::spawn_blocking(move || store.muxbus_load().ok().flatten().is_some()).await.unwrap_or(false)
+                } else {
+                    false
+                };
                 let opts = StartOptions {
                     target,
                     byo,
                     saved,
                     extra_scopes: req.scopes.clone(),
                     save_client: req.save_client.unwrap_or(true),
+                    cloud_signed_in,
+                    replace_user: req.replace_github_user,
                 };
                 match crate::identity::oauth_client::start(&req.provider, opts, mstore, identity_store) {
                     Ok((session_id, status)) => Ok(AccountOAuthStartResult {
@@ -647,9 +673,8 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // keeps its own copy of what a refresh needs.
     engine.register_typed(COMMAND_ACCOUNT_OAUTH_CLIENT_GET, move |req: OAuthClientReq, _ctx| async move {
         let builtin_available = crate::identity::oauth_client::config_for(&req.provider)
-            .ok_or_else(|| format!("account.oauth.client.get: unknown OAuth provider: {}", req.provider))?
-            .client_id
-            .is_some();
+            .map(|cfg| crate::identity::oauth_client::builtin_client_available(&cfg))
+            .ok_or_else(|| format!("account.oauth.client.get: unknown OAuth provider: {}", req.provider))?;
         let provider = req.provider.clone();
         let saved = tokio::task::spawn_blocking(move || crate::identity::oauth_tokens::load_saved_client(&provider))
             .await
@@ -675,6 +700,16 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             .map_err(|e| format!("account.oauth.client.clear: {e}"))?;
         tracing::info!(target: "identity", provider = %req.provider, cleared, "account.oauth.client.clear: saved OAuth client forgotten");
         Ok(AccountOAuthClientClearResult { cleared })
+    });
+
+    // What the broker says about the GitHub connection; a grant it says is gone marks the
+    // brokered account as needing to be connected again (spec §5.7).
+    let github_mstore = state.id_store.clone();
+    let github_identity_store = state.identity_store.clone();
+    engine.register_typed(COMMAND_GITHUB_CONNECTION, move |_req: GithubConnectionReq, _ctx| {
+        let mstore = github_mstore.clone();
+        let identity_store = github_identity_store.clone();
+        async move { Ok(crate::identity::github_connect::sync_connection(&mstore, &identity_store).await) }
     });
 
     // The response stays `Value`: oauth_status_wire builds it, and the frontend
@@ -723,7 +758,12 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let mut revoke_report = serde_json::Value::Null;
                 if let Some(acct) = acct.as_ref() {
                     use crate::identity::oauth_tokens::{revoke_before_delete, KeychainSecrets, LiveHttp};
-                    if let Some(report) = revoke_before_delete(&LiveHttp, &KeychainSecrets, acct).await {
+                    // A GitHub grant made through the broker is ended there.
+                    let report = match crate::identity::github_connect::revoke_before_delete(&mstore, &KeychainSecrets, acct).await {
+                        Some(report) => Some(report),
+                        None => revoke_before_delete(&LiveHttp, &KeychainSecrets, acct).await,
+                    };
+                    if let Some(report) = report {
                         revoke_report = report;
                     }
                 }

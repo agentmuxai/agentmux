@@ -22,6 +22,7 @@ import { registerPaneTab } from "@/app/block/pane-tab-registry";
 import { pinSection, sectionEntryKey, sectionPinMenuItems, shownSections } from "./section-pins";
 
 let unregister = () => {};
+let unregisterSwarm = () => {};
 beforeAll(() => {
     unregister = registerPaneTab({
         apiVersion: 1,
@@ -31,7 +32,7 @@ beforeAll(() => {
         sections: {
             default: "host",
             items: [
-                { id: "kanban", label: "Kanban", icon: "table-columns" },
+                { id: "jobs", label: "Jobs", icon: "table-columns" },
                 {
                     id: "vault",
                     label: "Vault",
@@ -44,14 +45,25 @@ beforeAll(() => {
         },
         create: () => ({ component: () => null }),
     });
+    unregisterSwarm = registerPaneTab({
+        apiVersion: 1,
+        view: "swarm",
+        label: "Swarm",
+        icon: "diagram-project",
+        sections: { default: "supervisor", items: [{ id: "supervisor", label: "Supervisor", icon: "user-shield" }, { id: "kanban", label: "Kanban", icon: "table-columns" }] },
+        create: () => ({ component: () => null }),
+    });
 });
-afterAll(() => unregister());
+afterAll(() => {
+    unregister();
+    unregisterSwarm();
+});
 
-const kanban: WidgetConfigType = { label: "Kanban", section: "kanban", blockdef: { meta: { view: "warden", "warden:section": "kanban" } } };
+const jobs: WidgetConfigType = { label: "Jobs", section: "jobs", blockdef: { meta: { view: "warden", "warden:section": "jobs" } } };
 const warden: WidgetConfigType = { label: "Warden", blockdef: { meta: { view: "warden" } } };
 
 beforeEach(() => {
-    config = { widgets: { "defwidget@kanban": kanban, "defwidget@warden": warden }, settings: { "widget:pinned": ["warden"] } };
+    config = { widgets: { "defwidget@jobs": jobs, "defwidget@warden": warden }, settings: { "widget:pinned": ["warden"] } };
     sectionEntry.mockClear();
     setConfig.mockClear();
 });
@@ -69,17 +81,25 @@ describe("pinning a section to the widget bar", () => {
 
     it("finds the entry that opens exactly that section, and only that one", () => {
         const [lan] = shownSections({ view: "warden", "warden:section": "lan" });
-        const [kan] = shownSections({ view: "warden", "warden:section": "kanban" });
-        expect(sectionEntryKey(kan, config.widgets)).toBe("defwidget@kanban");
+        const [kan] = shownSections({ view: "warden", "warden:section": "jobs" });
+        expect(sectionEntryKey(kan, config.widgets)).toBe("defwidget@jobs");
         // Warden itself opens no particular section: not LAN's entry.
         expect(sectionEntryKey(lan, config.widgets)).toBeUndefined();
     });
 
+    it("finds a user's entry that still names Warden's Kanban as the Swarm's Kanban entry (MOVED_SECTIONS)", () => {
+        const [kanban] = shownSections({ view: "swarm", "swarm:section": "kanban" });
+        const old = { label: "Kanban", blockdef: { meta: { view: "warden", "warden:section": "kanban" } } } as unknown as WidgetConfigType;
+        expect(sectionEntryKey(kanban, { "my@kanban": old, ...config.widgets })).toBe("my@kanban");
+        // Warden has no Kanban section to show or pin any more.
+        expect(sectionEntryKey(kanban, config.widgets)).toBeUndefined();
+    });
+
     it("pins an existing entry without adding one", async () => {
-        const [kan] = shownSections({ view: "warden", "warden:section": "kanban" });
+        const [kan] = shownSections({ view: "warden", "warden:section": "jobs" });
         await pinSection(kan);
         expect(sectionEntry).not.toHaveBeenCalled();
-        expect(setConfig).toHaveBeenCalledWith({}, { "widget:pinned": ["warden", "kanban"] });
+        expect(setConfig).toHaveBeenCalledWith({}, { "widget:pinned": ["warden", "jobs"] });
     });
 
     it("adds an entry through srv when none opens the section, then pins it by its key", async () => {
@@ -90,23 +110,23 @@ describe("pinning a section to the widget bar", () => {
     });
 
     it("shows an entry the user had hidden when pinning it", async () => {
-        config.settings["widget:hidden"] = ["defwidget@kanban"];
-        const [kan] = shownSections({ view: "warden", "warden:section": "kanban" });
-        expect(sectionPinMenuItems({ view: "warden", "warden:section": "kanban" }).map((i) => i.label)).toEqual(["Pin “Kanban” to bar"]);
+        config.settings["widget:hidden"] = ["defwidget@jobs"];
+        const [kan] = shownSections({ view: "warden", "warden:section": "jobs" });
+        expect(sectionPinMenuItems({ view: "warden", "warden:section": "jobs" }).map((i) => i.label)).toEqual(["Pin “Jobs” to bar"]);
         await pinSection(kan);
-        expect(setConfig).toHaveBeenCalledWith({}, { "widget:hidden": null, "widget:pinned": ["warden", "kanban"] });
+        expect(setConfig).toHaveBeenCalledWith({}, { "widget:hidden": null, "widget:pinned": ["warden", "jobs"] });
     });
 
     it("draws the pin icon on Pin and the unpin icon on Unpin", () => {
         const icons = (section: string) => sectionPinMenuItems({ view: "warden", "warden:section": section }).map((i) => i.icon);
-        expect(icons("kanban")).toEqual(["thumbtack"]);
-        config.settings["widget:pinned"] = ["warden", "kanban"];
-        expect(icons("kanban")).toEqual(["thumbtack-slash"]);
+        expect(icons("jobs")).toEqual(["thumbtack"]);
+        config.settings["widget:pinned"] = ["warden", "jobs"];
+        expect(icons("jobs")).toEqual(["thumbtack-slash"]);
     });
 
     it("offers to unpin a section whose entry is pinned", () => {
-        config.settings["widget:pinned"] = ["warden", "kanban"];
-        expect(sectionPinMenuItems({ view: "warden", "warden:section": "kanban" }).map((i) => i.label)).toEqual(["Unpin “Kanban” from bar"]);
+        config.settings["widget:pinned"] = ["warden", "jobs"];
+        expect(sectionPinMenuItems({ view: "warden", "warden:section": "jobs" }).map((i) => i.label)).toEqual(["Unpin “Jobs” from bar"]);
         expect(sectionPinMenuItems({ view: "warden", "warden:section": "lan" }).map((i) => i.label)).toEqual(["Pin “LAN” to bar"]);
         expect(sectionPinMenuItems({ view: "term" })).toEqual([]);
     });

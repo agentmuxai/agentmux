@@ -10,6 +10,9 @@ pub(crate) mod account_episodes;
 pub mod agent_resources;
 pub mod agent_handlers;
 mod agent_only;
+mod http_action;
+mod http_action_routes;
+pub(crate) mod agent_move_here;
 pub(crate) mod agent_takeover;
 mod pane_binding;
 mod pane_commands;
@@ -31,8 +34,15 @@ pub(crate) mod reactive;
 mod name_resolution;
 pub(crate) mod caller;
 pub(crate) mod agent_self_keys;
+mod container_tool_chunk;
 pub(crate) mod jekt_held;
 mod jekt_hold;
+pub(crate) mod jekt_start;
+pub(crate) mod controller_backstop;
+pub(crate) mod agent_lifecycle;
+mod availability_view;
+pub(crate) mod agent_runtime;
+pub(crate) mod start_rate;
 mod jekt_cold;
 mod limit_probe;
 pub(crate) mod jekt_files;
@@ -54,10 +64,13 @@ mod drone_handlers;
 pub(crate) mod cron;
 pub(crate) mod job_actions;
 pub(crate) mod job_caps;
+pub(crate) mod jobs_remote_stop;
 pub(crate) mod work_queue;
+mod work_media;
 mod work_tasks;
 mod work_delegate;
 mod work_act;
+mod sensitive_handlers;
 mod messaging_handlers;
 mod muxbus_handlers;
 mod muxspect_handlers;
@@ -104,6 +117,12 @@ mod sender_claims_tests;
 #[cfg(test)]
 #[path = "tests/peer_veto_tests.rs"]
 mod peer_veto_tests;
+#[cfg(test)]
+#[path = "tests/rpc_attribution_tests.rs"]
+mod rpc_attribution_tests;
+#[cfg(test)]
+#[path = "tests/http_action_tests.rs"]
+mod http_action_tests;
 #[cfg(test)]
 mod rpc_schema_export;
 

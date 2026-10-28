@@ -19,6 +19,35 @@ use crate::backend::rpc_types::ContainerImageAccess;
 /// provider CLI, which is installed on first start.
 pub const DEFAULT_AGENT_IMAGE: &str = "ghcr.io/agentmuxai/agent-base:latest";
 
+/// The base image's repository, without a tag.
+pub(crate) const AGENT_BASE_REPO: &str = "ghcr.io/agentmuxai/agent-base";
+
+/// The base image for this AgentMux version. The release workflow tags the image with the
+/// release version, so the `agentmux-mcp` and `agentmux-bashwrap` inside match this srv.
+pub fn versioned_agent_image() -> String {
+    format!("{AGENT_BASE_REPO}:{}", env!("CARGO_PKG_VERSION"))
+}
+
+/// Whether `image` is the base image at any tag or digest: what a container made from this
+/// AgentMux's own image runs, as opposed to an image the user chose.
+pub fn is_agent_base_image(image: &str) -> bool {
+    match image.trim().strip_prefix(AGENT_BASE_REPO) {
+        Some(rest) => rest.is_empty() || rest.starts_with(':') || rest.starts_with('@'),
+        None => false,
+    }
+}
+
+/// Whether `image` is a base image pinned to a version (`agent-base:0.60.2`), as opposed to
+/// `:latest` or anything else. Such an image can be missing: a build that has not been
+/// released has no tag yet.
+pub fn is_versioned_agent_image(image: &str) -> bool {
+    image
+        .trim()
+        .strip_prefix(AGENT_BASE_REPO)
+        .and_then(|rest| rest.strip_prefix(':'))
+        .is_some_and(|tag| tag.starts_with(|c: char| c.is_ascii_digit()))
+}
+
 /// Repository of the earlier image that bundled Claude Code. It is private, so
 /// only machines that already hold it can use it.
 const LEGACY_AGENT_IMAGE_REPO: &str = "ghcr.io/agentmuxai/agent-claude";
@@ -26,11 +55,12 @@ const LEGACY_AGENT_IMAGE_REPO: &str = "ghcr.io/agentmuxai/agent-claude";
 /// Where the provider CLI is installed inside the container.
 pub const CONTAINER_CLI_DIR: &str = "/home/agent/.agentmux/cli";
 
-/// The image a stored `agent:container_image` value means: empty is the default.
+/// The image a stored `agent:container_image` value means: empty, or the plain `:latest` base
+/// image that agent definitions carry by default, is this version's base image.
 pub fn resolve_container_image(stored: &str) -> String {
     let stored = stored.trim();
-    if stored.is_empty() {
-        DEFAULT_AGENT_IMAGE.to_string()
+    if stored.is_empty() || stored == DEFAULT_AGENT_IMAGE {
+        versioned_agent_image()
     } else {
         stored.to_string()
     }
@@ -59,6 +89,9 @@ pub enum PullFailure {
     Stalled,
     /// The download kept going but did not finish within [`PULL_TOTAL_SECS`].
     TooSlow,
+    /// The release's signed manifest is there and isn't trusted, so the image isn't pulled
+    /// (`agent_image_digest`).
+    Unverified,
     Other,
 }
 
@@ -144,6 +177,11 @@ pub fn pull_failure_message(image: &str, kind: PullFailure, detail: &str) -> Str
              Check your internet connection, then send your message again, \
              or create the agent to run on this computer (host).",
             PULL_TOTAL_SECS / 60
+        ),
+        PullFailure::Unverified => format!(
+            "Couldn't start the container for this agent: the signed manifest of this AgentMux release isn't trusted ({}), \
+             so {image} was not downloaded. Update AgentMux, or create the agent to run on this computer (host).",
+            truncate(detail.trim(), 200)
         ),
         PullFailure::Other => format!(
             "Couldn't start the container for this agent: couldn't download {image}: {}. \
@@ -301,7 +339,7 @@ fn split_challenge_params(s: &str) -> Vec<&str> {
 pub async fn check_image_access(manager: Option<&ContainerManager>, image: &str) -> ContainerImageAccess {
     let image = resolve_container_image(image);
     let mut candidates = vec![image.clone()];
-    if is_legacy_agent_image(&image) {
+    if is_legacy_agent_image(&image) || is_versioned_agent_image(&image) {
         candidates.push(DEFAULT_AGENT_IMAGE.to_string());
     }
     let mut best: Option<ContainerImageAccess> = None;
@@ -339,10 +377,35 @@ mod tests {
     use super::*;
 
     #[test]
-    fn an_empty_stored_image_means_the_public_base_image() {
-        assert_eq!(resolve_container_image(""), DEFAULT_AGENT_IMAGE);
-        assert_eq!(resolve_container_image("  "), DEFAULT_AGENT_IMAGE);
+    fn an_empty_stored_image_means_this_versions_base_image() {
+        let versioned = format!("ghcr.io/agentmuxai/agent-base:{}", env!("CARGO_PKG_VERSION"));
+        assert_eq!(resolve_container_image(""), versioned);
+        assert_eq!(resolve_container_image("  "), versioned);
+        assert_eq!(resolve_container_image(DEFAULT_AGENT_IMAGE), versioned, "the default definitions carry :latest");
         assert_eq!(resolve_container_image("my/own:1"), "my/own:1");
+        assert_eq!(resolve_container_image("ghcr.io/agentmuxai/agent-base:0.59.1"), "ghcr.io/agentmuxai/agent-base:0.59.1");
+    }
+
+    #[test]
+    fn the_base_image_is_recognised_at_any_tag_and_nothing_else_is() {
+        assert!(is_agent_base_image("ghcr.io/agentmuxai/agent-base:0.59.41"));
+        assert!(is_agent_base_image("ghcr.io/agentmuxai/agent-base:latest"));
+        assert!(is_agent_base_image("ghcr.io/agentmuxai/agent-base"));
+        assert!(is_agent_base_image("ghcr.io/agentmuxai/agent-base@sha256:abc"));
+        assert!(!is_agent_base_image("ghcr.io/agentmuxai/agent-base-extra:1.0.0"));
+        assert!(!is_agent_base_image("my/own:1"));
+    }
+
+    #[test]
+    fn only_a_version_pinned_base_image_can_fall_back_to_latest() {
+        assert!(is_versioned_agent_image(&versioned_agent_image()));
+        assert!(is_versioned_agent_image("ghcr.io/agentmuxai/agent-base:0.59.41"));
+        assert!(is_versioned_agent_image(" ghcr.io/agentmuxai/agent-base:1.0.0-beta.1 "));
+        assert!(!is_versioned_agent_image(DEFAULT_AGENT_IMAGE));
+        assert!(!is_versioned_agent_image("ghcr.io/agentmuxai/agent-base:dispatch-1ddc56f"));
+        assert!(!is_versioned_agent_image("ghcr.io/agentmuxai/agent-base"));
+        assert!(!is_versioned_agent_image("ghcr.io/agentmuxai/agent-base-extra:1.0.0"));
+        assert!(!is_versioned_agent_image("my/own:1.0.0"));
     }
 
     #[test]

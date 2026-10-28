@@ -12,19 +12,14 @@ use super::*;
 /// cross-channel, LAN, cloud) and audits the job's creator UID here only.
 ///
 /// Must run AFTER `build_app_state` and BEFORE `cron_scheduler.start()`, so
-/// no fire takes the HTTP fallback.
+/// no fire takes the HTTP fallback. A fire to a stopped agent starts it with `agents:always_available`
+/// on (`server::jekt_start`).
 pub fn install_cron_delivery(state: &AppState) {
     let st = state.clone();
     state.cron_scheduler.install_delivery(Arc::new(move |req, creator_uid| {
         let st = st.clone();
         Box::pin(async move {
-            crate::server::reactive::deliver(
-                &st,
-                crate::server::ReactiveAuthVia::FullAuthKey,
-                &creator_uid,
-                req,
-            )
-            .await
+            crate::server::jekt_start::deliver_cron(&st, &creator_uid, req).await
         })
     }));
     // A pending fire (catch-up `latest`) waits until its agent is back,
@@ -284,6 +279,10 @@ pub fn install_close_on_exit_handler(state: &AppState) {
     backend::blockcontroller::set_close_on_exit_handler(Arc::new(move |tab_id: String, block_id: String| {
         let state = state.clone();
         tokio::spawn(async move {
+            // An agent's process ending makes it stopped; its block stays (always-available agents).
+            if crate::sagas::park_agents::keeps_block(&state, &block_id) {
+                return;
+            }
             if let Err(e) = crate::sagas::delete_block::run(&state, tab_id.clone(), block_id.clone()).await {
                 // Best-effort, same posture as every other close-on-exit
                 // failure mode: the shell already exited and its PTY is

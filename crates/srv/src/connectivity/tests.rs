@@ -89,3 +89,34 @@ fn the_event_goes_out_under_its_name_with_the_status() {
     assert_eq!(event.data.unwrap()["services"][1]["state"], json!("degraded"));
     assert!(is_srv_event(EVENT_CONNECTIVITY_CHANGED), "only srv publishes it");
 }
+
+fn failed(exit: Option<i32>, signal: Option<i32>, text: &str) -> crate::agents::failure::AgentFailure {
+    crate::agents::failure::classify(exit, signal, text, None)
+}
+
+#[test]
+fn codex_and_gemini_turns_speak_for_their_own_api() {
+    let (api, outcome) = provider_turn_outcome("codex", None).unwrap();
+    assert_eq!((api.vendor, outcome), ("openai", Outcome::Answered));
+    let down = failed(Some(1), None, "APIConnectionError: Connection error.");
+    assert_eq!(down.code, crate::agents::failure::FailureClass::Network);
+    let (api, outcome) = provider_turn_outcome("gemini", Some(&down)).unwrap();
+    assert_eq!(api.vendor, "google");
+    assert!(matches!(outcome, Outcome::Unreachable(_)));
+    // The API itself returned these, so it was reached.
+    for text in ["Error: HTTP 429 Too Many Requests", "You've hit your weekly limit", "request failed with status 401", "overloaded_error: please retry"] {
+        let f = failed(Some(1), None, text);
+        assert_eq!(provider_turn_outcome("codex", Some(&f)).map(|(_, o)| o), Some(Outcome::Answered), "{text}");
+    }
+    // Others say nothing about the network.
+    for f in [failed(None, Some(9), ""), failed(Some(2), None, "something unexpected happened")] {
+        assert!(provider_turn_outcome("codex", Some(&f)).is_none(), "{:?}", f.code);
+    }
+}
+
+#[test]
+fn claude_and_untracked_providers_are_left_to_their_own_reporting() {
+    assert!(provider_turn_outcome("claude", None).is_none(), "Claude reports from its frames");
+    assert!(provider_turn_outcome("aider", None).is_none());
+    assert!(provider_turn_outcome("", None).is_none());
+}

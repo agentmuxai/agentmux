@@ -108,6 +108,14 @@ pub fn container_route_allowed(path: &str) -> bool {
         "/api/v1/agent/globalmemory/diff",
         "/api/v1/agent/self/quit",
         "/api/v1/agent/pane/close",
+        // The `SessionStart` hook's delivery of Global and Personal Memory. The
+        // handlers bind the request to the grant's own block and agent
+        // (`memory_delivery_handlers`), and ignore the host paths it names.
+        "/api/v1/agent/memory/session-start/part",
+        "/api/v1/agent/memory/session-start/ack",
+        // `agentmux-bashwrap`'s live output into the grant's own pane, as a typed `tool_chunk` only
+        // (`server::container_tool_chunk`); the generic `/agentmux/wps/publish` relay stays refused.
+        "/api/v1/agent/tool-chunk",
     ];
     if EXACT.contains(&path) {
         return true;
@@ -158,6 +166,9 @@ pub fn container_exec_env(block_id: &str, env_vars: &HashMap<String, String>) ->
     // doesn't go through `pane_env`'s sanitizers, and srv's values win over
     // any the agent's own env carried.
     out.extend(build_info.iter().map(|(k, v)| (k.to_string(), v.clone())));
+    // A hint for the client only: the in-container MCP doesn't ask srv for signing keys it is refused. srv
+    // never trusts this variable for anything (it comes from the container's own environment).
+    out.push(("AGENTMUX_IN_CONTAINER".to_string(), "1".to_string()));
     // On Linux a container cannot reach srv's loopback; when srv listens on the agents network's
     // gateway that is where the container is pointed.
     crate::backend::container_listener::point_env_at_listener(&mut out);
@@ -209,6 +220,7 @@ mod tests {
             "/api/v1/agent/globalmemory/read",
             "/api/v1/agent/pane/close",
             "/api/v1/agent/shutdown/req-12",
+            "/api/v1/agent/tool-chunk",
         ] {
             assert!(container_route_allowed(ok), "{ok} should be allowed");
         }
@@ -233,6 +245,10 @@ mod tests {
             "/api/v1/agent/shutdown/",
             "/api/v1/self/",
             "//api/v1/self",
+            // srv signs for a container agent, which holds no key to fetch.
+            "/agentmux/agents/self/keys",
+            // MCP health beats belong to persistent controllers; a container's turns are per-exec.
+            "/api/v1/agent/self/mcp-beat",
         ] {
             assert!(!container_route_allowed(denied), "{denied} should be refused");
         }
@@ -256,6 +272,11 @@ mod tests {
         assert_eq!(grant_for(token).unwrap().agent_token.as_deref(), Some("agent-tok"));
         assert_eq!(out["AGENTMUX_LOCAL_URL"], "http://host.docker.internal:1");
         assert!(!out.contains_key("HOME"), "the denylist still applies");
+        assert_eq!(out["AGENTMUX_IN_CONTAINER"], "1", "the hint the in-container MCP reads");
+        assert!(
+            !out.keys().any(|k| k.ends_with("_JEKT_KEY") || k.ends_with("_LAN_KEY") || k.ends_with("_WAN_KEY")),
+            "and no signing key"
+        );
     }
 
     #[test]

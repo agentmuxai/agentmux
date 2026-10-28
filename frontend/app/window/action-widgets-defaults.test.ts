@@ -76,7 +76,24 @@ describe("handleWidgetSelect", () => {
         expect(store.createBlock).not.toHaveBeenCalled();
     });
 
+    // The Kanban is a section of the Swarm: its button switches the Swarm in this tab to it. An entry
+    // that still names Warden's Kanban (a user's own, from before the move) does the same.
+    it("opens the Kanban's button on the Swarm's Kanban section, in the Swarm already open", async () => {
+        const entry = (meta: Record<string, unknown>) => ({ label: "Kanban", blockdef: { meta } }) as unknown as WidgetConfigType;
+        await handleWidgetSelect(entry({ view: "swarm", "swarm:section": "kanban" }));
+        await handleWidgetSelect(entry({ view: "warden", "warden:section": "kanban" }));
+        expect(store.openOrFocusPaneByView.mock.calls).toEqual([
+            ["swarm", { meta: { view: "swarm", "swarm:section": "kanban" } }, { "swarm:section": "kanban" }],
+            ["swarm", { meta: { view: "swarm", "swarm:section": "kanban" } }, { "swarm:section": "kanban" }],
+        ]);
+        expect(store.createBlock).not.toHaveBeenCalled();
+    });
+
     it("still opens a new pane for every other widget", async () => {
+        // The Swarm's own button too: each opens another Swarm.
+        await handleWidgetSelect(wmap["defwidget@swarm"]);
+        expect(store.createBlock).toHaveBeenCalledTimes(1);
+        store.createBlock.mockClear();
         await handleWidgetSelect(wmap["defwidget@terminal"]);
         expect(store.createBlock).toHaveBeenCalledTimes(1);
         expect(store.openOrFocusPaneByView).not.toHaveBeenCalled();

@@ -194,6 +194,15 @@ export async function openOrFocusPaneByView(
     blockDef?: BlockDef,
     focusMeta?: MetaType
 ): Promise<void> {
+    await openOrFocusPaneIdByView(viewType, blockDef, focusMeta);
+}
+
+/** `openOrFocusPaneByView`, resolving to the id of the block it focused or created. */
+export async function openOrFocusPaneIdByView(
+    viewType: string,
+    blockDef?: BlockDef,
+    focusMeta?: MetaType
+): Promise<string | undefined> {
     const layoutModel = getLayoutModelForStaticTab();
     for (const bcm of blockComponentModelMap.values()) {
         if (bcm.viewModel?.viewType === viewType) {
@@ -205,11 +214,11 @@ export async function openOrFocusPaneByView(
                     if (focusMeta != null) await setBlockMeta(blockId, focusMeta);
                     layoutModel.focusNode(node.id);
                     giveBlockFocus(blockId);
-                    return;
+                    return blockId;
                 }
                 // Block exists on another tab; fall through and open a fresh one here.
             }
         }
     }
-    await createBlock(blockDef ?? { meta: { view: viewType } });
+    return await createBlock(blockDef ?? { meta: { view: viewType } });
 }

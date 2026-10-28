@@ -582,7 +582,7 @@ fn append_checked(broker: &mps::Broker, fs: &FileStore, block_id: &str, data: &[
                 block_id,
                 "term",
                 std::collections::HashMap::new(),
-                crate::backend::storage::filestore::FileOpts::default(),
+                super::shell::term_cap::term_opts(),
             ) {
                 if !matches!(e, crate::backend::storage::error::StoreError::AlreadyExists) {
                     tracing::warn!(block_id = %block_id, error = %e, "durable ssh: could not create term");
@@ -612,6 +612,9 @@ fn append_checked(broker: &mps::Broker, fs: &FileStore, block_id: &str, data: &[
         echo: None,
     };
     broker.publish_event::<crate::backend::mps_events::BlockFile>(&event_data, vec![format!("block:{block_id}")], 0);
+    if super::shell::term_cap::after_append(fs, block_id, start as i64, data) {
+        append_checked(broker, fs, block_id, super::shell::term_cap::TRIMMED_NOTICE);
+    }
     true
 }
 

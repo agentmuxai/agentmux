@@ -2,6 +2,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { createSignInNotice } from "./sign-in-notice";
 import type { AttachmentRef } from "@/types/rpc/AttachmentRef";
 import {
     snapshot as layoutSnapshot,
@@ -96,6 +97,7 @@ import { lastUserMessage, useOfflineInput } from "./offline/useOfflineInput";
 import { useAgentAccountBinding } from "./failure/useAgentAccountBinding";
 import { useAuthHealth, useSyntheticAuthRow } from "./failure/useAuthHealth";
 import { requestAgentTakeover } from "./failure/takeover";
+import { openInOtherPaneActions } from "./failure/open-in-other-pane";
 import { useAgentKeyboard } from "./hooks/useAgentKeyboard";
 import { useAgentQuestions } from "./hooks/useAgentQuestions";
 import { useBlockActivity } from "./hooks/useBlockActivity";
@@ -567,22 +569,20 @@ export const AgentPresentationView = ({
             id: `system_notification_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
             content: `${prefix}${text}`,
         } as import("./types").MarkdownNode;
-        paneModel.dispatchDoc({
-            type: "StreamFlush",
-            newNodes: [node],
-            updatedNodes: [],
-        });
+        paneModel.dispatchDoc({ type: "StreamFlush", newNodes: [node], updatedNodes: [] });
     };
 
+    const signIn = createSignInNotice((text, style) => postSystemNotification(text, style));
     const status = useAgentControllerStatus({
         blockId: model.blockId,
         provider,
         log,
         onLoginSuccess: (email) => {
-            const display = email ? `Logged in as **${email}**` : "Login successful";
-            postSystemNotification(display, "success");
+            signIn.answered();
+            postSystemNotification(email ? `Logged in as **${email}**` : "Login successful", "success");
         },
-        onNotify: (text, style) => postSystemNotification(text, style),
+        onNotify: (text, style, kind) => { signIn.seen(kind); postSystemNotification(text, style); },
+        onAccountBound: signIn.bound,
         onReady: () => onReadyFn?.(),
         // A successful recovery (relogin / terminal login) refreshed
         // the credential — retry the failed turn so the agent recovers in one
@@ -1027,9 +1027,8 @@ export const AgentPresentationView = ({
 
     // Bind/switch account for this agent (failure/useAccountBinding.ts).
     const account = useAgentAccountBinding({
-        blockId: model.blockId,
-        providerId: () => provider()?.id,
-        bindExistingAccount: status.bindExistingAccount,
+        blockId: model.blockId, providerId: () => provider()?.id, bindExistingAccount: status.bindExistingAccount,
+        signedOut: () => loginStatus() === "unauthenticated", onLogin: () => void status.relogin({ retryAfterLogin: paneModel.state.failure?.turnAttempted ?? false }),
     });
 
     // Declaring auth healthy, and the auto-unblock after a bind from anywhere
@@ -1049,15 +1048,15 @@ export const AgentPresentationView = ({
         failure: (() => paneModel.state.failure),
         onRetry: retryLastTurn,
         reconnect: offline.recovery,
-        // live_elsewhere — take the agent over from the other AgentMux
-        // instance running it, then re-run the refused turn if there was one
-        // (SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24.md §4.6).
+        // live_elsewhere — take the agent over from the other AgentMux instance running it, then
+        // re-run the refused turn if there was one (SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24.md §4.6).
         onTakeOver: async (turnAttempted: boolean) => {
             log("agent", "Take over — asking the other AgentMux instance to hand this agent over");
             const r = await requestAgentTakeover(model.blockId);
             log("agent", r.released ? `Take over — released by ${r.fromChannel ?? "the other instance"}` : "Take over — nobody else was running it");
             if (turnAttempted) retryLastTurn();
         },
+        ...openInOtherPaneActions({ blockId: model.blockId, log, send: handleSendMessage }), // open_in_other_pane
         onOpenAccounts: () => void openConnectors("accounts"),
         // context_exceeded recovery — archive the over-full session and return
         // to the picker for a clean relaunch (resuming would only re-fail).
@@ -1433,7 +1432,7 @@ export const AgentPresentationView = ({
                 }}
             />
 
-            <div class="agent-composer-region">
+            <div class="agent-composer-region" data-toast-avoid>
                 <Show when={commands.helpVisible()}>
                     <SlashHelpPanel
                         commands={commands.availableCommands()}

@@ -17,6 +17,7 @@ pub mod name_resolution;
 pub mod identity_spawn;
 pub mod agent_session;
 pub mod blockcontroller;
+pub mod cli_native;
 pub mod bookmarks_store;
 pub mod browser_profiles_store;
 pub mod layout_file;
@@ -62,6 +63,7 @@ pub mod cli_install;
 pub mod cli_prune;
 pub mod cli_notice;
 pub mod startup_files;
+pub mod confined_read;
 pub mod workdir_fs;
 pub mod model_catalog;
 pub mod codex_models;
@@ -141,6 +143,7 @@ pub mod sampler;
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub mod own_instance;
 pub mod stall_watch;
+pub mod net_counters;
 pub mod sysinfo;
 pub mod blockstats_detail;
 pub mod tower_agentmux;
@@ -155,6 +158,7 @@ pub mod tower_sampler;
 pub mod update_check;
 pub mod update_download;
 pub mod update_signature;
+pub mod agent_image_digest;
 pub mod update_install;
 pub mod update_restart;
 pub mod update_unpack;
@@ -176,6 +180,7 @@ pub mod mps;
 pub mod mps_events;
 pub mod osc_extractor;
 pub mod tool_store;
+pub(crate) mod packaged_tools;
 pub mod container;
 pub mod container_cli;
 pub mod container_credential;
@@ -194,12 +199,19 @@ pub mod shell_node;
 pub mod work_facts;
 /// The Kanban's reminders and PR links (SPEC_WARDEN_KANBAN_2026_10_20.md).
 pub mod kanban;
+pub mod task_media;
 /// The wake at an out-of-quota agent's reset (SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §7).
 pub mod limit_wake;
 /// Which model a Claude agent's sub-agents run on (SPEC_SUBAGENT_MODELS_2026_10_25.md).
 pub mod subagent_model;
 /// An agent accepting or sending back a task in Review.
 pub mod kanban_delegate;
+/// The `agents:always_available` setting (SPEC_ALWAYS_AVAILABLE_AGENTS_2026_10_27.md).
+pub mod always_available;
+/// The operations the super agent reviews (SPEC_SUPER_AGENT_2026_10_25.md).
+pub mod sensitive_ops;
+/// The requests for those operations and what became of them.
+pub mod sensitive_requests;
 /// Holding a routine message for an agent whose session has gone cold (SPEC_JEKT_HOLD_FOR_COLD_SESSIONS_2026_10_25.md).
 pub mod cold_hold;
 /// A leader hears when its workers end a turn without reporting, fail or stop.

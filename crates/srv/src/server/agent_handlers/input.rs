@@ -538,7 +538,7 @@ pub(crate) async fn build_persistent_spawn_env(
     // Kept for the identity-M0 slug lookup below; `mstore` itself moves into
     // the identity injector.
     let mstore_for_slug = mstore.clone();
-    let mut env_vars = crate::identity::resolver::inject_identity_env_async(
+    let mut env_vars = crate::identity::token_warmup::inject_after_warmup(
         mstore,
         id_store.clone(),
         identity_store.clone(),
@@ -1012,10 +1012,9 @@ pub async fn run_agent_turn_joining(
         };
         let input = crate::backend::blockcontroller::health::TurnInput { origin, text: message.clone(), joins_turn };
         if let Err(e) = persistent_ctrl.send_message_with_images_from(message, inline_images, config, Some(input)) {
-            // A single-live-instance refusal from inside the controller (the
-            // spawn-time claim losing to another instance, or the pre-turn
-            // fence) gets the same pane treatment as the early check above.
-            if crate::backend::agent_admission::is_admission_refusal(&e) {
+            // A single-live-instance refusal from inside the controller (the spawn-time claim losing
+            // to another instance or pane, or the pre-turn fence) gets the early check's pane treatment.
+            if crate::backend::agent_admission::is_admission_refusal(&e) || blockcontroller::persistent::is_held_elsewhere_error(&e) {
                 surface_refusal(&e);
             }
             return Err(e);
@@ -1058,81 +1057,22 @@ pub async fn run_agent_turn_joining(
         // (struct-completeness — see host_spawn.rs's doc comment).
         let instance_id = crate::backend::obj::meta_get_string(&block.meta, "agentId", "");
         if agent_mode == "container" {
-            let cm = container_manager.get().await.ok_or_else(|| {
-                "Docker not available on this host; cannot start container agent".to_string()
-            })?;
-            let container_image =
-                crate::backend::obj::meta_get_string(&block.meta, "agent:container_image", "");
-            // Use agentId (UUID) — always valid as a Docker name; display names can have spaces.
-            let agent_id = crate::backend::obj::meta_get_string(&block.meta, "agentId", "");
-            let container_name = crate::backend::container::container_name_for_slug(&agent_id);
-            let volumes_json =
-                crate::backend::obj::meta_get_string(&block.meta, "agent:container_volumes", "[]");
-            let volumes: Vec<String> = serde_json::from_str(&volumes_json).unwrap_or_default();
-
-            // Mount the bound account's credentials and the agent's working
-            // directory. `CLAUDE_CONFIG_DIR` was resolved into `env_vars` by the
-            // identity injection above, but it is a HOST path and so is stripped
-            // by CONTAINER_ENV_DENYLIST before exec — mounting it is the only way
-            // the in-container CLI ever sees `.credentials.json`. Without this a
-            // container agent authenticates never, no matter how many times the
-            // operator logs in via Connectors → Accounts.
-            let mount_spec = crate::backend::container::ContainerMountSpec {
-                claude_config_host_dir: env_vars
-                    .get("CLAUDE_CONFIG_DIR")
-                    .and_then(|d| crate::backend::container::credentials_dir_if_file_backed(d)),
-                workspace_host_dir: Some(working_dir.clone()).filter(|d| !d.is_empty()),
-            };
-
-            // AGENTMUX_LOCAL_URL is never explicitly set in env_vars for a host
-            // agent either (see the PATH-block comment above) — a host
-            // subprocess just inherits it from this process's own env
-            // (bootstrap/network.rs). `docker exec` over the Docker socket never
-            // inherits host process env, so a container agent gets no sidecar
-            // URL at all unless it's injected here. Rewritten to
-            // host.docker.internal (routable from inside the container via
-            // the extra_hosts entry `create_and_start` sets — see
-            // container.rs) since the loopback address this process sees is
-            // not reachable from the container's own network namespace.
-            // #2939 workstream 1 (host integration) — the other half is the
-            // agentmux-mcp/agentmux-bashwrap binaries that
-            // docker/Dockerfile.agent-agentmux builds into the image.
-            if let Ok(local_url) = std::env::var("AGENTMUX_LOCAL_URL") {
-                env_vars.insert(
-                    "AGENTMUX_LOCAL_URL".to_string(),
-                    crate::backend::container::rewrite_local_url_for_container(&local_url),
-                );
-            }
-
-            // The command and provider the turn runs, resolved INSIDE the image
-            // (on PATH, e.g. `claude`) -- not `cli_command`/`cmd`, which is the
-            // host-resolved absolute npm path and does not exist in the
-            // container.
-            let container_command = crate::backend::obj::meta_get_string(
+            let cm = container_manager.get_or_explain().await?;
+            // Starting the container takes minutes the first time, so it runs in the turn's own task: this
+            // handler is dropped after five seconds. The pre-start builds the same one.
+            let startup = super::container_turn::ContainerStartup::for_block(
+                cm.clone(),
+                &block_id,
                 &block.meta,
-                "agent:container_command",
-                "claude",
+                &mut env_vars,
+                &working_dir,
+                broker.clone(),
+                filestore_gate.clone(),
+                mstore.clone(),
             );
-            let agent_provider =
-                crate::backend::obj::meta_get_string(&block.meta, "agentProvider", "claude");
-
-            // Starting the container takes minutes the first time, so it runs in
-            // the turn's own task: this handler is dropped after five seconds.
-            subprocess_ctrl.set_container_startup(super::container_turn::startup_step(
-                super::container_turn::ContainerStartup {
-                    cm: cm.clone(),
-                    block_id: block_id.clone(),
-                    container_name: container_name.clone(),
-                    image: container_image.clone(),
-                    volumes: volumes.clone(),
-                    mount_spec: mount_spec.clone(),
-                    provider_id: agent_provider.clone(),
-                    container_command: container_command.clone(),
-                    broker: broker.clone(),
-                    filestore: filestore_gate.clone(),
-                    mstore: mstore.clone(),
-                },
-            ));
+            let (container_name, container_image) = (startup.container_name.clone(), startup.image.clone());
+            let (container_command, agent_provider) = (startup.container_command.clone(), startup.provider_id.clone());
+            subprocess_ctrl.set_container_startup(super::container_turn::startup_step(startup));
 
             tracing::info!(
                 block_id = %block_id,
@@ -1390,6 +1330,9 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
         move |cmd: CommandAgentInputData, ctx| {
             let deps = deps_ai.clone();
             async move {
+                if cmd.prestart == Some(true) {
+                    return super::container_turn::prestart(&deps, cmd.blockid).await;
+                }
                 // From the connection, before anything else runs (composer_origin.rs).
                 let origin = super::composer_origin::composer_origin(&ctx, cmd.hidden.unwrap_or(false))?;
                 tracing::info!(block_id = %cmd.blockid, "AgentInput");

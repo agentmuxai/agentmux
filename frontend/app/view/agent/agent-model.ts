@@ -435,8 +435,13 @@ export class AgentViewModel {
             return false;
         }
 
+        // A container agent's CLI is installed inside its container on the first
+        // message, so launching it needs no Node.js and no CLI on this computer
+        // (SPEC_CONTAINER_AGENTS_AT_PARITY_2026_10_27.md, P10).
+        const runsInContainer = (overrides?.agentType ?? agent.agent_type ?? "host") === "container";
+
         // Check Node.js availability for npm-based providers
-        const nodejsError = await checkNodejsForProvider(provider);
+        const nodejsError = runsInContainer ? null : await checkNodejsForProvider(provider);
         if (nodejsError) {
             this.nodejsError = nodejsError;
             Logger.error("agent", "Node.js not available for agent definition", { agentId: agent.id, error: nodejsError });
@@ -444,14 +449,16 @@ export class AgentViewModel {
         }
 
         // Where the backend actually installed the CLI -- see resolveCliBin.
-        let cliBin: string;
-        try {
-            cliBin = await resolveCliBin(provider, this.blockId, targetBlockId ?? this.blockId, agent.id);
-        } catch (e) {
-            const t = translateError(e);
-            this.launchError = `${t.title}: ${t.message}`;
-            Logger.error("agent", "Could not resolve the agent CLI for agent definition", { agentId: agent.id, error: String(e) });
-            return false;
+        let cliBin: string | undefined;
+        if (!runsInContainer) {
+            try {
+                cliBin = await resolveCliBin(provider, this.blockId, targetBlockId ?? this.blockId, agent.id);
+            } catch (e) {
+                const t = translateError(e);
+                this.launchError = `${t.title}: ${t.message}`;
+                Logger.error("agent", "Could not resolve the agent CLI for agent definition", { agentId: agent.id, error: String(e) });
+                return false;
+            }
         }
 
         Logger.info("agent", `Launching agent definition ${agent.name} (${effectiveProvider})`, {
@@ -851,7 +858,8 @@ export class AgentViewModel {
                 // a container agent keeps the per-turn path into its container
                 // (SPEC_ACP_CLIENT_CONFORMANCE_2026_10_07.md).
                 controller: launchController(provider, agentMode),
-                cmd: cliBin,
+                // No host CLI path for a container agent: its CLI is in the container.
+                ...(cliBin ? { cmd: cliBin } : {}),
                 "cmd:args": cliArgs,
                 "cmd:cwd": finalWorkDir,
                 "cmd:env": envVars,

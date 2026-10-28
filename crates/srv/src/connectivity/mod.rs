@@ -21,6 +21,7 @@
 //! `connectivity.status` for a window that opens later; both carry a rising
 //! `revision`, since they can arrive out of order.
 
+mod netchange;
 mod probe;
 mod tracker;
 
@@ -95,6 +96,22 @@ pub static ANTHROPIC: ModelApi = ModelApi {
     label: "Anthropic API",
     default_base_url: "https://api.anthropic.com",
     base_url_env: Some("ANTHROPIC_BASE_URL"),
+};
+
+/// The API Codex calls.
+pub static OPENAI: ModelApi = ModelApi {
+    vendor: "openai",
+    label: "OpenAI API",
+    default_base_url: "https://api.openai.com",
+    base_url_env: Some("OPENAI_BASE_URL"),
+};
+
+/// The API Gemini CLI calls.
+pub static GOOGLE: ModelApi = ModelApi {
+    vendor: "google",
+    label: "Google AI API",
+    default_base_url: "https://generativelanguage.googleapis.com",
+    base_url_env: Some("GOOGLE_GEMINI_BASE_URL"),
 };
 
 /// The model APIs whose state srv tracks from startup: each is listed as
@@ -182,6 +199,14 @@ impl Shared {
         self.publish(changed);
     }
 
+    /// The OS reported a network change: every service is probed again, now.
+    fn network_changed_at(&self, now_ms: i64) {
+        if self.tracker().network_changed(now_ms) {
+            tracing::info!("connectivity: the network changed, probing again");
+            self.wake.notify_one();
+        }
+    }
+
     fn publish(&self, changed: Option<ConnectivityStatus>) {
         let Some(status) = changed else { return };
         let down: Vec<String> = status
@@ -210,6 +235,7 @@ pub fn install(event_bus: Arc<EventBus>) {
     SHARED.seed_at(agentmux_common::time::now_ms());
     let clock: probe::Clock = Arc::new(agentmux_common::time::now_ms);
     tokio::spawn(probe::drive(SHARED.clone(), Arc::new(probe::NetProber::new()), clock));
+    netchange::start(SHARED.clone());
 }
 
 /// The current state, for `connectivity.status`.
@@ -283,6 +309,39 @@ pub fn claude_frame_outcome(frame: &serde_json::Value) -> Option<Outcome> {
         }
         _ => None,
     }
+}
+
+/// The API of a provider whose turns end only in an exit, with no frames to read: Codex and Gemini. They join the
+/// status when their first turn reports, and are probed from then on while down. Claude reports through
+/// [`observe_claude_frame`]; other providers are not tracked.
+fn exit_reported_api(provider: &str) -> Option<&'static ModelApi> {
+    let vendor = *crate::backend::providers::get_provider(provider)?.supported_vendors.first()?;
+    [&OPENAI, &GOOGLE].into_iter().find(|api| api.vendor == vendor)
+}
+
+/// What a finished turn of `provider` says about its model API: a clean turn, or a failure the API itself returned
+/// (limit, auth, overload), reached it; a network failure did not. Any other failure says nothing.
+pub fn observe_provider_turn(provider: &str, failure: Option<&crate::agents::failure::AgentFailure>) {
+    if let Some((api, outcome)) = provider_turn_outcome(provider, failure) {
+        report(Service::ModelApi(api), outcome);
+    }
+}
+
+fn provider_turn_outcome(
+    provider: &str,
+    failure: Option<&crate::agents::failure::AgentFailure>,
+) -> Option<(&'static ModelApi, Outcome)> {
+    use crate::agents::failure::FailureClass::{Auth, ContextExceeded, Network, Overloaded, RateLimited, UsageLimit};
+    let api = exit_reported_api(provider)?;
+    let outcome = match failure {
+        None => Outcome::Answered,
+        Some(f) => match f.code {
+            Network => Outcome::Unreachable(f.title.clone()),
+            RateLimited | Overloaded | UsageLimit | Auth | ContextExceeded => Outcome::Answered,
+            _ => return None,
+        },
+    };
+    Some((api, outcome))
 }
 
 /// Reads one Claude CLI stdout frame (`persistent::stdout_reader`).

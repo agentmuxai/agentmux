@@ -8,6 +8,7 @@ import { createPaneReadiness, PANE_REVEAL_BOUND_MS, type PaneReadiness } from "@
 import { useWindowTabDisplayed } from "@/app/workspace/window-tab-visibility";
 import { scheduleOnSettle } from "@/app/util/settle-detector";
 import { createEffect, createMemo, createSignal, onCleanup, onMount, untrack, type Accessor } from "solid-js";
+import { agentMountSettled } from "@/app/tab/agent-mount-watch";
 import { agentOpenRevealed, beginAgentOpenOnMount, finishAgentOpen, markAgentOpen, noteAgentOpen } from "../open-trace";
 
 /** The launch-flow state the reveal waits on (useAgentControllerStatus). */
@@ -79,6 +80,7 @@ export function usePaneReveal(opts: {
     //   assembling → covered, not yet fading   (was: !historyLoaded && showOverlay)
     //   revealing  → covered, fading            (was:  historyLoaded && showOverlay)
     //   live       → unmounted                  (was: !showOverlay)
+    agentMountSettled(opts.blockId);
     beginAgentOpenOnMount(opts.blockId, opts.agentName());
     onCleanup(() => finishAgentOpen(opts.blockId, "closed"));
     const windowTabDisplayed = useWindowTabDisplayed();

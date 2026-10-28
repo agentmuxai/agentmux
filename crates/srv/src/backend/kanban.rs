@@ -178,6 +178,16 @@ fn tick(ctx: &Context, idle_since: &mut HashMap<String, i64>, now_ms: i64) -> Ve
     out
 }
 
+/// Forget the files of tasks finished long ago, and remove the stored files no task still names (and the
+/// uploads that were never attached).
+fn prune_media(store: &crate::backend::storage::store::Store, now: i64) {
+    let Some(root) = crate::backend::task_media::default_root() else { return };
+    if store.work_media_prune(now).is_err() {
+        return;
+    }
+    crate::backend::task_media::sweep(&root, |sha| store.work_media_named(sha).unwrap_or(true));
+}
+
 /// The reminder loop, which also prunes the history of tasks finished more
 /// than 30 days ago, once an hour. Started once, after [`install`].
 pub async fn run_reminder_loop() {
@@ -193,6 +203,7 @@ pub async fn run_reminder_loop() {
             let pruned = tokio::task::spawn_blocking(move || {
                 let _ = identity.work_deps_prune();
                 let _ = identity.work_prs_prune();
+                prune_media(&identity, now);
                 identity.work_events_prune(now)
             })
             .await;

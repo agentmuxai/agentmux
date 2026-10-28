@@ -7,20 +7,22 @@
 import { createMemo, type Accessor } from "solid-js";
 import { sectionOf, type PaneSections } from "@/app/block/pane-sections";
 
-export type SwarmSection = "supervisor" | "broadcast";
+export type SwarmSection = "supervisor" | "broadcast" | "kanban";
 
 // Label text only, so the title can read it without importing the view.
 export const SWARM_SECTION_LABELS: Record<SwarmSection, string> = {
     supervisor: "Supervisor",
     broadcast: "Broadcast",
+    kanban: "Kanban",
 };
 
-/** The Swarm's sections, in rail order (pane-sections.ts). The Kanban joins them when its view does. */
+/** The Swarm's sections, in rail order (pane-sections.ts). */
 export const SWARM_SECTIONS: PaneSections<SwarmSection> = {
     default: "supervisor",
     items: [
         { id: "supervisor", label: SWARM_SECTION_LABELS.supervisor, icon: "user-shield" },
         { id: "broadcast", label: SWARM_SECTION_LABELS.broadcast, icon: "tower-broadcast" },
+        { id: "kanban", label: SWARM_SECTION_LABELS.kanban, icon: "table-columns" },
     ],
 };
 
@@ -31,9 +33,11 @@ export function swarmDensityOf(section: SwarmSection): SwarmDensity {
     return section === "broadcast" ? "compact" : "full";
 }
 
-/** The pane's title: the Swarm, then the section it shows. */
-export function swarmTitleOf(section: SwarmSection): string {
-    return `Swarm · ${SWARM_SECTION_LABELS[section]}`;
+/** The pane's title: the Swarm, then the section it shows; on the Kanban, how many tasks need
+ *  the operator (SPEC_WARDEN_KANBAN_2026_10_20.md §6.1). */
+export function swarmTitleOf(section: SwarmSection, kanbanNeeds = 0): string {
+    const title = `Swarm · ${SWARM_SECTION_LABELS[section]}`;
+    return section === "kanban" && kanbanNeeds > 0 ? `${title} · ${kanbanNeeds} need${kanbanNeeds === 1 ? "s" : ""} you` : title;
 }
 
 /** The section the pane's meta selects (`swarm:section`), or the default. */

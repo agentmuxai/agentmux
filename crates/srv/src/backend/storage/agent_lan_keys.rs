@@ -79,6 +79,19 @@ impl Store {
         }
     }
 
+    /// Replace this agent's LAN keypair with a fresh one, if it has one (none is minted for an agent
+    /// that never had one). The old private key signs nothing that verifies from then on. `true` when a
+    /// keypair was replaced.
+    pub fn agent_lan_key_rotate(&self, agent_id: &str) -> Result<bool, StoreError> {
+        let (public_bytes, private_bytes) = agentmux_common::jekt_sign::generate_lan_keypair(random_seed_bytes());
+        let conn = self.conn.lock().unwrap();
+        let changed = conn.execute(
+            "UPDATE db_agent_lan_keys SET public_key = ?1, private_key = ?2, created_at = ?3 WHERE agent_id = ?4",
+            params![BASE64.encode(public_bytes), BASE64.encode(private_bytes), now_secs(), agent_id.to_lowercase()],
+        )?;
+        Ok(changed > 0)
+    }
+
     /// Return this agent's LAN keypair, minting and persisting a fresh
     /// random one on first use. Race-safe under concurrent first-use — same
     /// `INSERT OR IGNORE` + re-read pattern as `agent_jekt_key_ensure`: two
@@ -120,6 +133,18 @@ mod tests {
 
     fn object_store() -> Store {
         Store::open(std::path::Path::new(":memory:")).unwrap()
+    }
+
+    #[test]
+    fn rotate_replaces_an_existing_keypair_and_mints_none() {
+        let store = object_store();
+        assert!(!store.agent_lan_key_rotate("agentx").unwrap(), "no keypair, nothing replaced");
+        assert!(store.agent_lan_key_load("agentx").unwrap().is_none(), "and none minted");
+        let old = store.agent_lan_key_ensure("agentx").unwrap();
+        assert!(store.agent_lan_key_rotate("AgentX").unwrap());
+        let new = store.agent_lan_key_load("agentx").unwrap().unwrap();
+        assert_ne!(old.private_key, new.private_key);
+        assert_ne!(old.public_key, new.public_key);
     }
 
     #[test]

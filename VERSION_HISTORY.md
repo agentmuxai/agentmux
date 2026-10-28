@@ -1,5 +1,118 @@
 # AgentMux Version History
 
+## 0.60.4 — 2026-10-27
+
+- Messages agents send each other through the Claude CLI's own messaging now show up in the audit log (from, to, state, a preview), with the sender named by AgentMux from the verified process id rather than from the name the message gives
+- fix(agent): a second pane of an agent that is open in another pane now says so, with Go there and Move here, instead of taking the message and doing nothing
+- A container agent whose container runs an older agent image than AgentMux says so once in its pane, with an Update container button (also Agents update_container); it removes the container so the next message starts it from the current image, only between turns
+- The Swarm's Broadcast section reads its recipients from the agent list the pane already keeps, so a hidden pane no longer rebuilds the agent tree
+- The Kanban moves from Warden into the Swarm as its third section (Supervisor, Broadcast, Kanban); the Kanban widget, the Open Kanban command, the Needs-you badge and a task chip on an agent row open it there, and a saved pin or widget call naming Warden's Kanban keeps working
+- Supervisor: a restart no longer re-arms a pane the Supervisor had paused (the pane's start-up document is AgentMux's own turn, not work to judge)
+- Supervisor: a pane's wait reads "Continuing after a 30 s wait" (it no longer goes stale), and the fleet-budget stop says how many continuations went out and the cap
+- Swarm: the Broadcast hint reads Ctrl+Enter, a narrow Swarm pane keeps the agent name (no horizontal scrollbar), the Broadcast section keeps the composer at the bottom, scrolls its recent list, and shows the old result panel only for a failure
+- ci(release): the release is a reusable workflow on main with a gate, so signing no longer depends on who creates the tag
+- Pane tabs: a drag between minimized panes no longer expands the pane (only a plain click on a pill does), and a Ctrl/Cmd-click picks a pill with a ring drawn inside it, so no pill moves
+- Settings search: one "Swarm Supervisor" entry that opens the Swarm's Supervisor settings
+- Agents list and discovery now show each agent's availability (state, what a routine message would do, reason, reset time), and GET /agentmux/reactive/availability answers it for one agent
+- fix(windows): an in-app update restart no longer leaves the old AgentMux running when a window is still shown during the quit; the quit watchdog hides it and gives up re-arming after five cycles
+- Fix the .deb and .rpm not starting: the launcher no longer mistakes the package-upgrade helper in its folder for the window host
+- A container agent's MCP server no longer calls the health-beat route srv refuses for containers
+- The super agent: a new Super agent seat role. Only one agent holds it; naming another moves it and the first goes back to the role it had.
+- Groundwork for agents that outlive their pane: park and attach commands for a block, a by-agent lookup, and an agents:always_available setting (off); nothing changes while it is off
+- Docs: the Microsoft Store auth analysis no longer carries the Partner Center seller id and tenant id (kept in the private copy)
+- A container agent's Bash output streams into its pane again, through a route that takes only its own pane's tool_chunk
+- The countdown to close a pane now names what is closing (for example "Closing browser pane: <title>" or "Closing editor: <file>") instead of "Closing An agent", names the asker by display name, and gives the user 30 s (was 15) to keep an agent or pane another agent stops or closes
+- The sensitive operations that a super agent will review, and the requests for them, are modelled in srv (not used by anything yet).
+- A minimized pane in a row now expands vertically in the column it shows in, instead of coming back as a new column where it was minimized from
+- fix: a message to an agent whose pane is waiting for a sign-in is held for the sign-in instead of failing with no controller, and an agent pane that never starts is named in the log
+- Build folders are cleaned on a host that runs a local package: any srv started by its launcher on the real home may run the cleanup, one at a time per host, and AGENTMUX_BUILD_CACHE_CLEAN=0/1 overrides it
+- Every state-changing call on the websocket RPC channel is now recorded in the audit log as whoever made it (an agent, the AgentMux window proven by the host, or an unproven connection, never the operator by default), with the agent or pane it acted on and whether it was done or refused
+- A terminal pane now keeps at most 50 MB of its output on disk (the term:storedoutputmb setting changes it, 0 removes the limit), so a command that prints without end no longer fills the disk
+- srv reports every created agent's runtime state: agentruntime.list and the agentruntime:changed:<agent id> event, for the Swarm to list agents that have no pane
+- Closing a browser pane no longer shows Chrome's native "Leave site?" box: a pane whose page may have unsaved changes asks first in AgentMux's own dialog naming the site, and a close by an agent or by quitting just closes
+- The countdown behind the super agent's reviews: an approved sensitive request runs when its window ends unless the person vetoes it, and the person can approve it sooner (not used by anything yet).
+- A boot no longer starts several Claude CLIs on one identity while its token is expired: one goes first, the others and ambient calls wait for its refresh, and spawns that waited start 250 ms apart
+- The Swarm lists the agents that have no pane (stopped), with a group you can open each from
+- Classify agent.start and agentruntime.list in the recorded-commands lists, so main's rpc attribution test passes
+- A dev build running on your real AgentMux home now refuses to start when it would move the shared stores ahead of the installed build, and a server given a data folder outside the home no longer writes agents into the real shared folder
+- The person's veto and approve-now for a sensitive request's countdown are accepted only from the AgentMux window, never from an agent (not used by anything yet).
+- A sensitive operation the super agent approved now shows in the agent pane as a countdown with Veto and Approve now, and chimes
+- Agents can ask for a sensitive operation with the new Sensitive tool; the super agent approves or denies it, and an approved one starts the countdown the person can veto
+- With agents:always_available on, closing a pane, tab or workspace keeps an agent's block and its process instead of deleting them (setting off by default)
+- A sensitive request nobody reviews now goes ahead with a countdown twice as long that says no super agent reviewed it, and each step of a request leaves an audit row
+- A sensitive operation counting down now also shows an OS notification with the seconds left
+- An agent's block can outlive its pane: opening an agent attaches its parked block or focuses the pane showing it, and an agent can be started with no pane (agents:always_available, off by default)
+- A Claude account whose sign-in is lost while its agents run is marked as needing a sign-in at once, and an emptied credentials file no longer reads as signed in
+- An agent that runs without a pane still counts in its account's limit and sign-in notices and can be moved with the rest
+- Agents whose block is parked (agents:always_available) now appear in agent.list, in a leader's worker list and in the spawn account-blocked check
+
+## 0.60.3 — 2026-10-27
+
+- feat(srv): the log says when the async runtime stops running tasks, with a start and an end line prefixed runtime-stall:
+- An agent can set or clear the seats of agents on its machine, several at once, with Agents set_seat; each change is recorded under the agent's name
+- Any agent can accept, send back, cancel, reassign, take back, restart and edit Kanban tasks; the history records the agent, and a message it sends arrives as the agent's
+- On Windows, srv and the host no longer let other processes of the same user read or change their memory; Tower, crash dumps, hang dumps and restarts keep working
+- Agent pane: an AgentMux note, or a jekt with a note after it, no longer shows as the human's own message; only the AgentMux window can type into an agent's composer
+- Only the installed release's srv cleans old build folders and warns about low disk; a dev, headless, local-package or test instance no longer does.
+- MuxBus WebSocket connects through HTTPS_PROXY (CONNECT tunnel, NO_PROXY honoured, TLS end to end, fails closed)
+- Pane tab pills no longer show the out-of-quota dotted line; the Swarm still shows it
+- feat(swarm): the Swarm pane gets Supervisor and Broadcast sections (a sections shell; the agent list is rendered once and shared)
+- Swarm Supervisor: it is now off until you turn it on with supervisor:enabled in the settings. Panes set to Steady or Drive before this start at Off, new modes can't be set while it is off, and the continuation and time limits are settings (supervisor:steady:*, supervisor:drive:*, supervisor:noprogress).
+- The launcher no longer keeps an instance key it was started with in its own process environment
+- Settings: window:showstatusbar (Window & Panes, and Toggle Status Bar in the command palette) hides the status bar; it comes back by itself while the backend is down
+- Agent lists you pick from (My Agents, the Seat lead picker, job owner, Skill and MCP bind pickers, Hidden agents, the account bind menu, Hangar's Agents) now put the most recently used agent first; My Agents' default sort reads Recently used
+- An agent's stored usage limit is now cleared on every path that removes or replaces its account (unlink, self-service unlink, new sign-in), not only on a link or an episode move
+- Accounts that share a provider and an email are numbered (user@example.com ·2), with the number kept for the life of the account; agent spawn takes the numbered form and refuses a bare email two accounts share
+- Fix shared-store corruption on macOS and Linux: the background checkpointer no longer opens and closes the WAL index file, which released SQLite's locks mid-transaction
+- Pin that a user agent's segment log uid and transcript zone key are the same string, and that a template launch is the one place they differ
+- createagentinstance refuses a fresh launch of a template, so no pane is put on a template's shared transcript zone
+- An agent's account is changed from the composer's login email: it lists every signed-in account of the provider with its quota, a switch asked for during a turn waits for the turn to end, and agents can do it too (agent.account.switch)
+- A job run's cost is what its turns spent, not the pane's whole session: Claude's total_cost_usd counts the session, so a job delivered into a long-lived pane no longer reads the session's spend as its run's and stops at its cap
+- Hardened the LAN identity check for messages that claim an agent UID
+- Settings > Agents > Outdated agent ids: an agent whose new id is taken can be given the suggested id, or one of your own, with one click
+- An urgent message (or one naming a waiting task) to an agent out of quota starts one probe turn per 15 minutes; a clean turn frees what was held. The stored failure records when it began, so the state's 'since' survives a restart
+- Container agents find rootless Docker, Podman, Colima and OrbStack: DOCKER_HOST with tcp, TLS or https, else the first usual socket that answers a ping, and the pane names the runtime or says what is missing
+- A container agent's first message no longer hangs: the image download and container start-up now run in the background instead of being cut off after five seconds, the pane shows the download's progress, and a download that stalls for a minute or runs over ten minutes ends with a clear message
+- No two tabs in a window share a name: a new, renamed, moved or restored tab that takes a taken name gets a suffix (Tab 4 (2)), and a default name takes the next free number
+- Browser panes: read and drive the content of an iframe the page marks role=presentation (the Azure portal's blades), and don't count text in a frame that isn't shown when waiting
+- Workspace import starts the agents of every window, and never opens a second pane for an agent that already has one in the windows it shows
+- A tab name that ends in a year, like Report (2024), keeps it when it collides and gets its counter after it
+- Resizing the window no longer lays out minimized panes' content on every frame; they catch up one at a time after the resize settles
+- Internal: an ignored timing measurement for the Windows thread access lists
+- A container agent on Linux reaches srv through the agents network's gateway address, with its scoped container token only (the container's agentmux-mcp no longer gets connection refused)
+- One module decides whether an agent can take a message now (agent_availability); the jekt hold and the cold-session hold ask it, with no change in behaviour
+- A live Docker test runs a container agent's turn on Linux end to end: the message reaches the CLI, and the CLI calls a MuxAPI tool through the agents network's gateway with its container token
+- perf(srv): a transcript append updates its tail part instead of replacing it, so SQLite no longer spills a statement journal to a temp file for every line (about a third of the bytes srv wrote in the memory lab)
+- A container agent no longer installs or looks for the agent CLI on your computer when it is created or opened; the CLI is installed inside the container on the first message
+- The failure row's Bind and the Swarm strip's Move these agents change an agent's account the way the composer does: the pane's auth env follows, and an agent in a turn is queued to move when it ends
+- A Job run's timeout or cancel_other overlap now reaches an agent in another AgentMux on the same computer: the AgentMux that follows the run closes it and interrupts the agent's turn, instead of the run being left to go on
+- A container agent runs the agent-base image tagged with this AgentMux version, so the agentmux-mcp inside matches the srv; a version that has no image yet falls back to :latest
+- Message answers that refuse or hold a message now carry the reason as data (refused_reason, retry_when, until_ms), and the Message tool reads it before falling back to the wording
+- A container agent's Personal Memory is the same folder native sessions use: only that folder is mounted, where Claude reads memory in the container
+- A container agent now receives its Global and Personal Memory at session start, like a host agent
+- Container agents no longer get signing keys in their workspace; keys an earlier version left there are removed and replaced
+- An idle srv uses about a quarter less CPU: the machine telemetry tick no longer reads swap figures or looks up every network adapter's addresses each second, which nothing used
+- Binding an account to an agent that asked you to sign in now answers that line in the conversation, instead of leaving it looking unresolved
+- A new container agent starts its container in the background once its account is ready, so its first message finds it running
+- Agent composer: the login-email menu gets 'Sign in with another account…' (Claude), a signed-out agent's chip opens a menu with its accounts and Log in, and Connectors account cards number same-email accounts (email ·2).
+- Installing git, Node or Python from the Toolchain panel now asks you in a window AgentMux opens itself before anything runs; with no answer, nothing is installed
+- An idle Windows srv takes one process-table read for both the pane sampler and the agent process tracker instead of two, and the tracker opens each process once
+- feat(wan): an install that replaces an agent's WAN key tells the key directory, and receivers refuse the retired key
+- A container agent's container now also starts right after you bind an account to it, and a pane no longer shows "Working…" while that start runs
+- Container agents on Docker Desktop for Windows keep their container between messages instead of recreating it at every start
+- An idle srv checks the store's write-ahead log for checkpoints every two seconds instead of four times a second, and again at the fast rate as soon as it changes
+- The Swarm's Supervisor section has a Supervisor on/off switch and its limits (continuations and time caps for Steady and Drive, stop after turns with no tool); while it's off, Steady and Drive are disabled in the mode menus with the reason
+- Kanban tasks can carry screenshots and recordings: agents attach files with Tasks update or submit, the card shows thumbnails and the drawer lists them, and handing in a UI task that waits for your OK needs media (or a stated reason)
+- The Supervisor waits (30 s by default) between a turn's end and its continuation, stops continuing at a fleet budget of continuations per hour (30 by default), and each kind of Supervisor notice can be turned off (supervisor:cooldown, supervisor:hourly, supervisor:notify:*)
+- The page log names what filled a long frame: each frame of 50 ms or more logs its scripts (who invoked them, file and function, forced layouts) and its render and style/layout time
+- A slow store write logs how long it waited for the write lock, ran, and committed, so a long hold of the store connection says whether it waited on another srv or on the disk
+- Toasts no longer cover a pane's or drawer's action area: a block marked data-toast-avoid (the agent composer, the Kanban drawer's Accept / Send back row) keeps the toast stack above it.
+- A continuation that was waiting when AgentMux restarted now says "Not continued: AgentMux restarted" instead of "Continuing in 30 s" for good.
+- The Swarm's Supervisor settings panel has the wait before continuing, the fleet budget per hour and the four notice toggles
+- The Swarm's Broadcast section has its own composer docked under the agent list, with the recipient count and the last ten broadcasts; the Supervisor section no longer has a Broadcast button
+- task dev now runs on a data home of its own under the clone (never your real agents and accounts) and task dev:seed gives it an agent that works with no account; set AGENTMUX_DEV_USE_REAL_HOME=1 for the old behaviour
+- The Supervisor chip is only offered on a Claude agent whose output the Supervisor can read, as the Supervisor itself decides
+
 ## 0.60.2 — 2026-10-25
 
 - Vault: import from Dashlane, Keeper, NordPass, RoboForm and Zoho Vault CSV exports

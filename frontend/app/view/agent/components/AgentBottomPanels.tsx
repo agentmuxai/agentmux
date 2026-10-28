@@ -11,6 +11,7 @@ import { Show, type Accessor, type ComponentProps } from "solid-js";
 import type { UseAgentFailureResult } from "../hooks/useAgentFailure";
 import type { UseAgentControllerStatus } from "../hooks/useAgentControllerStatus";
 import type { useShellLogBridge } from "../hooks/useShellLogBridge";
+import { SensitiveBanner } from "../sensitive/SensitiveBanner";
 import { ShutdownPendingBanner } from "../shutdown/ShutdownPendingBanner";
 import { ActivityDock } from "./ActivityDock";
 import { AgentCredentialsRevokedChip } from "./AgentCredentialsRevokedChip";
@@ -25,6 +26,7 @@ import type { useOfflineInput } from "../offline/useOfflineInput";
 import { clockTime } from "@/store/muxbus-delivery";
 import { AgentQuestionPanel } from "./AgentQuestionPanel";
 import { AgentSessionNotices } from "./AgentSessionNotices";
+import { AgentStoppedBanner } from "./AgentStoppedBanner";
 import { compactionModelKey } from "../compaction-estimate";
 import { toolActivity } from "@/app/store/agent-pane-state/tool-labels";
 import { ForkProviderFallbackBanner } from "./ForkProviderFallbackBanner";
@@ -170,8 +172,10 @@ export const AgentBottomPanels = (props: {
             SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md §3. */}
         <AgentCredentialsRevokedChip agentId={props.agentId} />
         {/* Something other than the user asked to shut this agent down:
-            15 s to keep it (SPEC_AGENT_SELF_QUIT_2026_09_24.md §6.5). */}
+            30 s to keep it (SPEC_AGENT_SELF_QUIT_2026_09_24.md §6.5). */}
         <ShutdownPendingBanner blockId={props.blockId} agentId={props.agentId} agentName={props.agentName} />
+        {/* A sensitive operation the super agent approved: the person can veto it. */}
+        <SensitiveBanner />
         {/* Failure-recovery row — per-error-class actions + auto-retry,
             rendered through the shared PaneRow accessory primitive.
             SPEC_AGENT_FAILURE_RECOVERY_UI_2026_06_16. */}
@@ -308,5 +312,7 @@ export const AgentBottomPanels = (props: {
             blockAtom={props.block}
             providerId={props.providerId}
         />
+        {/* An agent that was stopped keeps its pane and conversation; Start runs it again. */}
+        <AgentStoppedBanner block={props.block} agentId={props.agentId} />
     </>
 );

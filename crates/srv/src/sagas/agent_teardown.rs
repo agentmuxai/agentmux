@@ -222,7 +222,12 @@ pub async fn stop(state: &AppState, block_id: &str, graceful: bool, stop_backgro
     let report = run(state, block_id, Policy::stop(graceful, stop_background)).await;
     match report.stop_error {
         Some(e) => Err(e),
-        None => Ok(report),
+        None => {
+            // An explicit stop: the agent is wanted stopped, so a restart does not resume it.
+            use crate::server::app_api::agent_attach::{set_desired, DESIRED_STOPPED};
+            set_desired(&state.mstore, block_id, DESIRED_STOPPED);
+            Ok(report)
+        }
     }
 }
 
@@ -496,6 +501,8 @@ async fn close_cli(
     //    AgentInput either.
     blockcontroller::mark_closing(block_id);
     state.reactive_handler.unregister_block(block_id);
+    // A container's pre-start has no controller: end it before the container is stopped below.
+    crate::server::agent_handlers::container_turn::cancel_prestart(block_id);
     let ctrl = blockcontroller::take_controller(block_id);
     // 2–4. End the turn, ask the process to exit, force-kill at the deadline;
     //      resolves once it has actually exited.

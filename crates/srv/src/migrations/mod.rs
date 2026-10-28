@@ -90,6 +90,7 @@ mod m0039_vault_into_warden;
 mod m0040_cron_jobs_to_db_jobs;
 mod m0041_retire_untouched_starter_skills;
 mod m0042_supervisor_modes_reset;
+mod m0043_rotate_container_agent_keys;
 mod backup;
 mod gate;
 mod prepare;
@@ -98,6 +99,7 @@ mod runner;
 mod phase5_tests;
 
 pub use gate::data_needs_preparing;
+pub use gate::refuse_if_real_home_would_move;
 pub use runner::count_pending_migrations;
 pub use runner::doctor_report_for_instance;
 pub use runner::run_migrate_command;
@@ -272,4 +274,5 @@ static REGISTRY: &[&(dyn Migration + Sync)] = &[
     &m0040_cron_jobs_to_db_jobs::M0040CronJobsToDbJobs,
     &m0041_retire_untouched_starter_skills::M0041RetireUntouchedStarterSkills,
     &m0042_supervisor_modes_reset::M0042SupervisorModesReset,
+    &m0043_rotate_container_agent_keys::M0043RotateContainerAgentKeys,
 ];

@@ -55,6 +55,9 @@ pub struct CloseOpts {
     /// `false` (the historical flow): the frontend already removed what it
     /// closed, and one `delete` for the visible block covers a whole leaf.
     pub frontend_waits: bool,
+    /// Park the agents' blocks whatever `agents:always_available` says: the explicit detach
+    /// (`Agents detach`), where the setting only decides what a plain close does.
+    pub park_agents: bool,
 }
 
 pub async fn run_with(state: &AppState, block_ids: Vec<String>, opts: CloseOpts) -> Result<Value, String> {
@@ -151,8 +154,19 @@ async fn run_inner(
 ) -> Result<Value, String> {
     let mut failures = Vec::new();
     let mut failed_ids: Vec<&String> = Vec::new();
-    super::agent_teardown::run_many(ctx.state, &block_ids, super::agent_teardown::Policy::close()).await;
-    for block_id in &block_ids {
+    // An agent's block outlives its pane when `agents:always_available` is on: parked, not stopped
+    // or deleted. Its pane leaves the layout below like any other member's.
+    let parked = super::park_agents::park_agent_blocks(&ctx, &block_ids, opts.park_agents).await;
+    // An explicit park never falls through to a stop and a delete: what could not be parked stays as it is.
+    if opts.park_agents {
+        let left = super::park_agents::not_parked(&block_ids, &parked);
+        if !left.is_empty() {
+            return Err(format!("ClosePane: could not park {}: it is left running and in its pane", left.join(", ")));
+        }
+    }
+    let closing = super::park_agents::not_parked(&block_ids, &parked);
+    super::agent_teardown::run_many(ctx.state, &closing, super::agent_teardown::Policy::close()).await;
+    for block_id in &closing {
         if let Err(reason) = ctx
             .dispatch(Command::DeleteBlock {
                 tab_id: tab_id.clone(),
@@ -607,7 +621,7 @@ mod tests {
         let b = seed_block(&state, &tab_id).await;
         set_tree(&state, &tab_id, stack_leaf("leaf", &[&a, &b], &a)).await;
 
-        let out = run_with(&state, vec![a.clone(), b.clone()], CloseOpts { frontend_waits: true }).await.unwrap();
+        let out = run_with(&state, vec![a.clone(), b.clone()], CloseOpts { frontend_waits: true, ..Default::default() }).await.unwrap();
         assert_eq!(out["leaf_removed"], true);
         // The frontend still shows both tabs: one `delete` each, the last
         // taking the pane — never only the visible one (§5.5).
@@ -622,7 +636,7 @@ mod tests {
         let b = seed_block(&state, &tab_id).await;
         set_tree(&state, &tab_id, stack_leaf("leaf", &[&a, &b], &a)).await;
 
-        let out = run_with(&state, vec![a.clone()], CloseOpts { frontend_waits: true }).await.unwrap();
+        let out = run_with(&state, vec![a.clone()], CloseOpts { frontend_waits: true, ..Default::default() }).await.unwrap();
         assert_eq!(out["leaf_removed"], false);
         assert!(state.srv_state.lock().await.blocks.contains_key(&b), "sibling survives");
         assert_eq!(queued_deletes(&state, &tab_id), vec![a.clone()], "the kept pane drops just that tab");
@@ -692,7 +706,7 @@ mod tests {
         run(&state, vec![b.clone()]).await.unwrap(); // b closed elsewhere first
         let before = queued_deletes(&state, &tab_id).len();
 
-        run_with(&state, vec![a.clone(), b.clone()], CloseOpts { frontend_waits: true }).await.unwrap();
+        run_with(&state, vec![a.clone(), b.clone()], CloseOpts { frontend_waits: true, ..Default::default() }).await.unwrap();
         let queued = queued_deletes(&state, &tab_id);
         assert_eq!(&queued[before..], &[a.clone(), b.clone()], "both leave the waiting frontend");
     }

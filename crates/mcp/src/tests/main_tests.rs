@@ -80,9 +80,9 @@ fn bulk_stop_folds_each_users_answer_into_succeeded_and_failed() {
 }
 
 #[test]
-fn stop_warns_it_can_take_15_seconds() {
+fn stop_warns_it_can_take_30_seconds() {
     let v: Value = serde_json::from_str(STOP_TOOL).unwrap();
-    assert!(v["description"].as_str().unwrap().contains("at least 15 seconds"));
+    assert!(v["description"].as_str().unwrap().contains("at least 30 seconds"));
 }
 
 
@@ -181,6 +181,17 @@ fn send_message_outcome_names_the_state_and_the_id() {
     assert!(signed_out.starts_with("Message delivery failed (unavailable): Camper needs to sign in again"), "{signed_out}");
     assert!(signed_out.contains("NOT kept") && signed_out.contains("Send it again after they sign in."), "{signed_out}");
     assert!(!signed_out.contains("reset"), "{signed_out}");
+
+    // The advice comes from `retry_when` when srv says it, whatever the wording of the error.
+    let by_data = err(json!({ "success": false, "refused_reason": "needs_login", "retry_when": "sign_in",
+        "error": "agent unavailable: Camper cannot take it" }));
+    assert!(by_data.contains("Send it again after they sign in."), "{by_data}");
+    let by_data = err(json!({ "success": false, "refused_reason": "usage_limit", "retry_when": "reset_or_account_move",
+        "error": "agent unavailable: Camper needs to sign in again" }));
+    assert!(by_data.contains("account move or the reset") && !by_data.contains("after they sign in"), "{by_data}");
+    let gate = err(json!({ "success": false, "refused_reason": "needs_login", "retry_when": "sign_in",
+        "error": "no credentials for claude" }));
+    assert!(gate.starts_with("Message delivery failed (needs_login)"), "{gate}");
 
     let e = err(json!({ "success": false, "block_id": "b1",
         "error": "identity spawn gate: no credentials for claude: the bound account was deleted or is unresolvable." }));

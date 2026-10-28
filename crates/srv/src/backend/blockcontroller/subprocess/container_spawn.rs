@@ -216,6 +216,13 @@ impl SubprocessController {
             return Ok(());
         }
 
+        // Shared for the whole turn: an update of this container waits for none, and refuses
+        // while one holds it.
+        let Ok(update_guard) = crate::backend::container::drift::update_gate(&container_name).try_read_owned() else {
+            self.unlock_run();
+            return Err("This agent's container is being updated. Send the message again in a moment.".to_string());
+        };
+
         self.hydrate_session_id_from_config(config.session_id.as_deref());
 
         let session_id_hint = self.inner.lock().unwrap().session_id.clone();
@@ -286,6 +293,7 @@ impl SubprocessController {
         // needing the returned future to be `'static`.
         tokio::spawn(async move {
             use bollard::container::LogOutput;
+            let _update_guard = update_guard;
 
             // Install the kill channel BEFORE any await, so a stop issued
             // while this turn is still starting is recorded rather than
@@ -684,6 +692,7 @@ impl SubprocessController {
             // call handles both cases regardless of whether run_failure is
             // Some or None. Mirrors host_spawn.rs's process_waiter.
             core::persist_last_failure(&block_id, run_failure.as_ref(), &mstore, &event_bus);
+            core::report_provider_turn(&block_id, run_failure.as_ref(), &mstore);
 
             // Surface the classified failure cause to the pane. persist:1 so
             // reconnecting subscribers also receive the last failure without a

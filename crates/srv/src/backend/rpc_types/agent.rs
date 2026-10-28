@@ -467,8 +467,8 @@ pub struct CommandAgentSetSeatData {
 #[derive(Debug, Clone, Default, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct SeatInput {
-    /// One of `leader`, `worker`, `specialist`, `platform_tester`, `analyst`.
-    #[ts(type = r#""leader" | "worker" | "specialist" | "platform_tester" | "analyst""#)]
+    /// One of `leader`, `worker`, `specialist`, `platform_tester`, `analyst`, `super`.
+    #[ts(type = r#""leader" | "worker" | "specialist" | "platform_tester" | "analyst" | "super""#)]
     pub role: String,
     /// At most 40 characters; blank means none.
     #[serde(default)]
@@ -527,6 +527,24 @@ pub struct AgentTakeoverResult {
     pub from_channel: Option<String>,
 }
 
+/// Request for `agent.move-here`: move the agent in `block_id` here from the other pane of this
+/// AgentMux that is running it. The operator's own client only.
+#[derive(Debug, Clone, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandAgentMoveHereData {
+    pub block_id: String,
+}
+
+/// Response for `agent.move-here`.
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct AgentMoveHereResult {
+    /// The pane the agent was moved from; absent when no other pane was running it any more.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub from_block: Option<String>,
+}
+
 /// Response for `agent.setSeat`: the seat as stored, `null` once cleared.
 #[derive(Debug, Clone, Serialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
@@ -540,7 +558,7 @@ pub struct AgentSetSeatResult {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct SeatSummary {
-    #[ts(type = r#""leader" | "worker" | "specialist" | "platform_tester" | "analyst""#)]
+    #[ts(type = r#""leader" | "worker" | "specialist" | "platform_tester" | "analyst" | "super""#)]
     pub role: String,
     pub qualifier: Option<String>,
     /// `null`: the agent reports to the operator.
@@ -1005,6 +1023,21 @@ pub struct ContainerRuntimeAvailableResult {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub detail: Option<String>,
+}
+
+/// Request for `updatecontainer`: remove a container agent's container so its next message
+/// starts it from the current agent image. Refused while a turn is running.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandUpdateContainerData {
+    pub block_id: String,
+}
+
+/// Result of `updatecontainer`: the agent image version the next start uses.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct UpdateContainerResult {
+    pub image_version: String,
 }
 
 /// Request for `containerimagecheck`. An empty `image` means the default image.

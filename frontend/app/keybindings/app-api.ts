@@ -50,7 +50,7 @@ export interface ResolvedNote {
  */
 const API_REFUSED: ReadonlyMap<string, string> = new Map([
     ["files:deletePermanently", "it can't be undone"],
-    ["pane:close", "a key press closes the focused pane at once: UI's command action with pane:close and a target closes it with the user's 15-second undo"],
+    ["pane:close", "a key press closes the focused pane at once: UI's command action with pane:close and a target closes it with the user's 30-second undo"],
 ]);
 
 /** Commands refused on macOS only, for something macOS can't undo yet. None

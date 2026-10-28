@@ -15,6 +15,7 @@
 
 pub mod judge;
 pub mod message;
+pub mod pacing;
 pub mod policy;
 pub mod settings;
 pub mod watcher;
@@ -232,6 +233,12 @@ impl SupervisorState {
 /// continued: the user's override wins (spec §3.4).
 pub fn stopped_by_user(block_id: &str) -> bool {
     crate::backend::user_stop::stopped_recently(block_id)
+}
+
+/// Whether the user stopped the pane at or after `since_ms`: what a continuation
+/// that waited checks, since the grace window is shorter than the wait.
+pub fn stopped_since(block_id: &str, since_ms: u64) -> bool {
+    crate::backend::user_stop::stopped_since(block_id, since_ms as i64)
 }
 
 /// Whether the Supervisor can work on this pane at all: a Claude agent, whose

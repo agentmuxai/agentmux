@@ -13,6 +13,7 @@ const OPERATOR_COMMANDS: ReadonlySet<string> = new Set([
     "agent.pane.unregister",
     "agent.setSeat",
     "agent.takeover",
+    "agent.move-here",
     "blockstats.detail",
     "browser_profiles.create",
     "browser_profiles.delete",
@@ -41,6 +42,7 @@ const OPERATOR_COMMANDS: ReadonlySet<string> = new Set([
     "tower.pair",
     "tower.peers",
     "tower.sample",
+    "widgets.session",
     "writeagentconfig",
 ]);
 

@@ -322,6 +322,10 @@ impl PersistentSubprocessController {
             // requested it, which is the only one it ever meant anything for.
             inner.restart_when_idle = false;
             inner.spawn_generation += 1;
+            // Requests parked for the user belong to the process that asked: a new process is not
+            // waiting on them. Left in place, an abandoned question would read the new turns as
+            // `waiting` (`Controller::awaiting_user_reply`).
+            super::input::forget_parked_requests(&mut inner);
             // Any spawn consumes or invalidates an adopted leftover
             // candidate — it only ever meant "for the very next spawn".
             inner.leftover_resume_candidate = None;
@@ -514,6 +518,9 @@ impl PersistentSubprocessController {
         {
             let mut inner = self.inner.lock().unwrap();
             inner.current_pid = Some(pid);
+            crate::backend::cli_native::pids::set(&self.block_id, pid);
+            // Its first turn may now take a while: whoever waits on this identity's refresh waits for it.
+            crate::identity::token_warmup::started(&self.block_id);
             inner.kill_tx = Some(kill_tx);
             inner.stdin_tx = Some(msg_tx);
             // The same `Arc` when an earlier generation's lease was reused
@@ -715,6 +722,9 @@ impl PersistentSubprocessController {
             super::super::session_recovery::mark_active_pid(mstore, &self.block_id, pid);
         }
 
+        // The user turns this writer sends, by uuid: the CLI echoes them back (`cli_native::sent`).
+        let sent_prompts = crate::backend::cli_native::sent::SentPrompts::default();
+        let sent_prompts_write = sent_prompts.clone();
         // Spawn stdin writer task
         tokio::spawn(async move {
             let mut stdin = stdin;
@@ -732,6 +742,7 @@ impl PersistentSubprocessController {
                     }
                     None => msg,
                 };
+                let msg = sent_prompts_write.tag(&msg);
                 if let Err(e) = stdin.write_all(msg.as_bytes()).await {
                     tracing::warn!("persistent stdin write error: {}", e);
                     break;
@@ -813,6 +824,7 @@ impl PersistentSubprocessController {
             segment_read,
             relocated_copy_read,
             forked_from_read,
+            sent_prompts,
         }));
 
         self.spawn_status_heartbeat();

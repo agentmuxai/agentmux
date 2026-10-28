@@ -32,6 +32,7 @@ import { parseBangCommand } from "../bang-command";
 import type { ProviderDefinition } from "../providers";
 import type { DocumentNode } from "../types";
 import type { AttachmentRef } from "@/types/rpc/AttachmentRef";
+import { forgetRefusedSend, isOpenInOtherPaneError, rememberRefusedSend } from "../failure/refused-send";
 import type { LogFn } from "./useAgentControllerStatus";
 import { setBlockMeta } from "@/app/store/block-meta";
 
@@ -919,8 +920,8 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         // Awaited so the flush loop keeps submission order (#1484). The
         // cmd:args round-trip is done, so the 30s expiry below measures only
         // backend acceptance (#752).
+        const attachments = attachmentsByMessage.get(messageId);
         try {
-            const attachments = attachmentsByMessage.get(messageId);
             await RpcApi.AgentInputCommand(TabRpcClient, {
                 blockid: opts.blockId,
                 message,
@@ -929,9 +930,16 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                 ...(joinsTurn != null ? { joins_turn: joinsTurn } : {}),
             });
             attachmentsByMessage.delete(messageId);
+            // This pane is the agent's live one: a message kept from an earlier refusal is stale.
+            forgetRefusedSend(opts.blockId);
         } catch (err: any) {
             attachmentsByMessage.delete(messageId);
             opts.log("error", err?.message ?? String(err), "error");
+            // The agent is open in another pane: the pending message is taken off the conversation
+            // below, so keep the text for the failure row's Move here, which sends it.
+            if (isOpenInOtherPaneError(String(err?.message ?? err))) {
+                rememberRefusedSend(opts.blockId, { text: message, attachments: attachments ?? [] });
+            }
             // RPC outright failed — remove the pending entry so the user
             // doesn't see a ghost row for a message the backend never received.
             opts.model.dispatchPane({

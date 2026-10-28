@@ -192,8 +192,11 @@ impl PersistentSubprocessController {
                 // it kept running.
                 let is_current_generation = inner.spawn_generation == my_generation_wait;
                 if is_current_generation {
+                    crate::identity::token_warmup::release(&block_id_wait);
                     inner.proc_exit_code = exit_code;
-                    inner.current_pid = None;
+                    if let Some(ended) = inner.current_pid.take() {
+                        crate::backend::cli_native::pids::clear(&block_id_wait, ended);
+                    }
                     inner.stdin_tx = None;
                     inner.kill_tx = None;
                     // This process no longer drives the agent: release
@@ -577,8 +580,11 @@ impl PersistentSubprocessController {
                 // own state as if IT had been stopped.
                 let is_current_generation = inner.spawn_generation == my_generation_wait;
                 if is_current_generation {
+                    crate::identity::token_warmup::release(&block_id_wait);
                     inner.proc_exit_code = -1;
-                    inner.current_pid = None;
+                    if let Some(ended) = inner.current_pid.take() {
+                        crate::backend::cli_native::pids::clear(&block_id_wait, ended);
+                    }
                     inner.stdin_tx = None;
                     inner.kill_tx = None;
                     // This process no longer drives the agent: release

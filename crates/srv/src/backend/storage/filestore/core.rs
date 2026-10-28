@@ -76,6 +76,19 @@ impl Drop for TimedConn<'_> {
     }
 }
 
+/// Which part of a slow write took longest: `begin` waits for the write lock (another srv
+/// instance holds it: the global store is one file for every instance), `body` is the work
+/// inside the transaction, `commit` waits for the disk.
+pub(super) fn slowest_phase(begin: std::time::Duration, body: std::time::Duration, commit: std::time::Duration) -> &'static str {
+    if begin >= body && begin >= commit {
+        "begin"
+    } else if commit >= body {
+        "commit"
+    } else {
+        "body"
+    }
+}
+
 /// `user_version` value stamped into the GLOBAL transcript store
 /// (`shared/agents/transcripts/filestore.db`) by builds that bundle SQLite 3.51.3
 /// or later. The schema is the same as [`FILESTORE_SCHEMA_VERSION`]'s; the number
@@ -386,10 +399,37 @@ impl FileStore {
         let site = std::panic::Location::caller();
         super::off_worker::off_worker(|| {
             let mut conn = self.lock_conn_at(site);
-            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-            let out = f(&tx)?;
-            tx.commit()?;
-            Ok(out)
+            // Each phase is timed whether or not it succeeds: a write that gives up after
+            // `busy_timeout` waiting for another srv's lock is the stall this exists to show.
+            let mut took = [std::time::Duration::ZERO; 3];
+            let result = (|| {
+                let began = std::time::Instant::now();
+                let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate);
+                took[0] = began.elapsed();
+                let tx = tx?;
+                let ran = std::time::Instant::now();
+                let out = f(&tx);
+                took[1] = ran.elapsed();
+                let out = out?;
+                let committing = std::time::Instant::now();
+                let committed = tx.commit();
+                took[2] = committing.elapsed();
+                committed?;
+                Ok::<T, StoreError>(out)
+            })();
+            let [begun, ran, committed] = took;
+            if begun + ran + committed >= SLOW_CONN {
+                tracing::warn!(
+                    site = %site,
+                    begin_ms = begun.as_millis() as u64,
+                    body_ms = ran.as_millis() as u64,
+                    commit_ms = committed.as_millis() as u64,
+                    slowest = slowest_phase(begun, ran, committed),
+                    ok = result.is_ok(),
+                    "filestore: write transaction was slow"
+                );
+            }
+            result
         })
     }
 
@@ -684,6 +724,19 @@ impl FileStore {
                 params![zone_id, name, idx as i32, part_data],
             )?;
         }
+        // The new content has its own start: a watermark left by a trim
+        // (trim.rs) described the old content, and would hide the new.
+        let meta_json: Option<String> = tx
+            .query_row("SELECT meta FROM db_wave_file WHERE zoneid = ?1 AND name = ?2", params![zone_id, name], |r| r.get(0))
+            .optional()?;
+        if let Some(mut meta) = meta_json.and_then(|m| serde_json::from_str::<FileMeta>(&m).ok()) {
+            if meta.remove(super::types::RETAINED_FROM_KEY).is_some() {
+                tx.execute(
+                    "UPDATE db_wave_file SET meta = ?1 WHERE zoneid = ?2 AND name = ?3",
+                    params![serde_json::to_string(&meta)?, zone_id, name],
+                )?;
+            }
+        }
         // The new epoch is recorded at the `rev` the part writes above left
         // (the delete trigger bumps it).
         let count = count_all(data);
@@ -751,6 +804,7 @@ impl FileStore {
                 if let Some(ref mut file) = entry.file {
                     file.size = data.len() as i64;
                     file.modts = now;
+                    file.meta.remove(super::types::RETAINED_FROM_KEY);
                 }
                 entry.last_access_ms = now;
                 entry.cached_size_bytes = new_size;

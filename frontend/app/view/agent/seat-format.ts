@@ -21,6 +21,7 @@ export const SEAT_ROLES: { value: SeatRole; label: string }[] = [
     { value: "specialist", label: "Specialist" },
     { value: "platform_tester", label: "Platform tester" },
     { value: "analyst", label: "Analyst" },
+    { value: "super", label: "Super agent" },
 ];
 
 /** srv's limits (`backend::agent_seat`), so the tab stops at the same place. */

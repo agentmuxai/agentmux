@@ -130,11 +130,11 @@
         "display:pinned": false,
         "icon": "table-columns",
         "label": "Kanban",
-        "description": "What every agent is working on, what waits for them, and what needs you (Warden's Kanban section)",
+        "description": "What every agent is working on, what waits for them, and what needs you (the Swarm's Kanban section)",
         "section": "kanban",
         "blockdef": {
             "meta": {
-                "view": "warden"
+                "view": "swarm"
             }
         }
     },

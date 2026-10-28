@@ -42,6 +42,7 @@ import { shouldReduceMotion } from "@/app/motion/motion";
 import { DURATION_BASE_MS, EASE_OUT } from "@/app/motion/tokens";
 import { isModKey, isWindows } from "@/util/platformutil";
 import { Tooltip } from "./tooltip";
+import { classifyPillClick, markPillDragEnded, msSinceLastPillDrag } from "./pane-tab-gesture";
 import "./PaneTabStrip.scss";
 // The Pane Tab pill's drag tag (drag-types.ts): distinct from the tile and
 // window-tab tags, so no existing target mistakes a pill for either.
@@ -956,8 +957,14 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
             onGenerateDragPreview: ({ nativeSetDragImage }) => {
                 hideDragImageOnNativeWayland(nativeSetDragImage);
             },
-            onDragStart: () => drag.start(),
-            onDrop: () => drag.release(),
+            onDragStart: () => {
+                dragStartedSincePress = true;
+                drag.start();
+            },
+            onDrop: () => {
+                markPillDragEnded();
+                drag.release();
+            },
         });
         const cleanupDropTarget = dropTargetForElements({
             element: el,
@@ -983,7 +990,15 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
         });
     });
 
+    // What the pointer did since it went down on this pill: where, and whether a drag started
+    // (pane-tab-gesture.ts). A drag or a slip past the drag threshold is not a click.
+    let pressedAt: { x: number; y: number } | null = null;
+    let dragStartedSincePress = false;
     const onMouseDown = (e: MouseEvent) => {
+        if (e.button === 0) {
+            pressedAt = { x: e.clientX, y: e.clientY };
+            dragStartedSincePress = false;
+        }
         // Middle-click → close (matches VS Code / Chrome convention).
         if (e.button === 1) {
             e.preventDefault();
@@ -992,18 +1007,31 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
     };
 
     const onClick = (e: MouseEvent) => {
-        // Ignore middle-click here — onMouseDown already handled it.
-        if (e.button !== 0) return;
+        const intent = classifyPillClick({
+            button: e.button,
+            mod: isModKey(e),
+            shift: e.shiftKey,
+            alt: e.altKey,
+            pressedAt,
+            clickedAt: { x: e.clientX, y: e.clientY },
+            dragStartedSincePress,
+            msSinceLastPillDrag: msSinceLastPillDrag(),
+        });
+        pressedAt = null;
+        dragStartedSincePress = false;
+        // Another button (a middle-click closes in onMouseDown), or the end of a drag: nothing.
+        if (intent === "ignore") return;
         // Ctrl (Cmd on macOS) + click picks or unpicks this tab for a multi-tab drag. It
         // does not activate, focus or expand anything, and the click goes no further, so
         // the pane's own click handler (focus) does not run either.
-        if (props.selection && isModKey(e)) {
+        if (intent === "toggle-selection" && props.selection) {
             e.stopPropagation();
             props.selection.toggle(id());
             return;
         }
         props.selection?.clear();
-        props.onSelect?.(id());
+        // Only a plain click expands a collapsed pane: a modifier makes it a selection gesture.
+        if (intent === "expand") props.onSelect?.(id());
         if (!props.active) props.onActivate(id());
     };
 

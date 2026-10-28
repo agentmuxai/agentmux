@@ -378,12 +378,23 @@ pub(crate) const LIFECYCLE_METHOD: &str = "Page.setWebLifecycleState";
 static FROZEN: LazyLock<Mutex<HashSet<i32>>> = LazyLock::new(Default::default);
 
 pub(crate) fn note_frozen(browser_id: i32, frozen: bool) {
-    let mut set = FROZEN.lock();
-    if frozen {
-        set.insert(browser_id);
-    } else {
-        set.remove(&browser_id);
+    {
+        let mut set = FROZEN.lock();
+        if frozen {
+            set.insert(browser_id);
+        } else {
+            set.remove(&browser_id);
+        }
     }
+    #[cfg(not(target_os = "windows"))]
+    if !frozen {
+        crate::browser_pane::side_button_cdp::on_thaw(browser_id);
+    }
+}
+
+/// Whether the window froze this browser's page (any call would thaw it).
+pub(crate) fn is_frozen(browser_id: i32) -> bool {
+    FROZEN.lock().contains(&browser_id)
 }
 
 fn release_browser(browser_id: i32, reason: &str) {
@@ -435,7 +446,7 @@ impl CdpSession {
         }
     }
 
-    fn browser_id(&self) -> Option<i32> {
+    pub(crate) fn browser_id(&self) -> Option<i32> {
         self.state.get_browser(&self.label).map(|b| b.identifier())
     }
 
@@ -495,6 +506,8 @@ impl CdpSession {
             tracing::info!(label = %self.label, method, "[hibernate] thawing a frozen page for a call");
             let mut page = CdpSession::attach(&self.state, &self.label);
             let _ = Box::pin(page.call(LIFECYCLE_METHOD, json!({ "state": "active" }))).await;
+            #[cfg(not(target_os = "windows"))]
+            crate::browser_pane::side_button_cdp::on_thaw(browser_id);
         }
         let (id, rx) = PENDING.lock().register(browser_id, method);
         let mut message = json!({ "id": id, "method": method, "params": params });
@@ -678,6 +691,16 @@ mod tests {
         assert!(a.has_unexplored(7), "S1's own frames were never looked for");
         a.to_configure(7);
         assert!(!a.has_unexplored(7));
+    }
+
+    #[test]
+    fn a_frozen_page_is_told_from_one_that_runs() {
+        let id = 987_660;
+        assert!(!is_frozen(id));
+        note_frozen(id, true);
+        assert!(is_frozen(id));
+        note_frozen(id, false);
+        assert!(!is_frozen(id));
     }
 
     #[test]

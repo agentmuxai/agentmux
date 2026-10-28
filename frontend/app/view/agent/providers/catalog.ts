@@ -147,10 +147,12 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         // control-frame handler (`handle_control_frame`) auto-allows ordinary tools to
         // preserve today's yolo UX and surfaces only AskUserQuestion to the user. Keep
         // in sync with `static CLAUDE` in crates/srv/src/backend/providers.rs.
+        // `--replay-user-messages`: a message another session sends this agent arrives in the
+        // stream (crates/srv/src/backend/cli_native); srv keeps the replays out of the transcript.
         // controllerType selects persistentLaunchArgs over launchArgs in agent-model.ts.
         // Spec: docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md.
         controllerType: "persistent",
-        persistentLaunchArgs: ["--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--exclude-dynamic-system-prompt-sections", "--permission-prompt-tool", "stdio", "--permission-mode", "default"],
+        persistentLaunchArgs: ["--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--exclude-dynamic-system-prompt-sections", "--replay-user-messages", "--permission-prompt-tool", "stdio", "--permission-mode", "default"],
         // Claude Code calls `git` at session-start (issue
         // anthropics/claude-code#29898). Without git the CLI fails
         // with `Error: Git is required but was not found.`.

@@ -69,6 +69,10 @@ export interface PaneRowProps {
     /** Status accent; defaults to "neutral". */
     accent?: PaneRowAccent;
     actions?: PaneRowAction[];
+    /** The row is a prompt addressed to the person (a veto, an approval): it marks itself
+     *  `data-operator-only`, which agents' UI query, click and key presses leave out and refuse
+     *  (crates/cef/src/browser_api/scripts/query.js). */
+    operatorOnly?: boolean;
     /** Applies the expanded modifier and reveals the body slot. */
     expanded?: boolean;
     /** Clicking the summary (e.g. toggle-expand or switch-to). */
@@ -80,6 +84,7 @@ export interface PaneRowProps {
 export const PaneRow = (props: PaneRowProps): JSX.Element => {
     return (
         <div
+            data-operator-only={props.operatorOnly ? "" : undefined}
             class={clsx("pane-row", `pane-row--${props.accent ?? "neutral"}`, {
                 "pane-row--expanded": props.expanded,
                 // Text-button rows (the failure-recovery row) wrap/stack on

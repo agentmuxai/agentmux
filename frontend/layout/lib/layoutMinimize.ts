@@ -54,6 +54,10 @@ export { isNodeLocked, isEffectivelyMinimized };
  * row-slot — no tree mutation, no restore-context bookkeeping, nothing for
  * it to corrupt.
  *
+ * Restore is the flag clearing, with one exception: a chip docked onto a pane of its Row has no
+ * column of its own, so it is expanded in the column it shows in instead of in a new column where it
+ * was minimized from (`layoutRestore.ts`; srv does the same in `restore_node`).
+ *
  * Legacy trees (with `minimizedSize`/`slipMinimize`/`columnDissolve`/
  * `minimizedLockedSize`/`_slipAnchor`) are migrated in place by
  * `rebuildMinimizedSet` at load.

@@ -252,6 +252,7 @@ export default defineConfig({
             ignored: [
                 `${path.resolve(__dirname).replace(/\\/g, "/")}/dist/**`,
                 `${path.resolve(__dirname).replace(/\\/g, "/")}/target/**`,
+                `${path.resolve(__dirname).replace(/\\/g, "/")}/.dev-home/**`,
                 `${path.resolve(__dirname).replace(/\\/g, "/")}/**/*.md`,
                 `${path.resolve(__dirname).replace(/\\/g, "/")}/**/*.json`,
             ],

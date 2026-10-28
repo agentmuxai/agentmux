@@ -9,9 +9,9 @@
 
 ## 1. Summary
 
-1. **Bookmarks moves to the right in the thin layout.** In a thin pane the top row becomes `← → ↻ ⌂ … 🔖 👤`: Bookmarks sits just left of Profile. In the wide layout it stays where it is, on the left after Home. The DOM doesn't change; only grid areas do, as in the 10-14 spec (§3).
+1. **Bookmarks moves to the right in the thin layout.** In a thin pane the top row becomes `← → ↻ ⌂ … 🔖 👤`: Bookmarks sits just left of Profile. In the wide layout it sits there too since 2026-10-28 (it used to be on the left, after Home), so nothing moves sides when the pane is resized. The DOM doesn't change; only grid areas do, as in the 10-14 spec (§3).
 2. **A line between the thin bar's two rows.** In a thin pane, a 1px full-width hairline separates the button row from the address row. It uses the same colour and weight as the bar's own bottom border, so the two rows read as two bands of one bar (§4).
-3. **The browser pane's menus stay inside the pane.** Bookmarks and Profile open inside the pane's rectangle when they fit, not just inside the window. Each opens from the side its button is on: Profile, always at the right, opens leftward (its right edge lined up with the button's). Bookmarks opens rightward in the wide layout and leftward in the thin one. A menu that doesn't fit in the pane (a pane narrower or shorter than the menu) may extend past it, but never past the window (§5).
+3. **The browser pane's menus stay inside the pane.** Bookmarks and Profile open inside the pane's rectangle when they fit, not just inside the window. Each opens from the side its button is on: Profile, always at the right, opens leftward (its right edge lined up with the button's). Bookmarks, now at the right end at every width, opens leftward. A menu that doesn't fit in the pane (a pane narrower or shorter than the menu) may extend past it, but never past the window (§5).
 4. **Only the browser pane opts in.** Every other menu in the app keeps today's behaviour: it is kept inside the window only (`avoidNativePanes: false`, window boundary).
 5. **A browser pane is at least 250px wide** when a splitter is dragged (§5.5).
 6. **Frontend only.** `browser-nav-bar.tsx`, `browser-profile-menu.tsx`, `browser-view.scss`, `flyoutmenu.tsx`, `menu-position.ts` and `layoutResize.ts`. No host, CEF or srv change.
@@ -78,7 +78,7 @@ The 10-14 spec's rule holds: one DOM, only grid areas change, so a resize never 
 }
 ```
 
-- The grid's 4px column gap is the nav group's own gap, so in the wide layout Bookmarks sits exactly where it sits today (4px after Home).
+- The wide row is `nav address bookmarks profile`: Bookmarks is 4px (the grid gap) left of Profile, as in the thin row.
 - **The breakpoint is unchanged.** The wide row's fixed parts are the same five 28px buttons, Profile and gaps: 208px, so 388px still leaves the address bar 180px.
 - **Keyboard order** stays Back → Forward → Reload → Home → Bookmarks → address bar → Profile in both layouts. In the thin one Bookmarks is drawn on the right of the first row but reached before the address bar. This is the same trade the 10-14 spec made for Profile (§3.4 there): one order for both layouts means a resize never changes what Tab does.
 - Below about 208px the nav group still wraps as a last resort; Bookmarks and Profile keep their own cells.
@@ -191,8 +191,8 @@ Without `containWithin`, nothing changes: the window is the boundary, as today.
 
 At bar widths 300, 387, 388 and 900px, chrome zoom 1.0 and 1.5:
 
-- Wide: Bookmarks after Home, as before. Thin: Bookmarks just left of Profile, the line across the full width between the rows, matching the bottom border.
-- Profile's menu opens leftward in both layouts, inside the pane. Bookmarks opens rightward when wide and leftward when thin.
+- Wide and thin: Bookmarks just left of Profile. Thin also has the line across the full width between the rows, matching the bottom border.
+- Profile's and Bookmarks' menus open leftward in both layouts, inside the pane.
 - In a 220px pane the Profile menu runs past the pane's left edge but not the window's; in a 150px-tall pane the menu extends below it.
 - Two browser panes side by side (on macOS or Linux): opening Profile in the left one doesn't freeze the right one.
 - A resize while the address bar has focus, mid-typing, keeps focus and the suggestions (the 10-14 spec's guarantee).
