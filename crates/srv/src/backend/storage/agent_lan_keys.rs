@@ -104,10 +104,12 @@ impl Store {
         aligned_name_key(&conn, host.as_deref(), &key, true)
     }
 
-    /// Load only this agent's PUBLIC key — the half safe to hand to a LAN
+    /// This agent's PUBLIC key — the half safe to hand to a LAN
     /// peer's pubkey-lookup query (see `LanDiscovery::find_agent_lan_pubkey`
-    /// and the `GET /agentmux/reactive/agent` handler it calls). Never loads
-    /// or touches the private half.
+    /// and the `GET /agentmux/reactive/agent` handler it calls). Only the public
+    /// half is returned, but it goes through `agent_lan_key_load`: the keypair is
+    /// read and brought level with the host's key (adopted, or published when the
+    /// host has none), so a peer is never told a key the agent no longer signs with.
     pub fn agent_lan_public_key_load(&self, agent_id: &str) -> Result<Option<String>, StoreError> {
         Ok(self.agent_lan_key_load(agent_id)?.map(|pair| pair.public_key))
     }
