@@ -147,3 +147,17 @@ async fn a_sender_over_its_starts_per_minute_starts_nothing_more() {
     assert_eq!(desired_of(&state, &second).await, None, "the refused start started nothing");
     start_once(&state, "ag-rate-2", "another-sender").await.expect("another sender has its own minute");
 }
+
+/// A message counts against the sender's uid when its token attributed one (as `Agents start` does), else
+/// the name it sent as.
+#[test]
+fn a_message_start_counts_against_the_senders_uid_not_its_name() {
+    let mut req = InjectionRequest::default();
+    req.source_agent = Some("qtest".into());
+    assert_eq!(sender_key(&req), "qtest", "no attributed uid: the name it sent as");
+    req.audit_source_uid = "uid-qtest".into();
+    assert_eq!(sender_key(&req), "uid-qtest");
+    req.source_agent = None;
+    req.audit_source_uid.clear();
+    assert_eq!(sender_key(&req), "unknown");
+}

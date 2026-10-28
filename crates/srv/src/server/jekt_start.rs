@@ -89,6 +89,16 @@ fn may_start(req: &InjectionRequest) -> bool {
     req.sig_verified != Some(false)
 }
 
+/// Whose starts per minute a message-started agent counts against: the sender's uid, which its token
+/// attributed (the same key `Agents start` uses, so one agent has one budget across both paths), else
+/// the name it sent as.
+fn sender_key(req: &InjectionRequest) -> String {
+    if !req.audit_source_uid.is_empty() {
+        return req.audit_source_uid.clone();
+    }
+    req.source_agent.clone().filter(|s| !s.is_empty()).unwrap_or_else(|| "unknown".to_string())
+}
+
 /// A message was held for the stopped agent `target_uid`: start it in the background. The row stays
 /// held and the replay delivers it once the agent registers, so a failed start loses nothing.
 pub(super) fn start_for_held(state: &AppState, req: &InjectionRequest, target_uid: &str) {
@@ -96,7 +106,7 @@ pub(super) fn start_for_held(state: &AppState, req: &InjectionRequest, target_ui
         return;
     }
     let (state, uid) = (state.clone(), target_uid.to_string());
-    let sender = req.source_agent.clone().filter(|s| !s.is_empty()).unwrap_or_else(|| "unknown".to_string());
+    let sender = sender_key(req);
     tokio::spawn(async move {
         match start_once(&state, &uid, &sender).await {
             Ok(()) => tracing::info!(target_uid = %uid, "message for a stopped agent: started it, the held message follows"),
