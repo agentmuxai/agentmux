@@ -19,7 +19,7 @@ fn live(parked: bool, state: AgentState, since_ms: u64) -> Live {
 }
 
 #[test]
-fn the_defaults_are_an_hour_twelve_agents_and_85_percent_and_zero_turns_each_off() {
+fn the_defaults_are_an_hour_24_agents_and_85_percent_and_zero_turns_each_off() {
     let p = Policy::from_extra(&extra(&[]));
     assert_eq!((p.idle_stop_ms, p.max_running, p.commit_limit_pct), (Some(3_600_000), Some(24), Some(85.0)));
     let p = Policy::from_extra(&extra(&[
