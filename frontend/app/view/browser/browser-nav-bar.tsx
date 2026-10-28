@@ -494,8 +494,8 @@ export function BrowserNavBar(props: {
                 {/* One row in a wide pane, two in a thin one (buttons, a line, then the
                     address bar): only the grid's areas change (browser-view.scss), never
                     the DOM, so a resize while typing keeps focus, the IME and the
-                    suggestions. Bookmarks is its own cell: after Home when wide, next to
-                    Profile when thin.
+                    suggestions. Bookmarks is its own cell, just left of Profile at the right
+                    end at every width.
                     SPEC_BROWSER_PANE_NAV_BAR_RESPONSIVE_AND_CHROME_ZOOM_2026_10_14.md §3,
                     SPEC_BROWSER_PANE_THIN_BAR_AND_MENUS_IN_PANE_2026_10_18.md §3-§4. */}
                 <div class="browser-nav-bar-grid">

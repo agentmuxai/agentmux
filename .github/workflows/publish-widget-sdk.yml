@@ -1,45 +1,85 @@
 name: Publish the widget SDK to npm
 
-# Publishes @agentmuxai/widget-sdk (sdk/widget-sdk/) to the public npm registry
-# when a widget-sdk-v<version> tag (widget-sdk-v1.0.0, ...) is pushed. The tag
-# must match sdk/widget-sdk/package.json's version.
+# Publishes @agentmuxai/widget-sdk (sdk/widget-sdk/) to the public npm registry when
+# a change to the SDK reaches main (or on a manual run from main) and the version in
+# sdk/widget-sdk/package.json is not on npm yet. Releasing the SDK is therefore a
+# reviewed pull request that bumps that version; nothing is published from a tag.
 #
-# Publishes through npm trusted publishing: the job's GitHub OIDC identity,
-# which npmjs.com accepts for this repo and this workflow file, so no npm token
-# is stored anywhere. Provenance is attached automatically. Needs npm 11.5.1+.
+# Why not a tag: npm trusted publishing accepts this repository and this workflow FILE
+# (plus an optional Environment), not the ref. With the tag trigger, any branch carrying
+# a copy of this file with `on: push` could publish too, and a pushed `widget-sdk-v*` tag
+# was no lock. The job now runs in the `npm-publish` Environment, which deploys from
+# main only: a branch or tag run is rejected before any step. The npm-side trusted
+# publisher should be set to require that Environment name, so a token from a job
+# outside it is refused by npm itself.
+#
+# Publishes through npm trusted publishing: the job's GitHub OIDC identity, which
+# npmjs.com accepts for this repo and this workflow file, so no npm token is stored
+# anywhere. Provenance is attached automatically. Needs npm 11.5.1+.
 # (A brand-new package can't be first-published this way, so the name was
 # reserved with a hand-published, code-free 0.0.0, as for muxcode.)
 # docs/specs/SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md §7.
 
 on:
   push:
-    tags: ['widget-sdk-v[0-9]+.[0-9]+.[0-9]+']
+    branches: [main]
+    paths: ['sdk/widget-sdk/**']
+  workflow_dispatch:
 
-permissions:
-  contents: read
-  id-token: write # trusted publishing (OIDC) and provenance
+# One publish at a time; a later push waits instead of cancelling a publish under way.
+concurrency:
+  group: publish-widget-sdk
+  cancel-in-progress: false
 
 jobs:
   publish:
     runs-on: ubuntu-latest
+    # Main only (the Environment's deployment branches); the check is repeated here
+    # so a copy of this file with the Environment removed still does nothing off main.
+    if: ${{ github.ref == 'refs/heads/main' }}
+    environment: npm-publish
+    permissions:
+      contents: write # the widget-sdk-v<version> tag, after a publish
+      id-token: write # trusted publishing (OIDC) and provenance
     defaults:
       run:
         working-directory: sdk/widget-sdk
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
           registry-url: https://registry.npmjs.org
-      - name: Tag matches package.json version
+      - name: Is this version already on npm?
+        id: version
         run: |
           version="$(node -p "require('./package.json').version")"
-          if [ "widget-sdk-v$version" != "$GITHUB_REF_NAME" ]; then
-            echo "::error::tag $GITHUB_REF_NAME does not match sdk/widget-sdk/package.json version $version"
-            exit 1
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if npm view "@agentmuxai/widget-sdk@$version" version >/dev/null 2>&1; then
+            echo "@agentmuxai/widget-sdk@$version is already on npm; nothing to publish."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
           fi
       - name: The module loads and exports connect
+        if: steps.version.outputs.publish == 'true'
         run: node -e "import('./v1.js').then(m => { if (typeof m.connect !== 'function') process.exit(1) })"
       # Trusted publishing needs npm 11.5.1 or later.
-      - run: npm install -g npm@11
-      - run: npm publish --access public
+      - if: steps.version.outputs.publish == 'true'
+        run: npm install -g npm@11
+      - if: steps.version.outputs.publish == 'true'
+        run: npm publish --access public
+      # The tag marks the commit that was published; nothing listens to it.
+      # The marker is not the release: a failure here (it runs after the publish) must not fail the run.
+      - name: Tag the published commit
+        if: steps.version.outputs.publish == 'true'
+        continue-on-error: true
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          git config user.name "agentmux-widget-sdk-publish"
+          git config user.email "widget-sdk-publish@agentmux.ai"
+          git tag -a "widget-sdk-v$VERSION" -m "@agentmuxai/widget-sdk $VERSION" "$GITHUB_SHA"
+          git push origin "widget-sdk-v$VERSION"
