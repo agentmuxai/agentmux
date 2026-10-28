@@ -224,6 +224,28 @@ pub(super) async fn reuse_existing_pane(
     }
 }
 
+/// The tab `agent.open` works in, or the agent's existing pane when it has one (`Err`: nothing more to
+/// do). A start needs no tab to run an agent that already has a block, so with no tab left it only
+/// reuses that block; a first block still needs a tab.
+pub(super) async fn tab_or_reuse(
+    state: &AppState,
+    agent: &crate::backend::storage::agents::AgentDefinition,
+    provider: &providers::ProviderConfig,
+    cmd: &CommandAgentOpenData,
+    headless: bool,
+    by_uid: bool,
+) -> Result<Result<String, AgentOpenResult>, String> {
+    let tab_id = match super::resolve_tab_id(&state.mstore, cmd.tab_id.as_deref()) {
+        Ok(tab_id) => tab_id,
+        Err(e) if headless => return reuse_existing_pane(state, agent, provider, cmd, "", true, by_uid).await?.map(Err).ok_or(e),
+        Err(e) => return Err(e),
+    };
+    Ok(match reuse_existing_pane(state, agent, provider, cmd, &tab_id, headless, by_uid).await? {
+        Some(done) => Err(done),
+        None => Ok(tab_id),
+    })
+}
+
 /// Start the agent with no pane: its block (made and parked if it has none) with its process running
 /// and its session resumed. Returns the block. Admission, the spawn gate and the lease apply as for
 /// `agent.open`. Needs an active tab to create a first block in.
