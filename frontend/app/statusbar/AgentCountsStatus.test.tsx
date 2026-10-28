@@ -29,9 +29,14 @@ const agent = (id: string, state: AgentRuntime["state"]): AgentRuntime => ({
 describe("AgentCountsStatus", () => {
     it("shows nothing while no agent runs", () => {
         const { container } = render(() => (
-            <AgentCountsStatus rows={() => [agent("a", "stopped"), agent("b", "signed_out")]} />
+            <AgentCountsStatus rows={() => [agent("a", "stopped"), agent("b", "error")]} />
         ));
         expect(container.querySelector(".status-agent-counts")).toBeNull();
+    });
+
+    it("counts an agent held by a sign-in or a limit: it has a process", () => {
+        render(() => <AgentCountsStatus rows={() => [agent("a", "signed_out"), agent("b", "limited")]} />);
+        expect(screen.getByText("2 running")).toBeTruthy();
     });
 
     it("counts the running agents, and says how many wait on the user", () => {
