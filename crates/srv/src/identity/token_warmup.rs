@@ -37,6 +37,10 @@ use crate::identity::resolver::{OAuthProbeStatus, SpawnGateError};
 
 /// The longest a dir stays taken by a process that has not reported its first turn over.
 pub const WARM_MAX: Duration = Duration::from_secs(90);
+/// The longest it stays taken by a spawn whose process has not started: the time the gate and the
+/// env take. A spawn that fails after the dir was taken (a gate refusal, a deleted agent) holds it
+/// no longer than this.
+pub const GATE_GRACE: Duration = Duration::from_secs(30);
 /// How often a waiter looks at the token file, which nothing signals when it changes.
 const POLL: Duration = Duration::from_millis(500);
 /// The gap between spawns that waited on the same dir.
@@ -93,7 +97,8 @@ impl Warmup {
                         owner,
                         "token warm-up: access token expired — {owner} goes first, others on this dir wait"
                     );
-                    g.taken.insert(dir.to_path_buf(), Entry { owner: owner.to_string(), deadline: now + WARM_MAX });
+                    let hold = if through_turn { WARM_MAX } else { GATE_GRACE };
+                    g.taken.insert(dir.to_path_buf(), Entry { owner: owner.to_string(), deadline: now + hold });
                 }
                 Step::Go
             }
@@ -131,6 +136,15 @@ impl Warmup {
         undo.armed = false;
     }
 
+    /// `owner`'s process is up: it now holds its dir for the first turn, up to [`WARM_MAX`].
+    fn started(&self, owner: &str) {
+        let mut g = self.inner.lock().unwrap();
+        let until = Instant::now() + WARM_MAX;
+        for e in g.taken.values_mut().filter(|e| e.owner == owner) {
+            e.deadline = until;
+        }
+    }
+
     /// Free every dir `owner` holds. True if there was one.
     fn release(&self, owner: &str) -> bool {
         let mut g = self.inner.lock().unwrap();
@@ -159,6 +173,15 @@ impl Drop for ReleaseOnDrop<'_> {
     }
 }
 
+/// The map key for a config dir: the same dir spelled two ways (a trailing separator, the other
+/// slash, case on Windows) is one dir. An ambient call names its dir from the block's `cmd:env`, a
+/// spawn from the bound account; they must meet.
+fn key_of(dir: &Path) -> PathBuf {
+    let s = dir.to_string_lossy().replace('\\', "/");
+    let s = s.trim_end_matches('/');
+    PathBuf::from(if cfg!(windows) { s.to_lowercase() } else { s.to_string() })
+}
+
 fn global() -> &'static Warmup {
     static GLOBAL: OnceLock<Warmup> = OnceLock::new();
     GLOBAL.get_or_init(Warmup::default)
@@ -177,6 +200,11 @@ fn token_is_stale(dir: &Path) -> bool {
 /// may go. Cheap and safe to call on every turn end and every process exit.
 pub fn release(block_id: &str) {
     global().release(block_id);
+}
+
+/// The CLI process for `block_id` is running: its first turn may take [`WARM_MAX`] to end.
+pub fn started(block_id: &str) {
+    global().started(block_id);
 }
 
 /// `inject_identity_env_async`, after waiting for this block's dir: the single-flight comes
@@ -199,9 +227,17 @@ pub async fn inject_after_warmup(
     };
     if let Some(dir) = dir {
         let probe = dir.clone();
-        global().enter(&dir, &block_id, false, move || token_is_stale(&probe)).await;
+        global().enter(&key_of(&dir), &block_id, false, move || token_is_stale(&probe)).await;
     }
-    crate::identity::resolver::inject_identity_env_async(mstore, id_store, identity_store, broker, block_id, env_vars).await
+    let result = crate::identity::resolver::inject_identity_env_async(
+        mstore, id_store, identity_store, broker, block_id.clone(), env_vars,
+    )
+    .await;
+    if result.is_err() {
+        // The gate refused: no process will start, so the dir this spawn took is nobody's.
+        release(&block_id);
+    }
+    result
 }
 
 /// Holds a dir for an ambient call while its token is expired; frees it when dropped.
@@ -223,7 +259,7 @@ pub async fn ambient_gate(config_dir: Option<&str>) -> AmbientGuard {
     if let Some(dir) = config_dir.filter(|d| !d.trim().is_empty()) {
         let dir = PathBuf::from(dir);
         let probe = dir.clone();
-        global().enter(&dir, &owner, true, move || token_is_stale(&probe)).await;
+        global().enter(&key_of(&dir), &owner, true, move || token_is_stale(&probe)).await;
     }
     AmbientGuard { owner }
 }
@@ -298,6 +334,7 @@ mod tests {
     async fn an_owner_that_never_reports_back_frees_the_dir_after_warm_max() {
         let w = Arc::new(Warmup::default());
         w.enter(&dir(), "a", false, || true).await;
+        w.started("a");
         let second = {
             let w = w.clone();
             tokio::spawn(async move { w.enter(&dir(), "b", false, || true).await })
@@ -315,6 +352,29 @@ mod tests {
         assert!(!third.is_finished());
         w.release("b");
         third.await.unwrap();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_spawn_that_never_starts_its_process_frees_the_dir_after_the_grace() {
+        let w = Arc::new(Warmup::default());
+        w.enter(&dir(), "a", false, || true).await;
+        let second = {
+            let w = w.clone();
+            tokio::spawn(async move { w.enter(&dir(), "b", false, || true).await })
+        };
+        tokio::time::sleep(GATE_GRACE - Duration::from_secs(1)).await;
+        assert!(!second.is_finished());
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        second.await.unwrap();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_same_dir_spelled_two_ways_is_one_dir() {
+        assert_eq!(key_of(Path::new("/identities/a/claude/")), key_of(Path::new("/identities/a/claude")));
+        assert_eq!(key_of(Path::new(r"C:\Ids\a\claude\")), key_of(Path::new("C:/Ids/a/claude")));
+        if cfg!(windows) {
+            assert_eq!(key_of(Path::new("C:/IDS/a")), key_of(Path::new("c:/ids/A")));
+        }
     }
 
     #[tokio::test(start_paused = true)]
