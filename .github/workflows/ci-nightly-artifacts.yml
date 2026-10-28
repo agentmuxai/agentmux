@@ -55,6 +55,7 @@ jobs:
     name: macOS arm64 — sign + notarize DMG
     permissions:
       contents: write
+      id-token: write   # build-macos.yml gets the Apple signing secrets with it
     uses: ./.github/workflows/build-macos.yml
     with:
       ref: ${{ github.ref }}

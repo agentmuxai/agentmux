@@ -19,7 +19,11 @@ Credential details (Apple ID, Team ID, certificate name) were also kept in the p
 was stale even before the repo vanished — for CI, the credentials actually live as
 this repo's own GitHub Actions secrets (`APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`,
 `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID`, consumed by [`.github/workflows/build-macos.yml`](../.github/workflows/build-macos.yml)),
-not in a separate repo. For local signing (this doc's own manual flow below), the
+not in a separate repo. **Since the AWS change** [`.github/workflows/build-macos.yml`](../.github/workflows/build-macos.yml)
+no longer reads those repository secrets: the job gets the same five values from one AWS secret through a role that accepts
+only a job of that workflow file on `main`, for a run on `main` or a gated release tag. The role and the secret's id are
+repository variables, not files here. Until the old repository secrets are deleted (after one nightly and one release have
+used the new path) they are unused. For local signing (this doc's own manual flow below), the
 packager's Keychain auto-detection is still the source.
 
 ---
@@ -30,8 +34,8 @@ packager's Keychain auto-detection is still the source.
   (`security find-identity -v -p codesigning` should list a
   `Developer ID Application: <Your Name> (<TEAMID>)` entry). The packager
   auto-detects it for local builds — never hardcode identity details here.
-  CI's own copy of these credentials is the GitHub Actions secrets listed
-  above, not a separate repo (`agentmux-builder`, which no longer exists).
+  CI's own copy of these credentials is described above (AWS, read by
+  `build-macos.yml`), not a separate repo (`agentmux-builder`, which no longer exists).
 - An **app-specific password** stored as a `notarytool` Keychain profile (one-time, below).
 - Xcode Command Line Tools (`codesign`, `xcrun notarytool`, `iconutil`, `sips`, `hdiutil`).
 

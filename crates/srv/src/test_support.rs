@@ -90,6 +90,21 @@ pub(crate) fn fake_app_server_binary() -> &'static std::path::PathBuf {
             return binary;
         }
         std::fs::create_dir_all(&dir).expect("create fake server build dir");
+        // One process compiles at a time. Under nextest every test is its own process, and the
+        // ones that need this binary start together: without the lock each compiles it, and on
+        // Windows their linkers collide on the shared pdb server (LNK1201), failing a test that
+        // is not about linking. The ones that waited find the binary in place.
+        let lock = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(dir.join(".build.lock"))
+            .expect("open fake server build lock");
+        lock.lock().expect("lock the fake server build");
+        if binary.is_file() {
+            return binary;
+        }
         // Build to a unique name and rename into place, so concurrent test
         // processes never run a half-written binary.
         let partial = dir.join(format!(".build-{}", uuid::Uuid::new_v4().simple()));
