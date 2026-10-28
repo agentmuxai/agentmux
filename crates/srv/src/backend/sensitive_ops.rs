@@ -21,7 +21,7 @@ pub const MAX_WINDOW_SECS: u64 = 120;
 
 /// Longest value of one fact a request carries. A longer one is refused, not
 /// cut: the banner shows each fact whole, so what a person approves is all of it.
-const VALUE_MAX: usize = 400;
+pub const VALUE_MAX: usize = 400;
 
 /// One sensitive operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

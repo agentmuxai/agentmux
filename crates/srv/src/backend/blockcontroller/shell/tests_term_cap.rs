@@ -111,21 +111,23 @@ fn the_pty_write_path_makes_the_file_circular() {
     assert_eq!(fs.read_file("blk", TERM_FILE).unwrap().unwrap(), b"hello");
 }
 
-/// A flood against a file-backed store in the PTY path's batch size: the
-/// largest the log was seen to be (sampled every few writes), and where the
-/// log and the database ended, in MB.
-fn flood_file_backed(chunks: usize, cap: i64) -> (u64, u64, u64) {
+/// A flood against a file-backed store in batches of `chunk` bytes (the PTY
+/// path's batch is anywhere from one 4 KiB read to 256 KiB, whatever the
+/// flusher found queued): the largest the log was seen to be (sampled every
+/// half megabyte written), and where the log and the database ended, in MB.
+fn flood_file_backed(chunks: usize, chunk: usize, cap: i64) -> (u64, u64, u64) {
     let dir = tempfile::tempdir().unwrap();
     let db = dir.path().join("filestore.db");
     let fs = FileStore::open(&db).unwrap();
     fs.make_file("b", TERM_FILE, FileMeta::new(), opts_for(cap)).unwrap();
-    let data = vec![b'y'; 256 * 1024];
+    let data = vec![b'y'; chunk];
     let size = |n: &str| std::fs::metadata(dir.path().join(n)).map(|m| m.len()).unwrap_or(0);
+    let every = (512 * 1024 / chunk).max(1);
     let mut peak = 0;
     for i in 0..chunks {
         let at = fs.append_data_at("b", TERM_FILE, &data).unwrap();
         after_append_capped(&fs, "b", at, &data, cap);
-        if i % 8 == 0 {
+        if i % every == 0 {
             peak = peak.max(size("filestore.db-wal"));
         }
     }
@@ -137,20 +139,22 @@ fn a_flood_leaves_the_database_at_the_cap_and_the_log_short() {
     // 200 MB at a 16 MB cap. Before the writer checkpointed between writes the
     // log held every byte written: a flood that never pauses is never found
     // fully copied back, so the log never restarted.
-    let (peak_wal, end_wal, db) = flood_file_backed(800, 16 * MB);
+    let (peak_wal, end_wal, db) = flood_file_backed(800, 256 * 1024, 16 * MB);
     assert!(peak_wal < 64, "the log reached {peak_wal} MB");
     assert!(end_wal < 64, "the log ended at {end_wal} MB");
     assert!(db < 40, "the database ended at {db} MB for a 16 MB cap");
 }
 
-/// A measurement, not a check. `MEASURE_CHUNKS` of 256 KiB (1600 by default),
-/// `MEASURE_CAP_MB` (50). Run with `--ignored --nocapture`.
+/// A measurement, not a check. `MEASURE_MB` written (400 by default) in batches
+/// of `MEASURE_CHUNK_KB` (256), `MEASURE_CAP_MB` (50). Run with `--ignored
+/// --nocapture`.
 #[test]
 #[ignore]
 fn measure_a_flood_against_a_file_backed_store() {
     let env = |k: &str, d: usize| std::env::var(k).ok().and_then(|v| v.parse().ok()).unwrap_or(d);
+    let chunk = env("MEASURE_CHUNK_KB", 256) * 1024;
     let started = std::time::Instant::now();
-    let (peak, end, db) = flood_file_backed(env("MEASURE_CHUNKS", 1600), env("MEASURE_CAP_MB", 50) as i64 * MB);
+    let (peak, end, db) = flood_file_backed(env("MEASURE_MB", 400) * 1024 * 1024 / chunk, chunk, env("MEASURE_CAP_MB", 50) as i64 * MB);
     println!("flood written in {:?}; db {db} MB, log {end} MB at the end, {peak} MB at most", started.elapsed());
 }
 
@@ -218,4 +222,31 @@ fn converting_or_widening_a_file_that_lost_nothing_announces_nothing() {
     let at = fs.append_data_at("b", TERM_FILE, b"more\r\n").unwrap();
     assert!(!after_append_capped(&fs, "b", at, b"more\r\n", 100 * MB));
     assert_eq!(fs.stat("b", TERM_FILE).unwrap().unwrap().opts.maxsize, 100 * MB);
+}
+
+#[test]
+fn the_writer_checkpoints_by_the_log_it_has_written_not_the_output() {
+    let due_after = |batch: usize| {
+        let pending = AtomicI64::new(0);
+        let mut at = 0i64;
+        let mut appends = 0;
+        loop {
+            appends += 1;
+            let due = relief_due(&pending, at, batch);
+            at += batch as i64;
+            if due {
+                return (appends, at);
+            }
+        }
+    };
+    // 256 KB batches write about what they hold: a pass every ~8 MB of output.
+    let (_, output) = due_after(256 * 1024);
+    assert!((6 * MB..=9 * MB).contains(&output), "{output} bytes of output");
+    // 4 KB batches rewrite a 64 KB part each: a pass after 128 of them, 512 KB of output.
+    let (appends, output) = due_after(4096);
+    assert!((120..=140).contains(&appends) && output <= MB, "{appends} appends, {output} bytes of output");
+    // The count starts again after a pass.
+    let pending = AtomicI64::new(0);
+    assert!(relief_due(&pending, 0, 9 * MB as usize));
+    assert!(!relief_due(&pending, 0, 4096));
 }

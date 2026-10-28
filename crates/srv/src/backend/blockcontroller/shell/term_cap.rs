@@ -20,7 +20,10 @@ const DEFAULT_MB: i64 = 50;
 /// A typo like 5000000 is a limit nobody meant.
 const MAX_MB: i64 = 100_000;
 const MIB: i64 = 1 << 20;
-/// Output written between two checkpoints made by the writer itself.
+/// Log written between two checkpoints made by the writer itself. Counted as the
+/// log takes it in (`append_log_cost`), not as output: the PTY's batches run
+/// from one 4 KB read to 256 KB, and the smaller they are the more log each
+/// byte of output costs.
 const WAL_RELIEF_EVERY: i64 = 8 * MIB;
 /// The block file the cap applies to.
 pub const TERM_FILE: &str = "term";
@@ -30,6 +33,20 @@ pub const TERM_FILE: &str = "term";
 pub const TRIMMED_NOTICE: &[u8] = b"\r\n\x1b[2m[earlier output trimmed: AgentMux keeps a limited amount of each terminal's output]\x1b[0m\r\n";
 
 static CAP_BYTES: AtomicI64 = AtomicI64::new(DEFAULT_MB * MIB);
+/// Log the terminal writers have put in since one of them last checkpointed.
+static LOG_SINCE_RELIEF: AtomicI64 = AtomicI64::new(0);
+
+/// Whether this append is the one that should checkpoint: `pending` has taken in
+/// `WAL_RELIEF_EVERY` of log. All panes share the store's log, so they share the
+/// count; whoever crosses the line resets it.
+fn relief_due(pending: &AtomicI64, start: i64, len: usize) -> bool {
+    let cost = crate::backend::storage::filestore::append_log_cost(start, len);
+    if pending.fetch_add(cost, Ordering::Relaxed) + cost < WAL_RELIEF_EVERY {
+        return false;
+    }
+    pending.store(0, Ordering::Relaxed);
+    true
+}
 
 /// The cap in bytes; 0 means no limit.
 pub fn cap_bytes() -> i64 {
@@ -110,7 +127,7 @@ pub(super) fn ends_at_boundary(data: &[u8]) -> bool {
 fn after_append_capped(fs: &FileStore, block_id: &str, start: i64, data: &[u8], cap: i64) -> bool {
     let len = data.len();
     // Under a flood the log would only grow: empty it every few megabytes.
-    if start.max(0) / WAL_RELIEF_EVERY != (start.max(0) + len as i64) / WAL_RELIEF_EVERY {
+    if relief_due(&LOG_SINCE_RELIEF, start, len) {
         if let Err(e) = fs.checkpoint_between_writes() {
             tracing::debug!(error = %e, "term cap: checkpoint between writes failed");
         }
