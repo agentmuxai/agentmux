@@ -347,8 +347,8 @@ pub fn apply_agent_git_in(
     }
 }
 
-/// `env` without what [`apply_agent_git_in`] sets: for a container, whose image has its own git and
-/// `gh` setup, and which the host's tokens are never given to.
+/// `env` without what [`apply_agent_git_in`] sets: for a container, which gets its own setup
+/// ([`apply_container_git`]) or none.
 pub fn without_agent_git(env: &HashMap<String, String>) -> HashMap<String, String> {
     use crate::backend::publish_guard::{without_git_config_key, HOOKS_PATH_KEY};
     if !env.contains_key(BROKER_ENV) {
@@ -373,12 +373,17 @@ pub fn attach_store(store: Arc<Store>) {
 /// through AgentMux Cloud (a brokered account that still works), and this isn't a fleet host,
 /// where `gh-agent` already gives agents their GitHub identity.
 fn agents_use_broker(env: &HashMap<String, String>) -> bool {
-    use std::sync::Mutex;
-    use std::time::{Duration, Instant};
-    static CACHE: Mutex<Option<(Instant, bool)>> = Mutex::new(None);
     if crate::backend::publish_guard::hooks_dir_for(env, |k| std::env::var(k).ok()).is_some() {
         return false;
     }
+    broker_account_connected()
+}
+
+/// Whether the person connected GitHub through AgentMux Cloud and the account still works.
+fn broker_account_connected() -> bool {
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
+    static CACHE: Mutex<Option<(Instant, bool)>> = Mutex::new(None);
     let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
     if let Some((at, answer)) = *cache {
         if at.elapsed() < Duration::from_secs(5) {
@@ -394,6 +399,32 @@ fn agents_use_broker(env: &HashMap<String, String>) -> bool {
     });
     *cache = Some((Instant::now(), answer));
     answer
+}
+
+/// Where AgentMux's git hooks are mounted, read-only, in a container agent's image. Ends in the
+/// directory's own name, which `agentmux-bashwrap` knows its hooks by.
+pub const CONTAINER_HOOKS_DIR: &str = "/opt/agentmux/github-hooks";
+
+/// The host's hooks directory when container agents get git and `gh` through AgentMux: a token
+/// source exists (the host's `gh-agent`, or the person's connected GitHub account) and the hooks
+/// can be written. Without the hooks there is no setup at all, so a container never gets a token
+/// whose pushes aren't scanned.
+pub fn container_git_hooks() -> Option<std::path::PathBuf> {
+    // The machine running the tests has its own answer; the tests give theirs.
+    if cfg!(test) {
+        return None;
+    }
+    if crate::identity::gh_agent_token::installed().is_none() && !broker_account_connected() {
+        return None;
+    }
+    crate::identity::github_hooks::hooks_dir()
+}
+
+/// A container agent's exec environment with its git and `gh` set up like a host agent's: the
+/// credential helper, the `git` and `gh` functions and the hooks, which `agentmux-bashwrap` in the
+/// image runs from [`CONTAINER_HOOKS_DIR`].
+pub fn apply_container_git(env: &mut HashMap<String, String>) {
+    apply_agent_git_in(env, |_| None, true, Some(std::path::Path::new(CONTAINER_HOOKS_DIR)));
 }
 
 /// [`apply_agent_git_in`] for a spawn: every path that starts an agent process or runs a command for
@@ -700,6 +731,22 @@ mod tests {
         // An env that never had it is returned as it was.
         let plain = env(&[("A", "b")]);
         assert_eq!(without_agent_git(&plain), plain);
+    }
+
+    #[test]
+    fn a_container_gets_the_helper_the_functions_and_the_hooks_where_the_image_finds_them() {
+        let mut e = env(&[("OTHER", "kept")]);
+        apply_container_git(&mut e);
+        assert_eq!(e[BROKER_ENV], "1");
+        assert!(e.contains_key(GH_FUNCTION_NAME) && e.contains_key(GIT_FUNCTION_NAME));
+        let config = entries(&e);
+        assert!(config.contains(&("core.hooksPath".to_string(), CONTAINER_HOOKS_DIR.to_string())), "{config:?}");
+        assert!(config.iter().any(|(k, v)| k == HELPER_KEY && v == HELPER));
+        // The directory is named like the host's, which the hook forwarding knows it by.
+        assert!(CONTAINER_HOOKS_DIR.ends_with("/github-hooks"));
+        assert_eq!(e["OTHER"], "kept");
+        // And a host path never reaches a container's config.
+        assert!(!config.iter().any(|(_, v)| v.contains(":\\") || v.contains(".agentmux")));
     }
 
     #[tokio::test]

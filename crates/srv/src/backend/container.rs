@@ -89,6 +89,9 @@ pub struct ContainerMountSpec {
     pub workspace_host_dir: Option<String>,
     /// The agent's Personal Memory folder on the host, bind-mounted where Claude reads memory in the container.
     pub memory_host_dir: Option<String>,
+    /// AgentMux's git hooks (push scan, commit trailers) on the host, mounted read-only at
+    /// [`crate::identity::github_tokens::CONTAINER_HOOKS_DIR`] where container agents get git through AgentMux.
+    pub github_hooks_host_dir: Option<String>,
 }
 
 /// Normalize a host path for Docker's mount API: backslashes are not accepted in
@@ -1077,11 +1080,12 @@ impl ContainerManager {
     /// Every mount target this module owns. Anything NOT in here (the caller's
     /// `agent:container_volumes`) is the user's business and is never a reason
     /// to rebuild their container.
-    fn owned_mount_targets() -> [String; 3] {
+    fn owned_mount_targets() -> [String; 4] {
         [
             CONTAINER_CLAUDE_DIR.to_string(),
             format!("{CONTAINER_CLAUDE_DIR}/{CLAUDE_CREDENTIALS_FILE}"),
             CONTAINER_WORKSPACE_DIR.to_string(),
+            crate::identity::github_tokens::CONTAINER_HOOKS_DIR.to_string(),
         ]
     }
 
