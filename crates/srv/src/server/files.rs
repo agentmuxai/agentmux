@@ -82,7 +82,7 @@ pub(super) async fn handle_mux_file(
     };
 
     // Read file data
-    let (_, data) = match state.filestore.read_at(zone_id, name, params.offset, 0) {
+    let (data_offset, data) = match state.filestore.read_at(zone_id, name, params.offset, 0) {
         Ok(result) => result,
         Err(e) => {
             return (
@@ -102,6 +102,9 @@ pub(super) async fn handle_mux_file(
         .status(StatusCode::OK)
         .header("Content-Type", "application/octet-stream")
         .header("X-ZoneFileInfo", file_info_b64)
+        // Where the body starts in the file: later than the offset asked for
+        // when a circular file has dropped its head.
+        .header("X-ZoneFileOffset", data_offset.to_string())
         .body(Body::from(data))
         .unwrap_or_else(|_| {
             (
