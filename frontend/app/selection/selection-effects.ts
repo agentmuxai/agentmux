@@ -53,6 +53,24 @@ export interface SelectionDeps {
     now(): number;
 }
 
+/**
+ * The window tabs this runner asked to switch to, for a while after. The active tab is committed by
+ * the workspace push, which can land after the switch's own reply, and after a newer request has
+ * begun; such a change is ours (a request that was replaced, say) and not the user switching tab.
+ */
+export function createRequestedTabs(now: () => number = Date.now, keepMs = 5000) {
+    const until = new Map<string, number>();
+    return {
+        asked(tabId: string): void {
+            until.set(tabId, now() + keepMs);
+        },
+        /** Whether a change of the active tab to `tabId` is one this runner caused. */
+        isOurs(tabId: string): boolean {
+            return (until.get(tabId) ?? 0) > now();
+        },
+    };
+}
+
 export interface SelectionRequest {
     blockId: string;
     source?: string;

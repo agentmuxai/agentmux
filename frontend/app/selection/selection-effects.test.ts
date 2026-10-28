@@ -4,6 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
     createSelectionRunner,
+    createRequestedTabs,
     LAYOUT_POLL_MS,
     type ResolveOutcome,
     type SelectionDeps,
@@ -247,5 +248,20 @@ describe("the selection runner", () => {
         await flush();
         await failed;
         expect(lines.some((l) => /resolving->failed .*not-found/.test(l))).toBe(true);
+    });
+});
+
+describe("the tabs the runner asked for", () => {
+    it("tells a late commit of its own switch from the user switching tab, and forgets it after a while", () => {
+        let t = 1000;
+        const tabs = createRequestedTabs(() => t, 5000);
+        expect(tabs.isOurs("t2")).toBe(false);
+        tabs.asked("t2");
+        expect(tabs.isOurs("t2")).toBe(true);
+        expect(tabs.isOurs("t9")).toBe(false);
+        t += 4999;
+        expect(tabs.isOurs("t2")).toBe(true);
+        t += 2;
+        expect(tabs.isOurs("t2")).toBe(false);
     });
 });

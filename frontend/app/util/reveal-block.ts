@@ -18,7 +18,7 @@
 
 import { giveBlockFocus } from "@/app/store/focusManager";
 import { createEffect, createRoot } from "solid-js";
-import { createSelectionRunner, type SelectionDeps } from "@/app/selection/selection-effects";
+import { createRequestedTabs, createSelectionRunner, type SelectionDeps } from "@/app/selection/selection-effects";
 import { isFailure, type Intent, type SelectionResult } from "@/app/selection/selection-machine";
 import { createSelectionTrace } from "@/app/selection/selection-trace";
 import { atoms, getApi, MOS, pushNotification, setActiveTab, workspace } from "@/app/store/global";
@@ -164,6 +164,8 @@ const twoFrames = () =>
             : setTimeout(resolve, 32)
     );
 
+const requestedTabs = createRequestedTabs();
+
 /** The real tabs, layouts and focus the selection machine drives. */
 const liveDeps: SelectionDeps = {
     async resolve(intent) {
@@ -172,7 +174,10 @@ const liveDeps: SelectionDeps = {
         if (!tabId) return { where: "other" };
         return { where: "here", tabId, active: atoms.activeTabId() === tabId };
     },
-    switchTab: (tabId) => setActiveTab(tabId), // no-op when already active
+    switchTab(tabId) {
+        requestedTabs.asked(tabId);
+        return setActiveTab(tabId); // no-op when already active
+    },
     layoutHas: (tabId, blockId) => getLayoutModelForTabById(tabId)?.getNodeByBlockId(blockId)?.id != null,
     show(tabId, blockId) {
         const model = getLayoutModelForTabById(tabId);
@@ -229,7 +234,8 @@ createRoot(() => {
     createEffect(() => {
         const active = atoms.activeTabId();
         const state = selection.state();
-        if ("tabId" in state && state.tabId !== active) selection.userMoved();
+        // A tab this runner asked for (an earlier request's, committed late) is not the user moving.
+        if ("tabId" in state && state.tabId !== active && !requestedTabs.isOurs(active)) selection.userMoved();
     });
 });
 
