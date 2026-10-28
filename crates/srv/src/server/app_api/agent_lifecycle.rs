@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! `Agents start`, `stop` and `detach` (`POST /api/v1/agent/{start,stop,detach}`): an agent runs, stops
-//! or leaves its pane without the operator's window
+//! or leaves its pane without the operator's window (a stop of another agent keeps its override window)
 //! (docs/specs/SPEC_ALWAYS_AVAILABLE_AGENTS_2026_10_27.md §5.1). Each acts as the agent its token
 //! names; a request without one is refused, so a change is never attributed to the operator, and
 //! each one, and each refusal, is recorded in the audit log under the calling agent.
@@ -10,7 +10,9 @@
 //! - start: `agent_attach::start_agent`, the one start path (admission, the spawn gate and the lease
 //!   apply), after the per-sender start limit (`start_rate`). Running already is not a start.
 //! - stop: `agent_teardown::stop`, which also records the agent as wanted stopped. Not your own
-//!   agent: `Stop` `self` is the way to end yourself.
+//!   agent: `Stop` `self` is the way to end yourself. Another agent's stop waits for the person's
+//!   30 s override window, like `Stop agents` (`fleet_stop_keep_pane_with_override`); a worker the
+//!   caller opened is stopped at once.
 //! - detach: the agent's pane closes and its block is parked, whatever `agents:always_available`
 //!   says (the setting decides what closing a pane does; this is the explicit action).
 
@@ -137,6 +139,12 @@ async fn start(state: &AppState, actor: &Actor, req: &LifecycleRequest) -> Resul
     }))
 }
 
+/// Whether `caller` stopping `target` waits for the person's override window: always, except for
+/// itself and for a worker it opened (`agent_spawn::worker_of`).
+pub(crate) fn needs_window(mstore: &crate::backend::storage::store::Store, caller: &str, target: &str) -> bool {
+    target != caller && crate::server::app_api::agent_spawn::worker_of(mstore, target).as_deref() != Some(caller)
+}
+
 async fn stop(state: &AppState, actor: &Actor, req: &LifecycleRequest) -> Result<Value, Refusal> {
     let blocking = state.clone();
     let named = req.agent.clone();
@@ -156,9 +164,26 @@ async fn stop(state: &AppState, actor: &Actor, req: &LifecycleRequest) -> Result
         crate::server::app_api::agent_attach::set_desired(&state.mstore, &block_id, crate::server::app_api::agent_attach::DESIRED_STOPPED);
         return Ok(json!({ "agent": target.name, "agent_id": target.agent_id, "stopped": false, "block_id": block_id, "note": "already stopped" }));
     }
-    crate::sagas::agent_teardown::stop(state, &block_id, true, None)
-        .await
-        .map_err(|e| refuse(StatusCode::CONFLICT, format!("Agents stop {}: {e}", target.name)))?;
+    // Another agent's stop waits for its user's override window; the agent's own worker is the
+    // leader's to end.
+    if needs_window(&state.mstore, &actor.uid, &target.agent_id) {
+        let (now, pending) =
+            crate::server::app_api::fleet::fleet_stop_keep_pane_with_override(state, &actor.slug, vec![block_id.clone()], None, None).await;
+        if let Some(v) = pending.into_iter().next() {
+            return Ok(json!({
+                "agent": target.name, "agent_id": target.agent_id, "stopped": false, "block_id": block_id, "pending": v,
+                "note": "its user has 30 seconds to keep it running; it stops after that unless they do",
+                "runtime": row_json(state, &target.agent_id),
+            }));
+        }
+        if let Some(failed) = now.failed.first() {
+            return Err(refuse(StatusCode::CONFLICT, format!("Agents stop {}: {}", target.name, failed.error)));
+        }
+    } else {
+        crate::sagas::agent_teardown::stop(state, &block_id, true, None)
+            .await
+            .map_err(|e| refuse(StatusCode::CONFLICT, format!("Agents stop {}: {e}", target.name)))?;
+    }
     Ok(json!({
         "agent": target.name, "agent_id": target.agent_id, "stopped": true, "block_id": block_id,
         "note": "stopped by an agent and wanted stopped: a restart does not resume it; Agents start or a message starts it again",

@@ -109,6 +109,7 @@ export const ShutdownPendingBanner = (props: ShutdownPendingBannerProps): JSX.El
         <Show when={pending()}>
             {(p) => (
                 <PaneRow
+                    operatorOnly
                     sigil="⏻"
                     accent="error"
                     title={`${pendingTitle(p(), props.agentId, props.agentName)}. ${countdownLine(p(), secondsLeft(p(), now()))}`}

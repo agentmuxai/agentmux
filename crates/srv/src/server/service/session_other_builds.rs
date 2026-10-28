@@ -75,6 +75,17 @@ struct DbFile {
     written_ms: i64,
 }
 
+/// Whether an srv is running on the database `db` (`<data>/db/objects.db`): the `srv.lock` beside `db/` names a pid that
+/// is still an srv that wrote it. Restoring that build's layout here would run its agents twice.
+fn srv_running(db: &Path) -> bool {
+    let Some(data) = db.parent().and_then(Path::parent) else { return false };
+    let lock = data.join(crate::backend::base::SRV_DATA_LOCK_FILE);
+    let written = std::fs::metadata(&lock).and_then(|m| m.modified()).ok();
+    crate::backend::slug_migration::stamp::lock_pid(&lock)
+        .filter(|pid| *pid != 0)
+        .is_some_and(|pid| crate::backend::process_identity::srv_alive(pid, written))
+}
+
 fn modified_ms(path: &Path) -> Option<i64> {
     let at = std::fs::metadata(path).ok()?.modified().ok()?;
     Some(at.duration_since(std::time::UNIX_EPOCH).ok()?.as_millis() as i64)
@@ -267,6 +278,10 @@ pub(crate) fn discover(roots: &ScanRoots, budget: Duration) -> Vec<OtherBuildLay
             tracing::debug!("session_other_builds: scan budget spent; skipping older builds");
             break;
         }
+        if srv_running(&file.path) {
+            tracing::debug!(channel = %file.channel, version = %file.version, "session_other_builds: not offered, it is running now");
+            continue;
+        }
         match read_record(&file.path) {
             Ok(Some(record)) => found.extend(summarize(&record, &file.channel, &file.version, file.written_ms)),
             Ok(None) => {}
@@ -350,6 +365,9 @@ fn locate(roots: &ScanRoots, channel: &str, version: &str) -> Result<PathBuf, St
     let path = db_dir.join("objects.db");
     if !path.is_file() {
         return Err(format!("no build {version} ({channel}) on this computer"));
+    }
+    if srv_running(&path) {
+        return Err(format!("{version} ({channel}) is running now: quit it first, or its agents would run twice"));
     }
     Ok(path)
 }

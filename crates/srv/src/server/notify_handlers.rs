@@ -873,7 +873,7 @@ mod live_tests {
             "Settings",
             "FleetBulkStop",
             "",
-            crate::sagas::pending_shutdown::Action::Stop { signal: None },
+            crate::sagas::pending_shutdown::Action::Stop { signal: None, stop_background: None },
         );
         let first = next_event(&mut rx, "notification").await;
         assert_eq!(first["title"], "Stopping agent pane in 30 s");

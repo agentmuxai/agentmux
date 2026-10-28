@@ -44,7 +44,7 @@ pub enum Action {
     ClosePane { block_ids: Vec<String> },
     /// Stop the controller and keep the block, as `agent.stop` does. Internal
     /// only (the fork slug migration): no tool an agent can call opens one.
-    Stop { signal: Option<String> },
+    Stop { signal: Option<String>, stop_background: Option<bool> },
     /// Another AgentMux asked this instance to let go of the agent (Take over):
     /// stop it gracefully and leave its lease to the other instance. `to` names
     /// the asking instance, for the pane's "taken over" row.
@@ -93,11 +93,16 @@ impl Action {
     /// for. A self-quit is the same either way; its detail is audit text.
     fn merge(&mut self, other: Action) {
         match (self, other) {
-            (Action::Stop { signal }, Action::Stop { signal: theirs }) => {
+            (Action::Stop { signal, stop_background }, Action::Stop { signal: theirs, stop_background: their_background }) => {
                 let forceful = |s: &Option<String>| matches!(s.as_deref(), Some("SIGKILL") | Some("SIGTERM"));
                 if theirs.as_deref() == Some("SIGKILL") || (signal.is_none() && forceful(&theirs)) {
                     *signal = theirs;
                 }
+                // Stopping the background tasks too is the more forceful ask.
+                *stop_background = match (*stop_background, their_background) {
+                    (Some(a), Some(b)) => Some(a || b),
+                    (a, b) => a.or(b),
+                };
             }
             // A release does all a stop does, and hands the lease over too.
             (this, Action::Release { to }) if matches!(this, Action::Stop { .. }) => *this = Action::Release { to },
@@ -601,8 +606,8 @@ async fn run_action(state: &AppState, block_id: &str, action: Action) -> Result<
                 .map(|_| ())
         }
         Action::ClosePane { block_ids } => super::close_pane::run(state, block_ids).await.map(|_| ()),
-        Action::Stop { signal } => {
-            crate::server::app_api::agent_io::stop_one_agent_block(state, block_id, signal.as_deref(), None)
+        Action::Stop { signal, stop_background } => {
+            crate::server::app_api::agent_io::stop_one_agent_block(state, block_id, signal.as_deref(), stop_background)
                 .await
                 .map(|_| ())
         }
@@ -684,7 +689,7 @@ mod tests {
     #[tokio::test]
     async fn a_stronger_request_joins_and_takes_over_the_pending_action() {
         let state = test_state();
-        let stop = request(&state, "blk-p4", "an agent", "FleetBulkStop", "", Action::Stop { signal: None });
+        let stop = request(&state, "blk-p4", "an agent", "FleetBulkStop", "", Action::Stop { signal: None, stop_background: None });
         let close = request(
             &state,
             "blk-p4",
@@ -699,7 +704,7 @@ mod tests {
 
         // A weaker joiner neither downgrades it nor takes the banner.
         let quit = request(&state, "blk-p5", "Camper", "QuitSelf", "done", Action::SelfQuit { detail: String::new() });
-        let again = request(&state, "blk-p5", "an agent", "FleetBulkStop", "", Action::Stop { signal: None });
+        let again = request(&state, "blk-p5", "an agent", "FleetBulkStop", "", Action::Stop { signal: None, stop_background: None });
         assert_eq!((again.request_id.as_str(), again.via.as_str()), (quit.request_id.as_str(), "QuitSelf"));
         assert!(matches!(begin(&quit.request_id), Some(Action::SelfQuit { .. })));
         let requesters = entries().get(&quit.request_id).unwrap().requesters.clone();
@@ -707,14 +712,24 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn an_explicit_stop_background_is_carried_and_the_stronger_ask_wins() {
+        let state = test_state();
+        let a = request(&state, "blk-stop-bg-opt", "Korp", "AgentStop", "", Action::Stop { signal: None, stop_background: Some(false) });
+        let b = request(&state, "blk-stop-bg-opt", "Korp", "AgentStop", "", Action::Stop { signal: None, stop_background: Some(true) });
+        assert_eq!(a.request_id, b.request_id);
+        let got = begin(&a.request_id);
+        assert!(matches!(got, Some(Action::Stop { stop_background: Some(true), .. })), "stopping the background tasks too wins: {got:?}");
+    }
+
+    #[tokio::test]
     async fn a_joiner_of_the_same_kind_is_folded_in_not_dropped() {
         let state = test_state();
-        let a = request(&state, "blk-p6", "Korp", "FleetBulkStop", "", Action::Stop { signal: None });
+        let a = request(&state, "blk-p6", "Korp", "FleetBulkStop", "", Action::Stop { signal: None, stop_background: None });
         assert!(!a.joined);
-        let b = request(&state, "blk-p6", "Korp", "FleetBulkStop", "", Action::Stop { signal: Some("SIGKILL".into()) });
+        let b = request(&state, "blk-p6", "Korp", "FleetBulkStop", "", Action::Stop { signal: Some("SIGKILL".into()), stop_background: None });
         assert!(b.joined && b.request_id == a.request_id);
         assert_eq!(audit_note(&state, &b, "Korp", "FleetBulkStop"), format!("joined its own pending request {}", a.request_id));
-        assert!(matches!(begin(&a.request_id), Some(Action::Stop { signal: Some(s) }) if s == "SIGKILL"), "the forceful stop wins");
+        assert!(matches!(begin(&a.request_id), Some(Action::Stop { signal: Some(s), .. }) if s == "SIGKILL"), "the forceful stop wins");
 
         let c = request(&state, "blk-p7", "Korp", "ClosePane", "", Action::ClosePane { block_ids: vec!["x".into()] });
         request(&state, "blk-p7", "Posa", "ClosePane", "", Action::ClosePane { block_ids: vec!["x".into(), "y".into()] });
@@ -733,7 +748,7 @@ mod tests {
         assert!(begin(&a.request_id).is_none(), "nothing closes");
 
         // A pending stop on one tab is joined — and taken over — by its pane's close.
-        let stop = request(&state, "tab-d", "an agent", "FleetBulkStop", "", Action::Stop { signal: None });
+        let stop = request(&state, "tab-d", "an agent", "FleetBulkStop", "", Action::Stop { signal: None, stop_background: None });
         let close = request(&state, "tab-c", "Korp", "ClosePane", "", Action::ClosePane { block_ids: vec!["tab-c".into(), "tab-d".into()] });
         assert_eq!(close.request_id, stop.request_id);
         assert_eq!(active_for("tab-c").map(|v| v.via), Some("ClosePane".to_string()));
@@ -865,7 +880,7 @@ mod tests {
     #[tokio::test]
     async fn a_tab_close_ranks_above_a_stop_and_replaces_it() {
         let state = test_state();
-        let stop = request(&state, "ct-s", "Settings", "FleetBulkStop", "", Action::Stop { signal: None });
+        let stop = request(&state, "ct-s", "Settings", "FleetBulkStop", "", Action::Stop { signal: None, stop_background: None });
         assert_eq!(stop.effect, "stop");
         let close = request(&state, "ct-s", "AgentY", "FleetBulkStop", "", close_tab());
         assert_eq!(close.request_id, stop.request_id, "one window per block");

@@ -299,6 +299,8 @@ import type { GetDroneReq } from "@/types/rpc/GetDroneReq";
 import type { GetEditorHomeResult } from "@/types/rpc/GetEditorHomeResult";
 import type { GetEditorRootsResult } from "@/types/rpc/GetEditorRootsResult";
 import type { GetToolStatusResult } from "@/types/rpc/GetToolStatusResult";
+import type { GithubConnection } from "@/types/rpc/GithubConnection";
+import type { GithubConnectionReq } from "@/types/rpc/GithubConnectionReq";
 import type { GlobalMemoryDiffResult } from "@/types/rpc/GlobalMemoryDiffResult";
 import type { GlobalMemoryHistoryResult } from "@/types/rpc/GlobalMemoryHistoryResult";
 import type { GlobalMemoryImportReport } from "@/types/rpc/GlobalMemoryImportReport";
@@ -585,6 +587,7 @@ export const GeneratedApi = {
       saveClient?: boolean;
       scopes?: string[];
       accountId?: string;
+      replaceGithubUser?: boolean;
     },
     opts?: RpcOpts
   ): Promise<AccountOAuthStartResult> {
@@ -1430,6 +1433,10 @@ export const GeneratedApi = {
   // command "gettoolstatus"
   GetToolStatusCommand(client: RpcClient, opts?: RpcOpts): Promise<GetToolStatusResult> {
     return client.rpcCall("gettoolstatus", {}, opts);
+  },
+  // command "github.connection"
+  GithubConnectionCommand(client: RpcClient, data: GithubConnectionReq, opts?: RpcOpts): Promise<GithubConnection> {
+    return client.rpcCall("github.connection", data, opts);
   },
   // command "globalmemory:diff"
   GlobalMemoryDiffCommand(

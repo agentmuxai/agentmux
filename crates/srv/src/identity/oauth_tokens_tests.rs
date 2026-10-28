@@ -305,7 +305,7 @@ async fn a_token_far_from_expiry_is_used_without_a_call() {
     let acct = oauth_account("acc-1", "google", "cid");
     let secrets = MemSecrets::with("acc-1", &blob("a-live", Some("r"), now() + 3600));
     let http = StubHttp::default();
-    let t = access_token_for(&http, &secrets, &a, &b, &acct).await.unwrap();
+    let t = access_token_for(&http, &secrets, &a, &b, &acct, None).await.unwrap();
     assert_eq!(t.as_str(), "a-live");
     assert!(http.calls().is_empty());
 }
@@ -319,7 +319,7 @@ async fn a_token_near_expiry_is_refreshed_and_written_back() {
     b.identity_upsert(&acct).unwrap();
     let secrets = MemSecrets::with("acc-1", &blob("a-old", Some("r1"), now() + 30));
     let http = StubHttp::answering(vec![reply(200, serde_json::json!({ "access_token": "a-new", "expires_in": 3600 }))]);
-    let t = access_token_for(&http, &secrets, &a, &b, &acct).await.unwrap();
+    let t = access_token_for(&http, &secrets, &a, &b, &acct, None).await.unwrap();
     assert_eq!(t.as_str(), "a-new");
     let stored = TokenBlob::parse(&secrets.value("acc-1").unwrap()).unwrap();
     assert_eq!((stored.access_token.as_str(), stored.refresh_token.as_deref()), ("a-new", Some("r1")));
@@ -338,7 +338,7 @@ async fn invalid_grant_marks_the_account_and_is_not_retried() {
     let before = blob("a-old", Some("r1"), now() - 10);
     let secrets = MemSecrets::with("acc-1", &before);
     let http = StubHttp::answering(vec![reply(400, serde_json::json!({ "error": "invalid_grant" }))]);
-    let e = access_token_for(&http, &secrets, &a, &b, &acct).await.unwrap_err();
+    let e = access_token_for(&http, &secrets, &a, &b, &acct, None).await.unwrap_err();
     assert!(e.starts_with(RECONNECT_NEEDED), "{e}");
     assert!(!e.contains("r1") && !e.contains("a-old"), "no token in the error: {e}");
     assert_eq!(http.calls().len(), 1, "never retried");
@@ -354,7 +354,7 @@ async fn an_account_with_no_recorded_client_needs_reconnecting() {
     acct.context = serde_json::json!({ "oauth": true });
     a.identity_upsert(&acct).unwrap();
     let secrets = MemSecrets::with("acc-1", &blob("a", Some("r"), now() - 10));
-    let e = access_token_for(&StubHttp::default(), &secrets, &a, &b, &acct).await.unwrap_err();
+    let e = access_token_for(&StubHttp::default(), &secrets, &a, &b, &acct, None).await.unwrap_err();
     assert!(e.starts_with(RECONNECT_NEEDED), "{e}");
     assert_eq!(a.identity_get("acc-1").unwrap().unwrap().status, STATUS_NEEDS_REAUTH);
 }
@@ -365,10 +365,10 @@ async fn a_plain_secret_is_returned_as_it_is() {
     let mut acct = oauth_account("acc-1", "github", "cid");
     acct.kind = "api_key".into();
     let secrets = MemSecrets::with("acc-1", "ghp_plain");
-    let t = access_token_for(&StubHttp::default(), &secrets, &a, &b, &acct).await.unwrap();
+    let t = access_token_for(&StubHttp::default(), &secrets, &a, &b, &acct, None).await.unwrap();
     assert_eq!(t.as_str(), "ghp_plain");
     // And an account with nothing stored says so.
-    let e = access_token_for(&StubHttp::default(), &MemSecrets::default(), &a, &b, &acct).await.unwrap_err();
+    let e = access_token_for(&StubHttp::default(), &MemSecrets::default(), &a, &b, &acct, None).await.unwrap_err();
     assert!(e.contains("no stored token"), "{e}");
 }
 
@@ -455,4 +455,21 @@ fn a_reply_never_prints_its_body() {
     let shown = format!("{reply:?}");
     assert!(shown.contains("200"));
     assert!(!shown.contains("secret"));
+}
+
+#[tokio::test]
+async fn a_brokered_github_grant_is_not_refreshed_at_github_and_a_missing_broker_is_not_a_dropped_grant() {
+    let (a, b) = stores();
+    let mut acct = oauth_account("acc-1", "github", "cid");
+    acct.context["broker"] = serde_json::json!(true);
+    a.identity_upsert(&acct).unwrap();
+    b.identity_upsert(&acct).unwrap();
+    let before = blob("a-old", Some("r1"), now() - 10);
+    let secrets = MemSecrets::with("acc-1", &before);
+    let http = StubHttp::default();
+    let e = access_token_for(&http, &secrets, &a, &b, &acct, None).await.unwrap_err();
+    assert!(http.calls().is_empty(), "GitHub's token endpoint wants the App's secret, which only the broker has");
+    assert!(!e.starts_with(RECONNECT_NEEDED), "no broker is a bad moment, not a revoked grant: {e}");
+    assert_eq!(a.identity_get("acc-1").unwrap().unwrap().status, "valid");
+    assert_eq!(secrets.value("acc-1").unwrap(), before, "the stored tokens are left as they were");
 }

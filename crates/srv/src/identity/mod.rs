@@ -36,6 +36,7 @@ pub mod auth_session;
 pub mod browser_credential_store;
 pub mod cleanup;
 pub mod credential_watch;
+pub mod github_connect;
 pub mod key_validator;
 pub mod oauth_client;
 pub mod oauth_tokens;

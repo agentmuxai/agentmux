@@ -324,3 +324,49 @@ async fn a_provider_without_an_id_token_still_connects() {
     // What the agent's GH_TOKEN becomes for this account (spec §2.3).
     assert_eq!(oauth_tokens::bearer_value(secrets.value(&account_id).unwrap()), "gho_x");
 }
+
+#[tokio::test]
+async fn a_brokered_github_grant_names_who_is_connected_and_is_marked_brokered() {
+    let store = Arc::new(Store::open_in_memory().unwrap());
+    let secrets = MemSecrets::default();
+    let cfg = config_for("github").unwrap();
+    let c = FlowCtx {
+        requested: requested_scopes(&cfg, &[]).unwrap(),
+        cfg,
+        client: ResolvedClient { client_id: "gh-app".into(), client_secret: None, mode: ClientMode::Builtin },
+        target: FlowTarget::New { name: String::new() },
+        save_client: false,
+        mstore: store.clone(),
+        identity_store: store.clone(),
+    };
+    let resp = serde_json::json!({
+        "access_token": "ghu_x", "refresh_token": "ghr_y", "expires_in": 28800,
+        "github_user_id": 42, "login": "octo", "broker": true,
+    });
+    let OAuthStatus::Success { account_id, .. } = finish(&c, &secrets, &resp).await.unwrap() else { panic!() };
+    let acct = store.identity_get(&account_id).unwrap().unwrap();
+    assert_eq!(acct.display_name, "@octo", "the account reads as who is connected");
+    assert_eq!((acct.context["github_user_id"].clone(), acct.context["github_login"].clone()), (serde_json::json!(42), serde_json::json!("octo")));
+    assert_eq!(acct.context["broker"], true);
+    let stored = oauth_tokens::TokenBlob::parse(&secrets.value(&account_id).unwrap()).unwrap();
+    assert_eq!(stored.refresh_token.as_deref(), Some("ghr_y"));
+    assert!(stored.expires_at > chrono::Utc::now().timestamp() + 28000);
+}
+
+#[test]
+fn a_user_mismatch_ends_the_flow_so_the_person_can_be_asked() {
+    let s = OAuthStatus::ConfirmUser { current_login: "old".into(), current_id: 1, new_login: "new".into(), new_id: 2 };
+    assert!(s.is_terminal());
+}
+
+#[test]
+fn only_agentmuxs_own_github_app_runs_through_the_broker() {
+    let client = |mode| ResolvedClient { client_id: "id".into(), client_secret: None, mode };
+    assert!(runs_through_broker("github", true, &client(ClientMode::Builtin)));
+    // The broker exchanges the code with AgentMux's App secret: the person's own app can't use it.
+    assert!(!runs_through_broker("github", true, &client(ClientMode::Byo)));
+    assert!(!runs_through_broker("github", true, &client(ClientMode::Workspace)));
+    // Signed out of AgentMux Cloud: the device flow; other providers never use the broker.
+    assert!(!runs_through_broker("github", false, &client(ClientMode::Builtin)));
+    assert!(!runs_through_broker("google", true, &client(ClientMode::Builtin)));
+}

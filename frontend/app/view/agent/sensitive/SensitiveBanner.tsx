@@ -37,6 +37,7 @@ export const SensitiveBanner = (): JSX.Element => {
         <For each={open()}>
             {(c) => (
                 <PaneRow
+                    operatorOnly
                     sigil="⏻"
                     accent="error"
                     title={countdownText(c, secondsLeft(c, now()))}

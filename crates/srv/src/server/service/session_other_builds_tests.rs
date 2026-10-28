@@ -339,3 +339,48 @@ async fn restoring_a_build_without_a_record_fails_and_changes_nothing() {
     assert!(restore(&here, &roots(dir.path(), None), &win.oid, "empty", "0.59.32").await.is_err());
     assert_eq!(tabs_of(&here, &win.workspaceid), before);
 }
+
+/// Says an srv holds `build`'s data dir: its lock names `pid`.
+fn lock(db: &Path, pid: u32) {
+    std::fs::write(db.parent().unwrap().parent().unwrap().join("srv.lock"), pid.to_string()).unwrap();
+}
+
+#[test]
+fn a_build_that_is_running_now_is_not_offered_and_one_that_quit_is() {
+    use crate::backend::process_identity::test_srv;
+    let dir = tempfile::tempdir().unwrap();
+    let running = build(dir.path(), "live", "0.60.3", Some(work_record(Some(5_000))));
+    let quit = build(dir.path(), "quit", "0.60.2", Some(work_record(Some(4_000))));
+    let own = build(dir.path(), "stable", "0.60.4", None);
+    let me = std::process::id();
+    lock(&running, me);
+    lock(&quit, me);
+    let r = roots(dir.path(), own.parent());
+    let names = |found: Vec<OtherBuildLayout>| found.into_iter().map(|l| l.channel).collect::<Vec<_>>();
+
+    // Both locks name a live srv: nothing to offer.
+    test_srv::treat_as_srv(&[me]);
+    assert!(names(discover(&r, SCAN_BUDGET)).is_empty());
+    // `quit`'s lock is left over from an srv that exited (its pid is no srv now): only `live` stays out.
+    lock(&quit, u32::MAX - 1);
+    assert_eq!(names(discover(&r, SCAN_BUDGET)), ["quit"]);
+    // A lock that names no pid (never written, empty) is not a running srv.
+    lock(&running, 0);
+    assert_eq!(names(discover(&r, SCAN_BUDGET)), ["live", "quit"]);
+}
+
+#[test]
+fn restoring_a_build_that_is_running_now_is_refused() {
+    use crate::backend::process_identity::test_srv;
+    let dir = tempfile::tempdir().unwrap();
+    let running = build(dir.path(), "live", "0.60.3", Some(work_record(Some(5_000))));
+    let own = build(dir.path(), "stable", "0.60.4", None);
+    let me = std::process::id();
+    lock(&running, me);
+    let r = roots(dir.path(), own.parent());
+    test_srv::treat_as_srv(&[me]);
+    let refused = locate(&r, "live", "0.60.3").unwrap_err();
+    assert!(refused.contains("is running now") && refused.contains("0.60.3"), "{refused}");
+    test_srv::treat_as_srv(&[]);
+    assert!(locate(&r, "live", "0.60.3").is_ok(), "once it has quit");
+}
