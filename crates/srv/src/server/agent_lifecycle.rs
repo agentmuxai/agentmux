@@ -91,6 +91,24 @@ impl Live {
     }
 }
 
+/// When each parked agent block was first seen without a view (ms). The agent-state tracker times how
+/// long a state has lasted, shown in a pane or not; the idle window is for the time with no view.
+fn view_lost_at() -> &'static std::sync::Mutex<HashMap<String, u64>> {
+    static LOST: std::sync::OnceLock<std::sync::Mutex<HashMap<String, u64>>> = std::sync::OnceLock::new();
+    LOST.get_or_init(Default::default)
+}
+
+/// Move each parked agent's `since_ms` up to when it was first seen parked, and forget blocks that are
+/// shown again or gone. A sweep sees a pane's closing within a minute, so the window can only run long.
+fn idle_from_view_lost(lives: &mut [Live], now: u64) {
+    let mut lost = view_lost_at().lock().unwrap_or_else(|e| e.into_inner());
+    lost.retain(|block_id, _| lives.iter().any(|l| l.parked && l.block_id == *block_id));
+    for l in lives.iter_mut().filter(|l| l.parked) {
+        let first_parked = *lost.entry(l.block_id.clone()).or_insert(now);
+        l.since_ms = l.since_ms.max(first_parked);
+    }
+}
+
 /// The agent processes running now, one per agent block that has a live controller.
 pub(crate) fn live_agents(state: &AppState) -> Vec<Live> {
     let mstore = &state.mstore;
@@ -98,7 +116,7 @@ pub(crate) fn live_agents(state: &AppState) -> Vec<Live> {
     let Ok(blocks) = super::app_api::agent_block::blocks_in_tabs_or_parked(mstore) else {
         return Vec::new();
     };
-    blocks
+    let mut lives: Vec<Live> = blocks
         .into_iter()
         .filter_map(|(block, tab)| {
             let controller = blockcontroller::get_controller(&block.oid)?;
@@ -119,7 +137,9 @@ pub(crate) fn live_agents(state: &AppState) -> Vec<Live> {
                 idle_override,
             })
         })
-        .collect()
+        .collect();
+    idle_from_view_lost(&mut lives, now);
+    lives
 }
 
 /// Why this agent is not stopped even when idle: it holds a claimed Kanban task, has a message held
@@ -251,16 +271,28 @@ fn pending_key(state: &AppState, agent_id: &str) -> String {
     format!("{:p}:{agent_id}", std::sync::Arc::as_ptr(&state.mstore))
 }
 
-/// The admitted starts of this instance that are not among `live` and not yet [`PENDING_FOR`] old.
+/// The admitted starts of this instance that are not yet running and not yet [`PENDING_FOR`] old. One
+/// seen among `live` is dropped for good: it counts as itself from then on, and if it is stopped to
+/// make room it must not count a second time.
 fn pending_not_running(state: &AppState, live: &[Live]) -> usize {
-    let mut pending = pending().lock().unwrap_or_else(|e| e.into_inner());
-    pending.retain(|_, at| at.elapsed() < PENDING_FOR);
     let prefix = pending_key(state, "");
-    pending
-        .keys()
-        .filter_map(|key| key.strip_prefix(prefix.as_str()))
-        .filter(|id| !live.iter().any(|l| l.uid == *id || l.agent_id == *id))
-        .count()
+    let mut pending = pending().lock().unwrap_or_else(|e| e.into_inner());
+    pending.retain(|key, at| {
+        if at.elapsed() >= PENDING_FOR {
+            return false;
+        }
+        match key.strip_prefix(prefix.as_str()) {
+            Some(id) => !live.iter().any(|l| l.uid == id || l.agent_id == id),
+            None => true,
+        }
+    });
+    pending.keys().filter(|key| key.starts_with(prefix.as_str())).count()
+}
+
+/// A start that was admitted did not happen (the agent is unknown, its provider has no headless mode, its
+/// CLI is missing): its room is free again.
+pub(crate) fn release_start(state: &AppState, agent_id: &str) {
+    pending().lock().unwrap_or_else(|e| e.into_inner()).remove(&pending_key(state, agent_id));
 }
 
 /// One admission at a time: the count, the stop that makes room and the claim of the room are one step.

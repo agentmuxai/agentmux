@@ -273,6 +273,10 @@ pub(crate) async fn start_agent(state: &AppState, agent_id: &str) -> Result<Stri
         None,
         marker,
     )
-    .await?;
+    .await
+    .map_err(|e| {
+        crate::server::agent_lifecycle::release_start(state, agent_id);
+        e
+    })?;
     Ok(opened.block_id)
 }

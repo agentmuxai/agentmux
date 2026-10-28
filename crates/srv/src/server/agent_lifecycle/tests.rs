@@ -222,3 +222,50 @@ async fn over_the_commit_limit_one_agent_is_stopped_not_every_idle_one() {
         blockcontroller::delete_controller(b);
     }
 }
+
+/// A reservation ends when its agent is seen running: evicting that agent then frees its room, where
+/// before the reservation counted again and the start was refused after both idle agents were stopped.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_reservation_ends_when_its_agent_runs_so_stopping_it_frees_room() {
+    let state = test_state();
+    let (_ws, tabs) = seed_workspace(&state, 1).await;
+    set_limits(&state, 2);
+    admit_start_with(&state, "ag-res-1", || None).await.expect("room for the first");
+    admit_start_with(&state, "ag-res-2", || None).await.expect("room for the second");
+    let blocks = [parked_running(&state, &tabs[0], "ag-res-1").await, parked_running(&state, &tabs[0], "ag-res-2").await];
+
+    admit_start_with(&state, "ag-res-3", || None).await.expect("one stop makes room");
+
+    assert_eq!(blocks.iter().filter(|b| was_stopped(&state, b)).count(), 1, "one agent was stopped, not both");
+    for b in &blocks {
+        blockcontroller::delete_controller(b);
+    }
+}
+
+/// A start that did not happen gives its room back.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_start_that_failed_gives_its_room_back() {
+    let state = test_state();
+    set_limits(&state, 1);
+    admit_start_with(&state, "ag-fail-1", || None).await.expect("room");
+    admit_start_with(&state, "ag-fail-2", || None).await.unwrap_err();
+    release_start(&state, "ag-fail-1");
+    admit_start_with(&state, "ag-fail-2", || None).await.expect("the failed start no longer holds the room");
+}
+
+/// The idle window runs from when the agent lost its view, not from when it went idle in its pane.
+#[test]
+fn the_idle_window_starts_when_the_view_is_lost() {
+    let mut lives = vec![live(true, AgentState::Idle, 1_000), live(false, AgentState::Idle, 1_000)];
+    lives[0].block_id = "b-lost-1".into();
+    lives[1].block_id = "b-lost-2".into();
+    idle_from_view_lost(&mut lives, 5_000_000);
+    assert_eq!(lives[0].since_ms, 5_000_000, "parked just now, idle in its pane for much longer");
+    assert_eq!(lives[1].since_ms, 1_000, "a shown agent keeps its own clock");
+    assert!(!lives[0].idle_expired(5_000_000 + 3_599_999, Some(3_600_000)));
+    assert!(lives[0].idle_expired(5_000_000 + 3_600_000, Some(3_600_000)));
+
+    lives[0].since_ms = 1_000;
+    idle_from_view_lost(&mut lives, 9_000_000);
+    assert_eq!(lives[0].since_ms, 5_000_000, "first seen parked stays the start of the window");
+}
