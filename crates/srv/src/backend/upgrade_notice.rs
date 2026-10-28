@@ -253,6 +253,10 @@ struct State {
     /// Where a pane's block says whether it has a session ([`has_session`]).
     store: Arc<crate::backend::storage::store::Store>,
     noted: Mutex<HashSet<String>>,
+    /// Panes being (or already) told to carry on. Apart from `noted`: a pane
+    /// told of an upgrade earlier (and kept across a later restart on the
+    /// same version) still gets told its turn was cut off.
+    continuing: Mutex<HashSet<String>>,
 }
 
 static STATE: OnceLock<Option<State>> = OnceLock::new();
@@ -291,6 +295,7 @@ pub fn init(store: Arc<crate::backend::storage::store::Store>) {
             dir,
             store,
             noted,
+            continuing: Mutex::new(HashSet::new()),
         })
     });
     let _ = STATE.set(state);
@@ -362,7 +367,9 @@ pub fn on_registered(block_id: &str) {
     if !upgrade_open && !cut_off_open {
         return;
     }
-    if !state.noted.lock().unwrap_or_else(|e| e.into_inner()).insert(block_id.to_string()) {
+    let want_note = upgrade_open && state.noted.lock().unwrap_or_else(|e| e.into_inner()).insert(block_id.to_string());
+    let want_continue = cut_off_open && state.continuing.lock().unwrap_or_else(|e| e.into_inner()).insert(block_id.to_string());
+    if !want_note && !want_continue {
         return;
     }
     let block_id = block_id.to_string();
@@ -370,19 +377,27 @@ pub fn on_registered(block_id: &str) {
         let Some(Some(state)) = STATE.get() else { return };
         // A new pane: no session yet, and no note; one that registers again
         // later, with a session by then, is told then.
+        let forget = |note: bool, cont: bool| {
+            if note {
+                state.noted.lock().unwrap_or_else(|e| e.into_inner()).remove(&block_id);
+            }
+            if cont {
+                state.continuing.lock().unwrap_or_else(|e| e.into_inner()).remove(&block_id);
+            }
+        };
         if !has_session(&state.store, &block_id) {
-            state.noted.lock().unwrap_or_else(|e| e.into_inner()).remove(&block_id);
+            forget(want_note, want_continue);
             return;
         }
         let agent = agent_id_of(&state.store, &block_id);
-        let cut_off = cut_off_open && !agent.is_empty() && state.interrupted.lock().unwrap_or_else(|e| e.into_inner()).contains(&agent);
+        let cut_off = want_continue && !agent.is_empty() && state.interrupted.lock().unwrap_or_else(|e| e.into_inner()).contains(&agent);
         let upgrade = state.upgraded.as_ref().filter(|_| upgrade_open);
         let text = if cut_off {
             continue_text(upgrade, state.quit_ms)
-        } else if let Some(u) = upgrade {
+        } else if let (true, Some(u)) = (want_note, upgrade) {
             note_text(u)
         } else {
-            state.noted.lock().unwrap_or_else(|e| e.into_inner()).remove(&block_id);
+            forget(want_note, want_continue);
             return;
         };
         tokio::time::sleep(SETTLE).await;
@@ -417,7 +432,8 @@ pub fn on_registered(block_id: &str) {
             }
             Err(e) => {
                 tracing::info!(block_id = %block_id, error = %e, "upgrade notice: not delivered; the next registration tries again");
-                state.noted.lock().unwrap_or_else(|e| e.into_inner()).remove(&block_id);
+                // Not told: the next registration tries again.
+                forget(want_note, want_continue);
             }
         }
     });
