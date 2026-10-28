@@ -391,7 +391,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 .await
                 .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
             if result["status"] == "pending_user_override" {
-                // Each running target's user had 15 s to keep it (§6.5). srv
+                // Each running target's user had 30 s to keep it (§6.5). srv
                 // runs the windows in parallel, so waiting on them one after
                 // another costs no extra time.
                 let pending = result["pending"].as_array().cloned().unwrap_or_default();

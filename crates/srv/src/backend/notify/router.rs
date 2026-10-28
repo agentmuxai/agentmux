@@ -751,7 +751,13 @@ impl Router {
         } else {
             String::new()
         };
-        (sanitize_name(&raw_name), sanitize_summary(&stored_summary))
+        // A pane that holds no agent (a browser, an editor) is named by what it is,
+        // not "An agent": the countdown to close it says what is closing.
+        let name = match block.as_ref().filter(|_| raw_name.trim().is_empty()) {
+            Some(b) => super::pane_label::pane_label(&b.meta),
+            None => sanitize_name(&raw_name),
+        };
+        (name, sanitize_summary(&stored_summary))
     }
 
     /// Run the policy and publish what it decided. `Activate` is returned,

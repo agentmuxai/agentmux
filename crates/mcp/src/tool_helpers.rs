@@ -142,7 +142,7 @@ pub(crate) fn close_pane_outcome(block: &str, now: &Value) -> anyhow::Result<Str
         };
     }
     match now["status"].as_str().unwrap_or("") {
-        "shut_down" => Ok(format!("Closed pane {block:?}: its user didn't keep it within 15 s.")),
+        "shut_down" => Ok(format!("Closed pane {block:?}: its user didn't keep it in time.")),
         "kept_by_user" => Ok(format!("Not closed: the user chose to keep pane {block:?} running.")),
         "superseded" => Ok(format!("Pane {block:?} was already closed.")),
         "proceeding" => Ok(format!("Pane {block:?} is shutting down: its user didn't keep it.")),

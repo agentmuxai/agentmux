@@ -4,7 +4,7 @@
 //! `agents.migrateForkSlugs`: the Settings › Agents card's way into the fork
 //! slug migration (`backend::slug_migration`). `plan`, `apply`, `rollback`
 //! and `restore` run on the disk, off the async workers; `stop` asks each
-//! running affected pane to stop, through the same 15 s user override an
+//! running affected pane to stop, through the same 30 s user override an
 //! agent's stop request waits for (`fleet_stop_keep_pane_with_override`).
 
 use std::sync::Arc;

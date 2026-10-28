@@ -30,7 +30,7 @@ pub enum NotifyKind {
     /// (`ESCALATE=required`). Body is fixed text — never message content.
     MessageNeedsReview,
     /// Something other than the user asked to shut the agent down; the user
-    /// has 15 s to keep it (SPEC_AGENT_SELF_QUIT_2026_09_24.md §6.5).
+    /// has 30 s to keep it (SPEC_AGENT_SELF_QUIT_2026_09_24.md §6.5).
     ShutdownPending,
     /// Rate-limit overflow digest (§5.1 step 6).
     Summary,
@@ -78,7 +78,7 @@ impl NotifyKind {
             // Same window as TurnErrored so the two coalesce into one toast.
             NotifyKind::TurnCompleted | NotifyKind::TurnErrored | NotifyKind::AgentCrashed => 10_000,
             NotifyKind::MessageNeedsReview => 2_000,
-            // The window is only 15 s: tell the user at once.
+            // The window is short: tell the user at once.
             // The episode's scan already waited for the failure to settle.
             NotifyKind::ShutdownPending | NotifyKind::CloudSignedOut | NotifyKind::AccountUnavailable | NotifyKind::JobFailed => 0,
             NotifyKind::Summary | NotifyKind::Test => 0,
@@ -436,7 +436,7 @@ pub fn title_for(kind: NotifyKind, agent_name: &str) -> String {
         NotifyKind::TurnErrored => format!("{agent_name} stopped with an error"),
         NotifyKind::AgentCrashed => format!("{agent_name} stopped unexpectedly"),
         NotifyKind::MessageNeedsReview => format!("A message for {agent_name} needs your review"),
-        NotifyKind::ShutdownPending => format!("{agent_name} will shut down in 15 s"),
+        NotifyKind::ShutdownPending => format!("{agent_name} will shut down soon"),
         // Count-bearing; see `summary_title`.
         NotifyKind::Summary => "More agent updates".to_string(),
         NotifyKind::Test => "AgentMux notifications are working".to_string(),
@@ -748,7 +748,7 @@ impl PolicyState {
     }
 
     /// A pending shutdown is never paused or rate-limited: it is the only
-    /// warning that an agent stops in 15 s, so holding it back lets the agent
+    /// warning that an agent stops in 30 s, so holding it back lets the agent
     /// stop unannounced. Only the master switch silences it.
     fn paused(&self, n: &Notification, now_ms: i64, s: &Settings) -> bool {
         !matches!(n.kind, NotifyKind::Test | NotifyKind::ShutdownPending)
@@ -845,10 +845,10 @@ mod tests {
     fn shutdown_pending_is_immediate_attention_and_not_silenceable_per_kind() {
         let k = NotifyKind::ShutdownPending;
         assert_eq!(k.setting_suffix(), None, "only the master switch can silence it");
-        assert_eq!(k.delay_ms(), 0, "the window is only 15 s");
+        assert_eq!(k.delay_ms(), 0, "the window is short");
         assert!(matches!(k.priority(), Priority::Attention));
         assert_eq!(k.group_key("b1"), "shutdown:b1");
-        assert_eq!(title_for(k, "Camper"), "Camper will shut down in 15 s");
+        assert_eq!(title_for(k, "Camper"), "Camper will shut down soon");
     }
 
     fn req(kind: NotifyKind, block: &str) -> Request {
@@ -1445,7 +1445,7 @@ mod tests {
         p.step(Input::Emit(req(NotifyKind::ShutdownPending, "b4")), 0, &s);
         let a = p.step(Input::Tick, 0, &s);
         let n = &shows(&a)[0];
-        assert_eq!(n.title, "lark will shut down in 15 s");
+        assert_eq!(n.title, "lark will shut down soon");
         assert!(n.actions.is_none() && n.countdown.is_none());
     }
 
