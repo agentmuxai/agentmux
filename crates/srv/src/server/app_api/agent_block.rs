@@ -69,6 +69,30 @@ pub(crate) fn find_agent_block_by_uid(mstore: &Store, agent_uid: &str) -> Result
     Ok(Some(AgentBlock { block, tab_id }))
 }
 
+/// Every block that is in a tab or parked, each with its tab (`None` when parked). The agent readers
+/// that used to walk tabs' `blockids` use this, so a headless agent's parked block is not missing
+/// from them. An unmarked block in no tab is an orphan and is left out.
+pub(crate) fn blocks_in_tabs_or_parked(mstore: &Store) -> Result<Vec<(Block, Option<String>)>, String> {
+    let tabs: Vec<Tab> = mstore.get_all::<Tab>().map_err(|e| format!("list tabs: {e}"))?;
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for tab in &tabs {
+        for block_id in &tab.blockids {
+            if let Ok(Some(block)) = mstore.get::<Block>(block_id) {
+                if seen.insert(block.oid.clone()) {
+                    out.push((block, Some(tab.oid.clone())));
+                }
+            }
+        }
+    }
+    for block in mstore.get_all::<Block>().map_err(|e| format!("list blocks: {e}"))? {
+        if is_parked(&block) && seen.insert(block.oid.clone()) {
+            out.push((block, None));
+        }
+    }
+    Ok(out)
+}
+
 /// [`resolve_tab_id_for_block`], and for a parked block, which no tab holds, the active tab: a
 /// headless agent that spawns or opens panes has no tab of its own to use.
 pub(crate) fn resolve_tab_id_or_active(mstore: &Store, block_id: &str) -> Result<String, String> {
@@ -156,6 +180,19 @@ mod tests {
             .unwrap();
         let found = find_agent_block_by_uid(&store, "inst").unwrap().unwrap();
         assert_eq!((found.block.oid.as_str(), found.tab_id.as_deref()), (block.oid.as_str(), Some(tab.as_str())));
+    }
+
+    #[test]
+    fn the_blocks_in_tabs_or_parked_leave_out_an_unmarked_orphan() {
+        let store = Store::open_in_memory().unwrap();
+        let (shown, parked, orphan) = (insert_block(&store, "ann", false), insert_block(&store, "bob", true), insert_block(&store, "cy", false));
+        let tab = insert_tab(&store, &[&shown]);
+        let mut all = blocks_in_tabs_or_parked(&store).unwrap();
+        all.sort_by(|a, b| a.0.oid.cmp(&b.0.oid));
+        let mut want = vec![(shown, Some(tab)), (parked, None)];
+        want.sort_by(|a, b| a.0.cmp(&b.0));
+        assert_eq!(all.iter().map(|(b, t)| (b.oid.clone(), t.clone())).collect::<Vec<_>>(), want);
+        assert!(all.iter().all(|(b, _)| b.oid != orphan));
     }
 
     #[test]
