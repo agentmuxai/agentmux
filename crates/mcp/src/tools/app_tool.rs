@@ -136,10 +136,6 @@ fn describe_outcome(o: &Value) -> String {
             }
             text
         }
-        "pending_user" => format!(
-            "Asked the user: every AgentMux window shows your request to upgrade to {version}. You'll get an \
-             [AgentMux] note with their answer; don't ask again meanwhile."
-        ),
         "requested" => format!(
             "Asked for the upgrade to {version} as a sensitive operation ({}). If the super agent approves, the person \
              sees a banner with a countdown and can veto it, and the upgrade starts when it ends. You'll get [AgentMux] \
@@ -199,7 +195,6 @@ mod tests {
             "stopping": ["Korp: an AgentMux instance (`task dev`), running 9 h"],
         }));
         assert!(stopping.contains("also stops what agents left running in the background: Korp: an AgentMux instance"), "{stopping}");
-        assert!(describe_outcome(&json!({ "status": "pending_user", "version": "0.59.27", "id": "r" })).contains("[AgentMux] note"));
         let r = describe_outcome(&json!({ "status": "requested", "version": "0.59.27", "id": "r7", "review": "the super agent has been asked" }));
         assert!(r.contains("sensitive operation (the super agent has been asked)") && r.contains("veto") && r.contains("id r7"), "{r}");
         assert!(describe_outcome(&json!({ "status": "up_to_date", "current": "0.59.27" })).contains("latest release"));
