@@ -120,7 +120,7 @@ pub fn repo_of_gh_command(args: &[String], env_repo: Option<&str>, origin_url: i
 
 /// The repository for what [`default_repo_source`] found: a remote's URL, or an `OWNER/REPO` set with
 /// `gh repo set-default`.
-fn repo_of_default(source: &str) -> Option<(String, String)> {
+pub fn repo_of_default(source: &str) -> Option<(String, String)> {
     repo_of_remote(source).or_else(|| repo_of_spec(source))
 }
 
@@ -166,9 +166,20 @@ fn repo_of_spec(spec: &str) -> Option<(String, String)> {
     }
 }
 
+/// What `POST /api/v1/github/token` granted: the token, who the App's bot is, and who the agent
+/// works for (the account's own GitHub id and login).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Granted {
+    pub token: String,
+    pub owner_github_id: Option<u64>,
+    pub owner_login: Option<String>,
+    pub bot_slug: Option<String>,
+    pub bot_user_id: Option<u64>,
+}
+
 /// The answer of `POST /api/v1/github/token`: a token, or what to tell the person.
 pub enum Answer {
-    Token(String),
+    Token(Granted),
     Refused(String),
 }
 
@@ -185,7 +196,13 @@ pub fn ask(owner: &str, repo: &str) -> Answer {
     let body = json!({ "owner": owner, "repo": repo });
     match rt.block_on(client.post_json_status("/api/v1/github/token", agent_token.as_deref(), &body, ASK_TIMEOUT)) {
         Ok((status, answer)) if (200..300).contains(&status) => match answer.get("token").and_then(Value::as_str).filter(|t| !t.is_empty()) {
-            Some(token) => Answer::Token(token.to_string()),
+            Some(token) => Answer::Token(Granted {
+                token: token.to_string(),
+                owner_github_id: answer.get("ownerGithubId").and_then(Value::as_u64),
+                owner_login: answer.get("ownerLogin").and_then(Value::as_str).map(str::to_string),
+                bot_slug: answer.get("botSlug").and_then(Value::as_str).map(str::to_string),
+                bot_user_id: answer.get("botUserId").and_then(Value::as_u64),
+            }),
             None => Answer::Refused("AgentMux gave no token".to_string()),
         },
         Ok((status, answer)) => Answer::Refused(
@@ -213,9 +230,9 @@ pub fn run_git_credential(op: &str) -> i32 {
         return 1;
     };
     match ask(&owner, &repo) {
-        Answer::Token(token) => {
+        Answer::Token(granted) => {
             let mut out = std::io::stdout();
-            let _ = out.write_all(credential_response(&token).as_bytes());
+            let _ = out.write_all(credential_response(&granted.token).as_bytes());
             let _ = out.flush();
             0
         }
@@ -226,30 +243,121 @@ pub fn run_git_credential(op: &str) -> i32 {
     }
 }
 
-/// `github-token -- <gh args>`: print a token for the repository the `gh` command is about; with
-/// none, say why on stderr (when there is a repository) and print nothing.
-pub fn run_github_token(gh_args: &[String]) -> i32 {
-    let env_repo = std::env::var("GH_REPO").ok();
+/// The repository `gh` itself would act on, as a remote's URL or an `OWNER/REPO`: the one it was
+/// told (`gh repo set-default`, a cloned fork's parent), else `origin`'s. `cwd` is where `git -C` points.
+pub fn default_repo_source(cwd: Option<&str>) -> Option<String> {
     let git_config = |args: &[&str]| {
         let mut cmd = std::process::Command::new("git");
+        if let Some(dir) = cwd {
+            cmd.arg("-C").arg(dir);
+        }
         cmd.arg("config").args(args).stdin(std::process::Stdio::null()).stderr(std::process::Stdio::null());
         // Windows: git is a console program, and this process has no console of its own.
         cmd.no_window();
         let out = cmd.output().ok()?;
         out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
     };
-    // The repository `gh` itself would act on: the one it was told (set-default, a cloned fork's parent), else `origin`.
-    let default_repo = || match resolved_default(&git_config(&["--get-regexp", r"^remote\..*\.gh-resolved$"]).unwrap_or_default()) {
+    match resolved_default(&git_config(&["--get-regexp", r"^remote\..*\.gh-resolved$"]).unwrap_or_default()) {
         Some(Ok(spec)) => Some(spec),
         Some(Err(remote)) => git_config(&["--get", &format!("remote.{remote}.url")]),
         None => git_config(&["--get", "remote.origin.url"]),
-    };
-    let Some((owner, repo)) = repo_of_gh_command(gh_args, env_repo.as_deref(), default_repo) else {
+    }
+}
+
+/// The repository a `gh` command is about, for [`run_github_token`] and [`run_github_owner_tag`].
+fn repo_of_command_here(gh_args: &[String]) -> Option<(String, String)> {
+    let env_repo = std::env::var("GH_REPO").ok();
+    repo_of_gh_command(gh_args, env_repo.as_deref(), || default_repo_source(None))
+}
+
+/// What marks a PR as the work of a person's agent: the id of the GitHub account it works for.
+pub fn owner_tag(owner_github_id: u64) -> String {
+    format!("<!-- agentmux:owner_github_id={owner_github_id} -->")
+}
+
+fn with_tag(body: &str, tag: &str) -> String {
+    if body.contains("agentmux:owner_github_id=") {
+        body.to_string()
+    } else if body.trim().is_empty() {
+        format!("{tag}\n")
+    } else {
+        format!("{}\n\n{tag}\n", body.trim_end())
+    }
+}
+
+/// `gh pr create` / `gh pr edit` arguments with `tag` added to the PR's body: `--body`/`-b` text,
+/// or a `--body-file`/`-F` file (copied with the tag, by `file_with_tag`; stdin can't be). Arguments
+/// that give no body (`--fill`, a prompt) are left alone.
+pub fn rewrite_pr_body(args: &[String], tag: &str, file_with_tag: impl Fn(&str) -> Option<String>) -> Vec<String> {
+    let mut out = Vec::with_capacity(args.len());
+    let mut i = 0;
+    while i < args.len() {
+        let a = args[i].as_str();
+        let value = args.get(i + 1);
+        match (a, value) {
+            ("--body" | "-b", Some(v)) => {
+                out.extend([a.to_string(), with_tag(v, tag)]);
+                i += 2;
+            }
+            ("--body-file" | "-F", Some(v)) => {
+                let file = if v == "-" { v.clone() } else { file_with_tag(v).unwrap_or_else(|| v.clone()) };
+                out.extend([a.to_string(), file]);
+                i += 2;
+            }
+            _ => {
+                if let Some(v) = a.strip_prefix("--body=") {
+                    out.push(format!("--body={}", with_tag(v, tag)));
+                } else if let Some(v) = a.strip_prefix("--body-file=") {
+                    out.push(format!("--body-file={}", file_with_tag(v).unwrap_or_else(|| v.to_string())));
+                } else {
+                    out.push(a.to_string());
+                }
+                i += 1;
+            }
+        }
+    }
+    out
+}
+
+/// A copy of the body file at `path` with `tag` added, in the temp directory.
+fn body_file_with_tag(path: &str, tag: &str) -> Option<String> {
+    let body = std::fs::read_to_string(path).ok()?;
+    let text = with_tag(&body, tag);
+    let name = format!("agentmux-pr-body-{}-{:x}.md", std::process::id(), text.len());
+    let copy = std::env::temp_dir().join(name);
+    std::fs::write(&copy, text).ok()?;
+    Some(copy.to_string_lossy().into_owned())
+}
+
+/// `github-owner-tag -- <gh args>`: the arguments of a `gh pr create` or `gh pr edit` with the owner
+/// tag in its body, each followed by a NUL byte, for the `gh` function to run `gh` with. The
+/// arguments unchanged when there is no owner to name or no body to put it in.
+pub fn run_github_owner_tag(gh_args: &[String]) -> i32 {
+    let mut args = gh_args.to_vec();
+    if let Some((owner, repo)) = repo_of_command_here(gh_args) {
+        if let Answer::Token(Granted { owner_github_id: Some(id), .. }) = ask(&owner, &repo) {
+            let tag = owner_tag(id);
+            args = rewrite_pr_body(gh_args, &tag, |path| body_file_with_tag(path, &tag));
+        }
+    }
+    let mut out = std::io::stdout();
+    for a in &args {
+        let _ = out.write_all(a.as_bytes());
+        let _ = out.write_all(&[0]);
+    }
+    let _ = out.flush();
+    0
+}
+
+/// `github-token -- <gh args>`: print a token for the repository the `gh` command is about; with
+/// none, say why on stderr (when there is a repository) and print nothing.
+pub fn run_github_token(gh_args: &[String]) -> i32 {
+    let Some((owner, repo)) = repo_of_command_here(gh_args) else {
         return 0;
     };
     match ask(&owner, &repo) {
-        Answer::Token(token) => {
-            println!("{token}");
+        Answer::Token(granted) => {
+            println!("{}", granted.token);
             0
         }
         Answer::Refused(why) => {
@@ -306,13 +414,13 @@ mod tests {
     #[test]
     fn a_token_comes_from_srv_for_the_repository_as_the_calling_agent() {
         let _guard = crate::test_env_lock::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let (url, srv) = stub_srv(200, r#"{"token":"ghs_FROM_SRV","expiresAt":1,"botSlug":"muxagent","botUserId":7}"#);
+        let (url, srv) = stub_srv(200, r#"{"token":"ghs_FROM_SRV","expiresAt":1,"botSlug":"muxagent","botUserId":7,"ownerGithubId":42,"ownerLogin":"octo"}"#);
         std::env::set_var("AGENTMUX_LOCAL_URL", &url);
         std::env::set_var("AGENTMUX_AUTH_KEY", "key");
         std::env::set_var("AGENTMUX_AGENT_TOKEN", "agent-token-1");
         let answer = ask("octo", "hello");
         let seen = srv.join().unwrap();
-        assert!(matches!(&answer, Answer::Token(t) if t == "ghs_FROM_SRV"));
+        assert!(matches!(&answer, Answer::Token(t) if t.token == "ghs_FROM_SRV" && t.owner_github_id == Some(42) && t.bot_slug.as_deref() == Some("muxagent")));
         assert!(seen.starts_with("POST /api/v1/github/token "), "{seen}");
         let lower = seen.to_ascii_lowercase();
         assert!(lower.contains("x-agent-token: agent-token-1"), "who is asking is the agent's own token: {seen}");
@@ -330,6 +438,31 @@ mod tests {
         let answer = ask("octo", "hello");
         srv.join().unwrap();
         assert!(matches!(&answer, Answer::Refused(why) if why == "the AgentMux GitHub App isn't installed on octo"), "refused with srv's words");
+    }
+
+    #[test]
+    fn the_owner_tag_goes_into_the_body_however_it_is_given() {
+        let tag = owner_tag(42);
+        assert_eq!(tag, "<!-- agentmux:owner_github_id=42 -->");
+        let copy = |p: &str| Some(format!("{p}.tagged"));
+        let got = rewrite_pr_body(&args(&["pr", "create", "--title", "t", "--body", "Text\n"]), &tag, copy);
+        assert_eq!(got[5], format!("Text\n\n{tag}\n"));
+        let got = rewrite_pr_body(&args(&["pr", "edit", "-b", "x", "--body=y", "--body-file", "f.md", "-F", "-", "--body-file=g.md"]), &tag, copy);
+        assert_eq!(got[2], "-b");
+        assert!(got[3].ends_with(&format!("{tag}
+")));
+        assert_eq!(got[4], format!("--body=y
+
+{tag}
+"));
+        assert_eq!(&got[5..7], &["--body-file".to_string(), "f.md.tagged".to_string()]);
+        assert_eq!(&got[7..9], &["-F".to_string(), "-".to_string()], "stdin can't be copied");
+        assert_eq!(got[9], "--body-file=g.md.tagged");
+        // Already there: not twice. No body: nothing to add it to.
+        let again = rewrite_pr_body(&args(&["pr", "create", "-b", &format!("x\n{tag}")]), &tag, copy);
+        assert_eq!(again[3], format!("x\n{tag}"));
+        assert_eq!(rewrite_pr_body(&args(&["pr", "create", "--fill"]), &tag, copy), args(&["pr", "create", "--fill"]));
+        assert_eq!(rewrite_pr_body(&args(&["pr", "create", "-b", ""]), &tag, copy)[3], format!("{tag}\n"));
     }
 
     #[test]

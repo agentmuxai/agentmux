@@ -26,7 +26,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Once;
 
 const COUNT: &str = "GIT_CONFIG_COUNT";
-const HOOKS_PATH_KEY: &str = "core.hooksPath";
+pub(crate) const HOOKS_PATH_KEY: &str = "core.hooksPath";
 /// Larger counts already in the env are not trusted (and not looped over).
 const MAX_ENTRIES: usize = 256;
 /// The line `gh-agent` writes into every hook it generates.

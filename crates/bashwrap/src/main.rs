@@ -41,6 +41,9 @@
 //! - `git-credential <op>` and `github-token -- <gh args>` — GitHub tokens for an agent's `git`
 //!   and `gh`, from srv. See `github.rs`.
 //!
+//! - `git-hook <name>`, `git-env -- <git args>` and `github-owner-tag -- <gh args>` — the guards
+//!   and attribution on an agent's pushes and commits. See `git_hooks.rs`, `secret_scan.rs`.
+//!
 //! - `sessionstart --part N` — registered as Claude Code's `SessionStart`
 //!   hook, once per part. Delivers part N of the agent's memory as the
 //!   hook's `additionalContext`. See `sessionstart.rs` and
@@ -58,11 +61,13 @@ mod askpass;
 mod bash_wrap;
 mod cwd_state;
 mod exec_args;
+mod git_hooks;
 mod github;
 mod idle_gate;
 mod hook;
 mod precompact;
 mod prefix;
+mod secret_scan;
 mod sessionstart;
 mod shim_functions;
 #[cfg(test)]
@@ -107,6 +112,29 @@ enum Command {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         gh_args: Vec<String>,
     },
+    /// The arguments of a `gh pr create` or `gh pr edit` with the owner tag in its body, each
+    /// followed by a NUL byte. The `gh` function this wrapper exports calls it.
+    GithubOwnerTag {
+        /// The arguments `gh` was given.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        gh_args: Vec<String>,
+    },
+    /// One of the git hooks srv installs for an agent (`pre-push`, `prepare-commit-msg`): the
+    /// repository's own hook, then AgentMux's part (the push scan, the commit trailers).
+    GitHook {
+        /// The hook's name.
+        name: String,
+        /// What git gave the hook.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+    /// Refuse a `git` command that would skip the hooks, and print the environment a commit needs.
+    /// The `git` function this wrapper exports calls it.
+    GitEnv {
+        /// The arguments `git` was given.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        git_args: Vec<String>,
+    },
 }
 
 fn main() -> Result<()> {
@@ -146,6 +174,9 @@ fn main() -> Result<()> {
         Command::Sessionstart(args) => rt.block_on(sessionstart::run(args)),
         Command::GitCredential { op } => std::process::exit(github::run_git_credential(&op)),
         Command::GithubToken { gh_args } => std::process::exit(github::run_github_token(&gh_args)),
+        Command::GithubOwnerTag { gh_args } => std::process::exit(github::run_github_owner_tag(&gh_args)),
+        Command::GitHook { name, args } => std::process::exit(git_hooks::run_git_hook(&name, &args)),
+        Command::GitEnv { git_args } => std::process::exit(git_hooks::run_git_env(&git_args)),
     }
 }
 
