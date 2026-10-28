@@ -7,9 +7,12 @@
 use bollard::image::CreateImageOptions;
 use futures_util::StreamExt as _;
 
+mod pinned;
+
 use super::{ContainerError, ContainerManager};
+use crate::backend::agent_image_digest::{pin_for_running_version, Pin};
 use crate::backend::container_image::{
-    classify_pull_error, is_legacy_agent_image, is_versioned_agent_image, PullFailure, DEFAULT_AGENT_IMAGE,
+    classify_pull_error, is_legacy_agent_image, is_versioned_agent_image, versioned_agent_image, PullFailure, DEFAULT_AGENT_IMAGE,
 };
 
 impl ContainerManager {
@@ -17,6 +20,17 @@ impl ContainerManager {
     /// is replaced by the public base image, and a version-pinned base image that
     /// is missing or unreachable by `:latest`. Returns the image to run.
     pub(super) async fn pull_with_fallback(&self, image: &str, observe: StartObserver<'_>) -> Result<String, ContainerError> {
+        // This AgentMux's own base image is run by the digest its signed release names, when it names one.
+        if image == versioned_agent_image() {
+            match pin_for_running_version().await {
+                Pin::Digest(reference) => {
+                    self.pull_pinned(image, &reference, observe).await?;
+                    return Ok(image.to_string());
+                }
+                Pin::Refused(detail) => return Err(ContainerError::ImagePull { image: image.to_string(), kind: PullFailure::Unverified, detail }),
+                Pin::Unpinned(_) => {}
+            }
+        }
         match self.pull_image(image, observe).await {
             Ok(()) => Ok(image.to_string()),
             Err(ContainerError::ImagePull { kind, .. }) if kind.is_unavailable_image() && is_legacy_agent_image(image) => {

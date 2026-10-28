@@ -26,6 +26,10 @@
 //! launcher's check for an orphaned one reads its environment), a dev build
 //! (people attach debuggers to those), and any process started with
 //! `AGENTMUX_ALLOW_PTRACE=1`.
+//!
+//! A process that holds `SeDebugPrivilege` enabled (an elevated admin token) ignores the
+//! access-control list on Windows, so it can still read a hardened process; this is by design
+//! and the tests that look for a refusal skip on such a runner (`debug_privilege`).
 
 /// Set to anything non-empty to leave a process attachable (a debugger, `perf`).
 pub const ALLOW_PTRACE_ENV: &str = "AGENTMUX_ALLOW_PTRACE";
@@ -460,6 +464,9 @@ mod tests {
         const SYNCHRONIZE: u32 = 0x10_0000;
         const ACCESS_DENIED: u32 = 5;
 
+        if crate::debug_privilege::refusal_cannot_be_observed("another_process_of_the_user_is_refused_the_memory_of_a_hardened_one") {
+            return;
+        }
         let mut child = Command::new(std::env::current_exe().unwrap())
             .args(["--exact", "process_hardening::tests::hardened_process_child", "--ignored", "--nocapture"])
             .env("AGENTMUX_PH_CHILD", "1")

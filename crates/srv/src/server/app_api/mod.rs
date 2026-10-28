@@ -25,6 +25,8 @@ use crate::backend::storage::bundles::Bundle;
 use super::AppState;
 
 pub(crate) mod agent_attach;
+pub(crate) mod agent_lifecycle;
+pub(crate) mod agent_watch;
 #[cfg(test)]
 mod agent_attach_tests;
 pub(crate) mod agent_block;
@@ -113,7 +115,7 @@ mod shells;
 pub(crate) mod kanban;
 mod jobs;
 mod jobs_edit;
-mod connectivity;
+pub(crate) mod connectivity;
 pub(crate) mod layout_intent;
 
 /// Register all MuxAPI handlers on the RPC engine.
@@ -214,6 +216,21 @@ pub(super) fn global_output_source(
         }
         _ => None,
     }
+}
+
+/// Whether the shared-store zone of the agent `block_id` belongs to was found corrupt in this
+/// process. The block's history reads then come from its own copy, which holds only what this
+/// block wrote, so the pane tells the user earlier history may be missing.
+pub(super) fn history_damaged(mstore: &Arc<crate::backend::storage::store::Store>, block_id: &str) -> bool {
+    let Some(block) = mstore.get::<Block>(block_id).ok().flatten() else { return false };
+    let archived = block
+        .meta
+        .get(crate::backend::session_archive::META_SESSION_ARCHIVED_AT)
+        .and_then(|v| v.as_i64())
+        .is_some_and(|v| v > 0);
+    !archived
+        && crate::backend::agent_session::agent_zone_for_block_meta(&block.meta)
+            .is_some_and(|zone| crate::backend::transcript::damage::is_damaged(&zone))
 }
 
 /// Exact non-blank line count of the `output` file in `zone`, computed via the

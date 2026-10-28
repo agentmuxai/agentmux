@@ -655,12 +655,40 @@ pub(crate) async fn stop_one_agent_block(
 
 fn register_agent_stop(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let state = state.clone();
-    engine.register_typed(COMMAND_AGENT_STOP_API, move |cmd: CommandAgentStopApiData, _ctx| {
+    engine.register_typed(COMMAND_AGENT_STOP_API, move |cmd: CommandAgentStopApiData, ctx| {
         let state = state.clone();
         async move {
-                stop_one_agent_block(&state, &cmd.block_id, cmd.signal.as_deref(), cmd.stop_background).await
+            // A connection registered as an agent that stops another agent waits for the person's
+            // override window, like `Agents stop`; the window's own connection stops at once.
+            if let Some(pending) = override_window_for(&state, &ctx.agent_id, &cmd).await {
+                return Ok(pending);
+            }
+            stop_one_agent_block(&state, &cmd.block_id, cmd.signal.as_deref(), cmd.stop_background).await
         }
     });
+}
+
+/// The answer when `agent.stop` on `cmd.block_id` opened an override window for the agent `caller`
+/// (a connection's registered agent, empty for the window), or `None` when the stop is immediate:
+/// the window's own, the agent's own block, or a worker it opened.
+async fn override_window_for(state: &AppState, caller: &str, cmd: &CommandAgentStopApiData) -> Option<AgentStopResult> {
+    if caller.trim().is_empty() {
+        return None;
+    }
+    let (store, block, name) = (state.mstore.clone(), cmd.block_id.clone(), caller.to_string());
+    let (caller_uid, target_uid) = tokio::task::spawn_blocking(move || {
+        (crate::backend::agent_resolve::resolve_agent_id(&store, &name).ok(), crate::backend::agent_resolve::uid_for_block(&store, &block))
+    })
+    .await
+    .ok()?;
+    if let (Some(c), Some(t)) = (&caller_uid, &target_uid) {
+        if !super::agent_lifecycle::needs_window(&state.mstore, c, t) {
+            return None;
+        }
+    }
+    let by = caller_uid.as_deref().unwrap_or(caller);
+    let (_, pending) = super::fleet::fleet_stop_keep_pane_with_override_opts(state, by, vec![cmd.block_id.clone()], cmd.signal.as_deref(), cmd.stop_background, None).await;
+    pending.into_iter().next().map(|_| AgentStopResult { block_id: cmd.block_id.clone(), status: "pending_override".to_string(), exit_code: None })
 }
 
 fn register_agent_status(engine: &Arc<WshRpcEngine>, state: &AppState) {

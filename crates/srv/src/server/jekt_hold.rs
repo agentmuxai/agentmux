@@ -216,6 +216,9 @@ async fn hold_with_reason(
         Ok(HoldOutcome::Held) | Ok(HoldOutcome::AlreadyHeld) => {
             replay.delivered();
             crate::backend::agent_resolve::record_uid_fallback("jekt.held");
+            if reason == HoldReason::NotRunning {
+                super::jekt_start::start_for_held(state, req, &target_uid);
+            }
             let error = match reason {
                 HoldReason::NotRunning => format!(
                     "agent {target} is not running — held for delivery on this AgentMux instance for up to 24 h"

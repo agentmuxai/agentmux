@@ -21,7 +21,8 @@ fn register_blockfile_line_count(engine: &Arc<WshRpcEngine>, state: &AppState) {
             let filestore = filestore.clone();
             let global_store = global_store.clone();
             async move {
-
+                let wants_flag = cmd.filename == crate::backend::agent_session::OUTPUT_FILE && cmd.archive_zone.is_none();
+                let result: Result<BlockfileLineCountResult, String> = async {
                 tracing::info!(block_id = %cmd.block_id, filename = %cmd.filename, "blockfile:line_count");
 
                 // Cross-channel fallback (checked first): when this channel has
@@ -131,6 +132,17 @@ fn register_blockfile_line_count(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 }
 
                 Ok(BlockfileLineCountResult { count, ..Default::default() })
+                }
+                .await;
+                // An empty count from the block's own copy of a damaged history is not "no history":
+                // the pane tells the user earlier history may be missing.
+                match result {
+                    Ok(mut r) if wants_flag && super::history_damaged(&mstore, &cmd.block_id) => {
+                        r.history_damaged = Some(true);
+                        Ok(r)
+                    }
+                    other => other,
+                }
             }
         },
     );
@@ -200,15 +212,25 @@ pub(crate) async fn read_range(
     cmd: CommandBlockfileReadRangeData,
 ) -> Result<BlockfileReadRangeResult, String> {
     let damaged = crate::backend::transcript::damage::damaged_count();
+    let (block_id, is_output, archive_zone) = (cmd.block_id.clone(), cmd.filename == crate::backend::agent_session::OUTPUT_FILE, cmd.archive_zone.clone());
+    let check = mstore.clone();
     let first = read_range_once(broker.clone(), filestore.clone(), global_store.clone(), mstore.clone(), cmd.clone()).await;
-    if crate::backend::transcript::damage::damaged_count() == damaged {
-        return first;
+    let mut result = if crate::backend::transcript::damage::damaged_count() == damaged {
+        first
+    } else {
+        // That read found the agent's shared zone corrupt (an index rebuild or a read
+        // failed on it, or on another agent's at the same time). The zone is marked
+        // now, so the source resolves to the block's own copy: answer from it, not
+        // with the failure.
+        read_range_once(broker, filestore, global_store, mstore, cmd).await
+    };
+    // The pane says so when what it was given is the block's own copy of a damaged history.
+    if is_output && archive_zone.is_none() && super::history_damaged(&check, &block_id) {
+        if let Ok(r) = result.as_mut() {
+            r.history_damaged = Some(true);
+        }
     }
-    // That read found the agent's shared zone corrupt (an index rebuild or a read
-    // failed on it, or on another agent's at the same time). The zone is marked
-    // now, so the source resolves to the block's own copy: answer from it, not
-    // with the failure.
-    read_range_once(broker, filestore, global_store, mstore, cmd).await
+    result
 }
 
 async fn read_range_once(
@@ -1033,7 +1055,7 @@ fn counted_line_count(
     let state = fs.line_state(zone, OUTPUT_FILE).ok()??;
     let state = if state.counted.is_some() { state } else { fs.init_line_counter(zone, OUTPUT_FILE).ok()?? };
     let counted = state.counted?;
-    Some(BlockfileLineCountResult { count: counted.lines, stream: Some(stream), gen: Some(counted.gen) })
+    Some(BlockfileLineCountResult { count: counted.lines, stream: Some(stream), gen: Some(counted.gen), history_damaged: None })
 }
 
 /// Where `block_id`'s transcript stands, from the same source `read_range`

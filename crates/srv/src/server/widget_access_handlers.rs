@@ -64,7 +64,10 @@ fn packages() -> Vec<WidgetPackageInfo> {
 }
 
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    engine.register_typed("widgets.session", |req: WidgetSessionReq, _ctx| async move {
+    engine.register_typed("widgets.session", |req: WidgetSessionReq, ctx| async move {
+        // The session token carries the widget's permissions (storage, agents:send, net): only the
+        // window that hosts the widget opens one, never an agent.
+        ctx.operator_only("only the AgentMux window opens a widget's session")?;
         let token = widget_access::sessions().open(&packages(), &req.id, &req.hash).map_err(|e| e.to_rpc())?;
         Ok(WidgetSessionResult { token })
     });
@@ -268,6 +271,34 @@ mod tests {
 
     async fn run(st: &AppState, packages: &[WidgetPackageInfo], token: &str, method: &str, params: Value) -> Result<Value, AccessError> {
         call(st, packages, WidgetCallReq { token: token.into(), method: method.into(), params }).await
+    }
+
+    /// Runs `widgets.session` as `ctx` and returns the error text ("" when it answered).
+    async fn open_session_as(ctx: crate::backend::rpc_types::RpcContext) -> String {
+        use crate::backend::rpc_types::RpcMessage;
+        let st = crate::server::tests::test_state();
+        let (engine, mut rx) = crate::backend::rpc::engine::WshRpcEngine::new();
+        register(&engine, &st);
+        engine.set_rpc_context(ctx);
+        engine.handle_message(RpcMessage {
+            command: "widgets.session".to_string(),
+            reqid: "ws-1".to_string(),
+            data: Some(json!({ "id": "acme.nothing", "hash": "h", "blockid": "b" })),
+            ..Default::default()
+        });
+        tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv()).await.unwrap().unwrap().error
+    }
+
+    #[tokio::test]
+    async fn only_the_window_opens_a_widgets_session() {
+        use crate::backend::rpc_types::RpcContext;
+        for ctx in [RpcContext::default(), RpcContext { agent_id: "someone".into(), ..Default::default() }, RpcContext { agent_id: "someone".into(), operator_proven: true, ..Default::default() }] {
+            let error = open_session_as(ctx).await;
+            assert!(error.starts_with("FORBIDDEN: only the AgentMux window opens a widget's session"), "{error}");
+        }
+        // The proven window gets past the gate, to the widget lookup (no such widget here).
+        let error = open_session_as(RpcContext::operator_for_tests()).await;
+        assert!(!error.starts_with("FORBIDDEN"), "{error}");
     }
 
     #[test]

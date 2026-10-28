@@ -3351,6 +3351,25 @@
     }
   },
   {
+    "command": "github.connection",
+    "request": "agentmux_srv::server::agent_handlers::identity::GithubConnectionReq",
+    "requestName": "GithubConnectionReq",
+    "requestTs": {
+      "imports": [
+        "GithubConnectionReq"
+      ],
+      "name": "GithubConnectionReq"
+    },
+    "response": "agentmux_srv::identity::github_connect::GithubConnection",
+    "responseName": "GithubConnection",
+    "responseTs": {
+      "imports": [
+        "GithubConnection"
+      ],
+      "name": "GithubConnection"
+    }
+  },
+  {
     "command": "globalmemory:diff",
     "request": "agentmux_srv::backend::rpc_types::bundle::CommandGlobalMemoryDiffData",
     "requestName": "CommandGlobalMemoryDiffData",

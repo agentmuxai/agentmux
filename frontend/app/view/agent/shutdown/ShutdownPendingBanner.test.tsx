@@ -61,6 +61,12 @@ describe("ShutdownPendingBanner (SPEC_AGENT_SELF_QUIT §6.5)", () => {
         expect(tone).toHaveBeenCalledTimes(1);
     });
 
+    it("marks itself for the person, so an agent's UI click, query and key presses leave it alone", () => {
+        const { container } = mount();
+        handlers.get("agent:shutdown-pending")!(pending("r1"));
+        expect(container.querySelector(".pane-row")?.hasAttribute("data-operator-only")).toBe(true);
+    });
+
     it("shows the reason as text: markup in it creates no element", () => {
         const { container } = mount();
         const hostile = pending("r1");

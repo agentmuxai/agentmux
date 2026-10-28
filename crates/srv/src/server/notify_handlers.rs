@@ -873,7 +873,7 @@ mod live_tests {
             "Settings",
             "FleetBulkStop",
             "",
-            crate::sagas::pending_shutdown::Action::Stop { signal: None },
+            crate::sagas::pending_shutdown::Action::Stop { signal: None, stop_background: None },
         );
         let first = next_event(&mut rx, "notification").await;
         assert_eq!(first["title"], "Stopping agent pane in 30 s");
@@ -990,7 +990,7 @@ mod toast_press_tests {
         let state = test_state();
         let facts: std::collections::BTreeMap<String, String> =
             [("template".to_string(), format!("t-{}", uuid::Uuid::new_v4().simple())), ("publisher".to_string(), "p".to_string())].into_iter().collect();
-        let id = requests::registry().request("u-asker", "asker", "job_template_approve", &facts, "", now_ms()).unwrap().id;
+        let id = requests::registry().request(&format!("u-{}", uuid::Uuid::new_v4().simple()), "asker", "job_template_approve", &facts, "", now_ms()).unwrap().id;
         requests::registry().approve(&id, "boss", now_ms()).unwrap();
         window::open(&state, &id, std::time::Duration::from_secs(60)).unwrap();
         let group = format!("{}{id}", window::TOAST_GROUP_PREFIX);

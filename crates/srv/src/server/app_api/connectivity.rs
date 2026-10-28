@@ -9,6 +9,11 @@ use std::sync::Arc;
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::{NoArgsReq, COMMAND_CONNECTIVITY_STATUS};
 
+/// `GET /api/v1/app/connectivity`: the `App` tool's `network`, the same answer as `connectivity.status`.
+pub(crate) async fn handle_status() -> axum::Json<crate::connectivity::ConnectivityStatus> {
+    axum::Json(crate::connectivity::status())
+}
+
 pub(super) fn register(engine: &Arc<WshRpcEngine>) {
     engine.register_typed(COMMAND_CONNECTIVITY_STATUS, |_req: Option<NoArgsReq>, _ctx| async move {
         Ok::<_, String>(crate::connectivity::status())
@@ -19,6 +24,13 @@ pub(super) fn register(engine: &Arc<WshRpcEngine>) {
 mod tests {
     use super::*;
     use crate::backend::rpc_types::RpcMessage;
+
+    #[tokio::test]
+    async fn the_http_route_answers_the_same_status() {
+        let axum::Json(status) = handle_status().await;
+        assert!(status.revision > 0);
+        assert_eq!(status.services[0].service, "internet");
+    }
 
     #[tokio::test]
     async fn answers_with_the_current_status() {

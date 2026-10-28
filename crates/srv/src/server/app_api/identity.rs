@@ -493,7 +493,7 @@ pub(crate) async fn identity_account_validate_stored_impl<'o>(
     // needed" (and marks the account) rather than probing a dead token.
     if acct.kind == "oauth" && matches!(acct.secret_ref, crate::backend::storage::identities::SecretRef::Keychain { .. }) {
         use crate::identity::oauth_tokens::{access_token_for, KeychainSecrets, LiveHttp};
-        let token = match access_token_for(&LiveHttp, &KeychainSecrets, &state.id_store, &state.identity_store, &acct).await {
+        let token = match access_token_for(&LiveHttp, &KeychainSecrets, &state.id_store, &state.identity_store, &acct, Some(&state.id_store)).await {
             Ok(t) => t,
             Err(e) => return Ok(IdentityAccountValidateResult {
                 valid: false,

@@ -77,6 +77,15 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             if !status.is_success() {
                 anyhow::bail!("the widget wasn't installed: {}", result["error"].as_str().unwrap_or("unknown error"));
             }
+            let mut result = result;
+            if result["status"] == "requested" {
+                result["message"] = json!(format!(
+                    "Asked for the install as a sensitive operation ({}). If the super agent approves, the person sees a \
+                     countdown and can veto it, and the widget is installed when it ends; you'll get [AgentMux] notes as it \
+                     goes. Widget list shows when it is approved; then open it.",
+                    result["review"].as_str().unwrap_or("")
+                ));
+            }
             Ok(serde_json::to_string_pretty(&result).unwrap_or_default())
         }
         "OpenWidget" => {

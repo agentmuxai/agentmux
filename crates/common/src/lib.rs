@@ -29,6 +29,7 @@ pub mod pagefile;
 pub mod platform_name;
 pub mod agent_roots;
 pub mod allowed_origins;
+pub mod debug_privilege;
 pub mod popup_rules;
 pub mod process;
 pub mod process_hardening;

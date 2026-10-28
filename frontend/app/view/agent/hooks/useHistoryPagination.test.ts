@@ -162,6 +162,27 @@ describe("useHistoryPagination — Option E agent-anchored snapshot read", () =>
         expect(model.paneEvents.some((e) => e.type === "InitReady")).toBe(true);
     });
 
+    it("opens ready but says the saved history is damaged when srv answered an empty count from the block's own copy (#125)", async () => {
+        vi.mocked(RpcApi.AgentSessionReadCommand).mockResolvedValue({});
+        vi.mocked(RpcApi.BlockfileLineCountCommand).mockResolvedValue({ count: 0, history_damaged: true });
+        const model = makeMockModel();
+        createRoot((d) => {
+            dispose = d;
+            useHistoryPagination({
+                blockId: "blk-1",
+                model,
+                outputFormat: () => "claude-stream-json",
+                definitionId: "def-claude",
+                log: () => {},
+            });
+        });
+        await flushMicrotasks();
+        await flushMicrotasks();
+        await flushMicrotasks();
+        const ready = model.paneEvents.find((e) => e.type === "InitReady");
+        expect(ready).toMatchObject({ type: "InitReady", historyDamaged: true });
+    });
+
     it("skips the snapshot fast-path entirely when definitionId is unset", async () => {
         vi.mocked(RpcApi.BlockfileLineCountCommand).mockResolvedValue({ count: 0 });
 

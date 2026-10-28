@@ -247,6 +247,9 @@ pub const COMMAND_ACCOUNT_OAUTH_CANCEL: &str = "account.oauth.cancel";
 /// whether one is saved, and forgetting it. Never returns the secret.
 pub const COMMAND_ACCOUNT_OAUTH_CLIENT_GET: &str = "account.oauth.client.get";
 pub const COMMAND_ACCOUNT_OAUTH_CLIENT_CLEAR: &str = "account.oauth.client.clear";
+/// What the GitHub broker says about this AgentMux account's GitHub connection. A grant it
+/// says is gone marks the brokered GitHub account as needing to be connected again.
+pub const COMMAND_GITHUB_CONNECTION: &str = "github.connection";
 
 // Agent ↔ Identity junction
 pub const COMMAND_LINK_AGENT_IDENTITY: &str = "linkagentidentity";

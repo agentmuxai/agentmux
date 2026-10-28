@@ -137,3 +137,54 @@ async fn a_tracked_api_is_probed_at_startup() {
     assert_eq!(h.call_times(), [0]);
     assert_eq!(h.state("model_api:anthropic"), Reachability::Online);
 }
+
+#[tokio::test(start_paused = true)]
+async fn a_network_change_checks_an_online_service_once() {
+    let h = Harness::start(Vec::new(), false);
+    h.shared.report_at(Service::Muxbus, Outcome::Answered, (h.clock)());
+    wait(3_600_000).await;
+    h.shared.network_changed_at((h.clock)());
+    wait(3_600_000).await;
+    assert_eq!(h.call_times(), [3_600_000], "one probe, and no schedule after it");
+    assert_eq!(h.state("muxbus"), Reachability::Online);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_network_change_that_breaks_a_service_shows_it_down_and_keeps_probing() {
+    let refused = || Outcome::Unreachable("no route".into());
+    let h = Harness::start(vec![refused(), refused()], false);
+    h.shared.report_at(Service::Muxbus, Outcome::Answered, (h.clock)());
+    wait(1_000).await;
+    h.shared.network_changed_at((h.clock)());
+    wait(10).await;
+    // One failed probe of an online service is a doubt, not a verdict: a probe follows in five seconds.
+    assert_eq!(h.state("muxbus"), Reachability::Degraded);
+    wait(5_000).await;
+    assert_eq!(h.state("muxbus"), Reachability::Offline);
+    assert_eq!(h.call_times(), [1_000, 6_000]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_network_change_probes_a_down_service_at_once_and_starts_its_backoff_over() {
+    let refused = || Outcome::Unreachable("refused".into());
+    let h = Harness::start(vec![refused(), refused(), refused(), refused(), refused()], false);
+    h.fail(Service::Muxbus);
+    // Probes at 5 s, 15 s, 35 s, 75 s: the next would be 155 s.
+    wait(100_000).await;
+    h.shared.network_changed_at((h.clock)());
+    wait(10).await;
+    assert_eq!(h.call_times(), [5_000, 15_000, 35_000, 75_000, 100_000]);
+    wait(10_000).await;
+    assert_eq!(h.call_times().last(), Some(&110_000), "the backoff began again: ten seconds, not sixty");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_network_change_during_a_probe_has_the_probe_repeated() {
+    let h = Harness::start(Vec::new(), true);
+    h.fail(Service::Muxbus);
+    wait(5_000 + 1_000).await;
+    h.shared.network_changed_at((h.clock)());
+    // The first probe, started at 5 s, gives up at 20 s as a failure about the old network.
+    wait(14_001).await;
+    assert_eq!(h.call_times(), [5_000, 20_000], "repeated at once, not after the doubled interval");
+}

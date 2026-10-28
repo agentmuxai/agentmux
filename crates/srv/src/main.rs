@@ -193,6 +193,9 @@ async fn app_main() {
     // Agent panes no window reconnected to after the restart get their controller a minute in.
     server::controller_backstop::install(&state);
 
+    // Idle agents with no view are stopped after the window (agents:always_available).
+    server::agent_lifecycle::install(&state);
+
     // The helper install asks first (SPEC_REMOTES_PANE_2026_10_05.md §4.9).
     server::app_api::connections::install_helper_consent(&state);
 
@@ -393,6 +396,8 @@ async fn app_main() {
     // Claude config dirs get the auto-compact window `agent:compactat` asks for.
     backend::providers::install_config(Arc::clone(&state.config_watcher));
     backend::context_reading::install_config(Arc::clone(&state.config_watcher));
+    // The Claude CLI's own cross-session messaging is off unless `agent:climessaging` is true.
+    backend::cli_messaging::install_config(Arc::clone(&state.config_watcher));
     // The Supervisor's switch and limits are read live from the settings.
     backend::supervisor::settings::install_config(Arc::clone(&state.config_watcher));
     backend::transcript::framer::install_config(Arc::clone(&state.config_watcher));

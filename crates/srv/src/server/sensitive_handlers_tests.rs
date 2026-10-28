@@ -16,6 +16,8 @@ fn run_nothing() {
 }
 
 struct Fixture {
+    /// Makes this fixture's agents' uids its own: the request registry is shared by every test.
+    tag: String,
     state: AppState,
     _defs: tempfile::TempDir,
 }
@@ -24,13 +26,13 @@ fn fixture() -> Fixture {
     let state = test_state();
     let defs = tempfile::tempdir().unwrap();
     state.mstore.set_def_registry(Arc::new(DefinitionStore::open(defs.path().join("definitions")).unwrap()));
-    Fixture { state, _defs: defs }
+    Fixture { tag: uuid::Uuid::new_v4().simple().to_string(), state, _defs: defs }
 }
 
 impl Fixture {
     /// An agent; its uid is `uid-<name>`.
     fn agent(&self, name: &str) -> (String, String) {
-        let uid = format!("uid-{name}");
+        let uid = format!("uid-{name}-{}", self.tag);
         let mut def = crate::backend::storage::agents::test_agent_def(&uid, name, "claude", "agent", 1, "");
         def.slug = name.to_string();
         self.state.mstore.agent_def_insert(&mut def).unwrap();
