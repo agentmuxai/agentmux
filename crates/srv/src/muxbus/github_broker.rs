@@ -1,8 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! The desktop side of the GitHub broker (agentmux-cloud `/github/v1/*`, spec
-//! SPEC_CONNECT_WITH_GITHUB_2026_10_04.md §4.1, §5.2).
+//! The desktop side of AgentMux Cloud's GitHub broker (`/github/v1/*`).
 //!
 //! The broker holds the AgentMux App's client secret, so a connect, a refresh
 //! and a disconnect all go through it. Every call carries two proofs:
