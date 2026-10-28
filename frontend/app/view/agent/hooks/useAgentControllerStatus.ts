@@ -619,6 +619,9 @@ export function useAgentControllerStatus(
         // in-flight recovery for loginWaiting().
         beginRecoveryFlow();
         setAuthNotice(null);
+        // The launch flow stopped at "sign in" (a container agent has no account until one is bound).
+        const stoppedAtSignIn = store.snapshot().authStatus === "unauthenticated";
+        let sendStarterPrompt = false;
         try {
             const r = await RpcApi.AgentAccountSwitchCommand(TabRpcClient, {
                 agent_id: agentDefinitionId,
@@ -633,8 +636,11 @@ export function useAgentControllerStatus(
             else if (r.status === "queued") setAuthNotice(`Moves to ${r.account_label} when the turn ends.`);
             if (r.failed.length === 0) {
                 opts.onAccountBound?.(account.display_name || account.name);
-                // The launch flow stopped at "sign in", so nothing has started this agent's container yet.
-                if (getBlockMetaKeyAtom(opts.blockId, "agentMode")() === "container") prestartContainerAgent(opts.blockId, opts.log);
+                if (getBlockMetaKeyAtom(opts.blockId, "agentMode")() === "container") {
+                    // Nothing has started this agent's container yet.
+                    prestartContainerAgent(opts.blockId, opts.log);
+                    sendStarterPrompt = stoppedAtSignIn;
+                }
             }
         } catch (e: any) {
             // A failed link upsert surfaces as a notice, like every other
@@ -644,6 +650,14 @@ export function useAgentControllerStatus(
             setAuthNotice(msg);
         } finally {
             endRecoveryFlow();
+        }
+        // A first start sends the starter prompt, as one with an account already does (the launch flow's success
+        // path), so the user never has to type to wake it. After the recovery flow ends and the pane no longer
+        // counts as signed out (the bind is trusted for a container agent, see recheckAuthAfterBind): a send
+        // fast-fails while either holds. onReady self-guards on `agent:sessionid`.
+        if (sendStarterPrompt) {
+            notifyControllerHealthy();
+            opts.onReady?.();
         }
     };
 

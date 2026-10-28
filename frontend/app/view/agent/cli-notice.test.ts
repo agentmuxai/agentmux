@@ -311,3 +311,26 @@ describe("the MCP self-heal row", () => {
         expect(notices.map((n) => n.mcpState)).toEqual(["ok"]);
     });
 });
+
+
+describe("a container agent that is ready and waiting", () => {
+    const ready = (extra: Record<string, unknown> = {}) => ({
+        type: "system",
+        subtype: "agentmux_agent_ready",
+        ready_id: "r-1",
+        provider: "claude",
+        seconds: 18.4,
+        timestamp: TS,
+        ...extra,
+    });
+
+    it("says it is waiting for the user's first message, with how long the start-up took", () => {
+        const node = parseCliNoticeFrame(ready(), 0) as CliNoticeNode;
+        expect(node).toMatchObject({ kind: "agent_ready", id: "agent-ready-r-1" });
+        expect(cliNoticeText(node)).toMatchObject({ label: "Ready (18 s): send a message to start", tone: "info" });
+    });
+
+    it("ignores a frame without an id", () => {
+        expect(parseCliNoticeFrame(ready({ ready_id: undefined }), 0)).toBeNull();
+    });
+});

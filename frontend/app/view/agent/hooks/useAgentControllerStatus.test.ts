@@ -103,6 +103,34 @@ describe("useAgentControllerStatus — binding an account answers the transcript
         });
     });
 
+    it("sends a container agent's starter prompt after a bind that answered its sign-in, and after no other", async () => {
+        const { runLaunchFlow } = await import("../flows/launch-flow");
+        hub.agentDefinitionId = "def-1";
+        hub.agentMode = "container";
+        // A send fast-fails while the pane counts as signed out or a recovery flow is in flight.
+        const sendable: boolean[] = [];
+        let read: () => boolean = () => false;
+        const onReady = vi.fn(() => sendable.push(read()));
+        await createRoot(async (dispose) => {
+            const status = useAgentControllerStatus({ blockId: "block-1", provider: () => claude, log: () => {}, onReady });
+            read = () => !status.canRetry() && !status.loginWaiting();
+            // A plain account switch on a pane that was never waiting on a sign-in starts nothing new.
+            await status.bindExistingAccount(account);
+            expect(onReady).not.toHaveBeenCalled();
+            // The launch flow stopped at "sign in": the bind is what starts the agent, so it sends the starter prompt.
+            vi.mocked(runLaunchFlow).mockImplementationOnce(async (o: any) => {
+                o.setLaunchPhase({ kind: "first-login" });
+                return "auth_failed";
+            });
+            await status.startLaunchFlow();
+            expect(onReady).not.toHaveBeenCalled();
+            await status.bindExistingAccount(account);
+            expect(onReady).toHaveBeenCalledOnce();
+            expect(sendable).toEqual([true]);
+            dispose();
+        });
+    });
+
     it("starts nothing when a pane did not restart on the account", async () => {
         hub.agentDefinitionId = "def-1";
         hub.agentMode = "container";

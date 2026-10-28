@@ -31,6 +31,8 @@ pub const INSTALL_SUBTYPE: &str = "agentmux_cli_install";
 pub const CONTAINER_START_SUBTYPE: &str = "agentmux_container_start";
 pub const VERSION_CHANGED_SUBTYPE: &str = "agentmux_cli_version_changed";
 pub const CONTAINER_IMAGE_SUBTYPE: &str = "agentmux_container_image";
+/// Subtype of the frame that says a container agent is ready and waiting for its first message.
+pub const AGENT_READY_SUBTYPE: &str = "agentmux_agent_ready";
 
 /// Per-agent last-run CLI versions, in [`record_dir`] (no schema change: a
 /// new column would lock older builds out of a shared store.db).
@@ -157,6 +159,19 @@ pub fn container_start_frame(
         frame["error"] = json!(e);
     }
     frame
+}
+
+/// An `agentmux_agent_ready` frame: a container agent's container and CLI are up and nothing is on
+/// its way to it, so the pane waits for the user's first message. `seconds` is the whole start-up.
+pub fn agent_ready_frame(ready_id: &str, provider: &str, seconds: f64) -> Value {
+    json!({
+        "type": "system",
+        "subtype": AGENT_READY_SUBTYPE,
+        "ready_id": ready_id,
+        "provider": provider,
+        "seconds": (seconds * 10.0).round() / 10.0,
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+    })
 }
 
 /// An `agentmux_container_image` frame: the container runs an older agent image than this
@@ -370,6 +385,9 @@ mod tests {
         assert!(f.get("error").is_none());
         let failed = install_frame("i", "claude", "2.1.285", InstallState::Failed, None, Some("exit 1"));
         assert_eq!(failed["error"], "exit 1");
+
+        let ready = agent_ready_frame("r1", "claude", 18.04);
+        assert_eq!((ready["subtype"].as_str(), ready["ready_id"].as_str(), ready["seconds"].as_f64()), (Some(AGENT_READY_SUBTYPE), Some("r1"), Some(18.0)));
 
         let v = version_changed_frame("claude", "2.1.218", "2.1.285", Some("2.1.285"));
         assert_eq!(v["subtype"], VERSION_CHANGED_SUBTYPE);
