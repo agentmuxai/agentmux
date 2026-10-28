@@ -54,3 +54,16 @@ export async function openAgentInActiveTab(agent: Pick<AgentRuntime, "agent_id" 
         return e instanceof Error ? e.message : String(e);
     }
 }
+
+/** Start an agent that has no pane, headless: its process runs and its session resumes, and it gets a
+ *  row of its own in the Swarm. Resolves to why srv refused (a terminal-tier CLI can't run without a
+ *  pane, or the agent can't start now), for the caller to say. */
+export async function startAgent(agent: Pick<AgentRuntime, "agent_id" | "name">): Promise<string | undefined> {
+    try {
+        await RpcApi.AgentStartCommand(TabRpcClient, { agent_id: agent.agent_id });
+        return undefined;
+    } catch (e) {
+        console.warn(`[agent-runtime] starting ${agent.name} failed`, e);
+        return e instanceof Error ? e.message : String(e);
+    }
+}
