@@ -186,6 +186,7 @@ pub(crate) mod packaged_tools;
 pub mod container;
 pub mod container_cli;
 pub mod container_credential;
+pub mod container_routes;
 pub mod container_image;
 pub mod container_listener;
 #[cfg(test)]

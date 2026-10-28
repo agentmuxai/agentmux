@@ -228,6 +228,35 @@ Per-agent isolation (from PR #154) already creates separate config dirs — moun
 
 ---
 
+## Which srv routes a container agent may call
+
+The rule (operator, 2026-10-28): a sandbox agent can do everything a native agent can do except
+directly update and run files on the machine. A container's scoped token (`amxc_…`) is accepted on
+every srv route except the ones in `backend/container_routes.rs`; a route added later is open to
+containers unless it is added there. A refusal answers `403` with `this route is not available to
+container agents: <why, and what to do instead>`.
+
+| Route | Container | Why |
+|---|---|---|
+| `/api/v1/shell/*`, `/api/v1/ptyshell/*` (Terminal, Shell) | no | runs commands on the host |
+| `/api/v1/conn/*`, `/api/v1/askpass` (connections: WSL, SSH as the user) | no | the same, on other machines as the user |
+| `/api/v1/agent/desktop/*` (Desktop control) | no | drives the OS and can launch programs (borderline; left to the operator) |
+| `/api/v1/host/*` | no | the app's own plumbing: approvals and state the windows report |
+| `/agentmux/service`, `/ws`, `/agentmux/wps/publish` | no | generic gateways to everything else |
+| `/agentmux/stream-local-file`, `/agentmux/file`, `/agentmux/file-icon`, `/api/v1/attachments/upload`, `/agentmux/work/media`, `/api/v1/ui/browser/set_files`, `/api/v1/pane/open` | no, for now | take a host path; they open to a path inside the container's own mounts once the path is checked against them (a host path outside would let a sandbox read `~/.ssh`, `~/.aws`) |
+| `/api/v1/agent/globalmemory/{write,remove,revert}` | no | Global Memory is composed into every native agent's context at launch; a container reads it, a native agent writes it |
+| `/api/v1/agent/self/upgrade` | no | replaces the app on the host |
+| `/api/v1/github/token` | no | the host's GitHub tokens are for native agents |
+| `/agentmux/agents/self/keys`, `/api/v1/agent/self/mcp-beat`, `/agentmux/reactive/register` | no | srv does this for a container agent itself |
+| `/agentmux/jobs/stop-run`, `/agentmux/viewer/*`, `/.well-known/*` | no | between AgentMux instances |
+| Everything else: Presence, Vault (with the user's approvals), Browser and UI (open, snapshot, find, act, navigate, eval, screenshot, query, click, shortcuts), Tasks, Schedule, Memory, Message, Agents, Widget, Google, RegisterDevServer, … | yes | what a native agent has |
+
+Two things stay true for the routes that are open. A request is attributed to the agent the token
+was minted for, whatever the body says, and every route opened since the denylist needs that
+identity (`route_needs_identity`). And a container's default browser is its own Incognito jar,
+never the user's Personal profile; it browses as a named profile only if the user switched on
+"Agents may use it" for it in Settings → Browser.
+
 ## Devcontainer Consideration
 
 The [Dev Containers spec](https://containers.dev/) is tempting but adds complexity:
