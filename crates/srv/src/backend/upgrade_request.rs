@@ -77,6 +77,9 @@ pub enum Outcome {
     },
     /// Every window asks the user; the agent hears the answer as a note.
     PendingUser { version: String, id: String },
+    /// Asked for like any sensitive operation (`Sensitive`): the super agent decides, the person
+    /// can veto the countdown. `review` says whom it went to; the agent hears the rest as notes.
+    Requested { version: String, id: String, review: String },
     UpToDate { current: String },
     /// Nothing this AgentMux can install itself; `url` is where the user can.
     Unavailable { message: String, #[serde(skip_serializing_if = "Option::is_none")] url: Option<String> },
@@ -410,6 +413,8 @@ mod tests {
     fn outcomes_read_as_the_tool_expects() {
         let v = serde_json::to_value(Outcome::PendingUser { version: "0.59.27".into(), id: "r1".into() }).unwrap();
         assert_eq!(v, serde_json::json!({ "status": "pending_user", "version": "0.59.27", "id": "r1" }));
+        let r = serde_json::to_value(Outcome::Requested { version: "0.59.27".into(), id: "r2".into(), review: "the super agent has been asked".into() }).unwrap();
+        assert_eq!(r, serde_json::json!({ "status": "requested", "version": "0.59.27", "id": "r2", "review": "the super agent has been asked" }));
         let v = serde_json::to_value(Outcome::Unavailable { message: "m".into(), url: None }).unwrap();
         assert_eq!(v, serde_json::json!({ "status": "unavailable", "message": "m" }));
     }

@@ -121,6 +121,12 @@ pub fn register_runner(op: &'static str, runner: Runner) {
     RUNNERS.lock().unwrap_or_else(|e| e.into_inner()).insert(op, runner);
 }
 
+/// Say what runs `op` unless something already says: how the real runners are registered, so
+/// registering them again (each connection does) never replaces one a test put there.
+pub fn register_default_runner(op: &'static str, runner: Runner) {
+    RUNNERS.lock().unwrap_or_else(|e| e.into_inner()).entry(op).or_insert(runner);
+}
+
 /// Take back what `register_runner` said, for a test of an operation nothing runs.
 #[cfg(test)]
 pub fn unregister_runner(op: &str) {

@@ -62,6 +62,7 @@ pub mod pending_shutdown;
 pub mod redock_floating_pane;
 pub mod self_quit;
 pub mod sensitive_fallback;
+pub mod sensitive_runners;
 pub mod sensitive_window;
 pub mod restore_torn_off_tab;
 pub mod tear_off_block;

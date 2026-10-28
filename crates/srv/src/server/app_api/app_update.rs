@@ -114,8 +114,8 @@ pub(crate) async fn handle_update_status(
 
 /// `POST /api/v1/agent/self/upgrade`: the `App` tool's `upgrade`. Starts the
 /// upgrade when the user's own turn asked for it (`self_quit::gate_upgrade`: as
-/// for `QuitSelf`, but not a Swarm broadcast), otherwise asks the user in every
-/// window.
+/// for `QuitSelf`, but not a Swarm broadcast), otherwise files a sensitive
+/// request: the super agent decides and the person can veto the countdown.
 pub(crate) async fn handle_request_upgrade(
     axum::extract::State(state): axum::extract::State<AppState>,
     caller: Option<axum::Extension<crate::server::caller::Caller>>,
@@ -155,9 +155,27 @@ pub(crate) async fn handle_request_upgrade(
             Outcome::Started { version, stopping: crate::backend::update_restart::stopping_now().await }
         }
         Err(refusal) => {
-            tracing::info!(agent, version = %version, reason, why = refusal.as_str(), "upgrade: asking the user");
-            let id = upgrade_request::ask_user(&state, &block_id, agent, reason, &version);
-            Outcome::PendingUser { version, id }
+            tracing::info!(agent, version = %version, reason, why = refusal.as_str(), "upgrade: asking as a sensitive request");
+            // The agent acting on its own word: the super agent decides, and the person can veto
+            // the countdown (`SPEC_SUPER_AGENT_2026_10_25.md`).
+            let uid = caller
+                .as_deref()
+                .and_then(crate::server::caller::Caller::uid)
+                .map(str::to_string)
+                .or_else(|| crate::backend::reactive::get_global_handler().get_agent(agent).and_then(|r| r.uid))
+                .unwrap_or_default();
+            if uid.is_empty() {
+                return (StatusCode::FORBIDDEN, Json(json!({ "error": "FORBIDDEN: this acts for an agent, so the request must carry that agent's token" }))).into_response();
+            }
+            let facts = std::collections::BTreeMap::from([("version".to_string(), version.clone())]);
+            match crate::server::sensitive_handlers::file_request(&state, &uid, agent, "upgrade", &facts, reason).await {
+                Ok(filed) => Outcome::Requested {
+                    version,
+                    id: filed["id"].as_str().unwrap_or_default().to_string(),
+                    review: filed["review"].as_str().unwrap_or_default().to_string(),
+                },
+                Err(e) => return (StatusCode::CONFLICT, Json(json!({ "error": e }))).into_response(),
+            }
         }
     };
     Json(outcome).into_response()
