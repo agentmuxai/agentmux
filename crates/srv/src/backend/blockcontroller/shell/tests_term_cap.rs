@@ -203,3 +203,19 @@ fn the_notice_waits_for_a_boundary_and_is_then_written_once() {
     assert!(write(b"2mgreen\x1b[0m\r\n"), "the next append ends cleanly: announced now");
     assert!(!write(b"after\r\n"), "and only once");
 }
+
+#[test]
+fn converting_or_widening_a_file_that_lost_nothing_announces_nothing() {
+    let fs = FileStore::open_in_memory().unwrap();
+    // Stored before the cap, and far under it.
+    fs.make_file("b", TERM_FILE, FileMeta::new(), FileOpts::default()).unwrap();
+    let at = fs.append_data_at("b", TERM_FILE, b"a few lines\r\n").unwrap();
+    assert!(!after_append_capped(&fs, "b", at, b"a few lines\r\n", 50 * MB), "converted, nothing dropped");
+    assert!(fs.stat("b", TERM_FILE).unwrap().unwrap().opts.circular);
+    assert!(fs.stat("b", TERM_FILE).unwrap().unwrap().meta.get("trimmed").is_none());
+
+    // The setting raised from 50 to 100 MB: the options change, the data doesn't.
+    let at = fs.append_data_at("b", TERM_FILE, b"more\r\n").unwrap();
+    assert!(!after_append_capped(&fs, "b", at, b"more\r\n", 100 * MB));
+    assert_eq!(fs.stat("b", TERM_FILE).unwrap().unwrap().opts.maxsize, 100 * MB);
+}

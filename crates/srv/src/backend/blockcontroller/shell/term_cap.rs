@@ -140,14 +140,20 @@ fn after_append_capped(fs: &FileStore, block_id: &str, start: i64, data: &[u8], 
         trim = true;
     }
     let announced = current.meta.get("trimmed").and_then(serde_json::Value::as_bool) == Some(true);
+    let mut removed = 0;
     if trim && cap > 0 {
-        if let Err(e) = fs.trim_circular_head(block_id, TERM_FILE) {
-            tracing::warn!(block_id = %block_id, error = %e, "term cap: trim failed");
-            return false;
+        match fs.trim_circular_head(block_id, TERM_FILE) {
+            Ok(n) => removed = n,
+            Err(e) => {
+                tracing::warn!(block_id = %block_id, error = %e, "term cap: trim failed");
+                return false;
+            }
         }
     }
-    // Dropped output is announced once, at the first boundary where text fits.
-    let dropped = trim && cap > 0 || current.meta.contains_key(crate::backend::storage::filestore::RETAINED_FROM_KEY);
+    // Output actually deleted (now, or by an earlier append that wasn't at a
+    // boundary) is announced once, at the first boundary where text fits. A
+    // file merely converted to the cap, or under a wider one, lost nothing.
+    let dropped = removed > 0 || current.meta.contains_key(crate::backend::storage::filestore::RETAINED_FROM_KEY);
     if announced || !dropped || !ends_at_boundary(data) {
         return false;
     }
