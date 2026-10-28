@@ -24,7 +24,7 @@ interface MemoryContentProps {
     draft?: string;
     onDraftInput?: (value: string) => void;
     /** "markdown" renders the read-only view as Markdown (Memory);
-     *  "plain" as preformatted text (the Stash, which always has). */
+     *  "plain" as preformatted text (no current caller). */
     view?: "markdown" | "plain";
     placeholder?: string;
     emptyText?: string;

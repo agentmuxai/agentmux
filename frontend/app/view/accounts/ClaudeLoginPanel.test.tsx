@@ -161,8 +161,8 @@ describe("ClaudeLoginPanel — staleAliasProvider cleanup (reagent P0 on PR #241
     });
 });
 
-describe("ClaudeLoginPanel — Stash link verification (codex P1 on PR #2414)", () => {
-    it("does NOT show success for a Stash flow (linkTarget set) when the account was persisted but the agent link itself never landed", async () => {
+describe("ClaudeLoginPanel — re-login link verification (codex P1 on PR #2414)", () => {
+    it("does NOT show success for a linkTarget flow when the account was persisted but the agent link itself never landed", async () => {
         // finalizeAccount (run-provider-login.ts) catches and only logs a
         // LinkAgentIdentityCommand failure — onAccountRegistered still
         // fires. This is exactly that: the account exists, but no link row
@@ -185,8 +185,7 @@ describe("ClaudeLoginPanel — Stash link verification (codex P1 on PR #2414)", 
     it("reagent P2 on PR #2414 (round 4): Retry after a link-verification failure reuses the account THIS panel already minted, instead of re-minting a second one", async () => {
         // First attempt: Connectors' bare-Connect shape (no existingAccountId
         // prop) mints a NEW account and persists it, but the agent-link
-        // check fails — mirrors the test above, just with a Stash
-        // linkTarget added so there's an agent to (fail to) link to.
+        // check fails — mirrors the test above, just with a linkTarget added so there's an agent to (fail to) link to.
         hub.runProviderLogin.mockImplementationOnce(async (opts: any) => {
             opts.onAccountRegistered?.("acct-new", "/tmp/acct-new");
             return "inapp-success";
@@ -233,7 +232,7 @@ describe("ClaudeLoginPanel — Stash link verification (codex P1 on PR #2414)", 
         expect(hub.refreshAccountCache).toHaveBeenCalled();
     });
 
-    it("reagent P0 on PR #2414 (round 3): does NOT show success when the only matching row is the STALE ALIAS link, not the canonical 'claude' one — a Stash re-login refreshes the SAME account_id, so an account_id-only check is vacuously satisfied by the pre-existing alias row even when the new canonical link insert silently failed", async () => {
+    it("reagent P0 on PR #2414 (round 3): does NOT show success when the only matching row is the STALE ALIAS link, not the canonical 'claude' one — a re-login refreshes the SAME account_id, so an account_id-only check is vacuously satisfied by the pre-existing alias row even when the new canonical link insert silently failed", async () => {
         hub.runProviderLogin.mockImplementation(async (opts: any) => {
             // A re-login: onAccountRegistered fires with the SAME account
             // id the alias row already points at (registeredAccountId ===
@@ -322,33 +321,33 @@ describe("ClaudeLoginPanel — login-runner rejection (codex P2 on PR #2414)", (
 });
 
 describe("ClaudeLoginPanel — nested modal stacking (Fix 3 of ANALYSIS_ARMORY_STASH_CREDENTIAL_VISIBILITY_GAP_2026_08_04.md)", () => {
-    // ClaudeLoginPanel's own `Modal` is opened from INSIDE the Agent Stash's
-    // Accounts tab, which is itself already inside a canonical `Modal`
-    // (AgentStashModal, dispatched via modal-dispatch.tsx/ModalLayer.tsx).
+    // ClaudeLoginPanel's own `Modal` is opened from INSIDE another dialog
+    // that is itself already a canonical `Modal` (a pane's modal layer,
+    // dispatched via modal-dispatch.tsx/ModalLayer.tsx).
     // The real risk this guards against: if ClaudeLoginPanel were wired
     // through `useModalLayer().open(...)` instead of a plain `<Modal>`
     // (a mistake that's easy to make — that's the established pattern for
     // most of this app's other dialogs), it would hit ModalLayer's
-    // single-`current`-signal "replace" semantics and CLOSE the Stash
+    // single-`current`-signal "replace" semantics and CLOSE the
     // modal it's nested in, instead of stacking on top of it. Standing up
-    // the full `AgentStashModal` (many unrelated tabs/RPC deps) isn't
+    // a real modal-layer panel (many unrelated RPC deps) isn't
     // needed to exercise this — the behavior lives entirely in the shared
     // `Modal`/`modal-stack.ts` primitive, so a minimal outer `<Modal>`
-    // standing in for AgentStashModal is a faithful, much cheaper test of
+    // standing in for that dialog is a faithful, much cheaper test of
     // the same mechanism.
     it("opening ClaudeLoginPanel from inside another open Modal does not close that outer Modal", async () => {
         const [outerOpen, setOuterOpen] = createSignal(true);
         const [innerOpen, setInnerOpen] = createSignal(false);
 
         render(() => (
-            <Modal open={outerOpen()} onClose={() => setOuterOpen(false)} ariaLabel="Agent Stash">
-                <div>Stash content marker</div>
+            <Modal open={outerOpen()} onClose={() => setOuterOpen(false)} ariaLabel="Outer dialog">
+                <div>Outer content marker</div>
                 <button onClick={() => setInnerOpen(true)}>Connect</button>
                 {innerOpen() && <ClaudeLoginPanel onClose={() => setInnerOpen(false)} />}
             </Modal>
         ));
 
-        expect(screen.getByRole("dialog", { name: "Agent Stash" })).toBeInTheDocument();
+        expect(screen.getByRole("dialog", { name: "Outer dialog" })).toBeInTheDocument();
 
         screen.getByText("Connect").click();
 
@@ -357,7 +356,7 @@ describe("ClaudeLoginPanel — nested modal stacking (Fix 3 of ANALYSIS_ARMORY_S
         await waitFor(() => {
             expect(screen.getByRole("dialog", { name: "Connect Anthropic" })).toBeInTheDocument();
         });
-        expect(screen.getByRole("dialog", { name: "Agent Stash" })).toBeInTheDocument();
-        expect(screen.getByText("Stash content marker")).toBeInTheDocument();
+        expect(screen.getByRole("dialog", { name: "Outer dialog" })).toBeInTheDocument();
+        expect(screen.getByText("Outer content marker")).toBeInTheDocument();
     });
 });

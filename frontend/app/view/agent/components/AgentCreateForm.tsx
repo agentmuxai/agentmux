@@ -246,7 +246,7 @@ export const AgentCreateForm = (props: AgentCreateFormProps): JSX.Element => {
 
     // The provider's first account, re-picked whenever `accounts()` changes
     // (it depends on the async provider resolution, #2596). No account field:
-    // it's changed later in the Stash (SPEC_RENAME_KNOWLEDGE_TO_MEMORY_2026_10_06.md
+    // it's changed later in Connectors → Accounts (SPEC_RENAME_KNOWLEDGE_TO_MEMORY_2026_10_06.md
     // §3.6). System bundles are workspace policy, not a per-agent choice
     // (#2782).
     const realBundles = createMemo(() => bundles().filter((m) => !m.is_blank && !m.is_system));

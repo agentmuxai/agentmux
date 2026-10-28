@@ -23,7 +23,6 @@ export const AGENT_VIEW_SOURCES: readonly string[] = [
     "activity/promotion-clock.ts",
     "startup/sendStartupSequence.ts",
     "activity/useAttachedTaskAxis.ts",
-    "components/AgentStashDrawer.tsx",
     "components/AgentShellDrawer.tsx",
     "components/AgentBottomPanels.tsx",
     "failure/useAccountBinding.ts",

@@ -7,14 +7,14 @@
 use super::*;
 use serde_json::json;
 
-// agent-native-memory-model.ts (`loadFiles`)
+// the native memory model (`loadFiles`)
 #[test]
 fn list_req_accepts_the_payload_the_stub_sends() {
     serde_json::from_value::<CommandNativeMemoryListData>(json!({"agent_id": "a1"}))
         .expect("agent:memory:list must accept {agent_id}");
 }
 
-// agent-native-memory-model.ts (`readSelected`, `selectFile`),
+// the native memory model (`readSelected`, `selectFile`),
 // native-memory-history-model.ts (`nativeMemoryHistorySource`'s `readContent`)
 #[test]
 fn read_file_req_accepts_the_payload_the_stub_sends() {
@@ -24,7 +24,7 @@ fn read_file_req_accepts_the_payload_the_stub_sends() {
     .expect("agent:memory:read_file must accept {agent_id, filename}");
 }
 
-// agent-native-memory-model.ts (the draft's `save` and `createFile`) and
+// the native memory model (the draft's `save` and `createFile`) and
 // NativeMemoryFileView.tsx (the draft's `save`) — EVERY call site sends
 // `provenance: { source: "human" }` and none sends `detail`, so the
 // nested `default_detail` path is the only one the UI ever exercises.

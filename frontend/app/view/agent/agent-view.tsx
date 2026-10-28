@@ -75,7 +75,6 @@ import { HistoryLoadingRow } from "./components/HistoryLoadingRow";
 import { AgentFooter } from "./components/AgentFooter";
 import { AgentSearchBar } from "./components/AgentSearchBar";
 import { collapseDrawerOnShellExit } from "./shell-exit-collapse";
-import { AgentStashDrawer } from "./components/AgentStashDrawer";
 import { BtwOverlay } from "./components/BtwOverlay";
 import { SlashCommandPicker } from "./components/SlashCommandPicker";
 import { SlashHelpPanel } from "./components/SlashHelpPanel";
@@ -182,29 +181,13 @@ export const AgentPresentationView = ({
     // tab with no agentId yet — see that component's comment for the full
     // rationale.
 
-    // Wire the Stash drawer's open/close/read callbacks into the model so the
-    // header toggle can drive it without the model holding a SolidJS context.
-    // The drawer replaced a modal (SPEC_AGENT_STASH_PANE_MIGRATION_2026_09_22.md
-    // §3.3), so each callback is a one-liner on the reducer; the names keep
-    // their `...StashModal` spelling to avoid churn. `_openModal` gives the
-    // right-click menu this pane's own modal layer (agent-body-menu.ts).
+    // `_openModal` gives the right-click menu this pane's own modal layer
+    // (agent-body-menu.ts).
     const modalLayer = useContext(ModalLayerContext);
     onMount(() => {
-        model._openAgentStashModal = () => paneModel.dispatchPane({ type: "StashExpand" }, "user");
-        model._closeAgentStashModal = () => paneModel.dispatchPane({ type: "StashCollapse" }, "user");
-        // Read fresh at call time. `paneModel.state` exposes each field as
-        // its own signal (agent-pane-state-store.ts's createFieldSignals),
-        // and agent-model.ts's endIconButtons() reads this inside
-        // blockframe.tsx's createMemo — so the icon's highlighted state
-        // tracks `stashOpen` reactively, including closes that don't come
-        // from the button itself.
-        model._isAgentStashOpen = () => paneModel.state.stashOpen;
         model._openModal = (req) => modalLayer?.open(req);
     });
     onCleanup(() => {
-        model._openAgentStashModal = null;
-        model._closeAgentStashModal = null;
-        model._isAgentStashOpen = null;
         model._openModal = null;
     });
 
@@ -1243,17 +1226,6 @@ export const AgentPresentationView = ({
             <PaneLoadingCover phase={readiness.phase} />
             {/* Shutdown log while the pane closes in place (SPEC_AGENT_SELF_QUIT_2026_09_24.md §5.5). */}
             <ShutdownOverlay blockId={model.blockId} agentName={agentName()} />
-            {/* Stash drawer: a DIRECT flex child of `.agent-view`, outside
-                `.agent-view-zoomed` (components/AgentStashDrawer.tsx). */}
-            <AgentStashDrawer
-                open={paneModel.state.stashOpen}
-                blockId={model.blockId}
-                persistedHeight={block()?.meta?.["agent:stashheight"] as number | undefined}
-                agentId={agentId}
-                agentName={agentName()}
-                workingDirectory={(block()?.meta?.["cmd:cwd"] as string) || currentAgent()?.working_directory || ""}
-                hasDefinition={currentAgent() != null}
-            />
             <div class="agent-view-zoomed" style={{ zoom: zoomFactor() }}>
             {/* Portaled above the tab strip; see components/AgentProgressBar.tsx. */}
             <AgentProgressBar

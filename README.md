@@ -58,7 +58,7 @@ Cross-platform (Windows, macOS, Linux). Rust backend (Tokio + Axum). CEF host (b
 - **Swarm** — A live view of every agent and its subagents, background tasks and todos, including agents on other machines you're connected to. Follow one agent, or broadcast a message to several at once.
 - **Accounts** — Sign-ins and keys for providers and services (Claude, Codex, GitHub, AWS, API keys and more), kept in Connectors → Accounts and bound to each agent, at most one per provider. They survive renames; switching an agent's account restarts that agent.
 - **Bundles** — A collection of instructions, context files and skills, captured once and reused across agents (renamed from "presets"). MCP servers aren't part of a bundle; they're bound to agents in Connectors. Backend: `db_bundles`; managed in the Memory pane (widget bar or hamburger → Memory → Bundles).
-- **Memory** — The Memory pane holds **Global Memory** (instructions every agent gets at launch), each agent's **Personal Memory** (its own memory files, with history, `agent:memory:*`), Skills and Bundles. An agent's Stash shows its own Personal Memory, the same data. Deeper cross-session memory is actively in development.
+- **Memory** — The Memory pane holds **Global Memory** (instructions every agent gets at launch), each agent's **Personal Memory** (its own memory files, with history, `agent:memory:*`), Skills and Bundles. Right-click an Agent pane and choose **Personal memory** to open that agent's memory there. Deeper cross-session memory is actively in development.
 - **AgentMux owns the session state** — Codex, Gemini, Qwen, Kimi, Mux Code and Antigravity are invoked once per turn. Claude Code runs as a persistent stream, and Copilot, OpenClaw, Pi, OpenCode, Kilo Code, Cline, goose, Grok Build and DeepSeek Harness as long-lived [ACP](https://agentclientprotocol.com/) processes, and Muse Code as a long-lived `muse serve` process speaking its own protocol, MSP. Aider and Crush run their own interface in a terminal pane. Either way AgentMux holds the durable session state, so a conversation survives a restart of its CLI. Measured memory use is in [#4714](https://github.com/agentmuxai/agentmux/issues/4714): an idle AgentMux with one terminal commits about 740 MB on Windows, against about 1,010 MB for an idle VS Code.
 - **Reducer stack** — The launcher, host and sidecar each keep their state in a reducer with a structured event log, so "what mutated this state?" has one place to look.
 - **Browser pane** — Native `CefBrowserView` embedded as a child window of the AgentMux frame — full Chromium fidelity (links, popups, DRM) without iframe limitations.
@@ -212,7 +212,7 @@ full rollout plan: [`docs/specs/SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_1
 
 | Surface | How to reach it |
 |---|---|
-| **Agent setup (the Stash)** | The suitcase button in an Agent pane's header opens a drawer with seven tabs: **Accounts** (the account this agent signs in with), **Personal Memory** (its own memory files, the same data as Memory → Personal), **MCP Servers** and **Skills** (agent-private or global entries), **Bundles** (in order, the bundles the agent starts with), **Registration** (its identity for messages between machines) and **Devices** (whether a paired device may watch it). |
+| **Agent setup** | Right-click an Agent pane for **Seat…**, **Bundles…** (in order, the bundles the agent starts with) and **Personal memory**; **My Agents** has the same, plus **Environment…**. The accounts an agent signs in with are in **Connectors → Accounts**, its MCP servers in **Connectors → MCP servers**, its skills in **Memory → Skills**, its registration for messages between machines in **Warden → Host**, and the agents hidden from paired devices in **Settings → Paired devices**. |
 | **The ≡ menu** | In the top tab bar: New Tab, New Window, Theme, Opacity, Layouts, Settings, Command Palette, Connectors, Memory, Toolchain, DevTools, Online Docs, Exit. Settings has ten sections (Appearance, Window & Panes, Browser, Terminal, Sounds, Notifications & Tray, Recording, Paired devices, Widgets, Advanced); a footer button opens the raw `settings.json` in your default editor. |
 | **Command Palette** | **Ctrl+Shift+P** (also **Ctrl+P** outside a terminal; **⌘P** on macOS), or the ≡ menu. Every keyboard shortcut is listed in Help and in [docs/keybindings.md](docs/keybindings.md). |
 | **DevTools** | ≡ menu → DevTools. Toggles Chromium DevTools. |
@@ -238,7 +238,7 @@ You can also rename an agent pane's tab. Nothing on disk moves — the working d
 
 ### Agent identity (accounts)
 
-Assign an agent its accounts (a GitHub sign-in, an AWS profile, an Anthropic API key, and so on) in its Stash → **Accounts**, or for any agent in **Connectors → Accounts**. An agent has at most one account per provider. Accounts survive renames. Switching an agent's account restarts that agent, so let its current turn finish first.
+Assign an agent its accounts (a GitHub sign-in, an AWS profile, an Anthropic API key, and so on) in **Connectors → Accounts**. An agent has at most one account per provider. Accounts survive renames. Switching an agent's account restarts that agent, so let its current turn finish first.
 
 An agent's own `gh` is deliberately not signed in as you: AgentMux points it at an empty config so an agent can't act on GitHub with your login by accident.
 
