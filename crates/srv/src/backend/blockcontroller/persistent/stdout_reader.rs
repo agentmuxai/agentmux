@@ -291,8 +291,11 @@ impl PersistentSubprocessController {
                 // can go back to false without waiting for process exit —
                 // see `send_message`'s matching `set_active_turn(true)`.
                 if is_result_frame {
-                    // The first turn on an expired identity is over: others waiting on its refresh may go.
-                    crate::identity::token_warmup::release(&block_id_read);
+                    // The first turn on an expired identity is over: others waiting on its refresh may go. Not a
+                    // replaced process's late frame, which would free its replacement's hold.
+                    if inner_read.lock().unwrap().spawn_generation == my_generation_read {
+                        crate::identity::token_warmup::release(&block_id_read);
+                    }
                     // A runtime-config change (model/effort/permission)
                     // arrived mid-turn and was deferred rather than
                     // killing this turn — see
