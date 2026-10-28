@@ -83,6 +83,18 @@ pub enum BrokerError {
     UserMismatch { current: GithubUser, new: GithubUser },
     /// GitHub or the broker is briefly unavailable.
     Unavailable(String),
+    /// The installation isn't linked to this account (or its link was revoked).
+    NotLinked,
+    /// The link wasn't verified lately: present a fresh user token to `links/revalidate`, then ask again.
+    LinkStale,
+    /// A requested repository is outside what this account can see in the installation.
+    RepositoryNotVisible(String),
+    /// A requested permission is above what the App may give.
+    PermissionNotAllowed(String),
+    /// The broker refused the request as malformed: a bug here, not something to retry.
+    BadRequest(String),
+    /// The broker isn't set up to mint yet.
+    NotConfigured,
     /// Anything else: the status and the broker's error code.
     Other { status: u16, error: String },
 }
@@ -102,6 +114,14 @@ impl std::fmt::Display for BrokerError {
                 write!(f, "this AgentMux account is connected as @{}, not @{}", current.login, new.login)
             }
             Self::Unavailable(why) => write!(f, "GitHub or AgentMux Cloud is unavailable right now ({why}); try again shortly"),
+            Self::NotLinked => write!(f, "the AgentMux GitHub App isn't linked to this account for that owner: install it in Connectors"),
+            Self::LinkStale => write!(f, "the link to that installation needs to be checked again"),
+            Self::RepositoryNotVisible(repo) => {
+                write!(f, "{repo} isn't a repository this account can reach through the AgentMux GitHub App: add it to the installation, or check you can see it on GitHub")
+            }
+            Self::PermissionNotAllowed(permission) => write!(f, "the AgentMux GitHub App can't give the {permission} permission"),
+            Self::BadRequest(why) => write!(f, "AgentMux Cloud refused a malformed GitHub request ({why})"),
+            Self::NotConfigured => write!(f, "AgentMux Cloud can't mint GitHub tokens yet"),
             Self::Other { status, error } => write!(f, "AgentMux Cloud refused the GitHub request ({status} {error})"),
         }
     }
@@ -166,6 +186,95 @@ pub struct Revoked {
     pub reason: Option<String>,
 }
 
+/// What `POST /github/v1/installation-token` asks for: a token for one installation, narrowed
+/// to the repositories (bare names under the installation's account) and the permissions.
+pub struct InstallationRequest<'a> {
+    pub installation_id: u64,
+    pub repositories: &'a [String],
+    pub permissions: &'a std::collections::BTreeMap<String, String>,
+    /// For the broker's audit line only; never what it trusts.
+    pub agent_id: &'a str,
+}
+
+/// The App's bot: what its commits are attributed to.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct AppBot {
+    pub slug: String,
+    pub bot_user_id: u64,
+}
+
+/// A minted installation token.
+#[derive(Clone, Deserialize)]
+pub struct InstallationToken {
+    pub token: String,
+    /// RFC 3339.
+    pub expires_at: String,
+    #[serde(default)]
+    pub permissions: std::collections::BTreeMap<String, String>,
+    #[serde(default)]
+    pub repository_ids: Vec<u64>,
+    pub app: AppBot,
+}
+
+impl std::fmt::Debug for InstallationToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InstallationToken")
+            .field("expires_at", &self.expires_at)
+            .field("permissions", &self.permissions)
+            .field("repository_ids", &self.repository_ids)
+            .field("app", &self.app)
+            .finish_non_exhaustive()
+    }
+}
+
+impl InstallationToken {
+    /// When the token expires, in epoch seconds; `None` if the broker's timestamp isn't RFC 3339.
+    pub fn expires_at_epoch(&self) -> Option<i64> {
+        chrono::DateTime::parse_from_rfc3339(&self.expires_at).ok().map(|t| t.timestamp())
+    }
+}
+
+/// The GitHub account an installation is on.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct InstallationAccount {
+    pub id: u64,
+    pub login: String,
+}
+
+/// One of the account's links to an installation, from `GET /github/v1/installations`.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct LinkedInstallation {
+    pub installation_id: u64,
+    pub github_account: InstallationAccount,
+    /// `all` or `selected`.
+    #[serde(default)]
+    pub repository_selection: String,
+    /// `active`, `suspended` or `deleted`.
+    pub installation_status: String,
+    /// `active` or `revoked`.
+    pub link_status: String,
+    #[serde(default)]
+    pub verified_at_ms: i64,
+}
+
+impl LinkedInstallation {
+    /// Whether a token can be asked for through this link.
+    pub fn is_usable(&self) -> bool {
+        self.installation_status == "active" && self.link_status == "active"
+    }
+}
+
+/// What a revalidation did.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct Revalidated {
+    #[serde(default)]
+    pub revalidated: Vec<u64>,
+    #[serde(default)]
+    pub revoked: Vec<u64>,
+    #[serde(default)]
+    pub remaining: u64,
+}
+
 /// The body of an authorization-code exchange.
 pub fn code_body(code: &str, code_verifier: &str, redirect_uri: &str, replace: bool) -> Value {
     let mut body = json!({ "grant": "code", "code": code, "code_verifier": code_verifier, "redirect_uri": redirect_uri });
@@ -179,10 +288,20 @@ pub fn code_body(code: &str, code_verifier: &str, redirect_uri: &str, replace: b
 pub fn error_for(status: u16, body: &Value) -> BrokerError {
     let code = body.get("error").and_then(Value::as_str).unwrap_or("").to_string();
     let user = |key: &str| -> Option<GithubUser> { serde_json::from_value(body.get(key)?.clone()).ok() };
+    // A name the broker put in its answer, for a message: short and printable, never trusted further.
+    let text = |key: &str| -> String {
+        body.get(key).and_then(Value::as_str).unwrap_or("").chars().filter(|c| !c.is_control()).take(100).collect()
+    };
     match (status, code.as_str()) {
         (401, "reauthorize") => BrokerError::Reauthorize,
         (401, c) if c.starts_with("install_signature") => BrokerError::InstallNotApproved(code),
-        (403, "install_unknown") | (403, "install_revoked") => BrokerError::InstallNotApproved(code),
+        (403, "install_unknown") | (403, "install_revoked") | (403, "install_not_approved") => BrokerError::InstallNotApproved(code),
+        (403, "not_linked") | (404, "not_linked") => BrokerError::NotLinked,
+        (403, "link_stale") => BrokerError::LinkStale,
+        (403, "repository_not_visible") => BrokerError::RepositoryNotVisible(text("repository")),
+        (403, "permission_not_allowed") => BrokerError::PermissionNotAllowed(text("permission")),
+        (400, "bad_request") => BrokerError::BadRequest(text("message")),
+        (503, "github_not_configured") => BrokerError::NotConfigured,
         (403, "blocked") => BrokerError::Blocked,
         (403, "not_connected") | (404, "not_connected") => BrokerError::NotConnected,
         (403, "revoked") => BrokerError::NotLive("revoked".to_string()),
@@ -267,6 +386,32 @@ pub async fn revoke(http: &reqwest::Client, who: &Caller, access_token: Option<&
 /// Whether the account has a live GitHub grant, and as whom.
 pub async fn connection(http: &reqwest::Client, who: &Caller) -> Result<Connection, BrokerError> {
     let answer = call(http, who, reqwest::Method::GET, "/github/v1/connection", None).await?;
+    serde_json::from_value(answer).map_err(|_| BrokerError::Other { status: 200, error: "unreadable_answer".to_string() })
+}
+
+/// A token narrowed to the repositories and permissions asked for, on one linked installation.
+pub async fn installation_token(http: &reqwest::Client, who: &Caller, request: &InstallationRequest<'_>) -> Result<InstallationToken, BrokerError> {
+    let body = json!({
+        "installation_id": request.installation_id,
+        "repositories": request.repositories,
+        "permissions": request.permissions,
+        "agent_id": request.agent_id.chars().take(80).collect::<String>(),
+    });
+    let answer = call(http, who, reqwest::Method::POST, "/github/v1/installation-token", Some(&body)).await?;
+    serde_json::from_value(answer).map_err(|_| BrokerError::Other { status: 200, error: "unreadable_answer".to_string() })
+}
+
+/// The installations this account has linked.
+pub async fn installations(http: &reqwest::Client, who: &Caller) -> Result<Vec<LinkedInstallation>, BrokerError> {
+    let answer = call(http, who, reqwest::Method::GET, "/github/v1/installations", None).await?;
+    let list = answer.get("installations").cloned().unwrap_or(Value::Array(Vec::new()));
+    serde_json::from_value(list).map_err(|_| BrokerError::Other { status: 200, error: "unreadable_answer".to_string() })
+}
+
+/// Present a fresh user token so the broker re-reads what this account can see; it keeps nothing of the token.
+pub async fn revalidate(http: &reqwest::Client, who: &Caller, user_token: &str) -> Result<Revalidated, BrokerError> {
+    let body = json!({ "access_token": user_token });
+    let answer = call(http, who, reqwest::Method::POST, "/github/v1/links/revalidate", Some(&body)).await?;
     serde_json::from_value(answer).map_err(|_| BrokerError::Other { status: 200, error: "unreadable_answer".to_string() })
 }
 
@@ -442,6 +587,58 @@ mod tests {
         assert_eq!(line, "POST /github/v1/token HTTP/1.1");
         assert_eq!(body, r#"{"grant":"refresh","refresh_token":"ghr_OLD"}"#);
         assert_eq!(sig, sign(&SEED, &signature_material("POST", "/github/v1/token", &ts, body.as_bytes())));
+    }
+
+    #[test]
+    fn the_new_refusals_map_to_what_the_desktop_does_next() {
+        let e = |status, v: Value| error_for(status, &v);
+        assert_eq!(e(403, json!({"error":"install_not_approved"})), BrokerError::InstallNotApproved("install_not_approved".into()));
+        assert_eq!(e(403, json!({"error":"not_linked"})), BrokerError::NotLinked);
+        assert_eq!(e(403, json!({"error":"link_stale"})), BrokerError::LinkStale);
+        assert_eq!(e(403, json!({"error":"repository_not_visible","repository":"secret-repo"})), BrokerError::RepositoryNotVisible("secret-repo".into()));
+        assert_eq!(e(403, json!({"error":"permission_not_allowed","permission":"workflows"})), BrokerError::PermissionNotAllowed("workflows".into()));
+        assert_eq!(e(400, json!({"error":"bad_request","message":"x"})), BrokerError::BadRequest("x".into()));
+        assert_eq!(e(503, json!({"error":"github_not_configured"})), BrokerError::NotConfigured);
+        // Still a brief outage, not "not configured".
+        assert!(matches!(e(503, json!({"error":"github_unavailable"})), BrokerError::Unavailable(_)));
+        assert!(matches!(e(429, json!({"error":"rate_limited"})), BrokerError::Unavailable(_)));
+        // What the broker puts in a name is cut and cleaned before it reaches a message.
+        let long = format!("a\u{7}{}", "b".repeat(300));
+        match e(403, json!({"error":"repository_not_visible","repository":long})) {
+            BrokerError::RepositoryNotVisible(r) => assert!(r.len() <= 100 && !r.contains('\u{7}'), "{r}"),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn an_installation_token_is_a_signed_post_that_names_the_repositories_and_permissions() {
+        let (base, task) = stub(r#"{"token":"ghs_SECRET","expires_at":"2026-10-28T10:00:00Z","permissions":{"contents":"write"},"repository_ids":[9],"app":{"slug":"muxagent","bot_user_id":77}}"#).await;
+        let permissions = std::collections::BTreeMap::from([("contents".to_string(), "write".to_string())]);
+        let repositories = vec!["repo".to_string()];
+        let request = InstallationRequest { installation_id: 5, repositories: &repositories, permissions: &permissions, agent_id: "korp" };
+        let minted = installation_token(&reqwest::Client::new(), &caller_at(base), &request).await.unwrap();
+        assert_eq!((minted.app.slug.as_str(), minted.app.bot_user_id, minted.repository_ids.clone()), ("muxagent", 77, vec![9]));
+        assert_eq!(minted.expires_at_epoch(), Some(1_793_181_600));
+        assert!(!format!("{minted:?}").contains("ghs_SECRET"), "the token must stay out of logs");
+        let (line, ts, sig, body) = task.await.unwrap();
+        assert_eq!(line, "POST /github/v1/installation-token HTTP/1.1");
+        let sent: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(sent["installation_id"], 5);
+        assert_eq!(sent["repositories"], json!(["repo"]));
+        assert_eq!(sent["permissions"], json!({"contents":"write"}));
+        assert_eq!(sent["agent_id"], "korp");
+        assert_eq!(sig, sign(&SEED, &signature_material("POST", "/github/v1/installation-token", &ts, body.as_bytes())));
+    }
+
+    #[tokio::test]
+    async fn the_installations_list_reads_the_links() {
+        let (base, task) = stub(r#"{"installations":[{"installation_id":5,"github_account":{"id":1,"login":"Octo-Org","type":"Organization"},"repository_selection":"selected","installation_status":"active","link_status":"active","visible_count":2,"visible_repository_ids":[1,2],"verified_at_ms":10,"linked_at_ms":5}]}"#).await;
+        let list = installations(&reqwest::Client::new(), &caller_at(base)).await.unwrap();
+        assert_eq!(list.len(), 1);
+        assert!(list[0].is_usable());
+        assert_eq!(list[0].github_account.login, "Octo-Org");
+        let (line, _, _, body) = task.await.unwrap();
+        assert_eq!((line.as_str(), body.as_str()), ("GET /github/v1/installations HTTP/1.1", ""));
     }
 
     #[tokio::test]
