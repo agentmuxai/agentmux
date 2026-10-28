@@ -6,7 +6,7 @@
 use super::*;
 use crate::backend::agent_session::agent_current_zone;
 use crate::backend::storage::filestore::{FileMeta, FileOpts};
-use crate::sagas::park_agents_tests::{dispatch_apply, seed_agent_block, seed_workspace, set_always_available};
+use crate::sagas::park_agents_tests::{dispatch_apply, seed_agent_block, seed_block, seed_workspace, set_always_available};
 use crate::server::app_api::agent_attach::{set_desired, DESIRED_STOPPED};
 use crate::server::tests::test_state;
 use agentmux_common::ipc::Command;
@@ -162,4 +162,23 @@ async fn an_older_layouts_agent_zone_in_the_channel_store_still_counts() {
 
     let got: Vec<String> = candidates(&state).into_iter().map(|c| c.block_id).collect();
     assert_eq!(got, vec![block]);
+}
+
+/// Two parked blocks of one agent with another agent's between them in time: the agent starts once.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_agent_with_two_parked_blocks_is_started_once_whatever_lies_between_them_in_time() {
+    let state = test_state();
+    let (_ws, tabs) = seed_workspace(&state, 1).await;
+    let _older = resumable(&state, &tabs[0], "ag-twice").await;
+    std::thread::sleep(Duration::from_millis(20));
+    let _other = resumable(&state, &tabs[0], "ag-between").await;
+    std::thread::sleep(Duration::from_millis(20));
+    let newer = seed_block(&state, &tabs[0], serde_json::json!({ "view": "agent", "agentId": "ag-twice" })).await;
+    dispatch_apply(&state, Command::ParkBlock { tab_id: tabs[0].clone(), block_id: newer.clone() }).await;
+    set_desired(&state.mstore, &newer, DESIRED_RUNNING);
+    set_meta(&state, &newer, serde_json::json!({ "agent:sessionid": "sess-9" }));
+    wrote_a_turn(&state, &newer);
+
+    let uids: Vec<String> = candidates(&state).into_iter().map(|c| c.uid).collect();
+    assert_eq!(uids, vec!["ag-twice".to_string(), "ag-between".to_string()], "once each, the newer block's time first");
 }

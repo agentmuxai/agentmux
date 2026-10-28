@@ -15,7 +15,7 @@
 
 use std::time::Duration;
 
-use crate::backend::agent_session::{agent_current_zone, global_transcript_store, is_valid_definition_id, OUTPUT_FILE};
+use crate::backend::agent_session::{agent_current_zone, agent_zone_for_block_meta, global_transcript_store, is_valid_definition_id, OUTPUT_FILE};
 use crate::backend::storage::filestore::FileStore;
 use crate::backend::blockcontroller;
 use crate::backend::obj;
@@ -61,16 +61,24 @@ fn latest_write_ms(sources: &[(&FileStore, &str)]) -> Option<u64> {
 
 /// When the agent's transcript was last written (ms): its last turn. `None` when it has none. A turn is
 /// appended to the agent's zone in the global transcript store and, unless that took it, to the block's
-/// own zone in this channel's store (an older layout kept the agent's zone there too): the newest of the
-/// three.
-fn last_active_ms(state: &AppState, uid: &str, block_id: &str) -> Option<u64> {
-    if !is_valid_definition_id(uid) {
+/// own zone in this channel's store (an older layout kept the agent's zone there too): the newest of
+/// them. The controller names the agent's zone by the block's `agentId` meta, which for a block launched
+/// from a template is the template's id; the bound instance's id (`uid`) names the other.
+fn last_active_ms(state: &AppState, uid: &str, block: &obj::Block) -> Option<u64> {
+    let mut zones: Vec<String> = agent_zone_for_block_meta(&block.meta).into_iter().collect();
+    if is_valid_definition_id(uid) {
+        zones.push(agent_current_zone(uid));
+    }
+    zones.dedup();
+    if zones.is_empty() {
         return None;
     }
-    let agent_zone = agent_current_zone(uid);
-    let mut sources: Vec<(&FileStore, &str)> = vec![(state.filestore.as_ref(), block_id), (state.filestore.as_ref(), agent_zone.as_str())];
-    if let Some(global) = global_transcript_store() {
-        sources.push((global.as_ref(), agent_zone.as_str()));
+    let mut sources: Vec<(&FileStore, &str)> = vec![(state.filestore.as_ref(), block.oid.as_str())];
+    for zone in &zones {
+        sources.push((state.filestore.as_ref(), zone.as_str()));
+        if let Some(global) = global_transcript_store() {
+            sources.push((global.as_ref(), zone.as_str()));
+        }
     }
     latest_write_ms(&sources)
 }
@@ -95,13 +103,15 @@ fn candidates(state: &AppState) -> Vec<Candidate> {
                 return None;
             }
             let uid = crate::sagas::park_agents::agent_of_block(state, &block.oid, &block)?.id;
-            let last_active_ms = last_active_ms(state, &uid, &block.oid)?;
+            let last_active_ms = last_active_ms(state, &uid, &block)?;
             let window = super::agent_lifecycle::idle_window_of(state, &block);
             active_within(last_active_ms, now, window).then_some(Candidate { uid, block_id: block.oid, last_active_ms })
         })
         .collect();
     found.sort_by(|a, b| b.last_active_ms.cmp(&a.last_active_ms).then_with(|| a.uid.cmp(&b.uid)));
-    found.dedup_by(|a, b| a.uid == b.uid);
+    // One start per agent, the most recently active of its blocks: the list is in that order.
+    let mut seen = std::collections::HashSet::new();
+    found.retain(|c| seen.insert(c.uid.clone()));
     found
 }
 
