@@ -85,35 +85,44 @@ fn facts_of(body: &Value) -> Result<BTreeMap<String, String>, String> {
 /// agent that did it, a refused approval or denial included.
 async fn act(state: &AppState, uid: &str, slug: &str, action: &str, body: &Value) -> Result<Value, String> {
     let result = act_inner(state, uid, slug, action, body).await;
-    if matches!(action, "request" | "approve" | "deny" | "cancel") {
-        let id = result.as_ref().ok().and_then(|v| v["id"].as_str()).map(str::to_string).unwrap_or_else(|| text(body, "id"));
-        // A request refused before it was filed has nothing to attach a row to.
-        if let Some(request) = requests::registry().get(&id) {
-            let outcome = match &result {
-                Ok(v) if action == "request" && v["joined"] == true => "joined".to_string(),
-                Ok(_) => serde_json::to_value(request.status).ok().and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default(),
-                Err(_) => "refused".to_string(),
-            };
-            window::audit_step(state, slug, &request, &format!("sensitive.{action}"), result.is_ok(), result.as_ref().err().map(String::as_str), &outcome);
-        }
+    if matches!(action, "approve" | "deny" | "cancel") {
+        audit_result(state, slug, action, &text(body, "id"), &result);
     }
+    result
+}
+
+/// An audit row for what `slug` did to the request `id`. A step refused before any request
+/// existed has nothing to attach a row to.
+fn audit_result(state: &AppState, slug: &str, action: &str, id: &str, result: &Result<Value, String>) {
+    let Some(request) = requests::registry().get(id) else { return };
+    let outcome = match result {
+        Ok(v) if action == "request" && v["joined"] == true => "joined".to_string(),
+        Ok(_) => serde_json::to_value(request.status).ok().and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default(),
+        Err(_) => "refused".to_string(),
+    };
+    window::audit_step(state, slug, &request, &format!("sensitive.{action}"), result.is_ok(), result.as_ref().err().map(String::as_str), &outcome);
+}
+
+/// File a request for `op` as the agent `uid`/`slug` and ask the super agent. The `Sensitive` tool's
+/// `request`, and what the tools that did these things on their own now do instead.
+pub(crate) async fn file_request(state: &AppState, uid: &str, slug: &str, op: &str, facts: &BTreeMap<String, String>, reason: &str) -> Result<Value, String> {
+    let filed = requests::registry().request(uid, slug, op, facts, reason, now_ms())?;
+    let request = requests::registry().get(&filed.id).ok_or("no request (it ended just now)")?;
+    let review = if filed.joined {
+        "joined a request for the same thing that was already open".to_string()
+    } else {
+        fallback::watch(state, &filed.id);
+        ask_the_super_agent(state, &request)
+    };
+    let result = Ok(json!({ "id": filed.id, "joined": filed.joined, "status": request.status, "summary": request.summary, "review": review }));
+    audit_result(state, slug, "request", &filed.id, &result);
     result
 }
 
 async fn act_inner(state: &AppState, uid: &str, slug: &str, action: &str, body: &Value) -> Result<Value, String> {
     let id = text(body, "id");
     match action {
-        "request" => {
-            let filed = requests::registry().request(uid, slug, &text(body, "op"), &facts_of(body)?, &text(body, "reason"), now_ms())?;
-            let request = requests::registry().get(&filed.id).ok_or("no request (it ended just now)")?;
-            let review = if filed.joined {
-                "joined a request for the same thing that was already open".to_string()
-            } else {
-                fallback::watch(state, &filed.id);
-                ask_the_super_agent(state, &request)
-            };
-            Ok(json!({ "id": filed.id, "joined": filed.joined, "status": request.status, "summary": request.summary, "review": review }))
-        }
+        "request" => file_request(state, uid, slug, &text(body, "op"), &facts_of(body)?, &text(body, "reason")).await,
         "approve" => {
             require_super(state, uid)?;
             let request = must_get(&id)?;

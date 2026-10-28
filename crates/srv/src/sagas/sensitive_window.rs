@@ -122,6 +122,12 @@ pub fn register_runner(op: &'static str, runner: Runner) {
     RUNNERS.lock().unwrap_or_else(|e| e.into_inner()).insert(op, runner);
 }
 
+/// Say what runs `op` unless something already says: how the real runners are registered, so
+/// registering them again (each connection does) never replaces one a test put there.
+pub fn register_default_runner(op: &'static str, runner: Runner) {
+    RUNNERS.lock().unwrap_or_else(|e| e.into_inner()).entry(op).or_insert(runner);
+}
+
 /// Take back what `register_runner` said, for a test of an operation nothing runs.
 #[cfg(test)]
 pub fn unregister_runner(op: &str) {
@@ -222,7 +228,8 @@ pub fn open(state: &AppState, request_id: &str, window: Duration) -> Result<Sens
             }
         };
         cleared(&state, &v.request_id, "proceeding");
-        let outcome = run(&state, request).await;
+        let outcome = run(&state, request.clone()).await;
+        tell_askers(&request, &ran_note(&request, &outcome));
         let (status, error, end) = match outcome {
             Ok(()) => ("done", None, Status::Done),
             Err(e) => ("failed", Some(e), Status::Failed),
@@ -252,6 +259,35 @@ fn set_status(request_id: &str, status: &'static str, error: Option<String>) {
         e.view.error = error;
         e.finished_at_ms = Some(now_ms());
     }
+}
+
+/// Something else did what the open requests for `op` (whose fact `key` is `value`) asked for, for
+/// example the person's own request started the same upgrade: end them, their countdowns included,
+/// so none runs it a second time, and tell the agents that asked.
+pub fn answered_by_another(state: &AppState, op: &str, key: &str, value: &str, how: &str) {
+    for request in requests::registry().open_matching(op, key, value) {
+        if request.status == Status::Pending {
+            cancelled(state, &request.id);
+        }
+        if requests::registry().finish(&request.id, Status::Done, now_ms()).is_ok() {
+            let what = crate::backend::reactive::sanitize::quote_in_system_note(&request.summary);
+            tell_askers(&request, &format!("[AgentMux] {how}, so your request to {what} is no longer needed."));
+        }
+    }
+}
+
+/// What the agents that asked are told when the countdown ended and the operation ran, or could not.
+fn ran_note(request: &Request, outcome: &Result<(), String>) -> String {
+    let what = crate::backend::reactive::sanitize::quote_in_system_note(&request.summary);
+    match outcome {
+        Ok(()) => format!("[AgentMux] Your request to {what} went ahead."),
+        Err(e) => format!("[AgentMux] Your request to {what} could not go ahead: {}", crate::backend::reactive::sanitize::quote_in_system_note(e)),
+    }
+}
+
+/// What they are told when the person vetoed it.
+fn vetoed_note(request: &Request) -> String {
+    format!("[AgentMux] The person vetoed your request to {}; it did not happen.", crate::backend::reactive::sanitize::quote_in_system_note(&request.summary))
 }
 
 /// Run the operation in a task of its own, so one that panics settles the
@@ -284,6 +320,9 @@ pub fn veto(state: &AppState, request_id: &str) -> &'static str {
         }
     };
     let _ = requests::registry().finish(request_id, Status::Vetoed, now_ms());
+    if let Some(request) = requests::registry().get(request_id) {
+        tell_askers(&request, &vetoed_note(&request));
+    }
     cleared(state, request_id, "vetoed");
     audit(state, &view, "sensitive.veto", true, None, "vetoed");
     tracing::info!(request_id, "sensitive request: vetoed by the person");
