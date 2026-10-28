@@ -37,14 +37,7 @@ async fn network(cx: &ToolCtx<'_>) -> Result<String> {
     if !status.is_success() {
         anyhow::bail!("App network: srv answered {status}: {body}");
     }
-    Ok(describe_network(&body, now_ms()))
-}
-
-fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
-        .unwrap_or(0)
+    Ok(describe_network(&body, agentmux_common::time::now_ms()))
 }
 
 /// `network`'s answer, from srv's `ConnectivityStatus`: one line per service, then what to make of it.
@@ -70,10 +63,14 @@ fn describe_network(status: &Value, now_ms: i64) -> String {
         out.push_str(&format!("\n- {label}: {line}"));
     }
     if down.is_empty() {
-        out.push_str("\nNothing is down; a failure you see is not the network's.");
+        out.push_str(
+            "\nNothing AgentMux has checked is down. It tracks only the services listed, and an online service is not re-probed; \
+             \"not checked yet\" and any service not listed are unknown, so this does not rule the network out.",
+        );
     } else {
         out.push_str(&format!(
-            "\nDown or failing: {}. A turn that stalls or retries meanwhile is the network, not your task; AgentMux keeps checking and resumes when it answers.",
+            "\nDown or failing: {}. A turn that stalls or retries on one of these may be the network; AgentMux keeps checking it and \
+             this changes when it answers. A service not listed here is not tracked.",
             down.join(", ")
         ));
     }
@@ -263,7 +260,7 @@ mod tests {
         ] });
         let text = describe_network(&all_up, now);
         assert!(text.contains("- Internet: online") && text.contains("- Anthropic API: not checked yet"), "{text}");
-        assert!(text.contains("Nothing is down"), "{text}");
+        assert!(text.contains("Nothing AgentMux has checked is down") && text.contains("does not rule the network out"), "{text}");
 
         let down = json!({ "revision": 2, "services": [
             { "service": "internet", "label": "Internet", "state": "online", "since_ms": 1, "last_error": null },
@@ -274,7 +271,7 @@ mod tests {
         assert!(text.contains("- MuxBus: OFFLINE for 2 h 5 min (connection reset)"), "{text}");
         assert!(text.contains("- Anthropic API: degraded for 30 s"), "{text}");
         assert!(text.contains("Down or failing: MuxBus, Anthropic API"), "{text}");
-        assert!(!text.contains("Nothing is down"), "{text}");
+        assert!(!text.contains("Nothing AgentMux has checked is down") && text.contains("may be the network"), "{text}");
 
         assert_eq!(describe_network(&json!({ "services": [] }), now), "AgentMux hasn't checked the network yet.");
     }
