@@ -48,6 +48,8 @@
 
     .agent-picker-filter-icon {
         flex-shrink: 0;
+        // Room from the bar's edge and from the input (4px each, beyond the bar's padding and gap).
+        margin: 0 var(--space-1);
         font-size: var(--text-xs);
         color: var(--secondary-text-color);
         opacity: 0.7;

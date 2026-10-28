@@ -18,7 +18,7 @@ const CHIPS: Record<AgentRuntime["state"], RuntimeChip> = {
     stopped: { label: "stopped", tone: "neutral" },
     starting: { label: "starting", tone: "neutral", icon: "circle-notch" },
     idle: { label: "idle", tone: "ok" },
-    working: { label: "working", tone: "accent" },
+    working: { label: "working", tone: "error" }, // red, as in the Swarm
     waiting_on_user: { label: "waiting on you", tone: "warn", icon: "circle-question" },
     limited: { label: "limited", tone: "warn" },
     signed_out: { label: "signed out", tone: "warn" },
