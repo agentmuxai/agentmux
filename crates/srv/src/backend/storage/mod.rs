@@ -35,6 +35,7 @@ pub mod def_registry_mirror;
 pub mod error;
 pub mod filestore;
 pub mod history;
+pub mod host_lan_keys;
 pub mod identities;
 pub mod managed;
 pub mod project_instructions;
