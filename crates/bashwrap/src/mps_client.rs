@@ -158,6 +158,32 @@ impl WpsClient {
     /// knows which agent is asking (an agent's own env carries it as
     /// `AGENTMUX_AGENT_TOKEN`). `timeout` replaces the client-wide default:
     /// callers on a synchronous hook must not wait long.
+    /// [`Self::post_json`], keeping a refusal's status and body: the caller shows the person what srv
+    /// said, not just that it said no.
+    pub async fn post_json_status(
+        &self,
+        path: &str,
+        agent_token: Option<&str>,
+        body: &impl Serialize,
+        timeout: std::time::Duration,
+    ) -> Result<(u16, serde_json::Value)> {
+        let url = format!("{}{}", self.endpoint, path);
+        let mut req = self
+            .inner
+            .post(&url)
+            .header(AUTH_KEY_HEADER, &self.auth_key)
+            .header("Content-Type", "application/json")
+            .timeout(timeout)
+            .json(body);
+        if let Some(token) = agent_token.filter(|t| !t.is_empty()) {
+            req = req.header("X-Agent-Token", token);
+        }
+        let resp = req.send().await?;
+        let status = resp.status().as_u16();
+        let text = resp.text().await.unwrap_or_default();
+        Ok((status, serde_json::from_str(&text).unwrap_or(serde_json::Value::Null)))
+    }
+
     pub async fn post_json(
         &self,
         path: &str,

@@ -38,6 +38,9 @@
 //!   runs ssh for an agent: shows ssh's prompt to the user through srv and
 //!   prints the answer. See `askpass.rs`.
 //!
+//! - `git-credential <op>` and `github-token -- <gh args>` — GitHub tokens for an agent's `git`
+//!   and `gh`, from srv. See `github.rs`.
+//!
 //! - `sessionstart --part N` — registered as Claude Code's `SessionStart`
 //!   hook, once per part. Delivers part N of the agent's memory as the
 //!   hook's `additionalContext`. See `sessionstart.rs` and
@@ -55,6 +58,7 @@ mod askpass;
 mod bash_wrap;
 mod cwd_state;
 mod exec_args;
+mod github;
 mod idle_gate;
 mod hook;
 mod precompact;
@@ -90,6 +94,19 @@ enum Command {
     /// Prints this part of the agent's memory as the hook's
     /// `additionalContext` (or nothing), then acknowledges it.
     Sessionstart(sessionstart::Args),
+    /// git's credential helper (`get`, `store`, `erase`) for an agent whose person connected
+    /// GitHub through AgentMux Cloud: the GitHub App's token for the repository, from srv.
+    GitCredential {
+        /// What git asks: get, store or erase.
+        op: String,
+    },
+    /// Print a token for the repository a `gh` command is about, or say why there is none. The
+    /// `gh` function this wrapper exports calls it.
+    GithubToken {
+        /// The arguments `gh` was given.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        gh_args: Vec<String>,
+    },
 }
 
 fn main() -> Result<()> {
@@ -127,6 +144,8 @@ fn main() -> Result<()> {
         Command::Hook => hook::run_pretooluse_bash(),
         Command::Precompact(args) => rt.block_on(precompact::run(args)),
         Command::Sessionstart(args) => rt.block_on(sessionstart::run(args)),
+        Command::GitCredential { op } => std::process::exit(github::run_git_credential(&op)),
+        Command::GithubToken { gh_args } => std::process::exit(github::run_github_token(&gh_args)),
     }
 }
 
