@@ -20,7 +20,7 @@ use super::memory_delivery::{Entry, Tier, HOOK_PARTS, MAX_PART_CHARS};
 
 /// The most characters one Personal Memory file contributes.
 pub const FILE_CAP_CHARS: usize = 8_000;
-/// Personal Memory above this (in characters, after the cap's cut) is worth pruning.
+/// Personal Memory above this (in characters, counted before the cap's cut) is worth pruning.
 pub const PERSONAL_BUDGET_CHARS: usize = 40_000;
 /// A `project` file untouched for this many days is called stale.
 pub const STALE_DAYS: i64 = 7;
