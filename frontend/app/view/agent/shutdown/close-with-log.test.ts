@@ -5,7 +5,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const closePane = vi.fn();
 vi.mock("@/store/services", () => ({ ObjectService: { ClosePane: (...a: unknown[]) => closePane(...a) } }));
-vi.mock("@/app/store/flash-notifications", () => ({ pushFlashError: vi.fn() }));
+const flash = vi.fn();
+vi.mock("@/app/store/flash-notifications", () => ({ pushFlashError: (...a: unknown[]) => flash(...a) }));
 const removeMovedBlock = vi.fn();
 vi.mock("@/layout/lib/layoutMagnify", () => ({ removeMovedBlock: (...a: unknown[]) => removeMovedBlock(...a) }));
 vi.mock("@/layout/lib/layoutModelHooks", () => ({ getLayoutModelForTabById: () => ({}) }));
@@ -16,7 +17,7 @@ vi.mock("./shutdown-log", () => ({
     failShutdownLog: (id: string, m: string) => log.fail(id, m),
 }));
 
-import { closeWithShutdownLog } from "./close-with-log";
+import { closeWithShutdownLog, isClosingWithLog } from "./close-with-log";
 
 describe("closeWithShutdownLog (SPEC_AGENT_SELF_QUIT §5.5)", () => {
     beforeEach(() => {
@@ -29,6 +30,25 @@ describe("closeWithShutdownLog (SPEC_AGENT_SELF_QUIT §5.5)", () => {
         expect(closePane).toHaveBeenCalledWith(["a", "term"], true);
         expect(log.begin.mock.calls).toEqual([["a"]]);
         expect(log.fail).not.toHaveBeenCalled();
+    });
+
+    it("a second close of the same pane while the first is running asks srv once and reports nothing", async () => {
+        let done!: () => void;
+        closePane.mockReturnValue(new Promise<void>((resolve) => (done = resolve)));
+        const first = closeWithShutdownLog("t1", ["a", "term"], (id) => id === "a");
+        // What the pane's close asks first, so a second click does not probe or prompt again.
+        expect(isClosingWithLog(["term"])).toBe(true);
+        expect(isClosingWithLog(["other"])).toBe(false);
+        await closeWithShutdownLog("t1", ["a", "term"], (id) => id === "a");
+        expect(closePane).toHaveBeenCalledTimes(1);
+        expect(flash).not.toHaveBeenCalled();
+        done();
+        await first;
+        expect(isClosingWithLog(["a", "term"])).toBe(false);
+        // Once it has answered the pane can be closed again (Try again after a failure).
+        closePane.mockResolvedValue({});
+        await closeWithShutdownLog("t1", ["a", "term"], (id) => id === "a");
+        expect(closePane).toHaveBeenCalledTimes(2);
     });
 
     it("a rejection before the close started shows in the log, so the pane never hangs on 'Shutting down…'", async () => {
