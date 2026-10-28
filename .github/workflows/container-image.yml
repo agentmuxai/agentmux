@@ -42,10 +42,12 @@ env:
   IMAGE_NAME: agentmuxai/agent-base
 
 jobs:
-  # Not for a manual run (that one must be on main, see build-and-push).
+  # For any run on a tag: a release, or a rerun of one (gh workflow run release.yml --ref <tag>).
+  # A manual run of this file is on a branch and must be main (see build-and-push). The
+  # caller's event name is not used: in a called workflow it is the caller's event.
   gate:
     name: Release gate (a release commit on main)
-    if: ${{ github.event_name != 'workflow_dispatch' }}
+    if: ${{ github.ref_type == 'tag' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
