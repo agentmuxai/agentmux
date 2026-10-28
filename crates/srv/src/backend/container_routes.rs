@@ -22,9 +22,12 @@ const DESKTOP: &str = "desktop control can launch programs on the host, so conta
                        Ask a native agent or your leader.";
 /// Generic gateways that reach everything else.
 const GATEWAY: &str = "this is a generic gateway to the host that container agents can't use. Use the specific tool for what you need.";
-/// A host path that would have to be checked against the container's mounts first.
-const HOST_PATHS: &str = "container agents can't read or open host paths outside their own workspace yet. \
-                          Put the file in /workspace, or ask a native agent.";
+/// Reading host files for the windows.
+const HOST_FILES: &str = "this reads files on the host for the app's windows. A container agent reads its own files in /workspace directly; \
+                          to show one in a pane, open it with the editor.";
+/// A host path that has to be mapped to the container's mounts first.
+const HOST_PATHS: &str = "container agents can't send files from host paths yet; this one is not available to them. \
+                          Ask a native agent, or hand the file over with the Browser tool's handoff.";
 /// Replacing the app.
 const UPGRADE: &str = "upgrading AgentMux replaces the app on the host, so container agents can't. Ask a native agent or your leader.";
 /// The host's own credentials.
@@ -68,14 +71,12 @@ const REFUSED: &[(Match, &str)] = &[
     (Match::Exact("/agentmux/service"), GATEWAY),
     (Match::Exact("/ws"), GATEWAY),
     (Match::Exact("/agentmux/wps/publish"), GATEWAY),
-    // Host paths, until they are checked against the container's mounts
-    (Match::Exact("/agentmux/stream-local-file"), HOST_PATHS),
-    (Match::Exact("/agentmux/file"), HOST_PATHS),
-    (Match::Exact("/agentmux/file-icon"), HOST_PATHS),
-    (Match::Exact("/api/v1/attachments/upload"), HOST_PATHS),
-    (Match::Exact("/agentmux/work/media"), HOST_PATHS),
+    // Host files: the windows read them to draw panes; a container agent reads its own in /workspace
+    (Match::Exact("/agentmux/stream-local-file"), HOST_FILES),
+    (Match::Exact("/agentmux/file"), HOST_FILES),
+    (Match::Exact("/agentmux/file-icon"), HOST_FILES),
+    // Uploading from a path in the agent's workspace needs the container's folder mapped first
     (Match::Exact("/api/v1/ui/browser/set_files"), HOST_PATHS),
-    (Match::Exact("/api/v1/pane/open"), HOST_PATHS),
     // What every native agent reads at launch
     (Match::Exact("/api/v1/agent/globalmemory/write"), GLOBAL_MEMORY),
     (Match::Exact("/api/v1/agent/globalmemory/remove"), GLOBAL_MEMORY),
@@ -141,7 +142,7 @@ mod tests {
             ("/agentmux/reactive/poller/config", "for the AgentMux app itself"),
             ("/api/messaging/discord/send", "for the AgentMux app itself"),
             ("/agentmux/service", "generic gateway"),
-            ("/agentmux/stream-local-file", "outside their own workspace"),
+            ("/agentmux/stream-local-file", "reads files on the host"),
             ("/api/v1/agent/self/upgrade", "replaces the app"),
             ("/api/v1/github/token", "native agents"),
             ("/api/v1/agent/globalmemory/write", "read it but not change it"),

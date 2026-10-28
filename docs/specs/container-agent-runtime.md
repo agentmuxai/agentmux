@@ -243,7 +243,9 @@ container agents: <why, and what to do instead>`.
 | `/api/v1/agent/desktop/*` (Desktop control) | no | drives the OS and can launch programs (borderline; left to the operator) |
 | `/api/v1/host/*`, `/agentmux/reactive/{poller/*,unregister,ensure-signing-key,agents,audit}`, `/agentmux/agent/holding`, `/agentmux/diag/sagas`, `/api/messaging/*`, `/api/post-chat-message`, `/webhook/*` | no | the app's own plumbing: approvals, state the windows report, controls no agent tool calls and whose handlers don't check who asks |
 | `/agentmux/service`, `/ws`, `/agentmux/wps/publish` | no | generic gateways to everything else |
-| `/agentmux/stream-local-file`, `/agentmux/file`, `/agentmux/file-icon`, `/api/v1/attachments/upload`, `/agentmux/work/media`, `/api/v1/ui/browser/set_files`, `/api/v1/pane/open` | no, for now | take a host path; they open to a path inside the container's own mounts once the path is checked against them (a host path outside would let a sandbox read `~/.ssh`, `~/.aws`) |
+| `/agentmux/stream-local-file`, `/agentmux/file`, `/agentmux/file-icon` | no | read host files for the app's windows; a container agent reads its own files in `/workspace` directly |
+| `/api/v1/ui/browser/set_files` | no, for now | uploads from a path; needs the container's `/workspace` mapped to the host folder first |
+| `/api/v1/pane/open` | yes, confined | only the views that show files (editor, media, files, sysinfo, help, tower), on paths inside the agent's own workspace (`/workspace/...` or relative); no terminal (runs on the host), no connection to another machine, no browser (the Browser tool opens one in the agent's Incognito jar) |
 | `/api/v1/agent/globalmemory/{write,remove,revert}` | no | Global Memory is composed into every native agent's context at launch; a container reads it, a native agent writes it |
 | `/api/v1/agent/self/upgrade` | no | replaces the app on the host |
 | `/api/v1/github/token` | no | the host's GitHub tokens are for native agents |
