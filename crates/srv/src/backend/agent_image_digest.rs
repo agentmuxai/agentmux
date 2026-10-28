@@ -25,7 +25,7 @@ use agentmux_common::update_manifest::{verify_release, UpdateKey, MAX_ENVELOPE_B
 
 use crate::backend::container_image::AGENT_BASE_REPO;
 use crate::backend::update_download::RELEASE_DOWNLOAD_PREFIX;
-use crate::backend::update_signature::{fetch_small, file_names};
+use crate::backend::update_signature::{fetch_small, file_names, FetchError};
 
 /// The name the release lists the default agent image under.
 pub(crate) const IMAGE_NAME: &str = "agent-base";
@@ -81,6 +81,15 @@ pub(crate) fn decide(keys: &[UpdateKey], version: &str, fetched: Fetched) -> Pin
     }
 }
 
+/// A file that couldn't be read: GitHub not answering is "can't tell", but a file larger than any
+/// such file may be is the release's metadata being wrong, which is refused like any other.
+fn unread(error: FetchError, file: &str) -> Fetched {
+    match error {
+        FetchError::Transport(why) => Fetched::Unreachable(why),
+        FetchError::TooLarge(cap) => Fetched::Incomplete(format!("the release's {file} is larger than {cap} bytes")),
+    }
+}
+
 /// Fetch the three files of the signed release called `version`.
 async fn fetch(version: &str) -> Fetched {
     let client = match reqwest::Client::builder()
@@ -96,17 +105,17 @@ async fn fetch(version: &str) -> Fetched {
     let envelope = match fetch_small(&client, &format!("{dir}{envelope_name}"), MAX_ENVELOPE_BYTES).await {
         Ok(Some(b)) => b,
         Ok(None) => return Fetched::NoManifest,
-        Err(e) => return Fetched::Unreachable(e),
+        Err(e) => return unread(e, "envelope"),
     };
     let signatures = match fetch_small(&client, &format!("{dir}{signature_name}"), MAX_ENVELOPE_BYTES).await {
         Ok(Some(b)) => String::from_utf8_lossy(&b).into_owned(),
         Ok(None) => return Fetched::Incomplete("the release's envelope has no signature".into()),
-        Err(e) => return Fetched::Unreachable(e),
+        Err(e) => return unread(e, "signature"),
     };
     let manifest = match fetch_small(&client, &format!("{dir}{manifest_name}"), MAX_MANIFEST_BYTES).await {
         Ok(Some(b)) => b,
         Ok(None) => return Fetched::Incomplete("the release's envelope has no manifest".into()),
-        Err(e) => return Fetched::Unreachable(e),
+        Err(e) => return unread(e, "manifest"),
     };
     Fetched::Files { envelope, signatures, manifest }
 }
@@ -172,6 +181,14 @@ mod tests {
         assert!(unpinned(Fetched::Unreachable("offline".into())));
         assert!(unpinned(release("[]")), "a release before the field");
         assert!(unpinned(release(&image("ghcr.io/someone/else"))), "never a repository the app didn't choose");
+    }
+
+    #[test]
+    fn a_file_over_its_cap_is_refused_and_a_silent_github_is_not() {
+        let transport = unread(FetchError::Transport("HTTP 503".into()), "manifest");
+        assert!(matches!(decide(&[key()], VERSION, transport), Pin::Unpinned(_)));
+        let padded = unread(FetchError::TooLarge(4096), "envelope");
+        assert!(matches!(decide(&[key()], VERSION, padded), Pin::Refused(why) if why.contains("envelope") && why.contains("4096")));
     }
 
     #[test]

@@ -58,27 +58,46 @@ pub(crate) fn judge(keys: &[UpdateKey], tag: &str, fetched: Option<(&[u8], &str,
     }
 }
 
+/// Why a small release file wasn't read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum FetchError {
+    /// GitHub didn't answer, or answered with an error status.
+    Transport(String),
+    /// It answered with more than the file may hold.
+    TooLarge(usize),
+}
+
+impl std::fmt::Display for FetchError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FetchError::Transport(why) => f.write_str(why),
+            FetchError::TooLarge(cap) => write!(f, "larger than {cap} bytes"),
+        }
+    }
+}
+
 /// Fetch one small release file: `None` when the release has no such file (404),
 /// an error for anything else, and never more than `cap` bytes.
-pub(crate) async fn fetch_small(client: &reqwest::Client, url: &str, cap: usize) -> Result<Option<Vec<u8>>, String> {
+pub(crate) async fn fetch_small(client: &reqwest::Client, url: &str, cap: usize) -> Result<Option<Vec<u8>>, FetchError> {
+    let transport = |why: String| FetchError::Transport(why);
     let mut resp = tokio::time::timeout(std::time::Duration::from_secs(20), client.get(url).send())
         .await
-        .map_err(|_| "GitHub didn't answer".to_string())?
-        .map_err(|e| e.to_string())?;
+        .map_err(|_| transport("GitHub didn't answer".to_string()))?
+        .map_err(|e| transport(e.to_string()))?;
     if resp.status() == reqwest::StatusCode::NOT_FOUND {
         return Ok(None);
     }
     if !resp.status().is_success() {
-        return Err(format!("HTTP {}", resp.status()));
+        return Err(transport(format!("HTTP {}", resp.status())));
     }
     let mut body = Vec::new();
     while let Some(chunk) = tokio::time::timeout(std::time::Duration::from_secs(20), resp.chunk())
         .await
-        .map_err(|_| "GitHub stopped answering".to_string())?
-        .map_err(|e| e.to_string())?
+        .map_err(|_| transport("GitHub stopped answering".to_string()))?
+        .map_err(|e| transport(e.to_string()))?
     {
         if body.len() + chunk.len() > cap {
-            return Err(format!("larger than {cap} bytes"));
+            return Err(FetchError::TooLarge(cap));
         }
         body.extend_from_slice(&chunk);
     }
