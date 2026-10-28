@@ -222,16 +222,16 @@ fn thread_main(
 pub fn build_xml(n: &Notification) -> windows::core::Result<XmlDocument> {
     let doc = XmlDocument::new()?;
     let live = n.countdown.is_some();
-    let keep = n.keep_label();
+    let buttons = n.buttons();
     // Title, then the body, then the summary in the `attribution` slot, which
     // Windows renders small and grey under the body without using up one of
     // ToastGeneric's three text lines (rich-content spec §1.3). The skeleton
     // is fixed markup; every line is filled as a text node below. A toast with
     // a countdown binds its title and bar to `NotificationData` instead
-    // (`data_for`), and one with a Keep running button stays up for its whole
+    // (`data_for`), and one with buttons stays up for its whole
     // window (`scenario="reminder"`).
     let mut skeleton = String::from("<toast");
-    if keep.is_some() {
+    if !buttons.is_empty() {
         skeleton.push_str(r#" scenario="reminder""#);
     }
     skeleton.push_str(r#"><visual><binding template="ToastGeneric">"#);
@@ -246,8 +246,12 @@ pub fn build_xml(n: &Notification) -> windows::core::Result<XmlDocument> {
         skeleton.push_str(r#"<progress value="{progressValue}" valueStringOverride="{progressValueString}" status="Closing"/>"#);
     }
     skeleton.push_str("</binding></visual>");
-    if keep.is_some() {
-        skeleton.push_str(&format!(r#"<actions><action content="" arguments="{KEEP_ARGUMENT}" activationType="foreground"/></actions>"#));
+    if !buttons.is_empty() {
+        skeleton.push_str("<actions>");
+        for (id, _) in &buttons {
+            skeleton.push_str(&format!(r#"<action content="" arguments="{id}" activationType="foreground"/>"#));
+        }
+        skeleton.push_str("</actions>");
     }
     skeleton.push_str(r#"<audio silent="true"/></toast>"#);
     doc.LoadXml(&HSTRING::from(skeleton))?;
@@ -262,33 +266,36 @@ pub fn build_xml(n: &Notification) -> windows::core::Result<XmlDocument> {
         let node = texts.Item(i as u32)?;
         node.AppendChild(&doc.CreateTextNode(&HSTRING::from(line))?)?;
     }
-    if let Some(label) = keep {
-        let button: XmlElement = doc.GetElementsByTagName(&HSTRING::from("action"))?.Item(0)?.cast()?;
-        button.SetAttribute(&HSTRING::from("content"), &HSTRING::from(label))?;
+    for (i, (_, label)) in buttons.iter().enumerate() {
+        let button: XmlElement = doc.GetElementsByTagName(&HSTRING::from("action"))?.Item(i as u32)?.cast()?;
+        button.SetAttribute(&HSTRING::from("content"), &HSTRING::from(*label))?;
     }
     Ok(doc)
 }
 
-/// What the Keep running button's `arguments` is. A constant: which
-/// notification it belongs to comes from the handler's closure.
+/// What the buttons' `arguments` are. Constants: which notification a press belongs to comes from
+/// the handler's closure.
 const KEEP_ARGUMENT: &str = "keep";
+const NOW_ARGUMENT: &str = "now";
 
 /// What a toast activation was.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Activation {
-    /// The Keep running button.
+    /// The cancel button (Keep running, ...).
     Keep,
+    /// The do-it-now button (Close now, ...).
+    Now,
     /// The toast itself: open the pane.
     Body,
 }
 
-/// Only the one constant argument is a button press; anything else is a click
+/// Only the two constant arguments are a button press; anything else is a click
 /// on the body.
 pub fn activation_for(arguments: &str) -> Activation {
-    if arguments == KEEP_ARGUMENT {
-        Activation::Keep
-    } else {
-        Activation::Body
+    match arguments {
+        KEEP_ARGUMENT => Activation::Keep,
+        NOW_ARGUMENT => Activation::Now,
+        _ => Activation::Body,
     }
 }
 
@@ -349,10 +356,17 @@ fn show(
             .and_then(|a| a.Arguments().ok())
             .map(|s| s.to_string())
             .unwrap_or_default();
-        if activation_for(&pressed) == Activation::Keep {
+        match activation_for(&pressed) {
             // A button, not a click on the pane: no window is raised.
-            let _ = tx.send(UserAction::Keep(id.clone()));
-            return Ok(());
+            Activation::Keep => {
+                let _ = tx.send(UserAction::Keep(id.clone()));
+                return Ok(());
+            }
+            Activation::Now => {
+                let _ = tx.send(UserAction::Now(id.clone()));
+                return Ok(());
+            }
+            Activation::Body => {}
         }
         // The toast click made us the foreground-eligible process; pass that
         // right on so the host can raise its window (SetForegroundWindow
@@ -446,7 +460,10 @@ mod tests {
         Notification {
             kind: "shutdown_pending".into(),
             title: "Closing QTimer in 15 s".into(),
-            actions: vec![super::super::NotifyAction { id: "keep".into(), label: "Keep running".into() }],
+            actions: vec![
+                super::super::NotifyAction { id: "keep".into(), label: "Keep running".into() },
+                super::super::NotifyAction { id: "now".into(), label: "Close now".into() },
+            ],
             countdown: Some(super::super::Countdown { remaining_ms: 15_000, title_template: "Closing QTimer in {n} s".into() }),
             ..n("", body)
         }
@@ -526,7 +543,10 @@ mod tests {
             priority: "attention".into(),
             title: "Closing QTimer in 15 s".into(),
             body: Some("AgentY asked to close it. It stays in My Agents, with its conversation.".into()),
-            actions: vec![super::super::NotifyAction { id: "keep".into(), label: "Keep running".into() }],
+            actions: vec![
+                super::super::NotifyAction { id: "keep".into(), label: "Keep running".into() },
+                super::super::NotifyAction { id: "now".into(), label: "Close now".into() },
+            ],
             countdown: Some(super::super::Countdown { remaining_ms: total_ms, title_template: "Closing QTimer in {n} s".into() }),
             ..Default::default()
         };
@@ -601,31 +621,32 @@ mod tests {
         assert!(xml.contains(r#"silent="true""#), "{xml}");
     }
 
-    /// A pending shutdown's toast: stays up for its window, one Keep running
-    /// button with the constant argument, a bound title and bar, and the title
+    /// A pending shutdown's toast: stays up for its window, a Keep running and a Close now
+    /// button with constant arguments, a bound title and bar, and the title
     /// text is not in the markup at all.
     #[test]
-    fn a_shutdown_toast_has_the_keep_button_a_bound_title_and_a_progress_bar() {
+    fn a_shutdown_toast_has_two_buttons_a_bound_title_and_a_progress_bar() {
         let doc = build_xml(&closing(Some("AgentY asked to close it."))).unwrap();
         let xml = doc.GetXml().unwrap().to_string();
         assert!(xml.contains(r#"scenario="reminder""#), "{xml}");
-        assert_eq!(count(&doc, "action"), 1, "{xml}");
+        assert_eq!(count(&doc, "action"), 2, "{xml}");
         assert!(xml.contains(r#"arguments="keep""#) && xml.contains(r#"content="Keep running""#), "{xml}");
+        assert!(xml.contains(r#"arguments="now""#) && xml.contains(r#"content="Close now""#), "{xml}");
         assert!(xml.contains("{title}") && xml.contains("{progressValue}") && xml.contains("{progressValueString}"), "{xml}");
         assert!(!xml.contains("Closing QTimer"), "the title travels as bound data, not markup: {xml}");
         assert!(xml.contains("AgentY asked to close it."), "{xml}");
         assert!(xml.contains(r#"launch="agentmux-notify:n1-1""#), "{xml}");
     }
 
-    /// Agent-influenced text in the body is still text: it adds no second button
-    /// and cannot reach the Keep running one.
+    /// Agent-influenced text in the body is still text: it adds no third button
+    /// and cannot reach the two we offer.
     #[test]
-    fn hostile_text_in_a_shutdown_toast_adds_no_second_action() {
+    fn hostile_text_in_a_shutdown_toast_adds_no_further_action() {
         let evil = r#"</text><action content="Approve" arguments="rm -rf"/><text>"#;
         let doc = build_xml(&closing(Some(evil))).unwrap();
-        assert_eq!(count(&doc, "action"), 1);
+        assert_eq!(count(&doc, "action"), 2);
         let xml = doc.GetXml().unwrap().to_string();
-        assert_eq!(xml.matches("<action ").count(), 1, "only our one button is markup: {xml}");
+        assert_eq!(xml.matches("<action ").count(), 2, "only our two buttons are markup: {xml}");
         assert!(xml.contains(r#"arguments="keep""#), "{xml}");
         assert!(xml.contains("&lt;/text&gt;&lt;action"), "{xml}");
     }
@@ -640,9 +661,10 @@ mod tests {
     }
 
     #[test]
-    fn only_the_one_constant_argument_is_a_button_press() {
+    fn only_the_two_constant_arguments_are_a_button_press() {
         assert_eq!(activation_for("keep"), Activation::Keep);
-        for other in ["", "agentmux-notify:n1-1", "keep ", "KEEP", "keep&x=1", "approve"] {
+        assert_eq!(activation_for("now"), Activation::Now);
+        for other in ["", "agentmux-notify:n1-1", "keep ", "KEEP", "keep&x=1", "approve", "now ", "NOW"] {
             assert_eq!(activation_for(other), Activation::Body, "{other:?}");
         }
     }

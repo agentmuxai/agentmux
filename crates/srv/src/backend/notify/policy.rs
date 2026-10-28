@@ -264,6 +264,8 @@ pub struct ShutdownInfo {
     /// so its Keep running button can only cancel this request, never a later
     /// one for the same block (#5397).
     pub request_id: String,
+    /// The two buttons' words when the countdown has its own (a sensitive operation); absent, the agent close's.
+    pub labels: Option<(String, String)>,
 }
 
 #[derive(Clone, Debug)]
@@ -447,7 +449,7 @@ pub fn title_for(kind: NotifyKind, agent_name: &str) -> String {
 }
 
 /// `ShutdownInfo::effect` of a sensitive operation's countdown
-/// (`SPEC_SUPER_AGENT_2026_10_25.md` §5): it shares the shutdown toast, without its button.
+/// (`SPEC_SUPER_AGENT_2026_10_25.md` §5): it shares the shutdown toast, with its own two words.
 pub const SENSITIVE_EFFECT: &str = "sensitive";
 
 /// A pending shutdown's title with `{n}` for the seconds left
@@ -619,9 +621,9 @@ impl PolicyState {
                         let template = shutdown_title_template(info.effect, &req.agent_name);
                         (
                             fill_seconds(&template, seconds_left(remaining_ms)),
-                            // A sensitive operation's countdown has no button: only the AgentMux
-                            // window, proven, may veto it, so the toast opens the window instead.
-                            (info.effect != SENSITIVE_EFFECT).then(|| vec![NotifyAction { id: "keep".to_string(), label: keep_label(info.running).to_string() }]),
+                            // Cancel and do-it-now. A press that skips or stops the wait is proven
+                            // in `notify.ack`, not here: any client holding the key can send one.
+                            Some(super::shutdown_buttons::actions(info)),
                             Some(Countdown { remaining_ms, title_template: template }),
                         )
                     }
@@ -1369,29 +1371,29 @@ mod tests {
 
     fn shutdown_req(effect: &'static str, running: bool, deadline_ms: i64) -> Request {
         Request {
-            shutdown: Some(ShutdownInfo { deadline_ms, effect, running, request_id: "r1".into() }),
+            shutdown: Some(ShutdownInfo { deadline_ms, effect, running, request_id: "r1".into(), labels: None }),
             ..req(NotifyKind::ShutdownPending, "b1")
         }
     }
 
     #[test]
-    fn a_pending_shutdown_says_what_will_happen_counts_down_and_offers_keep() {
+    fn a_pending_shutdown_says_what_will_happen_counts_down_and_offers_keep_and_close_now() {
         let s = Settings::default();
         let mut p = PolicyState::new();
         p.step(Input::Emit(shutdown_req("close_tab", true, 16_000)), 1_000, &s);
         let a = p.step(Input::Tick, 1_000, &s);
         let n = &shows(&a)[0];
         assert_eq!(n.title, "Closing lark in 15 s");
-        assert_eq!(n.actions, Some(vec![NotifyAction { id: "keep".into(), label: "Keep running".into() }]));
+        assert_eq!(n.actions, Some(vec![NotifyAction { id: "keep".into(), label: "Keep running".into() }, NotifyAction { id: "now".into(), label: "Close now".into() }]));
         assert_eq!(n.countdown, Some(Countdown { remaining_ms: 15_000, title_template: "Closing lark in {n} s".into() }));
     }
 
     #[test]
-    fn a_sensitive_operation_counts_down_with_its_name_and_no_button() {
+    fn a_sensitive_operation_counts_down_with_its_name_and_its_own_two_buttons() {
         let s = Settings::default();
         let mut p = PolicyState::new();
         let sensitive = Request {
-            shutdown: Some(ShutdownInfo { deadline_ms: 31_000, effect: SENSITIVE_EFFECT, running: true, request_id: "r9".into() }),
+            shutdown: Some(ShutdownInfo { deadline_ms: 31_000, effect: SENSITIVE_EFFECT, running: true, request_id: "r9".into(), labels: Some(("Don't upgrade".into(), "Upgrade now".into())) }),
             agent_name: "Upgrade AgentMux".into(),
             block_id: "sensitive:r9".into(),
             ..req(NotifyKind::ShutdownPending, "sensitive:r9")
@@ -1400,7 +1402,7 @@ mod tests {
         let a = p.step(Input::Tick, 1_000, &s);
         let n = &shows(&a)[0];
         assert_eq!(n.title, "Upgrade AgentMux in 30 s");
-        assert_eq!(n.actions, None, "only the AgentMux window, proven, may veto: the notification opens it");
+        assert_eq!(n.actions, Some(vec![NotifyAction { id: "keep".into(), label: "Don't upgrade".into() }, NotifyAction { id: "now".into(), label: "Upgrade now".into() }]), "its own words");
         assert_eq!(n.countdown, Some(Countdown { remaining_ms: 30_000, title_template: "Upgrade AgentMux in {n} s".into() }));
         assert_eq!(p.live_by_id(&n.id), Some((NotifyKind::ShutdownPending, "sensitive:r9".to_string(), Some("r9".to_string()))));
     }
@@ -1412,10 +1414,12 @@ mod tests {
         p.step(Input::Emit(shutdown_req("close_tab", false, 10_000)), 0, &s);
         let a = p.step(Input::Tick, 0, &s);
         assert_eq!(shows(&a)[0].actions.as_ref().unwrap()[0].label, "Keep open", "nothing is running to keep");
+        assert_eq!(shows(&a)[0].actions.as_ref().unwrap()[1].label, "Close now");
         let mut p = PolicyState::new();
         p.step(Input::Emit(shutdown_req("stop", true, 8_500)), 0, &s);
         let a = p.step(Input::Tick, 0, &s);
         assert_eq!(shows(&a)[0].title, "Stopping lark in 9 s", "whole seconds, rounded up");
+        assert_eq!(shows(&a)[0].actions.as_ref().unwrap()[1].label, "Stop now");
         let mut p = PolicyState::new();
         p.step(Input::Emit(shutdown_req("close_pane", true, 100)), 5_000, &s);
         let a = p.step(Input::Tick, 5_000, &s);
@@ -1441,7 +1445,7 @@ mod tests {
         assert_eq!(shows(&a)[0].title, "Closing lark in 15 s");
         // A different request for the block is a new shutdown, whatever its effect.
         let newer = Request {
-            shutdown: Some(ShutdownInfo { deadline_ms: 30_000, effect: "stop", running: true, request_id: "r2".into() }),
+            shutdown: Some(ShutdownInfo { deadline_ms: 30_000, effect: "stop", running: true, request_id: "r2".into(), labels: None }),
             ..req(NotifyKind::ShutdownPending, "b1")
         };
         p.step(Input::Emit(newer), 2, &s);

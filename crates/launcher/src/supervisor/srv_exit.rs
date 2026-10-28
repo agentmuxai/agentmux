@@ -206,7 +206,7 @@ pub(super) async fn respawn_srv(
     let incident = crate::incidents::srv_restarted(why);
     let (result, child) = srv_spawner::spawn_srv(launcher_exe_dir, paths, "", sink, Some(&incident.id)).await?;
     *srv = Srv::new(result, child);
-    crate::notify::update_endpoint(&srv.result.ws_endpoint, &srv.result.auth_key);
+    crate::notify::update_endpoint(&srv.result.ws_endpoint, &srv.result.auth_key, &srv.result.host_reg_secret);
     crate::incidents::record(&incident);
     log(&format!(
         "srv respawned (pid {}) — new endpoints ws={} web={}",

@@ -346,6 +346,24 @@ pub struct AgentShutdownKeepResult {
     pub outcome: String,
 }
 
+/// Data for AgentShutdownNowCommand: the pending-shutdown banner's "Close now"
+/// (`SPEC_COUNTDOWN_BUTTONS_AND_BATCH_AGENT_ACTIONS_2026_10_28.md` §3). The AgentMux window's alone.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandAgentShutdownNowData {
+    pub blockid: String,
+    /// From the `agent:shutdown-pending` event being answered.
+    pub request_id: String,
+}
+
+/// `closed_now`, or `too_late` when the shutdown had been kept or had already begun.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct AgentShutdownNowResult {
+    #[ts(type = "\"closed_now\" | \"too_late\"")]
+    pub outcome: String,
+}
+
 // ---- Subprocess agent command data types ----
 
 /// Data for SubprocessSpawnCommand — spawn agent CLI for a single turn.

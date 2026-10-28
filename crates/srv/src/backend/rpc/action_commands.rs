@@ -27,7 +27,7 @@ pub const ALWAYS: &[&str] = &[
     "agent.setSeat", "agent.start", "agent.stop", "agent.takeover", "agent:memory:revert", "agent:memory:write_file",
     "agent:session:append_output", "agent:session:archive", "agent:session:write_state", "agentanswer", "agentcancel",
     "agentdefcreatefromtemplate", "agentdefhide", "agentdefunhide", "agentinput", "agentlastruntime",
-    "agents.migrateForkSlugs", "agentshutdownkeep", "agentstop", "app.desktop", "app.upgrade-requests",
+    "agents.migrateForkSlugs", "agentshutdownkeep", "agentshutdownnow", "agentstop", "app.desktop", "app.upgrade-requests",
     "appendagenthistory", "asksidequestion", "attachments.copy-to-workdir", "attachments.ingest", "auth.cancel",
     "auth.start", "auth.submitcallback", "browser_profiles.create", "browser_profiles.delete",
     "browser_profiles.update", "browser_start_page.set", "bundle.delete", "bundle.import", "bundle.import.commit",

@@ -2,7 +2,13 @@
 
 export type NotifyAckParams = { id: string, clicked: boolean, 
 /**
- * A button on the toast: `keep` (Keep running). Absent for a body click or
- * a dismissal, and from a launcher that predates buttons.
+ * A button on the toast: `keep` (the cancel: Keep running, or a veto) or `now` (the do-it-now:
+ * Close now, ...). Absent for a body click or a dismissal, and from a launcher that predates
+ * buttons.
  */
-action?: string, };
+action?: string, 
+/**
+ * The launcher's proof, sent with a button: the host registration secret, which no agent has.
+ * Any client holding the instance key can send an ack; what skips or stops a wait needs this.
+ */
+proof?: string, };

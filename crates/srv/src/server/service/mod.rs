@@ -17,6 +17,7 @@
 
 mod client;
 mod credential;
+pub(crate) use credential::host_caller_allowed;
 mod host_ipc;
 mod introspect;
 mod memory_adopt;

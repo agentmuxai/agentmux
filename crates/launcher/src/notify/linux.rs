@@ -97,13 +97,13 @@ pub fn delivery(n: &Notification) -> (u8, i32, bool) {
 }
 
 /// The `actions` array of a `Notify` call: `default` (the body click) and, when
-/// the toast offers Keep running and the server supports actions, that button.
+/// the toast offers buttons (cancel, do it now) and the server supports actions, those.
 /// Pairs of (key, label), flattened as the spec wants.
 pub fn action_args(n: &Notification, server_has_actions: bool) -> Vec<String> {
     let mut out = vec!["default".to_string(), "Open".to_string()];
     if server_has_actions {
-        if let Some(label) = n.keep_label() {
-            out.push("keep".to_string());
+        for (id, label) in n.buttons() {
+            out.push(id.to_string());
             out.push(label.to_string());
         }
     }
@@ -116,6 +116,7 @@ pub fn pressed(offered: &[String], action: &str, id: &str) -> Option<UserAction>
     match action {
         "default" => Some(UserAction::Clicked(id.to_string())),
         "keep" if offered.iter().any(|a| a == "keep") => Some(UserAction::Keep(id.to_string())),
+        "now" if offered.iter().any(|a| a == "now") => Some(UserAction::Now(id.to_string())),
         _ => None,
     }
 }
@@ -322,16 +323,19 @@ mod tests {
 
     fn closing() -> Notification {
         Notification {
-            actions: vec![super::super::NotifyAction { id: "keep".into(), label: "Keep running".into() }],
+            actions: vec![
+                super::super::NotifyAction { id: "keep".into(), label: "Keep running".into() },
+                super::super::NotifyAction { id: "now".into(), label: "Close now".into() },
+            ],
             ..n(Some("AgentY asked to close it."))
         }
     }
 
-    /// The Keep running button is offered only when the server supports
+    /// The buttons are offered only when the server supports
     /// actions; the body click is always there.
     #[test]
-    fn keep_running_is_an_action_only_where_the_server_supports_actions() {
-        assert_eq!(action_args(&closing(), true), vec!["default", "Open", "keep", "Keep running"]);
+    fn the_buttons_are_actions_only_where_the_server_supports_actions() {
+        assert_eq!(action_args(&closing(), true), vec!["default", "Open", "keep", "Keep running", "now", "Close now"]);
         assert_eq!(action_args(&closing(), false), vec!["default", "Open"]);
         assert_eq!(action_args(&n(None), true), vec!["default", "Open"], "no button for any other notification");
     }
@@ -342,9 +346,11 @@ mod tests {
     fn a_press_is_only_what_we_offered() {
         let offered = action_args(&closing(), true);
         assert_eq!(pressed(&offered, "keep", "n1"), Some(UserAction::Keep("n1".into())));
+        assert_eq!(pressed(&offered, "now", "n1"), Some(UserAction::Now("n1".into())));
         assert_eq!(pressed(&offered, "default", "n1"), Some(UserAction::Clicked("n1".into())));
         assert_eq!(pressed(&offered, "something-else", "n1"), None);
         let plain = action_args(&n(None), true);
         assert_eq!(pressed(&plain, "keep", "n2"), None);
+        assert_eq!(pressed(&plain, "now", "n2"), None);
     }
 }

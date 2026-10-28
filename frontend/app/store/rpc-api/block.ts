@@ -26,6 +26,7 @@ export type BlockInputInput = Pick<CommandBlockInputData, "blockid"> & Partial<O
 // (controllerinput, controllerresync, agentanswer, createsubblock) have shapes
 // ts-rs cannot express -- see the carve-out notes in rpc_types/block.rs.
 export type { AgentShutdownKeepResult } from "@/types/rpc/AgentShutdownKeepResult";
+export type { AgentShutdownNowResult } from "@/types/rpc/AgentShutdownNowResult";
 export type { BackgroundTaskView } from "@/types/rpc/BackgroundTaskView";
 export type { BlockfileLineCountResult } from "@/types/rpc/BlockfileLineCountResult";
 export type { BlockfileReadRangeResult } from "@/types/rpc/BlockfileReadRangeResult";
@@ -33,6 +34,7 @@ export type { BlockfileReadStateResult } from "@/types/rpc/BlockfileReadStateRes
 export type { BlockfileWriteStateResult } from "@/types/rpc/BlockfileWriteStateResult";
 export type { CommandAgentCancelData } from "@/types/rpc/CommandAgentCancelData";
 export type { CommandAgentShutdownKeepData } from "@/types/rpc/CommandAgentShutdownKeepData";
+export type { CommandAgentShutdownNowData } from "@/types/rpc/CommandAgentShutdownNowData";
 export type { CommandAmbientNarrateData } from "@/types/rpc/CommandAmbientNarrateData";
 export type { CommandBackgroundTaskCompletionData } from "@/types/rpc/CommandBackgroundTaskCompletionData";
 export type { CommandBackgroundTaskPidData } from "@/types/rpc/CommandBackgroundTaskPidData";
