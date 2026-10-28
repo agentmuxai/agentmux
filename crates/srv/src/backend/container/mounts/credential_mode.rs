@@ -6,7 +6,8 @@
 //! volume is created from the image. When a container starts (or has been restarted since it was
 //! last looked at) a root exec tightens what is the turn user's: `~/.claude` and its top-level
 //! files to the agent alone, and the credentials file to `600`. A credentials file that root owns is
-//! handed to the turn user first. One owned by a real host user is left exactly as it is: through the
+//! handed to the turn user first, unless the container runs in a user namespace (rootless Docker or
+//! Podman), where root is the host user. One owned by a real host user is left exactly as it is: through the
 //! bind a `chown` would change the host's file, and a `chmod 600` could lock the agent out of a file
 //! it can read today. It then reads the file back, and says in the log what it is.
 
@@ -28,7 +29,10 @@ if [ -d "$d" ] && [ "$(stat -c %u "$d")" = "$3" ]; then
   find "$d" -maxdepth 1 -type f ! -path "$f" -user "$3" -exec chmod go-rwx {} +
 fi
 if [ -f "$f" ] && [ ! -L "$f" ]; then
-  [ "$(stat -c %u "$f")" = 0 ] && chown "$3:$4" "$f"
+  # Root-owned is Docker Desktop's synthesized owner only when root here is root there: under a user
+  # namespace (rootless Docker or Podman, userns-remap) root is the host user, and the file is theirs.
+  read -r inside outside _ </proc/self/uid_map
+  [ "$(stat -c %u "$f")" = 0 ] && [ "$inside $outside" = "0 0" ] && chown "$3:$4" "$f"
   [ "$(stat -c %u "$f")" = "$3" ] && chmod 600 "$f"
   stat -c '%u:%g %a' "$f"
 else
@@ -197,10 +201,13 @@ mod tests {
             let run = || run_as(me.uid());
 
             // Files that belong to somebody else (here: the turn user is another uid) are left exactly
-            // as they are, so a `600` can't lock the agent out of a file it reads today.
-            let out = run_as(me.uid() + 1);
-            assert_eq!(super::super::outcome(&out, me.uid() as u64 + 1, me.gid() as u64), Some(super::super::Outcome::Presented(format!("{}:{} 666", me.uid(), me.gid()))), "{out}");
-            assert_eq!((mode(&dir), mode(&creds), mode(&settings)), (0o755, 0o666, 0o666));
+            // as they are, so a `600` can't lock the agent out of a file it reads today. (Run as root,
+            // the fixture is root's, which the script hands over by design, so this part needs a user.)
+            if me.uid() != 0 {
+                let out = run_as(me.uid() + 1);
+                assert_eq!(super::super::outcome(&out, me.uid() as u64 + 1, me.gid() as u64), Some(super::super::Outcome::Presented(format!("{}:{} 666", me.uid(), me.gid()))), "{out}");
+                assert_eq!((mode(&dir), mode(&creds), mode(&settings)), (0o755, 0o666, 0o666));
+            }
 
             let out = run();
             assert_eq!(super::super::outcome(&out, me.uid() as u64, me.gid() as u64), Some(super::super::Outcome::Private), "{out}");

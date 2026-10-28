@@ -242,6 +242,8 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
      "no-window: calls no_window()/creation_flags in this file"),
     ("crates/srv/src/backend/claude_layout.rs", "\"git\"", 1,
      "test: unit-test or fixture code, never on a user machine"),
+    ("crates/srv/src/backend/container/mounts/credential_mode.rs", "\"sh\"", 1,
+     "test: the unix-only test runs the container's credential script against a temp dir"),
     ("crates/srv/src/backend/container_cli.rs", "\"sh\"", 2,
      "test: unit-test or fixture code, never on a user machine"),
     ("crates/srv/src/backend/cli_prune.rs", "\"ps\"", 1,
