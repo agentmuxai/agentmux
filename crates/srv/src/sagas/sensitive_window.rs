@@ -38,6 +38,9 @@ pub const EVENT_SENSITIVE_CLEARED: &str = "sensitive:cleared";
 pub const COMMAND_SENSITIVE_DECIDE: &str = "sensitive.decide";
 /// A settled window stays answerable this long, then is dropped.
 const KEEP_FINISHED_MS: i64 = 10 * 60 * 1000;
+/// How many of each event are kept for a window that opens mid-countdown: more than the
+/// countdowns that can overlap in the longest wait.
+const REPLAY_EVENTS: usize = 32;
 
 /// A countdown as the person's banner shows it.
 #[derive(Clone, Debug, Serialize, PartialEq, Eq, ts_rs::TS)]
@@ -55,6 +58,10 @@ pub struct SensitiveView {
     pub approver: Option<String>,
     #[ts(type = "number")]
     pub deadline_ms: i64,
+    /// When the countdown began. A window that connects later is replayed the countdowns still
+    /// running; this is what tells those from a new one.
+    #[ts(type = "number")]
+    pub opened_ms: i64,
     /// `pending` → `vetoed` or `cancelled`, or `proceeding` → `done` / `failed`.
     #[ts(type = r#""pending" | "vetoed" | "cancelled" | "proceeding" | "done" | "failed""#)]
     pub status: &'static str,
@@ -165,6 +172,7 @@ pub fn open(state: &AppState, request_id: &str, window: Duration) -> Result<Sens
             requester: request.requester_slug.clone(),
             approver: request.decided_by.clone(),
             deadline_ms: now + window.as_millis() as i64,
+            opened_ms: now,
             status: "pending",
             error: None,
         };
@@ -174,7 +182,7 @@ pub fn open(state: &AppState, request_id: &str, window: Duration) -> Result<Sens
         );
         view
     };
-    state.broker.publish_event::<crate::backend::mps_events::SensitivePending>(&view, vec![], 1);
+    state.broker.publish_event::<crate::backend::mps_events::SensitivePending>(&view, vec![], REPLAY_EVENTS);
     tracing::info!(request_id, op = %view.op, requester = %view.requester, "sensitive request: the person has {} s to veto it", window.as_secs());
 
     let wake = entries().get(request_id).map(|e| e.wake.clone());
@@ -303,7 +311,7 @@ pub fn approve_now(request_id: &str) -> &'static str {
 
 fn cleared(state: &AppState, request_id: &str, outcome: &str) {
     let data = SensitiveClearedEvent { request_id: request_id.to_string(), outcome: outcome.to_string() };
-    state.broker.publish_event::<crate::backend::mps_events::SensitiveCleared>(&data, vec![], 1);
+    state.broker.publish_event::<crate::backend::mps_events::SensitiveCleared>(&data, vec![], REPLAY_EVENTS);
 }
 
 /// One audit row for a step of the window: the person's veto, or the run.

@@ -17,6 +17,11 @@ requester: string,
  */
 approver?: string, deadline_ms: number, 
 /**
+ * When the countdown began. A window that connects later is replayed the countdowns still
+ * running; this is what tells those from a new one.
+ */
+opened_ms: number, 
+/**
  * `pending` → `vetoed` or `cancelled`, or `proceeding` → `done` / `failed`.
  */
 status: "pending" | "vetoed" | "cancelled" | "proceeding" | "done" | "failed", error?: string, };
