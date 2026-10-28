@@ -724,6 +724,19 @@ impl FileStore {
                 params![zone_id, name, idx as i32, part_data],
             )?;
         }
+        // The new content has its own start: a watermark left by a trim
+        // (trim.rs) described the old content, and would hide the new.
+        let meta_json: Option<String> = tx
+            .query_row("SELECT meta FROM db_wave_file WHERE zoneid = ?1 AND name = ?2", params![zone_id, name], |r| r.get(0))
+            .optional()?;
+        if let Some(mut meta) = meta_json.and_then(|m| serde_json::from_str::<FileMeta>(&m).ok()) {
+            if meta.remove(super::types::RETAINED_FROM_KEY).is_some() {
+                tx.execute(
+                    "UPDATE db_wave_file SET meta = ?1 WHERE zoneid = ?2 AND name = ?3",
+                    params![serde_json::to_string(&meta)?, zone_id, name],
+                )?;
+            }
+        }
         // The new epoch is recorded at the `rev` the part writes above left
         // (the delete trigger bumps it).
         let count = count_all(data);
@@ -791,6 +804,7 @@ impl FileStore {
                 if let Some(ref mut file) = entry.file {
                     file.size = data.len() as i64;
                     file.modts = now;
+                    file.meta.remove(super::types::RETAINED_FROM_KEY);
                 }
                 entry.last_access_ms = now;
                 entry.cached_size_bytes = new_size;

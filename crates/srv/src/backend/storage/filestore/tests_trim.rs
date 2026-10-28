@@ -183,3 +183,29 @@ fn a_read_never_returns_an_offset_earlier_than_its_body_while_trims_run() {
     }
     writer.join().unwrap();
 }
+
+#[test]
+fn replacing_the_content_of_a_trimmed_file_starts_it_afresh() {
+    let store = circular_store(2 * PART);
+    for _ in 0..8 {
+        store.append_data_at("z", "term", &vec![b'o'; PART as usize]).unwrap();
+    }
+    store.trim_circular_head("z", "term").unwrap();
+    assert!(store.stat("z", "term").unwrap().unwrap().data_start_idx() > 0, "trimmed, and cached so");
+
+    // A restore writes less than the old start; the cache and the row both forget it.
+    store.write_file("z", "term", b"restored").unwrap();
+    let file = store.stat("z", "term").unwrap().unwrap();
+    assert_eq!((file.size, file.data_start_idx(), file.data_length()), (8, 0, 8));
+    assert!(file.meta.get("retainedfrom").is_none());
+    assert_eq!(store.read_file("z", "term").unwrap().unwrap(), b"restored");
+    let (from, bytes) = store.read_at("z", "term", 0, 0).unwrap();
+    assert_eq!((from, bytes.as_slice()), (0, &b"restored"[..]));
+
+    store.append_data_at("z", "term", b" + more").unwrap();
+    assert_eq!(store.read_file("z", "term").unwrap().unwrap(), b"restored + more");
+
+    // The same from the database, as another process would see it.
+    let fresh = super::trim::file_row(&store.lock_conn(), "z", "term").unwrap().unwrap();
+    assert!(fresh.meta.get("retainedfrom").is_none());
+}
