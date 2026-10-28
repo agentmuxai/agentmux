@@ -66,9 +66,38 @@ pub fn strip_trailing_commas(input: &str) -> String {
     result
 }
 
+/// Dev mode (`app:devmode`, docs/specs/SPEC_DEV_MODE_SETTING_2026_10_28.md) from
+/// the text of `settings.json` (`None`: no such file): the key when it is a
+/// boolean, otherwise `dev_build`, whether this is a task dev or debug build.
+/// The host checks this before it opens DevTools.
+pub fn dev_mode_from(text: Option<&str>, dev_build: bool) -> bool {
+    text.and_then(parse_jsonc)
+        .and_then(|v| v.get("app:devmode").and_then(|b| b.as_bool()))
+        .unwrap_or(dev_build)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dev_mode_is_the_setting_when_it_is_set_and_the_build_when_it_is_not() {
+        for text in [None, Some(""), Some("{}"), Some("{ // nothing set
+}"), Some("{nope"), Some(r#"{"app:devmode": "yes"}"#)] {
+            assert!(dev_mode_from(text, true), "a dev build, {text:?}");
+            assert!(!dev_mode_from(text, false), "a release build, {text:?}");
+        }
+        let on = Some("{
+  // on
+  \"app:devmode\": true,
+}
+");
+        assert!(dev_mode_from(on, false), "on in a release build");
+        assert!(dev_mode_from(on, true));
+        let off = Some(r#"{"app:devmode": false, "other": 1}"#);
+        assert!(!dev_mode_from(off, true), "off in a dev build");
+        assert!(!dev_mode_from(off, false));
+    }
 
     #[test]
     fn reads_comments_and_trailing_commas() {

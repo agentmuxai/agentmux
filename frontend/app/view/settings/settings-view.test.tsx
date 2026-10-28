@@ -16,6 +16,12 @@
 import { takeSupervisorSettingsRequest } from "@/app/store/supervisor-settings-request";
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
+const devMode = vi.hoisted(() => ({ on: false }));
+// The build's default: this test runs as a release build, so dev mode is off.
+vi.mock("@/app/store/misc-utils", async (importOriginal) => ({
+    ...(await importOriginal<typeof import("@/app/store/misc-utils")>()),
+    isDev: () => devMode.on,
+}));
 
 // importOriginal, not a bare replacement object: each section file now also
 // exports a *_SETTINGS search-index registry (SPEC_SETTINGS_PANE_SEARCH_2026_09_21.md
@@ -200,6 +206,24 @@ describe("SettingsView search bar", () => {
     it("shows no results dropdown when the query is empty", () => {
         renderSettings();
         expect(screen.queryByTestId("settings-search-results")).not.toBeInTheDocument();
+    });
+
+    it("finds the Dev mode setting always, and the block ID option only in dev mode", () => {
+        const found = (query: string) => {
+            renderSettings();
+            fireEvent.input(screen.getByTestId("settings-search-input"), { target: { value: query } });
+            const labels = screen.queryAllByTestId("settings-search-result").map((r) => r.textContent ?? "");
+            cleanup();
+            return labels;
+        };
+        expect(found("devtools").some((l) => l.includes("Dev mode"))).toBe(true);
+        expect(found("blockheader:showblockids").some((l) => l.includes("Show block IDs"))).toBe(false);
+        devMode.on = true;
+        try {
+            expect(found("blockheader:showblockids").some((l) => l.includes("Show block IDs"))).toBe(true);
+        } finally {
+            devMode.on = false;
+        }
     });
 
     it("finds a setting by a curated synonym, not just its literal label", () => {

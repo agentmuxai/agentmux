@@ -38,6 +38,8 @@ vi.mock("@/store/global", () => ({
     viewerPairedAtom: () => null,
 }));
 vi.mock("@/app/store/rpc-api", () => ({ RpcApi: {} }));
+const devMode = vi.hoisted(() => ({ on: true }));
+vi.mock("@/app/store/dev-mode", () => ({ devModeOn: () => devMode.on }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 vi.mock("@/app/view/accounts/AgentMuxConnectPanel", () => ({
     useMuxBusStatus: vi.fn(),
@@ -126,6 +128,20 @@ describe("HostPopoverPanel — Instance row and Data-path link", () => {
 
     afterEach(() => {
         cleanup();
+    });
+
+    it("shows the DevTools port only in dev mode, and keeps the other ports", () => {
+        renderPanel();
+        expect(screen.getByText("DevTools")).toBeInTheDocument();
+        cleanup();
+        devMode.on = false;
+        try {
+            renderPanel();
+            expect(screen.queryByText("DevTools")).not.toBeInTheDocument();
+            for (const row of ["IPC", "Backend", "WS"]) expect(screen.getByText(row)).toBeInTheDocument();
+        } finally {
+            devMode.on = true;
+        }
     });
 
     it("no longer renders an Instance row", () => {

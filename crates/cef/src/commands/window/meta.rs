@@ -342,6 +342,7 @@ pub fn register_backend_window(state: &Arc<AppState>, args: &serde_json::Value) 
 /// That callback creates a top-level CefWindow with a native title bar,
 /// producing a standalone DevTools window — identical to Tauri's open_devtools().
 pub fn toggle_devtools(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    crate::dev_mode::require()?;
     let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main");
     crate::ui_tasks::post_show_dev_tools(state, label);
     Ok(serde_json::Value::Null)
@@ -351,6 +352,7 @@ pub fn toggle_devtools(state: &Arc<AppState>, args: &serde_json::Value) -> Resul
 /// coordinates. Equivalent to Chrome's right-click → Inspect Element.
 /// Used by the pane context menu's Inspect entry.
 pub fn inspect_element_at(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    crate::dev_mode::require()?;
     let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main");
     let x = args.get("x").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
     let y = args.get("y").and_then(|v| v.as_i64()).unwrap_or(0) as i32;

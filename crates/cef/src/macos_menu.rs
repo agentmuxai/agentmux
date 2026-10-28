@@ -350,8 +350,12 @@ unsafe fn install_inner(state: Arc<AppState>) {
     add_cmd(view, target, "Zoom In", "view:zoom:in", "", 0);
     add_cmd(view, target, "Zoom Out", "view:zoom:out", "", 0);
     add_cmd(view, target, "Actual Size", "view:zoom:reset", "", 0);
-    add_sep(view);
-    add_cmd(view, target, "Toggle DevTools", "dev:devtools", "", 0);
+    // The item is static, so it is decided when the app starts; the command
+    // behind it is gated live either way (dev_mode.rs).
+    if crate::dev_mode::dev_mode_on() {
+        add_sep(view);
+        add_cmd(view, target, "Toggle DevTools", "dev:devtools", "", 0);
+    }
 
     // ── Window (standard + tab nav) ──
     let window = add_submenu(main, "Window");
