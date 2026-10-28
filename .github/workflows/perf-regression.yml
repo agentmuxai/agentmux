@@ -50,14 +50,16 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: write # the perf-data branch (the history); nothing else is written
-  actions: read
-  issues: write
+  contents: read
 
 jobs:
   compare:
     name: lab, previous nightly against latest
     runs-on: windows-latest
+    permissions:
+      contents: write # the perf-data branch (the history); nothing else is written
+      actions: read
+      issues: write
     # About 5 minutes a run, 8 runs, plus setup (Phase 0 sizing on this runner type).
     timeout-minutes: 120
     steps:

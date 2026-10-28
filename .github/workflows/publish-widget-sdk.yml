@@ -31,6 +31,11 @@ concurrency:
   group: publish-widget-sdk
   cancel-in-progress: false
 
+# Read-only by default; a job that needs more says so itself (job-level permissions replace this
+# block). A job added later gets nothing it did not ask for.
+permissions:
+  contents: read
+
 jobs:
   publish:
     runs-on: ubuntu-latest

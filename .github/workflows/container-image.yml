@@ -41,6 +41,11 @@ env:
   REGISTRY: ghcr.io
   IMAGE_NAME: agentmuxai/agent-base
 
+# Read-only by default; a job that needs more says so itself (job-level permissions replace this
+# block). A job added later gets nothing it did not ask for.
+permissions:
+  contents: read
+
 jobs:
   # For any run on a tag: a release, or a rerun of one (gh workflow run release.yml --ref <tag>).
   # A manual run of this file is on a branch and must be main (see build-and-push). The
