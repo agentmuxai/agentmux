@@ -183,6 +183,7 @@ async fn the_sweep_stops_nothing_with_the_setting_off_and_nothing_that_is_not_ye
     let state = test_state();
     let (_ws, tabs) = seed_workspace(&state, 1).await;
     let block = parked_running(&state, &tabs[0], "ag-sweep").await;
+    set_always_available(&state, false);
     assert_eq!(sweep_once(&state).await, 0, "off");
     set_limits(&state, 12);
     assert_eq!(sweep_once(&state).await, 0, "idle for a moment, not an hour");

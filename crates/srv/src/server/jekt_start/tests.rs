@@ -78,6 +78,7 @@ async fn a_held_message_starts_the_stopped_agent_only_for_a_host_sender_with_the
         dispatch_apply(&state, Command::ParkBlock { tab_id: tabs[0].clone(), block_id: b.clone() }).await;
     }
 
+    set_always_available(&state, false);
     let held = hold_for(&state, "ag-off", crate::server::ReactiveAuthVia::FullAuthKey).await.expect("held");
     assert_eq!(held["held"], true, "{held}");
     set_always_available(&state, true);
