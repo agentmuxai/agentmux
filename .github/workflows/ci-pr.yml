@@ -508,6 +508,10 @@ jobs:
             try { Add-MpPreference -ExclusionPath $path -ErrorAction Stop } catch { Write-Warning "Defender exclusion failed ($path): $_" }
           }
       - uses: Swatinem/rust-cache@v2
+        with:
+          # While tests fail the job is red; without this the cache would never
+          # be saved and every run would build cold (~10 min).
+          cache-on-failure: true
       - name: Install cargo-nextest
         uses: taiki-e/install-action@nextest
       # Keep this crate list identical to the `rust` job's.
