@@ -138,31 +138,31 @@ pub fn desired_of(state: AgentRuntimeState) -> AgentDesiredState {
 /// The runtime state of every created agent, as of `now_ms`. Blocking: reads the store.
 pub(crate) fn list(state: &AppState, now_ms: u64) -> Vec<AgentRuntime> {
     let mstore = &state.mstore;
+    // The definitions, not the local instance rows: an agent defined on another channel of this
+    // host is in the shared registry before it has a row here, and `listagents` shows it too.
+    // A template is not an agent.
     let defs = mstore.agent_def_list().unwrap_or_default();
     let panes = pane_blocks_by_agent(mstore);
-    mstore
-        .instance_list(None, None)
-        .unwrap_or_default()
-        .into_iter()
-        .map(|i| {
-            let def = defs.iter().find(|d| d.id == i.definition_id);
+    defs.into_iter()
+        .filter(|d| d.is_seeded != 1 && d.user_hidden == 0)
+        .map(|d| {
             // By the agent's UID, not its name: two agents can share a display name.
-            let live = block_of_uid(state.reactive_handler, &i.id);
+            let live = block_of_uid(state.reactive_handler, &d.id);
             // A pane whose process ended is no longer registered, but it is still the agent's
             // block: a viewer needs its id to open or stop it. Its state is `stopped`.
-            let block_id = live.clone().or_else(|| panes.get(&i.id).cloned());
+            let block_id = live.clone().or_else(|| panes.get(&d.id).cloned());
             let (runtime_state, detail, resets_at) = state_of(&availability_of_block(mstore, live.as_deref(), now_ms));
             AgentRuntime {
-                agent_id: i.id,
+                color: block_id.as_deref().and_then(|b| color_of_block(mstore, b)),
+                agent_id: d.id,
                 state: runtime_state,
                 detail,
                 resets_at,
-                color: block_id.as_deref().and_then(|b| color_of_block(mstore, b)),
                 block_id,
                 desired: desired_of(runtime_state),
-                name: if i.instance_name.is_empty() { def.map(|d| d.name.clone()).unwrap_or_default() } else { i.instance_name },
-                provider: def.map(|d| d.provider.clone()).unwrap_or_default(),
-                icon: def.map(|d| d.icon.clone()).unwrap_or_default(),
+                name: d.name,
+                provider: d.provider,
+                icon: d.icon,
             }
         })
         .collect()
