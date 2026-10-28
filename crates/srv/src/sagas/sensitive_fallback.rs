@@ -85,7 +85,7 @@ fn go_ahead(state: &AppState, request_id: &str, no_reviewer: bool) {
         // Nothing here can do it: say so, rather than count down to nothing.
         if requests::registry().finish(request_id, Status::Expired, now_ms()).is_ok() {
             window::audit_step(state, "no super agent", &request, "sensitive.fallback", false, Some("nothing can run it from here"), "expired");
-            tell(&request.requester_uid, &format!("[AgentMux] Nobody reviewed your request to {} ({why}), and this AgentMux can't run it, so it ended.", request.summary));
+            window::tell_askers(&request, &format!("[AgentMux] Nobody reviewed your request to {} ({why}), and this AgentMux can't run it, so it ended.", request.summary));
         }
         return;
     }
@@ -97,16 +97,10 @@ fn go_ahead(state: &AppState, request_id: &str, no_reviewer: bool) {
         return;
     }
     window::audit_step(state, "no super agent", &request, "sensitive.fallback", true, None, &format!("countdown {window_secs} s, no super agent reviewed it"));
-    tell(
-        &request.requester_uid,
+    window::tell_askers(
+        &request,
         &format!("[AgentMux] Nobody reviewed your request to {} ({why}). The person has {window_secs} s to veto it; after that it happens.", request.summary),
     );
-}
-
-fn tell(uid: &str, note: &str) {
-    if let Err(e) = crate::backend::reactive::get_global_handler().deliver_system_note(uid, note) {
-        tracing::info!(error = %e, "sensitive request: note not delivered");
-    }
 }
 
 #[cfg(test)]

@@ -207,7 +207,7 @@ fn an_answer_goes_to_every_agent_that_asked_including_those_that_joined() {
     let facts: BTreeMap<String, String> = [("agent", "Camper"), ("old_fingerprint", "aa"), ("new_fingerprint", "bb")].iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
     let id = reg.request("u1", "first", "sender_key_repin", &facts, "", now_ms()).unwrap().id;
     assert!(reg.request("u2", "second", "sender_key_repin", &facts, "", now_ms()).unwrap().joined);
-    assert_eq!(askers(&reg.get(&id).unwrap()), vec!["u1", "u2"]);
+    assert_eq!(reg.get(&id).unwrap().askers(), vec!["u1", "u2"]);
 }
 
 #[test]

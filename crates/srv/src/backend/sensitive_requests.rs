@@ -282,6 +282,11 @@ impl Registry {
 }
 
 impl Request {
+    /// The agents that asked for this: the first, then those that joined.
+    pub fn askers(&self) -> Vec<&str> {
+        std::iter::once(self.requester_uid.as_str()).chain(self.also_asked_by.iter().map(|a| a.uid.as_str())).collect()
+    }
+
     /// Whether `uid` asked for this, first or by joining.
     pub fn asked_by(&self, uid: &str) -> bool {
         self.requester_uid == uid || self.also_asked_by.iter().any(|a| a.uid == uid)
