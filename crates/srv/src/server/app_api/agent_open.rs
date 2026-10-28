@@ -413,8 +413,17 @@ pub(super) async fn open_agent_inner(
                 let provider = providers::get_provider(&agent.provider)
                     .ok_or_else(|| format!("INVALID_PROVIDER: unknown provider '{}'", agent.provider))?;
 
-                // 3. Determine tab
-                let tab_id = resolve_tab_id(&mstore, cmd.tab_id.as_deref())?;
+                // 3. Determine tab. A start needs none to run an agent that already has a block, so with
+                //    no tab it only reuses that block and a first block still needs a tab.
+                let tab_id = match resolve_tab_id(&mstore, cmd.tab_id.as_deref()) {
+                    Ok(tab_id) => tab_id,
+                    Err(e) if headless => {
+                        return super::agent_attach::reuse_existing_pane(&app_state, &agent, provider, &cmd, "", true, into_block.is_none())
+                            .await?
+                            .ok_or(e);
+                    }
+                    Err(e) => return Err(e),
+                };
 
                 // 4. Reuse the agent's block when it has one: its pane in this tab; a parked block,
                 //    attached here; or the pane that shows it elsewhere (`agent_attach`).

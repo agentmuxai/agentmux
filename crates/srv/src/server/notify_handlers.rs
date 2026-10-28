@@ -161,7 +161,7 @@ pub struct BlockRevealResult {
     pub window_id: Option<String>,
 }
 
-fn router_for(state: &AppState) -> Arc<router::Router> {
+pub(crate) fn router_for(state: &AppState) -> Arc<router::Router> {
     router::init(state.broker.clone(), state.config_watcher.clone(), state.mstore.clone(), state.reactive_handler)
 }
 

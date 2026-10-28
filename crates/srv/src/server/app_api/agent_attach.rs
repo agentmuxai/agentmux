@@ -103,8 +103,14 @@ fn ensure_controller(
     Ok(())
 }
 
-/// Bring the window to the pane that shows `block_id` in `tab_id`: its tab active, its pane focused.
+/// Bring the window to the pane that shows `block_id` in `tab_id`: `block.reveal` makes it its pane's
+/// visible member and tells its window to restore, un-magnify and focus it; where that finds no open
+/// window, its tab is made active and its pane focused here.
 async fn focus_shown(state: &AppState, tab_id: &str, block_id: &str) {
+    let router = crate::server::notify_handlers::router_for(state);
+    if matches!(crate::server::notify_handlers::reveal_block(state, &router, block_id.to_string()).await, Ok(r) if r.found) {
+        return;
+    }
     let (workspace_id, node_id) = {
         let s = state.srv_state.lock().await;
         let ws = s.workspaces.iter().find(|(_, w)| w.tab_ids.iter().any(|t| t == tab_id)).map(|(id, _)| id.clone());

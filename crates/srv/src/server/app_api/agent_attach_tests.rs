@@ -101,3 +101,23 @@ fn the_desired_state_is_block_meta_and_a_block_without_it_has_none() {
     block.meta.insert(agent_attach::META_DESIRED.to_string(), serde_json::json!("stopped"));
     assert_eq!(agent_attach::desired_of(&block).as_deref(), Some("stopped"));
 }
+
+/// The last workspace deleted leaves the agents' blocks parked and no tab to put a pane in: a start still
+/// runs such an agent, and one with no block yet still needs a tab to make it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_start_runs_a_parked_agent_when_no_workspace_is_left() {
+    let state = crate::server::tests::test_state();
+    set_always_available(&state, true);
+    let (ws, tabs) = seed_workspace(&state, 1).await;
+    let block = seed_agent_block(&state, &tabs[0], "ag-nows").await;
+    crate::sagas::delete_workspace::run(&state, ws).await.unwrap();
+    assert_eq!(in_tab(&state, &block).await.as_deref(), Some(""));
+    assert!(state.srv_state.lock().await.tabs.is_empty(), "no tab is left");
+
+    let started = agent_attach::start_agent(&state, "ag-nows").await.unwrap();
+
+    assert_eq!(started, block);
+    let stored = state.mstore.get::<Block>(&block).unwrap().unwrap();
+    assert_eq!(agent_attach::desired_of(&stored).as_deref(), Some("running"));
+    assert!(agent_attach::start_agent(&state, "no-such-agent").await.is_err());
+}
