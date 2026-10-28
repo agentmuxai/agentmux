@@ -389,7 +389,10 @@ mod tests {
     }
 
     fn git(dir: &Path, args: &[&str]) -> String {
-        let out = Command::new("git").current_dir(dir).args(["-c", "user.name=t", "-c", "user.email=t@example.com"]).args(args).output().unwrap();
+        let mut cmd = Command::new("git");
+        cmd.current_dir(dir).args(["-c", "user.name=t", "-c", "user.email=t@example.com"]).args(args);
+        cmd.no_window();
+        let out = cmd.output().unwrap();
         assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
         String::from_utf8_lossy(&out.stdout).trim().to_string()
     }

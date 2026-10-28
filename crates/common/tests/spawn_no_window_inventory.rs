@@ -63,7 +63,7 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
     ("crates/bashwrap/src/github.rs", "\"git\"", 1,
      "no-window: calls no_window()/creation_flags in this file"),
     ("crates/bashwrap/src/git_hooks.rs", "\"git\"", 4,
-     "mixed: calls no_window()/creation_flags in this file; one is a test helper's git"),
+     "no-window: calls no_window()/creation_flags in this file"),
     ("crates/bashwrap/src/git_hooks.rs", "\"sh\"", 2,
      "no-window: calls no_window()/creation_flags in this file"),
     ("crates/bashwrap/src/git_hooks.rs", "path", 1,

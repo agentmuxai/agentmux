@@ -21,6 +21,8 @@ pub(crate) fn export() {
 
 #[cfg(test)]
 mod tests {
+    use agentmux_common::win32::NoWindow;
+
     /// The `gh` function runs plain `gh` without the switch, and with the broker's token (or none)
     /// with it. A fake `agentmux-bashwrap` and `gh` on PATH stand in for the real ones.
     #[test]
@@ -42,14 +44,14 @@ mod tests {
         let run = |broker: &str, bashwrap_prints: &str, inherited: &str| {
             script("agentmux-bashwrap", &format!("[ \"$1\" = github-token ] && printf '%s' '{bashwrap_prints}'"));
             let path = std::env::join_paths(std::iter::once(dir.clone()).chain(std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()))).unwrap();
-            let out = std::process::Command::new(&bash)
-                .args(["-c", "gh pr list"])
+            let mut cmd = std::process::Command::new(&bash);
+            cmd.args(["-c", "gh pr list"])
                 .env(agentmux_common::github_broker_shim::GH_FUNCTION_NAME, agentmux_common::github_broker_shim::GH_FUNCTION_BODY)
                 .env("PATH", path)
                 .env("AGENTMUX_GITHUB_BROKER", broker)
-                .env("GH_TOKEN", inherited)
-                .output()
-                .unwrap();
+                .env("GH_TOKEN", inherited);
+            cmd.no_window();
+            let out = cmd.output().unwrap();
             String::from_utf8_lossy(&out.stdout).trim().to_string()
         };
         // No switch: plain gh, with whatever the environment has.
@@ -97,8 +99,8 @@ esac"#,
         );
         let path = std::env::join_paths(std::iter::once(dir.clone()).chain(std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()))).unwrap();
         let run = |command: &str, broker: &str, refuse: &str, env: &str| {
-            let out = std::process::Command::new(&bash)
-                .args(["-c", command])
+            let mut cmd = std::process::Command::new(&bash);
+            cmd.args(["-c", command])
                 .env(agentmux_common::github_broker_shim::GIT_FUNCTION_NAME, agentmux_common::github_broker_shim::GIT_FUNCTION_BODY)
                 .env(agentmux_common::github_broker_shim::GH_FUNCTION_NAME, agentmux_common::github_broker_shim::GH_FUNCTION_BODY)
                 .env("PATH", &path)
@@ -107,9 +109,9 @@ esac"#,
                 .env("FAKE_ENV", env)
                 // This test may itself run under an agent's git setup.
                 .env_remove("GIT_AUTHOR_NAME")
-                .env_remove("AGENTMUX_OWNER_GITHUB_ID")
-                .output()
-                .unwrap();
+                .env_remove("AGENTMUX_OWNER_GITHUB_ID");
+            cmd.no_window();
+            let out = cmd.output().unwrap();
             // Shown when an assertion below fails.
             eprintln!("`{command}` (broker {broker:?}) exited {:?}, stderr: {}", out.status.code(), String::from_utf8_lossy(&out.stderr));
             (String::from_utf8_lossy(&out.stdout).trim().to_string(), out.status.code())
@@ -136,7 +138,10 @@ esac"#,
         let _guard = crate::test_env_lock::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let Ok(bash) = crate::bash_wrap::locate_bash() else { return };
         std::env::set_var("BASH_FUNC_agentmux_probe%%", "() {  echo from-function \"$@\"\n}");
-        let out = std::process::Command::new(bash).args(["-c", "agentmux_probe a b"]).output().unwrap();
+        let mut cmd = std::process::Command::new(bash);
+        cmd.args(["-c", "agentmux_probe a b"]);
+        cmd.no_window();
+        let out = cmd.output().unwrap();
         std::env::remove_var("BASH_FUNC_agentmux_probe%%");
         assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "from-function a b");
     }
