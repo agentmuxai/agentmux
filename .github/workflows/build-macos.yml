@@ -289,6 +289,9 @@ jobs:
             || { echo "::error::the Apple signing secret is not a flat object of non-empty single-line strings"; exit 1; }
           jq -r '.[]' "$FILE" | while IFS= read -r v; do echo "::add-mask::$v"; done
           echo "APPLE_SIGNING_FILE=$FILE" >> "$GITHUB_ENV"
+          # The role is needed for this one call. Later steps (installs, the build) get no AWS
+          # session: configure-aws-credentials exported one to the job, so it is emptied here.
+          for v in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN; do echo "$v=" >> "$GITHUB_ENV"; done
 
       - name: Import Developer ID certificate into temp keychain
         run: |
@@ -343,6 +346,8 @@ jobs:
             --team-id    "$APPLE_TEAM_ID" \
             --keychain   "$KEYCHAIN_PATH" \
             --no-validate
+          # Everything that needed the secret has read it: the file goes now, not at the end.
+          rm -f "$APPLE_SIGNING_FILE"
 
       # ── Remote helpers ─────────────────────────────────────────────────────
       # Every package carries agentmux-remote for all four SSH host platforms
