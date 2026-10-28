@@ -425,6 +425,8 @@ pub fn container_git_hooks() -> Option<std::path::PathBuf> {
 /// image runs from [`CONTAINER_HOOKS_DIR`].
 pub fn apply_container_git(env: &mut HashMap<String, String>) {
     apply_agent_git_in(env, |_| None, true, Some(std::path::Path::new(CONTAINER_HOOKS_DIR)));
+    // The workspace is a bind mount owned by the host's user: without this git stops at "dubious ownership".
+    crate::backend::publish_guard::set_git_config_list(env, |_| None, "safe.directory", &["/workspace"]);
 }
 
 /// [`apply_agent_git_in`] for a spawn: every path that starts an agent process or runs a command for
@@ -742,6 +744,7 @@ mod tests {
         let config = entries(&e);
         assert!(config.contains(&("core.hooksPath".to_string(), CONTAINER_HOOKS_DIR.to_string())), "{config:?}");
         assert!(config.iter().any(|(k, v)| k == HELPER_KEY && v == HELPER));
+        assert!(config.contains(&("safe.directory".to_string(), "/workspace".to_string())), "{config:?}");
         // The directory is named like the host's, which the hook forwarding knows it by.
         assert!(CONTAINER_HOOKS_DIR.ends_with("/github-hooks"));
         assert_eq!(e["OTHER"], "kept");
