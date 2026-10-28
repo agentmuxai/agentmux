@@ -142,6 +142,10 @@ pub(super) async fn handle_shell_create(
     let launch = match &target {
         AgentTarget::Local => None,
         AgentTarget::Wsl(distro) => {
+            // Whether the distro has an identity of its own (a gh-agent there) is not known from
+            // here, and the guard above looked at this machine: keep the person's gh login from
+            // a shell in the distro, as every spawn did before the guard became conditional.
+            crate::backend::gh_guard::apply_gh_guard_in(&mut effective_env, &crate::backend::gh_guard::guard_config_home());
             let wslenv = shell_wslenv(&std::env::var("WSLENV").unwrap_or_default(), &caller_keys, &effective_env);
             effective_env.insert("WSLENV".to_string(), wslenv);
             let args = crate::backend::remote::wsl::launch(distro, &req.cmd, &[], cwd_there).args;
