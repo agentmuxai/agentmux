@@ -9,7 +9,7 @@
 //! asks), mapped onto the states a viewer sees. An agent with no live pane is `stopped`; its row
 //! comes from its definition. A viewer (the Swarm) lists the rows once, then follows the event.
 //!
-//! A pane whose process ended keeps its `block_id` (found by the block's agent id) and reads `stopped`.
+//! A pane whose process ended, or a parked block, keeps its `block_id` (found by the block's agent id); one with no process reads `stopped`.
 //!
 //! Two things a viewer must not wait for until the always-available agents build lands: `starting`
 //! is never produced (a controller just created, with no process yet, reads as `idle`), and no event
@@ -168,19 +168,31 @@ pub(crate) fn list(state: &AppState, now_ms: u64) -> Vec<AgentRuntime> {
         .collect()
 }
 
-/// The block of each agent that has a pane, by agent id (one block when it has several: the first by
-/// id). One pass over the blocks for the whole list.
+/// The block of each agent that has one, in a pane or parked (one block when it has several: the
+/// first by id). One pass over the blocks for the whole list.
 fn pane_blocks_by_agent(mstore: &Store) -> HashMap<String, String> {
-    let agent_blocks: Vec<String> = mstore
+    let blocks: Vec<Block> = mstore
         .get_all::<Block>()
         .unwrap_or_default()
         .into_iter()
         .filter(|b| ["agentId", "agent:id"].iter().any(|k| !crate::backend::obj::meta_get_string(&b.meta, k, "").is_empty()))
-        .map(|b| b.oid)
         .collect();
+    let ids: Vec<String> = blocks.iter().map(|b| b.oid.clone()).collect();
     let mut by_agent: HashMap<String, String> = HashMap::new();
-    for pane in super::app_api::agent_io::open_agent_panes(mstore, &agent_blocks) {
+    for pane in super::app_api::agent_io::open_agent_panes(mstore, &ids) {
         by_agent.entry(pane.agent_id).or_insert(pane.block_id);
+    }
+    // A parked block is in no tab, so no pane lists it; it is still the agent's block, running or not.
+    for block in blocks.iter().filter(|b| crate::backend::obj::meta_get_bool(&b.meta, crate::persist_subscriber::parked::PARKED_META_KEY, false)) {
+        let agent_id = mstore
+            .instance_get_by_block_id(&block.oid)
+            .ok()
+            .flatten()
+            .map(|i| i.id)
+            .or_else(|| ["agentId", "agent:id"].iter().map(|k| crate::backend::obj::meta_get_string(&block.meta, k, "")).find(|v| !v.is_empty()));
+        if let Some(agent_id) = agent_id {
+            by_agent.entry(agent_id).or_insert_with(|| block.oid.clone());
+        }
     }
     by_agent
 }

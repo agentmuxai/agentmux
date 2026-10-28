@@ -167,15 +167,29 @@ async fn closing_parks_an_agents_block_and_nothing_else_with_the_setting_on() {
     let ids = vec![agent.clone(), term.clone()];
 
     let ctx = SagaCtx::new(&state, crate::sagas::alloc_saga_id(&state));
-    assert!(park_agent_blocks(&ctx, &ids).await.is_empty(), "off: nothing is parked");
+    assert!(park_agent_blocks(&ctx, &ids, false).await.is_empty(), "off: nothing is parked");
     assert_eq!(in_tab(&state, &agent).await.as_deref(), Some(tabs[0].as_str()));
 
     set_always_available(&state, true);
-    let parked = park_agent_blocks(&ctx, &ids).await;
+    let parked = park_agent_blocks(&ctx, &ids, false).await;
     assert_eq!(parked, vec![agent.clone()]);
     assert_eq!(in_tab(&state, &agent).await.as_deref(), Some(""), "kept, in no tab");
     assert_eq!(in_tab(&state, &term).await.as_deref(), Some(tabs[0].as_str()), "the terminal is closed as before");
     assert!(state.mstore.get::<crate::backend::obj::Block>(&agent).unwrap().is_some());
+}
+
+/// An explicit detach parks the agent's block with the setting off, and still only an agent's.
+#[tokio::test]
+async fn a_forced_park_keeps_an_agents_block_with_the_setting_off() {
+    let state = test_state();
+    let (_ws, tabs) = seed_workspace(&state, 1).await;
+    let agent = seed_agent_block(&state, &tabs[0], "ag-force").await;
+    let term = seed_block(&state, &tabs[0], serde_json::json!({ "view": "term" })).await;
+    let ctx = SagaCtx::new(&state, crate::sagas::alloc_saga_id(&state));
+    let parked = park_agent_blocks(&ctx, &[agent.clone(), term.clone()], true).await;
+    assert_eq!(parked, vec![agent.clone()]);
+    assert_eq!(in_tab(&state, &agent).await.as_deref(), Some(""));
+    assert_eq!(in_tab(&state, &term).await.as_deref(), Some(tabs[0].as_str()));
 }
 
 #[tokio::test]

@@ -36,6 +36,7 @@ pub(crate) mod jekt_held;
 mod jekt_hold;
 mod availability_view;
 pub(crate) mod agent_runtime;
+pub(crate) mod start_rate;
 mod jekt_cold;
 mod limit_probe;
 pub(crate) mod jekt_files;
