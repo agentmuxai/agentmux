@@ -100,8 +100,7 @@ fn view_lost_at() -> &'static std::sync::Mutex<HashMap<String, u64>> {
 
 /// Move each parked agent's `since_ms` up to when it was first seen parked, and forget blocks that are
 /// shown again or gone. A sweep sees a pane's closing within a minute, so the window can only run long.
-fn idle_from_view_lost(lives: &mut [Live], now: u64) {
-    let mut lost = view_lost_at().lock().unwrap_or_else(|e| e.into_inner());
+fn idle_from_view_lost(lost: &mut HashMap<String, u64>, lives: &mut [Live], now: u64) {
     lost.retain(|block_id, _| lives.iter().any(|l| l.parked && l.block_id == *block_id));
     for l in lives.iter_mut().filter(|l| l.parked) {
         let first_parked = *lost.entry(l.block_id.clone()).or_insert(now);
@@ -138,7 +137,7 @@ pub(crate) fn live_agents(state: &AppState) -> Vec<Live> {
             })
         })
         .collect();
-    idle_from_view_lost(&mut lives, now);
+    idle_from_view_lost(&mut view_lost_at().lock().unwrap_or_else(|e| e.into_inner()), &mut lives, now);
     lives
 }
 

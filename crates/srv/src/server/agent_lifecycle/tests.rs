@@ -259,13 +259,14 @@ fn the_idle_window_starts_when_the_view_is_lost() {
     let mut lives = vec![live(true, AgentState::Idle, 1_000), live(false, AgentState::Idle, 1_000)];
     lives[0].block_id = "b-lost-1".into();
     lives[1].block_id = "b-lost-2".into();
-    idle_from_view_lost(&mut lives, 5_000_000);
+    let mut lost = HashMap::new();
+    idle_from_view_lost(&mut lost, &mut lives, 5_000_000);
     assert_eq!(lives[0].since_ms, 5_000_000, "parked just now, idle in its pane for much longer");
     assert_eq!(lives[1].since_ms, 1_000, "a shown agent keeps its own clock");
     assert!(!lives[0].idle_expired(5_000_000 + 3_599_999, Some(3_600_000)));
     assert!(lives[0].idle_expired(5_000_000 + 3_600_000, Some(3_600_000)));
 
     lives[0].since_ms = 1_000;
-    idle_from_view_lost(&mut lives, 9_000_000);
+    idle_from_view_lost(&mut lost, &mut lives, 9_000_000);
     assert_eq!(lives[0].since_ms, 5_000_000, "first seen parked stays the start of the window");
 }
