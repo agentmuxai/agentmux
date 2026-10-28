@@ -18,17 +18,26 @@ pub(crate) fn enabled(state: &AppState) -> bool {
     crate::backend::always_available::enabled(&state.config_watcher.get_full_config().settings.extra)
 }
 
+/// The agent a block belongs to: the instance bound to the block (a block launched from a template
+/// keeps the template's id in `agentId` and binds its agent that way), else the agent `agentId` names.
+fn agent_of_block(state: &AppState, block_id: &str, block: &Block) -> Option<crate::backend::storage::agents::AgentInstance> {
+    if let Ok(Some(bound)) = state.mstore.instance_get_by_block_id(block_id) {
+        return Some(bound);
+    }
+    let named = obj::meta_get_string(&block.meta, "agentId", "");
+    if named.is_empty() {
+        return None;
+    }
+    state.mstore.instance_get(&named).ok().flatten()
+}
+
 /// An agent's pane block of an agent that still exists. A terminal, a browser or a drawer is not
 /// one, and neither is the block of a deleted agent: nothing would ever open it again.
 pub(crate) fn is_parkable(state: &AppState, block_id: &str) -> bool {
     let Ok(Some(block)) = state.mstore.get::<Block>(block_id) else {
         return false;
     };
-    if obj::meta_get_string(&block.meta, "view", "") != "agent" {
-        return false;
-    }
-    let agent = obj::meta_get_string(&block.meta, "agentId", "");
-    !agent.is_empty() && state.mstore.instance_get(&agent).ok().flatten().is_some()
+    obj::meta_get_string(&block.meta, "view", "") == "agent" && agent_of_block(state, block_id, &block).is_some()
 }
 
 /// Whether a block that is closing now is kept: parkable, with the setting on.
@@ -72,8 +81,9 @@ pub(crate) async fn delete_parked_blocks_of(state: &AppState, agent_id: &str) ->
         Ok(blocks) => blocks
             .into_iter()
             .filter(|b| {
-                obj::meta_get_string(&b.meta, "agentId", "") == agent_id
-                    && obj::meta_get_bool(&b.meta, crate::persist_subscriber::parked::PARKED_META_KEY, false)
+                obj::meta_get_bool(&b.meta, crate::persist_subscriber::parked::PARKED_META_KEY, false)
+                    && (obj::meta_get_string(&b.meta, "agentId", "") == agent_id
+                        || state.mstore.instance_get_by_block_id(&b.oid).ok().flatten().is_some_and(|i| i.id == agent_id))
             })
             .map(|b| b.oid)
             .collect(),

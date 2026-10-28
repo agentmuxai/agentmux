@@ -116,6 +116,48 @@ async fn only_an_existing_agents_pane_block_is_parkable() {
     assert!(!is_parkable(&state, "no-such-block"));
 }
 
+/// A block launched from a template keeps the template's id in `agentId` and binds its agent through
+/// `agentInstanceId`: the agent is found through the binding, not by that id.
+#[tokio::test]
+async fn a_template_launched_agents_block_is_parkable_through_its_binding() {
+    let state = test_state();
+    let (_ws, tabs) = seed_workspace(&state, 1).await;
+    let block = seed_block(
+        &state,
+        &tabs[0],
+        serde_json::json!({ "view": "agent", "agentId": "tmpl-1", "agentInstanceId": "inst-1" }),
+    )
+    .await;
+    assert!(!is_parkable(&state, &block), "no agent is bound yet");
+
+    let mut def: crate::backend::storage::AgentDefinition = serde_json::from_value(serde_json::json!({
+        "id": "inst-1", "slug": "inst-1", "name": "inst-1", "icon": "robot", "provider": "claude", "description": "", "created_at": 1,
+    }))
+    .unwrap();
+    state.mstore.agent_def_insert(&mut def).unwrap();
+    state
+        .mstore
+        .instance_create(&AgentInstance {
+            id: "inst-1".to_string(),
+            definition_id: "inst-1".to_string(),
+            parent_instance_id: String::new(),
+            block_id: block.clone(),
+            session_id: "sess".to_string(),
+            status: InstanceStatus::Running.as_str().to_string(),
+            github_context: String::new(),
+            started_at: 1000,
+            ended_at: 0,
+            created_at: 1000,
+            identity_id: String::new(),
+            memory_id: String::new(),
+            instance_name: String::new(),
+            working_directory: String::new(),
+            display_hidden: false,
+        })
+        .unwrap();
+    assert!(is_parkable(&state, &block), "its bound agent exists");
+}
+
 #[tokio::test]
 async fn closing_parks_an_agents_block_and_nothing_else_with_the_setting_on() {
     let state = test_state();
