@@ -67,7 +67,9 @@ const h = vi.hoisted(() => {
         renameWorkspacePrompt: vi.fn(),
         deleteWorkspacePrompt: vi.fn(),
     };
-    return { workspaces, actions, createTab, openNewWindow, openModal, CommandPaletteModal, store, settings, caps, win, menu: { items: [] as MenuItem[], close: vi.fn() } };
+    // Dev mode (store/dev-mode.ts); a test can swap in a reactive source.
+    const dev = { read: (): boolean => false };
+    return { dev, workspaces, actions, createTab, openNewWindow, openModal, CommandPaletteModal, store, settings, caps, win, menu: { items: [] as MenuItem[], close: vi.fn() } };
 });
 
 // keymodel.ts imports the store as "@/app/store/global", the menu as "@/store/global".
@@ -79,6 +81,7 @@ vi.mock("@/app/store/modalmodel", () => ({
 }));
 vi.mock("@/app/modals/command-palette", () => ({ CommandPaletteModal: h.CommandPaletteModal }));
 vi.mock("@/app/store/rpc-api", () => ({ RpcApi: { SetConfigCommand: vi.fn() } }));
+vi.mock("@/app/store/dev-mode", () => ({ devModeOn: () => h.dev.read() }));
 vi.mock("@/app/store/window-appearance", () => ({
     currentWindowLabel: () => "win-a",
     currentWindowTheme: () => h.win.theme(),
@@ -475,5 +478,55 @@ describe("closeHamburgerMenu", () => {
         h.menu.close.mockClear();
         closeHamburgerMenu();
         expect(h.menu.close).not.toHaveBeenCalled();
+    });
+});
+
+// SPEC_DEV_MODE_SETTING_2026_10_28.md §4.1: DevTools is a dev-mode item.
+describe("DevTools follows dev mode", () => {
+    const labels = () => h.menu.items.map((item) => item.label);
+
+    afterEach(() => {
+        h.dev.read = () => false;
+        cleanup();
+    });
+
+    it("is not in the menu while dev mode is off", () => {
+        createRoot((dispose) => {
+            render(() => <HamburgerMenu />);
+            expect(labels()).not.toContain("DevTools");
+            expect(labels()).toContain("Command Palette");
+            expect(labels()).toContain("Online Docs");
+            dispose();
+        });
+    });
+
+    it("is in the menu, between Command Palette and Online Docs, while it is on", () => {
+        h.dev.read = () => true;
+        createRoot((dispose) => {
+            render(() => <HamburgerMenu />);
+            const at = labels().indexOf("DevTools");
+            expect(at).toBeGreaterThan(-1);
+            expect(labels()[at - 1]).toBe("Command Palette");
+            expect(labels()[at + 1]).toBe("Online Docs");
+            dispose();
+        });
+    });
+
+    it("appears when dev mode is turned on, and Theme is not rebuilt by anything else", () => {
+        const [on, setOn] = createSignal(false);
+        const [theme, setTheme] = createSignal("default");
+        h.dev.read = on;
+        h.win.theme = theme;
+        createRoot((dispose) => {
+            render(() => <HamburgerMenu />);
+            expect(labels()).not.toContain("DevTools");
+            const before = h.menu.items;
+            setTheme("__none__");
+            expect(h.menu.items).toBe(before);
+            setOn(true);
+            expect(labels()).toContain("DevTools");
+            dispose();
+        });
+        h.win.theme = () => "default";
     });
 });

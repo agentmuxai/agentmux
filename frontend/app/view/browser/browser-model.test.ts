@@ -34,6 +34,8 @@ vi.mock("@/app/platform/ipc", () => ({
 vi.mock("@/app/store/global", () => ({
     refocusNode: vi.fn(),
 }));
+const devMode = vi.hoisted(() => ({ on: true }));
+vi.mock("@/app/store/dev-mode", () => ({ devModeOn: () => devMode.on }));
 
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
@@ -652,6 +654,18 @@ describe("BrowserViewModel body context menu icons (SPEC_CONTEXT_MENU_ICONS_2026
             "View Page Source": "code",
             "Inspect Element": "bug",
         });
+    });
+
+    it("leaves View Page Source and Inspect Element out while dev mode is off", () => {
+        devMode.on = false;
+        try {
+            const labels = makeVM()
+                .getBodyContextMenuItems({ x: 1, y: 2 })
+                .map((i) => (i.type === "separator" ? "-" : i.label));
+            expect(labels).toEqual(["Back", "Forward", "Reload", "-", "Print"]);
+        } finally {
+            devMode.on = true;
+        }
     });
 
     it("gives the edit and link rows theirs", () => {

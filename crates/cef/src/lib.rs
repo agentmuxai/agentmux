@@ -20,6 +20,7 @@ mod cdp_port;
 mod client;
 mod commands;
 mod dev_authfile;
+mod dev_mode;
 mod ipc_forward;
 mod drag_stash;
 mod events;

@@ -13,6 +13,7 @@ import { splitBlockDefFor } from "./split-block-def";
 import { createBlockSplitHorizontally, createBlockSplitVertically, getApi } from "@/app/store/global";
 import { readText as clipboardReadText, writeText as clipboardWriteText } from "@/util/clipboard";
 import { shortcutFor } from "@/app/keybindings";
+import { devModeOn } from "@/app/store/dev-mode";
 import { MENU_ICON } from "@/app/util/menu-icons";
 
 /** A menu item's shortcut, from the shortcut table; undefined when it has none. */
@@ -210,10 +211,9 @@ export function buildPaneContextMenu(
     // Inspect Element — opens CEF DevTools focused on whatever was
     // under the right-click. Only appears when `inspectAt` was supplied
     // (call sites that don't capture click coords don't get the entry).
-    // Available in any build; the DevTools window itself decides whether
-    // to launch based on the app's debug flags.
+    // Shown only in dev mode (app:devmode).
     const inspect: ContextMenuItem[] =
-        has("inspect") && opts.inspectAt
+        has("inspect") && opts.inspectAt && devModeOn()
             ? [
                   {
                       label: "Inspect Element",
