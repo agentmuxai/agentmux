@@ -99,7 +99,9 @@ pub fn bundled_tools_dir() -> Option<PathBuf> {
     }
 
     let bundled = exe_dir.join("tools").join("bin");
-    Some(bundled)
+    // A Store (MSIX) install can't run its tools from inside the package, so
+    // they run from a copy (see `packaged_tools`); anything else is unchanged.
+    Some(crate::backend::packaged_tools::runnable(bundled))
 }
 
 /// Returns `~/.agentmux/tools/bin/`.
