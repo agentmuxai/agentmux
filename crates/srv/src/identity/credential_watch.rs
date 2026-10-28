@@ -11,7 +11,7 @@
 //!
 //! [`check`] runs on the account tick. It probes each Claude account's config dir. A CLI that is
 //! rewriting the file can leave it unreadable for a moment, so a signed-out reading counts only
-//! when the next tick says the same; then it logs once, marks the account `needs_reauth`
+//! when a look at least [`LOOK_GAP_MS`] later says the same; then it logs once, marks the account `needs_reauth`
 //! (Connectors shows Reconnect) and tells the account list to reload. An account it marked that
 //! reads signed in again is put back. It never reads a token value, never writes the credentials
 //! file, and does not start a sign-in.
@@ -29,8 +29,8 @@ use crate::identity::resolver::{oauth_status, probe_oauth_status, OAuthProbeStat
 enum Seen {
     /// Signed in on the last look.
     In,
-    /// Signed out once after being signed in: one more tick decides.
-    Wobble,
+    /// Signed out once after being signed in, at this time (ms): a look [`LOOK_GAP_MS`] later decides.
+    Wobble(i64),
     /// Signed out twice running, after being signed in: it was reported.
     Out,
 }
@@ -45,14 +45,20 @@ enum Step {
     Back,
 }
 
-/// The next [`Seen`] and what to do, from the last one and this reading. A first look, or an
-/// account that was never signed in, is not news.
-fn step(before: Option<Seen>, signed_in: bool) -> (Option<Seen>, Step) {
+/// How far apart the two signed-out looks must be. `check` runs on every account refresh, which
+/// an agent's failure or turn end brings forward by a second or two, so the count of looks alone
+/// would not outlast a rewrite; this is the account tick (15 s) less a little.
+const LOOK_GAP_MS: i64 = 10_000;
+
+/// The next [`Seen`] and what to do, from the last one and this reading at `now_ms`. A first
+/// look, or an account that was never signed in, is not news.
+fn step(before: Option<Seen>, signed_in: bool, now_ms: i64) -> (Option<Seen>, Step) {
     match (before, signed_in) {
         (Some(Seen::Out), true) => (Some(Seen::In), Step::Back),
         (_, true) => (Some(Seen::In), Step::Nothing),
-        (Some(Seen::In), false) => (Some(Seen::Wobble), Step::Nothing),
-        (Some(Seen::Wobble), false) => (Some(Seen::Out), Step::Lost),
+        (Some(Seen::In), false) => (Some(Seen::Wobble(now_ms)), Step::Nothing),
+        (Some(Seen::Wobble(at)), false) if now_ms - at >= LOOK_GAP_MS => (Some(Seen::Out), Step::Lost),
+        (Some(Seen::Wobble(at)), false) => (Some(Seen::Wobble(at)), Step::Nothing),
         (Some(Seen::Out), false) => (Some(Seen::Out), Step::Nothing),
         (None, false) => (None, Step::Nothing),
     }
@@ -89,7 +95,10 @@ fn set_status(id_store: &Store, identity_store: &Store, broker: Option<&Broker>,
 /// Look at every Claude account once and act on the ones whose sign-in was lost or came back.
 /// BLOCKING (file and store reads). Returns the ids it marked, for tests.
 pub fn check(id_store: &Store, identity_store: &Store, broker: Option<&Broker>) -> Vec<String> {
-    let now_ms = agentmux_common::time::now_ms();
+    check_at(id_store, identity_store, broker, agentmux_common::time::now_ms())
+}
+
+fn check_at(id_store: &Store, identity_store: &Store, broker: Option<&Broker>, now_ms: i64) -> Vec<String> {
     let accounts = id_store.identity_list(None).unwrap_or_default();
     let mut marked = Vec::new();
     let mut seen = last_seen().lock().unwrap_or_else(|e| e.into_inner());
@@ -97,7 +106,7 @@ pub fn check(id_store: &Store, identity_store: &Store, broker: Option<&Broker>) 
     for account in &accounts {
         let Some(status) = probe(account, now_ms) else { continue };
         let signed_in = status != OAuthProbeStatus::NeedsReauth;
-        let (next, what) = step(seen.get(&account.id).copied(), signed_in);
+        let (next, what) = step(seen.get(&account.id).copied(), signed_in, now_ms);
         match next {
             Some(n) => seen.insert(account.id.clone(), n),
             None => seen.remove(&account.id),
@@ -146,19 +155,34 @@ mod tests {
         }
     }
 
+    const T: i64 = 5_000_000;
+    const TICK: i64 = 15_000;
+
     fn write(dir: &std::path::Path, body: &str) {
         std::fs::write(dir.join(".credentials.json"), body).unwrap();
     }
 
     #[test]
     fn a_sign_in_is_lost_only_after_two_signed_out_looks_in_a_row() {
-        assert_eq!(step(None, false), (None, Step::Nothing), "a first look at a signed-out account is not news");
-        assert_eq!(step(Some(Seen::In), false), (Some(Seen::Wobble), Step::Nothing), "one bad read can be a CLI mid-write");
-        assert_eq!(step(Some(Seen::Wobble), false), (Some(Seen::Out), Step::Lost));
-        assert_eq!(step(Some(Seen::Wobble), true), (Some(Seen::In), Step::Nothing), "it came back: nothing to say");
-        assert_eq!(step(Some(Seen::Out), false), (Some(Seen::Out), Step::Nothing), "said once, not at every tick");
-        assert_eq!(step(Some(Seen::Out), true), (Some(Seen::In), Step::Back));
-        assert_eq!(step(Some(Seen::In), true), (Some(Seen::In), Step::Nothing));
+        const T: i64 = 1_000_000;
+        assert_eq!(step(None, false, T), (None, Step::Nothing), "a first look at a signed-out account is not news");
+        assert_eq!(step(Some(Seen::In), false, T), (Some(Seen::Wobble(T)), Step::Nothing), "one bad read can be a CLI mid-write");
+        assert_eq!(step(Some(Seen::Wobble(T)), false, T + LOOK_GAP_MS), (Some(Seen::Out), Step::Lost));
+        assert_eq!(step(Some(Seen::Wobble(T)), true, T + LOOK_GAP_MS), (Some(Seen::In), Step::Nothing), "it came back: nothing to say");
+        assert_eq!(step(Some(Seen::Out), false, T), (Some(Seen::Out), Step::Nothing), "said once, not at every tick");
+        assert_eq!(step(Some(Seen::Out), true, T), (Some(Seen::In), Step::Back));
+        assert_eq!(step(Some(Seen::In), true, T), (Some(Seen::In), Step::Nothing));
+    }
+
+    /// An agent's turn end brings the account refresh forward by a second or two, so two looks that
+    /// close together are one rewrite, not two.
+    #[test]
+    fn two_looks_close_together_are_one_look() {
+        const T: i64 = 1_000_000;
+        let (seen, _) = step(Some(Seen::In), false, T);
+        assert_eq!(step(seen, false, T + 1_500), (Some(Seen::Wobble(T)), Step::Nothing), "1.5 s later is the same rewrite");
+        assert_eq!(step(seen, false, T + LOOK_GAP_MS - 1), (Some(Seen::Wobble(T)), Step::Nothing));
+        assert_eq!(step(seen, false, T + LOOK_GAP_MS).1, Step::Lost);
     }
 
     #[test]
@@ -172,20 +196,20 @@ mod tests {
         store.identity_upsert(&acct).unwrap();
         other.identity_upsert(&acct).unwrap();
 
-        assert!(check(&store, &other, None).is_empty(), "signed in: nothing to say");
+        assert!(check_at(&store, &other, None, T).is_empty(), "signed in: nothing to say");
 
         write(tmp.path(), r#"{"claudeAiOauth":{}}"#);
-        assert!(check(&store, &other, None).is_empty(), "the first signed-out look waits for a second");
+        assert!(check_at(&store, &other, None, T + TICK).is_empty(), "the first signed-out look waits for a second");
         assert_eq!(store.identity_list(None).unwrap()[0].status, "ok");
-        assert_eq!(check(&store, &other, None), vec!["watch-acct-1".to_string()]);
+        assert_eq!(check_at(&store, &other, None, T + 2 * TICK), vec!["watch-acct-1".to_string()]);
         assert_eq!(store.identity_list(None).unwrap()[0].status, oauth_status::NEEDS_REAUTH);
         assert_eq!(other.identity_list(None).unwrap()[0].status, oauth_status::NEEDS_REAUTH);
 
-        assert!(check(&store, &other, None).is_empty(), "said once, not at every tick");
+        assert!(check_at(&store, &other, None, T + 3 * TICK).is_empty(), "said once, not at every tick");
 
         // The sign-in comes back (the user signed in again): the status is put back.
         write(tmp.path(), r#"{"claudeAiOauth":{"accessToken":"a","refreshToken":"r","expiresAt":4102444800000}}"#);
-        assert!(check(&store, &other, None).is_empty());
+        assert!(check_at(&store, &other, None, T + 4 * TICK).is_empty());
         assert_eq!(store.identity_list(None).unwrap()[0].status, oauth_status::VALID);
     }
 
@@ -197,14 +221,14 @@ mod tests {
         write(tmp.path(), good);
         let store = Store::open_in_memory().unwrap();
         store.identity_upsert(&account("watch-acct-3", &dir)).unwrap();
-        assert!(check(&store, &store, None).is_empty());
+        assert!(check_at(&store, &store, None, T).is_empty());
 
         write(tmp.path(), "{ half written");
-        assert!(check(&store, &store, None).is_empty());
+        assert!(check_at(&store, &store, None, T + TICK).is_empty());
         write(tmp.path(), good);
-        assert!(check(&store, &store, None).is_empty());
+        assert!(check_at(&store, &store, None, T + 2 * TICK).is_empty());
         write(tmp.path(), "{ half written");
-        assert!(check(&store, &store, None).is_empty(), "two bad reads that are not in a row are not a wipe");
+        assert!(check_at(&store, &store, None, T + 3 * TICK).is_empty(), "two bad reads that are not in a row are not a wipe");
         assert_eq!(store.identity_list(None).unwrap()[0].status, "ok");
     }
 
@@ -215,8 +239,8 @@ mod tests {
         let store = Store::open_in_memory().unwrap();
         let acct = account("watch-acct-2", tmp.path().to_str().unwrap());
         store.identity_upsert(&acct).unwrap();
-        for _ in 0..3 {
-            assert!(check(&store, &store, None).is_empty());
+        for i in 0..3 {
+            assert!(check_at(&store, &store, None, T + i * TICK).is_empty());
         }
     }
 }
