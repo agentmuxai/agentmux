@@ -83,7 +83,8 @@ fn is_alive(row: &AgentRuntime) -> bool {
 
 fn audit(state: &AppState, actor: &Actor, action: &str, target: &str, block_id: &str, ok: bool, error: Option<&str>, note: &str) -> String {
     let request_id = uuid::Uuid::new_v4().to_string();
-    let reason = format!("{} (uid {}): {note}", actor.slug, actor.uid);
+    let reason = format!("agent-initiated {action} by {} (uid {}): {note}", actor.slug, actor.uid);
+    tracing::info!(action, target, ok, "{reason}");
     state.reactive_handler.log_fleet_action_audit(Some(&actor.slug), target, block_id, action, ok, error, &request_id, Some(&reason));
     request_id
 }
@@ -145,7 +146,7 @@ async fn stop(state: &AppState, actor: &Actor, req: &LifecycleRequest) -> Result
         .map_err(|e| refuse(StatusCode::CONFLICT, format!("Agents stop {}: {e}", target.name)))?;
     Ok(json!({
         "agent": target.name, "agent_id": target.agent_id, "stopped": true, "block_id": block_id,
-        "note": "stopped and wanted stopped: a restart does not resume it; Agents start or a message starts it again",
+        "note": "stopped by an agent and wanted stopped: a restart does not resume it; Agents start or a message starts it again",
         "runtime": row_json(state, &target.agent_id),
     }))
 }
