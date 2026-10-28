@@ -527,7 +527,7 @@ impl ContainerManager {
 
         match existing {
             Some(status) if status == "running" => {
-                // Already running — nothing to do.
+                self.secure_credentials_once(container_name).await;
             }
             Some(_) => {
                 // Exists but stopped — start it.
@@ -545,7 +545,7 @@ impl ContainerManager {
                 // Create and start.
                 observe(StartEvent::Starting);
                 self.create_and_start(container_name, &image, volumes, env_vars, spec).await?;
-                self.own_memory_parents(container_name, spec).await;
+                self.prepare_home(container_name, spec).await;
                 tracing::info!(container = container_name, image = image, "created and started container");
             }
         }
