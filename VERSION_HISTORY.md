@@ -1,5 +1,64 @@
 # AgentMux Version History
 
+## 0.60.5 — 2026-10-28
+
+- perf(srv): a line appended to a transcript is written in place into its tail row, so a line no longer rewrites the whole 64 KB tail part (the recovery tool knows the row's slack). srv writes about 89% fewer bytes in the memory lab. If a transcript is later appended to by an older AgentMux, its pane resyncs once
+- An agent's request to upgrade AgentMux now goes to the super agent as a sensitive request, with a countdown the person can veto, instead of a prompt in every window
+- The browser pane's toolbar keeps the bookmarks on the right, just left of the profile, at every width
+- The status bar counts the agents that are running and the ones waiting on you, and My Agents shows each agent's runtime state and attaches to one that runs with no pane
+- A Store (MSIX) install now runs its agent tools (agentmux-mcp, agentmux-bashwrap and the rest) from a copy outside the package folder, so agents keep their tools and Bash
+- Agents start, stop and detach for MuxAPI, a per-sender start limit, and Agents list shows every created agent's runtime state
+- A stopped agent's pane says it is stopped and keeps a Start button that runs it again from where it left off
+- agent.start starts an agent with no pane (headless, its session resumed), and the runtime list reports each agent's own desired state
+- With agents:always_available on, a message or an operator Job to a stopped agent starts it and delivers (host-tier senders only; LAN, WAN and unverified senders are still held)
+- A minute after startup, agent panes that no window reconnected to get their controller registered (through the same sign-in check and warm-up as a pane's own)
+- An agent's request to install a widget now goes to the super agent as a sensitive request, showing the widget, its publisher and every permission, with a countdown the person can veto
+- The Swarm's stopped agents have a Start button that runs the agent with no pane and resumes its session
+- Slack Socket Mode and the Discord gateway now connect through HTTPS_PROXY like MuxBus; the net-fault README and scripts are updated and formatted
+- Agents watch: an agent's recent transcript, then its new lines, without opening a pane
+- A message a pane refused because the agent is open in another pane goes back into its composer, with its attachments, when the failure row is dismissed
+- An agent's request to control a desktop app now goes to the super agent as a sensitive request, with a countdown the person can veto, instead of a prompt to the person
+- fix(limit-wake): the note to continue a claimed task waits up to 10 minutes for its agent to start, instead of being dropped when the agent isn't running at the reset
+- ci(container): the agent image is published after a gated release from main's workflow, not by any pushed v* tag
+- ci(widget-sdk): the SDK is published from main in the npm-publish Environment when its version is new, not by any pushed widget-sdk-v* tag
+- An agent with a question or approval parked for the user reads as waiting on you with no pane showing it, in the Swarm, the Kanban and a notification
+- feat(side-buttons): the mouse side buttons also work over a cross-site iframe in a browser pane on Linux and macOS, and are checked on Wayland
+- A signed LAN message whose sender's key was missed by an earlier lookup is checked again, so it no longer arrives as unverified; each LAN send and receipt logs whether it was signed and why not.
+- An agent that should be running but has no process yet, because it starts on its first message, reads idle in the runtime list, the status bar and the Swarm, not stopped
+- AgentMux agents message each other through jekt; the CLI's separate cross-session messaging is now off by default (setting agent:climessaging)
+- Agents can ask whether AgentMux can reach the internet, MuxBus and each model API: App with action network
+- Every state-changing HTTP call is recorded in the audit log as whoever made it: the agent its token names, or unproven; never the operator
+- The default container agent image is pulled by the digest the release's signed manifest names, when it names one
+- A terminal flood no longer lets the write-ahead log grow to several times the stored output: the writer now empties it by the log it has written, not the output.
+- The release manifest can name the agent container image by the digest of the pushed image, and the release workflow adds it, so an app that reads it runs the image the release built
+- Workflows start from read-only permissions: ten workflows that had no top-level block now say contents: read, and the perf lab's write access is on its job
+- AgentMux downloads an update only when its signed manifest verifies and matches the file: a release from v0.60.4 on that is unsigned, has a bad signature or doesn't list the file for this install is refused with a clear message
+- With agents:always_available on, an agent with no view that has been idle for an hour is stopped (it starts again on its next message), and a start over 12 running agents or 85% memory commit stops the longest-idle agent with no view or is refused
+- Showing a pane from the Swarm, Tower, the token popover or the agent picker is now owned by one state machine: the newest click wins, a slow layout is waited for, the result is read back with one retry, the locate flash plays when it settles, and a pane that cannot be shown says why in a quiet notice
+- The macOS release build gets the Apple signing secrets from AWS, for code on main only, instead of repository secrets
+- Connectors can connect GitHub through AgentMux Cloud: the account reads "Connected as @login", refreshes on its own, ends the grant when you remove it, and asks to reconnect if you revoke it on GitHub
+- A message or Job that starts a stopped agent counts against the sender's starts per minute (agents:start_per_minute)
+- Codex and Gemini turns now report on their own model API (OpenAI, Google) in the connectivity status, so an outage shows for them too
+- CI: PRs now run the Rust tests on Windows too (non-blocking while its time and flake rate are measured)
+- AgentMux agents can push and open pull requests on repositories where the AgentMux GitHub App is installed, as the App's bot with a short-lived token for that repository, once GitHub is connected through AgentMux Cloud
+- Windows nightly tests: the three process-hardening refusal tests skip when the test token holds SeDebugPrivilege enabled (a GitHub runner's admin), and the container memory-folder test no longer compares against a canonical path on Windows
+- The HTTP action record knows the Agents watch route: it is a read that tails a transcript and is not recorded, which unblocks main's route-decision test
+- The stop-veto and sensitive-operation banners are marked for the person, so an agent's UI click, query and key presses cannot press them
+- The messaging bot tokens and secrets in settings are hidden from every connection that reads the config, like the voice key already was
+- Agents stop of another agent waits for the person's 30 s override window, like Stop agents; an agent's own workers stop at once
+- The connectivity probe runs again as soon as Windows reports a network change, so a Wi-Fi switch or a VPN shows in the status bar in seconds instead of at the next scheduled probe
+- Only the AgentMux window opens a widget's session; an agent's connection can no longer take a widget's permissions
+- Restore layout from another build no longer offers a build that is running now
+- The connectivity status probes the API address an agent's CLI is really pointed at (a proxy or gateway), as its own row, and the pane's input hold follows that row
+- Agents that were running when AgentMux stopped and have no pane are started again after a restart, most recently active first and a few seconds apart, when always-available agents is on
+- An agent pane whose saved history is damaged says so (and that the agent's own conversation is intact) instead of opening blank
+- A .deb or .rpm install now checks the package it upgrades to against the release's signed manifest, with the same key and rules as the app's download, before it installs it
+- Windows PR test lane: the checkpoint timing test measures from the end of its write burst, and the fake App Server fixture is compiled by one test process at a time
+- The macOS build's AWS region for the Apple signing secret comes from a repository variable, not the workflow file
+- Added a Dev mode setting (off by default): DevTools and Inspect Element now show only when it is on.
+- Agents now keep running when their pane is closed: always-available agents is on by default (set agents:always_available to false to turn it off), and an old layout's second block for the same agent is closed, not parked
+- Selecting a tab in a narrow, overflowed pane tab bar scrolls it so the selected tab's left edge sits flush with the bar's left edge, and the left fade no longer dims it
+
 ## 0.60.4 — 2026-10-27
 
 - Messages agents send each other through the Claude CLI's own messaging now show up in the audit log (from, to, state, a preview), with the sender named by AgentMux from the verified process id rather than from the name the message gives
