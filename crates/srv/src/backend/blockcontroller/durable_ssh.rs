@@ -612,7 +612,7 @@ fn append_checked(broker: &mps::Broker, fs: &FileStore, block_id: &str, data: &[
         echo: None,
     };
     broker.publish_event::<crate::backend::mps_events::BlockFile>(&event_data, vec![format!("block:{block_id}")], 0);
-    if super::shell::term_cap::after_append(fs, block_id, start as i64, data.len()) {
+    if super::shell::term_cap::after_append(fs, block_id, start as i64, data) {
         append_checked(broker, fs, block_id, super::shell::term_cap::TRIMMED_NOTICE);
     }
     true

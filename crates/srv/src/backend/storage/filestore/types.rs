@@ -48,7 +48,7 @@ pub struct MuxFile {
 
 /// The meta key holding the first offset still stored once rows below it were
 /// deleted (`trim.rs`): it holds when the window is later widened or lifted.
-pub(super) const RETAINED_FROM_KEY: &str = "retainedfrom";
+pub(crate) const RETAINED_FROM_KEY: &str = "retainedfrom";
 
 impl MuxFile {
     /// Effective data length, accounting for circular files.

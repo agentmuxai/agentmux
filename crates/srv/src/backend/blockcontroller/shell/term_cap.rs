@@ -59,16 +59,56 @@ fn opts_for(cap: i64) -> FileOpts {
     FileOpts { circular: cap > 0, maxsize: cap, ..Default::default() }
 }
 
-/// After `len` bytes were appended to a pane's `term` at offset `start`: bring
-/// the file to the cap, and drop the parts that fell out of its window.
-/// Returns true when this is the first time output was dropped from that file,
-/// so the caller can write [`TRIMMED_NOTICE`] after the bytes. A store error is
-/// logged and costs nothing but the trim.
-pub fn after_append(fs: &FileStore, block_id: &str, start: i64, len: usize) -> bool {
-    after_append_capped(fs, block_id, start, len, cap_bytes())
+/// After `data` was appended to a pane's `term` at offset `start`: bring the
+/// file to the cap, and drop the parts that fell out of its window. Returns
+/// true when output has been dropped from the file and not yet announced, and
+/// `data` ends where a line of text can be inserted (not inside a character or
+/// an escape sequence, which the next read of the PTY continues), so the caller
+/// can write [`TRIMMED_NOTICE`] after it. At a bad boundary the notice waits
+/// for a later append. A store error is logged and costs nothing but the trim.
+pub fn after_append(fs: &FileStore, block_id: &str, start: i64, data: &[u8]) -> bool {
+    after_append_capped(fs, block_id, start, data, cap_bytes())
 }
 
-fn after_append_capped(fs: &FileStore, block_id: &str, start: i64, len: usize, cap: i64) -> bool {
+/// Whether text can be written after `data` without cutting something the PTY's
+/// next bytes continue: a UTF-8 character, or an escape sequence (CSI, OSC and
+/// the other string sequences, or an escape that wants a final byte). Looks back
+/// a bounded distance for the last escape, so a string sequence that began
+/// further back than that counts as finished.
+pub(super) fn ends_at_boundary(data: &[u8]) -> bool {
+    const LOOK_BACK: usize = 256;
+    let n = data.len();
+    for back in 1..=3.min(n) {
+        let b = data[n - back];
+        if b & 0xC0 == 0x80 {
+            continue; // a continuation byte: the character's start is further back
+        }
+        let width = match b {
+            0xF0..=0xFF => 4,
+            0xE0..=0xEF => 3,
+            0xC0..=0xDF => 2,
+            _ => 1,
+        };
+        if width > back {
+            return false;
+        }
+        break;
+    }
+    let Some(esc) = data[n.saturating_sub(LOOK_BACK)..].iter().rposition(|&b| b == 0x1b) else {
+        return true;
+    };
+    let seq = &data[n.saturating_sub(LOOK_BACK) + esc..];
+    match seq.get(1) {
+        None => false,
+        Some(b'[') => seq[2..].iter().any(|b| (0x40..=0x7e).contains(b)),
+        Some(b']' | b'P' | b'X' | b'^' | b'_') => seq[2..].iter().enumerate().any(|(i, &b)| b == 0x07 || (b == 0x1b && seq[2..].get(i + 1) == Some(&b'\\'))),
+        Some(0x20..=0x2f) => seq.len() >= 3,
+        Some(_) => true,
+    }
+}
+
+fn after_append_capped(fs: &FileStore, block_id: &str, start: i64, data: &[u8], cap: i64) -> bool {
+    let len = data.len();
     // Under a flood the log would only grow: empty it every few megabytes.
     if start.max(0) / WAL_RELIEF_EVERY != (start.max(0) + len as i64) / WAL_RELIEF_EVERY {
         if let Err(e) = fs.checkpoint_between_writes() {
@@ -99,17 +139,16 @@ fn after_append_capped(fs: &FileStore, block_id: &str, start: i64, len: usize, c
     if fs_first_live(start + len as i64, cap) > first_dead_before {
         trim = true;
     }
-    if !trim || cap <= 0 {
-        return false;
-    }
-    let removed = match fs.trim_circular_head(block_id, TERM_FILE) {
-        Ok(n) => n,
-        Err(e) => {
+    let announced = current.meta.get("trimmed").and_then(serde_json::Value::as_bool) == Some(true);
+    if trim && cap > 0 {
+        if let Err(e) = fs.trim_circular_head(block_id, TERM_FILE) {
             tracing::warn!(block_id = %block_id, error = %e, "term cap: trim failed");
             return false;
         }
-    };
-    if removed == 0 || current.meta.get("trimmed").and_then(serde_json::Value::as_bool) == Some(true) {
+    }
+    // Dropped output is announced once, at the first boundary where text fits.
+    let dropped = trim && cap > 0 || current.meta.contains_key(crate::backend::storage::filestore::RETAINED_FROM_KEY);
+    if announced || !dropped || !ends_at_boundary(data) {
         return false;
     }
     let mut meta = crate::backend::storage::filestore::FileMeta::new();

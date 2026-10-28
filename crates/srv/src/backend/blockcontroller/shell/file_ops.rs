@@ -186,7 +186,7 @@ pub fn handle_append_block_file(
                 if global_output_zone.is_some() {
                     append_tsidx_entry(fs, block_id, actual_start.max(0) as u64, unix_ms_now());
                 }
-                if filename == term_cap::TERM_FILE && term_cap::after_append(fs, block_id, actual_start, data.len()) {
+                if filename == term_cap::TERM_FILE && term_cap::after_append(fs, block_id, actual_start, data) {
                     handle_append_block_file(broker, block_id, filename, term_cap::TRIMMED_NOTICE, filestore, None);
                 }
             }

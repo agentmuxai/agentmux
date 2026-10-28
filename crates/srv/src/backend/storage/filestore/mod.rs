@@ -65,6 +65,7 @@ pub use types::{FileMeta, FileOpts, MuxFile};
 pub use zone_txn::ZoneTxn;
 pub(crate) use lines::is_blank_line;
 pub(crate) use trim::first_live_part;
+pub(crate) use types::RETAINED_FROM_KEY;
 pub(crate) use frames::{FrameOutcome, CODEC_DELTAS, CODEC_ZSTD, FRAME_PARTS};
 #[allow(unused_imports)] // consumed by the transcript writers in 5a-3
 pub use counter::{normalized_records, AppendPos, Counted, CountedAppend, LineState, TailState};

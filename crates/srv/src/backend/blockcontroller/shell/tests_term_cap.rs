@@ -16,7 +16,7 @@ fn flood(fs: &FileStore, block: &str, chunks: usize, chunk: usize, cap: i64) -> 
     let mut notices = 0;
     for _ in 0..chunks {
         let at = fs.append_data_at(block, TERM_FILE, &data).unwrap();
-        if after_append_capped(fs, block, at, data.len(), cap) {
+        if after_append_capped(fs, block, at, &data, cap) {
             notices += 1;
         }
     }
@@ -69,7 +69,7 @@ fn a_file_stored_before_the_cap_is_brought_to_it_on_its_next_write() {
     }
     assert_eq!(stored_bytes(&fs, "b"), 16 * MB, "stored whole, as before the cap");
     let at = fs.append_data_at("b", TERM_FILE, b"more").unwrap();
-    assert!(after_append_capped(&fs, "b", at, 4, 4 * MB), "converting drops output, so it is announced");
+    assert!(after_append_capped(&fs, "b", at, b"more", 4 * MB), "converting drops output, so it is announced");
     assert!(stored_bytes(&fs, "b") <= 4 * MB);
     assert!(fs.stat("b", TERM_FILE).unwrap().unwrap().opts.circular);
     assert!(fs.read_file("b", TERM_FILE).unwrap().unwrap().ends_with(b"more"));
@@ -80,7 +80,7 @@ fn zero_lifts_the_limit_and_a_limited_file_is_released() {
     let fs = FileStore::open_in_memory().unwrap();
     fs.make_file("b", TERM_FILE, FileMeta::new(), opts_for(MB)).unwrap();
     let at = fs.append_data_at("b", TERM_FILE, b"x").unwrap();
-    assert!(!after_append_capped(&fs, "b", at, 1, 0));
+    assert!(!after_append_capped(&fs, "b", at, b"x", 0));
     let file = fs.stat("b", TERM_FILE).unwrap().unwrap();
     assert!(!file.opts.circular && file.opts.maxsize == 0);
     assert_eq!(flood(&fs, "b", 20, 256 * 1024, 0), 0);
@@ -124,7 +124,7 @@ fn flood_file_backed(chunks: usize, cap: i64) -> (u64, u64, u64) {
     let mut peak = 0;
     for i in 0..chunks {
         let at = fs.append_data_at("b", TERM_FILE, &data).unwrap();
-        after_append_capped(&fs, "b", at, data.len(), cap);
+        after_append_capped(&fs, "b", at, &data, cap);
         if i % 8 == 0 {
             peak = peak.max(size("filestore.db-wal"));
         }
@@ -152,4 +152,54 @@ fn measure_a_flood_against_a_file_backed_store() {
     let started = std::time::Instant::now();
     let (peak, end, db) = flood_file_backed(env("MEASURE_CHUNKS", 1600), env("MEASURE_CAP_MB", 50) as i64 * MB);
     println!("flood written in {:?}; db {db} MB, log {end} MB at the end, {peak} MB at most", started.elapsed());
+}
+
+#[test]
+fn text_may_follow_output_that_ends_between_whole_things() {
+    assert!(ends_at_boundary(b""));
+    assert!(ends_at_boundary(b"plain\r\n"));
+    assert!(ends_at_boundary("caf\u{e9}".as_bytes()));
+    assert!(ends_at_boundary("\u{1f600}".as_bytes()));
+    assert!(ends_at_boundary(b"\x1b[31mred\x1b[0m"), "a finished CSI");
+    assert!(ends_at_boundary(b"\x1b]0;title\x07"), "an OSC ended by BEL");
+    assert!(ends_at_boundary(b"\x1b]0;title\x1b\\"), "an OSC ended by ST");
+    assert!(ends_at_boundary(b"\x1b7"), "a two-byte escape");
+    assert!(ends_at_boundary(b"\x1b(B"), "a charset escape with its final byte");
+}
+
+#[test]
+fn text_may_not_follow_output_that_stops_inside_a_character_or_an_escape() {
+    let e_acute = "\u{e9}".as_bytes();
+    assert!(!ends_at_boundary(&e_acute[..1]), "half of a two-byte character");
+    let smile = "\u{1f600}".as_bytes();
+    for cut in 1..4 {
+        assert!(!ends_at_boundary(&smile[..cut]), "{cut} of 4 bytes");
+    }
+    assert!(!ends_at_boundary(b"text\x1b"), "a lone escape");
+    assert!(!ends_at_boundary(b"text\x1b[31"), "an unfinished CSI");
+    assert!(!ends_at_boundary(b"\x1b[38;5;2"), "an unfinished CSI with parameters");
+    assert!(!ends_at_boundary(b"\x1b]0;a title"), "an OSC with no end yet");
+    assert!(!ends_at_boundary(b"\x1b("), "a charset escape missing its final byte");
+}
+
+#[test]
+fn the_notice_waits_for_a_boundary_and_is_then_written_once() {
+    let fs = FileStore::open_in_memory().unwrap();
+    fs.make_file("b", TERM_FILE, FileMeta::new(), opts_for(MB)).unwrap();
+    let write = |bytes: &[u8]| {
+        let at = fs.append_data_at("b", TERM_FILE, bytes).unwrap();
+        after_append_capped(&fs, "b", at, bytes, MB)
+    };
+    // Fill past the cap with batches that each end at a boundary but one, and
+    // make the batch that first drops output end in the middle of an escape.
+    let filler = vec![b'y'; 256 * 1024];
+    for _ in 0..4 {
+        assert!(!write(&filler));
+    }
+    let mut cut = filler.clone();
+    cut.extend_from_slice(b"\x1b[38;5;");
+    assert!(!write(&cut), "output was dropped but the batch ends inside an escape: wait");
+    assert_eq!(fs.stat("b", TERM_FILE).unwrap().unwrap().meta.get("trimmed"), None, "not yet announced");
+    assert!(write(b"2mgreen\x1b[0m\r\n"), "the next append ends cleanly: announced now");
+    assert!(!write(b"after\r\n"), "and only once");
 }
