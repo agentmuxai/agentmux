@@ -47,8 +47,10 @@ use super::{argv::build_turn_argv, SubprocessController, SubprocessControllerInn
 /// to `PATH`, after the image's own, so a CLI baked into an older image still
 /// wins over the installed one.
 fn container_turn_exec(prompt_path: &str, cmd: Vec<String>) -> Vec<String> {
+    // bash, not sh: the image's sh is dash, which drops the exported `git` and `gh` functions
+    // (`BASH_FUNC_*` environment entries) before the provider starts.
     let mut out = vec![
-        "sh".to_string(),
+        "bash".to_string(),
         "-c".to_string(),
         // $1 = prompt path, "$@" (after shift) = the CLI and its args.
         format!(
@@ -120,11 +122,29 @@ mod turn_exec_tests {
         );
     }
 
+    /// An exported function (`BASH_FUNC_*`) reaches the provider through the launcher: the container
+    /// agent's `git` and `gh` are such functions, and the image's `sh` would drop them.
+    #[cfg(unix)]
+    #[test]
+    fn an_exported_function_reaches_the_provider() {
+        let prompt = std::env::temp_dir().join(format!("amx-turn-fn-{}", std::process::id()));
+        std::fs::write(&prompt, "").unwrap();
+        let argv = container_turn_exec(prompt.to_str().unwrap(), v(&["bash", "-c", "type -t gh"]));
+        let out = std::process::Command::new(&argv[0])
+            .args(&argv[1..])
+            .env("BASH_FUNC_gh%%", "() {  echo from-function
+}")
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "function");
+        let _ = std::fs::remove_file(&prompt);
+    }
+
     /// Passed as "$@", so the CLI argv survives verbatim and in order.
     #[test]
     fn passes_the_cli_argv_through_unchanged() {
         let argv = container_turn_exec("/tmp/p", v(&["claude", "-p", "--model", "opus"]));
-        assert_eq!(&argv[0], "sh");
+        assert_eq!(&argv[0], "bash");
         assert_eq!(&argv[1], "-c");
         // argv[3] is $0, argv[4] is the prompt path; the CLI argv follows.
         assert_eq!(&argv[5..], &v(&["claude", "-p", "--model", "opus"])[..]);

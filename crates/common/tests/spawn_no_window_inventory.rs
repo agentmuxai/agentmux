@@ -66,6 +66,8 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
      "no-window: calls no_window()/creation_flags in this file"),
     ("crates/srv/src/identity/gh_agent_token.rs", "&exe", 1,
      "no-window: calls no_window()/creation_flags in this file"),
+    ("crates/srv/src/backend/blockcontroller/subprocess/container_spawn.rs", "&argv[0]", 1,
+     "not-windows: a unix-only test runs the container turn launcher's argv"),
     ("crates/bashwrap/src/git_hooks.rs", "\"git\"", 4,
      "no-window: calls no_window()/creation_flags in this file"),
     ("crates/bashwrap/src/git_hooks.rs", "\"sh\"", 2,
