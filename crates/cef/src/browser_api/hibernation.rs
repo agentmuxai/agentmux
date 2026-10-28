@@ -181,9 +181,6 @@ async fn window_has_beforeunload(cdp: &mut CdpSession) -> bool {
         if found {
             break;
         }
-        if depth >= super::frames::MAX_FRAME_DEPTH {
-            continue;
-        }
         let count = cdp
             .call(
                 "Runtime.callFunctionOn",
@@ -196,6 +193,11 @@ async fn window_has_beforeunload(cdp: &mut CdpSession) -> bool {
             found = true;
             break;
         };
+        // Frames below the depth we walk are not inspected: unknown, so yes.
+        if depth >= super::frames::MAX_FRAME_DEPTH && count > 0 {
+            found = true;
+            break;
+        }
         for i in 0..count {
             // A frame this window can't read (another origin, or its own process)
             // answers null: those are covered by the frame check and the sessions.
