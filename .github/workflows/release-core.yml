@@ -233,6 +233,7 @@ jobs:
     needs: [gate, cef-runtime-pins]
     permissions:
       contents: write
+      id-token: write   # the called workflow asks the actions broker with it
     uses: agentmuxai/agentmux/.github/workflows/build-linux.yml@main
     with:
       ref: ${{ github.sha }}

@@ -26,10 +26,11 @@ name: Nightly Release — Auto-Publish Pending Version Bump (manual fallback)
 # decide a version bump — it only finds the most recent `chore: release`
 # commit on main and tags it if (and only if) that tag doesn't exist yet.
 #
-# REQUIRES org secrets CI_APP_ID / CI_APP_PRIVATE_KEY. A contents:write
-# token for this repo is minted per run by the first step (there is no
-# longer a long-lived NIGHTLY_TAG_PAT repo secret). That token belongs to a
-# GitHub App identity — NOT a stand-in for the default GITHUB_TOKEN.
+# REQUIRES the ACTIONS_BROKER_URL secret. A contents:write token for this
+# repo is requested per run by the first step from the actions broker (entry
+# ci-nightly-tag, proved by this job's OIDC token; there is no longer a
+# long-lived NIGHTLY_TAG_PAT repo secret). That token belongs to a GitHub App
+# identity — NOT a stand-in for the default GITHUB_TOKEN.
 # GitHub does not allow a push/tag event made by the default
 # GITHUB_TOKEN to trigger *other* workflows' `on: push` listeners (the
 # anti-recursion guard) — if this workflow pushed the tag using
@@ -57,6 +58,9 @@ concurrency:
 jobs:
   detect-and-tag:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # the OIDC token the actions broker checks
     steps:
       # Replaces NIGHTLY_TAG_PAT. An App installation token works in the
       # x-access-token position of a git remote exactly as a PAT does, and
@@ -65,14 +69,27 @@ jobs:
       # rule is scoped to GITHUB_TOKEN's identity, not to "any token".
       # Proven by ci-app-token-smoke.yml (since removed): a real ref was created and deleted
       # with this token before this swap.
-      - name: Mint a short-lived token that can push tags
-        id: tag_token
-        uses: actions/create-github-app-token@v1
+      - name: Ask the actions broker for a short-lived token that can push tags
+        id: tag_token_grant
+        uses: agentmuxai/agentmux/.github/actions/actions-broker@main
         with:
-          app-id: ${{ secrets.CI_APP_ID }}
-          private-key: ${{ secrets.CI_APP_PRIVATE_KEY }}
-          owner: agentmuxai
-          repositories: agentmux
+          broker-url: ${{ secrets.ACTIONS_BROKER_URL }}
+          entry: ci-nightly-tag
+          mode: grant
+
+      - name: Read the token from the grant
+        id: tag_token
+        shell: bash
+        env:
+          GRANT_FILE: ${{ steps.tag_token_grant.outputs.grant-file }}
+        run: |
+          set -euo pipefail
+          # The broker masked every value it returned; this only moves the token to
+          # an output for the steps below. A grant without one fails the job.
+          token="$(python3 -c 'import json,os; print(json.load(open(os.environ["GRANT_FILE"]))["github"]["token"])')"
+          [ -n "$token" ]
+          echo "::add-mask::$token"
+          echo "token=$token" >> "$GITHUB_OUTPUT"
 
       - name: Checkout main (full history)
         uses: actions/checkout@v4
