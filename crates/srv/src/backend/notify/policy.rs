@@ -447,7 +447,7 @@ pub fn title_for(kind: NotifyKind, agent_name: &str) -> String {
 }
 
 /// `ShutdownInfo::effect` of a sensitive operation's countdown
-/// (`SPEC_SUPER_AGENT_2026_10_25.md` §5): it shares the shutdown toast, with a Veto button.
+/// (`SPEC_SUPER_AGENT_2026_10_25.md` §5): it shares the shutdown toast, without its button.
 pub const SENSITIVE_EFFECT: &str = "sensitive";
 
 /// A pending shutdown's title with `{n}` for the seconds left
@@ -483,11 +483,6 @@ pub fn fill_seconds(template: &str, secs: i64) -> String {
 /// Whole seconds left, rounded up, never negative.
 pub fn seconds_left(remaining_ms: i64) -> i64 {
     (remaining_ms.max(0) + 999) / 1000
-}
-
-/// The label of a pending toast's one button: Veto for a sensitive operation, else Keep running or Keep open.
-pub fn button_label(info: &ShutdownInfo) -> &'static str {
-    if info.effect == SENSITIVE_EFFECT { "Veto" } else { keep_label(info.running) }
 }
 
 /// The two button labels (spec §3.1): "Keep running" for an agent whose
@@ -624,7 +619,9 @@ impl PolicyState {
                         let template = shutdown_title_template(info.effect, &req.agent_name);
                         (
                             fill_seconds(&template, seconds_left(remaining_ms)),
-                            Some(vec![NotifyAction { id: "keep".to_string(), label: button_label(info).to_string() }]),
+                            // A sensitive operation's countdown has no button: only the AgentMux
+                            // window, proven, may veto it, so the toast opens the window instead.
+                            (info.effect != SENSITIVE_EFFECT).then(|| vec![NotifyAction { id: "keep".to_string(), label: keep_label(info.running).to_string() }]),
                             Some(Countdown { remaining_ms, title_template: template }),
                         )
                     }
@@ -1390,7 +1387,7 @@ mod tests {
     }
 
     #[test]
-    fn a_sensitive_operation_counts_down_with_its_name_and_a_veto_button() {
+    fn a_sensitive_operation_counts_down_with_its_name_and_no_button() {
         let s = Settings::default();
         let mut p = PolicyState::new();
         let sensitive = Request {
@@ -1403,7 +1400,7 @@ mod tests {
         let a = p.step(Input::Tick, 1_000, &s);
         let n = &shows(&a)[0];
         assert_eq!(n.title, "Upgrade AgentMux in 30 s");
-        assert_eq!(n.actions, Some(vec![NotifyAction { id: "keep".into(), label: "Veto".into() }]), "the press arrives as the one button id the launcher knows");
+        assert_eq!(n.actions, None, "only the AgentMux window, proven, may veto: the notification opens it");
         assert_eq!(n.countdown, Some(Countdown { remaining_ms: 30_000, title_template: "Upgrade AgentMux in {n} s".into() }));
         assert_eq!(p.live_by_id(&n.id), Some((NotifyKind::ShutdownPending, "sensitive:r9".to_string(), Some("r9".to_string()))));
     }

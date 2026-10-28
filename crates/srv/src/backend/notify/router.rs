@@ -848,7 +848,7 @@ impl Router {
         }));
     }
 
-    /// A sensitive operation counting down: the toast names what will happen and offers Veto.
+    /// A sensitive operation counting down: the toast names what will happen and counts down. It has no button; clicking it opens AgentMux, whose window alone can veto.
     /// `block_id` is the countdown's own group (there is no pane); `what` and `body` are app
     /// wording and cleaned names, never the requester's words. Not blocking: nothing is read.
     pub fn emit_sensitive(&self, block_id: &str, what: &str, body: Option<String>, info: ShutdownInfo) {

@@ -231,17 +231,12 @@ fn keep_from_toast(state: &AppState, r: &Arc<router::Router>, notification_id: &
     keep_for(state, kind, &block_id, &request_id?)
 }
 
-/// The press on a pending toast's button: Keep running for a shutdown, Veto for a sensitive
-/// operation's countdown (which answers as a keep does: the person stopped it, or too late).
+/// The press on a pending shutdown toast's Keep running button. A sensitive operation's
+/// countdown has no button: its veto is the AgentMux window's alone, proven, and this
+/// connection is not (any client holding the instance key can send an ack).
 fn keep_for(state: &AppState, kind: crate::backend::notify::policy::NotifyKind, block_id: &str, request_id: &str) -> Option<String> {
-    if kind != crate::backend::notify::policy::NotifyKind::ShutdownPending {
+    if kind != crate::backend::notify::policy::NotifyKind::ShutdownPending || block_id.starts_with(crate::sagas::sensitive_window::TOAST_GROUP_PREFIX) {
         return None;
-    }
-    if block_id.starts_with(crate::sagas::sensitive_window::TOAST_GROUP_PREFIX) {
-        return Some(match crate::sagas::sensitive_window::veto(state, request_id) {
-            "vetoed" => "kept_by_user",
-            _ => "too_late",
-        }.to_string());
     }
     Some(crate::sagas::pending_shutdown::keep(state, block_id, request_id).to_string())
 }
@@ -991,7 +986,7 @@ mod toast_press_tests {
     use agentmux_common::time::now_ms;
 
     #[tokio::test]
-    async fn the_veto_button_on_a_sensitive_toast_stops_that_countdown_once() {
+    async fn a_press_on_a_sensitive_toast_vetoes_nothing() {
         let state = test_state();
         let facts: std::collections::BTreeMap<String, String> =
             [("template".to_string(), format!("t-{}", uuid::Uuid::new_v4().simple())), ("publisher".to_string(), "p".to_string())].into_iter().collect();
@@ -1000,10 +995,10 @@ mod toast_press_tests {
         window::open(&state, &id, std::time::Duration::from_secs(60)).unwrap();
         let group = format!("{}{id}", window::TOAST_GROUP_PREFIX);
 
-        // Another kind of notification is not this button's.
-        assert_eq!(keep_for(&state, NotifyKind::InputWaiting, &group, &id), None);
-        assert_eq!(keep_for(&state, NotifyKind::ShutdownPending, &group, &id).as_deref(), Some("kept_by_user"));
-        assert_eq!(window::status(&id).unwrap().status, "vetoed");
-        assert_eq!(keep_for(&state, NotifyKind::ShutdownPending, &group, &id).as_deref(), Some("too_late"), "a second press finds it over");
+        // An ack that says "keep" on this toast is not the person's veto, whoever sends it.
+        assert_eq!(keep_for(&state, NotifyKind::ShutdownPending, &group, &id), None);
+        assert_eq!(window::status(&id).unwrap().status, "pending", "the countdown goes on");
+        // Only the window's `sensitive.decide` vetoes, and it is proven.
+        assert_eq!(window::veto(&state, &id), "vetoed");
     }
 }

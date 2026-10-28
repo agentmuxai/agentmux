@@ -352,10 +352,11 @@ fn toast_text(requester: &str, approver: Option<&str>, op: &str) -> (String, Str
         Some(a) => format!("Approved by {a}."),
         None => "No super agent reviewed this.".to_string(),
     };
-    (title, format!("{requester} asked. {reviewed} It happens when the countdown ends unless you veto it."))
+    (title, format!("{requester} asked. {reviewed} It happens when the countdown ends unless you veto it in AgentMux."))
 }
 
-/// The OS notification for a countdown: what will happen, the seconds left, and Veto.
+/// The OS notification for a countdown: what will happen and the seconds left. It has no button:
+/// clicking it opens AgentMux, where the banner's Veto is the window's (proven) alone.
 fn raise_toast(state: &AppState, view: &SensitiveView) {
     let Some(router) = crate::backend::notify::router::get(&state.broker) else { return };
     let name = |slug: &str| crate::sagas::pending_shutdown::clean_by(&crate::sagas::pending_shutdown::asker_name(state, slug));
