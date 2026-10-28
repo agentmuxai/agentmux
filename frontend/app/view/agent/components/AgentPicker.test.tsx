@@ -215,6 +215,9 @@ vi.mock("./MyAgentsList", () => {
                 <button data-testid="fork-trigger" onClick={() => props.onFork?.(forkSourceRow, "X #2")}>
                     fork
                 </button>
+                <button data-testid="reattach-trigger" onClick={() => props.onReattach?.(forkSourceRow)}>
+                    reattach
+                </button>
                 <button
                     data-testid="fork-trigger-no-session"
                     onClick={() => props.onFork?.(forkSourceRowNoSession, "X #2")}
@@ -226,6 +229,7 @@ vi.mock("./MyAgentsList", () => {
     };
 });
 
+import { takeOpenedByPerson } from "@/app/store/agent-open-note";
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import { invalidateInstallCheck } from "../install-check-cache";
 import { AgentPicker } from "./AgentPicker";
@@ -642,6 +646,16 @@ describe("AgentPicker — two-tier layout (Phase 1)", () => {
         const [, overrides] = model.launchAgentDefinition.mock.calls[0];
         expect(overrides.continueSessionId).toBeUndefined();
         expect(overrides.forkSession).toBeUndefined();
+    });
+
+    // Resuming a stopped agent from My Agents is the person opening it: the agent opens with its update.
+    it("handleReattach notes the open for the agent it resumes", async () => {
+        const model = makeMockModel();
+        render(() => <AgentPicker model={model as any} />);
+        fireEvent.click(await screen.findByTestId("reattach-trigger"));
+
+        await waitFor(() => expect(model.launchAgentDefinition).toHaveBeenCalledTimes(1));
+        expect(takeOpenedByPerson("user-maks")).toBe(true);
     });
 
     // #2594 — AgentPicker's install-check/prereq-probe/cache-invalidation
