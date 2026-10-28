@@ -83,6 +83,27 @@ fn last_active_ms(state: &AppState, uid: &str, block: &obj::Block) -> Option<u64
     latest_write_ms(&sources)
 }
 
+/// Whether `block_id` is the block `start_agent` runs for the agent `uid`, parked. Old layouts can hold
+/// several blocks for one agent and a start picks one by its own rule (a live process, then a pane over
+/// a parked block, then the lowest id): the checks for resuming have to be made on that block.
+fn is_the_agents_block(state: &AppState, uid: &str, block_id: &str) -> bool {
+    matches!(
+        super::app_api::agent_block::find_agent_block_by_uid(&state.mstore, uid),
+        Ok(Some(found)) if found.block.oid == block_id && found.tab_id.is_none()
+    )
+}
+
+/// Whether `c` is still to be resumed now: stopped agents and agents a window or a message started in the
+/// meantime are not. The wait between two starts is long enough for either.
+fn still_wanted(state: &AppState, c: &Candidate) -> bool {
+    let Ok(Some(block)) = state.mstore.get::<obj::Block>(&c.block_id) else {
+        return false;
+    };
+    desired_of(&block).as_deref() == Some(DESIRED_RUNNING)
+        && blockcontroller::get_controller(&c.block_id).is_none()
+        && is_the_agents_block(state, &c.uid, &c.block_id)
+}
+
 /// The parked agent blocks to resume, most recently active first.
 fn candidates(state: &AppState) -> Vec<Candidate> {
     let Ok(blocks) = super::app_api::agent_block::blocks_in_tabs_or_parked(&state.mstore) else {
@@ -103,6 +124,9 @@ fn candidates(state: &AppState) -> Vec<Candidate> {
                 return None;
             }
             let uid = crate::sagas::park_agents::agent_of_block(state, &block.oid, &block)?.id;
+            if !is_the_agents_block(state, &uid, &block.oid) {
+                return None;
+            }
             let last_active_ms = last_active_ms(state, &uid, &block)?;
             let window = super::agent_lifecycle::idle_window_of(state, &block);
             active_within(last_active_ms, now, window).then_some(Candidate { uid, block_id: block.oid, last_active_ms })
@@ -128,8 +152,8 @@ pub(crate) async fn run_once(state: &AppState) -> usize {
             tracing::info!("restart resume: at the cap or the commit limit; the rest stay stopped and start on their first message");
             break;
         }
-        // A message or a window may have started it while this ran.
-        if blockcontroller::get_controller(&c.block_id).is_some() {
+        // It may have been stopped, or started by a message or a window, while this ran.
+        if !still_wanted(state, &c) {
             continue;
         }
         match super::app_api::agent_attach::start_agent(state, &c.uid).await {

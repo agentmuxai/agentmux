@@ -99,6 +99,7 @@ async fn the_resume_starts_nothing_with_the_setting_off_and_stops_at_the_cap_ins
     let (_ws, tabs) = seed_workspace(&state, 1).await;
     let block = resumable(&state, &tabs[0], "ag-resume").await;
 
+    set_always_available(&state, false);
     assert_eq!(run_once(&state).await, 0, "the setting is off");
     assert!(blockcontroller::get_controller(&block).is_none());
 
@@ -179,6 +180,44 @@ async fn an_agent_with_two_parked_blocks_is_started_once_whatever_lies_between_t
     set_meta(&state, &newer, serde_json::json!({ "agent:sessionid": "sess-9" }));
     wrote_a_turn(&state, &newer);
 
-    let uids: Vec<String> = candidates(&state).into_iter().map(|c| c.uid).collect();
-    assert_eq!(uids, vec!["ag-twice".to_string(), "ag-between".to_string()], "once each, the newer block's time first");
+    let mut uids: Vec<String> = candidates(&state).into_iter().map(|c| c.uid).collect();
+    uids.sort();
+    assert_eq!(uids, vec!["ag-between".to_string(), "ag-twice".to_string()], "once each");
+}
+
+/// An agent with several parked blocks is judged on the one a start runs (the lowest id among them), not
+/// on a newer one that passes: the other block is never resumed in its place.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_block_that_is_checked_is_the_block_a_start_runs() {
+    let state = test_state();
+    let (_ws, tabs) = seed_workspace(&state, 1).await;
+    let first = resumable(&state, &tabs[0], "ag-pick").await;
+    let second = seed_block(&state, &tabs[0], serde_json::json!({ "view": "agent", "agentId": "ag-pick" })).await;
+    dispatch_apply(&state, Command::ParkBlock { tab_id: tabs[0].clone(), block_id: second.clone() }).await;
+    set_desired(&state.mstore, &second, DESIRED_RUNNING);
+    set_meta(&state, &second, serde_json::json!({ "agent:sessionid": "sess-2" }));
+    wrote_a_turn(&state, &second);
+    let (chosen, other) = if first < second { (first, second) } else { (second, first) };
+
+    set_desired(&state.mstore, &chosen, DESIRED_STOPPED);
+    assert!(candidates(&state).is_empty(), "the block a start runs is stopped; the other is not resumed instead");
+
+    set_desired(&state.mstore, &chosen, DESIRED_RUNNING);
+    let got: Vec<String> = candidates(&state).into_iter().map(|c| c.block_id).collect();
+    assert_eq!(got, vec![chosen], "only the block a start runs, never both ({other} is left)");
+}
+
+/// An agent stopped after the list was made is not started from it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_agent_stopped_while_the_list_was_being_worked_is_not_started() {
+    let state = test_state();
+    let (_ws, tabs) = seed_workspace(&state, 1).await;
+    set_always_available(&state, true);
+    let block = resumable(&state, &tabs[0], "ag-late-stop").await;
+    let queued = candidates(&state).into_iter().next().expect("a candidate");
+    assert!(still_wanted(&state, &queued));
+
+    set_desired(&state.mstore, &block, DESIRED_STOPPED);
+
+    assert!(!still_wanted(&state, &queued), "the stop is seen right before the start");
 }
