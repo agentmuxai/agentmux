@@ -297,10 +297,12 @@ pub(crate) async fn handle_authorize(
                 if uid.is_empty() {
                     return reply("refused", "This needs the agent's own token to ask for.");
                 }
+                // The grant is for the app, not a window, so the request is too: asking again for
+                // another window, or after its title changed, joins it. The title is only context.
                 let title: String = w.title.chars().take(80).collect();
-                let scope = format!("{app} ({title}) for {} minutes", p.grant_minutes);
+                let scope = format!("{app} for {} minutes", p.grant_minutes);
                 let facts = std::collections::BTreeMap::from([("scope".to_string(), scope)]);
-                let reason = format!("control {app} for the user");
+                let reason = format!("control {app} (window: {title}) for the user");
                 return match crate::server::sensitive_handlers::file_request(&state, &uid, &agent, "desktop_control_grant", &facts, &reason).await {
                     Ok(filed) => {
                         let id = filed["id"].as_str().unwrap_or_default().to_string();
