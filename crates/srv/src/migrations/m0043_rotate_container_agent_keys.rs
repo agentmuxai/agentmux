@@ -61,13 +61,15 @@ impl Migration for M0043RotateContainerAgentKeys {
             None => Wan::Unavailable,
         };
         // The host's LAN keys (shared by every channel): one that is still the exposed key goes with it.
-        let host = crate::registry::resolve_identity_store_path().filter(|p| p.exists()).and_then(|p| match HostLanKeys::open(&p) {
-            Ok(host) => Some(host),
-            Err(e) => {
-                tracing::warn!(error = %e, "rotate_container_agent_keys: the host's LAN key table did not open");
-                None
-            }
-        });
+        // A host database that exists but does not open fails the migration, which stays pending and runs
+        // again: going on without it would rotate this channel's keys and leave the exposed ones there.
+        let host = match crate::registry::resolve_identity_store_path().filter(|p| p.exists()) {
+            Some(path) => Some(
+                HostLanKeys::open(&path)
+                    .map_err(|e| MigrationError(format!("rotate_container_agent_keys: the host's LAN key table did not open: {e}")))?,
+            ),
+            None => None,
+        };
         let rotated = rotate_container_keys(&store, &wan, host.as_ref()).map_err(MigrationError)?;
         if rotated > 0 {
             tracing::info!(rotated, "rotate_container_agent_keys: replaced container agents' signing keys");
