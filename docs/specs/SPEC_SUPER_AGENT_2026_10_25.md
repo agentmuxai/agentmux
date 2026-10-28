@@ -86,7 +86,7 @@ One audit row per step, through `log_fleet_action_audit` (shown in Warden's Audi
 7. The routes and the tool, then the wrappers:
    a. HTTP routes under `/api/v1/sensitive/` and the `Sensitive` MCP tool: request, approve and deny (the super agent only), cancel, status, list (built).
    b. Wrap `App upgrade`, `Stop` quit, `Widget install`, `Desktop`, `Vault` to file requests, each registering its runner. They go live after step 8, so a request with no super agent has its fallback.
-8. Fallback timer (no super agent) and the audit rows for the request, approval and denial.
+8. Fallback timer (no super agent) and the audit rows for the request, approval and denial (built).
 9. Remove the `user_instruction` gates they replace.
 
 One PR per step, each behaviour-only text.
