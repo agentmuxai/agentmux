@@ -223,3 +223,31 @@ last
     assert_eq!(lines(&second).len(), 2);
     assert_eq!(second["more"], false);
 }
+
+/// A replay whose last line is longer than it looks back, and not finished: the cursor stands before that
+/// line, so what follows is the line skipped whole and then the next one, never a piece of it.
+#[tokio::test]
+async fn a_replay_of_an_unfinished_huge_line_leaves_the_cursor_before_it() {
+    let state = test_state();
+    let (_ws, tabs) = seed_workspace(&state, 1).await;
+    seed_agent_block(&state, &tabs[0], "wu-caller").await;
+    let block = seed_agent_block(&state, &tabs[0], "wu-target").await;
+    append(&state, &block, &format!("a
+{}", "z".repeat(2 * 1024 * 1024)));
+    let (_, replay) = call(&state, Some("wu-caller"), json!({ "agent": "wu-target" })).await;
+    assert!(lines(&replay)[0].contains("older output was skipped"), "{replay}");
+    assert_eq!(replay["next"], 2, "after the last line break, before the unfinished line");
+
+    // Still being written: nothing to show yet, the cursor stays.
+    let (_, wait) = call(&state, Some("wu-caller"), json!({ "agent": "wu-target", "after": 2 })).await;
+    assert_eq!((lines(&wait).len(), wait["next"].clone()), (0, json!(2)));
+
+    // The line ends and another follows: the huge one is skipped whole.
+    append(&state, &block, "
+end
+");
+    let (_, skipped) = call(&state, Some("wu-caller"), json!({ "agent": "wu-target", "after": 2 })).await;
+    assert!(lines(&skipped)[0].contains("too long to show and was skipped"), "{skipped}");
+    let (_, last) = call(&state, Some("wu-caller"), json!({ "agent": "wu-target", "after": skipped["next"] })).await;
+    assert_eq!(lines(&last), ["end"]);
+}

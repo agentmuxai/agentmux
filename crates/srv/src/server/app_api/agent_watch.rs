@@ -147,6 +147,24 @@ impl Source<'_> {
         }
     }
 
+    /// The position just after the last line break in the file (0 with none): a place a cursor can
+    /// stand without being inside a line, however long the line at the end is.
+    fn last_boundary(&self) -> Result<i64, String> {
+        let mut end = self.size;
+        while end > 0 {
+            let start = (end - CHUNK_BYTES).max(0);
+            let (at, data) = self.span(start, end - start)?;
+            if let Some(i) = data.iter().rposition(|&b| b == b'\n') {
+                return Ok(at + i as i64 + 1);
+            }
+            if at >= end {
+                break;
+            }
+            end = start;
+        }
+        Ok(0)
+    }
+
     /// The position of the first line break at or after `from`, reading on in spans.
     fn find_newline(&self, mut from: i64) -> Result<Option<i64>, String> {
         while from < self.size {
@@ -227,9 +245,12 @@ fn read_lines(state: &AppState, block_id: &str, after: Option<u64>, max: usize) 
             return Ok(Read { lines, reset, archived });
         }
         if window >= MAX_SCAN_BYTES {
+            // The last line is longer than a replay looks back (and may still be written): the cursor
+            // stands after the last line break before it, so the tail skips that line whole, or waits
+            // for it to end, and never returns a piece of it.
             let skipped = Lines {
                 lines: vec![format!("[no line break in the last {} bytes: older output was skipped]", size - at)],
-                next: size as u64,
+                next: src.last_boundary()? as u64,
                 more: true,
             };
             return Ok(Read { lines: skipped, reset, archived });
