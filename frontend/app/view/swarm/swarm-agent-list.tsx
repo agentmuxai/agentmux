@@ -5,14 +5,14 @@
 // changes the area above it and the density the rows read, never the rows' elements, so a press
 // is never lost because the pressed element was replaced before release (#5208).
 
-import { createEffect, createMemo, Show, type Accessor, type JSX } from "solid-js";
 import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
 import { MOS, atoms } from "@/app/store/global";
-import { getLayoutModelForTabById } from "@/layout/lib/layoutModelHooks";
 import { isAwaitingUser } from "@/app/store/swarm-line";
 import { readZoom } from "@/app/store/zoom-factor";
 import { selectTrace } from "@/app/util/select-trace";
-import { AgentRowHost, RemoteAgentRowHost, agentRowKey, focusedActiveBlockId } from "./swarm-view";
+import { getLayoutModelForTabById } from "@/layout/lib/layoutModelHooks";
+import type { AgentRuntime } from "@/types/rpc/AgentRuntime";
+import { Show, createEffect, createMemo, type Accessor, type JSX } from "solid-js";
 import { phaseToDisplayStatus } from "./swarm-display-status";
 import { remoteAgentKey } from "./swarm-fleet-targets";
 import { lastActiveMs } from "./swarm-last-active";
@@ -20,9 +20,12 @@ import { collectClearableRows, type AgentTreeNode, type SwarmViewModel } from ".
 import type { SwarmOrderItem } from "./swarm-order";
 import { useSwarmOrder } from "./swarm-order-hold";
 import { remoteChip, remoteRows, remoteSections, type RemoteRow } from "./swarm-remote";
-import type { SwarmDensity } from "./swarm-section";
+import { stoppedAgents } from "./swarm-runtime";
 import { SwarmGroupByControl, SwarmSeatList, useSwarmSeats } from "./swarm-seats";
+import type { SwarmDensity } from "./swarm-section";
 import { chipStatus } from "./swarm-status-chip";
+import { StoppedAgents } from "./swarm-stopped-agents";
+import { AgentRowHost, RemoteAgentRowHost, agentRowKey, focusedActiveBlockId } from "./swarm-view";
 
 /** The agents the Swarm lists, derived once for the list and for the sections' actions above it. */
 export interface SwarmAgents {
@@ -36,6 +39,8 @@ export interface SwarmAgents {
     remoteByKey: Accessor<Map<string, RemoteRow>>;
     /** Completed rows "Clear completed" would dismiss. */
     clearableCount: Accessor<number>;
+    /** Created agents with no pane and no process (swarm-runtime.ts). */
+    stopped: Accessor<AgentRuntime[]>;
     /** Everything a checkbox can select: this instance's agents, then the remote ones not gone
      *  stale. Select all and the selection both follow it. */
     selectableKeys: Accessor<string[]>;
@@ -66,8 +71,11 @@ export function useSwarmAgents(model: SwarmViewModel, ctx: PaneTabHostContext): 
     const rowsByKey = createMemo(() => new Map(keyedRows()));
     const clearableCount = createMemo(() => collectClearableRows(tree()).length);
     const remote = createMemo(() => remoteRows(remoteSections(model.otherInstancesAtom())));
-    const remoteByKey = createMemo(() => new Map(remote().map((r) => [remoteAgentKey(r.section, r.agent), r] as const)));
+    const remoteByKey = createMemo(
+        () => new Map(remote().map((r) => [remoteAgentKey(r.section, r.agent), r] as const))
+    );
     const localKeys = createMemo(() => tree().flatMap((n) => (n.blockId ? [n.blockId] : [])));
+    const stopped = createMemo(() => stoppedAgents(model.agentRuntime.rows(), new Set(localKeys())));
     const selectableKeys = createMemo(() => [
         ...localKeys(),
         ...remote().flatMap((r) => (r.section.stale ? [] : [remoteAgentKey(r.section, r.agent)])),
@@ -77,7 +85,7 @@ export function useSwarmAgents(model: SwarmViewModel, ctx: PaneTabHostContext): 
     createEffect(() => {
         if (!model.loadingAtom()) model.pruneSelection(localKeys());
     });
-    return { tree, keyedRows, rowsByKey, remote, remoteByKey, clearableCount, selectableKeys };
+    return { tree, keyedRows, rowsByKey, remote, remoteByKey, clearableCount, stopped, selectableKeys };
 }
 
 export function SwarmAgentList(props: {
@@ -99,7 +107,9 @@ export function SwarmAgentList(props: {
         zoom: zoomFactor,
         items: () => [
             ...keyedRows().map(([key, n]): SwarmOrderItem => {
-                const meta = n.blockId ? MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", n.blockId))()?.meta : undefined;
+                const meta = n.blockId
+                    ? MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", n.blockId))()?.meta
+                    : undefined;
                 const status = phaseToDisplayStatus(n.blockId, n.agentStatus);
                 return {
                     key,
@@ -109,15 +119,13 @@ export function SwarmAgentList(props: {
                     name: n.agentName,
                 };
             }),
-            ...remote().map(
-                (r): SwarmOrderItem => ({
-                    key: remoteAgentKey(r.section, r.agent),
-                    remote: true,
-                    working: remoteChip(r.agent.status, r.section.stale)?.status === "working",
-                    lastActive: 0,
-                    name: r.agent.name,
-                })
-            ),
+            ...remote().map((r): SwarmOrderItem => ({
+                key: remoteAgentKey(r.section, r.agent),
+                remote: true,
+                working: remoteChip(r.agent.status, r.section.stale)?.status === "working",
+                lastActive: 0,
+                name: r.agent.name,
+            })),
         ],
     });
     const seats = useSwarmSeats(props.ctx, keyedRows, remoteByKey); // Group by lead (swarm-seats.tsx)
@@ -141,29 +149,41 @@ export function SwarmAgentList(props: {
     return (
         // One list: this instance's agents and the other instances', working ones
         // first (swarm-order.ts; docs/specs/SPEC_SWARM_REFINEMENTS_2026_10_17.md §5).
-        <Show when={tree().length > 0 || remote().length > 0}>
-            <SwarmGroupByControl seats={seats} />
-            <div
-                class="swarm-tree"
-                data-density={props.density()}
-                ref={(el) => {
-                    treeRef = el;
-                    swarmOrder.bindList(el);
-                }}
-                {...swarmOrder.listHandlers}
-            >
-                <SwarmSeatList seats={seats} order={swarmOrder.order}>
-                    {(key) =>
-                        // Which kind of row it is comes from the maps the rows are read from. A key in
-                        // neither (the agent just left) has no row to show.
-                        rowsByKey().has(key) ? (
-                            <AgentRowHost rowKey={key} rows={rowsByKey} focusedBlockId={focusedBlockId} model={model} />
-                        ) : remoteByKey().has(key) ? (
-                            <RemoteAgentRowHost rowKey={key} rows={remoteByKey} model={model} />
-                        ) : null
-                    }
-                </SwarmSeatList>
-            </div>
-        </Show>
+        <>
+            <Show when={tree().length > 0 || remote().length > 0}>
+                <SwarmGroupByControl seats={seats} />
+                <div
+                    class="swarm-tree"
+                    data-density={props.density()}
+                    ref={(el) => {
+                        treeRef = el;
+                        swarmOrder.bindList(el);
+                    }}
+                    {...swarmOrder.listHandlers}
+                >
+                    <SwarmSeatList seats={seats} order={swarmOrder.order}>
+                        {(key) =>
+                            // Which kind of row it is comes from the maps the rows are read from. A key in
+                            // neither (the agent just left) has no row to show.
+                            rowsByKey().has(key) ? (
+                                <AgentRowHost
+                                    rowKey={key}
+                                    rows={rowsByKey}
+                                    focusedBlockId={focusedBlockId}
+                                    model={model}
+                                />
+                            ) : remoteByKey().has(key) ? (
+                                <RemoteAgentRowHost rowKey={key} rows={remoteByKey} model={model} />
+                            ) : null
+                        }
+                    </SwarmSeatList>
+                </div>
+            </Show>
+            <StoppedAgents
+                agents={props.agents.stopped}
+                hasLive={() => tree().length > 0 || remote().length > 0}
+                onOpen={(agent) => void model.openStoppedAgent(agent)}
+            />
+        </>
     );
 }
