@@ -70,9 +70,9 @@ fn the_build_slot_holder_is_the_agent_line_of_its_owner_file() {
 fn the_cap_and_the_commit_limit_are_each_a_reason_to_make_room() {
     let p = Policy::from_extra(&extra(&[(SETTING_MAX_RUNNING, serde_json::json!(2))]));
     assert!(over_limit(&p, 1, None).is_none());
-    assert!(over_limit(&p, 2, None).unwrap().contains("limit is 2"));
+    assert!(matches!(over_limit(&p, 2, None), Some(Over::Cap(why)) if why.contains("limit is 2")));
     assert!(over_limit(&p, 1, Some(84.0)).is_none());
-    assert!(over_limit(&p, 1, Some(86.0)).unwrap().contains("86%"));
+    assert!(matches!(over_limit(&p, 1, Some(86.0)), Some(Over::Commit(why)) if why.contains("86%")));
     let off = Policy::from_extra(&extra(&[(SETTING_MAX_RUNNING, serde_json::json!(0)), (SETTING_COMMIT_LIMIT_PCT, serde_json::json!(0))]));
     assert!(over_limit(&off, 99, Some(99.0)).is_none());
 }
@@ -188,4 +188,37 @@ async fn the_sweep_stops_nothing_with_the_setting_off_and_nothing_that_is_not_ye
     assert_eq!(sweep_once(&state).await, 0, "idle for a moment, not an hour");
     assert!(!was_stopped(&state, &block));
     blockcontroller::delete_controller(&block);
+}
+
+/// Starts admitted a moment apart count each other until the first is seen running, so a burst cannot
+/// each see room that the others are already using.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_burst_of_starts_counts_the_ones_already_admitted() {
+    let state = test_state();
+    set_limits(&state, 2);
+    admit_start_with(&state, "ag-burst-1", || None).await.expect("room for the first");
+    admit_start_with(&state, "ag-burst-2", || None).await.expect("room for the second");
+    let err = admit_start_with(&state, "ag-burst-3", || None).await.unwrap_err();
+    assert!(err.starts_with("capacity:") && err.contains("2 agents are running"), "{err}");
+}
+
+/// Over the commit limit one idle agent is stopped, not all of them, for a figure that has not fallen yet.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn over_the_commit_limit_one_agent_is_stopped_not_every_idle_one() {
+    let state = test_state();
+    let (_ws, tabs) = seed_workspace(&state, 1).await;
+    let blocks = [
+        parked_running(&state, &tabs[0], "ag-commit-1").await,
+        parked_running(&state, &tabs[0], "ag-commit-2").await,
+        parked_running(&state, &tabs[0], "ag-commit-3").await,
+    ];
+    set_limits(&state, 99);
+
+    let err = admit_start_with(&state, "ag-commit-new", || Some(99.0)).await.unwrap_err();
+
+    assert!(err.starts_with("capacity:") && err.contains("did not bring it down"), "{err}");
+    assert_eq!(blocks.iter().filter(|b| was_stopped(&state, b)).count(), 1);
+    for b in &blocks {
+        blockcontroller::delete_controller(b);
+    }
 }

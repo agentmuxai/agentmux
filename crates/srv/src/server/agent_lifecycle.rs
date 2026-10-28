@@ -125,11 +125,16 @@ pub(crate) fn live_agents(state: &AppState) -> Vec<Live> {
 /// Why this agent is not stopped even when idle: it holds a claimed Kanban task, has a message held
 /// for it, or holds the build slot. `None`: nothing keeps it.
 pub(crate) fn exempt(state: &AppState, live: &Live) -> Option<&'static str> {
-    if state.work_store.work_queue_claimed_by(&live.agent_id, &live.uid).is_ok_and(|claimed| !claimed.is_empty()) {
-        return Some("holds a claimed task");
+    // A read that fails keeps the agent: stopping it on a guess could drop work.
+    match state.work_store.work_queue_claimed_by(&live.agent_id, &live.uid) {
+        Ok(claimed) if claimed.is_empty() => {}
+        Ok(_) => return Some("holds a claimed task"),
+        Err(_) => return Some("its claimed tasks could not be read"),
     }
-    if state.mstore.jekt_held_targets().is_ok_and(|held| held.iter().any(|t| *t == live.uid)) {
-        return Some("has a held message");
+    match state.mstore.jekt_held_targets() {
+        Ok(held) if !held.iter().any(|t| *t == live.uid) => {}
+        Ok(_) => return Some("has a held message"),
+        Err(_) => return Some("its held messages could not be read"),
     }
     if build_slot_holder().is_some_and(|holder| holder.eq_ignore_ascii_case(&live.agent_id)) {
         return Some("holds the build slot");
@@ -206,15 +211,62 @@ pub(crate) fn commit_used_pct() -> Option<f64> {
     None
 }
 
+/// Which limit a start is over, and why.
+#[derive(Debug, PartialEq)]
+enum Over {
+    Cap(String),
+    Commit(String),
+}
+
+impl Over {
+    fn why(&self) -> &str {
+        match self {
+            Over::Cap(why) | Over::Commit(why) => why,
+        }
+    }
+}
+
 /// Whether the host is at its cap or over its commit limit, given the agents running.
-fn over_limit(policy: &Policy, running: usize, commit_pct: Option<f64>) -> Option<String> {
+fn over_limit(policy: &Policy, running: usize, commit_pct: Option<f64>) -> Option<Over> {
     if let Some(max) = policy.max_running.filter(|max| running >= *max) {
-        return Some(format!("{running} agents are running (the limit is {max})"));
+        return Some(Over::Cap(format!("{running} agents are running (the limit is {max})")));
     }
     match (policy.commit_limit_pct, commit_pct) {
-        (Some(limit), Some(used)) if used > limit => Some(format!("memory commit is at {used:.0}% (the limit is {limit:.0}%)")),
+        (Some(limit), Some(used)) if used > limit => Some(Over::Commit(format!("memory commit is at {used:.0}% (the limit is {limit:.0}%)"))),
         _ => None,
     }
+}
+
+/// How long an admitted start counts as running before its process shows as such.
+const PENDING_FOR: Duration = Duration::from_secs(90);
+
+/// Starts admitted but not yet seen running, so a burst of starts counts each other.
+fn pending() -> &'static std::sync::Mutex<HashMap<String, std::time::Instant>> {
+    static PENDING: std::sync::OnceLock<std::sync::Mutex<HashMap<String, std::time::Instant>>> = std::sync::OnceLock::new();
+    PENDING.get_or_init(Default::default)
+}
+
+/// The key of an admitted start: per store, so two instances in one process (tests) do not count each other.
+fn pending_key(state: &AppState, agent_id: &str) -> String {
+    format!("{:p}:{agent_id}", std::sync::Arc::as_ptr(&state.mstore))
+}
+
+/// The admitted starts of this instance that are not among `live` and not yet [`PENDING_FOR`] old.
+fn pending_not_running(state: &AppState, live: &[Live]) -> usize {
+    let mut pending = pending().lock().unwrap_or_else(|e| e.into_inner());
+    pending.retain(|_, at| at.elapsed() < PENDING_FOR);
+    let prefix = pending_key(state, "");
+    pending
+        .keys()
+        .filter_map(|key| key.strip_prefix(prefix.as_str()))
+        .filter(|id| !live.iter().any(|l| l.uid == *id || l.agent_id == *id))
+        .count()
+}
+
+/// One admission at a time: the count, the stop that makes room and the claim of the room are one step.
+fn admission() -> &'static tokio::sync::Mutex<()> {
+    static LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    &LOCK
 }
 
 /// May `agent_id` be started? Yes when it already runs, when nothing is over a limit, or when an idle
@@ -231,24 +283,35 @@ pub(crate) async fn admit_start_with(state: &AppState, agent_id: &str, commit_pc
     if policy.max_running.is_none() && policy.commit_limit_pct.is_none() {
         return Ok(());
     }
+    let _one_at_a_time = admission().lock().await;
     let mut live = live_agents(state);
     if live.iter().any(|l| l.uid == agent_id || l.agent_id == agent_id) {
         return Ok(());
     }
     let mut could_not_stop = std::collections::HashSet::new();
+    let mut stopped_for_commit = None;
     loop {
-        let Some(over) = over_limit(&policy, live.len(), commit_pct()) else {
+        let Some(over) = over_limit(&policy, live.len() + pending_not_running(state, &live), commit_pct()) else {
+            pending().lock().unwrap_or_else(|e| e.into_inner()).insert(pending_key(state, agent_id), std::time::Instant::now());
             return Ok(());
         };
+        // The commit figure may not fall until a stopped process has fully exited: one stop per start,
+        // not every idle agent for a figure that is slow to move (or held up by something else).
+        if let (Over::Commit(_), Some(stopped)) = (&over, &stopped_for_commit) {
+            return Err(format!("capacity: {}, and stopping {stopped} did not bring it down", over.why()));
+        }
         let victim = live
             .iter()
             .filter(|l| l.evictable() && !could_not_stop.contains(&l.block_id) && exempt(state, l).is_none())
             .min_by_key(|l| l.since_ms)
             .cloned();
         let Some(victim) = victim else {
-            return Err(format!("capacity: {over}, and no agent with no view is idle enough to stop for it"));
+            return Err(format!("capacity: {}, and no agent with no view is idle enough to stop for it", over.why()));
         };
-        if stop(state, &victim, &format!("to make room: {over}")).await {
+        if stop(state, &victim, &format!("to make room: {}", over.why())).await {
+            if matches!(over, Over::Commit(_)) {
+                stopped_for_commit = Some(victim.agent_id.clone());
+            }
             live.retain(|l| l.block_id != victim.block_id);
         } else {
             could_not_stop.insert(victim.block_id);
