@@ -28,6 +28,9 @@ struct ProbeSchedule {
     interval_ms: i64,
     /// The running probe's ticket; only its result is applied.
     in_flight: Option<u64>,
+    /// The network changed while the probe ran: its answer is about the old one, so the next
+    /// probe is due at once.
+    again: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -56,7 +59,7 @@ impl Entry {
 
     /// A service not checked yet, its first probe due now.
     fn unchecked(now_ms: i64) -> Self {
-        let probe = Some(ProbeSchedule { due_ms: now_ms, interval_ms: PROBE_FIRST_MS, in_flight: None });
+        let probe = Some(ProbeSchedule { due_ms: now_ms, interval_ms: PROBE_FIRST_MS, in_flight: None, again: false });
         Self { state: Reachability::Unknown, probe, ..Self::new(now_ms) }
     }
 
@@ -106,7 +109,7 @@ impl Entry {
             self.probe = None;
             self.last_error = None;
         } else if self.state == Reachability::Online {
-            self.probe = Some(ProbeSchedule { due_ms: now_ms + PROBE_FIRST_MS, interval_ms: PROBE_FIRST_MS, in_flight: None });
+            self.probe = Some(ProbeSchedule { due_ms: now_ms + PROBE_FIRST_MS, interval_ms: PROBE_FIRST_MS, in_flight: None, again: false });
         }
         self.state = next;
         self.since_ms = now_ms;
@@ -178,14 +181,46 @@ impl Tracker {
         if entry.probe.as_ref().and_then(|p| p.in_flight) != Some(ticket) {
             return None;
         }
-        let next = entry.apply(outcome, true, now_ms);
+        // A probe of a service believed down confirms what it finds; one of an online service, sent
+        // because the network changed, counts like any other request until it is repeated.
+        let probed = entry.state != Reachability::Online;
+        let next = entry.apply(outcome, probed, now_ms);
         let changed = entry.enter(next, now_ms);
-        if let Some(probe) = entry.probe.as_mut() {
+        if entry.state == Reachability::Online {
+            entry.probe = None;
+        }
+        // Leaving `Online` has scheduled a fresh first probe; otherwise this one backs off.
+        if let Some(probe) = entry.probe.as_mut().filter(|p| p.in_flight == Some(ticket)) {
             probe.in_flight = None;
-            probe.interval_ms = (probe.interval_ms * 2).min(PROBE_MAX_MS);
-            probe.due_ms = now_ms + probe.interval_ms;
+            if std::mem::take(&mut probe.again) {
+                probe.interval_ms = PROBE_FIRST_MS;
+                probe.due_ms = now_ms;
+            } else {
+                probe.interval_ms = (probe.interval_ms * 2).min(PROBE_MAX_MS);
+                probe.due_ms = now_ms + probe.interval_ms;
+            }
         }
         self.changed(changed, now_ms)
+    }
+
+    /// The OS says the network changed (a link, an address, a VPN): what was learned about every
+    /// service may no longer hold. A service believed down is probed at once, with its backoff
+    /// started over; one believed up is checked once; a probe already running is repeated when it
+    /// ends. Returns whether anything is waiting for the probe driver.
+    pub(super) fn network_changed(&mut self, now_ms: i64) -> bool {
+        for entry in self.services.values_mut() {
+            match entry.probe.as_mut() {
+                Some(probe) if probe.in_flight.is_some() => probe.again = true,
+                Some(probe) => {
+                    probe.due_ms = now_ms;
+                    probe.interval_ms = PROBE_FIRST_MS;
+                }
+                None => {
+                    entry.probe = Some(ProbeSchedule { due_ms: now_ms, interval_ms: PROBE_FIRST_MS, in_flight: None, again: false });
+                }
+            }
+        }
+        !self.services.is_empty()
     }
 
     /// The internet is `Offline` when two or more services are and none

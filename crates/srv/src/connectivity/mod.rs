@@ -21,6 +21,7 @@
 //! `connectivity.status` for a window that opens later; both carry a rising
 //! `revision`, since they can arrive out of order.
 
+mod netchange;
 mod probe;
 mod tracker;
 
@@ -182,6 +183,14 @@ impl Shared {
         self.publish(changed);
     }
 
+    /// The OS reported a network change: every service is probed again, now.
+    fn network_changed_at(&self, now_ms: i64) {
+        if self.tracker().network_changed(now_ms) {
+            tracing::info!("connectivity: the network changed, probing again");
+            self.wake.notify_one();
+        }
+    }
+
     fn publish(&self, changed: Option<ConnectivityStatus>) {
         let Some(status) = changed else { return };
         let down: Vec<String> = status
@@ -210,6 +219,7 @@ pub fn install(event_bus: Arc<EventBus>) {
     SHARED.seed_at(agentmux_common::time::now_ms());
     let clock: probe::Clock = Arc::new(agentmux_common::time::now_ms);
     tokio::spawn(probe::drive(SHARED.clone(), Arc::new(probe::NetProber::new()), clock));
+    netchange::start(SHARED.clone());
 }
 
 /// The current state, for `connectivity.status`.
