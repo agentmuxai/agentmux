@@ -12,6 +12,8 @@ import { settingsAtom } from "@/app/store/config-signals";
 import { pushNotification } from "@/app/store/flash-notifications";
 import { openAgentInActiveTab } from "@/app/store/agent-runtime-live";
 import { setNotificationAction } from "@/app/notification/usenotification";
+import { sharedAgentRuntime } from "@/app/store/agent-runtime-live";
+import * as MOS from "@/store/mos";
 import { keepsRunningSetting, keepsRunningTitle } from "./keeps-running-text";
 
 const SETTING_ALWAYS_AVAILABLE = "agents:always_available";
@@ -22,6 +24,20 @@ export function agentsKeepRunning(): boolean {
 }
 
 export type ParkedAgent = { agentId: string; name: string };
+
+/**
+ * The agent srv parks when this block's pane closes, if the window knows it will: a block whose view
+ * is exactly `agent` (not the legacy alias) that srv lists as the block of an agent that exists. Any
+ * other agent block (a deleted agent's, a second block of an agent, one not listed yet) is closed the
+ * old way, with its prompts. `agentId` is the agent's own id, which `Open` needs: a block launched from
+ * a template keeps the template's id in its meta.
+ */
+export function parkedAgentOf(blockId: string): ParkedAgent | undefined {
+    const view = MOS.getObjectValue<MuxObj>(MOS.makeORef("block", blockId))?.meta?.["view"];
+    if (view !== "agent") return undefined;
+    const row = sharedAgentRuntime().rows().find((r) => r.block_id === blockId);
+    return row ? { agentId: row.agent_id, name: row.name } : undefined;
+}
 
 /** The note after a close that parked these agents. The Open brings back the first one; the rest are in My Agents. */
 export function noteKeepsRunning(agents: ParkedAgent[]): void {

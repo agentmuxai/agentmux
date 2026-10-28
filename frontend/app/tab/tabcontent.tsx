@@ -24,7 +24,7 @@ import {
     type PaneCloseProbe,
 } from "@/app/tab/pane-close-guard";
 import { closeWithShutdownLog, isClosingWithLog } from "@/app/view/agent/shutdown/close-with-log";
-import { agentsKeepRunning, noteKeepsRunning } from "@/app/view/agent/shutdown/keeps-running";
+import { agentsKeepRunning, noteKeepsRunning, parkedAgentOf } from "@/app/view/agent/shutdown/keeps-running";
 import {
     describeLeave,
     leavePrompts,
@@ -62,12 +62,6 @@ const paneCloseProbe: PaneCloseProbe = {
         return (meta?.["agentName"] as string) || (meta?.["agentId"] as string) || "An agent";
     },
 };
-
-/** The agent a pane shows, as its block names it (the name when only that is there). */
-function agentIdOf(blockId: string): string {
-    const meta = MOS.getObjectValue<MuxObj>(MOS.makeORef("block", blockId))?.meta;
-    return (meta?.["agentId"] as string) || paneCloseProbe.name(blockId);
-}
 
 /** Through the view aliases (legacy "forge" is an agent pane too), as
  *  block.tsx requires — not a raw `meta.view === "agent"` check. */
@@ -184,8 +178,10 @@ function TabContent(props: { tabId: string }): JSX.Element {
             // Already closing (an agent winding down under its shutdown log): a second click
             // neither probes srv again nor asks the prompts again.
             if (isClosingWithLog(blockIds)) return false;
-            const keeping = agentsKeepRunning();
-            const busy = await busyMembers(keeping ? blockIds.filter((id) => !isAgentBlock(id)) : blockIds, paneCloseProbe);
+            const parked = new Map(
+                agentsKeepRunning() ? blockIds.flatMap((id) => { const a = parkedAgentOf(id); return a ? [[id, a] as const] : []; }) : []
+            );
+            const busy = await busyMembers(blockIds.filter((id) => !parked.has(id)), paneCloseProbe);
             if (busy.length > 0) {
                 const confirmed = await new Promise<boolean>((resolve) =>
                     setPendingCloses((q) => [...q, { busy, resolve }])
@@ -199,12 +195,13 @@ function TabContent(props: { tabId: string }): JSX.Element {
                 );
                 if (!confirmed) return false;
             }
-            if (keeping) {
-                noteKeepsRunning(blockIds.filter(isAgentBlock).map((id) => ({ agentId: agentIdOf(id), name: paneCloseProbe.name(id) })));
-            } else if (closesWithShutdownLog(blockIds, isAgentBlock)) {
-                void closeWithShutdownLog(props.tabId, blockIds, isAgentBlock);
+            // The agents srv parks close at once; any other agent block still winds down under its log.
+            const winds = (id: string) => isAgentBlock(id) && !parked.has(id);
+            if (closesWithShutdownLog(blockIds, winds)) {
+                void closeWithShutdownLog(props.tabId, blockIds, winds);
                 return false;
             }
+            noteKeepsRunning([...parked.values()]);
             // The host's log says the person closed these panes.
             notePersonClose(blockIds.filter(isBrowserBlock));
             return true;
