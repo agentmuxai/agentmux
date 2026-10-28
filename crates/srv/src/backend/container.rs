@@ -529,15 +529,15 @@ impl ContainerManager {
         };
 
         match existing {
-            Some(status) if status == "running" => {
-                // Already running — nothing to do.
-            }
-            Some(_) => {
-                // Exists but stopped — start it.
-                self.inner.docker
-                    .start_container(container_name, None::<StartContainerOptions<String>>)
-                    .await?;
-                tracing::info!(container = container_name, "restarted stopped container");
+            Some(status) => {
+                if status != "running" {
+                    // Exists but stopped — start it.
+                    self.inner.docker
+                        .start_container(container_name, None::<StartContainerOptions<String>>)
+                        .await?;
+                    tracing::info!(container = container_name, "restarted stopped container");
+                }
+                self.secure_credentials_once(container_name).await;
             }
             None => {
                 // Pull the image via Docker socket before create so the Engine API
@@ -548,7 +548,7 @@ impl ContainerManager {
                 // Create and start.
                 observe(StartEvent::Starting);
                 self.create_and_start(container_name, &image, volumes, env_vars, spec).await?;
-                self.own_memory_parents(container_name, spec).await;
+                self.prepare_home(container_name, spec).await;
                 tracing::info!(container = container_name, image = image, "created and started container");
             }
         }

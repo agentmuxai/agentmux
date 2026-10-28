@@ -1,6 +1,8 @@
 //! The mounts of a container agent's home: the per-agent volume, the bound account's
 //! credentials, and the agent's Personal Memory folder.
 
+mod credential_mode;
+
 use bollard::exec::{CreateExecOptions, StartExecOptions, StartExecResults};
 use bollard::models::{Mount, MountTypeEnum};
 use futures_util::StreamExt as _;

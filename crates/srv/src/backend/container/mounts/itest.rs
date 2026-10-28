@@ -60,3 +60,40 @@ async fn itest_personal_memory_is_the_same_files_natively_and_in_the_container()
         "the volume holds only the memory folder and what the agent wrote itself: {only}"
     );
 }
+
+/// The bound credentials file and `~/.claude` are the agent's alone once the container is up:
+///   cargo test -p agentmux-srv --bins -- --ignored --nocapture itest_credentials_are_the_agents_alone
+#[cfg(unix)]
+#[tokio::test]
+#[ignore]
+async fn itest_credentials_are_the_agents_alone() {
+    use std::os::unix::fs::PermissionsExt;
+    let cm = ContainerManager::connect().expect("connect to docker (set DOCKER_HOST)");
+    cm.check_available().await.expect("docker daemon must be reachable");
+    let root = std::env::temp_dir().join(format!("agentmux-cred-itest-{}", std::process::id()));
+    std::fs::create_dir_all(&root).unwrap();
+    let creds = root.join(".credentials.json");
+    std::fs::write(&creds, "{}").unwrap();
+    std::fs::set_permissions(&creds, std::fs::Permissions::from_mode(0o666)).unwrap();
+
+    let name = "agentmux-itest-cred";
+    let image = "ghcr.io/agentmuxai/agent-base:0.60.3";
+    let _ = cm.remove(name, true).await;
+    let _ = cm.inner.docker.remove_volume(&format!("agentmux-claude-{name}"), None).await;
+    let spec = ContainerMountSpec { claude_config_host_dir: Some(root.to_string_lossy().into_owned()), ..Default::default() };
+    cm.ensure_running_observed(name, image, &[], &[], &spec, &|_| {}).await.expect("ensure_running");
+    let seen = run(&cm, name, "stat -c '%u:%g %a' /home/agent/.claude /home/agent/.claude/.credentials.json; id -u").await;
+    let on_host = std::fs::metadata(&creds).unwrap().permissions().mode() & 0o777;
+
+    let _ = cm.remove(name, true).await;
+    for volume in [format!("agentmux-claude-{name}"), format!("agentmux-cli-{name}")] {
+        let _ = cm.inner.docker.remove_volume(&volume, None).await;
+    }
+    let _ = std::fs::remove_dir_all(&root);
+
+    let lines: Vec<&str> = seen.lines().map(str::trim).collect();
+    let me = lines.last().copied().unwrap_or("");
+    assert_eq!(lines[0], format!("{me}:{me} 700"), "~/.claude: {seen}");
+    assert_eq!(lines[1], format!("{me}:{me} 600"), "the credentials file: {seen}");
+    assert_eq!(on_host, 0o600, "the host file was 0666");
+}
