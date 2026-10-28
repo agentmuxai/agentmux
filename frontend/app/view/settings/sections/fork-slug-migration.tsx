@@ -6,7 +6,7 @@
 // "Update them", which runs the fork slug migration (srv
 // `backend/slug_migration`, docs/specs/SPEC_FORK_SLUG_MIGRATION_2026_10_22.md
 // §4 Phase 2). The plan is shown first; panes still running an affected agent
-// are stopped through the usual 15 s override before anything changes, and a
+// are stopped through the usual 30 s override before anything changes, and a
 // finished update can be undone from its journal. An agent whose new id is
 // taken is listed with the reason and the next free id; "Use <id>" (or an id of
 // the user's own) gives it that one, as the spec asks: never picked silently.
@@ -227,7 +227,7 @@ export function ForkSlugMigration(): JSX.Element {
             case "checking":
                 return "Checking agent ids…";
             case "stopping":
-                return "Stopping the panes. Each can still be kept running from its own pane for 15 s.";
+                return "Stopping the panes. Each can still be kept running from its own pane for 30 s.";
             case "applying":
                 return "Updating…";
             case "undoing":
@@ -412,7 +412,7 @@ export function ForkSlugMigration(): JSX.Element {
                 open={confirmStop()}
                 destructive
                 title={`Stop ${plural(running().length, "pane")}?`}
-                description="These panes run agents being updated. Each one shows a Keep running button for 15 seconds before it stops; the update starts once they have."
+                description="These panes run agents being updated. Each one shows a Keep running button for 30 seconds before it stops; the update starts once they have."
                 confirmLabel="Stop and update"
                 onConfirm={stopThenApply}
                 onCancel={cancelStop}

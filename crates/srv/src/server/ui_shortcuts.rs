@@ -121,14 +121,14 @@ pub(crate) async fn handle_ui_press_keys(
 }
 
 /// RunCommand `pane:close`: the pane named by `target`, closed the way
-/// ClosePane closes it (`app_api::pane::close_pane_as`): it waits 15 s for
+/// ClosePane closes it (`app_api::pane::close_pane_as`): it waits 30 s for
 /// its user to keep it, and the answer says so. The key itself closes the
 /// focused pane at once, with no undo, so the page never runs it for MuxAPI.
 async fn close_pane(state: &AppState, req: &UiRunCommandRequest) -> axum::response::Response {
     let Some(target) = req.target.as_deref().map(str::trim).filter(|t| !t.is_empty()) else {
         return err_response(
             StatusCode::BAD_REQUEST,
-            "pane:close needs `target`, the pane to close (the user gets 15 seconds to keep it)".to_string(),
+            "pane:close needs `target`, the pane to close (the user gets 30 seconds to keep it)".to_string(),
         );
     };
     let (code, body) = crate::server::app_api::pane::close_pane_as(
@@ -144,7 +144,7 @@ async fn close_pane(state: &AppState, req: &UiRunCommandRequest) -> axum::respon
         StatusCode::ACCEPTED => Json(json!({ "ok": true, "data": {
             "ran": false,
             "pending": body,
-            "reason": "its user has 15 seconds to keep it, and it closes after that unless they do",
+            "reason": "its user has 30 seconds to keep it, and it closes after that unless they do",
         } }))
         .into_response(),
         _ => err_response(code, body.get("error").and_then(|e| e.as_str()).unwrap_or("close failed").to_string()),

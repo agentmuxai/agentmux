@@ -753,11 +753,11 @@ async fn forward_stop_pending(
     })
 }
 
-/// Stop agents and KEEP their panes, behind the user's 15 s override. Internal
+/// Stop agents and KEEP their panes, behind the user's 30 s override. Internal
 /// only, since `Stop agents` closes the tab (`fleet_close_agents_with_override`):
 /// the fork slug migration, which restarts the agents in the same panes, is its
 /// one caller. Every target running on
-/// this instance waits for its user's 15 s override, all windows in parallel
+/// this instance waits for its user's 30 s override, all windows in parallel
 /// (docs/specs/SPEC_AGENT_SELF_QUIT_2026_09_24.md §6.5). A target running on
 /// another instance on this machine is asked there, in that instance's own
 /// window (`forward_stop_pending`). Targets running nowhere go through
@@ -794,7 +794,7 @@ pub(crate) async fn fleet_stop_keep_pane_with_override(
                 .unwrap_or_else(|| block_id.clone());
             state.reactive_handler.log_fleet_action_audit(
                 Some(by), &target, block_id, FLEET_BULK_STOP_AUDIT_ACTION,
-                true, None, &v.request_id, Some(&crate::sagas::pending_shutdown::audit_note(&v, by, "FleetBulkStop")),
+                true, None, &v.request_id, Some(&crate::sagas::pending_shutdown::audit_note(state, &v, by, "FleetBulkStop")),
             );
             v.block_id = block_id.clone();
             v.target = target;
@@ -883,7 +883,7 @@ async fn ask_other_instances(
 }
 
 /// `Stop agents`, from an agent: close each target agent's tab, as the user's
-/// tab × does, after the same 15 s override window as any other shutdown the
+/// tab × does, after the same 30 s override window as any other shutdown the
 /// user didn't ask for (docs/specs/SPEC_STOP_AN_AGENT_ONE_WAY_AND_SHUTDOWN_TOAST_2026_10_23.md
 /// §3.1). One window per target, all in parallel; only that agent's tab
 /// closes, so an agent stacked in the same pane keeps running.
@@ -944,7 +944,7 @@ pub(crate) async fn fleet_close_agents_with_override(
         );
         state.reactive_handler.log_fleet_action_audit(
             Some(by), &target, &block_id, FLEET_BULK_STOP_AUDIT_ACTION,
-            true, None, &v.request_id, Some(&crate::sagas::pending_shutdown::audit_note(&v, by, "FleetBulkStop")),
+            true, None, &v.request_id, Some(&crate::sagas::pending_shutdown::audit_note(state, &v, by, "FleetBulkStop")),
         );
         // A target can join a request opened for another block (its pane's
         // close, via a sibling tab): report it under the block named.

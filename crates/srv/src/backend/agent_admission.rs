@@ -896,7 +896,7 @@ pub async fn endpoint_for_channel(channel: &str) -> Option<HolderEndpoint> {
 }
 
 /// How long a release request may take to be answered (see
-/// [`request_release`]): the holder's user has 15 s to keep the agent running
+/// [`request_release`]): the holder's user has 30 s to keep the agent running
 /// before it lets go.
 const RELEASE_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 

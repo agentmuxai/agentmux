@@ -10,6 +10,7 @@
 //! subscribe to the `notification*` broker events; sources report through the
 //! `notify.*` RPCs in `server/notify_handlers.rs`.
 
+pub mod pane_label;
 pub mod policy;
 pub mod router;
 pub mod sources;

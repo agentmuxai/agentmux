@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// External shutdown: 15 seconds for the user to override
+// External shutdown: 30 seconds (15 for an agent's own quit) for the user to override
 // (docs/specs/SPEC_AGENT_SELF_QUIT_2026_09_24.md §6.5, contract §12.2–12.3).
 //
 // A shutdown the user didn't ask for doesn't happen at once. `request` marks
@@ -18,7 +18,12 @@ use serde::Serialize;
 
 use crate::server::AppState;
 
-pub const OVERRIDE_WINDOW: std::time::Duration = std::time::Duration::from_secs(15);
+/// How long the user has to keep what another agent asked to stop or close: 30 s, the
+/// default for a human override.
+pub const OVERRIDE_WINDOW: std::time::Duration = std::time::Duration::from_secs(30);
+/// An agent's own quit, from a turn the user didn't start: it waits for that turn to end
+/// anyway, so its window stays short.
+pub const SELF_QUIT_WINDOW: std::time::Duration = std::time::Duration::from_secs(15);
 pub const EVENT_SHUTDOWN_PENDING: &str = "agent:shutdown-pending";
 pub const EVENT_SHUTDOWN_PENDING_CLEARED: &str = "agent:shutdown-pending-cleared";
 /// Finished requests stay answerable this long, then are dropped.
@@ -54,6 +59,14 @@ impl Action {
             Action::Stop { .. } | Action::Release { .. } => 0,
             Action::SelfQuit { .. } | Action::CloseTab { .. } => 1,
             Action::ClosePane { .. } => 2,
+        }
+    }
+
+    /// How long the user has to keep it.
+    fn window(&self) -> std::time::Duration {
+        match self {
+            Action::SelfQuit { .. } => SELF_QUIT_WINDOW,
+            _ => OVERRIDE_WINDOW,
         }
     }
 
@@ -98,6 +111,11 @@ impl Action {
             _ => {}
         }
     }
+}
+
+/// How long a caller should wait, at least, for a request with this deadline.
+pub fn wait_at_least_ms(deadline_ms: i64) -> u64 {
+    (deadline_ms - now_ms()).max(0) as u64
 }
 
 /// A request as the caller and the frontend see it (§12.2).
@@ -271,7 +289,8 @@ fn notify_router(state: &AppState) -> Option<Arc<crate::backend::notify::router:
 /// for (ReAgent P1 on #3798). The returned view says whose request it is: a
 /// caller whose `by`/`via` differ has joined someone else's.
 pub fn request(state: &AppState, block_id: &str, by: &str, via: &str, reason: &str, action: Action) -> PendingView {
-    request_within(state, block_id, by, via, reason, action, OVERRIDE_WINDOW)
+    let window = action.window();
+    request_within(state, block_id, by, via, reason, action, window)
 }
 
 fn request_within(
@@ -286,7 +305,7 @@ fn request_within(
     let new_covers = action.covers(block_id);
     // What the user sees is the cleaned text; `by` and `via` keep their raw
     // form for the audit (`requesters`).
-    let shown_by = clean_by(by);
+    let shown_by = clean_by(&asker_name(state, by));
     let shown_reason = clean_reason(reason);
     let view = {
         let mut map = entries();
@@ -377,7 +396,7 @@ fn request_within(
         publish_pending(state, b, &view);
     }
     raise_toast(state, &view);
-    tracing::info!(block_id, by, via, request_id = %view.request_id, "shutdown pending: user has 15 s to keep it");
+    tracing::info!(block_id, by, via, request_id = %view.request_id, window_s = window.as_secs(), "shutdown pending: the user can keep it");
 
     let kept = entries().get(&view.request_id).map(|e| e.kept.clone());
     let (state, v) = (state.clone(), view.clone());
@@ -471,6 +490,19 @@ pub fn clean_reason(raw: &str) -> String {
 /// The longest asker name the banner and toast show.
 const BY_MAX: usize = 64;
 
+/// The asker as the user knows them: the display name of the agent whose id `by`
+/// is (`QTest`, not `qtest`), else `by` as given (a fixed app string, a name
+/// another AgentMux claims, or an agent that is not running).
+fn asker_name(state: &AppState, by: &str) -> String {
+    state
+        .reactive_handler
+        .get_agent(by)
+        .and_then(|a| state.mstore.get::<crate::backend::obj::Block>(&a.block_id).ok().flatten())
+        .map(|b| crate::backend::obj::meta_get_string(&b.meta, "agentName", ""))
+        .filter(|n| !n.trim().is_empty())
+        .unwrap_or_else(|| by.to_string())
+}
+
 /// The asker's name, cleaned for display. Normally a verified agent id; the
 /// only other sources are fixed app strings and a name another AgentMux on
 /// this machine claims (cross-channel), so it gets the same treatment.
@@ -523,8 +555,9 @@ fn settled_note(outcome: &str, v: &PendingView, via: &str, reason: &str) -> Stri
 
 /// The request-time audit note: whether this caller opened the window or
 /// joined someone else's.
-pub fn audit_note(v: &PendingView, by: &str, via: &str) -> String {
-    let shown_by = clean_by(by);
+pub fn audit_note(state: &AppState, v: &PendingView, by: &str, via: &str) -> String {
+    // `v.by` is the name `request_within` showed, so the raw `by` is resolved the same way.
+    let shown_by = clean_by(&asker_name(state, by));
     if !v.joined {
         "pending user override".to_string()
     } else if v.by == shown_by && v.via == via {
@@ -680,7 +713,7 @@ mod tests {
         assert!(!a.joined);
         let b = request(&state, "blk-p6", "Korp", "FleetBulkStop", "", Action::Stop { signal: Some("SIGKILL".into()) });
         assert!(b.joined && b.request_id == a.request_id);
-        assert_eq!(audit_note(&b, "Korp", "FleetBulkStop"), format!("joined its own pending request {}", a.request_id));
+        assert_eq!(audit_note(&state, &b, "Korp", "FleetBulkStop"), format!("joined its own pending request {}", a.request_id));
         assert!(matches!(begin(&a.request_id), Some(Action::Stop { signal: Some(s) }) if s == "SIGKILL"), "the forceful stop wins");
 
         let c = request(&state, "blk-p7", "Korp", "ClosePane", "", Action::ClosePane { block_ids: vec!["x".into()] });
@@ -924,12 +957,30 @@ mod tests {
         keep(&state, "ct-audit", &v.request_id);
     }
 
+    /// `by` is the agent's id, the view shows its display name; a repeat request from the same
+    /// agent is still "its own".
+    #[tokio::test]
+    async fn a_registered_agent_that_asks_twice_joins_its_own_request() {
+        let state = test_state();
+        let mut block = crate::backend::obj::Block { oid: "ct-reg-asker".into(), parentoref: String::new(), version: 1, runtimeopts: None, stickers: None, meta: Default::default(), subblockids: None };
+        block.meta.insert("agentName".into(), serde_json::json!("QTest"));
+        state.mstore.insert(&mut block).unwrap();
+        state.reactive_handler.register_agent("qtest", "ct-reg-asker", None).unwrap();
+        let a = request(&state, "ct-reg-target", "qtest", "FleetBulkStop", "", close_tab());
+        assert_eq!(a.by, "QTest");
+        let b = request(&state, "ct-reg-target", "qtest", "FleetBulkStop", "", close_tab());
+        assert!(b.joined);
+        assert_eq!(audit_note(&state, &b, "qtest", "FleetBulkStop"), format!("joined its own pending request {}", a.request_id));
+        assert!(audit_note(&state, &b, "someone-else", "FleetBulkStop").contains("by QTest's pending request"));
+        keep(&state, "ct-reg-target", &a.request_id);
+    }
+
     #[tokio::test]
     async fn the_asker_s_name_is_cleaned_for_display() {
         let state = test_state();
         let v = request(&state, "ct-by", "Ev\u{202E}il\u{0007}", "FleetBulkStop", "", close_tab());
         assert_eq!(v.by, "Evil");
-        assert_eq!(audit_note(&PendingView { joined: true, ..v.clone() }, "Ev\u{202E}il\u{0007}", "FleetBulkStop"), format!("joined its own pending request {}", v.request_id));
+        assert_eq!(audit_note(&state, &PendingView { joined: true, ..v.clone() }, "Ev\u{202E}il\u{0007}", "FleetBulkStop"), format!("joined its own pending request {}", v.request_id));
         keep(&state, "ct-by", &v.request_id);
     }
 

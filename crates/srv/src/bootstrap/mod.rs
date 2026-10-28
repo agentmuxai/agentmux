@@ -55,6 +55,7 @@ macro_rules! eprintln_lossy {
 mod watchers;
 mod logging;
 mod stores;
+mod shared_root;
 pub(crate) mod carry_forward;
 mod background;
 mod network;
