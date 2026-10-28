@@ -25,15 +25,18 @@ export function createLiveAgentRuntimeStore(): AgentRuntimeStore {
     });
 }
 
-/** Open an agent that has no pane, in the active tab (it starts, as opening one does). */
-export async function openStoppedAgent(row: AgentRuntime): Promise<void> {
+/** Open an agent that has no pane, in the active tab (it starts, as opening one does). Resolves to why
+ *  srv refused, for the row to say (the agent is open elsewhere, or its provider can't run here). */
+export async function openStoppedAgent(row: AgentRuntime): Promise<string | undefined> {
     try {
         await RpcApi.AgentOpenCommand(TabRpcClient, {
             agent_id: row.agent_id,
             tab_id: atoms.activeTabId(),
             focus: true,
         });
+        return undefined;
     } catch (e) {
         console.warn(`[swarm] opening ${row.name} failed`, e);
+        return e instanceof Error ? e.message : String(e);
     }
 }

@@ -1405,3 +1405,9 @@
         color: var(--error-text-color);
     }
 }
+
+.swarm-stopped__error {
+    padding: 0 10px 4px 36px;
+    font-size: var(--text-xs);
+    color: var(--error-text-color);
+}

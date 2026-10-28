@@ -15,9 +15,16 @@ export function StoppedAgents(props: {
     agents: Accessor<AgentRuntime[]>;
     /** Whether live agents are listed above: the list starts folded then, open when it is all there is. */
     hasLive: Accessor<boolean>;
-    onOpen: (agent: AgentRuntime) => void;
+    /** Resolves to why srv refused, shown under the row. */
+    onOpen: (agent: AgentRuntime) => Promise<string | undefined> | void;
 }): JSX.Element {
     const [folded, setFolded] = createSignal<boolean | null>(null);
+    const [refused, setRefused] = createSignal<Record<string, string>>({});
+    const open = async (agent: AgentRuntime) => {
+        setRefused((prev) => ({ ...prev, [agent.agent_id]: "" }));
+        const why = await props.onOpen(agent);
+        if (why) setRefused((prev) => ({ ...prev, [agent.agent_id]: why }));
+    };
     const isFolded = () => folded() ?? props.hasLive();
     return (
         <Show when={props.agents().length > 0}>
@@ -36,23 +43,35 @@ export function StoppedAgents(props: {
                 <Show when={!isFolded()}>
                     <For each={props.agents()}>
                         {(agent) => (
-                            <div class="swarm-stopped__row" data-agent-id={agent.agent_id}>
-                                <SwarmProviderIcon provider={agent.provider} unknownTitle={LOCAL_PROVIDER_UNKNOWN} />
-                                <span class="swarm-stopped__name" title={agent.name}>
-                                    {agent.name}
-                                </span>
-                                <span class={`swarm-stopped__state swarm-stopped__state--${agent.state}`}>
-                                    {agent.state}
-                                </span>
-                                <Button
-                                    density="compact"
-                                    aria-label={`Open ${agent.name}`}
-                                    title="Open it in a pane (starts it)"
-                                    onClick={() => props.onOpen(agent)}
-                                >
-                                    Open
-                                </Button>
-                            </div>
+                            <>
+                                <div class="swarm-stopped__row" data-agent-id={agent.agent_id}>
+                                    <SwarmProviderIcon
+                                        provider={agent.provider}
+                                        unknownTitle={LOCAL_PROVIDER_UNKNOWN}
+                                    />
+                                    <span class="swarm-stopped__name" title={agent.name}>
+                                        {agent.name}
+                                    </span>
+                                    <span class={`swarm-stopped__state swarm-stopped__state--${agent.state}`}>
+                                        {agent.state}
+                                    </span>
+                                    <Button
+                                        density="compact"
+                                        aria-label={`Open ${agent.name}`}
+                                        title="Open it in a pane (starts it)"
+                                        onClick={() => void open(agent)}
+                                    >
+                                        Open
+                                    </Button>
+                                </div>
+                                <Show when={refused()[agent.agent_id]}>
+                                    {(why) => (
+                                        <div class="swarm-stopped__error" role="alert">
+                                            {why()}
+                                        </div>
+                                    )}
+                                </Show>
+                            </>
                         )}
                     </For>
                 </Show>

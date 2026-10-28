@@ -54,4 +54,20 @@ describe("StoppedAgents", () => {
         expect(onOpen).toHaveBeenCalledTimes(1);
         expect(onOpen.mock.calls[0][0].agent_id).toBe("b");
     });
+
+    it("says why srv refused an Open, under that row, and clears it on the next press", async () => {
+        const onOpen = vi
+            .fn<(a: AgentRuntime) => Promise<string | undefined>>()
+            .mockResolvedValueOnce("AGENT_LIVE_ELSEWHERE: it runs in another AgentMux")
+            .mockResolvedValueOnce(undefined);
+        const { getByRole, container, findByRole } = render(() => (
+            <StoppedAgents agents={() => [agent("a"), agent("b")]} hasLive={() => false} onOpen={onOpen} />
+        ));
+        fireEvent.click(getByRole("button", { name: "Open Agent b" }));
+        const alert = await findByRole("alert");
+        expect(alert.textContent).toContain("AGENT_LIVE_ELSEWHERE");
+        expect(container.querySelectorAll('[role="alert"]').length).toBe(1);
+        fireEvent.click(getByRole("button", { name: "Open Agent b" }));
+        await vi.waitFor(() => expect(container.querySelector('[role="alert"]')).toBeNull());
+    });
 });
