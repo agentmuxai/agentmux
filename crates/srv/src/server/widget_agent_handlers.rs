@@ -18,7 +18,8 @@ use serde::Deserialize;
 use serde_json::json;
 
 use crate::backend::rpc::engine::WshRpcEngine;
-use crate::backend::widget_packages::{self, WidgetState};
+use crate::backend::widget_packages::{self, WidgetKind, WidgetPackageInfo, WidgetState};
+use crate::backend::widget_signature::SignatureState;
 use crate::backend::widget_requests::{self, Answer, WidgetInstallRequest};
 
 use super::AppState;
@@ -67,6 +68,57 @@ fn asking_agent(state: &AppState, auth: Option<&agentmux_common::api_types::UiAu
     }
 }
 
+/// The package an install request was filed for, by the request's id: the runner approves
+/// exactly this version and signer, so a package changed in the meantime is not approved.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct InstallTarget {
+    pub id: String,
+    pub hash: String,
+    pub signer: String,
+}
+
+fn targets() -> std::sync::MutexGuard<'static, std::collections::HashMap<String, InstallTarget>> {
+    static TARGETS: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, InstallTarget>>> = std::sync::OnceLock::new();
+    TARGETS.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// The most install requests remembered at once.
+const MAX_TARGETS: usize = 64;
+
+pub(crate) fn remember_target(request_id: &str, target: InstallTarget) {
+    let mut t = targets();
+    if t.len() >= MAX_TARGETS {
+        t.clear();
+    }
+    t.insert(request_id.to_string(), target);
+}
+
+pub(crate) fn take_target(request_id: &str) -> Option<InstallTarget> {
+    targets().remove(request_id)
+}
+
+/// The facts a widget install request shows the person: every permission, who signed it, and
+/// plainly when it is a trusted widget (full access to AgentMux).
+pub(crate) fn install_facts(pkg: &WidgetPackageInfo) -> std::collections::BTreeMap<String, String> {
+    let name: String = pkg.name.chars().take(80).collect();
+    let publisher = match (&pkg.signature.state, &pkg.signature.fingerprint) {
+        (SignatureState::Unsigned, _) | (_, None) => format!("{} (unsigned)", pkg.signature.publisher),
+        (SignatureState::KeyChanged, Some(f)) => format!("{} (signed by a different key than before, {f})", pkg.signature.publisher),
+        (_, Some(f)) => format!("{} (signed, key {f})", pkg.signature.publisher),
+    };
+    let permissions = if pkg.kind == WidgetKind::Trusted {
+        "TRUSTED: full access to AgentMux".to_string()
+    } else if pkg.permissions.is_empty() {
+        "none".to_string()
+    } else {
+        pkg.permissions.join(", ")
+    };
+    [("widget", format!("{name} ({} {})", pkg.id, pkg.version)), ("publisher", publisher), ("permissions", permissions)]
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v))
+        .collect()
+}
+
 /// `GET /api/v1/widgets`: every package and its state.
 pub(super) async fn handle_widgets_list() -> Response {
     match widget_packages::service() {
@@ -90,9 +142,10 @@ pub(super) struct InstallBody {
     wait_secs: Option<u64>,
 }
 
-/// `POST /api/v1/widgets/install`: copy the package in, ask the user, and
-/// answer when they do (or when the wait runs out, with the request left
-/// for them to answer later in Settings → Widgets).
+/// `POST /api/v1/widgets/install`: copy the package in and, for a verified agent, file a
+/// sensitive request to install it (answered at once with the request's id; the agent is told as
+/// it goes). Without a verified agent, ask the user and answer when they do (or when the wait
+/// runs out, with the request left for them to answer later in Settings → Widgets).
 pub(super) async fn handle_widgets_install(State(state): State<AppState>, Json(body): Json<InstallBody>) -> Response {
     let Some(svc) = widget_packages::service() else {
         return error(StatusCode::SERVICE_UNAVAILABLE, "widget packages aren't available on this AgentMux");
@@ -122,6 +175,28 @@ pub(super) async fn handle_widgets_install(State(state): State<AppState>, Json(b
         _ => {}
     }
     let (agent, pane) = asking_agent(&state, body.auth.as_ref());
+    // A verified agent's install is a sensitive request: the super agent decides and the person
+    // can veto the countdown. Something that isn't a verified agent has no one to answer for it,
+    // so the person is asked, as before.
+    if let Some(uid) = pane.as_ref().and_then(|_| crate::backend::reactive::get_global_handler().get_agent(&agent)).and_then(|r| r.uid) {
+        let reason = format!("install the widget {} for the user", pkg.name);
+        return match super::sensitive_handlers::file_request(&state, &uid, &agent, "widget_install", &install_facts(&pkg), &reason).await {
+            Ok(filed) => {
+                let request_id = filed["id"].as_str().unwrap_or_default().to_string();
+                remember_target(&request_id, InstallTarget { id: id.clone(), hash: pkg.hash.clone(), signer: pkg.signature.fingerprint.clone().unwrap_or_default() });
+                Json(json!({
+                    "status": "requested",
+                    "id": id,
+                    "request": request_id,
+                    "views": views,
+                    "signature": signature,
+                    "review": filed["review"],
+                }))
+                .into_response()
+            }
+            Err(e) => error(StatusCode::BAD_REQUEST, e),
+        };
+    }
     let answer = widget_requests::requests().ask(WidgetInstallRequest::of(&pkg, &agent));
     publish_requests(&state);
     // The asking agent's pane (or, unverified, no pane) waits on the user

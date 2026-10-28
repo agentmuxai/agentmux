@@ -15,6 +15,7 @@ use crate::server::AppState;
 /// Say what runs each operation that has a runner. Idempotent: every connection calls it.
 pub fn register_all() {
     window::register_default_runner("upgrade", Arc::new(|state, request| Box::pin(upgrade(state, request))));
+    window::register_default_runner("widget_install", Arc::new(|state, request| Box::pin(widget_install(state, request))));
 }
 
 /// Why a release can't be installed, as the requester is told.
@@ -37,6 +38,22 @@ async fn upgrade(state: AppState, request: Request) -> Result<(), String> {
     askers.extend(request.askers().into_iter().filter_map(|uid| handler.block_for_uid(uid)));
     tracing::info!(version = %version, requester = %request.requester_slug, "upgrade: approved and not vetoed; starting");
     upgrade_request::start_upgrade(version, askers);
+    Ok(())
+}
+
+/// Approve the package the request was filed for, as the person's approval of it would, if it is
+/// still exactly that version and signer. The person's countdown was the check.
+async fn widget_install(state: AppState, request: Request) -> Result<(), String> {
+    let target = crate::server::widget_agent_handlers::take_target(&request.id).ok_or("the package this request was for is no longer known; ask again")?;
+    let service = crate::backend::widget_packages::service().ok_or("widget packages aren't available on this AgentMux")?;
+    let svc = service.clone();
+    let t = target.clone();
+    tokio::task::spawn_blocking(move || svc.approve(&t.id, &t.hash, &t.signer)).await.map_err(|e| e.to_string())??;
+    tracing::info!(id = %target.id, requester = %request.requester_slug, approver = ?request.decided_by, "widget package approved through a sensitive request");
+    crate::backend::widget_packages::refresh_off_thread(&state.config_watcher, &state.event_bus, &state.broker).await;
+    if crate::backend::widget_requests::requests().answer(&target.id, &target.hash, crate::backend::widget_requests::Answer::Approved) {
+        crate::server::widget_agent_handlers::publish_requests(&state);
+    }
     Ok(())
 }
 
