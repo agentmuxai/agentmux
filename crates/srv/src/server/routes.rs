@@ -124,6 +124,8 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // follows changes without polling (SPEC_LAN_FLEET_FEED_2026_10_03.md).
         .route("/agentmux/fleet", get(handle_fleet))
         .route("/agentmux/fleet/events", get(handle_fleet_events))
+        // Who did what (`http_action`): inner to the caller layer, which names the caller.
+        .route_layer(middleware::from_fn_with_state(state.clone(), super::http_action::record_action))
         // Identity M4a: inner to the auth layer (route_layer order: the
         // last one added runs first), so it sees which key authenticated.
         .route_layer(middleware::from_fn_with_state(
@@ -329,6 +331,8 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/api/v1/agent/start", post(app_api::agent_lifecycle::handle_agent_start))
         .route("/api/v1/agent/stop", post(app_api::agent_lifecycle::handle_agent_stop))
         .route("/api/v1/agent/detach", post(app_api::agent_lifecycle::handle_agent_detach))
+        // Replay an agent's recent transcript, then tail it (`Agents watch`).
+        .route("/api/v1/agent/watch", post(app_api::agent_watch::handle_agent_watch))
         // One live instance per agent, Phase 2 (SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24 §4.6).
         .route("/api/v1/agent/takeover", post(pane_binding::handle_takeover))
         // Voice speech-to-text: the renderer POSTs mic audio (one
@@ -644,6 +648,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .merge(bus_routes)
         .merge(agent_routes)
         .merge(reactive_routes)
+        .route_layer(middleware::from_fn_with_state(state.clone(), super::http_action::record_action))
         // Identity M4a: attribute the (already authenticated) request.
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
