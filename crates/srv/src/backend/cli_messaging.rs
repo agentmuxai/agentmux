@@ -49,14 +49,60 @@ pub fn apply(env_vars: &mut HashMap<String, String>, provider: &str, messaging_o
 
 /// [`apply`] for a block's launch, reading the provider from its meta and the setting now.
 pub fn apply_for_spawn(env_vars: &mut HashMap<String, String>, block_meta: &MetaMapType) {
-    let provider = meta_get_string(block_meta, "agentProvider", "");
+    // The block keeps the definition's provider as written, which may be a legacy alias (`claude-code`).
+    let provider = super::providers::resolve_provider_alias(&meta_get_string(block_meta, "agentProvider", ""));
     let on = CONFIG.get().is_some_and(|c| enabled(&c.get_settings().extra));
-    apply(env_vars, &provider, on);
+    apply(env_vars, provider, on);
+}
+
+/// Whether a volume source is a host folder the CLI keeps its sessions' sockets in, or inside one:
+/// `/tmp/cc-socks`, the user's runtime folder (`$XDG_RUNTIME_DIR`, `/run/user/*`).
+pub fn is_cli_session_dir(source: &str) -> bool {
+    let xdg = std::env::var("XDG_RUNTIME_DIR").ok().map(|d| normalized(&d)).filter(|d| !d.is_empty());
+    let guarded = |p: &str| {
+        let inside = |dir: &str| p == dir || p.starts_with(&format!("{dir}/"));
+        inside("/tmp/cc-socks") || inside("/run/user") || xdg.as_deref().is_some_and(inside)
+    };
+    // A link to the folder resolves to it, where the path exists on this host.
+    guarded(&normalized(source)) || std::fs::canonicalize(source.trim()).is_ok_and(|c| guarded(&normalized(&c.to_string_lossy())))
+}
+
+/// `source` with `\` as `/`, repeated separators, `.` and `..` resolved, and no trailing separator.
+fn normalized(source: &str) -> String {
+    let unified = source.trim().replace('\\', "/");
+    let mut parts: Vec<&str> = Vec::new();
+    for part in unified.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => {
+                parts.pop();
+            }
+            p => parts.push(p),
+        }
+    }
+    format!("{}{}", if unified.starts_with('/') { "/" } else { "" }, parts.join("/"))
+}
+
+/// The first of a container's volume sources that is such a folder, which the container may not mount.
+pub fn refused_volume_source<'a>(mut sources: impl Iterator<Item = &'a str>) -> Option<String> {
+    sources.find(|s| is_cli_session_dir(s)).map(str::to_string)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_volume_from_the_cli_session_folders_is_refused_and_an_ordinary_one_is_not() {
+        for source in ["/tmp/cc-socks", "/tmp/cc-socks/abc", "/run/user/1000", "/run/user/1000/cc", "/run/user"] {
+            assert!(is_cli_session_dir(source), "{source}");
+        }
+        for source in ["/tmp/cc-socks-other", "/home/me/repo", "/tmp", "data", "C:\\Users\\me\\repo"] {
+            assert!(!is_cli_session_dir(source), "{source}");
+        }
+        assert_eq!(refused_volume_source(["data", "/run/user/1000"].into_iter()).as_deref(), Some("/run/user/1000"));
+        assert_eq!(refused_volume_source(["data", "/home/me"].into_iter()), None);
+    }
 
     fn extra(value: Option<serde_json::Value>) -> HashMap<String, serde_json::Value> {
         value.into_iter().map(|v| (SETTING_CLI_MESSAGING.to_string(), v)).collect()
@@ -92,6 +138,25 @@ mod tests {
         let mut codex = HashMap::new();
         apply(&mut codex, "codex", false);
         assert!(codex.is_empty());
+    }
+
+    #[test]
+    fn a_legacy_provider_alias_is_still_claude() {
+        for alias in ["claude-code", "claude_code", "claude"] {
+            let mut meta = MetaMapType::new();
+            meta.insert("agentProvider".to_string(), serde_json::json!(alias));
+            let mut env = HashMap::new();
+            apply_for_spawn(&mut env, &meta);
+            assert_eq!(env.get(ENV_GATE).map(String::as_str), Some("0"), "{alias}");
+        }
+    }
+
+    #[test]
+    fn a_volume_source_is_compared_after_dots_and_repeated_separators_are_resolved() {
+        for source in ["/tmp//cc-socks", "/tmp/cc-socks/../cc-socks", "/run/user/../user/1000", "/tmp/./cc-socks/", "\\tmp\\cc-socks"] {
+            assert!(is_cli_session_dir(source), "{source}");
+        }
+        assert!(!is_cli_session_dir("/tmp/cc-socks/.."), "the parent is not the folder");
     }
 
     #[test]
