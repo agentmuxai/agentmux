@@ -227,6 +227,7 @@ fn refresh() {
         apply(&rt.state, effect);
     }
     switch::apply_pending(&rt.state);
+    crate::identity::credential_watch::check(&rt.state.id_store, &rt.state.identity_store, Some(&rt.state.broker));
 }
 
 /// The failure kinds an episode is made of: a usage limit or a refused sign-in.
