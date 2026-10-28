@@ -32,6 +32,8 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_skill_catalog_bind(engine, state);
     register_skill_catalog_list_for_agent(engine, state);
     register_skill_catalog_unbind(engine, state);
+    register_skill_catalog_set_reach(engine, state);
+    register_skill_catalog_bind_all(engine, state);
     register_skill_catalog_bind_to_bundle(engine, state);
     register_skill_catalog_unbind_from_bundle(engine, state);
     register_skill_catalog_list_for_bundle(engine, state);
@@ -296,8 +298,16 @@ fn register_skill_catalog_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // per-agent check) — same defense-in-depth as the mcp.catalog
                 // fix, reagent P1 on #1948. Pure single-table op — called
                 // directly on identity_store.
+                let is_new = created_at == now;
                 identity_store.skill_upsert_unique_global(&skill)
                     .map_err(|e| format!("skill.catalog.upsert: {e}"))?;
+                // A new catalog skill reaches the agents created after it, unless switched off
+                // (the operator's default: new agents get the global skills, with a per-skill opt-out).
+                if is_new && !identity_store.skill_reach_map().unwrap_or_default().contains_key(&id) {
+                    identity_store
+                        .skill_set_reach(&id, false, true, now)
+                        .map_err(|e| format!("skill.catalog.upsert: {e}"))?;
+                }
                 broker.publish_event::<crate::backend::mps_events::SkillsChanged>(&(), vec![], 0);
                 Ok(skill)
             }
@@ -394,6 +404,71 @@ fn register_skill_catalog_list_for_agent(engine: &Arc<WshRpcEngine>, state: &App
 /// even though `skill_id` is never exposed by any no-`check_s1` command
 /// today — defense in depth over relying solely on UUID secrecy.
 /// reagentx P1 on PR #2329 (round 2).
+/// `skill.catalog.set_reach`: a global skill reaches every agent, the agents created from now on, or
+/// only the agents it is bound to.
+/// The switch lives in the identity store beside the catalog (`db_skill_reach`), so it survives an
+/// upgrade, like an MCP server's (`mcp.catalog.set_reach`).
+fn register_skill_catalog_set_reach(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let identity_store = state.identity_store.clone();
+    let broker = state.broker.clone();
+    engine.register_typed(
+        COMMAND_SKILL_CATALOG_SET_REACH,
+        move |req: CommandSkillCatalogSetReachData, _ctx| {
+            let identity_store = identity_store.clone();
+            let broker = broker.clone();
+            async move {
+                match identity_store.skill_get(&req.skill_id).map_err(|e| format!("skill.catalog.set_reach: {e}"))? {
+                    Some(s) if s.is_global => {}
+                    Some(_) => return Err("FORBIDDEN: a private skill has no catalog reach".to_string()),
+                    None => return Err(format!("skill.catalog.set_reach: no skill {}", req.skill_id)),
+                }
+                identity_store
+                    .skill_set_reach(&req.skill_id, req.all_agents, req.new_agents, now_ms())
+                    .map_err(|e| format!("skill.catalog.set_reach: {e}"))?;
+                broker.publish_event::<crate::backend::mps_events::SkillsChanged>(&(), vec![], 0);
+                Ok(SkillBindResult { bound: req.all_agents || req.new_agents })
+            }
+        },
+    );
+}
+
+/// `skill.catalog.bind_all`: a bind of one global skill to every agent that exists now. The agents
+/// are this channel's own definitions (not the seeded templates), the same ones the per-agent bind
+/// accepts.
+fn register_skill_catalog_bind_all(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let mstore = state.mstore.clone();
+    let identity_store = state.identity_store.clone();
+    let broker = state.broker.clone();
+    engine.register_typed(
+        COMMAND_SKILL_CATALOG_BIND_ALL,
+        move |req: CommandSkillCatalogBindAllData, _ctx| {
+            let mstore = mstore.clone();
+            let identity_store = identity_store.clone();
+            let broker = broker.clone();
+            async move {
+                match identity_store.skill_get(&req.skill_id).map_err(|e| format!("skill.catalog.bind_all: {e}"))? {
+                    Some(s) if s.is_global => {}
+                    Some(_) => return Err("FORBIDDEN: can only bind global skills".to_string()),
+                    None => return Err("skill.catalog.bind_all: skill not found".to_string()),
+                }
+                let mut bound: u64 = 0;
+                for agent in mstore.agent_def_list().map_err(|e| format!("skill.catalog.bind_all: {e}"))? {
+                    if agent.is_seeded == 1 {
+                        continue;
+                    }
+                    // A definition of another channel is not in this one's registry and refuses a bind: skipped.
+                    match mstore.skill_bind(&identity_store, &agent.id, &req.skill_id) {
+                        Ok(()) => bound += 1,
+                        Err(e) => tracing::debug!(agent_id = %agent.id, error = %e, "skill.catalog.bind_all: skipped an agent"),
+                    }
+                }
+                broker.publish_event::<crate::backend::mps_events::SkillsChanged>(&(), vec![], 0);
+                Ok(SkillBindAllResult { bound })
+            }
+        },
+    );
+}
+
 fn register_skill_catalog_unbind(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let mstore = state.mstore.clone();
     let identity_store = state.identity_store.clone();

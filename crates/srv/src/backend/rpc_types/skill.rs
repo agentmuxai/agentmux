@@ -44,6 +44,35 @@ pub struct SkillAgentBindingData {
     pub skill_id: String,
 }
 
+/// `skill.catalog.set_reach` — window-scoped. Who a catalog skill reaches beyond its binds:
+/// `all_agents` gives it to every agent, `new_agents` to every agent created from now on.
+/// `skill.catalog.upsert` leaves both as they are, except that a skill it creates starts with
+/// `new_agents` on.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandSkillCatalogSetReachData {
+    pub skill_id: String,
+    pub all_agents: bool,
+    pub new_agents: bool,
+}
+
+/// `skill.catalog.bind_all` — window-scoped. Binds a catalog skill to every agent that exists now (a
+/// bind each, so the skill stays with the agent when "all agents" is switched off). Agents created
+/// later get it only through `skill.catalog.set_reach`.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandSkillCatalogBindAllData {
+    pub skill_id: String,
+}
+
+/// Result of `skill.catalog.bind_all`: how many agents hold the bind now.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct SkillBindAllResult {
+    #[ts(type = "number")]
+    pub bound: u64,
+}
+
 /// `skill.catalog.bind_to_bundle`, `skill.catalog.unbind_from_bundle`.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]

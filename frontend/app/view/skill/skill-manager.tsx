@@ -16,7 +16,7 @@ import { PrimitiveListDetail } from "@/app/element/primitive-list-detail";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { SkillCatalogModel } from "./skill-model";
 import "../agent/components/AgentPrimitiveModal.scss";
-import { Button } from "@/app/element/ui";
+import { Button, Switch } from "@/app/element/ui";
 import { focusOnOpen } from "@/util/focusutil";
 
 /** The agents a skill is bound to, each with Unbind. */
@@ -46,6 +46,31 @@ function SkillBoundAgents(props: { model: SkillCatalogModel; skill: SkillCatalog
                 </For>
             </ul>
         </Show>
+    );
+}
+
+/** Who gets a skill without a bind: every agent, or the agents created from now on. */
+function SkillReach(props: { model: SkillCatalogModel; skill: SkillCatalogItem }): JSX.Element {
+    return (
+        <div class="agent-primitive-modal-reach" aria-label="Who gets this skill">
+            <div class="agent-primitive-modal-reach-row">
+                <Switch
+                    checked={props.skill.all_agents}
+                    ariaLabel="Every agent gets this skill"
+                    onChange={(on) => void props.model.setReach(props.skill.id, on, props.skill.new_agents || on)}
+                />
+                <span>Every agent gets it (the ones to come too)</span>
+            </div>
+            <div class="agent-primitive-modal-reach-row">
+                <Switch
+                    checked={props.skill.all_agents || props.skill.new_agents}
+                    disabled={props.skill.all_agents}
+                    ariaLabel="New agents get this skill"
+                    onChange={(on) => void props.model.setReach(props.skill.id, false, on)}
+                />
+                <span>New agents get it</span>
+            </div>
+        </div>
     );
 }
 
@@ -79,7 +104,9 @@ export const SkillManager = (): JSX.Element => {
                         >
                             <span class="agent-primitive-modal-list-item-name">{skill.name}</span>
                             <span class="agent-primitive-modal-list-item-badge">
-                                {skill.bound_count} {skill.bound_count === 1 ? "agent" : "agents"}
+                                {skill.all_agents
+                                    ? "all agents"
+                                    : `${skill.bound_count} ${skill.bound_count === 1 ? "agent" : "agents"}`}
                             </span>
                         </button>
                     )}
@@ -105,8 +132,11 @@ export const SkillManager = (): JSX.Element => {
                                     <div class="agent-primitive-modal-readonly">
                                         <h3 class="agent-primitive-modal-name">{skill().name}</h3>
                                         <p class="agent-primitive-modal-global-note">
-                                            Used by {skill().bound_count} {skill().bound_count === 1 ? "agent" : "agents"}
+                                            {skill().all_agents
+                                                ? "Used by every agent"
+                                                : `Used by ${skill().bound_count} ${skill().bound_count === 1 ? "agent" : "agents"}`}
                                         </p>
+                                        <SkillReach model={model} skill={skill()} />
                                         <SkillBoundAgents model={model} skill={skill()} />
                                         <Show when={skill().description}>
                                             <span class="agent-primitive-modal-field-label">Description</span>

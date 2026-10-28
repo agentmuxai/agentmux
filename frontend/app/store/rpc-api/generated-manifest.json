@@ -1294,6 +1294,14 @@
             "method": "SkillCatalogListForBundleCommand"
         },
         {
+            "command": "skill.catalog.set_reach",
+            "method": "SkillCatalogSetReachCommand"
+        },
+        {
+            "command": "skill.catalog.bind_all",
+            "method": "SkillCatalogBindAllCommand"
+        },
+        {
             "command": "skill.catalog.unbind",
             "method": "SkillCatalogUnbindCommand"
         },

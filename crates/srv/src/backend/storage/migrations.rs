@@ -833,6 +833,15 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             in_containers INTEGER NOT NULL DEFAULT 0,
             updated_at    INTEGER NOT NULL DEFAULT 0
         );
+        -- Who a catalog skill reaches beyond its binds: every agent, and/or every agent created
+        -- from `new_agents_since` (unix ms; 0 = off). Added without a version bump, like
+        -- db_mcp_server_reach (see IDENTITY_STORE_SCHEMA_VERSION's doc comment).
+        CREATE TABLE IF NOT EXISTS db_skill_reach (
+            skill_id         TEXT PRIMARY KEY,
+            all_agents       INTEGER NOT NULL DEFAULT 0,
+            new_agents_since INTEGER NOT NULL DEFAULT 0,
+            updated_at       INTEGER NOT NULL DEFAULT 0
+        );
 
         -- v34: skill_id's FK to this store's LOCAL db_skills is gone — see
         -- OBJECT_SCHEMA_VERSION's v34 doc comment above. agent_id's FK to
@@ -2219,6 +2228,15 @@ pub fn run_identity_store_schema(conn: &Connection) -> Result<(), StoreError> {
             all_agents    INTEGER NOT NULL DEFAULT 0,
             in_containers INTEGER NOT NULL DEFAULT 0,
             updated_at    INTEGER NOT NULL DEFAULT 0
+        );
+        -- Who a catalog skill reaches beyond its binds: every agent, and/or every agent created
+        -- from `new_agents_since` (unix ms; 0 = off). Added without a version bump, like
+        -- db_mcp_server_reach (see IDENTITY_STORE_SCHEMA_VERSION's doc comment).
+        CREATE TABLE IF NOT EXISTS db_skill_reach (
+            skill_id         TEXT PRIMARY KEY,
+            all_agents       INTEGER NOT NULL DEFAULT 0,
+            new_agents_since INTEGER NOT NULL DEFAULT 0,
+            updated_at       INTEGER NOT NULL DEFAULT 0
         );",
     )?;
     conn.execute_batch(super::vault::VAULT_SCHEMA)?; // The Vault's tables, no version bump: storage/vault.rs.
