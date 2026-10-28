@@ -325,6 +325,10 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/api/v1/agent/container/update", post(app_api::container_update::handle_update_container))
         // A leader's own workers and how each is doing (§3.4).
         .route("/api/v1/agent/workers", post(app_api::agent_spawn::handle_agent_workers))
+        // Start, stop or detach an agent with no window of the operator (`Agents start`, `stop`, `detach`).
+        .route("/api/v1/agent/start", post(app_api::agent_lifecycle::handle_agent_start))
+        .route("/api/v1/agent/stop", post(app_api::agent_lifecycle::handle_agent_stop))
+        .route("/api/v1/agent/detach", post(app_api::agent_lifecycle::handle_agent_detach))
         // One live instance per agent, Phase 2 (SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24 §4.6).
         .route("/api/v1/agent/takeover", post(pane_binding::handle_takeover))
         // Voice speech-to-text: the renderer POSTs mic audio (one
@@ -552,6 +556,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // The App tool: what AgentMux runs and whether a newer release is out,
         // and asking to upgrade (SPEC_UPGRADE_FOR_USERS_AND_AGENTS §5.1).
         .route("/api/v1/app/update-status", get(app_api::app_update::handle_update_status))
+        .route("/api/v1/app/connectivity", get(app_api::connectivity::handle_status))
         .route("/api/v1/agent/self/upgrade", post(app_api::app_update::handle_request_upgrade))
         // The Desktop tool: the gate in front of looking at and controlling a
         // native app (SPEC_DESKTOP_DRIVING_2026_10_20.md §6).

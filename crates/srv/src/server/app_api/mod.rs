@@ -25,6 +25,7 @@ use crate::backend::storage::bundles::Bundle;
 use super::AppState;
 
 pub(crate) mod agent_attach;
+pub(crate) mod agent_lifecycle;
 #[cfg(test)]
 mod agent_attach_tests;
 pub(crate) mod agent_block;
@@ -113,7 +114,7 @@ mod shells;
 pub(crate) mod kanban;
 mod jobs;
 mod jobs_edit;
-mod connectivity;
+pub(crate) mod connectivity;
 pub(crate) mod layout_intent;
 
 /// Register all MuxAPI handlers on the RPC engine.
