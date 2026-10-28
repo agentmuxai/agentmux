@@ -57,6 +57,10 @@ export interface FailureActions {
      * Spec: SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24.md §4.6.
      */
     takeOver?: () => void;
+    /** `open_in_other_pane`: focus the pane that holds this agent. */
+    goThere?: () => void;
+    /** `open_in_other_pane`: stop that pane and run the agent here. Two-step, like {@link takeOver}. */
+    moveHere?: () => void;
 }
 
 /** Transient view state for the failure row (no backing store). */
@@ -89,7 +93,7 @@ export interface FailureViewState {
     autoRetryIn: number | null;
     /** True while a retry is in flight (disables the button). */
     retrying: boolean;
-    /** `live_elsewhere`: the Take over button was clicked once and awaits the confirming click. */
+    /** `live_elsewhere` and `open_in_other_pane`: the Take over / Move here button was clicked once and awaits the confirming click. */
     takeoverArmed?: boolean;
     /** `live_elsewhere`: the takeover request is in flight (disables the button). */
     takingOver?: boolean;
@@ -101,6 +105,8 @@ export interface FailureViewState {
     /** A network failure that waits for its API to answer again: what
      *  happens then, or what became of its retry, added to the meta line. */
     reconnectHint?: string | null;
+    /** `open_in_other_pane`: the message the pane refused, which Move here sends. */
+    notSent?: string;
 }
 
 /** Per-class sigil. */
@@ -118,6 +124,7 @@ const ICON: Record<AgentFailure["code"], string> = {
     unknown_non_zero: "⚠",
     agent_deleted: "🗑",
     live_elsewhere: "⇄",
+    open_in_other_pane: "⇄",
 };
 
 /** Classes whose retry is safe to fire **automatically** (transient throttling). */
@@ -154,6 +161,8 @@ export function failureToRow(f: AgentFailure, view: FailureViewState, on: Failur
     else if (f.exitCode != null) meta.push(`exit ${f.exitCode}`);
     if (f.retryable) meta.push("retryable");
     if (view.reconnectHint) meta.push(view.reconnectHint);
+    // The message this pane refused is not lost: say so, and what it was.
+    if (view.notSent) meta.push(`not sent: "${view.notSent.length > 60 ? `${view.notSent.slice(0, 57)}…` : view.notSent}"`);
 
     const retryLabel = view.autoRetryIn != null ? `Retry now (${view.autoRetryIn}s)` : "Retry now";
     const retry: PaneRowAction = {
@@ -263,6 +272,32 @@ export function failureToRow(f: AgentFailure, view: FailureViewState, on: Failur
                     danger: !!view.takeoverArmed,
                     disabled: !!view.takingOver,
                     onClick: on.takeOver,
+                });
+            }
+            break;
+        case "open_in_other_pane":
+            // This agent runs in another pane of this AgentMux, so a Retry is refused identically. Go there
+            // is free; Move here stops the agent in the other pane, so it takes two clicks like Take over.
+            if (on.goThere) {
+                actions.push({
+                    glyph: "→",
+                    label: "Go there",
+                    title: "Focus the pane that is running this agent",
+                    primary: !on.moveHere,
+                    onClick: on.goThere,
+                });
+            }
+            if (on.moveHere) {
+                actions.push({
+                    glyph: "⇄",
+                    label: view.takingOver ? "Moving…" : view.takeoverArmed ? "Confirm move here" : "Move here",
+                    title: view.takeoverArmed
+                        ? "Click again to stop this agent in the other pane and run it here"
+                        : "Stop this agent in the other pane and run it here",
+                    primary: true,
+                    danger: !!view.takeoverArmed,
+                    disabled: !!view.takingOver,
+                    onClick: on.moveHere,
                 });
             }
             break;

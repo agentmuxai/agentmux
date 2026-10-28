@@ -11,7 +11,7 @@ use crate::server::tests::test_state;
 use crate::server::AppState;
 use agentmux_common::ipc::{Command, Event};
 
-async fn dispatch_apply(state: &AppState, cmd: Command) -> Vec<Event> {
+pub(crate) async fn dispatch_apply(state: &AppState, cmd: Command) -> Vec<Event> {
     let events = crate::server::service::dispatch_to_reducer(state, cmd).await;
     for ev in &events {
         crate::persist_subscriber::apply_event_to_mstore(ev, &state.mstore).unwrap();
@@ -19,7 +19,7 @@ async fn dispatch_apply(state: &AppState, cmd: Command) -> Vec<Event> {
     events
 }
 
-async fn seed_workspace(state: &AppState, tabs: usize) -> (String, Vec<String>) {
+pub(crate) async fn seed_workspace(state: &AppState, tabs: usize) -> (String, Vec<String>) {
     let ws = dispatch_apply(state, Command::CreateWorkspace { name: "w".into() })
         .await
         .iter()
@@ -43,7 +43,7 @@ async fn seed_workspace(state: &AppState, tabs: usize) -> (String, Vec<String>) 
     (ws, ids)
 }
 
-async fn seed_block(state: &AppState, tab_id: &str, meta: serde_json::Value) -> String {
+pub(crate) async fn seed_block(state: &AppState, tab_id: &str, meta: serde_json::Value) -> String {
     dispatch_apply(state, Command::CreateBlock { tab_id: tab_id.to_string(), meta })
         .await
         .iter()
@@ -55,7 +55,7 @@ async fn seed_block(state: &AppState, tab_id: &str, meta: serde_json::Value) -> 
 }
 
 /// An existing agent `id` with a pane block in `tab_id`.
-async fn seed_agent_block(state: &AppState, tab_id: &str, id: &str) -> String {
+pub(crate) async fn seed_agent_block(state: &AppState, tab_id: &str, id: &str) -> String {
     let block = seed_block(state, tab_id, serde_json::json!({ "view": "agent", "agentId": id })).await;
     let mut def: crate::backend::storage::AgentDefinition = serde_json::from_value(serde_json::json!({
         "id": id, "slug": id, "name": id, "icon": "robot", "provider": "claude", "description": "", "created_at": 1,
@@ -85,14 +85,14 @@ async fn seed_agent_block(state: &AppState, tab_id: &str, id: &str) -> String {
     block
 }
 
-fn set_always_available(state: &AppState, on: bool) {
+pub(crate) fn set_always_available(state: &AppState, on: bool) {
     state.config_watcher.update_settings(
         serde_json::from_value(serde_json::json!({ crate::backend::always_available::SETTING_ALWAYS_AVAILABLE: on })).unwrap(),
     );
 }
 
 /// The tab the reducer has the block in (empty when parked); `None` when it has no such block.
-async fn in_tab(state: &AppState, block_id: &str) -> Option<String> {
+pub(crate) async fn in_tab(state: &AppState, block_id: &str) -> Option<String> {
     state.srv_state.lock().await.blocks.get(block_id).map(|b| b.tab_id.clone())
 }
 

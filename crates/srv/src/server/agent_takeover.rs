@@ -355,7 +355,7 @@ fn describe_requester(channel: &str, version: &str) -> String {
 
 /// Show `message` in the pane's recovery row — the same persisted meta and
 /// live event a spawn refusal uses.
-fn surface_failure(state: &AppState, block_id: &str, message: &str) {
+pub(super) fn surface_failure(state: &AppState, block_id: &str, message: &str) {
     let failure = crate::agents::failure::classify(None, None, message, None);
     blockcontroller::core::persist_last_failure(
         block_id,

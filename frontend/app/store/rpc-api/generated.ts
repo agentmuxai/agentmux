@@ -27,6 +27,7 @@ import type { AgentKillProcessCommand } from "@/types/rpc/AgentKillProcessComman
 import type { AgentKillResult } from "@/types/rpc/AgentKillResult";
 import type { AgentKillTreeCommand } from "@/types/rpc/AgentKillTreeCommand";
 import type { AgentLastRuntime } from "@/types/rpc/AgentLastRuntime";
+import type { AgentMoveHereResult } from "@/types/rpc/AgentMoveHereResult";
 import type { AgentOpenPanesResult } from "@/types/rpc/AgentOpenPanesResult";
 import type { AgentOpenResult } from "@/types/rpc/AgentOpenResult";
 import type { AgentOpenTailResult } from "@/types/rpc/AgentOpenTailResult";
@@ -77,6 +78,7 @@ import type { CommandAgentDefCreateFromTemplateData } from "@/types/rpc/CommandA
 import type { CommandAgentDefHideData } from "@/types/rpc/CommandAgentDefHideData";
 import type { CommandAgentInputData } from "@/types/rpc/CommandAgentInputData";
 import type { CommandAgentLastRuntimeData } from "@/types/rpc/CommandAgentLastRuntimeData";
+import type { CommandAgentMoveHereData } from "@/types/rpc/CommandAgentMoveHereData";
 import type { CommandAgentOpenData } from "@/types/rpc/CommandAgentOpenData";
 import type { CommandAgentOpenTailData } from "@/types/rpc/CommandAgentOpenTailData";
 import type { CommandAgentPaneUnregisterData } from "@/types/rpc/CommandAgentPaneUnregisterData";
@@ -707,6 +709,14 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<AgentSessionWriteStateResult> {
     return client.rpcCall("agent:session:write_state", data, opts);
+  },
+  // command "agent.move-here"
+  AgentMoveHereCommand(
+    client: RpcClient,
+    data: CommandAgentMoveHereData,
+    opts?: RpcOpts
+  ): Promise<AgentMoveHereResult> {
+    return client.rpcCall("agent.move-here", data, opts);
   },
   // command "agent.pane.unregister"
   AgentPaneUnregisterCommand(

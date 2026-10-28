@@ -222,7 +222,12 @@ pub async fn stop(state: &AppState, block_id: &str, graceful: bool, stop_backgro
     let report = run(state, block_id, Policy::stop(graceful, stop_background)).await;
     match report.stop_error {
         Some(e) => Err(e),
-        None => Ok(report),
+        None => {
+            // An explicit stop: the agent is wanted stopped, so a restart does not resume it.
+            use crate::server::app_api::agent_attach::{set_desired, DESIRED_STOPPED};
+            set_desired(&state.mstore, block_id, DESIRED_STOPPED);
+            Ok(report)
+        }
     }
 }
 

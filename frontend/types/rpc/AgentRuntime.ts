@@ -20,7 +20,7 @@ detail?: string,
  */
 resets_at?: number, 
 /**
- * The block the agent runs in; absent for an agent that has no live pane.
+ * The block the agent runs in, shown in a pane or parked; absent for an agent that has never had one.
  */
 block_id?: string, desired: AgentDesiredState, name: string, provider: string, icon: string, 
 /**
