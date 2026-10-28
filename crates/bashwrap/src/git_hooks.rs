@@ -216,8 +216,10 @@ fn push_diff(dir: Option<&Path>, remote: &str, local: &str, remote_sha: &str) ->
         if let Some(dir) = dir {
             cmd.current_dir(dir);
         }
-        // `-m`: a merge commit shows no patch without it, and a conflict resolution can add anything.
-        cmd.args(["log", "--format=", "-p", "-m", "-U0", "--no-color", "--no-ext-diff"]).args(range).stdin(Stdio::null()).stderr(Stdio::null());
+        // `--cc`: a merge commit shows no patch without it, and a conflict resolution can add anything;
+        // it shows what differs from every parent, so history a parent already has isn't read again.
+        // `--no-textconv`: the text git commits, not what a repository's converter makes of it.
+        cmd.args(["log", "--format=", "-p", "--cc", "-U0", "--no-color", "--no-ext-diff", "--no-textconv"]).args(range).stdin(Stdio::null()).stderr(Stdio::null());
         cmd.no_window();
         cmd.output().ok().filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
     };

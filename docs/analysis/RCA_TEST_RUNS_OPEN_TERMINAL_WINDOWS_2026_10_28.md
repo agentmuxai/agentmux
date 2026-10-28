@@ -42,11 +42,19 @@ subshell). A test that asks the console API about itself, run through the shim i
 console window handle and ten processes attached to the console, so the test process has a console like any
 other child, and an unflagged child would inherit it.
 
-## 5. What is still open
+## 5. The mechanism is unconfirmed
 
-Tests that start `cmd`, `ping` or `sh` without `no_window()` exist elsewhere (the inventory's `test:` rows) and
-ran in the same period without opening windows, so "no flag in a test helper" does not by itself explain the
-windows. What differed for the `git` and `bash` children is unproven. A test spawning `git` through the
-`cmd\git.exe` redirector, without the flag, on a machine where a window is harmless (not the person's
-desktop) is the way to settle it. Until then the rule is the cheap one: every spawn is hidden, tests included,
-and `git`, `sh` and `bash` are enforced by the inventory.
+Tests that start `cmd`, `ping` or `sh` without `no_window()` exist elsewhere (the inventory's `test:` rows)
+and ran in the same period without opening windows, so "no flag in a test helper" does not by itself explain
+the windows.
+
+A probe on a second Windows machine ran six spawns (Git for Windows' `cmd\git.exe` redirector and
+`mingw64in\git.exe`, each succeeding and failing, plus `cmd` and `bash` failing), without the flag, three
+ways: through the build-slot shim, with the shim off, and from a PowerShell console. No window opened in any
+case, and the test process had a console each time. That machine's default terminal is the classic console
+host, not Windows Terminal, so it does not settle the mechanism on the machine where the windows appeared.
+
+Leading hypothesis: a console-less parent somewhere in the chain (a child then gets a fresh console), with
+Windows Terminal as the default terminal, which turns each fresh console into a window. It is not
+reproducible on a conhost-default host. The fix holds whichever mechanism it is: every Windows-reachable spawn
+is hidden, tests included, and the inventory enforces it for `git`, `sh` and `bash`.

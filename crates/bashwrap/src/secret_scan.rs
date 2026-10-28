@@ -52,10 +52,9 @@ pub fn credential_in(text: &str) -> Option<&'static str> {
     if ["ghp_", "gho_", "ghu_", "ghs_", "ghr_"].iter().any(|p| has_run(text, p, 36, is_alnum)) || has_run(text, "github_pat_", 22, is_key_char) {
         return Some("GitHub token");
     }
-    if ["AKIA", "ASIA", "AGPA", "AIDA", "AROA", "ANPA", "ANVA"]
-        .iter()
-        .any(|p| has_run(text, p, 16, |c| c.is_ascii_uppercase() || c.is_ascii_digit()))
-    {
+    // Access key ids and temporary ones; the other `A???` prefixes (AGPA, AIDA, AROA, ANPA, ANVA)
+    // are IAM group, user, role and policy ids, which are not credentials.
+    if ["AKIA", "ASIA"].iter().any(|p| has_run(text, p, 16, |c| c.is_ascii_uppercase() || c.is_ascii_digit())) {
         return Some("AWS access key id");
     }
     if has_run(text, "sk-ant-", 20, is_key_char) {
@@ -84,15 +83,52 @@ pub fn scan_diff(diff: &str) -> Vec<Finding> {
     // Lines the current hunk still has: a line that begins `+++ ` inside one is an added line
     // (its text begins `++ `), not the next file's header.
     let (mut old_left, mut new_left) = (0u32, 0u32);
+    // A merge commit is shown as a combined diff (`git log --cc`): one column per parent in front of
+    // each line, and only what differs from every parent is in it. `cols` is that count in the
+    // current hunk, 0 for a plain one.
+    let mut cols = 0usize;
     for line in diff.lines() {
         let in_hunk = old_left > 0 || new_left > 0;
+        let in_hunk = if line.starts_with("diff ") {
+            // A new file's diff: nothing of the last hunk is left.
+            (cols, old_left, new_left) = (0, 0, 0);
+            false
+        } else {
+            in_hunk
+        };
         if !in_hunk {
             if let Some(path) = line.strip_prefix("+++ ") {
                 file = path.strip_prefix("b/").unwrap_or(path).trim_matches('"').to_string();
                 continue;
             }
         }
-        if let Some(hunk) = line.strip_prefix("@@") {
+        if line.starts_with("@@@") {
+            cols = line.chars().take_while(|c| *c == '@').count() - 1;
+            let (start, count) = combined_new_range(line);
+            (old_left, new_left, line_no) = (0, count, start);
+        } else if cols > 0
+            && line.get(..cols).is_some_and(|p| p.chars().all(|c| matches!(c, ' ' | '+' | '-')) && (new_left > 0 || p.contains('-')))
+        {
+            let (prefix, text) = line.split_at(cols);
+            if prefix.contains('-') {
+                // Gone from the result.
+            } else if prefix.chars().all(|c| c == '+') {
+                // Added against every parent: what this merge brings that no parent had.
+                if let Some(category) = credential_in(text) {
+                    found.push(Finding { file: file.clone(), line: line_no, category });
+                    if found.len() >= MAX_FINDINGS {
+                        return found;
+                    }
+                }
+                line_no += 1;
+                new_left = new_left.saturating_sub(1);
+            } else {
+                // Already in a parent, so already wherever that parent is.
+                line_no += 1;
+                new_left = new_left.saturating_sub(1);
+            }
+        } else if let Some(hunk) = line.strip_prefix("@@") {
+            cols = 0;
             // `@@ -old[,count] +new[,count] @@`
             let (old, new) = hunk_counts(hunk);
             (old_left, new_left) = (old.1, new.1);
@@ -115,6 +151,16 @@ pub fn scan_diff(diff: &str) -> Vec<Finding> {
         }
     }
     found
+}
+
+/// `(start, count)` of the result side of a combined hunk header, `@@@ -a,b -c,d +e,f @@@`; a
+/// missing count is 1.
+fn combined_new_range(header: &str) -> (u32, u32) {
+    let Some((_, after)) = header.rsplit_once(" +") else { return (0, 0) };
+    let mut n = after.split(' ').next().unwrap_or("").split(',');
+    let start = n.next().and_then(|v| v.parse().ok()).unwrap_or(0);
+    let count = n.next().and_then(|v| v.parse().ok()).unwrap_or(1);
+    (start, count)
 }
 
 /// `(start, count)` of the old and the new side of a hunk header's `-a[,b] +c[,d] @@`; a missing
@@ -180,6 +226,8 @@ mod tests {
         ] {
             assert_eq!(credential_in(text), None, "{text}");
         }
+        // An IAM role id is an identifier, not a credential.
+        assert_eq!(credential_in(&["\"RoleId\": \"", "AROA", "KSCDLFT9R5DQP782U\""].concat()), None);
     }
 
     #[test]
@@ -217,6 +265,26 @@ mod tests {
             ]
         );
         assert_eq!(hunk_counts(" -3,2 +4 @@ fn x"), ((3, 2), (4, 1)));
+    }
+
+    #[test]
+    fn a_merge_is_scanned_for_what_no_parent_had() {
+        // `git log -p --cc`: the first line is in the result only through the merge, the second is
+        // already in the second parent, and the third is a plain commit after it.
+        let diff = format!(
+            "diff --cc a.txt\nindex 111,222..333\n--- a/a.txt\n+++ b/a.txt\n@@@ -1,2 -1,2 +1,3 @@@\n  base\n++key = {}\n +from_main = {}\n- gone\ndiff --git a/b b/b\n--- a/b\n+++ b/b\n@@ -0,0 +1 @@\n+{}\n",
+            gh(),
+            aws(),
+            aws()
+        );
+        assert_eq!(
+            scan_diff(&diff),
+            vec![
+                Finding { file: "a.txt".into(), line: 2, category: "GitHub token" },
+                Finding { file: "b".into(), line: 1, category: "AWS access key id" },
+            ]
+        );
+        assert_eq!(combined_new_range("@@@ -1,2 -1 +4,3 @@@ fn x"), (4, 3));
     }
 
     #[test]
