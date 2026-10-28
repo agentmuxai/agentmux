@@ -43,9 +43,16 @@ pub const META_KEY_PTYSHELL_GH_CONFIG_DIR: &str = "ptyshell:ghconfigdir";
 /// same way: created, with any login in it cleared. Empty when the agent is not
 /// guarded (it has no other GitHub identity), so the shell sets nothing.
 pub fn guard_dir_for(agent_env: &HashMap<String, String>) -> String {
+    guard_dir_for_target(agent_env, false)
+}
+
+/// [`guard_dir_for`] for a shell that may run elsewhere. `remote`: a WSL distro or an SSH host,
+/// whose own GitHub identity is not known from here, so the person's login is kept from it as
+/// every guarded spawn did before the guard became conditional.
+pub fn guard_dir_for_target(agent_env: &HashMap<String, String>, remote: bool) -> String {
     let home = guard_config_home();
     let mut env = agent_env.clone();
-    apply_gh_guard_for(&mut env, &home, has_other_github_identity(agent_env));
+    apply_gh_guard_for(&mut env, &home, remote || has_other_github_identity(agent_env));
     match env.remove(GH_CONFIG_DIR) {
         Some(dir) if is_own_guard_dir(&dir, &home) => dir,
         _ => String::new(),
