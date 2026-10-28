@@ -1,6 +1,6 @@
 # Spec: two buttons on every countdown, and agents stopped, opened and spawned as a batch
 
-**Status:** active: approved by the operator on 2026-10-28 ("yes, good for all 4"). S1 (part 1) is built in #5733 and S2 (part 2) in #5735; S3 and S4 are not.
+**Status:** active: approved by the operator on 2026-10-28 ("yes, good for all 4"). S1 (part 1) is built in #5733, S2 (part 2) in #5735 and S3 (part 3) in #5749; S4 is not.
 **Date:** 2026-10-28
 **Author:** Manoz@Area54 (agent-pane lifecycle), for AgentY, from the operator's own asks of 2026-10-28.
 **Verified against:** `origin/main` @ `bd2aa677f`, by reading code. Not checked: the macOS toast (the launcher has no macOS notify module yet; it is #1267) and a run of any of this.
@@ -71,6 +71,8 @@ A `Stop agents` call is one request over all its local targets.
 - Under one hold of the admission lock it reads the room (`agents:max_running` minus running and reserved, and the commit limit) and **reserves** all of it, so a concurrent start cannot take it between the check and the starts. A refusal reserves nothing.
 - If the room is short, the whole call is refused: `capacity: 12 agents are running (the limit is 12); room for 2 of the 5 asked: A and B would fit, C, D and E would not. Stop some agents (3 are idle with no view), or ask for fewer.` Nothing starts.
 - The batch counts N starts against the sender's `start_rate` and is refused whole if N exceed what is left.
+
+**Built as:** `app_api/agent_spawn/many.rs` (`spawn_many`: validate everything, take the leader lock, count against `MAX_LIVE_WORKERS`, reserve room with `admit_batch`, one consent, `start_rate::allow_n`, launch each and roll back with `discard_worker`, `release_batch`) and `app_api/agent_open_many.rs` (`open_many`: at most 16, each agent by id, slug or name, a duplicate refused, only agents not already running count as starts, panes it created are closed again if a later one fails). `admit()` lets an agent that holds a reservation through. The MCP `spawn` with `workers` sends the briefs only after srv answers that every worker is open.
 
 **Touch.** `app_api/agent_spawn.rs` (`spawn_many`, one `consent`), `app_api/agent_open.rs` and `agent_attach.rs` (`open_many`, reusing the per-agent lock), `server/agent_lifecycle.rs` (`admit_batch`: room, reservation, the refusal text), `server/start_rate.rs` (take N), `crates/common/src/api_types.rs` (the request types), `crates/mcp/src/tools/agents_tool.rs` and `tool_schemas.rs` (the two list parameters, the briefs sent after the launch).
 
