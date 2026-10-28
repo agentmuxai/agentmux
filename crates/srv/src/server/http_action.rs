@@ -30,6 +30,8 @@ const SERVICE_ROUTE: &str = "/agentmux/service";
 /// The largest service call read for its two names; a bigger one is refused with 413, as the
 /// route's own body limit would, and the refusal is recorded.
 const SERVICE_BODY_MAX: usize = 2 * 1024 * 1024;
+/// The largest service reply read for its verdict.
+const SERVICE_REPLY_MAX: usize = 32 * 1024 * 1024;
 const MAX_FIELD: usize = 200;
 
 /// The values a request's path gives for the route's `:name` parameters, as `name=value`.
@@ -50,6 +52,17 @@ fn service_names(body: &[u8]) -> Option<String> {
     Some(format!("{}.{}", name("service")?, name("method")?))
 }
 
+/// Why a service reply says the call failed: its `error`, or a bare failure when it gives none.
+/// (`success` is left out of a failed reply, so a reply without it failed.)
+fn service_failure(reply: &[u8]) -> Option<String> {
+    let serde_json::Value::Object(fields) = serde_json::from_slice(reply).ok()? else { return None };
+    if fields.get("success").and_then(|v| v.as_bool()).unwrap_or(false) {
+        return None;
+    }
+    let why = fields.get("error").and_then(|v| v.as_str()).unwrap_or("failed");
+    Some(why.chars().take(MAX_FIELD).collect())
+}
+
 fn is_write(method: &Method) -> bool {
     !matches!(*method, Method::GET | Method::HEAD | Method::OPTIONS | Method::TRACE | Method::CONNECT)
 }
@@ -65,7 +78,7 @@ pub(super) async fn record_action(State(state): State<AppState>, mut req: Reques
     let command = format!("{} {template}", req.method());
     let policy = policy(&command);
     let caller = req.extensions().get::<Caller>().cloned();
-    if policy == Some(Policy::Never) || policy == Some(Policy::Handler) {
+    if policy == Some(Policy::Never) {
         return next.run(req).await;
     }
     // The window's own calls and the host's cannot be told from a process that merely holds the
@@ -94,7 +107,27 @@ pub(super) async fn record_action(State(state): State<AppState>, mut req: Reques
         None => next.run(req).await,
     };
     let status = response.status();
-    let error = (status.as_u16() >= 400).then(|| format!("HTTP {}", status.as_u16()));
+    let mut error = (status.as_u16() >= 400).then(|| format!("HTTP {}", status.as_u16()));
+    // A route that records its own successes still has its refusals recorded here, since it may
+    // refuse before it gets to its own record.
+    if policy == Some(Policy::Handler) && error.is_none() {
+        return response;
+    }
+    // A service call answers 200 with its own verdict in the body.
+    let mut response = response;
+    if template == SERVICE_ROUTE && error.is_none() {
+        let (parts, body) = response.into_parts();
+        match axum::body::to_bytes(body, SERVICE_REPLY_MAX).await {
+            Ok(bytes) => {
+                error = service_failure(&bytes);
+                response = Response::from_parts(parts, Body::from(bytes));
+            }
+            Err(_) => {
+                error = Some("unreadable reply".to_string());
+                response = (StatusCode::INTERNAL_SERVER_ERROR, "reply too large").into_response();
+            }
+        }
+    }
     let store = state.mstore.clone();
     // Off the reply path: naming the agent reads the store.
     tokio::task::spawn_blocking(move || {
@@ -126,6 +159,14 @@ mod tests {
         assert_eq!(service_names(br#"{"service":"window","method":"CloseWindow","args":["secret"]}"#).as_deref(), Some("window.CloseWindow"));
         assert_eq!(service_names(br#"{"service":"window"}"#), None);
         assert_eq!(service_names(b"not json"), None);
+    }
+
+    #[test]
+    fn a_service_reply_without_success_is_a_failure_with_its_reason() {
+        assert_eq!(service_failure(br#"{"error":"no such window"}"#).as_deref(), Some("no such window"));
+        assert_eq!(service_failure(br#"{"success":false}"#).as_deref(), Some("failed"));
+        assert_eq!(service_failure(br#"{"success":true,"data":1}"#), None);
+        assert_eq!(service_failure(b"not json"), None);
     }
 
     #[test]

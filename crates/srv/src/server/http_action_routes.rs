@@ -13,7 +13,8 @@ pub(super) enum Policy {
     /// The window's and the host's own calls, which cannot be told from a process that holds the
     /// key: recorded when an agent's token is on the request.
     Plumbing,
-    /// The route records the call itself, with more than the layer knows.
+    /// The route records its successes itself, with more than the layer knows; the layer records
+    /// its refusals.
     Handler,
     /// Reads data or carries a stream, and changes nothing that is kept.
     Never,
@@ -71,7 +72,7 @@ pub(super) const PLUMBING: &[&str] = &[
     "POST /api/v1/voice/transcribe",
 ];
 
-/// Recorded by the route's own handler.
+/// Recorded by the route's own handler when it goes through; a refusal is recorded by the layer.
 pub(super) const HANDLER: &[&str] = &[
     "POST /agentmux/reactive/inject", "POST /agentmux/reactive/inject-files", "POST /api/v1/agent/env",
     "POST /api/v1/agent/seats",

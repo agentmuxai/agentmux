@@ -159,13 +159,12 @@ async fn plumbing_is_recorded_only_with_an_agents_token_and_a_service_call_names
 }
 
 #[tokio::test]
-async fn reads_streams_and_handler_recorded_routes_are_not_recorded_again() {
+async fn reads_and_streams_are_not_recorded() {
     let state = test_state();
     let token = token_for(&state, "uid-http-act-c");
     for (method, uri) in [
         (Method::GET, "/api/v1/layout"),
         (Method::POST, "/api/v1/shell/status"),
-        (Method::POST, "/api/v1/agent/seats"),
     ] {
         let (_, id) = send(&state, method, uri, Some(&token), "{}").await;
         not_recorded(&id).await;
@@ -181,4 +180,24 @@ async fn an_oversized_service_call_is_refused_and_the_refusal_is_recorded() {
     assert_eq!(status, 413);
     let line = recorded(&id).await;
     assert_eq!((line.source_agent.as_deref(), line.success, line.error_message.as_deref()), (Some("agent:uid-http-act-d"), false, Some("HTTP 413")));
+}
+
+#[tokio::test]
+async fn a_service_call_that_fails_is_recorded_as_failed_though_the_reply_is_200() {
+    let state = test_state();
+    let token = token_for(&state, "uid-http-act-e");
+    let (status, id) = send(&state, Method::POST, "/agentmux/service", Some(&token), "not a service call").await;
+    assert_eq!(status, 200);
+    let line = recorded(&id).await;
+    assert!(!line.success, "{line:?}");
+    assert!(line.error_message.as_deref().unwrap_or_default().contains("invalid request body"), "{line:?}");
+}
+
+#[tokio::test]
+async fn a_refusal_from_a_route_that_records_its_own_successes_is_recorded_here() {
+    let state = test_state();
+    let (status, id) = send(&state, Method::POST, "/api/v1/agent/seats", None, "{}").await;
+    assert!(status >= 400, "{status}");
+    let line = recorded(&id).await;
+    assert_eq!((line.source_agent.as_deref(), line.success), (Some("unproven"), false));
 }
