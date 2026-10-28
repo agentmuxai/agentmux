@@ -6,7 +6,7 @@
 //! Split out of the single ~2193-line `resolver.rs` (pure relocation, no
 //! behavior change).
 
-use crate::backend::storage::store::SecretRef;
+use crate::backend::storage::store::{SecretRef, Store};
 
 use super::errors::ResolverError;
 
@@ -31,6 +31,40 @@ use super::errors::ResolverError;
 /// credential (`oauth_tokens::bearer_value`). A plain key is unchanged.
 pub fn resolve_secret(secret_ref: &SecretRef) -> Result<String, ResolverError> {
     resolve_stored(secret_ref).map(crate::identity::oauth_tokens::bearer_value)
+}
+
+/// An account connected with OAuth (GitHub's tokens last hours) is refreshed before its token goes
+/// into an agent's environment, so a launch after the expiry doesn't hand out a dead token. Best
+/// effort: if it can't be refreshed, the stored token is used as it was, and a grant the provider
+/// no longer accepts marks the account as needing to be connected again (`oauth_tokens`). Runs on
+/// the blocking thread the injection already uses; with no runtime (a test), nothing happens.
+fn refresh_oauth_token_if_due(account: &crate::backend::storage::store::IdentityAccount, id_store: &std::sync::Arc<Store>, identity_store: &std::sync::Arc<Store>) {
+    if account.kind != "oauth" || !matches!(account.secret_ref, SecretRef::Keychain { .. }) {
+        return;
+    }
+    let Ok(runtime) = tokio::runtime::Handle::try_current() else { return };
+    let result = runtime.block_on(crate::identity::oauth_tokens::access_token_for(
+        &crate::identity::oauth_tokens::LiveHttp,
+        &crate::identity::oauth_tokens::KeychainSecrets,
+        id_store,
+        identity_store,
+        account,
+        Some(id_store),
+    ));
+    if let Err(e) = result {
+        tracing::info!(target: "identity", account_id = %account.id, error = %e, "identity.oauth: the token couldn't be refreshed before launch; using the stored one");
+    }
+}
+
+/// [`resolve_secret`] for an account about to go into an agent's environment: an OAuth token that is
+/// due is refreshed first.
+pub fn resolve_account_secret(
+    account: &crate::backend::storage::store::IdentityAccount,
+    id_store: &std::sync::Arc<Store>,
+    identity_store: &std::sync::Arc<Store>,
+) -> Result<String, ResolverError> {
+    refresh_oauth_token_if_due(account, id_store, identity_store);
+    resolve_secret(&account.secret_ref)
 }
 
 fn resolve_stored(secret_ref: &SecretRef) -> Result<String, ResolverError> {

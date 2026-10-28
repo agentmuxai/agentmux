@@ -28,7 +28,7 @@ use crate::backend::mps::Broker;
 use super::errors::{refusal_linked, SpawnGateError};
 use super::oauth_probe::{oauth_status, probe_oauth_status};
 use super::provider::{provider_class, ProviderClass};
-use super::secret::resolve_secret;
+use super::secret::{resolve_account_secret, resolve_secret};
 
 /// Inject identity-derived env vars into the spawn map for a block.
 ///
@@ -71,29 +71,6 @@ use super::secret::resolve_secret;
 /// because a secret didn't resolve") — that is still true for api-key-class
 /// bindings, but oauth-class resolution failures now fail the spawn by
 /// default so account deletion is honest at the next spawn.
-/// An account connected with OAuth (GitHub's tokens last hours) is refreshed before its token goes
-/// into an agent's environment, so a launch after the expiry doesn't hand out a dead token. Best
-/// effort: if it can't be refreshed, the stored token is used as it was, and a grant the provider
-/// no longer accepts marks the account as needing to be connected again (`oauth_tokens`). Runs on
-/// the blocking thread the injection already uses; with no runtime (a test), nothing happens.
-fn refresh_oauth_token_if_due(account: &crate::backend::storage::store::IdentityAccount, id_store: &Arc<Store>, identity_store: &Arc<Store>) {
-    if account.kind != "oauth" || !matches!(account.secret_ref, SecretRef::Keychain { .. }) {
-        return;
-    }
-    let Ok(runtime) = tokio::runtime::Handle::try_current() else { return };
-    let result = runtime.block_on(crate::identity::oauth_tokens::access_token_for(
-        &crate::identity::oauth_tokens::LiveHttp,
-        &crate::identity::oauth_tokens::KeychainSecrets,
-        id_store,
-        identity_store,
-        account,
-        Some(id_store),
-    ));
-    if let Err(e) = result {
-        tracing::info!(target: "identity", account_id = %account.id, error = %e, "identity.oauth: the token couldn't be refreshed before launch; using the stored one");
-    }
-}
-
 pub fn inject_identity_env(
     mstore: Arc<Store>,
     id_store: Arc<Store>,
@@ -731,8 +708,7 @@ pub fn inject_identity_env_with_broker(
 
         match class {
             ProviderClass::ApiKey { env_vars: env_keys } => {
-                refresh_oauth_token_if_due(&account, &id_store, &identity_store);
-                let secret = match resolve_secret(&account.secret_ref) {
+                let secret = match resolve_account_secret(&account, &id_store, &identity_store) {
                     Ok(s) => s,
                     Err(e) => {
                         tracing::warn!(
