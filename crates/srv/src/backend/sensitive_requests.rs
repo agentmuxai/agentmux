@@ -7,9 +7,11 @@
 //! are the ways it ends. Kept in memory: a request is a minutes-long exchange,
 //! and an AgentMux that restarts mid-way has the requester ask again.
 //!
-//! This holds the state and its rules only. Who may approve, the countdown and
-//! the messages arrive with the later steps of that spec's §9, so nothing
-//! outside the tests calls this yet.
+//! This holds the state and its rules only. The `Sensitive` routes
+//! (`server/sensitive_handlers.rs`) decide who may file, approve or deny, and the
+//! countdown is `sagas/sensitive_window.rs`. Not every way a request ends has a
+//! caller yet (a request nobody reviewed arrives with a later step of that
+//! spec's §9).
 #![allow(dead_code)]
 
 use std::collections::BTreeMap;

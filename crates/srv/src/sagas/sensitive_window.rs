@@ -15,8 +15,9 @@
 //! never from an agent. The banner, toast and chime that tell the person arrive
 //! with the next steps of the spec's §9; the events here carry what they show.
 //!
-//! Nothing starts a countdown yet: the routes that file and approve requests,
-//! and the runners, arrive with the later steps of that spec's §9.
+//! The `Sensitive` routes start a countdown when the super agent approves. The
+//! runners, the code that does each operation, arrive with the later steps of
+//! that spec's §9; an operation with none is not approved.
 #![allow(dead_code)]
 
 use std::collections::HashMap;

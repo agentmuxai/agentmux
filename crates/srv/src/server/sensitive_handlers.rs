@@ -98,14 +98,14 @@ async fn act(state: &AppState, uid: &str, slug: &str, action: &str, body: &Value
             }
             requests::registry().approve(&id, slug, now_ms())?;
             let view = window::open(state, &id, Duration::from_secs(spec.window_secs))?;
-            tell(&request.requester_uid, &approved_note(&request, slug, spec.window_secs));
+            tell_askers(&request, &approved_note(&request, slug, spec.window_secs));
             Ok(json!({ "id": id, "status": "pending", "deadline_ms": view.deadline_ms, "window_secs": spec.window_secs }))
         }
         "deny" => {
             require_super(state, uid)?;
             let request = must_get(&id)?;
             let denied = requests::registry().deny(&id, slug, &text(body, "reason"), now_ms())?;
-            tell(&denied.requester_uid, &denied_note(&denied, slug));
+            tell_askers(&denied, &denied_note(&denied, slug));
             Ok(json!({ "id": id, "status": "denied", "requester": request.requester_slug }))
         }
         "cancel" => {
@@ -164,6 +164,18 @@ fn tell(uid: &str, note: &str) -> bool {
             tracing::info!(error = %e, "sensitive request: note not delivered");
             false
         }
+    }
+}
+
+/// The agents that asked for it: the first, then those that joined.
+fn askers(request: &Request) -> Vec<&str> {
+    std::iter::once(request.requester_uid.as_str()).chain(request.also_asked_by.iter().map(|a| a.uid.as_str())).collect()
+}
+
+/// Tell every agent that asked for it, those that joined included.
+fn tell_askers(request: &Request, note: &str) {
+    for uid in askers(request) {
+        tell(uid, note);
     }
 }
 
