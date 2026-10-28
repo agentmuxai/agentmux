@@ -270,3 +270,19 @@ fn the_idle_window_starts_when_the_view_is_lost() {
     idle_from_view_lost(&mut lost, &mut lives, 9_000_000);
     assert_eq!(lives[0].since_ms, 5_000_000, "first seen parked stays the start of the window");
 }
+
+/// A start that must not cost another agent its process is refused at the cap, where the ordinary start
+/// stops an idle agent with no view to make room.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_start_without_eviction_is_refused_at_the_cap_and_stops_nobody() {
+    let state = test_state();
+    let (_ws, tabs) = seed_workspace(&state, 1).await;
+    let idle = parked_running(&state, &tabs[0], "ag-keep").await;
+    set_limits(&state, 1);
+
+    let err = admit_start_without_eviction(&state, "ag-more").await.unwrap_err();
+
+    assert!(err.starts_with("capacity:") && err.contains("does not stop other agents"), "{err}");
+    assert!(!was_stopped(&state, &idle), "the idle agent was left running");
+    blockcontroller::delete_controller(&idle);
+}

@@ -118,12 +118,6 @@ pub(crate) fn idle_window_of(state: &AppState, block: &obj::Block) -> Option<u64
     idle_override_of(block).unwrap_or(policy(state).idle_stop_ms)
 }
 
-/// Whether one more agent fits under the cap and the commit limit as things are, without stopping any.
-pub(crate) fn has_room(state: &AppState) -> bool {
-    let live = live_agents(state);
-    over_limit(&policy(state), live.len() + pending_not_running(state, &live), commit_used_pct()).is_none()
-}
-
 /// The agent processes running now, one per agent block that has a live controller.
 pub(crate) fn live_agents(state: &AppState) -> Vec<Live> {
     let mstore = &state.mstore;
@@ -327,6 +321,17 @@ pub(crate) async fn admit_start(state: &AppState, agent_id: &str) -> Result<(), 
 }
 
 pub(crate) async fn admit_start_with(state: &AppState, agent_id: &str, commit_pct: impl Fn() -> Option<f64>) -> Result<(), String> {
+    admit(state, agent_id, commit_pct, true).await
+}
+
+/// [`admit_start`] for a start that must not cost another agent its process (restart resume): over a limit
+/// it is refused with `Err("capacity: ...")` where `admit_start` would stop an idle agent to make room.
+/// The check and the claim of the room are one step under the admission lock.
+pub(crate) async fn admit_start_without_eviction(state: &AppState, agent_id: &str) -> Result<(), String> {
+    admit(state, agent_id, commit_used_pct, false).await
+}
+
+async fn admit(state: &AppState, agent_id: &str, commit_pct: impl Fn() -> Option<f64>, evict: bool) -> Result<(), String> {
     if !crate::sagas::park_agents::enabled(state) {
         return Ok(());
     }
@@ -347,6 +352,9 @@ pub(crate) async fn admit_start_with(state: &AppState, agent_id: &str, commit_pc
             pending().lock().unwrap_or_else(|e| e.into_inner()).insert(pending_key(state, agent_id), reservation);
             return Ok(());
         };
+        if !evict {
+            return Err(format!("capacity: {}, and this start does not stop other agents", over.why()));
+        }
         // The commit figure may not fall until a stopped process has fully exited: one stop per start,
         // not every idle agent for a figure that is slow to move (or held up by something else).
         if let (Over::Commit(_), Some(stopped)) = (&over, &stopped_for_commit) {

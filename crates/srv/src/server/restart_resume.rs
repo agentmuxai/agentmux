@@ -8,7 +8,7 @@
 //!
 //! It resumes the most recently active first, one start at a time with a pause between, through
 //! `start_agent`: the same spawn gate, per-account warm-up slot and start limit as any other start. It
-//! stops at the cap instead of making room (`agent_lifecycle::has_room`), so a long list does not stop the
+//! stops at the cap instead of making room (`start_agent_without_eviction`), so a long list does not stop the
 //! agents it just resumed. Left stopped, and started by their first message or by being opened: an agent
 //! with no session to resume (it starts lazily anyway), one the user stopped, one that was idle past its
 //! window, one signed out or out of quota, and one a terminal view starts.
@@ -148,16 +148,16 @@ pub(crate) async fn run_once(state: &AppState) -> usize {
     let all = candidates(state);
     let last = all.len().saturating_sub(1);
     for (i, c) in all.into_iter().enumerate() {
-        if !super::agent_lifecycle::has_room(state) {
-            tracing::info!("restart resume: at the cap or the commit limit; the rest stay stopped and start on their first message");
-            break;
-        }
         // It may have been stopped, or started by a message or a window, while this ran.
         if !still_wanted(state, &c) {
             continue;
         }
-        match super::app_api::agent_attach::start_agent(state, &c.uid).await {
+        match super::app_api::agent_attach::start_agent_without_eviction(state, &c.uid).await {
             Ok(_) => started += 1,
+            Err(e) if e.starts_with("capacity:") => {
+                tracing::info!("restart resume: {e}; the rest stay stopped and start on their first message");
+                break;
+            }
             Err(e) => tracing::warn!(agent = %c.uid, "restart resume: could not start it: {e}"),
         }
         if i < last {
