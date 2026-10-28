@@ -39,12 +39,13 @@ pub fn is_brokered(account: &IdentityAccount) -> bool {
 
 /// A grant as a GitHub-shaped token response, so the flow's last step stores it
 /// like any other: the expiry in seconds from now, the numeric id and login, and the
-/// marker that the account is brokered.
+/// marker that the account is brokered. A grant already expired (or about to) is one second
+/// from now, never 0: the blob reads 0 as "doesn't expire", so it would never be refreshed.
 pub fn grant_json(grant: &TokenGrant, now_ms: i64) -> Value {
     json!({
         "access_token": grant.access_token,
         "refresh_token": grant.refresh_token,
-        "expires_in": ((grant.expires_at_ms - now_ms) / 1000).max(0),
+        "expires_in": ((grant.expires_at_ms - now_ms) / 1000).max(1),
         "github_user_id": grant.github_user_id,
         "login": grant.login,
         "broker": true,
@@ -63,6 +64,11 @@ pub fn stamp_context(context: &mut Value, json: &Value) {
     if let Some((id, login)) = identity_in(json) {
         context["github_user_id"] = json!(id);
         context["github_login"] = json!(login);
+    } else if let Some(c) = context.as_object_mut() {
+        // A grant that couldn't say who it is: the previous user's id and login would be wrong
+        // for it, so the account shows nobody rather than someone it isn't.
+        c.remove("github_user_id");
+        c.remove("github_login");
     }
     if json.get("broker").and_then(Value::as_bool) == Some(true) {
         context["broker"] = json!(true);
@@ -243,7 +249,17 @@ mod tests {
     #[test]
     fn a_grant_already_expired_asks_for_a_refresh_at_once() {
         let j = grant_json(&grant(), 1_000_000 + 9 * 3600 * 1000);
-        assert_eq!(j["expires_in"], 0);
+        // Not 0: the blob reads that as "never expires" and would never refresh it.
+        let blob = TokenBlob::from_token_response(&j, 5_000, None, None).unwrap();
+        assert!(blob.expires_at > 0 && blob.needs_refresh(5_000), "{blob:?}");
+    }
+
+    #[test]
+    fn a_grant_that_cannot_say_who_it_is_does_not_keep_the_previous_user() {
+        let mut c = json!({ "oauth": true, "github_user_id": 7, "github_login": "old" });
+        stamp_context(&mut c, &json!({ "access_token": "x" }));
+        assert!(c.get("github_user_id").is_none() && c.get("github_login").is_none(), "{c}");
+        assert_eq!(c["oauth"], true);
     }
 
     #[test]

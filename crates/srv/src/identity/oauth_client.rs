@@ -582,7 +582,8 @@ async fn finish<S: TokenSecrets>(ctx: &FlowCtx, secrets: &S, json: &serde_json::
             updated_at: now_ms,
         },
         FlowTarget::Existing(acct) => IdentityAccount {
-            display_name: label.clone().or_else(|| email.clone()).unwrap_or_else(|| acct.display_name.clone()),
+            // A GitHub grant that couldn't say who it is doesn't keep the previous user's name.
+            display_name: label.clone().or_else(|| email.clone()).unwrap_or_else(|| if github { String::new() } else { acct.display_name.clone() }),
             context,
             status: "valid".to_string(),
             updated_at: now_ms,
