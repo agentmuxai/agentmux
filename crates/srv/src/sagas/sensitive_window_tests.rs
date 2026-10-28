@@ -130,6 +130,8 @@ async fn a_failed_run_is_recorded_as_failed() {
 
 #[tokio::test]
 async fn an_operation_nothing_runs_yet_fails_instead_of_passing() {
+    let _turn = TEST_RUNNER_TURN.lock().unwrap_or_else(|e| e.into_inner());
+    unregister_runner("sender_key_repin");
     let state = test_state();
     let reg = requests::registry();
     let id = reg.request("u-asker", "asker", "sender_key_repin", &facts(&[("agent", &format!("a-{}", uuid::Uuid::new_v4().simple())), ("old_fingerprint", "aa"), ("new_fingerprint", "bb")]), "", now_ms()).unwrap().id;
@@ -190,6 +192,7 @@ async fn a_withdrawal_in_the_last_moment_is_still_caught_before_the_run() {
 
 #[tokio::test]
 async fn a_runner_that_panics_before_returning_its_future_is_settled_as_failed() {
+    let _turn = TEST_RUNNER_TURN.lock().unwrap_or_else(|e| e.into_inner());
     let state = test_state();
     register_runner("quit_agentmux", Arc::new(|_, _| panic!("boom while building")));
     let reg = requests::registry();
