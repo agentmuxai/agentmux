@@ -199,17 +199,13 @@ pub(super) fn purge_name_keyed_keys(
     if let Some(wan) = wan {
         removed += wan.agent_keys_delete(&purged_names)?;
     }
-    // The host's LAN keys for the dead agent go too. A channel that still has the agent publishes its
-    // own key again when it next asks, so this is not a key change for it.
+    // The host's LAN keys for the dead agent go too, and a failure fails the delete like the WAN purge
+    // above: a key left there would be adopted by the next agent of the name. A channel that still has
+    // the agent publishes its own key again when it next asks, so this is not a key change for it.
     if let Some(host) = host {
         use super::super::host_lan_keys::HostKeyKind;
-        let dropped = host
-            .forget(HostKeyKind::Name, &purged_names)
-            .and_then(|n| host.forget(HostKeyKind::Uid, &[id.to_string()]).map(|m| n + m));
-        match dropped {
-            Ok(n) => removed += n,
-            Err(e) => tracing::warn!(agent = id, error = %e, "identity: the host's LAN keys of the dead agent could not be dropped"),
-        }
+        removed += host.forget(HostKeyKind::Name, &purged_names)?;
+        removed += host.forget(HostKeyKind::Uid, &[id.to_string()])?;
     }
     if removed > 0 {
         tracing::info!(

@@ -182,3 +182,30 @@ fn deleting_an_agent_drops_the_hosts_keys_and_a_channel_that_still_has_it_republ
     assert_eq!(b.agent_lan_key_ensure("zed").unwrap(), key);
     assert_eq!(host.claim(HostKeyKind::Name, "zed", None).unwrap().map(|k| k.pair), Some(key));
 }
+
+/// The host table is gone: its connection is dropped and its folder removed.
+fn break_host(dir: tempfile::TempDir, host: &HostLanKeys) {
+    *host.conn.lock().unwrap() = None;
+    drop(dir);
+}
+
+#[test]
+fn a_rotation_the_host_cannot_take_fails_and_changes_nothing() {
+    let (dir, host) = host_table();
+    let store = channel(Some(&host));
+    let old = store.agent_lan_key_ensure("opaz").unwrap();
+    break_host(dir, &host);
+    assert!(store.agent_lan_key_rotate("opaz").is_err());
+    assert_eq!(own_row(&store, "opaz"), Some(old), "the old key is not half-rotated away");
+}
+
+#[test]
+fn a_delete_the_host_cannot_take_fails() {
+    let (dir, host) = host_table();
+    let store = channel(Some(&host));
+    row(&store, "uid-zed", "zed");
+    store.agent_lan_key_ensure("zed").unwrap();
+    break_host(dir, &host);
+    assert!(store.agent_def_delete("uid-zed").is_err(), "a key left on the host would go to the next agent of the name");
+    assert!(store.agent_uid_keys_delete("uid-zed").is_err());
+}

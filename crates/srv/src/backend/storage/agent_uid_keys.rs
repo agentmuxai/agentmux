@@ -162,13 +162,12 @@ impl Store {
     pub fn agent_uid_keys_delete(&self, uid: &str) -> Result<bool, StoreError> {
         let conn = self.conn.lock().unwrap();
         let mut removed = 0;
+        // The host's key first: one left there would be adopted again by the next `agent_uid_keys_ensure`.
+        if let Some(host) = self.host_lan_keys() {
+            removed += host.forget(HostKeyKind::Uid, &[uid.trim().to_string()])?;
+        }
         for tier in [Tier::Lan, Tier::Wan] {
             removed += conn.execute(&format!("DELETE FROM {} WHERE uid = ?1", tier.uid_table()), params![uid.trim()])?;
-        }
-        if let Some(host) = self.host_lan_keys() {
-            if let Err(e) = host.forget(HostKeyKind::Uid, &[uid.trim().to_string()]) {
-                tracing::warn!(uid = uid.trim(), error = %e, "LAN key: the host table could not drop the UID's key");
-            }
         }
         Ok(removed > 0)
     }

@@ -121,17 +121,18 @@ impl Store {
         let fresh = AgentLanKeypair { public_key: BASE64.encode(public_bytes), private_key: BASE64.encode(private_bytes) };
         let now = now_secs();
         let conn = self.conn.lock().unwrap();
+        if read_local(&conn, &key)?.is_none() {
+            return Ok(false);
+        }
+        // The host's key first, and a failure fails the rotation: with the old key left there, the next
+        // load on any channel would adopt it over the new one and undo the rotation.
+        if let Some(host) = self.host_lan_keys() {
+            host.replace(HostKeyKind::Name, &key, &HostKey { pair: fresh.clone(), created_at: now })?;
+        }
         let changed = conn.execute(
             "UPDATE db_agent_lan_keys SET public_key = ?1, private_key = ?2, created_at = ?3 WHERE agent_id = ?4",
             params![fresh.public_key, fresh.private_key, now, key],
         )?;
-        if changed > 0 {
-            if let Some(host) = self.host_lan_keys() {
-                if let Err(e) = host.replace(HostKeyKind::Name, &key, &HostKey { pair: fresh, created_at: now }) {
-                    tracing::warn!(agent = key, error = %e, "LAN key: the host's key could not be replaced with the rotated one");
-                }
-            }
-        }
         Ok(changed > 0)
     }
 
