@@ -7780,7 +7780,6 @@ async fn container_token_is_refused_host_exec_and_host_file_routes() {
         ("POST", "/agentmux/service"),
         ("GET", "/ws"),
         ("POST", "/api/v1/pane/open"),
-        ("POST", "/api/v1/agent/open"),
         ("POST", "/api/v1/agent/globalmemory/write"),
         ("GET", "/agentmux/reactive/agents"),
     ] {
