@@ -140,6 +140,14 @@
 
     // Edge fades while the tabs overflow (createScrollEdges, PaneTabStrip.tsx).
     @include mixins.scroll-edge-fade(28px);
+    // The selected tab sits flush at the left edge (strip-reveal.ts `alignStart`), or inside the fade where
+    // the end of the strip stops it short of flush: no left fade over it.
+    &.has-more-left.pane-tab-strip--flush-left {
+        mask-image: none;
+    }
+    &.has-more-left.has-more-right.pane-tab-strip--flush-left {
+        mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+    }
 
     // Cross-pane drop-to-append hover (SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md
     // §3.4) — a pill dragged from a DIFFERENT pane is hovering this strip,

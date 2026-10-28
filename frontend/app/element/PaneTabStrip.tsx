@@ -384,7 +384,16 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
     onCleanup(() => clearTimeout(widthResetTimeout));
 
     // Edge fades while the tabs overflow (scroll-edge-fade, PaneTabStrip.scss).
-    const edges = createScrollEdges(() => stripRef);
+    // The selected tab sitting flush at the left edge drops the left fade, so it is not dimmed.
+    const edges = createScrollEdges(
+        () => stripRef,
+        () => {
+            const id = props.activeId;
+            if (id == null || !stripRef) return undefined;
+            for (const el of stripRef.querySelectorAll<HTMLElement>("[data-tab-id]")) if (el.dataset.tabId === id) return el;
+            return undefined;
+        }
+    );
 
     // Keeps the selected tab in view (strip-reveal-controller.ts). A strip in a
     // hidden window tab, or in a kept-alive document block that isn't showing,
@@ -399,6 +408,13 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
         overflows: () => edges.moreLeft() || edges.moreRight(),
     });
     registerStripWithPane(() => stripRef, reveal);
+    // A new selection may leave the strip where it was (already flush, or hidden until shown): measure the fade again.
+    const shown = () => windowDisplayed() && (blockVisibility?.() ?? "active") === "active";
+    createEffect(
+        on([() => props.activeId, shown], () => {
+            if (shown()) edges.remeasure();
+        }, { defer: true })
+    );
 
     // Cross-pane drop-to-append (Phase 4, §3.4). A dwell-free hover flash —
     // unlike the outer Window Tab bar's spring-loaded switch (which needs a
@@ -651,6 +667,7 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
                 "pane-tab-strip--no-invert": foreignHover() && highlightStrip() && flash() === "plain",
                 "has-more-left": edges.moreLeft(),
                 "has-more-right": edges.moreRight(),
+                "pane-tab-strip--flush-left": edges.flushLeft(),
             }}
             ref={(el) => { stripRef = el; }}
             // Double-click inside the strip should never bubble up and

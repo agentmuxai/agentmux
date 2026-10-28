@@ -126,11 +126,14 @@ export async function invokeCommand<T = any>(cmd: string, args?: Record<string, 
  * respond `{ ok: true, data }` / `{ ok: false, error }` (SPEC_BROWSER_DOM_API
  * §5.1) rather than `/ipc`'s `{ success, data, error }`. No retry loop —
  * callers of these routes (e.g. the pane freeze-frame) are best-effort
- * and prefer failing fast over stalling.
+ * and prefer failing fast over stalling. A `signal` that aborts ends the
+ * request and frees its connection: the page holds at most six to this server,
+ * and every other host command waits behind a call that lingers.
  */
 export async function invokeBrowserApi<T = any>(
     path: string,
     body: Record<string, any>,
+    opts?: { signal?: AbortSignal },
 ): Promise<T> {
     const port = window.__AGENTMUX_IPC_PORT__;
     const token = window.__AGENTMUX_IPC_TOKEN__;
@@ -144,6 +147,7 @@ export async function invokeBrowserApi<T = any>(
             Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify(body),
+        signal: opts?.signal,
     });
     if (!resp.ok) {
         throw new Error(`browser API HTTP error: ${resp.status} ${resp.statusText}`);
