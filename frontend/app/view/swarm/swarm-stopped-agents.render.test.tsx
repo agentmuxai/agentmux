@@ -73,7 +73,7 @@ describe("StoppedAgents", () => {
 
     it("starts the agent whose Start was pressed, and holds both buttons until srv answers", async () => {
         let answer: (why: string | undefined) => void = () => {};
-        const onStart = vi.fn(() => new Promise<string | undefined>((resolve) => (answer = resolve)));
+        const onStart = vi.fn((_agent: AgentRuntime) => new Promise<string | undefined>((resolve) => (answer = resolve)));
         const onOpen = vi.fn();
         const { getByRole } = render(() => (
             <StoppedAgents agents={() => [agent("a"), agent("b")]} hasLive={() => false} onOpen={onOpen} onStart={onStart} />
