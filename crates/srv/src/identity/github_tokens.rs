@@ -134,24 +134,26 @@ pub trait Backend {
     fn revalidate(&self) -> impl Future<Output = Result<(), TokenError>> + Send;
 }
 
-struct Entry {
-    minted: Minted,
-}
-
 #[derive(Default)]
 struct State {
-    cache: HashMap<Want, Entry>,
+    cache: HashMap<Want, Minted>,
     installations: Option<(i64, Vec<LinkedInstallation>)>,
     refused: HashMap<Want, (i64, TokenError)>,
+    /// One lock per token wanted, so a slow broker call for one repository doesn't hold up another's.
+    locks: HashMap<Want, Arc<tokio::sync::Mutex<()>>>,
 }
 
 /// The tokens srv has minted for agents.
 #[derive(Default)]
 pub struct Tokens {
-    state: tokio::sync::Mutex<State>,
+    state: std::sync::Mutex<State>,
 }
 
 impl Tokens {
+    fn st(&self) -> std::sync::MutexGuard<'_, State> {
+        self.state.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     /// A token for `want`: the cached one while it has time left, else a new one.
     pub async fn token_for<B: Backend>(&self, backend: &B, want: &Want, now: i64) -> Result<Minted, TokenError> {
         for (what, name) in [("the owner", &want.owner), ("the repository", &want.repo)] {
@@ -160,34 +162,48 @@ impl Tokens {
             }
         }
         let want = want.normalized();
-        // One at a time: an agent's many commands at once must not each mint.
-        let mut st = self.state.lock().await;
-        if let Some(entry) = st.cache.get(&want) {
-            if entry.minted.expires_at - now > REFRESH_MARGIN_SECS {
-                return Ok(entry.minted.clone());
-            }
+        // One at a time for this token: an agent's many commands at once must not each mint.
+        let lock = self.st().locks.entry(want.clone()).or_default().clone();
+        let _one = lock.lock().await;
+        if let Some(found) = self.remembered(&want, now) {
+            return found;
         }
-        if let Some((until, error)) = st.refused.get(&want) {
-            if now < *until {
-                return Err(error.clone());
-            }
-        }
-        match Self::mint(backend, &mut st, &want, now).await {
+        let result = self.mint(backend, &want, now).await;
+        let mut st = self.st();
+        match &result {
             Ok(minted) => {
                 st.refused.remove(&want);
-                st.cache.insert(want, Entry { minted: minted.clone() });
-                Ok(minted)
+                st.cache.insert(want.clone(), minted.clone());
             }
             Err(error) => {
                 st.cache.remove(&want);
-                st.refused.insert(want, (now + REFUSAL_TTL_SECS, error.clone()));
-                Err(error)
+                st.refused.insert(want.clone(), (now + REFUSAL_TTL_SECS, error.clone()));
             }
+        }
+        // What has run out is dropped, so the maps hold only what is in use.
+        st.cache.retain(|_, m| m.expires_at > now);
+        st.refused.retain(|_, (until, _)| *until > now);
+        let keep: Vec<Want> = st.cache.keys().chain(st.refused.keys()).cloned().collect();
+        st.locks.retain(|k, l| Arc::strong_count(l) > 1 || keep.contains(k) || *k == want);
+        result
+    }
+
+    /// The answer already known for `want`: a token with time left, or a refusal not yet expired.
+    fn remembered(&self, want: &Want, now: i64) -> Option<Result<Minted, TokenError>> {
+        let st = self.st();
+        if let Some(minted) = st.cache.get(want) {
+            if minted.expires_at - now > REFRESH_MARGIN_SECS {
+                return Some(Ok(minted.clone()));
+            }
+        }
+        match st.refused.get(want) {
+            Some((until, error)) if now < *until => Some(Err(error.clone())),
+            _ => None,
         }
     }
 
-    async fn mint<B: Backend>(backend: &B, st: &mut State, want: &Want, now: i64) -> Result<Minted, TokenError> {
-        let installation = Self::installation_for(backend, st, &want.owner, now).await?;
+    async fn mint<B: Backend>(&self, backend: &B, want: &Want, now: i64) -> Result<Minted, TokenError> {
+        let installation = self.installation_for(backend, &want.owner, now).await?;
         let request = MintRequest {
             installation_id: installation.installation_id,
             repositories: vec![want.repo.clone()],
@@ -198,11 +214,11 @@ impl Tokens {
             // The link wasn't verified lately: the person's own token proves it again, once.
             Err(BrokerError::LinkStale) => {
                 backend.revalidate().await?;
-                st.installations = None;
+                self.st().installations = None;
                 backend.mint(request).await
             }
             Err(BrokerError::NotLinked) => {
-                st.installations = None;
+                self.st().installations = None;
                 Err(BrokerError::NotLinked)
             }
             other => other,
@@ -212,21 +228,25 @@ impl Tokens {
         Ok(Minted { token: Zeroizing::new(answer.token), expires_at, bot: answer.app })
     }
 
-    async fn installation_for<B: Backend>(backend: &B, st: &mut State, owner: &str, now: i64) -> Result<LinkedInstallation, TokenError> {
-        let fresh = matches!(&st.installations, Some((at, _)) if now - *at < INSTALLATIONS_TTL_SECS);
-        if !fresh {
-            let list = backend.installations().await?;
-            st.installations = Some((now, list));
-        }
-        let list = st.installations.as_ref().map(|(_, l)| l.as_slice()).unwrap_or(&[]);
+    async fn installation_for<B: Backend>(&self, backend: &B, owner: &str, now: i64) -> Result<LinkedInstallation, TokenError> {
+        let known = self.st().installations.clone();
+        let fresh = matches!(&known, Some((at, _)) if now - *at < INSTALLATIONS_TTL_SECS);
+        let list = match known {
+            Some((_, list)) if fresh => list,
+            _ => {
+                let list = backend.installations().await?;
+                self.st().installations = Some((now, list.clone()));
+                list
+            }
+        };
         let found = |list: &[LinkedInstallation]| list.iter().find(|i| i.is_usable() && i.github_account.login.eq_ignore_ascii_case(owner)).cloned();
-        if let Some(i) = found(list) {
+        if let Some(i) = found(&list) {
             return Ok(i);
         }
         // Not in a list this old: an install made in the last minute is worth one look.
         if fresh {
             let list = backend.installations().await?;
-            st.installations = Some((now, list.clone()));
+            self.st().installations = Some((now, list.clone()));
             if let Some(i) = found(&list) {
                 return Ok(i);
             }
@@ -236,8 +256,14 @@ impl Tokens {
 
     /// The tokens held, for tests.
     #[cfg(test)]
-    async fn cached(&self) -> usize {
-        self.state.lock().await.cache.len()
+    fn cached(&self) -> usize {
+        self.st().cache.len()
+    }
+
+    /// The per-token locks kept, for tests.
+    #[cfg(test)]
+    fn locks(&self) -> usize {
+        self.st().locks.len()
     }
 }
 
@@ -271,6 +297,19 @@ pub fn apply_agent_git_in(env: &mut HashMap<String, String>, process: impl Fn(&s
         }
         env.remove(BROKER_ENV);
     }
+}
+
+/// `env` without what [`apply_agent_git_in`] sets: for a container, whose image has its own git and
+/// `gh` setup, and which the host's tokens are never given to.
+pub fn without_agent_git(env: &HashMap<String, String>) -> HashMap<String, String> {
+    use crate::backend::publish_guard::without_git_config_key;
+    if !env.contains_key(BROKER_ENV) {
+        return env.clone();
+    }
+    let mut out = [HELPER_KEY, HTTP_PATH_KEY, REWRITE_KEY].iter().fold(env.clone(), |e, key| without_git_config_key(&e, key));
+    out.remove(BROKER_ENV);
+    out.remove("GIT_TERMINAL_PROMPT");
+    out
 }
 
 static STORE: OnceLock<Arc<Store>> = OnceLock::new();
@@ -522,7 +561,33 @@ mod tests {
         tokens.token_for(&fake, &Want { agent: "agenty".into(), ..w.clone() }, NOW).await.unwrap();
         tokens.token_for(&fake, &Want { workflows: true, ..w.clone() }, NOW).await.unwrap();
         assert_eq!(fake.asked.lock().unwrap().len(), 4);
-        assert_eq!(tokens.cached().await, 3);
+        assert_eq!(tokens.cached(), 3);
+    }
+
+    #[tokio::test]
+    async fn what_has_run_out_is_dropped_and_one_slow_token_does_not_hold_up_another() {
+        let fake = Fake::new(vec![vec![link(5, "o", "active", "active")]], vec![Ok(ok_for(3600)), Ok(ok_for(3600)), Ok(ok_for(3600)), Ok(ok_for(10_800))]);
+        let tokens = Tokens::default();
+        for repo in ["a", "b", "c"] {
+            tokens.token_for(&fake, &want("o", repo), NOW).await.unwrap();
+        }
+        assert_eq!((tokens.cached(), tokens.locks()), (3, 3));
+        // An hour later all three have run out: asking for a fourth drops them.
+        tokens.token_for(&fake, &want("o", "d"), NOW + 7200).await.unwrap();
+        assert_eq!((tokens.cached(), tokens.locks()), (1, 1));
+    }
+
+    #[tokio::test]
+    async fn a_container_gets_none_of_the_agent_git_setup() {
+        let mut e = env(&[("GIT_CONFIG_COUNT", "1"), ("GIT_CONFIG_KEY_0", "user.name"), ("GIT_CONFIG_VALUE_0", "x"), ("OTHER", "kept")]);
+        apply_agent_git_in(&mut e, |_| None, true);
+        let out = without_agent_git(&e);
+        assert_eq!(entries(&out), vec![("user.name".to_string(), "x".to_string())]);
+        assert!(!out.contains_key(BROKER_ENV) && !out.contains_key("GIT_TERMINAL_PROMPT"));
+        assert_eq!(out["OTHER"], "kept");
+        // An env that never had it is returned as it was.
+        let plain = env(&[("A", "b")]);
+        assert_eq!(without_agent_git(&plain), plain);
     }
 
     #[tokio::test]

@@ -29,8 +29,6 @@ const GH_FUNCTION_BODY: &str = "() {  if [ -n \"${AGENTMUX_GITHUB_BROKER:-}\" ];
 
 #[cfg(test)]
 mod tests {
-    /// A variable set with `std::env::set_var` under the name bash uses for exported functions
-    /// reaches a bash started afterwards as a function (the mechanism `export` relies on).
     /// The `gh` function runs plain `gh` without the switch, and with the broker's token (or none)
     /// with it. A fake `agentmux-bashwrap` and `gh` on PATH stand in for the real ones.
     #[test]
@@ -71,6 +69,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// A variable set with `std::env::set_var` under the name bash uses for exported functions
+    /// reaches a bash started afterwards as a function (the mechanism `export` relies on).
     #[test]
     fn an_exported_function_variable_reaches_a_child_bash() {
         let _guard = crate::test_env_lock::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());

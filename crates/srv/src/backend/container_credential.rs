@@ -148,6 +148,8 @@ pub fn container_exec_env(block_id: &str, env_vars: &HashMap<String, String>) ->
     // The publish guard's hooks directory is a host path; the agent's other
     // GIT_CONFIG_* settings still apply inside the container.
     let env_vars = crate::backend::publish_guard::without_hooks_path(env_vars);
+    // The host's GitHub tokens are for host agents: the image has its own git and gh setup.
+    let env_vars = crate::identity::github_tokens::without_agent_git(&env_vars);
     let build_info = crate::backend::pane_env::build_info();
     let is_build_info = |k: &str| build_info.iter().any(|(b, _)| *b == k);
     let mut out: Vec<(String, String)> = env_vars
