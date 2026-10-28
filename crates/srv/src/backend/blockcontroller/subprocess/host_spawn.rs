@@ -733,6 +733,7 @@ impl SubprocessController {
                 &mstore_wait,
                 &event_bus_wait,
             );
+            core::report_provider_turn(&block_id_wait, run_failure.as_ref(), &mstore_wait);
 
             // Surface the classified failure cause to the pane (Phase 2 of
             // SPEC_AGENT_FAILURE_DIAGNOSTICS). persist:1 so reconnecting

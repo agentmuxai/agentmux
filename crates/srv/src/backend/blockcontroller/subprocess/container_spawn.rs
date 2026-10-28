@@ -692,6 +692,7 @@ impl SubprocessController {
             // call handles both cases regardless of whether run_failure is
             // Some or None. Mirrors host_spawn.rs's process_waiter.
             core::persist_last_failure(&block_id, run_failure.as_ref(), &mstore, &event_bus);
+            core::report_provider_turn(&block_id, run_failure.as_ref(), &mstore);
 
             // Surface the classified failure cause to the pane. persist:1 so
             // reconnecting subscribers also receive the last failure without a
