@@ -257,6 +257,8 @@ pub(super) async fn tab_or_reuse(
 /// and its session resumed. Returns the block. Admission, the spawn gate and the lease apply as for
 /// `agent.open`. Needs an active tab to create a first block in.
 pub(crate) async fn start_agent(state: &AppState, agent_id: &str) -> Result<String, String> {
+    // A start over the cap (or the host's commit limit) stops an idle agent with no view, or is refused.
+    crate::server::agent_lifecycle::admit_start(state, agent_id).await?;
     let mut marker = obj::MetaMapType::new();
     marker.insert(START_PARKED.to_string(), json!(true));
     let opened = super::agent_open::open_agent_inner(

@@ -37,6 +37,7 @@ pub(crate) mod jekt_held;
 mod jekt_hold;
 pub(crate) mod jekt_start;
 pub(crate) mod controller_backstop;
+pub(crate) mod agent_lifecycle;
 mod availability_view;
 pub(crate) mod agent_runtime;
 mod jekt_cold;
