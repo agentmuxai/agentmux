@@ -132,6 +132,10 @@
             "method": "AgentShutdownKeepCommand"
         },
         {
+            "command": "agentshutdownnow",
+            "method": "AgentShutdownNowCommand"
+        },
+        {
             "command": "sensitive.decide",
             "method": "SensitiveDecideCommand"
         },

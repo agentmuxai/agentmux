@@ -21,10 +21,12 @@ vi.mock("@/app/store/mps", async () => {
 });
 let resolveHistory: Array<(events: MuxEvent[]) => void> = [];
 const keepCommand = vi.fn();
+const nowCommand = vi.fn();
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
         EventReadHistoryCommand: () => new Promise<MuxEvent[]>((r) => resolveHistory.push(r)),
         AgentShutdownKeepCommand: (...a: unknown[]) => keepCommand(...a),
+        AgentShutdownNowCommand: (...a: unknown[]) => nowCommand(...a),
     },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
@@ -116,5 +118,29 @@ describe("ShutdownPendingBanner (SPEC_AGENT_SELF_QUIT §6.5)", () => {
         expect(keepCommand.mock.calls[0][1]).toEqual({ blockid: "b1", request_id: "r1" });
         await flush();
         expect(screen.queryByText(/Korp asked/)).toBeNull();
+    });
+
+    it("Close now asks srv once, and neither button works while it is asked", async () => {
+        nowCommand.mockResolvedValue({ outcome: "closed_now" });
+        mount();
+        handlers.get("agent:shutdown-pending")!(pending("r1"));
+        const button = screen.getByText("Close now");
+        fireEvent.click(button);
+        fireEvent.click(screen.getByText("Keep running"));
+        expect(nowCommand).toHaveBeenCalledTimes(1);
+        expect(nowCommand.mock.calls[0][1]).toEqual({ blockid: "b1", request_id: "r1" });
+        expect(keepCommand).not.toHaveBeenCalled();
+        await flush();
+        // srv's cleared event settles the banner; until it comes, the button says so.
+        expect(screen.getByText("Closing…")).toBeTruthy();
+    });
+
+    it("a Close now that is too late lets the buttons work again", async () => {
+        nowCommand.mockResolvedValue({ outcome: "too_late" });
+        mount();
+        handlers.get("agent:shutdown-pending")!(pending("r1"));
+        fireEvent.click(screen.getByText("Close now"));
+        await flush();
+        expect(screen.getByText("Close now")).toBeTruthy();
     });
 });

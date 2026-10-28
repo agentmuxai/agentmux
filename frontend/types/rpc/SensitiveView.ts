@@ -9,6 +9,10 @@ export type SensitiveView = { request_id: string, op: string,
  */
 summary: string, 
 /**
+ * The words of its two buttons: the cancel and the do-it-now (`OpSpec`).
+ */
+cancel_label: string, now_label: string, 
+/**
  * The agent that asked.
  */
 requester: string, 

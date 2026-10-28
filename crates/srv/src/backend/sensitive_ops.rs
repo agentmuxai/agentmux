@@ -30,6 +30,9 @@ pub struct OpSpec {
     pub op: &'static str,
     /// What the banner says will happen.
     pub label: &'static str,
+    /// The two buttons of its countdown, worded for it: the cancel and the do-it-now.
+    pub cancel: &'static str,
+    pub now: &'static str,
     /// The countdown after approval, in seconds.
     pub window_secs: u64,
     /// Whether the super agent reviews it first. The stop and close windows
@@ -40,25 +43,32 @@ pub struct OpSpec {
     pub facts: &'static [&'static str],
 }
 
-const fn op(op: &'static str, label: &'static str, window_secs: u64, reviewed: bool, facts: &'static [&'static str]) -> OpSpec {
-    OpSpec { op, label, window_secs, reviewed, facts }
+const fn op(
+    op: &'static str,
+    label: &'static str,
+    (cancel, now): (&'static str, &'static str),
+    window_secs: u64,
+    reviewed: bool,
+    facts: &'static [&'static str],
+) -> OpSpec {
+    OpSpec { op, label, cancel, now, window_secs, reviewed, facts }
 }
 
 /// The operations. 30 s by default; a restart of AgentMux is critical and
 /// gets the longest window.
 pub const OPS: [OpSpec; 12] = [
-    op("stop_agents", "stop agents", 15, false, &["target"]),
-    op("close_pane", "close a pane", 15, false, &["target"]),
-    op("quit_agentmux", "close this AgentMux", MAX_WINDOW_SECS, true, &[]),
-    op("upgrade", "upgrade AgentMux", MAX_WINDOW_SECS, true, &["version"]),
-    op("widget_install", "install a widget", 30, true, &["widget", "publisher", "permissions"]),
-    op("desktop_control_grant", "let an agent control the desktop", 30, true, &["scope"]),
-    op("vault_use", "use a Vault entry", 30, true, &["entry", "kind"]),
-    op("vault_always_allow", "always allow a Vault entry", 30, true, &["entry", "kind"]),
-    op("sender_key_repin", "trust a new key for an agent", 30, true, &["agent", "old_fingerprint", "new_fingerprint"]),
-    op("job_template_install", "install a job template", 30, true, &["template", "publisher"]),
-    op("job_template_approve", "approve a job template", 30, true, &["template", "publisher"]),
-    op("tower_pair", "pair a device", 30, true, &["device"]),
+    op("stop_agents", "stop agents", ("Keep running", "Close now"), 15, false, &["target"]),
+    op("close_pane", "close a pane", ("Keep running", "Close now"), 15, false, &["target"]),
+    op("quit_agentmux", "close this AgentMux", ("Keep open", "Close now"), MAX_WINDOW_SECS, true, &[]),
+    op("upgrade", "upgrade AgentMux", ("Don't upgrade", "Upgrade now"), MAX_WINDOW_SECS, true, &["version"]),
+    op("widget_install", "install a widget", ("Don't install", "Install now"), 30, true, &["widget", "publisher", "permissions"]),
+    op("desktop_control_grant", "let an agent control the desktop", ("Don't allow", "Allow now"), 30, true, &["scope"]),
+    op("vault_use", "use a Vault entry", ("Don't allow", "Allow now"), 30, true, &["entry", "kind"]),
+    op("vault_always_allow", "always allow a Vault entry", ("Don't allow", "Allow now"), 30, true, &["entry", "kind"]),
+    op("sender_key_repin", "trust a new key for an agent", ("Don't trust", "Trust now"), 30, true, &["agent", "old_fingerprint", "new_fingerprint"]),
+    op("job_template_install", "install a job template", ("Don't install", "Install now"), 30, true, &["template", "publisher"]),
+    op("job_template_approve", "approve a job template", ("Don't approve", "Approve now"), 30, true, &["template", "publisher"]),
+    op("tower_pair", "pair a device", ("Don't pair", "Pair now"), 30, true, &["device"]),
 ];
 
 /// The operation named `name`.
@@ -130,6 +140,17 @@ fn clean_value(raw: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Each operation words both buttons of its countdown, and the two differ: the toast and the
+    /// banner show them as given.
+    #[test]
+    fn every_operation_words_both_its_buttons() {
+        for o in OPS {
+            assert!(!o.cancel.is_empty() && !o.now.is_empty() && o.cancel != o.now, "{}", o.op);
+            assert!(o.cancel.chars().count() <= 20 && o.now.chars().count() <= 20, "{}: a toast button is short", o.op);
+        }
+        assert_eq!((spec("upgrade").unwrap().cancel, spec("upgrade").unwrap().now), ("Don't upgrade", "Upgrade now"));
+    }
 
     fn facts(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
         pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()

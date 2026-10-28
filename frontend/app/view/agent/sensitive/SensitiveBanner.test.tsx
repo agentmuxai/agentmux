@@ -40,6 +40,8 @@ const pending = (id: string, over: Record<string, unknown> = {}) =>
             request_id: id,
             op: "upgrade",
             summary: "upgrade AgentMux (version 0.61.0)",
+            cancel_label: "Don't upgrade",
+            now_label: "Upgrade now",
             requester: "Parlo",
             approver: "Camper",
             deadline_ms: Date.now() + 30_000,
@@ -162,11 +164,11 @@ describe("SensitiveBanner (SPEC_SUPER_AGENT §5)", () => {
         expect(screen.queryByText(/second thing/), "cleared live, not brought back by the replay").toBeNull();
     });
 
-    it("Veto asks srv once and hides the banner", async () => {
+    it("Don't upgrade asks srv once and hides the banner", async () => {
         decide.mockResolvedValue({ outcome: "vetoed" });
         render(() => <SensitiveBanner />);
         handlers.get("sensitive:pending")!(pending("r1"));
-        const button = screen.getByText("Veto");
+        const button = screen.getByText("Don't upgrade");
         fireEvent.click(button);
         fireEvent.click(button);
         expect(decide).toHaveBeenCalledTimes(1);
@@ -175,11 +177,11 @@ describe("SensitiveBanner (SPEC_SUPER_AGENT §5)", () => {
         expect(screen.queryByText(/Parlo asked/)).toBeNull();
     });
 
-    it("Approve now asks srv to skip the wait and leaves the banner to the clear event", async () => {
+    it("Upgrade now asks srv to skip the wait and leaves the banner to the clear event", async () => {
         decide.mockResolvedValue({ outcome: "approved_now" });
         render(() => <SensitiveBanner />);
         handlers.get("sensitive:pending")!(pending("r1"));
-        fireEvent.click(screen.getByText("Approve now"));
+        fireEvent.click(screen.getByText("Upgrade now"));
         expect(decide.mock.calls[0][1]).toEqual({ request_id: "r1", decision: "approve_now" });
         await flush();
         expect(screen.queryByText(/Parlo asked/)).toBeTruthy();

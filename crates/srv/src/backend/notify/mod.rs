@@ -13,4 +13,5 @@
 pub mod pane_label;
 pub mod policy;
 pub mod router;
+mod shutdown_buttons;
 pub mod sources;

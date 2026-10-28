@@ -52,6 +52,9 @@ pub struct SensitiveView {
     pub op: String,
     /// What will happen, built by AgentMux from the request's facts.
     pub summary: String,
+    /// The words of its two buttons: the cancel and the do-it-now (`OpSpec`).
+    pub cancel_label: String,
+    pub now_label: String,
     /// The agent that asked.
     pub requester: String,
     /// The super agent that approved it; absent when none reviewed it.
@@ -188,6 +191,8 @@ pub fn open(state: &AppState, request_id: &str, window: Duration) -> Result<Sens
             request_id: request.id.clone(),
             op: request.op.clone(),
             summary: request.summary.clone(),
+            cancel_label: sensitive_ops::spec(&request.op).map_or("Veto", |o| o.cancel).to_string(),
+            now_label: sensitive_ops::spec(&request.op).map_or("Approve now", |o| o.now).to_string(),
             requester: request.requester_slug.clone(),
             approver: request.decided_by.clone(),
             deadline_ms: now + window.as_millis() as i64,
@@ -394,8 +399,8 @@ fn toast_text(requester: &str, approver: Option<&str>, op: &str) -> (String, Str
     (title, format!("{requester} asked. {reviewed} It happens when the countdown ends unless you veto it in AgentMux."))
 }
 
-/// The OS notification for a countdown: what will happen and the seconds left. It has no button:
-/// clicking it opens AgentMux, where the banner's Veto is the window's (proven) alone.
+/// The OS notification for a countdown: what will happen, the seconds left, and its two buttons
+/// (cancel and do it now), which `notify.ack` accepts only with the launcher's proof.
 fn raise_toast(state: &AppState, view: &SensitiveView) {
     let Some(router) = crate::backend::notify::router::get(&state.broker) else { return };
     let name = |slug: &str| crate::sagas::pending_shutdown::clean_by(&crate::sagas::pending_shutdown::asker_name(state, slug));
@@ -405,6 +410,7 @@ fn raise_toast(state: &AppState, view: &SensitiveView) {
         effect: crate::backend::notify::policy::SENSITIVE_EFFECT,
         running: true,
         request_id: view.request_id.clone(),
+        labels: Some((view.cancel_label.clone(), view.now_label.clone())),
     };
     router.emit_sensitive(&toast_group(&view.request_id), &title, Some(body), info);
     // A withdrawal or veto that settled the countdown while this was being raised asked the router
