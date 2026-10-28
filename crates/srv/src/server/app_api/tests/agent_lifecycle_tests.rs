@@ -188,6 +188,11 @@ fn a_process_runs_in_every_state_but_stopped_and_error() {
         (AgentRuntimeState::SignedOut, true),
     ] {
         row.state = state;
+        row.desired = agent_runtime::desired_of(state);
         assert_eq!(is_alive(&row), alive, "{state:?}");
     }
+    // Stopped by `Agents stop`: the block says so, whatever state the controller reads as.
+    row.state = AgentRuntimeState::Idle;
+    row.desired = agent_runtime::AgentDesiredState::Stopped;
+    assert!(!is_alive(&row), "an idle subprocess agent that was stopped is not running");
 }

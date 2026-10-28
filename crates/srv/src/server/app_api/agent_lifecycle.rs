@@ -76,9 +76,11 @@ pub(super) fn target_of(state: &AppState, named: &str) -> Result<AgentRuntime, R
         .ok_or_else(|| refuse(StatusCode::NOT_FOUND, format!("TEMPLATE_NOT_OPENABLE: '{named}' is not an agent created on this machine")))
 }
 
-/// Alive: a process runs in every state but these two.
+/// Running: the agent is in a state with a process and is not wanted stopped. The state alone does
+/// not say: a subprocess agent that was stopped reads `idle` (its process exits between turns), and a
+/// stored sign-in or limit failure shows over an ended process. An explicit stop is what settles it.
 fn is_alive(row: &AgentRuntime) -> bool {
-    !matches!(row.state, AgentRuntimeState::Stopped | AgentRuntimeState::Error)
+    !matches!(row.state, AgentRuntimeState::Stopped | AgentRuntimeState::Error) && row.desired == agent_runtime::AgentDesiredState::Running
 }
 
 fn audit(state: &AppState, actor: &Actor, action: &str, target: &str, block_id: &str, ok: bool, error: Option<&str>, note: &str) -> String {
