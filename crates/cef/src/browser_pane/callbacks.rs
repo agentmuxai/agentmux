@@ -359,6 +359,8 @@ pub fn on_after_created_browser_pane(state: &Arc<AppState>, browser: &Browser) {
 pub fn on_before_close_browser_pane(state: &Arc<AppState>, label: &str, browser_id: i32) {
     // Its hidden mark (hibernation closes hidden panes, so these would pile up).
     crate::browser_panes::bounds::forget_hidden(browser_id);
+    // The close it was marked for is done.
+    crate::browser_pane::leaving::forget(browser_id);
 
     // Step 1 (Linux/macOS): destroy the deferred OverlayController.
     // Safe now because the Browser is fully torn down and Chromium has

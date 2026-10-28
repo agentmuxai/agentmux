@@ -240,6 +240,8 @@ declare global {
         media?: boolean;
         edited?: boolean;
         beforeunload?: boolean;
+        /** Closing the pane would show the page's "Leave site?": a listener, on a page the person used. */
+        leave_prompt?: boolean;
         devtools?: boolean;
     };
 
