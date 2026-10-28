@@ -526,15 +526,15 @@ impl ContainerManager {
         };
 
         match existing {
-            Some(status) if status == "running" => {
+            Some(status) => {
+                if status != "running" {
+                    // Exists but stopped — start it.
+                    self.inner.docker
+                        .start_container(container_name, None::<StartContainerOptions<String>>)
+                        .await?;
+                    tracing::info!(container = container_name, "restarted stopped container");
+                }
                 self.secure_credentials_once(container_name).await;
-            }
-            Some(_) => {
-                // Exists but stopped — start it.
-                self.inner.docker
-                    .start_container(container_name, None::<StartContainerOptions<String>>)
-                    .await?;
-                tracing::info!(container = container_name, "restarted stopped container");
             }
             None => {
                 // Pull the image via Docker socket before create so the Engine API
