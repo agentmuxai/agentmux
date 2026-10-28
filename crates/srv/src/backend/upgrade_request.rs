@@ -10,9 +10,13 @@
 //!   `QuitSelf`, but a Swarm broadcast doesn't count):
 //!   the upgrade starts — the release is downloaded if it isn't yet, then
 //!   AgentMux restarts once every agent has finished its turn;
-//! - anything else: every window asks the user ("QTest asks to upgrade
-//!   AgentMux to 0.59.27: <reason>", Upgrade now / Later), and the agent is
-//!   told the answer as an `[AgentMux]` note.
+//! - anything else is a sensitive request (`server/sensitive_handlers.rs`): the
+//!   super agent decides, the person can veto the countdown, and the agent is
+//!   told each step as an `[AgentMux]` note. When the countdown ends,
+//!   `sagas/sensitive_runners.rs` starts the same upgrade.
+//!
+//! The prompt every window used to show for the second case is gone; `answer`,
+//! `list` and `UpgradeRequest` below only serve any left from before.
 //!
 //! Either way the launcher still asks the user in its own dialog before it
 //! restarts (`crates/launcher/src/upgrade_restart.rs`), and only a release
