@@ -158,6 +158,16 @@ fn main() -> Result<()> {
     }
 
     let cli = Cli::parse();
+    // The git ones are synchronous, and git hooks run them on every ref update and index write of
+    // an agent's git, so they start without an async runtime.
+    match &cli.command {
+        Command::GitCredential { op } => std::process::exit(github::run_git_credential(op)),
+        Command::GithubToken { gh_args } => std::process::exit(github::run_github_token(gh_args)),
+        Command::GithubOwnerTag { gh_args } => std::process::exit(github::run_github_owner_tag(gh_args)),
+        Command::GitHook { name, args } => std::process::exit(git_hooks::run_git_hook(name, args)),
+        Command::GitEnv { git_args } => std::process::exit(git_hooks::run_git_env(git_args)),
+        _ => {}
+    }
     let rt = tokio::runtime::Runtime::new()?;
     match cli.command {
         Command::Exec(args) => {
@@ -172,11 +182,8 @@ fn main() -> Result<()> {
         Command::Hook => hook::run_pretooluse_bash(),
         Command::Precompact(args) => rt.block_on(precompact::run(args)),
         Command::Sessionstart(args) => rt.block_on(sessionstart::run(args)),
-        Command::GitCredential { op } => std::process::exit(github::run_git_credential(&op)),
-        Command::GithubToken { gh_args } => std::process::exit(github::run_github_token(&gh_args)),
-        Command::GithubOwnerTag { gh_args } => std::process::exit(github::run_github_owner_tag(&gh_args)),
-        Command::GitHook { name, args } => std::process::exit(git_hooks::run_git_hook(&name, &args)),
-        Command::GitEnv { git_args } => std::process::exit(git_hooks::run_git_env(&git_args)),
+        // Handled above.
+        Command::GitCredential { .. } | Command::GithubToken { .. } | Command::GithubOwnerTag { .. } | Command::GitHook { .. } | Command::GitEnv { .. } => Ok(()),
     }
 }
 

@@ -98,9 +98,18 @@ github-token) printf 'ghs_X';;
 esac"#,
         );
         let path = std::env::join_paths(std::iter::once(dir.clone()).chain(std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()))).unwrap();
+        // The stand-ins go first on the shell's own PATH: on Windows a bash started with a PATH of
+        // Windows paths puts Git's `mingw64/bin` (the real `git`) ahead of it.
+        let posix_dir = {
+            let d = dir.to_string_lossy().replace(std::path::MAIN_SEPARATOR, "/");
+            match d.split_once(':') {
+                Some((drive, rest)) if drive.len() == 1 => format!("/{}{rest}", drive.to_ascii_lowercase()),
+                _ => d,
+            }
+        };
         let run = |command: &str, broker: &str, refuse: &str, env: &str| {
             let mut cmd = std::process::Command::new(&bash);
-            cmd.args(["-c", command])
+            cmd.args(["-c", &format!("PATH='{posix_dir}':\"$PATH\"; {command}")])
                 .env(agentmux_common::github_broker_shim::GIT_FUNCTION_NAME, agentmux_common::github_broker_shim::GIT_FUNCTION_BODY)
                 .env(agentmux_common::github_broker_shim::GH_FUNCTION_NAME, agentmux_common::github_broker_shim::GH_FUNCTION_BODY)
                 .env("PATH", &path)
