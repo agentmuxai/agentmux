@@ -1082,6 +1082,7 @@ declare global {
         "app:runinbackground"?: boolean;
         "app:showtray"?: boolean;
         "app:startatlogin"?: boolean;
+        "app:devmode"?: boolean;
         "widget:*"?: boolean;
         "widget:icononly"?: boolean;
         /** Pinned widget-bar icons, in order: a built-in's short name (`agent` for `defwidget@agent`), or an installed package widget's full key (`ext@<id>/<pane>`). */

@@ -12,6 +12,7 @@ import { ChangeConnectionBlockModal } from "@/app/modals/conntypeahead";
 import { getApi } from "@/app/store/app-api";
 import { connBarShows } from "@/app/store/conn-status-rules";
 import { ContextMenuModel } from "@/app/store/contextmenu";
+import { devModeOn } from "@/app/store/dev-mode";
 import {
     atoms,
     getBlockComponentModel,
@@ -556,7 +557,8 @@ function BlockFrame_Header(
     // inside a memo that re-runs when blockId changes correctly re-points at
     // live data with no leak (frontend/app/store/mos.ts).
     const blockData = createMemo(() => MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", props.blockId()))());
-    const showBlockIds = getSettingsKeyAtom("blockheader:showblockids")();
+    // A developer aid: drawn only while dev mode is on, whatever the stored value.
+    const showBlockIds = () => !!getSettingsKeyAtom("blockheader:showblockids")() && devModeOn();
     // Memos, not bare top-level reads (ReAgent P1 on PR #3157). These read
     // through `props.viewModel`, which for a HOISTED header
     // (SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md) is the
@@ -783,7 +785,7 @@ function BlockFrame_Header(
                     >
                         <ViewNameEditor name={viewName()} onSave={(v) => void props.viewModel.setViewName(v)} />
                     </Show>
-                    <Show when={showBlockIds}>
+                    <Show when={showBlockIds()}>
                         <div class="block-frame-blockid">[{props.blockId().substring(0, 8)}]</div>
                     </Show>
                 </div>

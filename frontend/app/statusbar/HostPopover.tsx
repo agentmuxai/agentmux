@@ -13,6 +13,7 @@ import {
     type LanDiscoverability,
     type LanFirewall,
 } from "@/store/global";
+import { devModeOn } from "@/app/store/dev-mode";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { Accessor, createEffect, createSignal, For, onCleanup, Show, untrack, type JSX } from "solid-js";
@@ -352,10 +353,12 @@ const HostPopoverPanel = (props: HostPopoverPanelProps): JSX.Element => {
                     <span class="status-bar-popover-label">WS</span>
                     <span class="status-bar-popover-mono">{props.hostInfo()!.ports.ws}</span>
                 </div>
-                <div class="status-bar-popover-row">
-                    <span class="status-bar-popover-label">DevTools</span>
-                    <span class="status-bar-popover-mono">{props.hostInfo()!.ports.devtools}</span>
-                </div>
+                <Show when={devModeOn()}>
+                    <div class="status-bar-popover-row">
+                        <span class="status-bar-popover-label">DevTools</span>
+                        <span class="status-bar-popover-mono">{props.hostInfo()!.ports.devtools}</span>
+                    </div>
+                </Show>
             </Show>
         </AnchoredPopover>
     );
