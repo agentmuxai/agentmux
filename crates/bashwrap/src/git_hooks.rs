@@ -208,7 +208,8 @@ fn push_diff(dir: Option<&Path>, remote: &str, local: &str, remote_sha: &str) ->
         if let Some(dir) = dir {
             cmd.current_dir(dir);
         }
-        cmd.args(["log", "--format=", "-p", "-U0", "--no-color", "--no-ext-diff"]).args(range).stdin(Stdio::null()).stderr(Stdio::null());
+        // `-m`: a merge commit shows no patch without it, and a conflict resolution can add anything.
+        cmd.args(["log", "--format=", "-p", "-m", "-U0", "--no-color", "--no-ext-diff"]).args(range).stdin(Stdio::null()).stderr(Stdio::null());
         cmd.no_window();
         cmd.output().ok().filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
     };
@@ -417,6 +418,37 @@ key = {token}
         assert_eq!((found[0].file.as_str(), found[0].line), ("a.txt", 2));
         // The remote already has it: nothing is added.
         assert!(scan_diff(&push_diff(Some(repo), "origin", &second, &second)).is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A credential that only a merge commit adds (a conflict resolution) is found.
+    #[test]
+    fn a_credential_added_only_by_a_merge_commit_is_found() {
+        let dir = std::env::temp_dir().join(format!("amx-merge-scan-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let repo = dir.as_path();
+        let write = |text: &str| std::fs::write(repo.join("a.txt"), format!("{text}\n")).unwrap();
+        git(repo, &["init", "-q", "-b", "main"]);
+        write("base");
+        git(repo, &["add", "."]);
+        git(repo, &["commit", "-q", "-m", "base"]);
+        let base = git(repo, &["rev-parse", "HEAD"]);
+        git(repo, &["checkout", "-q", "-b", "side"]);
+        std::fs::write(repo.join("side.txt"), "side\n").unwrap();
+        git(repo, &["add", "."]);
+        git(repo, &["commit", "-q", "-m", "side"]);
+        git(repo, &["checkout", "-q", "main"]);
+        write("main");
+        git(repo, &["commit", "-q", "-am", "main"]);
+        // The merge is stopped before its commit, and the credential goes in as part of it.
+        git(repo, &["merge", "-q", "--no-commit", "--no-ff", "side"]);
+        write(&format!("key = {}{}", "ghp_", "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8"));
+        git(repo, &["add", "."]);
+        git(repo, &["commit", "-q", "--no-edit"]);
+        let head = git(repo, &["rev-parse", "HEAD"]);
+        let found = scan_diff(&push_diff(Some(repo), "origin", &head, &base));
+        assert!(found.iter().any(|f| f.file == "a.txt" && f.category == "GitHub token"), "{found:?}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
