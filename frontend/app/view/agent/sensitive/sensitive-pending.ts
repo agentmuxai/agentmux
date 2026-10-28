@@ -33,6 +33,9 @@ export interface SensitiveCountdown {
     op: string;
     /** What will happen, built by srv from the request's facts. */
     summary: string;
+    /** The words of its two buttons, srv's: the cancel and the do-it-now ("Don't upgrade", "Upgrade now"). */
+    cancel_label: string;
+    now_label: string;
     requester: string;
     /** The super agent that approved it; empty when none reviewed it. */
     approver: string;
@@ -50,6 +53,8 @@ export function parseCountdown(data: unknown): SensitiveCountdown | null {
         request_id: d.request_id,
         op: typeof d.op === "string" ? d.op : "",
         summary: typeof d.summary === "string" ? d.summary : "",
+        cancel_label: typeof d.cancel_label === "string" && d.cancel_label ? d.cancel_label : "Veto",
+        now_label: typeof d.now_label === "string" && d.now_label ? d.now_label : "Approve now",
         requester: typeof d.requester === "string" ? d.requester : "",
         approver: typeof d.approver === "string" ? d.approver : "",
         deadline_ms: d.deadline_ms,

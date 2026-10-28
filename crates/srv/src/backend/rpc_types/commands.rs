@@ -129,6 +129,7 @@ pub const COMMAND_AGENT_CANCEL: &str = "agentcancel";
 /// The banner's "Keep running": cancel a pending external shutdown
 /// (docs/specs/SPEC_AGENT_SELF_QUIT_2026_09_24.md §6.5, §12.3).
 pub const COMMAND_AGENT_SHUTDOWN_KEEP: &str = "agentshutdownkeep";
+pub const COMMAND_AGENT_SHUTDOWN_NOW: &str = "agentshutdownnow";
 pub const COMMAND_AGENT_STOP: &str = "agentstop";
 /// The API retry a pane's CLI is waiting on, as of now (`backend::agent_api_retry`).
 pub const COMMAND_AGENT_API_RETRY: &str = "agentapiretry";

@@ -185,6 +185,9 @@ struct Entry {
     /// naming two tabs of one pane got two windows, and keeping one didn't
     /// stop the other closing the whole pane).
     covers: Vec<String>,
+    /// The person chose Close now: the window task is about to begin it, so a second press or a
+    /// Keep running finds `too_late`.
+    closing: bool,
 }
 
 static ENTRIES: LazyLock<Mutex<HashMap<String, Entry>>> = LazyLock::new(Default::default);
@@ -391,6 +394,7 @@ fn request_within(
                 action: Some(action),
                 requesters: vec![(by.to_string(), via.to_string(), reason.trim().to_string())],
                 covers: new_covers.clone(),
+                closing: false,
             },
         );
         view
@@ -453,6 +457,7 @@ fn raise_toast(state: &AppState, view: &PendingView) {
         effect: view.effect,
         running: session_running(&view.block_id),
         request_id: view.request_id.clone(),
+        labels: None,
     };
     // `emit_shutdown` reads the block (blocking): off the async workers.
     tokio::task::spawn_blocking(move || router.emit_shutdown(&block, Some(body), info));
@@ -642,7 +647,7 @@ pub fn keep(state: &AppState, block_id: &str, request_id: &str) -> &'static str 
     let view = {
         let mut map = entries();
         match map.get_mut(request_id) {
-            Some(e) if e.covers.iter().any(|b| b == block_id) && e.view.status == "pending" => {
+            Some(e) if e.covers.iter().any(|b| b == block_id) && e.view.status == "pending" && !e.closing => {
                 // Decided here, under the lock; the window task only wakes to
                 // find it no longer pending.
                 e.view.status = "kept_by_user";
@@ -659,6 +664,27 @@ pub fn keep(state: &AppState, block_id: &str, request_id: &str) -> &'static str 
     "kept_by_user"
 }
 
+/// "Close now" (the second button of the banner and the toast): the person ends the wait, and the
+/// shutdown begins at once as it would at the deadline. `closed_now` if the request was still
+/// pending, `too_late` if it was kept, had begun, or is not this block's. Only the person's: the
+/// RPC and the toast press that call it are proven by the caller.
+pub fn close_now(state: &AppState, block_id: &str, request_id: &str) -> &'static str {
+    {
+        let mut map = entries();
+        match map.get_mut(request_id) {
+            Some(e) if e.covers.iter().any(|b| b == block_id) && e.view.status == "pending" && !e.closing => {
+                // The window task is waiting on this: it wakes, finds the request still pending and begins.
+                e.closing = true;
+                e.kept.notify_one();
+            }
+            _ => return "too_late",
+        }
+    }
+    audit(state, request_id, "closed_now_by_user", None);
+    tracing::info!(block_id, request_id, "shutdown pending: the user closed it now");
+    "closed_now"
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -673,6 +699,27 @@ mod tests {
         assert_eq!((b.request_id.as_str(), b.deadline_ms), (a.request_id.as_str(), a.deadline_ms), "never restarts the clock");
         assert_eq!(active_for("blk-p1").map(|v| v.request_id), Some(a.request_id.clone()));
         assert_eq!(keep(&state, "blk-p1", &a.request_id), "kept_by_user");
+    }
+
+    /// "Close now" ends the wait and the shutdown begins at once, once; a kept request, one that has
+    /// begun and another block's name are `too_late`.
+    #[tokio::test]
+    async fn close_now_ends_the_wait_and_the_shutdown_begins_once() {
+        let state = test_state();
+        let a = request(&state, "blk-now1", "Korp", "FleetBulkStop", "", Action::Stop { signal: None, stop_background: None });
+        assert_eq!(close_now(&state, "blk-now1", &a.request_id), "closed_now");
+        let done = settled(&a.request_id).await;
+        assert!(matches!(done.status, "shut_down" | "superseded" | "failed"), "it began well before its 30 s: {}", done.status);
+        assert_eq!(close_now(&state, "blk-now1", &a.request_id), "too_late", "once");
+
+        let b = request(&state, "blk-now2", "Korp", "FleetBulkStop", "", Action::Stop { signal: None, stop_background: None });
+        assert_eq!(keep(&state, "blk-now2", &b.request_id), "kept_by_user");
+        assert_eq!(close_now(&state, "blk-now2", &b.request_id), "too_late", "a kept request is not closed");
+
+        let c = request(&state, "blk-now3", "Korp", "FleetBulkStop", "", Action::Stop { signal: None, stop_background: None });
+        assert_eq!(close_now(&state, "blk-other", &c.request_id), "too_late", "not this block's request");
+        assert_eq!(status(&c.request_id).unwrap().status, "pending");
+        assert_eq!(keep(&state, "blk-now3", &c.request_id), "kept_by_user");
     }
 
     #[tokio::test]

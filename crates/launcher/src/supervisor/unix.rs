@@ -376,7 +376,7 @@ pub(crate) async fn run_unix(
     // §6.2) and gets the no-op presenter, but still needs the srv session: it
     // carries `app:startatlogin` to the menu-bar item and the LaunchAgent
     // (SPEC_START_WITH_OS_2026_09_25 §3.9).
-    crate::notify::start(&first_srv_result.ws_endpoint, &first_srv_result.auth_key, paths.data_dir.clone(), dir_hash.clone(), state.clone());
+    crate::notify::start(&first_srv_result.ws_endpoint, &first_srv_result.auth_key, &first_srv_result.host_reg_secret, paths.data_dir.clone(), dir_hash.clone(), state.clone());
 
     // CRITICAL (same rationale as run_windows): `Srv::new` takes srv's stdin out
     // of the Child so tokio's wait() can't close it and trip srv's parent-watch

@@ -1113,6 +1113,25 @@
     }
   },
   {
+    "command": "agentshutdownnow",
+    "request": "agentmux_srv::backend::rpc_types::block::CommandAgentShutdownNowData",
+    "requestName": "CommandAgentShutdownNowData",
+    "requestTs": {
+      "imports": [
+        "CommandAgentShutdownNowData"
+      ],
+      "name": "CommandAgentShutdownNowData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::block::AgentShutdownNowResult",
+    "responseName": "AgentShutdownNowResult",
+    "responseTs": {
+      "imports": [
+        "AgentShutdownNowResult"
+      ],
+      "name": "AgentShutdownNowResult"
+    }
+  },
+  {
     "command": "agentstop",
     "request": "agentmux_srv::backend::rpc_types::block::CommandAgentStopData",
     "requestName": "CommandAgentStopData",

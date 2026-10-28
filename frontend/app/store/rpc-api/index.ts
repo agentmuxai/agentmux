@@ -94,6 +94,7 @@ export type {
 } from "./agent";
 export type {
     AgentShutdownKeepResult,
+    AgentShutdownNowResult,
     BackgroundTaskView,
     BlockfileLineCountResult,
     BlockfileReadRangeResult,
@@ -103,6 +104,7 @@ export type {
     CommandAgentAnswerData,
     CommandAgentCancelData,
     CommandAgentShutdownKeepData,
+    CommandAgentShutdownNowData,
     CommandAmbientNarrateData,
     CommandBackgroundTaskCompletionData,
     CommandBackgroundTaskPidData,
