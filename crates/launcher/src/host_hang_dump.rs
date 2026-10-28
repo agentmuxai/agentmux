@@ -360,6 +360,9 @@ mod tests {
         use std::io::{BufRead, BufReader};
         use std::os::windows::io::AsRawHandle;
         use std::process::{Command, Stdio};
+        if agentmux_common::debug_privilege::refusal_cannot_be_observed("dumps_a_hardened_process_through_the_handle_its_creator_holds") {
+            return;
+        }
         let mut child = Command::new(std::env::current_exe().unwrap())
             .args(["--exact", "host_hang_dump::tests::hardened_hang_child", "--ignored", "--nocapture"])
             .env("AGENTMUX_HD_CHILD", "1")

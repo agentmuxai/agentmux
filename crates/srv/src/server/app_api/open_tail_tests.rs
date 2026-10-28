@@ -378,3 +378,104 @@ fn stamps_reach_back_past_a_long_sidecar_to_the_oldest_line() {
     assert!(stamps.iter().all(|s| *s > 0), "even the oldest line of a long slice has its receive time");
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// An agent's block in `mstore`, carrying the agent id the shared zone is keyed by.
+fn agent_block(mstore: &Store, agent_id: &str) {
+    let mut meta = crate::backend::obj::MetaMapType::default();
+    meta.insert("agentId".into(), serde_json::json!(agent_id));
+    let mut b = Block { oid: BLOCK.into(), parentoref: String::new(), version: 1, runtimeopts: None, stickers: None, meta, subblockids: None };
+    mstore.insert(&mut b).unwrap();
+}
+
+#[test]
+fn a_damaged_shared_zone_is_answered_from_the_blocks_copy_and_says_so() {
+    use crate::backend::transcript::damage::{self, test_support};
+    let def = "def-open-tail-damaged-1";
+    let zone = crate::backend::agent_session::agent_current_zone(def);
+    let (own, own_dir) = file_store("damaged-own");
+    let (global, global_dir) = file_store("damaged-global");
+    global.make_file(&zone, "output", FileMeta::default(), FileOpts::default()).unwrap();
+    global.append_lines(&zone, "output", b"{\"copy\":\"global\"}
+").unwrap();
+    seed(&own, &[line(0, 10), line(1, 10)]);
+    let mstore = mem_store();
+    agent_block(&mstore, def);
+
+    let healthy = open_tail(&own, Some(&global), &mstore, cmd(None)).unwrap();
+    assert_eq!(healthy.stream.as_deref(), Some(format!("g:{zone}").as_str()));
+    assert_eq!(healthy.history_damaged, None, "a healthy zone says nothing");
+
+    test_support::corrupt(&global);
+    let r = open_tail(&own, Some(&global), &mstore, cmd(None)).unwrap();
+    assert!(damage::is_damaged(&zone));
+    assert_eq!(r.stream.as_deref(), Some("b:blk-open-tail"), "the block's own copy answers");
+    assert_eq!(r.lines.len(), 2);
+    assert_eq!(r.history_damaged, Some(true));
+    let _ = std::fs::remove_dir_all(own_dir);
+    let _ = std::fs::remove_dir_all(global_dir);
+}
+
+#[test]
+fn a_damaged_zone_with_an_empty_blocks_copy_still_says_so() {
+    use crate::backend::transcript::damage::{self, test_support};
+    let def = "def-open-tail-damaged-2";
+    let zone = crate::backend::agent_session::agent_current_zone(def);
+    let (own, own_dir) = file_store("damaged-empty-own");
+    let (global, global_dir) = file_store("damaged-empty-global");
+    global.make_file(&zone, "output", FileMeta::default(), FileOpts::default()).unwrap();
+    global.append_lines(&zone, "output", b"{\"copy\":\"global\"}
+").unwrap();
+    let mstore = mem_store();
+    agent_block(&mstore, def);
+    test_support::corrupt(&global);
+    let r = open_tail(&own, Some(&global), &mstore, cmd(None)).unwrap();
+    assert!(damage::is_damaged(&zone));
+    assert!(r.lines.is_empty());
+    assert_eq!(r.history_damaged, Some(true), "the pane must not show an empty history as if nothing was lost");
+    let _ = std::fs::remove_dir_all(own_dir);
+    let _ = std::fs::remove_dir_all(global_dir);
+}
+
+#[test]
+fn a_block_that_is_not_an_agents_never_says_its_history_is_damaged() {
+    let (fs, dir) = file_store("not-agent");
+    seed(&fs, &[line(0, 10)]);
+    assert_eq!(run(&fs, cmd(None)).history_damaged, None);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn a_range_read_of_a_damaged_zone_comes_from_the_blocks_copy_and_says_so() {
+    use crate::backend::transcript::damage::test_support;
+    let def = "def-open-tail-damaged-3";
+    let zone = crate::backend::agent_session::agent_current_zone(def);
+    let (own, own_dir) = file_store("damaged-range-own");
+    let (global, global_dir) = file_store("damaged-range-global");
+    global.make_file(&zone, "output", FileMeta::default(), FileOpts::default()).unwrap();
+    global.append_lines(&zone, "output", b"{\"copy\":\"global\"}
+").unwrap();
+    seed(&own, &[line(0, 10), line(1, 10)]);
+    let mstore = mem_store();
+    agent_block(&mstore, def);
+    let range = || CommandBlockfileReadRangeData {
+        block_id: BLOCK.into(),
+        filename: "output".into(),
+        offset: 0,
+        limit: 100,
+        expect_gen: None,
+        tail_turns: None,
+        tail_bytes: None,
+        archive_zone: None,
+    };
+    let broker = Arc::new(crate::backend::mps::Broker::new());
+
+    let healthy = super::blockfile::read_range(broker.clone(), own.clone(), Some(global.clone()), mstore.clone(), range()).await.unwrap();
+    assert_eq!(healthy.history_damaged, None);
+
+    test_support::corrupt(&global);
+    let r = super::blockfile::read_range(broker, own, Some(global), mstore, range()).await.unwrap();
+    assert_eq!(r.lines.len(), 2, "the block's own copy answers");
+    assert_eq!(r.history_damaged, Some(true));
+    let _ = std::fs::remove_dir_all(own_dir);
+    let _ = std::fs::remove_dir_all(global_dir);
+}

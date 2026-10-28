@@ -90,7 +90,11 @@ import type { AgentFailure } from "@/types/rpc/AgentFailure";
  */
 export type InitPhase =
     | { kind: "InitPending" }
-    | { kind: "InitReady"; at: number }
+    /**
+     * `historyDamaged`: srv found the agent's saved history in the shared store damaged and
+     * answered from the block's own copy, which holds only what this block wrote.
+     */
+    | { kind: "InitReady"; at: number; historyDamaged?: true }
     | { kind: "InitFailed"; at: number; reason: string };
 
 // TurnPhase discriminated union — single source of truth for the turn
@@ -645,7 +649,7 @@ export type AgentPaneCommand =
      */
     | { type: "InitStart" }
     /** Caller signal: history fetch resolved successfully. */
-    | { type: "InitReady"; at: number }
+    | { type: "InitReady"; at: number; historyDamaged?: boolean }
     /** Caller signal: history fetch failed; reason surfaced for diagnostics. */
     | { type: "InitFailed"; at: number; reason: string }
 

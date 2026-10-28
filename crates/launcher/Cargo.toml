@@ -186,6 +186,8 @@ proptest = "1"
 # on-disk SQLite file (in addition to the `open_in_memory()` path) so
 # WAL-mode + busy-timeout pragmas exercise their real code paths.
 tempfile = "3"
+# verify_update tests sign a throwaway release with a key of their own.
+ed25519-dalek = { version = "3", default-features = false, features = ["alloc"] }
 
 # `cargo machete` (CI gate, ci-pr.yml) can't see build.rs-only use: winres
 # embeds the Windows icon/version resource from build.rs.

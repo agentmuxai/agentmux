@@ -57,6 +57,15 @@ describe("agent-pane-state reducer", () => {
             expect(isWorking(r.state)).toBe(false);
         });
 
+        it("InitReady carries historyDamaged only when srv said the saved history is damaged", () => {
+            const whole = update(mk(), { type: "InitReady", at: 100 }).state;
+            expect(whole.initPhase).toEqual({ kind: "InitReady", at: 100 });
+            const falsy = update(mk(), { type: "InitReady", at: 100, historyDamaged: false }).state;
+            expect(falsy.initPhase).toEqual({ kind: "InitReady", at: 100 });
+            const damaged = update(mk(), { type: "InitReady", at: 100, historyDamaged: true }).state;
+            expect(damaged.initPhase).toEqual({ kind: "InitReady", at: 100, historyDamaged: true });
+        });
+
         it("StreamSubscribe after Submitting advances phase to Streaming", () => {
             // Manual sequence: Submitting then a fresh subscribe (e.g.
             // after reconnect). The subscribe should hand off to

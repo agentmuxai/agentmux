@@ -308,6 +308,89 @@ pub fn verify_release(
     Ok(parsed)
 }
 
+/// The three files of a signed release, as published next to its other files:
+/// the envelope, its signature and the manifest.
+pub fn file_names(version: &str) -> (String, String, String) {
+    (
+        format!("AgentMux-{version}-envelope.json"),
+        format!("AgentMux-{version}-envelope.json.sig"),
+        format!("AgentMux-{version}-manifest.json"),
+    )
+}
+
+/// The first release the pipeline signs (v0.60.4). From it on, a release without a
+/// verified signed manifest is not installed; an older one never had one.
+pub const FIRST_SIGNED: (u64, u64, u64) = (0, 60, 4);
+
+/// `major.minor.patch` out of a version or tag (`v0.59.27`, `0.59.27+g1a2b`),
+/// or `None` when it doesn't start with three integers.
+pub fn version_core(v: &str) -> Option<(u64, u64, u64)> {
+    let v = v.trim().trim_start_matches('v');
+    let core = v.split(['+', '-']).next().unwrap_or(v);
+    let mut parts = core.split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    let patch = parts.next()?.parse().ok()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    Some((major, minor, patch))
+}
+
+/// What the signed manifest said about a release file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Outcome {
+    /// The release publishes no signed manifest (made before signing).
+    Unsigned,
+    /// Signed and valid; the file is listed with the size and hash it has.
+    Verified,
+    /// Signed and valid, but the file isn't listed in it.
+    NotListed(String),
+    /// Signed and valid, but the file's size or hash differ from the manifest's.
+    Disagrees(String),
+    /// A manifest is there but doesn't verify (or isn't what the envelope signed).
+    Failed(String),
+    /// The signed files couldn't be fetched (GitHub didn't answer, an error status): nothing is known.
+    Unreachable(String),
+}
+
+/// The decision, given what was fetched (`None`: the release has no signed
+/// manifest) and the file called `name` that has `size` bytes and hashes to `sha256`.
+pub fn judge_file(keys: &[UpdateKey], tag: &str, fetched: Option<(&[u8], &str, &[u8])>, name: &str, size: u64, sha256: &str) -> Outcome {
+    let Some((envelope, signatures, manifest)) = fetched else {
+        return Outcome::Unsigned;
+    };
+    let manifest: Manifest = match verify_release(keys, tag, envelope, signatures, manifest) {
+        Ok(m) => m,
+        Err(e) => return Outcome::Failed(e.to_string()),
+    };
+    match manifest.file(name) {
+        None => Outcome::NotListed(format!("{name} isn't in the signed manifest")),
+        Some(f) if f.size != size => Outcome::Disagrees(format!("size {} in the manifest, {size} in the file", f.size)),
+        Some(f) if !f.sha256.eq_ignore_ascii_case(sha256) => Outcome::Disagrees("the manifest's SHA-256 differs from the file's".into()),
+        Some(_) => Outcome::Verified,
+    }
+}
+
+/// What to do about `outcome` for `version`: `Ok` to go on, or the message to show (spec §7).
+/// The app's download and the Linux package helper say the same thing.
+pub fn decide(version: &str, outcome: &Outcome) -> Result<(), String> {
+    let v = format!("v{}", version.trim_start_matches('v'));
+    let signature_wrong = format!("The signature on {v} doesn't match, so AgentMux won't download it. Don't install it; tell the AgentMux team.");
+    match outcome {
+        Outcome::Verified => Ok(()),
+        Outcome::Unsigned => match version_core(version) {
+            // Made before signing existed: used as before.
+            Some(core) if core < FIRST_SIGNED => Ok(()),
+            // A version that can't be read is not trusted to be an old one.
+            _ => Err(format!("{v} wasn't signed, so AgentMux won't download it itself. Get it from the release page.")),
+        },
+        Outcome::NotListed(_) => Err(format!("{v} has no file for this kind of install.")),
+        Outcome::Disagrees(_) | Outcome::Failed(_) => Err(signature_wrong),
+        Outcome::Unreachable(why) => Err(format!("Couldn't check the signature of {v} ({why}). Try again.")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -634,5 +717,75 @@ mod tests {
     #[test]
     fn hex_is_lowercase_and_padded() {
         assert_eq!(hex(&[0, 15, 255]), "000fff");
+    }
+
+    #[test]
+    fn the_files_are_named_as_the_release_script_publishes_them() {
+        let (e, s, m) = file_names("0.60.1");
+        assert_eq!((e.as_str(), s.as_str(), m.as_str()), ("AgentMux-0.60.1-envelope.json", "AgentMux-0.60.1-envelope.json.sig", "AgentMux-0.60.1-manifest.json"));
+    }
+
+    #[test]
+    fn a_verified_release_is_downloaded() {
+        assert_eq!(decide("0.60.4", &Outcome::Verified), Ok(()));
+    }
+
+    #[test]
+    fn an_unsigned_release_before_the_first_signed_one_is_downloaded_as_before() {
+        assert_eq!(decide("0.59.40", &Outcome::Unsigned), Ok(()));
+        assert_eq!(decide("v0.60.3", &Outcome::Unsigned), Ok(()));
+    }
+
+    #[test]
+    fn an_unsigned_release_from_the_first_signed_one_on_is_refused() {
+        for v in ["0.60.4", "0.60.5", "0.61.0", "1.0.0"] {
+            let e = decide(v, &Outcome::Unsigned).unwrap_err();
+            assert!(e.contains("wasn't signed") && e.contains("release page"), "{v}: {e}");
+        }
+        // A version that can't be read is not trusted to be an old one.
+        assert!(decide("nightly", &Outcome::Unsigned).is_err());
+    }
+
+    #[test]
+    fn a_bad_signature_or_a_disagreement_is_refused_with_the_signature_message() {
+        for o in [Outcome::Failed("x".into()), Outcome::Disagrees("y".into())] {
+            let e = decide("0.60.4", &o).unwrap_err();
+            assert!(e.contains("The signature on v0.60.4 doesn't match") && e.contains("tell the AgentMux team"), "{e}");
+        }
+    }
+
+    #[test]
+    fn a_release_without_a_file_for_this_install_and_an_unreachable_check_are_refused_plainly() {
+        assert_eq!(decide("0.60.4", &Outcome::NotListed("z".into())).unwrap_err(), "v0.60.4 has no file for this kind of install.");
+        let e = decide("0.60.4", &Outcome::Unreachable("GitHub didn't answer".into())).unwrap_err();
+        assert!(e.contains("Couldn't check the signature of v0.60.4") && e.contains("GitHub didn't answer") && e.contains("Try again"), "{e}");
+    }
+
+    #[test]
+    fn the_first_signed_release_is_the_one_the_pipeline_first_signed() {
+        assert_eq!(FIRST_SIGNED, (0, 60, 4));
+    }
+
+    #[test]
+    fn a_version_is_read_down_to_its_three_numbers() {
+        assert_eq!(version_core("0.59.100"), Some((0, 59, 100)));
+        assert_eq!(version_core("v1.2.3+g1a2b"), Some((1, 2, 3)));
+        assert_eq!(version_core("1.2"), None);
+        assert_eq!(version_core("1.2.3.4"), None);
+    }
+
+    #[test]
+    fn a_release_is_judged_by_the_name_size_and_hash_of_the_file_it_signs() {
+        let k = key("k1", 7);
+        let hash = "8fb6d5f37e8055ce720bd0b1d56587f88c0071f285966ba17e72b2b12672aa73";
+        let manifest = manifest_json(&[("AgentMux_0.60.1_amd64.deb", 100, hash)]);
+        let envelope = envelope_json(TAG, &manifest);
+        let sig = sig_line("k1", 7, &envelope);
+        let judged = |name: &str, size: u64, sha: &str| judge_file(&[k], TAG, Some((envelope.as_bytes(), sig.as_str(), manifest.as_bytes())), name, size, sha);
+        assert_eq!(judged("AgentMux_0.60.1_amd64.deb", 100, hash), Outcome::Verified);
+        assert!(matches!(judged("AgentMux_0.60.1_amd64.deb", 101, hash), Outcome::Disagrees(_)));
+        assert!(matches!(judged("AgentMux_0.60.1_amd64.deb", 100, &"0".repeat(64)), Outcome::Disagrees(_)));
+        assert!(matches!(judged("AgentMux-0.60.1-1.x86_64.rpm", 100, hash), Outcome::NotListed(_)));
+        assert_eq!(judge_file(&[k], TAG, None, "x", 1, hash), Outcome::Unsigned);
     }
 }
