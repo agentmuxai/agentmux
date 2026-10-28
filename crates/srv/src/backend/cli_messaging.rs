@@ -50,7 +50,9 @@ pub fn apply(env_vars: &mut HashMap<String, String>, provider: &str, messaging_o
 /// [`apply`] for a block's launch, reading the provider from its meta and the setting now.
 pub fn apply_for_spawn(env_vars: &mut HashMap<String, String>, block_meta: &MetaMapType) {
     // The block keeps the definition's provider as written, which may be a legacy alias (`claude-code`).
-    let provider = super::providers::resolve_provider_alias(&meta_get_string(block_meta, "agentProvider", ""));
+    // A block with no provider is a Claude one, as elsewhere in the launch code.
+    let provider = super::providers::resolve_provider_alias(&meta_get_string(block_meta, "agentProvider", "claude"));
+    let provider = if provider.is_empty() { "claude" } else { provider };
     let on = CONFIG.get().is_some_and(|c| enabled(&c.get_settings().extra));
     apply(env_vars, provider, on);
 }
@@ -138,6 +140,15 @@ mod tests {
         let mut codex = HashMap::new();
         apply(&mut codex, "codex", false);
         assert!(codex.is_empty());
+    }
+
+    #[test]
+    fn a_block_with_no_provider_is_a_claude_launch() {
+        for meta in [MetaMapType::new(), MetaMapType::from_iter([("agentProvider".to_string(), serde_json::json!(""))])] {
+            let mut env = HashMap::new();
+            apply_for_spawn(&mut env, &meta);
+            assert_eq!(env.get(ENV_GATE).map(String::as_str), Some("0"));
+        }
     }
 
     #[test]
