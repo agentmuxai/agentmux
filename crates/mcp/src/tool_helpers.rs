@@ -151,6 +151,19 @@ pub(crate) fn close_pane_outcome(block: &str, now: &Value) -> anyhow::Result<Str
     }
 }
 
+/// One target's own answer from a settled request over several agents: srv lists what became of each
+/// agent (`outcomes`), while the request's own `status` is for all of them. A request for one agent
+/// has no list, and its answer is the target's own.
+pub(crate) fn own_outcome(now: Value, block: &str) -> Value {
+    let Some(o) = now["outcomes"].as_array().and_then(|all| all.iter().find(|o| o["block_id"].as_str() == Some(block))) else {
+        return now;
+    };
+    let mut own = now.clone();
+    own["status"] = o["outcome"].clone();
+    own["error"] = o.get("error").cloned().unwrap_or(Value::Null);
+    own
+}
+
 /// Folds each waited-on target into `Stop agents`' shape: closed (or already
 /// gone) → `succeeded`; kept by the user or failed → `failed`, with the kept
 /// ones also listed in `kept_by_user`. A target srv refused up front is already
