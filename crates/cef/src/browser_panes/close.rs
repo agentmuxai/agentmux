@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use cef::*;
 
+use crate::browser_pane::leaving::ClosedBy;
 use crate::state::AppState;
 
 #[cfg(target_os = "windows")]
@@ -48,11 +49,16 @@ impl BrowserPaneManager {
     ///    reparent-then-destroy teardown; `drain_closed_label` stays
     ///    idempotent as a backstop for any remaining async-timing edge case.
     ///
-    /// Trade-off: because we bypass `close_browser`, Chromium's `beforeunload`
-    /// handler doesn't run. Acceptable for a browser pane (no form data the
-    /// user expects to persist across close). If beforeunload becomes
-    /// important, revisit.
+    /// `beforeunload`: the teardown still runs CEF's real close, which asks the
+    /// page "Leave site?". The pane is already going, so that is answered
+    /// Leave at once (`browser_pane::leaving`); the person is asked beforehand,
+    /// in the window, when the page would prompt (`pane-close-guard.ts`).
     pub fn close(&self, block_id: &str, state: &Arc<AppState>) {
+        self.close_by(block_id, state, ClosedBy::App);
+    }
+
+    /// `close`, saying who closed the pane (for the log of its page's "Leave site?").
+    pub(crate) fn close_by(&self, block_id: &str, state: &Arc<AppState>, by: ClosedBy) {
         crate::browser_pane::trace::pane_trace(block_id, "close", "");
         // Phase H.1.d (PR #5) — sole pane-close entry point. The reducer
         // flips Live→Closing atomically and returns the entry's label iff
@@ -70,6 +76,11 @@ impl BrowserPaneManager {
             Some(l) => l,
             None => return,
         };
+        // The close is decided: the page's "Leave site?" is answered Leave
+        // (browser_pane/leaving.rs). Before the browser is taken out below.
+        if let Some(browser) = state.get_browser(&label) {
+            crate::browser_pane::leaving::mark(browser.identifier(), block_id, by);
+        }
 
         // Drop this pane's media grants. Placed after the Live→Closing
         // transition fired (a None above means "missing or already closing" —

@@ -42,6 +42,17 @@ pub async fn invoke_haiku(
     timeout: std::time::Duration,
 ) -> Result<(String, Option<crate::agents::TokenCounts>), String> {
     let auth_env = crate::backend::blockcontroller::cmd_env_of(meta);
+    // Not on an identity whose first spawn is still refreshing its token (#6081): held until that
+    // spawn's first turn has ended, and over this call's own run. Gives up on cancel, or when the
+    // wait alone uses up the call's time.
+    let began = std::time::Instant::now();
+    let _identity = tokio::select! {
+        biased;
+        _ = cancel.cancelled() => return Err("cancelled: superseded by a newer request".to_string()),
+        held = tokio::time::timeout(timeout, crate::identity::token_warmup::ambient_gate(auth_env.get("CLAUDE_CONFIG_DIR").map(String::as_str))) => {
+            held.map_err(|_| format!("ambient CLI waited {}s for its identity's first turn", timeout.as_secs()))?
+        }
+    };
 
     let mut cmd = crate::server::cli_handlers::make_cli_cmd(cli_path);
     // A bare text-generation call, not an agent session: no tools, one turn, no
@@ -82,6 +93,10 @@ pub async fn invoke_haiku(
             .map_err(|e| format!("ambient CLI stdin shutdown: {e}"))?;
     }
 
+    // What the gate wait left of the call's time is all the child gets.
+    let budget = timeout;
+    let timeout = budget.saturating_sub(began.elapsed());
+
     // `child.wait()` only borrows (unlike `wait_with_output()`, which
     // consumes `child` by value and would make the cancel branch's
     // group kill below impossible). Drain stdout concurrently via a
@@ -107,7 +122,7 @@ pub async fn invoke_haiku(
             Ok(status) => status.map_err(|e| format!("ambient CLI wait: {e}"))?,
             Err(_) => {
                 let _ = agentmux_common::process::kill_child_and_group(&mut child).await;
-                return Err(format!("ambient CLI timed out after {}s", timeout.as_secs()));
+                return Err(format!("ambient CLI timed out after {}s", budget.as_secs()));
             }
         },
     };

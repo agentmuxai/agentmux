@@ -659,7 +659,12 @@ async fn route_command(
                     tracing::warn!("[credential-broker] failed to close orphaned approval window: {e}");
                 }
             }
-            state.browser_panes.close(block_id, state);
+            // `closed_by: "person"` when the window asked the person first (the page
+            // would prompt "Leave site?") and they chose to close; the log says so.
+            let closed_by = crate::browser_pane::leaving::ClosedBy::from_arg(
+                args.get("closed_by").and_then(|v| v.as_str()),
+            );
+            state.browser_panes.close_by(block_id, state, closed_by);
             Ok(serde_json::json!(true))
         }
         "browser_pane_go_back" => {

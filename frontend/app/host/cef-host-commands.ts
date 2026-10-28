@@ -6,6 +6,7 @@
 // docs/specs/SPEC_HOST_API_SEAM_2026_09_26.md add their groups here.
 
 import { invokeBrowserApi, invokeCommand } from "@/app/platform/ipc";
+import { takePersonClose } from "@/app/view/browser/leave-prompt";
 
 /**
  * What a batch of pane rects was laid out against, in their physical pixels:
@@ -50,7 +51,12 @@ export const cefBrowserPanes: BrowserPaneHostApi = {
         });
     },
     close: async (blockId, windowLabel) => {
-        await invokeCommand("browser_pane_close", { block_id: blockId, window_label: windowLabel });
+        await invokeCommand("browser_pane_close", {
+            block_id: blockId,
+            window_label: windowLabel,
+            // The host logs who closed the pane (crates/cef/src/browser_pane/leaving.rs).
+            ...(takePersonClose(blockId) ? { closed_by: "person" } : {}),
+        });
     },
     navigate: async (blockId, url) => {
         await invokeCommand("browser_pane_navigate", { block_id: blockId, url });
