@@ -110,16 +110,17 @@ fn lines_of(data: &[u8], from: u64, mid_line: bool, from_end: bool, max: usize) 
     Lines { lines: kept.into_iter().map(|(_, t)| t).collect(), next: from + next_at as u64, more: more_than_max }
 }
 
-/// The transcript, whole in memory (an archived session) or read in spans from the file store.
-struct Source<'a> {
-    state: &'a AppState,
-    block_id: &'a str,
+/// The transcript, whole in memory (an archived session) or read in spans from the file store the pane
+/// reads: the agent's own zone in the global transcript store when it has content, else the block's.
+struct Source {
+    fs: std::sync::Arc<crate::backend::storage::filestore::FileStore>,
+    zone: String,
     whole: Option<Vec<u8>>,
     size: i64,
 }
 
-impl Source<'_> {
-    fn open<'a>(state: &'a AppState, block_id: &'a str) -> Result<Option<Source<'a>>, String> {
+impl Source {
+    fn open(state: &AppState, block_id: &str) -> Result<Option<Source>, String> {
         let archived = state
             .mstore
             .get::<crate::backend::obj::Block>(block_id)
@@ -129,10 +130,12 @@ impl Source<'_> {
             .is_some_and(|at| at > 0);
         if archived {
             let (bytes, _) = crate::backend::session_archive::read_session_output(&state.mstore, &state.filestore, block_id)?;
-            return Ok(Some(Source { state, block_id, size: bytes.len() as i64, whole: Some(bytes) }));
+            return Ok(Some(Source { fs: state.filestore.clone(), zone: block_id.to_string(), size: bytes.len() as i64, whole: Some(bytes) }));
         }
-        let stat = state.filestore.stat(block_id, OUTPUT_FILE).map_err(|e| format!("filestore stat: {e}"))?;
-        Ok(stat.map(|f| Source { state, block_id, whole: None, size: f.size }))
+        let (fs, zone) = super::global_output_source(&state.filestore, &state.global_transcript_store, &state.mstore, block_id, OUTPUT_FILE)
+            .unwrap_or_else(|| (state.filestore.clone(), block_id.to_string()));
+        let stat = fs.stat(&zone, OUTPUT_FILE).map_err(|e| format!("filestore stat: {e}"))?;
+        Ok(stat.map(|f| Source { fs, zone, whole: None, size: f.size }))
     }
 
     /// `len` bytes from `from`, and where they really start (a circular file may have dropped the front).
@@ -143,7 +146,7 @@ impl Source<'_> {
                 Ok((from, bytes[(from as usize).min(end)..end].to_vec()))
             }
             None if len <= 0 => Ok((from, Vec::new())),
-            None => self.state.filestore.read_at(self.block_id, OUTPUT_FILE, from, len).map_err(|e| format!("filestore read: {e}")),
+            None => self.fs.read_at(&self.zone, OUTPUT_FILE, from, len).map_err(|e| format!("filestore read: {e}")),
         }
     }
 

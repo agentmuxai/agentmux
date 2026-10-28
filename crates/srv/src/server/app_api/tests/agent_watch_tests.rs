@@ -251,3 +251,24 @@ end
     let (_, last) = call(&state, Some("wu-caller"), json!({ "agent": "wu-target", "after": skipped["next"] })).await;
     assert_eq!(lines(&last), ["end"]);
 }
+
+/// A defined agent's lines may be stored only in its global zone (single copy): that is what a pane
+/// reads, so it is what a watch reads, and the block's own empty file is not mistaken for no transcript.
+#[tokio::test]
+async fn a_transcript_kept_only_in_the_agents_global_zone_is_watched() {
+    let mut state = test_state();
+    let global = std::sync::Arc::new(crate::backend::storage::filestore::FileStore::open_in_memory().unwrap());
+    state.global_transcript_store = Some(global.clone());
+    let (_ws, tabs) = seed_workspace(&state, 1).await;
+    seed_agent_block(&state, &tabs[0], "wg-caller").await;
+    seed_agent_block(&state, &tabs[0], "wg-target").await;
+    let zone = "agent:wg-target:current";
+    global.make_file(zone, OUTPUT_FILE, FileMeta::default(), FileOpts::default()).unwrap();
+    global.append_data(zone, OUTPUT_FILE, b"g1\ng2\n").unwrap();
+
+    let (_, first) = call(&state, Some("wg-caller"), json!({ "agent": "wg-target" })).await;
+    assert_eq!(lines(&first), ["g1", "g2"], "{first}");
+    global.append_data(zone, OUTPUT_FILE, b"g3\n").unwrap();
+    let (_, tail) = call(&state, Some("wg-caller"), json!({ "agent": "wg-target", "after": first["next"] })).await;
+    assert_eq!(lines(&tail), ["g3"]);
+}
