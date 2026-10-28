@@ -106,14 +106,7 @@ impl HostLanKeys {
         subject: &str,
         candidate: Option<&HostKey>,
     ) -> Result<Option<HostKey>, StoreError> {
-        self.with(|conn| {
-            if let Some(c) = candidate {
-                conn.execute(
-                    "INSERT OR IGNORE INTO db_host_lan_keys (kind, subject, public_key, private_key, created_at) \
-                     VALUES (?1, ?2, ?3, ?4, ?5)",
-                    params![kind.as_str(), subject, c.pair.public_key, c.pair.private_key, c.created_at],
-                )?;
-            }
+        let select = |conn: &Connection| {
             conn.query_row(
                 "SELECT public_key, private_key, created_at FROM db_host_lan_keys WHERE kind = ?1 AND subject = ?2",
                 params![kind.as_str(), subject],
@@ -125,6 +118,18 @@ impl HostLanKeys {
                 },
             )
             .optional()
+        };
+        self.with(|conn| {
+            // Read first: the table is shared with the other stores' writes, and a read of a key that is
+            // already there must not take its write lock.
+            let found = select(conn)?;
+            let Some(c) = candidate.filter(|_| found.is_none()) else { return Ok(found) };
+            conn.execute(
+                "INSERT OR IGNORE INTO db_host_lan_keys (kind, subject, public_key, private_key, created_at) \
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![kind.as_str(), subject, c.pair.public_key, c.pair.private_key, c.created_at],
+            )?;
+            select(conn) // re-read: a channel that published at the same moment wins
         })
     }
 
