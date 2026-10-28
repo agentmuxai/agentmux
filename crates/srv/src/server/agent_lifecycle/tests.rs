@@ -287,3 +287,62 @@ async fn a_start_without_eviction_is_refused_at_the_cap_and_stops_nobody() {
     assert!(!was_stopped(&state, &idle), "the idle agent was left running");
     blockcontroller::delete_controller(&idle);
 }
+
+fn wanted(keys: &[&str]) -> Vec<Wanted> {
+    keys.iter().map(|k| Wanted { key: (*k).to_string(), label: k.to_uppercase() }).collect()
+}
+
+#[test]
+fn names_are_listed_in_words() {
+    assert_eq!(names_in_words(&["A"]), "A");
+    assert_eq!(names_in_words(&["A", "B"]), "A and B");
+    assert_eq!(names_in_words(&["A", "B", "C"]), "A, B and C");
+}
+
+/// A short room refuses the whole batch, says which would fit, and reserves nothing.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_batch_over_the_room_is_refused_whole_names_who_would_fit_and_reserves_nothing() {
+    let state = test_state();
+    let (_ws, tabs) = seed_workspace(&state, 1).await;
+    let one = parked_running(&state, &tabs[0], "ag-batch-run").await;
+    set_limits(&state, 3);
+
+    let five = wanted(&["b1", "b2", "b3", "b4", "b5"]);
+    let err = admit_batch_with(&state, &five, true, || None).await.unwrap_err();
+    assert!(
+        err.starts_with("capacity: 1 agents are running (the limit is 3); room for 2 of the 5 asked: B1 and B2 would fit, B3, B4 and B5 would not. Stop some agents (1 is idle with no view)"),
+        "{err}"
+    );
+    assert!(!was_stopped(&state, &one), "a batch never stops an agent to make room");
+    admit_batch_with(&state, &wanted(&["b1", "b2"]), true, || None).await.expect("a refusal reserved nothing, so two fit");
+    let err = admit_batch_with(&state, &wanted(&["b6"]), false, || None).await.unwrap_err();
+    assert!(err.contains("none of the 1 asked would fit: B6"), "{err}");
+    release_batch(&state, &wanted(&["b1", "b2"]));
+    admit_batch_with(&state, &wanted(&["b6"]), false, || None).await.expect("released: the room is free again");
+    blockcontroller::delete_controller(&one);
+}
+
+/// A reserved agent's own start is not counted against itself, and one already running needs no room.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_reserved_agent_starts_on_its_reservation_and_a_running_one_needs_no_room() {
+    let state = test_state();
+    let (_ws, tabs) = seed_workspace(&state, 1).await;
+    let running = parked_running(&state, &tabs[0], "ag-batch-up").await;
+    set_limits(&state, 2);
+    admit_batch_with(&state, &wanted(&["ag-batch-up", "n1"]), true, || None).await.expect("one already runs; one needs room");
+    admit_start_with(&state, "n1", || None).await.expect("its own reservation is its room, and nobody is stopped");
+    assert!(!was_stopped(&state, &running));
+    let err = admit_start_without_eviction(&state, "n2").await.unwrap_err();
+    assert!(err.starts_with("capacity:"), "the reserved room is still counted: {err}");
+    blockcontroller::delete_controller(&running);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_batch_is_refused_whole_over_the_commit_limit_and_off_it_is_admitted() {
+    let state = test_state();
+    set_limits(&state, 24);
+    let err = admit_batch_with(&state, &wanted(&["c1", "c2"]), true, || Some(99.0)).await.unwrap_err();
+    assert!(err.starts_with("capacity: memory commit is at 99%") && err.contains("none of the 2 asked would start"), "{err}");
+    admit_batch_with(&state, &wanted(&["c1", "c2"]), true, || Some(10.0)).await.expect("under the limit");
+    release_batch(&state, &wanted(&["c1", "c2"]));
+}

@@ -25,6 +25,9 @@ use agentmux_common::api_types::SpawnAgentRequest;
 
 use super::*;
 
+mod many;
+pub(crate) use many::handle_agent_spawn_many;
+
 /// The worker pane's leader, `{agent, id, block_id}`: the leader's name, its
 /// definition id and its pane. srv writes it when it opens the worker; no
 /// client can (`browser_owner::srv_only_keys`).
@@ -112,7 +115,7 @@ async fn spawn_worker(
     caller: Option<&crate::server::caller::Caller>,
     req: SpawnAgentRequest,
 ) -> Result<SpawnAgentResult, SpawnError> {
-    let leader = leader_of(state, caller, &req)?;
+    let leader = leader_of(state, caller, &req.auth)?;
     spawn_with(state, leader, &req, false).await
 }
 
@@ -253,9 +256,9 @@ async fn launch(
 fn leader_of(
     state: &AppState,
     caller: Option<&crate::server::caller::Caller>,
-    req: &SpawnAgentRequest,
+    auth: &agentmux_common::api_types::UiAutomationAuth,
 ) -> Result<Leader, SpawnError> {
-    let block_id = crate::server::ui_handlers::verified_block_id(state, caller, &req.auth)
+    let block_id = crate::server::ui_handlers::verified_block_id(state, caller, auth)
         .map_err(|e| refuse(StatusCode::UNAUTHORIZED, format!("could not verify which agent is asking: {e}")))?;
     leader_at(state, block_id)
 }
@@ -713,15 +716,21 @@ async fn consent(
         "ok_label": "Start it",
         "cancel_label": "Don't",
     });
+    ask_consent(state, leader, question, "a worker", "the worker").await
+}
+
+/// Put `question` to the user and return whether they approved it. `these` names what is started in the
+/// refusals' words ("a worker" / "the worker").
+async fn ask_consent(state: &AppState, leader: &Leader, question: serde_json::Value, these: &str, them: &str) -> Result<bool, SpawnError> {
     let answer = super::connections::ask_user(state, &leader.block_id, question)
         .await
-        .map_err(|e| refuse(StatusCode::FORBIDDEN, format!("NOT_ALLOWED: starting a worker needs the user's go-ahead, and {e}")))?;
+        .map_err(|e| refuse(StatusCode::FORBIDDEN, format!("NOT_ALLOWED: starting {these} needs the user's go-ahead, and {e}")))?;
     if answer.answered && answer.approve {
         Ok(true)
     } else if answer.answered {
-        Err(refuse(StatusCode::FORBIDDEN, "NOT_ALLOWED: the user said no to starting the worker"))
+        Err(refuse(StatusCode::FORBIDDEN, format!("NOT_ALLOWED: the user said no to starting {them}")))
     } else {
-        Err(refuse(StatusCode::FORBIDDEN, "NOT_ALLOWED: the user didn't answer, so no worker was started"))
+        Err(refuse(StatusCode::FORBIDDEN, "NOT_ALLOWED: the user didn't answer, so nothing was started"))
     }
 }
 

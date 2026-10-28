@@ -31,6 +31,7 @@ pub(crate) mod agent_watch;
 mod agent_attach_tests;
 pub(crate) mod agent_block;
 pub(crate) mod agent_open;
+pub(crate) mod agent_open_many;
 /// Re-exported for `server/mod.rs`'s `POST /api/v1/agent/open` handler (the
 /// `OpenAgent` MCP tool's backing route) — the HTTP surface must share the
 /// RPC path's exact implementation, including its AGENT_OPEN_LOCKS TOCTOU

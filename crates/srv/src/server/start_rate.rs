@@ -41,6 +41,33 @@ fn limit_of(state: &AppState) -> usize {
         .map_or(DEFAULT_PER_MINUTE, |n| n as usize)
 }
 
+/// Count `n` starts by `sender_key` at once, all or none: a batch that would go over the limit is
+/// refused whole and nothing is counted.
+pub(crate) fn allow_n(state: &AppState, sender_key: &str, n: usize) -> Result<(), String> {
+    allow_n_at(sender_key, n, limit_of(state), agentmux_common::time::now_ms_u64())
+}
+
+fn allow_n_at(sender_key: &str, n: usize, limit: usize, now_ms: u64) -> Result<(), String> {
+    if limit == 0 || n == 0 {
+        return Ok(());
+    }
+    let mut table = table().lock().unwrap_or_else(|e| e.into_inner());
+    let starts = table.entry(sender_key.to_string()).or_default();
+    while starts.front().is_some_and(|&at| now_ms.saturating_sub(at) >= WINDOW_MS) {
+        starts.pop_front();
+    }
+    let left = limit.saturating_sub(starts.len());
+    if n > left {
+        let retry_in = starts.front().map_or(0, |&at| (at + WINDOW_MS).saturating_sub(now_ms)).div_ceil(1000);
+        return Err(format!(
+            "START_RATE_LIMIT: {sender_key} asked to start {n} agents at once and may start {left} more this minute (the limit is {limit} per sender per minute); \
+             start fewer, or try again in {retry_in}s"
+        ));
+    }
+    starts.extend(std::iter::repeat_n(now_ms, n));
+    Ok(())
+}
+
 /// Count one start by `sender_key` and say whether it may go ahead. `Err` names the limit and when
 /// the sender may start again; the refused start is not counted.
 pub(crate) fn allow(state: &AppState, sender_key: &str) -> Result<(), String> {
@@ -109,6 +136,18 @@ mod tests {
         for _ in 0..50 {
             assert!(allow_at("rate-test-d", 0, 3).is_ok());
         }
+    }
+
+    #[test]
+    fn a_batch_is_counted_whole_or_refused_whole() {
+        let key = "rate-test-e";
+        allow_n_at(key, 3, 5, 1_000).unwrap();
+        let e = allow_n_at(key, 3, 5, 2_000).unwrap_err();
+        assert!(e.starts_with("START_RATE_LIMIT: rate-test-e asked to start 3 agents at once and may start 2 more"), "{e}");
+        assert!(allow_n_at(key, 2, 5, 2_001).is_ok(), "the refused batch counted nothing");
+        assert!(allow_n_at(key, 1, 5, 2_002).is_err());
+        assert!(allow_n_at(key, 5, 5, 63_000).is_ok(), "a minute later it is all free again");
+        assert!(allow_n_at("rate-test-f", 50, 0, 1).is_ok(), "0 turns the limit off");
     }
 
     #[tokio::test]

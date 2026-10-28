@@ -302,6 +302,11 @@ fn pending_not_running(state: &AppState, live: &[Live]) -> usize {
     pending.keys().filter(|key| key.starts_with(prefix.as_str())).count()
 }
 
+/// Whether `agent_id` holds a reservation that has not run out.
+fn is_reserved(state: &AppState, agent_id: &str) -> bool {
+    pending().lock().unwrap_or_else(|e| e.into_inner()).get(&pending_key(state, agent_id)).is_some_and(|(store, at)| at.elapsed() < PENDING_FOR && store.strong_count() > 0)
+}
+
 /// A start that was admitted did not happen (the agent is unknown, its provider has no headless mode, its
 /// CLI is missing): its room is free again.
 pub(crate) fn release_start(state: &AppState, agent_id: &str) {
@@ -333,6 +338,10 @@ pub(crate) async fn admit_start_without_eviction(state: &AppState, agent_id: &st
 
 async fn admit(state: &AppState, agent_id: &str, commit_pct: impl Fn() -> Option<f64>, evict: bool) -> Result<(), String> {
     if !crate::sagas::park_agents::enabled(state) {
+        return Ok(());
+    }
+    // A batch already claimed this agent's room (`admit_batch`): its start is the one that room is for.
+    if is_reserved(state, agent_id) {
         return Ok(());
     }
     let policy = policy(state);
@@ -376,6 +385,80 @@ async fn admit(state: &AppState, agent_id: &str, commit_pct: impl Fn() -> Option
         } else {
             could_not_stop.insert(victim.block_id);
         }
+    }
+}
+
+/// An agent a batch would start: the key its room is held under (its id, or a stand-in while it does
+/// not exist yet) and the name a refusal gives it.
+pub(crate) struct Wanted {
+    pub key: String,
+    pub label: String,
+}
+
+/// "A", "A and B", "A, B and C".
+fn names_in_words(labels: &[&str]) -> String {
+    match labels {
+        [] => String::new(),
+        [only] => (*only).to_string(),
+        [init @ .., last] => format!("{} and {last}", init.join(", ")),
+    }
+}
+
+/// May all of `wanted` start? A batch never stops an agent to make room (a start may stop one idle
+/// agent with no view; five of them stopping five would be a mass stop nobody asked for), and it is
+/// admitted whole or refused whole. Those already running need no room. With `reserve` the room is
+/// claimed under the same lock as the check, so a start that comes between this and the batch's own
+/// cannot take it; [`release_batch`] gives it back when the batch is done or failed.
+pub(crate) async fn admit_batch(state: &AppState, wanted: &[Wanted], reserve: bool) -> Result<(), String> {
+    admit_batch_with(state, wanted, reserve, commit_used_pct).await
+}
+
+pub(crate) async fn admit_batch_with(state: &AppState, wanted: &[Wanted], reserve: bool, commit_pct: impl Fn() -> Option<f64>) -> Result<(), String> {
+    if !crate::sagas::park_agents::enabled(state) {
+        return Ok(());
+    }
+    let policy = policy(state);
+    if policy.max_running.is_none() && policy.commit_limit_pct.is_none() {
+        return Ok(());
+    }
+    let _one_at_a_time = admission().lock().await;
+    let live = live_agents(state);
+    let to_start: Vec<&Wanted> = wanted.iter().filter(|w| !live.iter().any(|l| l.uid == w.key || l.agent_id == w.key) && !is_reserved(state, &w.key)).collect();
+    if to_start.is_empty() {
+        return Ok(());
+    }
+    let running = live.len() + pending_not_running(state, &live);
+    let asked = to_start.len();
+    let room = policy.max_running.map_or(usize::MAX, |max| max.saturating_sub(running));
+    let idle = live.iter().filter(|l| l.evictable() && exempt(state, l).is_none()).count();
+    let stop_some = if idle > 0 { format!("Stop some agents ({idle} {} idle with no view), or ask for fewer.", if idle == 1 { "is" } else { "are" }) } else { "Stop some agents, or ask for fewer.".to_string() };
+    if let (Some(limit), Some(used)) = (policy.commit_limit_pct, commit_pct()) {
+        if used > limit {
+            return Err(format!("capacity: memory commit is at {used:.0}% (the limit is {limit:.0}%), so none of the {asked} asked would start. {stop_some}"));
+        }
+    }
+    if asked > room {
+        let max = policy.max_running.unwrap_or(running);
+        let labels: Vec<&str> = to_start.iter().map(|w| w.label.as_str()).collect();
+        let fit = names_in_words(&labels[..room]);
+        let rest = names_in_words(&labels[room..]);
+        let outcome = if room == 0 { format!("none of the {asked} asked would fit: {rest}") } else { format!("room for {room} of the {asked} asked: {fit} would fit, {rest} would not") };
+        return Err(format!("capacity: {running} agents are running (the limit is {max}); {outcome}. {stop_some}"));
+    }
+    if reserve {
+        let mut held = pending().lock().unwrap_or_else(|e| e.into_inner());
+        for w in to_start {
+            held.insert(pending_key(state, &w.key), (std::sync::Arc::downgrade(&state.mstore), std::time::Instant::now()));
+        }
+    }
+    Ok(())
+}
+
+/// Give back the room [`admit_batch`] claimed for `wanted`: the batch is done (its agents run, and
+/// count as themselves) or failed.
+pub(crate) fn release_batch(state: &AppState, wanted: &[Wanted]) {
+    for w in wanted {
+        release_start(state, &w.key);
     }
 }
 

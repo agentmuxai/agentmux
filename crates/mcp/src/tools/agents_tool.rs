@@ -12,7 +12,7 @@
 //! launches the worker, then this process sends it the brief, signed as the
 //! caller.
 
-use agentmux_common::api_types::SpawnAgentRequest;
+use agentmux_common::api_types::{SpawnAgentRequest, SpawnManyRequest, SpawnWorkerSpec};
 
 use super::family::{pick, public_params, relabeled, Act};
 use super::*;
@@ -52,7 +52,9 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             }
             let result = match act.tool {
                 "DiscoverAgents" => fleet::call(act.tool, &args, cx).await,
+                "OpenAgent" if args.get("agents").is_some_and(|a| !a.is_null()) => open_many(&args, cx).await,
                 "OpenAgent" => panes::call(act.tool, &args, cx).await,
+                "SpawnAgent" if args.get("workers").is_some_and(|w| !w.is_null()) => spawn_many(&args, cx).await,
                 "SpawnAgent" => spawn(&args, cx).await,
                 "AgentWorkers" => workers(cx).await,
                 "AgentStart" => lifecycle(cx, "start", &args).await,
@@ -130,6 +132,87 @@ async fn spawn(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
         Ok(outcome) => outcome,
         Err(e) => format!("NOT SENT: {e:#}. The worker is open but has no task: send it the brief with Message send"),
     });
+    Ok(serde_json::to_string_pretty(&body)?)
+}
+
+/// `spawn` with `workers`: srv checks them all, asks the user once, and launches all or none
+/// (`/api/v1/agent/spawn_many`); only then does each brief go to its worker, so a refused or failed
+/// batch has sent nothing.
+async fn spawn_many(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    require_agent_env(cx.local_url, cx.auth_key, cx.block_id)?;
+    let Some(asked) = arguments.get("workers").and_then(Value::as_array) else {
+        anyhow::bail!("Agents spawn: workers must be a list of {{brief, name?, model?, effort?, account?}}");
+    };
+    if ["brief", "name", "model", "effort", "account"].iter().any(|k| str_arg(arguments, k).is_some()) {
+        anyhow::bail!("Agents spawn: give either workers or brief (with name, model, effort, account), not both");
+    }
+    let mut specs = Vec::with_capacity(asked.len());
+    for (i, w) in asked.iter().enumerate() {
+        let brief = str_arg(w, "brief").ok_or_else(|| anyhow::anyhow!("Agents spawn: workers[{i}] needs a brief"))?;
+        specs.push(SpawnWorkerSpec { name: str_arg(w, "name"), model: str_arg(w, "model"), effort: str_arg(w, "effort"), account: str_arg(w, "account"), brief });
+    }
+    let briefs: Vec<String> = specs.iter().map(|s| s.brief.clone()).collect();
+    let request = SpawnManyRequest { auth: sign_ui_automation_auth()?, workers: specs, user_instruction: str_arg(arguments, "user_instruction").unwrap_or_default() };
+    let url = format!("{}/api/v1/agent/spawn_many", cx.local_url.trim_end_matches('/'));
+    let resp = cx
+        .client
+        .post(&url)
+        .timeout(SPAWN_WAIT * 2)
+        .header(AUTH_KEY_HEADER, cx.auth_key)
+        .json(&request)
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+    let status = resp.status();
+    let mut body: Value = resp.json().await.unwrap_or(Value::Null);
+    if !status.is_success() {
+        anyhow::bail!("SpawnAgent: {}", body["error"].as_str().map(str::to_string).unwrap_or_else(|| format!("srv answered {status}: {body}")));
+    }
+    let leader = std::env::var("AGENTMUX_AGENT_ID").unwrap_or_default();
+    let mut workers = body["workers"].as_array().cloned().unwrap_or_default();
+    for (worker, brief) in workers.iter_mut().zip(&briefs) {
+        let to = worker["message_to"].as_str().unwrap_or_default().to_string();
+        let name = worker["name"].as_str().unwrap_or_default().to_string();
+        let sent = super::fleet::call("SendMessage", &json!({ "to": to, "message": brief_message(&leader, &name, &to, brief) }), cx).await;
+        worker["brief"] = json!(match sent {
+            Ok(outcome) => outcome,
+            Err(e) => format!("NOT SENT: {e:#}. The worker is open but has no task: send it the brief with Message send"),
+        });
+    }
+    body["workers"] = json!(workers);
+    Ok(serde_json::to_string_pretty(&body)?)
+}
+
+/// `open` with `agents`: srv opens them all or none (`/api/v1/agent/open_many`).
+async fn open_many(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    require_agent_env(cx.local_url, cx.auth_key, cx.block_id)?;
+    let Some(asked) = arguments.get("agents").and_then(Value::as_array) else {
+        anyhow::bail!("Agents open: agents must be a list of {{agent, tab_id?, focus?}}");
+    };
+    if str_arg(arguments, "agent_id").is_some() {
+        anyhow::bail!("Agents open: give either agents or agent, not both");
+    }
+    let (tab_id, focus) = (str_arg(arguments, "tab_id"), arguments.get("focus").and_then(Value::as_bool));
+    let mut items = Vec::with_capacity(asked.len());
+    for (i, a) in asked.iter().enumerate() {
+        let agent = str_arg(a, "agent").or_else(|| str_arg(a, "agent_id")).ok_or_else(|| anyhow::anyhow!("Agents open: agents[{i}] needs an agent"))?;
+        items.push(json!({ "agent_id": agent, "tab_id": str_arg(a, "tab_id").or_else(|| tab_id.clone()), "focus": a.get("focus").and_then(Value::as_bool).or(focus) }));
+    }
+    let url = format!("{}/api/v1/agent/open_many", cx.local_url.trim_end_matches('/'));
+    let resp = cx
+        .client
+        .post(&url)
+        .timeout(SPAWN_WAIT)
+        .header(AUTH_KEY_HEADER, cx.auth_key)
+        .json(&json!({ "agents": items }))
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+    let status = resp.status();
+    let body: Value = resp.json().await.unwrap_or(Value::Null);
+    if !status.is_success() {
+        anyhow::bail!("Agents open: {}", body["error"].as_str().map(str::to_string).unwrap_or_else(|| format!("srv answered {status}: {body}")));
+    }
     Ok(serde_json::to_string_pretty(&body)?)
 }
 
@@ -377,6 +460,33 @@ mod tests {
         listed.sort();
         want.sort();
         assert_eq!(listed, want);
+    }
+
+    #[test]
+    fn the_schema_offers_workers_for_spawn_and_agents_for_open() {
+        let schema: Value = serde_json::from_str(crate::tool_schemas::AGENTS_TOOL).unwrap();
+        let props = &schema["inputSchema"]["properties"];
+        assert_eq!(props["workers"]["items"]["required"], json!(["brief"]));
+        assert_eq!(props["agents"]["items"]["required"], json!(["agent"]));
+        let d = schema["description"].as_str().unwrap();
+        assert!(d.contains("To start several workers") && d.contains("To open several at once"), "the description names the batch forms");
+    }
+
+    /// A batch with a bad shape is refused before anything is sent to srv.
+    #[tokio::test]
+    async fn a_bad_batch_is_refused_before_srv_is_asked() {
+        let client = reqwest::Client::new();
+        let loops = LoopRegistry::default();
+        let counter = std::sync::atomic::AtomicU64::new(0);
+        let cx = ToolCtx { local_url: "http://127.0.0.1:1", auth_key: "k", block_id: "b", client: &client, loops: &loops, loop_counter: &counter };
+        let e = spawn_many(&json!({ "workers": [{ "name": "a" }] }), &cx).await.unwrap_err().to_string();
+        assert!(e.contains("workers[0] needs a brief"), "{e}");
+        let e = spawn_many(&json!({ "workers": [{ "brief": "x" }], "brief": "y" }), &cx).await.unwrap_err().to_string();
+        assert!(e.contains("either workers or brief"), "{e}");
+        let e = open_many(&json!({ "agents": [{ "tab_id": "t" }] }), &cx).await.unwrap_err().to_string();
+        assert!(e.contains("agents[0] needs an agent"), "{e}");
+        let e = open_many(&json!({ "agents": [{ "agent": "a" }], "agent_id": "b" }), &cx).await.unwrap_err().to_string();
+        assert!(e.contains("either agents or agent"), "{e}");
     }
 
     #[test]
