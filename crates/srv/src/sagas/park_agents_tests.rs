@@ -166,6 +166,7 @@ async fn closing_parks_an_agents_block_and_nothing_else_with_the_setting_on() {
     let term = seed_block(&state, &tabs[0], serde_json::json!({ "view": "term" })).await;
     let ids = vec![agent.clone(), term.clone()];
 
+    set_always_available(&state, false);
     let ctx = SagaCtx::new(&state, crate::sagas::alloc_saga_id(&state));
     assert!(park_agent_blocks(&ctx, &ids, false).await.is_empty(), "off: nothing is parked");
     assert_eq!(in_tab(&state, &agent).await.as_deref(), Some(tabs[0].as_str()));
@@ -210,6 +211,7 @@ async fn a_closed_pane_keeps_its_agents_block_with_the_setting_on_and_deletes_it
     let state = test_state();
     let (_ws, tabs) = seed_workspace(&state, 1).await;
 
+    set_always_available(&state, false);
     let off = seed_agent_block(&state, &tabs[0], "ag-off").await;
     crate::sagas::close_pane::run(&state, vec![off.clone()]).await.unwrap();
     assert_eq!(in_tab(&state, &off).await, None, "off: deleted, as always");
@@ -328,8 +330,64 @@ async fn a_process_that_exits_keeps_its_agents_block_with_the_setting_on() {
     let (_ws, tabs) = seed_workspace(&state, 1).await;
     let agent = seed_agent_block(&state, &tabs[0], "ag-exit").await;
     let term = seed_block(&state, &tabs[0], serde_json::json!({ "view": "term" })).await;
+    set_always_available(&state, false);
     assert!(!keeps_block(&state, &agent), "off");
     set_always_available(&state, true);
     assert!(keeps_block(&state, &agent));
     assert!(!keeps_block(&state, &term), "a terminal still closes on exit");
+}
+
+/// An old layout with two blocks for one agent: closing the one that does not run it closes it (as
+/// before), and closing the only block parks it.
+#[tokio::test]
+async fn a_second_block_of_the_same_agent_is_closed_not_parked() {
+    let state = test_state();
+    let (_ws, tabs) = seed_workspace(&state, 1).await;
+    set_always_available(&state, true);
+    let first = seed_agent_block(&state, &tabs[0], "ag-dup").await;
+    let second = seed_block(&state, &tabs[0], serde_json::json!({ "view": "agent", "agentId": "ag-dup" })).await;
+    let ctx = SagaCtx::new(&state, crate::sagas::alloc_saga_id(&state));
+
+    assert!(park_agent_blocks(&ctx, &[second.clone()], false).await.is_empty(), "the agent has another block");
+    assert_eq!(in_tab(&state, &second).await.as_deref(), Some(tabs[0].as_str()), "left for the close to delete");
+
+    let parked = park_agent_blocks(&ctx, &[first.clone()], true).await;
+    assert_eq!(parked, vec![first], "an explicit detach parks what it is asked to");
+}
+
+/// The block that runs the agent's process is the one kept.
+#[tokio::test]
+async fn of_two_blocks_of_one_agent_the_one_with_the_process_is_parked() {
+    let state = test_state();
+    let (_ws, tabs) = seed_workspace(&state, 1).await;
+    set_always_available(&state, true);
+    let idle = seed_agent_block(&state, &tabs[0], "ag-dup2").await;
+    let running = seed_block(&state, &tabs[0], serde_json::json!({ "view": "agent", "agentId": "ag-dup2" })).await;
+    crate::backend::agent_state::test_support::register_quiet(&running, 1000);
+    let ctx = SagaCtx::new(&state, crate::sagas::alloc_saga_id(&state));
+
+    assert_eq!(park_agent_blocks(&ctx, &[running.clone()], false).await, vec![running.clone()]);
+    assert!(park_agent_blocks(&ctx, &[idle.clone()], false).await.is_empty(), "the other is closed as before");
+    crate::backend::blockcontroller::delete_controller(&running);
+}
+
+/// A running agent whose block has no desired state (opened before it existed) is wanted running once
+/// its pane is closed; one that is not running is left alone.
+#[tokio::test]
+async fn closing_the_pane_of_a_running_agent_records_it_as_wanted_running() {
+    use crate::server::app_api::agent_attach::desired_of;
+    let state = test_state();
+    let (_ws, tabs) = seed_workspace(&state, 1).await;
+    set_always_available(&state, true);
+    let running = seed_agent_block(&state, &tabs[0], "ag-run").await;
+    crate::backend::agent_state::test_support::register_quiet(&running, 1000);
+    let exited = seed_agent_block(&state, &tabs[0], "ag-exited").await;
+    let ctx = SagaCtx::new(&state, crate::sagas::alloc_saga_id(&state));
+
+    park_agent_blocks(&ctx, &[running.clone(), exited.clone()], false).await;
+
+    let get = |id: &str| desired_of(&state.mstore.get::<crate::backend::obj::Block>(id).unwrap().unwrap());
+    assert_eq!(get(&running).as_deref(), Some("running"));
+    assert_eq!(get(&exited), None);
+    crate::backend::blockcontroller::delete_controller(&running);
 }

@@ -40,6 +40,45 @@ pub(crate) fn is_parkable(state: &AppState, block_id: &str) -> bool {
     obj::meta_get_string(&block.meta, "view", "") == "agent" && agent_of_block(state, block_id, &block).is_some()
 }
 
+/// An agent block that is one of several for the same agent, and not the one to keep. Layouts from before
+/// one block per agent can hold two; parking both would leave the agent two parked blocks. The one
+/// that runs the agent's process is kept, else the one closing is dropped as it would have been.
+fn is_extra_block_of_its_agent(state: &AppState, block_id: &str) -> bool {
+    let Ok(Some(block)) = state.mstore.get::<Block>(block_id) else {
+        return false;
+    };
+    let Some(agent) = agent_of_block(state, block_id, &block) else {
+        return false;
+    };
+    let Ok(blocks) = crate::server::app_api::agent_block::blocks_in_tabs_or_parked(&state.mstore) else {
+        return false;
+    };
+    let runs = |id: &str| {
+        crate::backend::blockcontroller::get_controller(id)
+            .is_some_and(|c| c.get_runtime_status().shellprocstatus == crate::backend::blockcontroller::STATUS_RUNNING)
+    };
+    let others: Vec<String> = blocks
+        .into_iter()
+        .filter(|(b, _)| b.oid != block_id && agent_of_block(state, &b.oid, b).is_some_and(|i| i.id == agent.id))
+        .map(|(b, _)| b.oid)
+        .collect();
+    !others.is_empty() && !(runs(block_id) && !others.iter().any(|id| runs(id)))
+}
+
+/// An agent that is running when its pane closes is wanted running, so a restart brings it back
+/// (`restart_resume`); a block from before desired states has no record of it.
+fn record_running_as_desired(state: &AppState, block_id: &str) {
+    use crate::server::app_api::agent_attach::{desired_of, set_desired, DESIRED_RUNNING};
+    let Ok(Some(block)) = state.mstore.get::<Block>(block_id) else {
+        return;
+    };
+    let running = crate::backend::blockcontroller::get_controller(block_id)
+        .is_some_and(|c| c.get_runtime_status().shellprocstatus == crate::backend::blockcontroller::STATUS_RUNNING);
+    if running && desired_of(&block).is_none() {
+        set_desired(&state.mstore, block_id, DESIRED_RUNNING);
+    }
+}
+
 /// Whether a block that is closing now is kept: parkable, with the setting on.
 pub(crate) fn keeps_block(state: &AppState, block_id: &str) -> bool {
     enabled(state) && is_parkable(state, block_id)
@@ -57,6 +96,12 @@ pub(crate) async fn park_agent_blocks(ctx: &SagaCtx<'_>, block_ids: &[String], f
         if !is_parkable(ctx.state, block_id) {
             continue;
         }
+        // An explicit detach parks whatever it is asked to; a close drops the extra block of an agent.
+        if !force && is_extra_block_of_its_agent(ctx.state, block_id) {
+            tracing::info!(block_id = %block_id, "closing a second block of the same agent: it is closed, not parked");
+            continue;
+        }
+        record_running_as_desired(ctx.state, block_id);
         let tab_id = match ctx.state.srv_state.lock().await.blocks.get(block_id) {
             Some(b) if !b.tab_id.is_empty() => b.tab_id.clone(),
             _ => continue,
