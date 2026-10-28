@@ -17,6 +17,6 @@ requester: string,
  */
 approver?: string, deadline_ms: number, 
 /**
- * `pending` → `vetoed`, or `proceeding` → `done` / `failed`.
+ * `pending` → `vetoed` or `cancelled`, or `proceeding` → `done` / `failed`.
  */
-status: "pending" | "vetoed" | "proceeding" | "done" | "failed", error?: string, };
+status: "pending" | "vetoed" | "cancelled" | "proceeding" | "done" | "failed", error?: string, };

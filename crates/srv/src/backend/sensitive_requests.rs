@@ -31,6 +31,8 @@ pub enum Status {
     Asked,
     /// Approved: the countdown runs and the person can still stop it.
     Pending,
+    /// The countdown ended and the operation is under way: no longer cancellable.
+    Running,
     Denied,
     /// The requester withdrew it.
     Cancelled,
@@ -43,9 +45,9 @@ pub enum Status {
 }
 
 impl Status {
-    /// Asked or pending: still undecided or counting down.
+    /// Not ended: undecided, counting down or under way.
     pub fn is_open(self) -> bool {
-        matches!(self, Status::Asked | Status::Pending)
+        matches!(self, Status::Asked | Status::Pending | Status::Running)
     }
 }
 
@@ -199,6 +201,9 @@ impl Registry {
             if !r.asked_by(requester_uid) {
                 return Err("FORBIDDEN: only an agent that asked can cancel it".to_string());
             }
+            if r.status == Status::Running {
+                return Err(format!("request {} is already under way", r.id));
+            }
             if !r.status.is_open() {
                 return Err(format!("request {} has ended ({})", r.id, status_word(r.status)));
             }
@@ -212,6 +217,18 @@ impl Registry {
                 r.requester_uid = next.uid;
                 r.requester_slug = next.slug;
             }
+            Ok(())
+        })
+    }
+
+    /// The countdown ended: `pending` becomes `running`, atomically, so a
+    /// request withdrawn or vetoed meanwhile is not run.
+    pub fn start(&self, id: &str) -> Result<Request, String> {
+        self.change(id, |r| {
+            if r.status != Status::Pending {
+                return Err(format!("request {} is {}, not approved", r.id, status_word(r.status)));
+            }
+            r.status = Status::Running;
             Ok(())
         })
     }

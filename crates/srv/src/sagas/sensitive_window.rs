@@ -26,6 +26,7 @@ use serde::Serialize;
 
 use crate::backend::sensitive_requests::{self as requests, Request, Status};
 use crate::server::AppState;
+use agentmux_common::time::now_ms;
 
 pub const EVENT_SENSITIVE_PENDING: &str = "sensitive:pending";
 pub const EVENT_SENSITIVE_CLEARED: &str = "sensitive:cleared";
@@ -48,8 +49,8 @@ pub struct SensitiveView {
     pub approver: Option<String>,
     #[ts(type = "number")]
     pub deadline_ms: i64,
-    /// `pending` → `vetoed`, or `proceeding` → `done` / `failed`.
-    #[ts(type = r#""pending" | "vetoed" | "proceeding" | "done" | "failed""#)]
+    /// `pending` → `vetoed` or `cancelled`, or `proceeding` → `done` / `failed`.
+    #[ts(type = r#""pending" | "vetoed" | "cancelled" | "proceeding" | "done" | "failed""#)]
     pub status: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -91,10 +92,6 @@ pub fn register_runner(op: &'static str, runner: Runner) {
 
 fn runner_for(op: &str) -> Option<Runner> {
     RUNNERS.lock().unwrap_or_else(|e| e.into_inner()).get(op).cloned()
-}
-
-fn now_ms() -> i64 {
-    agentmux_common::time::now_ms()
 }
 
 pub fn status(request_id: &str) -> Option<SensitiveView> {
@@ -152,8 +149,17 @@ pub fn open(state: &AppState, request_id: &str, window: Duration) -> Result<Sens
         if !begin(&v.request_id) {
             return;
         }
+        // A request withdrawn in the last moment is not run.
+        let request = match requests::registry().start(&v.request_id) {
+            Ok(request) => request,
+            Err(_) => {
+                set_status(&v.request_id, "cancelled", None);
+                cleared(&state, &v.request_id, "cancelled");
+                return;
+            }
+        };
         cleared(&state, &v.request_id, "proceeding");
-        let outcome = run(&state, &v.request_id).await;
+        let outcome = run(&state, request).await;
         let (status, error, end) = match outcome {
             Ok(()) => ("done", None, Status::Done),
             Err(e) => ("failed", Some(e), Status::Failed),
@@ -185,10 +191,14 @@ fn set_status(request_id: &str, status: &'static str, error: Option<String>) {
     }
 }
 
-async fn run(state: &AppState, request_id: &str) -> Result<(), String> {
-    let request = requests::registry().get(request_id).ok_or_else(|| format!("no request {request_id}"))?;
+/// Run the operation in a task of its own, so one that panics settles the
+/// window as failed instead of leaving it counted as under way.
+async fn run(state: &AppState, request: Request) -> Result<(), String> {
     let runner = runner_for(&request.op).ok_or_else(|| format!("nothing runs {} yet", request.op))?;
-    runner(state.clone(), request).await
+    match tokio::spawn(runner(state.clone(), request)).await {
+        Ok(result) => result,
+        Err(e) => Err(format!("the operation stopped unexpectedly: {e}")),
+    }
 }
 
 /// The person vetoes the countdown: `vetoed`, or `too_late` once it has begun
@@ -213,6 +223,25 @@ pub fn veto(state: &AppState, request_id: &str) -> &'static str {
     audit(state, &view, "sensitive.veto", true, None, "vetoed");
     tracing::info!(request_id, "sensitive request: vetoed by the person");
     "vetoed"
+}
+
+/// The request was withdrawn (see `Registry::cancel`) while the countdown ran:
+/// end it, so the banner stops counting for an operation that will not run.
+/// `cancelled`, or `too_late` once it has begun or ended.
+pub fn cancelled(state: &AppState, request_id: &str) -> &'static str {
+    {
+        let mut map = entries();
+        match map.get_mut(request_id) {
+            Some(e) if e.view.status == "pending" => {
+                e.view.status = "cancelled";
+                e.finished_at_ms = Some(now_ms());
+                e.wake.notify_one();
+            }
+            _ => return "too_late",
+        }
+    }
+    cleared(state, request_id, "cancelled");
+    "cancelled"
 }
 
 /// The person approves it now, skipping the rest of the wait: `approved_now`,

@@ -156,3 +156,48 @@ async fn only_an_approved_request_gets_a_countdown_and_the_clock_never_restarts(
     veto(&state, &id);
     assert!(!pending().iter().any(|v| v.request_id == id), "a vetoed one is no longer counting down");
 }
+
+#[tokio::test]
+async fn a_request_withdrawn_during_the_countdown_does_not_run() {
+    let state = test_state();
+    let ran = Arc::new(AtomicUsize::new(0));
+    register_runner("widget_install", counting_runner(&ran, Ok(())));
+    let id = approved("widget_install", &[("widget", "w"), ("publisher", "p"), ("permissions", "storage")]);
+    open(&state, &id, Duration::from_secs(600)).unwrap();
+    assert_eq!(requests::registry().cancel(&id, "u-asker", now_ms()).unwrap().status, Status::Cancelled);
+    assert_eq!(cancelled(&state, &id), "cancelled");
+    assert_eq!(status(&id).unwrap().status, "cancelled", "the banner stops counting");
+    assert_eq!(cancelled(&state, &id), "too_late");
+    assert_eq!(veto(&state, &id), "too_late");
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert_eq!(ran.load(Ordering::SeqCst), 0);
+    assert_eq!(requests::registry().get(&id).unwrap().status, Status::Cancelled);
+}
+
+#[tokio::test]
+async fn a_withdrawal_in_the_last_moment_is_still_caught_before_the_run() {
+    let state = test_state();
+    let ran = Arc::new(AtomicUsize::new(0));
+    register_runner("vault_use", counting_runner(&ran, Ok(())));
+    let id = approved("vault_use", &[("entry", "e"), ("kind", "login")]);
+    open(&state, &id, Duration::from_millis(40)).unwrap();
+    // Withdrawn in the registry, with nobody telling the window.
+    requests::registry().cancel(&id, "u-asker", now_ms()).unwrap();
+    assert_eq!(settled(&id).await.status, "cancelled");
+    assert_eq!(ran.load(Ordering::SeqCst), 0, "the run is claimed in the registry first");
+    assert_eq!(requests::registry().get(&id).unwrap().status, Status::Cancelled);
+}
+
+#[tokio::test]
+async fn an_operation_that_panics_is_settled_as_failed() {
+    let state = test_state();
+    register_runner("upgrade", Arc::new(|_, _| Box::pin(async { panic!("boom") })));
+    let id = approved("upgrade", &[("version", "9")]);
+    open(&state, &id, Duration::from_millis(10)).unwrap();
+    let done = settled(&id).await;
+    assert_eq!(done.status, "failed");
+    assert!(done.error.unwrap().contains("stopped unexpectedly"));
+    let r = requests::registry().get(&id).unwrap();
+    assert_eq!(r.status, Status::Failed, "it no longer counts as open");
+    assert!(!r.status.is_open());
+}
