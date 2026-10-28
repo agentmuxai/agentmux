@@ -15,7 +15,17 @@ bad() { fail=$((fail+1)); printf '  FAIL  %s\n     -> %s\n' "$1" "${2:-}"; }
 BIN="$TMP/bin"; mkdir -p "$BIN"
 fake() { printf '#!/bin/sh\n%s\n' "$2" > "$BIN/$1"; chmod +x "$BIN/$1"; }
 fake uname 'echo x86_64'
-fake curl 'case "$*" in */download/*) case "$*" in *" -L "*" --proto-redir =https "*) cat "$FAKE_DOWNLOAD";; esac;; *) cat "$FAKE_LISTING";; esac'
+fake curl 'echo "$*" >> "$FAKE_CURL_LOG"
+case "$*" in
+*" -w "*) # a signed-release file: into -o, its status code on stdout
+  for a in "$@"; do [ "${prev:-}" = -o ] && out=$a; prev=$a; url=$a; done
+  name=${url##*/}
+  if [ -n "${FAKE_SIGNED_FAIL:-}" ]; then printf 503
+  elif [ -f "$FAKE_SIGNED_DIR/$name" ]; then cp "$FAKE_SIGNED_DIR/$name" "$out"; printf 200
+  else printf 404; fi;;
+*/download/*) case "$*" in *" -L "*" --proto-redir =https "*) cat "$FAKE_DOWNLOAD";; esac;;
+*) cat "$FAKE_LISTING";;
+esac'
 fake dpkg-query 'case "$1" in -S) [ "$FAKE_OWNER" = deb ];; -W) printf %s "$FAKE_INSTALLED";; esac'
 fake dpkg-deb 'case "$3" in Package) echo "$FAKE_NAME";; Version) echo "$FAKE_VERSION";; Architecture) echo "${FAKE_ARCH:-amd64}";; esac'
 fake dpkg '[ "$1" = --compare-versions ] && [ "$3" = gt ] && [ "$(printf "%s\n%s\n" "$2" "$4" | sort -V | tail -1)" = "$2" ] && [ "$2" != "$4" ]'
@@ -56,14 +66,25 @@ JSON
 }
 
 run() { # runs the helper with the fakes; args are the helper's. Output in $TMP/out, status in $?
-    : > "$TMP/log"
+    : > "$TMP/log"; : > "$TMP/curl.log"
     env -i HOME="$TMP" AGENTMUX_HELPER_TEST=1 AGENTMUX_HELPER_PATH="$BIN" AGENTMUX_QUIT_WAIT="${QUIT_WAIT:-2}" \
         AGENTMUX_CACHE_DIR="$TMP/cache" AGENTMUX_STATE_DIR="$TMP/state" AGENTMUX_INSTALL_ROOT="$TMP/opt" AGENTMUX_PROC_DIR="$TMP/proc" \
-        AGENTMUX_DOWNLOAD_BASE=https://example.test/download FAKE_DOWNLOAD="$TMP/download" FAKE_LISTING="$TMP/listing.json" FAKE_LOG="$TMP/log" FAKE_OWNER="${FAKE_OWNER:-deb}" FAKE_INSTALLED="${FAKE_INSTALLED:-0.60.1}" \
+        AGENTMUX_DOWNLOAD_BASE="${DOWNLOAD_BASE:-https://example.test/download}" FAKE_DOWNLOAD="$TMP/download" FAKE_LISTING="$TMP/listing.json" FAKE_LOG="$TMP/log" FAKE_CURL_LOG="$TMP/curl.log" FAKE_SIGNED_DIR="$TMP/signed" FAKE_SIGNED_FAIL="${FAKE_SIGNED_FAIL:-}" AGENTMUX_HELPER_STRICT_BASE="${STRICT_BASE:-}" FAKE_OWNER="${FAKE_OWNER:-deb}" FAKE_INSTALLED="${FAKE_INSTALLED:-0.60.1}" \
         FAKE_NAME="${FAKE_NAME:-agentmux}" FAKE_VERSION="${FAKE_VERSION:-0.60.2}" FAKE_ARCH="${FAKE_ARCH:-}" \
         sh "$HELPER" "$@" > "$TMP/out" 2> "$TMP/err"
 }
-mkdir -p "$TMP/proc"
+mkdir -p "$TMP/proc" "$TMP/opt/bin" "$TMP/signed"
+# The install's launcher, whose --verify-update checks the file against the signed manifest (tested in
+# Rust, crates/launcher/src/verify_update.rs). Here it only answers as told: 10 = the release predates signing.
+cat > "$TMP/opt/bin/agentmux-launcher" <<LAUNCHER
+#!/bin/sh
+echo "\$*" > "$TMP/verify.args"
+cat "$TMP/verify.msg" >&2
+exit \$(cat "$TMP/verify.rc")
+LAUNCHER
+chmod +x "$TMP/opt/bin/agentmux-launcher"
+verify() { printf '%s' "$1" > "$TMP/verify.rc"; printf '%s' "${2:-}" > "$TMP/verify.msg"; }
+verify 10
 
 deb="$TMP/updates/AgentMux_0.60.2_amd64.deb"; rpm="$TMP/updates/AgentMux-0.60.2-1.x86_64.rpm"
 mkdir -p "$TMP/updates"; printf 'deb bytes' > "$deb"; printf 'rpm bytes' > "$rpm"
@@ -97,6 +118,37 @@ FAKE_OWNER=none run "$deb" 0.60.2 $dead_pid; st=$?; refused "an install neither 
 listing "AgentMux_0.60.9_amd64.deb" "$(sha "$deb")"
 FAKE_OWNER=deb run "$deb" 0.60.2 $dead_pid; st=$?; refused "a release whose listing doesn't name the file"
 listing "AgentMux_0.60.2_amd64.deb" "$(sha "$deb")"
+
+# A signed release (0.60.4 on): the three files are fetched from the release's own address, the
+# install's launcher decides, and GitHub's API listing is not read at all.
+for f in envelope.json envelope.json.sig manifest.json; do printf 'signed %s' "$f" > "$TMP/signed/AgentMux-0.60.2-$f"; done
+verify 0
+FAKE_OWNER=deb run "$deb" 0.60.2 $dead_pid; st=$?
+if [ $st = 0 ] && grep -q '^READY$' "$TMP/out" && grep -q 'apt-get install' "$TMP/log" && ! grep -q 'api\|releases/tags' "$TMP/curl.log" \
+    && grep -q "download/v0.60.2/AgentMux-0.60.2-envelope.json\$" "$TMP/curl.log" && grep -q "download/v0.60.2/AgentMux-0.60.2-manifest.json\$" "$TMP/curl.log" \
+    && grep -q -e "^--verify-update 0.60.2 .*/signed .*/AgentMux_0.60.2_amd64.deb\$" "$TMP/verify.args"; then
+    ok "a signed release: its files are fetched, the launcher verifies, GitHub's listing is not read, installed"
+else bad "a signed release" "status $st: $(cat "$TMP/out" "$TMP/err" "$TMP/log" "$TMP/verify.args") curl: $(cat "$TMP/curl.log")"; fi
+verify 1 "The signature on v0.60.2 doesn't match, so AgentMux won't download it. Don't install it; tell the AgentMux team."
+FAKE_OWNER=deb run "$deb" 0.60.2 $dead_pid; st=$?; refused "a file the signed manifest refuses"
+grep -q "signature on v0.60.2 doesn't match" "$TMP/err" && ok "...and the person reads the launcher's own words" || bad "the refusal's message" "$(cat "$TMP/err")"
+FAKE_SIGNED_FAIL=1 FAKE_OWNER=deb run "$deb" 0.60.2 $dead_pid; st=$?; refused "a release whose files GitHub won't serve"
+grep -q "unreachable:GitHub didn't answer\$" "$TMP/verify.args" && ok "...which the launcher is told is unreachable, not unsigned" || bad "the unreachable hand-over" "$(cat "$TMP/verify.args")"
+rm -f "$TMP/opt/bin/agentmux-launcher"
+FAKE_OWNER=deb run "$deb" 0.60.2 $dead_pid; st=$?; refused "an install without its launcher to check the signature"
+cat > "$TMP/opt/bin/agentmux-launcher" <<LAUNCHER
+#!/bin/sh
+echo "\$*" > "$TMP/verify.args"
+cat "$TMP/verify.msg" >&2
+exit \$(cat "$TMP/verify.rc")
+LAUNCHER
+chmod +x "$TMP/opt/bin/agentmux-launcher"
+rm -f "$TMP/signed"/*; verify 10
+for base in https://github.com/agentmuxai/agentmux-evil/releases/download https://github.com/agentmux/agentmux/releases/download https://github.com/agentmuxai/agentmux/releases/download/ http://github.com/agentmuxai/agentmux/releases/download https://github.com.evil.test/agentmuxai/agentmux/releases/download; do
+    STRICT_BASE=1 DOWNLOAD_BASE=$base FAKE_OWNER=deb run "$deb" 0.60.2 $dead_pid; st=$?; refused "a release address that is nearly AgentMux's ($base)"
+done
+STRICT_BASE=1 DOWNLOAD_BASE=https://github.com/agentmuxai/agentmux/releases/download FAKE_OWNER=deb run "$deb" 0.60.2 $dead_pid; st=$?
+if grep -q "releases/download/v0.60.2/AgentMux-0.60.2-envelope.json" "$TMP/curl.log"; then ok "AgentMux's own release address is the one fetched from"; else bad "the real address" "$(cat "$TMP/curl.log" "$TMP/err")"; fi
 
 # AgentMux is still running: from the launcher the helper was told about, or from the install by anyone.
 /bin/sleep 30 & SLEEPER=$!

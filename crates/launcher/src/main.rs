@@ -89,6 +89,7 @@ mod srv_spawner;
 #[cfg(unix)]
 mod stale_srv;
 mod state;
+mod verify_update;
 mod wrr;
 
 use binary_resolution::find_cef_binary;
@@ -125,6 +126,11 @@ fn suppress_os_crash_dialogs() {}
 /// Windows crash modal either. Spec:
 /// docs/specs/SPEC_SERVICE_SUPERVISION_AND_RECOVERY_2026_05_20.md.
 fn main() {
+    // `--verify-update`: the root helper of a .deb/.rpm upgrade asks for a downloaded
+    // package to be checked against the release's signed manifest. Nothing else starts.
+    if let Some(code) = verify_update::run_if_requested(&std::env::args().collect::<Vec<_>>()) {
+        std::process::exit(code);
+    }
     // Before any thread or child exists: an instance key inherited from the shell that
     // started this launcher goes no further; the launcher mints its own for srv and the host.
     agentmux_common::secret_env::discard_startup_secrets();
