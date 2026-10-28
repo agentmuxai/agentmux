@@ -46,6 +46,13 @@ async fn upgrade(state: AppState, request: Request) -> Result<(), String> {
 async fn widget_install(state: AppState, request: Request) -> Result<(), String> {
     let target = crate::server::widget_agent_handlers::take_target(&request.id).ok_or("the package this request was for is no longer known; ask again")?;
     let service = crate::backend::widget_packages::service().ok_or("widget packages aren't available on this AgentMux")?;
+    // The person may have answered meanwhile, in Settings: approved it themselves (nothing left to
+    // do) or turned it off (a later approval must not turn it back on).
+    match service.list().into_iter().find(|p| p.id == target.id).map(|p| p.state) {
+        Some(crate::backend::widget_packages::WidgetState::Disabled) => return Err("the person turned this widget off in the meantime; it stays off".to_string()),
+        Some(crate::backend::widget_packages::WidgetState::Approved) => return Ok(()),
+        _ => {}
+    }
     let svc = service.clone();
     let t = target.clone();
     tokio::task::spawn_blocking(move || svc.approve(&t.id, &t.hash, &t.signer)).await.map_err(|e| e.to_string())??;
@@ -90,7 +97,7 @@ mod tests {
         let reg = crate::backend::sensitive_requests::registry();
         let mut facts = crate::server::widget_agent_handlers::install_facts(pkg);
         facts.insert("widget".into(), format!("{} {}", facts["widget"], uuid::Uuid::new_v4().simple()));
-        let id = reg.request("u-asker", "asker", "widget_install", &facts, "", agentmux_common::time::now_ms()).unwrap().id;
+        let id = reg.request(&format!("u-{}", uuid::Uuid::new_v4().simple()), "asker", "widget_install", &facts, "", agentmux_common::time::now_ms()).unwrap().id;
         reg.get(&id).unwrap()
     }
 
@@ -125,6 +132,36 @@ mod tests {
         crate::server::widget_agent_handlers::remember_target("some-later-request", target("later"));
         assert_eq!(crate::server::widget_agent_handlers::take_target(&ended.id), None, "denied: forgotten");
         assert_eq!(crate::server::widget_agent_handlers::take_target(&open.id).unwrap().hash, "first");
+    }
+
+    #[tokio::test]
+    async fn a_widget_the_person_turned_off_or_approved_meanwhile_is_left_as_they_left_it() {
+        let state = crate::server::tests::test_state();
+        let off = installed(&state, "acme.runner-off", "sandboxed", json!([])).await;
+        let service = crate::backend::widget_packages::service().unwrap();
+        // The person approves it in Settings, then turns it off.
+        service.approve(&off.id, &off.hash, "").unwrap();
+        service.set_enabled(&off.id, false).unwrap();
+        crate::backend::widget_packages::refresh_off_thread(&state.config_watcher, &state.event_bus, &state.broker).await;
+        let request = filed(&off);
+        crate::server::widget_agent_handlers::remember_target(
+            &request.id,
+            crate::server::widget_agent_handlers::InstallTarget { id: off.id.clone(), hash: off.hash.clone(), signer: String::new() },
+        );
+        let err = widget_install(state.clone(), request).await.unwrap_err();
+        assert!(err.contains("turned this widget off"), "{err}");
+        let after = service.list().into_iter().find(|p| p.id == off.id).unwrap();
+        assert_eq!(after.state, crate::backend::widget_packages::WidgetState::Disabled, "still off");
+        // One the person approved themselves needs nothing more.
+        let done = installed(&state, "acme.runner-done", "sandboxed", json!([])).await;
+        service.approve(&done.id, &done.hash, "").unwrap();
+        crate::backend::widget_packages::refresh_off_thread(&state.config_watcher, &state.event_bus, &state.broker).await;
+        let request = filed(&done);
+        crate::server::widget_agent_handlers::remember_target(
+            &request.id,
+            crate::server::widget_agent_handlers::InstallTarget { id: done.id.clone(), hash: done.hash.clone(), signer: String::new() },
+        );
+        widget_install(state, request).await.unwrap();
     }
 
     #[tokio::test]

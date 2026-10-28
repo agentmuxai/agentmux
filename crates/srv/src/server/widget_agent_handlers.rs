@@ -82,16 +82,11 @@ fn targets() -> std::sync::MutexGuard<'static, std::collections::HashMap<String,
     TARGETS.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// The most install requests remembered at once.
-const MAX_TARGETS: usize = 64;
-
 pub(crate) fn remember_target(request_id: &str, target: InstallTarget) {
     let mut t = targets();
-    // A request that ended without running (denied, vetoed, withdrawn) leaves no use for its entry.
+    // A request that ended without running (denied, vetoed, withdrawn) leaves no use for its entry,
+    // and what stays is bounded by the open requests there can be.
     t.retain(|id, _| crate::backend::sensitive_requests::registry().get(id).is_some_and(|r| r.status.is_open()));
-    if t.len() >= MAX_TARGETS {
-        t.clear();
-    }
     // The content is part of what the request shows, so a request joined is for the same content;
     // the first target stands in any case.
     t.entry(request_id.to_string()).or_insert(target);
