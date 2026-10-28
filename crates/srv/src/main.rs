@@ -190,6 +190,9 @@ async fn app_main() {
     // (SPEC_DURABLE_JEKT_DELIVERY_2026_09_24.md).
     server::jekt_held::install(&state);
 
+    // Agent panes no window reconnected to after the restart get their controller a minute in.
+    server::controller_backstop::install(&state);
+
     // The helper install asks first (SPEC_REMOTES_PANE_2026_10_05.md §4.9).
     server::app_api::connections::install_helper_consent(&state);
 
