@@ -510,12 +510,16 @@ fn set_status(id_store: &Store, identity_store: &Store, account_id: &str, status
 /// keychain). A plain (non-OAuth) secret is returned as it is. A grant the
 /// provider no longer accepts marks the account [`STATUS_NEEDS_REAUTH`] and
 /// fails with [`RECONNECT_NEEDED`]; it is never retried.
+///
+/// `broker` is the store behind AgentMux Cloud's sign-in and this install's key: the
+/// way a GitHub grant made through the broker is refreshed (spec §4.1 item 4).
 pub async fn access_token_for<H: OAuthHttp, S: TokenSecrets>(
     http: &H,
     secrets: &S,
     id_store: &Store,
     identity_store: &Store,
     account: &IdentityAccount,
+    broker: Option<&Arc<Store>>,
 ) -> Result<Zeroizing<String>, String> {
     if !matches!(account.secret_ref, SecretRef::Keychain { .. }) {
         return Err("this account keeps no token in the keychain".to_string());
@@ -558,10 +562,20 @@ pub async fn access_token_for<H: OAuthHttp, S: TokenSecrets>(
     };
     let cfg = crate::identity::oauth_client::config_for(&account.provider)
         .ok_or_else(|| format!("unknown OAuth provider: {}", account.provider))?;
-    let Some((_, client_id)) = account_client(account) else {
-        return Err(reauth("the account doesn't record the OAuth client it was made with".to_string()));
+    // The refresh token is single use at GitHub: what the broker returns is stored below
+    // before anything else can fail.
+    let refreshed = if crate::identity::github_connect::is_brokered(account) {
+        match broker {
+            Some(mstore) => crate::identity::github_connect::refresh_blob(mstore, &blob, now).await,
+            None => Err(RefreshError::Failed("no AgentMux Cloud connection to refresh the GitHub grant through".to_string())),
+        }
+    } else {
+        let Some((_, client_id)) = account_client(account) else {
+            return Err(reauth("the account doesn't record the OAuth client it was made with".to_string()));
+        };
+        refresh_blob(http, &cfg, &client_id, &blob, now).await
     };
-    match refresh_blob(http, &cfg, &client_id, &blob, now).await {
+    match refreshed {
         Ok(fresh) => {
             secrets.put(&account.id, &fresh.to_json()).await?;
             if account.status != "valid" {
