@@ -131,16 +131,44 @@ fn container_agents(store: &Store) -> Result<Vec<(String, String)>, String> {
     Ok(slugs)
 }
 
+/// A new LAN keypair, as the stores mint them.
+fn fresh_lan_pair() -> AgentLanKeypair {
+    use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+    let mut seed = [0u8; 32];
+    seed[..16].copy_from_slice(uuid::Uuid::new_v4().as_bytes());
+    seed[16..].copy_from_slice(uuid::Uuid::new_v4().as_bytes());
+    let (public, private) = agentmux_common::jekt_sign::generate_lan_keypair(seed);
+    AgentLanKeypair { public_key: BASE64.encode(public), private_key: BASE64.encode(private) }
+}
+
 /// Replace the keys of each container agent; how many agents had any.
 ///
-/// `host` is the host's LAN key table. A key there that is still the exposed one is replaced by the new
-/// one (or dropped, for the UID key), so the next lookup cannot adopt it back; a key another channel put
-/// there is not the exposed one and stays, so no other channel's key changes.
+/// `host` is the host's LAN key table. A key there that is still the exposed one is replaced by a new
+/// one, so the next lookup cannot adopt it back; a key another channel put there is not the exposed one
+/// and stays, so no other channel's key changes.
 fn rotate_container_keys(store: &Store, wan: &Wan, host: Option<&HostLanKeys>) -> Result<usize, String> {
     let mut rotated = 0;
     for (id, slug) in container_agents(store)? {
         let old_name = store.agent_lan_key_load(&slug).map_err(|e| format!("rotate_container_agent_keys: LAN key of {slug}: {e}"))?;
         let old_uid = store.agent_uid_lan_public_key_load(&id).map_err(|e| format!("rotate_container_agent_keys: UID LAN key of {slug}: {e}"))?;
+        // The host's keys first, with new keys made here: a failure leaves this channel untouched, so a
+        // retry still finds the exposed keys to match. (Replacing them afterwards lost them on a retry.)
+        // The channel's own rotation below makes keys of its own; once the host table is attached the
+        // channel follows the host's. An empty host slot is never left for a channel that still holds the
+        // exposed key to fill.
+        if let Some(host) = host {
+            let now = agentmux_common::time::now_secs();
+            if let Some(old) = &old_name {
+                let new = HostKey { pair: fresh_lan_pair(), created_at: now };
+                host.supersede(HostKeyKind::Name, &slug.to_lowercase(), &old.public_key, Some(&new))
+                    .map_err(|e| format!("rotate_container_agent_keys: host LAN key of {slug}: {e}"))?;
+            }
+            if let Some(old) = &old_uid {
+                let new = HostKey { pair: fresh_lan_pair(), created_at: now };
+                host.supersede(HostKeyKind::Uid, &id, old, Some(&new))
+                    .map_err(|e| format!("rotate_container_agent_keys: host UID LAN key of {slug}: {e}"))?;
+            }
+        }
         let uid_copies = store
             .agent_uid_keys_delete(&id)
             .map_err(|e| format!("rotate_container_agent_keys: UID keys of {slug}: {e}"))?;
@@ -166,30 +194,6 @@ fn rotate_container_keys(store: &Store, wan: &Wan, host: Option<&HostLanKeys>) -
         let lan = store
             .agent_lan_key_rotate(&slug)
             .map_err(|e| format!("rotate_container_agent_keys: LAN key of {slug}: {e}"))?;
-        if let Some(host) = host {
-            if let Some(old) = old_name {
-                let new = store
-                    .agent_lan_key_load(&slug)
-                    .map_err(|e| format!("rotate_container_agent_keys: LAN key of {slug}: {e}"))?
-                    .map(|pair| HostKey { pair, created_at: agentmux_common::time::now_secs() });
-                host.supersede(HostKeyKind::Name, &slug.to_lowercase(), &old.public_key, new.as_ref())
-                    .map_err(|e| format!("rotate_container_agent_keys: host LAN key of {slug}: {e}"))?;
-            }
-            if let Some(old) = old_uid {
-                // Replaced, not dropped: an empty slot would let a channel that still holds the exposed
-                // UID key publish it again.
-                let now = agentmux_common::time::now_secs();
-                let new = store
-                    .agent_uid_keys_ensure(&id)
-                    .map_err(|e| format!("rotate_container_agent_keys: UID keys of {slug}: {e}"))?
-                    .map(|(keys, _)| HostKey {
-                        pair: AgentLanKeypair { public_key: keys.lan.public_key, private_key: keys.lan.private_key },
-                        created_at: now,
-                    });
-                host.supersede(HostKeyKind::Uid, &id, &old, new.as_ref())
-                    .map_err(|e| format!("rotate_container_agent_keys: host UID LAN key of {slug}: {e}"))?;
-            }
-        }
         rotated += usize::from(jekt || lan || wan_removed || uid_copies);
     }
     Ok(rotated)
@@ -328,11 +332,25 @@ mod tests {
 
         let fresh = store.agent_lan_key_load(&boxed).unwrap().unwrap();
         assert_ne!(fresh, exposed);
-        assert_eq!(host_key(&host, HostKeyKind::Name, &boxed).unwrap().pair, fresh, "the host's key is the new one");
-        let fresh_uid = store.agent_uid_keys_ensure(&id).unwrap().unwrap().0.lan;
-        let on_host = host_key(&host, HostKeyKind::Uid, &id).expect("the slot is filled, not left empty for a stale channel to reclaim");
-        assert_eq!(on_host.pair.public_key, fresh_uid.public_key, "the host's UID key is the new one");
-        assert_ne!(on_host.pair.public_key, exposed_uid_public, "and not the exposed one");
+        let on_host = host_key(&host, HostKeyKind::Name, &boxed).expect("the slot is filled");
+        assert_ne!(on_host.pair, exposed, "the exposed key is off the host");
+        let uid_on_host = host_key(&host, HostKeyKind::Uid, &id).expect("the slot is filled, not left empty for a stale channel to reclaim");
+        assert_ne!(uid_on_host.pair.public_key, exposed_uid_public, "and not the exposed UID key either");
+    }
+
+    #[test]
+    fn a_host_that_cannot_be_updated_fails_the_migration_before_anything_is_rotated() {
+        let store = Store::open_in_memory().unwrap();
+        let (dir, host) = host_table();
+        let boxed = agent(&store, "Boxed", "container");
+        let exposed = store.agent_lan_key_ensure(&boxed).unwrap();
+        let now = agentmux_common::time::now_secs();
+        host.replace(HostKeyKind::Name, &boxed, &HostKey { pair: exposed.clone(), created_at: now }).unwrap();
+        host.disconnect();
+        drop(dir);
+
+        assert!(rotate_container_keys(&store, &Wan::Unavailable, Some(&host)).is_err());
+        assert_eq!(store.agent_lan_key_load(&boxed).unwrap().unwrap(), exposed, "nothing was rotated, so a retry still finds the exposed key");
     }
 
     #[test]

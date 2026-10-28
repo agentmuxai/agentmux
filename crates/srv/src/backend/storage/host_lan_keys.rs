@@ -146,6 +146,12 @@ impl HostLanKeys {
         })
     }
 
+    /// Test helper: drop the connection and let the next call find the file gone.
+    #[cfg(test)]
+    pub(crate) fn disconnect(&self) {
+        *self.conn.lock().unwrap() = None;
+    }
+
     /// Replace (with `None`, drop) the host's key for `subject`, but only while it is still the key with
     /// public half `old_public`: a key exposed to a container is taken off the host, and a key another
     /// channel has since put there is left alone. `true` when the host's key was changed.
