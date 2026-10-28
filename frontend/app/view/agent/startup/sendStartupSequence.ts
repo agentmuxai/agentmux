@@ -6,6 +6,7 @@
 import type { AgentDefinition } from "@/app/store/rpc-api";
 import type { AgentAccounts } from "@/app/view/identity/identity-model";
 import { buildStartupPayload, resolveAccounts } from "./buildStartupPayload";
+import { OPENING_SUMMARY_PROMPT, takeOpenedByPerson } from "./opening-summary";
 
 /**
  * Everything the startup sequence reads or does, injected so it runs without a
@@ -33,8 +34,13 @@ export interface StartupSequenceDeps {
  * turn. See docs/specs/SPEC_AGENT_STARTUP_SEQUENCE_2026_04_16.md.
  */
 export async function sendStartupSequence(d: StartupSequenceDeps): Promise<void> {
-    // Skip if this is a resumed session
-    if (d.sessionId()) return;
+    // The note an explicit open left for this agent is used up by the first pane that asks.
+    const openedByPerson = takeOpenedByPerson(d.agent()?.id);
+    // A resumed session has no startup payload; one the person just opened gets the opening update.
+    if (d.sessionId()) {
+        if (openedByPerson) await d.send(OPENING_SUMMARY_PROMPT).catch((err) => d.log("warn", `opening update failed: ${err}`, "warn"));
+        return;
+    }
 
     try {
         const agent = d.agent();

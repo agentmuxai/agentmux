@@ -10,6 +10,7 @@ import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { noteOpenedByPerson } from "@/app/view/agent/startup/opening-summary";
 import type { AgentRuntime } from "@/types/rpc/AgentRuntime";
 import { createRoot } from "solid-js";
 import { createAgentRuntimeStore, type AgentRuntimeStore } from "./agent-runtime";
@@ -42,6 +43,8 @@ export function sharedAgentRuntime(): AgentRuntimeStore {
  *  focuses the pane that shows it. Resolves to why srv refused, for the caller to say (the agent is open
  *  elsewhere, or its provider can't run here). */
 export async function openAgentInActiveTab(agent: Pick<AgentRuntime, "agent_id" | "name">): Promise<string | undefined> {
+    // Before the call: the pane can mount before srv answers. The agent opens with its update.
+    noteOpenedByPerson(agent.agent_id);
     try {
         await RpcApi.AgentOpenCommand(TabRpcClient, {
             agent_id: agent.agent_id,
