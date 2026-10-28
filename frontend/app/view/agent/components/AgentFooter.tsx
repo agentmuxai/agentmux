@@ -42,6 +42,7 @@ import { caretAtSelectionEdge } from "./composer-caret";
 import { InputHistorySearch } from "./InputHistorySearch";
 import { AttachmentTray } from "../attachments/AttachmentTray";
 import { getAttachmentDraft } from "../attachments/attachment-draft";
+import { registerComposerRestore, joinDraft } from "../composer-restore";
 import { getComposerDraft, getSentHistory, saveSentHistory, SENT_HISTORY_MAX, setComposerDraft } from "../reload-persistence";
 import { agentDraft, agentHistory, historyAgentId, loadOlderAgentHistory, movedCursor, rememberSent, saveAgentDraft, watchAgentHistory } from "../agent-input-history";
 import { attachmentNoun, fileKind } from "../attachments/file-kind";
@@ -935,6 +936,17 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
     // suggestion after the user already started typing.
     onMount(() => {
         props.isComposerEmptyRef?.(() => (textareaRef?.value.length ?? 0) === 0);
+    });
+    // A message the pane took off the conversation and could not use comes back here (composer-restore.ts).
+    onMount(() => {
+        if (!draftBlockId) return;
+        onCleanup(
+            registerComposerRestore(draftBlockId, (restored) => {
+                if (!textareaRef) return;
+                setComposerValue(joinDraft(textareaRef.value, restored));
+                textareaRef.focus();
+            })
+        );
     });
 
     // Restore a draft left behind by a prior mount of this same block (a

@@ -55,7 +55,8 @@ import type { AgentPaneModel } from "@/app/store/agent-pane-model";
 import type { PaneFailure } from "@/app/store/agent-pane-state/types";
 import type { FailedTurnRecovery } from "../offline/failed-turn";
 import { failureToRow, isTransient, type FailureRow } from "../failure/failure-accessory";
-import { forgetRefusedSend, refusedSendOf } from "../failure/refused-send";
+import { refusedSendOf } from "../failure/refused-send";
+import { restoreRefusedSend } from "../failure/refused-send-restore";
 import { registerRecycleBlocker } from "@/app/store/recycle-blockers";
 import { copyErrorReport } from "@/app/errors/CopyErrorButton";
 import { formatErrorReport } from "@/app/errors/error-report";
@@ -474,7 +475,8 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
                     // Before the row clears: a clear the recovery didn't hear
                     // about first reads as the operator's send, not a dismiss.
                     opts.reconnect?.failureDismissed();
-                    forgetRefusedSend(opts.blockId);
+                    // A message this pane refused for another pane has nobody to send it now.
+                    restoreRefusedSend(opts.blockId);
                     endEpisode();
                 },
                 takeOver: opts.onTakeOver ? () => takeOver(pf.turnAttempted ?? true) : undefined,
