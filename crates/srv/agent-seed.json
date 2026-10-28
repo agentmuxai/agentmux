@@ -22,7 +22,8 @@
           "trigger": "startup",
           "skill_type": "prompt",
           "description": "Re-run tool verification checks and report status table",
-          "content": "Check your GitHub identity with `gh-agent auth status` where `gh-agent` is installed (plain `gh` reports \"not logged in\" for agents on purpose; never run `gh auth login`, and run `gh-agent doctor` if the check fails; if neither `gh-agent` nor `gh` is installed, as in some containers, report GitHub as N/A), your git identity (`git config user.name` and `git config user.email`), and that the AgentMux MCP server is connected (list peer agents). Report a status table with OK/FAIL for each check. Fix any failures automatically if possible."
+          "content": "Check your GitHub identity with `gh auth status` where `gh` is installed (if a `gh-agent` command is installed here, use `gh-agent auth status` instead, and run `gh-agent doctor` if it fails). If it says you are not logged in, report GitHub as not connected for this agent, and never run `gh auth login`: an agent's GitHub access is set up by AgentMux, not by logging in inside the agent. If neither `gh` nor `gh-agent` is installed, as in some containers, report GitHub as N/A. Check your git identity (`git config user.name` and `git config user.email`), and that the AgentMux MCP server is connected (list peer agents). Report a status table with OK/FAIL for each check. Fix any failures automatically if possible.",
+          "replaces_content_sha256": ["2735a3671393d524c305af35f0eaf60f8e8e409d1fbc4c1b65cf2aafd6768ec0"]
         }
       ]
     },
@@ -46,7 +47,8 @@
           "trigger": "startup",
           "skill_type": "prompt",
           "description": "Re-run tool verification checks and report status table",
-          "content": "Check your GitHub identity with `gh-agent auth status` where `gh-agent` is installed (plain `gh` reports \"not logged in\" for agents on purpose; never run `gh auth login`, and run `gh-agent doctor` if the check fails; if neither `gh-agent` nor `gh` is installed, as in some containers, report GitHub as N/A), your git identity (`git config user.name` and `git config user.email`), and that the AgentMux MCP server is connected (list peer agents). Report a status table with OK/FAIL for each check. Fix any failures automatically if possible."
+          "content": "Check your GitHub identity with `gh auth status` where `gh` is installed (if a `gh-agent` command is installed here, use `gh-agent auth status` instead, and run `gh-agent doctor` if it fails). If it says you are not logged in, report GitHub as not connected for this agent, and never run `gh auth login`: an agent's GitHub access is set up by AgentMux, not by logging in inside the agent. If neither `gh` nor `gh-agent` is installed, as in some containers, report GitHub as N/A. Check your git identity (`git config user.name` and `git config user.email`), and that the AgentMux MCP server is connected (list peer agents). Report a status table with OK/FAIL for each check. Fix any failures automatically if possible.",
+          "replaces_content_sha256": ["2735a3671393d524c305af35f0eaf60f8e8e409d1fbc4c1b65cf2aafd6768ec0"]
         }
       ]
     },
@@ -70,7 +72,8 @@
           "trigger": "startup",
           "skill_type": "prompt",
           "description": "Re-run tool verification checks and report status table",
-          "content": "Check your GitHub identity with `gh-agent auth status` where `gh-agent` is installed (plain `gh` reports \"not logged in\" for agents on purpose; never run `gh auth login`, and run `gh-agent doctor` if the check fails; if neither `gh-agent` nor `gh` is installed, as in some containers, report GitHub as N/A), your git identity (`git config user.name` and `git config user.email`), and that the AgentMux MCP server is connected (list peer agents). Report a status table with OK/FAIL for each check. Fix any failures automatically if possible."
+          "content": "Check your GitHub identity with `gh auth status` where `gh` is installed (if a `gh-agent` command is installed here, use `gh-agent auth status` instead, and run `gh-agent doctor` if it fails). If it says you are not logged in, report GitHub as not connected for this agent, and never run `gh auth login`: an agent's GitHub access is set up by AgentMux, not by logging in inside the agent. If neither `gh` nor `gh-agent` is installed, as in some containers, report GitHub as N/A. Check your git identity (`git config user.name` and `git config user.email`), and that the AgentMux MCP server is connected (list peer agents). Report a status table with OK/FAIL for each check. Fix any failures automatically if possible.",
+          "replaces_content_sha256": ["2735a3671393d524c305af35f0eaf60f8e8e409d1fbc4c1b65cf2aafd6768ec0"]
         }
       ]
     },
@@ -94,7 +97,8 @@
           "trigger": "startup",
           "skill_type": "prompt",
           "description": "Re-run tool verification checks and report status table",
-          "content": "Check your GitHub identity with `gh-agent auth status` where `gh-agent` is installed (plain `gh` reports \"not logged in\" for agents on purpose; never run `gh auth login`, and run `gh-agent doctor` if the check fails; if neither `gh-agent` nor `gh` is installed, as in some containers, report GitHub as N/A), your git identity (`git config user.name` and `git config user.email`), and that the AgentMux MCP server is connected (list peer agents). Report a status table with OK/FAIL for each check. Fix any failures automatically if possible."
+          "content": "Check your GitHub identity with `gh auth status` where `gh` is installed (if a `gh-agent` command is installed here, use `gh-agent auth status` instead, and run `gh-agent doctor` if it fails). If it says you are not logged in, report GitHub as not connected for this agent, and never run `gh auth login`: an agent's GitHub access is set up by AgentMux, not by logging in inside the agent. If neither `gh` nor `gh-agent` is installed, as in some containers, report GitHub as N/A. Check your git identity (`git config user.name` and `git config user.email`), and that the AgentMux MCP server is connected (list peer agents). Report a status table with OK/FAIL for each check. Fix any failures automatically if possible.",
+          "replaces_content_sha256": ["2735a3671393d524c305af35f0eaf60f8e8e409d1fbc4c1b65cf2aafd6768ec0"]
         }
       ]
     },
@@ -118,7 +122,8 @@
           "trigger": "startup",
           "skill_type": "prompt",
           "description": "Re-run tool verification checks and report status table",
-          "content": "Check your GitHub identity with `gh-agent auth status` where `gh-agent` is installed (plain `gh` reports \"not logged in\" for agents on purpose; never run `gh auth login`, and run `gh-agent doctor` if the check fails; if neither `gh-agent` nor `gh` is installed, as in some containers, report GitHub as N/A), your git identity (`git config user.name` and `git config user.email`), and that the AgentMux MCP server is connected (list peer agents). Report a status table with OK/FAIL for each check. Fix any failures automatically if possible."
+          "content": "Check your GitHub identity with `gh auth status` where `gh` is installed (if a `gh-agent` command is installed here, use `gh-agent auth status` instead, and run `gh-agent doctor` if it fails). If it says you are not logged in, report GitHub as not connected for this agent, and never run `gh auth login`: an agent's GitHub access is set up by AgentMux, not by logging in inside the agent. If neither `gh` nor `gh-agent` is installed, as in some containers, report GitHub as N/A. Check your git identity (`git config user.name` and `git config user.email`), and that the AgentMux MCP server is connected (list peer agents). Report a status table with OK/FAIL for each check. Fix any failures automatically if possible.",
+          "replaces_content_sha256": ["2735a3671393d524c305af35f0eaf60f8e8e409d1fbc4c1b65cf2aafd6768ec0"]
         }
       ]
     },
@@ -142,7 +147,8 @@
           "trigger": "startup",
           "skill_type": "prompt",
           "description": "Re-run tool verification checks and report status table",
-          "content": "Check your GitHub identity with `gh-agent auth status` where `gh-agent` is installed (plain `gh` reports \"not logged in\" for agents on purpose; never run `gh auth login`, and run `gh-agent doctor` if the check fails; if neither `gh-agent` nor `gh` is installed, as in some containers, report GitHub as N/A), your git identity (`git config user.name` and `git config user.email`), and that the AgentMux MCP server is connected (list peer agents). Report a status table with OK/FAIL for each check. Fix any failures automatically if possible."
+          "content": "Check your GitHub identity with `gh auth status` where `gh` is installed (if a `gh-agent` command is installed here, use `gh-agent auth status` instead, and run `gh-agent doctor` if it fails). If it says you are not logged in, report GitHub as not connected for this agent, and never run `gh auth login`: an agent's GitHub access is set up by AgentMux, not by logging in inside the agent. If neither `gh` nor `gh-agent` is installed, as in some containers, report GitHub as N/A. Check your git identity (`git config user.name` and `git config user.email`), and that the AgentMux MCP server is connected (list peer agents). Report a status table with OK/FAIL for each check. Fix any failures automatically if possible.",
+          "replaces_content_sha256": ["2735a3671393d524c305af35f0eaf60f8e8e409d1fbc4c1b65cf2aafd6768ec0"]
         }
       ]
     },
@@ -166,7 +172,8 @@
           "trigger": "startup",
           "skill_type": "prompt",
           "description": "Re-run tool verification checks and report status table",
-          "content": "Check your GitHub identity with `gh-agent auth status` where `gh-agent` is installed (plain `gh` reports \"not logged in\" for agents on purpose; never run `gh auth login`, and run `gh-agent doctor` if the check fails; if neither `gh-agent` nor `gh` is installed, as in some containers, report GitHub as N/A), your git identity (`git config user.name` and `git config user.email`), and that the AgentMux MCP server is connected (list peer agents). Report a status table with OK/FAIL for each check. Fix any failures automatically if possible."
+          "content": "Check your GitHub identity with `gh auth status` where `gh` is installed (if a `gh-agent` command is installed here, use `gh-agent auth status` instead, and run `gh-agent doctor` if it fails). If it says you are not logged in, report GitHub as not connected for this agent, and never run `gh auth login`: an agent's GitHub access is set up by AgentMux, not by logging in inside the agent. If neither `gh` nor `gh-agent` is installed, as in some containers, report GitHub as N/A. Check your git identity (`git config user.name` and `git config user.email`), and that the AgentMux MCP server is connected (list peer agents). Report a status table with OK/FAIL for each check. Fix any failures automatically if possible.",
+          "replaces_content_sha256": ["2735a3671393d524c305af35f0eaf60f8e8e409d1fbc4c1b65cf2aafd6768ec0"]
         }
       ]
     },
@@ -190,7 +197,8 @@
           "trigger": "startup",
           "skill_type": "prompt",
           "description": "Re-run tool verification checks and report status table",
-          "content": "Check your GitHub identity with `gh-agent auth status` where `gh-agent` is installed (plain `gh` reports \"not logged in\" for agents on purpose; never run `gh auth login`, and run `gh-agent doctor` if the check fails; if neither `gh-agent` nor `gh` is installed, as in some containers, report GitHub as N/A), your git identity (`git config user.name` and `git config user.email`), and that the AgentMux MCP server is connected (list peer agents). Report a status table with OK/FAIL for each check. Fix any failures automatically if possible."
+          "content": "Check your GitHub identity with `gh auth status` where `gh` is installed (if a `gh-agent` command is installed here, use `gh-agent auth status` instead, and run `gh-agent doctor` if it fails). If it says you are not logged in, report GitHub as not connected for this agent, and never run `gh auth login`: an agent's GitHub access is set up by AgentMux, not by logging in inside the agent. If neither `gh` nor `gh-agent` is installed, as in some containers, report GitHub as N/A. Check your git identity (`git config user.name` and `git config user.email`), and that the AgentMux MCP server is connected (list peer agents). Report a status table with OK/FAIL for each check. Fix any failures automatically if possible.",
+          "replaces_content_sha256": ["2735a3671393d524c305af35f0eaf60f8e8e409d1fbc4c1b65cf2aafd6768ec0"]
         }
       ]
     },
@@ -214,7 +222,8 @@
           "trigger": "startup",
           "skill_type": "prompt",
           "description": "Re-run tool verification checks and report status table",
-          "content": "Check your GitHub identity with `gh-agent auth status` where `gh-agent` is installed (plain `gh` reports \"not logged in\" for agents on purpose; never run `gh auth login`, and run `gh-agent doctor` if the check fails; if neither `gh-agent` nor `gh` is installed, as in some containers, report GitHub as N/A), your git identity (`git config user.name` and `git config user.email`), and that the AgentMux MCP server is connected (list peer agents). Report a status table with OK/FAIL for each check. Fix any failures automatically if possible."
+          "content": "Check your GitHub identity with `gh auth status` where `gh` is installed (if a `gh-agent` command is installed here, use `gh-agent auth status` instead, and run `gh-agent doctor` if it fails). If it says you are not logged in, report GitHub as not connected for this agent, and never run `gh auth login`: an agent's GitHub access is set up by AgentMux, not by logging in inside the agent. If neither `gh` nor `gh-agent` is installed, as in some containers, report GitHub as N/A. Check your git identity (`git config user.name` and `git config user.email`), and that the AgentMux MCP server is connected (list peer agents). Report a status table with OK/FAIL for each check. Fix any failures automatically if possible.",
+          "replaces_content_sha256": ["2735a3671393d524c305af35f0eaf60f8e8e409d1fbc4c1b65cf2aafd6768ec0"]
         }
       ]
     },
@@ -238,7 +247,8 @@
           "trigger": "startup",
           "skill_type": "prompt",
           "description": "Re-run tool verification checks and report status table",
-          "content": "Check your GitHub identity with `gh-agent auth status` where `gh-agent` is installed (plain `gh` reports \"not logged in\" for agents on purpose; never run `gh auth login`, and run `gh-agent doctor` if the check fails; if neither `gh-agent` nor `gh` is installed, as in some containers, report GitHub as N/A), your git identity (`git config user.name` and `git config user.email`), and that the AgentMux MCP server is connected (list peer agents). Report a status table with OK/FAIL for each check. Fix any failures automatically if possible."
+          "content": "Check your GitHub identity with `gh auth status` where `gh` is installed (if a `gh-agent` command is installed here, use `gh-agent auth status` instead, and run `gh-agent doctor` if it fails). If it says you are not logged in, report GitHub as not connected for this agent, and never run `gh auth login`: an agent's GitHub access is set up by AgentMux, not by logging in inside the agent. If neither `gh` nor `gh-agent` is installed, as in some containers, report GitHub as N/A. Check your git identity (`git config user.name` and `git config user.email`), and that the AgentMux MCP server is connected (list peer agents). Report a status table with OK/FAIL for each check. Fix any failures automatically if possible.",
+          "replaces_content_sha256": ["2735a3671393d524c305af35f0eaf60f8e8e409d1fbc4c1b65cf2aafd6768ec0"]
         }
       ]
     },
@@ -262,7 +272,8 @@
           "trigger": "startup",
           "skill_type": "prompt",
           "description": "Re-run tool verification checks and report status table",
-          "content": "Check your GitHub identity with `gh-agent auth status` where `gh-agent` is installed (plain `gh` reports \"not logged in\" for agents on purpose; never run `gh auth login`, and run `gh-agent doctor` if the check fails; if neither `gh-agent` nor `gh` is installed, as in some containers, report GitHub as N/A), your git identity (`git config user.name` and `git config user.email`), and that the AgentMux MCP server is connected (list peer agents). Report a status table with OK/FAIL for each check. Fix any failures automatically if possible."
+          "content": "Check your GitHub identity with `gh auth status` where `gh` is installed (if a `gh-agent` command is installed here, use `gh-agent auth status` instead, and run `gh-agent doctor` if it fails). If it says you are not logged in, report GitHub as not connected for this agent, and never run `gh auth login`: an agent's GitHub access is set up by AgentMux, not by logging in inside the agent. If neither `gh` nor `gh-agent` is installed, as in some containers, report GitHub as N/A. Check your git identity (`git config user.name` and `git config user.email`), and that the AgentMux MCP server is connected (list peer agents). Report a status table with OK/FAIL for each check. Fix any failures automatically if possible.",
+          "replaces_content_sha256": ["2735a3671393d524c305af35f0eaf60f8e8e409d1fbc4c1b65cf2aafd6768ec0"]
         }
       ]
     },
@@ -286,7 +297,8 @@
           "trigger": "startup",
           "skill_type": "prompt",
           "description": "Re-run tool verification checks and report status table",
-          "content": "Check your GitHub identity with `gh-agent auth status` where `gh-agent` is installed (plain `gh` reports \"not logged in\" for agents on purpose; never run `gh auth login`, and run `gh-agent doctor` if the check fails; if neither `gh-agent` nor `gh` is installed, as in some containers, report GitHub as N/A), your git identity (`git config user.name` and `git config user.email`), and that the AgentMux MCP server is connected (list peer agents). Report a status table with OK/FAIL for each check. Fix any failures automatically if possible."
+          "content": "Check your GitHub identity with `gh auth status` where `gh` is installed (if a `gh-agent` command is installed here, use `gh-agent auth status` instead, and run `gh-agent doctor` if it fails). If it says you are not logged in, report GitHub as not connected for this agent, and never run `gh auth login`: an agent's GitHub access is set up by AgentMux, not by logging in inside the agent. If neither `gh` nor `gh-agent` is installed, as in some containers, report GitHub as N/A. Check your git identity (`git config user.name` and `git config user.email`), and that the AgentMux MCP server is connected (list peer agents). Report a status table with OK/FAIL for each check. Fix any failures automatically if possible.",
+          "replaces_content_sha256": ["2735a3671393d524c305af35f0eaf60f8e8e409d1fbc4c1b65cf2aafd6768ec0"]
         }
       ]
     },
@@ -310,7 +322,8 @@
           "trigger": "startup",
           "skill_type": "prompt",
           "description": "Re-run tool verification checks and report status table",
-          "content": "Check your GitHub identity with `gh-agent auth status` where `gh-agent` is installed (plain `gh` reports \"not logged in\" for agents on purpose; never run `gh auth login`, and run `gh-agent doctor` if the check fails; if neither `gh-agent` nor `gh` is installed, as in some containers, report GitHub as N/A), your git identity (`git config user.name` and `git config user.email`), and that the AgentMux MCP server is connected (list peer agents). Report a status table with OK/FAIL for each check. Fix any failures automatically if possible."
+          "content": "Check your GitHub identity with `gh auth status` where `gh` is installed (if a `gh-agent` command is installed here, use `gh-agent auth status` instead, and run `gh-agent doctor` if it fails). If it says you are not logged in, report GitHub as not connected for this agent, and never run `gh auth login`: an agent's GitHub access is set up by AgentMux, not by logging in inside the agent. If neither `gh` nor `gh-agent` is installed, as in some containers, report GitHub as N/A. Check your git identity (`git config user.name` and `git config user.email`), and that the AgentMux MCP server is connected (list peer agents). Report a status table with OK/FAIL for each check. Fix any failures automatically if possible.",
+          "replaces_content_sha256": ["2735a3671393d524c305af35f0eaf60f8e8e409d1fbc4c1b65cf2aafd6768ec0"]
         }
       ]
     },
@@ -334,7 +347,8 @@
           "trigger": "startup",
           "skill_type": "prompt",
           "description": "Re-run tool verification checks and report status table",
-          "content": "Check your GitHub identity with `gh-agent auth status` where `gh-agent` is installed (plain `gh` reports \"not logged in\" for agents on purpose; never run `gh auth login`, and run `gh-agent doctor` if the check fails; if neither `gh-agent` nor `gh` is installed, as in some containers, report GitHub as N/A), your git identity (`git config user.name` and `git config user.email`), and that the AgentMux MCP server is connected (list peer agents). Report a status table with OK/FAIL for each check. Fix any failures automatically if possible."
+          "content": "Check your GitHub identity with `gh auth status` where `gh` is installed (if a `gh-agent` command is installed here, use `gh-agent auth status` instead, and run `gh-agent doctor` if it fails). If it says you are not logged in, report GitHub as not connected for this agent, and never run `gh auth login`: an agent's GitHub access is set up by AgentMux, not by logging in inside the agent. If neither `gh` nor `gh-agent` is installed, as in some containers, report GitHub as N/A. Check your git identity (`git config user.name` and `git config user.email`), and that the AgentMux MCP server is connected (list peer agents). Report a status table with OK/FAIL for each check. Fix any failures automatically if possible.",
+          "replaces_content_sha256": ["2735a3671393d524c305af35f0eaf60f8e8e409d1fbc4c1b65cf2aafd6768ec0"]
         }
       ]
     },
@@ -358,7 +372,8 @@
           "trigger": "startup",
           "skill_type": "prompt",
           "description": "Re-run tool verification checks and report status table",
-          "content": "Check your GitHub identity with `gh-agent auth status` where `gh-agent` is installed (plain `gh` reports \"not logged in\" for agents on purpose; never run `gh auth login`, and run `gh-agent doctor` if the check fails; if neither `gh-agent` nor `gh` is installed, as in some containers, report GitHub as N/A), your git identity (`git config user.name` and `git config user.email`), and that the AgentMux MCP server is connected (list peer agents). Report a status table with OK/FAIL for each check. Fix any failures automatically if possible."
+          "content": "Check your GitHub identity with `gh auth status` where `gh` is installed (if a `gh-agent` command is installed here, use `gh-agent auth status` instead, and run `gh-agent doctor` if it fails). If it says you are not logged in, report GitHub as not connected for this agent, and never run `gh auth login`: an agent's GitHub access is set up by AgentMux, not by logging in inside the agent. If neither `gh` nor `gh-agent` is installed, as in some containers, report GitHub as N/A. Check your git identity (`git config user.name` and `git config user.email`), and that the AgentMux MCP server is connected (list peer agents). Report a status table with OK/FAIL for each check. Fix any failures automatically if possible.",
+          "replaces_content_sha256": ["2735a3671393d524c305af35f0eaf60f8e8e409d1fbc4c1b65cf2aafd6768ec0"]
         }
       ]
     },
@@ -382,7 +397,8 @@
           "trigger": "startup",
           "skill_type": "prompt",
           "description": "Re-run tool verification checks and report status table",
-          "content": "Check your GitHub identity with `gh-agent auth status` where `gh-agent` is installed (plain `gh` reports \"not logged in\" for agents on purpose; never run `gh auth login`, and run `gh-agent doctor` if the check fails; if neither `gh-agent` nor `gh` is installed, as in some containers, report GitHub as N/A), your git identity (`git config user.name` and `git config user.email`), and that the AgentMux MCP server is connected (list peer agents). Report a status table with OK/FAIL for each check. Fix any failures automatically if possible."
+          "content": "Check your GitHub identity with `gh auth status` where `gh` is installed (if a `gh-agent` command is installed here, use `gh-agent auth status` instead, and run `gh-agent doctor` if it fails). If it says you are not logged in, report GitHub as not connected for this agent, and never run `gh auth login`: an agent's GitHub access is set up by AgentMux, not by logging in inside the agent. If neither `gh` nor `gh-agent` is installed, as in some containers, report GitHub as N/A. Check your git identity (`git config user.name` and `git config user.email`), and that the AgentMux MCP server is connected (list peer agents). Report a status table with OK/FAIL for each check. Fix any failures automatically if possible.",
+          "replaces_content_sha256": ["2735a3671393d524c305af35f0eaf60f8e8e409d1fbc4c1b65cf2aafd6768ec0"]
         }
       ]
     },
@@ -406,7 +422,8 @@
           "trigger": "startup",
           "skill_type": "prompt",
           "description": "Re-run tool verification checks and report status table",
-          "content": "Check your GitHub identity with `gh-agent auth status` where `gh-agent` is installed (plain `gh` reports \"not logged in\" for agents on purpose; never run `gh auth login`, and run `gh-agent doctor` if the check fails; if neither `gh-agent` nor `gh` is installed, as in some containers, report GitHub as N/A), your git identity (`git config user.name` and `git config user.email`), and that the AgentMux MCP server is connected (list peer agents). Report a status table with OK/FAIL for each check. Fix any failures automatically if possible."
+          "content": "Check your GitHub identity with `gh auth status` where `gh` is installed (if a `gh-agent` command is installed here, use `gh-agent auth status` instead, and run `gh-agent doctor` if it fails). If it says you are not logged in, report GitHub as not connected for this agent, and never run `gh auth login`: an agent's GitHub access is set up by AgentMux, not by logging in inside the agent. If neither `gh` nor `gh-agent` is installed, as in some containers, report GitHub as N/A. Check your git identity (`git config user.name` and `git config user.email`), and that the AgentMux MCP server is connected (list peer agents). Report a status table with OK/FAIL for each check. Fix any failures automatically if possible.",
+          "replaces_content_sha256": ["2735a3671393d524c305af35f0eaf60f8e8e409d1fbc4c1b65cf2aafd6768ec0"]
         }
       ]
     }
@@ -429,12 +446,13 @@
     {
       "id": "seed-agentmux-dev",
       "replaces_instructions_sha256": [
+        "64d2618ce6f38cf5b12cc9f9c76c67ce5658e9e84ce11695e0ae5c57933927f6",
         "04af0430edeaa5c0acbdae583e239a880061221c9406be5a4eeff318c8a2f34e"
       ],
       "name": "AgentMux Development",
       "description": "Stack, build commands, version management, and workflow for the AgentMux codebase",
       "is_global": false,
-      "instructions": "## AgentMux Development\n\nContext for working on the AgentMux codebase. Add this bundle to an agent\nthat works on agentmux.\n\n### Stack\n\n- **agentmux-cef** — Chromium host, window management, IPC bridge\n- **agentmux-launcher** — Job Object, single-instance pipe, saga coordinator\n- **agentmux-srv** — Async Rust backend (SQLite, agent/block management)\n- **agentmux-common** — Shared types and utilities\n- **Frontend** — SolidJS + SCSS, built with Vite\n\n### Build Commands\n\n| Command | Purpose |\n|---------|---------|\n| `task dev` | Development (hot reload) |\n| `task package` | Portable ZIP build |\n| `task build:backend` | Rebuild Rust sidecar after changes |\n| `task test` | Run tests |\n\nAfter Rust changes: `task build:backend`, then restart `task dev`.\n\n### Version Management\n\nFeature PRs use changesets — do NOT bump versions manually:\n```bash\ntask changeset -- patch \"fix(scope): short description\"\n```\n\n### Logs\n\n`muxlog host` / `muxlog srv` / `muxlog fe` — pipe to `grep` for filtering.\n\n### muxreview Bot\n\nAll PRs are auto-reviewed by muxreview (Claude Opus). Address P1 findings before\nmerging. P2 findings should also be fixed if feasible.\n\n### Critical Rule\n\n**NEVER kill AgentMux by image name** — use PID only. Multiple instances share\nthe same binary name; killing by name kills ALL of them."
+      "instructions": "## AgentMux Development\n\nContext for working on the AgentMux codebase. Add this bundle to an agent\nthat works on agentmux.\n\n### Stack\n\n- **agentmux-cef** — Chromium host, window management, IPC bridge\n- **agentmux-launcher** — Job Object, single-instance pipe, saga coordinator\n- **agentmux-srv** — Async Rust backend (SQLite, agent/block management)\n- **agentmux-common** — Shared types and utilities\n- **Frontend** — SolidJS + SCSS, built with Vite\n\n### Build Commands\n\n| Command | Purpose |\n|---------|---------|\n| `task dev` | Development (hot reload) |\n| `task package` | Portable ZIP build |\n| `task build:backend` | Rebuild Rust sidecar after changes |\n| `task test` | Run tests |\n\nAfter Rust changes: `task build:backend`, then restart `task dev`.\n\n### Version Management\n\nFeature PRs use changesets — do NOT bump versions manually:\n```bash\ntask changeset -- patch \"fix(scope): short description\"\n```\n\n### Logs\n\n`muxlog host` / `muxlog srv` / `muxlog fe` — pipe to `grep` for filtering.\n\n### Automated review\n\nPRs are reviewed automatically. Address P1 findings before merging. P2 findings\nshould also be fixed if feasible.\n\n### Critical Rule\n\n**NEVER kill AgentMux by image name** — use PID only. Multiple instances share\nthe same binary name; killing by name kills ALL of them."
     }
   ]
 }

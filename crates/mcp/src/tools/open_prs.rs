@@ -3,8 +3,8 @@
 
 //! Open PRs in `WhoIsWorkingOn` (docs/specs/SPEC_AGENT_OVERLAP_AWARENESS_2026_10_10.md
 //! §3.5). They come from GitHub, so they cover agents on every computer. They
-//! are read through this agent's own `gh-agent` (srv holds no GitHub
-//! credential), credited to the agent named by the `<Agent>@<host>: ` title
+//! are read through this agent's own GitHub access (`gh-agent` where it is
+//! installed, else `gh`; srv holds no GitHub credential), credited to the agent named by the `<Agent>@<host>: ` title
 //! prefix CI requires, and cached for 2 minutes per repository. A PR without
 //! that prefix (a person's or a bot's, which the prefix rule exempts) is
 //! credited to its GitHub author, with no host.
@@ -28,6 +28,8 @@ const FILES_NAMED: usize = 3;
 const GH_AGENT: &str = "gh-agent.cmd";
 #[cfg(not(windows))]
 const GH_AGENT: &str = "gh-agent";
+/// What a machine without `gh-agent` uses.
+const GH: &str = "gh";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct OpenPr {
@@ -51,8 +53,8 @@ pub(super) fn title_author(title: &str) -> Option<(String, String)> {
 
 /// `gh pr list --json number,title,headRefName,files,author`'s output.
 pub(super) fn parse_pr_list(text: &str) -> Result<Vec<OpenPr>, String> {
-    let list: Value = serde_json::from_str(text.trim()).map_err(|e| format!("gh-agent printed something other than JSON: {e}"))?;
-    let items = list.as_array().ok_or("gh-agent printed something other than a list")?;
+    let list: Value = serde_json::from_str(text.trim()).map_err(|e| format!("the GitHub CLI printed something other than JSON: {e}"))?;
+    let items = list.as_array().ok_or("the GitHub CLI printed something other than a list")?;
     Ok(items.iter().filter_map(parse_pr).collect())
 }
 
@@ -89,8 +91,8 @@ pub(super) async fn open_pr(repo: &str, number: u64) -> Result<Option<OpenPr>, S
         run_gh_agent(&["pr", "view", &n, "--repo", &repo, "--json", &format!("{PR_FIELDS},state")])
     })
     .await
-    .map_err(|e| format!("gh-agent: {e}"))??;
-    let pr: Value = serde_json::from_str(text.trim()).map_err(|e| format!("gh-agent printed something other than JSON: {e}"))?;
+    .map_err(|e| format!("GitHub CLI: {e}"))??;
+    let pr: Value = serde_json::from_str(text.trim()).map_err(|e| format!("the GitHub CLI printed something other than JSON: {e}"))?;
     Ok(if pr.get("state").and_then(Value::as_str) == Some("OPEN") { parse_pr(&pr) } else { None })
 }
 
@@ -114,17 +116,40 @@ pub(super) async fn open_prs(repo: &str) -> Result<Vec<OpenPr>, String> {
         run_gh_agent(&["pr", "list", "--repo", &repo_arg, "--state", "open", "--limit", LIST_LIMIT, "--json", PR_FIELDS])
     })
         .await
-        .map_err(|e| format!("gh-agent: {e}"))??;
+        .map_err(|e| format!("GitHub CLI: {e}"))??;
     let prs = parse_pr_list(&text)?;
     cache().insert(repo.to_string(), (Instant::now(), prs.clone()));
     Ok(prs)
 }
 
-/// `gh-agent <args>`'s output, killed after [`GH_TIMEOUT`].
+/// `gh-agent <args>`'s output, or `gh <args>`'s on a machine without `gh-agent`, killed after [`GH_TIMEOUT`].
 fn run_gh_agent(args: &[&str]) -> Result<String, String> {
+    match run_cli(GH_AGENT, "gh-agent", args) {
+        Err(CliError::NotInstalled) => run_cli(GH, "gh", args).map_err(CliError::into_message),
+        other => other.map_err(CliError::into_message),
+    }
+}
+
+enum CliError {
+    NotInstalled,
+    Failed(String),
+}
+
+impl CliError {
+    fn into_message(self) -> String {
+        match self {
+            CliError::NotInstalled => "neither gh-agent nor gh is installed".to_string(),
+            CliError::Failed(m) => m,
+        }
+    }
+}
+
+/// `program <args>`'s output, which `name` calls itself in what it says.
+fn run_cli(program: &str, name: &str, args: &[&str]) -> Result<String, CliError> {
     use std::io::Read;
     use std::process::{Command, Stdio};
-    let mut cmd = Command::new(GH_AGENT);
+    let failed = |m: String| CliError::Failed(m);
+    let mut cmd = Command::new(program);
     cmd.args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -134,9 +159,15 @@ fn run_gh_agent(args: &[&str]) -> Result<String, String> {
         use agentmux_common::win32::NoWindow;
         cmd.no_window();
     }
-    let mut child = cmd.spawn().map_err(|e| format!("can't run gh-agent: {e}"))?;
-    let mut stdout = child.stdout.take().ok_or("no stdout")?;
-    let mut stderr = child.stderr.take().ok_or("no stderr")?;
+    let mut child = cmd.spawn().map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            CliError::NotInstalled
+        } else {
+            failed(format!("can't run {name}: {e}"))
+        }
+    })?;
+    let mut stdout = child.stdout.take().ok_or_else(|| failed("no stdout".to_string()))?;
+    let mut stderr = child.stderr.take().ok_or_else(|| failed("no stderr".to_string()))?;
     let out = std::thread::spawn(move || {
         let mut s = String::new();
         let _ = stdout.read_to_string(&mut s);
@@ -155,16 +186,16 @@ fn run_gh_agent(args: &[&str]) -> Result<String, String> {
             Ok(None) => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err(format!("gh-agent took over {} s", GH_TIMEOUT.as_secs()));
+                return Err(failed(format!("{name} took over {} s", GH_TIMEOUT.as_secs())));
             }
-            Err(e) => return Err(format!("gh-agent: {e}")),
+            Err(e) => return Err(failed(format!("{name}: {e}"))),
         }
     };
     let (out, err) = (out.join().unwrap_or_default(), err.join().unwrap_or_default());
     if !status.success() {
         // Its own status lines start with `gh-agent:`; the error is the rest.
         let why = err.lines().filter(|l| !l.starts_with("gh-agent:")).collect::<Vec<_>>().join(" ");
-        return Err(format!("gh-agent {} failed: {}", args.iter().take(2).copied().collect::<Vec<_>>().join(" "), why.trim()));
+        return Err(failed(format!("{name} {} failed: {}", args.iter().take(2).copied().collect::<Vec<_>>().join(" "), why.trim())));
     }
     Ok(out)
 }
