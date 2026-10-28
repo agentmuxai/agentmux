@@ -9,6 +9,8 @@
 //! asks), mapped onto the states a viewer sees. An agent with no live pane is `stopped`; its row
 //! comes from its definition. A viewer (the Swarm) lists the rows once, then follows the event.
 //!
+//! A pane whose process ended keeps its `block_id` (found by the block's agent id) and reads `stopped`.
+//!
 //! Two things a viewer must not wait for until the always-available agents build lands: `starting`
 //! is never produced (a controller just created, with no process yet, reads as `idle`), and no event
 //! says an agent was deleted (`changed_rows` only forgets it), so a viewer relists on `agents:changed`.
@@ -137,6 +139,7 @@ pub fn desired_of(state: AgentRuntimeState) -> AgentDesiredState {
 pub(crate) fn list(state: &AppState, now_ms: u64) -> Vec<AgentRuntime> {
     let mstore = &state.mstore;
     let defs = mstore.agent_def_list().unwrap_or_default();
+    let panes = pane_blocks_by_agent(mstore);
     mstore
         .instance_list(None, None)
         .unwrap_or_default()
@@ -144,8 +147,11 @@ pub(crate) fn list(state: &AppState, now_ms: u64) -> Vec<AgentRuntime> {
         .map(|i| {
             let def = defs.iter().find(|d| d.id == i.definition_id);
             // By the agent's UID, not its name: two agents can share a display name.
-            let block_id = block_of_uid(state.reactive_handler, &i.id);
-            let (runtime_state, detail, resets_at) = state_of(&availability_of_block(mstore, block_id.as_deref(), now_ms));
+            let live = block_of_uid(state.reactive_handler, &i.id);
+            // A pane whose process ended is no longer registered, but it is still the agent's
+            // block: a viewer needs its id to open or stop it. Its state is `stopped`.
+            let block_id = live.clone().or_else(|| panes.get(&i.id).cloned());
+            let (runtime_state, detail, resets_at) = state_of(&availability_of_block(mstore, live.as_deref(), now_ms));
             AgentRuntime {
                 agent_id: i.id,
                 state: runtime_state,
@@ -160,6 +166,23 @@ pub(crate) fn list(state: &AppState, now_ms: u64) -> Vec<AgentRuntime> {
             }
         })
         .collect()
+}
+
+/// The block of each agent that has a pane, by agent id (one block when it has several: the first by
+/// id). One pass over the blocks for the whole list.
+fn pane_blocks_by_agent(mstore: &Store) -> HashMap<String, String> {
+    let agent_blocks: Vec<String> = mstore
+        .get_all::<Block>()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|b| ["agentId", "agent:id"].iter().any(|k| !crate::backend::obj::meta_get_string(&b.meta, k, "").is_empty()))
+        .map(|b| b.oid)
+        .collect();
+    let mut by_agent: HashMap<String, String> = HashMap::new();
+    for pane in super::app_api::agent_io::open_agent_panes(mstore, &agent_blocks) {
+        by_agent.entry(pane.agent_id).or_insert(pane.block_id);
+    }
+    by_agent
 }
 
 /// The colour the agent's pane shows (its border colour, `frame:activebordercolor`, set when it opens).
