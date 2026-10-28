@@ -97,10 +97,18 @@ mod tests {
 
     #[test]
     fn only_a_path_inside_windowsapps_is_a_package() {
-        assert!(is_package_path(Path::new(r"C:\Program Files\WindowsApps\AgentMux.AgentMux_0.60.2.0_x64__abc\runtime\tools\bin")));
+        // Forward slashes: `Path` splits on them on every platform (on backslashes only on Windows).
+        assert!(is_package_path(Path::new("C:/Program Files/WindowsApps/AgentMux.AgentMux_0.60.2.0_x64__abc/runtime/tools/bin")));
         assert!(is_package_path(Path::new("c:/program files/windowsapps/AgentMux.AgentMux_1_x64__abc/tools/bin")));
-        assert!(!is_package_path(Path::new(r"C:\Users\a\AppData\Local\Programs\AgentMux\runtime\tools\bin")));
-        assert!(!is_package_path(Path::new(r"C:\Users\a\Desktop\agentmux-portable\runtime\tools\bin")));
+        assert!(!is_package_path(Path::new("C:/Users/a/AppData/Local/Programs/AgentMux/runtime/tools/bin")));
+        assert!(!is_package_path(Path::new("C:/Users/a/Desktop/agentmux-portable/runtime/tools/bin")));
+        assert!(!is_package_path(Path::new("C:/Users/a/WindowsAppsBackup/tools")));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_windows_path_with_backslashes_is_a_package_too() {
+        assert!(is_package_path(Path::new(r"C:\Program Files\WindowsApps\AgentMux.AgentMux_0.60.2.0_x64__abc\runtime\tools\bin")));
         assert!(!is_package_path(Path::new(r"C:\Users\a\WindowsAppsBackup\tools")));
     }
 
