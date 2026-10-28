@@ -299,7 +299,7 @@ fn open_forwarded_window(state: &AppState, block_id: &str, signal: Option<String
     let action = if close {
         crate::sagas::pending_shutdown::Action::CloseTab { detail: format!("asked by {by} (Stop agents, from another AgentMux)") }
     } else {
-        crate::sagas::pending_shutdown::Action::Stop { signal }
+        crate::sagas::pending_shutdown::Action::Stop { signal, stop_background: None }
     };
     let v = crate::sagas::pending_shutdown::request(state, block_id, by, "FleetBulkStop", "", action);
     state.reactive_handler.log_fleet_action_audit(

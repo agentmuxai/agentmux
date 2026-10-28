@@ -687,7 +687,7 @@ async fn override_window_for(state: &AppState, caller: &str, cmd: &CommandAgentS
         }
     }
     let by = caller_uid.as_deref().unwrap_or(caller);
-    let (_, pending) = super::fleet::fleet_stop_keep_pane_with_override(state, by, vec![cmd.block_id.clone()], cmd.signal.as_deref(), None).await;
+    let (_, pending) = super::fleet::fleet_stop_keep_pane_with_override_opts(state, by, vec![cmd.block_id.clone()], cmd.signal.as_deref(), cmd.stop_background, None).await;
     pending.into_iter().next().map(|_| AgentStopResult { block_id: cmd.block_id.clone(), status: "pending_override".to_string(), exit_code: None })
 }
 

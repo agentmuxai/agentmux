@@ -769,6 +769,19 @@ pub(crate) async fn fleet_stop_keep_pane_with_override(
     signal: Option<&str>,
     staged: Option<StagePlanInput>,
 ) -> (FleetActionResult, Vec<crate::sagas::pending_shutdown::PendingView>) {
+    fleet_stop_keep_pane_with_override_opts(state, by, targets, signal, None, staged).await
+}
+
+/// [`fleet_stop_keep_pane_with_override`] with the caller's explicit `stop_background`
+/// (`None`: the user's setting), carried through the window to the stop.
+pub(crate) async fn fleet_stop_keep_pane_with_override_opts(
+    state: &AppState,
+    by: &str,
+    targets: Vec<String>,
+    signal: Option<&str>,
+    stop_background: Option<bool>,
+    staged: Option<StagePlanInput>,
+) -> (FleetActionResult, Vec<crate::sagas::pending_shutdown::PendingView>) {
     let (local, other): (Vec<String>, Vec<String>) = targets
         .into_iter()
         .partition(|b| crate::backend::blockcontroller::get_controller(b).is_some());
@@ -781,7 +794,7 @@ pub(crate) async fn fleet_stop_keep_pane_with_override(
                 by,
                 "FleetBulkStop",
                 "",
-                crate::sagas::pending_shutdown::Action::Stop { signal: signal.map(str::to_string) },
+                crate::sagas::pending_shutdown::Action::Stop { signal: signal.map(str::to_string), stop_background },
             );
             // A target can join a request opened for another block (its
             // pane's close, via a sibling tab): audit and report it under the
