@@ -21,7 +21,7 @@ import type { SwarmOrderItem } from "./swarm-order";
 import { useSwarmOrder } from "./swarm-order-hold";
 import { remoteChip, remoteRows, remoteSections, type RemoteRow } from "./swarm-remote";
 import { stoppedAgents } from "./swarm-runtime";
-import { createLiveAgentRuntimeStore, openStoppedAgent } from "./swarm-runtime-live";
+import { openAgentInActiveTab, sharedAgentRuntime } from "@/app/store/agent-runtime-live";
 import { SwarmGroupByControl, SwarmSeatList, useSwarmSeats } from "./swarm-seats";
 import type { SwarmDensity } from "./swarm-section";
 import { chipStatus } from "./swarm-status-chip";
@@ -77,9 +77,7 @@ export function useSwarmAgents(model: SwarmViewModel, ctx: PaneTabHostContext): 
     );
     const localKeys = createMemo(() => tree().flatMap((n) => (n.blockId ? [n.blockId] : [])));
     // Every created agent's runtime state, for the ones with no pane (swarm-runtime.ts).
-    const runtime = createLiveAgentRuntimeStore();
-    void runtime.load();
-    onCleanup(runtime.dispose);
+    const runtime = sharedAgentRuntime();
     const stopped = createMemo(() => stoppedAgents(runtime.rows(), new Set(localKeys())));
     const selectableKeys = createMemo(() => [
         ...localKeys(),
@@ -187,7 +185,7 @@ export function SwarmAgentList(props: {
             <StoppedAgents
                 agents={props.agents.stopped}
                 hasLive={() => tree().length > 0 || remote().length > 0}
-                onOpen={openStoppedAgent}
+                onOpen={openAgentInActiveTab}
             />
         </>
     );

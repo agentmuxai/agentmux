@@ -7,6 +7,7 @@
 // activity, none of which a stopped agent has. Open starts the agent in a pane, as opening it does.
 
 import { Button } from "@/app/element/ui/Button";
+import { AgentRuntimeChip } from "@/app/view/agent/components/AgentRuntimeChip";
 import type { AgentRuntime } from "@/types/rpc/AgentRuntime";
 import { createSignal, For, Show, type Accessor, type JSX } from "solid-js";
 import { LOCAL_PROVIDER_UNKNOWN, SwarmProviderIcon } from "./swarm-provider-icon";
@@ -52,9 +53,7 @@ export function StoppedAgents(props: {
                                     <span class="swarm-stopped__name" title={agent.name}>
                                         {agent.name}
                                     </span>
-                                    <span class={`swarm-stopped__state swarm-stopped__state--${agent.state}`}>
-                                        {agent.state}
-                                    </span>
+                                    <AgentRuntimeChip state={agent.state} detail={agent.detail} />
                                     <Button
                                         density="compact"
                                         aria-label={`Open ${agent.name}`}
