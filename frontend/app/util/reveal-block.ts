@@ -17,7 +17,11 @@
  */
 
 import { giveBlockFocus } from "@/app/store/focusManager";
-import { getApi, MOS, setActiveTab, workspace } from "@/app/store/global";
+import { createEffect, createRoot } from "solid-js";
+import { createSelectionRunner, type SelectionDeps } from "@/app/selection/selection-effects";
+import { isFailure, type Intent, type SelectionResult } from "@/app/selection/selection-machine";
+import { createSelectionTrace } from "@/app/selection/selection-trace";
+import { atoms, getApi, MOS, pushNotification, setActiveTab, workspace } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { ClientService, WorkspaceService } from "@/app/store/services";
@@ -132,24 +136,122 @@ export async function revealBlockLocally(blockId: string, opts: RevealOptions = 
     return true;
 }
 
+/** What the notice says for each reason a pane could not be shown. */
+const FAIL_TEXT: Record<string, string> = {
+    "not-found": "it is no longer open",
+    "resolve-timeout": "it took too long to find",
+    "tab-timeout": "its tab did not open in time",
+    "layout-timeout": "its tab is still loading",
+    mismatch: "it did not come to the front",
+    stuck: "it did not respond in time",
+    "remote-timeout": "the other window did not answer",
+    gone: "it was just closed",
+    error: "something went wrong",
+};
+
+/** The pane's own name, for the notice. */
+function blockName(blockId: string): string {
+    const meta = MOS.getObjectValue<Block>(MOS.makeORef("block", blockId))?.meta;
+    const name = [meta?.["agentName"], meta?.["title"], meta?.["name"]].find((v) => typeof v === "string" && v.trim());
+    return typeof name === "string" ? name.trim() : "that pane";
+}
+
+/** Two animation frames: what a tab switch schedules for after its RPC (a refocus) has had its turn. */
+const twoFrames = () =>
+    new Promise<void>((resolve) =>
+        typeof requestAnimationFrame === "function"
+            ? requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+            : setTimeout(resolve, 32)
+    );
+
+/** The real tabs, layouts and focus the selection machine drives. */
+const liveDeps: SelectionDeps = {
+    async resolve(intent) {
+        const tabId = await findTabHolding(intent.blockId, intent.tabHint);
+        // Not in this window's tabs: another window may show it (the handoff asks srv).
+        if (!tabId) return { where: "other" };
+        return { where: "here", tabId, active: atoms.activeTabId() === tabId };
+    },
+    switchTab: (tabId) => setActiveTab(tabId), // no-op when already active
+    layoutHas: (tabId, blockId) => getLayoutModelForTabById(tabId)?.getNodeByBlockId(blockId)?.id != null,
+    show(tabId, blockId) {
+        const model = getLayoutModelForTabById(tabId);
+        const node = model?.getNodeByBlockId(blockId);
+        if (!model || node?.id == null) throw new Error("the pane left its layout");
+        showBlockInPane(model, node, blockId);
+    },
+    focus(tabId, blockId, caret) {
+        const model = getLayoutModelForTabById(tabId);
+        const node = model?.getNodeByBlockId(blockId);
+        if (!model || node?.id == null) throw new Error("the pane left its layout");
+        model.focusNode(node.id);
+        // After the switch: a hidden kept-alive tab is still registered and would otherwise take the
+        // caret while invisible. Also covers focusNode's early return when the pane was already focused.
+        if (caret) giveBlockFocus(blockId);
+    },
+    settle: twoFrames,
+    verify(tabId, blockId) {
+        const model = getLayoutModelForTabById(tabId);
+        const node = model?.getNodeByBlockId(blockId);
+        if (!model || node?.id == null) return { gone: true };
+        if (atoms.activeTabId() !== tabId) return { ok: false, detail: "the window tab is not the active one" };
+        const active = node.data?.activeBlockId ?? node.data?.blockId;
+        if (active && active !== blockId) return { ok: false, detail: "the pane shows another member" };
+        if (node.minimized) return { ok: false, detail: "the pane is still minimized" };
+        if (model.magnifiedNodeId && model.magnifiedNodeId !== node.id) return { ok: false, detail: "another pane is magnified" };
+        if (model.treeState.focusedNodeId !== node.id) return { ok: false, detail: "the pane is not the focused one" };
+        return { ok: true };
+    },
+    handoff: (blockId) => revealInOtherWindow(blockId),
+    flash: (blockId) => emitPaneLocate(blockId),
+    notify(intent: Intent, reason: string) {
+        pushNotification({
+            icon: "fa-triangle-exclamation",
+            title: `Couldn't show ${blockName(intent.blockId)}`,
+            message: `${FAIL_TEXT[reason] ?? reason}`,
+            timestamp: new Date().toISOString(),
+            type: "info",
+            expiration: Date.now() + 5000,
+        });
+    },
+    setTimer: (fn, ms) => setTimeout(fn, ms),
+    clearTimer: (h) => clearTimeout(h as ReturnType<typeof setTimeout>),
+    now: () => Date.now(),
+};
+
+const selectionTrace = createSelectionTrace();
+const selection = createSelectionRunner(liveDeps, selectionTrace);
+(globalThis as { __selectionTrace?: () => string[] }).__selectionTrace = () =>
+    selectionTrace.entries().map((e) => `${new Date(e.at).toISOString()} ${e.line}`);
+
+// The user switched window tab on their own while a request was in flight: that request ends, not retried.
+createRoot(() => {
+    createEffect(() => {
+        const active = atoms.activeTabId();
+        const state = selection.state();
+        if ("tabId" in state && state.tabId !== active) selection.userMoved();
+    });
+});
+
 /**
- * Reveal `blockId` wherever it is: in this window if it's here, else in the
- * window that shows it. A renderer can't drive another window's layout, so
- * srv (`block.reveal`) tells THAT window's renderer to reveal it
- * (`block:reveal`, reveal-block-events.ts) and this one raises that window.
- * Spec §4.3.
+ * Show `blockId` wherever it is, and resolve with whether it was shown: in this window if it's here,
+ * else in the window that shows it. The selection machine (`app/selection`) owns it from the request to
+ * a verified result: the newest request wins, a layout that is slow to arrive is waited for, what
+ * was done is read back (one retry), the locate flash plays once it is settled, and a failure says
+ * why in a quiet notice. A renderer can't drive another window's layout, so srv (`block.reveal`) tells
+ * THAT window's renderer to reveal it (`block:reveal`, reveal-block-events.ts) and this one raises
+ * that window. Spec §4.3.
  */
-export async function revealBlock(blockId: string, opts: RevealOptions = {}): Promise<void> {
+export async function revealBlock(blockId: string, opts: RevealOptions = {}): Promise<SelectionResult> {
     const done = selectTrace.revealStarted(opts.source ?? "unknown", blockId);
-    try {
-        if (await revealBlockLocally(blockId, opts)) {
-            done(true);
-            return;
-        }
-        done(await revealInOtherWindow(blockId), "other-window");
-    } finally {
-        done(false);
-    }
+    const result = await selection.select({
+        blockId,
+        source: opts.source,
+        tabHint: opts.tabId,
+        focusCaret: opts.focusCaret,
+    });
+    done(!isFailure(result) || result.reason === "superseded", isFailure(result) ? result.reason : undefined);
+    return result;
 }
 
 /** Whether another window (or workspace) was found to hold the block. */
