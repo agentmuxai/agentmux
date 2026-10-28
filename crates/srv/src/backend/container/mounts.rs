@@ -221,7 +221,10 @@ mod tests {
         let got = personal_memory_host_dir(Some(&config.to_string_lossy()), &work.to_string_lossy()).expect("a folder");
         let want = crate::server::native_memory_handlers::memory_dir_for_cwd(&config.to_string_lossy(), &work.to_string_lossy());
         assert!(want.is_dir(), "created, so Docker has a source to bind");
-        assert_eq!(std::path::Path::new(&got), want.canonicalize().unwrap());
+        // Windows passes the folder through as it is (a canonical path there has the verbatim prefix, which
+        // Docker doesn't take); elsewhere symlinks are resolved.
+        let expected = if cfg!(windows) { want.clone() } else { want.canonicalize().unwrap() };
+        assert_eq!(std::path::Path::new(&got), expected);
         assert_eq!(personal_memory_host_dir(Some(&config.to_string_lossy()), ""), None);
         let _ = std::fs::remove_dir_all(&root);
     }
