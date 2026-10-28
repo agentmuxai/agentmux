@@ -651,6 +651,8 @@ pub(crate) async fn build_persistent_spawn_env(
     // them back: these are reserved variables, not defaults.
     crate::backend::gh_guard::apply_gh_guard(&mut env_vars);
     crate::backend::account_login_guard::strip_account_login(&mut env_vars);
+    // AgentMux agents message each other through jekt: the CLI's separate messaging is off by default.
+    crate::backend::cli_messaging::apply_for_spawn(&mut env_vars, block_meta);
 
     Ok(env_vars)
 }
