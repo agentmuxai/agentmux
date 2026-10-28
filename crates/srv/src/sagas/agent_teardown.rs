@@ -326,6 +326,28 @@ async fn record_turns_in_flight(state: &AppState, ids: &[String]) {
     }
 }
 
+/// A quit is closing the windows (the GUI saved its session record a moment
+/// ago) and the agent in `block_id` has a turn running that the close is about
+/// to interrupt: keep it for the next start to tell it to carry on. The windows
+/// close before srv exits, so by `app_exit` these agents are already gone.
+async fn note_turn_cut_off_by_quit(state: &AppState, block_id: &str) {
+    let st = state.clone();
+    let id = block_id.to_string();
+    let agent = tokio::task::spawn_blocking(move || {
+        if !crate::server::service::session_closed::quit_under_way(&st.mstore) {
+            return None;
+        }
+        let block = st.mstore.get::<crate::backend::obj::Block>(&id).ok().flatten()?;
+        distinct_agents([crate::backend::obj::meta_get_string(&block.meta, "agentId", "")]).pop()
+    })
+    .await
+    .ok()
+    .flatten();
+    if let (Some(agent), Some(paths)) = (agent, agentmux_common::DataPaths::from_env()) {
+        crate::backend::upgrade_notice::record_interrupted(&paths.instance_dir, &[agent], agentmux_common::time::now_ms());
+    }
+}
+
 /// The agent ids in `ids`, each once, none empty (a pane that is no agent's
 /// has none).
 fn distinct_agents(ids: impl IntoIterator<Item = String>) -> Vec<String> {
@@ -549,6 +571,7 @@ async fn close_cli(
         Some(ctrl) => {
             if ctrl.get_runtime_status().turn_active {
                 publish_shutdown(state, block_id, "interrupt", "turn interrupted".into(), ShutdownExtra::default());
+                note_turn_cut_off_by_quit(state, block_id).await;
             }
             let outcome = ctrl.shutdown(deadline).await;
             (ctrl.controller_type().to_string(), outcome)

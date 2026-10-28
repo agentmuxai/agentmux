@@ -132,18 +132,25 @@ pub fn observe_start(dir: &Path, version: &str, now_ms: i64) -> Option<Upgraded>
     })
 }
 
-/// At quit, before the agents are closed: keep which of them have a turn in
-/// flight (`agents`, their ids), for the next start to tell them to carry on.
-/// Replaces the last list; none removes it. Unlike a note held for a turn, an
-/// interrupted turn is never continued by the CLI by itself on `--resume`.
+/// At quit, as each agent is closed (or all that are left when srv exits): add
+/// the ones with a turn in flight (`agents`, their ids) to the list the next
+/// start tells to carry on. A quit closes its agents one by one, so this adds
+/// to what the quit has recorded so far (a list over an hour old is dropped
+/// first). Unlike a note held for a turn, an interrupted turn is never
+/// continued by the CLI by itself on `--resume`.
 pub fn record_interrupted(dir: &Path, agents: &[String], now_ms: i64) {
-    let _guard = RECORD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let path = dir.join(INTERRUPTED_FILE);
     if agents.is_empty() {
-        let _ = std::fs::remove_file(&path);
         return;
     }
-    write_interrupted(dir, &Interrupted { at: now_ms, agents: agents.to_vec() });
+    let _guard = RECORD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut record = read_interrupted(dir, now_ms);
+    for agent in agents {
+        if !record.agents.contains(agent) {
+            record.agents.push(agent.clone());
+        }
+    }
+    record.at = now_ms;
+    write_interrupted(dir, &record);
 }
 
 fn write_interrupted(dir: &Path, record: &Interrupted) {
@@ -547,9 +554,14 @@ mod tests {
         // An hour later a list is stale.
         record_interrupted(dir.path(), &["agent-a".into()], 1_000);
         assert_eq!(read_interrupted(dir.path(), 1_000 + hour), Interrupted::default());
-        // A quit with no turn running replaces the list with none.
-        record_interrupted(dir.path(), &[], 3_000);
-        assert!(!dir.path().join(INTERRUPTED_FILE).exists());
+        record_continued(dir.path(), "agent-a");
+        // A quit closes its agents one by one: each adds to the list, and none changes nothing.
+        record_interrupted(dir.path(), &["agent-b".into()], 5_000);
+        record_interrupted(dir.path(), &["agent-c".into(), "agent-b".into()], 5_100);
+        record_interrupted(dir.path(), &[], 5_200);
+        let list = read_interrupted(dir.path(), 5_300);
+        assert_eq!(list.agents, vec!["agent-b".to_string(), "agent-c".to_string()]);
+        assert_eq!(list.at, 5_100);
     }
 
     #[test]

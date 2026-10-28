@@ -615,7 +615,8 @@ pub(crate) fn plain_cut_off(line: &str) -> Option<(String, String)> {
         return None;
     }
     let mut frame: Value = serde_json::from_str(line).ok()?;
-    if frame.get("type").and_then(|v| v.as_str()) != Some("result") {
+    // An error result only: a turn that finished and quotes the diagnostic is left as it is.
+    if frame.get("type").and_then(|v| v.as_str()) != Some("result") || !is_error_result_frame(&frame) {
         return None;
     }
     let diagnostic = frame_error_text(&frame);
@@ -1230,6 +1231,8 @@ mod tests {
         assert!(plain_cut_off(r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Error [ede_diagnostic] stop_reason=tool_use"}]}}"#).is_none());
         assert!(plain_cut_off("not json [ede_diagnostic]").is_none());
         assert!(plain_cut_off(r#"{"type":"result","is_error":false,"result":"done"}"#).is_none());
+        // A turn that finished and quotes the diagnostic in its answer is not one that was cut off.
+        assert!(plain_cut_off(r#"{"type":"result","subtype":"success","is_error":false,"result":"The CLI said Error [ede_diagnostic] result_type=user stop_reason=tool_use"}"#).is_none());
     }
 }
 
