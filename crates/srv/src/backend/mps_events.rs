@@ -185,6 +185,9 @@ events! {
     /// A shutdown waiting for the user to keep the agent, and its end (`sagas::pending_shutdown`).
     AgentShutdownPending: crate::sagas::pending_shutdown::EVENT_SHUTDOWN_PENDING => crate::sagas::pending_shutdown::PendingView,
     AgentShutdownPendingCleared: crate::sagas::pending_shutdown::EVENT_SHUTDOWN_PENDING_CLEARED => crate::sagas::pending_shutdown::PendingClearedEvent,
+    /// A sensitive request's countdown, and its end (`sagas::sensitive_window`).
+    SensitivePending: crate::sagas::sensitive_window::EVENT_SENSITIVE_PENDING => crate::sagas::sensitive_window::SensitiveView,
+    SensitiveCleared: crate::sagas::sensitive_window::EVENT_SENSITIVE_CLEARED => crate::sagas::sensitive_window::SensitiveClearedEvent,
     /// An OS notification to show, retract or act on (`notify::router`).
     Notification: crate::backend::notify::router::EVENT_NOTIFICATION => crate::backend::notify::policy::Notification,
     NotificationRetract: crate::backend::notify::router::EVENT_NOTIFICATION_RETRACT => crate::backend::notify::router::NotificationRetractEvent,

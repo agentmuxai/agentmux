@@ -66,6 +66,8 @@ import type { ProcessStatus } from "@/types/rpc/ProcessStatus";
 import type { ProtocolFrame } from "@/types/rpc/ProtocolFrame";
 import type { ResumeRetryEvent } from "@/types/rpc/ResumeRetryEvent";
 import type { RunEvent } from "@/types/rpc/RunEvent";
+import type { SensitiveClearedEvent } from "@/types/rpc/SensitiveClearedEvent";
+import type { SensitiveView } from "@/types/rpc/SensitiveView";
 import type { ShellChunkEvent } from "@/types/rpc/ShellChunkEvent";
 import type { ShellNodeCreateEvent } from "@/types/rpc/ShellNodeCreateEvent";
 import type { ShutdownLineEvent } from "@/types/rpc/ShutdownLineEvent";
@@ -168,6 +170,8 @@ export type MuxEventPayloads = {
   "processbroker:status-changed": ProcessStatus;
   "processbroker:tracked-blocks-changed": null;
   remoteschange: null;
+  "sensitive:cleared": SensitiveClearedEvent;
+  "sensitive:pending": SensitiveView;
   shell_chunk: ShellChunkEvent;
   shell_node_create: ShellNodeCreateEvent;
   "singleton:claim": SingletonClaimEvent;
@@ -278,6 +282,8 @@ export const TYPED_MUX_EVENTS = [
   "processbroker:status-changed",
   "processbroker:tracked-blocks-changed",
   "remoteschange",
+  "sensitive:cleared",
+  "sensitive:pending",
   "shell_chunk",
   "shell_node_create",
   "singleton:claim",

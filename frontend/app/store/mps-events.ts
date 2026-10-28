@@ -204,6 +204,9 @@ export const WpsEvent = {
     AgentShutdown: "agent:shutdown",
     AgentShutdownPending: "agent:shutdown-pending",
     AgentShutdownPendingCleared: "agent:shutdown-pending-cleared",
+    /** A sensitive request's countdown for the person to veto, and its end (crates/srv/src/sagas/sensitive_window.rs). */
+    SensitivePending: "sensitive:pending",
+    SensitiveCleared: "sensitive:cleared",
     AmbientSpent: "ambient:spent",
     BlockReveal: "block:reveal",
     ConnectivityChanged: "connectivity:changed",
