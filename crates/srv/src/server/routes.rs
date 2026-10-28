@@ -558,6 +558,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // The App tool: what AgentMux runs and whether a newer release is out,
         // and asking to upgrade (SPEC_UPGRADE_FOR_USERS_AND_AGENTS §5.1).
         .route("/api/v1/app/update-status", get(app_api::app_update::handle_update_status))
+        .route("/api/v1/app/connectivity", get(app_api::connectivity::handle_status))
         .route("/api/v1/agent/self/upgrade", post(app_api::app_update::handle_request_upgrade))
         // The Desktop tool: the gate in front of looking at and controlling a
         // native app (SPEC_DESKTOP_DRIVING_2026_10_20.md §6).

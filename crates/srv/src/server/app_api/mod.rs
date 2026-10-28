@@ -115,7 +115,7 @@ mod shells;
 pub(crate) mod kanban;
 mod jobs;
 mod jobs_edit;
-mod connectivity;
+pub(crate) mod connectivity;
 pub(crate) mod layout_intent;
 
 /// Register all MuxAPI handlers on the RPC engine.

@@ -25,6 +25,13 @@ const CHIPS: Record<AgentRuntime["state"], RuntimeChip> = {
     error: { label: "error", tone: "error" },
 };
 
+/** What srv's reason codes (`AgentRuntime.detail`) say, for the chip's tooltip. */
+const DETAIL_TEXT: Record<string, string> = {
+    usage_limit: "Out of usage until it resets",
+    needs_login: "Signed out: sign in to continue",
+    starts_on_first_message: "Runs on its first message",
+};
+
 export function runtimeChip(state: AgentRuntime["state"]): RuntimeChip {
     return CHIPS[state];
 }
@@ -36,7 +43,7 @@ export function AgentRuntimeChip(props: { state: AgentRuntime["state"]; detail?:
         <Pill
             tone={chip().tone}
             icon={chip().icon}
-            title={props.detail}
+            title={props.detail ? (DETAIL_TEXT[props.detail] ?? props.detail) : undefined}
             class={`agent-runtime-chip agent-runtime-chip--${props.state}`}
         >
             {chip().label}

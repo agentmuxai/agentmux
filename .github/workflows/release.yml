@@ -26,13 +26,19 @@ on:
         description: 'Not used (kept for old command lines). Run this workflow from the tag to rebuild: gh workflow run release.yml --ref <tag>'
         required: false
 
+# Read-only by default; a job that needs more says so itself (job-level permissions replace this
+# block). A job added later gets nothing it did not ask for.
+permissions:
+  contents: read
+
 jobs:
   release:
     name: Release
     # The core's jobs get at most what is granted here: contents for the builds
-    # and the publish, id-token for the signing job.
+    # and the publish, id-token for the signing job, packages for the container image.
     permissions:
       contents: write
       id-token: write
+      packages: write
     uses: agentmuxai/agentmux/.github/workflows/release-core.yml@main
     secrets: inherit

@@ -15,6 +15,11 @@ on:
     - cron: '0 10 * * *' # nightly
   workflow_dispatch: {}
 
+# Read-only by default; a job that needs more says so itself (job-level permissions replace this
+# block). A job added later gets nothing it did not ask for.
+permissions:
+  contents: read
+
 jobs:
   layout-reads:
     name: layout-read guardrail

@@ -12,9 +12,11 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
     buildRelease,
+    checkImages,
     envelopeName,
     listFiles,
     manifestName,
+    parseImageArg,
     selfCheck,
     sha256Hex,
     signWithKey,
@@ -158,5 +160,80 @@ describe("what must fail", () => {
         } finally {
             rmSync(empty, { recursive: true, force: true });
         }
+    });
+});
+
+describe("the container images a release names", () => {
+    const DIGEST = `sha256:${"ab".repeat(32)}`;
+    const IMAGE = { name: "agent-base", ref: "ghcr.io/agentmuxai/agent-base", digest: DIGEST };
+    const withImages = (images) => {
+        const files = listFiles(dir);
+        const { manifest, envelope } = buildRelease({ files, tag: TAG, createdAt: "2026-10-25T12:00:00Z", images });
+        return { files, manifest, envelope, signatures: signWithKey(envelope, pemOf(7), "k1") };
+    };
+
+    it("are written after the files, signed with the manifest, and verify", () => {
+        const r = withImages([IMAGE]);
+        expect(verify(r, { files: r.files }).images).toEqual([IMAGE]);
+        expect(Object.keys(JSON.parse(r.manifest))).toEqual(["format", "version", "tag", "files", "images"]);
+        // The envelope covers the manifest, so changing the digest breaks the signature.
+        const swapped = r.manifest.replace(DIGEST, `sha256:${"cd".repeat(32)}`);
+        expect(() => verify(r, { manifest: swapped })).toThrow(/isn't the one the signature covers/);
+    });
+
+    it("leave a release without images byte for byte as before", () => {
+        const plain = release();
+        expect(withImages([]).manifest).toBe(plain.manifest);
+        expect(withImages(undefined).manifest).toBe(plain.manifest);
+        expect(JSON.parse(plain.manifest).images).toBeUndefined();
+    });
+
+    it("are read from --image name=path@digest", () => {
+        expect(parseImageArg(`agent-base=ghcr.io/agentmuxai/agent-base@${DIGEST}`)).toEqual(IMAGE);
+        for (const bad of ["", "agent-base", "ghcr.io/x/y@sha256:ab", `=ghcr.io/x/y@${DIGEST}`, `a=ghcr.io/x/y:latest`]) {
+            expect(() => checkImages([parseImageArg(bad)]), bad).toThrow();
+        }
+    });
+
+    it("must be well formed: name, registry path, digest, no repeats, at most 16", () => {
+        const bad = (over) => () => checkImages([{ ...IMAGE, ...over }]);
+        expect(() => checkImages([IMAGE, { ...IMAGE, name: "other", ref: "registry.example.com:5000/team/app" }])).not.toThrow();
+        for (const name of ["", "Agent-Base", "-x", "has space", "a".repeat(65), undefined]) expect(bad({ name }), String(name)).toThrow(/plain image name/);
+        for (const ref of [
+            "agent-base",
+            "https://ghcr.io/agentmuxai/agent-base",
+            "ghcr.io/agentmuxai/agent-base:latest",
+            `ghcr.io/agentmuxai/agent-base@${DIGEST}`,
+            "ghcr.io//agent-base",
+            "ghcr.io/AgentMux/agent-base",
+            "ghcr.io/agentmuxai/agent base",
+            `ghcr.io/${"a".repeat(260)}`,
+            undefined,
+        ]) {
+            expect(bad({ ref }), String(ref)).toThrow(/registry|ref/);
+        }
+        for (const digest of ["", "sha256:AB", `sha256:${"ab".repeat(31)}`, `sha512:${"ab".repeat(32)}`, "latest", undefined]) {
+            expect(bad({ digest }), String(digest)).toThrow(/digest/);
+        }
+        expect(() => checkImages([IMAGE, IMAGE])).toThrow(/listed twice/);
+        const many = Array.from({ length: 17 }, (_, i) => ({ ...IMAGE, name: `img-${i}` }));
+        expect(() => checkImages(many)).toThrow(/more than 16/);
+        expect(() => checkImages(many.slice(0, 16))).not.toThrow();
+        expect(() => checkImages("agent-base")).toThrow(/isn't a list/);
+    });
+
+    it("are refused by verify when a signed manifest carries a bad entry", () => {
+        const make = (images) => {
+            const m = JSON.parse(release().manifest);
+            m.images = images;
+            const manifest = JSON.stringify(m);
+            const envelope = JSON.stringify({ format: 1, tag: TAG, manifest_sha256: sha256Hex(manifest), created_at: "x" });
+            return () => verifyRelease({ envelope, signatures: signWithKey(envelope, pemOf(7), "k1"), manifest, tag: TAG, publicKeyB64: publicB64(7), id: "k1" });
+        };
+        expect(make([IMAGE])).not.toThrow();
+        expect(make([])).not.toThrow();
+        expect(make([{ ...IMAGE, digest: "sha256:zz" }])).toThrow(/digest/);
+        expect(make([IMAGE, IMAGE])).toThrow(/listed twice/);
+        expect(make({ name: "agent-base" })).toThrow(/isn't a list/);
     });
 });

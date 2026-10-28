@@ -31,6 +31,7 @@ import type { PaneFailure } from "@/app/store/agent-pane-state/types";
 import type { AgentPaneEvent } from "@/app/store/agent-pane-state-store";
 import { __resetListeners, fireEvent } from "@/app/store/agent-pane-state-store";
 import { recycleBlockers } from "@/app/store/recycle-blockers";
+import { forgetRefusedSend, refusedSendOf, rememberRefusedSend } from "../failure/refused-send";
 
 const hub = vi.hoisted(() => ({
     handlers: new Map<string, (e: unknown) => void>(),
@@ -53,6 +54,8 @@ vi.mock("@/app/store/mos", () => ({ makeORef: (a: string, b: string) => `${a}:${
 vi.mock("@/app/store/global", () => ({
     getBlockMetaKeyAtom: (_blockId: string, _key: string) => () => hub.persistedFailure,
 }));
+const restoreRefusedSendMock = vi.hoisted(() => vi.fn());
+vi.mock("../failure/refused-send-restore", () => ({ restoreRefusedSend: restoreRefusedSendMock }));
 const setBlockMetaMock = vi.hoisted(() => vi.fn(async () => {}));
 vi.mock("@/app/store/block-meta", () => ({ setBlockMeta: setBlockMetaMock }));
 const writeTextMock = vi.fn();
@@ -789,6 +792,68 @@ describe("useAgentFailure — a network failure that waits for its API", () => {
             fire("agentfailure", transient());
             ui.row()!.actions.find((a) => a.title === "Dismiss")!.onClick();
             expect(setBlockMetaMock).not.toHaveBeenCalled();
+            dispose();
+        });
+    });
+
+    const openElsewhere = (): AgentFailure => ({
+        code: "open_in_other_pane",
+        title: "Open in another pane",
+        detail: "already open in another pane (block h1)",
+        retryable: false,
+        holderBlockId: "h1",
+    });
+
+    it("dismissing an open_in_other_pane row gives the refused message back to its pane", async () => {
+        await createRoot(async (dispose) => {
+            restoreRefusedSendMock.mockClear();
+            const { ui } = mkUI(vi.fn());
+            await Promise.resolve();
+            fire("agentfailure", openElsewhere());
+            ui.row()!.actions.find((a) => a.title === "Dismiss")!.onClick();
+            expect(restoreRefusedSendMock).toHaveBeenCalledWith(BLOCK_ID);
+            expect(ui.row()).toBeNull();
+            dispose();
+        });
+    });
+
+    it("dismissing any other row drops a stale kept message and does not put it in the composer", async () => {
+        await createRoot(async (dispose) => {
+            restoreRefusedSendMock.mockClear();
+            rememberRefusedSend(BLOCK_ID, { text: "old", attachments: [] });
+            const { ui } = mkUI(vi.fn());
+            await Promise.resolve();
+            fire("agentfailure", transient());
+            ui.row()!.actions.find((a) => a.title === "Dismiss")!.onClick();
+            expect(restoreRefusedSendMock).not.toHaveBeenCalled();
+            expect(refusedSendOf(BLOCK_ID)).toBeUndefined();
+            forgetRefusedSend(BLOCK_ID);
+            dispose();
+        });
+    });
+
+    it("keeps the refused message while the row stays, as when the user goes to the other pane", async () => {
+        await createRoot(async (dispose) => {
+            restoreRefusedSendMock.mockClear();
+            const onGoThere = vi.fn();
+            const { model, failure } = makeFakeModel();
+            const ui = useAgentFailure({
+                blockId: BLOCK_ID,
+                model,
+                failure,
+                onRetry() {},
+                onLoginAgain() {},
+                onLoginViaTerminal() {},
+                onOpenAccounts() {},
+                onNewSession() {},
+                onGoThere,
+            });
+            await Promise.resolve();
+            fire("agentfailure", openElsewhere());
+            ui.row()!.actions.find((a) => a.label === "Go there")!.onClick();
+            expect(onGoThere).toHaveBeenCalledWith("h1");
+            expect(restoreRefusedSendMock).not.toHaveBeenCalled();
+            expect(ui.row()).not.toBeNull();
             dispose();
         });
     });

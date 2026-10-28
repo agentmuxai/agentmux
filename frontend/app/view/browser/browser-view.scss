@@ -58,8 +58,8 @@ $browser-nav-stack-below: 388px;
 
 .browser-nav-bar-grid {
     display: grid;
-    grid-template-columns: auto auto minmax(0, 1fr) auto;
-    grid-template-areas: "nav bookmarks address profile";
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
+    grid-template-areas: "nav address bookmarks profile";
     align-items: center;
     gap: var(--space-1);
     padding: var(--space-1) var(--space-2);
@@ -76,8 +76,7 @@ $browser-nav-stack-below: 388px;
         grid-area: nav;
     }
 
-    // After Home in a wide pane (the grid's gap is the group's own), next to
-    // Profile in a thin one.
+    // Just left of Profile, at the right end, at every width.
     &--bookmarks {
         grid-area: bookmarks;
     }

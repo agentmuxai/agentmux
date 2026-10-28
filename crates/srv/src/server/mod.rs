@@ -35,6 +35,7 @@ pub(crate) mod agent_self_keys;
 mod container_tool_chunk;
 pub(crate) mod jekt_held;
 mod jekt_hold;
+pub(crate) mod jekt_start;
 pub(crate) mod controller_backstop;
 mod availability_view;
 pub(crate) mod agent_runtime;
