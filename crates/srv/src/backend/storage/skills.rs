@@ -467,7 +467,7 @@ impl Store {
     pub fn skill_delete(&self, catalog: &Store, id: &str) -> Result<bool, StoreError> {
         let deleted = self.managed_delete::<Skill>(catalog, id)?;
         // Its reach goes with it.
-        catalog.conn.lock().unwrap().execute("DELETE FROM db_skill_reach WHERE skill_id = ?1", params![id])?;
+        catalog.skill_reach_forget(id)?;
         Ok(deleted)
     }
 

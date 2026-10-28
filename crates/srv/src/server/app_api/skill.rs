@@ -394,16 +394,6 @@ fn register_skill_catalog_list_for_agent(engine: &Arc<WshRpcEngine>, state: &App
     );
 }
 
-/// Catalog-tier sibling of `skill.unbind` (above) — same DB write, no
-/// `check_s1`. Restricted to global rows only, matching the guard
-/// `register_skill_catalog_bind`/`register_skill_catalog_delete` already
-/// apply in this file: any window connection can sever any agent's binding
-/// to a *global* skill (an intentional, pre-existing trust boundary — bind
-/// and delete already have the same or larger blast radius), but a private
-/// row's own binding must not be touchable via this no-`check_s1` surface,
-/// even though `skill_id` is never exposed by any no-`check_s1` command
-/// today — defense in depth over relying solely on UUID secrecy.
-/// reagentx P1 on PR #2329 (round 2).
 /// `skill.catalog.set_reach`: a global skill reaches every agent, the agents created from now on, or
 /// only the agents it is bound to.
 /// The switch lives in the identity store beside the catalog (`db_skill_reach`), so it survives an
@@ -469,6 +459,16 @@ fn register_skill_catalog_bind_all(engine: &Arc<WshRpcEngine>, state: &AppState)
     );
 }
 
+/// Catalog-tier sibling of `skill.unbind` (above) — same DB write, no
+/// `check_s1`. Restricted to global rows only, matching the guard
+/// `register_skill_catalog_bind`/`register_skill_catalog_delete` already
+/// apply in this file: any window connection can sever any agent's binding
+/// to a *global* skill (an intentional, pre-existing trust boundary — bind
+/// and delete already have the same or larger blast radius), but a private
+/// row's own binding must not be touchable via this no-`check_s1` surface,
+/// even though `skill_id` is never exposed by any no-`check_s1` command
+/// today — defense in depth over relying solely on UUID secrecy.
+/// reagentx P1 on PR #2329 (round 2).
 fn register_skill_catalog_unbind(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let mstore = state.mstore.clone();
     let identity_store = state.identity_store.clone();

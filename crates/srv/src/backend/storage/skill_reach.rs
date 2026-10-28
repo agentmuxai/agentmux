@@ -12,6 +12,16 @@ use std::collections::HashMap;
 use super::error::StoreError;
 use super::store::Store;
 
+/// The table, created on first use in the store that holds the catalog: it is added without a
+/// schema version bump, like `db_mcp_server_reach` (an older build ignores it, a newer one
+/// creates it), and no migration file grows for it.
+const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS db_skill_reach (
+        skill_id         TEXT PRIMARY KEY,
+        all_agents       INTEGER NOT NULL DEFAULT 0,
+        new_agents_since INTEGER NOT NULL DEFAULT 0,
+        updated_at       INTEGER NOT NULL DEFAULT 0
+    );";
+
 /// Who a catalog (global) skill reaches beyond its binds, from `db_skill_reach`. The default, no
 /// row, is "only the agents it is bound to". Same shape as an MCP server's reach
 /// (`McpServerReach`), with a second switch for the agents to come.
@@ -36,6 +46,7 @@ impl Store {
     /// where `db_skill_reach` sits beside `db_skills`.
     pub fn skill_reach_map(&self) -> Result<HashMap<String, SkillReach>, StoreError> {
         let conn = self.conn.lock().unwrap();
+        conn.execute_batch(SCHEMA)?;
         let mut stmt = conn.prepare("SELECT skill_id, all_agents, new_agents_since FROM db_skill_reach")?;
         let rows = stmt.query_map([], |row| {
             Ok((
@@ -50,7 +61,9 @@ impl Store {
     /// global row. Switching "new agents" on starts at `now_ms` and keeps its start when it is
     /// already on, so setting `all_agents` later does not make older agents count as new.
     pub fn skill_set_reach(&self, skill_id: &str, all_agents: bool, new_agents: bool, now_ms: i64) -> Result<(), StoreError> {
-        self.conn.lock().unwrap().execute(
+        let conn = self.conn.lock().unwrap();
+        conn.execute_batch(SCHEMA)?;
+        conn.execute(
             "INSERT INTO db_skill_reach (skill_id, all_agents, new_agents_since, updated_at)
              VALUES (?1, ?2, CASE WHEN ?3 THEN ?4 ELSE 0 END, ?4)
              ON CONFLICT(skill_id) DO UPDATE SET
@@ -61,6 +74,14 @@ impl Store {
                 updated_at = excluded.updated_at",
             params![skill_id, all_agents as i64, new_agents as i64, now_ms],
         )?;
+        Ok(())
+    }
+
+    /// Drop a deleted skill's reach. Call on the catalog store.
+    pub fn skill_reach_forget(&self, skill_id: &str) -> Result<(), StoreError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute_batch(SCHEMA)?;
+        conn.execute("DELETE FROM db_skill_reach WHERE skill_id = ?1", params![skill_id])?;
         Ok(())
     }
 }
