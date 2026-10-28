@@ -12,16 +12,20 @@
 //! So while a dir's token is expired, one process goes first and the rest wait:
 //!   - the first spawn finds no entry and an expired token, and takes the dir (`Entry::owner` is
 //!     its block). It runs at once; its CLI does the refresh;
-//!   - a later spawn on that dir waits until the token is fresh again, the owner's first turn has
-//!     ended or its process is gone, or [`WARM_MAX`] has passed. Those that waited start
+//!   - a later spawn, or an ambient call, on that dir waits until the token is fresh again, the
+//!     owner's first turn has ended or its process is gone, or the owner's hold runs out:
+//!     [`GATE_GRACE`] until its process is up, [`WARM_MAX`] after. Those that waited start
 //!     [`STAGGER`] apart, so a dozen panes do not all hit the API in the same millisecond;
-//!   - an ambient call waits until the owner's turn has ended, whether or not the token is fresh
-//!     by then, and takes the dir itself when the token is expired and nobody has it.
+//!   - an ambient call takes the dir itself when the token is expired and nobody has it.
 //!
-//! This never refreshes a token itself and never blocks for good: a dead refresh token, or an
-//! owner that never reports back, costs one [`WARM_MAX`] and then the next caller owns the dir.
-//! The wait comes before the account is resolved (`inject_after_warmup`), so the status the
-//! spawn gate reads is the one after the refresh, not before it.
+//! An owner whose hold runs out (a resumed CLI that waits for its first prompt before it
+//! refreshes, or a refresh that failed) does not hand the dir to the next waiter: the dir is
+//! unclaimed for [`SETTLED_FOR`], so the panes behind it go together rather than one by one.
+//!
+//! This never refreshes a token itself and never blocks for good: a dead refresh token or an
+//! owner that never reports back costs one hold. The wait comes before the account is resolved
+//! (`inject_after_warmup`), so the status the spawn gate reads is the one after the refresh, not
+//! before it.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -35,8 +39,12 @@ use crate::backend::mps::Broker;
 use crate::backend::storage::store::Store;
 use crate::identity::resolver::{OAuthProbeStatus, SpawnGateError};
 
-/// The longest a dir stays taken by a process that has not reported its first turn over.
-pub const WARM_MAX: Duration = Duration::from_secs(90);
+/// The longest a dir stays taken once its owner's process is up and its first turn has not ended.
+/// A CLI that refreshes does so in its first seconds; one that waits for a prompt first (a resumed
+/// pane) must not hold the panes behind it for long.
+pub const WARM_MAX: Duration = Duration::from_secs(20);
+/// How long a dir stays unclaimed after an owner's hold ran out.
+pub const SETTLED_FOR: Duration = Duration::from_secs(60);
 /// The longest it stays taken by a spawn whose process has not started: the time the gate and the
 /// env take. A spawn that fails after the dir was taken (a gate refusal, a deleted agent) holds it
 /// no longer than this.
@@ -61,6 +69,8 @@ enum Step {
 #[derive(Default)]
 struct Inner {
     taken: HashMap<PathBuf, Entry>,
+    /// Dirs whose owner's hold ran out, and until when no one claims them again.
+    settled: HashMap<PathBuf, Instant>,
     next_release: HashMap<PathBuf, Instant>,
 }
 
@@ -71,9 +81,9 @@ struct Warmup {
 }
 
 impl Warmup {
-    /// Decide for `owner` on `dir`. `through_turn` is an ambient call's rule: it waits for the
-    /// owner's turn to end even once the token is fresh.
-    fn step(&self, dir: &Path, owner: &str, stale: bool, through_turn: bool, now: Instant) -> Step {
+    /// Decide for `owner` on `dir`. An ambient owner's hold starts at [`WARM_MAX`]: it has no
+    /// process start to wait for.
+    fn step(&self, dir: &Path, owner: &str, stale: bool, ambient: bool, now: Instant) -> Step {
         let mut g = self.inner.lock().unwrap();
         if g.taken.get(dir).is_some_and(|e| e.deadline <= now) {
             if let Some(e) = g.taken.remove(dir) {
@@ -81,23 +91,24 @@ impl Warmup {
                     target: "identity",
                     dir = %dir.display(),
                     owner = %e.owner,
-                    "token warm-up: owner never reported its first turn over — dir released"
+                    "token warm-up: owner's hold ran out before its token refreshed — dir released to all"
                 );
+                g.settled.insert(dir.to_path_buf(), now + SETTLED_FOR);
             }
         }
         match g.taken.get(dir) {
             Some(e) if e.owner == owner => Step::Go,
-            Some(e) if stale || through_turn => Step::Wait(e.deadline),
+            Some(e) if stale => Step::Wait(e.deadline),
             Some(_) => Step::Go,
             None => {
-                if stale {
+                if stale && !g.settled.get(dir).is_some_and(|until| *until > now) {
                     tracing::info!(
                         target: "identity",
                         dir = %dir.display(),
                         owner,
                         "token warm-up: access token expired — {owner} goes first, others on this dir wait"
                     );
-                    let hold = if through_turn { WARM_MAX } else { GATE_GRACE };
+                    let hold = if ambient { WARM_MAX } else { GATE_GRACE };
                     g.taken.insert(dir.to_path_buf(), Entry { owner: owner.to_string(), deadline: now + hold });
                 }
                 Step::Go
@@ -113,7 +124,7 @@ impl Warmup {
         at
     }
 
-    async fn enter(&self, dir: &Path, owner: &str, through_turn: bool, is_stale: impl Fn() -> bool) {
+    async fn enter(&self, dir: &Path, owner: &str, ambient: bool, is_stale: impl Fn() -> bool) {
         // A caller dropped while it waited out its stagger must not leave the dir it took held.
         let mut undo = ReleaseOnDrop { warmup: self, owner, armed: true };
         let mut waited = false;
@@ -122,7 +133,7 @@ impl Warmup {
             tokio::pin!(notified);
             notified.as_mut().enable();
             let now = Instant::now();
-            match self.step(dir, owner, is_stale(), through_turn, now) {
+            match self.step(dir, owner, is_stale(), ambient, now) {
                 Step::Go => break,
                 Step::Wait(deadline) => {
                     waited = true;
@@ -251,8 +262,8 @@ impl Drop for AmbientGuard {
     }
 }
 
-/// Wait before an ambient CLI runs on `config_dir` (its `CLAUDE_CONFIG_DIR`), until the first
-/// spawn on that dir has had its turn. `None`: the call has no dir of its own to protect.
+/// Wait before an ambient CLI runs on `config_dir` (its `CLAUDE_CONFIG_DIR`) while a spawn on it
+/// is refreshing the expired token. No dir, or a blank one: the call has none of its own to protect.
 pub async fn ambient_gate(config_dir: Option<&str>) -> AmbientGuard {
     static NEXT: AtomicU64 = AtomicU64::new(0);
     let owner = format!("ambient:{}", NEXT.fetch_add(1, Ordering::Relaxed));
@@ -331,27 +342,25 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn an_owner_that_never_reports_back_frees_the_dir_after_warm_max() {
+    async fn an_owner_that_never_refreshes_frees_the_dir_to_everyone_at_once() {
         let w = Arc::new(Warmup::default());
         w.enter(&dir(), "a", false, || true).await;
         w.started("a");
-        let second = {
+        let mut waiting = Vec::new();
+        for owner in ["b", "c"] {
             let w = w.clone();
-            tokio::spawn(async move { w.enter(&dir(), "b", false, || true).await })
-        };
+            waiting.push(tokio::spawn(async move { w.enter(&dir(), owner, false, || true).await }));
+        }
         tokio::time::sleep(WARM_MAX - Duration::from_secs(1)).await;
-        assert!(!second.is_finished());
+        assert!(waiting.iter().all(|h| !h.is_finished()));
         tokio::time::sleep(Duration::from_secs(3)).await;
-        second.await.unwrap();
-        // b took it over, so a third now waits for b.
-        let third = {
-            let w = w.clone();
-            tokio::spawn(async move { w.enter(&dir(), "c", false, || true).await })
-        };
-        tokio::time::sleep(Duration::from_secs(2)).await;
-        assert!(!third.is_finished());
-        w.release("b");
-        third.await.unwrap();
+        // Neither took the dir over from the other: both are through, after a stagger apart.
+        for h in waiting {
+            h.await.unwrap();
+        }
+        assert!(!w.release("b") && !w.release("c"), "the dir stays unclaimed for a while");
+        // Even a newcomer is not held, while the dir is settled.
+        timeout(Duration::from_millis(1), w.enter(&dir(), "d", false, || true)).await.expect("settled");
     }
 
     #[tokio::test(start_paused = true)]
@@ -403,19 +412,34 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn an_ambient_call_waits_for_the_first_turn_even_when_the_token_is_fresh_again() {
+    async fn an_ambient_call_waits_while_the_token_is_expired_and_goes_once_it_is_fresh() {
         let w = Arc::new(Warmup::default());
         let stale = stale_flag(true);
         let s1 = stale.clone();
         w.enter(&dir(), "a", false, move || s1.load(Ordering::SeqCst)).await;
-        stale.store(false, Ordering::SeqCst);
 
+        let s2 = stale.clone();
         let ambient = {
             let w = w.clone();
-            tokio::spawn(async move { w.enter(&dir(), "ambient:0", true, || false).await })
+            tokio::spawn(async move { w.enter(&dir(), "ambient:0", true, move || s2.load(Ordering::SeqCst)).await })
         };
         tokio::time::sleep(Duration::from_secs(10)).await;
-        assert!(!ambient.is_finished(), "the ambient call waits until a's turn ends");
+        assert!(!ambient.is_finished(), "the ambient call waits while a refreshes");
+        stale.store(false, Ordering::SeqCst);
+        tokio::time::sleep(POLL * 2).await;
+        ambient.await.unwrap();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_ambient_call_goes_when_the_owners_turn_ends_though_the_token_is_still_expired() {
+        let w = Arc::new(Warmup::default());
+        w.enter(&dir(), "a", false, || true).await;
+        let ambient = {
+            let w = w.clone();
+            tokio::spawn(async move { w.enter(&dir(), "ambient:0", true, || true).await })
+        };
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        assert!(!ambient.is_finished());
         w.release("a");
         ambient.await.unwrap();
     }
