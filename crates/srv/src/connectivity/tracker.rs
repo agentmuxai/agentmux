@@ -185,23 +185,21 @@ impl Tracker {
         // A probe of a service believed down confirms what it finds; one of an online service, sent
         // because the network changed, counts like any other request until it is repeated.
         let probed = entry.state != Reachability::Online;
+        // The network changed again while this probe ran: its answer is about the old one.
+        let repeat = entry.probe.as_ref().is_some_and(|p| p.in_flight == Some(ticket) && p.again);
         let next = entry.apply(outcome, probed, now_ms);
         let changed = entry.enter(next, now_ms);
-        // An online service keeps its probe only to be repeated: the network changed again while this one ran.
-        let repeat = entry.probe.as_ref().is_some_and(|p| p.in_flight == Some(ticket) && p.again);
-        if entry.state == Reachability::Online && !repeat {
+        if repeat {
+            // Whatever the answer did to the schedule (an answer drops it, leaving `Online` makes a
+            // fresh one), the next probe is due at once, with the backoff started over.
+            entry.probe = Some(ProbeSchedule { due_ms: now_ms, interval_ms: PROBE_FIRST_MS, in_flight: None, again: false });
+        } else if entry.state == Reachability::Online {
             entry.probe = None;
-        }
-        // Leaving `Online` has scheduled a fresh first probe; otherwise this one backs off.
-        if let Some(probe) = entry.probe.as_mut().filter(|p| p.in_flight == Some(ticket)) {
+        } else if let Some(probe) = entry.probe.as_mut().filter(|p| p.in_flight == Some(ticket)) {
+            // Leaving `Online` has scheduled a fresh first probe; otherwise this one backs off.
             probe.in_flight = None;
-            if std::mem::take(&mut probe.again) {
-                probe.interval_ms = PROBE_FIRST_MS;
-                probe.due_ms = now_ms;
-            } else {
-                probe.interval_ms = (probe.interval_ms * 2).min(PROBE_MAX_MS);
-                probe.due_ms = now_ms + probe.interval_ms;
-            }
+            probe.interval_ms = (probe.interval_ms * 2).min(PROBE_MAX_MS);
+            probe.due_ms = now_ms + probe.interval_ms;
         }
         self.changed(changed, now_ms)
     }
