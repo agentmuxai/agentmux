@@ -16,16 +16,17 @@
 // is allowed with an entry in ALLOW below: the exact wording, and a reason. An entry
 // that no longer matches anything fails too, so the list cannot go stale.
 //
-// What is scanned: SEED_FILES (the shipped manifests), every file under SKILL_DIRS
-// (built-in skills), and USER_FACING_FILES (shipped text kept in code). To bring more
+// What is scanned: SEED_FILES (the shipped manifests, whose skills and prompts live in
+// them) and USER_FACING_FILES (shipped text kept in code). A listed file that does not
+// exist fails, so a rename cannot take a file out of the rule unnoticed. To bring more
 // text under the rule, add its file to one of them.
 //
 // Usage:
 //   node scripts/check-product-text.mjs
 // Exit 0 = clean, exit 1 = a violation (or a stale allow entry) was found.
 
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { dirname, join, relative, sep } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isMain } from "./lib/is-main.mjs";
 
@@ -48,9 +49,6 @@ export const SEED_FILES = [
     "crates/srv/operator-config-seed.json",
     "crates/srv/src/config/starter-mcp-servers.json",
 ];
-
-/** Directories of built-in skills: every file under them is scanned. */
-export const SKILL_DIRS = ["crates/srv/builtin-skills", "crates/srv/src/builtin-skills"];
 
 /** Shipped text that lives in code. */
 export const USER_FACING_FILES = [
@@ -77,7 +75,8 @@ export const ALLOW = [
 ];
 
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-const termRe = (term) => new RegExp(`(?<![\\w-])${escapeRe(term)}(?![\\w-])`, "gi");
+// A whole name. A JSON escape ("\\n", "\\t", "\\"") before it is a boundary: its letter is not part of a word.
+const termRe = (term) => new RegExp(`(?:(?<![\\w-])|(?<=\\\\[nrtbf"\\\\/]))${escapeRe(term)}(?![\\w-])`, "gi");
 
 const lineAt = (text, index) => text.slice(0, index).split("\n").length;
 
@@ -105,44 +104,34 @@ export function checkText(path, text, allow = ALLOW.filter((a) => a.file === pat
     return out.sort((a, b) => a.line - b.line);
 }
 
-function* walk(dir) {
-    for (const name of readdirSync(dir)) {
-        const full = join(dir, name);
-        if (statSync(full).isDirectory()) yield* walk(full);
-        else yield full;
-    }
-}
-
-const rel = (full) => relative(REPO_ROOT, full).split(sep).join("/");
-
 /** Every file the rule covers, repo-relative. */
-export function targets(root = REPO_ROOT) {
-    const files = [...SEED_FILES, ...USER_FACING_FILES].filter((f) => existsSync(join(root, f)));
-    for (const dir of SKILL_DIRS) {
-        if (existsSync(join(root, dir))) for (const f of walk(join(root, dir))) files.push(relative(root, f).split(sep).join("/"));
-    }
-    return files;
+export function targets() {
+    return [...SEED_FILES, ...USER_FACING_FILES];
 }
 
-/** Violations across the repo, and the allow entries that matched nothing. */
+/** Violations across the repo, the listed files that do not exist, and the allow entries that matched nothing. */
 export function run(root = REPO_ROOT) {
     const used = new Set();
     const violations = [];
-    for (const path of targets(root)) {
+    const missing = targets().filter((f) => !existsSync(join(root, f)));
+    for (const path of targets().filter((f) => !missing.includes(f))) {
         violations.push(...checkText(path, readFileSync(join(root, path), "utf8"), ALLOW.filter((a) => a.file === path), used));
     }
-    return { violations, stale: ALLOW.filter((a) => !used.has(a)) };
+    return { violations, missing, stale: ALLOW.filter((a) => !used.has(a)) };
 }
 
 function main() {
-    const { violations, stale } = run();
+    const { violations, missing, stale } = run();
     for (const v of violations) {
         console.error(`${v.path}:${v.line}: "${v.term}" in text every user gets: ${v.text}`);
+    }
+    for (const f of missing) {
+        console.error(`${f}: listed in scripts/check-product-text.mjs but missing (renamed or moved? update the list)`);
     }
     for (const a of stale) {
         console.error(`${a.file}: allow entry matches nothing (remove it): ${a.text.slice(0, 80)}`);
     }
-    if (violations.length || stale.length) {
+    if (violations.length || missing.length || stale.length) {
         console.error(
             "\nText AgentMux ships to every user must not name one deployment's own setup. Reword it generically, or, " +
                 "where a term is needed for the machines that have it, add an ALLOW entry (exact wording and a reason) to scripts/check-product-text.mjs."

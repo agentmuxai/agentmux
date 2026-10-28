@@ -5,7 +5,7 @@
 
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { ALLOW, checkText, run, targets } from "./check-product-text.mjs";
 
@@ -19,6 +19,11 @@ describe("the deny-list", () => {
             "shared-infrastructure:3",
         ]);
         expect(found("seed.json", "ask muxreview, or Run Secrets Escalate").sort()).toEqual(["muxreview:1", "secrets escalate:1"]);
+    });
+
+    it("finds a name right after a JSON escape, as in a multi-line prompt", () => {
+        expect(found("seed.json", '"a\\ngh-agent auth"')).toEqual(["gh-agent:1"]);
+        expect(found("seed.json", '"a\\tmuxreview and \\"a5af\\""')).toEqual(["a5af:1", "muxreview:1"]);
     });
 
     it("matches whole names only", () => {
@@ -64,15 +69,17 @@ describe("the repository", () => {
         expect(files).toContain("crates/srv/operator-config-seed.json");
     });
 
-    it("scans every file under a built-in skills directory", () => {
+    it("fails on a listed file that does not exist, and scans the ones that do", () => {
         const root = mkdtempSync(join(tmpdir(), "product-text-"));
-        const dir = join(root, "crates/srv/builtin-skills/disk-cleanup");
-        mkdirSync(dir, { recursive: true });
-        writeFileSync(join(dir, "SKILL.md"), "Run `gh-agent doctor` first.\n");
-        expect(targets(root)).toEqual(["crates/srv/builtin-skills/disk-cleanup/SKILL.md"]);
-        const { violations } = run(root);
-        expect(violations.map((v) => `${v.path}:${v.line}:${v.term}`)).toEqual([
-            "crates/srv/builtin-skills/disk-cleanup/SKILL.md:1:gh-agent",
-        ]);
+        const [first, ...rest] = targets();
+        mkdirSync(dirname(join(root, first)), { recursive: true });
+        writeFileSync(join(root, first), "Run `gh-agent doctor` first.\n");
+        const { violations, missing } = run(root);
+        expect(missing).toEqual(rest);
+        expect(violations.map((v) => `${v.path}:${v.line}:${v.term}`)).toEqual([`${first}:1:gh-agent`]);
+    });
+
+    it("finds every listed file in the repository", () => {
+        expect(run().missing).toEqual([]);
     });
 });
