@@ -58,6 +58,10 @@ pub struct SensitiveView {
     pub approver: Option<String>,
     #[ts(type = "number")]
     pub deadline_ms: i64,
+    /// When the countdown began. A window that connects later is replayed the countdowns still
+    /// running; this is what tells those from a new one.
+    #[ts(type = "number")]
+    pub opened_ms: i64,
     /// `pending` → `vetoed` or `cancelled`, or `proceeding` → `done` / `failed`.
     #[ts(type = r#""pending" | "vetoed" | "cancelled" | "proceeding" | "done" | "failed""#)]
     pub status: &'static str,
@@ -168,6 +172,7 @@ pub fn open(state: &AppState, request_id: &str, window: Duration) -> Result<Sens
             requester: request.requester_slug.clone(),
             approver: request.decided_by.clone(),
             deadline_ms: now + window.as_millis() as i64,
+            opened_ms: now,
             status: "pending",
             error: None,
         };

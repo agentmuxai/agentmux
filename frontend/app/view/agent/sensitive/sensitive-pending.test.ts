@@ -23,6 +23,7 @@ const view = (over: Record<string, unknown> = {}) => ({
     requester: "Parlo",
     approver: "Camper",
     deadline_ms: 100_000,
+    opened_ms: 70_000,
     status: "pending",
     ...over,
 });

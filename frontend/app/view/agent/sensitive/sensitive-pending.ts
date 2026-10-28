@@ -21,6 +21,8 @@ export const LAST_CALL_MS = 5_000;
 const REPLAY_EVENTS = 32;
 /** A countdown whose end was never announced is dropped this long after its deadline. */
 const STALE_MS = 5_000;
+/** A countdown that began longer ago than this was replayed to a window that connected later, not just started. */
+const FRESH_MS = 5_000;
 /** A countdown's first chime waits this long, so a replayed one that was already cleared stays silent. */
 export const CHIME_DELAY_MS = 300;
 /** How long a live clear is remembered. */
@@ -35,6 +37,8 @@ export interface SensitiveCountdown {
     /** The super agent that approved it; empty when none reviewed it. */
     approver: string;
     deadline_ms: number;
+    /** When srv began the countdown; 0 when it did not say. */
+    opened_ms: number;
 }
 
 /** A countdown still running, from a `sensitive:pending` payload. */
@@ -49,6 +53,7 @@ export function parseCountdown(data: unknown): SensitiveCountdown | null {
         requester: typeof d.requester === "string" ? d.requester : "",
         approver: typeof d.approver === "string" ? d.approver : "",
         deadline_ms: d.deadline_ms,
+        opened_ms: typeof d.opened_ms === "number" ? d.opened_ms : 0,
     };
 }
 
@@ -96,16 +101,18 @@ function begin(): () => void {
     // back. srv keeps a finished countdown ten minutes, so no id is remembered longer.
     const clearedLive = new Map<string, number>();
     const lastCalled = new Set<string>();
+    // Set when the last pane lets go: a history read still on its way must not touch the store then.
+    let disposed = false;
     const chimes = new Set<ReturnType<typeof setTimeout>>();
-    // The broker replays its kept events through these same handlers when this connection
-    // subscribes: an expired one is ignored, and the chime waits a moment so a countdown that was
-    // vetoed or finished a while ago (its clear arrives right behind it) never sounds.
+    // The broker replays its kept events through these same handlers whenever this connection
+    // subscribes: an expired one is ignored, only a countdown that has just begun chimes, and the
+    // chime waits a moment so one cleared right behind it never sounds.
     const unsubPending = onMuxEvent(WpsEvent.SensitivePending, (view) => {
         const c = parseCountdown(view);
         if (!c || c.deadline_ms <= Date.now() || clearedLive.has(c.request_id)) return;
         const known = open().some((x) => x.request_id === c.request_id);
         setOpen((list) => withCountdown(list, c));
-        if (known) return;
+        if (known || Date.now() - c.opened_ms > FRESH_MS) return;
         const t = setTimeout(() => {
             chimes.delete(t);
             if (open().some((x) => x.request_id === c.request_id)) playShutdownPendingTone();
@@ -122,6 +129,7 @@ function begin(): () => void {
         readMuxEventHistory(WpsEvent.SensitivePending, "", REPLAY_EVENTS).catch(() => []),
         readMuxEventHistory(WpsEvent.SensitiveCleared, "", REPLAY_EVENTS).catch(() => []),
     ]).then(([pending, cleared]) => {
+        if (disposed) return;
         // Merged by request: what the live events already said stands, the rest is added.
         const replayed = replayCountdowns(pending, cleared, Date.now()).filter((c) => !clearedLive.has(c.request_id));
         setOpen((list) => replayed.reduce((l, c) => (l.some((x) => x.request_id === c.request_id) ? l : withCountdown(l, c)), list));
@@ -143,6 +151,7 @@ function begin(): () => void {
         unsubCleared();
         clearInterval(timer);
         chimes.forEach(clearTimeout);
+        disposed = true;
         setOpen([]);
     };
 }

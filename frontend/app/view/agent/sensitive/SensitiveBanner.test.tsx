@@ -43,6 +43,7 @@ const pending = (id: string, over: Record<string, unknown> = {}) =>
             requester: "Parlo",
             approver: "Camper",
             deadline_ms: Date.now() + 30_000,
+            opened_ms: Date.now(),
             status: "pending",
             ...over,
         },
@@ -97,6 +98,27 @@ describe("SensitiveBanner (SPEC_SUPER_AGENT §5)", () => {
         handlers.get("sensitive:cleared")!(cleared("r1"));
         await afterChimeDelay();
         expect(tone).not.toHaveBeenCalled();
+    });
+
+    it("a countdown replayed on connect, begun a while ago and still running, is shown but not sounded", async () => {
+        render(() => <SensitiveBanner />);
+        handlers.get("sensitive:pending")!(pending("r1", { opened_ms: Date.now() - 20_000 }));
+        await afterChimeDelay();
+        expect(screen.queryByText(/Parlo asked/)).toBeTruthy();
+        expect(tone).not.toHaveBeenCalled();
+    });
+
+    it("a history read that lands after the last banner went doesn't touch the next one", async () => {
+        const first = render(() => <SensitiveBanner />);
+        first.unmount();
+        render(() => <SensitiveBanner />);
+        handlers.get("sensitive:pending")!(pending("r2"));
+        handlers.get("sensitive:cleared")!(cleared("r2"));
+        // The first banner's history read, answered late, still lists r2 as pending.
+        resolveHistory[0]([pending("r2")]);
+        resolveHistory[1]([]);
+        await flush();
+        expect(screen.queryByText(/Parlo asked/)).toBeNull();
     });
 
     it("a clear that arrives first keeps its countdown from showing", () => {
