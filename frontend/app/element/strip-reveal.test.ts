@@ -157,3 +157,64 @@ describe("revealInStrip options", () => {
         expect(into).not.toHaveBeenCalled();
     });
 });
+
+// A pane tab strip aligns the selected tab flush with its left edge instead of the least scroll.
+describe("revealTargetScrollLeft with alignStart", () => {
+    const ALIGN = { ...FADE, alignStart: true };
+    const FORCE = { ...ALIGN, force: true };
+
+    it("puts the tab's left edge at the strip's left edge, in the strip's own pixels", () => {
+        // The tab is 320px from the strip's left edge: scrolling 320px right brings it to x=0.
+        expect(revealTargetScrollLeft(geo(200, 320, 380), false, ALIGN)).toBe(520);
+        // One hidden on the left scrolls back just as far.
+        expect(revealTargetScrollLeft(geo(200, -60, 0), false, ALIGN)).toBe(140);
+    });
+
+    it("clamps at the end, where the last tabs cannot be brought to the left edge", () => {
+        expect(revealTargetScrollLeft(geo(650, 300, 360), false, ALIGN)).toBe(700);
+        expect(revealTargetScrollLeft(geo(0, 900, 960), false, FORCE)).toBe(700);
+        expect(revealTargetScrollLeft(geo(300, 0, 0), true, FORCE)).toBe(700);
+    });
+
+    it("clamps at the start", () => {
+        expect(revealTargetScrollLeft(geo(20, -10, 50), false, ALIGN)).toBe(10);
+        expect(revealTargetScrollLeft(geo(20, -40, 20), false, ALIGN)).toBe(0);
+        expect(revealTargetScrollLeft(geo(300, 0, 0), false, { ...ALIGN, isFirst: true })).toBe(0);
+    });
+
+    it("leaves a tab alone that is flush or clear of the fades, unless it is a selection", () => {
+        expect(revealTargetScrollLeft(geo(200, 0, 60), false, ALIGN)).toBeNull();
+        expect(revealTargetScrollLeft(geo(200, 0.8, 60), false, ALIGN)).toBeNull();
+        expect(revealTargetScrollLeft(geo(200, 40, 100), false, ALIGN)).toBeNull();
+        // A selection aligns a tab that was fully in view.
+        expect(revealTargetScrollLeft(geo(200, 40, 100), false, FORCE)).toBe(240);
+        // And a tab already flush stays where it is.
+        expect(revealTargetScrollLeft(geo(200, 0, 60), false, FORCE)).toBeNull();
+    });
+
+    it("moves a tab that sits under a fade flush to the left", () => {
+        expect(revealTargetScrollLeft(geo(200, 10, 70), false, ALIGN)).toBe(210);
+        expect(revealTargetScrollLeft(geo(200, 230, 290), false, ALIGN)).toBe(430);
+    });
+
+    it("does nothing when the strip does not scroll", () => {
+        expect(revealTargetScrollLeft(geo(0, 250, 350, 1, { scrollWidth: 300 }), false, FORCE)).toBeNull();
+        expect(revealTargetScrollLeft(geo(0, 250, 350, 1, { scrollWidth: 300 }), true, FORCE)).toBeNull();
+    });
+
+    it.each([0.5, 1, 2])("measures in the strip's own pixels at zoom %s", (zoom) => {
+        expect(revealTargetScrollLeft(geo(200, 320, 380, zoom), false, ALIGN)).toBe(520);
+        expect(revealTargetScrollLeft(geo(200, 40, 100, zoom), false, FORCE)).toBe(240);
+    });
+
+    it("writes the scroll, smooth or instant, on the strip only", () => {
+        const s = strip(100);
+        revealInStrip(s, tab(280, 340), false, ALIGN);
+        expect(s.scrollLeft).toBe(380);
+        const t = strip(100);
+        const scrollTo = vi.fn();
+        t.scrollTo = scrollTo as unknown as typeof t.scrollTo;
+        revealInStrip(t, tab(280, 340), false, { ...ALIGN, behavior: "smooth" });
+        expect(scrollTo).toHaveBeenCalledWith({ left: 380, behavior: "smooth" });
+    });
+});

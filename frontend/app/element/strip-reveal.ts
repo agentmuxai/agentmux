@@ -11,6 +11,9 @@
 // the least amount that brings it fully into view; a strip that fades its
 // edges passes `edgeClearance` so the item lands beside the fade, not under it.
 //
+// With `alignStart` (the pane tab strip) a scroll puts the item's left edge flush
+// with the strip's left edge instead, clamped where the strip cannot scroll further.
+//
 // Writes `scrollLeft` or `scrollTo` on the strip only, never `scrollIntoView`:
 // that also scrolls every scrollable ancestor, which is how the whole app once
 // got shifted sideways (REPORT_LAN_UNDISCOVERABLE_AND_PAGE_SHIFT_2026_10_04.md §3).
@@ -25,6 +28,10 @@ export interface StripRevealOptions {
     edgeClearance?: number;
     /** `smooth` animates the scroll; default `instant`. */
     behavior?: "smooth" | "instant";
+    /** Scroll so the item's left edge is flush with the strip's, rather than the least amount. */
+    alignStart?: boolean;
+    /** With `alignStart`: align even when the item is already fully in view (a selection, not a click in the pane). */
+    force?: boolean;
 }
 
 /** What a reveal measures. Lengths are in the strip's own pixels except the two `item*` rects. */
@@ -46,7 +53,7 @@ export interface StripRevealGeometry {
 export function revealTargetScrollLeft(
     g: StripRevealGeometry,
     isLast: boolean,
-    { isFirst = false, edgeClearance = 0 }: StripRevealOptions = {}
+    { isFirst = false, edgeClearance = 0, alignStart = false, force = false }: StripRevealOptions = {}
 ): number | null {
     const max = g.scrollWidth - g.clientWidth;
     if (max <= 0) return null;
@@ -61,6 +68,15 @@ export function revealTargetScrollLeft(
     // A fade only covers an edge with more content beyond it.
     const leftFade = g.scrollLeft > 1 ? edgeClearance : 0;
     const rightFade = g.scrollLeft < max - 1 ? edgeClearance : 0;
+    if (alignStart) {
+        if (!force) {
+            // Flush is a settled place (the strip drops its left fade there); so is a tab clear of both fades.
+            const flush = Math.abs(left) <= 1;
+            const clear = left >= leftFade && right <= g.clientWidth - rightFade;
+            if (flush || clear) return null;
+        }
+        return Math.abs(left) < 0.5 ? null : pick(g.scrollLeft + left);
+    }
     if (left < leftFade) return pick(g.scrollLeft + left - edgeClearance);
     if (right > g.clientWidth - rightFade) {
         const toRight = g.scrollLeft + right - g.clientWidth + edgeClearance;
