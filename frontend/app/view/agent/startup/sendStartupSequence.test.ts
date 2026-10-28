@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { AgentDefinition } from "@/app/store/rpc-api";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { noteOpenedByPerson, OPEN_NOTE_TTL_MS, takeOpenedByPerson } from "@/app/store/agent-open-note";
+import { OPENING_SUMMARY_PROMPT } from "./opening-summary";
 import { sendStartupSequence, type StartupSequenceDeps } from "./sendStartupSequence";
 
 const agent = { id: "a1", name: "Ada", slug: "ada" } as unknown as AgentDefinition;
@@ -91,5 +93,97 @@ describe("sendStartupSequence", () => {
         });
         await expect(sendStartupSequence(d)).resolves.toBeUndefined();
         expect(d.logs.some((l) => l.startsWith("warn: startup sequence failed"))).toBe(true);
+    });
+});
+
+describe("the opening update", () => {
+    // Nothing leaks from one test into the next: a note is used up by whoever asks.
+    afterEach(() => void takeOpenedByPerson("a1"));
+
+    it("goes to a resumed session whose pane the person opened, once", async () => {
+        noteOpenedByPerson("a1");
+        const d = deps({ sessionId: () => "s-1" });
+        await sendStartupSequence(d);
+        expect(d.sent).toEqual([OPENING_SUMMARY_PROMPT]);
+        // The pane connects again (a login, a restart of its process): no second update.
+        await sendStartupSequence(d);
+        expect(d.sent).toHaveLength(1);
+    });
+
+    it("does not go to a pane that only mounted: a layout restore, a tab switch or a background resume", async () => {
+        // None of them goes through the explicit open, so no note exists.
+        const d = deps({ sessionId: () => "s-1" });
+        await sendStartupSequence(d);
+        await sendStartupSequence(d);
+        expect(d.sent).toEqual([]);
+    });
+
+    it("does not go to a pane opened for another agent", async () => {
+        noteOpenedByPerson("someone-else");
+        const d = deps({ sessionId: () => "s-1" });
+        await sendStartupSequence(d);
+        expect(d.sent).toEqual([]);
+        expect(takeOpenedByPerson("someone-else")).toBe(true);
+    });
+
+    it("is not sent for a new agent: it has nothing to report and gets its usual startup payload", async () => {
+        noteOpenedByPerson("a1");
+        const d = deps();
+        await sendStartupSequence(d);
+        expect(d.sent).toHaveLength(1);
+        expect(d.sent[0]).not.toBe(OPENING_SUMMARY_PROMPT);
+        expect(d.sent[0]).toContain("# Session Context");
+        expect(d.sent[0]).not.toContain("Opening update");
+    });
+
+    it("is skipped while the agent is working, so it is never held into a running task", async () => {
+        noteOpenedByPerson("a1");
+        const d = deps({ sessionId: () => "s-1", isBusy: () => true });
+        await sendStartupSequence(d);
+        expect(d.sent).toEqual([]);
+        expect(d.logs.some((l) => l.includes("opening update skipped"))).toBe(true);
+    });
+
+    it("goes out when the agent is idle", async () => {
+        noteOpenedByPerson("a1");
+        const d = deps({ sessionId: () => "s-1", isBusy: () => false });
+        await sendStartupSequence(d);
+        expect(d.sent).toEqual([OPENING_SUMMARY_PROMPT]);
+    });
+
+    it("a failed send is logged, not thrown", async () => {
+        noteOpenedByPerson("a1");
+        const d = deps({
+            sessionId: () => "s-1",
+            send: async () => {
+                throw new Error("offline");
+            },
+        });
+        await expect(sendStartupSequence(d)).resolves.toBeUndefined();
+        expect(d.logs.some((l) => l.includes("opening update failed"))).toBe(true);
+    });
+});
+
+describe("the note of an explicit open", () => {
+    it("is used up by the first pane that asks", () => {
+        noteOpenedByPerson("a2", 1000);
+        expect(takeOpenedByPerson("a2", 1500)).toBe(true);
+        expect(takeOpenedByPerson("a2", 1600)).toBe(false);
+    });
+
+    it("expires: an open that mounted no pane does not fire for a later mount of the same agent", () => {
+        noteOpenedByPerson("a3", 1000);
+        expect(takeOpenedByPerson("a3", 1000 + OPEN_NOTE_TTL_MS + 1)).toBe(false);
+    });
+
+    it("is not there for an agent nobody opened, or without an id", () => {
+        expect(takeOpenedByPerson("nobody")).toBe(false);
+        expect(takeOpenedByPerson(undefined)).toBe(false);
+    });
+
+    it("the summary asks for at most three lines and the usual startup heading", () => {
+        expect(OPENING_SUMMARY_PROMPT.startsWith("# Session Context")).toBe(true);
+        expect(OPENING_SUMMARY_PROMPT).toContain("at most three short lines");
+        expect(OPENING_SUMMARY_PROMPT).toContain("New agent, nothing yet.");
     });
 });

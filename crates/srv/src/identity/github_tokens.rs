@@ -372,7 +372,7 @@ pub fn attach_store(store: Arc<Store>) {
 /// Whether agents on this machine get the broker's GitHub tokens: the person connected GitHub
 /// through AgentMux Cloud (a brokered account that still works), and this isn't a fleet host,
 /// where `gh-agent` already gives agents their GitHub identity.
-fn agents_use_broker(env: &HashMap<String, String>) -> bool {
+pub(crate) fn agents_use_broker(env: &HashMap<String, String>) -> bool {
     if crate::backend::publish_guard::hooks_dir_for(env, |k| std::env::var(k).ok()).is_some() {
         return false;
     }

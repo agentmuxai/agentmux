@@ -33,7 +33,7 @@ pub(crate) mod object_helpers;
 pub(crate) mod reducer_helpers;
 pub(crate) mod session_restore;
 pub(crate) mod session_other_builds;
-mod session_closed;
+pub(crate) mod session_closed;
 mod session_windows;
 pub(crate) use session_windows::forget_windows_left_by_quit;
 pub(crate) mod user_workspace;

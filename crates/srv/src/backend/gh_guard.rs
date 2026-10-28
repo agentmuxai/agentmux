@@ -1,24 +1,31 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Plain `gh` inside an agent process must not act as a human's `gh` login.
+//! Plain `gh` inside an agent process must not act as a human's `gh` login, when
+//! the agent has a GitHub identity of its own.
 //!
-//! Agents reach GitHub through `gh-agent`, which hands `gh` a per-call token of
-//! the agent's own. The `gh` CLI, run directly, instead reads whatever login a
-//! human made on the host — so an agent that types `gh` where it meant
-//! `gh-agent` silently acts as that human, with nothing failing. `gh` finds its
+//! An agent can reach GitHub through an identity of its own: `gh-agent`, which
+//! hands `gh` a per-call token, or the AgentMux App's broker, which does the same
+//! for `git` and `gh`. The `gh` CLI, run directly, instead reads whatever login a
+//! human made on the host — so an agent that types `gh` where it meant its own
+//! identity silently acts as that human, with nothing failing. `gh` finds its
 //! accounts through `$GH_CONFIG_DIR/hosts.yml`; pointing that variable at a
 //! directory with no `hosts.yml` leaves `gh` with no accounts, so it reports
-//! "not logged in" instead. `gh-agent` is unaffected: it passes its own token.
+//! "not logged in" instead. The agent's own identity is unaffected: it passes its
+//! own token.
+//!
+//! An agent with no such identity has nothing to be protected into using: the
+//! person's own `gh login` is the only GitHub access it can have, so it is left
+//! alone ([`has_other_github_identity`]). A guard directory an earlier start set
+//! is dropped then, so a person who logged in with `gh auth login` and runs agents
+//! gets agents that can use `gh`.
 //!
 //! [`apply_gh_guard`] is called on every path that spawns an agent process or
-//! runs a command on an agent's behalf. It is a RESERVED variable: it always
-//! overwrites whatever the env already carries (a persisted `cmd:env`, a
-//! caller's override), because a single user-supplied value would re-open the
-//! hole. Containers keep it on `CONTAINER_ENV_DENYLIST` deliberately — the
-//! host path means nothing inside the image.
-//!
-//! Design: `a5af/shared-infrastructure` `SPEC_AGENT_PLAIN_GH_GUARD_2026_09_25`.
+//! runs a command on an agent's behalf. Where it applies, `GH_CONFIG_DIR` is a
+//! RESERVED variable: it always overwrites whatever the env already carries (a
+//! persisted `cmd:env`, a caller's override), because a single user-supplied
+//! value would re-open the hole. Containers keep it on `CONTAINER_ENV_DENYLIST`
+//! deliberately — the host path means nothing inside the image.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -33,11 +40,31 @@ pub const META_KEY_PTYSHELL_GH_CONFIG_DIR: &str = "ptyshell:ghconfigdir";
 
 /// The guard directory for an agent whose stored `cmd:env` is `agent_env`
 /// (the slug is read from it, as for the agent's own spawns), prepared the
-/// same way: created, with any login in it cleared.
+/// same way: created, with any login in it cleared. Empty when the agent is not
+/// guarded (it has no other GitHub identity), so the shell sets nothing.
 pub fn guard_dir_for(agent_env: &HashMap<String, String>) -> String {
+    guard_dir_for_target(agent_env, false)
+}
+
+/// [`guard_dir_for`] for a shell that may run elsewhere. `remote`: a WSL distro or an SSH host,
+/// whose own GitHub identity is not known from here, so the person's login is kept from it as
+/// every guarded spawn did before the guard became conditional.
+pub fn guard_dir_for_target(agent_env: &HashMap<String, String>, remote: bool) -> String {
+    let home = guard_config_home();
     let mut env = agent_env.clone();
-    apply_gh_guard(&mut env);
-    env.remove(GH_CONFIG_DIR).unwrap_or_default()
+    apply_gh_guard_for(&mut env, &home, remote || has_other_github_identity(agent_env));
+    match env.remove(GH_CONFIG_DIR) {
+        Some(dir) if is_own_guard_dir(&dir, &home) => dir,
+        _ => String::new(),
+    }
+}
+
+/// Whether `dir` is one of the guard directories [`agent_gh_config_dir`] makes
+/// under `config_home`, as opposed to a `GH_CONFIG_DIR` the person or their
+/// agent's definition chose.
+fn is_own_guard_dir(dir: &str, config_home: &Path) -> bool {
+    let dir = Path::new(dir);
+    dir.parent() == Some(config_home) && dir.file_name().is_some_and(|n| n.to_string_lossy().starts_with("gh-"))
 }
 
 /// The file `gh` records its accounts in. Its absence is what "logged out"
@@ -107,11 +134,55 @@ pub fn apply_gh_guard_in(env_vars: &mut HashMap<String, String>, config_home: &P
     env_vars.insert(GH_CONFIG_DIR.to_string(), dir.to_string_lossy().into_owned());
 }
 
-/// [`apply_gh_guard_in`] under this instance's config dir, plus the publish
+/// Guard the agent when it has another GitHub identity; otherwise leave `gh` to
+/// the person's own login, and drop a guard directory an earlier start put in the
+/// env (a `GH_CONFIG_DIR` of the person's own choosing stays).
+pub fn apply_gh_guard_for(env_vars: &mut HashMap<String, String>, config_home: &Path, other_identity: bool) {
+    if other_identity {
+        apply_gh_guard_in(env_vars, config_home);
+    } else if env_vars.get(GH_CONFIG_DIR).is_some_and(|dir| is_own_guard_dir(dir, config_home)) {
+        env_vars.remove(GH_CONFIG_DIR);
+    }
+}
+
+/// Whether the agent whose spawn env is `env` has a GitHub identity besides the
+/// person's `gh` login: `gh-agent` on this machine (its hooks written, or the
+/// command on the PATH), or the AgentMux App's broker. Only then does
+/// [`apply_gh_guard`] keep the person's login from it.
+pub fn has_other_github_identity(env: &HashMap<String, String>) -> bool {
+    // Under test every spawn is guarded, as every test of a spawn env expects.
+    #[cfg(test)]
+    {
+        let _ = env;
+        true
+    }
+    #[cfg(not(test))]
+    {
+        crate::backend::publish_guard::hooks_dir_for(env, |k| std::env::var(k).ok()).is_some()
+            || gh_agent_on_path(env)
+            || crate::identity::github_tokens::agents_use_broker(env)
+    }
+}
+
+/// Whether a `gh-agent` command is on the PATH the spawn gets (its own, else this process's).
+#[cfg_attr(test, allow(dead_code))]
+fn gh_agent_on_path(env: &HashMap<String, String>) -> bool {
+    let path = env
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case("PATH"))
+        .map(|(_, v)| std::ffi::OsString::from(v))
+        .or_else(|| std::env::var_os("PATH"))
+        .unwrap_or_default();
+    let names: &[&str] = if cfg!(windows) { &["gh-agent.cmd", "gh-agent.exe", "gh-agent.bat"] } else { &["gh-agent"] };
+    std::env::split_paths(&path).any(|dir| names.iter().any(|name| dir.join(name).is_file()))
+}
+
+/// [`apply_gh_guard_for`] under this instance's config dir, plus the publish
 /// guard's `core.hooksPath` ([`crate::backend::publish_guard`]): every path that
 /// spawns an agent process or runs a command for one comes through here.
 pub fn apply_gh_guard(env_vars: &mut HashMap<String, String>) {
-    apply_gh_guard_in(env_vars, &guard_config_home());
+    let other_identity = has_other_github_identity(env_vars);
+    apply_gh_guard_for(env_vars, &guard_config_home(), other_identity);
     #[cfg(not(test))]
     {
         crate::backend::publish_guard::apply_publish_guard(env_vars);
@@ -164,6 +235,52 @@ mod tests {
         let dir = PathBuf::from(&e[GH_CONFIG_DIR]);
         assert_eq!(dir, home.path().join("gh-agenty"));
         assert!(dir.is_dir(), "the dir is created so gh has somewhere empty to look");
+    }
+
+    #[test]
+    fn an_agent_with_no_other_github_identity_keeps_the_persons_gh_login() {
+        // The person ran `gh auth login` and has no gh-agent and no connected account: the guard
+        // must neither point gh at an empty folder nor delete a login in it.
+        let home = tempfile::tempdir().unwrap();
+        let dir = agent_gh_config_dir(home.path(), Some("agenty"));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("hosts.yml"), "github.com:\n  user: someone\n").unwrap();
+        let mut e = env(&[("AGENTMUX_AGENT_SLUG", "agenty")]);
+        apply_gh_guard_for(&mut e, home.path(), false);
+        assert!(!e.contains_key(GH_CONFIG_DIR), "gh finds the person's own login");
+        assert!(dir.join("hosts.yml").exists(), "nothing is cleared for an unguarded agent");
+    }
+
+    #[test]
+    fn an_unguarded_agent_drops_a_guard_dir_an_earlier_start_left_but_not_a_dir_of_the_persons_choosing() {
+        let home = tempfile::tempdir().unwrap();
+        let ours = agent_gh_config_dir(home.path(), Some("agenty")).to_string_lossy().into_owned();
+        let mut e = env(&[("AGENTMUX_AGENT_SLUG", "agenty"), (GH_CONFIG_DIR, &ours)]);
+        apply_gh_guard_for(&mut e, home.path(), false);
+        assert!(!e.contains_key(GH_CONFIG_DIR));
+
+        let mut e = env(&[("AGENTMUX_AGENT_SLUG", "agenty"), (GH_CONFIG_DIR, "/home/person/.config/gh")]);
+        apply_gh_guard_for(&mut e, home.path(), false);
+        assert_eq!(e[GH_CONFIG_DIR], "/home/person/.config/gh");
+    }
+
+    #[test]
+    fn a_guarded_agent_is_set_up_as_before() {
+        let home = tempfile::tempdir().unwrap();
+        let mut e = env(&[("AGENTMUX_AGENT_SLUG", "agenty")]);
+        apply_gh_guard_for(&mut e, home.path(), true);
+        assert_eq!(PathBuf::from(&e[GH_CONFIG_DIR]), home.path().join("gh-agenty"));
+    }
+
+    #[test]
+    fn gh_agent_on_the_path_counts_as_another_identity() {
+        let bin = tempfile::tempdir().unwrap();
+        let name = if cfg!(windows) { "gh-agent.cmd" } else { "gh-agent" };
+        let path = |dirs: &[&Path]| std::env::join_paths(dirs.iter().copied()).unwrap().to_string_lossy().into_owned();
+        let empty = tempfile::tempdir().unwrap();
+        assert!(!gh_agent_on_path(&env(&[("PATH", &path(&[empty.path()]))])));
+        std::fs::write(bin.path().join(name), "").unwrap();
+        assert!(gh_agent_on_path(&env(&[("PATH", &path(&[empty.path(), bin.path()]))])));
     }
 
     #[test]
