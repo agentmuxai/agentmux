@@ -100,6 +100,15 @@ async fn a_held_message_starts_the_stopped_agent_only_for_a_host_sender_with_the
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
     assert_eq!(desired_of(&state, &on).await.as_deref(), Some("running"), "the held message started its agent");
+    assert!(state.reactive_handler.has_uid_registration("ag-on"), "and it can be delivered to");
     assert_eq!(desired_of(&state, &off).await, None, "setting off: held, not started");
     assert_eq!(desired_of(&state, &lan).await, None, "LAN: not started");
+}
+
+#[test]
+fn a_sender_whose_signature_failed_does_not_start_an_agent() {
+    let req = |sig_verified| InjectionRequest { sig_verified, ..Default::default() };
+    assert!(may_start(&req(None)), "a sender with no key on file is as before");
+    assert!(may_start(&req(Some(true))));
+    assert!(!may_start(&req(Some(false))));
 }

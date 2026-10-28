@@ -217,7 +217,7 @@ async fn hold_with_reason(
             replay.delivered();
             crate::backend::agent_resolve::record_uid_fallback("jekt.held");
             if reason == HoldReason::NotRunning {
-                super::jekt_start::start_for_held(state, &target_uid);
+                super::jekt_start::start_for_held(state, req, &target_uid);
             }
             let error = match reason {
                 HoldReason::NotRunning => format!(
