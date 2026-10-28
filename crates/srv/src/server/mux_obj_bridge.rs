@@ -406,10 +406,13 @@ async fn dispatch_event(event: Event, mstore: Arc<Store>, event_bus: Arc<EventBu
         Event::BlockDeleted {
             tab_id, block_id, ..
         } => {
-            emit_fetched::<Tab>(
-                &mstore, &event_bus, OTYPE_TAB, tab_id, "BlockDeleted parent",
-            )
-            .await;
+            // A parked block had no parent tab.
+            if !tab_id.is_empty() {
+                emit_fetched::<Tab>(
+                    &mstore, &event_bus, OTYPE_TAB, tab_id, "BlockDeleted parent",
+                )
+                .await;
+            }
             emit_delete(&event_bus, OTYPE_BLOCK, &block_id);
         }
         Event::BlockMetaUpdated { block_id, .. } => {

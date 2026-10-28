@@ -47,6 +47,16 @@ pub(super) fn create_block_with_id(
 /// Phase E.3 — delete a block from a tab. Idempotent: deleting a
 /// missing tab or missing block is a silent no-op.
 pub(super) fn handle_delete_block(state: &mut State, tab_id: String, block_id: String) -> Vec<Event> {
+    // A parked block is in no tab, so it is deleted with an empty `tab_id` (an agent's delete).
+    // Any other block with no tab, or a tab-less delete of a block that has one, is not this.
+    if tab_id.is_empty() {
+        if !state.blocks.get(&block_id).is_some_and(|b| b.tab_id.is_empty()) {
+            return Vec::new();
+        }
+        state.blocks.remove(&block_id);
+        let v = state.bump_version();
+        return vec![Event::BlockDeleted { tab_id, block_id, version: v }];
+    }
     let Some(tab) = state.tabs.get_mut(&tab_id) else {
         return Vec::new();
     };
@@ -311,6 +321,25 @@ mod tests {
         // Again, and for a block or tab that is not there: nothing happens.
         assert!(update(&mut state, Command::ParkBlock { tab_id: tab.clone(), block_id: parked.clone() }, &ctx(3)).is_empty());
         assert!(update(&mut state, Command::ParkBlock { tab_id: "ghost".into(), block_id: parked }, &ctx(4)).is_empty());
+    }
+
+    #[test]
+    fn a_parked_block_is_deleted_with_no_tab_and_no_other_block_is() {
+        let mut state = State::default();
+        let ws = create_workspace(&mut state, "w");
+        let tab = create_tab(&mut state, &ws, "t");
+        let (shown, parked) = (create_block(&mut state, &tab), create_block(&mut state, &tab));
+        update(&mut state, Command::ParkBlock { tab_id: tab.clone(), block_id: parked.clone() }, &ctx(2));
+
+        // A block that has a tab is not deleted by a tab-less delete.
+        assert!(update(&mut state, Command::DeleteBlock { tab_id: String::new(), block_id: shown.clone() }, &ctx(3)).is_empty());
+        assert!(state.blocks.contains_key(&shown));
+
+        let events = update(&mut state, Command::DeleteBlock { tab_id: String::new(), block_id: parked.clone() }, &ctx(4));
+        assert!(matches!(&events[..], [Event::BlockDeleted { tab_id, block_id, .. }] if tab_id.is_empty() && *block_id == parked));
+        assert!(!state.blocks.contains_key(&parked));
+        assert_eq!(state.tabs[&tab].block_ids, vec![shown], "the tab is untouched");
+        assert!(update(&mut state, Command::DeleteBlock { tab_id: String::new(), block_id: parked }, &ctx(5)).is_empty(), "again: nothing");
     }
 
     #[test]

@@ -53,6 +53,19 @@ pub fn delete_block(
     tab.blockids.retain(|id| id != block_id);
     store.update(&mut tab)?;
     store.delete::<Block>(block_id)?;
+    forget_block_state(block_id);
+    Ok(())
+}
+
+/// Delete a parked block's row: it is in no tab, so there is no tab to update.
+pub fn delete_parked_block(store: &Store, block_id: &str) -> Result<(), StoreError> {
+    store.delete::<Block>(block_id)?;
+    forget_block_state(block_id);
+    Ok(())
+}
+
+/// What the rest of srv keeps about a block that is gone.
+fn forget_block_state(block_id: &str) {
     // An agent's ownership of a browser pane ends with the pane
     // (SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md §3).
     crate::server::browser_owner::forget(block_id);
@@ -65,7 +78,6 @@ pub fn delete_block(
     crate::server::browser_actions::drop_pane(block_id);
     // The host drops an Incognito jar once no tab uses it: tell it now.
     crate::server::browser_owner::changed().notify_one();
-    Ok(())
 }
 
 /// Resolve a block ID from an 8-character prefix within a tab.

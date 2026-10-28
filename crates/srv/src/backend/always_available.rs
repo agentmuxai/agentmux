@@ -12,7 +12,6 @@ use std::collections::HashMap;
 pub const SETTING_ALWAYS_AVAILABLE: &str = "agents:always_available";
 
 /// Whether closing a pane parks the agent's block instead of deleting it.
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn enabled(extra: &HashMap<String, serde_json::Value>) -> bool {
     extra.get(SETTING_ALWAYS_AVAILABLE).and_then(|v| v.as_bool()).unwrap_or(false)
 }

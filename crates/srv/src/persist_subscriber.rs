@@ -146,7 +146,7 @@ pub(crate) fn apply_event_to_mstore(
         } => apply_block_created(mstore, tab_id, block_id, meta),
         Event::BlockDeleted {
             tab_id, block_id, ..
-        } => apply_block_deleted(mstore, tab_id, block_id),
+        } => parked::apply_block_deleted(mstore, tab_id, block_id),
         Event::BlockParked { tab_id, block_id, .. } => parked::apply_block_parked(mstore, tab_id, block_id),
         Event::BlockAttached { block_id, dst_tab_id, dst_index, .. } => parked::apply_block_attached(mstore, block_id, dst_tab_id, *dst_index),
         Event::SrvWindowOpened {
@@ -455,21 +455,6 @@ fn apply_block_created(
         Ok(())
     })?;
     Ok(())
-}
-
-fn apply_block_deleted(
-    mstore: &Store,
-    tab_id: &str,
-    block_id: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    if mstore.get::<Block>(block_id)?.is_none() {
-        return Ok(()); // already gone
-    }
-    match wcore::delete_block(mstore, tab_id, block_id) {
-        Ok(()) => Ok(()),
-        Err(crate::backend::storage::StoreError::NotFound) => Ok(()),
-        Err(e) => Err(Box::new(e)),
-    }
 }
 
 /// Phase E.5 — record/update a window's workspace pointer on the
