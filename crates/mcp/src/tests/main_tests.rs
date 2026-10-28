@@ -1006,3 +1006,12 @@ fn resolve_detail_tells_no_such_agent_from_name_only() {
     let one = r#"{"resolution":"one","uid":"u-1"}"#;
     assert_eq!(interpret_resolve_detail(S::OK, one, "Naki-2").unwrap(), BoundaryResolution::Uid("u-1".into()));
 }
+
+/// An agent that stops itself while it is one of several in a request is told its own answer, even while
+/// the request is still pending for the others.
+#[test]
+fn a_self_stop_in_a_batch_is_told_its_own_answer() {
+    let pending = serde_json::json!({ "status": "pending", "outcomes": [{ "block_id": "me", "name": "Me", "outcome": "kept_by_user" }] });
+    let own = own_outcome(pending, "me");
+    assert!(quit_self_outcome(own["status"].as_str().unwrap(), &own).unwrap().contains("keep you running"));
+}
