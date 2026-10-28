@@ -322,6 +322,10 @@ impl PersistentSubprocessController {
             // requested it, which is the only one it ever meant anything for.
             inner.restart_when_idle = false;
             inner.spawn_generation += 1;
+            // Requests parked for the user belong to the process that asked: a new process is not
+            // waiting on them. Left in place, an abandoned question would read the new turns as
+            // `waiting` (`Controller::awaiting_user_reply`).
+            super::input::forget_parked_requests(&mut inner);
             // Any spawn consumes or invalidates an adopted leftover
             // candidate — it only ever meant "for the very next spawn".
             inner.leftover_resume_candidate = None;
