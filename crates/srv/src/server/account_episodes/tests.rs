@@ -105,6 +105,21 @@ fn cleanup(blocks: &[&String]) {
 }
 
 #[tokio::test]
+async fn a_parked_agent_blocks_failure_is_an_episode_too() {
+    let state = test_state();
+    let tab = new_tab(&state).await;
+    let block = pane(&state, &tab, "a-parked", "Parked", "acct-p", Some(failure("usage_limit", None, None)), false).await;
+    assert!(tab_blocks(&state.mstore).iter().any(|b| b.oid == block));
+
+    dispatch_apply(&state, Command::ParkBlock { tab_id: tab.clone(), block_id: block.clone() }).await;
+    let tab_after = state.mstore.get::<Tab>(&tab).unwrap().unwrap();
+    assert!(!tab_after.blockids.contains(&block), "parked: in no tab");
+
+    assert!(tab_blocks(&state.mstore).iter().any(|b| b.oid == block), "a parked agent block is still scanned");
+    assert!(scan(&state, 1_000).iter().any(|p| p.block_id == block), "and its limit joins the episode");
+}
+
+#[tokio::test]
 async fn the_scan_groups_limited_and_signed_out_panes_by_their_run_account() {
     let state = test_state();
     state.id_store.identity_upsert(&account("acct-1", "claude-code", "valid")).unwrap();
