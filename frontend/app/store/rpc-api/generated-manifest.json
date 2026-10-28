@@ -26,7 +26,7 @@
         {
             "command": "account.oauth.start",
             "method": "AccountOAuthStartCommand",
-            "dataType": "{ provider: string; name?: string; clientId?: string; clientSecret?: string; clientMode?: \"byo\" | \"workspace\"; saveClient?: boolean; scopes?: string[]; accountId?: string }"
+            "dataType": "{ provider: string; name?: string; clientId?: string; clientSecret?: string; clientMode?: \"byo\" | \"workspace\"; saveClient?: boolean; scopes?: string[]; accountId?: string; replaceGithubUser?: boolean }"
         },
         {
             "command": "session:activity_summary",
@@ -629,6 +629,10 @@
             "command": "gettoolstatus",
             "method": "GetToolStatusCommand",
             "send": "{}"
+        },
+        {
+            "command": "github.connection",
+            "method": "GithubConnectionCommand"
         },
         {
             "command": "globalmemory:diff",

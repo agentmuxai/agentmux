@@ -16,6 +16,9 @@
  *                   asked for and unticked (a partial grant), and the email
  *                   from the ID token when the provider sends one
  *   failed        — `error` describes why
+ *   confirm-user  — GitHub only: this AgentMux account is connected as another GitHub
+ *                   user than the one who just authorized. The flow stopped; connect
+ *                   again with `replaceGithubUser` once the person agrees.
  */
 export type OAuthFlowStatus =
     | { status: "pending" }
@@ -28,4 +31,5 @@ export type OAuthFlowStatus =
           missingScopes?: string[];
           email?: string | null;
       }
-    | { status: "failed"; error: string };
+    | { status: "failed"; error: string }
+    | { status: "confirm-user"; currentLogin: string; currentId: number; newLogin: string; newId: number };

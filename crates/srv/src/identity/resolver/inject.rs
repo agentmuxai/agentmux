@@ -28,7 +28,7 @@ use crate::backend::mps::Broker;
 use super::errors::{refusal_linked, SpawnGateError};
 use super::oauth_probe::{oauth_status, probe_oauth_status};
 use super::provider::{provider_class, ProviderClass};
-use super::secret::resolve_secret;
+use super::secret::{resolve_account_secret, resolve_secret};
 
 /// Inject identity-derived env vars into the spawn map for a block.
 ///
@@ -708,7 +708,7 @@ pub fn inject_identity_env_with_broker(
 
         match class {
             ProviderClass::ApiKey { env_vars: env_keys } => {
-                let secret = match resolve_secret(&account.secret_ref) {
+                let secret = match resolve_account_secret(&account, &id_store, &identity_store) {
                     Ok(s) => s,
                     Err(e) => {
                         tracing::warn!(

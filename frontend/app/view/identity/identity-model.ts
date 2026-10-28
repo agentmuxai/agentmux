@@ -75,6 +75,11 @@ export interface AccountContext {
     // and the client the account was connected with. Never a secret.
     granted_scopes?: string[];
     oauth_client?: { mode: "builtin" | "byo" | "workspace"; client_id?: string };
+    // GitHub (srv's github_connect.rs): who is connected (GitHub's numeric id and login),
+    // and whether AgentMux Cloud's broker refreshes the grant. Never a secret.
+    github_user_id?: number;
+    github_login?: string;
+    broker?: boolean;
 }
 
 export interface Account {

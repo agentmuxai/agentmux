@@ -209,3 +209,44 @@ describe("other providers", () => {
         });
     });
 });
+
+describe("Connect GitHub", () => {
+    const GITHUB_URL = "https://github.com/login/oauth/authorize?x";
+    const mismatch = {
+        sessionId: "s1",
+        status: { status: "confirm-user", currentLogin: "old", currentId: 1, newLogin: "new", newId: 2 },
+    };
+
+    beforeEach(() => {
+        // AgentMux's own App is configured: no client to ask for.
+        rpc.AccountOAuthClientGetCommand.mockResolvedValue({ saved: false, hasSecret: false, builtinAvailable: true });
+    });
+
+    it("asks before replacing the GitHub user this account is connected as, then connects again with replace", async () => {
+        rpc.AccountOAuthStartCommand.mockResolvedValueOnce(mismatch).mockResolvedValueOnce({
+            sessionId: "s2",
+            status: { status: "url-available", authUrl: GITHUB_URL },
+        });
+        render(() => <OAuthConnectPanel provider="github" name={() => "work"} onConnected={() => {}} />);
+        fireEvent.click(await screen.findByRole("button", { name: "Connect GitHub" }));
+        expect(await screen.findByText("Connect a different GitHub account?")).toBeTruthy();
+        // The flow ended at the broker's question: nothing is polled, and nothing waits for a browser.
+        expect(rpc.AccountOAuthPollCommand).not.toHaveBeenCalled();
+        expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+
+        fireEvent.click(screen.getByRole("button", { name: "Replace with @new" }));
+        await waitFor(() => expect(rpc.AccountOAuthStartCommand).toHaveBeenCalledTimes(2));
+        expect(rpc.AccountOAuthStartCommand.mock.calls[0][1].replaceGithubUser).toBeUndefined();
+        expect(rpc.AccountOAuthStartCommand.mock.calls[1][1]).toMatchObject({ provider: "github", replaceGithubUser: true });
+        await waitFor(() => expect(openLink).toHaveBeenCalledWith(GITHUB_URL));
+    });
+
+    it("keeps the connected user, and starts nothing, when the person says so", async () => {
+        rpc.AccountOAuthStartCommand.mockResolvedValueOnce(mismatch);
+        render(() => <OAuthConnectPanel provider="github" name={() => "work"} onConnected={() => {}} />);
+        fireEvent.click(await screen.findByRole("button", { name: "Connect GitHub" }));
+        fireEvent.click(await screen.findByRole("button", { name: "Keep @old" }));
+        expect(await screen.findByRole("button", { name: "Connect GitHub" })).toBeTruthy();
+        expect(rpc.AccountOAuthStartCommand).toHaveBeenCalledTimes(1);
+    });
+});
