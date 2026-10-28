@@ -76,7 +76,7 @@ describe("MyAgentsList runtime state", () => {
         expect(chips[0].closest("li")!.getAttribute("data-definition-id")).toBe("def-1");
     });
 
-    it("attaches to an agent that runs with no pane, instead of starting another", async () => {
+    it("asks before attaching to an agent that runs with no pane: Open it attaches, instead of starting another", async () => {
         load([makeRow()]);
         const onReattach = vi.fn();
         const onAttach = vi.fn();
@@ -84,9 +84,50 @@ describe("MyAgentsList runtime state", () => {
             <MyAgentsList onReattach={onReattach} onAttach={onAttach} runtimeOf={() => runtime("working")} />
         ));
         await userEvent.click(await screen.findByTestId("agent-my-agents-entry"));
+        expect(onAttach).not.toHaveBeenCalled();
+        expect(screen.getByTestId("agent-fork-prompt").textContent).toContain("is running with no pane");
+        await userEvent.click(screen.getByTestId("agent-fork-attach"));
         expect(onAttach).toHaveBeenCalledTimes(1);
         expect(onAttach.mock.calls[0][0].definition_id).toBe("def-1");
         expect(onReattach).not.toHaveBeenCalled();
+        expect(screen.queryByTestId("agent-fork-prompt")).toBeNull();
+    });
+
+    it("Fork on that prompt starts the named-copy flow, not an attach", async () => {
+        load([makeRow()]);
+        const onAttach = vi.fn();
+        render(() => <MyAgentsList onReattach={() => {}} onAttach={onAttach} runtimeOf={() => runtime("idle")} />);
+        await userEvent.click(await screen.findByTestId("agent-my-agents-entry"));
+        await userEvent.click(screen.getByTestId("agent-fork-fork"));
+        expect(onAttach).not.toHaveBeenCalled();
+        expect(screen.queryByTestId("agent-fork-attach")).toBeNull();
+        expect(await screen.findByTestId("agent-fork-name-input")).toBeTruthy();
+    });
+
+    it("gives an agent that runs with no pane its own look; an open one and a stopped one don't have it", async () => {
+        load([
+            makeRow(),
+            makeRow({ definition_id: "def-2", instance_name: "Shown", instance_id: "inst-2" }),
+            makeRow({ definition_id: "def-3", instance_name: "Off", instance_id: "inst-3" }),
+        ]);
+        const states: Record<string, AgentRuntime["state"]> = { "def-1": "idle", "def-2": "working", "def-3": "stopped" };
+        const { container } = render(() => (
+            <MyAgentsList
+                onReattach={() => {}}
+                onAttach={() => {}}
+                runtimeOf={(id) => runtime(states[id])}
+                openDefinitions={() => new Map([["def-2", "blk-9"]])}
+            />
+        ));
+        await screen.findAllByTestId("agent-my-agents-entry");
+        const row = (id: string) => container.querySelector(`li[data-definition-id="${id}"]`)!;
+        expect(row("def-1").classList.contains("agent-recent-sessions-row--no-pane")).toBe(true);
+        expect(row("def-1").querySelector(".agent-no-pane-tag")?.textContent).toBe("no pane");
+        expect(row("def-2").classList.contains("agent-recent-sessions-row--no-pane")).toBe(false);
+        expect(row("def-2").classList.contains("agent-recent-sessions-row--active")).toBe(true);
+        expect(row("def-2").querySelector(".agent-no-pane-tag")).toBeNull();
+        expect(row("def-3").classList.contains("agent-recent-sessions-row--no-pane")).toBe(false);
+        expect(row("def-3").querySelector(".agent-no-pane-tag")).toBeNull();
     });
 
     it("starts a stopped agent the way it always did", async () => {

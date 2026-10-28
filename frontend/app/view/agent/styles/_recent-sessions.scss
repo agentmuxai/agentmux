@@ -430,6 +430,23 @@
         background: color-mix(in srgb, var(--success-color) 4%, transparent);
     }
 
+    // Running with no pane (parked): the "open in a pane" green, dashed.
+    .agent-recent-sessions-row--no-pane {
+        border-style: dashed;
+        border-color: color-mix(in srgb, var(--success-color) 55%, var(--border-color));
+    }
+
+    .agent-no-pane-tag {
+        flex-shrink: 0;
+        align-self: center;
+        padding: 0 5px;
+        border: 1px dashed color-mix(in srgb, var(--success-color) 55%, var(--border-color));
+        border-radius: var(--radius-full);
+        font-size: var(--text-xs);
+        line-height: 1.5;
+        color: var(--secondary-text-color);
+    }
+
     // Row actions menu — chevron toggle. The right half of the footer row; it
     // sits in the grid like the timestamps beside it, with no absolute offsets.
     // docs/specs/SPEC_AGENT_DELETE_2026_09_16.md §4.1/§4.2.
