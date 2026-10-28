@@ -17,6 +17,7 @@ import {
     keyedLock,
     modelApiService,
     type OfflineInput,
+    paneModelApiService,
     type PaneMessageEvent,
     UNKNOWN_HOLD_MS,
     sentInTranscript,
@@ -32,6 +33,16 @@ describe("pure rules", () => {
         expect(modelApiService(["anthropic"])).toBe("model_api:anthropic");
         expect(modelApiService(undefined)).toBeNull();
         expect(modelApiService([])).toBeNull();
+    });
+
+    it("uses the service srv recorded for a pane pointed at another address, for the same vendor only", () => {
+        const proxy = { service: "model_api:anthropic@proxy.example.com", url: "https://proxy.example.com" };
+        expect(paneModelApiService(["anthropic"], proxy)).toBe("model_api:anthropic@proxy.example.com");
+        expect(paneModelApiService(["anthropic"], undefined)).toBe("model_api:anthropic");
+        expect(paneModelApiService(["anthropic"], null)).toBe("model_api:anthropic");
+        expect(paneModelApiService(["openai"], proxy)).toBe("model_api:openai");
+        expect(paneModelApiService(["anthropic"], { service: 5 })).toBe("model_api:anthropic");
+        expect(paneModelApiService(undefined, proxy)).toBeNull();
     });
 
     it("reads a tracked service's state, unknown before srv has word on it, and null for one srv doesn't track", () => {

@@ -32,6 +32,8 @@ pub(super) struct StdoutReaderCtx {
     pub(super) forked_from_read: Option<String>,
     /// The user turns the stdin writer sent (`backend::cli_native::sent`).
     pub(super) sent_prompts: crate::backend::cli_native::sent::SentPrompts,
+    /// The model API this pane's CLI calls, which its frames report on (`connectivity`).
+    pub(super) model_api: crate::connectivity::Service,
 }
 
 impl PersistentSubprocessController {
@@ -58,6 +60,7 @@ impl PersistentSubprocessController {
             mut relocated_copy_read,
             forked_from_read,
             sent_prompts,
+            model_api,
         } = ctx;
         let reader = BufReader::new(stdout);
         let mut lines = reader.lines();
@@ -193,7 +196,7 @@ impl PersistentSubprocessController {
                     }
                 }
                 api_retry.observe(&parsed, || inner_read.lock().unwrap().spawn_generation);
-                crate::connectivity::observe_claude_frame(&parsed);
+                crate::connectivity::observe_claude_frame(&parsed, &model_api);
                 if let Some(store) = mstore_read.as_deref() {
                     let now_ms = agentmux_common::time::now_ms();
                     task_feed.apply(

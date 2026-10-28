@@ -255,6 +255,8 @@ impl SubprocessController {
             crate::backend::identity_spawn::SpawnPath::Container,
             &container_env.iter().cloned().collect(),
         );
+        // Which model API address this turn's CLI is given, for the connectivity status.
+        core::attach_model_api(&self.block_id, &container_env.iter().cloned().collect(), &self.mstore, &self.event_bus);
 
         // Snapshot container params for the queue-drain path before base_cmd is consumed.
         let cm_for_drain = cm.clone();

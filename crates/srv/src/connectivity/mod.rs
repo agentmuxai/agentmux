@@ -21,6 +21,7 @@
 //! `connectivity.status` for a window that opens later; both carry a rising
 //! `revision`, since they can arrive out of order.
 
+mod endpoint;
 mod netchange;
 mod probe;
 mod tracker;
@@ -123,6 +124,11 @@ pub static TRACKED_MODEL_APIS: [&ModelApi; 1] = [&ANTHROPIC];
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Service {
     ModelApi(&'static ModelApi),
+    /// A model API at an address other than the one srv itself would call (`ModelApi`'s
+    /// [`Service::probe_url`]): a pane whose CLI is pointed at a proxy or a gateway. It is its own
+    /// service, so its state, and the probe of it, are about the host that pane really uses. The
+    /// address is [`endpoint::normalise`]d.
+    ModelApiAt(&'static ModelApi, String),
     /// The relay and its sign-in server.
     Muxbus,
 }
@@ -134,6 +140,7 @@ impl Service {
     pub fn id(&self) -> String {
         match self {
             Service::ModelApi(api) => format!("model_api:{}", api.vendor),
+            Service::ModelApiAt(api, url) => format!("model_api:{}@{}", api.vendor, endpoint::host_of(url)),
             Service::Muxbus => "muxbus".to_string(),
         }
     }
@@ -141,14 +148,16 @@ impl Service {
     pub fn label(&self) -> String {
         match self {
             Service::ModelApi(api) => api.label.to_string(),
+            Service::ModelApiAt(api, url) => format!("{} ({})", api.label, endpoint::host_of(url)),
             Service::Muxbus => "MuxBus".to_string(),
         }
     }
 
-    /// Where a probe goes. srv's own environment, so a pane that sets its
-    /// own `ANTHROPIC_BASE_URL` is still probed at the default.
+    /// Where a probe goes: srv's own environment for a `ModelApi` (a pane that sets its own
+    /// address is a [`Service::ModelApiAt`], probed at that address).
     pub fn probe_url(&self) -> String {
         match self {
+            Service::ModelApiAt(_, url) => url.clone(),
             Service::ModelApi(api) => api
                 .base_url_env
                 .and_then(|var| std::env::var(var).ok())
@@ -156,6 +165,40 @@ impl Service {
                 .unwrap_or_else(|| api.default_base_url.to_string()),
             Service::Muxbus => crate::muxbus::relay::rest_base_url(),
         }
+    }
+}
+
+/// The service a pane's calls to `api` go to, given the address its CLI was started with
+/// (`None` or empty: the CLI's default). The same address srv itself would call is just `api`.
+pub fn service_for(api: &'static ModelApi, configured: Option<&str>) -> Service {
+    let Some(url) = configured.map(str::trim).filter(|u| !u.is_empty()) else {
+        return Service::ModelApi(api);
+    };
+    let url = endpoint::normalise(url);
+    if url == endpoint::normalise(&Service::ModelApi(api).probe_url()) {
+        Service::ModelApi(api)
+    } else {
+        Service::ModelApiAt(api, url)
+    }
+}
+
+/// [`service_for`] with the address read from the environment a pane's CLI was started with.
+pub fn service_for_env(api: &'static ModelApi, env: &std::collections::HashMap<String, String>) -> Service {
+    service_for(api, api.base_url_env.and_then(|var| env.get(var)).map(String::as_str))
+}
+
+/// The model API a provider's CLI calls, from its first vendor, if srv tracks it.
+pub fn model_api_of(provider: &str) -> Option<&'static ModelApi> {
+    let vendor = *crate::backend::providers::get_provider(provider)?.supported_vendors.first()?;
+    [&ANTHROPIC, &OPENAI, &GOOGLE].into_iter().find(|api| api.vendor == vendor)
+}
+
+/// What a pane keeps in its block meta (`agent:api_endpoint`) when its model API is not at srv's own
+/// address: its service id, so the pane reads its own state, and the address.
+pub fn endpoint_meta(service: &Service) -> Option<serde_json::Value> {
+    match service {
+        Service::ModelApiAt(_, url) => Some(serde_json::json!({ "service": service.id(), "url": url })),
+        _ => None,
     }
 }
 
@@ -191,6 +234,12 @@ impl Shared {
         for api in TRACKED_MODEL_APIS {
             changed = self.tracker().seed(Service::ModelApi(api), now_ms).or(changed);
         }
+        self.publish(changed);
+    }
+
+    /// Lists `service` as not checked yet, due for a probe, unless it has reported.
+    fn track_at(&self, service: Service, now_ms: i64) {
+        let changed = self.tracker().seed(service, now_ms);
         self.publish(changed);
     }
 
@@ -241,6 +290,12 @@ pub fn install(event_bus: Arc<EventBus>) {
 /// The current state, for `connectivity.status`.
 pub fn status() -> ConnectivityStatus {
     SHARED.tracker().status()
+}
+
+/// Starts tracking `service` now: listed as not checked yet and probed at once, as the
+/// [`TRACKED_MODEL_APIS`] are at startup. For a pane's own address, when its CLI starts.
+pub fn track(service: Service) {
+    SHARED.track_at(service, agentmux_common::time::now_ms());
 }
 
 /// What a request to `service` found.
@@ -321,9 +376,9 @@ fn exit_reported_api(provider: &str) -> Option<&'static ModelApi> {
 
 /// What a finished turn of `provider` says about its model API: a clean turn, or a failure the API itself returned
 /// (limit, auth, overload), reached it; a network failure did not. Any other failure says nothing.
-pub fn observe_provider_turn(provider: &str, failure: Option<&crate::agents::failure::AgentFailure>) {
+pub fn observe_provider_turn(provider: &str, failure: Option<&crate::agents::failure::AgentFailure>, configured: Option<&str>) {
     if let Some((api, outcome)) = provider_turn_outcome(provider, failure) {
-        report(Service::ModelApi(api), outcome);
+        report(service_for(api, configured), outcome);
     }
 }
 
@@ -345,9 +400,9 @@ fn provider_turn_outcome(
 }
 
 /// Reads one Claude CLI stdout frame (`persistent::stdout_reader`).
-pub fn observe_claude_frame(frame: &serde_json::Value) {
+pub fn observe_claude_frame(frame: &serde_json::Value, service: &Service) {
     if let Some(outcome) = claude_frame_outcome(frame) {
-        report(Service::ModelApi(&ANTHROPIC), outcome);
+        report(service.clone(), outcome);
     }
 }
 

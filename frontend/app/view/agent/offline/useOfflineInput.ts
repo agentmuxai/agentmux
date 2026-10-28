@@ -43,9 +43,9 @@ import {
     type HeldInput,
     isTrackedService,
     keyedLock,
-    modelApiService,
     type OfflineInput,
     type OfflineStorage,
+    paneModelApiService,
     type PaneMessageEvent,
     serviceReachability,
 } from "./offline-input";
@@ -54,6 +54,8 @@ export { lastUserMessage } from "./failed-turn";
 
 export const HELD_INPUT_META_KEY = "agent:held_input";
 export const RETRY_MARK_META_KEY = "agent:retried_turn";
+/** Where srv says this pane's model API is, when it is not the provider's default address. */
+const API_ENDPOINT_META_KEY = "agent:api_endpoint";
 export const RETRY_ON_RECONNECT_SETTING = "agent:retryonreconnect";
 
 /**
@@ -144,7 +146,8 @@ export function useOfflineInput(opts: {
     if (connectivity() === null) void loadConnectivity();
     const storage = blockMetaStorage(opts.blockId, opts.agentId);
     const state = opts.paneModel.state;
-    const service = () => modelApiService(opts.provider()?.supportedVendors);
+    const endpoint = getBlockMetaKeyAtom(opts.blockId, API_ENDPOINT_META_KEY);
+    const service = () => paneModelApiService(opts.provider()?.supportedVendors, endpoint());
     const api = () => serviceReachability(connectivity()?.services, service());
     const working = () => workingFromPhase(state.turnPhase);
     const ready = () => state.initPhase.kind !== "InitPending";
