@@ -26,6 +26,7 @@ import type { useOfflineInput } from "../offline/useOfflineInput";
 import { clockTime } from "@/store/muxbus-delivery";
 import { AgentQuestionPanel } from "./AgentQuestionPanel";
 import { AgentSessionNotices } from "./AgentSessionNotices";
+import { AgentStoppedBanner } from "./AgentStoppedBanner";
 import { compactionModelKey } from "../compaction-estimate";
 import { toolActivity } from "@/app/store/agent-pane-state/tool-labels";
 import { ForkProviderFallbackBanner } from "./ForkProviderFallbackBanner";
@@ -311,5 +312,7 @@ export const AgentBottomPanels = (props: {
             blockAtom={props.block}
             providerId={props.providerId}
         />
+        {/* An agent that was stopped keeps its pane and conversation; Start runs it again. */}
+        <AgentStoppedBanner block={props.block} agentId={props.agentId} />
     </>
 );

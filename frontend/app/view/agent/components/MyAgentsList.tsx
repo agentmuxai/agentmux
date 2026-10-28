@@ -37,6 +37,8 @@
  */
 
 import { useTick } from "@/app/hook/useTick";
+import { hasProcess } from "@/app/store/agent-runtime";
+import type { AgentRuntime } from "@/types/rpc/AgentRuntime";
 import type { RecentSessionRow } from "@/types/rpc/RecentSessionRow";
 import { eventBelongsToPaneOf } from "@/util/focusutil";
 import {
@@ -73,6 +75,7 @@ import type { OpenAgentLocation } from "../open-agent-panes";
 import { resolveEffectiveVendor } from "../providers/catalog";
 import { seatBadgeText, seatReportsLine, seatTooltipLine } from "../seat-format";
 import type { AgentSortOption } from "./AgentPickerFilterBar";
+import { AgentRuntimeChip } from "./AgentRuntimeChip";
 import { RuntimeBadge } from "./RuntimeBadge";
 
 import { WpsEvent } from "@/app/store/mps-events";
@@ -236,6 +239,13 @@ export interface MyAgentsListProps {
      * docs/specs/SPEC_AGENT_DELETE_2026_09_16.md §4.3.
      */
     onViewHistory?: (row: RecentSessionRow) => void;
+    /** The agent's runtime state (store/agent-runtime.ts), for the chip on its row. */
+    runtimeOf?: (definitionId: string) => AgentRuntime | undefined;
+    /**
+     * Called when the user clicks an agent that runs with no pane shown anywhere: it attaches to the
+     * process that is running, where `onReattach` would start another one.
+     */
+    onAttach?: (row: RecentSessionRow) => void;
 }
 
 type ForkState =
@@ -490,6 +500,11 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
         if (existingBlockId) {
             // Already open — show fork prompt
             setForkState(row.definition_id, { kind: "prompt" });
+            return;
+        }
+        const runtime = props.runtimeOf?.(row.definition_id);
+        if (props.onAttach && runtime && hasProcess(runtime.state)) {
+            props.onAttach(row);
             return;
         }
         props.onReattach(row);
@@ -1101,6 +1116,11 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                                         {row.instance_name || row.definition_name}
                                                     </span>
                                                 </button>
+                                                <Show when={props.runtimeOf?.(row.definition_id)}>
+                                                    {(runtime) => (
+                                                        <AgentRuntimeChip state={runtime().state} detail={runtime().detail} />
+                                                    )}
+                                                </Show>
                                                 <Show when={isActive()}>
                                                     <span
                                                         class="agent-active-badge"
