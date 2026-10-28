@@ -4,6 +4,7 @@
 //! Persisting a parked block: one in no tab (`Command::ParkBlock`, `Command::AttachBlock`).
 
 use crate::backend::obj::{Block, Tab};
+use crate::backend::wcore;
 use crate::backend::storage::store::Store;
 
 /// Block meta that marks a parked block, one in no tab (`Command::ParkBlock`): boot loads such a
@@ -52,6 +53,21 @@ pub(super) fn apply_block_attached(mstore: &Store, block_id: &str, dst_tab_id: &
     Ok(())
 }
 
+/// A deleted block: its row, and its place in its tab. A parked block was in no tab (`tab_id` is
+/// empty), so there is only the row. Idempotent.
+pub(super) fn apply_block_deleted(mstore: &Store, tab_id: &str, block_id: &str) -> Result<(), Box<dyn std::error::Error>> {
+    if mstore.get::<Block>(block_id)?.is_none() {
+        return Ok(()); // already gone
+    }
+    if tab_id.is_empty() {
+        return Ok(wcore::delete_parked_block(mstore, block_id)?);
+    }
+    match wcore::delete_block(mstore, tab_id, block_id) {
+        Ok(()) | Err(crate::backend::storage::StoreError::NotFound) => Ok(()),
+        Err(e) => Err(Box::new(e)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -83,5 +99,21 @@ mod tests {
         assert_eq!(s.get::<Tab>(&b.oid).unwrap().unwrap().blockids, vec!["blk".to_string()], "once, however often delivered");
         assert_eq!(block.parentoref, format!("tab:{}", b.oid));
         assert!(!block.meta.contains_key(PARKED_META_KEY));
+    }
+
+    /// A parked block was in no tab: its delete removes the row and touches no tab.
+    #[test]
+    fn deleting_a_parked_block_removes_its_row_and_leaves_the_tabs_alone() {
+        let s = Store::open_in_memory().unwrap();
+        let ws = wcore::create_workspace(&s, "W").unwrap();
+        let a = wcore::create_tab_with_opts(&s, &ws.oid, "a", false).unwrap();
+        crate::persist_subscriber::apply_event_to_mstore(&block_created(&a.oid, "blk"), &s).unwrap();
+        apply_block_parked(&s, &a.oid, "blk").unwrap();
+
+        let deleted = Event::BlockDeleted { tab_id: String::new(), block_id: "blk".into(), version: 3 };
+        crate::persist_subscriber::apply_event_to_mstore(&deleted, &s).unwrap();
+        crate::persist_subscriber::apply_event_to_mstore(&deleted, &s).unwrap();
+        assert!(s.get::<Block>("blk").unwrap().is_none());
+        assert!(s.get::<Tab>(&a.oid).unwrap().is_some());
     }
 }

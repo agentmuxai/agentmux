@@ -367,6 +367,25 @@ mod tests {
         assert!(s.blocks.contains_key(&placed), "placed block untouched");
     }
 
+    /// A parked agent block is in no tab's `block_ids`, so the sweep never sees it, however long it
+    /// has been unplaced (always-available agents).
+    #[tokio::test]
+    async fn a_parked_agent_block_is_never_reaped() {
+        let state = test_state();
+        let tab = seed_tab(&state).await;
+        let placed = seed_block(&state, &tab, "agent").await;
+        let parked = seed_block(&state, &tab, "agent").await;
+        place(&state, &tab, &[&placed]).await;
+        dispatch_apply(&state, Command::ParkBlock { tab_id: tab.clone(), block_id: parked.clone() }).await;
+
+        let t0 = Instant::now();
+        let mut seen = Watch::default();
+        let age = Duration::from_secs(90);
+        assert!(sweep(&state, &mut seen, t0, age).await.is_empty());
+        assert!(sweep(&state, &mut seen, t0 + age * 10, age).await.is_empty());
+        assert!(state.srv_state.lock().await.blocks.contains_key(&parked), "still there, parked");
+    }
+
     /// `last_sweep_stats()`'s cumulative-reaped counter is process-wide
     /// (shared with every other test in this binary, since it's a plain
     /// static) and other tests in this module call `sweep` concurrently —
