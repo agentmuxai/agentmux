@@ -4,8 +4,8 @@
 /**
  * The agent pane's right-click menu (`AgentViewModel.getBodyContextMenuItems`):
  * Agent History and Quick Fork for the pane's conversation, then Seat…,
- * Bundles… and Personal memory for the agent itself, which stand in for the
- * Stash drawer's tabs for them.
+ * Bundles… and Personal memory for the agent itself. The pane header has no
+ * button of its own (SPEC_DROP_THE_AGENT_STASH_2026_10_24.md, D6).
  */
 
 import type { ModalLayerRequest } from "@/app/element/modal-layer";

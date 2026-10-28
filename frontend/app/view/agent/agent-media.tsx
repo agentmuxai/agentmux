@@ -35,7 +35,7 @@ export function useAgentMedia(): Accessor<MarkdownMediaOpts | undefined> {
 /**
  * The agent pane's render-path contexts in one place: dormancy, the
  * working directory its own messages resolve images against — the actual
- * launch cwd (`cmd:cwd`) first, as the stash drawer does, else the
+ * launch cwd (`cmd:cwd`) first, else the
  * definition's `working_directory` — and, for a host agent, what "Open in
  * editor" needs (`agent-open-in-editor.tsx`).
  */

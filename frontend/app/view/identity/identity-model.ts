@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // NOTE: Identity is NOT a standalone pane. It is embedded inside the agent
-// pane as a tab in the floating settings panel (AgentCardSettingsPanel →
-// AgentIdentityPanel). The standalone identity widget was removed in
+// pane as a tab in the floating settings panel (AgentCardSettingsPanel).
+// The standalone identity widget was removed in
 // v0.33.197. Do not re-register this as a block view — account management
 // lives inside the agent pane's settings overlay.
 

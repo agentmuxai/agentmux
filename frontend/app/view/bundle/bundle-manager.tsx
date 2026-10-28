@@ -243,9 +243,8 @@ const BundleManagerBody = (props: BundleManagerBodyProps): JSX.Element => {
                                     </div>
                                     {/* Skills are managed live via their own
                                         bind/unbind + upsert-for-bundle RPCs,
-                                        independent of the edit-draft flow above —
-                                        same reason AgentSkillsModal sits outside
-                                        the agent's own edit form. A bundle carries
+                                        independent of the edit-draft flow above.
+                                        A bundle carries
                                         no MCP servers; they're bound to agents in
                                         Connectors
                                         (SPEC_BUNDLE_CONTENTS_MEMORY_NOT_MCP_2026_10_07.md). */}
