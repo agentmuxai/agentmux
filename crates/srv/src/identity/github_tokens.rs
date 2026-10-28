@@ -296,6 +296,8 @@ pub fn apply_agent_git_in(env: &mut HashMap<String, String>, process: impl Fn(&s
             set_git_config_list(env, process, key, &[]);
         }
         env.remove(BROKER_ENV);
+        // Set with the rest, and only ever set by it: prompts come back with the connection gone.
+        env.remove("GIT_TERMINAL_PROMPT");
     }
 }
 
@@ -521,7 +523,7 @@ mod tests {
         apply_agent_git_in(&mut e, |_| None, true);
         apply_agent_git_in(&mut e, |_| None, false);
         assert_eq!(entries(&e), vec![("user.name".to_string(), "x".to_string())]);
-        assert!(!e.contains_key(BROKER_ENV));
+        assert!(!e.contains_key(BROKER_ENV) && !e.contains_key("GIT_TERMINAL_PROMPT"), "prompts are back too");
     }
 
     #[tokio::test]
