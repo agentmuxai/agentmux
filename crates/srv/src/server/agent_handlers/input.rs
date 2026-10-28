@@ -538,7 +538,7 @@ pub(crate) async fn build_persistent_spawn_env(
     // Kept for the identity-M0 slug lookup below; `mstore` itself moves into
     // the identity injector.
     let mstore_for_slug = mstore.clone();
-    let mut env_vars = crate::identity::resolver::inject_identity_env_async(
+    let mut env_vars = crate::identity::token_warmup::inject_after_warmup(
         mstore,
         id_store.clone(),
         identity_store.clone(),

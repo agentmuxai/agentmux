@@ -40,6 +40,7 @@ pub mod oauth_client;
 pub mod oauth_tokens;
 pub mod resolver;
 pub mod secret_store;
+pub mod token_warmup;
 
 // Legacy convenience re-export — newer call sites use
 // `resolver::inject_identity_env_with_broker` directly so the OAuth
