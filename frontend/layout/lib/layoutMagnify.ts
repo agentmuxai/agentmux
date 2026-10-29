@@ -172,8 +172,12 @@ async function closeNodeOnce(model: LayoutModel, nodeId: string, opts: { confirm
         const membersAsked = effectiveStack(nodeToDelete.data).join("\n");
         // A person's answer to a prompt: the prompt is the indicator, so the pane shows its normal
         // look while it is open and goes back to closing on yes.
+        // The asks are done when the first prompt opens, so the wait on a person is its own phase.
+        let probed = false;
         const hooks: BeforeDeleteHooks = {
             async asking(answer) {
+                if (!probed) trace.mark("probes");
+                probed = true;
                 endClosing(model, nodeId);
                 const yes = await answer;
                 if (yes) beginClosing(model, nodeId, effectiveStack(nodeToDelete.data).length);
@@ -182,7 +186,8 @@ async function closeNodeOnce(model: LayoutModel, nodeId: string, opts: { confirm
             },
         };
         const proceed = await model.beforeNodeDelete(nodeToDelete.data, hooks);
-        trace.mark(proceed ? "probes" : "kept");
+        if (!proceed) trace.mark("kept");
+        else if (!probed) trace.mark("probes");
         if (!proceed) return;
         // The tree may have changed while the prompt was open (a backend
         // push, the orphan reaper, another close). Close only what the user

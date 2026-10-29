@@ -528,6 +528,12 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
         onCleanup(() => vm?.setProgressBarMount?.(null));
     });
 
+    let bodyEl: HTMLDivElement | undefined;
+    createEffect(() => {
+        const closing = nodeModel.isClosing?.() ?? false;
+        if (bodyEl) bodyEl.inert = closing;
+    });
+
     const renderHeader = (viewModel: ViewModel | null): JSX.Element => (
         <PaneHeaderTabStrip
             tabs={tabIds()}
@@ -618,7 +624,9 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
             </ErrorBoundary>
             {model()?.renderBelowHeader?.()}
             <div class="pane-progress-bar-slot" ref={setProgressSlotEl} />
-            <div class={`pane-stack-body${model()?.bodyClass ? ` ${model()!.bodyClass}` : ""}`}>
+            {/* `inert`, not only pointer-events: the kept-alive content slot takes pointer events back
+                and a focused field would still take keys, for a pane that is about to be deleted. */}
+            <div class={`pane-stack-body${model()?.bodyClass ? ` ${model()!.bodyClass}` : ""}`} ref={(el) => (bodyEl = el)}>
                 {model()?.renderBehindContent?.()}
                 {contentRegion}
             </div>

@@ -205,6 +205,23 @@ describe("closing state", () => {
         expect(model.treeState.rootNode).toBeDefined();
     });
 
+    it("the trace records the asks done before the wait on a person", async () => {
+        const model = createLayoutModel();
+        const nodeId = insertRootBlock(model, "b1");
+        model.onNodeDelete = vi.fn().mockResolvedValue(undefined);
+        let answer!: (go: boolean) => void;
+        model.beforeNodeDelete = vi.fn(async (_data, hooks) => hooks!.asking(new Promise<boolean>((resolve) => (answer = resolve))));
+        const closing = closeNode(model, nodeId);
+        await Promise.resolve();
+        await Promise.resolve();
+        answer(true);
+        await closing;
+        await vi.advanceTimersByTimeAsync(50);
+        const line = (globalThis as { __closeTrace?: () => string[] }).__closeTrace!().at(-1)!;
+        expect(line.indexOf("probes+")).toBeGreaterThan(-1);
+        expect(line.indexOf("probes+")).toBeLessThan(line.indexOf("prompt+"));
+    });
+
     it("a close whose asks throw leaves a failed entry in the trace", async () => {
         const model = createLayoutModel();
         const nodeId = insertRootBlock(model, "b1");

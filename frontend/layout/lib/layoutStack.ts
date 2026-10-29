@@ -259,8 +259,11 @@ async function closeTabOfStack(
     // Same confirmation as closing the whole pane, scoped to this one tab.
     let leafData = nodeData;
     if (model.beforeNodeDelete && !opts?.confirmed) {
+        let probed = false;
         const hooks: BeforeDeleteHooks = {
             async asking(answer) {
+                if (!probed) trace.mark("probes");
+                probed = true;
                 endClosingBlock(model, blockId);
                 const yes = await answer;
                 if (yes) beginClosingBlock(model, blockId);
@@ -269,7 +272,8 @@ async function closeTabOfStack(
             },
         };
         const proceed = await model.beforeNodeDelete({ blockId } as TabLayoutData, hooks);
-        trace.mark(proceed ? "probes" : "kept");
+        if (!proceed) trace.mark("kept");
+        else if (!probed) trace.mark("probes");
         if (!proceed) return;
         // The tree may have changed while the prompt was open. Re-find by node
         // id, not object identity (`balanceNode` can swap the object when an
