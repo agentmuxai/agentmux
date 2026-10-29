@@ -39,6 +39,7 @@ export const DEVICES_SETTINGS = {
         description:
             "Paired devices can watch this computer's terminals, read-only: what they show, as it happens. Terminals often show passwords and keys, so this is off unless you turn it on. An agent hidden from paired devices keeps its shell hidden too.",
         section: "devices",
+        group: "Paired devices",
         keywords: ["terminal", "shell", "mobile", "device", "share", "watch", "viewer", "viewer:shareterminals"],
     },
     hiddenAgents: HIDDEN_AGENTS_SETTING,

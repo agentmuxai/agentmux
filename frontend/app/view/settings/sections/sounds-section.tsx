@@ -72,12 +72,14 @@ export const SOUNDS_SETTINGS = {
         label: "Enable",
         description: "Play a subliminal synth tone for every agent tool call",
         section: "sounds",
+        group: "Tool-call tones",
         keywords: ["tool call tones", "tool call sound", "synth tone", "notify:tooltones:enabled"],
     },
     toolTonesVolume: {
         id: "sounds.tool_tones_volume",
         label: "Volume",
         section: "sounds",
+        group: "Tool-call tones",
         keywords: ["tool tone volume", "notify:tooltones:volume"],
     },
     toolTonesScope: {
@@ -85,6 +87,7 @@ export const SOUNDS_SETTINGS = {
         label: "Scope",
         description: "Which panes play tool-call tones",
         section: "sounds",
+        group: "Tool-call tones",
         keywords: ["tool tone scope", "focused only", "all panes", "notify:tooltones:scope"],
     },
     toolTonesFlash: {
@@ -100,6 +103,7 @@ export const SOUNDS_SETTINGS = {
         description:
             "Play a looping tone while an agent waits for you: a question, a tool permission, a browser hand-off or approval, an SSH consent or a widget install",
         section: "sounds",
+        group: "Waiting for input",
         keywords: ["waiting for input sound", "ambient tone", "blocked sound", "permission", "approval", "notify:sound:agent.waiting.for.input"],
     },
     waitingBrowser: {
@@ -107,6 +111,7 @@ export const SOUNDS_SETTINGS = {
         label: "Browser hand-offs and approvals",
         description: "Also when an agent hands you a browser pane or asks to approve something in it",
         section: "sounds",
+        group: "Waiting for input",
         keywords: ["browser", "hand-off", "handoff", "approval", "notify:waiting:browser"],
     },
     shutdownToneEnabled: {
@@ -114,12 +119,14 @@ export const SOUNDS_SETTINGS = {
         label: "Shutdown warning chime",
         description: "Play a falling chime when something other than you asks to shut an agent down, at the start of the window to keep it and again with 5 seconds left",
         section: "sounds",
+        group: "Shutdown warning",
         keywords: ["shutdown sound", "quit warning", "keep running", "notify:sound:agent.shutdown.pending"],
     },
     waitingToneVolume: {
         id: "sounds.waiting_tone_volume",
         label: "Volume",
         section: "sounds",
+        group: "Waiting for input",
         keywords: ["waiting tone volume", "notify:sounds:waiting:volume"],
     },
 } satisfies Record<string, SettingsIndexEntry>;

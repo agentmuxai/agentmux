@@ -76,9 +76,33 @@
     }
 }
 
+// "Sounds › Tool-call tones › Volume": the parents muted, the setting itself in the normal weight.
+// A long path gives up its start first (direction: rtl puts the ellipsis on the left, the <bdi> keeps
+// the text itself reading left to right); the full path is the row's tooltip.
+.settings-search-result-path {
+    display: flex;
+    align-items: baseline;
+    min-width: 0;
+}
+
+.settings-search-result-parents {
+    flex: 0 1000 auto;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    direction: rtl;
+    text-align: left;
+    font-size: var(--text-sm);
+    color: var(--secondary-text-color);
+}
+
 .settings-search-result-label {
+    flex: 0 1 auto;
+    min-width: 0;
     font-size: var(--text-base);
     color: var(--main-text-color);
+    @include mixins.truncate;
 }
 
 .settings-search-result-desc {
