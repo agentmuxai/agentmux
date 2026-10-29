@@ -1,6 +1,6 @@
 # Minimizing a pane next to a minimized pane merges its tabs into that pane
 
-**Status:** approved by the operator 2026-10-28 ("yes" to the four recommended answers in §4); built in task #8675 by Camper-2@narko.
+**Status:** active. Approved by the operator 2026-10-28 ("yes" to the four recommended answers in §4); built in task #8675 by Camper-2@narko.
 **Author:** Camper@narko, at the operator's request (2026-10-28).
 **Scope:** [`frontend/layout/lib/layoutMinimize.ts`](../../frontend/layout/lib/layoutMinimize.ts) (`minimizeNodeToggle`), [`layoutStack.ts`](../../frontend/layout/lib/layoutStack.ts) (`moveBlocksInStack`), [`layoutSlip.ts`](../../frontend/layout/lib/layoutSlip.ts) (what a minimized pane docks onto), [`frontend/app/element/PaneTabStrip.tsx`](../../frontend/app/element/PaneTabStrip.tsx) (the landing animation).
 
