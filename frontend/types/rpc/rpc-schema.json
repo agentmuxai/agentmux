@@ -5584,7 +5584,7 @@
   },
   {
     "command": "reactive.registration_flags",
-    "request": "agentmux_srv::server::reactive::ReactiveRegistrationFlagsParams",
+    "request": "agentmux_srv::server::reactive::registration_flags::ReactiveRegistrationFlagsParams",
     "requestName": "ReactiveRegistrationFlagsParams",
     "requestTs": {
       "imports": [
@@ -5592,7 +5592,7 @@
       ],
       "name": "ReactiveRegistrationFlagsParams"
     },
-    "response": "agentmux_srv::server::reactive::ReactiveRegistrationFlagsResult",
+    "response": "agentmux_srv::server::reactive::registration_flags::ReactiveRegistrationFlagsResult",
     "responseName": "ReactiveRegistrationFlagsResult",
     "responseTs": {
       "imports": [
