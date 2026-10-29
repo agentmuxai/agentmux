@@ -62,6 +62,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                         "why": s("why"),
                         "fields": arguments.get("fields").cloned().unwrap_or_else(|| json!({})),
                         "rules": arguments.get("rules").cloned().unwrap_or_else(|| json!({})),
+                        "expires": arguments.get("expires").and_then(Value::as_str),
                         "auth": crate::identity::sign_ui_automation_auth().map_err(|e| anyhow::anyhow!("Vault generate needs this agent's signed identity: {e}"))?,
                     });
                     let result = crate::srv_http::srv_post_json(cx.client, &format!("{base}/api/v1/vault/generate"), cx.auth_key, &body, "Vault generate").await?;

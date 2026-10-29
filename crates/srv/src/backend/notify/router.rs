@@ -716,6 +716,7 @@ pub fn settings_from_extra(extra: &std::collections::HashMap<String, serde_json:
         NotifyKind::CloudSignedOut,
         NotifyKind::AccountUnavailable,
         NotifyKind::JobFailed,
+        NotifyKind::VaultExpiring,
     ] {
         if let Some(sfx) = kind.setting_suffix() {
             s.kind_enabled.insert(kind, setting_bool(extra, &format!("notify:os:{sfx}"), true));
@@ -942,6 +943,20 @@ impl Router {
             kind: NotifyKind::JobFailed,
             block_id: key.to_string(),
             agent_name: sanitize_name(job_name),
+            body: Some(body),
+            summary: None,
+            shutdown: None,
+        }));
+    }
+
+    /// A Vault entry's expiry date is near (`vault::expiry`). `key` is the
+    /// entry's (`vault:<id>`); the title names the entry by its label, the body
+    /// is fixed text with the date. Never a value: the Vault doesn't open one.
+    pub fn vault_expiring(&self, key: &str, label: &str, body: String) {
+        self.step(Input::Emit(Request {
+            kind: NotifyKind::VaultExpiring,
+            block_id: key.to_string(),
+            agent_name: sanitize_name(label),
             body: Some(body),
             summary: None,
             shutdown: None,

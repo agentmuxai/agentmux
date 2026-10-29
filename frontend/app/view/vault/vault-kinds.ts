@@ -33,10 +33,12 @@ export interface VaultKind {
 
 const OWNER: VaultInput = { name: "owner", label: "Whose", placeholder: "e.g. Alex Doe" };
 const NOTES: VaultInput = { name: "notes", label: "Notes", multiline: true };
+/** A plain date srv reminds the person of (spec §15.2 of SPEC_VAULT_GENERATE_CAPTURE_AND_BROWSER_SIGNINS_2026_10_28.md). */
+const EXPIRES: VaultInput = { name: "expires", label: "Expires", placeholder: "YYYY-MM-DD" };
 const ID_FIELDS: VaultInput[] = [
     OWNER,
     { name: "issuer", label: "Issued by", placeholder: "Country or state" },
-    { name: "expires", label: "Expires", placeholder: "YYYY-MM-DD" },
+    EXPIRES,
     NOTES,
 ];
 const value = (label: string, placeholder?: string): VaultInput[] => [{ name: "value", label, placeholder }];
@@ -80,7 +82,7 @@ export const VAULT_KINDS: VaultKind[] = [
         fields: [
             { name: "service", label: "Service", placeholder: "e.g. Stripe" },
             { name: "env_name", label: "Environment variable", placeholder: "e.g. STRIPE_API_KEY" },
-            { name: "expires", label: "Expires", placeholder: "YYYY-MM-DD" },
+            EXPIRES,
             NOTES,
         ],
     },
@@ -92,9 +94,9 @@ export const VAULT_KINDS: VaultKind[] = [
             { name: "password", label: "Password" },
             { name: "totp", label: "One-time code seed", placeholder: "otpauth:// or base32" },
         ],
-        fields: [{ name: "site", label: "Site", placeholder: "https://example.com" }, { name: "username", label: "Username" }, NOTES],
+        fields: [{ name: "site", label: "Site", placeholder: "https://example.com" }, { name: "username", label: "Username" }, EXPIRES, NOTES],
     },
-    { name: "note", label: "Secret note", section: "notes", parts: [{ name: "text", label: "Text", multiline: true }], fields: [] },
+    { name: "note", label: "Secret note", section: "notes", parts: [{ name: "text", label: "Text", multiline: true }], fields: [EXPIRES] },
 ];
 
 export const SECTION_LABELS: Record<VaultPaneSection, string> = {

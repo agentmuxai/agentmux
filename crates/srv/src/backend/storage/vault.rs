@@ -37,6 +37,8 @@ pub(super) const VAULT_SCHEMA: &str = "
         target      TEXT NOT NULL DEFAULT '',
         outcome     TEXT NOT NULL DEFAULT ''
     );
+    -- An entry's own lines: its expiry reminders, and who made its value.
+    CREATE INDEX IF NOT EXISTS idx_vault_activity_entry ON db_vault_activity (entry_id, seq);
     -- Where the person let an agent use an entry without asking again: the
     -- origin of a site, for one entry (spec section 6.4).
     CREATE TABLE IF NOT EXISTS db_vault_grants (
@@ -305,6 +307,27 @@ impl Store {
              ORDER BY seq DESC LIMIT ?1",
         )?;
         let rows = stmt.query_map(params![limit], |r| {
+            Ok(VaultActivityRow {
+                at: r.get(0)?,
+                entry_id: r.get(1)?,
+                entry_label: r.get(2)?,
+                actor: r.get(3)?,
+                action: r.get(4)?,
+                target: r.get(5)?,
+                outcome: r.get(6)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// One entry's latest `limit` activity rows, newest first.
+    pub fn vault_activity_for_entry(&self, entry_id: &str, limit: i64) -> Result<Vec<VaultActivityRow>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT at, entry_id, entry_label, actor, action, target, outcome FROM db_vault_activity \
+             WHERE entry_id = ?1 ORDER BY seq DESC LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![entry_id, limit], |r| {
             Ok(VaultActivityRow {
                 at: r.get(0)?,
                 entry_id: r.get(1)?,

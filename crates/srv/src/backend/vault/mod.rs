@@ -9,6 +9,7 @@
 //! the Vault makes itself (`generate`), which no one has seen. Everything here
 //! is blocking (the store, the keychain): call it off the async runtime.
 
+pub mod expiry;
 pub mod files;
 pub mod generate;
 pub mod import;
@@ -68,14 +69,17 @@ pub struct VaultEntryInfo {
     pub last_used_at: i64,
 }
 
-/// An entry as an agent sees it (`Vault` `list`): what it is called and what
-/// kind it is. No value, tail, field or grant.
+/// An entry as an agent sees it (`Vault` `list`): what it is called, what
+/// kind it is, and when it expires, a date being no secret. No value, tail,
+/// other field or grant.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct VaultAgentEntry {
     pub id: String,
     pub label: String,
     pub kind: String,
     pub section: VaultSection,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expires: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, ts_rs::TS)]
@@ -134,6 +138,9 @@ fn validate(kind: &kinds::Kind, label: &str, fields: &BTreeMap<String, String>, 
         if v.len() > MAX_FIELD {
             return Err(format!("{k} is longer than {MAX_FIELD} bytes"));
         }
+        if k == expiry::FIELD {
+            expiry::parse(v)?;
+        }
     }
     if tags.len() > MAX_TAGS || tags.iter().any(|t| t.chars().count() > MAX_LABEL) {
         return Err(format!("at most {MAX_TAGS} tags, each at most {MAX_LABEL} characters"));
@@ -181,15 +188,26 @@ fn new_id(store: &Store, kind: &str, label: &str) -> Result<String, String> {
     Err("too many entries with that label".into())
 }
 
+/// The actions that use an entry's value: one of an expired entry says so.
+const USES: &[&str] = &["filled a web form", "ran a command", "revealed", "copied"];
+
 /// Adds a line to the activity log; a failure to is logged, not raised.
 pub fn record(store: &Store, entry_id: &str, entry_label: &str, actor: &str, action: &str, target: &str, outcome: &str) {
+    let mut target = target.to_string();
+    if USES.contains(&action) && !entry_id.is_empty() {
+        if let Ok(Some(row)) = store.vault_get(entry_id) {
+            if expiry::expired(&row, expiry::today()) {
+                target = if target.is_empty() { "(expired)".into() } else { format!("{target} (expired)") };
+            }
+        }
+    }
     let row = VaultActivityRow {
         at: now_ms(),
         entry_id: entry_id.into(),
         entry_label: entry_label.into(),
         actor: actor.into(),
         action: action.into(),
-        target: target.into(),
+        target,
         outcome: outcome.into(),
     };
     if let Err(e) = store.vault_activity_add(&row) {
@@ -247,6 +265,10 @@ pub struct GenerateRequest {
     pub fields: BTreeMap<String, String>,
     #[serde(default)]
     pub rules: generate::RulesRequest,
+    /// When the value stops working (`YYYY-MM-DD`), if the agent knows: the person
+    /// is reminded before then (spec §15.2).
+    #[serde(default)]
+    pub expires: Option<String>,
 }
 
 /// What `generate` made: the entry, never its value.
@@ -272,7 +294,11 @@ pub fn generate_entry(store: &Store, req: GenerateRequest, actor: &str) -> Resul
     parts.0.insert(part.to_string(), value.to_string());
     let why: String = req.why.trim().chars().take(160).collect();
     let target = if why.is_empty() { generate::describe(&rules) } else { why };
-    let entry = NewEntry { kind: kind.to_string(), label: req.label, fields: req.fields, tags: Vec::new(), parts };
+    let mut fields = req.fields;
+    if let Some(date) = req.expires.filter(|d| !d.trim().is_empty()) {
+        fields.insert(expiry::FIELD.to_string(), date);
+    }
+    let entry = NewEntry { kind: kind.to_string(), label: req.label, fields, tags: Vec::new(), parts };
     let label = entry.label.trim().to_string();
     let id = insert(store, entry, actor, "generated", &target)?;
     Ok(Generated { id, label, kind: kind.to_string(), made: generate::describe(&rules) })
@@ -301,6 +327,12 @@ pub fn update(store: &Store, mut change: EntryChange) -> Result<(), String> {
         }
     }
     let label = change.label.trim().to_string();
+    let old_fields: BTreeMap<String, String> = serde_json::from_str(&row.fields).unwrap_or_default();
+    let target = match (old_fields.get(expiry::FIELD), fields.get(expiry::FIELD)) {
+        (old, Some(new)) if old != Some(new) => format!("expires {new}"),
+        (Some(_), None) => "no expiry date".to_string(),
+        _ => String::new(),
+    };
     let changed = VaultRow {
         label: label.clone(),
         fields: serde_json::to_string(&fields).map_err(|e| e.to_string())?,
@@ -312,7 +344,7 @@ pub fn update(store: &Store, mut change: EntryChange) -> Result<(), String> {
     if !store.vault_update(&changed).map_err(|e| e.to_string())? {
         return Err(format!("no entry {}", changed.id));
     }
-    record(store, &changed.id, &label, PERSON, "changed", "", "done");
+    record(store, &changed.id, &label, PERSON, "changed", &target, "done");
     Ok(())
 }
 
@@ -482,7 +514,8 @@ pub fn list_for_agent(store: &Store) -> Result<Vec<VaultAgentEntry>, String> {
         .into_iter()
         .filter_map(|r| {
             let section = kinds::kind(&r.kind)?.section;
-            Some(VaultAgentEntry { id: r.id, label: r.label, kind: r.kind, section })
+            let expires = expiry::of(&r).map(|d| d.to_string());
+            Some(VaultAgentEntry { id: r.id, label: r.label, kind: r.kind, section, expires })
         })
         .collect())
 }

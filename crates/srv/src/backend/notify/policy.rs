@@ -48,6 +48,11 @@ pub enum NotifyKind {
     /// SPEC_JOBS_AND_TEMPLATES_2026_10_24.md §3.4). Its key is the job's
     /// (`job:<id>`); the job's name stands where an agent's would.
     JobFailed,
+    /// A Vault entry's expiry date is near or here: 14 days, 3 days and on the
+    /// day, once each (`vault::expiry`, SPEC_VAULT_GENERATE_CAPTURE_AND_BROWSER_SIGNINS_2026_10_28.md
+    /// §15.2). Its key is the entry's (`vault:<id>`); the entry's label stands
+    /// where an agent's name would.
+    VaultExpiring,
 }
 
 impl NotifyKind {
@@ -62,6 +67,7 @@ impl NotifyKind {
             NotifyKind::CloudSignedOut => Some("cloudsignedout"),
             NotifyKind::AccountUnavailable => Some("accountunavailable"),
             NotifyKind::JobFailed => Some("jobfailed"),
+            NotifyKind::VaultExpiring => Some("vaultexpiring"),
             // Follows the master switch only: a shutdown the user can still
             // stop must not be silenceable per kind.
             NotifyKind::ShutdownPending => None,
@@ -80,7 +86,7 @@ impl NotifyKind {
             NotifyKind::MessageNeedsReview => 2_000,
             // The window is short: tell the user at once.
             // The episode's scan already waited for the failure to settle.
-            NotifyKind::ShutdownPending | NotifyKind::CloudSignedOut | NotifyKind::AccountUnavailable | NotifyKind::JobFailed => 0,
+            NotifyKind::ShutdownPending | NotifyKind::CloudSignedOut | NotifyKind::AccountUnavailable | NotifyKind::JobFailed | NotifyKind::VaultExpiring => 0,
             NotifyKind::Summary | NotifyKind::Test => 0,
         }
     }
@@ -114,7 +120,7 @@ impl NotifyKind {
             NotifyKind::Test => "test".to_string(),
             NotifyKind::CloudSignedOut => "cloud".to_string(),
             // One per account, or per job: the key already names it.
-            NotifyKind::AccountUnavailable | NotifyKind::JobFailed => block_id.to_string(),
+            NotifyKind::AccountUnavailable | NotifyKind::JobFailed | NotifyKind::VaultExpiring => block_id.to_string(),
         }
     }
 
@@ -123,7 +129,12 @@ impl NotifyKind {
     fn has_summary(self) -> bool {
         !matches!(
             self,
-            NotifyKind::Summary | NotifyKind::Test | NotifyKind::CloudSignedOut | NotifyKind::AccountUnavailable | NotifyKind::JobFailed
+            NotifyKind::Summary
+                | NotifyKind::Test
+                | NotifyKind::CloudSignedOut
+                | NotifyKind::AccountUnavailable
+                | NotifyKind::JobFailed
+                | NotifyKind::VaultExpiring
         )
     }
 
@@ -445,6 +456,7 @@ pub fn title_for(kind: NotifyKind, agent_name: &str) -> String {
         NotifyKind::CloudSignedOut => "AgentMux is signed out of MuxBus".to_string(),
         NotifyKind::AccountUnavailable => "An account can't run your agents".to_string(),
         NotifyKind::JobFailed => format!("Job failed: {agent_name}"),
+        NotifyKind::VaultExpiring => format!("Vault: {agent_name} is expiring"),
     }
 }
 
