@@ -126,8 +126,6 @@ pub fn route_needs_identity(path: &str) -> bool {
     path.starts_with("/api/v1/agent/memory/") || !accepted_without_identity(path)
 }
 
-/// A container turn's `docker exec` env: the container denylist applied, and
-/// the instance key replaced by this block's container token.
 /// File watchers poll where the workspace is a file-sharing mount that sends no change events:
 /// Docker Desktop on Windows and macOS (a 9p or virtiofs share). On Linux a bind mount reports changes
 /// and polling would only cost CPU. What the agent's own environment already sets is left alone.
@@ -142,6 +140,8 @@ pub(crate) fn watcher_polling_env(shared_mount: bool, set: &[(String, String)]) 
         .collect()
 }
 
+/// A container turn's `docker exec` env: the container denylist applied, and
+/// the instance key replaced by this block's container token.
 pub fn container_exec_env(block_id: &str, env_vars: &HashMap<String, String>) -> Vec<(String, String)> {
     let agent_token = env_vars.get("AGENTMUX_AGENT_TOKEN").map(String::as_str);
     // The publish guard's hooks directory is a host path; the agent's other
