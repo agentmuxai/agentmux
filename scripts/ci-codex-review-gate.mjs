@@ -65,7 +65,7 @@
 
 import { createGitHubClient, GitHubError } from "./lib/github-rest.mjs";
 import { isMain } from "./lib/is-main.mjs";
-import { isNoCodePr } from "./lib/no-codex-class.mjs";
+import { isNoCodePr, PR_FILE_CAP } from "./lib/no-codex-class.mjs";
 
 export const CODEX_LOGIN = "chatgpt-codex-connector[bot]";
 export const STATUS_CONTEXT = "Codex review";
@@ -122,8 +122,11 @@ const TRIGGER_HEAD = /reagent:codex-trigger\s+head=([0-9a-f]{7,40})/i;
 // older name of the same skip).
 const SKIPPED_HEAD = /<!--\s*reagent:codex-skipped\s+reason=(quota|round-cap|docs-only|no-code)\s+head=([0-9a-f]{7,40})\s*-->/i;
 // The reasons that are a claim about the PR's files. The gate does not take them
-// on muxreview's word: it reads the file list itself (prNoCode) and passes the head
-// only when that agrees.
+// on muxreview's word: it reads the file list itself (checkSkipClaim) and passes the
+// head only when that agrees. `no-code` is checked with lib/no-codex-class.mjs;
+// `docs-only`, the older name still on notes muxreview made before it learned
+// `no-code`, with the path rule it was made under (isDocsOnlyPath), so those notes
+// pass as they always did, now confirmed against the file list.
 const CLASS_CHECKED_REASONS = new Set(["docs-only", "no-code"]);
 
 // muxreview keeps a mirror of this rule; keep the two in step.
@@ -343,10 +346,14 @@ const PASSES_WITHOUT_CODEX = {
     "no-code": (short) => `No code in this PR (release version lines, docs or assets): Codex isn't asked; ${short} passes without it`,
 };
 
-/** Whether the head has a muxreview skip note whose reason is a claim about the PR's files. */
-export function skipNeedsClassCheck({ headSha, comments = [] }) {
+/**
+ * The reason of the muxreview skip note for this head when it is a claim about the PR's files
+ * (`no-code`, `docs-only`), else null.
+ */
+export function skipClaim({ headSha, comments = [] }) {
     const head = headSha.toLowerCase();
-    return muxreviewSkips(comments).some((s) => namesCommit(head, s.sha) && CLASS_CHECKED_REASONS.has(s.reason));
+    const skip = muxreviewSkips(comments).filter((s) => namesCommit(head, s.sha)).at(-1);
+    return skip && CLASS_CHECKED_REASONS.has(skip.reason) ? skip.reason : null;
 }
 
 /**
@@ -376,8 +383,9 @@ export function evaluateCodexGate({
     const short = head.slice(0, 10);
     const all = codexOutputs({ comments, reviews, reviewComments });
     const namesHead = (o) => namesCommit(head, o.sha);
-    // A skip note that claims "no code" counts only when the caller's own check of the PR's files
-    // said so (`noCodePr === true`); anything else, including a check not made, refuses it.
+    // A skip note that claims something about the PR's files counts only when the caller's own
+    // check of them agreed (`noCodePr === true`); anything else, including a check not made,
+    // refuses it.
     const skipOnHead = muxreviewSkips(comments).filter(namesHead).at(-1);
     const refusedSkip = skipOnHead !== undefined && CLASS_CHECKED_REASONS.has(skipOnHead.reason) && noCodePr !== true;
     const onHead = all.filter(namesHead).at(-1) ?? (refusedSkip ? undefined : skipOnHead);
@@ -527,6 +535,18 @@ export async function prNoCode(client, repo, pull) {
     return isNoCodePr({ files, readText });
 }
 
+/**
+ * Checks the claim of a skip note (`skipClaim`) against the PR's own files: { ok, why }.
+ * `no-code` by lib/no-codex-class.mjs; `docs-only` by the older path rule.
+ */
+export async function checkSkipClaim(client, repo, pull, reason) {
+    if (reason === "no-code") return prNoCode(client, repo, pull);
+    const files = await client.paginate(`/repos/${repo}/pulls/${pull.number}/files`);
+    if (files.length === 0 || files.length >= PR_FILE_CAP) return { ok: false, why: "the file list is empty or may be cut short" };
+    const notDocs = files.find((f) => !isDocsOnlyPath(f.filename) || (f.previous_filename && !isDocsOnlyPath(f.previous_filename)));
+    return notDocs ? { ok: false, why: `${notDocs.filename} is not a docs path` } : { ok: true, why: "every changed file is a docs path" };
+}
+
 export const WORKFLOW_FILE = "codex-review-gate.yml";
 
 /** The head's latest `Codex review` status, or null. */
@@ -602,8 +622,9 @@ async function main() {
         DEPENDENCY_BOTS.has(String(pull.user?.login ?? "").toLowerCase()) &&
         pull.commits <= 250 &&
         isDependencyBotPr(pull.user.login, await client.paginate(`/repos/${repo}/pulls/${pr}/commits`));
-    // Read the PR's files only when muxreview's note claims there is no code in them.
-    const noCode = skipNeedsClassCheck({ headSha, comments }) ? await prNoCode(client, repo, pull) : null;
+    // Read the PR's files only when muxreview's note claims something about them.
+    const claim = skipClaim({ headSha, comments });
+    const noCode = claim ? await checkSkipClaim(client, repo, pull, claim) : null;
     const result = evaluateCodexGate({
         headSha,
         comments,

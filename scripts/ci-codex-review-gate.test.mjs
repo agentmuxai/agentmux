@@ -21,8 +21,9 @@ import {
     prNoCode,
     reviewedCommit,
     SKIP_AUTHORS,
-    skipNeedsClassCheck,
+    skipClaim,
     skipNote,
+    checkSkipClaim,
     STALE_REQUEST_MS,
     sweep,
     sweepReason,
@@ -590,15 +591,15 @@ describe("muxreview skip reasons", () => {
         expect(evaluateCodexGate({ headSha: HEAD, comments: [note("no-code", OLD)], noCodePr: true }).state).toBe("pending");
         const forged = { ...note("no-code"), user: { login: "someone-else" } };
         expect(evaluateCodexGate({ headSha: HEAD, comments: [forged], noCodePr: true }).state).toBe("pending");
-        expect(skipNeedsClassCheck({ headSha: HEAD, comments: [forged] })).toBe(false);
+        expect(skipClaim({ headSha: HEAD, comments: [forged] })).toBeNull();
     });
 
     it("the files are read only for a skip that claims there is no code, on this head", () => {
-        expect(skipNeedsClassCheck({ headSha: HEAD, comments: [note("no-code")] })).toBe(true);
-        expect(skipNeedsClassCheck({ headSha: HEAD, comments: [note("docs-only")] })).toBe(true);
-        expect(skipNeedsClassCheck({ headSha: HEAD, comments: [note("no-code", OLD)] })).toBe(false);
-        expect(skipNeedsClassCheck({ headSha: HEAD, comments: [note("round-cap")] })).toBe(false);
-        expect(skipNeedsClassCheck({ headSha: HEAD, comments: [note("quota")] })).toBe(false);
+        expect(skipClaim({ headSha: HEAD, comments: [note("no-code")] })).toBe("no-code");
+        expect(skipClaim({ headSha: HEAD, comments: [note("docs-only")] })).toBe("docs-only");
+        expect(skipClaim({ headSha: HEAD, comments: [note("no-code", OLD)] })).toBeNull();
+        expect(skipClaim({ headSha: HEAD, comments: [note("round-cap")] })).toBeNull();
+        expect(skipClaim({ headSha: HEAD, comments: [note("quota")] })).toBeNull();
     });
 
     it("a round-cap or quota skip does not depend on the files", () => {
@@ -685,6 +686,23 @@ describe("prNoCode", () => {
     it("a file missing at one of the commits is refused, not an error", async () => {
         const client = fakeClient({ files: [{ filename: "package.json", status: "modified" }], contents: { [`package.json@${HEAD}`]: manifest("0.60.7") } });
         expect(await prNoCode(client, "o/r", pull)).toMatchObject({ ok: false });
+    });
+});
+
+describe("checkSkipClaim", () => {
+    const pull = { number: 7, base: { sha: "b".repeat(40) }, head: { sha: HEAD } };
+    const clientOf = (files) => ({ paginate: async () => files });
+
+    it("a docs-only note is confirmed by the older path rule, as before (any file type under docs/)", async () => {
+        const files = [{ filename: "docs/specs/SPEC_X.md" }, { filename: "docs/data/sample.json" }, { filename: "README.md" }];
+        expect(await checkSkipClaim(clientOf(files), "o/r", pull, "docs-only")).toMatchObject({ ok: true });
+    });
+
+    it("a docs-only note on a PR with code, a code rename, or no file list is refused", async () => {
+        expect((await checkSkipClaim(clientOf([{ filename: "docs/a.md" }, { filename: "src/a.rs" }]), "o/r", pull, "docs-only")).ok).toBe(false);
+        const moved = [{ filename: "docs/a.md", status: "renamed", previous_filename: "src/a.rs" }];
+        expect((await checkSkipClaim(clientOf(moved), "o/r", pull, "docs-only")).ok).toBe(false);
+        expect((await checkSkipClaim(clientOf([]), "o/r", pull, "docs-only")).ok).toBe(false);
     });
 });
 
