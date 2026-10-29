@@ -143,18 +143,20 @@ pub(super) async fn view_of_agent(state: &AppState, agent: &str) -> Known {
     .unwrap_or(Known::Unknown)
 }
 
-/// What to tell a sender who filed a task for `agent` (a name or a UID) that the agent can't take up now:
-/// its availability (`target`) and a `note` saying the task waits. `None` for an agent that can work, a
-/// group or unaddressed task, or a name no agent here has, so the answer stays as it was.
-pub(super) async fn enqueue_note(state: &AppState, agent: &str) -> Option<Value> {
-    let agent = agent.trim();
-    if agent.is_empty() {
+/// What to tell a sender who filed a task for the agent `lookup` (a name or a UID) that the agent can't
+/// take up now: its availability (`target`) and a `note` saying the task waits, naming the agent `name`
+/// as the sender typed it (`lookup` when that is empty). `None` for an agent that can work, a group or
+/// unaddressed task, or a name no agent here has, so the answer stays as it was.
+pub(super) async fn enqueue_note(state: &AppState, lookup: &str, name: &str) -> Option<Value> {
+    let lookup = lookup.trim();
+    if lookup.is_empty() {
         return None;
     }
-    let Known::Live(view) = view_of_agent(state, agent).await else {
+    let Known::Live(view) = view_of_agent(state, lookup).await else {
         return None;
     };
-    let note = wait_note(&view, agent)?;
+    let name = Some(name.trim()).filter(|n| !n.is_empty()).unwrap_or(lookup);
+    let note = wait_note(&view, name)?;
     Some(json!({ "target": view, "note": note }))
 }
 

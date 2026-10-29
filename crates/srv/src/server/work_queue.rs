@@ -141,8 +141,9 @@ pub(super) async fn handle_work_enqueue(
 
     let now = now_ms();
     let ui_change = req.ui_change;
-    // Who to tell the filer about if the target can't work now: the UID it was carried with, else its name.
-    let target = if target_agent_uid.is_empty() { req.target_agent.clone() } else { target_agent_uid.clone() };
+    // Who to tell the filer about if the target can't work now: looked up by the UID it was carried with,
+    // else by its name, and named in the note as the filer typed it.
+    let target = (if target_agent_uid.is_empty() { req.target_agent.clone() } else { target_agent_uid.clone() }, req.target_agent.clone());
     let item = WorkItem {
         id: Uuid::new_v4().to_string(),
         title: req.title,
@@ -186,7 +187,7 @@ pub(super) async fn handle_work_enqueue(
             Ok(num) => {
                 let _ = state.work_store.work_ui_set(&item.id, ui_change, None, 0, now);
                 publish_changed(&state);
-                let note = super::availability_view::enqueue_note(&state, &target).await;
+                let note = super::availability_view::enqueue_note(&state, &target.0, &target.1).await;
                 (StatusCode::OK, Json(super::availability_view::with_note(json!({ "id": item.id, "num": num }), note)))
             }
             Err(e) => e,
@@ -224,7 +225,7 @@ pub(super) async fn handle_work_enqueue(
         }
     };
     publish_changed(&state);
-    let note = super::availability_view::enqueue_note(&state, &target).await;
+    let note = super::availability_view::enqueue_note(&state, &target.0, &target.1).await;
     let body = json!({ "id": spec.id, "num": spec_num, "build_id": build.id, "build_num": build_num });
     (StatusCode::OK, Json(super::availability_view::with_note(body, note)))
 }
