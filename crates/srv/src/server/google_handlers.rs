@@ -7,6 +7,8 @@
 //! - `GET /api/v1/google/self/services`: the services the calling agent has a
 //!   grant on, so its MCP lists only those tools.
 //! - `POST /api/v1/google/calendar`: one `Calendar` action.
+//! - `POST /api/v1/google/drive`: one `Drive` action (`pick_files` opens Google's file picker
+//!   for the person).
 //!
 //! Both need an attributed caller (the agent's own `X-Agent-Token`): a grant
 //! belongs to an agent, so a request that names none has none.
@@ -22,8 +24,9 @@ use super::app_api::bundle::SelfOwner;
 use super::caller::Caller;
 use super::AppState;
 use crate::backend::google::calendar::CalendarArgs;
-use crate::backend::google::calls::{calendar_read, CallDeps};
-use crate::backend::google::{access, LiveGoogleHttp};
+use crate::backend::google::calls::{calendar_read, drive_read, log_call, CallDeps};
+use crate::backend::google::drive::DriveArgs;
+use crate::backend::google::{access, LiveGoogleHttp, Service};
 use crate::backend::storage::store::AgentDefinition;
 use crate::identity::oauth_tokens::{KeychainSecrets, LiveHttp};
 
@@ -101,8 +104,124 @@ pub(crate) async fn handle_google_calendar(
     }
 }
 
+#[derive(Debug, Deserialize)]
+pub(crate) struct DriveBody {
+    action: String,
+    /// The account's email, when the agent names one.
+    #[serde(default)]
+    account: Option<String>,
+    #[serde(flatten)]
+    args: DriveArgs,
+}
+
+/// `POST /api/v1/google/drive`: `{ account, result }`, or `{ error }` with a sentence the agent
+/// can act on.
+pub(crate) async fn handle_google_drive(
+    State(state): State<AppState>,
+    caller: Option<Extension<Caller>>,
+    Json(body): Json<DriveBody>,
+) -> Response {
+    let def = match calling_agent(&state, caller.as_deref()) {
+        Ok(d) => d,
+        Err(e) => return error(StatusCode::FORBIDDEN, e),
+    };
+    let deps = CallDeps {
+        google: &LiveGoogleHttp,
+        oauth: &LiveHttp,
+        secrets: &KeychainSecrets,
+        mstore: &state.mstore,
+        id_store: &state.id_store,
+        identity_store: &state.identity_store,
+    };
+    let action = body.action.trim();
+    let result = if action == "pick_files" {
+        pick_files(&state, &deps, &def, body.account.as_deref()).await
+    } else {
+        drive_read(&deps, &def, action, &body.args, body.account.as_deref(), chrono::Utc::now()).await
+    };
+    match result {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => error(StatusCode::UNPROCESSABLE_ENTITY, e),
+    }
+}
+
+/// The least time between two pickers opened for one account by agents, so a loop of
+/// `pick_files` calls can't fill the person's browser with tabs.
+const PICK_GAP: std::time::Duration = std::time::Duration::from_secs(60);
+
+fn last_picks() -> std::sync::MutexGuard<'static, std::collections::HashMap<String, std::time::Instant>> {
+    use std::sync::{Mutex, OnceLock};
+    static LAST: OnceLock<Mutex<std::collections::HashMap<String, std::time::Instant>>> = OnceLock::new();
+    LAST.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Take the account's picker slot, or say it was taken a moment ago. The slot is held
+/// from the check, so two calls at once can't both open a picker; [`pick_release`] gives it
+/// back when the picker didn't open.
+fn pick_throttle(account_id: &str, now: std::time::Instant) -> Result<(), String> {
+    let mut last = last_picks();
+    if let Some(at) = last.get(account_id) {
+        if now.saturating_duration_since(*at) < PICK_GAP {
+            return Err("a file picker was opened for this account a moment ago: wait for the person to pick, then search_files".to_string());
+        }
+    }
+    last.insert(account_id.to_string(), now);
+    Ok(())
+}
+
+/// A picker that failed to open doesn't count against the account.
+fn pick_release(account_id: &str) {
+    last_picks().remove(account_id);
+}
+
+/// `pick_files`: open Google's file picker in the person's browser. The agent gets no ids
+/// back: it searches once the person has picked.
+async fn pick_files<G, O, S>(
+    state: &AppState,
+    deps: &CallDeps<'_, G, O, S>,
+    def: &AgentDefinition,
+    account: Option<&str>,
+) -> Result<serde_json::Value, String>
+where
+    G: crate::backend::google::GoogleHttp,
+    O: crate::identity::oauth_tokens::OAuthHttp,
+    S: crate::identity::oauth_tokens::TokenSecrets,
+{
+    let acc = access::access_for(&state.mstore, &state.id_store, &state.identity_store, def, Service::Drive, account)?;
+    let result = match pick_throttle(&acc.account.id, std::time::Instant::now()) {
+        Ok(()) => {
+            let started = start_picker_for(state, &acc.account).await;
+            if started.is_err() {
+                pick_release(&acc.account.id);
+            }
+            started.map(|_| {
+                json!({
+                    "started": true,
+                    "note": "A Google file picker is open in the person's browser. Nothing to wait for here: once they have picked, search_files lists what they gave you."
+                })
+            })
+        }
+        Err(e) => Err(e),
+    };
+    log_call(deps, &acc, def, Service::Drive, "pick_files", String::new(), &result, chrono::Utc::now());
+    result.map(|r| json!({ "account": acc.email(), "result": r }))
+}
+
+/// Start the picker for `account` with the client it was made with; the session id is
+/// polled with `account.oauth.poll`.
+async fn start_picker_for(state: &AppState, account: &crate::backend::storage::store::IdentityAccount) -> Result<String, String> {
+    let client = crate::identity::oauth_client::picker_client(&KeychainSecrets, account).await?;
+    let (session_id, _) = crate::identity::oauth_client::start_picker(
+        account.clone(),
+        client,
+        state.id_store.clone(),
+        state.identity_store.clone(),
+    )?;
+    Ok(session_id)
+}
+
 /// The services a grant can be set on today; the rest come with their stage.
-const BUILT_SERVICES: [&str; 1] = ["calendar"];
+const BUILT_SERVICES: [&str; 2] = ["calendar", "drive"];
 
 /// How many log lines the account panel shows.
 const PANEL_CALLS: usize = 100;
@@ -113,6 +232,8 @@ const PANEL_CALLS: usize = 100;
 ///   and its call log.
 /// - `set` `{ account_id, agent_id, service, level }`: `read`, `write` or
 ///   `off`.
+/// - `pick` `{ account_id }`: open Google's file picker for the person; answers
+///   `{ session_id }` to poll with `account.oauth.poll`.
 pub(crate) async fn handle_host_google(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -129,12 +250,19 @@ pub(crate) async fn handle_host_google(
     let result = match s("op").as_str() {
         "account" => account_panel(&state, &account_id),
         "set" => set_grant(&state, &account_id, &s("agent_id"), &s("service"), &s("level")),
+        "pick" => pick_for_person(&state, &account_id).await,
         other => Err(format!("no Google operation \"{other}\"")),
     };
     match result {
         Ok(data) => Json(json!({ "data": data })).into_response(),
         Err(e) => error(StatusCode::UNPROCESSABLE_ENTITY, e),
     }
+}
+
+async fn pick_for_person(state: &AppState, account_id: &str) -> Result<serde_json::Value, String> {
+    let account = state.id_store.identity_get(account_id).map_err(|e| e.to_string())?.ok_or("no such account")?;
+    let session_id = start_picker_for(state, &account).await?;
+    Ok(json!({ "session_id": session_id }))
 }
 
 fn account_panel(state: &AppState, account_id: &str) -> Result<serde_json::Value, String> {

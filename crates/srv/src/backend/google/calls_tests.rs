@@ -136,3 +136,80 @@ async fn an_unknown_action_is_refused_before_anything_is_read() {
     assert!(e.contains("one of list_calendars"), "{e}");
     assert!(w.store.google_calls("acc-1", 10).unwrap().is_empty());
 }
+
+
+const DRIVE: &[&str] = &["drive.file"];
+
+/// [`world`], with Drive at `level` instead of Calendar.
+fn drive_world(scopes: &[&str], level: Option<GrantLevel>) -> World {
+    let w = world(scopes, None, true);
+    w.store.google_grant_set("def-1", "acc-1", "drive", level, 1).unwrap();
+    w
+}
+
+async fn drive_call(w: &World, google: &StubGoogle, action: &str, args: DriveArgs) -> Result<Value, String> {
+    let oauth = StubHttp::default();
+    let deps = CallDeps { google, oauth: &oauth, secrets: &w.secrets, mstore: &w.store, id_store: &w.store, identity_store: &w.store };
+    drive_read(&deps, &w.def, action, &args, None, chrono::Utc::now()).await
+}
+
+fn two_replies(first: Value, second: HttpReply) -> StubGoogle {
+    StubGoogle { replies: Mutex::new(vec![HttpReply { status: 200, body: first }, second]), ..Default::default() }
+}
+
+#[tokio::test]
+async fn a_drive_search_uses_the_accounts_token_and_is_logged() {
+    let w = drive_world(DRIVE, Some(GrantLevel::Read));
+    let google = StubGoogle::answering(200, json!({ "files": [{ "id": "f1", "name": "Plan", "mimeType": "text/plain" }] }));
+    let out = drive_call(&w, &google, "search_files", DriveArgs { query: Some("plan".into()), ..Default::default() }).await.unwrap();
+    assert_eq!(out["account"], "me@example.com");
+    assert_eq!(out["result"]["files"][0]["name"], "Plan");
+    assert_eq!(google.seen()[0].1, "a-live");
+    let log = w.store.google_calls("acc-1", 10).unwrap();
+    assert_eq!((log[0].service.as_str(), log[0].action.as_str(), log[0].ids.as_str(), log[0].outcome.as_str()), ("drive", "search_files", "", "ok"));
+}
+
+#[tokio::test]
+async fn reading_a_google_doc_asks_for_its_metadata_then_its_text() {
+    let w = drive_world(DRIVE, Some(GrantLevel::Read));
+    let meta = json!({ "id": "d1", "name": "Plan", "mimeType": "application/vnd.google-apps.document" });
+    let google = two_replies(meta, HttpReply { status: 200, body: json!({ "text": "Step one", "truncated": false }) });
+    let out = drive_call(&w, &google, "read_file_content", DriveArgs { file_id: Some("d1".into()), ..Default::default() }).await.unwrap();
+    assert_eq!(out["result"]["content"], "Step one");
+    assert_eq!(out["result"]["file"]["name"], "Plan");
+    let seen = google.seen();
+    assert_eq!(seen.len(), 2);
+    assert!(!seen[0].0.text && seen[1].0.text);
+    assert!(seen[1].0.url.ends_with("/files/d1/export"));
+    assert_eq!(seen[1].1, "a-live");
+    assert_eq!(w.store.google_calls("acc-1", 10).unwrap()[0].ids, "d1");
+}
+
+#[tokio::test]
+async fn a_pdf_is_refused_after_the_metadata_and_a_file_not_picked_says_how_to_get_it() {
+    let w = drive_world(DRIVE, Some(GrantLevel::Read));
+    let google = StubGoogle::answering(200, json!({ "id": "p1", "name": "a.pdf", "mimeType": "application/pdf" }));
+    let e = drive_call(&w, &google, "read_file_content", DriveArgs { file_id: Some("p1".into()), ..Default::default() }).await.unwrap_err();
+    assert!(e.contains("can't be read as text"), "{e}");
+    assert_eq!(google.seen().len(), 1, "no download was attempted");
+
+    let google = StubGoogle::answering(404, json!({ "error": { "message": "File not found: x" } }));
+    let e = drive_call(&w, &google, "get_file_metadata", DriveArgs { file_id: Some("x".into()), ..Default::default() }).await.unwrap_err();
+    assert!(e.contains("pick_files") && e.contains("picked"), "{e}");
+}
+
+#[tokio::test]
+async fn drive_needs_its_own_grant_and_its_own_scope() {
+    let google = StubGoogle::default();
+    let off = drive_world(DRIVE, None);
+    let e = drive_call(&off, &google, "search_files", DriveArgs::default()).await.unwrap_err();
+    assert!(e.contains("Drive is off for you"), "{e}");
+    // A Calendar grant is not a Drive grant, and a Calendar-only token can't search Drive.
+    let calendar_only = world(READ, Some(GrantLevel::Read), true);
+    let e = drive_call(&calendar_only, &google, "search_files", DriveArgs::default()).await.unwrap_err();
+    assert!(e.contains("Drive is off for you"), "{e}");
+    let no_scope = drive_world(READ, Some(GrantLevel::Read));
+    let e = drive_call(&no_scope, &google, "search_files", DriveArgs::default()).await.unwrap_err();
+    assert!(e.contains("hasn't granted the Drive permission"), "{e}");
+    assert!(google.seen().is_empty());
+}

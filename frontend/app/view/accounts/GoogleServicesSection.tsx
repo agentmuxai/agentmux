@@ -14,6 +14,7 @@ import {
     callLine,
     canManageGrants,
     loadGooglePanel,
+    pickDriveFiles,
     serviceState,
     SERVICES,
     setGoogleGrant,
@@ -134,6 +135,59 @@ export function GoogleServicesSection(props: { account: Account }): JSX.Element 
     );
 }
 
+/** "Give agents files from Drive…": Google's file picker, in the browser, for this account. */
+function DrivePicker(props: { account: Account }): JSX.Element {
+    const [picking, setPicking] = createSignal(false);
+    const [gave, setGave] = createSignal<number | null>(null);
+    const [error, setError] = createSignal<string | null>(null);
+    let cancelled = false;
+    const pick = async () => {
+        cancelled = false;
+        setError(null);
+        setGave(null);
+        setPicking(true);
+        try {
+            const ids = await pickDriveFiles(props.account.id, () => cancelled);
+            if (!cancelled) setGave(ids.length);
+        } catch (e) {
+            setError(e instanceof Error ? e.message : String(e));
+        } finally {
+            setPicking(false);
+        }
+    };
+    return (
+        <>
+            <div class="identity-key-actions">
+                <Show
+                    when={picking()}
+                    fallback={
+                        <Button density="compact" onClick={() => void pick()}>
+                            Give agents files from Drive…
+                        </Button>
+                    }
+                >
+                    <span class="identity-detail-hint">Choose files in the window that opened in your browser…</span>
+                    <Button density="compact" onClick={() => (cancelled = true)}>
+                        Cancel
+                    </Button>
+                </Show>
+            </div>
+            <Show when={gave() !== null}>
+                <div class="identity-detail-hint">
+                    {gave() === 0 ? "No files were picked." : `Gave agents ${gave()} ${gave() === 1 ? "file" : "files"}. Agents you allow can find them with Drive.`}
+                </div>
+            </Show>
+            <Show when={error()}>
+                {(e) => (
+                    <div class="identity-form-error" role="alert">
+                        {e()}
+                    </div>
+                )}
+            </Show>
+        </>
+    );
+}
+
 function ServiceRow(props: { account: Account; info: ServiceInfo }): JSX.Element {
     const [turningOn, setTurningOn] = createSignal(false);
     const state = () => serviceState(props.info, props.account.context.granted_scopes ?? []);
@@ -145,6 +199,9 @@ function ServiceRow(props: { account: Account; info: ServiceInfo }): JSX.Element
                 <span class="identity-detail-value">{stateText()}</span>
             </div>
             <div class="identity-detail-hint">{props.info.line}</div>
+            <Show when={props.info.service === "drive" && state() === "on" && canManageGrants()}>
+                <DrivePicker account={props.account} />
+            </Show>
             <Show
                 when={turningOn()}
                 fallback={

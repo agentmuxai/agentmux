@@ -209,6 +209,9 @@ fn oauth_status_wire(s: &crate::identity::oauth_client::OAuthStatus) -> serde_js
             "email": email,
         }),
         OAuthStatus::Failed { error } => serde_json::json!({ "status": "failed", "error": error }),
+        OAuthStatus::Picked { account_id, file_ids } => {
+            serde_json::json!({ "status": "picked", "accountId": account_id, "fileIds": file_ids })
+        }
         OAuthStatus::ConfirmUser { current_login, current_id, new_login, new_id } => serde_json::json!({
             "status": "confirm-user",
             "currentLogin": current_login,

@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! The Google connectors' tools: `Calendar` (then `Drive` and `Gmail`), each
+//! The Google connectors' tools: `Calendar` and `Drive` (then `Gmail`), each
 //! listed only for an agent with a grant on its service
 //! (docs/specs/SPEC_GOOGLE_CONNECTORS_GMAIL_CALENDAR_DRIVE_2026_10_14.md D3,
 //! D4). srv makes the call with the account's token; this only forwards the
@@ -47,13 +47,13 @@ fn untrusted(tool: &str, body: &Value) -> String {
 
 pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     match name {
-        "Calendar" => {
+        "Calendar" | "Drive" => {
             if cx.local_url.is_empty() || cx.auth_key.is_empty() {
-                anyhow::bail!("Calendar: AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. Is this agent pane opened via AgentMux?");
+                anyhow::bail!("{name}: AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. Is this agent pane opened via AgentMux?");
             }
-            let url = format!("{}/api/v1/google/calendar", cx.local_url.trim_end_matches('/'));
-            let body = crate::srv_http::srv_post_json(cx.client, &url, cx.auth_key, arguments, "Calendar").await?;
-            Ok(untrusted("Calendar", &body))
+            let url = format!("{}/api/v1/google/{}", cx.local_url.trim_end_matches('/'), name.to_ascii_lowercase());
+            let body = crate::srv_http::srv_post_json(cx.client, &url, cx.auth_key, arguments, name).await?;
+            Ok(untrusted(name, &body))
         }
         _ => Err(not_in_family()),
     }
@@ -87,6 +87,9 @@ mod tests {
         };
         assert!(!names(&[]).contains(&"Calendar".to_string()));
         assert!(names(&["calendar"]).contains(&"Calendar".to_string()));
+        assert!(!names(&["calendar"]).contains(&"Drive".to_string()));
+        assert!(names(&["drive"]).contains(&"Drive".to_string()));
+        assert!(!names(&["drive"]).contains(&"Calendar".to_string()));
         assert_eq!(names(&["gmail"]).len(), names(&[]).len(), "no tool for a service not built yet");
     }
 }
