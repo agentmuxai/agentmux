@@ -309,3 +309,34 @@ fn many_lines_a_few_seconds_out_of_order_still_page_newest_first() {
     let range = world.all(AuditQueryReq { since_ms: Some(1_100_000), until_ms: Some(1_110_000), ..Default::default() });
     assert_eq!(range.iter().map(|e| e.ts_ms).collect::<Vec<_>>(), want.iter().copied().filter(|t| (1_100_000..=1_110_000).contains(t)).collect::<Vec<_>>());
 }
+
+#[test]
+fn a_start_or_end_points_at_the_zone_its_bytes_are_in_after_new_conversation_archived_them() {
+    use crate::backend::storage::filestore::{FileMeta, FileOpts};
+    let world = World::new(&[]);
+    // The conversation was archived at 1000, and again at 3000.
+    for zone in ["agent:a1:archive:1000", "agent:a1:archive:3000", "agent:a1:current"] {
+        world.store.make_file(zone, "output", FileMeta::default(), FileOpts::default()).unwrap();
+    }
+    let one = ledger::record_start(&world.store, start("a1", 500, 0)).unwrap();
+    ledger::record_end(&world.store, "a1", &one, EndReason::Closed, Some(40), 900).unwrap();
+    let two = ledger::record_start(&world.store, start("a1", 2_000, 0)).unwrap();
+    ledger::record_end(&world.store, "a1", &two, EndReason::Closed, Some(70), 2_500).unwrap();
+    ledger::record_start(&world.store, start("a1", 3_500, 0)).unwrap();
+
+    let zones: Vec<(u64, String)> = world
+        .all(AuditQueryReq::default())
+        .iter()
+        .map(|e| (e.ts_ms, e.links.history.as_ref().unwrap().zone.clone().unwrap()))
+        .collect();
+    assert_eq!(
+        zones,
+        [
+            (3_500, "agent:a1:current".to_string()),
+            (2_500, "agent:a1:archive:3000".to_string()),
+            (2_000, "agent:a1:archive:3000".to_string()),
+            (900, "agent:a1:archive:1000".to_string()),
+            (500, "agent:a1:archive:1000".to_string()),
+        ]
+    );
+}

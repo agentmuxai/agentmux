@@ -74,6 +74,9 @@ impl Iterator for ReverseLines {
                 return Some(Ok(line));
             }
             if let Err(e) = self.read_before() {
+                // Nothing more is read after an error: asking again would fail the same way.
+                self.pos = 0;
+                self.buf.clear();
                 return Some(Err(e));
             }
         }
@@ -82,7 +85,7 @@ impl Iterator for ReverseLines {
 
 /// An entry of the file, with where its line starts and where it ends (the next line's start).
 pub(super) fn entries(path: &Path, end: Option<u64>) -> impl Iterator<Item = (u64, u64, AuditLogEntry)> {
-    ReverseLines::open(path, end).into_iter().flatten().filter_map(Result::ok).filter_map(|line| {
+    ReverseLines::open(path, end).into_iter().flatten().map_while(Result::ok).filter_map(|line| {
         let to = line.start + line.bytes.len() as u64 + 1;
         serde_json::from_slice::<AuditLogEntry>(&line.bytes).ok().map(|e| (line.start, to, e))
     })
@@ -133,6 +136,17 @@ mod tests {
         let before = all(&path, Some(8), 4);
         assert_eq!(before.iter().map(|(_, l)| l.as_str()).collect::<Vec<_>>(), ["two", "one"]);
         assert!(all(&path, Some(0), 4).is_empty());
+    }
+
+    #[test]
+    fn a_read_error_ends_the_lines_instead_of_repeating() {
+        let (_dir, path) = file_of(&["alpha", "bravo", "charlie", "delta"], true);
+        let mut lines = ReverseLines::open_with(&path, None, 4).unwrap();
+        // The file shrinks after it was measured: reading back past the new end fails.
+        std::fs::write(&path, "al").unwrap();
+        let got: Vec<_> = lines.by_ref().take(10).collect();
+        assert!(got.iter().any(|l| l.is_err()), "the error is reported once");
+        assert!(got.len() < 10 && lines.next().is_none(), "and then there is nothing more");
     }
 
     #[test]

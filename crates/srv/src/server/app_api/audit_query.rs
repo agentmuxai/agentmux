@@ -4,7 +4,6 @@
 //! `audit.query` (`backend::audit_query`): a page of the Audit view's list. The window's, not an agent API: the
 //! Audit is the operator's view of every agent, so a connection registered as an agent is refused.
 
-use super::tower_pane::not_an_agent_api;
 use super::*;
 use crate::backend::audit_query::{self, Ctx, Sources};
 
@@ -13,7 +12,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     engine.register_typed(COMMAND_AUDIT_QUERY, move |req: AuditQueryReq, ctx| {
         let state = state.clone();
         async move {
-            not_an_agent_api(&ctx)?;
+            ctx.operator_only("the Audit is the AgentMux window's, not an agent API")?;
             // Reads files, the whole segment ledger and the registry: off the async workers.
             tokio::task::spawn_blocking(move || {
                 let slugs = state.mstore.shared_def_registry().and_then(|reg| reg.slug_index().ok());

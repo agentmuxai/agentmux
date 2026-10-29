@@ -23,14 +23,38 @@ fn reason_word(reason: EndReason) -> String {
     serde_json::to_value(reason).ok().and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default()
 }
 
-/// The start and end entries of `segment`, for the agent known as `slug`.
-fn entries_of(slug: &str, segment: &Segment, ctx: &Ctx) -> Vec<AuditEntry> {
+/// The times (Unix ms) `current`'s conversation was archived at, oldest first: "New conversation" moves what the
+/// current zone holds to `agent:<id>:archive:<ms>` and starts it again from byte 0.
+fn archived_at(store: &FileStore, current: &str) -> Vec<u64> {
+    let Some(prefix) = current.strip_suffix(":current").map(|p| format!("{p}:archive:")) else { return Vec::new() };
+    let mut times: Vec<u64> = store
+        .zone_ids_with_prefix(&prefix)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|z| z.strip_prefix(&prefix)?.parse().ok())
+        .collect();
+    times.sort_unstable();
+    times
+}
+
+/// The zone holding the bytes a segment wrote at `at_ms`: the first archive made after then, else the current zone.
+fn zone_at(current: &str, archives: &[u64], at_ms: i64) -> String {
+    let prefix = current.strip_suffix(":current").map(|p| format!("{p}:archive:"));
+    match (archives.iter().find(|a| **a as i64 >= at_ms), prefix) {
+        (Some(ms), Some(prefix)) => format!("{prefix}{ms}"),
+        _ => current.to_string(),
+    }
+}
+
+/// The start and end entries of `segment`, for the agent known as `slug`; `archives` are the times its transcript
+/// was archived at.
+fn entries_of(slug: &str, segment: &Segment, archives: &[u64], ctx: &Ctx) -> Vec<AuditEntry> {
     let start = &segment.start;
     let link = |at_ms: i64, byte: Option<i64>| AuditLinks {
         history: Some(AuditHistoryLink {
             agent_id: slug.to_string(),
             definition_id: start.definition_id.clone(),
-            zone: start.zone.clone().filter(|_| byte.is_some()),
+            zone: start.zone.as_deref().filter(|_| byte.is_some()).map(|z| zone_at(z, archives, at_ms)),
             at_ms: at_ms.max(0) as u64,
             at_byte: byte.map(|b| b.max(0) as u64),
         }),
@@ -83,8 +107,13 @@ pub(super) fn entries(store: &FileStore, only: Option<&str>, ctx: &Ctx) -> Vec<A
                 continue;
             }
         }
+        let mut archives: std::collections::HashMap<String, Vec<u64>> = std::collections::HashMap::new();
         for segment in ledger::segments(store, &uid) {
-            out.extend(entries_of(&slug, &segment, ctx));
+            let times = match segment.start.zone.as_deref() {
+                Some(zone) => archives.entry(zone.to_string()).or_insert_with(|| archived_at(store, zone)).clone(),
+                None => Vec::new(),
+            };
+            out.extend(entries_of(&slug, &segment, &times, ctx));
         }
     }
     out
