@@ -38,11 +38,14 @@ export function mergeIntoMinimizedNeighbour(model: LayoutModel, nodeId: string):
 
     if (moved.length) {
         const landedIn = model.treeState.rootNode && findNodeByBlockId(model.treeState.rootNode, targetBlockId);
+        // The pills travel first (as copies, see travelPills), then land with the bounce.
+        const travelMs = from?.size ? DURATION_MODERATE_MS : 0;
         if (landedIn && !reduceMotion) {
-            markLanded(moved, landedIn.id);
-            if (from) travelPills(targetBlockId, moved, from);
+            if (travelMs) travelPills(targetBlockId, moved, from!);
+            if (travelMs) setTimeout(() => markLanded(moved, landedIn.id), travelMs);
+            else markLanded(moved, landedIn.id);
         }
-        revealArrivals(targetBlockId, moved[moved.length - 1], reduceMotion);
+        revealArrivals(targetBlockId, moved[moved.length - 1], reduceMotion, travelMs);
     }
     return true;
 }
@@ -65,12 +68,13 @@ function paneElement(blockId: string): HTMLElement | null {
 }
 
 /**
- * FLIP: once the target's strip has drawn the arrived pills, move each from where it was in the
- * merged pane's header to its place, so the tabs travel into the neighbour instead of appearing in it.
- * The landing bounce (pane-tab-landing) plays on the pill itself, on top of the travel.
+ * Once the target's strip has drawn the arrived pills, a copy of each travels from where it was in
+ * the merged pane's header to its place in the strip, so the tabs move into the neighbour instead
+ * of appearing in it. Copies in a fixed layer, not the pills themselves: the strip clips its
+ * contents, so a pill moved back to the other pane's header would be invisible until it entered
+ * the strip. The real pills stay hidden meanwhile and land with the bounce (pane-tab-landing).
  */
 function travelPills(targetBlockId: string, movedIds: readonly string[], from: Map<string, DOMRect>): void {
-    if (!from.size) return;
     requestAnimationFrame(() => {
         const pane = paneElement(targetBlockId);
         if (!pane) return;
@@ -79,14 +83,30 @@ function travelPills(targetBlockId: string, movedIds: readonly string[], from: M
             const before = id && movedIds.includes(id) ? from.get(id) : undefined;
             if (!before) continue;
             const after = el.getBoundingClientRect();
-            const dx = before.left - after.left;
-            const dy = before.top - after.top;
-            if (!dx && !dy) continue;
-            el.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: "translate(0, 0)" }], {
-                duration: DURATION_MODERATE_MS,
-                easing: EASE_EMPHASIZED,
-                composite: "add", // on top of the landing bounce's own transform
+            const copy = el.cloneNode(true) as HTMLElement;
+            copy.classList.remove("pane-tab--landing", "pane-tab--active");
+            Object.assign(copy.style, {
+                position: "fixed",
+                left: `${before.left}px`,
+                top: `${before.top}px`,
+                width: `${after.width}px`,
+                height: `${after.height}px`,
+                margin: "0",
+                pointerEvents: "none",
+                zIndex: "10000",
             });
+            document.body.append(copy);
+            el.style.visibility = "hidden";
+            const done = () => {
+                copy.remove();
+                el.style.visibility = "";
+            };
+            const travel = copy.animate(
+                [{ transform: "translate(0, 0)" }, { transform: `translate(${after.left - before.left}px, ${after.top - before.top}px)` }],
+                { duration: DURATION_MODERATE_MS, easing: EASE_EMPHASIZED }
+            );
+            travel.onfinish = done;
+            travel.oncancel = done;
         }
     });
 }
@@ -94,10 +114,10 @@ function travelPills(targetBlockId: string, movedIds: readonly string[], from: M
 /**
  * Scroll the target's strip to the end, where the arrived pills are, when it overflows: the merge
  * leaves the target's own tab visible, so the strip's selected-tab reveal never shows them. Runs
- * after the landing bounce, when the strip's own reveal (which waits that out) has had its turn,
+ * after the travel and the landing bounce, when the strip's own reveal (which waits that out) has had its turn,
  * and whether or not motion is reduced.
  */
-function revealArrivals(targetBlockId: string, lastArrivedId: string, reduceMotion: boolean): void {
+function revealArrivals(targetBlockId: string, lastArrivedId: string, reduceMotion: boolean, travelMs: number): void {
     if (typeof document === "undefined") return;
     setTimeout(() => {
         const pane = paneElement(targetBlockId);
@@ -113,5 +133,5 @@ function revealArrivals(targetBlockId: string, lastArrivedId: string, reduceMoti
             }
             return;
         }
-    }, LANDING_BOUNCE_MS + 100);
+    }, travelMs + LANDING_BOUNCE_MS + 100);
 }

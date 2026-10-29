@@ -1672,6 +1672,65 @@ describe("minimizing next to a minimized pane (merge)", () => {
         }
     });
 
+    it("travels copies of the pills from the merged pane's header, hides the real ones meanwhile, then bounces them", () => {
+        const model = fourPanes();
+        model.minimizeNodeToggle(idOf(model, "a1"));
+        const makePane = (blockId: string, ids: string[], left: number) => {
+            const pane = document.createElement("div");
+            pane.dataset.role = "pane";
+            pane.dataset.blockid = blockId;
+            const strip = document.createElement("div");
+            strip.className = "pane-tab-strip";
+            for (const id of ids) {
+                const pill = document.createElement("div");
+                pill.className = "pane-tab";
+                pill.dataset.tabId = id;
+                pill.getBoundingClientRect = () => new DOMRect(left, 10, 80, 20);
+                strip.append(pill);
+            }
+            pane.append(strip);
+            document.body.append(pane);
+            return pane;
+        };
+        const source = makePane("b2", ["b1", "b2"], 500);
+        const target = makePane("a2", ["a1", "a2", "b1", "b2"], 100);
+        const finish: Array<() => void> = [];
+        const animate = vi.fn(function (this: HTMLElement) {
+            const anim: any = {};
+            finish.push(() => anim.onfinish?.());
+            return anim;
+        });
+        (HTMLElement.prototype as any).animate = animate;
+
+        try {
+            model.minimizeNodeToggle(idOf(model, "b1"));
+            vi.advanceTimersByTime(20); // the frame the strip draws the arrivals in
+            const real = target.querySelector<HTMLElement>('[data-tab-id="b1"]')!;
+            const copies = [...document.body.children].filter((el) => el.classList.contains("pane-tab"));
+
+            expect(copies).toHaveLength(2);
+            expect((copies[0] as HTMLElement).style.position).toBe("fixed");
+            expect((copies[0] as HTMLElement).style.left).toBe("500px"); // where it was
+            expect(animate).toHaveBeenCalledWith(
+                [{ transform: "translate(0, 0)" }, { transform: "translate(-400px, 0px)" }],
+                expect.objectContaining({ duration: expect.any(Number) })
+            );
+            expect(real.style.visibility).toBe("hidden");
+            expect(landedTab()).toBeNull();
+
+            finish.forEach((f) => f());
+            vi.advanceTimersByTime(300);
+
+            expect(copies.every((el) => !el.isConnected)).toBe(true);
+            expect(real.style.visibility).toBe("");
+            expect([...landedTab()!.ids]).toEqual(["b1", "b2"]);
+        } finally {
+            delete (HTMLElement.prototype as any).animate;
+            source.remove();
+            target.remove();
+        }
+    });
+
     it("keeps the target's visible tab", () => {
         const model = fourPanes();
         model.minimizeNodeToggle(idOf(model, "a1"));
