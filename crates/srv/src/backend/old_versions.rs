@@ -120,8 +120,6 @@ pub enum Kind {
     VersionData,
     /// An unpacked portable of an old version.
     Portable,
-    /// A folder an earlier removal renamed and did not finish deleting.
-    Leftover,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -256,6 +254,20 @@ fn portable_version(name: &str) -> Option<&str> {
     }
 }
 
+/// `name` without the `.removing-<pid>` a removal renames a folder to.
+fn leftover_stem(name: &str) -> Option<&str> {
+    let (stem, pid) = name.rsplit_once(".removing-")?;
+    (!pid.is_empty() && pid.bytes().all(|b| b.is_ascii_digit())).then_some(stem)
+}
+
+/// Whether `stem` is the name of a folder of `kind` that this module removes.
+fn stem_is_ours(kind: Kind, stem: &str) -> bool {
+    match kind {
+        Kind::Portable => portable_version(stem).and_then(parse_version).is_some(),
+        Kind::VersionData => parse_version(stem).is_some(),
+    }
+}
+
 /// Total size of the files under `dir`, never following a symlink.
 fn dir_size(dir: &Path) -> u64 {
     let mut total = 0;
@@ -313,7 +325,7 @@ struct Entry {
 }
 
 /// Folders of `kind` named by version in `parent`, plus what is kept without being judged.
-fn scan_dir(parent: &Path, kind: Kind, layout: &Layout, kept: &mut Vec<(PathBuf, Keep)>, leftovers: &mut Vec<PathBuf>) -> Vec<Entry> {
+fn scan_dir(parent: &Path, kind: Kind, layout: &Layout, kept: &mut Vec<(PathBuf, Keep)>, leftovers: &mut Vec<(PathBuf, Kind)>) -> Vec<Entry> {
     let Ok(rd) = std::fs::read_dir(parent) else { return Vec::new() };
     let mut out = Vec::new();
     for e in rd.flatten() {
@@ -328,7 +340,11 @@ fn scan_dir(parent: &Path, kind: Kind, layout: &Layout, kept: &mut Vec<(PathBuf,
             continue;
         }
         if name.contains(".removing-") {
-            leftovers.push(path);
+            // Only what a removal of ours renamed: `<a version folder's name>.removing-<pid>`. A
+            // portable's parent is the user's, and holds other things.
+            if leftover_stem(&name).is_some_and(|stem| stem_is_ours(kind, stem)) {
+                leftovers.push((path, kind));
+            }
             continue;
         }
         let version = match kind {
@@ -394,10 +410,10 @@ pub fn plan(layout: &Layout, policy: &Policy, now: SystemTime, in_use: &InUse) -
         portables.extend(scan_dir(parent, Kind::Portable, layout, &mut plan.kept, &mut leftovers));
     }
     judge(&mut plan, Kind::Portable, portables, running, policy, now, in_use);
-    for dir in leftovers {
+    for (dir, kind) in leftovers {
         match in_use_reason(&dir, policy, now, in_use) {
             Some(k) => plan.kept.push((dir, k)),
-            None => plan.removable.push(Candidate { bytes: dir_size(&dir), version: String::new(), dir, kind: Kind::Leftover }),
+            None => plan.removable.push(Candidate { bytes: dir_size(&dir), version: String::new(), dir, kind }),
         }
     }
     plan
@@ -415,6 +431,7 @@ pub struct Report {
 pub fn remove(plan: &Plan, policy: &Policy, now: SystemTime, in_use: &dyn Fn() -> InUse) -> Report {
     let mut report = Report::default();
     for c in &plan.removable {
+        // A portable's leftover counts as a portable: the user's, so only when turned on.
         if c.kind == Kind::Portable && !policy.portables {
             report.skipped.push((c.dir.clone(), "portable cleanup is off (oldversions:portables)".into()));
             continue;
@@ -427,7 +444,7 @@ pub fn remove(plan: &Plan, policy: &Policy, now: SystemTime, in_use: &dyn Fn() -
             report.skipped.push((c.dir.clone(), format!("{why:?}: in use now")));
             continue;
         }
-        let target = if c.kind == Kind::Leftover {
+        let target = if c.dir.file_name().is_some_and(|n| n.to_string_lossy().contains(".removing-")) {
             c.dir.clone()
         } else {
             let name = c.dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();

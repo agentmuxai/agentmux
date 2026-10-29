@@ -231,9 +231,39 @@ fn a_folder_left_half_removed_is_finished_on_the_next_pass() {
     let leftover = version(&l, "0.60.1.removing-777");
     let p = plan(&l, &eager(), SystemTime::now(), &nothing_running());
     assert_eq!(p.removable.len(), 1);
-    assert_eq!(p.removable[0].kind, Kind::Leftover);
+    assert_eq!(p.removable[0].kind, Kind::VersionData);
     remove(&p, &eager(), SystemTime::now(), &nothing_running);
     assert!(!leftover.exists());
+}
+
+#[test]
+fn only_a_folder_a_removal_renamed_counts_as_a_leftover_and_a_portable_one_follows_the_portable_switch() {
+    let root = tempfile::tempdir().unwrap();
+    let l = layout(root.path(), "0.60.6");
+    version(&l, "0.60.6");
+    // Beside the running portable, in the user's folder: not ours, whatever its name says.
+    let desk = &l.portable_parents[0];
+    let stranger = desk.join("backup.removing-1");
+    let near_miss = desk.join("agentmux-notes.removing-1");
+    let no_pid = desk.join("agentmux-0.60.2-x64-portable.removing-");
+    for d in [&stranger, &near_miss, &no_pid] {
+        std::fs::create_dir_all(d.join("sub")).unwrap();
+    }
+    // Inside the versions folder, a stranger is not ours either.
+    let odd = version(&l, "scratch.removing-5");
+    let half_portable = desk.join(if cfg!(windows) { "agentmux-0.60.2-x64-portable.removing-9" } else { "AgentMux-0.60.2.removing-9" });
+    std::fs::create_dir_all(half_portable.join("runtime")).unwrap();
+
+    let p = plan(&l, &eager(), SystemTime::now(), &nothing_running());
+    assert_eq!(p.removable.iter().map(|c| c.dir.clone()).collect::<Vec<_>>(), [half_portable.clone()]);
+    assert_eq!(p.removable[0].kind, Kind::Portable);
+
+    let off = remove(&p, &eager(), SystemTime::now(), &nothing_running);
+    assert!(off.removed.is_empty() && half_portable.is_dir(), "portable cleanup is off by default");
+    let on = Policy { portables: true, ..eager() };
+    remove(&p, &on, SystemTime::now(), &nothing_running);
+    assert!(!half_portable.exists());
+    assert!(stranger.is_dir() && near_miss.is_dir() && no_pid.is_dir() && odd.is_dir(), "nothing else was touched");
 }
 
 #[test]
