@@ -337,6 +337,22 @@ async fn a_reserved_agent_starts_on_its_reservation_and_a_running_one_needs_no_r
     blockcontroller::delete_controller(&running);
 }
 
+/// Only a batch's reservation lets a start through uncounted, and only once: an agent started, stopped and
+/// started again is counted again, so it cannot skip the cap.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn only_a_batch_reservation_skips_the_count_and_only_once() {
+    let state = test_state();
+    set_limits(&state, 1);
+    admit_start_without_eviction(&state, "plain").await.expect("room for one");
+    let err = admit_start_without_eviction(&state, "plain").await;
+    assert!(err.is_err(), "a plain reservation does not let the same agent start again uncounted: {err:?}");
+    release_start(&state, "plain");
+    admit_batch_with(&state, &wanted(&["claimed"]), true, || None).await.expect("a batch reserves its room");
+    admit_start_without_eviction(&state, "claimed").await.expect("the batch's start uses its claim");
+    assert!(admit_start_without_eviction(&state, "other").await.is_err(), "the claim's room is still counted");
+    release_start(&state, "claimed");
+}
+
 /// A batch that makes its agents as it goes holds their room under stand-ins; once an agent exists the
 /// room is its own, so its start is not counted against the stand-ins still waiting.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

@@ -4,8 +4,8 @@
 //! `POST /api/v1/agent/open_many`, the `Agents` tool's `open` with `agents`
 //! (`SPEC_COUNTDOWN_BUTTONS_AND_BATCH_AGENT_ACTIONS_2026_10_28.md` §5): several agents opened at once,
 //! with everything checked first. Opening asks the user nothing, as for one. The agents that are not running must be
-//! able to start together (room under the agent cap, without stopping anyone; the sender's starts per
-//! minute) or the call is refused whole; an open that still fails closes the panes this call made. An agent
+//! able to start together (room under the agent cap, without stopping anyone) or the call is refused
+//! whole; an open that still fails closes the panes this call made. An agent
 //! that was already open or parked is not put back as it was, and a pane the failing open itself
 //! half made is left to the ordinary close.
 
@@ -39,11 +39,9 @@ fn refuse(status: StatusCode, message: impl Into<String>) -> Refusal {
 
 pub(crate) async fn handle_agent_open_many(
     State(state): State<AppState>,
-    caller: Option<axum::Extension<crate::server::caller::Caller>>,
     Json(req): Json<OpenManyRequest>,
 ) -> Response {
-    let sender = caller.as_ref().and_then(|c| c.0.uid().map(str::to_string)).unwrap_or_else(|| "agent.open_many".to_string());
-    match open_many(&state, &sender, req.agents).await {
+    match open_many(&state, req.agents).await {
         Ok(opened) => Json(json!({ "opened": opened })).into_response(),
         Err(e) => (e.status, Json(json!({ "error": e.message }))).into_response(),
     }
@@ -58,7 +56,7 @@ fn resolve(state: &AppState, named: &str) -> Result<crate::backend::storage::age
         .ok_or_else(|| format!("AGENT_NOT_FOUND: no agent {named:?} (use an agent's id or name from Agents list; a template can't be opened)"))
 }
 
-async fn open_many(state: &AppState, sender: &str, asked: Vec<CommandAgentOpenData>) -> Result<Vec<AgentOpenResult>, Refusal> {
+async fn open_many(state: &AppState, asked: Vec<CommandAgentOpenData>) -> Result<Vec<AgentOpenResult>, Refusal> {
     if asked.is_empty() {
         return Err(refuse(StatusCode::BAD_REQUEST, "INVALID_ARG: agents is empty: give [{agent, tab_id?, focus?}]"));
     }
@@ -82,10 +80,6 @@ async fn open_many(state: &AppState, sender: &str, asked: Vec<CommandAgentOpenDa
     let running: std::collections::HashSet<String> = crate::server::agent_lifecycle::live_agents(state).into_iter().map(|l| l.uid).collect();
     let wanted: Vec<Wanted> = defs.iter().filter(|d| !running.contains(&d.id)).map(|d| Wanted { key: d.id.clone(), label: d.name.clone() }).collect();
     admit_batch(state, &wanted, true).await.map_err(|e| refuse(StatusCode::CONFLICT, e))?;
-    if let Err(e) = crate::server::start_rate::allow_n(state, sender, wanted.len()) {
-        release_batch(state, &wanted);
-        return Err(refuse(StatusCode::TOO_MANY_REQUESTS, e));
-    }
 
     let total = cmds.len();
     let mut opened: Vec<AgentOpenResult> = Vec::with_capacity(total);
@@ -124,13 +118,13 @@ mod tests {
     #[tokio::test]
     async fn an_empty_list_a_missing_agent_and_a_repeat_are_refused_before_anything_opens() {
         let state = test_state();
-        let e = open_many(&state, "t", vec![]).await.err().expect("empty");
+        let e = open_many(&state, vec![]).await.err().expect("empty");
         assert!(e.message.starts_with("INVALID_ARG: agents is empty"), "{}", e.message);
-        let e = open_many(&state, "t", vec![ask("no-such-agent-xyz")]).await.err().expect("missing");
+        let e = open_many(&state, vec![ask("no-such-agent-xyz")]).await.err().expect("missing");
         assert_eq!(e.status, StatusCode::BAD_REQUEST);
         assert!(e.message.starts_with("agent 1: AGENT_NOT_FOUND"), "{}", e.message);
         let many: Vec<_> = (0..=MAX_OPEN_MANY).map(|i| ask(&format!("a{i}"))).collect();
-        let e = open_many(&state, "t", many).await.err().expect("too many");
+        let e = open_many(&state, many).await.err().expect("too many");
         assert!(e.message.contains("at most 16 agents"), "{}", e.message);
     }
 
@@ -140,7 +134,7 @@ mod tests {
         let mut def = crate::backend::storage::agents::test_agent_def(&format!("om-{}", uuid::Uuid::new_v4()), "Open Many Twice", "claude", "agent", 1, "");
         def.slug = "open-many-twice".to_string();
         state.mstore.agent_def_insert(&mut def).unwrap();
-        let e = open_many(&state, "t", vec![ask(&def.id), ask("OPEN MANY TWICE")]).await.err().expect("twice");
+        let e = open_many(&state, vec![ask(&def.id), ask("OPEN MANY TWICE")]).await.err().expect("twice");
         assert!(e.message.contains("appears twice"), "{}", e.message);
     }
 }

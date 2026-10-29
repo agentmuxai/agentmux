@@ -279,6 +279,14 @@ fn pending() -> &'static std::sync::Mutex<HashMap<String, Reservation>> {
     PENDING.get_or_init(Default::default)
 }
 
+/// The reservations a batch made ([`admit_batch`]): only these let their agent's start through without
+/// counting the room again, and only once. An ordinary reservation (a start that was admitted) does not,
+/// or an agent started, stopped and started again within [`PENDING_FOR`] would skip the cap.
+fn batch_held() -> &'static std::sync::Mutex<std::collections::HashSet<String>> {
+    static HELD: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> = std::sync::OnceLock::new();
+    HELD.get_or_init(Default::default)
+}
+
 /// The key of an admitted start: per store, so two instances in one process (tests) do not count each other.
 fn pending_key(state: &AppState, agent_id: &str) -> String {
     format!("{:p}:{agent_id}", std::sync::Arc::as_ptr(&state.mstore))
@@ -307,10 +315,19 @@ fn is_reserved(state: &AppState, agent_id: &str) -> bool {
     pending().lock().unwrap_or_else(|e| e.into_inner()).get(&pending_key(state, agent_id)).is_some_and(|(store, at)| at.elapsed() < PENDING_FOR && store.strong_count() > 0)
 }
 
+/// Whether `agent_id`'s start is the one a batch reserved room for, taking that claim: the next start
+/// of the agent is counted as any other.
+fn take_batch_claim(state: &AppState, agent_id: &str) -> bool {
+    let key = pending_key(state, agent_id);
+    is_reserved(state, agent_id) && batch_held().lock().unwrap_or_else(|e| e.into_inner()).remove(&key)
+}
+
 /// A start that was admitted did not happen (the agent is unknown, its provider has no headless mode, its
 /// CLI is missing): its room is free again.
 pub(crate) fn release_start(state: &AppState, agent_id: &str) {
-    pending().lock().unwrap_or_else(|e| e.into_inner()).remove(&pending_key(state, agent_id));
+    let key = pending_key(state, agent_id);
+    batch_held().lock().unwrap_or_else(|e| e.into_inner()).remove(&key);
+    pending().lock().unwrap_or_else(|e| e.into_inner()).remove(&key);
 }
 
 /// The room [`admit_batch`] claimed under the stand-in key `from` is now the agent `to`'s, in one step:
@@ -318,8 +335,13 @@ pub(crate) fn release_start(state: &AppState, agent_id: &str) {
 /// and the agent's own start must find its room reserved, not count it against itself.
 pub(crate) fn rekey_reservation(state: &AppState, from: &str, to: &str) {
     let mut pending = pending().lock().unwrap_or_else(|e| e.into_inner());
-    if let Some(reservation) = pending.remove(&pending_key(state, from)) {
-        pending.insert(pending_key(state, to), reservation);
+    let (from_key, to_key) = (pending_key(state, from), pending_key(state, to));
+    if let Some(reservation) = pending.remove(&from_key) {
+        pending.insert(to_key.clone(), reservation);
+        let mut claims = batch_held().lock().unwrap_or_else(|e| e.into_inner());
+        if claims.remove(&from_key) {
+            claims.insert(to_key);
+        }
     }
 }
 
@@ -351,7 +373,7 @@ async fn admit(state: &AppState, agent_id: &str, commit_pct: impl Fn() -> Option
         return Ok(());
     }
     // A batch already claimed this agent's room (`admit_batch`): its start is the one that room is for.
-    if is_reserved(state, agent_id) {
+    if take_batch_claim(state, agent_id) {
         return Ok(());
     }
     let policy = policy(state);
@@ -457,8 +479,11 @@ pub(crate) async fn admit_batch_with(state: &AppState, wanted: &[Wanted], reserv
     }
     if reserve {
         let mut held = pending().lock().unwrap_or_else(|e| e.into_inner());
+        let mut claims = batch_held().lock().unwrap_or_else(|e| e.into_inner());
         for w in to_start {
-            held.insert(pending_key(state, &w.key), (std::sync::Arc::downgrade(&state.mstore), std::time::Instant::now()));
+            let key = pending_key(state, &w.key);
+            claims.insert(key.clone());
+            held.insert(key, (std::sync::Arc::downgrade(&state.mstore), std::time::Instant::now()));
         }
     }
     Ok(())
