@@ -13,7 +13,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const h = vi.hoisted(() => {
     const state = {
         replaceBlock: vi.fn(async (..._a: unknown[]) => "new-block"),
-        closeNode: vi.fn(async (..._a: unknown[]) => undefined),
+        closeBlockInStack: vi.fn(async (..._a: unknown[]) => undefined),
         blocks: {} as Record<string, { meta: Record<string, unknown> }>,
         globalMock: undefined as unknown as () => Promise<Record<string, unknown>>,
     };
@@ -34,11 +34,12 @@ vi.mock("@/app/asset/logo.svg?url", () => ({ default: "logo.svg" }));
 // The same module under both of its import names.
 vi.mock("@/app/store/global", () => h.globalMock());
 vi.mock("@/store/global", () => h.globalMock());
+const layoutModel = {
+    getNodeByBlockId: (blockId: string) => (h.blocks[blockId] ? { id: `node-of-${blockId}` } : undefined),
+};
 vi.mock("@/layout/index", () => ({
-    getLayoutModelForStaticTab: () => ({
-        getNodeByBlockId: (blockId: string) => (h.blocks[blockId] ? { id: `node-of-${blockId}` } : undefined),
-        closeNode: h.closeNode,
-    }),
+    getLayoutModelForStaticTab: () => layoutModel,
+    closeBlockInStack: h.closeBlockInStack,
 }));
 
 import { setFullConfigAtom } from "@/app/store/config-signals";
@@ -98,6 +99,24 @@ describe("Shortcuts pane: tile order", () => {
     });
 });
 
+describe("Shortcuts pane: a group's tiles", () => {
+    it("the last used of a group's tiles come first, as at the top level", () => {
+        setFullConfigAtom({
+            settings: { "launcher:recent": ["defwidget@teams"] },
+            widgets: {
+                ...widgets(),
+                "defwidget@messengers": w("Messengers", 7, "messengers", { children: ["discord", "teams", "slack"] }),
+                "defwidget@discord": w("Discord", 8, "browser", { "display:grouponly": true }),
+                "defwidget@teams": w("Teams", 9, "browser", { "display:grouponly": true }),
+                "defwidget@slack": w("Slack", 10, "browser", { "display:grouponly": true }),
+            },
+        } as unknown as FullConfigType);
+        const m = new ShortcutsViewModel("b1");
+        m.drillInto(m.filteredWidgets().find((x) => x.label === "Messengers")!);
+        expect(labels(m)).toEqual(["Teams", "Discord", "Slack"]);
+    });
+});
+
 describe("Shortcuts pane: choosing a tile", () => {
     const tile = (m: ShortcutsViewModel, label: string) => m.filteredWidgets().find((x) => x.label === label)!;
 
@@ -146,11 +165,12 @@ describe("Shortcuts pane: Escape", () => {
         return m;
     }
 
-    it("closes a pane a split opened when the search is empty, with nothing asked", () => {
+    it("closes a pane a split opened when the search is empty, with nothing asked, and only its own tab", () => {
         const m = open({ "shortcuts:from": "src" });
         expect(m.keyDownHandler(escape())).toBe(true);
-        expect(h.closeNode).toHaveBeenCalledOnce();
-        expect(h.closeNode).toHaveBeenCalledWith("node-of-sc");
+        expect(h.closeBlockInStack).toHaveBeenCalledOnce();
+        // The tab, not the pane: the other tabs of a stack it was added to stay.
+        expect(h.closeBlockInStack).toHaveBeenCalledWith(layoutModel, "node-of-sc", "sc");
     });
 
     it("only clears the search first, then closes on the next Escape", () => {
@@ -158,9 +178,9 @@ describe("Shortcuts pane: Escape", () => {
         m.searchTerm._set("ter");
         m.keyDownHandler(escape());
         expect(m.searchTerm()).toBe("");
-        expect(h.closeNode).not.toHaveBeenCalled();
+        expect(h.closeBlockInStack).not.toHaveBeenCalled();
         m.keyDownHandler(escape());
-        expect(h.closeNode).toHaveBeenCalledOnce();
+        expect(h.closeBlockInStack).toHaveBeenCalledOnce();
     });
 
     it("pops out of a group before it closes", () => {
@@ -168,13 +188,13 @@ describe("Shortcuts pane: Escape", () => {
         m.activeParent._set(w("Messengers", 9, "messengers", { children: ["discord"] }));
         m.keyDownHandler(escape());
         expect(m.activeParent()).toBeNull();
-        expect(h.closeNode).not.toHaveBeenCalled();
+        expect(h.closeBlockInStack).not.toHaveBeenCalled();
     });
 
     it("never closes a pane that no split opened (app:defaultnewblock)", () => {
         const m = open({});
         expect(m.openedBySplit()).toBe(false);
         m.keyDownHandler(escape());
-        expect(h.closeNode).not.toHaveBeenCalled();
+        expect(h.closeBlockInStack).not.toHaveBeenCalled();
     });
 });

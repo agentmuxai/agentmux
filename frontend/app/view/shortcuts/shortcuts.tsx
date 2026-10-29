@@ -4,7 +4,7 @@
 
 import logoUrl from "@/app/asset/logo.svg?url";
 import { atoms, MOS, replaceBlock } from "@/app/store/global";
-import { getLayoutModelForStaticTab } from "@/layout/index";
+import { closeBlockInStack, getLayoutModelForStaticTab } from "@/layout/index";
 import { getChildWidgets, getHiddenKeys, getPinnedKeys, isWidgetHidden, widgetEntryColor } from "@/app/window/action-widgets-config";
 import { checkKeyPressed, keydownWrapper } from "@/util/keyutil";
 import { isBlank, makeIconClass, createSignalAtom } from "@/util/util";
@@ -73,7 +73,9 @@ export class ShortcutsViewModel {
             // Drilled into a group — a child that's since been individually
             // pinned (promoted out via its own "Pin to bar") is excluded
             // here; it now shows at the top level instead, not doubled up.
-            source = getChildWidgets(parent, wmap, settings).map((c) => c.widget);
+            // The last used of the group's tiles come first here too.
+            const children = getChildWidgets(parent, wmap, settings).map((c) => [c.key, c.widget] as const);
+            source = orderByRecent(children, settings["launcher:recent"]).map(([, widget]) => widget);
         } else {
             // display:grouponly normally keeps a grouped child out of this
             // top-level grid — but an individually pinned child (promoted
@@ -197,11 +199,13 @@ export class ShortcutsViewModel {
         return MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", from))()?.meta;
     }
 
-    /** Closes this pane. It has no content to lose, so nothing is asked and the neighbour takes its space. */
+    /** Closes this tab. It has no content to lose, so nothing is asked and the neighbour takes its
+     *  space. Only this block goes: when it was stacked with other panes the rest stay, and when it
+     *  is the pane's last tab the pane closes. */
     closeSelf(): void {
         const layoutModel = getLayoutModelForStaticTab();
         const node = layoutModel.getNodeByBlockId(this.blockId);
-        if (node) void layoutModel.closeNode(node.id);
+        if (node) void closeBlockInStack(layoutModel, node.id, this.blockId);
     }
 
     async handleWidgetSelect(widget: WidgetConfigType) {
