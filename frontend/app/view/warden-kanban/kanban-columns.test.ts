@@ -7,6 +7,7 @@ import {
     backlogGroups,
     checklistProgress,
     columnOf,
+    columnStats,
     columnTasks,
     isSpecd,
     matchesQuery,
@@ -14,6 +15,7 @@ import {
     needsReason,
     quotaReason,
     parseAfter,
+    parseCollapsed,
     prLabel,
     rankBetween,
     repoLabel,
@@ -22,6 +24,8 @@ import {
     reviewLimitOf,
     reviewLoad,
     stageWord,
+    takesDrops,
+    toggleCollapsed,
     untrackedAgents,
     waitingOn,
 } from "./kanban-columns";
@@ -321,5 +325,33 @@ describe("what a card says", () => {
     it("labels a PR link with its number", () => {
         expect(prLabel("https://github.com/agentmuxai/agentmux/pull/5248")).toBe("#5248");
         expect(prLabel("https://example.com/merge_requests/3")).toBe("PR");
+    });
+});
+
+describe("collapsed columns", () => {
+    it("reads the pane's list as column ids, once each, in column order", () => {
+        expect(parseCollapsed(["review", "backlog", "review", "nonsense", 7])).toEqual(["backlog", "review"]);
+        expect(parseCollapsed(undefined)).toEqual([]);
+        expect(parseCollapsed("review")).toEqual([]);
+    });
+
+    it("toggles a column in and out", () => {
+        expect(toggleCollapsed([], "review")).toEqual(["review"]);
+        expect(toggleCollapsed(["review", "backlog"], "review")).toEqual(["backlog"]);
+        expect(toggleCollapsed(["review"], "backlog")).toEqual(["backlog", "review"]);
+    });
+
+    it("counts a column's tasks, the ones on hold and the oldest", () => {
+        const tasks = [task(1, "held"), task(2, "open"), task(3, "held")];
+        expect(columnStats(tasks, 10_000)).toEqual({ count: 3, held: 2, oldestMs: 9_000 });
+        expect(columnStats(tasks, 10_000, 2).count).toBe(5);
+        expect(columnStats([], 10_000, 1)).toEqual({ count: 1, held: 0, oldestMs: 0 });
+    });
+
+    it("takes a dropped card on the waiting columns only", () => {
+        expect(takesDrops("backlog")).toBe(true);
+        expect(takesDrops("specd")).toBe(true);
+        expect(takesDrops("review")).toBe(false);
+        expect(takesDrops("merged")).toBe(false);
     });
 });

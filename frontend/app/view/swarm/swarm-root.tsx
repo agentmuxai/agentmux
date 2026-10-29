@@ -12,6 +12,7 @@ import { SwarmAgentList, useSwarmAgents, type SwarmAgents } from "./swarm-agent-
 import { ClearCompletedButton } from "./swarm-view";
 import { SwarmSectionBar } from "./swarm-section-bar";
 import { KanbanSection } from "@/app/view/warden-kanban/kanban-section";
+import { parseCollapsed } from "@/app/view/warden-kanban/kanban-columns";
 import { createSwarmSection, swarmDensityOf, type SwarmSection } from "./swarm-section";
 import { BroadcastDock } from "./swarm-broadcast";
 import { SupervisorSettingsBar } from "./swarm-supervisor-settings";
@@ -167,6 +168,8 @@ export function SwarmView(props: {
                                     onNeedsCount={(n) => props.onKanbanNeeds?.(n)}
                                     lanes={ctx.meta()?.["kanban:lanes"] === true}
                                     onLanes={(on) => void ctx.setMeta({ "kanban:lanes": on })}
+                                    collapsed={parseCollapsed(ctx.meta()?.["kanban:collapsed"])}
+                                    onCollapsed={(ids) => void ctx.setMeta({ "kanban:collapsed": ids })}
                                     onOpenAgent={openAgent}
                                 />
                             </div>

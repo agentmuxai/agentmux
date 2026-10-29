@@ -26,10 +26,13 @@ import {
     KANBAN_NARROW_PX,
     matchesQuery,
     needsCountOf,
+    parseCollapsed,
     repoLabel,
     repoLanes,
     reviewLimitOf,
+    toggleCollapsed,
     untrackedAgents,
+    type ColumnId,
 } from "./kanban-columns";
 import { KanbanDrawer } from "./kanban-drawer";
 import { KanbanModel } from "./kanban-model";
@@ -96,6 +99,15 @@ export const KanbanSection = (props: Pick<SwarmKanbanSlotProps, "visible"> & Par
     const [ownLanes, setOwnLanes] = createSignal(false);
     const lanes = () => props.lanes ?? ownLanes();
     const setLanes = (on: boolean) => (props.onLanes ? props.onLanes(on) : setOwnLanes(on));
+    // Columns collapsed to a strip: the pane's (it survives a restart), or this section's own when it
+    // mounts alone.
+    const [ownCollapsed, setOwnCollapsed] = createSignal<ColumnId[]>([]);
+    const collapsed = () => parseCollapsed(props.collapsed ?? ownCollapsed());
+    const toggleColumn = (id: ColumnId) => {
+        const next = toggleCollapsed(collapsed(), id);
+        if (props.onCollapsed) props.onCollapsed(next);
+        else setOwnCollapsed(next);
+    };
     const [folded, setFolded] = createSignal<ReadonlySet<string>>(new Set());
     const fold = (repo: string) =>
         setFolded((f) => {
@@ -232,6 +244,8 @@ export const KanbanSection = (props: Pick<SwarmKanbanSlotProps, "visible"> & Par
                                 reviewTotal={reviewTotal()}
                                 colors={board()?.agent_colors}
                                 narrow={narrow()}
+                                collapsed={collapsed()}
+                                onToggleCollapsed={toggleColumn}
                             />
                         }
                     >
@@ -256,6 +270,8 @@ export const KanbanSection = (props: Pick<SwarmKanbanSlotProps, "visible"> & Par
                                         reviewTotal={reviewTotal()}
                                         colors={board()?.agent_colors}
                                         narrow={narrow()}
+                                        collapsed={collapsed()}
+                                        onToggleCollapsed={toggleColumn}
                                     />
                                 </section>
                             </Show>
@@ -296,6 +312,8 @@ export const KanbanSection = (props: Pick<SwarmKanbanSlotProps, "visible"> & Par
                                                         reviewTotal={reviewTotal()}
                                                         colors={board()?.agent_colors}
                                                         narrow={narrow()}
+                                                        collapsed={collapsed()}
+                                                        onToggleCollapsed={toggleColumn}
                                                     />
                                                 </Show>
                                             </section>

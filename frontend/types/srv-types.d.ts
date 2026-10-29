@@ -920,6 +920,8 @@ declare global {
         "kanban:open"?: string | null;
         /** The Swarm's Kanban section shows one lane per repository. */
         "kanban:lanes"?: boolean;
+        /** The Kanban's columns folded to a strip, by column id (kanban-columns.ts). */
+        "kanban:collapsed"?: string[];
         // The Vault's own section, within Warden's Vault section (vault-in-warden.ts).
         "vault:section"?: "personal" | "cards" | "api-keys" | "logins" | "notes" | "kept" | "activity";
         // An agent's Vault request to open the form for (vault-model.ts); cleared once shown.
