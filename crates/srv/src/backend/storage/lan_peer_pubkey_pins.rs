@@ -47,6 +47,18 @@ impl Store {
         }
     }
 
+    /// The pinned key for `agent_id` and when it was first seen, if pinned. A
+    /// certificate for a replacement has to be newer than this.
+    pub fn lan_peer_pubkey_pin_since(&self, agent_id: &str) -> Result<Option<(String, i64)>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT public_key, first_seen_at FROM db_lan_peer_pubkey_pins WHERE agent_id = ?1")?;
+        match stmt.query_row(params![agent_id.to_lowercase()], |row| Ok((row.get(0)?, row.get(1)?))) {
+            Ok(v) => Ok(Some(v)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
     /// Get-or-pin: if a pin already exists for this agent_id, returns it
     /// UNCHANGED regardless of what `observed_key_b64` says (the whole
     /// point — a later, different key must never silently overwrite an

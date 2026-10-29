@@ -384,6 +384,17 @@ async fn fetch_listed(dir: &Directory<'_>, instance_id: &str) -> Option<bool> {
     }
 }
 
+/// Whether `instance_id` is a live, unrevoked install of the signed-in account:
+/// listed in its presence list and not revoked (the standard a WAN sender's
+/// install is held to). `None` when that can't be told.
+pub(crate) async fn instance_is_live_install(dir: &Directory<'_>, instance_id: &str) -> Option<bool> {
+    if fetch_listed(dir, instance_id).await? {
+        fetch_revoked(dir, instance_id).await.map(|revoked| !revoked)
+    } else {
+        Some(false)
+    }
+}
+
 /// What the pin said about the install that signed a message.
 enum PinCheck {
     /// Pinned to this install, or not pinnable yet.
