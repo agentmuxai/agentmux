@@ -182,3 +182,20 @@ fn text_is_read_in_the_charset_its_part_declares() {
     assert_eq!(body(part("text/plain; charset=x-made-up", &utf8)), "Café");
     assert_eq!(body(json!({ "id": "m", "payload": { "mimeType": "text/plain", "body": { "data": utf8 } } })), "Café");
 }
+
+#[test]
+fn html_with_thousands_of_style_tags_is_read_in_one_pass_and_an_unclosed_script_ends_the_text() {
+    let many = format!("<p>start</p>{}<p>end</p>", "<style></style><script>x</script>".repeat(50_000));
+    let t0 = std::time::Instant::now();
+    let text = html_text(&many);
+    assert!(t0.elapsed() < std::time::Duration::from_secs(2), "{:?}", t0.elapsed());
+    assert!(text.contains("start") && text.contains("end") && !text.contains('x'), "{text:?}");
+    let unclosed = format!("<p>kept</p>{}", "<SCRIPT>never closed ".repeat(50_000));
+    let t0 = std::time::Instant::now();
+    let text = html_text(&unclosed);
+    assert!(t0.elapsed() < std::time::Duration::from_secs(2), "{:?}", t0.elapsed());
+    assert!(text.contains("kept") && !text.contains("never"), "{text:?}");
+    // Upper-case tags are tags too.
+    assert_eq!(html_text("<DIV>a</DIV><STYLE>p{}</STYLE>b").trim(), "a
+b");
+}

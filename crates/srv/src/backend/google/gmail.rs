@@ -272,29 +272,37 @@ fn decode(data: &str, charset: Option<&str>) -> String {
 }
 
 /// HTML as plain text: tags dropped, the common entities decoded, `script` and `style` removed.
+/// One pass over the text, whatever the mail holds: the lowercase copy is made once (ASCII
+/// lowercasing keeps every byte offset), and a `script` or `style` with no end swallows the rest,
+/// as a browser reads it.
 fn html_text(html: &str) -> String {
+    let lower = html.to_ascii_lowercase();
     let mut out = String::with_capacity(html.len() / 2);
-    let mut rest = html;
-    while let Some(open) = rest.find('<') {
-        out.push_str(&rest[..open]);
-        let tail = &rest[open..];
-        let lower: String = tail.chars().take(8).collect::<String>().to_ascii_lowercase();
-        let skip_to = ["script", "style"].iter().find_map(|t| {
-            lower.strip_prefix('<').filter(|l| l.starts_with(t)).and_then(|_| tail.to_ascii_lowercase().find(&format!("</{t}")))
-        });
-        if let Some(end) = skip_to {
-            let after = &tail[end..];
-            rest = after.find('>').map_or("", |i| &after[i + 1..]);
+    let mut at = 0;
+    while let Some(rel) = html[at..].find('<') {
+        let open = at + rel;
+        out.push_str(&html[at..open]);
+        let tag = &lower[open + 1..];
+        if let Some(name) = ["script", "style"].into_iter().find(|n| tag.starts_with(n)) {
+            let Some(end) = lower[open..].find(&format!("</{name}")) else {
+                return finish_text(out);
+            };
+            let closing = open + end;
+            at = html[closing..].find('>').map_or(html.len(), |i| closing + i + 1);
             continue;
         }
-        let block = lower.starts_with("<br") || lower.starts_with("<p") || lower.starts_with("</p") || lower.starts_with("<div") || lower.starts_with("</div") || lower.starts_with("<li") || lower.starts_with("<tr");
+        let block = ["br", "p", "/p", "div", "/div", "li", "tr"].iter().any(|t| tag.starts_with(t));
         if block {
             out.push('\n');
         }
-        rest = tail.find('>').map_or("", |i| &tail[i + 1..]);
+        at = html[open..].find('>').map_or(html.len(), |i| open + i + 1);
     }
-    out.push_str(rest);
-    out.replace("&nbsp;", " ").replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&#39;", "'").replace("&amp;", "&")
+    out.push_str(&html[at..]);
+    finish_text(out)
+}
+
+fn finish_text(text: String) -> String {
+    text.replace("&nbsp;", " ").replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&#39;", "'").replace("&amp;", "&")
 }
 
 /// The message's readable text: its `text/plain` parts, else its `text/html` parts as text.
