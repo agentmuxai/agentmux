@@ -1875,32 +1875,15 @@ pub(super) async fn handle_reactive_transcript(
     };
     let block_id = reg.block_id.clone();
 
-    let (raw_bytes, _total_line_count) = match crate::backend::session_archive::read_session_output(
-        &state.mstore,
-        &state.filestore,
-        &block_id,
-    ) {
-        Ok(v) => v,
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("read_session_output: {e}")})),
-            )
-                .into_response();
-        }
-    };
-
-    let text = String::from_utf8_lossy(&raw_bytes);
-    let all_lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
+    // A bounded tail, off the async workers (transcript_tail.rs): the file can be hundreds of MB.
     let requested = params.max_lines.min(TRANSCRIPT_MAX_LINES_CAP).max(1);
-    let truncated = all_lines.len() > requested;
-    let lines: Vec<String> = all_lines
-        .iter()
-        .rev()
-        .take(requested)
-        .rev()
-        .map(|l| l.to_string())
-        .collect();
+    let (mstore, filestore, bid) = (state.mstore.clone(), state.filestore.clone(), block_id.clone());
+    let read = tokio::task::spawn_blocking(move || super::transcript_tail::tail_lines(&mstore, &filestore, &bid, requested)).await;
+    let (lines, truncated) = match read {
+        Ok(Ok(t)) => (t.lines, t.truncated),
+        Ok(Err(e)) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("read_session_output: {e}")}))).into_response(),
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("transcript read: {e}")}))).into_response(),
+    };
 
     let turn_active = crate::backend::blockcontroller::get_block_controller_status(&block_id)
         .map(|s| s.turn_active)
