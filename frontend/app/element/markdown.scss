@@ -262,7 +262,7 @@
     .am-badge {
         display: inline-block;
         padding: 0 0.45em;
-        border-radius: 0.6em;
+        border-radius: var(--radius-full);
         font-size: 0.85em;
         font-weight: 600;
         line-height: 1.5;
@@ -364,7 +364,7 @@
     // late doesn't shove the transcript; the real aspect ratio replaces 16:9.
     .am-media-placeholder {
         width: 100%;
-        border-radius: 4px;
+        border-radius: var(--radius-sm);
         background: color-mix(in srgb, var(--secondary-text-color) 10%, transparent);
     }
 
@@ -382,7 +382,7 @@
         gap: 0.5em;
         padding: 0.25em 0.7em;
         border: 1px solid color-mix(in srgb, var(--secondary-text-color) 35%, transparent);
-        border-radius: 6px;
+        border-radius: var(--radius-md);
         background: color-mix(in srgb, var(--secondary-text-color) 8%, transparent);
         color: inherit;
         font: inherit;
@@ -411,7 +411,7 @@
         max-height: min(60vh, 640px);
         aspect-ratio: 16 / 9;
         overflow: hidden;
-        border-radius: 4px;
+        border-radius: var(--radius-sm);
         background: color-mix(in srgb, var(--secondary-text-color) 10%, transparent);
 
         .am-media-poster,
@@ -459,7 +459,7 @@
         gap: 0.6em;
         padding: 0.3em 0.8em 0.3em 0.3em;
         border: 1px solid color-mix(in srgb, var(--secondary-text-color) 35%, transparent);
-        border-radius: 999px;
+        border-radius: var(--radius-full);
 
         .am-media-play {
             width: 2em;

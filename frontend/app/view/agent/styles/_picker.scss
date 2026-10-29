@@ -358,7 +358,7 @@
             color: var(--warning-text-color);
             background: var(--warning-bg);
             border: 1px solid color-mix(in srgb, var(--warning-color) 35%, transparent);
-            border-radius: 3px;
+            border-radius: var(--radius-sm);
             pointer-events: none;
             z-index: 1;
             user-select: none;
@@ -476,7 +476,7 @@
         border: 1px solid var(--warning-line);
 
         .nodejs-notice-icon {
-            font-size: 18px;
+            font-size: var(--text-xl);
             color: var(--warning-text-color);
             flex-shrink: 0;
             padding-top: var(--space-0-5);

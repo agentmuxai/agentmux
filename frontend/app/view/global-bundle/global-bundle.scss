@@ -138,7 +138,7 @@ code.global-bundle-file-label {
     margin: 0 0 var(--space-2);
     padding: var(--space-1-5) var(--space-2);
     border: 1px solid var(--border-color);
-    border-radius: 6px;
+    border-radius: var(--radius-md);
     background: var(--accent-bg-subtle);
     font-size: var(--text-sm);
 }
@@ -161,7 +161,7 @@ code.global-bundle-file-label {
 .global-memory-import-button {
     padding: var(--space-1) var(--space-2);
     border: 1px solid var(--border-color);
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     background: var(--main-bg-color);
     color: var(--main-text-color);
     font-size: var(--text-sm);

@@ -303,7 +303,7 @@ $browser-nav-stack-below: 388px;
 
             > i {
                 color: var(--attention-color);
-                font-size: 16px;
+                font-size: var(--text-lg);
             }
         }
     }

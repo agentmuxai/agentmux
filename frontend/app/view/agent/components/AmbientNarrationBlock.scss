@@ -21,7 +21,7 @@
     @include mixins.label-caps;
     color: var(--secondary-text-color);
     border: 1px solid rgba(from var(--secondary-text-color) r g b / 0.35);
-    border-radius: 3px;
+    border-radius: var(--radius-sm);
     padding: 0 4px;
     opacity: 0.7;
     white-space: nowrap;
