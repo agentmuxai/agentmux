@@ -226,6 +226,25 @@ describe("move", () => {
         expect(fake.calls).toHaveLength(1);
     });
 
+    it("cancels a slide still running before it measures, so the new one starts from the captured place", () => {
+        const a = row("a", 0, 0);
+        const before = capture([a], keyOf);
+        a.place(0, 100);
+        move(before, [a], keyOf, { axis: "y" });
+        // Mid-flight the element reports a rectangle that includes the slide's transform.
+        const measured = a.getBoundingClientRect;
+        a.getBoundingClientRect = () => {
+            const rect = measured.call(a);
+            return fake.calls[0].ended ? rect : ({ ...rect, top: rect.top - 50 } as DOMRect);
+        };
+        const midFlight = capture([a], keyOf);
+        a.place(0, 200);
+        move(midFlight, [a], keyOf, { axis: "y" });
+        expect(fake.calls[0].ended).toBe(true);
+        // From the visual place (50) to the layout place (200): 50 - 200.
+        expect(fake.calls[1].keyframes[0]).toEqual({ transform: "translateY(-150px)" });
+    });
+
     it("replaces a slide still running on the element", () => {
         const a = row("a", 0, 10);
         const before = capture([a], keyOf);

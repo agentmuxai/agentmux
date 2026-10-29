@@ -84,6 +84,11 @@ export interface PlayOptions {
 
 const running = new WeakMap<Element, Map<string, MotionHandle>>();
 
+/** Cancel the motion running on `el` under `key`, if any. */
+function cancelRunning(el: Element, key: string): void {
+    running.get(el)?.get(key)?.cancel();
+}
+
 function warn(what: string, err: unknown): void {
     console.warn(`[motion] ${what}`, err);
 }
@@ -119,7 +124,7 @@ export function groupHandle(handles: readonly MotionHandle[]): MotionHandle {
  */
 export function play(el: Element, keyframes: Keyframe[], opts: PlayOptions): MotionHandle {
     const { key } = opts;
-    if (key) running.get(el)?.get(key)?.cancel();
+    if (key) cancelRunning(el, key);
 
     let ended = false;
     let cancelled = false;
@@ -238,6 +243,8 @@ export function move(
             if (onNew) handles.push(enter(el, onNew));
             continue;
         }
+        // A slide still running would be in the measurement; the captured place is where it starts.
+        cancelRunning(el, "move");
         const now = el.getBoundingClientRect();
         const dx = axis === "y" ? 0 : (was.left - now.left) / (zoom || 1);
         const dy = axis === "x" ? 0 : (was.top - now.top) / (zoom || 1);
