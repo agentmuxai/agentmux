@@ -507,6 +507,10 @@ jobs:
     if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' && needs.changes.outputs.queue != 'true' }}
     runs-on: windows-latest
     continue-on-error: true
+    # `continue-on-error` makes this job's `result` read `success` to `needs` even
+    # when it failed, so the shards test this output, set only after the upload.
+    outputs:
+      archived: ${{ steps.archived.outputs.archived }}
     timeout-minutes: 35
     env:
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
@@ -542,12 +546,17 @@ jobs:
           # Only this run's shards read it.
           retention-days: 1
           compression-level: 0
+      - name: The archive is uploaded
+        id: archived
+        shell: bash
+        run: echo "archived=true" >> "$GITHUB_OUTPUT"
 
   rust-windows:
     name: nextest (windows-latest, all ${{ matrix.shard }}/3)
     needs: [changes, rust-windows-build]
-    # The build ran and succeeded; if it did not, its own job is the red one.
-    if: ${{ !cancelled() && needs.rust-windows-build.result == 'success' }}
+    # Only when the build got as far as uploading the archive; if it did not, its
+    # own job is the red one and these would only fail at the download.
+    if: ${{ !cancelled() && needs.rust-windows-build.outputs.archived == 'true' }}
     runs-on: windows-latest
     continue-on-error: true
     timeout-minutes: 35
