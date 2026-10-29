@@ -46,6 +46,7 @@ pub mod migrations;
 pub mod muxbus;
 pub mod registry_mirror;
 pub mod builtin_seeds;
+pub mod skill_optout;
 pub mod skill_reach;
 pub mod skill_source;
 pub mod skills;

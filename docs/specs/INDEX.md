@@ -719,6 +719,7 @@ partial list.
 | [`SPEC_KANBAN_STAGES_COLOURS_AND_NARROW_VIEW_2026_10_23`](SPEC_KANBAN_STAGES_COLOURS_AND_NARROW_VIEW_2026_10_23.md) | Spec: the Kanban's stages (Backlog, In Research, Spec'd, In progress, Review, Merged, Released), its colours, and its narrow view |
 | [`SPEC_KANBAN_TASK_MEDIA_2026_10_25`](SPEC_KANBAN_TASK_MEDIA_2026_10_25.md) | Spec: Kanban tasks carry media; a UI change that needs the operator's OK comes with screenshots or a recording |
 | [`SPEC_KEYED_SLOT_RETENTION_FIX_2026_10_12`](SPEC_KEYED_SLOT_RETENTION_FIX_2026_10_12.md) | Spec: `<Key>` slots must not keep old rows alive |
+| [`SPEC_LAN_KEY_CONTINUITY_2026_10_29`](SPEC_LAN_KEY_CONTINUITY_2026_10_29.md) | SPEC: LAN key continuity, with no person in the loop |
 | [`SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30`](SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30.md) | SPEC: Large-file module analysis and DRY opportunities |
 | [`SPEC_LAUNCHER_TEARDOWN_BACKSTOP_2026_07_11`](SPEC_LAUNCHER_TEARDOWN_BACKSTOP_2026_07_11.md) | SPEC: Launcher-side teardown backstop (UI-thread liveness probe + armed J0 teardown) |
 | [`SPEC_LAUNCH_CONTEXT_WORKSPACE_RULE_AND_STARTUP_FILES_2026_09_30`](SPEC_LAUNCH_CONTEXT_WORKSPACE_RULE_AND_STARTUP_FILES_2026_09_30.md) | SPEC: Launch context — host agents work in their own workspace, the card lists every startup file, and CLI upgrades are shown |

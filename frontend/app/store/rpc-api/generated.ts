@@ -231,6 +231,7 @@ import type { CommandShellStopData } from "@/types/rpc/CommandShellStopData";
 import type { CommandSkillCatalogBindAllData } from "@/types/rpc/CommandSkillCatalogBindAllData";
 import type { CommandSkillCatalogImportCommitData } from "@/types/rpc/CommandSkillCatalogImportCommitData";
 import type { CommandSkillCatalogImportPreviewData } from "@/types/rpc/CommandSkillCatalogImportPreviewData";
+import type { CommandSkillCatalogSetOptOutData } from "@/types/rpc/CommandSkillCatalogSetOptOutData";
 import type { CommandSkillCatalogSetReachData } from "@/types/rpc/CommandSkillCatalogSetReachData";
 import type { CommandSkillCatalogUpsertData } from "@/types/rpc/CommandSkillCatalogUpsertData";
 import type { CommandSkillCatalogUpsertForBundleData } from "@/types/rpc/CommandSkillCatalogUpsertForBundleData";
@@ -2333,6 +2334,14 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<Array<SkillBundleListItem>> {
     return client.rpcCall("skill.catalog.list_for_bundle", data, opts);
+  },
+  // command "skill.catalog.set_opt_out"
+  SkillCatalogSetOptOutCommand(
+    client: RpcClient,
+    data: CommandSkillCatalogSetOptOutData,
+    opts?: RpcOpts
+  ): Promise<void> {
+    return client.rpcCall("skill.catalog.set_opt_out", data, opts);
   },
   // command "skill.catalog.set_reach"
   SkillCatalogSetReachCommand(

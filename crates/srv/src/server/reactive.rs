@@ -391,8 +391,8 @@ pub(super) async fn verify_lan_signature(state: &AppState, req: &mut InjectionRe
         req.lan_verified = Some(false); // fail closed
         return;
     };
-    if pinned_key_b64 != observed_key_b64 {
-        lan_refusals::pin_mismatch(&claimed, &observed_key_b64);
+    // A different key moves the pin only if the hosting install vouches for it (lan_continuity).
+    if pinned_key_b64 != observed_key_b64 && !lan_continuity::on_mismatch(state, &claimed, &observed_key).await {
         req.lan_verified = Some(false);
         return;
     }
@@ -419,6 +419,7 @@ mod channel_v2;
 mod registration_flags;
 pub(crate) mod former_slug;
 mod lan_v2;
+pub(crate) mod lan_continuity;
 pub(crate) mod lan_refusals;
 pub(super) mod replay;
 
@@ -1361,6 +1362,7 @@ pub(super) async fn handle_reactive_agent(
             if let Ok(Some(pubkey)) = state.mstore.agent_lan_public_key_load(id) {
                 if let Some(obj) = value.as_object_mut() {
                     obj.insert("lan_public_key".to_string(), json!(pubkey));
+                    lan_continuity::add_cert(&state, id, &pubkey, obj); // so a peer pinned to an older key can move its pin
                 }
             }
             // Identity M4d-5: the registration's UID key, separately; the
