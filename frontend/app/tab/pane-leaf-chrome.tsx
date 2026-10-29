@@ -357,7 +357,8 @@ export function PaneLeafChrome(props: { nodeModel: NodeModel }): JSX.Element {
     // dormant in the visibility signal, so a row of minimized agents stops doing the work of
     // visible ones. Restoring the pane makes the front member active again.
     createEffect(() => {
-        const minimized = nodeModel.isMinimized?.() ?? false;
+        // A maximized pane shows its content in the overlay, so it is on screen even while its flag stays minimized.
+        const minimized = (nodeModel.isMinimized?.() ?? false) && !(nodeModel.isMagnified?.() ?? false);
         for (const id of stackBlockIds()) setBlockMinimized(id, minimized);
     });
     onCleanup(() => {
