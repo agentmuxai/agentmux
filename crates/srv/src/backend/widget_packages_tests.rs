@@ -371,6 +371,19 @@ fn a_container_install_reads_only_files_inside_its_workspace() {
     assert_eq!(install_within(&widgets, &src, false, &ws).unwrap(), "acme.mine");
     assert!(widgets.join("acme.mine/index.html").exists());
 
+    // A zip in the workspace installs through the same checks.
+    let zip_path = ws.join("pkg.zip");
+    {
+        let mut z = zip::ZipWriter::new(std::fs::File::create(&zip_path).unwrap());
+        let opts = zip::write::SimpleFileOptions::default();
+        z.start_file("widget.json", opts).unwrap();
+        std::io::Write::write_all(&mut z, manifest("acme.ziptest").to_string().as_bytes()).unwrap();
+        z.start_file("index.html", opts).unwrap();
+        std::io::Write::write_all(&mut z, b"<p>z</p>").unwrap();
+        z.finish().unwrap();
+    }
+    assert_eq!(install_within(&widgets, &zip_path, false, &ws).unwrap(), "acme.ziptest");
+
     // A package outside the workspace root is refused before anything is copied.
     let other = package(&tmp.path().join("elsewhere"), "acme.other");
     assert!(install_within(&widgets, &other, false, &ws).unwrap_err().contains("outside the workspace"));
@@ -390,6 +403,11 @@ fn a_container_install_reads_only_files_inside_its_workspace() {
         std::os::unix::fs::symlink(tmp.path().join("elsewhere"), swapped.join("index.html")).unwrap();
         assert!(install_within(&widgets, &swapped, true, &ws).is_err());
         assert!(!widgets.join("acme.linked").exists() && !widgets.join("acme.swapped").exists());
+        // A package folder that is itself a link to somewhere else is not entered, so there is nothing to race.
+        let outside_pkg = package(&tmp.path().join("hidden"), "acme.hidden");
+        std::os::unix::fs::symlink(&outside_pkg, ws.join("door")).unwrap();
+        assert!(install_within(&widgets, &ws.join("door"), true, &ws.canonicalize().unwrap()).is_err());
+        assert!(!widgets.join("acme.hidden").exists());
         // The file the path names must be the file opened: a link at the final name is not followed.
         assert!(open_within(&swapped.join("index.html"), Some(&ws.canonicalize().unwrap())).is_err());
     }

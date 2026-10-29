@@ -1130,8 +1130,8 @@ pub fn install(widgets_dir: &Path, source: &Path, replace: bool) -> Result<Strin
 }
 
 /// [`install`] for a package a container agent built in its workspace, whose host folder is `root`:
-/// every file is read only if it is, at the moment it is opened, a file inside `root` (see [`open_within`]),
-/// so a link swapped in while the copy runs reads nothing outside it.
+/// every file is read only if it is inside `root`. On Unix the copy walks open folders and follows no link
+/// (`widget_beneath`); elsewhere each file is checked as it is opened (see [`open_within`]).
 pub fn install_within(widgets_dir: &Path, source: &Path, replace: bool, root: &Path) -> Result<String, String> {
     let root = root.canonicalize().map_err(|e| format!("the workspace can't be read: {e}"))?;
     install_checked(widgets_dir, source, replace, MANIFEST_FILE, Some(&root), validate_manifest)
@@ -1186,11 +1186,18 @@ fn install_checked(
         .or_else(|_| tempfile::tempdir())
         .map_err(|e| format!("can't make a staging folder: {e}"))?;
     let stage = staging.path().join("pkg");
-    if is_zip {
-        unzip_from(open_within(source, within)?, &stage)?;
-    } else {
-        let folder = if source.file_name().is_some_and(|n| n == manifest_file) { source.parent().unwrap_or(source) } else { source };
-        copy_tree(folder, &stage, &mut Budget::default(), within)?;
+    let folder = if source.file_name().is_some_and(|n| n == manifest_file) { source.parent().unwrap_or(source) } else { source };
+    match within {
+        // A container agent's workspace is read through open folders, so no swap on the way is followed.
+        #[cfg(unix)]
+        Some(root) if is_zip => unzip_from(super::widget_beneath::file_beneath(root, source).map_err(|e| beneath_error(source, e))?, &stage)?,
+        #[cfg(unix)]
+        Some(root) => {
+            let dir = super::widget_beneath::dir_beneath(root, folder).map_err(|e| beneath_error(folder, e))?;
+            copy_tree_beneath(&dir, &stage, &mut Budget::default())?;
+        }
+        _ if is_zip => unzip_from(open_within(source, within)?, &stage)?,
+        _ => copy_tree(folder, &stage, &mut Budget::default(), within)?,
     }
     // A zip may hold the package at its root or in one top-level folder.
     let root = package_root(&stage, manifest_file)?;
@@ -1278,6 +1285,35 @@ fn open_within(path: &Path, within: Option<&Path>) -> Result<std::fs::File, Stri
         }
     }
     Ok(file)
+}
+
+#[cfg(unix)]
+fn beneath_error(path: &Path, e: std::io::Error) -> String {
+    format!("{} is outside the workspace or a link ({e})", path.display())
+}
+
+/// [`copy_tree`] for a folder that is open: every entry is opened relative to it, and a link is an error.
+#[cfg(unix)]
+fn copy_tree_beneath(dir: &std::os::fd::OwnedFd, to: &Path, budget: &mut Budget) -> Result<(), String> {
+    use super::widget_beneath::Kind;
+    std::fs::create_dir_all(to).map_err(|e| e.to_string())?;
+    for (name, kind) in super::widget_beneath::entries(dir).map_err(|e| format!("can't read the folder: {e}"))? {
+        let target = to.join(&name);
+        let shown = || name.to_string_lossy().into_owned();
+        match kind {
+            Kind::Link => return Err(format!("{} is a link; a package can't contain links", shown())),
+            Kind::Dir => {
+                let sub = super::widget_beneath::subdir(dir, &name).map_err(|e| beneath_error(Path::new(&name), e))?;
+                copy_tree_beneath(&sub, &target, budget)?;
+            }
+            Kind::File => {
+                let mut f = super::widget_beneath::file_in(dir, &name).map_err(|e| beneath_error(Path::new(&name), e))?;
+                budget.copy(&mut f, &target)?;
+            }
+            Kind::Other => return Err(format!("{} isn't a regular file", shown())),
+        }
+    }
+    Ok(())
 }
 
 fn copy_tree(from: &Path, to: &Path, budget: &mut Budget, within: Option<&Path>) -> Result<(), String> {
