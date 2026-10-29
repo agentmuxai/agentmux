@@ -264,7 +264,7 @@
 .instance-panel-opacity-value {
     flex: 0 0 auto;
     font-size: var(--text-xs);
-    color: var(--secondary-text-color, rgb(from var(--main-text-color) r g b / 0.6));
+    color: var(--secondary-text-color);
     width: 32px;
     text-align: right;
 }

@@ -561,6 +561,8 @@ fn should_send_resize_tick(shift_held: bool, shift_held_last_tick: bool) -> bool
 ///   `windowresize:tick { edge, shiftHeld }`, so Shift can be
 ///   pressed/released mid-resize and the renderer mode follows live.
 /// - `WM_EXITSIZEMOVE` — emits `windowresize:end {}` iff a begin was sent.
+/// - `WM_SIZE` — after CEF has the new size, moves the window's shown browser
+///   panes ahead of the page (`bounds::follow_window_resize`).
 ///
 /// The renderer computes the pixel delta itself from its own container
 /// rect (no coordinates are forwarded — that sidesteps every
@@ -593,7 +595,7 @@ unsafe extern "system" fn window_edge_resize_wndproc(
 ) -> isize {
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_SHIFT};
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        CallWindowProcW, DefWindowProcW, WM_EXITSIZEMOVE, WM_NCDESTROY, WM_SIZING,
+        CallWindowProcW, DefWindowProcW, WM_EXITSIZEMOVE, WM_NCDESTROY, WM_SIZE, WM_SIZING,
     };
 
     if msg == WM_SIZING {
@@ -751,6 +753,26 @@ unsafe extern "system" fn window_edge_resize_wndproc(
                     result = 1;
                 }
             }
+        }
+    }
+
+    // The window has its new size (CEF handled WM_SIZE above): move its shown
+    // browser panes now, in this UI-thread turn, instead of when the page has
+    // laid out and sent their rects. A busy page takes frames to do that, and
+    // the panes trail the chrome around them (`bounds::follow_window_resize`).
+    // Not for a minimize, which has no size to follow.
+    const SIZE_MINIMIZED: usize = 1;
+    if msg == WM_SIZE && wparam != SIZE_MINIMIZED {
+        let install_label = WINDOW_EDGE_RESIZE_WNDPROCS
+            .lock()
+            .ok()
+            .and_then(|m| m.get(&(hwnd as usize)).map(|e| e.install_label.clone()));
+        let label = window_edge_resize_app_state()
+            .get()
+            .and_then(|state| state.label_for_hwnd(hwnd))
+            .or(install_label);
+        if let Some(label) = label {
+            crate::browser_panes::bounds::follow_window_resize(&label);
         }
     }
 

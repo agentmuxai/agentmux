@@ -256,6 +256,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/schema/*path", get(files::handle_schema))
         .route("/api/lan-instances", get(handle_lan_instances))
         .route("/agentmux/discovery", get(handle_discovery))
+        .route("/agentmux/old-versions", get(super::old_versions_handlers::handle_get).post(super::old_versions_handlers::handle_post))
         .route("/agentmux/reactive/availability", get(super::availability_view::handle_availability))
         .route("/agentmux/diag/sagas", get(handle_diag_sagas))
         // Streaming-bash wrapper publish endpoint

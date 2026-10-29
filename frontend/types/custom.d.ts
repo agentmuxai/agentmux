@@ -260,8 +260,15 @@ declare global {
             opts?: { allowedOrigins?: string[]; identity?: string }
         ): Promise<void>;
         resize(blockId: string, rect: HostRect): Promise<void>;
-        /** Move several of this window's panes in one step; resolves once they have moved. */
-        setRects(windowLabel: string, rects: ({ blockId: string } & HostRect)[]): Promise<void>;
+        /**
+         * Move several of this window's panes in one step; resolves once they have moved.
+         * `order` lets the host drop a pane's rect that a newer batch already replaced.
+         */
+        setRects(
+            windowLabel: string,
+            rects: ({ blockId: string } & HostRect)[],
+            order?: { epoch: number; seq: number },
+        ): Promise<void>;
         close(blockId: string, windowLabel: string): Promise<void>;
         navigate(blockId: string, url: string): Promise<void>;
         /** Chrome's address bar suggestions for `text` in the pane's profile
