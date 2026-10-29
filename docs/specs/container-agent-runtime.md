@@ -243,12 +243,14 @@ container agents: <why, and what to do instead>`.
 | `/api/v1/agent/desktop/*` (Desktop control) | no | drives the OS and can launch programs (borderline; left to the operator) |
 | `/api/v1/host/*`, `/agentmux/reactive/{poller/*,unregister,ensure-signing-key,agents,audit}`, `/agentmux/agent/holding`, `/agentmux/diag/sagas`, `/api/messaging/*`, `/api/post-chat-message`, `/webhook/*` | no | the app's own plumbing: approvals, state the windows report, controls no agent tool calls and whose handlers don't check who asks |
 | `/agentmux/service`, `/ws`, `/agentmux/wps/publish` | no | generic gateways to everything else |
-| `/agentmux/stream-local-file`, `/agentmux/file`, `/agentmux/file-icon`, `/api/v1/attachments/upload`, `/agentmux/work/media`, `/api/v1/ui/browser/set_files`, `/api/v1/pane/open`, `/api/v1/widgets/install` | no, for now | take a host path; they open to a path inside the container's own mounts once the path is checked against them (a host path outside would let a sandbox read `~/.ssh`, `~/.aws`) |
+| `/agentmux/stream-local-file`, `/agentmux/file`, `/agentmux/file-icon` | no | read host files for the app's windows; a container agent reads its own files in `/workspace` directly |
+| `/api/v1/ui/browser/set_files` | no, for now | uploads from a path; needs the container's `/workspace` mapped to the host folder first |
+| `/api/v1/pane/open` | no, for now | a pane shows a host file in the user's windows, which read the path they are given; a container agent reads its own files in `/workspace` directly, or asks a native agent to open one |
 | `/api/v1/agent/globalmemory/{write,remove,revert}` | no | Global Memory is composed into every native agent's context at launch; a container reads it, a native agent writes it |
 | `/api/v1/agent/self/upgrade` | no | replaces the app on the host |
 | `/agentmux/agents/self/keys`, `/api/v1/agent/self/mcp-beat`, `/agentmux/reactive/register` | no | srv does this for a container agent itself |
 | `/agentmux/jobs/stop-run`, `/agentmux/viewer/*`, `/.well-known/*` | no | between AgentMux instances |
-| Everything else: Presence, Vault (with the user's approvals), Browser and UI (open, snapshot, find, act, navigate, eval, screenshot, query, click, shortcuts), Tasks, Schedule, Memory, Message, Agents, Widget (installing one from a host path excepted), the GitHub token for the agent's own git, Google, RegisterDevServer, … | yes | what a native agent has |
+| Everything else: Presence, Vault (with the user's approvals), Browser and UI (open, snapshot, find, act, navigate, eval, screenshot, query, click, shortcuts), Tasks, Schedule, Memory, Message, Agents, Widget (installing one from a folder in `/workspace`, which the handler maps to the host's), the GitHub token for the agent's own git, Google, RegisterDevServer, … | yes | what a native agent has |
 
 Two things stay true for the routes that are open. A request is attributed to the agent the token
 was minted for, whatever the body says, and every route opened since the denylist needs that

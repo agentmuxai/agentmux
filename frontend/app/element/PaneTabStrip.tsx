@@ -22,6 +22,8 @@
  * Spec: docs/specs/SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md §3.1.
  */
 
+import { landedTab, markLanded } from "./pane-tab-landing";
+export { LANDING_BOUNCE_MS } from "./pane-tab-landing";
 import { batch, createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show, type Accessor, type JSX } from "solid-js";
 import { draggable, dropTargetForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import { preventUnhandled } from "@atlaskit/pragmatic-drag-and-drop/prevent-unhandled";
@@ -61,28 +63,6 @@ import type { PaneTabProgress } from "@/app/store/pane-tab-progress";
 const WIDTH_TRANSITION_MS = DURATION_BASE_MS;
 
 
-/** How long a just-landed pill keeps `.pane-tab--landing` — the Window Tab
- *  bar's own clear-timeout for its bounce (tab-reorder.ts), so the two match. */
-export const LANDING_BOUNCE_MS = 400;
-
-/** The tab that was just dropped into place and should play the landing
- *  bounce: its id AND the pane (`paneKey`) it landed in. Module-level rather
- *  than per-strip: a cross-pane drop re-renders the pill in the destination
- *  strip (mounting it fresh there), so the flag has to be readable by
- *  whichever strip ends up rendering it. The pane is part of the identity
- *  because one block can have pills in several strips: agent fork lineages
- *  show blocks from OTHER panes as extra tabs (`PaneChromeModel.extraTabs`),
- *  and only the pill in the pane it actually landed in should bounce (Codex
- *  P2 on #3694). Only header strips set it.
- *  SPEC_PANE_TAB_DRAG_LANDING_FLASH_AND_LAST_TAB_CLOSE_2026_09_24.md §3.4. */
-const [landedTab, setLandedTab] = createSignal<{ ids: ReadonlySet<string>; paneKey: string | undefined } | null>(null);
-let landingTimer: ReturnType<typeof setTimeout> | undefined;
-/** `id` is one tab, or every tab a multi-tab move brought into the pane. */
-function markLanded(id: string | readonly string[], paneKey: string | undefined): void {
-    clearTimeout(landingTimer);
-    setLandedTab({ ids: new Set(typeof id === "string" ? [id] : id), paneKey });
-    landingTimer = setTimeout(() => setLandedTab(null), LANDING_BOUNCE_MS);
-}
 
 /** The block ids a pane-tab drag carries when it carries several (a Ctrl/Cmd+click selection), else undefined. */
 function multiIdsOf(data: Record<string | symbol, unknown>): readonly string[] | undefined {

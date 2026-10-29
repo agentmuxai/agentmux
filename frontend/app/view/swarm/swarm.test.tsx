@@ -15,7 +15,6 @@ vi.mock("./swarm-model", () => ({
 vi.mock("./swarm-root", () => ({ SwarmView: () => null }));
 
 import { swarmPaneTab } from "./swarm";
-import { swarmTitleOf } from "./swarm-section";
 import { create } from "./swarm-instance";
 import { createRoot, createSignal } from "solid-js";
 import { memberMismatch, type PaneTabMember } from "@/app/block/lazy-pane-tab";
@@ -38,9 +37,9 @@ describe("swarmPaneTab", () => {
         expect(swarmPaneTab.capabilities).toEqual({ paneZoom: {}, noPadding: true });
     });
 
-    it("declares the Supervisor, Broadcast and Kanban sections, opening on the Supervisor", () => {
+    it("declares the Supervisor and Broadcast sections, opening on the Supervisor", () => {
         expect(swarmPaneTab.sections?.default).toBe("supervisor");
-        expect(swarmPaneTab.sections?.items.map((s) => s.id)).toEqual(["supervisor", "broadcast", "kanban"]);
+        expect(swarmPaneTab.sections?.items.map((s) => s.id)).toEqual(["supervisor", "broadcast"]);
     });
 
     it("is named by the selected section", () => {
@@ -50,19 +49,22 @@ describe("swarmPaneTab", () => {
             expect(inst.liveTitle!().text).toBe("Swarm · Supervisor");
             setMeta({ "swarm:section": "broadcast" });
             expect(inst.liveTitle!().text).toBe("Swarm · Broadcast");
-            setMeta({ "swarm:section": "kanban" });
-            expect(inst.liveTitle!().text).toBe("Swarm · Kanban");
             setMeta({ "swarm:section": "nope" });
             expect(inst.liveTitle!().text).toBe("Swarm · Supervisor");
             dispose();
         });
     });
 
-    it("counts the tasks that need the operator in the title, on the Kanban only", () => {
-        expect(swarmTitleOf("kanban", 1)).toBe("Swarm · Kanban · 1 needs you");
-        expect(swarmTitleOf("kanban", 3)).toBe("Swarm · Kanban · 3 need you");
-        expect(swarmTitleOf("kanban", 0)).toBe("Swarm · Kanban");
-        expect(swarmTitleOf("supervisor", 3)).toBe("Swarm · Supervisor");
+    it("turns a saved Swarm on its old Kanban section into the Kanban pane, and leaves the others alone", async () => {
+        const setMeta = vi.fn(async () => {});
+        const stop = createRoot((dispose) => {
+            create({ blockId: "w1", meta: () => ({ view: "swarm", "swarm:section": "kanban", "kanban:lanes": true }), setMeta } as any);
+            create({ blockId: "w2", meta: () => ({ view: "swarm", "swarm:section": "broadcast" }), setMeta } as any);
+            return dispose;
+        });
+        await new Promise((r) => setTimeout(r, 0));
+        expect(setMeta.mock.calls).toEqual([[{ view: "kanban", "swarm:section": null }]]);
+        stop();
     });
 
     it("disposes its model — subscriptions and timers — with the instance", () => {

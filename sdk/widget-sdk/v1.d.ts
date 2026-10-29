@@ -39,7 +39,7 @@ export type Visibility = "active" | "dormant" | "windowHidden";
  *  not a view: it lists the sections of Warden's Vault section, set with `vault:section` beside
  *  `"warden:section": "vault"`. */
 export interface PaneSections {
-    swarm: "supervisor" | "broadcast" | "kanban";
+    swarm: "supervisor" | "broadcast";
     warden: "jobs" | "vault" | "host" | "lan" | "internet" | "audit" | "history" | "ambient";
     vault: "personal" | "cards" | "api-keys" | "logins" | "notes" | "kept" | "activity";
     connectors: "accounts" | "mcp" | "remotes";
@@ -181,7 +181,7 @@ export interface AgentMux {
     theme: { get(): Promise<Theme> };
     panes: {
         /** Opens one of AgentMux's sectioned panes on a section (needs `panes`):
-         *  `am.panes.open("swarm", { "swarm:section": "kanban" })`, or the Vault's Cards with
+         *  `am.panes.open("swarm", { "swarm:section": "broadcast" })`, or the Vault's Cards with
          *  `am.panes.open("warden", { "warden:section": "vault", "vault:section": "cards" })`. */
         open<V extends Exclude<keyof PaneSections, "vault">>(
             view: V,
@@ -190,7 +190,7 @@ export interface AgentMux {
         ): Promise<{ pane: string }>;
         /** The package's own views need no permission; any other view needs `panes`.
          *  For an own view, `meta` becomes that pane's widget meta (what `meta.get` reads there).
-         *  Another view gets only its section (`{ "swarm:section": "kanban" }`; also `vault:`,
+         *  Another view gets only its section (`{ "swarm:section": "broadcast" }`; also `vault:`,
          *  `connectors:`, `memory:` and `settings:section`) or, for `browser`, an http(s) `url`;
          *  every other key is dropped. */
         open<V extends string>(

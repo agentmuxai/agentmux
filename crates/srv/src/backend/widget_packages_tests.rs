@@ -361,3 +361,54 @@ fn install_copies_a_folder_or_a_zip_and_refuses_a_bad_one() {
     std::fs::write(bad.join(MANIFEST_FILE), "{\"manifestVersion\": 9}").unwrap();
     assert!(install(&widgets, &bad, false).is_err());
 }
+
+#[test]
+fn a_container_install_reads_only_files_inside_its_workspace() {
+    let tmp = tempfile::tempdir().unwrap();
+    let widgets = tmp.path().join("widgets");
+    let ws = tmp.path().join("ws");
+    let src = package(&ws, "acme.mine");
+    assert_eq!(install_within(&widgets, &src, false, &ws).unwrap(), "acme.mine");
+    assert!(widgets.join("acme.mine/index.html").exists());
+
+    // A zip in the workspace installs through the same checks.
+    let zip_path = ws.join("pkg.zip");
+    {
+        let mut z = zip::ZipWriter::new(std::fs::File::create(&zip_path).unwrap());
+        let opts = zip::write::SimpleFileOptions::default();
+        z.start_file("widget.json", opts).unwrap();
+        std::io::Write::write_all(&mut z, manifest("acme.ziptest").to_string().as_bytes()).unwrap();
+        z.start_file("index.html", opts).unwrap();
+        std::io::Write::write_all(&mut z, b"<p>z</p>").unwrap();
+        z.finish().unwrap();
+    }
+    assert_eq!(install_within(&widgets, &zip_path, false, &ws).unwrap(), "acme.ziptest");
+
+    // A package outside the workspace root is refused before anything is copied.
+    let other = package(&tmp.path().join("elsewhere"), "acme.other");
+    assert!(install_within(&widgets, &other, false, &ws).unwrap_err().contains("outside the workspace"));
+    assert!(!widgets.join("acme.other").exists());
+
+    // A link in the package, to a file or a folder outside the workspace, is refused.
+    #[cfg(unix)]
+    {
+        let secret = tmp.path().join("secret.txt");
+        std::fs::write(&secret, "outside").unwrap();
+        let linked = package(&ws.join("linked"), "acme.linked");
+        std::os::unix::fs::symlink(&secret, linked.join("key.txt")).unwrap();
+        assert!(install_within(&widgets, &linked, true, &ws).unwrap_err().contains("link"));
+        // A folder swapped for a link to somewhere else is not read either.
+        let swapped = package(&ws.join("swapped"), "acme.swapped");
+        std::fs::remove_file(swapped.join("index.html")).unwrap();
+        std::os::unix::fs::symlink(tmp.path().join("elsewhere"), swapped.join("index.html")).unwrap();
+        assert!(install_within(&widgets, &swapped, true, &ws).is_err());
+        assert!(!widgets.join("acme.linked").exists() && !widgets.join("acme.swapped").exists());
+        // A package folder that is itself a link to somewhere else is not entered, so there is nothing to race.
+        let outside_pkg = package(&tmp.path().join("hidden"), "acme.hidden");
+        std::os::unix::fs::symlink(&outside_pkg, ws.join("door")).unwrap();
+        assert!(install_within(&widgets, &ws.join("door"), true, &ws.canonicalize().unwrap()).is_err());
+        assert!(!widgets.join("acme.hidden").exists());
+        // The file the path names must be the file opened: a link at the final name is not followed.
+        assert!(open_within(&swapped.join("index.html"), Some(&ws.canonicalize().unwrap())).is_err());
+    }
+}

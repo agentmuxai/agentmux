@@ -53,21 +53,23 @@ export function sectionOf<Id extends string>(
     return hasSection(sections, s) ? s : sections.default;
 }
 
-/** A section that moved from one pane to another (the Kanban left Warden for the Swarm). An old
- *  pin, widget entry or `am.panes.open` call naming the old pair keeps working through this table:
+/** A section that moved out of a pane: to a section of another pane, or (no `section`) to a pane of its
+ *  own (the Kanban left Warden for the Swarm, then the Swarm for the Kanban pane). An old pin, widget
+ *  entry, saved pane or `am.panes.open` call naming the old pair keeps working through this table:
  *  the widget bridge, `sectionProblem`, the widget bar's pins, `openWarden` and srv's
  *  `resolve_section` (crates/srv/src/backend/wconfig/types.rs, which has the same table) all read it. */
-const MOVED_SECTIONS: readonly { from: { view: string; section: string }; to: { view: string; section: string } }[] = [
-    { from: { view: "warden", section: "kanban" }, to: { view: "swarm", section: "kanban" } },
+const MOVED_SECTIONS: readonly { from: { view: string; section: string }; to: { view: string; section?: string } }[] = [
+    { from: { view: "warden", section: "kanban" }, to: { view: "kanban" } },
+    { from: { view: "swarm", section: "kanban" }, to: { view: "kanban" } },
 ];
 
 /** Where `view`'s `section` lives now, or null when it has not moved. */
-export function movedSection(view: string | null | undefined, section: string): { view: string; section: string } | null {
+export function movedSection(view: string | null | undefined, section: string): { view: string; section?: string } | null {
     return MOVED_SECTIONS.find((m) => m.from.view === view && m.from.section === section)?.to ?? null;
 }
 
 /** `meta` as the pane that holds a moved section reads it: a blockdef or `panes.open` meta naming
- *  the old pair (`view: warden`, `warden:section: kanban`) comes back naming the new one. Any other
+ *  the old pair (`view: swarm`, `swarm:section: kanban`) comes back naming the new one. Any other
  *  meta comes back as it is. */
 export function movedMeta(meta: Record<string, unknown>): Record<string, unknown>;
 export function movedMeta(meta: Record<string, unknown> | undefined): Record<string, unknown> | undefined;
@@ -77,7 +79,7 @@ export function movedMeta(meta: Record<string, unknown> | undefined): Record<str
     const to = movedSection(view, String(meta[sectionKeyOf(view ?? "")]));
     if (!view || !to) return meta;
     const { [sectionKeyOf(view)]: _old, ...rest } = meta;
-    return { ...rest, view: to.view, [sectionKeyOf(to.view)]: to.section };
+    return to.section === undefined ? { ...rest, view: to.view } : { ...rest, view: to.view, [sectionKeyOf(to.view)]: to.section };
 }
 
 /** The sections a registered view declares (an old alias resolves to its view). */

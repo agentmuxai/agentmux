@@ -8,7 +8,7 @@
 // and the search over it.
 
 import { literalFirstSearch } from "@/app/util/fuzzysearch";
-import type { SettingsIndexEntry } from "./settings-model";
+import { SETTINGS_SECTION_LABELS, type SettingsIndexEntry } from "./settings-model";
 import { APPEARANCE_SETTINGS } from "./sections/appearance-section";
 import { WINDOW_SETTINGS } from "./sections/window-panes-section";
 import { BROWSER_SETTINGS } from "./sections/browser-section";
@@ -46,6 +46,18 @@ const FUZZY_KEYS = [
     { name: "description", weight: 0.2 },
 ];
 
+/** Where a setting sits in the pane, outermost first, ending in its own name:
+ *  ["Sounds", "Tool-call tones", "Volume"]. Two settings with the same name are told apart by this. */
+export function settingsPath(e: Pick<SettingsIndexEntry, "section" | "group" | "label">): string[] {
+    const section = SETTINGS_SECTION_LABELS[e.section];
+    const path = [section];
+    if (e.group && e.group !== section && e.group !== e.label) path.push(e.group);
+    path.push(e.label);
+    return path;
+}
+
+const textOf = (e: SettingsIndexEntry): string[] => [e.label, ...e.keywords, e.description ?? "", settingsPath(e).join(" ")];
+
 /**
  * The Settings search (§3.5), best first. Literal first, like the My Agents
  * filter: an entry whose label contains the query comes before one that only
@@ -54,5 +66,16 @@ const FUZZY_KEYS = [
  * entry contains the query does fuzzy matching step in, for a typo.
  */
 export function searchSettings(entries: SettingsIndexEntry[], query: string): SettingsIndexEntry[] {
-    return literalFirstSearch(entries, query, (e) => [e.label, ...e.keywords, e.description], { keys: FUZZY_KEYS });
+    const q = query.trim().toLowerCase();
+    const literal = literalFirstSearch(entries, query, textOf, { keys: FUZZY_KEYS });
+    const words = q.split(/\s+/).filter(Boolean);
+    if (words.length < 2) return literal;
+    // The path is searched too: "sounds volume" finds Volume under Sounds, though no one string holds both words.
+    // The setting's own words (not its path) holding the whole phrase is a literal match; keep that order.
+    if (literal.some((e) => textOf(e).slice(0, -1).some((t) => t.toLowerCase().includes(q)))) return literal;
+    const together = entries.filter((e) => {
+        const hay = textOf(e).join(" ").toLowerCase();
+        return words.every((w) => hay.includes(w));
+    });
+    return together.length > 0 ? together : literal;
 }

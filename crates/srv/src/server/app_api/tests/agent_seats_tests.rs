@@ -165,6 +165,44 @@ async fn an_unknown_agent_or_lead_or_a_template_is_refused_and_nothing_is_writte
     assert!(seat_of(&state, &template).is_none() && seat_of(&state, &a).is_none());
 }
 
+/// A seat's lead may be an agent on another machine on the LAN: named `Name@host` (any case), kept as the
+/// LAN lists it and shown that way; one the LAN does not list is refused, with what is known.
+#[tokio::test]
+async fn a_lead_on_another_machine_is_accepted_when_the_lan_lists_it_and_shown_as_name_at_host() {
+    let (state, _dir) = seated_state();
+    let (me, a) = (agent(&state, "host", false), agent(&state, "host", false));
+    let known = vec!["AgentY@narko".to_string(), "AgentX@narko".to_string()];
+    let body = json!({ "seats": [{ "agent": a.slug, "seat": { "role": "worker", "lead": "agenty@NARKO" } }] });
+    let (changes, remote) = changes_of_with(&state, serde_json::from_value(body).unwrap(), &known).unwrap();
+    assert_eq!(remote, vec!["AgentY@narko".to_string()], "kept as the LAN lists it");
+    let actor = Actor { uid: me.id.clone(), slug: me.slug.clone(), name: me.name.clone() };
+    apply(&state, &actor, changes, &remote).unwrap();
+    assert_eq!(seat_of(&state, &a).unwrap().lead.as_deref(), Some("AgentY@narko"));
+    let shown = crate::backend::agent_seat::summary_by_id(&state.mstore, &a.id).unwrap().lead.unwrap();
+    assert_eq!((shown.id.as_str(), shown.name.as_deref()), ("AgentY@narko", Some("AgentY@narko")));
+
+    let ghost = json!({ "seats": [{ "agent": a.slug, "seat": { "role": "worker", "lead": "ghost@nowhere" } }] });
+    let refused = changes_of_with(&state, serde_json::from_value(ghost).unwrap(), &known).err().expect("refused");
+    assert_eq!(refused.status, StatusCode::NOT_FOUND);
+    assert!(refused.message.contains("ghost@nowhere") && refused.message.contains("AgentY@narko, AgentX@narko"), "{}", refused.message);
+    // Not listed on the LAN, through the handler: never accepted on a guess.
+    let (status, body) = call(&state, Some(&me), json!({ "seats": [{ "agent": a.slug, "seat": { "role": "worker", "lead": "AgentY@narko" } }] })).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    assert!(body["error"].as_str().unwrap().contains("Known now: none right now"), "{body}");
+}
+
+/// A sibling channel on this machine is on the LAN list too, but its agents are this machine's own: they
+/// are named by their local id, not offered as `Name@host`.
+#[test]
+fn an_agent_on_this_host_is_not_a_remote_lead() {
+    let peers = vec![
+        ("narko".to_string(), vec!["AgentY".to_string(), "AgentX".to_string()]),
+        ("Area54".to_string(), vec!["Manoz".to_string()]),
+        ("starpower".to_string(), vec!["Manoz".to_string()]),
+    ];
+    assert_eq!(remote_agents_on(peers, "area54"), vec!["AgentY@narko", "AgentX@narko", "Manoz@starpower"]);
+}
+
 /// The answer for a batch doesn't depend on the order of its changes: it is
 /// judged against the leads as they will stand once every change is written.
 #[tokio::test]

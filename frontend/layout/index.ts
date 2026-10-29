@@ -21,6 +21,8 @@ import {
     openBlockInStack,
     setActiveBlockInStack,
 } from "./lib/layoutStack";
+import { setMinimizeMerger } from "./lib/layoutMinimize";
+import { mergeIntoMinimizedNeighbour } from "./lib/layoutMinimizeMergeApply";
 import { installWindowEdgeResizeListener } from "./lib/windowEdgeResize";
 import type {
     ContentRenderer,
@@ -32,6 +34,8 @@ import type {
     PreviewRenderer,
 } from "./lib/types";
 import { LayoutTreeActionType, NavigateDirection } from "./lib/types";
+
+setMinimizeMerger(mergeIntoMinimizedNeighbour);
 
 export {
     addWidgetAsPaneTab,

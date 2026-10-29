@@ -731,6 +731,7 @@ partial list.
 | [`SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16`](SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16.md) | Memory-Pressure Supervision & Graceful Degradation (host / instance level) |
 | [`SPEC_MESSAGE_ORIGIN_AND_ONE_CONTAINER_2026_10_25`](SPEC_MESSAGE_ORIGIN_AND_ONE_CONTAINER_2026_10_25.md) | SPEC: Only the human's own words look like the human: one message origin, set by srv, and one container for everything else |
 | [`SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03`](SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md) | Migration System Audit & Hardening Plan |
+| [`SPEC_MINIMIZE_MERGES_INTO_ADJACENT_MINIMIZED_PANE_2026_10_28`](SPEC_MINIMIZE_MERGES_INTO_ADJACENT_MINIMIZED_PANE_2026_10_28.md) | Minimizing a pane next to a minimized pane merges its tabs into that pane |
 | [`SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15`](SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15.md) | SPEC: two motion tiers, one motion policy, and a DRY pass over the stylesheets |
 | [`SPEC_MUXAPI_TOOL_CONSOLIDATION_2026_10_15`](SPEC_MUXAPI_TOOL_CONSOLIDATION_2026_10_15.md) | SPEC: MuxAPI in fourteen tools: one per family, with actions |
 | [`SPEC_MUXBUS_MULTI_TIER_DISCOVERY_AND_REMOTE_INVOCATION_2026_07_29`](SPEC_MUXBUS_MULTI_TIER_DISCOVERY_AND_REMOTE_INVOCATION_2026_07_29.md) | Spec: multi-tier discovery + remote API invocation over muxbus |

@@ -530,6 +530,8 @@ declare global {
         /** The node id srv gave the leaf it placed (insert, split): the
          *  frontend's mirror uses it, so both trees name it alike. */
         nodeid?: string;
+        /** When srv queued the action (ms since the epoch); srv drops the old ones. */
+        queuedat?: number;
     };
 
     // waveobj.LayoutState
@@ -914,12 +916,14 @@ declare global {
         // block remount and names the pane (section-pane.tsx, warden-model.ts).
         "connectors:section"?: "accounts" | "mcp" | "remotes";
         "memory:section"?: "global" | "personal" | "skills" | "bundles";
-        "swarm:section"?: "supervisor" | "broadcast" | "kanban";
+        "swarm:section"?: "supervisor" | "broadcast";
         "warden:section"?: "jobs" | "vault" | "host" | "lan" | "internet" | "audit" | "history" | "ambient";
-        /** A Kanban task to open in the drawer, set by a link from elsewhere (a Swarm row's task chip) and cleared once opened. Read by the Swarm. */
+        /** A Kanban task to open in the drawer, set by a link from elsewhere (a Swarm row's task chip) and cleared once opened. Read by the Kanban pane. */
         "kanban:open"?: string | null;
-        /** The Swarm's Kanban section shows one lane per repository. */
+        /** The Kanban pane shows one lane per repository. */
         "kanban:lanes"?: boolean;
+        /** The Kanban's columns folded to a strip, by column id (kanban-columns.ts). */
+        "kanban:collapsed"?: string[];
         // The Vault's own section, within Warden's Vault section (vault-in-warden.ts).
         "vault:section"?: "personal" | "cards" | "api-keys" | "logins" | "notes" | "kept" | "activity";
         // An agent's Vault request to open the form for (vault-model.ts); cleared once shown.

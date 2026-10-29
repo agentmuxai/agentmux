@@ -96,19 +96,24 @@ describe("pane sections", () => {
     });
 
     it("sends a section that moved panes to where it lives now, and leaves everything else alone", () => {
-        // The Kanban left Warden for the Swarm.
-        expect(movedSection("warden", "kanban")).toEqual({ view: "swarm", section: "kanban" });
+        // The Kanban left Warden for the Swarm, then the Swarm for a pane of its own: both open that pane.
+        expect(movedSection("warden", "kanban")).toEqual({ view: "kanban" });
+        expect(movedSection("swarm", "kanban")).toEqual({ view: "kanban" });
         expect(movedSection("warden", "host")).toBeNull();
-        expect(movedSection("swarm", "kanban")).toBeNull();
+        expect(movedSection("swarm", "broadcast")).toBeNull();
         expect(movedMeta({ view: "warden", "warden:section": "kanban", "kanban:open": "t1" })).toEqual({
-            view: "swarm",
-            "swarm:section": "kanban",
+            view: "kanban",
             "kanban:open": "t1",
+        });
+        expect(movedMeta({ view: "swarm", "swarm:section": "kanban", "kanban:lanes": true })).toEqual({
+            view: "kanban",
+            "kanban:lanes": true,
         });
         const same = { view: "warden", "warden:section": "host" };
         expect(movedMeta(same)).toBe(same);
         expect(movedMeta(undefined)).toBeUndefined();
-        expect(movedMeta({ view: "swarm", "swarm:section": "kanban" })).toEqual({ view: "swarm", "swarm:section": "kanban" });
+        const broadcast = { view: "swarm", "swarm:section": "broadcast" };
+        expect(movedMeta(broadcast)).toBe(broadcast);
     });
 
     it("does not flag a moved pair in Settings > Widgets", () => {

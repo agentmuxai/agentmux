@@ -1,0 +1,780 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// The Kanban pane's board (kanban-section.tsx). Line style: borders, no fills; the theme's
+// semantic colours mark state, the words carry it. Each column has its stage's colour (a bar over its
+// header, a dot before its name); each card its agent's, on its left edge
+// (SPEC_KANBAN_STAGES_COLOURS_AND_NARROW_VIEW_2026_10_23.md §7).
+
+@use "../../mixins.scss";
+
+// The width at or under which the board is one list (§8); KANBAN_NARROW_PX in kanban-columns.ts.
+$kanban-narrow: 760px;
+
+// The Kanban pane (kanban-instance.tsx): the board fills it edge to edge.
+.kanban-pane {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+}
+
+// The section is its own named container, so it measures itself and not the pane it sits in (`.kanban-pane`
+// gives it a definite width and height). A container cannot answer its own query, so the queries below
+// match what is inside it. It does not scroll (the board and `.kanban` do).
+.kanban-container {
+    flex: 1 1 0;
+    min-height: 0;
+    width: 100%;
+    height: 100%;
+    container-type: inline-size;
+    container-name: kanban;
+}
+
+.kanban {
+    position: relative;
+    overflow: hidden;
+    // Its own stacking context: the sticky section heads and the drawer are ordered against each other
+    // here, not against the rest of the pane.
+    isolation: isolate;
+}
+
+.kanban-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+
+    > :first-child {
+        flex: 1 1 220px;
+        min-width: 160px;
+    }
+}
+
+.kanban-toolbar__switch,
+.kanban-new__hold {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    font-size: var(--text-sm);
+    color: var(--secondary-text-color);
+}
+
+.kanban-error {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+}
+
+.kanban-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+}
+
+.kanban-strip__agent {
+    border-style: dashed;
+}
+
+.kanban-drop--hover {
+    outline: 1px solid var(--accent-color);
+    outline-offset: 1px;
+}
+
+.kanban-board {
+    // A collapsed column's width (board.tsx sets the track list when some are collapsed).
+    --kanban-strip-width: 40px;
+
+    display: grid;
+    grid-template-columns: repeat(8, minmax(160px, 1fr));
+    gap: var(--space-2);
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-x: auto;
+    // A column opening or closing slides its neighbours instead of jumping them.
+    transition: grid-template-columns var(--duration-quick) var(--ease-out);
+
+    @include mixins.when-motion-reduced(transition) {
+        transition: none;
+    }
+}
+
+// Narrow panes: one long list with one scrollbar, each column a section under its sticky header, Needs you
+// first; empty sections are a header line, Merged and Released folded until opened (§8).
+@container kanban (max-width: #{$kanban-narrow}) {
+    .kanban-board {
+        grid-template-columns: 1fr;
+        align-content: start;
+        overflow-x: visible;
+        overflow-y: auto;
+    }
+
+    // Qualified by the board: these come before the base rules below and must win over them.
+    .kanban-board .kanban-column {
+        min-height: auto;
+    }
+
+    .kanban-board .kanban-column__list {
+        overflow-y: visible;
+        min-height: 0;
+    }
+
+    .kanban-column__head {
+        position: sticky;
+        top: 0;
+        z-index: var(--z-tab-name);
+        background: var(--main-bg-color);
+    }
+
+    // Extra-large section labels, so where one section ends and the next begins reads at a glance
+    // while scrolling. Qualified by the board for the same reason as the rules above: the base
+    // label and count rules come later in this file.
+    .kanban-board .kanban-column__label {
+        font-size: var(--text-2xl);
+        line-height: var(--leading-tight);
+
+        // The stage's dot grows with the label.
+        &::before {
+            width: 0.5em;
+            height: 0.5em;
+        }
+    }
+
+    .kanban-board .kanban-column__count {
+        font-size: var(--text-base);
+    }
+
+    .kanban-board .kanban-column--empty .kanban-column__list {
+        display: none;
+    }
+
+    // Folded only in the narrow list; the manager's `narrow` follows the same width.
+    .kanban-board .kanban-column--folded .kanban-column__list {
+        display: none;
+    }
+
+    .kanban-column--needs {
+        order: -1;
+    }
+
+    // In lanes the lane header leads; two sticky levels would overlap on a short pane.
+    .kanban-lanes .kanban-column__head {
+        position: static;
+    }
+}
+
+
+.kanban-lanes {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+
+    // In a lane the columns are as tall as their cards; the lanes scroll together.
+    .kanban-board {
+        flex: none;
+    }
+
+    .kanban-column__list {
+        overflow-y: visible;
+    }
+}
+
+.kanban-lane {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+}
+
+.kanban-lane__head {
+    display: flex;
+    align-items: baseline;
+    align-self: flex-start;
+    gap: var(--space-2);
+}
+
+.kanban-lane__name {
+    font-weight: 600;
+}
+
+.kanban-column {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    border: 1px solid var(--border-color);
+    border-top: 3px solid var(--kanban-stage, var(--border-color));
+    border-radius: var(--radius-sm);
+}
+
+.kanban-column--backlog {
+    --kanban-stage: var(--kanban-stage-backlog);
+}
+
+.kanban-column--research {
+    --kanban-stage: var(--kanban-stage-research);
+}
+
+.kanban-column--specd {
+    --kanban-stage: var(--kanban-stage-specd);
+}
+
+.kanban-column--progress {
+    --kanban-stage: var(--kanban-stage-progress);
+}
+
+.kanban-column--needs {
+    --kanban-stage: var(--kanban-stage-needs);
+
+    border-color: var(--kanban-stage-needs);
+}
+
+.kanban-column--review {
+    --kanban-stage: var(--kanban-stage-review);
+}
+
+.kanban-column--merged {
+    --kanban-stage: var(--kanban-stage-merged);
+}
+
+.kanban-column--released {
+    --kanban-stage: var(--kanban-stage-released);
+}
+
+.kanban-column__head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0 var(--space-1);
+    padding: var(--space-1) var(--space-2);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.kanban-column__label {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    font-weight: 600;
+    font-size: var(--text-sm);
+
+    // The stage's dot, beside its name.
+    &::before {
+        content: "";
+        width: 8px;
+        height: 8px;
+        border-radius: var(--radius-full);
+        background: var(--kanban-stage, var(--border-color));
+    }
+}
+
+.kanban-column__head--foldable {
+    cursor: pointer;
+
+    &:focus-visible {
+        @include mixins.focus-ring;
+    }
+}
+
+.kanban-column__fold {
+    align-self: flex-start;
+}
+
+// The header's collapse control sits beside the count and shrinks to its icon.
+.kanban-column__collapse {
+    margin-left: auto;
+}
+
+// A collapsed column: a strip that is one button. Its name and stats run down it, top to bottom.
+.kanban-column--collapsed {
+    min-width: 0;
+}
+
+.kanban-collapsed {
+    flex: 1 1 auto;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    gap: var(--space-2);
+    height: 100%;
+    min-height: 0;
+    padding: var(--space-2) 0;
+    border: 0;
+    border-radius: 0;
+    overflow: hidden;
+    width: 100%;
+}
+
+.kanban-collapsed__chevron {
+    font-size: var(--text-xs);
+    color: var(--secondary-text-color);
+}
+
+.kanban-collapsed__count {
+    font-weight: 600;
+    font-size: var(--text-sm);
+}
+
+.kanban-collapsed__name,
+.kanban-collapsed__stat {
+    writing-mode: vertical-rl;
+    white-space: nowrap;
+}
+
+.kanban-collapsed__name {
+    font-weight: 600;
+    font-size: var(--text-sm);
+}
+
+.kanban-collapsed__stat {
+    font-size: var(--text-xs);
+    color: var(--secondary-text-color);
+}
+
+.kanban-column__count {
+    font-size: var(--text-xs);
+    color: var(--secondary-text-color);
+}
+
+.kanban-column__count--over {
+    color: var(--warning-text-color);
+    font-weight: 600;
+}
+
+.kanban-column__list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding: var(--space-2);
+    overflow-y: auto;
+    min-height: 60px;
+
+    // The list scrolls; what it holds never shrinks to fit it. Without this, an item with its
+    // own min-height (a Backlog group's) is squeezed to it and its cards spill over the next
+    // (docs/retro/RETRO_KANBAN_BACKLOG_CARDS_OVERLAP_2026_10_21.md).
+    > * {
+        flex-shrink: 0;
+    }
+}
+
+.kanban-group {
+    display: flex;
+    flex: none;
+    flex-direction: column;
+    gap: var(--space-1);
+    padding-bottom: var(--space-1);
+    // A floor, so an empty group stays a drop target; `flex: none` keeps it from being a shrink limit.
+    min-height: 32px;
+}
+
+.kanban-group__head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-1);
+    font-size: var(--text-xs);
+}
+
+.kanban-group__anyone {
+    font-weight: 600;
+}
+
+.kanban-card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    padding: var(--space-2);
+    border: 1px solid var(--border-color);
+    // Its agent's colour; the plain border for a task for no one.
+    border-left: 3px solid var(--kanban-agent-color, var(--border-color));
+    border-radius: var(--radius-sm);
+    background: var(--main-bg-color);
+    cursor: pointer;
+    font-size: var(--text-sm);
+    transition: border-color var(--duration-fast);
+
+    // Not the left edge: that is the agent's colour.
+    &:hover {
+        border-top-color: var(--secondary-text-color);
+        border-right-color: var(--secondary-text-color);
+        border-bottom-color: var(--secondary-text-color);
+    }
+
+    &:focus-visible {
+        @include mixins.focus-ring;
+    }
+}
+
+// A held or cancelled card is quieter, not faded: its text takes the secondary colour (AA on every
+// theme) where `opacity` took the whole card, text and pills, under 3:1 on the light themes.
+.kanban-card--held .kanban-card__text {
+    color: var(--secondary-text-color);
+}
+
+.kanban-card--needs {
+    border-color: var(--kanban-stage-needs);
+    border-left-color: var(--kanban-agent-color, var(--kanban-stage-needs));
+}
+
+.kanban-card--cancelled .kanban-card__text {
+    color: var(--secondary-text-color);
+    text-decoration: line-through;
+}
+
+.kanban-card--untracked {
+    border-style: dashed;
+    cursor: default;
+}
+
+.kanban-card__title {
+    display: flex;
+    gap: var(--space-1);
+    line-height: 1.35;
+}
+
+.kanban-card__num {
+    color: var(--secondary-text-color);
+    font-family: monospace;
+    flex: none;
+}
+
+.kanban-card__text {
+    overflow-wrap: anywhere;
+}
+
+.kanban-card__reason {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-1);
+    color: var(--kanban-stage-needs);
+    font-size: var(--text-xs);
+}
+
+.kanban-card__note {
+    color: var(--secondary-text-color);
+    font-size: var(--text-xs);
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+}
+
+.kanban-card__meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-1);
+}
+
+.kanban-card__repo,
+.kanban-card__untracked-label {
+    font-size: var(--text-xs);
+    color: var(--secondary-text-color);
+}
+
+.kanban-card__foot {
+    display: flex;
+    justify-content: space-between;
+    font-size: var(--text-2xs);
+    color: var(--secondary-text-color);
+}
+
+.kanban-card__actions {
+    display: flex;
+    gap: var(--space-1);
+}
+
+.kanban-agent-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    font-size: var(--text-xs);
+}
+
+// The agent's colour when it has one (set inline), else the text colour it sits in.
+.kanban-agent-chip__name {
+    font-weight: 500;
+    color: var(--kanban-agent-text, inherit);
+}
+
+.kanban-new {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding: var(--space-2);
+    border: 1px solid var(--accent-color);
+    border-radius: var(--radius-sm);
+}
+
+.kanban-drawer {
+    position: absolute;
+    // Over the narrow list's sticky section heads (--z-tab-name).
+    z-index: var(--z-pane-overlay);
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(440px, 92%);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    padding: var(--space-3);
+    overflow-y: auto;
+    background: var(--main-bg-color);
+    border-left: 1px solid var(--border-color);
+    box-shadow: -8px 0 24px rgb(0 0 0 / 25%);
+}
+
+.kanban-drawer__head {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-2);
+}
+
+.kanban-drawer__title {
+    flex: 1;
+    margin: 0;
+    font-size: var(--text-md);
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+.kanban-drawer__facts {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+    font-size: var(--text-sm);
+}
+
+.kanban-drawer__reason {
+    margin: 0;
+    color: var(--warning-text-color);
+}
+
+.kanban-drawer__section {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+
+    h4 {
+        margin: 0;
+        font-size: var(--text-xs);
+        font-weight: 600;
+        color: var(--secondary-text-color);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+    }
+}
+
+.kanban-drawer__quote {
+    margin: 0;
+    padding-left: var(--space-2);
+    border-left: 2px solid var(--accent-color);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.kanban-drawer__doc {
+    font-family: monospace;
+    font-size: var(--text-xs);
+    overflow-wrap: anywhere;
+}
+
+.kanban-drawer__payload {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-size: var(--text-sm);
+}
+
+.kanban-drawer__actions {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
+.kanban-drawer__confirm {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
+.kanban-drawer__row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-1);
+}
+
+.kanban-drawer__text {
+    width: 100%;
+    box-sizing: border-box;
+    padding: var(--space-1) var(--space-2);
+    resize: vertical;
+    font: inherit;
+    font-size: var(--text-sm);
+    color: var(--main-text-color);
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+
+    &:focus-visible {
+        @include mixins.focus-ring;
+    }
+}
+
+.kanban-checklist {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    font-size: var(--text-sm);
+
+    li {
+        display: flex;
+        gap: var(--space-1);
+        align-items: baseline;
+    }
+
+    i {
+        color: var(--secondary-text-color);
+    }
+}
+
+.kanban-after {
+    margin: 0 0 var(--space-1);
+    padding: 0;
+    list-style: none;
+    font-size: var(--text-sm);
+
+    li {
+        display: flex;
+        gap: var(--space-1);
+        align-items: center;
+    }
+}
+
+.kanban-after--finished {
+    color: var(--secondary-text-color);
+    text-decoration: line-through;
+}
+
+.kanban-checklist__done {
+    color: var(--secondary-text-color);
+    text-decoration: line-through;
+}
+
+.kanban-checklist__now i {
+    color: var(--accent-color);
+}
+
+.kanban-history {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    font-size: var(--text-xs);
+}
+
+.kanban-history__line {
+    display: flex;
+    gap: var(--space-2);
+    padding: var(--space-0) 0;
+}
+
+.kanban-history__age {
+    flex: none;
+    width: 3em;
+    color: var(--secondary-text-color);
+}
+
+.kanban-history__body {
+    color: var(--secondary-text-color);
+    overflow-wrap: anywhere;
+}
+
+// The files a task carries (SPEC_KANBAN_TASK_MEDIA_2026_10_25.md §4).
+.kanban-media__strip {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+}
+
+.ui-button.kanban-media__thumb {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    min-width: 0;
+    height: 32px;
+    min-height: 0;
+    padding: 0;
+    overflow: hidden;
+    color: var(--secondary-text-color);
+    background: var(--main-bg-color);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+
+    img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+}
+
+.kanban-media__play {
+    position: absolute;
+    right: var(--space-1);
+    bottom: var(--space-1);
+    font-size: var(--text-2xs);
+    color: var(--main-text-color);
+}
+
+.kanban-media__more {
+    font-size: var(--text-xs);
+    color: var(--secondary-text-color);
+}
+
+.kanban-media__flag {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-1);
+    font-size: var(--text-xs);
+    color: var(--secondary-text-color);
+}
+
+.kanban-media__grid {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
+.kanban-media__item {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    font-size: var(--text-xs);
+}
+
+.kanban-media__removed {
+    padding: var(--space-2);
+    color: var(--secondary-text-color);
+    border: 1px dashed var(--border-color);
+    border-radius: var(--radius-sm);
+}
+
+// The shared inline-media component names a recording by its stored (content-hash) file name; the file's own
+// name is the figcaption's first line, so its label keeps only the size.
+.kanban-media__item .am-media-card-name {
+    display: none;
+}
+
+.kanban-media__name {
+    overflow-wrap: anywhere;
+    color: var(--main-text-color);
+}
