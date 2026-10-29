@@ -939,6 +939,7 @@ partial list.
 | [`SPEC_PILLAR1_STEP3_WINDOW_TOPOLOGY_2026_07_07`](SPEC_PILLAR1_STEP3_WINDOW_TOPOLOGY_2026_07_07.md) | Pillar 1 Step 3 — Persist Window Kind + Parent Linkage to srv |
 | [`SPEC_PILLAR1_STEP4_CRASH_REPROJECT_2026_07_07`](SPEC_PILLAR1_STEP4_CRASH_REPROJECT_2026_07_07.md) | Pillar 1 Step 4 — Crash Reproject: Automatic Multi-Window Reconstruction |
 | [`SPEC_POOL_WINDOW_HWND_NULL_2026_05_06`](SPEC_POOL_WINDOW_HWND_NULL_2026_05_06.md) | Pool window HWND-null at promote time |
+| [`SPEC_PROVIDER_CARD_TAGS_FREE_LOCAL_2026_10_29`](SPEC_PROVIDER_CARD_TAGS_FREE_LOCAL_2026_10_29.md) | SPEC: provider-card tags (Free, Local), card filters, and a free-signup guide |
 | [`SPEC_PROVIDER_CLI_VERSION_UPGRADE_2026_09_06`](SPEC_PROVIDER_CLI_VERSION_UPGRADE_2026_09_06.md) | Provider CLI version upgrade (2026-09-06 drift report) |
 | [`SPEC_PROVIDER_ISOLATION_2026_06_20`](SPEC_PROVIDER_ISOLATION_2026_06_20.md) | SPEC: Provider environment isolation — never touch the user's `~/.claude` or global CLI |
 | [`SPEC_RELEASE_CICD_CORRECTION_2026_06_30`](SPEC_RELEASE_CICD_CORRECTION_2026_06_30.md) | Release CI/CD Correction — remove the `dl.agentmux.ai` fabrication |
