@@ -19,9 +19,10 @@ import { loadActivity, loadGrants, revokeGrant, vaultAvailable, vaultChangedMs, 
 /** How many of an agent's recent uses to list. */
 const RECENT = 50;
 
-/** What an agent does with an entry. A request for a new entry (`requested an entry`) isn't a use, and
- *  the person's own doings (saving, revealing, copying) are the Vault's to show. */
-export const USE_ACTIONS = ["filled a web form", "ran a command"];
+/** What an agent does with an entry, or makes as one (`generated`: a value the Vault made for it). A
+ *  request for a new entry (`requested an entry`) isn't a use, and the person's own doings (saving,
+ *  revealing, copying) are the Vault's to show. */
+export const USE_ACTIONS = ["filled a web form", "ran a command", "generated"];
 export const isAgentUse = (a: VaultActivity): boolean => a.actor !== "you" && USE_ACTIONS.includes(a.action);
 
 /** `visible`: this is the Audit section's shown. Opening the Vault's list opens its key and can ask the

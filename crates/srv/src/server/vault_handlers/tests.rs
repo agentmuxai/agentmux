@@ -398,3 +398,47 @@ async fn an_export_can_be_a_keepass_database_and_only_a_known_format() {
     assert_eq!(&bytes[..4], &[0x03, 0xD9, 0xA2, 0x9A]);
     assert!(!body.to_string().contains("123-45"), "{body}");
 }
+
+/// A state and a signed identity for a registered agent, as `Vault` `generate` sends.
+fn signed_agent(state: &AppState) -> agentmux_common::api_types::UiAutomationAuth {
+    let agent = format!("maker-{}", uuid::Uuid::new_v4());
+    let block = format!("block-{}", uuid::Uuid::new_v4());
+    state.reactive_handler.register_agent(&agent, &block, None).unwrap();
+    let key = state.mstore.agent_jekt_key_ensure(&agent).unwrap();
+    let ts = agentmux_common::time::now_secs();
+    let sig = agentmux_common::jekt_sign::sign_jekt(&key, "ui-automation-identity", &agent, "__srv__", ts, "");
+    agentmux_common::api_types::UiAutomationAuth { agent_id: agent, ts_secs: ts, sig }
+}
+
+// §4.1 of the generate spec: the answer names the entry and never holds its value.
+#[tokio::test]
+async fn generate_answers_with_the_entry_and_never_the_value() {
+    crate::backend::vault::seal::use_test_key();
+    let state = crate::server::tests::test_state();
+    let auth = signed_agent(&state);
+    let app = crate::server::build_router(state.clone());
+    let (s, body) = send(
+        &app,
+        post("/api/v1/vault/generate", &[], json!({ "kind": "api-key", "label": "Webhook signing secret", "why": "sign test webhooks", "auth": auth })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    let id = body["id"].as_str().unwrap().to_string();
+    assert_eq!(body["status"], "created");
+    let value = crate::backend::vault::reveal(&state.identity_store, &id, "value", "revealed").unwrap();
+    assert!(!body.to_string().contains(value.as_str()), "the answer holds the value");
+    let rows = crate::backend::vault::activity(&state.identity_store, 10).unwrap();
+    assert!(rows.iter().any(|r| r.action == "generated" && r.actor == auth.agent_id));
+}
+
+#[tokio::test]
+async fn generate_refuses_a_caller_without_a_proven_identity() {
+    let app = app().await;
+    let (s, body) = send(&app, post("/api/v1/vault/generate", &[], json!({ "kind": "api-key", "label": "x" }))).await;
+    assert_eq!(s, StatusCode::FORBIDDEN, "{body}");
+    let forged = json!({ "agent_id": "AgentY", "ts_secs": agentmux_common::time::now_secs(), "sig": "00" });
+    let (s, _) = send(&app, post("/api/v1/vault/generate", &[], json!({ "kind": "api-key", "label": "x", "auth": forged }))).await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    let (_, list) = send(&app, get("/api/v1/vault")).await;
+    assert_eq!(list["entries"], json!([]));
+}

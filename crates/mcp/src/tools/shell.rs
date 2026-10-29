@@ -61,6 +61,11 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                     Some(v) => Some(serde_json::from_value(v.clone()).map_err(|_| anyhow::anyhow!("secrets must be an object of environment variable names to Vault entry ids, e.g. {{\"STRIPE_API_KEY\": \"api-key-stripe\"}}"))?),
                     None => None,
                 },
+                stdin_secret: arguments.get("stdin_secret").and_then(|v| v.as_str()).map(str::to_string),
+                secret_files: match arguments.get("secret_files").filter(|v| !v.is_null()) {
+                    Some(v) => Some(serde_json::from_value(v.clone()).map_err(|_| anyhow::anyhow!("secret_files must be an object of environment variable names to Vault entry ids, e.g. {{\"GOOGLE_APPLICATION_CREDENTIALS\": \"api-key-gcp\"}}"))?),
+                    None => None,
+                },
             };
 
             let resp = client

@@ -304,9 +304,11 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // for the user's answer, which only the host can carry.
         .route("/api/v1/widgets", get(super::widget_agent_handlers::handle_widgets_list))
         .route("/api/v1/widgets/install", post(super::widget_agent_handlers::handle_widgets_install))
-        // The Vault for agents: entries' names, and asking the person for a
-        // new one. Never a value; writes come only from the host, below.
+        // The Vault for agents: entries' names, asking the person for a new
+        // one, and an entry whose value the Vault makes. Never a value back;
+        // the person's writes come only from the host, below.
         .route("/api/v1/vault", get(super::vault_handlers::handle_vault_list))
+        .route("/api/v1/vault/generate", post(super::vault_handlers::handle_vault_generate))
         .route("/api/v1/vault/request", post(super::vault_handlers::handle_vault_request))
         .route("/api/v1/vault/on_screen", get(super::vault_handlers::handle_vault_on_screen))
         // An agent's `Browser` `fill` with `vault`: the person says where it may go.
