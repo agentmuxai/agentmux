@@ -338,7 +338,7 @@
 }
 
 .files-entry-error {
-    color: var(--warning-text-color, var(--error-color));
+    color: var(--warning-text-color);
     font-size: var(--text-2xs);
 }
 
@@ -373,7 +373,7 @@
     border: 1px solid var(--error-color);
     border-radius: var(--radius-sm);
     background: var(--modal-bg-color);
-    color: var(--error-text-color, var(--main-text-color));
+    color: var(--error-text-color);
     white-space: normal;
 }
 
@@ -567,7 +567,7 @@
 .files-conflict {
     width: min(440px, 90vw);
     padding: 16px;
-    border: 1px solid var(--modal-border-color, var(--border-color));
+    border: 1px solid var(--modal-border-color);
     border-radius: var(--radius-md);
     background: var(--modal-bg-color);
     color: var(--main-text-color);
