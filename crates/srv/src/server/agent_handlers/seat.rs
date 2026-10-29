@@ -96,12 +96,14 @@ pub(crate) enum SeatActor<'a> {
 /// Check every change as it will stand once all of them are written: a lead
 /// may be an agent set in the same call, and a cycle through two changes of one
 /// call is a cycle. Nothing is written. `refuse` starts the message of the
-/// two "no such agent" refusals, so each caller names itself.
+/// two "no such agent" refusals, so each caller names itself. `remote` are the leads on other
+/// machines (`Name@host`) the caller checked against the LAN directory and accepts in this call.
 pub(crate) fn plan_seats(
     mstore: &Store,
     defs: &[AgentDefinition],
     changes: &[SeatChange],
     refuse: &str,
+    remote: &[String],
 ) -> Result<Vec<PlannedSeat>, String> {
     use std::collections::HashMap;
     let now = agentmux_common::time::now_ms();
@@ -131,7 +133,7 @@ pub(crate) fn plan_seats(
                     &agent_id,
                     input,
                     now,
-                    |id| defs.iter().any(|d| d.id == id && d.is_seeded == 0),
+                    |id| defs.iter().any(|d| d.id == id && d.is_seeded == 0) || remote.iter().any(|r| r == id),
                     alone,
                 )?;
                 let lead = seat.lead.clone();
@@ -248,7 +250,17 @@ pub(super) fn set_seat(mstore: &Store, cmd: CommandAgentSetSeatData) -> Result<A
     let _seats = mstore.agent_seat_lock().map_err(|e| format!("agent.setSeat: {e}"))?;
     let defs = mstore.agent_def_list().map_err(|e| format!("agent.setSeat: {e}"))?;
     let change = SeatChange { agent_id: cmd.agent_id, seat: cmd.seat };
-    let planned = plan_seats(mstore, &defs, std::slice::from_ref(&change), "agent.setSeat: ")?;
+    // A lead on another machine, set through MuxAPI, stays when the operator edits the seat's other fields:
+    // the window sends the stored lead back. A new one is set with `Agents set_seat`, which checks the LAN.
+    let kept_remote: Vec<String> = defs
+        .iter()
+        .find(|d| d.id == change.agent_id.trim())
+        .and_then(|d| crate::backend::agent_seat::effective_seat(mstore, d))
+        .and_then(|s| s.lead)
+        .filter(|lead| crate::backend::agent_seat::is_remote_lead(lead))
+        .into_iter()
+        .collect();
+    let planned = plan_seats(mstore, &defs, std::slice::from_ref(&change), "agent.setSeat: ", &kept_remote)?;
     write_seats(mstore, &planned, &SeatActor::Operator)?;
     Ok(AgentSetSeatResult { seat: planned.into_iter().next().and_then(|p| p.seat) })
 }
