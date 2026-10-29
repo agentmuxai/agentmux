@@ -38,6 +38,8 @@ pub mod job_templates;
 pub mod vault;
 pub mod build_cache;
 pub mod build_cache_service;
+pub mod old_versions;
+pub mod old_versions_service;
 pub mod bundle_export;
 pub mod bundle_import;
 pub mod bundle_import_skill_text;
