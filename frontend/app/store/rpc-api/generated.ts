@@ -225,6 +225,8 @@ import type { CommandShellExecData } from "@/types/rpc/CommandShellExecData";
 import type { CommandShellStatusData } from "@/types/rpc/CommandShellStatusData";
 import type { CommandShellStopData } from "@/types/rpc/CommandShellStopData";
 import type { CommandSkillCatalogBindAllData } from "@/types/rpc/CommandSkillCatalogBindAllData";
+import type { CommandSkillCatalogImportCommitData } from "@/types/rpc/CommandSkillCatalogImportCommitData";
+import type { CommandSkillCatalogImportPreviewData } from "@/types/rpc/CommandSkillCatalogImportPreviewData";
 import type { CommandSkillCatalogSetReachData } from "@/types/rpc/CommandSkillCatalogSetReachData";
 import type { CommandSkillCatalogUpsertData } from "@/types/rpc/CommandSkillCatalogUpsertData";
 import type { CommandSkillCatalogUpsertForBundleData } from "@/types/rpc/CommandSkillCatalogUpsertForBundleData";
@@ -478,6 +480,8 @@ import type { SkillCatalogItem } from "@/types/rpc/SkillCatalogItem";
 import type { SkillCatalogItemData } from "@/types/rpc/SkillCatalogItemData";
 import type { SkillCatalogListData } from "@/types/rpc/SkillCatalogListData";
 import type { SkillDeleteResult } from "@/types/rpc/SkillDeleteResult";
+import type { SkillImportCommitResult } from "@/types/rpc/SkillImportCommitResult";
+import type { SkillImportPreview } from "@/types/rpc/SkillImportPreview";
 import type { SkillListItem } from "@/types/rpc/SkillListItem";
 import type { SkillUnbindResult } from "@/types/rpc/SkillUnbindResult";
 import type { StartPageSetReq } from "@/types/rpc/StartPageSetReq";
@@ -2337,6 +2341,22 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<SkillBindAllResult> {
     return client.rpcCall("skill.catalog.bind_all", data, opts);
+  },
+  // command "skill.catalog.import_preview"
+  SkillCatalogImportPreviewCommand(
+    client: RpcClient,
+    data: CommandSkillCatalogImportPreviewData,
+    opts?: RpcOpts
+  ): Promise<SkillImportPreview> {
+    return client.rpcCall("skill.catalog.import_preview", data, opts);
+  },
+  // command "skill.catalog.import_commit"
+  SkillCatalogImportCommitCommand(
+    client: RpcClient,
+    data: CommandSkillCatalogImportCommitData,
+    opts?: RpcOpts
+  ): Promise<SkillImportCommitResult> {
+    return client.rpcCall("skill.catalog.import_commit", data, opts);
   },
   // command "skill.catalog.unbind"
   SkillCatalogUnbindCommand(

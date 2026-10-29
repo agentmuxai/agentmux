@@ -134,6 +134,8 @@ pub mod continuity_state;
 pub mod memory_delivery;
 /// Skills that ship with AgentMux, seeded into the catalog once.
 pub mod builtin_skills;
+/// Reading a skill from a folder, a git repository or a URL, for import.
+pub mod skill_import;
 /// What of Personal Memory fits in a delivery, and what the agent is told about the rest.
 pub mod memory_fit;
 pub mod shellexec;

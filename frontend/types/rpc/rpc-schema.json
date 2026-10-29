@@ -6363,6 +6363,44 @@
     }
   },
   {
+    "command": "skill.catalog.import_commit",
+    "request": "agentmux_srv::backend::rpc_types::skill::CommandSkillCatalogImportCommitData",
+    "requestName": "CommandSkillCatalogImportCommitData",
+    "requestTs": {
+      "imports": [
+        "CommandSkillCatalogImportCommitData"
+      ],
+      "name": "CommandSkillCatalogImportCommitData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::skill::SkillImportCommitResult",
+    "responseName": "SkillImportCommitResult",
+    "responseTs": {
+      "imports": [
+        "SkillImportCommitResult"
+      ],
+      "name": "SkillImportCommitResult"
+    }
+  },
+  {
+    "command": "skill.catalog.import_preview",
+    "request": "agentmux_srv::backend::rpc_types::skill::CommandSkillCatalogImportPreviewData",
+    "requestName": "CommandSkillCatalogImportPreviewData",
+    "requestTs": {
+      "imports": [
+        "CommandSkillCatalogImportPreviewData"
+      ],
+      "name": "CommandSkillCatalogImportPreviewData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::skill::SkillImportPreview",
+    "responseName": "SkillImportPreview",
+    "responseTs": {
+      "imports": [
+        "SkillImportPreview"
+      ],
+      "name": "SkillImportPreview"
+    }
+  },
+  {
     "command": "skill.catalog.list",
     "request": "agentmux_srv::backend::rpc_types::skill::SkillCatalogListData",
     "requestName": "SkillCatalogListData",
