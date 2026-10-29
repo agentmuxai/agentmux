@@ -27,17 +27,20 @@
  *
  * A header small enough to fall under WCAG 2.3.1's general flash threshold is outside
  * the rule, and is outside this budget: it always gets the burst. The threshold is a
- * flashing area of more than a quarter of a 10-degree field of view (341 by 256 px on
- * the 1024 by 768 reference screen). Without this a pointer moving from pane to pane
+ * flashing area of more than a quarter of a 10-degree field of view: a quarter of
+ * 341 by 256 px on the 1024 by 768 reference screen, 21,824 px² (W3C technique G176).
+ * The pane the pointer left changes in the same frame as the one it enters, so each
+ * gets half of that. Without this a pointer moving from pane to pane
  * (the exit of the one it left counts against the burst of the one it enters) got the
  * blink on the first pane and only the held negative, or the outline alone, on the
  * next ones, so only some panes seemed to flash.
  * docs/specs/SPEC_PANE_TAB_MULTI_SELECT_MOVE_AND_COLLAPSED_EXPAND_2026_10_24.md §3.
  */
 
-/** A flashing area (CSS px²) at or under which a hover is outside the flash rule: half of the threshold
- *  (341 by 256 px), because the pane the pointer left changes in the same frame as the one it enters. */
-export const EXEMPT_AREA_PX2 = (341 * 256) / 2;
+/** A flashing area (CSS px²) at or under which a hover is outside the flash rule: half of the threshold,
+ *  which is a quarter of a 341 by 256 px field (21,824 px²), because the pane the pointer left changes in
+ *  the same frame as the one it enters. */
+export const EXEMPT_AREA_PX2 = (341 * 256) / 4 / 2;
 
 /** Blinks in a burst. Must equal `$drop-blink-count` in drop-feedback.scss (a test checks). */
 export const BLINK_COUNT = 2;

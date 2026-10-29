@@ -106,10 +106,16 @@ describe("the window's flash budget", () => {
     });
 
     describe("a header under the flash threshold", () => {
-        const header = 1000 * 32; // a pane header's area in CSS px²
+        const header = 300 * 33; // a narrow pane header's area in CSS px²
 
-        it("is small enough to be outside the rule: a quarter of a 10-degree field is far larger", () => {
+        it("is small enough to be outside the rule: half of a quarter of a 10-degree field (341 by 256 px)", () => {
+            expect(EXEMPT_AREA_PX2).toBe(10912);
             expect(header).toBeLessThan(EXEMPT_AREA_PX2);
+        });
+
+        it("a wide header, or a narrow one at 200% zoom, is not exempt", () => {
+            expect(1000 * 33).toBeGreaterThan(EXEMPT_AREA_PX2);
+            expect(500 * 66).toBeGreaterThan(EXEMPT_AREA_PX2);
         });
 
         it("always gets the burst, pane after pane, however fast the pointer moves between them", () => {
