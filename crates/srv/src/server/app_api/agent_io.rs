@@ -236,29 +236,77 @@ pub(crate) fn agent_panes_of(store: &Store, agent_id: &str) -> Vec<AgentOpenPane
         .collect()
 }
 
+/// An agent's connection ends processes only under its own block or a worker's it opened. Another
+/// agent's go through `agent.stop`, which gives the person their override window, so killing them
+/// directly would skip it.
+pub(crate) async fn refuse_other_agents_processes(state: &AppState, caller: &str, block_id: &str) -> Result<(), String> {
+    match window_caller_for(state, caller, block_id).await {
+        Some(_) => Err(format!(
+            "FORBIDDEN: block {block_id} belongs to another agent; stop it with Agents stop (its user gets a window to keep it running)"
+        )),
+        None => Ok(()),
+    }
+}
+
+/// `fleet.bulk-stop` from the agent `caller`: its own block and its workers stop at once, every
+/// other agent's opens the override window (`pending` in the answer) and stops when it runs out.
+pub(crate) async fn agent_bulk_stop(
+    state: &AppState,
+    caller: &str,
+    targets: Vec<String>,
+    signal: Option<&str>,
+    staged: Option<StagePlanInput>,
+) -> FleetActionResult {
+    let (mut waits, mut at_once, mut by) = (Vec::new(), Vec::new(), None);
+    for block_id in targets {
+        match window_caller_for(state, caller, &block_id).await {
+            Some(who) => {
+                by.get_or_insert(who);
+                waits.push(block_id);
+            }
+            None => at_once.push(block_id),
+        }
+    }
+    let mut result = if at_once.is_empty() {
+        FleetActionResult::default()
+    } else {
+        super::fleet::fleet_bulk_stop_impl(state, at_once, signal, staged.clone()).await
+    };
+    if let Some(by) = by {
+        let (now, pending) = super::fleet::fleet_stop_keep_pane_with_override(state, &by, waits, signal, staged).await;
+        result.succeeded.extend(now.succeeded);
+        result.failed.extend(now.failed);
+        result.aborted_early |= now.aborted_early;
+        result.pending.extend(pending.into_iter().map(|v| v.block_id));
+    }
+    result
+}
+
 fn register_agent_kill_process(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let process_tracker = state.process_tracker.clone();
-    engine.register_typed(COMMAND_AGENT_KILL_PROCESS, move |cmd: AgentKillProcessCommand, _ctx| {
-        let process_tracker = process_tracker.clone();
+    let state = state.clone();
+    engine.register_typed(COMMAND_AGENT_KILL_PROCESS, move |cmd: AgentKillProcessCommand, ctx| {
+        let state = state.clone();
         async move {
+                refuse_other_agents_processes(&state, &ctx.agent_id, &cmd.block_id).await?;
                 tracing::info!(
                     block_id = %cmd.block_id,
                     pid = cmd.pid,
                     "agent.kill-process"
                 );
-                let ok = process_tracker.kill_pid(&cmd.block_id, cmd.pid);
+                let ok = state.process_tracker.kill_pid(&cmd.block_id, cmd.pid);
                 Ok(AgentKillResult { ok })
         }
     });
 }
 
 fn register_agent_kill_tree(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let process_tracker = state.process_tracker.clone();
-    engine.register_typed(COMMAND_AGENT_KILL_TREE, move |cmd: AgentKillTreeCommand, _ctx| {
-        let process_tracker = process_tracker.clone();
+    let state = state.clone();
+    engine.register_typed(COMMAND_AGENT_KILL_TREE, move |cmd: AgentKillTreeCommand, ctx| {
+        let state = state.clone();
         async move {
+                refuse_other_agents_processes(&state, &ctx.agent_id, &cmd.block_id).await?;
                 tracing::info!(block_id = %cmd.block_id, "agent.kill-tree");
-                let ok = process_tracker.kill_tree(&cmd.block_id);
+                let ok = state.process_tracker.kill_tree(&cmd.block_id);
                 Ok(AgentKillResult { ok })
         }
     });
@@ -668,14 +716,15 @@ fn register_agent_stop(engine: &Arc<WshRpcEngine>, state: &AppState) {
     });
 }
 
-/// The answer when `agent.stop` on `cmd.block_id` opened an override window for the agent `caller`
-/// (a connection's registered agent, empty for the window), or `None` when the stop is immediate:
-/// the window's own, the agent's own block, or a worker it opened.
-async fn override_window_for(state: &AppState, caller: &str, cmd: &CommandAgentStopApiData) -> Option<AgentStopResult> {
+/// The agent an override window is opened for, when `caller` (a connection's registered agent,
+/// empty for the person's window) acts on `block_id` that is another agent's: `Some(by)`, the caller's
+/// uid (its name when it has none). `None` for the window itself, the agent's own block and a worker
+/// it opened, which it ends at once.
+pub(crate) async fn window_caller_for(state: &AppState, caller: &str, block_id: &str) -> Option<String> {
     if caller.trim().is_empty() {
         return None;
     }
-    let (store, block, name) = (state.mstore.clone(), cmd.block_id.clone(), caller.to_string());
+    let (store, block, name) = (state.mstore.clone(), block_id.to_string(), caller.to_string());
     let (caller_uid, target_uid) = tokio::task::spawn_blocking(move || {
         (crate::backend::agent_resolve::resolve_agent_id(&store, &name).ok(), crate::backend::agent_resolve::uid_for_block(&store, &block))
     })
@@ -686,8 +735,15 @@ async fn override_window_for(state: &AppState, caller: &str, cmd: &CommandAgentS
             return None;
         }
     }
-    let by = caller_uid.as_deref().unwrap_or(caller);
-    let (_, pending) = super::fleet::fleet_stop_keep_pane_with_override_opts(state, by, vec![cmd.block_id.clone()], cmd.signal.as_deref(), cmd.stop_background, None).await;
+    Some(caller_uid.unwrap_or_else(|| caller.to_string()))
+}
+
+/// The answer when `agent.stop` on `cmd.block_id` opened an override window for the agent `caller`
+/// (a connection's registered agent, empty for the window), or `None` when the stop is immediate:
+/// the window's own, the agent's own block, or a worker it opened.
+async fn override_window_for(state: &AppState, caller: &str, cmd: &CommandAgentStopApiData) -> Option<AgentStopResult> {
+    let by = window_caller_for(state, caller, &cmd.block_id).await?;
+    let (_, pending) = super::fleet::fleet_stop_keep_pane_with_override_opts(state, &by, vec![cmd.block_id.clone()], cmd.signal.as_deref(), cmd.stop_background, None).await;
     pending.into_iter().next().map(|_| AgentStopResult { block_id: cmd.block_id.clone(), status: "pending_override".to_string(), exit_code: None })
 }
 
