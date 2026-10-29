@@ -442,3 +442,32 @@ async fn generate_refuses_a_caller_without_a_proven_identity() {
     let (_, list) = send(&app, get("/api/v1/vault")).await;
     assert_eq!(list["entries"], json!([]));
 }
+
+// QTest, 2026-10-27: a request asked again after the session ended opened a second form.
+// The same agent asking for the same entry gets the one request, then its answer.
+#[tokio::test]
+async fn asking_again_for_the_same_entry_opens_no_second_form() {
+    crate::backend::vault::seal::use_test_key();
+    let state = crate::server::tests::test_state();
+    *state.host_ipc.lock().await = Some(crate::server::state::HostIpc { port: 1, token: "host-ipc-token".into() });
+    let auth = signed_agent(&state);
+    let app = crate::server::build_router(state);
+    let label = format!("Store client secret {}", uuid::Uuid::new_v4().simple());
+    let ask = json!({ "kind": "api-key", "label": label, "why": "sign the Store upload", "wait_secs": 0, "auth": auth });
+
+    let (s, first) = send(&app, post("/api/v1/vault/request", &[], ask.clone())).await;
+    assert_eq!(s, StatusCode::OK, "{first}");
+    assert_eq!(first["status"], "pending");
+    let (_, second) = send(&app, post("/api/v1/vault/request", &[], ask.clone())).await;
+    assert_eq!(second["status"], "pending");
+    assert_eq!(second["request_id"], first["request_id"], "the retry joins the open request");
+    assert_eq!(requests::requests().list().iter().filter(|r| r.label == label).count(), 1, "one form");
+
+    let fill = json!({ "op": "create", "request_id": first["request_id"], "kind": "api-key", "label": label, "parts": { "value": "client-secret-value-123" } });
+    let (s, body) = send(&app, post("/api/v1/host/vault", &[HOST], fill)).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    let (_, third) = send(&app, post("/api/v1/vault/request", &[], ask)).await;
+    assert_eq!(third["status"], "created", "{third}");
+    assert_eq!(third["id"], body["data"]["id"]);
+    assert!(!third.to_string().contains("client-secret-value"));
+}
