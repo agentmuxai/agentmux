@@ -14,7 +14,7 @@ import { registerPaneTab } from "./pane-tab-registry";
 // Two sectioned panes, as their manifests declare them (pane-sections.ts).
 const unregister: (() => void)[] = [];
 beforeAll(() => {
-    for (const [view, ids] of [["warden", ["jobs", "host"]], ["swarm", ["supervisor", "kanban"]], ["memory", ["global", "skills"]]] as const) {
+    for (const [view, ids] of [["warden", ["jobs", "host"]], ["swarm", ["supervisor", "broadcast"]], ["memory", ["global", "skills"]]] as const) {
         unregister.push(
             registerPaneTab({
                 apiVersion: 1,
@@ -242,11 +242,13 @@ describe("permissions", () => {
         const state = await ready(h);
         await handleBridgeRequest(h, state, "panes.open", { view: "warden", meta: { "warden:section": "jobs", cmd: "x" } });
         expect(h.openPane).toHaveBeenLastCalledWith("warden", { "warden:section": "jobs" }, "right");
-        await handleBridgeRequest(h, state, "panes.open", { view: "swarm", meta: { "swarm:section": "kanban", cmd: "x" } });
-        expect(h.openPane).toHaveBeenLastCalledWith("swarm", { "swarm:section": "kanban" }, "right");
-        // The Kanban moved from Warden to the Swarm: the old call opens where it lives now (MOVED_SECTIONS).
+        await handleBridgeRequest(h, state, "panes.open", { view: "swarm", meta: { "swarm:section": "broadcast", cmd: "x" } });
+        expect(h.openPane).toHaveBeenLastCalledWith("swarm", { "swarm:section": "broadcast" }, "right");
+        // The Kanban moved from Warden to the Swarm and then out of it: either old call opens the Kanban pane (MOVED_SECTIONS).
         await handleBridgeRequest(h, state, "panes.open", { view: "warden", meta: { "warden:section": "kanban", cmd: "x" } });
-        expect(h.openPane).toHaveBeenLastCalledWith("swarm", { "swarm:section": "kanban" }, "right");
+        expect(h.openPane).toHaveBeenLastCalledWith("kanban", {}, "right");
+        await handleBridgeRequest(h, state, "panes.open", { view: "swarm", meta: { "swarm:section": "kanban" } });
+        expect(h.openPane).toHaveBeenLastCalledWith("kanban", {}, "right");
         await handleBridgeRequest(h, state, "panes.open", { view: "warden", meta: { "warden:section": "vault", "vault:section": "cards" } });
         expect(h.openPane).toHaveBeenLastCalledWith("warden", { "warden:section": "vault", "vault:section": "cards" }, "right");
         await handleBridgeRequest(h, state, "panes.open", { view: "warden", meta: { "vault:section": "nope", "vault:request": "r1" } });

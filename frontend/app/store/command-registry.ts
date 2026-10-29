@@ -170,10 +170,8 @@ export function registerDefaultCommands(): void {
         label: "Open Kanban",
         category: "Open",
         icon: "table-columns",
-        // The Swarm's Kanban section: the tab's Swarm, or a new one (what kanban-held.tsx's openKanbanTask
-        // does; the store layer doesn't import views).
-        execute: () =>
-            openOrFocusPaneByView("swarm", { meta: { view: "swarm", "swarm:section": "kanban" } }, { "swarm:section": "kanban" }),
+        // The tab's Kanban, or a new one (the store layer doesn't import views).
+        execute: () => openOrFocusPaneByView("kanban", { meta: { view: "kanban" } }),
     });
     commandRegistry.register({
         id: "open:vault",

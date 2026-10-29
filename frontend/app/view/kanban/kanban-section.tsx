@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// The Swarm's Kanban section (it moved here from Warden, SPEC_SWARM_SECTIONS_SUPERVISOR_SETTINGS_AND_KANBAN_2026_10_24.md §4):
+// The Kanban pane's board (it was a Warden section, then a Swarm section, SPEC_SWARM_SECTIONS_SUPERVISOR_SETTINGS_AND_KANBAN_2026_10_24.md §4):
 // what work there is and where it stands, kept current by the agents doing it
 // (docs/specs/SPEC_WARDEN_KANBAN_2026_10_20.md). Eight columns
 // (SPEC_KANBAN_STAGES_COLOURS_AND_NARROW_VIEW_2026_10_23.md): Backlog and Spec'd (grouped by the agent each
@@ -39,8 +39,8 @@ import { KanbanModel } from "./kanban-model";
 import { KanbanNewTask } from "./kanban-new-task";
 import { KANBAN_REMINDERS_DESCRIPTION, kanbanRemindersOn, setKanbanReminders } from "./kanban-reminders";
 import { reportsTo, ReportsToSelect, seatOf, taskReportsTo, useSeatIndex } from "./kanban-seats";
+import type { KanbanSectionProps } from "./kanban-props";
 import type { KanbanAgent, KanbanTask } from "./kanban-types";
-import type { SwarmKanbanSlotProps } from "@/app/view/swarm/swarm-kanban-slot";
 
 import "@/app/view/warden-shared/warden-manager-chrome.scss";
 import "./kanban.scss";
@@ -66,8 +66,8 @@ function AgentStripChip(props: { agent: KanbanAgent; model: KanbanModel; onOpenA
     );
 }
 
-/** What the Swarm passes (swarm-kanban-slot.ts); all but `visible` are optional, so the board also mounts alone. */
-export const KanbanSection = (props: Pick<SwarmKanbanSlotProps, "visible"> & Partial<Omit<SwarmKanbanSlotProps, "visible">>): JSX.Element => {
+/** What the Kanban pane passes (kanban-props.ts); all but `visible` are optional, so the board also mounts alone. */
+export const KanbanSection = (props: Pick<KanbanSectionProps, "visible"> & Partial<Omit<KanbanSectionProps, "visible">>): JSX.Element => {
     const model = new KanbanModel();
     onCleanup(() => model.dispose());
     createEffect(() => model.setVisible(props.visible));
@@ -78,7 +78,7 @@ export const KanbanSection = (props: Pick<SwarmKanbanSlotProps, "visible"> & Par
     const tick = useTick(10_000);
     // The narrow layout (SPEC_KANBAN_STAGES_COLOURS_AND_NARROW_VIEW_2026_10_23.md §8): this section's own width
     // at KANBAN_NARROW_PX or less, as `kanban.scss`'s container query; the board folds Merged and Released.
-    // The section is the named container (`.kanban-container`), so the Swarm needs no knowledge of it.
+    // The section is the named container (`.kanban-container`), so the pane needs no knowledge of it.
     let container: HTMLDivElement | undefined;
     const [narrow, setNarrow] = createSignal(false);
     onMount(() => {
@@ -159,7 +159,7 @@ export const KanbanSection = (props: Pick<SwarmKanbanSlotProps, "visible"> & Par
     // The soft limit is on the board's whole Review column: every lane's, and those a filter hides.
     const reviewTotal = createMemo(() => (board()?.tasks ?? []).filter((t) => columnOf(t) === "review").length);
     const open = (t: KanbanTask) => setOpenId(t.id);
-    // "Go to this agent": in the Swarm, its row is selected; on its own, the agent is revealed where it is.
+    // "Go to this agent": the pane's owner may place it (`onOpenAgent`); on its own, the agent is revealed where it is.
     const openAgent = (blockId: string) =>
         props.onOpenAgent ? props.onOpenAgent(blockId) : void revealBlock(blockId, { source: "kanban" });
 

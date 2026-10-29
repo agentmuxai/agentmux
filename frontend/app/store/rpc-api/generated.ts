@@ -1622,9 +1622,9 @@ export const GeneratedApi = {
   // command "kanban.act"
   KanbanActCommand(
     client: RpcClient,
-    data: import("@/app/view/warden-kanban/kanban-types").KanbanActRequest,
+    data: import("@/app/view/kanban/kanban-types").KanbanActRequest,
     opts?: RpcOpts
-  ): Promise<import("@/app/view/warden-kanban/kanban-types").KanbanActResult> {
+  ): Promise<import("@/app/view/kanban/kanban-types").KanbanActResult> {
     return client.rpcCall("kanban.act", data, opts);
   },
   // command "kanban.list"
@@ -1632,7 +1632,7 @@ export const GeneratedApi = {
     client: RpcClient,
     data: Record<string, never>,
     opts?: RpcOpts
-  ): Promise<import("@/app/view/warden-kanban/kanban-types").KanbanBoard> {
+  ): Promise<import("@/app/view/kanban/kanban-types").KanbanBoard> {
     return client.rpcCall("kanban.list", data, opts);
   },
   // command "kanban.task"
@@ -1640,7 +1640,7 @@ export const GeneratedApi = {
     client: RpcClient,
     data: { id: string },
     opts?: RpcOpts
-  ): Promise<import("@/app/view/warden-kanban/kanban-types").KanbanTaskDetail> {
+  ): Promise<import("@/app/view/kanban/kanban-types").KanbanTaskDetail> {
     return client.rpcCall("kanban.task", data, opts);
   },
   // command "linkagentidentity"

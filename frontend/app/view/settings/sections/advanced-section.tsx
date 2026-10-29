@@ -10,7 +10,7 @@ import {
     KANBAN_REMINDERS_DESCRIPTION,
     KANBAN_REMINDERS_SETTING,
     kanbanRemindersOn,
-} from "@/app/view/warden-kanban/kanban-reminders";
+} from "@/app/view/kanban/kanban-reminders";
 import type { SettingsIndexEntry } from "../settings-model";
 import { KeyValueEditor, NumberControl, SectionHeader, set, SettingRow, ToggleControl } from "../settings-controls";
 

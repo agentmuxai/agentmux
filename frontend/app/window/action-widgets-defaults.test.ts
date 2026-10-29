@@ -76,15 +76,17 @@ describe("handleWidgetSelect", () => {
         expect(store.createBlock).not.toHaveBeenCalled();
     });
 
-    // The Kanban is a section of the Swarm: its button switches the Swarm in this tab to it. An entry
-    // that still names Warden's Kanban (a user's own, from before the move) does the same.
-    it("opens the Kanban's button on the Swarm's Kanban section, in the Swarm already open", async () => {
+    // The Kanban is a pane of its own: its button focuses the one open in this tab. An entry that still
+    // names the Kanban as a section of Warden or the Swarm (a user's own, from before the moves) does the same.
+    it("focuses the open Kanban from its button, and from an entry that names an old section", async () => {
         const entry = (meta: Record<string, unknown>) => ({ label: "Kanban", blockdef: { meta } }) as unknown as WidgetConfigType;
+        await handleWidgetSelect(entry({ view: "kanban" }));
         await handleWidgetSelect(entry({ view: "swarm", "swarm:section": "kanban" }));
         await handleWidgetSelect(entry({ view: "warden", "warden:section": "kanban" }));
         expect(store.openOrFocusPaneByView.mock.calls).toEqual([
-            ["swarm", { meta: { view: "swarm", "swarm:section": "kanban" } }, { "swarm:section": "kanban" }],
-            ["swarm", { meta: { view: "swarm", "swarm:section": "kanban" } }, { "swarm:section": "kanban" }],
+            ["kanban", { meta: { view: "kanban" } }, undefined],
+            ["kanban", { meta: { view: "kanban" } }, undefined],
+            ["kanban", { meta: { view: "kanban" } }, undefined],
         ]);
         expect(store.createBlock).not.toHaveBeenCalled();
     });

@@ -325,17 +325,17 @@ export function buildPaneWidgetMenuItems(
 // ── Widget actions ────────────────────────────────────────────────────────────
 
 /** Views whose widget focuses the pane already open in this tab instead of
- *  opening another: there's one Connectors, one Memory and one Warden (with the
- *  Vault) to manage. An entry for a section (Vault, or the Swarm's Kanban) switches it there. */
-const FOCUS_EXISTING_VIEWS = new Set(["connectors", "memory", "warden"]);
+ *  opening another: there's one Connectors, one Memory, one Warden (with the
+ *  Vault) and one Kanban to manage. An entry for a section (the Vault) switches it there. */
+const FOCUS_EXISTING_VIEWS = new Set(["connectors", "memory", "warden", "kanban"]);
 
 export async function handleWidgetSelect(widget: WidgetConfigType) {
-    // An entry that still names a section that moved (Warden's Kanban) opens where it lives now.
+    // An entry that still names a section that moved (the Kanban, of Warden or the Swarm) opens where it lives now.
     const meta = movedMeta(widget.blockdef?.meta as Record<string, unknown> | undefined);
     const blockdef = meta === widget.blockdef?.meta ? widget.blockdef : { ...widget.blockdef, meta: meta as MetaType };
     const view = meta?.["view"] as string | undefined;
-    // The Swarm focuses the one in this tab only to switch it to a section (the Kanban's button); its
-    // plain button opens another Swarm, as before.
+    // The Swarm focuses the one in this tab only to switch it to a section; its plain button opens
+    // another Swarm, as before.
     const focusSection = view === "swarm" && sectionKeysIn(meta) !== undefined;
     if (view && (FOCUS_EXISTING_VIEWS.has(view) || focusSection) && !widget.magnified) {
         await openOrFocusPaneByView(view, blockdef, sectionKeysIn(meta) as MetaType | undefined);

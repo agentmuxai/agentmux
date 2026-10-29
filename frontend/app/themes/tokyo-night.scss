@@ -87,7 +87,7 @@
 }
 
 // The Kanban's stage colours this palette needs moved apart, or made readable
-// (view/warden-kanban/kanban-stage-colours.test.ts).
+// (view/kanban/kanban-stage-colours.test.ts).
 [data-theme="tokyo-night"] {
     --kanban-stage-backlog: var(--conn-icon-color-3);
     --kanban-stage-released: var(--conn-icon-color-4);
