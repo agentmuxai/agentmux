@@ -118,6 +118,9 @@ pub(crate) mod tests;
 #[path = "tests/sender_claims_tests.rs"]
 mod sender_claims_tests;
 #[cfg(test)]
+#[path = "tests/http_skill_tests.rs"]
+mod http_skill_tests;
+#[cfg(test)]
 #[path = "tests/peer_veto_tests.rs"]
 mod peer_veto_tests;
 #[cfg(test)]

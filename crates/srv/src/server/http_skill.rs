@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! `POST /api/v1/agent/skill`: an agent manages the skill catalog (list, get, upsert, delete, bind,
-//! unbind, reach), the same operations Memory > Skills offers a person. Backs the `Skill` MCP tool.
+//! unbind, reach), the same operations Memory > Skills offers a person. Backs the `Skills` MCP tool.
 //! The request carries the agent's own token; every change is recorded as that agent.
 
 use super::*;
