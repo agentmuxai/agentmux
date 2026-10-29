@@ -80,12 +80,17 @@ pub fn revoke_block(block_id: &str) {
     }
 }
 
-/// The routes a container agent may call. Everything else is refused, notably
-/// host shell/pty creation, file streaming, editor and attachment paths, pane
-/// and agent opening, UI automation, cron, and the `/ws` and
-/// `/agentmux/service` RPC surfaces. Matched on the raw path, exactly as the
-/// router matches it.
+/// Whether a container agent may call `path`. Every route is open to it except the ones
+/// [`crate::backend::container_routes`] refuses, with a reason each: commands on the host, the host's
+/// files outside its mounts, the app's own plumbing. Matched on the raw path, exactly as the router
+/// matches it.
 pub fn container_route_allowed(path: &str) -> bool {
+    crate::backend::container_routes::refusal(path).is_none()
+}
+
+/// The routes a container token has always been accepted on. They work for a grant that carries no
+/// agent identity (they bind to the grant's own block, or to nobody in particular).
+fn accepted_without_identity(path: &str) -> bool {
     const EXACT: &[&str] = &[
         "/agentmux/reactive/inject",
         "/agentmux/reactive/agent",
@@ -94,58 +99,31 @@ pub fn container_route_allowed(path: &str) -> bool {
         "/agentmux/work",
         "/agentmux/work/claim",
         "/api/v1/self",
-        "/api/v1/agent/memory/list",
-        "/api/v1/agent/memory/read",
-        "/api/v1/agent/memory/write",
-        "/api/v1/agent/memory/history",
-        "/api/v1/agent/memory/diff",
-        "/api/v1/agent/memory/revert",
-        // Read-only: Global Memory is composed into every agent's context at
-        // launch, so writes from a sandbox would reach host agents.
-        "/api/v1/agent/globalmemory/list",
-        "/api/v1/agent/globalmemory/read",
-        "/api/v1/agent/globalmemory/history",
-        "/api/v1/agent/globalmemory/diff",
         "/api/v1/agent/self/quit",
         "/api/v1/agent/pane/close",
-        // The `SessionStart` hook's delivery of Global and Personal Memory. The
-        // handlers bind the request to the grant's own block and agent
-        // (`memory_delivery_handlers`), and ignore the host paths it names.
-        "/api/v1/agent/memory/session-start/part",
-        "/api/v1/agent/memory/session-start/ack",
-        // `agentmux-bashwrap`'s live output into the grant's own pane, as a typed `tool_chunk` only
-        // (`server::container_tool_chunk`); the generic `/agentmux/wps/publish` relay stays refused.
         "/api/v1/agent/tool-chunk",
-        // `RegisterDevServer`: the tool exists for container agents' dev servers. The handler takes
-        // the caller's own pane from the token and resolves the container's address itself, so a
-        // container can register a route to itself only (`app_api::dev_server`).
-        "/api/v1/agent/dev_server/register",
-        // The GitHub token for the caller's own git and `gh`. The handler takes the agent from the token
-        // and answers only where the container's git setup is on (`github_tokens::container_git_hooks`).
-        "/api/v1/github/token",
     ];
-    if EXACT.contains(&path) {
-        return true;
-    }
     let is_id = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
-    if let Some(rest) = path.strip_prefix("/agentmux/work/") {
-        return match rest.split('/').collect::<Vec<_>>().as_slice() {
+    EXACT.contains(&path)
+        || path == "/"
+        || path == "/health"
+        || ["/docsite/", "/schema/", "/agentmux/widget-sdk/"].iter().any(|p| path.starts_with(p))
+        || path.strip_prefix("/agentmux/work/").is_some_and(|rest| match rest.split('/').collect::<Vec<_>>().as_slice() {
             [id] => is_id(id),
             [id, "heartbeat" | "complete" | "release" | "update" | "ask" | "submit"] => is_id(id),
             _ => false,
-        };
-    }
-    if let Some(id) = path.strip_prefix("/api/v1/agent/shutdown/") {
-        return is_id(id);
-    }
-    false
+        })
+        || path.strip_prefix("/api/v1/agent/shutdown/").is_some_and(is_id)
 }
 
 /// Routes that act on the calling agent's own data, and so are refused to a
 /// container token that carries no agent identity rather than falling back to
-/// an agent named in the request body.
+/// an agent named in the request body. Every route a container has been given since the
+/// denylist (`container_routes`) opened them all does: a handler that takes the agent from
+/// the caller serves it, one that takes it from the body does not. The memory routes always
+/// did, the session-start delivery included.
 pub fn route_needs_identity(path: &str) -> bool {
-    path.starts_with("/api/v1/agent/memory/") || path == "/api/v1/agent/dev_server/register" || path == "/api/v1/github/token"
+    path.starts_with("/api/v1/agent/memory/") || !accepted_without_identity(path)
 }
 
 /// A container turn's `docker exec` env: the container denylist applied, and
@@ -220,14 +198,13 @@ mod tests {
     }
 
     #[test]
-    fn allowlist_admits_agent_routes_only() {
+    fn a_container_agent_has_the_routes_a_native_agent_has_except_the_hosts() {
         for ok in [
             "/agentmux/reactive/inject",
             "/agentmux/discovery",
             "/agentmux/work",
             "/agentmux/work/claim",
             "/agentmux/work/7f3a/heartbeat",
-            "/agentmux/work/7f3a",
             "/api/v1/self",
             "/api/v1/agent/memory/write",
             "/api/v1/agent/globalmemory/read",
@@ -235,6 +212,13 @@ mod tests {
             "/api/v1/agent/shutdown/req-12",
             "/api/v1/agent/tool-chunk",
             "/api/v1/agent/dev_server/register",
+            "/api/v1/work-facts/who",
+            "/api/v1/vault",
+            "/api/v1/ui/browser/open",
+            "/api/v1/ui/screenshot",
+            "/api/v1/ui/shortcuts/list",
+            "/agentmux/cron",
+            "/api/v1/agent/open",
         ] {
             assert!(container_route_allowed(ok), "{ok} should be allowed");
         }
@@ -245,45 +229,28 @@ mod tests {
             "/agentmux/service",
             "/ws",
             "/api/v1/pane/open",
-            "/api/v1/agent/open",
             "/api/v1/attachments/upload",
-            "/api/v1/ui/browser/eval",
-            "/api/v1/ui/screenshot",
-            "/agentmux/cron",
-            "/api/v1/fleet/bulk-stop",
+            "/api/v1/host/browser_bypass",
+            "/api/v1/agent/desktop/authorize",
             "/api/v1/agent/globalmemory/write",
             "/api/v1/agent/globalmemory/remove",
-            "/agentmux/reactive/agents",
-            "/agentmux/work/7f3a/steal",
-            "/agentmux/work/../service",
-            "/api/v1/agent/shutdown/",
-            "/api/v1/self/",
-            "//api/v1/self",
-            // srv signs for a container agent, which holds no key to fetch.
+            "/agentmux/wps/publish",
+            "/agentmux/jobs/stop-run",
             "/agentmux/agents/self/keys",
-            // MCP health beats belong to persistent controllers; a container's turns are per-exec.
             "/api/v1/agent/self/mcp-beat",
-            "/api/v1/agent/dev_server/register/",
-            "/api/v1/agent/dev_server",
         ] {
             assert!(!container_route_allowed(denied), "{denied} should be refused");
         }
     }
 
     #[test]
-    fn the_github_token_route_is_open_to_a_container_and_needs_its_agent() {
-        assert!(container_route_allowed("/api/v1/github/token"));
-        assert!(!container_route_allowed("/api/v1/github/token/"));
-        assert!(!container_route_allowed("/api/v1/github/connect"));
-        // Without an agent behind the token there is nothing to take the request's word for.
-        assert!(route_needs_identity("/api/v1/github/token"));
-    }
-
-    #[test]
-    fn registering_a_dev_server_needs_the_agents_identity() {
-        // Without one the route would fall back to an agent named in the body.
-        assert!(route_needs_identity("/api/v1/agent/dev_server/register"));
-        assert!(!route_needs_identity("/api/v1/agent/dev_server/registers"));
+    fn only_the_routes_a_container_always_had_work_without_an_identity() {
+        for old in ["/agentmux/reactive/inject", "/agentmux/work/claim", "/agentmux/work/7f3a/ask", "/api/v1/self", "/api/v1/agent/tool-chunk", "/health"] {
+            assert!(!route_needs_identity(old), "{old}");
+        }
+        for new in ["/api/v1/agent/memory/session-start/part", "/api/v1/agent/memory/write", "/api/v1/agent/dev_server/register", "/api/v1/github/token", "/api/v1/vault", "/api/v1/ui/browser/open", "/api/v1/ui/screenshot", "/agentmux/cron", "/api/v1/agent/open", "/agentmux/work/7f3a/hold"] {
+            assert!(route_needs_identity(new), "{new}");
+        }
     }
 
     #[test]
