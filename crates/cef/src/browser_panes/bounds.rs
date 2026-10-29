@@ -252,7 +252,7 @@ pub(crate) fn window_client_px(window: &Window) -> (i32, i32) {
 
 /// How long after a window's last size change the page's rects count as
 /// settled: they were laid out for the size the window has now.
-#[cfg(any(target_os = "windows", test))]
+#[cfg(target_os = "windows")]
 const SETTLE: Duration = Duration::from_millis(250);
 
 /// A page's viewport is `innerWidth * devicePixelRatio` rounded, so at a
@@ -885,9 +885,10 @@ mod tests {
     fn the_pages_own_rounding_is_not_a_resize() {
         // At a fractional display scale the viewport is a pixel or two off the client area.
         let r = Rect { x: 500, y: 100, width: 500, height: 300 };
-        assert_eq!(t(follow_rect(&base(), &r, (1001, 799), (0, 0))), t(r));
+        let same = t(Rect { x: r.x, y: r.y, width: r.width, height: r.height });
+        assert_eq!(t(follow_rect(&base(), &r, (1001, 799), (0, 0))), same);
         // And a client area that is always 3 px wider than the page's viewport is the offset.
-        assert_eq!(t(follow_rect(&base(), &r, (1003, 800), (3, 0))), t(r));
+        assert_eq!(t(follow_rect(&base(), &r, (1003, 800), (3, 0))), same);
         assert_eq!(t(follow_rect(&base(), &r, (803, 800), (3, 0))), (400, 100, 400, 300));
     }
 
