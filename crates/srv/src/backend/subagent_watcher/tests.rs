@@ -1141,9 +1141,10 @@ fn resolve_claude_config_dir_never_follows_a_snapshot_in_another_channels_identi
         "cmd:env".to_string(),
         serde_json::json!({ "CLAUDE_CONFIG_DIR": "/h/.agentmux/channels/some-other-channel/identities/acct-9/claude" }),
     );
-    assert_eq!(resolve_claude_config_dir(&meta, "some-agent", None), None);
+    let foreign = |dir: &Path| crate::identity::foreign_dir::is_other_channel_identity_dir(dir, "this-channel");
+    assert_eq!(resolve_claude_config_dir_with(&meta, "some-agent", None, foreign), None);
     let shared = PathBuf::from("/h/.agentmux/shared/identities/acct-1/claude");
-    assert_eq!(resolve_claude_config_dir(&meta, "some-agent", Some(shared.clone())), Some(shared));
+    assert_eq!(resolve_claude_config_dir_with(&meta, "some-agent", Some(shared.clone()), foreign), Some(shared));
 }
 
 #[tokio::test]

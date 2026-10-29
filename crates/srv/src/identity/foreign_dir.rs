@@ -33,17 +33,34 @@ pub fn is_other_channel_identity_dir(dir: &Path, own_channel: &str) -> bool {
     parts.windows(3).any(|w| w[0] == "channels" && w[2] == "identities" && w[1] != own)
 }
 
-/// [`is_other_channel_identity_dir`] for this process's channel (`AGENTMUX_INSTANCE_CHANNEL`).
+/// [`is_other_channel_identity_dir`] for the channel this srv runs in. `own_channel` is
+/// `AGENTMUX_CHANNEL` and `own_instance_dir` is `AGENTMUX_INSTANCE_DIR` (what the launcher gives srv).
+/// A srv that doesn't know its channel treats no dir as foreign, and a dir under its own instance
+/// dir never is.
+fn is_foreign_in(dir: &Path, own_channel: Option<&str>, own_instance_dir: Option<&Path>) -> bool {
+    let Some(own) = own_channel.map(str::trim).filter(|c| !c.is_empty()) else { return false };
+    if own_instance_dir.is_some_and(|own_dir| dir.starts_with(own_dir)) {
+        return false;
+    }
+    is_other_channel_identity_dir(dir, own)
+}
+
+/// [`is_foreign_in`] for this process's environment.
 pub fn is_foreign_to_this_channel(dir: &Path) -> bool {
-    let own = std::env::var("AGENTMUX_INSTANCE_CHANNEL").unwrap_or_default();
-    is_other_channel_identity_dir(dir, &own)
+    let channel = std::env::var("AGENTMUX_CHANNEL").ok();
+    let instance_dir = std::env::var_os("AGENTMUX_INSTANCE_DIR").map(std::path::PathBuf::from);
+    is_foreign_in(dir, channel.as_deref(), instance_dir.as_deref())
 }
 
 /// The pane's `cmd:env` with its `CLAUDE_CONFIG_DIR` pointed at `bound`, when the value it holds is
 /// a dir of another channel's (`None` when there is nothing to heal).
-pub fn env_with_bound_config_dir(env: &HashMap<String, String>, bound: &Path) -> Option<HashMap<String, String>> {
+fn env_with_bound_config_dir(
+    env: &HashMap<String, String>,
+    bound: &Path,
+    is_foreign: impl Fn(&Path) -> bool,
+) -> Option<HashMap<String, String>> {
     let held = env.get(VAR)?;
-    if !is_foreign_to_this_channel(Path::new(held)) || is_foreign_to_this_channel(bound) {
+    if !is_foreign(Path::new(held)) || is_foreign(bound) {
         return None;
     }
     let mut healed = env.clone();
@@ -55,7 +72,7 @@ pub fn env_with_bound_config_dir(env: &HashMap<String, String>, bound: &Path) ->
 /// account really spawns in. The window's auth re-check and login recovery read `cmd:env` as it is.
 pub fn heal_block_config_dir_env(mstore: &Store, block: Option<&Block>, bound: Option<&Path>) {
     let (Some(block), Some(bound)) = (block, bound) else { return };
-    let Some(healed) = env_with_bound_config_dir(&crate::backend::blockcontroller::cmd_env_of(&block.meta), bound) else {
+    let Some(healed) = env_with_bound_config_dir(&crate::backend::blockcontroller::cmd_env_of(&block.meta), bound, is_foreign_to_this_channel) else {
         return;
     };
     let mut update = MetaMapType::new();
@@ -74,15 +91,16 @@ mod tests {
     fn a_pane_env_naming_another_channels_dir_is_pointed_at_the_bound_dir() {
         let mut env = HashMap::from([("CLAUDE_CONFIG_DIR".to_string(), OTHER.to_string()), ("X".to_string(), "1".to_string())]);
         let bound = Path::new(SHARED);
-        let healed = env_with_bound_config_dir(&env, bound).expect("foreign dir is healed");
+        let foreign = |dir: &Path| is_other_channel_identity_dir(dir, "this-channel");
+        let healed = env_with_bound_config_dir(&env, bound, foreign).expect("foreign dir is healed");
         assert_eq!(healed["CLAUDE_CONFIG_DIR"], SHARED);
         assert_eq!(healed["X"], "1", "the rest of the env is kept");
         // Nothing to heal: a shared dir, no variable, or a bound dir that is itself foreign.
         env.insert("CLAUDE_CONFIG_DIR".to_string(), SHARED.to_string());
-        assert_eq!(env_with_bound_config_dir(&env, bound), None);
-        assert_eq!(env_with_bound_config_dir(&HashMap::new(), bound), None);
+        assert_eq!(env_with_bound_config_dir(&env, bound, foreign), None);
+        assert_eq!(env_with_bound_config_dir(&HashMap::new(), bound, foreign), None);
         env.insert("CLAUDE_CONFIG_DIR".to_string(), OTHER.to_string());
-        assert_eq!(env_with_bound_config_dir(&env, Path::new(OTHER)), None);
+        assert_eq!(env_with_bound_config_dir(&env, Path::new(OTHER), foreign), None);
     }
 
     const OTHER: &str = "C:/Users/u/.agentmux/channels/local-main-b28b7a-051fbf53/identities/322f5f07-40a2/claude";
@@ -99,6 +117,20 @@ mod tests {
         assert!(!is_other_channel_identity_dir(Path::new(OTHER), "local-main-b28b7a-051fbf53"));
         assert!(!is_other_channel_identity_dir(Path::new(OTHER), "LOCAL-MAIN-B28B7A-051FBF53"));
         assert!(!is_other_channel_identity_dir(Path::new(SHARED), "stable"));
+    }
+
+    #[test]
+    fn a_srv_that_does_not_know_its_channel_calls_nothing_foreign() {
+        assert!(!is_foreign_in(Path::new(OTHER), None, None));
+        assert!(!is_foreign_in(Path::new(OTHER), Some("  "), None));
+        assert!(is_foreign_in(Path::new(OTHER), Some("stable"), None));
+    }
+
+    #[test]
+    fn a_dir_under_this_srvs_own_instance_dir_is_never_foreign() {
+        let own = Path::new("C:/Users/u/.agentmux/channels/local-main-b28b7a-051fbf53");
+        assert!(!is_foreign_in(Path::new(OTHER), Some("renamed"), Some(own)));
+        assert!(is_foreign_in(Path::new(OTHER), Some("renamed"), Some(Path::new("C:/Users/u/.agentmux/channels/stable"))));
     }
 
     #[test]
