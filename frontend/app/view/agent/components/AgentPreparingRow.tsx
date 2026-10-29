@@ -6,13 +6,23 @@
  * in the background (`preparing.ts`). Not a working turn: no spinner of the Working row, no timer,
  * and it does not queue what the user types.
  */
-import { Show, createMemo, type Accessor, type JSX } from "solid-js";
+import { Show, createEffect, createMemo, createSignal, onCleanup, type Accessor, type JSX } from "solid-js";
 import { AsciiSpinner } from "@/app/element/AsciiSpinner";
-import { preparingNow } from "../preparing";
+import { PREPARING_RECHECK_MS, preparingNow } from "../preparing";
 import type { DocumentNode } from "../types";
 
 export function AgentPreparingRow(props: { nodes: Accessor<readonly DocumentNode[]>; enabled: Accessor<boolean>; now?: () => number }): JSX.Element {
-    const preparing = createMemo(() => (props.enabled() ? preparingNow(props.nodes(), (props.now ?? Date.now)()) : null));
+    // The give-up age is a time, not a change in the document: while the line is up it is looked at again now and then.
+    const [tick, setTick] = createSignal(0);
+    const preparing = createMemo(() => {
+        tick();
+        return props.enabled() ? preparingNow(props.nodes(), (props.now ?? Date.now)()) : null;
+    });
+    createEffect(() => {
+        if (!preparing()) return;
+        const id = setInterval(() => setTick((t) => t + 1), PREPARING_RECHECK_MS);
+        onCleanup(() => clearInterval(id));
+    });
     return (
         <Show when={preparing()}>
             {(p) => (

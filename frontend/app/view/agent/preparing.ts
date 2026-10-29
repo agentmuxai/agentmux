@@ -17,6 +17,8 @@ import type { CliNoticeNode, DocumentNode } from "./types";
 
 /** A start-up row still "in progress" after this long is a start that died without saying so. */
 export const PREPARING_MAX_AGE_MS = 15 * 60 * 1000;
+/** How often a showing line is checked against that age. */
+export const PREPARING_RECHECK_MS = 30 * 1000;
 
 export interface Preparing {
     /** Where the start is, in the row's own words ("Downloading the agent image… 42%"). */
