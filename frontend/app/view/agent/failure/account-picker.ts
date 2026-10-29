@@ -7,7 +7,7 @@
  * is unit-tested rather than living untested inside agent-view.tsx.
  * SPEC_COMPOSER_ACCOUNT_SWITCH_AND_JEKT_HEIGHT_CAP_2026_09_26.md Part A.
  *
- * - `"adopt"`: the failure row's "Bind account". The agent is already broken, so
+ * - `"adopt"`: the failure row's "Use account…". The agent is already broken, so
  *   a lone candidate is bound at once.
  * - `"switch"`: the composer chip's link. The agent works and a switch restarts
  *   it, so the user always picks a named destination, even from one candidate.

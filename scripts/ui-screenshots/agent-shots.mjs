@@ -20,7 +20,7 @@
 // the agent starts with no history. The panel binds the provider's first
 // account, the demo one; the sign-in shot removes that account while it
 // creates its agent, so the agent starts unbound, then adds it back for the
-// pane's "Bind: dev@acme.example". Cleanup closes the tab, which stops the
+// pane's "Use dev@acme.example". Cleanup closes the tab, which stops the
 // agent, and deletes it.
 
 import { mkdirSync, writeFileSync } from "node:fs";
