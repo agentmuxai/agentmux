@@ -735,12 +735,27 @@ pub fn start(
         mstore,
         identity_store,
     };
+    if needs_cloud_sign_in(ctx.cfg.provider, opts.cloud_signed_in, &ctx.client) {
+        return Err(NEEDS_CLOUD_SIGN_IN.to_string());
+    }
     let brokered = runs_through_broker(ctx.cfg.provider, opts.cloud_signed_in, &ctx.client);
     match ctx.cfg.flow {
         OAuthFlow::AuthCodePkce => start_code_flow(ctx, None),
         OAuthFlow::Device if brokered => start_code_flow(ctx, Some(BrokerLeg { replace: opts.replace_user })),
         OAuthFlow::Device => start_device_flow(ctx),
     }
+}
+
+/// What a GitHub connect answers when the person isn't signed in to AgentMux Cloud: a code the UI
+/// turns into "Sign in to AgentMux Cloud to connect GitHub" and a sign-in button, never a bare error
+/// (`frontend/app/view/accounts/github-cloud-gate.ts` has the same string). GitHub through AgentMux's
+/// own App is a Cloud feature (the Connect with GitHub design).
+pub const NEEDS_CLOUD_SIGN_IN: &str = "needs-cloud-sign-in";
+
+/// Whether a GitHub connect with AgentMux's own App has to stop because the person isn't signed
+/// in to AgentMux Cloud. A client the person brought is their own App and costs us nothing.
+fn needs_cloud_sign_in(provider: &str, cloud_signed_in: bool, client: &ResolvedClient) -> bool {
+    provider == github_connect::PROVIDER && !cloud_signed_in && client.mode == ClientMode::Builtin
 }
 
 /// Whether a GitHub connect goes through AgentMux Cloud's broker: the person is signed in to
@@ -763,6 +778,9 @@ async fn broker_exchange(ctx: &FlowCtx, code: &str, verifier: &str, redirect_uri
     use crate::muxbus::github_broker::{self, BrokerError};
     let who = match github_broker::caller(&ctx.mstore).await {
         Ok(who) => who,
+        // A sign-in that lapsed since the connect began is the same question as none. The other
+        // reasons ("not running yet", "the key can't be read") are not fixed by signing in.
+        Err(e) if e.needs_sign_in() => return OAuthStatus::Failed { error: NEEDS_CLOUD_SIGN_IN.to_string() },
         Err(e) => return OAuthStatus::Failed { error: e.to_string() },
     };
     match github_broker::exchange_code(http(), &who, code, verifier, redirect_uri, replace).await {

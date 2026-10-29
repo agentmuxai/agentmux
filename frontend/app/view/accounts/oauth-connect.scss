@@ -103,3 +103,20 @@
         margin-bottom: var(--space-0-5);
     }
 }
+
+// GitHub without an AgentMux Cloud sign-in: the sentence, why, and the sign-in.
+.oauth-cloud-signin {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+
+    .oauth-cloud-signin-text {
+        font-weight: 600;
+        color: var(--main-text-color);
+    }
+
+    .oauth-cloud-signin-note {
+        font-size: 0.9em;
+        color: var(--secondary-text-color);
+    }
+}
