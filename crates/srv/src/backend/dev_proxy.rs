@@ -42,6 +42,8 @@ pub const DEV_PROXY_PORT: u16 = 8090;
 struct Route {
     target: Target,
     agent_id: String,
+    /// The container it was registered from, when known: what stopping or removing a container clears.
+    container: Option<String>,
 }
 
 /// How to reach a registered dev server.
@@ -62,7 +64,7 @@ impl From<SocketAddr> for Target {
 /// `"<project>-<agent_id>"` → the container's internal `ip:port` its dev
 /// server is actually listening on. Cleared per-agent when that agent's
 /// container stops (`ContainerManager::stop`/`remove` in `container.rs`
-/// call `unregister_agent` — see that module's `cleanup_dev_proxy_routes`).
+/// call `unregister_container` — see that module's `cleanup_dev_proxy_routes`).
 ///
 /// Cheap to clone (one `Arc` inside) — held directly by `AppState` and
 /// passed to the proxy's own axum router as state.
@@ -86,14 +88,23 @@ impl DevProxyRegistry {
     }
 
     pub async fn register(&self, project: &str, agent_id: &str, target: impl Into<Target>) {
+        self.register_from(project, agent_id, None, target).await
+    }
+
+    /// [`register`](Self::register) for a dev server in `container`, so that container stopping or being removed
+    /// clears the route ([`unregister_container`](Self::unregister_container)).
+    pub async fn register_from(&self, project: &str, agent_id: &str, container: Option<&str>, target: impl Into<Target>) {
         let key = Self::routing_key(project, agent_id);
         self.routes.write().await.insert(
             key,
-            Route {
-                target: target.into(),
-                agent_id: agent_id.to_lowercase(),
-            },
+            Route { target: target.into(), agent_id: agent_id.to_lowercase(), container: container.map(str::to_string) },
         );
+    }
+
+    /// Removes every registration made from `container`. A container is named from its definition's uuid and
+    /// a route from the agent's id, which are not the same string, so this is how a stopped container's routes go.
+    pub async fn unregister_container(&self, container: &str) {
+        self.routes.write().await.retain(|_, route| route.container.as_deref() != Some(container));
     }
 
     /// Removes every registration belonging to `agent_id`, regardless of
@@ -310,6 +321,21 @@ mod tests {
     async fn lookup_of_an_unregistered_key_is_none() {
         let registry = DevProxyRegistry::new();
         assert_eq!(registry.lookup("nope-nobody").await, None);
+    }
+
+    #[tokio::test]
+    async fn unregister_container_removes_what_was_registered_from_it_whatever_the_agent_is_called() {
+        let reg = DevProxyRegistry::new();
+        let addr: SocketAddr = "127.0.0.1:5173".parse().unwrap();
+        // The route is under the agent's id; the container is named from the definition's uuid.
+        reg.register_from("app", "kcont", Some("agentmux-a5e772db"), addr).await;
+        reg.register_from("api", "kcont", Some("agentmux-a5e772db"), addr).await;
+        reg.register_from("app", "other", Some("agentmux-ffff"), addr).await;
+        reg.register("loose", "kcont", addr).await;
+        reg.unregister_container("agentmux-a5e772db").await;
+        assert!(reg.lookup("app-kcont").await.is_none() && reg.lookup("api-kcont").await.is_none());
+        assert!(reg.lookup("app-other").await.is_some(), "another container's route stays");
+        assert!(reg.lookup("loose-kcont").await.is_some(), "a route with no container isn't a container's to lose");
     }
 
     #[tokio::test]

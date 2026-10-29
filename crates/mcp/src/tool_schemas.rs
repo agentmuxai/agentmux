@@ -249,12 +249,14 @@ pub(crate) const SCHEDULE_TOOL: &str = r#"{
 
 pub(crate) const REGISTER_DEV_SERVER_TOOL: &str = r#"{
   "name": "RegisterDevServer",
-  "description": "Container-type agents only. Registers a dev server YOU just started inside YOUR OWN container (e.g. `npm run dev`) with AgentMux's native reverse proxy, so a human or another agent can browse to it at a friendly `http://<project>-<your-agent-id>.localhost:8090` URL instead of needing the container's internal port. Call this once your dev server is actually listening. Identity is verified server-side (same mechanism as Stop and the UI tool) — you can only register a server as running inside YOUR OWN container, never anyone else's. Registrations are cleared automatically when your container stops; call this again after a restart.",
+  "description": "Container-type agents only. Registers a dev server YOU just started inside YOUR OWN container (e.g. `npm run dev`) with AgentMux's native reverse proxy, so a human or another agent can browse to it at a friendly `http://<project>-<your-agent-id>.localhost:8090` URL instead of needing the container's internal port. Call this once your dev server is actually listening. Identity is verified server-side (same mechanism as Stop and the UI tool) — you can only register a server as running inside YOUR OWN container, never anyone else's. Registrations are cleared when your container stops. Pass `command` (and `dir`) and AgentMux starts the server if it is not listening yet, and starts it again and re-registers it whenever your container is recreated, so it survives upgrades; without `command`, call this again after a restart.",
   "inputSchema": {
     "type": "object",
     "properties": {
       "project": { "type": "string", "description": "Short project name, becomes part of the routing hostname (e.g. \"pulse\" -> pulse-<agent-id>.localhost)" },
-      "port": { "type": "number", "description": "Port the dev server is listening on INSIDE this container (container-internal — not a host-published port)" }
+      "port": { "type": "number", "description": "Port the dev server is listening on INSIDE this container (container-internal — not a host-published port)" },
+      "command": { "type": "string", "description": "Optional: the shell command that starts the server (e.g. `npm run dev`). With it AgentMux starts the server for you if nothing is listening yet, and starts it again and re-registers it whenever your container is recreated (an upgrade, an image update). Without it the registration lasts only as long as the container" },
+      "dir": { "type": "string", "description": "With command: the folder to run it in, /workspace/... or relative to /workspace (default /workspace)" }
     },
     "required": ["project", "port"]
   }

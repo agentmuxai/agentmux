@@ -1176,6 +1176,14 @@ pub struct RegisterDevServerRequest {
     /// Port the dev server is listening on INSIDE the caller's own
     /// container (container-internal — never a host-published port).
     pub port: u16,
+    /// The shell command that starts the server (e.g. `npm run dev`). With it AgentMux starts the
+    /// server when it isn't listening yet and starts it again, and re-registers it, whenever the
+    /// container is recreated; without it the registration lasts only as long as the container.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    /// The folder the command runs in: `/workspace/...` or relative to `/workspace` (default `/workspace`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dir: Option<String>,
 }
 
 /// Response for `POST /api/v1/agent/dev_server/register`.
