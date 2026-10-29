@@ -22,9 +22,10 @@ name: Release (core)
 # the tag NAME: a tag deleted and made again at another commit during the signing
 # wait (see sign-release) must not change what is built, signed or run.
 #
-# WinGet/Microsoft Store submission jobs are disabled (see "Phase 4" below,
-# commented out, 2026-08-12) — MS Store is uploaded manually. WinGet's
-# automated job never actually worked: `wingetcreate update` requires an
+# The WinGet submission job is disabled (see "Phase 4" below, commented out,
+# 2026-08-12). The Microsoft Store job (`ms-store`) is off until the repository
+# variable MSSTORE_SUBMIT_ENABLED is 'true'; until then the Store is uploaded by
+# hand. WinGet's automated job never actually worked: `wingetcreate update` requires an
 # existing manifest in microsoft/winget-pkgs, which was never bootstrapped
 # via a first-time `wingetcreate new` submission, so every release back
 # through at least v0.54.14 failed this job identically
@@ -573,9 +574,9 @@ jobs:
             -f event_type=release \
             -F client_payload[version]="${VERSION}"
 
-  # ── Phase 4: Distribution channels — DISABLED 2026-08-12 ──────────────────
-  # MS Store is uploaded manually; WinGet automation never worked (see header
-  # comment above). Both job bodies kept for reference, fully commented out.
+  # ── Phase 4: Distribution channels ────────────────────────────────────────
+  # WinGet automation never worked (see header comment above): its job body is
+  # kept for reference, fully commented out. The Microsoft Store job follows it.
   # WinGet identifier corrected to AgentMux.AI 2026-09-10 (distinct from the
   # already-published MSIX/Store identity AgentMux.AgentMux — see
   # docs/specs/SPEC_WINGET_PACKAGE_BOOTSTRAP_2026_09_10.md) so this job is
@@ -621,43 +622,93 @@ jobs:
   #           --submit \
   #           --token "$WINGET_TOKEN"
   #
-  # ms-store:
-  #   name: Submit Microsoft Store update
-  #   needs: [gate, publish]
-  #   runs-on: windows-latest
-  #   continue-on-error: true
-  #   env:
-  #     VERSION: ${{ needs.gate.outputs.version }}
-  #   steps:
-  #     - name: Install msstore CLI
-  #       shell: pwsh
-  #       run: winget install Microsoft.StoreCLI --silent --accept-package-agreements --accept-source-agreements
+  # The Microsoft Store: submits the MSIX that `publish` attached to the GitHub
+  # Release, through the Store Developer CLI (`msstore`). The Store certifies it
+  # after this; a release is on GitHub before it is in the Store.
   #
-  #     - name: Configure msstore credentials
-  #       shell: pwsh
-  #       env:
-  #         MSSTORE_TENANT_ID: ${{ secrets.MSSTORE_TENANT_ID }}
-  #         MSSTORE_CLIENT_ID: ${{ secrets.MSSTORE_CLIENT_ID }}
-  #         MSSTORE_CLIENT_SECRET: ${{ secrets.MSSTORE_CLIENT_SECRET }}
-  #         MSSTORE_SELLER_ID: ${{ secrets.MSSTORE_SELLER_ID }}
-  #       run: |
-  #         msstore settings --tenantId $env:MSSTORE_TENANT_ID `
-  #           --clientId $env:MSSTORE_CLIENT_ID `
-  #           --clientSecret $env:MSSTORE_CLIENT_SECRET `
-  #           --sellerId $env:MSSTORE_SELLER_ID
+  # Off until the repository variable MSSTORE_SUBMIT_ENABLED is 'true'. Even then
+  # the submission is left as a DRAFT in Partner Center (`--noCommit`) for a person
+  # to check and send, until MSSTORE_COMMIT is also 'true' and it is sent by this
+  # job. The credentials (a Partner Center app registration's tenant, client and
+  # seller ids and its client secret) are secrets of the `release-store` environment,
+  # which is limited to `v*` tags; nothing about them is in this file.
   #
-  #     - name: Download MSIX from GitHub Release
-  #       shell: bash
-  #       env:
-  #         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  #       run: |
-  #         gh release download "v${VERSION}" \
-  #           --repo agentmuxai/agentmux \
-  #           --pattern "*.msix" \
-  #           --dir msix-download
-  #
-  #     - name: Submit to Microsoft Store
-  #       shell: pwsh
-  #       run: |
-  #         $msix = Get-ChildItem msix-download -Filter "*.msix" | Select-Object -First 1
-  #         msstore publish $msix.FullName --no-confirmation
+  # Not a need of `publish` or `sign-release`, and `continue-on-error`: a Store
+  # problem never changes whether a release that is already published went out.
+  ms-store:
+    name: Submit the Microsoft Store update
+    needs: [gate, publish]
+    if: ${{ vars.MSSTORE_SUBMIT_ENABLED == 'true' && !cancelled() && needs.publish.result == 'success' }}
+    runs-on: windows-latest
+    environment: release-store
+    continue-on-error: true
+    permissions:
+      contents: read
+    env:
+      TAG: v${{ needs.gate.outputs.version }}
+      # The Store listing's product id (the same one the app's "Update in the Store" opens).
+      STORE_PRODUCT_ID: 9P9QCXNNCRK3
+    steps:
+      - name: The run is for the release tag
+        shell: bash
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [ "$REF_TYPE" != "tag" ] || [ "$REF_NAME" != "$TAG" ]; then
+            echo "::error::this run is for $REF_TYPE '$REF_NAME', not the release tag '$TAG'"
+            exit 1
+          fi
+
+      # The file the release published, so the Store gets what GitHub has.
+      - name: Download the MSIX from the GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir msix-download
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern 'AgentMux_*_x64.msix' --dir msix-download
+          count=$(ls msix-download | wc -l)
+          if [ "$count" != "1" ]; then
+            echo "::error::expected one MSIX in release $TAG, found $count"
+            ls -l msix-download
+            exit 1
+          fi
+          sha256sum msix-download/*.msix
+
+      # Pinned by commit: this job holds the Store credentials.
+      - name: Install the Microsoft Store Developer CLI
+        uses: microsoft/microsoft-store-apppublisher@cc9910a8d59f2eb55cbb83df0a3800cf3b5300e0 # v1.4
+
+      - name: Configure the CLI with the Store credentials
+        shell: pwsh
+        env:
+          MSSTORE_TENANT_ID: ${{ secrets.MSSTORE_TENANT_ID }}
+          MSSTORE_CLIENT_ID: ${{ secrets.MSSTORE_CLIENT_ID }}
+          MSSTORE_CLIENT_SECRET: ${{ secrets.MSSTORE_CLIENT_SECRET }}
+          MSSTORE_SELLER_ID: ${{ secrets.MSSTORE_SELLER_ID }}
+        run: |
+          foreach ($name in 'MSSTORE_TENANT_ID', 'MSSTORE_CLIENT_ID', 'MSSTORE_CLIENT_SECRET', 'MSSTORE_SELLER_ID') {
+            if (-not [Environment]::GetEnvironmentVariable($name)) {
+              Write-Error "the release-store environment has no secret $name"
+              exit 1
+            }
+          }
+          msstore reconfigure --tenantId $env:MSSTORE_TENANT_ID `
+            --sellerId $env:MSSTORE_SELLER_ID `
+            --clientId $env:MSSTORE_CLIENT_ID `
+            --clientSecret $env:MSSTORE_CLIENT_SECRET
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Submit to the Microsoft Store
+        shell: pwsh
+        env:
+          MSSTORE_COMMIT: ${{ vars.MSSTORE_COMMIT }}
+        run: |
+          $msix = Get-ChildItem msix-download -Filter '*.msix' | Select-Object -First 1
+          $commit = $env:MSSTORE_COMMIT -eq 'true'
+          $extra = if ($commit) { @() } else { @('--noCommit') }
+          msstore publish msix-download --inputFile $msix.FullName --appId $env:STORE_PRODUCT_ID @extra
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $what = if ($commit) { 'sent to the Store for certification' } else { 'left as a draft in Partner Center: check it there and send it' }
+          "Microsoft Store: $($msix.Name) $what." | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
