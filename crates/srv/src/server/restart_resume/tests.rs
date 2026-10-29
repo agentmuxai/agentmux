@@ -282,17 +282,26 @@ async fn an_agent_quiet_past_its_window_still_comes_back_if_it_was_running_at_ex
 }
 
 #[test]
-fn the_agents_running_at_exit_are_kept_for_one_start_only() {
+fn the_agents_running_at_exit_stay_on_file_until_the_resume_has_run() {
     let dir = tempfile::tempdir().unwrap();
-    assert!(take_running(dir.path()).is_empty(), "no file: none");
+    assert!(read_running(dir.path()).is_empty(), "no file: none");
     write_running(dir.path(), &["a".to_string(), "b".to_string()]);
-    let got = take_running(dir.path());
-    assert_eq!(got, ["a".to_string(), "b".to_string()].into_iter().collect::<HashSet<_>>());
-    assert!(take_running(dir.path()).is_empty(), "read once: gone");
+    assert_eq!(read_running(dir.path()), vec!["a".to_string(), "b".to_string()]);
+    assert_eq!(read_running(dir.path()), vec!["a".to_string(), "b".to_string()], "a crash before the resume ran loses nothing");
+    clear_running(dir.path());
+    assert!(read_running(dir.path()).is_empty(), "spent");
     // An exit with nothing running leaves nothing from an earlier one.
     write_running(dir.path(), &["a".to_string()]);
     write_running(dir.path(), &[]);
-    assert!(take_running(dir.path()).is_empty());
+    assert!(read_running(dir.path()).is_empty());
     std::fs::write(dir.path().join(RUNNING_FILE), b"not json").unwrap();
-    assert!(take_running(dir.path()).is_empty(), "an unreadable list is none");
+    assert!(read_running(dir.path()).is_empty(), "an unreadable list is none");
+}
+
+#[test]
+fn an_exit_before_the_resume_ran_carries_the_agents_still_waiting() {
+    let running = vec!["c".to_string(), "a".to_string()];
+    let pending = vec!["b".to_string(), "a".to_string()];
+    assert_eq!(with_pending(running, &pending), vec!["a".to_string(), "b".to_string(), "c".to_string()]);
+    assert!(with_pending(Vec::new(), &[]).is_empty());
 }

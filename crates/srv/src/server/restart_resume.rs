@@ -15,6 +15,7 @@
 
 use std::collections::HashSet;
 use std::path::Path;
+use std::sync::Mutex;
 use std::time::Duration;
 
 use crate::backend::agent_session::{agent_current_zone, agent_zone_for_block_meta, global_transcript_store, is_valid_definition_id, OUTPUT_FILE};
@@ -33,6 +34,10 @@ const GAP: Duration = Duration::from_secs(3);
 /// The parked agents that were running when srv last exited, in the channel folder
 /// ([`record_running_at_exit`]).
 const RUNNING_FILE: &str = "agentmux-running-at-exit.json";
+
+/// The agents the last exit left running that this start has not resumed yet: a second exit before
+/// the resume ran carries them into its own list.
+static PENDING: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
 /// At app exit, before the agents are closed: keep which parked agents (no pane; a window
 /// brings its own panes back) have a running process, by definition id. The next start
@@ -53,15 +58,23 @@ pub(crate) async fn record_running_at_exit(state: &AppState, ids: &[String]) {
             .filter(|(block, _)| crate::sagas::park_agents::is_parkable(&st, &block.oid))
             .filter_map(|(block, _)| crate::sagas::park_agents::agent_of_block(&st, &block.oid, &block).map(|a| a.id))
             .collect();
-        uids.sort();
-        uids.dedup();
         uids
     })
     .await
     .unwrap_or_default();
+    let running = with_pending(running, &PENDING.lock().unwrap_or_else(|e| e.into_inner()));
     if let Some(paths) = agentmux_common::DataPaths::from_env() {
         write_running(&paths.instance_dir, &running);
     }
+}
+
+/// `running` and the `pending` ones too, each once, in order. Candidates still skip an agent that was
+/// stopped since, so carrying one along does no harm.
+fn with_pending(mut running: Vec<String>, pending: &[String]) -> Vec<String> {
+    running.extend(pending.iter().cloned());
+    running.sort();
+    running.dedup();
+    running
 }
 
 fn write_running(dir: &Path, uids: &[String]) {
@@ -80,22 +93,32 @@ fn write_running(dir: &Path, uids: &[String]) {
     }
 }
 
-/// The agents the last exit left running, and forget them: they are for this start only.
-fn take_running(dir: &Path) -> HashSet<String> {
-    let path = dir.join(RUNNING_FILE);
-    let uids = std::fs::read(&path).ok().and_then(|b| serde_json::from_slice::<Vec<String>>(&b).ok()).unwrap_or_default();
-    let _ = std::fs::remove_file(&path);
-    uids.into_iter().collect()
+/// The agents the last exit left running. The file stays until the resume has run ([`clear_running`]),
+/// so a crash during the wait does not lose them.
+fn read_running(dir: &Path) -> Vec<String> {
+    std::fs::read(dir.join(RUNNING_FILE)).ok().and_then(|b| serde_json::from_slice::<Vec<String>>(&b).ok()).unwrap_or_default()
+}
+
+/// The resume has run: the list is spent.
+fn clear_running(dir: &Path) {
+    let _ = std::fs::remove_file(dir.join(RUNNING_FILE));
 }
 
 /// Resume once, [`DELAY`] after startup.
 pub(crate) fn install(state: &AppState) {
     let state = state.clone();
-    // Read now, not after the wait: a second exit before it would otherwise replace the list.
-    let running_at_exit = agentmux_common::DataPaths::from_env().map(|p| take_running(&p.instance_dir)).unwrap_or_default();
+    // Read now, and kept until the resume has run: an exit before then carries these agents into its own list.
+    let dir = agentmux_common::DataPaths::from_env().map(|p| p.instance_dir);
+    let running_at_exit = dir.as_deref().map(read_running).unwrap_or_default();
+    *PENDING.lock().unwrap_or_else(|e| e.into_inner()) = running_at_exit.clone();
+    let running_at_exit: HashSet<String> = running_at_exit.into_iter().collect();
     tokio::spawn(async move {
         tokio::time::sleep(DELAY).await;
         let n = run_once_with(&state, &running_at_exit).await;
+        PENDING.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        if let Some(dir) = &dir {
+            clear_running(dir);
+        }
         if n > 0 {
             tracing::info!(resumed = n, "restart resume: started the parked agents that were running");
         }
