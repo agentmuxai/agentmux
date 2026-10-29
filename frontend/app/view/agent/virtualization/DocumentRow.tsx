@@ -38,8 +38,18 @@ import { compactionCardTokens } from "../compact-boundary";
 import { formatExactTime, formatTimeAgo } from "@/util/format-time";
 import { useTick } from "@/app/hook/useTick";
 import { showCopyContextMenu } from "@/app/store/contextmenu";
+import { getApi } from "@/app/store/global";
 import { CopyErrorButton } from "@/app/errors/CopyErrorButton";
 import { formatErrorReport } from "@/app/errors/error-report";
+
+/** The version of the AgentMux showing the conversation; a persisted row may name an older one. */
+function runningAppVersion(): string | undefined {
+    try {
+        return getApi().getAboutModalDetails().version;
+    } catch {
+        return undefined;
+    }
+}
 
 export interface DocumentRowProps {
     /**
@@ -730,7 +740,7 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                     // Read through the accessor, not captured once: an
                     // install row is updated in place (installing → installed).
                     const node = () => props.node() as Extract<DocumentNode, { type: "cli_notice" }>;
-                    const text = createMemo(() => cliNoticeText(node()));
+                    const text = createMemo(() => cliNoticeText(node(), runningAppVersion()));
                     return (
                         <div class={`agent-cli-notice agent-cli-notice-${text().tone}`} title={formatExactTime(node().timestamp)}>
                             <div class="agent-cli-notice-rule">
