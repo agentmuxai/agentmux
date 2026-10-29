@@ -23,7 +23,7 @@ export const WINDOW_SETTINGS = {
     defaultNewBlock: {
         id: "window.default_new_block",
         label: "Default new block",
-        description: "View type opened by default for new tabs/panes (e.g. term, agent)",
+        description: "View type opened by default for new tabs/panes (e.g. term, agent, shortcuts)",
         section: "window",
         keywords: ["new tab default", "new pane default", "default view", "app:defaultnewblock"],
     },

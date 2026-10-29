@@ -3,7 +3,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import logoUrl from "@/app/asset/logo.svg?url";
-import { atoms, replaceBlock } from "@/app/store/global";
+import { atoms, MOS, replaceBlock } from "@/app/store/global";
+import { getLayoutModelForStaticTab } from "@/layout/index";
 import { getChildWidgets, getHiddenKeys, getPinnedKeys, isWidgetHidden, widgetEntryColor } from "@/app/window/action-widgets-config";
 import { checkKeyPressed, keydownWrapper } from "@/util/keyutil";
 import { isBlank, makeIconClass, createSignalAtom } from "@/util/util";
@@ -12,6 +13,8 @@ import clsx from "clsx";
 import { createEffect, createMemo, createSignal, For, onMount, Show } from "solid-js";
 import type { JSX } from "solid-js";
 import type { PaneTabManifest } from "@/app/block/pane-tab-registry";
+import { blockDefFromSource, SHORTCUTS_FROM_META } from "./shortcuts-from";
+import { orderByRecent } from "@/app/store/shortcuts-recent";
 
 function sortByDisplayOrder(
     wmap: { [key: string]: WidgetConfigType } | null | undefined
@@ -24,9 +27,9 @@ function sortByDisplayOrder(
 
 type GridLayoutType = { columns: number; tileWidth: number; tileHeight: number; showLabel: boolean };
 
-/** The launcher's state behind its native pane tab (`launcherPaneTab`). */
-/** Exported for launcher-hidden.test.ts; the app reaches it through `launcherPaneTab`. */
-export class LauncherViewModel {
+/** The Shortcuts pane's state behind its native pane tab (`shortcutsPaneTab`). */
+/** Exported for the tests; the app reaches it through `shortcutsPaneTab`. */
+export class ShortcutsViewModel {
     blockId: string;
     searchTerm: SignalAtom<string>;
     selectedIndex: SignalAtom<number>;
@@ -58,7 +61,7 @@ export class LauncherViewModel {
         const wmap = fullConfig?.widgets || {};
         const settings = fullConfig?.settings || {};
         // A group that's been hidden since the user drilled into it (Settings → Widgets, the bar)
-        // drops the Launcher back to the top-level grid, where it no longer shows either.
+        // drops the Shortcuts pane back to the top-level grid, where it no longer shows either.
         const drilled = this.activeParent();
         const drilledKey = drilled
             ? Object.keys(wmap).find((k) => wmap[k] === drilled || (wmap[k]?.label === drilled.label && wmap[k]?.children?.join() === drilled.children?.join()))
@@ -79,12 +82,12 @@ export class LauncherViewModel {
             // getEffectiveGroupedChildKeys).
             const pinnedSet = new Set(getPinnedKeys(settings, wmap));
             const hidden = getHiddenKeys(settings);
-            source = sortByDisplayOrder(wmap).filter(
-                ([key, widget]) => !widget["display:grouponly"] || pinnedSet.has(key.replace("defwidget@", ""))
-            )
+            const shown = sortByDisplayOrder(wmap)
+                .filter(([key, widget]) => !widget["display:grouponly"] || pinnedSet.has(key.replace("defwidget@", "")))
                 // Hidden by the user in Settings → Widgets, like the bar and the "+" picker.
-                .filter(([key]) => !isWidgetHidden(key, wmap, settings, hidden))
-                .map(([, widget]) => widget);
+                .filter(([key]) => !isWidgetHidden(key, wmap, settings, hidden));
+            // The pane types the person opened last come first, the rest keep their configured order.
+            source = orderByRecent(shown, settings["launcher:recent"]).map(([, widget]) => widget);
         }
 
         return source.filter(
@@ -160,12 +163,14 @@ export class LauncherViewModel {
             return true;
         }
         if (checkKeyPressed(e, "Escape")) {
-            // Two-stage: clear an in-progress search first; only pop back out
-            // of a drilled-into group once the search box is already empty,
-            // so "Escape, Escape" from a filtered child list doesn't skip
-            // straight past the group's own child list.
+            // Stages: clear an in-progress search first; then pop back out of a
+            // drilled-into group, so "Escape, Escape" from a filtered child list
+            // doesn't skip straight past the group's own child list; then, for a pane
+            // a split opened, close it (a question the person can dismiss).
             if (this.searchTerm() === "" && this.activeParent() !== null) {
                 this.goBack();
+            } else if (this.searchTerm() === "" && this.openedBySplit()) {
+                this.closeSelf();
             } else {
                 this.searchTerm._set("");
                 this.selectedIndex._set(0);
@@ -175,20 +180,45 @@ export class LauncherViewModel {
         return false;
     }
 
+    /** The pane's own meta (the split it came from is in `shortcuts:from`). */
+    private ownMeta(): Record<string, unknown> | undefined {
+        return MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", this.blockId))()?.meta;
+    }
+
+    /** True for a pane a split opened; one opened by `app:defaultnewblock` has no source. */
+    openedBySplit(): boolean {
+        return typeof this.ownMeta()?.[SHORTCUTS_FROM_META] === "string";
+    }
+
+    /** The meta of the pane that was split to open this one, while that pane is still there. */
+    private sourceMeta(): Record<string, unknown> | undefined {
+        const from = this.ownMeta()?.[SHORTCUTS_FROM_META];
+        if (typeof from !== "string") return undefined;
+        return MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", from))()?.meta;
+    }
+
+    /** Closes this pane. It has no content to lose, so nothing is asked and the neighbour takes its space. */
+    closeSelf(): void {
+        const layoutModel = getLayoutModelForStaticTab();
+        const node = layoutModel.getNodeByBlockId(this.blockId);
+        if (node) void layoutModel.closeNode(node.id);
+    }
+
     async handleWidgetSelect(widget: WidgetConfigType) {
         if (this.isParentWidget(widget)) {
             this.drillInto(widget);
             return;
         }
         try {
-            await replaceBlock(this.blockId, widget.blockdef, true);
+            // A Terminal or Hangar tile starts where the pane that was split was.
+            await replaceBlock(this.blockId, blockDefFromSource(widget.blockdef, this.sourceMeta()), true);
         } catch (error) {
             console.error("Error replacing block:", error);
         }
     }
 }
 
-function LauncherView(props: { model: LauncherViewModel }): JSX.Element {
+function ShortcutsView(props: { model: ShortcutsViewModel }): JSX.Element {
     const model = props.model;
     const searchTerm = model.searchTerm;
     const selectedIndex = model.selectedIndex;
@@ -281,7 +311,7 @@ function LauncherView(props: { model: LauncherViewModel }): JSX.Element {
                 onKeyDown={keydownWrapper(model.keyDownHandler.bind(model))}
                 onChange={(e) => model.searchTerm._set((e.target as HTMLInputElement).value)}
                 class="sr-only dummy"
-                aria-label="Search widgets"
+                aria-label="Search shortcuts"
             />
 
             {/* Logo */}
@@ -359,20 +389,22 @@ function LauncherView(props: { model: LauncherViewModel }): JSX.Element {
     );
 }
 
-/** The widget launcher as a native pane tab (Pane Tab contract Phase 2c). It
- *  draws no header of its own: its search box is its top edge. */
-export const launcherPaneTab: PaneTabManifest = {
+/** The Shortcuts pane as a native pane tab (Pane Tab contract Phase 2c): tiles for every pane
+ *  type and widget, the last used first. It draws no header of its own: its search box is its
+ *  top edge. `launcher` is its old name, still found in saved layouts and `app:defaultnewblock`. */
+export const shortcutsPaneTab: PaneTabManifest = {
     apiVersion: 1,
-    view: "launcher",
-    label: "Launcher",
+    view: "shortcuts",
+    aliases: ["launcher"],
+    label: "Shortcuts",
     icon: "shapes",
     defaultHue: 330,
     capabilities: { header: "none" },
     create: (ctx) => {
-        const model = new LauncherViewModel(ctx.blockId);
+        const model = new ShortcutsViewModel(ctx.blockId);
         return {
-            component: () => <LauncherView model={model} />,
-            liveTitle: () => ({ text: "Widget Launcher" }),
+            component: () => <ShortcutsView model={model} />,
+            liveTitle: () => ({ text: "Shortcuts" }),
             focus: () => model.giveFocus(),
             onKeyDown: (e) => model.keyDownHandler(e),
         };

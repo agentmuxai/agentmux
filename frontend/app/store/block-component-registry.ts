@@ -6,6 +6,7 @@
 // Re-exported from global.ts for backward-compat (97 files import from that
 // module).
 
+import { recordBlockOpened } from "./shortcuts-recent";
 import { createSignal, type Accessor } from "solid-js";
 import { getLayoutModelForStaticTab } from "@/layout/index";
 import { cleanupBlockAtomCache } from "./block-atom-cache";
@@ -208,6 +209,8 @@ export async function openOrFocusPaneIdByView(
     const layoutModel = getLayoutModelForStaticTab();
     // In another tab of this window: the most recently registered one.
     let elsewhere: string | undefined;
+    // Showing the pane that is already open is a use of it too (the Shortcuts pane's last-used order).
+    recordBlockOpened(blockDef ?? { meta: { view: viewType } });
     for (const bcm of blockComponentModelMap.values()) {
         if (bcm.viewModel?.viewType === viewType) {
             const blockId = (bcm.viewModel as any).blockId as string | undefined;

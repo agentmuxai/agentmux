@@ -23,6 +23,7 @@ const revealBlockLocally = vi.hoisted(() => vi.fn(async (_id: string, _opts?: un
 
 vi.mock("@/layout/index", () => ({ getLayoutModelForStaticTab: () => layout.model }));
 vi.mock("./block-layout-actions", () => ({ createBlock }));
+vi.mock("./shortcuts-recent", () => ({ recordBlockOpened: vi.fn() }));
 vi.mock("./block-meta", () => ({ setBlockMeta: vi.fn(async () => {}) }));
 vi.mock("./focusManager", () => ({ giveBlockFocus: (id: string) => void calls.push(`give:${id}`) }));
 vi.mock("./block-atom-cache", () => ({ cleanupBlockAtomCache: vi.fn() }));

@@ -915,6 +915,8 @@ declare global {
         // Selected section of a sectioned pane, meta-backed so it survives a
         // block remount and names the pane (section-pane.tsx, warden-model.ts).
         "connectors:section"?: "accounts" | "mcp" | "remotes";
+        /** The block id of the pane that was split to open this Shortcuts pane: its Terminal and Hangar tiles start where that pane was. */
+        "shortcuts:from"?: string;
         "memory:section"?: "global" | "personal" | "skills" | "bundles";
         "swarm:section"?: "supervisor" | "broadcast";
         "warden:section"?: "jobs" | "vault" | "host" | "lan" | "internet" | "audit" | "history" | "ambient";
@@ -1093,6 +1095,8 @@ declare global {
         "widget:pinned"?: string[];
         /** Widget-bar entries the user hid, as full keys (`defwidget@drone`). */
         "widget:hidden"?: string[];
+        /** The widget keys opened last, newest first (at most 12): the Shortcuts pane's tile order. */
+        "launcher:recent"?: string[];
         "statusbar:showmuxbuscloud"?: boolean;
         "window:*"?: boolean;
         "window:transparent"?: boolean;

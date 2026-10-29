@@ -237,6 +237,17 @@ pub struct SettingsType {
     )]
     pub widget_hidden: Option<Vec<String>>,
 
+    /// The widget keys (`defwidget@terminal`, `ext@acme.board/main`) the person opened last, newest
+    /// first, at most 12: the Shortcuts pane lists these tiles first. Written by the window
+    /// when the person opens a pane. SPEC_SHORTCUTS_PANE_FOR_SPLITS_2026_10_28.md.
+    #[serde(
+        rename = "launcher:recent",
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_string_list"
+    )]
+    pub launcher_recent: Option<Vec<String>>,
+
     // -- Status bar settings --
     /// Whether the status bar shows MuxBus Cloud: the dot after the host name and
     /// the sign-in block in the host popover. Absent means shown; only an explicit

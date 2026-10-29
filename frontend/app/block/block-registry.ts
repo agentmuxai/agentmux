@@ -15,7 +15,7 @@ import { dronePaneTab } from "@/app/view/drone/drone";
 import { editorPaneTab } from "@/app/view/editor/editor";
 import { filesPaneTab } from "@/app/view/files/files";
 import { identityPaneTab } from "@/app/view/identity/identity-pane";
-import { launcherPaneTab } from "@/app/view/launcher/launcher";
+import { shortcutsPaneTab } from "@/app/view/shortcuts/shortcuts";
 import { memoryPaneTab } from "@/app/view/memory/memory";
 import { settingsPaneTab } from "@/app/view/settings/settings";
 import { swarmPaneTab } from "@/app/view/swarm/swarm";
@@ -47,7 +47,7 @@ const builtins = [
     sysinfoPaneTab("sysinfo"),
     sysinfoPaneTab("cpuplot"),
     helpPaneTab, // native (create(ctx)) — the Phase 2b pilot
-    launcherPaneTab, // native — Phase 2c (no header)
+    shortcutsPaneTab, // native — Phase 2c (no header)
     swarmPaneTab, // native — Phase 2c
     kanbanPaneTab, // native — out of the Swarm (#9670)
     identityPaneTab, // native — Phase 2c

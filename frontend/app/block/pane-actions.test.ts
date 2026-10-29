@@ -143,71 +143,44 @@ describe("buildPaneContextMenu — omit", () => {
     });
 });
 
-describe("split — the floating 'Always on top' tack is not inherited", () => {
-    it("drops pane:floating_ontop and keeps the rest of the source meta", async () => {
-        const { createBlockSplitVertically } = await import("@/app/store/global");
-        const tacked = {
-            oid: "b9",
-            meta: { view: "term", "pane:floating_ontop": true, "frame:hue": 210 },
-        } as unknown as Block;
-        const splitDown = buildPaneContextMenu(tacked, opts()).find((i) => i.label === "Split Down");
-        splitDown!.click!();
-        await Promise.resolve();
-
-        const [blockDef, targetId] = (createBlockSplitVertically as any).mock.calls.at(-1);
-        expect(targetId).toBe("b9");
-        expect(blockDef.meta).not.toHaveProperty("pane:floating_ontop");
-        expect(blockDef.meta["frame:hue"]).toBe(210);
-        expect(blockDef.meta.view).toBe("term");
-    });
-});
-
-// SPEC_AGENT_PANE_SPLIT_OPENS_PICKER_2026_09_30.md: a view with `splitBlockDef`
-// splits into that block; nothing comes from the source pane.
-describe("split — a view's splitBlockDef replaces copying its meta", () => {
-    const PICKER_META = { view: "agentsplit", controller: "cmd", "cmd:args": [] as string[] };
+// SPEC_SHORTCUTS_PANE_FOR_SPLITS_2026_10_28.md: every split opens a Shortcuts pane, whatever the
+// source is. It names the pane it came from and carries nothing else of it (no copied meta, no
+// "Always on top" tack, no hue); the tiles take the directory and connection from that pane.
+describe("split — a Shortcuts pane, whatever the pane is", () => {
+    const AGENT_PICKER_META = { view: "agentsplit", controller: "cmd", "cmd:args": [] as string[] };
     registerPaneTab(
         stubPaneTab("agentsplit", {
-            capabilities: { splitBlockDef: () => ({ meta: { ...PICKER_META, "cmd:args": [] } }) },
+            capabilities: { splitBlockDef: () => ({ meta: { ...AGENT_PICKER_META, "cmd:args": [] } }) },
         })
     );
-    const historyTab = {
-        oid: "b7",
-        meta: {
-            view: "agentsplit",
-            agentId: "lark",
-            "agent:historyTabFor": "lark",
-            "agent:runtime": { model: "opus" },
-            "agent:sessionid": "sess-1",
-            "pane:floating_ontop": true,
+    const sources = {
+        tacked: {
+            oid: "b9",
+            meta: { view: "term", "pane:floating_ontop": true, "frame:hue": 210, "cmd:cwd": "C:/work" },
         },
-    } as unknown as Block;
+        agent: {
+            oid: "b7",
+            meta: { view: "agentsplit", agentId: "lark", "agent:runtime": { model: "opus" }, "agent:sessionid": "sess-1" },
+        },
+    } as unknown as Record<string, Block>;
 
-    it("Split Down creates exactly the declared block below the source", async () => {
-        const { createBlockSplitVertically } = await import("@/app/store/global");
-        buildPaneContextMenu(historyTab, opts())
-            .find((i) => i.label === "Split Down")!
-            .click!();
-        await Promise.resolve();
-        const [blockDef, targetId, position] = (createBlockSplitVertically as any).mock.calls.at(-1);
-        expect(targetId).toBe("b7");
-        expect(position).toBe("after");
-        expect(blockDef).toEqual({ meta: PICKER_META });
-    });
-
-    it("both directions split into the declared block", async () => {
+    it("both directions open a Shortcuts pane that names the source and copies none of its meta", async () => {
         const g = (await import("@/app/store/global")) as any;
-        const expected: Record<string, [any, string]> = {
-            "Split Down": [g.createBlockSplitVertically, "after"],
-            "Split Right": [g.createBlockSplitHorizontally, "after"],
-        };
-        for (const [label, [fn, position]] of Object.entries(expected)) {
-            buildPaneContextMenu(historyTab, opts())
-                .find((i) => i.label === label)!
-                .click!();
-            await Promise.resolve();
-            const [blockDef, targetId, pos] = fn.mock.calls.at(-1);
-            expect([label, blockDef, targetId, pos]).toEqual([label, { meta: PICKER_META }, "b7", position]);
+        const expected: Record<string, any> = { "Split Down": g.createBlockSplitVertically, "Split Right": g.createBlockSplitHorizontally };
+        for (const source of Object.values(sources)) {
+            for (const [label, fn] of Object.entries(expected)) {
+                buildPaneContextMenu(source, opts())
+                    .find((i) => i.label === label)!
+                    .click!();
+                await Promise.resolve();
+                const [blockDef, targetId, position] = fn.mock.calls.at(-1);
+                expect([label, blockDef, targetId, position]).toEqual([
+                    label,
+                    { meta: { view: "shortcuts", "shortcuts:from": source.oid } },
+                    source.oid,
+                    "after",
+                ]);
+            }
         }
     });
 });
