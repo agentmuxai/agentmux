@@ -35,7 +35,9 @@ function sortByDisplayOrder(
 }
 
 /** Whether a pane of `view` is open in this window. */
-const isViewOpen = (view: string): boolean => getAllBlockComponentModels().some((m) => m.viewModel?.viewType === view);type GridLayoutType = { columns: number; tileWidth: number; tileHeight: number; showLabel: boolean };
+const isViewOpen = (view: string): boolean => getAllBlockComponentModels().some((m) => m.viewModel?.viewType === view);
+
+type GridLayoutType = { columns: number; tileWidth: number; tileHeight: number; showLabel: boolean };
 
 /** The Shortcuts pane's state behind its native pane tab (`shortcutsPaneTab`). */
 /** Exported for the tests; the app reaches it through `shortcutsPaneTab`. */
