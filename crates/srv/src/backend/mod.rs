@@ -11,6 +11,7 @@ pub mod attachments;
 pub mod agent_color;
 pub mod agent_env;
 pub mod agent_config;
+pub mod agent_skill_files;
 pub mod agent_registry_lookup;
 pub mod agent_resolve;
 pub mod name_resolution;
