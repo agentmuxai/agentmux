@@ -8,6 +8,7 @@
 
 import { For, Show, createMemo, createSignal, onMount, type JSX } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
+import { Button } from "@/app/element/ui";
 import { openOrFocusPaneByView } from "@/app/store/block-component-registry";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -34,8 +35,14 @@ export function LanPeerRow(props: { peer: LanInstance; pins: readonly LanPinInfo
     const agentCount = () => props.peer.agents.length;
     return (
         <div class="lan-peer" data-testid="lan-peer">
-            <button type="button" class="lan-peer-head" aria-expanded={open()} onClick={() => setOpen(!open())}>
-                <i class={`fa-solid ${open() ? "fa-chevron-down" : "fa-chevron-right"} lan-peer-chevron`} />
+            <Button
+                tone="quiet"
+                density="compact"
+                class="lan-peer-head"
+                icon={open() ? "chevron-down" : "chevron-right"}
+                aria-expanded={open()}
+                onClick={() => setOpen(!open())}
+            >
                 <span class="lan-peer-name">{name()}</span>
                 <Show when={props.peer.version}>
                     <span class="status-bar-popover-mono lan-peer-version">v{props.peer.version}</span>
@@ -47,7 +54,7 @@ export function LanPeerRow(props: { peer: LanInstance; pins: readonly LanPinInfo
                         title="A message from this peer was refused: its key changed"
                     />
                 </Show>
-            </button>
+            </Button>
             <Show when={open()}>
                 <div class="lan-peer-body">
                     <div class="status-bar-popover-row">
@@ -68,9 +75,9 @@ export function LanPeerRow(props: { peer: LanInstance; pins: readonly LanPinInfo
                             {agentCount()}
                             <Show when={agentCount() > 0}>
                                 {" "}
-                                <button type="button" class="lan-peer-link" onClick={openSwarm}>
+                                <Button tone="accent" density="compact" onClick={openSwarm}>
                                     Show in Swarm
-                                </button>
+                                </Button>
                             </Show>
                         </span>
                     </div>
@@ -89,9 +96,9 @@ export function LanPeerRow(props: { peer: LanInstance; pins: readonly LanPinInfo
                                     </div>
                                 )}
                             </For>
-                            <button type="button" class="lan-peer-link" onClick={openPinnedSenders}>
+                            <Button tone="attention" density="compact" onClick={openPinnedSenders}>
                                 Review in Settings › Devices › Pinned senders
-                            </button>
+                            </Button>
                         </div>
                     </Show>
                 </div>

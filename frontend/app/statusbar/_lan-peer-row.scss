@@ -6,23 +6,8 @@
 }
 
 .lan-peer-head {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
     width: 100%;
-    padding: var(--space-0-5) 0;
-    border: 0;
-    background: none;
-    color: inherit;
-    font: inherit;
-    text-align: left;
-    cursor: pointer;
-}
-
-.lan-peer-chevron {
-    width: 0.8em;
-    opacity: 0.5;
-    font-size: 0.75em;
+    justify-content: flex-start;
 }
 
 .lan-peer-name {
@@ -39,15 +24,6 @@
 
 .lan-peer-body {
     padding-left: var(--space-4);
-}
-
-.lan-peer-link {
-    border: 0;
-    background: none;
-    color: var(--accent-color);
-    font: inherit;
-    cursor: pointer;
-    text-decoration: underline;
 }
 
 .lan-peer-key-warning {
