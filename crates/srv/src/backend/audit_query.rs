@@ -62,30 +62,33 @@ pub(crate) fn same_agent(a: &str, b: &str) -> bool {
     !a.is_empty() && a == b
 }
 
-/// Where in the query a page stopped: the last entry given, and where the audit file's next line ends.
+/// Where in the query a page stopped, in each store: the last ledger entry given, and where the audit file's next
+/// line ends. (The audit file is only roughly in time order, so one time and id for both would repeat or lose entries.)
 struct Cursor {
-    ts: u64,
-    id: String,
+    ledger: Option<(u64, String)>,
     jekt_end: Option<u64>,
 }
 
 impl Cursor {
     fn encode(&self) -> String {
-        format!("1|{}|{}|{}", self.ts, self.jekt_end.map_or("-".to_string(), |e| e.to_string()), self.id)
+        let (ts, id) = self.ledger.as_ref().map_or(("-".to_string(), ""), |(ts, id)| (ts.to_string(), id.as_str()));
+        format!("2|{ts}|{}|{id}", self.jekt_end.map_or("-".to_string(), |e| e.to_string()))
     }
 
     fn decode(text: &str) -> Result<Self, String> {
         let bad = || "audit.query: that cursor isn't one this query gave".to_string();
         let mut parts = text.splitn(4, '|');
-        if parts.next() != Some("1") {
+        if parts.next() != Some("2") {
             return Err(bad());
         }
-        let ts = parts.next().and_then(|t| t.parse().ok()).ok_or_else(bad)?;
+        let ts = parts.next().ok_or_else(bad)?;
         let jekt_end = match parts.next().ok_or_else(bad)? {
             "-" => None,
             n => Some(n.parse().map_err(|_| bad())?),
         };
-        Ok(Self { ts, id: parts.next().ok_or_else(bad)?.to_string(), jekt_end })
+        let id = parts.next().ok_or_else(bad)?.to_string();
+        let ledger = if ts == "-" { None } else { Some((ts.parse().map_err(|_| bad())?, id)) };
+        Ok(Self { ledger, jekt_end })
     }
 }
 
@@ -176,14 +179,26 @@ fn from_audit(at: u64, e: &AuditLogEntry, ctx: &Ctx) -> AuditEntry {
             links: end_of(&e.target_agent, ts_ms, Some(&e.block_id), ctx).links,
             ..blank
         },
-        "action" => AuditEntry {
-            kind: KIND_ACTION.to_string(),
-            agent_id: Some(who.clone()),
-            to: Some(end_of(&e.target_agent, ts_ms, Some(&e.block_id), ctx)),
-            summary: format!("{who} {} {to}{}", e.outcome.as_deref().unwrap_or("acted on"), if e.success { "" } else { " (failed)" }),
-            links: from.map(|f| end_of(f, ts_ms, None, ctx).links).unwrap_or_default(),
-            ..blank
-        },
+        "action" => {
+            // The actor is `agent:<id>`, `operator` or `unproven`: only an agent has an id and a history.
+            let source = e.source_agent.as_deref().unwrap_or("").trim();
+            let actor = source.strip_prefix("agent:").map(route).filter(|a| !a.is_empty());
+            let target = Some(to.clone()).filter(|t| !t.is_empty());
+            let name = actor.clone().unwrap_or_else(|| if source.is_empty() { "unknown".to_string() } else { source.to_string() });
+            AuditEntry {
+                kind: KIND_ACTION.to_string(),
+                links: actor.as_deref().map(|a| end_of(a, ts_ms, None, ctx).links).unwrap_or_default(),
+                to: target.as_ref().map(|_| end_of(&e.target_agent, ts_ms, Some(&e.block_id), ctx)),
+                summary: format!(
+                    "{name} {}{}{}",
+                    e.outcome.as_deref().unwrap_or("acted"),
+                    target.map(|t| format!(" on {t}")).unwrap_or_default(),
+                    if e.success { "" } else { " (failed)" }
+                ),
+                agent_id: actor,
+                ..blank
+            }
+        }
         other => {
             let cli = other == "cli_native";
             let status = if !e.success {
@@ -241,13 +256,15 @@ pub fn query(src: &Sources, req: &AuditQueryReq) -> Result<AuditQueryResult, Str
     } else {
         Vec::new()
     };
-    ledger.retain(|e| filter.keep(e) && cursor.as_ref().is_none_or(|c| (e.ts_ms, e.id.as_str()) < (c.ts, c.id.as_str())));
+    let past = cursor.as_ref().and_then(|c| c.ledger.clone());
+    ledger.retain(|e| filter.keep(e) && past.as_ref().is_none_or(|(ts, id)| (e.ts_ms, e.id.as_str()) < (*ts, id.as_str())));
     ledger.sort_by(|a, b| (b.ts_ms, &b.id).cmp(&(a.ts_ms, &a.id)));
     let mut ledger = ledger.into_iter().peekable();
     let mut jekts = jekt_stream(src, &filter, jekt_from).peekable();
 
     let mut entries: Vec<AuditEntry> = Vec::new();
     let mut jekt_end = jekt_from;
+    let mut ledger_last = past;
     let mut more = false;
     loop {
         let take_ledger = match (ledger.peek(), jekts.peek()) {
@@ -261,13 +278,16 @@ pub fn query(src: &Sources, req: &AuditQueryReq) -> Result<AuditQueryResult, Str
             break;
         }
         if take_ledger {
-            entries.extend(ledger.next());
+            if let Some(entry) = ledger.next() {
+                ledger_last = Some((entry.ts_ms, entry.id.clone()));
+                entries.push(entry);
+            }
         } else if let Some((at, entry)) = jekts.next() {
             jekt_end = Some(at);
             entries.push(entry);
         }
     }
-    let next_cursor = (more).then(|| entries.last().map(|last| Cursor { ts: last.ts_ms, id: last.id.clone(), jekt_end }.encode())).flatten();
+    let next_cursor = more.then(|| Cursor { ledger: ledger_last, jekt_end }.encode());
     let not_recorded = NOT_RECORDED.iter().filter(|k| filter.kinds.contains(**k)).map(|k| k.to_string()).collect();
     Ok(AuditQueryResult { entries, next_cursor, not_recorded })
 }

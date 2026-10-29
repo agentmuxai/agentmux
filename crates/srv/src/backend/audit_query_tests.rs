@@ -228,3 +228,61 @@ fn a_bad_cursor_or_kind_is_refused_and_a_missing_file_is_an_empty_audit() {
     let src = Sources { jekt_file: Some(Path::new("/nonexistent/jekt-audit.jsonl")), segments: None, ctx: Ctx { slug_of_uid: &slug, pane_of_agent: &none, block_exists: &exists } };
     assert!(query(&src, &AuditQueryReq::default()).unwrap().entries.is_empty());
 }
+
+fn action(ts: u64, actor: &str, command: &str, target: &str) -> AuditLogEntry {
+    AuditLogEntry { event_kind: "action".into(), outcome: Some(command.into()), ..audit_entry(ts, actor, target) }
+}
+
+#[test]
+fn an_action_names_its_actor_only_when_the_actor_is_an_agent() {
+    let world = World::new(&[
+        action(100, "agent:Korp", "agent.stop", "Opaz"),
+        action(200, "operator", "agent.stop", "Opaz"),
+        action(300, "unproven", "agent.stop", ""),
+        action(400, "", "agent.stop", "Opaz"),
+    ]);
+    let got = world.all(AuditQueryReq::default());
+    assert!(got.iter().all(|e| e.kind == "action"));
+    let by_ts = |ts: u64| got.iter().find(|e| e.ts_ms == ts).unwrap();
+    let korp = by_ts(100);
+    assert_eq!(korp.agent_id.as_deref(), Some("korp"));
+    assert_eq!(korp.links.history.as_ref().unwrap().agent_id, "korp");
+    assert_eq!(korp.to.as_ref().unwrap().agent_id, "opaz");
+    for ts in [200, 300, 400] {
+        let e = by_ts(ts);
+        assert_eq!((e.agent_id.as_deref(), e.links.clone()), (None, AuditLinks::default()), "{}", e.summary);
+    }
+    assert!(by_ts(300).to.is_none(), "no target, no link to it");
+    assert!(by_ts(200).summary.starts_with("operator agent.stop on opaz"));
+    // Korp's own actions are found under its slug; the operator's are not any agent's.
+    let mine = world.all(AuditQueryReq { agent_id: Some("korp".into()), ..Default::default() });
+    assert_eq!(mine.iter().map(|e| e.ts_ms).collect::<Vec<_>>(), [100]);
+    assert_eq!(world.all(AuditQueryReq { agent_id: Some("operator".into()), ..Default::default() }).len(), 0);
+}
+
+#[test]
+fn a_file_out_of_time_order_neither_repeats_nor_loses_entries_across_pages() {
+    // The newest line of the file is not the newest entry: a later write carries an earlier time.
+    let world = World::new(&[audit_entry(110, "Korp", "Opaz"), audit_entry(100, "Korp", "Opaz"), audit_entry(90, "Korp", "Opaz")]);
+    let l = ledger::record_start(&world.store, start("a1", 105, 0)).unwrap();
+    ledger::record_end(&world.store, "a1", &l, EndReason::Closed, None, 95).unwrap();
+    let whole = ids(&world.all(AuditQueryReq::default()));
+    assert_eq!(whole.len(), 5);
+    for limit in 1..=4u32 {
+        let mut seen = Vec::new();
+        let mut cursor = None;
+        loop {
+            let page = world.run(AuditQueryReq { limit: Some(limit), cursor, ..Default::default() }).unwrap();
+            seen.extend(ids(&page.entries));
+            cursor = page.next_cursor;
+            if cursor.is_none() {
+                break;
+            }
+        }
+        let mut sorted = seen.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(sorted.len(), 5, "limit {limit}: {seen:?}");
+        assert_eq!(seen.len(), 5, "limit {limit} repeated one: {seen:?}");
+    }
+}
