@@ -1096,7 +1096,7 @@ pub(crate) fn banner_for(target: &str) -> (String, Option<String>) {
 /// Refuse a tool call on a pane that is waiting for the user: a hand-off
 /// (they're working in it), an approval (they're reading the form the
 /// approved click will send, which mustn't change under them), or a question.
-fn not_waiting_on_user(pane: &str) -> Result<(), (StatusCode, String)> {
+pub(crate) fn not_waiting_on_user(pane: &str) -> Result<(), (StatusCode, String)> {
     crate::server::browser_actions::not_paused(pane)?;
     match crate::server::browser_attention::waiting_on_user(pane) {
         None => Ok(()),

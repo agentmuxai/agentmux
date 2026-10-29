@@ -615,6 +615,38 @@ pub struct UiScreenshotResponse {
     pub png_base64: String,
 }
 
+/// `POST /api/v1/ui/record`: `op` is `start` (a recording of the caller's own pane, or of `pane`) or `stop`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiRecordRequest {
+    #[serde(flatten)]
+    pub auth: UiAutomationAuth,
+    pub op: String,
+    /// As for `UiScreenshotRequest`: a browser pane this agent opened; absent = the caller's own pane.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane: Option<String>,
+    /// start: frames a second (1 to 10, default 5).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fps: Option<u32>,
+    /// start: the most seconds to record (1 to 30, default 30).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seconds: Option<u32>,
+}
+
+/// Response for `POST /api/v1/ui/record`. `status` is `recording` or `saved`; `path` is the finished file.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiRecordResponse {
+    pub status: String,
+    pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(default)]
+    pub frames: u32,
+    #[serde(default)]
+    pub skipped: u32,
+    #[serde(default)]
+    pub seconds: f32,
+}
+
 /// `POST /api/v1/ui/click`
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UiClickRequest {
