@@ -107,6 +107,10 @@ function WorkspaceElem(): JSX.Element {
     // frame is rendered.
     const [leavingTabId, setLeavingTabId] = createSignal<string | null>(null);
     let leavingSeq = 0;
+    // A warm tab just swapped in whose selected pane should take the caret, once
+    // the effect below sees the swap's DOM (the same pattern as the layout read
+    // further down: a separate effect runs after the bindings are applied).
+    let focusWhenShown: string | null = null;
     createEffect(() => {
         const next = targetTabId();
         const prev = displayTabId();
@@ -125,9 +129,11 @@ function WorkspaceElem(): JSX.Element {
                 );
             }
             setDisplayTabId(next);
-            // The caret goes with the content, in this same task: the backend's
-            // commit (and the focus net behind it) is a round trip away.
-            if (instant) focusManager.focusShownTab(next);
+            // The caret goes with the content: the backend's commit (and the
+            // focus net behind it) is a round trip away. Not from this effect:
+            // the tab's visibility bindings are only applied once it has run,
+            // and a terminal's focus() reports success on a hidden element.
+            if (instant) focusWhenShown = next;
             if (tabSwitching()) scheduleRevealLift();
         };
         if (!instant && !shouldReduceMotion("transition")) {
@@ -171,6 +177,10 @@ function WorkspaceElem(): JSX.Element {
         const id = displayTabId();
         const el = tabEls.get(id);
         if (el) void el.getBoundingClientRect();
+        if (focusWhenShown === id) {
+            focusWhenShown = null;
+            focusManager.focusShownTab(id);
+        }
     });
 
     // Reveal gate, destination-aware (SPEC_TAB_CLOSE_BUTTON_SELECT_FLASH §9):
