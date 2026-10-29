@@ -105,27 +105,47 @@ pub(crate) fn check_cert(cert: &WanKeyRecord, agent: &str, observed_key: &[u8], 
 }
 
 /// Whether this machine trusts the install `instance_id`: pinned here for some
-/// agent already, else live and not revoked in the account's directory.
+/// agent already, else live in the account's directory. An install this machine
+/// knows to be revoked is trusted by neither way, and a pin does not outlive a
+/// revocation the directory holds.
 async fn instance_trust(state: &AppState, instance_id: &str) -> Result<Path, String> {
-    if let Some(wan) = state.mstore.wan_identity().or_else(crate::backend::storage::wan_identity::global) {
-        if wan.agent_instance_pins_list().map_err(|e| format!("the WAN pins could not be read: {e}"))?.iter().any(|p| p.instance_id == instance_id) {
-            return Ok(Path::PinnedInstance);
+    use crate::muxbus::wan_verify::{instance_is_live_install, instance_is_revoked, Directory, GLOBAL_BUDGET};
+    let wan = state.mstore.wan_identity().or_else(crate::backend::storage::wan_identity::global);
+    if let Some(wan) = &wan {
+        let known = wan.known_instance_get(instance_id).map_err(|e| format!("the known installs could not be read: {e}"))?;
+        if known.is_some_and(|k| k.revoked_at.is_some()) {
+            return Err("the install is revoked".to_string());
         }
     }
-    let Some(scheduler) = crate::broker::get_global() else {
-        return Err("the install is not pinned here and this machine is not signed in to ask the account's directory".to_string());
+    let pinned = match &wan {
+        Some(wan) => wan
+            .agent_instance_pins_list()
+            .map_err(|e| format!("the WAN pins could not be read: {e}"))?
+            .iter()
+            .any(|p| p.instance_id == instance_id),
+        None => false,
     };
-    let Some(token) = crate::muxbus::cloud_subscriber::load_valid_token(&state.id_store, &scheduler).await else {
-        return Err("the install is not pinned here and this machine is not signed in to ask the account's directory".to_string());
+    let token = match crate::broker::get_global() {
+        Some(scheduler) => crate::muxbus::cloud_subscriber::load_valid_token(&state.id_store, &scheduler).await,
+        None => None,
     };
     let base_url = crate::muxbus::relay::rest_base_url();
-    let dir = crate::muxbus::wan_verify::Directory {
-        base_url: &base_url,
-        http: &state.http_client,
-        token: &token,
-        budget: &crate::muxbus::wan_verify::GLOBAL_BUDGET,
+    let dir = token.as_ref().map(|token| Directory { base_url: &base_url, http: &state.http_client, token, budget: &GLOBAL_BUDGET });
+    if pinned {
+        if let Some(dir) = &dir {
+            if instance_is_revoked(dir, instance_id).await == Some(true) {
+                if let Some(wan) = &wan {
+                    let _ = wan.known_instance_record_revocation_check(instance_id, true, agentmux_common::time::now_secs());
+                }
+                return Err("the install is revoked".to_string());
+            }
+        }
+        return Ok(Path::PinnedInstance);
+    }
+    let Some(dir) = dir else {
+        return Err("the install is not pinned here and this machine is not signed in to ask the account's directory".to_string());
     };
-    match crate::muxbus::wan_verify::instance_is_live_install(&dir, instance_id).await {
+    match instance_is_live_install(&dir, instance_id).await {
         Some(true) => Ok(Path::AccountDirectory),
         Some(false) => Err("the install is not pinned here and the account's directory does not list it as a live install".to_string()),
         None => Err("the install is not pinned here and the account's directory could not be read".to_string()),

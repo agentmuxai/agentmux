@@ -26,7 +26,7 @@ The `(name, UID)` pins go with the old key: moving the name pin clears them, and
 ## 3. What stops an impostor
 
 - **On the LAN, without the account** (the case the pin exists for): the vouch needs a signature by an install key that is pinned here or listed in the account's directory. The attacker has neither private key, so they cannot make a certificate for a key of their own. Copying a real certificate gains nothing: it certifies the real key, whose private half they lack. Replaying an old one fails the freshness and newer-than-pin checks.
-- **Path "pinned instance":** the attacker would need that install's private key, which never leaves its machine and which the agent never holds (so an agent whose key leaked cannot vouch for a replacement).
+- **Path "pinned instance":** the attacker would need that install's private key, which never leaves its machine and which the agent never holds (so an agent whose key leaked cannot vouch for a replacement). A pin does not outlive a revocation: an install this machine has recorded as revoked vouches for nothing, and when the machine is signed in the directory is asked too, so a retired install's key cannot certify a replacement.
 - **Path "account's directory":** the attacker would need to be signed in to the account and to have published their own install. That is the same boundary WAN verification already treats as trusted, so it adds no new exposure; it is also why every automatic move is audited and alerted (§4). When an approved-installs list exists, this path narrows to approved installs only.
 - A moved pin never marks a message verified by itself: the message signature must still verify under the new key.
 
@@ -44,6 +44,6 @@ Retire notices for keys the install retired (a refused key can be told apart fro
 
 ## 7. Tests
 
-An impostor key with no certificate is refused and the pin stays; a certificate by an untrusted instance is refused; a vouched rotation moves the name pin and the UID pin; the audit line is written with the path and the fingerprints; a stale certificate, a certificate older than the pin (also with the host's clock ahead), a pin that changed while the install was being checked is not written over, a certificate for another agent or another key, and a certificate whose chain is broken are each refused; the agent route accepts a vouched key and refuses an unvouched one; a host that sends no certificate is unchanged.
+An impostor key with no certificate is refused and the pin stays; a certificate by an untrusted instance is refused; a vouched rotation moves the name pin and the UID pin; the audit line is written with the path and the fingerprints; a stale certificate, a certificate older than the pin (also with the host's clock ahead), a pin that changed while the install was being checked is not written over, a certificate for another agent or another key, a certificate whose chain is broken, and a certificate by an install known as revoked (while still pinned) are each refused; the agent route accepts a vouched key and refuses an unvouched one; a host that sends no certificate is unchanged.
 
 Agent: Lazo@Area54

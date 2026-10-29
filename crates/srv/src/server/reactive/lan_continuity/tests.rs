@@ -210,6 +210,27 @@ async fn a_pin_moves_only_if_it_is_still_the_one_that_was_checked() {
 }
 
 #[tokio::test]
+async fn an_install_known_here_to_be_revoked_vouches_for_nothing_even_while_it_is_still_pinned() {
+    let state = test_state();
+    let (_sdir, sender) = host("starpower");
+    let (_rdir, receiver) = host("narko");
+    trust(&state, &receiver, &sender);
+    let (old, _) = generate_lan_keypair([1u8; 32]);
+    let (new, _) = generate_lan_keypair([2u8; 32]);
+    pin(&state, "maop-rv", &old);
+    let installed = sender.instance_ensure("starpower").unwrap();
+    // A WAN message from it had shown the revocation: the record stands, the pin was never removed.
+    receiver.known_instance_observe(&installed.instance_id, &installed.host_hint, now()).unwrap();
+    receiver.known_instance_record_revocation_check(&installed.instance_id, true, now()).unwrap();
+    let new_cert = cert(&sender, "maop-rv", &new, now() + 5);
+
+    let err = move_if_vouched(&state, "maop-rv", &new, Some(&new_cert), "automatic", false).await.unwrap_err();
+    assert!(err.contains("revoked"), "{err}");
+    assert_eq!(pinned(&state, "maop-rv"), BASE64.encode(old));
+    assert!(audited_for("maop-rv").is_empty());
+}
+
+#[tokio::test]
 async fn an_install_certifies_the_key_it_hosts_and_a_receiver_accepts_the_certificate() {
     let state = test_state();
     let (_dir, wan) = host("starpower");

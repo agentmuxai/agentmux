@@ -395,6 +395,12 @@ pub(crate) async fn instance_is_live_install(dir: &Directory<'_>, instance_id: &
     }
 }
 
+/// Whether the directory holds a revocation `instance_id` signed itself (the
+/// standard WAN verification applies). `None` when that can't be told.
+pub(crate) async fn instance_is_revoked(dir: &Directory<'_>, instance_id: &str) -> Option<bool> {
+    fetch_revoked(dir, instance_id).await
+}
+
 /// What the pin said about the install that signed a message.
 enum PinCheck {
     /// Pinned to this install, or not pinnable yet.
