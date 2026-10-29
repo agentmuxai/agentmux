@@ -676,9 +676,13 @@ jobs:
           fi
           sha256sum msix-download/*.msix
 
-      # Pinned by commit: this job holds the Store credentials.
+      # The action and the CLI it installs are both pinned: this job holds the Store
+      # credentials. The command below is for this CLI version (v0.4.3): the MSIX file
+      # itself is the path, and the app id is given because there is no project to read it from.
       - name: Install the Microsoft Store Developer CLI
         uses: microsoft/microsoft-store-apppublisher@cc9910a8d59f2eb55cbb83df0a3800cf3b5300e0 # v1.4
+        with:
+          version: v0.4.3
 
       - name: Configure the CLI with the Store credentials
         shell: pwsh
@@ -708,7 +712,7 @@ jobs:
           $msix = Get-ChildItem msix-download -Filter '*.msix' | Select-Object -First 1
           $commit = $env:MSSTORE_COMMIT -eq 'true'
           $extra = if ($commit) { @() } else { @('--noCommit') }
-          msstore publish msix-download --inputFile $msix.FullName --appId $env:STORE_PRODUCT_ID @extra
+          msstore publish $msix.FullName --appId $env:STORE_PRODUCT_ID @extra
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $what = if ($commit) { 'sent to the Store for certification' } else { 'left as a draft in Partner Center: check it there and send it' }
           "Microsoft Store: $($msix.Name) $what." | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
