@@ -5,7 +5,7 @@
 import logoUrl from "@/app/asset/logo.svg?url";
 import { atoms, MOS, replaceBlock } from "@/app/store/global";
 import { closeBlockInStack, getLayoutModelForStaticTab } from "@/layout/index";
-import { getAllBlockComponentModels } from "@/app/store/block-component-registry";
+import { findOpenBlockByView } from "@/app/util/reveal-block";
 import { isSingletonView } from "@/app/store/widget-singleton";
 import {
     getChildWidgets,
@@ -34,8 +34,8 @@ function sortByDisplayOrder(
     return entries;
 }
 
-/** Whether a pane of `view` is open in this window. */
-const isViewOpen = (view: string): boolean => getAllBlockComponentModels().some((m) => m.viewModel?.viewType === view);
+/** Whether a pane of `view` is open in this window, mounted or not (an inactive tab of a pane's stack is not). */
+const isViewOpen = async (view: string): Promise<boolean> => (await findOpenBlockByView(view)) != null;
 
 type GridLayoutType = { columns: number; tileWidth: number; tileHeight: number; showLabel: boolean };
 
@@ -234,7 +234,7 @@ export class ShortcutsViewModel {
             return;
         }
         const view = widget.blockdef?.meta?.["view"] as string | undefined;
-        if (view && !opts.forceNew && !widget.magnified && (widget.singleton ?? isSingletonView(view)) && isViewOpen(view)) {
+        if (view && !opts.forceNew && !widget.magnified && (widget.singleton ?? isSingletonView(view)) && (await isViewOpen(view))) {
             try {
                 // This pane first: closing it afterwards would hand the focus to its neighbour.
                 await this.closeSelf();

@@ -42,8 +42,8 @@ vi.mock("@/store/global", () => h.globalMock());
 const layoutModel = {
     getNodeByBlockId: (blockId: string) => (h.blocks[blockId] ? { id: `node-of-${blockId}` } : undefined),
 };
-vi.mock("@/app/store/block-component-registry", () => ({
-    getAllBlockComponentModels: () => [...h.openViews].map((viewType) => ({ viewModel: { viewType } })),
+vi.mock("@/app/util/reveal-block", () => ({
+    findOpenBlockByView: async (view: string) => (h.openViews.has(view) ? `open-${view}` : null),
 }));
 vi.mock("@/layout/index", () => ({
     getLayoutModelForStaticTab: () => layoutModel,
