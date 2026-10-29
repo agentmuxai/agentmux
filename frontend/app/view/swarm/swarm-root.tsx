@@ -12,6 +12,7 @@ import { SwarmAgentList, useSwarmAgents, type SwarmAgents } from "./swarm-agent-
 import type { SwarmFilterFocus } from "./swarm-filter-bar";
 import { ClearCompletedButton } from "./swarm-view";
 import { SwarmSectionBar } from "./swarm-section-bar";
+import { RegistrationFlagsProvider } from "./swarm-row-registration";
 import { createSwarmSection, swarmDensityOf, type SwarmSection } from "./swarm-section";
 import { BroadcastDock } from "./swarm-broadcast";
 import { SupervisorSettingsBar } from "./swarm-supervisor-settings";
@@ -125,19 +126,21 @@ export function SwarmView(props: {
                 when={!model.loadingAtom()}
                 fallback={<div class="swarm-loading">Loading…</div>}
             >
-                <AccountAvailabilityStrip />
-                <SwarmSectionBar section={section} onChange={(id) => void ctx.setMeta({ "swarm:section": id })}>
-                    {/* The body is the same elements in every section: the area above the list
-                        follows the section, the list itself is rendered once and never remounted
-                        by a switch, which is what keeps a press on a row from being lost (#5208). */}
-                    <div class="swarm-section-body">
-                        <div class="swarm-agents-pane">
-                            <SectionControls model={model} agents={agents} section={section()} />
-                            <SectionListNotes model={model} agents={agents} />
-                            <SwarmAgentList model={model} ctx={ctx} agents={agents} density={density} filterFocusRef={props.filterFocusRef} />
+                <RegistrationFlagsProvider visible={() => ctx.visibility() === "active"}>
+                    <AccountAvailabilityStrip />
+                    <SwarmSectionBar section={section} onChange={(id) => void ctx.setMeta({ "swarm:section": id })}>
+                        {/* The body is the same elements in every section: the area above the list
+                            follows the section, the list itself is rendered once and never remounted
+                            by a switch, which is what keeps a press on a row from being lost (#5208). */}
+                        <div class="swarm-section-body">
+                            <div class="swarm-agents-pane">
+                                <SectionControls model={model} agents={agents} section={section()} />
+                                <SectionListNotes model={model} agents={agents} />
+                                <SwarmAgentList model={model} ctx={ctx} agents={agents} density={density} filterFocusRef={props.filterFocusRef} />
+                            </div>
                         </div>
-                    </div>
-                </SwarmSectionBar>
+                    </SwarmSectionBar>
+                </RegistrationFlagsProvider>
             </Show>
         </div>
     );
