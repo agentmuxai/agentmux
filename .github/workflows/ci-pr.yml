@@ -583,6 +583,12 @@ jobs:
         with:
           name: nextest-windows-archive
           path: ${{ runner.temp }}\nextest-archive
+      # A debug build of some dependencies reads their files from the cargo
+      # registry source folder it was compiled from (age's message files, via
+      # rust-embed), so a test fails here, where nothing was compiled, unless the
+      # sources are in that same folder.
+      - name: Fetch the crate sources the tests read at run time
+        run: cargo fetch --locked --target x86_64-pc-windows-msvc
       # The archive holds the test binaries; the checkout is where they run
       # (their working folder, the nextest profile and the test data files).
       # It is unpacked into the checkout, not beside it: the integration tests
