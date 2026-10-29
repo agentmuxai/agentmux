@@ -864,6 +864,14 @@ fn is_runtime_config_only_replace(existing_type: &str, target_type: &str, force:
         && target_type == BLOCK_CONTROLLER_PERSISTENT
 }
 
+/// A controller is about to (re)start an agent: its bound skills are written first, so a skill bound after its
+/// first launch is on disk when the CLI reads its project.
+fn refresh_agent_skill_files(meta: &MetaMapType, mstore: &Option<Arc<Store>>, identity_store: &Option<Arc<Store>>) {
+    if let (Some(m), Some(i)) = (mstore, identity_store) {
+        crate::backend::agent_skill_files::refresh_for_block(meta, m, i);
+    }
+}
+
 /// Resync a block's controller — the main entry point for starting/restarting blocks.
 /// Port of Go's `ResyncController`.
 ///
@@ -1032,10 +1040,12 @@ pub fn resync_controller(
                 "[dnd-debug] existing controller — skipping spawn (no cmd:cwd seed)"
             );
             if status.shellprocstatus == STATUS_INIT {
+                refresh_agent_skill_files(block_meta, &mstore, &identity_store);
                 return ctrl.start(block_meta.clone(), rt_opts, force);
             }
             if status.shellprocstatus == STATUS_DONE {
                 if respawn_if_done {
+                    refresh_agent_skill_files(block_meta, &mstore, &identity_store);
                     return ctrl.start(block_meta.clone(), rt_opts, force);
                 }
                 return Err(RESYNC_ERR_ALREADY_EXITED.to_string());
@@ -1045,6 +1055,7 @@ pub fn resync_controller(
     }
 
     // Create new controller
+    refresh_agent_skill_files(block_meta, &mstore, &identity_store);
     match controller_type.as_str() {
         // A durable SSH pane: the shell lives in the helper's session on the
         // host, reached over ssh (durable_ssh.rs). Same `shell` type and
