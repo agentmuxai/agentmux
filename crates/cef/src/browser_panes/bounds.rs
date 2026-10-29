@@ -8,9 +8,10 @@
 //! thread that waited for the UI thread. A window drag over nine panes queued
 //! up to 111 requests, so panes trailed the page by about half a second
 //! (ANALYSIS_BROWSER_PANE_RESIZE_ARCHITECTURE_2026_10_06.md). Now the frontend
-//! sends one batch per window with at most one in flight
+//! sends one batch per window, at most 3 out at once and numbered (`RectsOrder`)
 //! (`frontend/app/view/browser/pane-rect-batcher.ts`), and here:
 //!
+//! - A pane's rect from an older batch than one already received is dropped.
 //! - A batch merges into the window's pending rects (a pane's newer rect
 //!   replaces its older one) and one UI task is scheduled for the window if
 //!   none is waiting. Batches can't pile up on the UI thread.
