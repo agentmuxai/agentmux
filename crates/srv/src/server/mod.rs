@@ -64,6 +64,7 @@ mod voice;
 mod attachments;
 pub(crate) mod mux_obj_bridge;
 mod websocket;
+mod cli_version;
 mod drone_handlers;
 pub(crate) mod cron;
 pub(crate) mod job_actions;

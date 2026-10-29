@@ -1095,7 +1095,14 @@ impl CliNotices {
     }
 }
 
+/// The version `cli_path` reports, asked of the CLI once per file (`cli_version.rs`): it runs on
+/// every agent open, and each probe is a node process.
 pub(crate) async fn get_cli_version(cli_path: &str) -> String {
+    super::cli_version::cached_version(cli_path, || probe_cli_version(cli_path)).await
+}
+
+/// Run `<cli> --version`; `None` if it timed out or failed.
+async fn probe_cli_version(cli_path: &str) -> Option<String> {
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(5),
         {
@@ -1108,12 +1115,12 @@ pub(crate) async fn get_cli_version(cli_path: &str) -> String {
     ).await;
     match result {
         Ok(Ok(output)) if output.status.success() => {
-            String::from_utf8_lossy(&output.stdout).trim().to_string()
+            Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
         }
-        Ok(_) => "unknown".to_string(),
+        Ok(_) => None,
         Err(_) => {
             tracing::warn!(cli_path = %cli_path, "get_cli_version timed out after 5s");
-            "unknown".to_string()
+            None
         }
     }
 }
