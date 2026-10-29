@@ -108,19 +108,26 @@ pub(super) async fn handle_availability(State(state): State<AppState>, Query(q):
     let Some(agent) = q.agent.as_deref().map(str::trim).filter(|a| !a.is_empty()) else {
         return (StatusCode::BAD_REQUEST, Json(json!({ "error": "missing agent param" }))).into_response();
     };
+    match view_of_agent(&state, agent).await {
+        Known::Live(view) => Json(view).into_response(),
+        Known::Ambiguous => (StatusCode::CONFLICT, Json(json!({ "error": format!("{agent} names more than one agent here") }))).into_response(),
+        Known::Unknown => (StatusCode::NOT_FOUND, Json(json!({ "error": format!("no agent named {agent} here") }))).into_response(),
+    }
+}
+
+/// [`describe_block`] for the agent `agent` (a name or a UID) names on this instance.
+pub(super) async fn view_of_agent(state: &AppState, agent: &str) -> Known {
     let route = crate::backend::reactive::sanitize::route_name(agent).unwrap_or_else(|| agent.to_string());
     let block_id = match state.reactive_handler.lookup_delivery_target(&route) {
         LookupOutcome::One(reg) => Some(reg.block_id),
-        LookupOutcome::Ambiguous(_) => {
-            return (StatusCode::CONFLICT, Json(json!({ "error": format!("{agent} names more than one agent here") }))).into_response();
-        }
+        LookupOutcome::Ambiguous(_) => return Known::Ambiguous,
         LookupOutcome::NotFound => None,
     };
     let (mstore, agent_owned) = (state.mstore.clone(), agent.to_string());
     let after_ms = crate::backend::cold_hold::cold_after_ms(&state.config_watcher.get_full_config().settings.extra)
         .and_then(|ms| u64::try_from(ms).ok());
     let now_ms = agentmux_common::time::now_ms_u64();
-    let known = tokio::task::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || {
         if block_id.is_some() {
             return Known::Live(describe_block(&mstore, block_id.as_deref(), after_ms, now_ms));
         }
@@ -133,12 +140,49 @@ pub(super) async fn handle_availability(State(state): State<AppState>, Query(q):
         }
     })
     .await
-    .unwrap_or(Known::Unknown);
-    match known {
-        Known::Live(view) => Json(view).into_response(),
-        Known::Ambiguous => (StatusCode::CONFLICT, Json(json!({ "error": format!("{agent} names more than one agent here") }))).into_response(),
-        Known::Unknown => (StatusCode::NOT_FOUND, Json(json!({ "error": format!("no agent named {agent} here") }))).into_response(),
+    .unwrap_or(Known::Unknown)
+}
+
+/// What to tell a sender who filed a task for `agent` (a name or a UID) that the agent can't take up now:
+/// its availability (`target`) and a `note` saying the task waits. `None` for an agent that can work, a
+/// group or unaddressed task, or a name no agent here has, so the answer stays as it was.
+pub(super) async fn enqueue_note(state: &AppState, agent: &str) -> Option<Value> {
+    let agent = agent.trim();
+    if agent.is_empty() {
+        return None;
     }
+    let Known::Live(view) = view_of_agent(state, agent).await else {
+        return None;
+    };
+    let note = wait_note(&view, agent)?;
+    Some(json!({ "target": view, "note": note }))
+}
+
+/// `body` with the fields of [`enqueue_note`], if there is one.
+pub(super) fn with_note(mut body: Value, note: Option<Value>) -> Value {
+    if let (Some(fields), Some(map)) = (note, body.as_object_mut()) {
+        if let Some(extra) = fields.as_object() {
+            map.extend(extra.clone());
+        }
+    }
+    body
+}
+
+/// The sentence for an agent in `view` that can't work: `limited` or `signed_out`. It says the task is
+/// filed and waits for the agent, and when that is expected.
+fn wait_note(view: &Value, agent: &str) -> Option<String> {
+    let when = match view["state"].as_str()? {
+        "limited" => match view["resets_at_ms"].as_u64() {
+            Some(at) => format!("at the limit, which lifts at {}", super::jekt_hold::local_time_label(at).unwrap_or_default()),
+            None => "at its usage limit (no reset time known)".to_string(),
+        },
+        "signed_out" => "signed out".to_string(),
+        _ => return None,
+    };
+    Some(format!(
+        "{agent} is {when}. The task is filed and stays in its queue; {agent} can take it only once it can work again, \
+         so do not expect it sooner."
+    ))
 }
 
 /// How a name that no live pane answers to stands in the directory.
@@ -159,7 +203,7 @@ fn classify_stopped(defined_here: bool, matching: usize) -> Stopped {
     }
 }
 
-enum Known {
+pub(super) enum Known {
     Live(Value),
     Ambiguous,
     Unknown,
@@ -173,6 +217,29 @@ mod tests {
 
     fn view(av: Availability) -> Value {
         describe(&av, &verdict(&av, false, true, Some(AFTER), || false))
+    }
+
+    #[test]
+    fn a_task_for_an_agent_that_cannot_work_says_it_waits_and_for_one_that_can_says_nothing() {
+        let limited = view(Availability::Limited { resets_at_ms: Some(9_000), since_ms: 7 });
+        let note = wait_note(&limited, "ann").unwrap();
+        assert!(note.starts_with("ann is at the limit, which lifts at "), "{note}");
+        assert!(note.contains("stays in its queue"), "{note}");
+        let no_reset = view(Availability::Limited { resets_at_ms: None, since_ms: 7 });
+        assert!(wait_note(&no_reset, "ann").unwrap().contains("no reset time known"));
+        let out = view(Availability::SignedOut { since_ms: 7 });
+        assert!(wait_note(&out, "ann").unwrap().starts_with("ann is signed out."));
+        for av in [Availability::Idle { quiet_for_ms: None }, Availability::Running { waiting_on_user: false }, Availability::NotRunning { exited_with_error: false }] {
+            assert_eq!(wait_note(&view(av), "ann"), None);
+        }
+    }
+
+    #[test]
+    fn the_note_joins_the_enqueue_answer_only_when_there_is_one() {
+        let body = json!({ "id": "w1", "num": 4 });
+        assert_eq!(with_note(body.clone(), None), body);
+        let joined = with_note(body, Some(json!({ "target": { "state": "limited" }, "note": "n" })));
+        assert_eq!((joined["num"].clone(), joined["note"].clone(), joined["target"]["state"].clone()), (json!(4), json!("n"), json!("limited")));
     }
 
     #[test]

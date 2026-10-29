@@ -77,21 +77,23 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let v = serde_json::from_str::<Value>(&text).unwrap_or(serde_json::json!({}));
             let id = v.get("id").and_then(|x| x.as_str()).unwrap_or_default().to_string();
             let name = task_name(&v, &id);
+            // srv adds a note when the target can't work now (limited or signed out): the task still waits.
+            let wait = v.get("note").and_then(|n| n.as_str()).map(|n| format!(" Note: {n}")).unwrap_or_default();
             if let Some(build) = v.get("build_num").and_then(|n| n.as_i64()) {
                 let whose = if for_me { "your backlog" } else { "the queue" };
                 return Ok(format!(
                     "Filed {name} (the spec) and #{build} (the build, which starts after it) in {whose}: {title}. \
                      Tell the operator both numbers. Hand the spec's path in with Tasks update (links.doc); \
-                     complete the spec when it is approved, and the build's agent is told it can start."
+                     complete the spec when it is approved, and the build's agent is told it can start.{wait}"
                 ));
             }
             Ok(if for_me {
                 format!(
                     "Filed {name} in your backlog: {title}. Tell the operator its number. It waits for you: \
-                     finish what you are doing, then take it with Tasks claim."
+                     finish what you are doing, then take it with Tasks claim.{wait}"
                 )
             } else {
-                format!("Enqueued {name}: {title}")
+                format!("Enqueued {name}: {title}{wait}")
             })
         }
         "WorkClaim" => {
