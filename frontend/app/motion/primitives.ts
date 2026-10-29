@@ -456,13 +456,13 @@ export function exit(el: Element, kind: EnterKind = "fade", opts: { category?: M
 export type PulseKind = "bounce" | "flash" | "glow";
 
 const PULSE: Record<PulseKind, { keyframes: Keyframe[]; feel: Feel }> = {
-    // The landing bounce of a pane tab (tab-bounce).
+    // The landing bounce of a tab, a row or a pill: a spring that overshoots and settles.
     bounce: {
         keyframes: [
-            { transform: "scaleX(0.88)", opacity: 0, offset: 0 },
-            { transform: "scaleX(1.04)", opacity: 1, offset: 0.55 },
-            { transform: "scaleX(0.98)", offset: 0.8 },
-            { transform: "scaleX(1)", opacity: 1, offset: 1 },
+            { transform: "scaleX(0.88)", transformOrigin: "center bottom", offset: 0 },
+            { transform: "scaleX(1.04)", transformOrigin: "center bottom", offset: 0.55 },
+            { transform: "scaleX(0.98)", transformOrigin: "center bottom", offset: 0.8 },
+            { transform: "scaleX(1)", transformOrigin: "center bottom", offset: 1 },
         ],
         feel: MOTION.pulseBounce,
     },

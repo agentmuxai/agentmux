@@ -292,9 +292,22 @@ pub struct SinceTracker {
     by_block: parking_lot::Mutex<HashMap<String, AgentStatus>>,
 }
 
+/// Whether a change from `from` to `to` can make a held message deliverable: the agent left a state
+/// that held messages (out of quota, signed out, not running), or a session that had gone quiet took
+/// a turn (a cold session warming). The one place a state change wakes the held-message replay, so a
+/// path that forgets its own wake is still covered.
+pub fn change_wakes_held(from: AgentState, to: AgentState) -> bool {
+    match from {
+        AgentState::Limited | AgentState::SignedOut | AgentState::Stopped | AgentState::Error => from != to,
+        AgentState::Idle => matches!(to, AgentState::Working | AgentState::Waiting),
+        AgentState::Working | AgentState::Waiting => false,
+    }
+}
+
 impl SinceTracker {
     /// Record `state` for `block_id` as seen at `now_ms`; returns it with the
-    /// time it began.
+    /// time it began. A change that can make a held message deliverable wakes the replay
+    /// ([`change_wakes_held`]).
     pub fn record(&self, block_id: &str, state: Option<AgentState>, now_ms: u64) -> Option<AgentStatus> {
         let mut by_block = self.by_block.lock();
         let Some(state) = state else {
@@ -303,9 +316,13 @@ impl SinceTracker {
         };
         match by_block.get(block_id) {
             Some(known) if known.state == state => Some(*known),
-            _ => {
+            previous => {
+                let wake = previous.is_some_and(|known| change_wakes_held(known.state, state));
                 let status = AgentStatus { state, since_ms: now_ms };
                 by_block.insert(block_id.to_string(), status);
+                if wake {
+                    crate::backend::reactive::held_jekt_wake().notify_one();
+                }
                 Some(status)
             }
         }
@@ -585,6 +602,25 @@ mod tests {
             Some(AgentStatus { state: AgentState::Idle, since_ms: 300 })
         );
         assert_eq!(t.record("b", working, 400).unwrap().since_ms, 400, "back to working starts again");
+    }
+
+    #[test]
+    fn only_a_change_that_can_free_a_held_message_wakes_the_replay() {
+        use AgentState::*;
+        for from in [Limited, SignedOut, Stopped, Error] {
+            for to in [Working, Waiting, Idle, Stopped, Error, Limited, SignedOut] {
+                assert_eq!(change_wakes_held(from, to), from != to, "{from:?} -> {to:?}");
+            }
+        }
+        assert!(change_wakes_held(Idle, Working) && change_wakes_held(Idle, Waiting), "a quiet session taking a turn");
+        for to in [Idle, Stopped, Error, Limited, SignedOut] {
+            assert!(!change_wakes_held(Idle, to), "Idle -> {to:?}");
+        }
+        for from in [Working, Waiting] {
+            for to in [Working, Waiting, Idle, Stopped, Error, Limited, SignedOut] {
+                assert!(!change_wakes_held(from, to), "{from:?} -> {to:?}: a running agent was already taking messages");
+            }
+        }
     }
 
     #[test]

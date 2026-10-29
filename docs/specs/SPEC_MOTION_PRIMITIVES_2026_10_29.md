@@ -1,6 +1,6 @@
 # Motion primitives: one shared set of reusable animations on top of the motion policy and tokens
 
-**Status:** active. Approved 2026-10-29 by the operator ("yes, motion is good"): decisions 1-6 as recommended, 7 settled with Camper. Built in the order of §5, one PR per step, each updating this line. Step 1 (the module, its tests, the guard and the Swarm row slide) is #5781, with #5798 batching `move`'s reads; step 2 (the minimize merge's flight on `mergeInto`) is the next PR, then the landing bounce.
+**Status:** active. Approved 2026-10-29 by the operator ("yes, motion is good"): decisions 1-6 as recommended, 7 settled with Camper. Built in the order of §5, one PR per step, each updating this line. Step 1 (the module, its tests, the guard and the Swarm row slide) is #5781, with #5798 batching `move`'s reads; step 2 (the minimize merge's flight on `mergeInto`) is #5802; step 3 (the landing bounce as `pulse`, in the pane tab strip, the window tab bar and the activity row) is the next PR.
 **Date:** 2026-10-29.
 **Requested by:** the operator, through AgentY. Their words (2026-10-28): "do we have a solid animations framework, where we can quickly reuse them in a DRY Manner? lets get that to a spec".
 **Author:** Agent1@narko.

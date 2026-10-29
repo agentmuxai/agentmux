@@ -22,6 +22,7 @@ import {
     type SubagentEvent,
 } from "../../swarm/swarm-model";
 import { EXIT_FLASH_MS, KIND_SIGIL, type PinnedActivity } from "../activity/types";
+import { usePulseWhen } from "@/app/motion/solid";
 import { toolOutputChunks } from "../activity/tool-adapter";
 import type { ToolLogChunk } from "../types";
 
@@ -67,11 +68,11 @@ interface ActivityRowProps {
 export const ActivityRow = (props: ActivityRowProps): JSX.Element => {
     const tick = useTick(1000);
 
-    // Landing flash on first mount — same visual as a tab landing after a
-    // drag/drop (tab-bounce, drag/drop-indicators.scss), reused here rather than a new
-    // bespoke animation. Cleared after EXIT_FLASH_MS so it plays once, not
-    // on every re-render.
+    // Landing flash on first mount: the same bounce a tab plays when it lands after a
+    // drag/drop. `entering` is cleared after EXIT_FLASH_MS so the departure flash waits it out.
     const [entering, setEntering] = createSignal(true);
+    let rowRef: HTMLDivElement | undefined;
+    usePulseWhen(() => rowRef, entering);
     onMount(() => {
         const timer = setTimeout(() => setEntering(false), EXIT_FLASH_MS);
         onCleanup(() => clearTimeout(timer));
@@ -201,9 +202,11 @@ export const ActivityRow = (props: ActivityRowProps): JSX.Element => {
         <Show when={props.activity()}>
             {(a) => (
                 <div
+                    ref={(el) => {
+                        rowRef = el;
+                    }}
                     class={clsx("agent-activity-row", a().kind, a().status, {
                         expanded: props.expanded(),
-                        "activity-flash-in": entering(),
                         "activity-flash-out": !entering() && props.leaving(),
                     })}
                 >
