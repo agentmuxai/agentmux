@@ -380,10 +380,11 @@ mod tests {
     /// rather than assume it is gone the instant `wait` returns.
     #[test]
     fn an_exited_process_is_not_a_survivor() {
+        // Waits on its piped stdin (kept open until the kill), so there is no grandchild to leave behind.
         #[cfg(windows)]
-        let mut child = std::process::Command::new("ping").args(["-n", "30", "127.0.0.1"]).stdout(std::process::Stdio::null()).spawn().unwrap();
+        let mut child = std::process::Command::new("cmd").args(["/C", "set /p x="]).stdin(std::process::Stdio::piped()).spawn().unwrap();
         #[cfg(unix)]
-        let mut child = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        let mut child = std::process::Command::new("sh").args(["-c", "read x"]).stdin(std::process::Stdio::piped()).spawn().unwrap();
         let pid = child.id();
         let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
         let mut started_at_ms = 0;
