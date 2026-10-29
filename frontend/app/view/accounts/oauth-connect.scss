@@ -18,7 +18,7 @@
         line-height: 1.5;
         padding: var(--space-2);
         background: var(--button-secondary-bg-color);
-        border-radius: 4px;
+        border-radius: var(--radius-sm);
     }
 
     .oauth-link {
@@ -36,7 +36,7 @@
         gap: var(--space-2);
         padding: var(--space-2);
         border: 1px solid var(--border-color);
-        border-radius: 4px;
+        border-radius: var(--radius-sm);
     }
 
     .oauth-device {
@@ -58,12 +58,12 @@
 
     .oauth-device-code {
         font-family: var(--font-mono);
-        font-size: 18px;
+        font-size: var(--text-xl);
         letter-spacing: 2px;
         font-weight: 600;
         padding: 4px 10px;
         background: var(--tint-4);
-        border-radius: 4px;
+        border-radius: var(--radius-sm);
         user-select: all;
     }
 
@@ -101,5 +101,22 @@
     .oauth-error-title {
         font-weight: 600;
         margin-bottom: var(--space-0-5);
+    }
+}
+
+// GitHub without an AgentMux Cloud sign-in: the sentence, why, and the sign-in.
+.oauth-cloud-signin {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+
+    .oauth-cloud-signin-text {
+        font-weight: 600;
+        color: var(--main-text-color);
+    }
+
+    .oauth-cloud-signin-note {
+        font-size: 0.9em;
+        color: var(--secondary-text-color);
     }
 }

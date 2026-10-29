@@ -584,7 +584,8 @@ async fn route_command(
             // answers once the panes have moved (browser_panes::bounds).
             let (window_label, rects) = crate::browser_panes::bounds::parse_set_rects_args(args)?;
             let base = crate::browser_panes::bounds::LayoutBase::parse(args);
-            state.browser_panes.set_rects(state, &window_label, rects, base).await;
+            let order = crate::browser_panes::bounds::RectsOrder::parse(args);
+            state.browser_panes.set_rects(state, &window_label, rects, base, order).await;
             Ok(serde_json::json!(true))
         }
         "browser_pane_hibernation_check" => {

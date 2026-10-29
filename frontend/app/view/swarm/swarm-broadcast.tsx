@@ -1,10 +1,11 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// The Swarm's Broadcast section: the composer docked under the shared agent list, and the last ten
+// The Swarm's Broadcast section: the composer at the top, above the shared agent list, and the last ten
 // broadcasts sent from this Swarm. The draft and the recent list live outside the section, so
 // switching away and back loses neither. docs/specs/SPEC_SWARM_SECTIONS_SUPERVISOR_SETTINGS_AND_KANBAN_2026_10_24.md §3.3.
 
+import { actionableKeys } from "./swarm-filter-state";
 import { createMemo, createSignal, For, onCleanup, Show, type Accessor, type JSX, type Setter } from "solid-js";
 import { Button, TextArea } from "@/app/element/ui";
 import { keyLabel } from "@/app/keybindings";
@@ -65,9 +66,11 @@ export function BroadcastDock(props: { model: SwarmViewModel; agents: Pick<Swarm
     const known = createMemo(
         () => new Map([...localFleetTargets(props.agents.tree()), ...remoteFleetTargets(remoteSections(model.otherInstancesAtom()))])
     );
-    const split = createMemo(() => partitionTargets([...model.selectedBlockIdsAtom()], "broadcast", known()));
+    // The selected agents the filter shows: one it hides stays selected but is not sent to.
+    const split = createMemo(() => partitionTargets(actionableKeys(model, model.selectedBlockIdsAtom()), "broadcast", known()));
     const recipients = () => split().reachable.length;
-    const selected = () => model.selectedBlockIdsAtom().size;
+    const selected = () => actionableKeys(model, model.selectedBlockIdsAtom()).length;
+    const hidden = () => model.selectedBlockIdsAtom().size - selected();
     const gap = () => gapSummary(split().unreachable, selected(), "broadcast");
     const canSend = () => state.draft().trim().length > 0 && recipients() > 0 && !model.fleetActionInFlightAtom();
     // The ages in the recent list tick; the list itself changes only on a send.
@@ -124,6 +127,9 @@ export function BroadcastDock(props: { model: SwarmViewModel; agents: Pick<Swarm
                 </Button>
                 <span class="swarm-broadcast-hint">{keyLabel("mod+Enter")} sends</span>
                 <Show when={gap()}>{(text) => <span class="swarm-fleet-broadcast-gap">{text()}</span>}</Show>
+                <Show when={hidden() > 0}>
+                    <span class="swarm-fleet-broadcast-gap">{hidden()} hidden by the filter, not included</span>
+                </Show>
             </div>
             <Show when={state.recent().length > 0}>
                 <div class="swarm-broadcast-recent" aria-label="Recent broadcasts">

@@ -68,7 +68,7 @@ function makePreview(): BundleImportPreviewResponse {
 describe("BundleImportPreviewModalPanel — rename conflict check", () => {
     it("warns when a rename matches a global skill name outside this bundle's own flagged rows", async () => {
         vi.mocked(RpcApi.SkillCatalogListCommand).mockResolvedValue([
-            { id: "x", name: "taken-elsewhere", trigger: "taken-elsewhere", skill_type: "agent_skill", description: "", content: "", is_global: true, created_at: 0, updated_at: 0, bound_count: 0 },
+            { id: "x", name: "taken-elsewhere", trigger: "taken-elsewhere", skill_type: "agent_skill", description: "", content: "", is_global: true, created_at: 0, updated_at: 0, bound_count: 0, all_agents: false, new_agents: false, source: null },
         ]);
 
         render(() => (

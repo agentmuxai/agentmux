@@ -1,6 +1,6 @@
 # Spec: Selecting a pane from Swarm — the lost click, and one state machine for "show this pane"
 
-**Status:** active — decisions taken 2026-10-20 (section 9); P0 (the trace) is in #5193; P1 (stable rows, press to select, keyboard, quiet poll) is in the next PR; P2 to P4 not started. Verified 2026-10-20.
+**Status:** active — decisions taken 2026-10-20 (section 9); P0 (the trace) is in #5193; P1 (stable rows, press to select, keyboard, quiet poll) in #5208; P2 (the machine) in #5697; P3 (every entry through the machine, and the P1.4 audit of Tower and the token popover) in #5816; P4 (the cross-window acknowledgement) in the Camper-2 P4 PR. Verified 2026-10-29.
 **Date:** 2026-10-18
 **Author:** AgentY
 **Requested by:** the owner, 2026-10-18: "sometimes, but not all the time, if I click on an agent in swarm, nothing happens, I need to click a 2nd time. it is not always reproducible, likely has to do with some order of selection which makes me think perhaps we need a proper architecture like state machine. take a closer look, write spec to file."
@@ -165,6 +165,8 @@ Each transition logs `[select] id=7 swarm blk=ab12 resolving->awaitingLayout +38
 
 The window that owns the block runs its own machine for the same intent id. v1 keeps today's one-way `block:reveal` event but gives the sender a deadline and a trace line. v2 adds a `block:revealed` acknowledgement so the sender's machine can finish `settled` or `failed(remote-timeout)`.
 
+*Built in P4:* `block.reveal` takes `await_ack`; srv puts a `request_id` on the `block:reveal` it publishes and holds the call until the named window answers with `block.revealed` (`request_id`, `ok`, `reason`) or 2 s pass. The result carries `revealed` (and the window's `reason`); absent means no answer. The sender's machine ends `settled` on `revealed: true`, `failed(remote-failed)` with the window's reason on `false`, `failed(remote-timeout)` on no answer. The receiving window runs its own `localOnly` request, quiet when a caller waits (the sender shows the notice); a `block:reveal` with no `request_id` (an agent's pane open) still shows its notice there.
+
 ### 6.6 What stays out
 
 In-tab pane navigation, pane creation and close keep calling the layout directly. If the machine proves itself, they can move onto it later (section 9).
@@ -179,6 +181,7 @@ In-tab pane navigation, pane creation and close keep calling the layout directly
 | **P1** | Stable keyed rows; `AgentRow` on an accessor; id-set comparison before `setTrackedBlockIds`; press-to-activate with keyboard support; audit Tower and the token popover. | Removes the confirmed cause. |
 | **P2** | The machine for the reveal flows, with the failure notice and the flash wired to `settled`. | Fixes the class of race (R1-R7) and gives one owner. |
 | **P3** | Route the remaining `revealBlock` callers and the MCP/`block:reveal` entry through `requestSelect`. | Removes the duplicate paths. |
+| | *Done in P3:* `revealBlockLocally` is gone. The OS-notification click, MuxAPI's focus-a-pane, a pane tab's switch to another pane, the widget reuse path and the receiving side of `block:reveal` call `revealBlock` with `localOnly` (a block that is not in this window is not found, and no other window is asked, so a handed-over request cannot bounce). A `localOnly` request that finds nothing here makes no notice: its caller has the answer. *P1.4 audit:* Tower's buttons survive a poll (its snapshot is merged by `id`; the detail head's button sits in a `Show` that does not re-key). The token popover's agent rows were keyed by data objects the breakdown rebuilds on every finished turn, so a turn landing between press and release dropped the click; they are now listed by pane id and read their data from the latest breakdown. | |
 | **P4** | Acknowledgement for cross-window reveals. | Closes the last silent case. |
 
 P0 can ship alone and be read for a day before P1/P2 are tuned.

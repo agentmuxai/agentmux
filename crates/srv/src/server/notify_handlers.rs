@@ -24,6 +24,7 @@ use std::sync::Arc;
 use crate::backend::notify::policy::{Family, FocusReport};
 use crate::backend::notify::router;
 use crate::backend::rpc::engine::WshRpcEngine;
+use crate::backend::rpc_types::{AgentShutdownNowResult, CommandAgentShutdownNowData, COMMAND_AGENT_SHUTDOWN_NOW};
 
 use super::AppState;
 
@@ -75,11 +76,17 @@ pub struct NotifyFocusParams {
 pub struct NotifyAckParams {
     pub id: String,
     pub clicked: bool,
-    /// A button on the toast: `keep` (Keep running). Absent for a body click or
-    /// a dismissal, and from a launcher that predates buttons.
+    /// A button on the toast: `keep` (the cancel: Keep running, or a veto) or `now` (the do-it-now:
+    /// Close now, ...). Absent for a body click or a dismissal, and from a launcher that predates
+    /// buttons.
     #[serde(default)]
     #[ts(optional)]
     pub action: Option<String>,
+    /// The launcher's proof, sent with a button: the host registration secret, which no agent has.
+    /// Any client holding the instance key can send an ack; what skips or stops a wait needs this.
+    #[serde(default)]
+    #[ts(optional)]
+    pub proof: Option<String>,
 }
 
 /// `notify.attention`: the calls to action srv holds open now
@@ -147,7 +154,37 @@ pub struct NotifyOk {
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct BlockRevealParams {
     pub block_id: String,
+    /// Wait for the window to say whether it showed the block (`block.revealed`), up to
+    /// `REVEAL_ACK_WAIT`; the answer is in `revealed`. Without it the call returns once the
+    /// window has been told.
+    #[serde(default)]
+    #[ts(optional)]
+    pub await_ack: Option<bool>,
 }
+
+/// `block.revealed`: the window named by `block:reveal` says how it went.
+#[derive(serde::Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct BlockRevealedParams {
+    /// The `request_id` the `block:reveal` carried.
+    pub request_id: String,
+    pub ok: bool,
+    /// Why not, when `ok` is false (the renderer's own word for it).
+    #[serde(default)]
+    #[ts(optional)]
+    pub reason: Option<String>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct BlockRevealedResult {
+    /// A caller was still waiting for this answer.
+    pub delivered: bool,
+}
+
+/// How long `block.reveal` with `await_ack` waits for the window. Less than the renderer's own
+/// deadline for a hand-over, so the caller hears a named failure rather than its own timeout.
+const REVEAL_ACK_WAIT: std::time::Duration = std::time::Duration::from_millis(2000);
 
 #[derive(serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
@@ -159,6 +196,15 @@ pub struct BlockRevealResult {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub window_id: Option<String>,
+    /// With `await_ack`: whether that window showed the block. Absent when it did not answer
+    /// in time, or the caller did not wait.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub revealed: Option<bool>,
+    /// With `revealed: false`: why, in the window's words.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub reason: Option<String>,
 }
 
 pub(crate) fn router_for(state: &AppState) -> Arc<router::Router> {
@@ -174,6 +220,7 @@ pub(crate) async fn reveal_block(
     state: &AppState,
     r: &Arc<router::Router>,
     block_id: String,
+    await_ack: bool,
 ) -> Result<BlockRevealResult, String> {
     if block_id.is_empty() {
         return Err("block.reveal: block_id required".to_string());
@@ -183,11 +230,26 @@ pub(crate) async fn reveal_block(
         .await
         .map_err(|e| format!("block.reveal: {e}"))?;
     let Some(target) = target else {
-        return Ok(BlockRevealResult { found: false, window_id: None });
+        return Ok(BlockRevealResult { found: false, window_id: None, revealed: None, reason: None });
     };
     activate_in_stored_layout(state, &target.tab_id, &target.block_id).await;
+    let mut target = target;
+    // Registered before the window is told, so an answer cannot beat the waiter.
+    let waiting = await_ack.then(|| {
+        let id = uuid::Uuid::new_v4().to_string();
+        let rx = r.expect_reveal_ack(&id);
+        target.request_id = Some(id.clone());
+        (id, rx)
+    });
     r.publish_block_reveal(&target);
-    Ok(BlockRevealResult { found: true, window_id: Some(target.window_id) })
+    let (mut revealed, mut reason) = (None, None);
+    if let Some((id, rx)) = waiting {
+        match tokio::time::timeout(REVEAL_ACK_WAIT, rx).await {
+            Ok(Ok(ack)) => (revealed, reason) = (Some(ack.ok), ack.reason),
+            _ => r.forget_reveal_ack(&id),
+        }
+    }
+    Ok(BlockRevealResult { found: true, window_id: Some(target.window_id), revealed, reason })
 }
 
 /// `LayoutStackActivate` through the reducer, then mstore — the same
@@ -219,29 +281,69 @@ async fn activate_in_stored_layout(state: &AppState, tab_id: &str, block_id: &st
     crate::server::service::publish_events(state, &events);
 }
 
-/// The Keep running button on a pending shutdown's toast: the same
-/// `pending_shutdown::keep` the pane banner's RPC calls, so exactly one of
-/// this and the window running out wins. Which request it cancels comes from
-/// srv's own record of the notification, never from the press, and is the
-/// request the toast was raised for: a press on a toast whose request already
-/// ended finds `too_late` and cannot cancel a newer request for the same block.
+/// A button on a pending shutdown's toast (or a sensitive operation's): the same calls the
+/// pane banner's RPCs make, so exactly one of this and the window running out wins. Which request
+/// it is about comes from srv's own record of the notification, never from the press, and is the
+/// request the toast was raised for: a press on a toast whose request already ended finds
+/// `too_late` and cannot touch a newer request for the same block.
 /// `None` when the id is no live shutdown notification.
-fn keep_from_toast(state: &AppState, r: &Arc<router::Router>, notification_id: &str) -> Option<String> {
+fn press_from_toast(state: &AppState, r: &Arc<router::Router>, notification_id: &str, action: &str, proof: Option<&str>) -> Option<String> {
     let (kind, block_id, request_id) = r.live_by_id(notification_id)?;
-    keep_for(state, kind, &block_id, &request_id?)
+    press_for(state, kind, &block_id, &request_id?, action, proof)
 }
 
-/// The press on a pending shutdown toast's Keep running button. A sensitive operation's
-/// countdown has no button: its veto is the AgentMux window's alone, proven, and this
-/// connection is not (any client holding the instance key can send an ack).
-fn keep_for(state: &AppState, kind: crate::backend::notify::policy::NotifyKind, block_id: &str, request_id: &str) -> Option<String> {
-    if kind != crate::backend::notify::policy::NotifyKind::ShutdownPending || block_id.starts_with(crate::sagas::sensitive_window::TOAST_GROUP_PREFIX) {
+/// Whether a press carries the launcher's proof: the host registration secret the launcher made for
+/// srv, which agents never see. Every agent holds the instance key, so the key proves nothing here.
+fn launcher_proven(state: &AppState, proof: Option<&str>) -> bool {
+    crate::server::service::host_caller_allowed(state.host_reg_secret.as_deref(), proof.unwrap_or(""))
+}
+
+/// The press on a pending shutdown toast's cancel (`keep`) or do-it-now (`now`) button.
+///
+/// Cancelling a shutdown is the safe direction: it leaves things as they are, so it needs no proof,
+/// as before. Everything else is the person's: ending a wait early, and any decision on a sensitive
+/// operation (its veto is the window's alone, or this launcher's). Those need the launcher's proof;
+/// without it the press is `refused` and the countdown goes on.
+fn press_for(
+    state: &AppState,
+    kind: crate::backend::notify::policy::NotifyKind,
+    block_id: &str,
+    request_id: &str,
+    action: &str,
+    proof: Option<&str>,
+) -> Option<String> {
+    if kind != crate::backend::notify::policy::NotifyKind::ShutdownPending {
         return None;
     }
-    Some(crate::sagas::pending_shutdown::keep(state, block_id, request_id).to_string())
+    let sensitive = block_id.starts_with(crate::sagas::sensitive_window::TOAST_GROUP_PREFIX);
+    if action == "keep" && !sensitive {
+        return Some(crate::sagas::pending_shutdown::keep(state, block_id, request_id).to_string());
+    }
+    if !launcher_proven(state, proof) {
+        tracing::warn!(block_id, action, "notify.ack: a press that decides a countdown came without the launcher's proof; ignored");
+        return Some("refused".to_string());
+    }
+    let outcome = match (action, sensitive) {
+        ("keep", true) => crate::sagas::sensitive_window::veto(state, request_id),
+        ("now", true) => crate::sagas::sensitive_window::approve_now(request_id),
+        ("now", false) => crate::sagas::pending_shutdown::close_now(state, block_id, request_id),
+        _ => return None,
+    };
+    Some(outcome.to_string())
 }
 
 pub fn register_notify_handlers(engine: &Arc<WshRpcEngine>, state: &AppState, conn_id: String) {
+    // The banner's "Close now": ends the wait early, so it is the AgentMux window's alone, proven
+    // (keeping is the safe direction and is open to any caller).
+    let state_now = state.clone();
+    engine.register_typed(COMMAND_AGENT_SHUTDOWN_NOW, move |cmd: CommandAgentShutdownNowData, ctx| {
+        let state = state_now.clone();
+        async move {
+            ctx.operator_only("only the person can close an agent before its countdown ends")?;
+            let outcome = crate::sagas::pending_shutdown::close_now(&state, &cmd.blockid, &cmd.request_id);
+            Ok(AgentShutdownNowResult { outcome: outcome.to_string() })
+        }
+    });
     let r = router_for(state);
 
     let rr = r.clone();
@@ -299,7 +401,10 @@ pub fn register_notify_handlers(engine: &Arc<WshRpcEngine>, state: &AppState, co
         let r = rr.clone();
         let state = ack_state.clone();
         async move {
-            let kept = if p.action.as_deref() == Some("keep") { keep_from_toast(&state, &r, &p.id) } else { None };
+            let kept = match p.action.as_deref() {
+                Some(action @ ("keep" | "now")) => press_from_toast(&state, &r, &p.id, action, p.proof.as_deref()),
+                _ => None,
+            };
             // A button is not a click on the body: it must not raise a window.
             let clicked = p.clicked && p.action.is_none();
             // Resolving the click's pane reads the store — off the async workers.
@@ -337,12 +442,20 @@ pub fn register_notify_handlers(engine: &Arc<WshRpcEngine>, state: &AppState, co
         }
     });
 
-    let rr = r;
+    let rr = r.clone();
     let st = state.clone();
     engine.register_typed("block.reveal", move |p: BlockRevealParams, _ctx| {
         let r = rr.clone();
         let st = st.clone();
-        async move { reveal_block(&st, &r, p.block_id).await }
+        async move { reveal_block(&st, &r, p.block_id, p.await_ack == Some(true)).await }
+    });
+    let rr = r;
+    engine.register_typed("block.revealed", move |p: BlockRevealedParams, _ctx| {
+        let r = rr.clone();
+        async move {
+            let ack = router::RevealAck { ok: p.ok, reason: p.reason.filter(|s| !s.is_empty()) };
+            Ok(BlockRevealedResult { delivered: r.reveal_acked(&p.request_id, ack) })
+        }
     });
 }
 
@@ -453,7 +566,7 @@ mod block_reveal_tests {
     #[tokio::test]
     async fn reveals_a_background_pane_tab_in_the_window_showing_it() {
         let f = fixture(true).await;
-        let res = super::reveal_block(&f.state, &f.router, f.b.clone()).await.unwrap();
+        let res = super::reveal_block(&f.state, &f.router, f.b.clone(), false).await.unwrap();
         assert!(res.found);
         assert_eq!(res.window_id.as_deref(), Some(f.window_id.as_str()));
 
@@ -469,13 +582,64 @@ mod block_reveal_tests {
         let reveals = f.reveals.lock().unwrap().clone();
         assert_eq!(reveals.len(), 1, "{reveals:?}");
         let ev: BlockRevealEvent = serde_json::from_value(reveals[0].clone()).unwrap();
-        assert_eq!(ev, BlockRevealEvent { block_id: f.b.clone(), tab_id: f.tab_id.clone(), window_id: f.window_id.clone() });
+        assert_eq!(ev, BlockRevealEvent { block_id: f.b.clone(), tab_id: f.tab_id.clone(), window_id: f.window_id.clone(), request_id: None });
+    }
+
+    /// The request id the window was told to answer, once it has been told.
+    async fn told_request_id(f: &Fixture) -> String {
+        loop {
+            if let Some(v) = f.reveals.lock().unwrap().first().cloned() {
+                let ev: BlockRevealEvent = serde_json::from_value(v).unwrap();
+                return ev.request_id.expect("the event names the request the caller waits on");
+            }
+            tokio::task::yield_now().await;
+        }
+    }
+
+    #[tokio::test]
+    async fn a_caller_that_waits_hears_the_window_say_it_showed_the_block() {
+        let f = fixture(true).await;
+        let (res, delivered) = tokio::join!(
+            super::reveal_block(&f.state, &f.router, f.b.clone(), true),
+            async {
+                let id = told_request_id(&f).await;
+                f.router.reveal_acked(&id, router::RevealAck { ok: true, reason: None })
+            }
+        );
+        let res = res.unwrap();
+        assert!(delivered);
+        assert!(res.found);
+        assert_eq!((res.revealed, res.reason), (Some(true), None));
+    }
+
+    #[tokio::test]
+    async fn a_window_that_could_not_show_the_block_says_why() {
+        let f = fixture(true).await;
+        let (res, _) = tokio::join!(
+            super::reveal_block(&f.state, &f.router, f.b.clone(), true),
+            async {
+                let id = told_request_id(&f).await;
+                f.router.reveal_acked(&id, router::RevealAck { ok: false, reason: Some("layout-timeout".into()) })
+            }
+        );
+        let res = res.unwrap();
+        assert_eq!((res.revealed, res.reason.as_deref()), (Some(false), Some("layout-timeout")));
+    }
+
+    #[tokio::test]
+    async fn a_caller_that_does_not_wait_sends_no_request_id_and_an_answer_to_nobody_is_dropped() {
+        let f = fixture(true).await;
+        let res = super::reveal_block(&f.state, &f.router, f.b.clone(), false).await.unwrap();
+        assert_eq!(res.revealed, None);
+        let ev: BlockRevealEvent = serde_json::from_value(f.reveals.lock().unwrap()[0].clone()).unwrap();
+        assert_eq!(ev.request_id, None);
+        assert!(!f.router.reveal_acked("nobody-asked", router::RevealAck { ok: true, reason: None }));
     }
 
     #[tokio::test]
     async fn unknown_block_is_not_found_and_publishes_nothing() {
         let f = fixture(true).await;
-        let res = super::reveal_block(&f.state, &f.router, "no-such-block".into()).await.unwrap();
+        let res = super::reveal_block(&f.state, &f.router, "no-such-block".into(), false).await.unwrap();
         assert!(!res.found);
         assert_eq!(res.window_id, None);
         assert!(f.reveals.lock().unwrap().is_empty());
@@ -484,7 +648,7 @@ mod block_reveal_tests {
     #[tokio::test]
     async fn workspace_open_in_no_window_is_not_found_and_changes_nothing() {
         let f = fixture(false).await;
-        let res = super::reveal_block(&f.state, &f.router, f.b.clone()).await.unwrap();
+        let res = super::reveal_block(&f.state, &f.router, f.b.clone(), false).await.unwrap();
         assert!(!res.found);
         assert!(f.reveals.lock().unwrap().is_empty());
         let tree = f.state.srv_state.lock().await.tabs[&f.tab_id].rootnode.clone().unwrap();
@@ -494,7 +658,7 @@ mod block_reveal_tests {
     #[tokio::test]
     async fn empty_block_id_is_an_error() {
         let f = fixture(true).await;
-        assert!(super::reveal_block(&f.state, &f.router, String::new()).await.is_err());
+        assert!(super::reveal_block(&f.state, &f.router, String::new(), false).await.is_err());
     }
 }
 
@@ -708,7 +872,7 @@ mod live_tests {
         assert_eq!(n["kind"], "shutdown_pending");
         assert_eq!(n["title"], "Closing agent pane in 30 s");
         assert_eq!(n["body"], "AgentY asked to close it. It stays in My Agents, with its conversation.");
-        assert_eq!(n["actions"], serde_json::json!([{ "id": "keep", "label": "Keep open" }]), "no session runs here");
+        assert_eq!(n["actions"], serde_json::json!([{ "id": "keep", "label": "Keep open" }, { "id": "now", "label": "Close now" }]), "no session runs here");
         assert_eq!(n["countdown"]["title_template"], "Closing agent pane in {n} s");
         let left = n["countdown"]["remaining_ms"].as_i64().unwrap();
         assert!((28_000..=30_000).contains(&left), "{left}");
@@ -983,22 +1147,70 @@ mod toast_press_tests {
     use crate::backend::sensitive_requests as requests;
     use crate::sagas::sensitive_window as window;
     use crate::server::tests::test_state;
+    use crate::server::AppState;
     use agentmux_common::time::now_ms;
 
-    #[tokio::test]
-    async fn a_press_on_a_sensitive_toast_vetoes_nothing() {
-        let state = test_state();
+    /// A sensitive operation's countdown, approved and running: its id and its toast group.
+    fn countdown(state: &AppState) -> (String, String) {
         let facts: std::collections::BTreeMap<String, String> =
             [("template".to_string(), format!("t-{}", uuid::Uuid::new_v4().simple())), ("publisher".to_string(), "p".to_string())].into_iter().collect();
         let id = requests::registry().request(&format!("u-{}", uuid::Uuid::new_v4().simple()), "asker", "job_template_approve", &facts, "", now_ms()).unwrap().id;
         requests::registry().approve(&id, "boss", now_ms()).unwrap();
-        window::open(&state, &id, std::time::Duration::from_secs(60)).unwrap();
+        window::open(state, &id, std::time::Duration::from_secs(60)).unwrap();
         let group = format!("{}{id}", window::TOAST_GROUP_PREFIX);
+        (id, group)
+    }
 
-        // An ack that says "keep" on this toast is not the person's veto, whoever sends it.
-        assert_eq!(keep_for(&state, NotifyKind::ShutdownPending, &group, &id), None);
+    fn proven_state() -> AppState {
+        let mut state = test_state();
+        state.host_reg_secret = Some("launcher-secret".into());
+        state
+    }
+
+    #[tokio::test]
+    async fn a_press_on_a_sensitive_toast_decides_nothing_without_the_launchers_proof() {
+        let state = proven_state();
+        let (id, group) = countdown(&state);
+        // An ack that says "keep" or "now" on this toast is not the person's, whoever sends it: no
+        // proof, or the instance key (every agent has it) in its place, decides nothing.
+        for action in ["keep", "now"] {
+            assert_eq!(press_for(&state, NotifyKind::ShutdownPending, &group, &id, action, None).as_deref(), Some("refused"), "{action}");
+            assert_eq!(press_for(&state, NotifyKind::ShutdownPending, &group, &id, action, Some("not-the-secret")).as_deref(), Some("refused"), "{action}");
+        }
         assert_eq!(window::status(&id).unwrap().status, "pending", "the countdown goes on");
-        // Only the window's `sensitive.decide` vetoes, and it is proven.
+        // A server with no secret configured refuses everything, even an empty proof.
+        let mut open = test_state();
+        open.host_reg_secret = None;
+        assert_eq!(press_for(&open, NotifyKind::ShutdownPending, &group, &id, "now", Some("")).as_deref(), Some("refused"));
         assert_eq!(window::veto(&state, &id), "vetoed");
+    }
+
+    #[tokio::test]
+    async fn the_launchers_proof_lets_a_sensitive_toast_veto_or_approve_now() {
+        let state = proven_state();
+        let (veto_id, veto_group) = countdown(&state);
+        assert_eq!(press_for(&state, NotifyKind::ShutdownPending, &veto_group, &veto_id, "keep", Some("launcher-secret")).as_deref(), Some("vetoed"));
+        assert_eq!(window::status(&veto_id).unwrap().status, "vetoed");
+
+        let (now_id, now_group) = countdown(&state);
+        assert_eq!(press_for(&state, NotifyKind::ShutdownPending, &now_group, &now_id, "now", Some("launcher-secret")).as_deref(), Some("approved_now"));
+        let _ = window::veto(&state, &now_id);
+    }
+
+    /// Keep running on an agent's close needs no proof (it only leaves things as they are); Close now does.
+    #[tokio::test]
+    async fn keep_needs_no_proof_on_an_agent_close_and_close_now_needs_it() {
+        use crate::sagas::pending_shutdown as shutdown;
+        let state = proven_state();
+        let block = format!("blk-{}", uuid::Uuid::new_v4().simple());
+        let a = shutdown::request(&state, &block, "Korp", "FleetBulkStop", "", shutdown::Action::CloseTab { detail: String::new() });
+        assert_eq!(press_for(&state, NotifyKind::ShutdownPending, &block, &a.request_id, "now", None).as_deref(), Some("refused"));
+        assert_eq!(shutdown::status(&a.request_id).unwrap().status, "pending");
+        assert_eq!(press_for(&state, NotifyKind::ShutdownPending, &block, &a.request_id, "keep", None).as_deref(), Some("kept_by_user"));
+
+        let block = format!("blk-{}", uuid::Uuid::new_v4().simple());
+        let b = shutdown::request(&state, &block, "Korp", "FleetBulkStop", "", shutdown::Action::CloseTab { detail: String::new() });
+        assert_eq!(press_for(&state, NotifyKind::ShutdownPending, &block, &b.request_id, "now", Some("launcher-secret")).as_deref(), Some("closed_now"));
+        assert_eq!(press_for(&state, NotifyKind::ShutdownPending, &block, &b.request_id, "now", Some("launcher-secret")).as_deref(), Some("too_late"), "once");
     }
 }

@@ -94,6 +94,9 @@ pub(crate) fn apply_working_dir(
 
 /// Expand a leading `~/` or bare `~` to the user's home directory.
 pub(crate) fn expand_home_dir(dir: &str) -> String {
+    if let Some(under_override) = crate::backend::base::expand_under_home_override(dir) {
+        return under_override.to_string_lossy().to_string();
+    }
     if dir.starts_with("~/") || dir == "~" {
         if let Some(home) = dirs::home_dir() {
             return home

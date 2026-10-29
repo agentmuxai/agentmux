@@ -48,8 +48,13 @@ fn wanted(s: &Setup) -> HashMap<String, String> {
     HashMap::from([("STRIPE_API_KEY".to_string(), s.entry.clone())])
 }
 
+/// Values for the environment only, as `secrets` alone names them.
+fn env(m: &HashMap<String, String>) -> Wanted<'_> {
+    Wanted { env: Some(m), ..Default::default() }
+}
+
 async fn run(s: &Setup, wanted: &HashMap<String, String>, remote: bool) -> Result<Option<Injected>, Refusal> {
-    inject(&s.state, &s.block, Some(&s.auth), Some(wanted), remote, "stripe balance retrieve", "C:/work").await
+    inject(&s.state, &s.block, Some(&s.auth), env(wanted), remote, "stripe balance retrieve", "C:/work").await
 }
 
 /// Answers `agent`'s waiting use as the person would, and says what it showed.
@@ -118,10 +123,10 @@ async fn a_command_is_refused_secrets_it_cannot_safely_have() {
     let err = run(&s, &wanted(&s), true).await.err().unwrap();
     assert!(err.1.contains("WSL or an SSH host"), "{err:?}");
     // No signed identity, or another agent's.
-    let unsigned = inject(&s.state, &s.block, None, Some(&wanted(&s)), false, "x", "").await.err().unwrap();
+    let unsigned = inject(&s.state, &s.block, None, env(&wanted(&s)), false, "x", "").await.err().unwrap();
     assert_eq!(unsigned.0, StatusCode::FORBIDDEN);
     let other = setup().await;
-    let borrowed = inject(&s.state, &s.block, Some(&other.auth), Some(&wanted(&s)), false, "x", "").await.err().unwrap();
+    let borrowed = inject(&s.state, &s.block, Some(&other.auth), env(&wanted(&s)), false, "x", "").await.err().unwrap();
     assert_eq!(borrowed.0, StatusCode::FORBIDDEN);
     // A name that isn't a variable, one that is AgentMux's, an entry that isn't there, a part it lacks.
     for (name, entry, why) in [
@@ -155,8 +160,10 @@ async fn a_value_too_short_to_scrub_is_not_handed_over() {
 #[tokio::test]
 async fn nothing_given_is_nothing_injected() {
     let s = setup().await;
-    assert!(inject(&s.state, &s.block, None, None, false, "x", "").await.ok().flatten().is_none());
-    assert!(inject(&s.state, &s.block, None, Some(&HashMap::new()), false, "x", "").await.ok().flatten().is_none());
+    assert!(inject(&s.state, &s.block, None, Wanted::default(), false, "x", "").await.ok().flatten().is_none());
+    let none = HashMap::new();
+    assert!(inject(&s.state, &s.block, None, env(&none), false, "x", "").await.ok().flatten().is_none());
+    assert!(inject(&s.state, &s.block, None, Wanted { stdin: Some("  "), ..Default::default() }, false, "x", "").await.ok().flatten().is_none());
 }
 
 // A card's expiry is not its number: an Always for one part covers only that part, and
@@ -196,16 +203,16 @@ async fn a_grant_is_for_one_part_and_the_question_names_every_part_asked_for() {
 async fn a_command_too_long_to_show_whole_is_refused_without_asking() {
     let s = setup().await;
     let long = format!("echo hi {}", "x".repeat(MAX_COMMAND));
-    let err = inject(&s.state, &s.block, Some(&s.auth), Some(&wanted(&s)), false, &long, "C:/work").await.err().expect("refused");
+    let err = inject(&s.state, &s.block, Some(&s.auth), env(&wanted(&s)), false, &long, "C:/work").await.err().expect("refused");
     assert!(err.1.contains("fit in the approval prompt"), "{err:?}");
     let far = "d".repeat(MAX_CWD + 1);
-    let err = inject(&s.state, &s.block, Some(&s.auth), Some(&wanted(&s)), false, "echo hi", &far).await.err().expect("refused");
+    let err = inject(&s.state, &s.block, Some(&s.auth), env(&wanted(&s)), false, "echo hi", &far).await.err().expect("refused");
     assert!(err.1.contains("fit in the approval prompt"), "{err:?}");
     assert!(uses::uses().list().iter().all(|u| u.agent != s.auth.agent_id));
     // At the limit it is shown whole.
     let ask = tokio::spawn(answer_when_asked(s.auth.agent_id.clone(), Decision::Once));
     let at_limit = "y".repeat(MAX_COMMAND);
-    assert!(inject(&s.state, &s.block, Some(&s.auth), Some(&wanted(&s)), false, &at_limit, "C:/work").await.is_ok());
+    assert!(inject(&s.state, &s.block, Some(&s.auth), env(&wanted(&s)), false, &at_limit, "C:/work").await.is_ok());
     assert_eq!(ask.await.unwrap().command, at_limit);
 }
 
@@ -251,4 +258,35 @@ async fn the_cleaned_output_is_read_back_only_by_the_agent_that_ran_the_job() {
     // The instance key is not an identity: a request that only names an agent is refused.
     let forged = UiAutomationAuth { agent_id: s.auth.agent_id.clone(), ts_secs: s.auth.ts_secs, sig: "not-a-signature".to_string() };
     assert_eq!(ask("job-with-secrets", &forged).await.0, StatusCode::FORBIDDEN);
+}
+
+// SPEC_VAULT_GENERATE_CAPTURE_AND_BROWSER_SIGNINS_2026_10_28.md §4.3: stdin and files are
+// asked about, read and scrubbed the same way as the environment.
+#[tokio::test]
+async fn stdin_and_files_are_given_their_values_after_the_same_question() {
+    let s = setup().await;
+    let files = HashMap::from([("KEY_FILE".to_string(), s.entry.clone())]);
+    let want = Wanted { env: None, stdin: Some(s.entry.as_str()), files: Some(&files) };
+    let ask = tokio::spawn(answer_when_asked(s.auth.agent_id.clone(), Decision::Once));
+    let injected = inject(&s.state, &s.block, Some(&s.auth), want, false, "docker login --password-stdin", "C:/work").await.ok().flatten().expect("allowed");
+    let shown = ask.await.unwrap();
+    assert_eq!(shown.field, "stdin (value), a file at KEY_FILE (value)");
+    assert!(injected.env.is_empty());
+    assert_eq!(injected.stdin.as_deref().map(String::as_str), Some(VALUE));
+    assert_eq!(injected.files.iter().map(|(n, v)| (n.as_str(), v.as_str())).collect::<Vec<_>>(), vec![("KEY_FILE", VALUE)]);
+    assert_eq!(injected.scrubber.scrub(VALUE).as_ref(), format!("[vault:{}]", s.entry));
+}
+
+#[tokio::test]
+async fn a_name_given_both_as_a_variable_and_as_a_file_is_refused_without_asking() {
+    let s = setup().await;
+    let both = wanted(&s);
+    let want = Wanted { env: Some(&both), stdin: None, files: Some(&both) };
+    let err = inject(&s.state, &s.block, Some(&s.auth), want, false, "x", "").await.err().expect("refused");
+    assert_eq!(err.0, StatusCode::BAD_REQUEST);
+    assert!(err.1.contains("both secrets and secret_files"), "{err:?}");
+    let bad = HashMap::from([("not a name".to_string(), s.entry.clone())]);
+    let err = inject(&s.state, &s.block, Some(&s.auth), Wanted { files: Some(&bad), ..Default::default() }, false, "x", "").await.err().expect("refused");
+    assert!(err.1.contains("usable environment variable"), "{err:?}");
+    assert!(uses::uses().list().iter().all(|u| u.agent != s.auth.agent_id));
 }

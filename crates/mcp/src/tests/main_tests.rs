@@ -79,6 +79,31 @@ fn bulk_stop_folds_each_users_answer_into_succeeded_and_failed() {
     assert!(out.get("status").is_none(), "the usual FleetActionResult shape");
 }
 
+/// Several agents are one window: the request's status is for all of them, so each target takes its own
+/// answer from the per-agent `outcomes`; a request for one agent has none and answers as itself.
+#[test]
+fn a_batch_answers_each_target_from_its_own_outcome() {
+    let settled = serde_json::json!({
+        "status": "shut_down",
+        "outcomes": [
+            { "block_id": "a", "name": "A", "outcome": "shut_down" },
+            { "block_id": "b", "name": "B", "outcome": "kept_by_user" },
+            { "block_id": "c", "name": "C", "outcome": "failed", "error": "boom" },
+        ],
+    });
+    let status = |block: &str| own_outcome(settled.clone(), block)["status"].as_str().unwrap().to_string();
+    assert_eq!((status("a"), status("b"), status("c")), ("shut_down".into(), "kept_by_user".into(), "failed".into()));
+    assert_eq!(own_outcome(settled.clone(), "c")["error"], "boom");
+    let single = serde_json::json!({ "status": "kept_by_user" });
+    assert_eq!(own_outcome(single.clone(), "a"), single);
+    let out = merge_bulk_stop_outcomes(
+        serde_json::json!({ "succeeded": [], "failed": [] }),
+        ["a", "b", "c"].map(|b| (b.to_string(), own_outcome(settled.clone(), b))).into(),
+    );
+    assert_eq!(out["succeeded"], serde_json::json!(["a"]));
+    assert_eq!(out["kept_by_user"], serde_json::json!(["b"]));
+}
+
 #[test]
 fn stop_warns_it_can_take_30_seconds() {
     let v: Value = serde_json::from_str(STOP_TOOL).unwrap();
@@ -146,6 +171,12 @@ fn send_message_outcome_names_the_state_and_the_id() {
     let t = ok(json!({ "success": false, "held": true, "request_id": "1-2-3", "error": "agent Camper is not running" }));
     assert!(t.starts_with("HELD for Camper (not_running)"), "{t}");
     assert!(t.contains("24 hours") && t.ends_with(" id=1-2-3"), "{t}");
+
+    // Held while srv starts the stopped agent: the sender is told it is on its way, not to wait for someone.
+    let t = ok(json!({ "success": false, "held": true, "starting": true, "request_id": "1-2-3", "error": "agent Camper is not running" }));
+    assert!(t.starts_with("HELD for Camper (not_running, starting)"), "{t}");
+    assert!(t.contains("starting it now") && t.contains("within a few seconds") && t.contains("Do not resend"), "{t}");
+    assert!(t.ends_with(" id=1-2-3"), "{t}");
 
     // Held because the receiver is not signed in (Phase 0 item 4).
     let t = ok(json!({ "success": false, "held": true, "held_reason": "needs_login", "request_id": "1-2-3",
@@ -980,4 +1011,13 @@ fn resolve_detail_tells_no_such_agent_from_name_only() {
     assert_eq!(interpret_resolve_detail(S::NOT_FOUND, "", "Naki-2").unwrap(), BoundaryResolution::NameOnly);
     let one = r#"{"resolution":"one","uid":"u-1"}"#;
     assert_eq!(interpret_resolve_detail(S::OK, one, "Naki-2").unwrap(), BoundaryResolution::Uid("u-1".into()));
+}
+
+/// An agent that stops itself while it is one of several in a request is told its own answer, even while
+/// the request is still pending for the others.
+#[test]
+fn a_self_stop_in_a_batch_is_told_its_own_answer() {
+    let pending = serde_json::json!({ "status": "pending", "outcomes": [{ "block_id": "me", "name": "Me", "outcome": "kept_by_user" }] });
+    let own = own_outcome(pending, "me");
+    assert!(quit_self_outcome(own["status"].as_str().unwrap(), &own).unwrap().contains("keep you running"));
 }

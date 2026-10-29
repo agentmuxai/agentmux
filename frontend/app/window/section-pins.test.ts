@@ -50,7 +50,7 @@ beforeAll(() => {
         view: "swarm",
         label: "Swarm",
         icon: "diagram-project",
-        sections: { default: "supervisor", items: [{ id: "supervisor", label: "Supervisor", icon: "user-shield" }, { id: "kanban", label: "Kanban", icon: "table-columns" }] },
+        sections: { default: "supervisor", items: [{ id: "supervisor", label: "Supervisor", icon: "user-shield" }, { id: "broadcast", label: "Broadcast", icon: "tower-broadcast" }] },
         create: () => ({ component: () => null }),
     });
 });
@@ -85,14 +85,6 @@ describe("pinning a section to the widget bar", () => {
         expect(sectionEntryKey(kan, config.widgets)).toBe("defwidget@jobs");
         // Warden itself opens no particular section: not LAN's entry.
         expect(sectionEntryKey(lan, config.widgets)).toBeUndefined();
-    });
-
-    it("finds a user's entry that still names Warden's Kanban as the Swarm's Kanban entry (MOVED_SECTIONS)", () => {
-        const [kanban] = shownSections({ view: "swarm", "swarm:section": "kanban" });
-        const old = { label: "Kanban", blockdef: { meta: { view: "warden", "warden:section": "kanban" } } } as unknown as WidgetConfigType;
-        expect(sectionEntryKey(kanban, { "my@kanban": old, ...config.widgets })).toBe("my@kanban");
-        // Warden has no Kanban section to show or pin any more.
-        expect(sectionEntryKey(kanban, config.widgets)).toBeUndefined();
     });
 
     it("pins an existing entry without adding one", async () => {

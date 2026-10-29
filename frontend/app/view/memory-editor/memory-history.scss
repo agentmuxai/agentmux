@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Styles for MemoryHistory — the shared version history/diff/revert list,
-// mounted from the Stash memory tab and Memory → Personal and
+// mounted from Memory → Personal and
 // Memory → Global full views. Was the NativeMemoryHistoryPanel stylesheet; the class names keep
 // their `native-memory-history-*` prefix so nothing that targets them moves.
 // The panel's "current content" rules went with it — content now renders in
@@ -114,20 +114,6 @@
 
 .native-memory-history-revert-btn {
     flex-shrink: 0;
-    padding: var(--space-1) var(--space-2);
-    border: 1px solid var(--border-color);
-    background: transparent;
-    color: var(--main-text-color);
-    font-size: var(--text-xs);
-    cursor: default;
-
-    &:hover:not(:disabled) {
-        background: var(--hover-bg-color);
-    }
-
-    &:disabled {
-        opacity: 0.5;
-    }
 }
 
 .native-memory-history-revert-confirm {

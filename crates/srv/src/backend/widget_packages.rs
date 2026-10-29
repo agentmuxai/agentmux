@@ -1126,15 +1126,24 @@ connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'";
 /// `.zip`) into the widgets folder; returns its id. Validates first; refuses
 /// to replace an existing package unless `replace`.
 pub fn install(widgets_dir: &Path, source: &Path, replace: bool) -> Result<String, String> {
-    install_package(widgets_dir, source, replace, MANIFEST_FILE, |root| {
-        let manifest: Manifest = serde_json::from_str(
-            &std::fs::read_to_string(root.join(MANIFEST_FILE)).map_err(|e| format!("can't read widget.json: {e}"))?,
-        )
-        .map_err(|e| format!("widget.json: {e}"))?;
-        validate(&manifest, &manifest.id)?;
-        hash_files(root)?;
-        Ok(manifest.id)
-    })
+    install_package(widgets_dir, source, replace, MANIFEST_FILE, validate_manifest)
+}
+
+/// [`install`] for a package a container agent built in its workspace, whose host folder is `root`:
+/// every file is read only if it is inside `root`. On Unix the copy walks open folders and follows no link
+/// (`widget_beneath`); elsewhere each file is checked as it is opened (see [`open_within`]).
+pub fn install_within(widgets_dir: &Path, source: &Path, replace: bool, root: &Path) -> Result<String, String> {
+    let root = root.canonicalize().map_err(|e| format!("the workspace can't be read: {e}"))?;
+    install_checked(widgets_dir, source, replace, MANIFEST_FILE, Some(&root), validate_manifest)
+}
+
+fn validate_manifest(root: &Path) -> Result<String, String> {
+    let manifest: Manifest =
+        serde_json::from_str(&std::fs::read_to_string(root.join(MANIFEST_FILE)).map_err(|e| format!("can't read widget.json: {e}"))?)
+            .map_err(|e| format!("widget.json: {e}"))?;
+    validate(&manifest, &manifest.id)?;
+    hash_files(root)?;
+    Ok(manifest.id)
 }
 
 /// The package folder in an unpacked zip or a copied folder: `stage`
@@ -1161,16 +1170,34 @@ pub(crate) fn install_package(
     manifest_file: &str,
     check: impl FnOnce(&Path) -> Result<String, String>,
 ) -> Result<String, String> {
+    install_checked(packages_dir, source, replace, manifest_file, None, check)
+}
+
+fn install_checked(
+    packages_dir: &Path,
+    source: &Path,
+    replace: bool,
+    manifest_file: &str,
+    within: Option<&Path>,
+    check: impl FnOnce(&Path) -> Result<String, String>,
+) -> Result<String, String> {
     let is_zip = source.extension().is_some_and(|e| e.eq_ignore_ascii_case("zip"));
     let staging = tempfile::tempdir_in(packages_dir.parent().unwrap_or(packages_dir))
         .or_else(|_| tempfile::tempdir())
         .map_err(|e| format!("can't make a staging folder: {e}"))?;
     let stage = staging.path().join("pkg");
-    if is_zip {
-        unzip(source, &stage)?;
-    } else {
-        let folder = if source.file_name().is_some_and(|n| n == manifest_file) { source.parent().unwrap_or(source) } else { source };
-        copy_tree(folder, &stage, &mut Budget::default())?;
+    let folder = if source.file_name().is_some_and(|n| n == manifest_file) { source.parent().unwrap_or(source) } else { source };
+    match within {
+        // A container agent's workspace is read through open folders, so no swap on the way is followed.
+        #[cfg(unix)]
+        Some(root) if is_zip => unzip_from(super::widget_beneath::file_beneath(root, source).map_err(|e| beneath_error(source, e))?, &stage)?,
+        #[cfg(unix)]
+        Some(root) => {
+            let dir = super::widget_beneath::dir_beneath(root, folder).map_err(|e| beneath_error(folder, e))?;
+            copy_tree_beneath(&dir, &stage, &mut Budget::default())?;
+        }
+        _ if is_zip => unzip_from(open_within(source, within)?, &stage)?,
+        _ => copy_tree(folder, &stage, &mut Budget::default(), within)?,
     }
     // A zip may hold the package at its root or in one top-level folder.
     let root = package_root(&stage, manifest_file)?;
@@ -1203,7 +1230,7 @@ fn put_in_place(root: &Path, dest: &Path) -> Result<(), String> {
     if std::fs::rename(root, dest).is_ok() {
         return Ok(());
     }
-    copy_tree(root, dest, &mut Budget::default())
+    copy_tree(root, dest, &mut Budget::default(), None)
 }
 
 /// What a package may still take while it is copied or unpacked: the limits
@@ -1233,7 +1260,77 @@ impl Budget {
     }
 }
 
-fn copy_tree(from: &Path, to: &Path, budget: &mut Budget) -> Result<(), String> {
+/// `p` without Windows' `\\?\` verbatim prefix, so a canonical path compares with a folder given without it.
+fn plain(p: &Path) -> &Path {
+    let s = p.to_str().unwrap_or_default();
+    match s.strip_prefix(r"\\?\") {
+        Some(rest) if !rest.starts_with("UNC\\") => Path::new(rest),
+        _ => p,
+    }
+}
+
+/// Opens `path` to read. With `within` (a canonical folder), the file must be one inside it: opened without
+/// following a link, and the file at that path inside `within` right after is the one opened, so a path
+/// whose folder was swapped for a link to somewhere else reads nothing from there.
+pub(crate) fn open_within(path: &Path, within: Option<&Path>) -> Result<std::fs::File, String> {
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    if within.is_some() {
+        std::os::unix::fs::OpenOptionsExt::custom_flags(&mut options, libc::O_NOFOLLOW);
+    }
+    let file = options.open(path).map_err(|e| format!("can't open {}: {e}", path.display()))?;
+    if let Some(root) = within {
+        let outside = || format!("{} is outside the workspace", path.display());
+        let real = path.canonicalize().map_err(|_| outside())?;
+        if !plain(&real).starts_with(plain(root)) {
+            return Err(outside());
+        }
+        // The same file, on every platform (a Windows link is followed by the open, so the identity check is what catches it).
+        let named = same_file::Handle::from_path(&real).map_err(|_| outside())?;
+        let opened = same_file::Handle::from_file(file.try_clone().map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+        if named != opened {
+            return Err(outside());
+        }
+    }
+    Ok(file)
+}
+
+#[cfg(unix)]
+fn beneath_error(path: &Path, e: std::io::Error) -> String {
+    format!("{} is outside the workspace or a link ({e})", path.display())
+}
+
+/// [`copy_tree`] for a folder that is open: every entry is opened relative to it, and a link is an error.
+#[cfg(unix)]
+fn copy_tree_beneath(dir: &std::os::fd::OwnedFd, to: &Path, budget: &mut Budget) -> Result<(), String> {
+    use super::widget_beneath::Kind;
+    std::fs::create_dir_all(to).map_err(|e| e.to_string())?;
+    for (name, kind) in super::widget_beneath::entries(dir).map_err(|e| format!("can't read the folder: {e}"))? {
+        let target = to.join(&name);
+        let shown = || name.to_string_lossy().into_owned();
+        match kind {
+            Kind::Link => return Err(format!("{} is a link; a package can't contain links", shown())),
+            Kind::Dir => {
+                let sub = super::widget_beneath::subdir(dir, &name).map_err(|e| beneath_error(Path::new(&name), e))?;
+                copy_tree_beneath(&sub, &target, budget)?;
+            }
+            Kind::File => {
+                let mut f = super::widget_beneath::file_in(dir, &name).map_err(|e| beneath_error(Path::new(&name), e))?;
+                budget.copy(&mut f, &target)?;
+            }
+            Kind::Other => return Err(format!("{} isn't a regular file", shown())),
+        }
+    }
+    Ok(())
+}
+
+fn copy_tree(from: &Path, to: &Path, budget: &mut Budget, within: Option<&Path>) -> Result<(), String> {
+    if let Some(root) = within {
+        if !from.canonicalize().is_ok_and(|real| plain(&real).starts_with(plain(root))) {
+            return Err(format!("{} is outside the workspace", from.display()));
+        }
+    }
     std::fs::create_dir_all(to).map_err(|e| e.to_string())?;
     for entry in std::fs::read_dir(from).map_err(|e| format!("can't read {}: {e}", from.display()))? {
         let entry = entry.map_err(|e| e.to_string())?;
@@ -1242,9 +1339,9 @@ fn copy_tree(from: &Path, to: &Path, budget: &mut Budget) -> Result<(), String> 
         if ft.is_symlink() {
             return Err(format!("{} is a link; a package can't contain links", entry.path().display()));
         } else if ft.is_dir() {
-            copy_tree(&entry.path(), &target, budget)?;
+            copy_tree(&entry.path(), &target, budget, within)?;
         } else {
-            let mut f = std::fs::File::open(entry.path()).map_err(|e| e.to_string())?;
+            let mut f = open_within(&entry.path(), within)?;
             budget.copy(&mut f, &target)?;
         }
     }
@@ -1252,7 +1349,10 @@ fn copy_tree(from: &Path, to: &Path, budget: &mut Budget) -> Result<(), String> 
 }
 
 pub(crate) fn unzip(zip_path: &Path, to: &Path) -> Result<(), String> {
-    let file = std::fs::File::open(zip_path).map_err(|e| format!("can't open {}: {e}", zip_path.display()))?;
+    unzip_from(open_within(zip_path, None)?, to)
+}
+
+fn unzip_from(file: std::fs::File, to: &Path) -> Result<(), String> {
     let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("not a zip file: {e}"))?;
     if archive.len() > MAX_PACKAGE_FILES {
         return Err(format!("the package has over {MAX_PACKAGE_FILES} files"));

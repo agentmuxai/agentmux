@@ -16,6 +16,7 @@
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { createBlock, openOrFocusPaneByView } from "@/store/global";
+import { isSingletonView } from "@/app/store/widget-singleton";
 import { fireAndForget } from "@/util/util";
 import { isLightThemeActive, widgetRoleColor } from "@/app/block/pane-identity";
 import { movedMeta, sectionKeysIn } from "@/app/block/pane-sections";
@@ -324,20 +325,19 @@ export function buildPaneWidgetMenuItems(
 
 // ── Widget actions ────────────────────────────────────────────────────────────
 
-/** Views whose widget focuses the pane already open in this tab instead of
- *  opening another: there's one Connectors, one Memory and one Warden (with the
- *  Vault) to manage. An entry for a section (Vault, or the Swarm's Kanban) switches it there. */
-const FOCUS_EXISTING_VIEWS = new Set(["connectors", "memory", "warden"]);
-
-export async function handleWidgetSelect(widget: WidgetConfigType) {
-    // An entry that still names a section that moved (Warden's Kanban) opens where it lives now.
+/**
+ * What a click on a widget does: bring back the pane already open when the widget is a singleton
+ * (`singleton` in its config entry, else whether the view it opens is one), else open a new one. `forceNew` (a
+ * Shift-click) opens a new one even for a singleton. An entry for a section (the Vault) switches
+ * the pane it brings back to that section. A magnified entry asked for a full-size pane, so it
+ * always opens one.
+ */
+export async function openWidget(widget: WidgetConfigType, opts: { forceNew?: boolean } = {}) {
+    // An entry that still names a section that moved (the Kanban, of Warden or the Swarm) opens where it lives now.
     const meta = movedMeta(widget.blockdef?.meta as Record<string, unknown> | undefined);
     const blockdef = meta === widget.blockdef?.meta ? widget.blockdef : { ...widget.blockdef, meta: meta as MetaType };
     const view = meta?.["view"] as string | undefined;
-    // The Swarm focuses the one in this tab only to switch it to a section (the Kanban's button); its
-    // plain button opens another Swarm, as before.
-    const focusSection = view === "swarm" && sectionKeysIn(meta) !== undefined;
-    if (view && (FOCUS_EXISTING_VIEWS.has(view) || focusSection) && !widget.magnified) {
+    if (view && (widget.singleton ?? isSingletonView(view)) && !opts.forceNew && !widget.magnified) {
         await openOrFocusPaneByView(view, blockdef, sectionKeysIn(meta) as MetaType | undefined);
         return;
     }

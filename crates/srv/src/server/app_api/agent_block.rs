@@ -22,13 +22,20 @@ pub(crate) struct AgentBlock {
 /// A block launched from a template keeps the template's id in `agentId` and binds its agent through
 /// `agentInstanceId`, so the bound instance counts too.
 fn is_agent_block_of(mstore: &Store, block: &Block, agent_uid: &str) -> bool {
-    ["agentId", "agent:id"].iter().any(|key| obj::meta_get_string(&block.meta, key, "") == agent_uid)
-        || (obj::meta_get_string(&block.meta, "view", "") == "agent"
-            && mstore.instance_get_by_block_id(&block.oid).ok().flatten().is_some_and(|i| i.id == agent_uid))
+    !obj::is_history_reader(&block.meta)
+        && (["agentId", "agent:id"].iter().any(|key| obj::meta_get_string(&block.meta, key, "") == agent_uid)
+            || (obj::meta_get_string(&block.meta, "view", "") == "agent"
+                && mstore.instance_get_by_block_id(&block.oid).ok().flatten().is_some_and(|i| i.id == agent_uid)))
 }
 
 fn is_parked(block: &Block) -> bool {
     obj::meta_get_bool(&block.meta, crate::persist_subscriber::parked::PARKED_META_KEY, false)
+}
+
+/// Whether the block failed to open because the agent's conversation is open in another pane
+/// (`open_in_other_pane`): it is not the one that holds the conversation.
+fn lost_the_conversation(block: &Block) -> bool {
+    block.meta.get(blockcontroller::core::META_LAST_FAILURE).and_then(|f| f.get("code")).and_then(|c| c.as_str()) == Some("open_in_other_pane")
 }
 
 /// Whether the block runs its agent now: a controller that has not ended. A stopped one stays
@@ -42,8 +49,9 @@ fn controller_is_live(block_id: &str) -> bool {
 ///
 /// Only a block that is in a tab or marked parked counts: an unmarked block in no tab is an
 /// orphan boot drops (`persist.rs`), which `AttachBlock` could not attach. An agent should have
-/// one block. Where old layouts left several, the one with a live controller wins, then one in a
-/// tab over a parked one, then the lowest id (so the answer is stable).
+/// one block. Where old layouts left several, one that was refused for a conversation open in
+/// another pane comes last (another block holds it), then the one with a live controller wins, then
+/// one in a tab over a parked one, then the lowest id (so the answer is stable).
 pub(crate) fn find_agent_block_by_uid(mstore: &Store, agent_uid: &str) -> Result<Option<AgentBlock>, String> {
     let agent_uid = agent_uid.trim();
     if agent_uid.is_empty() {
@@ -61,7 +69,7 @@ pub(crate) fn find_agent_block_by_uid(mstore: &Store, agent_uid: &str) -> Result
     let tabs: Vec<Tab> = mstore.get_all::<Tab>().map_err(|e| format!("find_agent_block_by_uid: list tabs: {e}"))?;
     let tab_of = |block: &Block| tabs.iter().find(|t| t.blockids.iter().any(|id| id == &block.oid)).map(|t| t.oid.clone());
     found.retain(|b| is_parked(b) || tab_of(b).is_some());
-    found.sort_by_key(|b| (!controller_is_live(&b.oid), tab_of(b).is_none(), b.oid.clone()));
+    found.sort_by_key(|b| (lost_the_conversation(b), !controller_is_live(&b.oid), tab_of(b).is_none(), b.oid.clone()));
     let Some(block) = found.into_iter().next() else {
         return Ok(None);
     };
@@ -79,30 +87,45 @@ pub(crate) fn blocks_in_tabs_or_parked(mstore: &Store) -> Result<Vec<(Block, Opt
     for tab in &tabs {
         for block_id in &tab.blockids {
             if let Ok(Some(block)) = mstore.get::<Block>(block_id) {
-                if seen.insert(block.oid.clone()) {
+                if !obj::is_history_reader(&block.meta) && seen.insert(block.oid.clone()) {
                     out.push((block, Some(tab.oid.clone())));
                 }
             }
         }
     }
     for block in mstore.get_all::<Block>().map_err(|e| format!("list blocks: {e}"))? {
-        if is_parked(&block) && seen.insert(block.oid.clone()) {
+        if is_parked(&block) && !obj::is_history_reader(&block.meta) && seen.insert(block.oid.clone()) {
             out.push((block, None));
         }
     }
     Ok(out)
 }
 
-/// [`resolve_tab_id_for_block`], and for a parked block, which no tab holds, the active tab: a
-/// headless agent that spawns or opens panes has no tab of its own to use.
+/// [`resolve_tab_id_for_block`], and for a parked block, which no tab holds, its agent's home tab
+/// ([`parked_agents_tab`]) and only then the active tab: a headless agent that spawns or opens panes
+/// has no tab of its own to use.
 pub(crate) fn resolve_tab_id_or_active(mstore: &Store, block_id: &str) -> Result<String, String> {
     match resolve_tab_id_for_block(mstore, block_id) {
         Ok(tab_id) => Ok(tab_id),
         Err(e) => match mstore.get::<Block>(block_id) {
-            Ok(Some(block)) if is_parked(&block) => resolve_tab_id(mstore, None),
+            Ok(Some(block)) if is_parked(&block) => match parked_agents_tab(mstore, &block) {
+                Some(tab_id) => Ok(tab_id),
+                None => resolve_tab_id(mstore, None),
+            },
             _ => Err(e),
         },
     }
+}
+
+/// The tab a parked agent works from, so its workers open beside it and not in whatever tab the user
+/// is looking at: the tab its pane was parked from, else a tab one of its open workers is in.
+fn parked_agents_tab(mstore: &Store, block: &Block) -> Option<String> {
+    let from = obj::meta_get_string(&block.meta, crate::persist_subscriber::parked::PARKED_FROM_TAB_META_KEY, "");
+    if !from.is_empty() && mstore.get::<Tab>(&from).ok().flatten().is_some() {
+        return Some(from);
+    }
+    let agent = obj::meta_get_string(&block.meta, "agentId", "");
+    super::agent_spawn::workers_of(mstore, &agent).iter().find_map(|w| resolve_tab_id_for_block(mstore, &w.block_id).ok())
 }
 
 #[cfg(test)]
@@ -195,6 +218,66 @@ mod tests {
         assert!(all.iter().all(|(b, _)| b.oid != orphan));
     }
 
+    /// Two blocks of one agent (an old layout): the one refused for a conversation open in another pane does
+    /// not hold it, so a start resumes the other. The refused block's id sorts first, so without the rule the
+    /// last tie-break (the id) would pick it.
+    #[test]
+    fn a_block_refused_for_an_open_conversation_is_not_picked_over_the_holder() {
+        let store = Store::open_in_memory().unwrap();
+        let with_id = |oid: &str| {
+            let mut meta = MetaMapType::new();
+            meta.insert("agentId".to_string(), serde_json::json!("ann"));
+            let mut block = Block { oid: oid.to_string(), meta, ..Default::default() };
+            store.insert(&mut block).unwrap();
+            block
+        };
+        let holder = with_id("b-holder").oid;
+        let mut refused = with_id("a-refused");
+        refused.meta.insert(blockcontroller::core::META_LAST_FAILURE.to_string(), serde_json::json!({ "code": "open_in_other_pane", "holderBlockId": holder }));
+        store.update(&mut refused).unwrap();
+        insert_tab(&store, &[&holder, &refused.oid]);
+        let found = find_agent_block_by_uid(&store, "ann").unwrap().unwrap();
+        assert_eq!(found.block.oid, holder);
+    }
+
+    /// The history reader carries the agent's id like its pane does, and is not the pane: with the agent
+    /// parked, a reader in a tab must not be taken for it.
+    #[test]
+    fn a_history_reader_is_not_the_agents_block() {
+        let store = Store::open_in_memory().unwrap();
+        let parked = insert_block(&store, "ann", true);
+        let mut meta = MetaMapType::new();
+        meta.insert("view".to_string(), serde_json::json!("agent"));
+        meta.insert("agentId".to_string(), serde_json::json!("ann"));
+        meta.insert(obj::HISTORY_READER_META_KEY.to_string(), serde_json::json!("ann"));
+        let mut reader = Block { oid: uuid::Uuid::new_v4().to_string(), meta, ..Default::default() };
+        store.insert(&mut reader).unwrap();
+        insert_tab(&store, &[&reader.oid]);
+        let found = find_agent_block_by_uid(&store, "ann").unwrap().unwrap();
+        assert_eq!((found.block.oid.as_str(), found.tab_id), (parked.as_str(), None), "the parked block, not the reader in the tab");
+        assert!(blocks_in_tabs_or_parked(&store).unwrap().iter().all(|(b, _)| b.oid != reader.oid));
+        assert!(obj::is_history_reader(&reader.meta));
+        assert!(!obj::is_history_reader(&MetaMapType::new()));
+    }
+
+    /// `find_agent_block` (the open path's "this tab already has the agent's pane") skips a reader of
+    /// the agent too, and still finds the live pane beside it.
+    #[test]
+    fn the_tab_lookup_does_not_take_a_history_reader_for_the_agents_pane() {
+        let store = Store::open_in_memory().unwrap();
+        let mut meta = MetaMapType::new();
+        meta.insert("view".to_string(), serde_json::json!("agent"));
+        meta.insert("agentId".to_string(), serde_json::json!("ann"));
+        meta.insert(obj::HISTORY_READER_META_KEY.to_string(), serde_json::json!("ann"));
+        let mut reader = Block { oid: uuid::Uuid::new_v4().to_string(), meta, ..Default::default() };
+        store.insert(&mut reader).unwrap();
+        let tab = insert_tab(&store, &[&reader.oid]);
+        assert!(super::super::find_agent_block(&store, &tab, "ann").unwrap().is_none(), "a reader alone is no pane");
+        let pane = insert_block(&store, "ann", false);
+        let tab = insert_tab(&store, &[&reader.oid, &pane]);
+        assert_eq!(super::super::find_agent_block(&store, &tab, "ann").unwrap().unwrap().oid, pane);
+    }
+
     #[test]
     fn an_unmarked_block_in_no_tab_is_not_the_agents_block() {
         let store = Store::open_in_memory().unwrap();
@@ -213,6 +296,45 @@ mod tests {
         let found = find_agent_block_by_uid(&store, "ann").unwrap().unwrap();
         assert_eq!(found.block.oid, shown);
         assert_ne!(found.block.oid, parked);
+    }
+
+    #[test]
+    fn a_parked_agent_works_from_the_tab_it_was_parked_from_not_the_active_one() {
+        let store = Store::open_in_memory().unwrap();
+        let (team, active) = (insert_tab(&store, &[]), insert_tab(&store, &[]));
+        let mut ws = Workspace { oid: uuid::Uuid::new_v4().to_string(), tabids: vec![team.clone(), active.clone()], activetabid: active.clone(), ..Default::default() };
+        store.insert(&mut ws).unwrap();
+        let parked = insert_block(&store, "ann", true);
+        assert_eq!(resolve_tab_id_or_active(&store, &parked).unwrap(), active, "no home tab recorded: the active one");
+        let mut block = store.get::<Block>(&parked).unwrap().unwrap();
+        block.meta.insert(crate::persist_subscriber::parked::PARKED_FROM_TAB_META_KEY.to_string(), serde_json::json!(team));
+        store.update(&mut block).unwrap();
+        assert_eq!(resolve_tab_id_or_active(&store, &parked).unwrap(), team);
+        block.meta.insert(crate::persist_subscriber::parked::PARKED_FROM_TAB_META_KEY.to_string(), serde_json::json!("gone"));
+        store.update(&mut block).unwrap();
+        assert_eq!(resolve_tab_id_or_active(&store, &parked).unwrap(), active, "a tab that is gone is not a home");
+    }
+
+    #[test]
+    fn a_parked_agent_with_no_recorded_tab_works_from_the_tab_of_its_open_worker() {
+        let store = Store::open_in_memory().unwrap();
+        let (team, active) = (insert_tab(&store, &[]), insert_tab(&store, &[]));
+        let mut ws = Workspace { oid: uuid::Uuid::new_v4().to_string(), tabids: vec![team.clone(), active.clone()], activetabid: active, ..Default::default() };
+        store.insert(&mut ws).unwrap();
+        let parked = insert_block(&store, "lead", true);
+        let mut def: crate::backend::storage::AgentDefinition = serde_json::from_value(serde_json::json!({
+            "id": "wrk", "slug": "wrk", "name": "Wrk", "icon": "robot", "provider": "claude", "description": "", "created_at": 1,
+        }))
+        .unwrap();
+        store.agent_def_insert(&mut def).unwrap();
+        let mut worker = Block { oid: uuid::Uuid::new_v4().to_string(), ..Default::default() };
+        worker.meta.insert("agentId".to_string(), serde_json::json!("wrk"));
+        worker.meta.insert(crate::server::app_api::agent_spawn::COACHED_BY_META_KEY.to_string(), serde_json::json!({ "id": "lead" }));
+        store.insert(&mut worker).unwrap();
+        let mut tab = store.get::<Tab>(&team).unwrap().unwrap();
+        tab.blockids.push(worker.oid.clone());
+        store.update(&mut tab).unwrap();
+        assert_eq!(resolve_tab_id_or_active(&store, &parked).unwrap(), team);
     }
 
     #[test]

@@ -30,7 +30,8 @@ import { addEventListener as addPaneListener } from "@/app/store/agent-pane-stat
 import type { AgentPaneEvent } from "@/app/store/agent-pane-state/types";
 import { focusManager } from "@/app/store/focusManager";
 import { getApi, getSettingsKeyAtom, workspace } from "@/app/store/global";
-import { revealBlockLocally } from "@/app/util/reveal-block";
+import { isFailure } from "@/app/selection/selection-machine";
+import { revealBlock } from "@/app/util/reveal-block";
 import { onMuxEvent } from "@/app/store/mps";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -120,11 +121,13 @@ export function shouldActivateHere(d: ActivatePayload | undefined, myWindowId: s
  * reveal path (SPEC_REVEAL_BLOCK_ONE_PATH_2026_09_27.md Phase 2): it finds the
  * tab via `Tab.blockids` (so tabs whose layout isn't built yet are found), uses
  * `tabId` first when srv resolved it, switches a multi-tab pane to the block,
- * and puts the caret in it. Returns whether the block was found here.
+ * and puts the caret in it. Returns whether it was shown here.
  */
 export async function activateBlockLocally(blockId: string, tabId?: string): Promise<boolean> {
-    if (!(await revealBlockLocally(blockId, { tabId }))) {
-        console.warn("[os-notify] activation: block not in this window's workspace", { blockId, tabId });
+    const shown = await revealBlock(blockId, { tabId, source: "os-notify", localOnly: true });
+    if (isFailure(shown)) {
+        const why = shown.reason === "not-found" ? "block not in this window's workspace" : `could not show it (${shown.reason})`;
+        console.warn(`[os-notify] activation: ${why}`, { blockId, tabId });
         return false;
     }
     // The launcher already raised this window; this is a second try that

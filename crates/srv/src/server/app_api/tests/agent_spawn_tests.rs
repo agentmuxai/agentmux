@@ -6,7 +6,7 @@
 use super::*;
 use crate::backend::storage::agents::test_agent_def;
 use crate::server::tests::test_state;
-use agentmux_common::api_types::UiAutomationAuth;
+use agentmux_common::api_types::{SpawnWorkerSpec, UiAutomationAuth};
 use agentmux_common::ipc::{Command, Event};
 
 async fn dispatch_apply(state: &AppState, cmd: Command) -> Vec<Event> {
@@ -272,7 +272,7 @@ async fn a_worker_that_does_not_open_leaves_no_definition_behind() {
     let own = account_of(&leader_account(&def));
     let leader = Leader { block_id, def };
     let before = definitions(&state);
-    let err = launch(&state, &leader, "Lead 4", &tab, &WorkerRuntime::default(), &own).await.unwrap_err();
+    let err = launch(&state, &leader, "Lead 4", &tab, &WorkerRuntime::default(), &own, None).await.unwrap_err();
     assert_eq!(err.status, StatusCode::INTERNAL_SERVER_ERROR);
     assert!(err.message.starts_with("the worker couldn't be opened, and was removed"), "{}", err.message);
     assert_eq!(definitions(&state), before);
@@ -611,4 +611,129 @@ async fn with_no_account_that_can_run_nothing_is_started() {
     failing_pane(&state, &tab, &leader_account(&def).id, "auth").await;
     let e = choose_account(&state, &leader_in(&state, &def, &block), "claude", None).unwrap_err();
     assert!(e.message.starts_with("NO_ACCOUNT: your account") && e.message.contains("had its sign-in refused"), "{}", e.message);
+}
+
+// ---- spawn_many (the countdown buttons spec §5) ----
+
+fn spec(name: &str, brief: &str) -> SpawnWorkerSpec {
+    SpawnWorkerSpec { name: Some(name.into()), model: None, effort: None, account: None, brief: brief.into() }
+}
+
+async fn spawn_many_via_http(state: &AppState, auth: UiAutomationAuth, workers: Vec<SpawnWorkerSpec>) -> (StatusCode, serde_json::Value) {
+    let req = agentmux_common::api_types::SpawnManyRequest { auth, workers, user_instruction: String::new() };
+    let resp = handle_agent_spawn_many(State(state.clone()), None, Json(req)).await;
+    let status = resp.status();
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    (status, serde_json::from_slice(&body).unwrap_or_default())
+}
+
+/// Everything that can be checked is checked before anything is made: a bad worker anywhere in the list
+/// refuses the call, says which, and creates nothing.
+#[tokio::test]
+async fn a_batch_with_one_bad_worker_is_refused_whole_and_names_it() {
+    let state = test_state();
+    let (def, _, _) = seed_leader(&state, "claude", "host", json!({})).await;
+    let before = definitions(&state);
+    let auth = || sign_auth(&state, &def.slug);
+
+    let (status, body) = spawn_many_via_http(&state, auth(), vec![spec("Batch A", "do a"), spec("Batch B", "  ")]).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert!(body["error"].as_str().unwrap().contains("worker 2: a brief is required"), "{body}");
+
+    let (status, body) = spawn_many_via_http(&state, auth(), vec![spec("Batch A", "do a"), spec("batch a", "do b")]).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert!(body["error"].as_str().unwrap().contains("worker 2") && body["error"].as_str().unwrap().contains("named twice"), "{body}");
+
+    let mut bad_model = spec("Batch C", "do c");
+    bad_model.model = Some("gpt-5".into());
+    let (status, body) = spawn_many_via_http(&state, auth(), vec![spec("Batch A", "do a"), bad_model]).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert!(body["error"].as_str().unwrap().contains("worker 2") && body["error"].as_str().unwrap().contains("unknown model"), "{body}");
+
+    let (status, body) = spawn_many_via_http(&state, auth(), vec![]).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(definitions(&state), before, "nothing was made");
+}
+
+/// The leader's limit counts the whole batch: two asked with two open is refused, with the room said.
+#[tokio::test]
+async fn a_batch_over_the_leaders_limit_is_refused_whole() {
+    let state = test_state();
+    let (def, tab, _) = seed_leader(&state, "claude", "host", json!({})).await;
+    for _ in 0..2 {
+        new_block(&state, &tab, json!({ "view": "agent", COACHED_BY_META_KEY: { "agent": def.name, "id": def.id, "block_id": "x" } })).await;
+    }
+    let before = definitions(&state);
+    let (status, body) = spawn_many_via_http(&state, sign_auth(&state, &def.slug), vec![spec("Batch A", "do a"), spec("Batch B", "do b")]).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    let error = body["error"].as_str().unwrap();
+    assert!(error.starts_with("TOO_MANY_WORKERS") && error.contains("you have 2 workers open and asked for 2") && error.contains("room for 1"), "{error}");
+    assert_eq!(definitions(&state), before);
+}
+
+/// With no window to ask in, one prompt covers all of them and, unanswered, nothing is created.
+#[tokio::test]
+async fn without_the_users_go_ahead_a_batch_creates_nothing() {
+    let state = test_state();
+    let (def, _, _) = seed_leader(&state, "claude", "host", json!({})).await;
+    let before = definitions(&state);
+    let (status, body) = spawn_many_via_http(&state, sign_auth(&state, &def.slug), vec![spec("Batch A", "do a"), spec("Batch B", "do b")]).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert!(body["error"].as_str().unwrap().starts_with("NOT_ALLOWED"), "{body}");
+    assert_eq!(definitions(&state), before);
+}
+
+/// One question lists every worker.
+#[test]
+fn the_one_prompt_lists_every_worker() {
+    let account = WorkerAccount { id: "a1".into(), label: "me@example.com".into(), provider: "claude".into(), note: None };
+    let planned = vec![
+        many::Planned { name: Some("Batch A".into()), brief: "first task\nmore".into(), runtime: WorkerRuntime::default(), account: account.clone() },
+        many::Planned { name: None, brief: "second task".into(), runtime: worker_runtime("claude", "", Some("sonnet"), None).unwrap(), account },
+    ];
+    let m = many::consent_message_many("Lead", &planned);
+    assert!(m.starts_with("Lead wants to start 2 new agents"), "{m}");
+    assert!(m.contains("• Batch A, account me@example.com: first task more"), "{m}");
+    assert!(m.contains("• a new agent on sonnet, account me@example.com: second task"), "{m}");
+    assert!(m.contains("Start them?"), "{m}");
+}
+
+/// A name made for an unnamed worker skips the ones the same batch gave to later workers.
+#[tokio::test]
+async fn a_generated_worker_name_skips_the_names_a_batch_asked_for() {
+    let state = test_state();
+    let asked: std::collections::HashSet<String> = ["lead worker 1".to_string()].into();
+    assert_eq!(next_worker_name(&state.mstore, "Lead", &asked), "Lead worker 2");
+    assert_eq!(next_worker_name(&state.mstore, "Lead", &Default::default()), "Lead worker 1");
+}
+
+/// A leader's workers open in "<Leader> team" in the leader's workspace: made the first time, reused
+/// after, one per leader, and the user's own tab is left alone.
+#[tokio::test]
+async fn a_leaders_workers_open_in_its_own_team_tab_made_once() {
+    let state = test_state();
+    let (def, tab, block_id) = seed_leader(&state, "claude", "host", json!({})).await;
+    let leader = leader_in(&state, &def, &block_id);
+
+    let team = team::team_tab(&state, &leader, &tab).await;
+    assert_ne!(team, tab, "not the tab the leader is in");
+    let made: Tab = state.mstore.must_get(&team).unwrap();
+    assert_eq!(made.name, format!("{} team", def.name));
+    let workspace = state.mstore.get_all::<crate::backend::obj::Workspace>().unwrap().into_iter().find(|w| w.tabids.contains(&tab)).unwrap();
+    assert!(workspace.tabids.contains(&team), "in the leader's workspace");
+    assert_eq!(team::team_tab(&state, &leader, &tab).await, team, "the next worker uses it");
+    assert_eq!(workspace.tabids.len(), 2, "one team tab, however many workers");
+
+    let other = test_agent_def("other-id", "Other", "claude", "host", 1, "");
+    let other_leader = Leader { block_id: block_id.clone(), def: other };
+    assert_ne!(team::team_tab(&state, &other_leader, &tab).await, team, "each leader has its own");
+}
+
+/// With no workspace to make a tab in, the worker opens where the leader is, as before.
+#[tokio::test]
+async fn without_a_workspace_to_make_a_team_tab_in_the_worker_opens_beside_the_leader() {
+    let state = test_state();
+    let (def, _tab, block_id) = seed_leader(&state, "claude", "host", json!({})).await;
+    let leader = leader_in(&state, &def, &block_id);
+    assert_eq!(team::team_tab(&state, &leader, "no-such-tab").await, "no-such-tab");
 }

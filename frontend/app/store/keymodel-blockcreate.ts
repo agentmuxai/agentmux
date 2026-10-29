@@ -2,17 +2,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { paneTabCapability } from "@/app/block/pane-tab-registry";
-import { splitBlockDefFor } from "@/app/block/split-block-def";
+import { shortcutsSplitBlockDef } from "@/app/block/split-block-def";
 import { createBlock, createBlockSplitHorizontally, createBlockSplitVertically, getSettingsKeyAtom, MOS } from "@/app/store/global";
 import { getLayoutModelForStaticTab } from "@/layout/index";
 
 function getDefaultNewBlockDef(): BlockDef {
     const adnbAtom = getSettingsKeyAtom("app:defaultnewblock");
     const adnb = adnbAtom() ?? "term";
-    if (adnb == "launcher") {
+    // `launcher` is the Shortcuts pane's old name.
+    if (adnb == "shortcuts" || adnb == "launcher") {
         return {
             meta: {
-                view: "launcher",
+                view: "shortcuts",
             },
         };
     }
@@ -55,7 +56,7 @@ export async function handleSplitHorizontal(position: "before" | "after") {
     if (focusedNode == null) {
         return;
     }
-    const blockDef = splitBlockDefFor(focusedBlock(focusedNode.data.blockId), getDefaultNewBlockDef);
+    const blockDef = shortcutsSplitBlockDef(focusedBlock(focusedNode.data.blockId), getDefaultNewBlockDef);
     await createBlockSplitHorizontally(blockDef, focusedNode.data.blockId, position);
 }
 
@@ -65,6 +66,6 @@ export async function handleSplitVertical(position: "before" | "after") {
     if (focusedNode == null) {
         return;
     }
-    const blockDef = splitBlockDefFor(focusedBlock(focusedNode.data.blockId), getDefaultNewBlockDef);
+    const blockDef = shortcutsSplitBlockDef(focusedBlock(focusedNode.data.blockId), getDefaultNewBlockDef);
     await createBlockSplitVertically(blockDef, focusedNode.data.blockId, position);
 }

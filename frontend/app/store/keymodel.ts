@@ -135,7 +135,7 @@ function registerGlobalKeys() {
         if (blockId == null) {
             return true;
         }
-        if (getBlockComponentModel(blockId)?.viewModel?.viewType === "launcher") {
+        if (getBlockComponentModel(blockId)?.viewModel?.viewType === "shortcuts") {
             return true;
         }
         // One confirmation at a time: a held key repeats, and global
@@ -149,7 +149,7 @@ function registerGlobalKeys() {
                     blockId,
                     {
                         meta: {
-                            view: "launcher",
+                            view: "shortcuts",
                         },
                     },
                     true

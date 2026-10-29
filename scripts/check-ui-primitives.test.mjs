@@ -23,6 +23,7 @@ import {
     rootTokens,
     solidFills,
     stripComments,
+    tsColourLiterals,
 } from "./check-ui-primitives.mjs";
 
 describe("SCSS walking", () => {
@@ -260,6 +261,8 @@ describe("collect", () => {
 
     it("counts each <button", () => {
         expect(countButtons("<button>\n<button\n  type='x'>\n<buttons>")).toBe(2);
+        // A comment that mentions the element isn't one.
+        expect(countButtons("// not a native <button>\n/** nor a <button> here */\n<button>")).toBe(1);
     });
 });
 
@@ -307,6 +310,47 @@ describe("parseCatFileBatch", () => {
             Buffer.from(`def456 blob ${Buffer.byteLength(b)}\n${b}\n`),
         ]);
         expect(parseCatFileBatch(out)).toEqual([a, null, b]);
+    });
+});
+
+describe("tsColourLiterals", () => {
+    const literals = (source) => tsColourLiterals(source).map((c) => `${c.line} ${c.literal}`);
+
+    it("finds hex and function colours in code, not pure black and white", () => {
+        const source = 'const a = "#ef4444";\nconst b = `rgba(1, 2, 3, 0.5)`;\nconst c = ["#fff", "#000000", "rgb(255, 255, 255)"];';
+        expect(literals(source)).toEqual(["1 #ef4444", "2 rgba(1, 2, 3, 0.5)"]);
+    });
+
+    it("skips comments, JSX comments and issue numbers", () => {
+        const source = "// #123456\n/* #abcdef\n   #fedcba */\n{/* #334455 */}\nconst n = 'PR #1057 and #784';\nconst x = 1; // #aabbcc";
+        expect(literals(source)).toEqual(["5 #784"]);
+    });
+
+    it("leaves out a line marked colour: fixed, on it or in the comment above", () => {
+        const source = 'const a = "#EA4335"; // colour: fixed (brand)\n// colour: fixed (palette)\nconst b = "#4285F4";\nconst c = "#34A853";';
+        expect(literals(source)).toEqual(["4 #34A853"]);
+    });
+
+    it("keeps line numbers when a comment follows a blank line", () => {
+        const source = '\n// Introductory comment\nconst brand = "#EA4335"; // colour: fixed\nconst other = "#112233";';
+        expect(literals(source)).toEqual(["4 #112233"]);
+    });
+
+    it("leaves channels built from variables alone", () => {
+        expect(literals("const a = `rgba(${r}, ${g}, ${b}, ${alpha})`; const b = `rgba(${rgb[1]}, 0, 0, 1)`; const c = 'rgb(10, 20, 30)';")).toEqual(["1 rgb(10, 20, 30)"]);
+    });
+
+    it("leaves colours built from a token alone", () => {
+        expect(literals('const a = "var(--x, red)"; const b = "rgb(from var(--y) r g b / 0.5)";')).toEqual([]);
+    });
+
+    it("is counted per file by collect, outside tests and type files", () => {
+        const c = collect([
+            { path: "frontend/app/a.tsx", source: 'const a = "#ef4444";' },
+            { path: "frontend/app/a.test.tsx", source: 'const a = "#ef4444";' },
+            { path: "frontend/types/x.d.ts", source: 'const a = "#ef4444";' },
+        ]);
+        expect(c.tsColours).toEqual({ "frontend/app/a.tsx": 1 });
     });
 });
 

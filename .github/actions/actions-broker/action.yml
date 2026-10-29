@@ -38,4 +38,7 @@ runs:
         CONTEXT: ${{ inputs.context }}
         GRANT_FILE: ${{ runner.temp }}/broker-grant.json
         RESULT_FILE: ${{ inputs.result-file }}
-      run: python3 "$GITHUB_ACTION_PATH/broker.py"
+      run: |
+        # Windows runners have no python3 on the path; python is the same interpreter there.
+        if command -v python3 >/dev/null 2>&1; then PY=python3; else PY=python; fi
+        "$PY" "$GITHUB_ACTION_PATH/broker.py"

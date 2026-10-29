@@ -366,7 +366,7 @@ fn only_agentmuxs_own_github_app_runs_through_the_broker() {
     // The broker exchanges the code with AgentMux's App secret: the person's own app can't use it.
     assert!(!runs_through_broker("github", true, &client(ClientMode::Byo)));
     assert!(!runs_through_broker("github", true, &client(ClientMode::Workspace)));
-    // Signed out of AgentMux Cloud: the device flow; other providers never use the broker.
+    // Signed out of AgentMux Cloud: no broker; other providers never use it.
     assert!(!runs_through_broker("github", false, &client(ClientMode::Builtin)));
     assert!(!runs_through_broker("google", true, &client(ClientMode::Builtin)));
 }
@@ -463,4 +463,113 @@ async fn a_request_that_never_ends_its_line_is_cut_at_the_limit() {
     let mut r = &endless[..];
     let got = read_request_line(&mut r).await;
     assert!(got.len() >= MAX_REQUEST_LINE && got.len() < MAX_REQUEST_LINE + 4096);
+}
+
+// ── Sessions: cancel is final, and per flow ─────────────────────────────────
+
+fn success() -> OAuthStatus {
+    OAuthStatus::Success {
+        account_id: "acc-1".into(),
+        granted_scopes: Vec::new(),
+        missing_scopes: Vec::new(),
+        email: None,
+    }
+}
+
+fn is_cancelled(s: Option<OAuthStatus>) -> bool {
+    matches!(s, Some(OAuthStatus::Failed { error }) if error == "cancelled")
+}
+
+#[test]
+fn a_cancelled_flow_cannot_later_report_success() {
+    let m = OAuthSessionManager::default();
+    let (id, _stop) = m.new_session(OAuthStatus::Pending);
+    assert!(m.cancel(&id));
+    // The flow's task finishes after the cancel and tries to record its result.
+    assert!(!m.set_status(&id, success()), "a terminal status is final");
+    assert!(is_cancelled(m.poll(&id)), "the poll still says cancelled");
+}
+
+#[test]
+fn a_flow_that_was_cancelled_may_not_begin_to_write_the_account() {
+    let m = OAuthSessionManager::default();
+    let (id, _stop) = m.new_session(OAuthStatus::Pending);
+    assert!(m.cancel(&id));
+    assert!(!m.begin_commit(&id), "the cancel came first: the flow writes nothing");
+}
+
+#[test]
+fn a_cancel_after_the_flow_began_to_write_is_refused() {
+    let m = OAuthSessionManager::default();
+    let (id, _stop) = m.new_session(OAuthStatus::Pending);
+    assert!(m.begin_commit(&id));
+    assert!(!m.cancel(&id), "too late to cancel");
+    assert!(m.set_status(&id, success()));
+    assert!(matches!(m.poll(&id), Some(OAuthStatus::Success { .. })));
+}
+
+#[test]
+fn cancel_of_an_unknown_or_finished_session() {
+    let m = OAuthSessionManager::default();
+    assert!(!m.cancel("oauth-nope"), "unknown");
+    let (id, _stop) = m.new_session(OAuthStatus::Pending);
+    assert!(m.set_status(&id, OAuthStatus::Failed { error: "access denied".into() }));
+    assert!(m.cancel(&id), "already over: nothing to cancel");
+    assert!(
+        matches!(m.poll(&id), Some(OAuthStatus::Failed { error }) if error == "access denied"),
+        "a cancel does not rewrite a finished flow's result"
+    );
+}
+
+#[tokio::test]
+async fn a_cancel_stops_that_flow_only() {
+    let m = OAuthSessionManager::default();
+    let (a, mut stop_a) = m.new_session(OAuthStatus::Pending);
+    let (b, mut stop_b) = m.new_session(OAuthStatus::Pending);
+    assert!(m.cancel(&a));
+    tokio::time::timeout(Duration::from_secs(1), stop_a.stopped()).await.expect("the cancelled flow is told to stop");
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), stop_b.stopped()).await.is_err(),
+        "the other flow keeps running"
+    );
+    assert!(matches!(m.poll(&b), Some(OAuthStatus::Pending)));
+    assert!(m.begin_commit(&b));
+}
+
+#[tokio::test]
+async fn the_timeout_sweep_is_final_and_stops_the_flow() {
+    let m = OAuthSessionManager::default();
+    let (id, mut stop) = m.new_session(OAuthStatus::Pending);
+    {
+        let mut guard = m.sessions.lock().unwrap();
+        let s = guard.get_mut(&id).unwrap();
+        s.started_at = Instant::now().checked_sub(SESSION_TIMEOUT + Duration::from_secs(1)).expect("uptime");
+    }
+    assert!(matches!(m.poll(&id), Some(OAuthStatus::Failed { error }) if error.contains("timed out")));
+    tokio::time::timeout(Duration::from_secs(1), stop.stopped()).await.expect("a timed-out flow is told to stop");
+    assert!(!m.set_status(&id, success()), "a flow that wakes up late cannot report success");
+    assert!(!m.begin_commit(&id));
+}
+
+#[test]
+fn only_a_missing_sign_in_is_answered_with_the_sign_in_prompt() {
+    use crate::muxbus::github_broker::{BrokerError, NO_VALID_SIGN_IN};
+    assert!(BrokerError::NotSignedIn(NO_VALID_SIGN_IN.into()).needs_sign_in());
+    // Not running yet, or a key that can't be read: signing in changes nothing.
+    assert!(!BrokerError::NotSignedIn("AgentMux Cloud isn't running yet".into()).needs_sign_in());
+    assert!(!BrokerError::NotSignedIn("this install's key can't be read: x".into()).needs_sign_in());
+    assert!(!BrokerError::NotConnected.needs_sign_in());
+}
+
+#[test]
+fn github_through_agentmuxs_own_app_needs_a_cloud_sign_in() {
+    let client = |mode| ResolvedClient { client_id: "id".into(), client_secret: None, mode };
+    // No sign-in: AgentMux's own App stops with the code the UI turns into a sign-in prompt.
+    assert!(needs_cloud_sign_in("github", false, &client(ClientMode::Builtin)));
+    assert!(!needs_cloud_sign_in("github", true, &client(ClientMode::Builtin)));
+    // The person's own app costs AgentMux nothing, and other providers are not GitHub Connect.
+    assert!(!needs_cloud_sign_in("github", false, &client(ClientMode::Byo)));
+    assert!(!needs_cloud_sign_in("github", false, &client(ClientMode::Workspace)));
+    assert!(!needs_cloud_sign_in("google", false, &client(ClientMode::Builtin)));
+    assert_eq!(NEEDS_CLOUD_SIGN_IN, "needs-cloud-sign-in");
 }

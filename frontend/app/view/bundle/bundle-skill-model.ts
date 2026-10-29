@@ -3,8 +3,7 @@
 
 /**
  * BundleSkillModel — view model for a bundle's Skills section (part of the
- * Bundle editor, bundle-manager.tsx). Same shape as AgentSkillModel
- * (agent-skill-model.ts), keyed by bundle_id instead of agent_id.
+ * Bundle editor, bundle-manager.tsx), keyed by bundle_id.
  *
  * Binding an existing GLOBAL skill here gives it to every agent with this
  * bundle; a global skill nothing binds reaches no agent (composable model

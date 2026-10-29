@@ -16,7 +16,7 @@ import { widgetHueFor } from "./pane-identity";
 import { getPaneTab, isKeepAliveView, paneTabCapability, resolvePaneTabView } from "./pane-tab-registry";
 
 const VIEWS = [
-    "term", "cpuplot", "sysinfo", "help", "launcher", "agent", "swarm", "editor", "browser",
+    "term", "cpuplot", "sysinfo", "help", "shortcuts", "agent", "swarm", "editor", "browser",
     "memory", "identity", "drone", "warden", "toolchain", "settings",
     "connectors",
 ];
@@ -40,10 +40,10 @@ const OLD_LABELS: Record<string, string> = {
 // three of them to their lowercase view name.
 const NEW_ICONS: Record<string, string> = {
     cpuplot: "chart-line", warden: "shield-halved", connectors: "plug",
-    launcher: "shapes", memory: "brain", identity: "user", toolchain: "wrench", settings: "cog",
+    shortcuts: "shapes", memory: "brain", identity: "user", toolchain: "wrench", settings: "cog",
 };
 const NEW_LABELS: Record<string, string> = {
-    cpuplot: "Sysinfo", connectors: "Connectors", launcher: "Launcher", toolchain: "Toolchain", settings: "Settings",
+    cpuplot: "Sysinfo", connectors: "Connectors", shortcuts: "Shortcuts", toolchain: "Toolchain", settings: "Settings",
 };
 
 describe("built-in pane tabs (block-registry.ts)", () => {
@@ -72,16 +72,19 @@ describe("built-in pane tabs (block-registry.ts)", () => {
         // The Media pane is folded into the Editor (SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS §4.12).
         expect(resolvePaneTabView("media")).toBe("editor");
         expect(getPaneTab("media")).toBe(getPaneTab("editor"));
+        // The Shortcuts pane was the launcher: saved layouts and app:defaultnewblock still say so.
+        expect(resolvePaneTabView("launcher")).toBe("shortcuts");
+        expect(getPaneTab("launcher")).toBe(getPaneTab("shortcuts"));
     });
 
     // Phase 5: each capability replaces a view-name check in shared code, so
     // exactly the view types those checks named declare it.
     it("declares exactly the capabilities the old view-name checks encoded", () => {
         const holders = (key: string) => VIEWS.filter((v) => paneTabCapability(v, key as any) != null).sort();
-        expect(holders("header")).toEqual(["agent", "launcher"]);
+        expect(holders("header")).toEqual(["agent", "shortcuts"]);
         expect(paneTabCapability("agent", "header")).toBe("surface");
-        // The launcher's old `noHeader`.
-        expect(paneTabCapability("launcher", "header")).toBe("none");
+        // The Shortcuts pane's old `noHeader`.
+        expect(paneTabCapability("shortcuts", "header")).toBe("none");
         expect(holders("statsBadgeSetting")).toEqual(["term"]);
         expect(paneTabCapability("term", "statsBadgeSetting")).toBe("term:showstatsbadge");
         expect(holders("hueBorder")).toEqual(["term"]);
@@ -135,7 +138,7 @@ describe("built-in widget colors", () => {
     });
 
     it("gives the most used widgets distinct colors", () => {
-        const common = ["term", "agent", "browser", "editor", "files", "sysinfo", "swarm", "help", "launcher", "memory"];
+        const common = ["term", "agent", "browser", "editor", "files", "sysinfo", "swarm", "help", "shortcuts", "memory"];
         expect(new Set(common.map((v) => getPaneTab(v)?.defaultHue)).size).toBe(common.length);
     });
 });

@@ -275,6 +275,11 @@ pub async fn app_exit(state: &AppState) -> usize {
         tokio::task::spawn_blocking(move || without_sub_blocks(&st, ids)).await.unwrap_or(all)
     };
     let cap = APP_EXIT_CAP.saturating_sub(SHELL_SWEEP_GRACE);
+    // Before the close interrupts them: the next start tells these agents to
+    // carry on (`upgrade_notice`).
+    record_turns_in_flight(state, &ids).await;
+    // And which parked agents are running, for the restart resume to bring back whatever their last turn.
+    crate::server::restart_resume::record_running_at_exit(state, &ids).await;
     let all_closed = async {
         run_many(state, &ids, Policy::app_exit()).await;
         // And every close already in flight: its controller has left the
@@ -294,6 +299,66 @@ pub async fn app_exit(state: &AppState) -> usize {
         tokio::time::sleep(SHELL_SWEEP_GRACE).await;
     }
     ids.len()
+}
+
+/// Add the agents with a turn running among the panes in `ids` to the list the
+/// next start tells to carry on (`upgrade_notice::record_interrupted`). A GUI
+/// quit has closed most of them already (`note_turn_cut_off_by_quit`), so this
+/// catches what is left when srv exits on its own. It only adds: none running
+/// leaves the list as it is. Nothing here can fail the exit.
+async fn record_turns_in_flight(state: &AppState, ids: &[String]) {
+    let controllers = blockcontroller::get_all_controllers();
+    let busy: Vec<String> = ids
+        .iter()
+        .filter(|id| controllers.get(*id).is_some_and(|c| c.get_runtime_status().turn_active))
+        .cloned()
+        .collect();
+    let st = state.clone();
+    let agents = tokio::task::spawn_blocking(move || {
+        distinct_agents(busy.iter().filter_map(|id| {
+            let block = st.mstore.get::<crate::backend::obj::Block>(id).ok().flatten()?;
+            Some(crate::backend::obj::meta_get_string(&block.meta, "agentId", ""))
+        }))
+    })
+    .await
+    .unwrap_or_default();
+    if let Some(paths) = agentmux_common::DataPaths::from_env() {
+        crate::backend::upgrade_notice::record_interrupted(&paths.instance_dir, &agents, agentmux_common::time::now_ms());
+    }
+    if !agents.is_empty() {
+        tracing::info!(count = agents.len(), "app exit: agents with a turn in flight recorded");
+    }
+}
+
+/// A quit is closing the windows (the GUI saved its session record a moment
+/// ago) and the agent in `block_id` has a turn running that the close is about
+/// to interrupt: keep it for the next start to tell it to carry on. The windows
+/// close before srv exits, so by `app_exit` these agents are already gone.
+async fn note_turn_cut_off_by_quit(state: &AppState, block_id: &str) {
+    let st = state.clone();
+    let id = block_id.to_string();
+    let agent = tokio::task::spawn_blocking(move || {
+        if !crate::server::service::session_closed::quit_under_way(&st.mstore) {
+            return None;
+        }
+        let block = st.mstore.get::<crate::backend::obj::Block>(&id).ok().flatten()?;
+        distinct_agents([crate::backend::obj::meta_get_string(&block.meta, "agentId", "")]).pop()
+    })
+    .await
+    .ok()
+    .flatten();
+    if let (Some(agent), Some(paths)) = (agent, agentmux_common::DataPaths::from_env()) {
+        crate::backend::upgrade_notice::record_interrupted(&paths.instance_dir, &[agent], agentmux_common::time::now_ms());
+    }
+}
+
+/// The agent ids in `ids`, each once, none empty (a pane that is no agent's
+/// has none).
+fn distinct_agents(ids: impl IntoIterator<Item = String>) -> Vec<String> {
+    let mut agents: Vec<String> = ids.into_iter().map(|a| a.trim().to_string()).filter(|a| !a.is_empty()).collect();
+    agents.sort();
+    agents.dedup();
+    agents
 }
 
 /// `ids` minus any that is a sub-block (PtyShell drawer) of another block in
@@ -510,6 +575,7 @@ async fn close_cli(
         Some(ctrl) => {
             if ctrl.get_runtime_status().turn_active {
                 publish_shutdown(state, block_id, "interrupt", "turn interrupted".into(), ShutdownExtra::default());
+                note_turn_cut_off_by_quit(state, block_id).await;
             }
             let outcome = ctrl.shutdown(deadline).await;
             (ctrl.controller_type().to_string(), outcome)
@@ -845,5 +911,12 @@ mod tests {
              route these through it:\n{}",
             offenders.join("\n")
         );
+    }
+
+    #[test]
+    fn the_agents_with_a_turn_in_flight_are_listed_once_and_a_pane_with_no_agent_is_left_out() {
+        let ids = ["b", " a ", "", "b", "  "].map(String::from);
+        assert_eq!(distinct_agents(ids), vec!["a".to_string(), "b".to_string()]);
+        assert!(distinct_agents(Vec::new()).is_empty());
     }
 }

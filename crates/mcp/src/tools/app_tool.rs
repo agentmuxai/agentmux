@@ -17,7 +17,8 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             Some("version") => version(cx).await,
             Some("upgrade") => upgrade(arguments, cx).await,
             Some("network") => network(cx).await,
-            other => anyhow::bail!("App: unknown action {other:?}; use \"version\", \"upgrade\" or \"network\""),
+            Some("history_reclaim") => history_reclaim(arguments, cx).await,
+            other => anyhow::bail!("App: unknown action {other:?}; use \"version\", \"upgrade\", \"network\" or \"history_reclaim\""),
         },
         _ => Err(not_in_family()),
     }
@@ -130,6 +131,69 @@ async fn upgrade(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
         anyhow::bail!("App upgrade: srv answered {status}: {}", body["error"].as_str().unwrap_or(&body.to_string()));
     }
     Ok(describe_outcome(&body))
+}
+
+/// `history_reclaim`: ask for the shared pane-history store's free space to be given back at the next start,
+/// withdraw that, or read where it stands (`/api/v1/agent/history/reclaim`). srv records the request as this agent.
+async fn history_reclaim(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    require_agent_env(cx.local_url, cx.auth_key, cx.block_id)?;
+    let what = str_arg(arguments, "reclaim").unwrap_or_else(|| "status".to_string());
+    let url = format!("{}/api/v1/agent/history/reclaim", cx.local_url.trim_end_matches('/'));
+    let req = match what.as_str() {
+        "status" => cx.client.get(&url),
+        "request" | "cancel" => cx.client.post(&url).json(&json!({ "action": what })),
+        other => anyhow::bail!("App history_reclaim: reclaim is \"request\", \"cancel\" or \"status\", not {other:?}"),
+    };
+    let resp = req.header(AUTH_KEY_HEADER, cx.auth_key).send().await.map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+    let status = resp.status();
+    let body: Value = resp.json().await.unwrap_or(Value::Null);
+    if !status.is_success() {
+        anyhow::bail!("App history_reclaim: {}", body["error"].as_str().map(str::to_string).unwrap_or_else(|| format!("srv answered {status}: {body}")));
+    }
+    Ok(describe_reclaim(&body, &what))
+}
+
+/// `history_reclaim`'s answer, from srv's status of the request and the last reclaim.
+fn describe_reclaim(st: &Value, what: &str) -> String {
+    let mut out = String::new();
+    if st["pending"].as_bool() == Some(true) {
+        let by = s(st, "requested_by");
+        out.push_str(&format!(
+            "A reclaim of the pane-history store is asked for{}. It runs at the next start of AgentMux, before the store opens: \
+             the store is rewritten without its free pages, which takes a while for a large store and needs free disk of about \
+             the store's live size plus 1 GB. The person sees it pending in Warden > History > Storage and can cancel it there; \
+             App history_reclaim with reclaim \"cancel\" withdraws it too.",
+            if by.is_empty() { String::new() } else { format!(" (by {by})") }
+        ));
+        if what == "request" && !by.is_empty() {
+            out.push_str(" Asking again keeps the first request.");
+        }
+        let waiting = s(st, "waiting_for");
+        if !waiting.is_empty() {
+            out.push_str(&format!(" The last start did not run it: {waiting}."));
+        }
+    } else if what == "cancel" {
+        out.push_str("No reclaim of the pane-history store is asked for now.");
+        let was = s(st, "withdrew_request_of");
+        if !was.is_empty() {
+            out.push_str(&format!(" It withdrew the request made by {was}."));
+        }
+    } else {
+        out.push_str("No reclaim of the pane-history store is asked for. App history_reclaim with reclaim \"request\" asks for one at the next start.");
+    }
+    let error = s(st, "last_error");
+    if !error.is_empty() {
+        out.push_str(&format!(" The last attempt failed: {error}."));
+    }
+    if st["last_done_ms"].as_u64().unwrap_or(0) > 0 {
+        let (before, after) = (st["last_before_bytes"].as_u64().unwrap_or(0), st["last_after_bytes"].as_u64().unwrap_or(0));
+        out.push_str(&format!(" The last reclaim took the store from {} to {}.", mb(before), mb(after)));
+    }
+    out
+}
+
+fn mb(bytes: u64) -> String {
+    format!("{:.1} MB", bytes as f64 / 1_048_576.0)
 }
 
 /// `key`'s value, if it is a non-empty string.
@@ -249,6 +313,28 @@ mod tests {
         let text = describe_status(&old);
         assert!(text.contains("older than 0.60.0 upgrades from: the user installs 0.58.0 first"), "{text}");
         assert!(!text.contains("action \"upgrade\""), "{text}");
+    }
+
+    #[test]
+    fn history_reclaim_says_who_asked_when_it_runs_and_how_to_take_it_back() {
+        let pending = json!({ "pending": true, "requested_by": "loap-3", "requested_at_ms": 1, "last_done_ms": 0, "last_before_bytes": 0, "last_after_bytes": 0 });
+        let text = describe_reclaim(&pending, "request");
+        assert!(text.contains("is asked for (by loap-3)"), "{text}");
+        assert!(text.contains("next start of AgentMux") && text.contains("Warden > History > Storage"), "{text}");
+        assert!(text.contains("reclaim \"cancel\"") && text.contains("keeps the first request"), "{text}");
+        assert!(!describe_reclaim(&pending, "status").contains("keeps the first request"));
+
+        let none = json!({ "pending": false, "last_done_ms": 0, "last_before_bytes": 0, "last_after_bytes": 0 });
+        assert!(describe_reclaim(&none, "cancel").starts_with("No reclaim of the pane-history store is asked for now."));
+        assert!(describe_reclaim(&none, "status").contains("reclaim \"request\" asks for one"));
+        let taken = json!({ "pending": false, "withdrew_request_of": "operator" });
+        assert!(describe_reclaim(&taken, "cancel").contains("withdrew the request made by operator"));
+
+        let done = json!({ "pending": false, "last_done_ms": 5, "last_before_bytes": 3u64 << 30, "last_after_bytes": 1u64 << 30 });
+        assert!(describe_reclaim(&done, "status").contains("from 3072.0 MB to 1024.0 MB"));
+        let failed = json!({ "pending": true, "requested_by": "operator", "waiting_for": "another AgentMux is running", "last_error": "disk full" });
+        let text = describe_reclaim(&failed, "status");
+        assert!(text.contains("did not run it: another AgentMux is running") && text.contains("failed: disk full"), "{text}");
     }
 
     #[test]

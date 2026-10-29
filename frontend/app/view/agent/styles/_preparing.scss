@@ -1,0 +1,28 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// "Preparing…" line above the composer while a container agent's container starts
+// (components/AgentPreparingRow.tsx). A quiet status line, not a banner.
+.agent-view {
+    .agent-preparing-row {
+        display: flex;
+        align-items: baseline;
+        gap: var(--space-1-5);
+        padding: var(--space-0-5) var(--space-1-5);
+        border-top: 1px solid var(--border-color);
+        color: var(--secondary-text-color);
+        font-size: var(--text-sm);
+        flex-shrink: 0;
+
+        .agent-preparing-title {
+            font-weight: 600;
+        }
+
+        .agent-preparing-phase {
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+    }
+}

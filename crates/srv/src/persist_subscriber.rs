@@ -746,7 +746,7 @@ fn apply_layout_tree_replaced(
             Some(v) if !v.is_null() => Some(serde_json::from_value(v.clone())?),
             _ => None,
         },
-        None => layout.pendingbackendactions.clone(),
+        None => layout_queue::without_stale(layout.pendingbackendactions.clone()),
     };
 
     let already = layout.rootnode == *new_tree
@@ -1610,7 +1610,7 @@ mod tests {
                 ephemeral: false,
                 targetblockid: String::new(),
                 position: String::new(),
-                nodeid: None,
+                ..Default::default()
             }]);
             s.update(&mut layout).unwrap();
         }
@@ -1653,7 +1653,7 @@ mod tests {
                         "blockid": "b2",
                         "focused": false,
                         "magnified": false,
-                        "ephemeral": false,
+                        "ephemeral": false, "queuedat": agentmux_common::time::now_ms(),
                     }])),
                 )),
                 version: 3,
@@ -2080,7 +2080,7 @@ mod tests {
             ephemeral: false,
             targetblockid: String::new(),
             position: String::new(),
-            nodeid: None,
+            ..Default::default()
         }
     }
 

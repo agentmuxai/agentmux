@@ -2,11 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The pane's "shutting down in N s — Keep running" banner
+ * The pane's "shutting down in N s — Keep running / Close now" banner
  * (docs/specs/SPEC_AGENT_SELF_QUIT_2026_09_24.md §6.5): shown when something
  * other than the user asked to shut this agent down. Counts down live, chimes
- * the falling shutdown tone at the start and with 5 s left, and "Keep
- * running" cancels it through `agentshutdownkeep`.
+ * the falling shutdown tone at the start and with 5 s left, "Keep
+ * running" cancels it through `agentshutdownkeep`, and "Close now" ends the wait
+ * through `agentshutdownnow` (the window's alone: srv proves it)
+ * (docs/specs/SPEC_COUNTDOWN_BUTTONS_AND_BATCH_AGENT_ACTIONS_2026_10_28.md §3).
  */
 
 import { createSignal, onCleanup, Show, type JSX } from "solid-js";
@@ -38,6 +40,7 @@ export const ShutdownPendingBanner = (props: ShutdownPendingBannerProps): JSX.El
     const [pending, setPending] = createSignal<PendingShutdown | null>(null);
     const [now, setNow] = createSignal(Date.now());
     const [keeping, setKeeping] = createSignal(false);
+    const [closing, setClosing] = createSignal(false);
     let lastCallFor: string | null = null;
     // Set by any live event: from then on it, not the history replay, is the
     // truth (a replay resolving after a live -cleared must not bring the
@@ -47,6 +50,7 @@ export const ShutdownPendingBanner = (props: ShutdownPendingBannerProps): JSX.El
     const show = (p: PendingShutdown | null, chime: boolean) => {
         setPending(p);
         setKeeping(false);
+        setClosing(false);
         setNow(Date.now());
         if (p && chime) playShutdownPendingTone();
     };
@@ -54,7 +58,9 @@ export const ShutdownPendingBanner = (props: ShutdownPendingBannerProps): JSX.El
     const scope = `block:${props.blockId}`;
     const unsubPending = onMuxEvent(EVENT_SHUTDOWN_PENDING, (view) => {
         sawLive = true;
-        show(parsePending(view), true);
+        const next = parsePending(view, props.blockId);
+        // The same request again (another agent of its batch was kept) updates the line, without a chime.
+        show(next, next?.request_id !== pending()?.request_id);
     }, scope);
     const unsubCleared = onMuxEvent(EVENT_SHUTDOWN_PENDING_CLEARED, (cleared) => {
         sawLive = true;
@@ -73,7 +79,7 @@ export const ShutdownPendingBanner = (props: ShutdownPendingBannerProps): JSX.El
     ]).then(
         ([p, cleared]) => {
             if (sawLive) return;
-            const replayed = replayPending(p, cleared, Date.now());
+            const replayed = replayPending(p, cleared, Date.now(), props.blockId);
             if (replayed) show(replayed, false);
         },
     );
@@ -92,7 +98,7 @@ export const ShutdownPendingBanner = (props: ShutdownPendingBannerProps): JSX.El
 
     const keep = () => {
         const p = pending();
-        if (!p || keeping()) return;
+        if (!p || keeping() || closing()) return;
         setKeeping(true);
         RpcApi.AgentShutdownKeepCommand(TabRpcClient, { blockid: props.blockId, request_id: p.request_id })
             .then((res) => {
@@ -102,6 +108,21 @@ export const ShutdownPendingBanner = (props: ShutdownPendingBannerProps): JSX.El
             .catch((e) => {
                 console.error("[shutdown] keep running failed:", e);
                 setKeeping(false);
+            });
+    };
+
+    const closeNow = () => {
+        const p = pending();
+        if (!p || keeping() || closing()) return;
+        setClosing(true);
+        RpcApi.AgentShutdownNowCommand(TabRpcClient, { blockid: props.blockId, request_id: p.request_id })
+            .then((res) => {
+                // `too_late`: it was kept or has begun; the cleared event settles the banner.
+                if (res?.outcome === "too_late") setClosing(false);
+            })
+            .catch((e) => {
+                console.error("[shutdown] close now failed:", e);
+                setClosing(false);
             });
     };
 
@@ -116,10 +137,16 @@ export const ShutdownPendingBanner = (props: ShutdownPendingBannerProps): JSX.El
                     actions={[
                         {
                             label: keeping() ? "Keeping…" : "Keep running",
-                            title: "Cancel this shutdown and keep the agent running",
+                            title: p().others > 0 ? "Keep this agent running; the others still close" : "Cancel this shutdown and keep the agent running",
                             primary: true,
-                            disabled: keeping(),
+                            disabled: keeping() || closing(),
                             onClick: keep,
+                        },
+                        {
+                            label: closing() ? "Closing…" : p().effect === "stop" ? "Stop now" : "Close now",
+                            title: p().others > 0 ? "Don't wait for the countdown: close all of them now" : "Don't wait for the countdown: do it now",
+                            disabled: keeping() || closing(),
+                            onClick: closeNow,
                         },
                     ]}
                 />

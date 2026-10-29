@@ -36,6 +36,7 @@ export const RECORDING_SETTINGS = {
         label: "Engine",
         description: "whisper.cpp runs fully offline; Groq sends audio to Groq's API",
         section: "recording",
+        group: "Transcription engine",
         keywords: ["transcription engine", "stt engine", "whisper", "groq", "voice:engine"],
     },
     groqApiKey: {
@@ -43,12 +44,14 @@ export const RECORDING_SETTINGS = {
         label: "Groq API key",
         description: "Sent once, over HTTPS, from the AgentMux backend on this machine directly to api.groq.com — never to any other AgentMux service.",
         section: "recording",
+        group: "Transcription engine",
         keywords: ["groq key", "api key", "voice:groqApiKey"],
     },
     whisperCliPath: {
         id: "recording.whisper_cli_path",
         label: "whisper-cli path",
         section: "recording",
+        group: "Transcription engine",
         keywords: ["whisper path", "local transcription binary", "voice:whisperCliPath"],
     },
     model: {
@@ -56,18 +59,21 @@ export const RECORDING_SETTINGS = {
         label: "Model",
         description: "Auto-downloaded on first use. Only one of Model or Model file path applies at a time — file path takes precedence if both are set.",
         section: "recording",
+        group: "Transcription engine",
         keywords: ["whisper model", "transcription model", "voice:whisperModel"],
     },
     modelFilePath: {
         id: "recording.model_file_path",
         label: "Model file path",
         section: "recording",
+        group: "Transcription engine",
         keywords: ["custom model path", "ggml model", "voice:whisperModelPath"],
     },
     inputDevice: {
         id: "recording.input_device",
         label: "Input device",
         section: "recording",
+        group: "Microphone",
         keywords: ["microphone device", "audio input", "voice:inputDeviceId"],
     },
 } satisfies Record<string, SettingsIndexEntry>;

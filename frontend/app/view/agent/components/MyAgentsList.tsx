@@ -34,6 +34,10 @@
  * already open in another pane, clicking it shows an inline prompt
  * instead of immediately reattaching. The user can either fork into a
  * new named session or switch focus to the existing pane.
+ *
+ * An agent that runs with no pane (always-available, parked) gets the same kind of
+ * choice: "Open it" attaches it to this pane, "Fork" makes a named copy. Its row has a
+ * dashed border and a "no pane" tag, so it doesn't look like any idle card.
  */
 
 import { useTick } from "@/app/hook/useTick";
@@ -59,6 +63,7 @@ import { TransitionGroup } from "solid-transition-group";
 import { AnchoredPopover } from "@/app/element/anchored-popover";
 import { ModalLayerContext } from "@/app/element/modal-layer";
 import { Button, Pill } from "@/app/element/ui";
+import { NoPanePrompt } from "./NoPanePrompt";
 import { getOpenBlockIdsForDefinition } from "@/app/store/agent-pane-state-store";
 import { shouldReduceMotion } from "@/app/motion/motion";
 import { pushNotification } from "@/app/store/global";
@@ -251,6 +256,7 @@ export interface MyAgentsListProps {
 type ForkState =
     | { kind: "idle" }
     | { kind: "prompt" } // showing "Open new session / Switch" buttons
+    | { kind: "promptNoPane" } // showing "Open it / Fork" buttons for an agent that runs with no pane
     | { kind: "naming"; label: string; loading: boolean; error: string | null }; // name input expanded
 
 interface NamePromptProps {
@@ -504,10 +510,16 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
         }
         const runtime = props.runtimeOf?.(row.definition_id);
         if (props.onAttach && runtime && hasProcess(runtime.state)) {
-            props.onAttach(row);
+            // Running with no pane: attach or fork, the user's choice.
+            setForkState(row.definition_id, { kind: "promptNoPane" });
             return;
         }
         props.onReattach(row);
+    };
+
+    const handleAttachNoPane = (row: RecentSessionRow) => {
+        setForkState(row.definition_id, { kind: "idle" });
+        props.onAttach?.(row);
     };
 
     const handleOpenNewSession = async (row: RecentSessionRow) => {
@@ -613,8 +625,8 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
         document.removeEventListener("keydown", onDocumentKeyDown);
     });
 
-    // "Seat…" opens the Seat editor over the picker; the Stash drawer's
-    // Seat tab needs the agent's own pane (SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md §3).
+    // "Seat…" opens the Seat editor over the picker, whether or not the
+    // agent has a pane open (SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md §3).
     // No modal layer (a bare test render): no item.
     const modalLayer = useContext(ModalLayerContext);
     const handleSeatOpen = (row: RecentSessionRow): void => {
@@ -1070,6 +1082,10 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                         <For each={sortedRows()}>
                             {(row) => {
                                 const isActive = () => (props.openDefinitions?.() ?? new Map()).has(row.definition_id);
+                                const noPane = () => {
+                                    const runtime = props.runtimeOf?.(row.definition_id);
+                                    return !!runtime && hasProcess(runtime.state) && !isActive();
+                                };
                                 const openWhere = () =>
                                     props.openLocations?.().get(row.definition_id)?.label ?? "open in another pane";
                                 const forkState = () => getForkState(row.definition_id);
@@ -1088,6 +1104,7 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                         classList={{
                                             "is-expanded": isRowExpanded(row.definition_id),
                                             "agent-recent-sessions-row--active": isActive(),
+                                            "agent-recent-sessions-row--no-pane": noPane(),
                                         }}
                                         data-definition-id={row.definition_id}
                                     >
@@ -1120,6 +1137,14 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                                     {(runtime) => (
                                                         <AgentRuntimeChip state={runtime().state} detail={runtime().detail} />
                                                     )}
+                                                </Show>
+                                                <Show when={noPane()}>
+                                                    <span
+                                                        class="agent-no-pane-tag"
+                                                        data-testid="agent-no-pane-tag"
+                                                    >
+                                                        no pane
+                                                    </span>
                                                 </Show>
                                                 <Show when={isActive()}>
                                                     <span
@@ -1373,6 +1398,14 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                                             <strong>{row.instance_name || row.definition_name}</strong>{" "}
                                                             is already {openWhere()}.
                                                         </span>
+                                                    </Show>
+                                                    <Show when={forkState().kind === "promptNoPane"}>
+                                                        <NoPanePrompt
+                                                            name={row.instance_name || row.definition_name}
+                                                            onOpen={() => handleAttachNoPane(row)}
+                                                            onFork={() => handleOpenNewSession(row)}
+                                                            onCancel={() => handleForkCancel(row.definition_id)}
+                                                        />
                                                     </Show>
                                                     <Show when={forkState().kind === "prompt"}>
                                                         <div class="agent-fork-prompt-actions">

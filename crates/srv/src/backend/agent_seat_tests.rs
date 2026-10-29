@@ -179,6 +179,21 @@ fn summary_in_names_the_lead() {
     assert_eq!(lone.lead, Some(SeatLead { id: "far".into(), name: None }));
 }
 
+/// A lead on another machine is shown as it was set ("AgentY@narko"), never as "not an agent here".
+#[test]
+fn a_lead_on_another_machine_is_named_as_set_and_a_uid_has_no_at_sign() {
+    assert!(is_remote_lead("AgentY@narko") && !is_remote_lead("2f8c0c0e-uid") && !is_remote_lead("agenty"));
+    let seat = AgentSeat { role: "worker".into(), lead: Some("AgentY@narko".into()), ..Default::default() };
+    assert_eq!(summarize(&seat, |_| None).lead, Some(SeatLead { id: "AgentY@narko".into(), name: Some("AgentY@narko".into()) }));
+    // A name this machine knows wins.
+    assert_eq!(summarize(&seat, |_| Some("Renamed".into())).lead.unwrap().name.as_deref(), Some("Renamed"));
+    // The checked remote lead is accepted by `validate`; a cycle through it cannot form (its own lead is on its machine).
+    let input = SeatInput { lead: Some("AgentY@narko".into()), ..input("worker") };
+    let ok = validate("me", &input, 1, |id| id == "AgentY@narko", |_| None).unwrap();
+    assert_eq!(ok.lead.as_deref(), Some("AgentY@narko"));
+    assert!(validate("me", &input, 1, |_| false, |_| None).unwrap_err().contains("is not an agent on this machine"));
+}
+
 #[test]
 fn a_peer_summary_is_bounded_and_needs_a_known_role() {
     let ok = serde_json::json!({
@@ -230,6 +245,12 @@ fn only_agent_panes_whose_seat_changed_are_patched() {
         // Not an agent pane, or an empty one: never touched.
         pane("b5", "term", "a", None),
         pane("b6", "agent", "", None),
+        // An agent's history reader names it but is not its pane: never patched.
+        {
+            let mut reader = pane("b7", "agent", "a", None);
+            reader.meta.insert(crate::backend::obj::HISTORY_READER_META_KEY.into(), serde_json::json!("a"));
+            reader
+        },
     ];
     let mut asked = Vec::new();
     let stale = stale_seat_meta(&blocks, |id| {

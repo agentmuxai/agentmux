@@ -65,7 +65,7 @@ const CommandPaletteModal = (props: ModalCloseProps): JSX.Element => {
         props.close();
     }
 
-    function executeSelected() {
+    function executeSelected(forceNew = false) {
         const cmds = filtered();
         const idx = clampedIdx();
         if (cmds.length === 0) return;
@@ -73,7 +73,7 @@ const CommandPaletteModal = (props: ModalCloseProps): JSX.Element => {
         close();
         // Execute after close so the palette doesn't interfere
         setTimeout(() => {
-            void Promise.resolve(cmd.execute());
+            void Promise.resolve(cmd.execute({ forceNew }));
         }, 0);
     }
 
@@ -92,7 +92,7 @@ const CommandPaletteModal = (props: ModalCloseProps): JSX.Element => {
         }
         if (e.key === "Enter") {
             e.preventDefault();
-            executeSelected();
+            executeSelected(e.shiftKey);
             return;
         }
     }
@@ -130,9 +130,9 @@ const CommandPaletteModal = (props: ModalCloseProps): JSX.Element => {
                         {(cmd, i) => (
                             <div
                                 class={`command-palette-item${i() === clampedIdx() ? " selected" : ""}`}
-                                onClick={() => {
+                                onClick={(e) => {
                                     setSelectedIdx(i());
-                                    executeSelected();
+                                    executeSelected(e.shiftKey);
                                 }}
                                 onMouseEnter={() => setSelectedIdx(i())}
                             >

@@ -374,15 +374,36 @@ mod tests {
         assert_eq!(container_of(&block(&[("agentMode", "container")])), None, "no agentId, no name");
     }
 
+    /// A start time of 0 means "unknown" and matches whatever process the OS gives that PID next, and
+    /// Windows hands a freed PID out at once (another test spawning), so the entry carries the real start
+    /// time. The OS also takes a moment to stop listing an exited process: wait for it up to a deadline
+    /// rather than assume it is gone the instant `wait` returns.
     #[test]
     fn an_exited_process_is_not_a_survivor() {
+        // Waits on its piped stdin (kept open until the kill), so there is no grandchild to leave behind.
         #[cfg(windows)]
-        let mut child = std::process::Command::new("cmd").args(["/C", "exit 0"]).spawn().unwrap();
+        let mut child = std::process::Command::new("cmd").args(["/C", "set /p x="]).stdin(std::process::Stdio::piped()).spawn().unwrap();
         #[cfg(unix)]
-        let mut child = std::process::Command::new("sh").args(["-c", "exit 0"]).spawn().unwrap();
+        let mut child = std::process::Command::new("sh").args(["-c", "read x"]).stdin(std::process::Stdio::piped()).spawn().unwrap();
         let pid = child.id();
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let mut started_at_ms = 0;
+        while started_at_ms == 0 && std::time::Instant::now() < until {
+            started_at_ms = start_times(&[pid]).get(&pid).copied().unwrap_or(0);
+            if started_at_ms == 0 {
+                std::thread::sleep(std::time::Duration::from_millis(25));
+            }
+        }
+        assert_ne!(started_at_ms, 0, "the running child has a start time");
+        let entry = ProcessEntry { pid, command: "gone".into(), started_at_ms };
+        assert_eq!(survivors(std::slice::from_ref(&entry)).len(), 1, "a running process is a survivor");
+        child.kill().unwrap();
         child.wait().unwrap();
         drop(child);
-        assert!(survivors(&[ProcessEntry { pid, command: "gone".into(), started_at_ms: 0 }]).is_empty());
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while !survivors(std::slice::from_ref(&entry)).is_empty() && std::time::Instant::now() < until {
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+        assert!(survivors(std::slice::from_ref(&entry)).is_empty(), "an exited process is not a survivor");
     }
 }

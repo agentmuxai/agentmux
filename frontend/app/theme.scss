@@ -307,7 +307,7 @@
     // (SPEC_KANBAN_STAGES_COLOURS_AND_NARROW_VIEW_2026_10_23.md §7.1). Aliases of
     // tokens each theme already tunes (the process kinds stay apart and readable),
     // so a theme overrides one only where two still meet, as
-    // view/warden-kanban/kanban-stage-colours.test.ts measures.
+    // view/kanban/kanban-stage-colours.test.ts measures.
     --kanban-stage-backlog: var(--secondary-text-color);
     --kanban-stage-research: var(--process-kind-agentmux);
     --kanban-stage-specd: var(--info-color);
@@ -371,7 +371,7 @@
     // Typography scale — size + weight + leading as independent tokens
     // plus composite role tokens for common text patterns.
     --text-3xs:  9px;
-    --text-2xs:  10px; // dense chrome: composer strip, Stash drawer, compact controls
+    --text-2xs:  10px; // dense chrome: composer strip, compact controls
     --text-xs:   11px;
     --text-sm:   12px;
     --text-base: 13px;

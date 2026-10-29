@@ -416,6 +416,7 @@ pub(super) async fn verify_lan_signature(state: &AppState, req: &mut InjectionRe
 }
 
 mod channel_v2;
+mod registration_flags;
 pub(crate) mod former_slug;
 mod lan_v2;
 pub(crate) mod lan_refusals;
@@ -1518,6 +1519,7 @@ pub(super) async fn handle_reactive_register(
                 &state.identity_store,
                 &req.block_id,
             );
+            crate::identity::foreign_dir::heal_block_config_dir_env(&state.mstore, block.as_ref(), bound_dir.as_deref());
             let config_dir = subagent_watcher::resolve_claude_config_dir(
                 block.as_ref().map(|b| &b.meta).unwrap_or(&empty_meta),
                 &req.agent_id,
@@ -1874,32 +1876,15 @@ pub(super) async fn handle_reactive_transcript(
     };
     let block_id = reg.block_id.clone();
 
-    let (raw_bytes, _total_line_count) = match crate::backend::session_archive::read_session_output(
-        &state.mstore,
-        &state.filestore,
-        &block_id,
-    ) {
-        Ok(v) => v,
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("read_session_output: {e}")})),
-            )
-                .into_response();
-        }
-    };
-
-    let text = String::from_utf8_lossy(&raw_bytes);
-    let all_lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
+    // A bounded tail, off the async workers (transcript_tail.rs): the file can be hundreds of MB.
     let requested = params.max_lines.min(TRANSCRIPT_MAX_LINES_CAP).max(1);
-    let truncated = all_lines.len() > requested;
-    let lines: Vec<String> = all_lines
-        .iter()
-        .rev()
-        .take(requested)
-        .rev()
-        .map(|l| l.to_string())
-        .collect();
+    let (mstore, filestore, bid) = (state.mstore.clone(), state.filestore.clone(), block_id.clone());
+    let read = tokio::task::spawn_blocking(move || super::transcript_tail::tail_lines(&mstore, &filestore, &bid, requested)).await;
+    let (lines, truncated) = match read {
+        Ok(Ok(t)) => (t.lines, t.truncated),
+        Ok(Err(e)) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("read_session_output: {e}")}))).into_response(),
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("transcript read: {e}")}))).into_response(),
+    };
 
     let turn_active = crate::backend::blockcontroller::get_block_controller_status(&block_id)
         .map(|s| s.turn_active)
@@ -2229,6 +2214,7 @@ pub fn register_reactive_ws_handlers(engine: &std::sync::Arc<crate::backend::rpc
     // params/result structs carry `#[derive(ts_rs::TS)]`, so the frontend
     // consumes generated bindings instead of four hand-written interfaces
     // that each said "mirrors agentmux-srv's ...".
+    registration_flags::register(engine, state.clone());
     engine.register_typed(
         "reactive.registrations",
         move |params: ReactiveRegistrationsParams, _ctx| {
@@ -2237,56 +2223,7 @@ pub fn register_reactive_ws_handlers(engine: &std::sync::Arc<crate::backend::rpc
 
                 let local = state.reactive_handler.get_agent(&params.agent_id);
 
-                // Every agent (including this instance's own) unconditionally
-                // writes itself into the same host-global shared registry
-                // (write_shared_from_env, called from both the PTY-shell and
-                // persistent auto-register paths and from handle_reactive_
-                // register above) — so without filtering, `remote` always
-                // includes THIS instance's own entry alongside any genuinely
-                // other instance, and the "registered elsewhere too" badge
-                // would fire on every healthy agent (reagentx P1). Same
-                // self-filter this file already uses for Tier 2a/2b forwarding
-                // (`entry.local_url == state.local_web_url` in
-                // `handle_reactive_inject`).
-                let remote = crate::registry::resolve_shared_reactive_dir()
-                    .map(|shared_dir| {
-                        agent_registry::lookup_all_shared(&shared_dir, &params.agent_id)
-                            .into_iter()
-                            .filter(|e| !is_self_registration(&e.local_url, &state.local_web_url))
-                            // A crashed sibling instance's entry otherwise
-                            // lingers until the next startup-only
-                            // cleanup_stale_shared sweep (bootstrap/network.rs) —
-                            // up to hours later — showing a false "Also
-                            // registered elsewhere" badge in the meantime
-                            // (reagentx P2). PID-liveness is authoritative
-                            // here (same-host by construction, per
-                            // pid_alive's own doc comment), so check it live
-                            // instead of waiting for that sweep.
-                            .filter(|e| agent_registry::pid_alive(e.pid))
-                            .map(|e| RemoteRegistrationEntry {
-                                channel: e.channel,
-                                pid: e.pid,
-                                updated_at: e.updated_at,
-                            })
-                            .collect::<Vec<_>>()
-                    })
-                    .unwrap_or_default();
-
-                let target_lower = params.agent_id.to_lowercase();
-                let recent_mismatch = state
-                    .reactive_handler
-                    .get_audit_log(100)
-                    .into_iter()
-                    .find(|e| {
-                        e.outcome.as_deref() == Some("identity-mismatch")
-                            && e.target_agent.to_lowercase() == target_lower
-                    })
-                    .map(|e| MismatchAuditSummary {
-                        timestamp: e.timestamp,
-                        block_id: e.block_id,
-                        error_message: e.error_message,
-                    });
-
+                let (remote, recent_mismatch) = registration_flags::problems_of(&state, &local, &params.agent_id);
                 let result = ReactiveRegistrationsResult {
                     local,
                     remote,
@@ -2327,6 +2264,10 @@ mod verify_reagent_signature_tests;
 #[cfg(test)]
 #[path = "tests/reactive/verify_lan_signature_tests.rs"]
 mod verify_lan_signature_tests;
+
+#[cfg(test)]
+#[path = "tests/reactive/registration_flags_tests.rs"]
+mod registration_flags_tests;
 
 /// SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md §9 — the unit half of the
 /// test plan (items 1–8 and the D5 replay cases 9–10, driven through the

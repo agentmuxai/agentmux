@@ -9,7 +9,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { registerPaneTab } from "./pane-tab-registry";
 import { stubPaneTab } from "./pane-tab-test-utils";
-import { splitBlockDefFor } from "./split-block-def";
+import { shortcutsSplitBlockDef, splitBlockDefFor } from "./split-block-def";
 
 const PICKER = { meta: { view: "pickerview" } };
 registerPaneTab(stubPaneTab("pickerview", { capabilities: { splitBlockDef: () => PICKER } }));
@@ -40,5 +40,31 @@ describe("splitBlockDefFor", () => {
     it("no source block (nothing focused) gets the fallback", () => {
         const term = { meta: { view: "term" } };
         expect(splitBlockDefFor(undefined, () => term)).toBe(term);
+    });
+});
+
+describe("shortcutsSplitBlockDef", () => {
+    const fallback = () => ({ meta: { view: "shortcuts" } });
+
+    it("is a Shortcuts pane naming the pane that was split, whatever its view declares", () => {
+        for (const view of ["pickerview", "plainview", "term"]) {
+            expect(shortcutsSplitBlockDef(block({ view }), fallback)).toEqual({ meta: { view: "shortcuts", "shortcuts:from": "b1" } });
+        }
+    });
+
+    it("splitting a Shortcuts pane passes on the pane it came from, under either name of the view", () => {
+        for (const view of ["shortcuts", "launcher"]) {
+            expect(shortcutsSplitBlockDef(block({ view, "shortcuts:from": "origin" }), fallback)).toEqual({
+                meta: { view: "shortcuts", "shortcuts:from": "origin" },
+            });
+        }
+        // One opened by app:defaultnewblock has no source of its own: the Shortcuts pane is the source.
+        expect(shortcutsSplitBlockDef(block({ view: "shortcuts" }), fallback)).toEqual({ meta: { view: "shortcuts", "shortcuts:from": "b1" } });
+    });
+
+    it("nothing to split gets the caller's fallback", () => {
+        const make = vi.fn(fallback);
+        expect(shortcutsSplitBlockDef(undefined, make)).toEqual({ meta: { view: "shortcuts" } });
+        expect(make).toHaveBeenCalledOnce();
     });
 });

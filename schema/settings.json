@@ -208,6 +208,11 @@
           "items": { "type": "string" },
           "description": "Widget-bar entries hidden from the bar, More and the pane + picker, as full keys (\"defwidget@drone\"). Set in Settings > Widgets. See docs/specs/SPEC_WIDGET_BAR_VISIBILITY_SETTINGS_2026_10_12.md."
         },
+        "launcher:recent": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "The widget keys opened last, newest first (at most 12): the Shortcuts pane shows these tiles first. Kept by the app; see docs/specs/SPEC_SHORTCUTS_PANE_FOR_SPLITS_2026_10_28.md."
+        },
         "statusbar:showmuxbuscloud": {
           "type": "boolean",
           "description": "Show MuxBus Cloud in the status bar: the dot after the host name and the sign-in block in the host menu. Default true (absent means shown); set false to hide both. LAN discovery is unaffected. See docs/specs/SPEC_STATUSBAR_HIDE_MUXBUS_SETTING_2026_10_08.md."

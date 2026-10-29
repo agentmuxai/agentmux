@@ -67,9 +67,19 @@ impl Notification {
         self.priority == "attention"
     }
 
-    /// The label of the Keep running button, when the toast offers one.
+    /// The label of the cancel button (Keep running, or a sensitive operation's veto), when the toast offers one.
     pub fn keep_label(&self) -> Option<&str> {
         self.actions.iter().find(|a| a.id == "keep").map(|a| a.label.as_str())
+    }
+
+    /// The label of the do-it-now button (Close now, ...), when the toast offers one.
+    pub fn now_label(&self) -> Option<&str> {
+        self.actions.iter().find(|a| a.id == "now").map(|a| a.label.as_str())
+    }
+
+    /// The buttons the toast offers, in order: (`UserAction` id, label). Only the two ids srv sends.
+    pub fn buttons(&self) -> Vec<(&'static str, &str)> {
+        [("keep", self.keep_label()), ("now", self.now_label())].into_iter().filter_map(|(id, label)| Some((id, label?))).collect()
     }
 }
 
@@ -131,8 +141,10 @@ pub fn countdown_update(template: &str, remaining_ms: i64, total_ms: i64) -> Cou
 pub enum UserAction {
     Clicked(String),
     Dismissed(String),
-    /// The Keep running button on a toast (by notification id).
+    /// The cancel button on a toast (by notification id): Keep running, or a sensitive operation's veto.
     Keep(String),
+    /// The do-it-now button on a toast (by notification id): Close now, ...
+    Now(String),
     /// Set `notify:pause:until` (epoch ms; 0 = resume).
     SetPause(i64),
     /// Set `app:startatlogin` (the tray's check item; `start_at_login`).
@@ -164,6 +176,9 @@ impl Presenter for NullPresenter {
 struct Endpoint {
     ws: String,
     auth_key: String,
+    /// What srv accepts as the launcher's proof on a press that skips or stops a wait: the host
+    /// registration secret this launcher made for srv, which no agent has (`SrvSpawnResult`).
+    proof: String,
 }
 
 struct Handle {
@@ -214,11 +229,12 @@ fn make_presenter(actions: mpsc::UnboundedSender<UserAction>, data_dir: &std::pa
 pub fn start(
     ws_endpoint: &str,
     auth_key: &str,
+    proof: &str,
     data_dir: std::path::PathBuf,
     dir_hash: String,
     state: LauncherState,
 ) {
-    let ep = Endpoint { ws: ws_endpoint.to_string(), auth_key: auth_key.to_string() };
+    let ep = Endpoint { ws: ws_endpoint.to_string(), auth_key: auth_key.to_string(), proof: proof.to_string() };
     if let Some(h) = HANDLE.get() {
         let _ = h.endpoint.send(Some(ep));
         return;
@@ -241,10 +257,10 @@ pub fn start(
 /// srv was respawned: reconnect to its new endpoint. The toasts on screen
 /// name ids the new srv never issued — clear them rather than leave clicks
 /// that can't find their pane (rich-content spec §3.3 F).
-pub fn update_endpoint(ws_endpoint: &str, auth_key: &str) {
+pub fn update_endpoint(ws_endpoint: &str, auth_key: &str, proof: &str) {
     if let Some(h) = HANDLE.get() {
         h.presenter.clear_all();
-        let _ = h.endpoint.send(Some(Endpoint { ws: ws_endpoint.to_string(), auth_key: auth_key.to_string() }));
+        let _ = h.endpoint.send(Some(Endpoint { ws: ws_endpoint.to_string(), auth_key: auth_key.to_string(), proof: proof.to_string() }));
     }
 }
 
@@ -401,11 +417,15 @@ pub fn parse_frame(text: &str) -> Frame {
 
 /// The data of a `notify.ack`: a body click, a dismissal, or (`action`) a
 /// button. The id is the notification's; what a button does is decided in srv
-/// from its own record, never from this.
-fn ack_params(id: &str, clicked: bool, action: Option<&str>) -> serde_json::Value {
+/// from its own record, never from this. A button carries `proof`: any client with the
+/// instance key can send an ack, and srv does what skips or stops a wait only for the launcher.
+fn ack_params(id: &str, clicked: bool, action: Option<&str>, proof: &str) -> serde_json::Value {
     let mut data = serde_json::json!({ "id": id, "clicked": clicked });
     if let Some(action) = action {
         data["action"] = serde_json::Value::String(action.to_string());
+        if !proof.is_empty() {
+            data["proof"] = serde_json::Value::String(proof.to_string());
+        }
     }
     data
 }
@@ -550,6 +570,7 @@ async fn session(
                     UserAction::Clicked(id) => (id.clone(), true, None),
                     UserAction::Dismissed(id) => (id.clone(), false, None),
                     UserAction::Keep(id) => (id.clone(), false, Some("keep")),
+                    UserAction::Now(id) => (id.clone(), false, Some("now")),
                     UserAction::SetPause(until) => {
                         let msg = rpc("setconfig", Some(&uuid::Uuid::new_v4().to_string()), serde_json::json!({ "notify:pause:until": until }));
                         if let Err(e) = write.send(Message::Text(msg.into())).await {
@@ -569,7 +590,7 @@ async fn session(
                 if clicked {
                     pending_clicks.insert(reqid.clone());
                 }
-                let msg = rpc("notify.ack", Some(&reqid), ack_params(&id, clicked, button));
+                let msg = rpc("notify.ack", Some(&reqid), ack_params(&id, clicked, button, &ep.proof));
                 if let Err(e) = write.send(Message::Text(msg.into())).await {
                     return SessionEnd::Closed(format!("send ack: {e}"));
                 }
@@ -830,7 +851,7 @@ mod tests {
 
         let fake = Arc::new(Fake::default());
         let presenter: Arc<dyn Presenter> = fake.clone();
-        let (_ep_tx, ep_rx) = watch::channel(Some(Endpoint { ws: addr.to_string(), auth_key: "k1".into() }));
+        let (_ep_tx, ep_rx) = watch::channel(Some(Endpoint { ws: addr.to_string(), auth_key: "k1".into(), proof: "p1".into() }));
         let (act_tx, act_rx) = mpsc::unbounded_channel();
         let dir = std::env::temp_dir();
         let state: LauncherState = Default::default();
@@ -910,8 +931,16 @@ mod tests {
 
     #[test]
     fn a_button_press_acks_with_its_action_and_a_click_does_not() {
-        assert_eq!(ack_params("n1", true, None), serde_json::json!({ "id": "n1", "clicked": true }));
-        assert_eq!(ack_params("n1", false, Some("keep")), serde_json::json!({ "id": "n1", "clicked": false, "action": "keep" }));
+        assert_eq!(ack_params("n1", true, None, "p"), serde_json::json!({ "id": "n1", "clicked": true }), "a click carries no proof");
+        assert_eq!(
+            ack_params("n1", false, Some("keep"), "p"),
+            serde_json::json!({ "id": "n1", "clicked": false, "action": "keep", "proof": "p" })
+        );
+        assert_eq!(
+            ack_params("n1", false, Some("now"), "p"),
+            serde_json::json!({ "id": "n1", "clicked": false, "action": "now", "proof": "p" })
+        );
+        assert_eq!(ack_params("n1", false, Some("now"), ""), serde_json::json!({ "id": "n1", "clicked": false, "action": "now" }));
     }
 
     /// The ticker redraws a live toast once a second and stops with its retract.

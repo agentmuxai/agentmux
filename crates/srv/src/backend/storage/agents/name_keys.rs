@@ -180,6 +180,7 @@ pub(super) fn purge_name_keyed_keys(
     conn: &rusqlite::Connection,
     id: &str,
     wan: Option<&super::super::wan_identity::WanIdentityStore>,
+    host: Option<&super::super::host_lan_keys::HostLanKeys>,
     shared: &SharedSlugs,
 ) -> Result<usize, StoreError> {
     let Some((slug, name, instance_name)) = deleting_row_names(conn, id)? else {
@@ -197,6 +198,14 @@ pub(super) fn purge_name_keyed_keys(
     }
     if let Some(wan) = wan {
         removed += wan.agent_keys_delete(&purged_names)?;
+    }
+    // The host's LAN keys for the dead agent go too, and a failure fails the delete like the WAN purge
+    // above: a key left there would be adopted by the next agent of the name. A channel that still has
+    // the agent publishes its own key again when it next asks, so this is not a key change for it.
+    if let Some(host) = host {
+        use super::super::host_lan_keys::HostKeyKind;
+        removed += host.forget(HostKeyKind::Name, &purged_names)?;
+        removed += host.forget(HostKeyKind::Uid, &[id.to_string()])?;
     }
     if removed > 0 {
         tracing::info!(

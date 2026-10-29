@@ -20,6 +20,7 @@ import { RpcApi, type NativeMemoryAdoptionCandidate, type NativeMemoryAdoptionLi
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getApi } from "@/store/global";
 import { accountLabel } from "@/app/view/memory-adoption-approval/MemoryAdoptionApprovalWindow";
+import { Button } from "@/app/element/ui";
 
 interface MemoryAdoptionPanelProps {
     agentId: string;
@@ -184,14 +185,9 @@ export const MemoryAdoptionPanel = (props: MemoryAdoptionPanelProps): JSX.Elemen
                             )}
                         </For>
                         <div class="memory-adoption-panel-actions">
-                            <button
-                                type="button"
-                                class="memory-adoption-panel-adopt"
-                                disabled={chosen().size === 0 || waiting()}
-                                onClick={() => void adopt()}
-                            >
+                            <Button disabled={chosen().size === 0 || waiting()} onClick={() => void adopt()}>
                                 {waiting() ? "Waiting for confirmation…" : "Adopt selected…"}
-                            </button>
+                            </Button>
                         </div>
                     </div>
                 </Show>

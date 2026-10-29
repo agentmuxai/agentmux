@@ -31,7 +31,7 @@ import {
     getPinnedKeys,
     getPinnedWidgets,
     getSavedPinNames,
-    handleWidgetSelect,
+    openWidget,
     keyOfPinId,
     pinIdOf,
     pinWidget,
@@ -46,7 +46,7 @@ import { closeHamburgerMenu } from "./hamburger-menu";
 import { PinnedWidgetFlyout } from "./pinned-widget-flyout";
 import { useWidgetBarResponsive } from "./use-widget-bar-responsive";
 import { useWidgetDragReorder } from "./use-widget-drag-reorder";
-import { KanbanNeedsBadge, opensKanban } from "@/app/view/warden-kanban/kanban-needs-badge";
+import { KanbanNeedsBadge, opensKanban } from "@/app/view/kanban/kanban-needs-badge";
 import "./action-widgets.scss";
 
 // ── ActionWidget ──────────────────────────────────────────────────────────────
@@ -74,7 +74,7 @@ const ActionWidget = (props: {
             content={props.widget.description || props.widget.label}
             placement="bottom"
             divClassName="flex flex-row items-center gap-1 px-2 py-0.5 text-secondary hover:bg-hoverbg hover:text-foreground rounded-sm h-full"
-            divOnClick={props.onClick ?? (() => handleWidgetSelect(props.widget))}
+            divOnClick={props.onClick ?? ((e) => openWidget(props.widget, { forceNew: e?.shiftKey }))}
         >
             <div class="widget-icon text-sm" style={widgetIconStyle(props.widget)}>
                 <i class={makeIconClass(props.widget.icon, true, { defaultIcon: "window-maximize" })}></i>

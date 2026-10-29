@@ -37,8 +37,8 @@
 //                   mixins.focus-ring`. `outline: none` alone doesn't count,
 //                   nor does the shared ring: mixin bodies are skipped.
 //
-// And one for the colour scheme (docs/reports/REPORT_TOOLCHAIN_PANE_THEME_
-// INTEGRATION_2026_10_19.md §6), per file, in SCSS/CSS outside the theme files:
+// And two for the colour scheme (docs/reports/REPORT_TOOLCHAIN_PANE_THEME_
+// INTEGRATION_2026_10_19.md §6), per file; the first in SCSS/CSS outside the theme files:
 //
 //  10. colours      colour literals (`#ef4444`, `rgba(245, 158, 11, 0.1)`,
 //                   `hsl(…)`) where a theme token belongs: a literal is one
@@ -47,6 +47,13 @@
 //                   a token (`rgba(var(--x-rgb), 0.2)`, `rgb(from var(…) …)`),
 //                   a palette token set on `:root`, and lines under a
 //                   `stylelint-disable color-no-hex` don't count.
+//
+//  11. tsColours    colour literals in .ts/.tsx (an inline `style`, a canvas or SVG
+//                   fill, a generated palette), per file, other than pure black and
+//                   white. Comments don't count; a line marked `// colour: fixed`
+//                   (or the line after a `// colour: fixed` comment) doesn't either:
+//                   a brand mark, a user-pickable palette, a fallback for a page
+//                   that has no stylesheet. A chrome colour is a `var(--…)` token.
 //
 // A count above the base's fails: use the element/ui/ components instead. A
 // count below it is reported and passes. There is no checked-in baseline:
@@ -88,7 +95,7 @@ const isTest = (p) => /\.test\.(tsx?|mjs)$/.test(p);
 // ── Rule 1: hand-rolled buttons ─────────────────────────────────────────────
 
 export function countButtons(source) {
-    return (source.match(/<button\b/g) ?? []).length;
+    return (stripScriptComments(source).match(/<button\b/g) ?? []).length;
 }
 
 // ── SCSS walking (rules 2 and 3) ────────────────────────────────────────────
@@ -254,7 +261,7 @@ export function definedVars(source, kind) {
  * `var(--x, …)` must not count as a use.
  */
 export function stripScriptComments(source) {
-    return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
 }
 
 export function usedVars(source) {
@@ -360,6 +367,32 @@ export function colourLiterals(scss) {
         );
 }
 
+// A hex colour (3, 6 or 8 digits: not an issue number like `#1057`, which has 4) or a colour
+// function whose channels are literal numbers (`rgba(${r}, ${g}, 0)` and `rgb(from var(--x) r g b)`
+// are built from something else), in a script's code.
+const TS_COLOUR = /(?<![\w&/#-])#(?:[0-9a-f]{8}|[0-9a-f]{6}|[0-9a-f]{3})\b(?![\w-])|\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch)\((?=\s*[\d.])[^)$]*\)/gi;
+
+/**
+ * Colour literals in a script's code, other than pure black and white, comments, and lines the
+ * script marks `colour: fixed` (on the line, or on a comment line just above it).
+ */
+export function tsColourLiterals(source) {
+    // Comments blanked, line numbers kept, so the markers below still point at the right line.
+    const code = source.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, "")).replace(/^[ \t]*\/\/.*$/gm, "");
+    const marked = new Set();
+    source.split("\n").forEach((text, i) => {
+        if (!/colour:\s*fixed/.test(text)) return;
+        marked.add(i + 1);
+        if (/^\s*(\/\/|\*|\/\*)/.test(text)) marked.add(i + 2);
+    });
+    const out = [];
+    code.split("\n").forEach((text, i) => {
+        if (marked.has(i + 1)) return;
+        for (const literal of text.replace(/\s\/\/\s.*$/, "").match(TS_COLOUR) ?? []) if (!isNeutral(literal)) out.push({ line: i + 1, literal });
+    });
+    return out;
+}
+
 export function rawZIndexes(scss) {
     return declarations(scss, { includeMixins: true }).filter((d) => d.property === "z-index" && /^-?\d+$/.test(unimportant(d.value)));
 }
@@ -402,6 +435,7 @@ export function collect(files) {
     const zIndex = {};
     const focusRings = {};
     const colours = {};
+    const tsColours = {};
     const styles = [];
 
     for (const { path, source } of files) {
@@ -413,6 +447,7 @@ export function collect(files) {
         for (const name of definedVars(source, isStyle ? "style" : "script")) defined.add(name);
         for (const name of usedVars(isStyle ? stripComments(source) : stripScriptComments(source))) used.add(name);
 
+        if (isScript && !path.endsWith(".d.ts")) countInto(tsColours, path, tsColourLiterals(source).length);
         if (path.endsWith(".tsx") && !path.startsWith(UI_DIR)) {
             const n = countButtons(source);
             if (n > 0) buttons[path] = n;
@@ -451,6 +486,7 @@ export function collect(files) {
         zIndex: sortObject(zIndex),
         focusRings: sortObject(focusRings),
         colours: sortObject(colours),
+        tsColours: sortObject(tsColours),
     };
 }
 
@@ -464,7 +500,7 @@ function sortObject(obj) {
 
 // ── Compare ─────────────────────────────────────────────────────────────────
 
-const PER_FILE = ["buttons", "radius", "durations", "fontSizes", "fallbacks", "zIndex", "focusRings", "colours"];
+const PER_FILE = ["buttons", "radius", "durations", "fontSizes", "fallbacks", "zIndex", "focusRings", "colours", "tsColours"];
 
 /** How `current` differs from `baseline` (the base branch), as human-readable lines. */
 export function compare(current, baseline) {
@@ -589,7 +625,7 @@ if (isMain(import.meta.url)) {
             `${current.undefinedVars.length} undefined variables, ${total(current.durations)} raw durations, ` +
             `${total(current.fontSizes)} raw px font sizes, ${total(current.fallbacks)} fallbacks on always-defined ` +
             `tokens, ${total(current.zIndex)} raw z-indexes, ${total(current.focusRings)} hand-written focus rings, ` +
-            `${total(current.colours)} colour literals.`
+            `${total(current.colours)} colour literals in styles, ${total(current.tsColours)} in scripts.`
     );
     if (shrank.length > 0) {
         console.log(`Down from the base branch (${shrank.length}):`);

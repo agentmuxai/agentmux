@@ -11,7 +11,7 @@ import { createMemo, createSignal, For, Show, type Accessor, type JSX } from "so
 
 import { IconButton } from "@/app/element/ui";
 import { devModeOn } from "@/app/store/dev-mode";
-import { SETTINGS_INDEX, searchSettings } from "./settings-index";
+import { SETTINGS_INDEX, searchSettings, settingsPath } from "./settings-index";
 import type { SettingsIndexEntry } from "./settings-model";
 import "./settings-search-bar.scss";
 
@@ -115,8 +115,14 @@ export function SettingsSearchBar(props: SettingsSearchBarProps): JSX.Element {
                                 data-testid="settings-search-result"
                                 onClick={() => selectEntry(entry)}
                                 onMouseEnter={() => setSelectedIdx(i())}
+                                title={settingsPath(entry).join(" › ")}
                             >
-                                <span class="settings-search-result-label">{entry.label}</span>
+                                <span class="settings-search-result-path">
+                                    <span class="settings-search-result-parents">
+                                        <bdi>{settingsPath(entry).slice(0, -1).join(" › ")} › </bdi>
+                                    </span>
+                                    <span class="settings-search-result-label">{entry.label}</span>
+                                </span>
                                 <Show when={entry.description}>
                                     <span class="settings-search-result-desc">{entry.description}</span>
                                 </Show>

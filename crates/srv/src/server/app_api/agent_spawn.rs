@@ -25,6 +25,10 @@ use agentmux_common::api_types::SpawnAgentRequest;
 
 use super::*;
 
+mod many;
+mod team;
+pub(crate) use many::handle_agent_spawn_many;
+
 /// The worker pane's leader, `{agent, id, block_id}`: the leader's name, its
 /// definition id and its pane. srv writes it when it opens the worker; no
 /// client can (`browser_owner::srv_only_keys`).
@@ -112,7 +116,7 @@ async fn spawn_worker(
     caller: Option<&crate::server::caller::Caller>,
     req: SpawnAgentRequest,
 ) -> Result<SpawnAgentResult, SpawnError> {
-    let leader = leader_of(state, caller, &req)?;
+    let leader = leader_of(state, caller, &req.auth)?;
     spawn_with(state, leader, &req, false).await
 }
 
@@ -166,9 +170,10 @@ async fn spawn_with(
 
     let name = match name {
         Some(n) => n.to_string(),
-        None => next_worker_name(&state.mstore, &leader.def.name),
+        None => next_worker_name(&state.mstore, &leader.def.name, &std::collections::HashSet::new()),
     };
-    let (worker, opened) = launch(state, &leader, &name, &tab_id, &runtime, &account).await?;
+    let tab_id = team::team_tab(state, &leader, &tab_id).await;
+    let (worker, opened) = launch(state, &leader, &name, &tab_id, &runtime, &account, None).await?;
     tracing::info!(
         leader = %leader.def.name,
         worker = %worker.name,
@@ -206,6 +211,9 @@ async fn launch(
     tab_id: &str,
     runtime: &WorkerRuntime,
     account: &WorkerAccount,
+    // The stand-in key a batch holds this worker's room under: it becomes the worker's own as soon as
+    // the worker exists, so its start is the one that room is for.
+    reserved: Option<&str>,
 ) -> Result<(AgentDefinition, AgentOpenResult), SpawnError> {
     let worker = crate::server::agent_handlers::copy_definition(
         &state.mstore,
@@ -220,6 +228,9 @@ async fn launch(
         refuse(status, e)
     })?;
     state.broker.publish_event::<crate::backend::mps_events::AgentsChanged>(&(), vec![], 0);
+    if let Some(stand_in) = reserved {
+        crate::server::agent_lifecycle::rekey_reservation(state, stand_in, &worker.id);
+    }
     let marked = state
         .mstore
         .agent_content_set(&crate::backend::storage::store::AgentContent {
@@ -243,6 +254,7 @@ async fn launch(
         Ok(opened) => Ok((worker, opened)),
         Err(e) => {
             discard_worker(state, tab_id, &worker.id).await;
+            crate::server::agent_lifecycle::release_start(state, &worker.id);
             Err(refuse(StatusCode::INTERNAL_SERVER_ERROR, format!("the worker couldn't be opened, and was removed: {e}")))
         }
     }
@@ -253,9 +265,9 @@ async fn launch(
 fn leader_of(
     state: &AppState,
     caller: Option<&crate::server::caller::Caller>,
-    req: &SpawnAgentRequest,
+    auth: &agentmux_common::api_types::UiAutomationAuth,
 ) -> Result<Leader, SpawnError> {
-    let block_id = crate::server::ui_handlers::verified_block_id(state, caller, &req.auth)
+    let block_id = crate::server::ui_handlers::verified_block_id(state, caller, auth)
         .map_err(|e| refuse(StatusCode::UNAUTHORIZED, format!("could not verify which agent is asking: {e}")))?;
     leader_at(state, block_id)
 }
@@ -562,9 +574,10 @@ fn account_matches(a: &IdentityAccount, wanted: &str, all: &[IdentityAccount]) -
 }
 
 /// "<Leader> worker N", the first N no agent is named.
-fn next_worker_name(mstore: &Store, leader: &str) -> String {
-    let taken: std::collections::HashSet<String> =
+fn next_worker_name(mstore: &Store, leader: &str, also_taken: &std::collections::HashSet<String>) -> String {
+    let mut taken: std::collections::HashSet<String> =
         mstore.agent_def_list().unwrap_or_default().into_iter().map(|d| d.name.to_lowercase()).collect();
+    taken.extend(also_taken.iter().cloned());
     (1..)
         .map(|n| format!("{leader} worker {n}"))
         .find(|n| !taken.contains(&n.to_lowercase()))
@@ -713,15 +726,21 @@ async fn consent(
         "ok_label": "Start it",
         "cancel_label": "Don't",
     });
+    ask_consent(state, leader, question, "a worker", "the worker").await
+}
+
+/// Put `question` to the user and return whether they approved it. `these` names what is started in the
+/// refusals' words ("a worker" / "the worker").
+async fn ask_consent(state: &AppState, leader: &Leader, question: serde_json::Value, these: &str, them: &str) -> Result<bool, SpawnError> {
     let answer = super::connections::ask_user(state, &leader.block_id, question)
         .await
-        .map_err(|e| refuse(StatusCode::FORBIDDEN, format!("NOT_ALLOWED: starting a worker needs the user's go-ahead, and {e}")))?;
+        .map_err(|e| refuse(StatusCode::FORBIDDEN, format!("NOT_ALLOWED: starting {these} needs the user's go-ahead, and {e}")))?;
     if answer.answered && answer.approve {
         Ok(true)
     } else if answer.answered {
-        Err(refuse(StatusCode::FORBIDDEN, "NOT_ALLOWED: the user said no to starting the worker"))
+        Err(refuse(StatusCode::FORBIDDEN, format!("NOT_ALLOWED: the user said no to starting {them}")))
     } else {
-        Err(refuse(StatusCode::FORBIDDEN, "NOT_ALLOWED: the user didn't answer, so no worker was started"))
+        Err(refuse(StatusCode::FORBIDDEN, "NOT_ALLOWED: the user didn't answer, so nothing was started"))
     }
 }
 
@@ -733,7 +752,7 @@ fn consent_message(leader: &str, name: Option<&str>, model: Option<&str>, accoun
     let on = model.map(|m| format!(" on {}", one_line(m, 40))).unwrap_or_default();
     let note = account.note.as_deref().map(|n| format!(" {}", one_line(n, 200))).unwrap_or_default();
     format!(
-        "{} wants to start {who}{on}, from its own instructions, in a pane next to its own, with this task:\n\n{}\n\n\
+        "{} wants to start {who}{on}, from its own instructions, in its team tab, with this task:\n\n{}\n\n\
          It runs on the account {}.{note} It spends tokens until it is stopped. Start it?",
         one_line(leader, 60),
         one_line(brief, 400),
@@ -751,8 +770,8 @@ fn one_line(s: &str, max: usize) -> String {
     }
 }
 
-/// Remember the worker's runtime, then open it right of the leader's pane,
-/// marked as the leader's worker from the moment its block exists.
+/// Remember the worker's runtime, then open it in `tab_id` (right of the leader's pane when that pane
+/// is in the tab), marked as the leader's worker from the moment its block exists.
 async fn open_worker(
     state: &AppState,
     leader: &Leader,
@@ -771,13 +790,15 @@ async fn open_worker(
         COACHED_BY_META_KEY.to_string(),
         json!({ "agent": leader.def.name, "id": leader.def.id, "block_id": leader.block_id }),
     );
+    let beside = resolve_tab_id_for_block(&state.mstore, &leader.block_id).is_ok_and(|t| t == tab_id);
     super::agent_open::open_agent_inner(
         state,
         CommandAgentOpenData {
             agent_id: worker.id.clone(),
             tab_id: Some(tab_id.to_string()),
-            split_direction: Some("right".to_string()),
-            split_reference_block_id: Some(leader.block_id.clone()),
+            // Beside the leader's pane only when it is in the tab: a team tab has its own layout.
+            split_direction: beside.then(|| "right".to_string()),
+            split_reference_block_id: beside.then(|| leader.block_id.clone()),
             focus: Some(false),
         },
         None,

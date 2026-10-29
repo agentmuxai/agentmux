@@ -100,6 +100,10 @@ pub async fn spawn_reducer_plumbing(
     let block_prune_rx = srv_events_tx.subscribe();
     backend::subagent_watcher::spawn_block_prune_subscriber(subagent_watcher.clone(), block_prune_rx);
 
+    // A container agent's pane snapshots go with their panes; those left by a pane that is gone go now.
+    crate::server::container_pane_snapshot::spawn_sweeper(srv_events_tx.subscribe());
+    crate::server::container_pane_snapshot::sweep(|block| mstore.get::<backend::obj::Block>(block).ok().flatten().is_some());
+
     ReducerPlumbing {
         srv_state,
         srv_events_tx,

@@ -98,6 +98,21 @@ describe("TokenBreakdownPopover — by-agent regroup", () => {
         expect(focusBlockMock).toHaveBeenCalledWith("block-1", { source: "tokens" });
     });
 
+    it("keeps an agent's row element when a turn lands, so a press on it is not lost, and the click goes to its agent", () => {
+        recordTurn("claude", { input: 1000, output: 50 }, { blockId: "block-1", agentName: "Manoz" });
+        renderPopover();
+        const before = screen.getByText("Manoz").closest("button") as HTMLButtonElement;
+
+        recordTurn("claude", { input: 500, output: 20 }, { blockId: "block-1", agentName: "Manoz" });
+        recordTurn("claude", { input: 10, output: 1 }, { blockId: "block-2", agentName: "Camper" });
+
+        const after = screen.getByText("Manoz").closest("button") as HTMLButtonElement;
+        expect(after).toBe(before);
+        expect(after.textContent).toContain("2 turns");
+        fireEvent.click(before);
+        expect(focusBlockMock).toHaveBeenCalledWith("block-1", { source: "tokens" });
+    });
+
     it("does not throw when clicking the ambient row (no blockId to focus)", () => {
         recordTurn("ambient:next_prompt_suggestion", { input: 100, output: 5 });
         renderPopover();

@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createSignInNotice } from "./sign-in-notice";
+import { createSystemNotifier } from "./system-notification";
 import type { AttachmentRef } from "@/types/rpc/AttachmentRef";
 import {
     snapshot as layoutSnapshot,
@@ -67,6 +68,7 @@ import { askSideQuestion } from "./btw";
 import type { AgentViewModel } from "./agent-model";
 import "./agent-view.scss";
 import { AgentBottomPanels } from "./components/AgentBottomPanels";
+import { AgentPreparingRow } from "./components/AgentPreparingRow";
 import { AgentComposerStrip } from "./components/AgentComposerStrip";
 import { AgentShellDrawer } from "./components/AgentShellDrawer";
 import { AgentDocumentView } from "./components/AgentDocumentView";
@@ -74,7 +76,6 @@ import { HistoryLoadingRow } from "./components/HistoryLoadingRow";
 import { AgentFooter } from "./components/AgentFooter";
 import { AgentSearchBar } from "./components/AgentSearchBar";
 import { collapseDrawerOnShellExit } from "./shell-exit-collapse";
-import { AgentStashDrawer } from "./components/AgentStashDrawer";
 import { BtwOverlay } from "./components/BtwOverlay";
 import { SlashCommandPicker } from "./components/SlashCommandPicker";
 import { SlashHelpPanel } from "./components/SlashHelpPanel";
@@ -181,29 +182,13 @@ export const AgentPresentationView = ({
     // tab with no agentId yet — see that component's comment for the full
     // rationale.
 
-    // Wire the Stash drawer's open/close/read callbacks into the model so the
-    // header toggle can drive it without the model holding a SolidJS context.
-    // The drawer replaced a modal (SPEC_AGENT_STASH_PANE_MIGRATION_2026_09_22.md
-    // §3.3), so each callback is a one-liner on the reducer; the names keep
-    // their `...StashModal` spelling to avoid churn. `_openModal` gives the
-    // right-click menu this pane's own modal layer (agent-body-menu.ts).
+    // `_openModal` gives the right-click menu this pane's own modal layer
+    // (agent-body-menu.ts).
     const modalLayer = useContext(ModalLayerContext);
     onMount(() => {
-        model._openAgentStashModal = () => paneModel.dispatchPane({ type: "StashExpand" }, "user");
-        model._closeAgentStashModal = () => paneModel.dispatchPane({ type: "StashCollapse" }, "user");
-        // Read fresh at call time. `paneModel.state` exposes each field as
-        // its own signal (agent-pane-state-store.ts's createFieldSignals),
-        // and agent-model.ts's endIconButtons() reads this inside
-        // blockframe.tsx's createMemo — so the icon's highlighted state
-        // tracks `stashOpen` reactively, including closes that don't come
-        // from the button itself.
-        model._isAgentStashOpen = () => paneModel.state.stashOpen;
         model._openModal = (req) => modalLayer?.open(req);
     });
     onCleanup(() => {
-        model._openAgentStashModal = null;
-        model._closeAgentStashModal = null;
-        model._isAgentStashOpen = null;
         model._openModal = null;
     });
 
@@ -557,31 +542,17 @@ export const AgentPresentationView = ({
         })
     );
 
-    // Posts a permanent, visible line into the pane's own conversation \u2014
-    // distinct from `log()`, which routes to the hidden activity-log/shell-
-    // terminal channel (see docs/specs/SPEC_AGENT_PANE_AUTH_NOTIFICATIONS_2026_07_26.md
-    // \u00a71). "success"/"warning" get a symbol prefix; "info" doesn't (used for
-    // neutral narration like "Signing in..." or "Ready...").
-    const postSystemNotification = (text: string, style: "info" | "warning" | "success" = "info"): void => {
-        const prefix = style === "success" ? "\u2713 " : style === "warning" ? "\u26a0 " : "";
-        const node: import("./types").MarkdownNode = {
-            type: "markdown",
-            id: `system_notification_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-            content: `${prefix}${text}`,
-        } as import("./types").MarkdownNode;
-        paneModel.dispatchDoc({ type: "StreamFlush", newNodes: [node], updatedNodes: [] });
-    };
+    const postSystemNotification = createSystemNotifier(paneModel.document, (action) => paneModel.dispatchDoc(action));
 
-    const signIn = createSignInNotice((text, style) => postSystemNotification(text, style));
+    const signIn = createSignInNotice(postSystemNotification);
     const status = useAgentControllerStatus({
         blockId: model.blockId,
         provider,
         log,
         onLoginSuccess: (email) => {
-            signIn.answered();
-            postSystemNotification(email ? `Logged in as **${email}**` : "Login successful", "success");
+            signIn.answered(email ? `Logged in as **${email}**` : "Login successful");
         },
-        onNotify: (text, style, kind) => { signIn.seen(kind); postSystemNotification(text, style); },
+        onNotify: (text, style, kind) => (kind === "sign-in" ? signIn.needed(text, style) : postSystemNotification(text, style)),
         onAccountBound: signIn.bound,
         onReady: () => onReadyFn?.(),
         // A successful recovery (relogin / terminal login) refreshed
@@ -1124,6 +1095,7 @@ export const AgentPresentationView = ({
             listIdentities: () => RpcApi.ListAgentIdentitiesCommand(TabRpcClient, { agent_id: agentId }),
             loadAccounts,
             send: handleSendMessage,
+            isBusy: () => workingFromPhase(paneSnapshot(model.blockId)?.turnPhase ?? { kind: "Idle" }),
             log,
         });
 
@@ -1256,17 +1228,6 @@ export const AgentPresentationView = ({
             <PaneLoadingCover phase={readiness.phase} />
             {/* Shutdown log while the pane closes in place (SPEC_AGENT_SELF_QUIT_2026_09_24.md §5.5). */}
             <ShutdownOverlay blockId={model.blockId} agentName={agentName()} />
-            {/* Stash drawer: a DIRECT flex child of `.agent-view`, outside
-                `.agent-view-zoomed` (components/AgentStashDrawer.tsx). */}
-            <AgentStashDrawer
-                open={paneModel.state.stashOpen}
-                blockId={model.blockId}
-                persistedHeight={block()?.meta?.["agent:stashheight"] as number | undefined}
-                agentId={agentId}
-                agentName={agentName()}
-                workingDirectory={(block()?.meta?.["cmd:cwd"] as string) || currentAgent()?.working_directory || ""}
-                hasDefinition={currentAgent() != null}
-            />
             <div class="agent-view-zoomed" style={{ zoom: zoomFactor() }}>
             {/* Portaled above the tab strip; see components/AgentProgressBar.tsx. */}
             <AgentProgressBar
@@ -1401,6 +1362,9 @@ export const AgentPresentationView = ({
                 onStop={commands.stopAgent}
                 offline={offline}
             />
+
+            {/* A container agent's container starting in the background (preparing.ts). */}
+            <AgentPreparingRow nodes={displayDocument} enabled={() => block()?.meta?.["agentMode"] === "container"} />
 
             {/* Composer status strip — single 28-32px row with live
                 activity ticker and Log button that toggles the log panel.

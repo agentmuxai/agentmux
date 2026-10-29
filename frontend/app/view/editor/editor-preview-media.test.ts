@@ -16,4 +16,10 @@ describe("previewMedia", () => {
     it("resolves a scratch tab's images locally, even in an editor on an SSH host", () => {
         expect(previewMedia("C:/scratch/notes.md", "user@build-box", true)).toEqual({ baseDir: "C:/scratch" });
     });
+
+    it("reads no local file for a snapshot of a container agent's document", () => {
+        expect(previewMedia("C:/Users/u/AppData/Local/agentmux/container-snapshots/1f/copy/notes.md", "", false)).toBeUndefined();
+        expect(previewMedia("/home/u/.local/share/agentmux/container-snapshots/1f/copy/notes.md", "", false)).toBeUndefined();
+        expect(previewMedia("/home/u/my-container-snapshots-notes/README.md", "", false)).toEqual({ baseDir: "/home/u/my-container-snapshots-notes" });
+    });
 });

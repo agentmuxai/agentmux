@@ -29,6 +29,17 @@ import { resolveStack, resolveStackSync, type ResolveStatus } from "./source-map
 
 let initialized = false;
 
+/**
+ * The browser's notice that a ResizeObserver callback had more to deliver than one
+ * frame allowed ("ResizeObserver loop completed with undelivered notifications", or
+ * "... limit exceeded" in older engines). Nothing failed: the observer delivers the
+ * rest on the next frame. It arrives as a window `error` event with no Error object,
+ * so left alone it was logged as an uncaught error every time a layout settled.
+ */
+export function isBenignBrowserNotice(message: string | undefined | null): boolean {
+    return /^ResizeObserver loop (completed with undelivered notifications|limit exceeded)/.test(message ?? "");
+}
+
 interface ForwardedErrorPayload {
     message: string;
     stack: string | null;
@@ -170,6 +181,7 @@ export function initErrorForwarder(): void {
     initialized = true;
 
     window.addEventListener("error", (event: ErrorEvent) => {
+        if (isBenignBrowserNotice(event.message)) return;
         // Codex P2 on #989: when `event.error` is null/undefined (common
         // for cross-origin and resource/script errors), the previous
         // implementation passed `undefined` through `extractErrorFields`

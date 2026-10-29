@@ -80,12 +80,17 @@ pub fn revoke_block(block_id: &str) {
     }
 }
 
-/// The routes a container agent may call. Everything else is refused, notably
-/// host shell/pty creation, file streaming, editor and attachment paths, pane
-/// and agent opening, UI automation, cron, and the `/ws` and
-/// `/agentmux/service` RPC surfaces. Matched on the raw path, exactly as the
-/// router matches it.
+/// Whether a container agent may call `path`. Every route is open to it except the ones
+/// [`crate::backend::container_routes`] refuses, with a reason each: commands on the host, the host's
+/// files outside its mounts, the app's own plumbing. Matched on the raw path, exactly as the router
+/// matches it.
 pub fn container_route_allowed(path: &str) -> bool {
+    crate::backend::container_routes::refusal(path).is_none()
+}
+
+/// The routes a container token has always been accepted on. They work for a grant that carries no
+/// agent identity (they bind to the grant's own block, or to nobody in particular).
+fn accepted_without_identity(path: &str) -> bool {
     const EXACT: &[&str] = &[
         "/agentmux/reactive/inject",
         "/agentmux/reactive/agent",
@@ -94,51 +99,45 @@ pub fn container_route_allowed(path: &str) -> bool {
         "/agentmux/work",
         "/agentmux/work/claim",
         "/api/v1/self",
-        "/api/v1/agent/memory/list",
-        "/api/v1/agent/memory/read",
-        "/api/v1/agent/memory/write",
-        "/api/v1/agent/memory/history",
-        "/api/v1/agent/memory/diff",
-        "/api/v1/agent/memory/revert",
-        // Read-only: Global Memory is composed into every agent's context at
-        // launch, so writes from a sandbox would reach host agents.
-        "/api/v1/agent/globalmemory/list",
-        "/api/v1/agent/globalmemory/read",
-        "/api/v1/agent/globalmemory/history",
-        "/api/v1/agent/globalmemory/diff",
         "/api/v1/agent/self/quit",
         "/api/v1/agent/pane/close",
-        // The `SessionStart` hook's delivery of Global and Personal Memory. The
-        // handlers bind the request to the grant's own block and agent
-        // (`memory_delivery_handlers`), and ignore the host paths it names.
-        "/api/v1/agent/memory/session-start/part",
-        "/api/v1/agent/memory/session-start/ack",
-        // `agentmux-bashwrap`'s live output into the grant's own pane, as a typed `tool_chunk` only
-        // (`server::container_tool_chunk`); the generic `/agentmux/wps/publish` relay stays refused.
         "/api/v1/agent/tool-chunk",
     ];
-    if EXACT.contains(&path) {
-        return true;
-    }
     let is_id = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
-    if let Some(rest) = path.strip_prefix("/agentmux/work/") {
-        return match rest.split('/').collect::<Vec<_>>().as_slice() {
+    EXACT.contains(&path)
+        || path == "/"
+        || path == "/health"
+        || ["/docsite/", "/schema/", "/agentmux/widget-sdk/"].iter().any(|p| path.starts_with(p))
+        || path.strip_prefix("/agentmux/work/").is_some_and(|rest| match rest.split('/').collect::<Vec<_>>().as_slice() {
             [id] => is_id(id),
             [id, "heartbeat" | "complete" | "release" | "update" | "ask" | "submit"] => is_id(id),
             _ => false,
-        };
-    }
-    if let Some(id) = path.strip_prefix("/api/v1/agent/shutdown/") {
-        return is_id(id);
-    }
-    false
+        })
+        || path.strip_prefix("/api/v1/agent/shutdown/").is_some_and(is_id)
 }
 
 /// Routes that act on the calling agent's own data, and so are refused to a
 /// container token that carries no agent identity rather than falling back to
-/// an agent named in the request body.
+/// an agent named in the request body. Every route a container has been given since the
+/// denylist (`container_routes`) opened them all does: a handler that takes the agent from
+/// the caller serves it, one that takes it from the body does not. The memory routes always
+/// did, the session-start delivery included.
 pub fn route_needs_identity(path: &str) -> bool {
-    path.starts_with("/api/v1/agent/memory/")
+    path.starts_with("/api/v1/agent/memory/") || !accepted_without_identity(path)
+}
+
+/// File watchers poll where the workspace is a file-sharing mount that sends no change events:
+/// Docker Desktop on Windows and macOS (a 9p or virtiofs share). On Linux a bind mount reports changes
+/// and polling would only cost CPU. What the agent's own environment already sets is left alone.
+pub(crate) fn watcher_polling_env(shared_mount: bool, set: &[(String, String)]) -> Vec<(String, String)> {
+    if !shared_mount {
+        return Vec::new();
+    }
+    [("CHOKIDAR_USEPOLLING", "1"), ("CHOKIDAR_INTERVAL", "300"), ("WATCHPACK_POLLING", "true")]
+        .into_iter()
+        .filter(|(k, _)| !set.iter().any(|(have, _)| have == k))
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect()
 }
 
 /// A container turn's `docker exec` env: the container denylist applied, and
@@ -148,8 +147,12 @@ pub fn container_exec_env(block_id: &str, env_vars: &HashMap<String, String>) ->
     // The publish guard's hooks directory is a host path; the agent's other
     // GIT_CONFIG_* settings still apply inside the container.
     let env_vars = crate::backend::publish_guard::without_hooks_path(env_vars);
-    // The host's GitHub tokens are for host agents: the image has its own git and gh setup.
-    let env_vars = crate::identity::github_tokens::without_agent_git(&env_vars);
+    // A host agent's git setup is for the host; a container gets its own where tokens can be given
+    // (`github_tokens::container_git_hooks`), with the hooks where the image finds them.
+    let mut env_vars = crate::identity::github_tokens::without_agent_git(&env_vars);
+    if crate::identity::github_tokens::container_git_hooks().is_some() {
+        crate::identity::github_tokens::apply_container_git(&mut env_vars);
+    }
     let build_info = crate::backend::pane_env::build_info();
     let is_build_info = |k: &str| build_info.iter().any(|(b, _)| *b == k);
     let mut out: Vec<(String, String)> = env_vars
@@ -171,6 +174,7 @@ pub fn container_exec_env(block_id: &str, env_vars: &HashMap<String, String>) ->
     // A hint for the client only: the in-container MCP doesn't ask srv for signing keys it is refused. srv
     // never trusts this variable for anything (it comes from the container's own environment).
     out.push(("AGENTMUX_IN_CONTAINER".to_string(), "1".to_string()));
+    out.extend(watcher_polling_env(cfg!(any(windows, target_os = "macos")), &out));
     // On Linux a container cannot reach srv's loopback; when srv listens on the agents network's
     // gateway that is where the container is pointed.
     crate::backend::container_listener::point_env_at_listener(&mut out);
@@ -209,20 +213,30 @@ mod tests {
     }
 
     #[test]
-    fn allowlist_admits_agent_routes_only() {
+    fn a_container_agent_has_the_routes_a_native_agent_has_except_the_hosts() {
         for ok in [
             "/agentmux/reactive/inject",
             "/agentmux/discovery",
             "/agentmux/work",
             "/agentmux/work/claim",
             "/agentmux/work/7f3a/heartbeat",
-            "/agentmux/work/7f3a",
             "/api/v1/self",
             "/api/v1/agent/memory/write",
             "/api/v1/agent/globalmemory/read",
             "/api/v1/agent/pane/close",
             "/api/v1/agent/shutdown/req-12",
             "/api/v1/agent/tool-chunk",
+            "/api/v1/agent/dev_server/register",
+            "/api/v1/work-facts/who",
+            "/api/v1/vault",
+            "/api/v1/ui/browser/open",
+            "/api/v1/ui/screenshot",
+            "/api/v1/ui/shortcuts/list",
+            "/agentmux/cron",
+            "/api/v1/agent/open",
+            "/api/v1/attachments/upload",
+            "/api/v1/pane/open",
+            "/api/v1/widgets/install",
         ] {
             assert!(container_route_allowed(ok), "{ok} should be allowed");
         }
@@ -232,28 +246,39 @@ mod tests {
             "/agentmux/stream-local-file",
             "/agentmux/service",
             "/ws",
-            "/api/v1/pane/open",
-            "/api/v1/agent/open",
-            "/api/v1/attachments/upload",
-            "/api/v1/ui/browser/eval",
-            "/api/v1/ui/screenshot",
-            "/agentmux/cron",
-            "/api/v1/fleet/bulk-stop",
+            "/api/v1/ui/browser/set_files",
+            "/api/v1/host/browser_bypass",
+            "/api/v1/agent/desktop/authorize",
             "/api/v1/agent/globalmemory/write",
             "/api/v1/agent/globalmemory/remove",
-            "/agentmux/reactive/agents",
-            "/agentmux/work/7f3a/steal",
-            "/agentmux/work/../service",
-            "/api/v1/agent/shutdown/",
-            "/api/v1/self/",
-            "//api/v1/self",
-            // srv signs for a container agent, which holds no key to fetch.
+            "/agentmux/wps/publish",
+            "/agentmux/jobs/stop-run",
             "/agentmux/agents/self/keys",
-            // MCP health beats belong to persistent controllers; a container's turns are per-exec.
             "/api/v1/agent/self/mcp-beat",
         ] {
             assert!(!container_route_allowed(denied), "{denied} should be refused");
         }
+    }
+
+    #[test]
+    fn only_the_routes_a_container_always_had_work_without_an_identity() {
+        for old in ["/agentmux/reactive/inject", "/agentmux/work/claim", "/agentmux/work/7f3a/ask", "/api/v1/self", "/api/v1/agent/tool-chunk", "/health"] {
+            assert!(!route_needs_identity(old), "{old}");
+        }
+        for new in ["/api/v1/agent/memory/session-start/part", "/api/v1/agent/memory/write", "/api/v1/agent/dev_server/register", "/api/v1/github/token", "/api/v1/vault", "/api/v1/ui/browser/open", "/api/v1/ui/screenshot", "/agentmux/cron", "/api/v1/agent/open", "/agentmux/work/7f3a/hold"] {
+            assert!(route_needs_identity(new), "{new}");
+        }
+    }
+
+    #[test]
+    fn file_watchers_poll_only_where_the_workspace_is_a_file_sharing_mount() {
+        assert!(watcher_polling_env(false, &[]).is_empty(), "a Linux bind mount reports changes");
+        let on = watcher_polling_env(true, &[]);
+        let get = |k: &str| on.iter().find(|(n, _)| n == k).map(|(_, v)| v.as_str());
+        assert_eq!((get("CHOKIDAR_USEPOLLING"), get("CHOKIDAR_INTERVAL"), get("WATCHPACK_POLLING")), (Some("1"), Some("300"), Some("true")));
+        // The agent's own choice wins.
+        let own = watcher_polling_env(true, &[("CHOKIDAR_USEPOLLING".into(), "0".into())]);
+        assert!(own.iter().all(|(k, _)| k != "CHOKIDAR_USEPOLLING") && own.len() == 2);
     }
 
     #[test]

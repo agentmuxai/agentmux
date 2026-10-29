@@ -11,7 +11,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { SETTINGS_INDEX, searchSettings } from "./settings-index";
+import { SETTINGS_INDEX, searchSettings, settingsPath } from "./settings-index";
 
 const labels = (query: string) => searchSettings(SETTINGS_INDEX, query).map((e) => e.label);
 
@@ -97,5 +97,56 @@ describe("searchSettings", () => {
     it("still finds a setting through a typo", () => {
         expect(labels("Copy on selct")[0]).toBe("Copy on select");
         expect(labels("Opactiy")[0]).toBe("Opacity");
+    });
+});
+
+describe("the path of a setting", () => {
+    const path = (e: { section: never; group?: string; label: string }) => settingsPath(e).join(" › ");
+    const volumes = () => searchSettings(SETTINGS_INDEX, "volume").filter((e) => e.label === "Volume");
+
+    it("is its section, the heading it sits under and its own name", () => {
+        expect(settingsPath({ section: "sounds", label: "Volume" })).toEqual(["Sounds", "Volume"]);
+        expect(settingsPath({ section: "sounds", group: "Tool-call tones", label: "Volume" })).toEqual([
+            "Sounds",
+            "Tool-call tones",
+            "Volume",
+        ]);
+        // A heading that repeats the section or the setting's own name adds nothing.
+        expect(settingsPath({ section: "sounds", group: "Sounds", label: "Volume" })).toEqual(["Sounds", "Volume"]);
+        expect(settingsPath({ section: "browser", group: "Profiles", label: "Profiles" })).toEqual(["Browser", "Profiles"]);
+    });
+
+    it("tells the three Volume settings apart", () => {
+        const paths = volumes().map((e) => path(e as never));
+        expect(paths).toHaveLength(3);
+        expect(new Set(paths).size).toBe(3);
+        expect(paths).toEqual(
+            expect.arrayContaining(["Sounds › Volume", "Sounds › Tool-call tones › Volume", "Sounds › Waiting for input › Volume"])
+        );
+    });
+
+    it("is unique for every setting in the index, so no two results read the same", () => {
+        const seen = new Map<string, string>();
+        for (const e of SETTINGS_INDEX) {
+            const p = settingsPath(e).join(" › ");
+            expect(seen.get(p), `"${p}" is the path of both ${seen.get(p)} and ${e.id}`).toBeUndefined();
+            seen.set(p, e.id);
+        }
+    });
+
+    it("is searched too: the section and the heading find a setting, in one word or several", () => {
+        const only = (q: string) => searchSettings(SETTINGS_INDEX, q).map((e) => path(e as never));
+        expect(only("sounds volume")).toEqual(
+            expect.arrayContaining(["Sounds › Volume", "Sounds › Tool-call tones › Volume", "Sounds › Waiting for input › Volume"])
+        );
+        const tool = only("tool-call tones volume");
+        expect(tool[0]).toBe("Sounds › Tool-call tones › Volume");
+        const waiting = only("waiting volume");
+        expect(waiting).toContain("Sounds › Waiting for input › Volume");
+        expect(waiting).not.toContain("Sounds › Tool-call tones › Volume");
+    });
+
+    it("leaves the order of single-word searches as it was", () => {
+        expect(labels("opacity")).toEqual(["Opacity", "Magnified opacity", "Terminal transparency"]);
     });
 });

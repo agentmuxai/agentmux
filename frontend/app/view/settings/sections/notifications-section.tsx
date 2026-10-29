@@ -26,6 +26,7 @@ export const NOTIFICATIONS_SETTINGS = {
         description:
             "Show an AgentMux icon in the system tray (the menu bar on macOS) while AgentMux is running. Always shown while “Keep running after all windows are closed” is on. Applies at the next launch. On Windows 11 new tray icons start in the overflow (^) area — drag it onto the taskbar to keep it visible.",
         section: "notifications",
+        group: "System tray",
         keywords: ["system tray", "tray icon", "menu bar", "notification area", "app:showtray"],
     },
     runInBackground: {
@@ -34,6 +35,7 @@ export const NOTIFICATIONS_SETTINGS = {
         description:
             "When all windows are closed, AgentMux keeps running in the system tray instead of quitting. Quit it from the tray icon's menu. Applies at the next launch.",
         section: "notifications",
+        group: "System tray",
         keywords: ["background", "minimize to tray", "close to tray", "keep running", "app:runinbackground"],
     },
     autostart: {
@@ -42,6 +44,7 @@ export const NOTIFICATIONS_SETTINGS = {
         description:
             "Start AgentMux in the tray when you log in, without opening a window. The tray icon's menu has the same switch.",
         section: "notifications",
+        group: "System tray",
         keywords: ["auto start", "autostart", "launch at login", "startup", "run at boot", "login items", "app:startatlogin"],
     },
     osEnabled: {
@@ -49,6 +52,7 @@ export const NOTIFICATIONS_SETTINGS = {
         label: "Desktop notifications",
         description: "Show a system notification when an agent needs you or finishes while you're not looking at it.",
         section: "notifications",
+        group: "Notifications",
         keywords: ["toast", "os notification", "system notification", "alert", "action center", "notify:os:enabled"],
     },
     osWhen: {
@@ -56,6 +60,7 @@ export const NOTIFICATIONS_SETTINGS = {
         label: "When to notify",
         description: "\u201cWhen AgentMux isn't focused\u201d still alerts you if an agent needs input in a pane you aren't looking at.",
         section: "notifications",
+        group: "Notifications",
         keywords: ["focus", "background only", "always notify", "notify:os:when"],
     },
     osInputWaiting: {
@@ -126,6 +131,7 @@ export const NOTIFICATIONS_SETTINGS = {
         label: "While paused, still alert when an agent needs me",
         description: "Pause from the tray icon's menu. Input requests and review requests still get through.",
         section: "notifications",
+        group: "Notifications",
         keywords: ["pause", "snooze", "do not disturb", "notify:pause:allowattention"],
     },
     taskbarAttention: {
@@ -140,6 +146,7 @@ export const NOTIFICATIONS_SETTINGS = {
         label: "Quiet hours",
         description: "Hold notifications back every day during these hours (local time), e.g. 22:00-08:00. Leave empty for none.",
         section: "notifications",
+        group: "Notifications",
         keywords: ["do not disturb", "night", "schedule", "sleep", "notify:quiethours"],
     },
     osSummary: {
@@ -154,6 +161,7 @@ export const NOTIFICATIONS_SETTINGS = {
         label: "Notification content",
         description: "How much of an agent's question to show. Credentials and sensitive terms are always hidden.",
         section: "notifications",
+        group: "Notifications",
         keywords: ["privacy", "preview", "lock screen", "notify:os:preview"],
     },
     osTest: {
@@ -161,6 +169,7 @@ export const NOTIFICATIONS_SETTINGS = {
         label: "Send test notification",
         description: "Check that notifications reach your desktop (Windows Focus / Do Not Disturb may hold it in the notification center).",
         section: "notifications",
+        group: "Notifications",
         keywords: ["test toast", "try notification"],
     },
 } satisfies Record<string, SettingsIndexEntry>;

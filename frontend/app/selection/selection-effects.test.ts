@@ -10,7 +10,7 @@ import {
     type SelectionDeps,
     type VerifyOutcome,
 } from "./selection-effects";
-import { DEADLINES_MS } from "./selection-machine";
+import { DEADLINES_MS, type RemoteOutcome } from "./selection-machine";
 import { createSelectionTrace } from "./selection-trace";
 
 /** A fake window: every async step waits for the test to complete it, so the orders real timing
@@ -19,7 +19,7 @@ function fake() {
     const log: string[] = [];
     const resolves: Array<{ blockId: string; done: (o: ResolveOutcome) => void }> = [];
     const switches: Array<() => void> = [];
-    const handoffs: Array<(found: boolean) => void> = [];
+    const handoffs: Array<(o: { outcome: RemoteOutcome; reason?: string }) => void> = [];
     const layout = new Set<string>();
     let verifyOutcomes: VerifyOutcome[] = [];
     const notices: Array<{ blockId: string; reason: string }> = [];
@@ -191,14 +191,24 @@ describe("the selection runner", () => {
         const result = runner.select({ blockId: "far" });
         f.resolves[0].done({ where: "other" });
         await flush();
-        f.handoffs[0](true);
+        f.handoffs[0]({ outcome: "revealed" });
         expect(await result).toEqual({ ok: true });
         expect(f.log).not.toContain("flash:far");
         const missing = runner.select({ blockId: "gone" });
         f.resolves[1].done({ where: "other" });
         await flush();
-        f.handoffs[1](false);
+        f.handoffs[1]({ outcome: "not-found" });
         expect(await missing).toMatchObject({ ok: false, reason: "not-found" });
+        const refused = runner.select({ blockId: "stuck" });
+        f.resolves[2].done({ where: "other" });
+        await flush();
+        f.handoffs[2]({ outcome: "failed", reason: "layout-timeout" });
+        expect(await refused).toMatchObject({ ok: false, reason: "remote-failed", detail: "layout-timeout" });
+        const silent = runner.select({ blockId: "late" });
+        f.resolves[3].done({ where: "other" });
+        await flush();
+        f.handoffs[3]({ outcome: "timeout" });
+        expect(await silent).toMatchObject({ ok: false, reason: "remote-timeout" });
     });
 
     it("an effect that throws fails the request as an error instead of hanging", async () => {

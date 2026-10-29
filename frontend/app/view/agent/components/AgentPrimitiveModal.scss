@@ -1,9 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// Shared styles for the agent-scoped primitive list/detail tabs (MCP
-// Servers, Skills) hosted inside AgentStashModal, and reused by the
-// Skills/MCP servers sections (skill-manager.tsx / mcp-manager.tsx). Content
+// Shared styles for the Skills and MCP servers sections
+// (skill-manager.tsx / mcp-manager.tsx). Content
 // styling only — the outer list/detail layout and the list-vs-detail toggle
 // live in PrimitiveListDetail (frontend/app/element/primitive-list-detail.tsx).
 // This used to be a fixed-width side-by-side split with no narrow-pane
@@ -133,6 +132,21 @@
     margin: 0 0 var(--space-2);
     padding: 0;
     list-style: none;
+}
+
+// Who gets a global skill without a bind (Memory → Skills).
+.agent-primitive-modal-reach {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1-5);
+}
+
+.agent-primitive-modal-reach-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1-5);
+    font-size: var(--text-xs);
+    color: var(--main-text-color);
 }
 
 .agent-primitive-modal-bound-agent {

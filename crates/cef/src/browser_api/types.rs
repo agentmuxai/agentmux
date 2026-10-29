@@ -122,6 +122,12 @@ pub struct ScreenshotReq {
     /// JPEG quality 0-100 (default 80). Ignored for PNG.
     #[serde(default)]
     pub quality: Option<u32>,
+    /// Capture the whole viewport instead of clipping to the pane, and say where the pane is in it
+    /// (`crop`, `viewport_width`): the caller crops. A clipped capture in a visible page briefly changes its
+    /// viewport and flickers the window, which a recording would do for its whole length. The caller must
+    /// crop before the image goes anywhere (the whole viewport shows other panes).
+    #[serde(default)]
+    pub whole_viewport: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]
@@ -141,6 +147,12 @@ pub struct ScreenshotData {
     /// give the screenshot out.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub secrets_unchecked: bool,
+    /// With `whole_viewport`: the pane's box (x, y, width, height, CSS pixels) in the image.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub crop: Option<[f64; 4]>,
+    /// With `whole_viewport`: the viewport's width in CSS pixels, to scale `crop` to the image.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub viewport_width: Option<f64>,
 }
 
 /// `dispatch_key`'s answer: what has focus after the keys, so an agent can

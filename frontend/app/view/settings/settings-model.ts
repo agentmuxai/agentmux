@@ -31,6 +31,9 @@ export interface SettingsIndexEntry {
     label: string;
     description?: string;
     section: SettingsSection;
+    /** The heading the row sits under inside its section ("Tool-call tones"), when it sits under one:
+     *  the middle of the result's path, "Sounds › Tool-call tones › Volume". */
+    group?: string;
     keywords: string[];
     /** An entry whose settings live in another pane: choosing it runs this instead of showing a row. */
     opens?: () => void;

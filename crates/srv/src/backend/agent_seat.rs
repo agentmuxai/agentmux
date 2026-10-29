@@ -37,6 +37,12 @@ const MAX_CHAIN: usize = 256;
 /// The qualifier of a spawned worker's effective seat.
 pub const SPAWNED_QUALIFIER: &str = "spawned";
 
+/// A lead that is an agent on another machine, `Name@host` as `Agents list` shows it. A uid srv minted
+/// holds no `@`.
+pub fn is_remote_lead(lead: &str) -> bool {
+    lead.contains('@')
+}
+
 /// Whether `role` is one a seat may name.
 pub fn is_role(role: &str) -> bool {
     ROLES.contains(&role)
@@ -68,9 +74,10 @@ fn within(field: &str, value: Option<String>, max: usize) -> Result<Option<Strin
 /// which is how a cycle is found: following leads from the new lead must not
 /// come back to `agent_id`.
 ///
-/// Only an agent this machine has a definition for can be a lead. A uid the
-/// LAN directory knows isn't accepted yet: LAN peers list agents by name, not
-/// by uid, so there is nothing to check it against.
+/// A lead is an agent this machine has a definition for, or one on another machine
+/// (`Name@host`, [`is_remote_lead`]), which the caller has already checked against the LAN
+/// directory and says so through `is_agent`: a peer lists agents by name, so there is no uid here
+/// to check it against.
 pub fn validate(
     agent_id: &str,
     input: &SeatInput,
@@ -173,7 +180,8 @@ pub fn summarize(seat: &AgentSeat, name_of: impl Fn(&str) -> Option<String>) -> 
     SeatSummary {
         role: seat.role.clone(),
         qualifier: seat.qualifier.clone(),
-        lead: seat.lead.as_ref().map(|id| SeatLead { id: id.clone(), name: name_of(id) }),
+        // A lead on another machine is named as it was set: "AgentY@narko".
+        lead: seat.lead.as_ref().map(|id| SeatLead { id: id.clone(), name: name_of(id).or_else(|| is_remote_lead(id).then(|| id.clone())) }),
         area: seat.area.clone(),
     }
 }
@@ -225,7 +233,7 @@ pub fn stale_seat_meta(
     let mut by_agent: std::collections::HashMap<String, serde_json::Value> = std::collections::HashMap::new();
     let mut stale = Vec::new();
     for block in blocks {
-        if crate::backend::obj::meta_get_string(&block.meta, "view", "") != "agent" {
+        if crate::backend::obj::meta_get_string(&block.meta, "view", "") != "agent" || crate::backend::obj::is_history_reader(&block.meta) {
             continue;
         }
         let agent_id = crate::backend::obj::meta_get_string(&block.meta, "agentId", "");

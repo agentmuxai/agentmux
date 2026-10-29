@@ -33,6 +33,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::backend::container_credential::ContainerGrant;
 use crate::backend::memory_delivery::{self, Entry, Reason, Tier};
+use crate::backend::memory_fit;
 
 use super::caller::Caller;
 use super::AppState;
@@ -186,6 +187,10 @@ struct DeliveryState {
     /// ask at once; the first composes while the rest wait here and then read
     /// its result, instead of each reading the memory and composing it again.
     compose_gates: HashMap<DeliveryKey, std::sync::Arc<tokio::sync::Mutex<()>>>,
+    /// Session starts that composed to nothing (no memory to deliver), by the
+    /// time they did: the parts that ask after the first answer from here,
+    /// instead of each reading the memory again to find it still empty.
+    composed_nothing: HashMap<DeliveryKey, i64>,
     /// A compaction's notice that finished before this block's stdout showed
     /// the boundary (the CLI runs its `SessionStart` hooks first): block →
     /// (delivery composed at, notice line). The stdout reader writes them
@@ -218,6 +223,7 @@ enum FallbackClaim {
 impl DeliveryState {
     fn prune(&mut self, now: i64) {
         self.deliveries.retain(|_, d| now - d.created_ms < DELIVERY_TTL_MS);
+        self.composed_nothing.retain(|_, at| now - *at < DELIVERY_TTL_MS);
         self.fallback_claims.retain(|_, at| now - *at < CLAIM_WINDOW_MS);
         self.fallbacks.retain(|_, f| now - f.created_ms < FALLBACK_TTL_MS);
     }
@@ -446,6 +452,9 @@ async fn session_start_part(state: AppState, caller: Option<axum::Extension<Call
             tracing::info!(block_id = %req.block_id, reason = reason.as_str(), part = req.part, "memory delivery: part stood down, the fallback claimed the event");
             return Json(PartResponse { text: None, part: req.part, of: 0 });
         }
+        if st.composed_nothing.contains_key(&key) {
+            return Json(PartResponse { text: None, part: req.part, of: 0 });
+        }
         st.deliveries.get(&key).cloned()
     };
     let delivery = match cached {
@@ -458,10 +467,13 @@ async fn session_start_part(state: AppState, caller: Option<axum::Extension<Call
             let _gate_entry = GateEntry(key.clone());
             // A part that held the gate before this one may have composed it, or
             // the fallback may have claimed the event while this one waited.
-            let (composed_meanwhile, claimed) = {
+            let (composed_meanwhile, claimed, nothing_meanwhile) = {
                 let st = state_lock();
-                (st.deliveries.get(&key).cloned(), st.fallback_claimed(&req.block_id, reason))
+                (st.deliveries.get(&key).cloned(), st.fallback_claimed(&req.block_id, reason), st.composed_nothing.contains_key(&key))
             };
+            if nothing_meanwhile {
+                return Json(PartResponse { text: None, part: req.part, of: 0 });
+            }
             if claimed {
                 tracing::info!(block_id = %req.block_id, reason = reason.as_str(), part = req.part, "memory delivery: part stood down, the fallback claimed the event");
                 return Json(PartResponse { text: None, part: req.part, of: 0 });
@@ -478,12 +490,17 @@ async fn session_start_part(state: AppState, caller: Option<axum::Extension<Call
                     compose_delivery(&state, &block_id, uid.as_deref(), reason, launch.as_ref(), now)
                 })
                     .await
-                    .unwrap_or_else(|e| {
-                        tracing::warn!(error = %e, "memory delivery: composing failed");
-                        None
-                    })
+            };
+            // A failed compose is not "nothing to deliver": the next part tries again.
+            let composed = match composed {
+                Ok(composed) => composed,
+                Err(e) => {
+                    tracing::warn!(error = %e, "memory delivery: composing failed");
+                    return Json(PartResponse { text: None, part: req.part, of: 0 });
+                }
             };
             let Some(composed) = composed else {
+                state_lock().composed_nothing.insert(key.clone(), now);
                 tracing::info!(block_id = %req.block_id, session_id = %req.session_id, reason = reason.as_str(), part = req.part, cwd_known = !req.cwd.is_empty(), "memory delivery: nothing to deliver for this session start");
                 return Json(PartResponse { text: None, part: req.part, of: 0 });
             };
@@ -1020,14 +1037,12 @@ fn compose_delivery(
         .flatten();
     // Nothing left for the hook to carry is still a delivery when there are
     // startup items to show: it has no parts, and its card goes out at once.
-    let (parts, delivered) = match memory_delivery::compose_items_with(&entries, reason, summary.as_deref(), global_in_file) {
-        Some(composed) => {
-            let (parts, delivered_chars) = memory_delivery::split_into_parts_counted(
-                &composed.text,
-                memory_delivery::MAX_PART_CHARS,
-                memory_delivery::HOOK_PARTS,
-            );
-            let delivered = delivery_items(&entries, &composed, delivered_chars);
+    let age_days = |e: &Entry| modified_ms_of(e).map(|m| ((now - m).max(0)) / 86_400_000);
+    let (parts, delivered) = match fit_and_compose(entries, summary.as_deref(), reason, global_in_file, &age_days) {
+        Some((fitted, composed, parts, delivered_chars)) => {
+            let mut delivered = delivery_items(&fitted.kept, &composed, delivered_chars);
+            apply_capped(&mut delivered, &fitted.capped);
+            delivered.extend(fitted.skipped.iter().map(not_sent_item));
             (parts, delivered)
         }
         None if !items.is_empty() => (Vec::new(), Vec::new()),
@@ -1084,7 +1099,7 @@ fn personal_entries_in(dir: &std::path::Path) -> Vec<Entry> {
         .filter(|(name, _)| name.ends_with(".md") && name != "MEMORY.md")
         .collect();
     files.sort();
-    files
+    let mut entries: Vec<Entry> = files
         .into_iter()
         .filter_map(|(name, path)| {
             let text = std::fs::read_to_string(&path).ok()?;
@@ -1098,7 +1113,81 @@ fn personal_entries_in(dir: &std::path::Path) -> Vec<Entry> {
                 path: Some(path.to_string_lossy().into_owned()),
             })
         })
-        .collect()
+        .collect();
+    // Most recently modified first (the sort is stable, so equal times keep name order), so what a cut
+    // delivery drops is the oldest, not whatever sorts last by name.
+    entries.sort_by_cached_key(|e| std::cmp::Reverse(modified_ms_of(e).unwrap_or(0)));
+    entries
+}
+
+/// The files that fit one delivery (newest first and capped, the rest named, not dropped silently), composed and
+/// split the way the hooks will carry them. The character budget is only a guess at how the parts break at line
+/// ends, so when the real split still cuts (the notes at the end are what can tip it), a little more room is
+/// kept back and the fit is redone, so the reserved summary and the notes are never the part that is lost.
+fn fit_and_compose(
+    entries: Vec<Entry>,
+    summary: Option<&str>,
+    reason: Reason,
+    global_in_file: bool,
+    age_days: &dyn Fn(&Entry) -> Option<i64>,
+) -> Option<(memory_fit::Fitted, memory_delivery::Composed, Vec<String>, usize)> {
+    const STEP: usize = 2_000;
+    const LAST: usize = 40_000;
+    let reserve = summary.map_or(0, |s| s.chars().count());
+    let mut slack = 0;
+    loop {
+        let fitted = memory_fit::fit(entries.clone(), reserve + slack, reason == Reason::Compact, age_days);
+        let composed = memory_delivery::compose_items_tail(&fitted.kept, reason, summary, global_in_file, fitted.tail.as_deref())?;
+        let (parts, delivered_chars) = memory_delivery::split_into_parts_counted(&composed.text, memory_delivery::MAX_PART_CHARS, memory_delivery::HOOK_PARTS);
+        if delivered_chars >= composed.text.chars().count() || slack >= LAST {
+            return Some((fitted, composed, parts, delivered_chars));
+        }
+        slack += STEP;
+    }
+}
+
+/// A file the cap cut shows on the card with its real size, as partly delivered.
+fn apply_capped(rows: &mut [EntrySize], capped: &[memory_fit::Capped]) {
+    for row in rows.iter_mut().filter(|r| r.kind == "personal_memory") {
+        let Some(c) = capped.iter().find(|c| c.name == row.name) else { continue };
+        row.source_size_bytes = c.source_bytes;
+        row.source_tokens = tokens_for_chars(c.source_chars as u64) as usize;
+        if row.delivered == memory_delivery::Delivered::Full.as_str() {
+            row.delivered = memory_delivery::Delivered::Partial(0).as_str();
+        }
+    }
+}
+
+/// When a Personal Memory file was last modified, in Unix ms: its `modified` frontmatter when it has one that
+/// parses, else the file's mtime.
+fn modified_ms_of(e: &Entry) -> Option<i64> {
+    if let Some(v) = memory_fit::frontmatter_value(&e.text, "modified") {
+        if let Ok(t) = chrono::DateTime::parse_from_rfc3339(&v) {
+            return Some(t.timestamp_millis());
+        }
+    }
+    let mtime = std::fs::metadata(e.path.as_deref()?).ok()?.modified().ok()?;
+    i64::try_from(mtime.duration_since(std::time::UNIX_EPOCH).ok()?.as_millis()).ok()
+}
+
+/// The card's row for a file left out of the delivery whole.
+fn not_sent_item(e: &Entry) -> EntrySize {
+    EntrySize {
+        label: e.label.clone(),
+        source: e.tier.as_str(),
+        size_bytes: 0,
+        tokens: 0,
+        kind: "personal_memory",
+        name: e.name.clone(),
+        tier: None,
+        bundle_id: e.bundle_id.clone(),
+        path: e.path.clone(),
+        delivered: memory_delivery::Delivered::Omitted.as_str(),
+        source_size_bytes: e.text.len(),
+        source_tokens: estimate_tokens(&e.text) as usize,
+        startup: None,
+        via: None,
+    }
 }
 
 /// The notice's items, in delivery order, sized by what the parts carried.

@@ -45,6 +45,7 @@ struct SeatEntry {
     seat: Option<SeatInput>,
 }
 
+#[derive(Debug)]
 struct Refusal {
     status: StatusCode,
     message: String,
@@ -88,8 +89,55 @@ fn uid_of(state: &AppState, named: &str, what: &str) -> Result<String, Refusal> 
         .ok_or_else(|| refuse(StatusCode::NOT_FOUND, format!("no agent '{named}' on this machine ({what}); seats are set only for this machine's agents")))
 }
 
-/// The changes `req` asks for, with every agent and lead named by id.
-fn changes_of(state: &AppState, req: SetSeatsRequest) -> Result<Vec<SeatChange>, Refusal> {
+/// The agents on other machines this one sees on the LAN, as `Name@host`: the leads a seat may name
+/// besides this machine's own agents.
+fn known_remote_agents(state: &AppState) -> Vec<String> {
+    let peers = state.lan_discovery.get_instances().into_iter().map(|lan| (lan.hostname, lan.agents));
+    remote_agents_on(peers, &crate::backend::reactive::registry::local_host_label())
+}
+
+/// `peers` (host, agent names) as `Name@host`, without the ones on `own_host`: another channel on this
+/// machine shares its agents, which are named by their local id, and `Name@host` would only be a second
+/// spelling of a local agent that the self-lead and cycle checks do not see.
+fn remote_agents_on(peers: impl IntoIterator<Item = (String, Vec<String>)>, own_host: &str) -> Vec<String> {
+    let mut known: Vec<String> = Vec::new();
+    for (host, agents) in peers {
+        if host.trim().eq_ignore_ascii_case(own_host.trim()) {
+            continue;
+        }
+        for name in &agents {
+            let agent = format!("{name}@{host}");
+            if !known.contains(&agent) {
+                known.push(agent);
+            }
+        }
+    }
+    known
+}
+
+/// The lead `named` (`agent@host`, any case) as the LAN lists it, else a refusal that lists what is known.
+fn remote_lead(known: &[String], named: &str) -> Result<String, Refusal> {
+    known.iter().find(|k| k.eq_ignore_ascii_case(named)).cloned().ok_or_else(|| {
+        let list = if known.is_empty() { "none right now".to_string() } else { known.join(", ") };
+        refuse(
+            StatusCode::NOT_FOUND,
+            format!("no agent '{named}' on the LAN (lead); an agent on another machine is named Name@host, as Agents list shows it. Known now: {list}"),
+        )
+    })
+}
+
+/// The changes `req` asks for, with every agent and lead named by id, and the leads on other machines
+/// among them.
+fn changes_of(state: &AppState, req: SetSeatsRequest) -> Result<(Vec<SeatChange>, Vec<String>), Refusal> {
+    let known = if req.seats.iter().any(|e| e.seat.as_ref().and_then(|s| s.lead.as_deref()).is_some_and(crate::backend::agent_seat::is_remote_lead)) {
+        known_remote_agents(state)
+    } else {
+        Vec::new()
+    };
+    changes_of_with(state, req, &known)
+}
+
+fn changes_of_with(state: &AppState, req: SetSeatsRequest, known: &[String]) -> Result<(Vec<SeatChange>, Vec<String>), Refusal> {
     if req.seats.is_empty() {
         return Err(refuse(StatusCode::BAD_REQUEST, "INVALID_ARG: seats is empty; give [{agent, seat}], seat null to clear"));
     }
@@ -100,6 +148,7 @@ fn changes_of(state: &AppState, req: SetSeatsRequest) -> Result<Vec<SeatChange>,
         ));
     }
     let mut changes: Vec<SeatChange> = Vec::with_capacity(req.seats.len());
+    let mut remote: Vec<String> = Vec::new();
     for entry in req.seats {
         let agent_id = uid_of(state, &entry.agent, "agent")?;
         if changes.iter().any(|c| c.agent_id == agent_id) {
@@ -109,12 +158,18 @@ fn changes_of(state: &AppState, req: SetSeatsRequest) -> Result<Vec<SeatChange>,
         if let Some(input) = seat.as_mut() {
             // A lead may be named by slug, like the agent itself.
             if let Some(lead) = input.lead.as_deref().map(str::trim).filter(|l| !l.is_empty()) {
-                input.lead = Some(uid_of(state, lead, "lead")?);
+                input.lead = Some(if crate::backend::agent_seat::is_remote_lead(lead) {
+                    let canonical = remote_lead(known, lead)?;
+                    remote.push(canonical.clone());
+                    canonical
+                } else {
+                    uid_of(state, lead, "lead")?
+                });
             }
         }
         changes.push(SeatChange { agent_id, seat });
     }
-    Ok(changes)
+    Ok((changes, remote))
 }
 
 fn audit(state: &AppState, actor: &Actor, target_slug: &str, ok: bool, error: Option<&str>, note: &str) -> String {
@@ -150,7 +205,7 @@ fn summary_of(p: &PlannedSeat) -> String {
 }
 
 /// Plan, then write all of `changes` under the seat lock.
-fn apply(state: &AppState, actor: &Actor, changes: Vec<SeatChange>) -> Result<Vec<PlannedSeat>, Refusal> {
+fn apply(state: &AppState, actor: &Actor, changes: Vec<SeatChange>, remote: &[String]) -> Result<Vec<PlannedSeat>, Refusal> {
     let bad = |e: String| refuse(if e.contains("not found") { StatusCode::NOT_FOUND } else { StatusCode::BAD_REQUEST }, e);
     let mstore = &state.mstore;
     // Held from reading every seat to writing the last, across channels and
@@ -161,7 +216,7 @@ fn apply(state: &AppState, actor: &Actor, changes: Vec<SeatChange>) -> Result<Ve
     let defs = mstore
         .agent_def_list()
         .map_err(|e| refuse(StatusCode::INTERNAL_SERVER_ERROR, format!("agent seats: {e}")))?;
-    let planned = plan_seats(mstore, &defs, &changes, "").map_err(bad)?;
+    let planned = plan_seats(mstore, &defs, &changes, "", remote).map_err(bad)?;
     write_seats(mstore, &planned, &SeatActor::Agent { uid: &actor.uid, name: &actor.name })
         .map_err(|e| refuse(StatusCode::INTERNAL_SERVER_ERROR, e))?;
     Ok(planned)
@@ -171,7 +226,7 @@ async fn run(state: &AppState, caller: Option<&Caller>, req: SetSeatsRequest) ->
     let actor = actor_of(state, caller)?;
     let outcome = {
         let (s, a) = (state.clone(), Actor { uid: actor.uid.clone(), slug: actor.slug.clone(), name: actor.name.clone() });
-        tokio::task::spawn_blocking(move || changes_of(&s, req).and_then(|changes| apply(&s, &a, changes)))
+        tokio::task::spawn_blocking(move || changes_of(&s, req).and_then(|(changes, remote)| apply(&s, &a, changes, &remote)))
             .await
             .map_err(|e| refuse(StatusCode::INTERNAL_SERVER_ERROR, format!("agent seats: {e}")))?
     };

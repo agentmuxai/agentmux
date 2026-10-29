@@ -6,7 +6,11 @@
 //! §5.1 item 4). The host finds the fields and their boxes in the page's CSS
 //! pixels; this paints them over in the image, which is in device pixels.
 
-use image::{DynamicImage, ImageFormat, Rgba};
+use image::{DynamicImage, ImageFormat, Rgba, RgbaImage};
+
+/// Why a capture the host could not check for secret fields is not given out.
+const UNCHECKED_REFUSAL: &str = "AgentMux couldn't check this page for password, card or tax-ID fields, so the screenshot \
+                    isn't returned: take a snapshot instead, or try again once the page has loaded";
 
 /// The host's screenshot answer (`data.secret_boxes`, `data.css_width`)
 /// applied to its decoded image: unchanged when the page has no secret
@@ -19,14 +23,9 @@ pub(crate) fn redact_host_screenshot(
 ) -> Result<(Vec<u8>, String), String> {
     use base64::Engine as _;
     if host_resp.pointer("/data/secrets_unchecked").and_then(|v| v.as_bool()) == Some(true) {
-        return Err("AgentMux couldn't check this page for password, card or tax-ID fields, so the screenshot \
-                    isn't returned: take a snapshot instead, or try again once the page has loaded"
-            .to_string());
+        return Err(UNCHECKED_REFUSAL.to_string());
     }
-    let boxes: Vec<[f64; 4]> = host_resp
-        .pointer("/data/secret_boxes")
-        .and_then(|v| serde_json::from_value(v.clone()).ok())
-        .unwrap_or_default();
+    let boxes = boxes_of(host_resp);
     if boxes.is_empty() {
         return Ok((bytes, encoded));
     }
@@ -37,6 +36,28 @@ pub(crate) fn redact_host_screenshot(
     Ok((out, encoded))
 }
 
+/// `redact_host_screenshot` on an image already decoded (a recording's frame, cropped from the whole viewport):
+/// painted over in place, or `Err` with what to give instead.
+pub(crate) fn redact_image(host_resp: &serde_json::Value, img: &mut RgbaImage) -> Result<(), String> {
+    if host_resp.pointer("/data/secrets_unchecked").and_then(|v| v.as_bool()) == Some(true) {
+        return Err(UNCHECKED_REFUSAL.to_string());
+    }
+    let boxes = boxes_of(host_resp);
+    if boxes.is_empty() {
+        return Ok(());
+    }
+    let css_width = host_resp.pointer("/data/css_width").and_then(|v| v.as_f64());
+    paint(img, &boxes, css_width)
+        .map_err(|e| format!("couldn't black out the secret fields on this page, so the screenshot isn't returned: {e}"))
+}
+
+fn boxes_of(host_resp: &serde_json::Value) -> Vec<[f64; 4]> {
+    host_resp
+        .pointer("/data/secret_boxes")
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or_default()
+}
+
 /// CSS pixels added around each box: a field's border and its focus ring.
 const PAD: f64 = 3.0;
 
@@ -45,6 +66,16 @@ const PAD: f64 = 3.0;
 /// the boxes can't be placed, so it fails rather than guess.
 pub(crate) fn black_out(image_bytes: &[u8], boxes: &[[f64; 4]], css_width: Option<f64>) -> Result<Vec<u8>, String> {
     let mut img = image::load_from_memory(image_bytes).map_err(|e| format!("read the image: {e}"))?.to_rgba8();
+    paint(&mut img, boxes, css_width)?;
+    let mut out = Vec::new();
+    DynamicImage::ImageRgba8(img)
+        .write_to(&mut std::io::Cursor::new(&mut out), ImageFormat::Png)
+        .map_err(|e| format!("write the image: {e}"))?;
+    Ok(out)
+}
+
+/// Paint every box black on `img`, in place.
+fn paint(img: &mut RgbaImage, boxes: &[[f64; 4]], css_width: Option<f64>) -> Result<(), String> {
     let (w, h) = img.dimensions();
     let scale = match css_width {
         Some(cw) if cw > 0.0 => f64::from(w) / cw,
@@ -60,11 +91,7 @@ pub(crate) fn black_out(image_bytes: &[u8], boxes: &[[f64; 4]], css_width: Optio
             }
         }
     }
-    let mut out = Vec::new();
-    DynamicImage::ImageRgba8(img)
-        .write_to(&mut std::io::Cursor::new(&mut out), ImageFormat::Png)
-        .map_err(|e| format!("write the image: {e}"))?;
-    Ok(out)
+    Ok(())
 }
 
 #[cfg(test)]

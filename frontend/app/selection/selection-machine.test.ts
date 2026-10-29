@@ -14,7 +14,7 @@ import {
     type SelectionStateKind,
 } from "./selection-machine";
 
-const intent = (id: number, blockId = "blk"): Intent => ({ id, blockId, source: "swarm", focusCaret: true });
+const intent = (id: number, blockId = "blk"): Intent => ({ id, blockId, source: "swarm", focusCaret: true, localOnly: false, quiet: false });
 
 /** Feed events in order; the state after, and every effect they produced. */
 function run(events: SelectionEvent[], from: SelectionState = IDLE) {
@@ -90,13 +90,20 @@ describe("the selection machine", () => {
     });
 
     it("hands a block that is not in this window to srv, and settles on its answer without a flash of its own", () => {
-        const found = run([select(1), { type: "resolved", intentId: 1, where: "other" }, { type: "remoteDone", intentId: 1, found: true }]);
+        const found = run([select(1), { type: "resolved", intentId: 1, where: "other" }, { type: "remoteDone", intentId: 1, outcome: "revealed" }]);
         expect(found.state.kind).toBe("settled");
         expect(types(found.effects)).toContain("handoff");
         expect(types(found.effects)).not.toContain("flash");
         expect(finished(found.effects)).toEqual([{ id: 1, result: { ok: true } }]);
-        const missing = run([select(1), { type: "resolved", intentId: 1, where: "other" }, { type: "remoteDone", intentId: 1, found: false }]);
+        const missing = run([select(1), { type: "resolved", intentId: 1, where: "other" }, { type: "remoteDone", intentId: 1, outcome: "not-found" }]);
         expect(missing.state).toMatchObject({ kind: "failed", reason: "not-found" });
+        const handed = [select(1), { type: "resolved", intentId: 1, where: "other" } as SelectionEvent];
+        expect(run([...handed, { type: "remoteDone", intentId: 1, outcome: "timeout" }]).state).toMatchObject({ kind: "failed", reason: "remote-timeout" });
+        expect(run([...handed, { type: "remoteDone", intentId: 1, outcome: "failed", reason: "mismatch" }]).state).toMatchObject({
+            kind: "failed",
+            reason: "remote-failed",
+            detail: "mismatch",
+        });
     });
 
     it("fails with a notice when nothing holds the block", () => {

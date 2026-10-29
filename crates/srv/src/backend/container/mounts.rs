@@ -1,6 +1,9 @@
 //! The mounts of a container agent's home: the per-agent volume, the bound account's
 //! credentials, and the agent's Personal Memory folder.
 
+mod credential_mode;
+mod dev_exec;
+
 use bollard::exec::{CreateExecOptions, StartExecOptions, StartExecResults};
 use bollard::models::{Mount, MountTypeEnum};
 use futures_util::StreamExt as _;
@@ -44,11 +47,17 @@ impl ContainerMountSpec {
             claude_config_host_dir: config_dir.and_then(super::credentials_dir_if_file_backed),
             workspace_host_dir: Some(working_dir.to_string()).filter(|d| !d.is_empty()),
             memory_host_dir: config_dir.and_then(|dir| personal_memory_host_dir(Some(dir), working_dir)),
+            github_hooks_host_dir: crate::identity::github_tokens::container_git_hooks().map(|d| d.to_string_lossy().into_owned()),
         }
     }
 }
 
 impl ContainerManager {
+    /// The daemon connection, for services that sit beside the container manager (the dev relay).
+    pub(crate) fn docker(&self) -> &bollard::Docker {
+        &self.inner.docker
+    }
+
     /// Hands the folders above the memory mount to the user the container runs turns as.
     /// Docker creates them as root inside the per-agent volume, and Claude could not then
     /// write its session files into `projects/<workspace>/`. Best-effort: a failure, or a
@@ -174,6 +183,16 @@ pub(super) fn agent_home_mounts(container_name: &str, spec: &ContainerMountSpec)
             ..Default::default()
         });
     }
+    if let Some(host_dir) = spec.github_hooks_host_dir.as_deref().filter(|d| !d.is_empty()) {
+        // Read-only: the push scan is not the agent's to edit.
+        mounts.push(Mount {
+            target: Some(crate::identity::github_tokens::CONTAINER_HOOKS_DIR.to_string()),
+            source: Some(normalize_host_path(host_dir)),
+            typ: Some(MountTypeEnum::BIND),
+            read_only: Some(true),
+            ..Default::default()
+        });
+    }
     mounts
 }
 
@@ -192,6 +211,19 @@ mod tests {
     #[test]
     fn claude_reads_memory_from_the_folder_it_names_for_the_workspace() {
         assert_eq!(container_memory_dir(), "/home/agent/.claude/projects/-workspace/memory");
+    }
+
+    #[test]
+    fn the_git_hooks_are_a_read_only_bind_and_only_when_there_are_some() {
+        let with = ContainerMountSpec { github_hooks_host_dir: Some("/host/github-hooks".into()), ..Default::default() };
+        let mounts = agent_home_mounts("agentmux-abc", &with);
+        let hooks = bind_at(&mounts, crate::identity::github_tokens::CONTAINER_HOOKS_DIR).expect("the hooks are mounted");
+        assert_eq!(hooks.source.as_deref(), Some("/host/github-hooks"));
+        assert_eq!(hooks.read_only, Some(true), "the scan is not the agent's to edit");
+        for none in [None, Some(String::new())] {
+            let without = ContainerMountSpec { github_hooks_host_dir: none, ..Default::default() };
+            assert!(bind_at(&agent_home_mounts("agentmux-abc", &without), crate::identity::github_tokens::CONTAINER_HOOKS_DIR).is_none());
+        }
     }
 
     #[test]

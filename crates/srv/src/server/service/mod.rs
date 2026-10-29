@@ -17,6 +17,7 @@
 
 mod client;
 mod credential;
+pub(crate) use credential::host_caller_allowed;
 mod host_ipc;
 mod introspect;
 mod memory_adopt;
@@ -32,7 +33,7 @@ pub(crate) mod object_helpers;
 pub(crate) mod reducer_helpers;
 pub(crate) mod session_restore;
 pub(crate) mod session_other_builds;
-mod session_closed;
+pub(crate) mod session_closed;
 mod session_windows;
 pub(crate) use session_windows::forget_windows_left_by_quit;
 pub(crate) mod user_workspace;
@@ -66,6 +67,7 @@ pub(crate) use introspect::{
 pub(crate) use layout_helpers::setup_torn_off_block_layout;
 pub(crate) use object_helpers::{schedule_agent_zoom_mirror, update_object_meta};
 pub(crate) use reducer_helpers::{dispatch_to_reducer, publish_events};
+pub(crate) use tab_lifecycle::handle_create_tab;
 
 pub(super) async fn handle_service(
     State(state): State<AppState>,

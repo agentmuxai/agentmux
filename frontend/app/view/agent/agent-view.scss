@@ -9,11 +9,9 @@
 @use "styles/system-note";
 @use "styles/preview";
 @use "styles/composer-strip";
-@use "styles/stash-drawer";
 @use "styles/slash";
 @use "styles/input-history-search";
 @use "styles/tool-overlay-portal";
-@use "styles/identity-panel";
 @use "styles/search";
 @use "styles/desktop-bar";
 @use "styles/disconnected-banner";
@@ -25,6 +23,7 @@
 @use "styles/session";
 @use "styles/document";
 @use "styles/pending-footer";
+@use "styles/preparing";
 @use "styles/attachments";
 @use "styles/responsive";
 @use "styles/decision-panel";
@@ -333,7 +332,7 @@
     pointer-events: none;
     opacity: 0;
     transition: opacity 200ms var(--ease-standard);
-    border-radius: var(--block-border-radius);
+    border-radius: var(--radius-md);
     padding: var(--pane-ring-width, 2px);
     -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
     -webkit-mask-composite: xor;

@@ -466,6 +466,7 @@ pub(crate) async fn run_windows(
     crate::notify::start(
         &srv_result.ws_endpoint,
         &srv_result.auth_key,
+        &srv_result.host_reg_secret,
         paths.data_dir.clone(),
         dir_hash.clone(),
         state.clone(),
@@ -1256,7 +1257,7 @@ pub(crate) async fn run_windows(
                         srv_child = new_child;
                         // OS notification presenter follows srv to its new
                         // endpoint + auth key (SPEC_OS_NOTIFICATIONS §3.3).
-                        crate::notify::update_endpoint(&srv_result.ws_endpoint, &srv_result.auth_key);
+                        crate::notify::update_endpoint(&srv_result.ws_endpoint, &srv_result.auth_key, &srv_result.host_reg_secret);
                         // Park the NEW srv's stdin exactly like cold boot does
                         // (see `srv_stdin_keepalive`'s comment above): the next
                         // `srv_child.wait()` poll would otherwise drop it, and

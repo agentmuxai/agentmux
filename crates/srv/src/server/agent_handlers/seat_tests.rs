@@ -260,8 +260,31 @@ fn set(h: &Harness, id: &str, role: &str) {
     let change = SeatChange { agent_id: id.to_string(), seat: Some(SeatInput { role: role.to_string(), qualifier: Some("q".into()), lead: None, area: None, lane: None }) };
     let _seats = h.state.mstore.agent_seat_lock().unwrap();
     let defs = h.state.mstore.agent_def_list().unwrap();
-    let planned = plan_seats(&h.state.mstore, &defs, std::slice::from_ref(&change), "").unwrap();
+    let planned = plan_seats(&h.state.mstore, &defs, std::slice::from_ref(&change), "", &[]).unwrap();
     write_seats(&h.state.mstore, &planned, &SeatActor::Operator).unwrap();
+}
+
+/// A lead on another machine, set through MuxAPI, stays when the operator edits the seat's other fields
+/// (the window sends the stored lead back); a different remote lead is not taken from the window.
+#[tokio::test]
+async fn the_operator_can_edit_a_seat_that_has_a_remote_lead() {
+    let h = harness(None);
+    h.agent("a-1", "Posa");
+    {
+        let change = SeatChange { agent_id: "a-1".into(), seat: Some(SeatInput { role: "specialist".into(), qualifier: None, lead: Some("AgentY@narko".into()), area: None, lane: None }) };
+        let _seats = h.state.mstore.agent_seat_lock().unwrap();
+        let defs = h.state.mstore.agent_def_list().unwrap();
+        let planned = plan_seats(&h.state.mstore, &defs, std::slice::from_ref(&change), "", &["AgentY@narko".to_string()]).unwrap();
+        write_seats(&h.state.mstore, &planned, &SeatActor::Operator).unwrap();
+    }
+    let edit = |lead: &str| CommandAgentSetSeatData {
+        agent_id: "a-1".into(),
+        seat: Some(SeatInput { role: "specialist".into(), qualifier: Some("Area54".into()), lead: Some(lead.into()), area: Some("builds".into()), lane: None }),
+    };
+    let result = set_seat(&h.state.mstore, edit("AgentY@narko")).expect("the stored remote lead comes back unchanged");
+    assert_eq!(result.seat.unwrap().lead.as_deref(), Some("AgentY@narko"));
+    let err = set_seat(&h.state.mstore, edit("AgentX@narko")).unwrap_err();
+    assert!(err.contains("is not an agent on this machine"), "{err}");
 }
 
 #[tokio::test]
@@ -314,7 +337,7 @@ async fn two_super_agents_in_one_call_are_refused_and_nothing_is_written() {
     let changes = [SeatChange { agent_id: "a-1".into(), seat: input() }, SeatChange { agent_id: "a-2".into(), seat: input() }];
     let _seats = h.state.mstore.agent_seat_lock().unwrap();
     let defs = h.state.mstore.agent_def_list().unwrap();
-    let err = plan_seats(&h.state.mstore, &defs, &changes, "").unwrap_err();
+    let err = plan_seats(&h.state.mstore, &defs, &changes, "", &[]).unwrap_err();
     assert!(err.contains("only one agent can be the super agent"), "{err}");
     assert!(h.state.mstore.agent_seat_get("a-1").is_none() && h.state.mstore.agent_seat_get("a-2").is_none());
 }

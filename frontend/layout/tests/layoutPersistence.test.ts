@@ -569,6 +569,72 @@ describe("processPendingBackendActions — Phase 4b Split routes", () => {
     });
 });
 
+// srv drops a queued action ten minutes after it queued it, so nothing may depend on an old one
+// surviving: a window that slept through an edit, or loads from a cached row, shows srv's stored
+// tree on its own (layoutIntents.ts reconcileWithStoredLayout).
+describe("a window that missed queued actions", () => {
+    beforeEach(() => {
+        layoutStateSignals.clear();
+        vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
+    /** srv's tree after it applied the edits: `existing` and `new-block` side by side. */
+    function storedTreeWithBothBlocks() {
+        const srv = createLayoutModel();
+        insertBlock(srv, "existing");
+        insertBlock(srv, "new-block");
+        return structuredClone(srv.treeState.rootNode);
+    }
+
+    /** A block in the tree with no intent sent to srv (the window's own edits would raise its version floor). */
+    function insertLocal(model: LayoutModel, blockId: string) {
+        const node = newLayoutNode(undefined, undefined, undefined, { blockId });
+        model.treeReducer(
+            { type: LayoutTreeActionType.InsertNode, node, magnified: false, focused: true } as LayoutTreeInsertNodeAction,
+            true,
+            { local: true }
+        );
+    }
+
+    function storeRow(model: LayoutModel, row: Partial<LayoutState>) {
+        const muxObj = model.getter(model.muxObjectAtom) as LayoutState;
+        layoutStateSignals.get(muxObj.oid)?._set({ ...muxObj, version: 5, ...row });
+    }
+
+    it("ends up with srv's tree when the queue no longer holds the action it missed", () => {
+        const stored = storedTreeWithBothBlocks();
+        layoutStateSignals.clear();
+        const stale = createLayoutModel();
+        insertLocal(stale, "existing");
+        expect(findBlock(stale, "new-block")).toBeFalsy();
+
+        // The queue has been pruned empty; only the stored tree carries the edit.
+        storeRow(stale, { rootnode: stored, pendingbackendactions: undefined });
+        stale.onBackendUpdate();
+
+        expect(findBlock(stale, "new-block")).toBeTruthy();
+        expect(findBlock(stale, "existing")).toBeTruthy();
+    });
+
+    it("a model built from a stale row shows the tree of the row it gets next, with an empty queue", () => {
+        const stored = storedTreeWithBothBlocks();
+        layoutStateSignals.clear();
+        const old = createLayoutModel();
+        insertLocal(old, "existing");
+        // The window wakes with a cached row from before the edit, then the current row arrives.
+        storeRow(old, { rootnode: old.treeState.rootNode, version: 2, pendingbackendactions: undefined });
+        old.onBackendUpdate();
+        storeRow(old, { rootnode: stored, version: 7, pendingbackendactions: [] });
+        old.onBackendUpdate();
+
+        expect(findBlock(old, "new-block")).toBeTruthy();
+    });
+});
+
 // Another window watching this layout applies the queued `stackmove` that
 // `pane.moveTab` sends. When the moved tab was its pane's only one, that
 // pane has to go here too — as a move, never through onNodeDelete.

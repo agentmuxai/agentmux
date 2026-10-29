@@ -4,11 +4,13 @@
 //! The Vault: the person's secrets, which agents use by name without seeing
 //! them (docs/specs/SPEC_VAULT_PANE_AGENTS_USE_SECRETS_UNSEEN_2026_10_19.md).
 //!
-//! Only the person writes the Vault, through the host
-//! (`server::vault_handlers`); agents list entries' names and ask for new
-//! ones. Everything here is blocking (the store, the keychain): call it off
-//! the async runtime.
+//! The person writes the Vault through the host (`server::vault_handlers`).
+//! Agents list entries' names, ask for new ones, and create entries whose value
+//! the Vault makes itself (`generate`), which no one has seen. Everything here
+//! is blocking (the store, the keychain): call it off the async runtime.
 
+pub mod files;
+pub mod generate;
 pub mod import;
 pub mod kdbx_export;
 pub mod kdbx_names;
@@ -195,8 +197,13 @@ pub fn record(store: &Store, entry_id: &str, entry_label: &str, actor: &str, act
     }
 }
 
-/// Saves a new entry; returns its id.
-pub fn create(store: &Store, mut entry: NewEntry) -> Result<String, String> {
+/// Saves a new entry from the person; returns its id.
+pub fn create(store: &Store, entry: NewEntry) -> Result<String, String> {
+    insert(store, entry, PERSON, "created", "")
+}
+
+/// Saves a new entry and records who made it and how.
+fn insert(store: &Store, mut entry: NewEntry, actor: &str, action: &str, target: &str) -> Result<String, String> {
     let kind = kinds::kind(&entry.kind).ok_or_else(|| format!("unknown kind {:?}", entry.kind))?;
     drop_empty(&mut entry.parts);
     let fields = trimmed(std::mem::take(&mut entry.fields));
@@ -220,8 +227,55 @@ pub fn create(store: &Store, mut entry: NewEntry) -> Result<String, String> {
         last_used_at: 0,
     };
     store.vault_insert(&row).map_err(|e| e.to_string())?;
-    record(store, &id, &label, PERSON, "created", "", "done");
+    record(store, &id, &label, actor, action, target, "done");
     Ok(id)
+}
+
+/// The kinds `generate` makes, and the part it fills: a value no person needs to
+/// choose. An ID number or a card is the person's, never made up.
+pub const GENERATED_KINDS: &[(&str, &str)] = &[("api-key", "value"), ("login", "password"), ("note", "text")];
+
+/// What an agent asks `generate` for.
+#[derive(Debug, Deserialize)]
+pub struct GenerateRequest {
+    pub kind: String,
+    pub label: String,
+    #[serde(default)]
+    pub why: String,
+    /// Plain fields of the kind (a login's site and username, an API key's service).
+    #[serde(default)]
+    pub fields: BTreeMap<String, String>,
+    #[serde(default)]
+    pub rules: generate::RulesRequest,
+}
+
+/// What `generate` made: the entry, never its value.
+#[derive(Debug, Serialize, PartialEq)]
+pub struct Generated {
+    pub id: String,
+    pub label: String,
+    pub kind: String,
+    /// The rules it was made under, e.g. "20 characters from 66 choices, 123 bits".
+    pub made: String,
+}
+
+/// Creates an entry whose main value the Vault makes, for `actor` (the agent that
+/// asked). The value goes from the generator into the sealed row and nowhere else.
+pub fn generate_entry(store: &Store, req: GenerateRequest, actor: &str) -> Result<Generated, String> {
+    let Some((kind, part)) = GENERATED_KINDS.iter().find(|(k, _)| *k == req.kind) else {
+        let names: Vec<&str> = GENERATED_KINDS.iter().map(|(k, _)| *k).collect();
+        return Err(format!("generate makes {} entries, not {:?}: an ID number or a card is the person's, so ask for it with request", names.join(", "), req.kind));
+    };
+    let rules = generate::rules(&req.rules)?;
+    let value = generate::generate(&rules)?;
+    let mut parts = Parts::default();
+    parts.0.insert(part.to_string(), value.to_string());
+    let why: String = req.why.trim().chars().take(160).collect();
+    let target = if why.is_empty() { generate::describe(&rules) } else { why };
+    let entry = NewEntry { kind: kind.to_string(), label: req.label, fields: req.fields, tags: Vec::new(), parts };
+    let label = entry.label.trim().to_string();
+    let id = insert(store, entry, actor, "generated", &target)?;
+    Ok(Generated { id, label, kind: kind.to_string(), made: generate::describe(&rules) })
 }
 
 /// Changes an entry's label, fields, tags and the parts given.
@@ -375,6 +429,8 @@ pub fn value_for_fill(store: &Store, id: &str, created_at: i64, part: &str) -> R
 pub fn delete(store: &Store, id: &str) -> Result<(), String> {
     let row = store.vault_get(id).map_err(|e| e.to_string())?.ok_or_else(|| format!("no entry {id}"))?;
     store.vault_delete(id).map_err(|e| e.to_string())?;
+    // An agent asking again for the entry it was given must not get this id.
+    requests::requests().forget_entry(id);
     record(store, id, &row.label, PERSON, "deleted", "", "done");
     Ok(())
 }

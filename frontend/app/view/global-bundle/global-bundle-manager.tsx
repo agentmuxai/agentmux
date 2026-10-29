@@ -39,6 +39,7 @@ import { Button } from "@/element/button";
 import { agentKindLabel, GlobalBundleViewModel, removedByLabel, utf8Bytes, type GlobalMemoryView } from "./global-bundle-model";
 import { GlobalMemoryTokenStrip } from "./GlobalMemoryTokenStrip";
 import "./global-bundle.scss";
+import { Button as UiButton } from "@/app/element/ui";
 
 
 function viewTitle(model: GlobalBundleViewModel, view: GlobalMemoryView): string {
@@ -282,9 +283,9 @@ export const GlobalBundleManager = (): JSX.Element => {
                         {/* The Personal Memory back/breadcrumb header
                             (native-memory-manager.tsx), one level deep here. */}
                         <div class="native-memory-manager-header">
-                            <button type="button" class="native-memory-manager-back" onClick={back}>
+                            <UiButton class="native-memory-manager-back" density="compact" onClick={back}>
                                 ← All global memory
-                            </button>
+                            </UiButton>
                             <span class="native-memory-manager-crumbs">
                                 <span class="native-memory-manager-agent-name">Global Memory</span>
                                 <span class="native-memory-manager-crumb-sep" aria-hidden="true">

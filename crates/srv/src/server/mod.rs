@@ -35,6 +35,8 @@ pub(crate) mod reactive;
 mod name_resolution;
 pub(crate) mod caller;
 pub(crate) mod agent_self_keys;
+pub(crate) mod container_pane_snapshot;
+mod container_workspace;
 mod container_tool_chunk;
 pub(crate) mod jekt_held;
 mod jekt_hold;
@@ -76,6 +78,7 @@ mod sensitive_handlers;
 mod messaging_handlers;
 mod muxbus_handlers;
 mod muxspect_handlers;
+mod transcript_tail;
 mod coord_channel_handlers;
 mod work_claims_handlers;
 mod work_facts_handlers;
@@ -102,6 +105,7 @@ pub(crate) mod host_http;
 pub(crate) mod operator_proof;
 pub(crate) mod screenshot_redact;
 pub(crate) mod ui_handlers;
+pub(crate) mod ui_record;
 pub(crate) mod ui_shortcuts;
 pub(crate) mod widget_access_handlers;
 pub(crate) mod widget_agent_handlers;
@@ -117,6 +121,9 @@ pub(crate) mod tests;
 #[cfg(test)]
 #[path = "tests/sender_claims_tests.rs"]
 mod sender_claims_tests;
+#[cfg(test)]
+#[path = "tests/http_skill_tests.rs"]
+mod http_skill_tests;
 #[cfg(test)]
 #[path = "tests/peer_veto_tests.rs"]
 mod peer_veto_tests;
@@ -171,6 +178,7 @@ use agentmux_common::api_types::{
 mod state;
 mod routes;
 mod http_health;
+mod old_versions_handlers;
 mod http_fleet;
 mod http_viewer;
 mod http_viewer_input;
@@ -181,6 +189,7 @@ mod http_pty_shell;
 mod http_open;
 mod http_app_api;
 mod http_self;
+mod http_skill;
 mod http_naming;
 mod http_layout;
 mod auth;
@@ -194,6 +203,7 @@ use http_pty_shell::*;
 use http_open::*;
 use http_app_api::*;
 use http_self::*;
+use http_skill::*;
 use http_naming::*;
 use http_layout::*;
 pub(crate) use auth::*;

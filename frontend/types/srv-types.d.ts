@@ -530,6 +530,8 @@ declare global {
         /** The node id srv gave the leaf it placed (insert, split): the
          *  frontend's mirror uses it, so both trees name it alike. */
         nodeid?: string;
+        /** When srv queued the action (ms since the epoch); srv drops the old ones. */
+        queuedat?: number;
     };
 
     // waveobj.LayoutState
@@ -913,13 +915,17 @@ declare global {
         // Selected section of a sectioned pane, meta-backed so it survives a
         // block remount and names the pane (section-pane.tsx, warden-model.ts).
         "connectors:section"?: "accounts" | "mcp" | "remotes";
+        /** The block id of the pane that was split to open this Shortcuts pane: its Terminal and Hangar tiles start where that pane was. */
+        "shortcuts:from"?: string;
         "memory:section"?: "global" | "personal" | "skills" | "bundles";
-        "swarm:section"?: "supervisor" | "broadcast" | "kanban";
+        "swarm:section"?: "supervisor" | "broadcast";
         "warden:section"?: "jobs" | "vault" | "host" | "lan" | "internet" | "audit" | "history" | "ambient";
-        /** A Kanban task to open in the drawer, set by a link from elsewhere (a Swarm row's task chip) and cleared once opened. Read by the Swarm. */
+        /** A Kanban task to open in the drawer, set by a link from elsewhere (a Swarm row's task chip) and cleared once opened. Read by the Kanban pane. */
         "kanban:open"?: string | null;
-        /** The Swarm's Kanban section shows one lane per repository. */
+        /** The Kanban pane shows one lane per repository. */
         "kanban:lanes"?: boolean;
+        /** The Kanban's columns folded to a strip, by column id (kanban-columns.ts). */
+        "kanban:collapsed"?: string[];
         // The Vault's own section, within Warden's Vault section (vault-in-warden.ts).
         "vault:section"?: "personal" | "cards" | "api-keys" | "logins" | "notes" | "kept" | "activity";
         // An agent's Vault request to open the form for (vault-model.ts); cleared once shown.
@@ -1089,6 +1095,8 @@ declare global {
         "widget:pinned"?: string[];
         /** Widget-bar entries the user hid, as full keys (`defwidget@drone`). */
         "widget:hidden"?: string[];
+        /** The widget keys opened last, newest first (at most 12): the Shortcuts pane's tile order. */
+        "launcher:recent"?: string[];
         "statusbar:showmuxbuscloud"?: boolean;
         "window:*"?: boolean;
         "window:transparent"?: boolean;
@@ -1578,6 +1586,8 @@ declare global {
         label?: string;
         description?: string;
         magnified?: boolean;
+        /** A click brings back the pane already open instead of opening another (a pane a person manages). */
+        singleton?: boolean;
         children?: string[];
         /** A third-party pane tab's ES module (Pane Tab contract Phase 6). */
         module?: string;

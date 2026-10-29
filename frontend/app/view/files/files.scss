@@ -50,7 +50,7 @@
     flex-shrink: 0;
     padding: 2px 4px;
     border: none;
-    border-radius: 3px;
+    border-radius: var(--radius-sm);
     background: transparent;
     color: var(--main-text-color);
     font: inherit;
@@ -69,7 +69,7 @@
     gap: 5px;
     margin-right: 4px;
     padding: 1px 6px;
-    border-radius: 3px;
+    border-radius: var(--radius-sm);
     background: var(--hover-bg-color);
     color: var(--secondary-text-color);
 
@@ -91,7 +91,7 @@
     height: 22px;
     padding: 0 6px;
     border: 1px solid var(--accent-color);
-    border-radius: 3px;
+    border-radius: var(--radius-sm);
     background: var(--input-bg-color);
     color: var(--main-text-color);
     font-family: var(--font-mono);
@@ -338,7 +338,7 @@
 }
 
 .files-entry-error {
-    color: var(--warning-text-color, var(--error-color));
+    color: var(--warning-text-color);
     font-size: var(--text-2xs);
 }
 
@@ -353,7 +353,7 @@
     height: 20px;
     padding: 0 4px;
     border: 1px solid var(--accent-color);
-    border-radius: 2px;
+    border-radius: var(--radius-sm);
     background: var(--input-bg-color);
     color: var(--main-text-color);
     font: inherit;
@@ -371,9 +371,9 @@
     z-index: 2;
     padding: 3px 6px;
     border: 1px solid var(--error-color);
-    border-radius: 3px;
+    border-radius: var(--radius-sm);
     background: var(--modal-bg-color);
-    color: var(--error-text-color, var(--main-text-color));
+    color: var(--error-text-color);
     white-space: normal;
 }
 
@@ -424,7 +424,7 @@
     height: 22px;
     padding: 0 6px;
     border: 1px solid var(--border-color);
-    border-radius: 3px;
+    border-radius: var(--radius-sm);
     background: var(--input-bg-color);
     color: var(--main-text-color);
     font: inherit;
@@ -546,7 +546,7 @@
     flex: 1;
     min-width: 40px;
     height: 4px;
-    border-radius: 2px;
+    border-radius: var(--radius-sm);
     background: var(--hover-bg-color);
     overflow: hidden;
 }
@@ -567,8 +567,8 @@
 .files-conflict {
     width: min(440px, 90vw);
     padding: 16px;
-    border: 1px solid var(--modal-border-color, var(--border-color));
-    border-radius: 6px;
+    border: 1px solid var(--modal-border-color);
+    border-radius: var(--radius-md);
     background: var(--modal-bg-color);
     color: var(--main-text-color);
     font-family: var(--font-sans);
@@ -676,7 +676,7 @@
     width: 108px;
     height: 128px;
     padding: 6px 4px;
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     cursor: default;
     user-select: none;
 
@@ -716,7 +716,7 @@
     max-width: 96px;
     max-height: 80px;
     object-fit: contain;
-    border-radius: 2px;
+    border-radius: var(--radius-sm);
 }
 
 .files-tile-icon {
@@ -741,7 +741,7 @@
     bottom: 0;
     margin: 0;
     padding: 0 3px;
-    border-radius: 2px;
+    border-radius: var(--radius-sm);
     background: var(--main-bg-color);
 }
 

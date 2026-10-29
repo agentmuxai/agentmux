@@ -256,6 +256,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/schema/*path", get(files::handle_schema))
         .route("/api/lan-instances", get(handle_lan_instances))
         .route("/agentmux/discovery", get(handle_discovery))
+        .route("/agentmux/old-versions", get(super::old_versions_handlers::handle_get).post(super::old_versions_handlers::handle_post))
         .route("/agentmux/reactive/availability", get(super::availability_view::handle_availability))
         .route("/agentmux/diag/sagas", get(handle_diag_sagas))
         // Streaming-bash wrapper publish endpoint
@@ -303,9 +304,11 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // for the user's answer, which only the host can carry.
         .route("/api/v1/widgets", get(super::widget_agent_handlers::handle_widgets_list))
         .route("/api/v1/widgets/install", post(super::widget_agent_handlers::handle_widgets_install))
-        // The Vault for agents: entries' names, and asking the person for a
-        // new one. Never a value; writes come only from the host, below.
+        // The Vault for agents: entries' names, asking the person for a new
+        // one, and an entry whose value the Vault makes. Never a value back;
+        // the person's writes come only from the host, below.
         .route("/api/v1/vault", get(super::vault_handlers::handle_vault_list))
+        .route("/api/v1/vault/generate", post(super::vault_handlers::handle_vault_generate))
         .route("/api/v1/vault/request", post(super::vault_handlers::handle_vault_request))
         .route("/api/v1/vault/on_screen", get(super::vault_handlers::handle_vault_on_screen))
         // An agent's `Browser` `fill` with `vault`: the person says where it may go.
@@ -328,6 +331,8 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // definition (not a fork), in a pane next to its own
         // (SPEC_AGENT_WORKERS_2026_10_15.md §3.1).
         .route("/api/v1/agent/spawn", post(app_api::agent_spawn::handle_agent_spawn))
+        .route("/api/v1/agent/spawn_many", post(app_api::agent_spawn::handle_agent_spawn_many))
+        .route("/api/v1/agent/open_many", post(app_api::agent_open_many::handle_agent_open_many))
         // Remove a container agent's container so its next message starts it from the current
         // agent image (`Agents update_container`); only between turns.
         .route("/api/v1/agent/container/update", post(app_api::container_update::handle_update_container))
@@ -495,11 +500,13 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/api/v1/agent/identity/accounts", get(handle_agent_identity_accounts))
         .route("/api/v1/agent/identity/validate", post(handle_agent_identity_validate))
         .route("/api/v1/agent/identity/switch", post(handle_agent_identity_switch))
+        .route("/api/v1/agent/skill", post(handle_agent_skill))
         // Agent UI automation (SPEC_AGENT_UI_AUTOMATION_CLICK_SCREENSHOT_2026_08_18.md)
         // — proxies to the paired CEF host's browser_api CDP routes. `block_id`
         // is stamped by agentmux-mcp from AGENTMUX_BLOCKID, same trust model as
         // the agent/memory/preset/identity routes just above.
         .route("/api/v1/ui/screenshot", post(ui_handlers::handle_ui_screenshot))
+        .route("/api/v1/ui/record", post(ui_record::handle_ui_record))
         .route("/api/v1/ui/click", post(ui_handlers::handle_ui_click))
         .route("/api/v1/ui/query", post(ui_handlers::handle_ui_query))
         // Shortcuts (PLAN_SHORTCUTS_VERIFIED_AND_APP_API_2026_10_10.md §4) —
@@ -591,6 +598,12 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/api/v1/github/token", post(app_api::github_token::handle_github_token))
         // An agent sets or clears seats, several at once; recorded under its name.
         .route("/api/v1/agent/seats", post(app_api::agent_seats::handle_agent_seats))
+        // An agent asks for the shared pane-history store's free space to be given back at the next
+        // start, withdraws that, or reads where it stands (`App history_reclaim`).
+        .route(
+            "/api/v1/agent/history/reclaim",
+            post(app_api::agent_history_reclaim::handle_history_reclaim).get(app_api::agent_history_reclaim::handle_history_reclaim_status),
+        )
         // The outcome of a shutdown waiting on the user's override (§6.5):
         // the MCP tools poll it after their 202.
         // axum 0.7: a path parameter is `:name`; `{name}` would be a literal.

@@ -71,6 +71,7 @@ export const APPEARANCE_SETTINGS = {
         label: "Magnified opacity",
         description: "Background opacity of a pane while magnified (0–1)",
         section: "appearance",
+        group: "Pane hover-magnify",
         keywords: ["zoom opacity", "focus mode opacity", "pane zoom", "window:magnifiedblockopacity"],
     },
     magnifiedSize: {
@@ -78,6 +79,7 @@ export const APPEARANCE_SETTINGS = {
         label: "Magnified size",
         description: "Scale factor applied to a pane while magnified",
         section: "appearance",
+        group: "Pane hover-magnify",
         keywords: ["zoom scale", "pane zoom factor", "magnify scale", "window:magnifiedblocksize"],
     },
     magnifiedBlurPrimary: {
@@ -85,6 +87,7 @@ export const APPEARANCE_SETTINGS = {
         label: "Magnified blur (primary)",
         description: "Backdrop blur, in pixels, applied to the magnified pane itself",
         section: "appearance",
+        group: "Pane hover-magnify",
         keywords: ["focused pane blur", "zoom blur", "window:magnifiedblockblurprimarypx"],
     },
     magnifiedBlurSecondary: {
@@ -92,6 +95,7 @@ export const APPEARANCE_SETTINGS = {
         label: "Magnified blur (secondary)",
         description: "Backdrop blur, in pixels, applied to the other panes behind it",
         section: "appearance",
+        group: "Pane hover-magnify",
         keywords: ["background pane blur", "other panes blur", "window:magnifiedblockblursecondarypx"],
     },
     widgetColors: {
@@ -99,6 +103,7 @@ export const APPEARANCE_SETTINGS = {
         label: "Widget colors",
         description: "The color of every pane of each widget type: its border, tabs and header. A pane's own Pane Color and an agent's color still win.",
         section: "appearance",
+        group: "Widget colors",
         keywords: ["color", "colour", "widget", "pane", "tab", "border", "pane:colors"],
     },
 } satisfies Record<string, SettingsIndexEntry>;

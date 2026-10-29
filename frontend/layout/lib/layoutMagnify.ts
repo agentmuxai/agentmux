@@ -113,6 +113,24 @@ export function removeMovedBlock(model: LayoutModel, blockId: string): boolean {
  * close-agent-tab.ts, which has to ask before it changes the pane.
  */
 export async function closeNode(model: LayoutModel, nodeId: string, opts?: { confirmed?: boolean }) {
+    // A pane is closed once at a time: a second click while the first is still asking (the
+    // busy-agent check, a prompt) or closing would run the whole thing again, and the second
+    // ClosePane for the same blocks is what reported a failure for a close that was working.
+    let closing = closingNodes.get(model);
+    if (!closing) closingNodes.set(model, (closing = new Set()));
+    if (closing.has(nodeId)) return;
+    closing.add(nodeId);
+    try {
+        await closeNodeOnce(model, nodeId, opts);
+    } finally {
+        closing.delete(nodeId);
+    }
+}
+
+/** The nodes of each layout whose close is under way (`closeNode`). */
+const closingNodes = new WeakMap<LayoutModel, Set<string>>();
+
+async function closeNodeOnce(model: LayoutModel, nodeId: string, opts?: { confirmed?: boolean }) {
     const nodeToDelete = findNode(model.treeState.rootNode, nodeId);
     if (!nodeToDelete) {
         // TODO: clean up the ephemeral node handling

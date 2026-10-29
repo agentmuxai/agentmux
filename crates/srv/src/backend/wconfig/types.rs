@@ -237,6 +237,17 @@ pub struct SettingsType {
     )]
     pub widget_hidden: Option<Vec<String>>,
 
+    /// The widget keys (`defwidget@terminal`, `ext@acme.board/main`) the person opened last, newest
+    /// first, at most 12: the Shortcuts pane lists these tiles first. Written by the window
+    /// when the person opens a pane. SPEC_SHORTCUTS_PANE_FOR_SPLITS_2026_10_28.md.
+    #[serde(
+        rename = "launcher:recent",
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_string_list"
+    )]
+    pub launcher_recent: Option<Vec<String>>,
+
     // -- Status bar settings --
     /// Whether the status bar shows MuxBus Cloud: the dot after the host name and
     /// the sign-in block in the host popover. Absent means shown; only an explicit
@@ -680,6 +691,13 @@ pub struct WidgetConfigType {
     #[serde(default, skip_serializing_if = "is_false")]
     pub magnified: bool,
 
+    /// A pane a person manages, of which one is the point (Memory, Connectors, Settings...): a click
+    /// on this entry brings back the one already open (restores it, switches to its tab, focuses it)
+    /// instead of opening another. Off, an entry opens a new pane each time. Absent, it follows the
+    /// view it opens; a user's `false` is kept, so it can switch a built-in entry off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub singleton: Option<bool>,
+
     /// Ordered short-names (no "defwidget@" prefix, same convention as
     /// `widget:pinned`) of this widget's children. A non-empty `children`
     /// list is what makes a widget entry a "parent" — it expands a submenu
@@ -709,16 +727,17 @@ pub struct WidgetConfigType {
     pub block_def: BlockDef,
 }
 
-/// Sections that moved from one pane to another, as `(old view, section, new view)`. An entry that
-/// still names the old pair opens the pane that holds the section now. The frontend has the same
-/// table (`MOVED_SECTIONS` in `pane-sections.ts`).
-const MOVED_SECTIONS: &[(&str, &str, &str)] = &[("warden", "kanban", "swarm")];
+/// Sections that moved out of a pane, as `(old view, section, new view, new section)`. An entry that
+/// still names the old pair opens the pane that holds it now: a section of another pane, or (no new
+/// section) a pane of its own, as the Kanban is. The frontend has the same table (`MOVED_SECTIONS` in
+/// `pane-sections.ts`).
+const MOVED_SECTIONS: &[(&str, &str, &str, Option<&str>)] = &[("warden", "kanban", "kanban", None), ("swarm", "kanban", "kanban", None)];
 
 impl WidgetConfigType {
     /// Writes `section` into the blockdef's meta under `<view>:section`, and a
     /// sub-section under `<section>:section`. Nothing without a section or a view.
     /// A section that moved panes (`MOVED_SECTIONS`) is written for the pane it lives in now,
-    /// and the blockdef's `view` follows it.
+    /// and the blockdef's `view` follows it. One that became a pane of its own leaves no section.
     pub fn resolve_section(&mut self) {
         if self.section.is_empty() {
             return;
@@ -726,9 +745,16 @@ impl WidgetConfigType {
         let Some(mut view) = self.block_def.meta.get("view").and_then(|v| v.as_str()).map(str::to_owned) else {
             return;
         };
-        if let Some((_, _, to)) = MOVED_SECTIONS.iter().find(|(from, id, _)| *from == view && *id == self.section) {
+        if let Some((_, _, to, to_section)) = MOVED_SECTIONS.iter().find(|(from, id, _, _)| *from == view && *id == self.section) {
             view = (*to).to_owned();
             self.block_def.meta.insert("view".to_owned(), Value::String(view.clone()));
+            match to_section {
+                Some(section) => self.section = (*section).to_owned(),
+                None => {
+                    self.section.clear();
+                    return;
+                }
+            }
         }
         let (id, sub) = match self.section.split_once('/') {
             Some((id, sub)) => (id.to_owned(), Some(sub.to_owned())),

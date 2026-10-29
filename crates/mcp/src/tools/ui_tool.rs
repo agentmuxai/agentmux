@@ -19,6 +19,7 @@ pub(super) const ACTS: &[Act] = &[
     Act { action: "keys", tool: "PressKeys", rename: &[] },
     Act { action: "windows", tool: "DiscoverWindows", rename: &[] },
     Act { action: "window", tool: "CaptureWindow", rename: &[] },
+    Act { action: "record", tool: "UIRecord", rename: &[] },
 ];
 
 pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {

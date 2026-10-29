@@ -8,7 +8,7 @@
  * servers" (the catalog) and "Also in use" (what agents run that isn't in
  * it), with a card's details and forms opening below its row
  * (docs/specs/SPEC_CONNECTORS_CARDS_2026_10_13.md §3.5). Per-agent private
- * servers live in the Agent-setup modal (AgentMcpModal), not here.
+ * servers are not built.
  */
 
 import { createMemo, createSignal, onCleanup, Show, type JSX } from "solid-js";

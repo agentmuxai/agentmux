@@ -116,7 +116,7 @@ pub(super) async fn handle_pty_shell_create(
     }
     meta.insert(
         crate::backend::gh_guard::META_KEY_PTYSHELL_GH_CONFIG_DIR.to_string(),
-        json!(crate::backend::gh_guard::guard_dir_for(&agent_env)),
+        json!(crate::backend::gh_guard::guard_dir_for_target(&agent_env, remote)),
     );
     // And the publish guard's git hooks, so a push typed here is scanned too.
     // Local shells only: the hooks directory is a host path, which a WSL distro

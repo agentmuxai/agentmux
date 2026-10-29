@@ -86,4 +86,13 @@ describe("seat-format", () => {
         });
         expect(seats.has("uid-none")).toBe(false);
     });
+
+    it("names a lead on another machine as it was set", () => {
+        const seats = seatsByAgent([
+            { id: "uid-w", name: "W", seat: { role: "worker", lead: "AgentY@narko", set_at_ms: 1 } },
+            { id: "uid-x", name: "X", seat: { role: "worker", lead: "AgentX@narko", set_at_ms: 1 } },
+        ]);
+        expect(seats.get("uid-w")?.lead).toEqual({ id: "AgentY@narko", name: "AgentY@narko" });
+        expect(seats.get("uid-x")?.lead?.name).toBe("AgentX@narko");
+    });
 });

@@ -10,14 +10,10 @@ import type { JSX } from "solid-js";
 import { BrowserAuthModalPanel } from "@/app/view/browser/components/BrowserAuthModal";
 import { AgentBundlesTab } from "@/app/view/agent/components/AgentBundlesTab";
 import { AgentEnvPanel } from "@/app/view/agent/components/AgentEnvPanel";
-import { AgentIdentityModalPanel } from "@/app/view/agent/components/AgentIdentityModal";
-import { AgentNativeMemoryModal } from "@/app/view/agent/components/AgentNativeMemoryModal";
 import { AgentSeatPanel } from "@/app/view/agent/components/AgentSeatPanel";
 import { BundleImportSelectModalPanel } from "@/app/view/bundle/components/BundleImportSelectModal";
 import { BundleImportPreviewModalPanel } from "@/app/view/bundle/components/BundleImportPreviewModal";
 import { BundleImportConfirmModalPanel } from "@/app/view/bundle/components/BundleImportConfirmModal";
-import "@/app/view/agent/components/AgentIdentityModal.scss";
-import "@/app/view/agent/components/AgentStashModal.scss";
 import "@/app/view/browser/components/BrowserAuthModal.scss";
 import "@/app/view/bundle/components/BundleImportModal.scss";
 
@@ -27,10 +23,6 @@ export function requestLabel(req: ModalLayerRequest): string {
     switch (req.kind) {
         case "browser-auth":
             return req.isProxy ? "Proxy authentication required" : "Authentication required";
-        case "agent-identity":
-            return `Identity — ${req.agent.name}`;
-        case "agent-memory":
-            return `Memory — ${req.agentName}`;
         case "agent-seat":
             return `Seat — ${req.agentName}`;
         case "agent-env":
@@ -68,29 +60,6 @@ export function renderRequest(
                             req.onSubmit(username, password, save);
                             api.close();
                         }}
-                    />
-                ),
-            };
-        case "agent-identity":
-            return {
-                label: requestLabel(req),
-                panel: (
-                    <AgentIdentityModalPanel
-                        agent={req.agent}
-                        blockId={req.blockId}
-                        onClose={api.close}
-                    />
-                ),
-            };
-        case "agent-memory":
-            return {
-                label: requestLabel(req),
-                panel: (
-                    <AgentNativeMemoryModal
-                        agentId={req.agentId}
-                        agentName={req.agentName}
-                        workingDirectory={req.workingDirectory}
-                        onClose={api.close}
                     />
                 ),
             };

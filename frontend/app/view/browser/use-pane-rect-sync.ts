@@ -11,6 +11,7 @@ import { focusManager } from "@/app/store/focusManager";
 import type { BrowserViewModel } from "./browser-model";
 import { afterDiscard } from "./hibernation";
 import { paneRectBatcher } from "./pane-rect-batcher";
+import { observePaneElement } from "./pane-resize-observer";
 
 /** How long a hidden pane parked at its real size settles before a discard:
  *  Chromium reports a page's scroll position to the browser about a second
@@ -96,7 +97,7 @@ export function usePaneRectSync(params: {
     // Every pane in this window shares one host request per batch.
     const rects = paneRectBatcher(windowLabel, () => getApi().browserPanes);
 
-    let resizeObserver: ResizeObserver | null = null;
+    let stopObserving: (() => void) | null = null;
     let positionInterval: ReturnType<typeof setInterval> | null = null;
     // Last rect we actually sent to the host. syncPosition compares against
     // this and skips the IPC when nothing changed — without this gate the
@@ -280,8 +281,9 @@ export function usePaneRectSync(params: {
     onMount(() => {
         const ph = placeholderRef();
         if (ph) {
-            resizeObserver = new ResizeObserver(syncPosition);
-            resizeObserver.observe(ph);
+            // The window's one observer: this pane's rect is recorded and the window's batch
+            // goes out in the rendering step that laid it out (pane-resize-observer.ts).
+            stopObserving = observePaneElement(windowLabel, ph, syncPosition, rects.flushNow);
             positionInterval = setInterval(syncPosition, 200);
         }
         // macOS/Linux: after a JS-driven drag moves the floating pane window,
@@ -451,7 +453,8 @@ export function usePaneRectSync(params: {
         } else if (paneCreated()) {
             diag(`view-unmount — a newer mount owns the page, leaving it open`);
         }
-        resizeObserver?.disconnect();
+        stopObserving?.();
+        stopObserving = null;
         if (positionInterval) {
             clearInterval(positionInterval);
             positionInterval = null;

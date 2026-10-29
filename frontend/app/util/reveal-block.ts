@@ -19,7 +19,7 @@
 import { giveBlockFocus } from "@/app/store/focusManager";
 import { createEffect, createRoot } from "solid-js";
 import { createRequestedTabs, createSelectionRunner, type SelectionDeps } from "@/app/selection/selection-effects";
-import { isFailure, type Intent, type SelectionResult } from "@/app/selection/selection-machine";
+import { isFailure, type Intent, type RemoteOutcome, type SelectionResult } from "@/app/selection/selection-machine";
 import { createSelectionTrace } from "@/app/selection/selection-trace";
 import { atoms, getApi, MOS, pushNotification, setActiveTab, workspace } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -39,13 +39,11 @@ export interface RevealOptions {
     focusCaret?: boolean;
     /** Who asked, for the selection trace: "swarm", "tower", "tokens", "picker". */
     source?: string;
+    /** This window only: a block that is not here is not found, and no other window is asked. */
+    localOnly?: boolean;
+    /** No failure notice: whoever handed this request over tells the user. */
+    quiet?: boolean;
 }
-
-/** How long to wait for a just-activated tab's layout to contain the block. */
-const LAYOUT_POLL_TRIES = 10;
-const LAYOUT_POLL_MS = 50;
-
-const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /** The tab in THIS window's workspace whose `blockids` include `blockId`.
  *  Reads Tab objects rather than layout models, so it also finds tabs whose
@@ -101,41 +99,6 @@ export async function showBlockWithoutFocus(blockId: string, opts: { tabId?: str
     return true;
 }
 
-/**
- * Reveal `blockId` in THIS window. Returns false when the block isn't in this
- * window's workspace (the caller may then look in other windows).
- */
-export async function revealBlockLocally(blockId: string, opts: RevealOptions = {}): Promise<boolean> {
-    const tabId = await findTabHolding(blockId, opts.tabId);
-    if (!tabId) return false;
-
-    await setActiveTab(tabId); // no-op when already active
-
-    // A tab that wasn't visited yet builds its layout only after the switch
-    // renders; wait briefly for the block to appear in it.
-    let model = getLayoutModelForTabById(tabId);
-    let node = model?.getNodeByBlockId(blockId);
-    for (let i = 0; i < LAYOUT_POLL_TRIES && node?.id == null; i++) {
-        await sleep(LAYOUT_POLL_MS);
-        model = getLayoutModelForTabById(tabId);
-        node = model?.getNodeByBlockId(blockId);
-    }
-    if (!model || node?.id == null) return false;
-
-    showBlockInPane(model, node, blockId);
-
-    model.focusNode(node.id);
-
-    // After the switch: a hidden kept-alive tab is still registered and would
-    // otherwise take the caret while invisible. Also covers focusNode's early
-    // return when the pane was already focused.
-    if (opts.focusCaret !== false) giveBlockFocus(blockId);
-
-    // The pane flashes once it can be seen, so the user sees which one it is.
-    emitPaneLocate(blockId);
-    return true;
-}
-
 /** What the notice says for each reason a pane could not be shown. */
 const FAIL_TEXT: Record<string, string> = {
     "not-found": "it is no longer open",
@@ -145,6 +108,7 @@ const FAIL_TEXT: Record<string, string> = {
     mismatch: "it did not come to the front",
     stuck: "it did not respond in time",
     "remote-timeout": "the other window did not answer",
+    "remote-failed": "the other window could not show it",
     gone: "it was just closed",
     error: "something went wrong",
 };
@@ -215,6 +179,9 @@ const liveDeps: SelectionDeps = {
     handoff: (blockId) => revealInOtherWindow(blockId),
     flash: (blockId) => emitPaneLocate(blockId),
     notify(intent: Intent, reason: string) {
+        // A block that is not in this window, asked for in this window only, is not a failure to tell the
+        // user about: the caller has the answer (false) and may look elsewhere.
+        if (intent.quiet || (intent.localOnly && reason === "not-found")) return;
         pushNotification({
             icon: "fa-triangle-exclamation",
             title: `Couldn't show ${blockName(intent.blockId)}`,
@@ -268,24 +235,31 @@ export async function revealBlock(blockId: string, opts: RevealOptions = {}): Pr
         source: opts.source,
         tabHint: opts.tabId,
         focusCaret: opts.focusCaret,
+        localOnly: opts.localOnly,
+        quiet: opts.quiet,
     });
     done(!isFailure(result) || result.reason === "superseded", isFailure(result) ? result.reason : undefined);
     return result;
 }
 
-/** Whether another window (or workspace) was found to hold the block. */
-async function revealInOtherWindow(blockId: string): Promise<boolean> {
+/**
+ * Hand the block to the window that shows it and wait for that window's answer (`block:revealed`, through srv):
+ * it showed the pane, could not, or did not say in time.
+ */
+async function revealInOtherWindow(blockId: string): Promise<{ outcome: RemoteOutcome; reason?: string }> {
     try {
-        const r = await RpcApi.BlockRevealCommand(TabRpcClient, { block_id: blockId });
+        const r = await RpcApi.BlockRevealCommand(TabRpcClient, { block_id: blockId, await_ack: true });
         if (r?.found && r.window_id) {
             await raiseWindowById(r.window_id);
-            return true;
+            if (r.revealed === true) return { outcome: "revealed" };
+            if (r.revealed === false) return { outcome: "failed", reason: r.reason };
+            return { outcome: "timeout" };
         }
     } catch (e) {
         // An older srv without block.reveal: fall back below.
         console.warn("[reveal-block] block.reveal failed", { blockId, error: String(e) });
     }
-    return activateTabInOtherWorkspace(blockId);
+    return { outcome: (await activateTabInOtherWorkspace(blockId)) ? "revealed" : "not-found" };
 }
 
 /** Raise the window whose `Window` oid is `windowId`. */

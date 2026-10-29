@@ -21,7 +21,7 @@
     z-index: var(--z-file-drop);
     @include mixins.flex-center;
     pointer-events: none;
-    border-radius: var(--block-border-radius);
+    border-radius: var(--radius-md);
     animation: am-fade-in var(--duration-fast) var(--ease-out);
 
     // Reduced treatment (feedback), dormant under the motion policy.
@@ -45,7 +45,7 @@
         gap: 8px;
         max-width: calc(100% - 32px);
         padding: 8px 14px;
-        border-radius: 6px;
+        border-radius: var(--radius-md);
         font-size: var(--text-base);
         font-weight: 500;
         color: var(--drop-prompt-fg);

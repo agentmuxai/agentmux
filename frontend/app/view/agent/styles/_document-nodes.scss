@@ -73,18 +73,18 @@ $transcript-preview-max-height: calc(50vh / 3);
         color: var(--accent-color);
     }
     .sh-subcommand {
-        color: var(--term-cyan, var(--accent-color));
+        color: var(--term-cyan);
     }
     .sh-keyword,
     .sh-heredoc-marker {
-        color: var(--term-magenta, var(--accent-color));
+        color: var(--term-magenta);
     }
     .sh-flag {
-        color: var(--term-blue, var(--info-color));
+        color: var(--term-blue);
     }
     .sh-flag-value,
     .sh-string {
-        color: var(--term-green, var(--success-color));
+        color: var(--term-green);
     }
     // A heredoc body of unknown language is plain text, not one long
     // string; known languages are coloured below.
@@ -95,10 +95,10 @@ $transcript-preview-max-height: calc(50vh / 3);
     .sh-variable,
     .sh-env-assign,
     .sh-number {
-        color: var(--term-yellow, var(--warning-color, var(--accent-color)));
+        color: var(--term-yellow);
     }
     .sh-substitution {
-        color: var(--term-magenta, var(--accent-color));
+        color: var(--term-magenta);
     }
     .sh-operator,
     .sh-redirect,
@@ -109,7 +109,7 @@ $transcript-preview-max-height: calc(50vh / 3);
         color: var(--link-color);
     }
     .sh-comment {
-        color: var(--grey-text-color, var(--secondary-text-color));
+        color: var(--grey-text-color);
         font-style: italic;
     }
 }
@@ -681,7 +681,7 @@ $transcript-preview-max-height: calc(50vh / 3);
             align-items: center;
             gap: var(--space-1);
             padding: var(--space-1) var(--space-2);
-            border-radius: 4px;
+            border-radius: var(--radius-sm);
             background: color-mix(in srgb, var(--term-bright-magenta) 8%, transparent);
             cursor: default;
             font-size: var(--text-sm);
@@ -1078,7 +1078,7 @@ $transcript-preview-max-height: calc(50vh / 3);
                 color: var(--secondary-text-color);
                 padding: 1px var(--space-1);
                 border: 1px solid var(--border-color);
-                border-radius: 3px;
+                border-radius: var(--radius-sm);
                 white-space: nowrap;
             }
         }
@@ -1198,7 +1198,7 @@ $transcript-preview-max-height: calc(50vh / 3);
             font-size: var(--text-xs);
             padding: 0 var(--space-1);
             border: 1px solid var(--border-color);
-            border-radius: 3px;
+            border-radius: var(--radius-sm);
             white-space: nowrap;
         }
 
@@ -1869,7 +1869,7 @@ $transcript-preview-max-height: calc(50vh / 3);
         flex-shrink: 0;
         width: 14px;
         height: 14px;
-        border-radius: 2px;
+        border-radius: var(--radius-sm);
         opacity: 0.85;
     }
 }
@@ -1959,7 +1959,7 @@ $transcript-preview-max-height: calc(50vh / 3);
         flex-shrink: 0;
         width: 14px;
         height: 14px;
-        border-radius: 2px;
+        border-radius: var(--radius-sm);
         opacity: 0.85;
     }
 
@@ -2032,7 +2032,7 @@ $transcript-preview-max-height: calc(50vh / 3);
         flex-shrink: 0;
         width: 14px;
         height: 14px;
-        border-radius: 2px;
+        border-radius: var(--radius-sm);
     }
 
     .agent-fetch-domain {
@@ -2044,7 +2044,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     .agent-fetch-status {
         font-size: var(--text-2xs);
         padding: 1px 6px;
-        border-radius: 10px;
+        border-radius: var(--radius-full);
         flex-shrink: 0;
         font-weight: 600;
 
@@ -2183,7 +2183,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     margin: var(--space-1) 0;
     border-left: 2px solid var(--error-color);
     background: var(--error-bg-subtle);
-    border-radius: 0 2px 2px 0;
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
     font-size: var(--text-sm);
     line-height: 1.4;
 
@@ -2209,7 +2209,7 @@ $transcript-preview-max-height: calc(50vh / 3);
         align-self: center;
         padding: 2px var(--space-1-5);
         border: 1px solid var(--error-color);
-        border-radius: 3px;
+        border-radius: var(--radius-sm);
         background: transparent;
         color: var(--error-text-color);
         font-size: var(--text-xs);
@@ -2286,7 +2286,7 @@ $transcript-preview-max-height: calc(50vh / 3);
         color: var(--secondary-text-color);
         padding: 2px 10px;
         border: 1px solid var(--border-color);
-        border-radius: 10px;
+        border-radius: var(--radius-full);
         background: var(--panel-bg-color);
     }
 
@@ -2317,7 +2317,7 @@ $transcript-preview-max-height: calc(50vh / 3);
         color: var(--warning-text-color);
         padding: 2px 10px;
         border: 1px solid var(--warning-line-strong);
-        border-radius: 10px;
+        border-radius: var(--radius-full);
     }
 
     .agent-compaction-started-detail {
@@ -2347,7 +2347,7 @@ $transcript-preview-max-height: calc(50vh / 3);
         letter-spacing: 0.02em;
         padding: 2px 10px;
         border: 1px solid var(--border-color);
-        border-radius: 10px;
+        border-radius: var(--radius-full);
         background: var(--panel-bg-color);
     }
 
@@ -2411,7 +2411,7 @@ $transcript-preview-max-height: calc(50vh / 3);
         letter-spacing: 0.05em;
         color: rgba(255, 255, 255, 0.35);
         padding: 1px 9px;
-        border-radius: 9px;
+        border-radius: var(--radius-full);
         background: var(--panel-bg-color);
     }
 }
@@ -2449,7 +2449,7 @@ $transcript-preview-max-height: calc(50vh / 3);
         color: var(--secondary-text-color);
         padding: 2px 10px;
         border: 1px solid var(--border-color);
-        border-radius: 10px;
+        border-radius: var(--radius-full);
         background: var(--panel-bg-color);
     }
 
@@ -2506,7 +2506,7 @@ $transcript-preview-max-height: calc(50vh / 3);
         color: var(--cli-notice-tone);
         padding: 2px 10px;
         border: 1px solid var(--border-color);
-        border-radius: 10px;
+        border-radius: var(--radius-full);
         background: var(--panel-bg-color);
     }
 
@@ -2561,7 +2561,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     padding: 8px var(--space-2);
     margin: 0 var(--space-1-5);
     border: 1px dashed var(--border-color);
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     cursor: var(--cursor-interactive);
     user-select: none;
 
@@ -2780,7 +2780,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     padding: 8px var(--space-2);
     margin: 0 var(--space-1-5);
     border: 1px dashed var(--border-color);
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     user-select: none;
 
     .agent-resume-preflight-sigil {

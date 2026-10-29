@@ -435,6 +435,7 @@ impl SubagentWatcher {
                 &self.identity_store,
                 &block_id,
             );
+            crate::identity::foreign_dir::heal_block_config_dir_env(&self.mstore, Some(&block), bound_dir.as_deref());
             let new_dir = resolve_claude_config_dir(&block.meta, &agent_id, bound_dir);
             if let Some(new_dir) = new_dir {
                 self.recheck_config_dir(&agent_id, new_dir);

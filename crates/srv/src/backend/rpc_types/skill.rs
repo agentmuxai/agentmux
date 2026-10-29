@@ -44,6 +44,35 @@ pub struct SkillAgentBindingData {
     pub skill_id: String,
 }
 
+/// `skill.catalog.set_reach` — window-scoped. Who a catalog skill reaches beyond its binds:
+/// `all_agents` gives it to every agent, `new_agents` to every agent created from now on.
+/// `skill.catalog.upsert` leaves both as they are, except that a skill it creates starts with
+/// `new_agents` on.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandSkillCatalogSetReachData {
+    pub skill_id: String,
+    pub all_agents: bool,
+    pub new_agents: bool,
+}
+
+/// `skill.catalog.bind_all` — window-scoped. Binds a catalog skill to every agent that exists now (a
+/// bind each, so the skill stays with the agent when "all agents" is switched off). Agents created
+/// later get it only through `skill.catalog.set_reach`.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandSkillCatalogBindAllData {
+    pub skill_id: String,
+}
+
+/// Result of `skill.catalog.bind_all`: how many agents hold the bind now.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct SkillBindAllResult {
+    #[ts(type = "number")]
+    pub bound: u64,
+}
+
 /// `skill.catalog.bind_to_bundle`, `skill.catalog.unbind_from_bundle`.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
@@ -126,6 +155,72 @@ pub struct CommandSkillCatalogUpsertData {
     pub description: String,
     #[serde(default)]
     pub content: String,
+}
+
+/// `skill.catalog.import_preview` — window-scoped. Read what a source holds, and how each skill in
+/// it compares with the catalog, without writing anything. For an import give `source`; to check an
+/// imported skill for changes give `skill_id` and leave `source` out (its recorded source is read).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandSkillCatalogImportPreviewData {
+    #[serde(default)]
+    pub source: Option<crate::backend::storage::skill_source::SkillSource>,
+    #[serde(default)]
+    pub skill_id: String,
+}
+
+/// One skill found by `skill.catalog.import_preview`, with the catalog skill it would replace.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct SkillImportItem {
+    pub key: String,
+    pub name: String,
+    pub description: String,
+    pub content: String,
+    /// `new`, `changed` or `same` against the catalog skill it matches (by recorded source, then by name).
+    pub status: String,
+    /// The matching catalog skill's id and text; empty for `new`.
+    pub existing_id: String,
+    pub existing_description: String,
+    pub existing_content: String,
+}
+
+/// Result of `skill.catalog.import_preview`.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct SkillImportPreview {
+    pub source: crate::backend::storage::skill_source::SkillSource,
+    pub items: Vec<SkillImportItem>,
+    pub warnings: Vec<String>,
+}
+
+/// What the person approved for one skill in `skill.catalog.import_commit`: the text they saw.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct SkillImportCommitItem {
+    pub key: String,
+    pub name: String,
+    pub description: String,
+    pub content: String,
+    /// The catalog skill to update; empty to create one.
+    #[serde(default)]
+    pub existing_id: String,
+}
+
+/// `skill.catalog.import_commit` — window-scoped. Write the approved skills into the catalog and
+/// record where they came from. A new one starts unbound and outside "new agents get it".
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandSkillCatalogImportCommitData {
+    pub source: crate::backend::storage::skill_source::SkillSource,
+    pub items: Vec<SkillImportCommitItem>,
+}
+
+/// Result of `skill.catalog.import_commit`: the ids written, in order.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct SkillImportCommitResult {
+    pub saved: Vec<String>,
 }
 
 /// `skill.catalog.upsert_for_bundle` — bundle-scoped. Same field rules again.

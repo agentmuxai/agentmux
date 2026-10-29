@@ -129,6 +129,7 @@ pub const COMMAND_AGENT_CANCEL: &str = "agentcancel";
 /// The banner's "Keep running": cancel a pending external shutdown
 /// (docs/specs/SPEC_AGENT_SELF_QUIT_2026_09_24.md §6.5, §12.3).
 pub const COMMAND_AGENT_SHUTDOWN_KEEP: &str = "agentshutdownkeep";
+pub const COMMAND_AGENT_SHUTDOWN_NOW: &str = "agentshutdownnow";
 pub const COMMAND_AGENT_STOP: &str = "agentstop";
 /// The API retry a pane's CLI is waiting on, as of now (`backend::agent_api_retry`).
 pub const COMMAND_AGENT_API_RETRY: &str = "agentapiretry";
@@ -761,6 +762,10 @@ pub const COMMAND_SKILL_CATALOG_BIND: &str = "skill.catalog.bind";
 // See docs/reports/REPORT_ARMORY_ARCHITECTURE_AND_NAMING_REVIEW_2026_07_23.md §2.2.
 pub const COMMAND_SKILL_CATALOG_LIST_FOR_AGENT: &str = "skill.catalog.list_for_agent";
 pub const COMMAND_SKILL_CATALOG_UNBIND: &str = "skill.catalog.unbind";
+pub const COMMAND_SKILL_CATALOG_SET_REACH: &str = "skill.catalog.set_reach";
+pub const COMMAND_SKILL_CATALOG_BIND_ALL: &str = "skill.catalog.bind_all";
+pub const COMMAND_SKILL_CATALOG_IMPORT_PREVIEW: &str = "skill.catalog.import_preview";
+pub const COMMAND_SKILL_CATALOG_IMPORT_COMMIT: &str = "skill.catalog.import_commit";
 
 // Bundle-scoped siblings of the three above (composable model v2,
 // docs/specs/SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md, GH issue #2024 item

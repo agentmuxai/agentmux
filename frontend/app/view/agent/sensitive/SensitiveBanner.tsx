@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The pane's "this will happen in 30 s: Veto" banner for a sensitive operation the super agent
+ * The pane's "this will happen in 30 s" banner for a sensitive operation the super agent
  * approved (docs/specs/SPEC_SUPER_AGENT_2026_10_25.md §5). No click is needed to let it
- * proceed; Veto stops it and Approve now skips the wait. The words are srv's, shown as text.
+ * proceed; the first button stops it and the second skips the wait, each worded for the
+ * operation ("Don't upgrade" / "Upgrade now": `OpSpec`). The words are srv's, shown as text.
  */
 
 import { createSignal, For, onCleanup, type JSX } from "solid-js";
@@ -43,14 +44,14 @@ export const SensitiveBanner = (): JSX.Element => {
                     title={countdownText(c, secondsLeft(c, now()))}
                     actions={[
                         {
-                            label: "Veto",
+                            label: c.cancel_label,
                             title: "Stop this from happening",
                             primary: true,
                             disabled: deciding() !== null,
                             onClick: () => decide(c.request_id, "veto"),
                         },
                         {
-                            label: "Approve now",
+                            label: c.now_label,
                             title: "Let it happen now, without waiting",
                             disabled: deciding() !== null,
                             onClick: () => decide(c.request_id, "approve_now"),

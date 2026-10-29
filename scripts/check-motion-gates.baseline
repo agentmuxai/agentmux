@@ -1,0 +1,40 @@
+# Hand-rolled motion that predates the motion primitives, and the most each file
+# may have (scripts/check-motion-gates.mjs; docs/specs/SPEC_MOTION_PRIMITIVES_2026_10_29.md §6).
+# A count may only go down: migrate the file, then run
+# `node scripts/check-motion-gates.mjs --update`. Adding a file or raising a number
+# is a hand edit that the PR has to justify.
+# <rule> <path> <count>
+animate frontend/app/util/pane-locate.ts 1
+animate frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx 2
+keyframes frontend/app/block/block.scss 1
+keyframes frontend/app/drag/drop-indicators.scss 4
+keyframes frontend/app/element/BrainSpinner.scss 1
+keyframes frontend/app/element/MicButton.scss 1
+keyframes frontend/app/element/modal-layer.scss 1
+keyframes frontend/app/element/modal.scss 3
+keyframes frontend/app/element/ui/card.scss 1
+keyframes frontend/app/element/ui/ui.scss 1
+keyframes frontend/app/element/zoomindicator.scss 1
+keyframes frontend/app/view/agent/agent-view.scss 1
+keyframes frontend/app/view/agent/styles/_attachments.scss 1
+keyframes frontend/app/view/agent/styles/_control-bar.scss 1
+keyframes frontend/app/view/agent/styles/_decision-panel.scss 1
+keyframes frontend/app/view/agent/styles/_recent-sessions.scss 1
+keyframes frontend/app/view/agent/styles/_search.scss 1
+keyframes frontend/app/view/agent/styles/_shell-node.scss 2
+keyframes frontend/app/view/settings/settings-search-bar.scss 1
+literal-ms frontend/app/app.scss 1
+literal-ms frontend/app/drop-feedback.scss 1
+literal-ms frontend/app/element/BrainSpinner.scss 1
+literal-ms frontend/app/element/PaneLoadingCover.scss 1
+literal-ms frontend/app/element/modal-layer.scss 1
+literal-ms frontend/app/element/modal.scss 2
+literal-ms frontend/app/element/ui/card.scss 1
+literal-ms frontend/app/view/accounts/accounts-gallery.scss 1
+literal-ms frontend/app/view/agent/agent-view.scss 1
+literal-ms frontend/app/view/agent/styles/_attachments.scss 2
+literal-ms frontend/app/view/agent/styles/_composer-strip.scss 1
+literal-ms frontend/app/view/agent/styles/_document.scss 3
+literal-ms frontend/app/view/agent/styles/_recent-sessions.scss 2
+literal-ms frontend/app/view/agent/styles/_shell-node.scss 1
+literal-ms frontend/app/view/browser/browser-view.scss 2
