@@ -14,7 +14,7 @@ import { newLayoutNode } from "@/layout/lib/layoutNode";
 import { activeKeyFor, getNodeByBlockId, paneStackIds } from "@/layout/lib/layoutNodeModels";
 import { closeNode, removeMovedBlock } from "@/layout/lib/layoutMagnify";
 import { collapseMaximizedNode, setMinimizeMerger } from "@/layout/lib/layoutMinimize";
-import { landedTab } from "@/app/element/pane-tab-landing";
+import { LANDING_BOUNCE_MS, landedTab } from "@/app/element/pane-tab-landing";
 import { mergeIntoMinimizedNeighbour } from "@/layout/lib/layoutMinimizeMergeApply";
 import {
     addWidgetAsPaneTab,
@@ -1639,6 +1639,37 @@ describe("minimizing next to a minimized pane (merge)", () => {
         // The arrived pills play the landing bounce in the pane that took them.
         expect([...landedTab()!.ids]).toEqual(["b1", "b2"]);
         expect(landedTab()!.paneKey).toBe(merged.id);
+    });
+
+    it("scrolls the target's strip to the arrived pills when it overflows, after the landing bounce", () => {
+        const model = fourPanes();
+        model.minimizeNodeToggle(idOf(model, "a1"));
+        const pane = document.createElement("div");
+        pane.dataset.role = "pane";
+        pane.dataset.blockid = "a2";
+        const strip = document.createElement("div");
+        strip.className = "pane-tab-strip";
+        Object.defineProperty(strip, "scrollWidth", { value: 600 });
+        Object.defineProperty(strip, "clientWidth", { value: 200 });
+        const scrollTo = vi.fn();
+        strip.scrollTo = scrollTo as any;
+        for (const id of ["a1", "a2", "b1", "b2"]) {
+            const pill = document.createElement("div");
+            pill.dataset.tabId = id;
+            strip.append(pill);
+        }
+        pane.append(strip);
+        document.body.append(pane);
+
+        try {
+            model.minimizeNodeToggle(idOf(model, "b1"));
+            expect(scrollTo).not.toHaveBeenCalled();
+            vi.advanceTimersByTime(LANDING_BOUNCE_MS + 100);
+
+            expect(scrollTo).toHaveBeenCalledWith({ left: 400, behavior: "smooth" });
+        } finally {
+            pane.remove();
+        }
     });
 
     it("keeps the target's visible tab", () => {

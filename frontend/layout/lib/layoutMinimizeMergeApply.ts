@@ -7,9 +7,10 @@
  * modules must not pull in; layout/index.ts registers it with `setMinimizeMerger`.
  */
 
-import { markLanded } from "@/app/element/pane-tab-landing";
+import { LANDING_BOUNCE_MS, markLanded } from "@/app/element/pane-tab-landing";
 import { DURATION_MODERATE_MS, EASE_EMPHASIZED } from "@/app/motion/tokens";
 import { shouldReduceMotion } from "@/app/motion/motion";
+import { revealInStrip, STRIP_EDGE_FADE_PX } from "@/app/element/strip-reveal";
 import { findNode, findNodeByBlockId } from "./layoutNode";
 import { findMinimizeMergeTarget } from "./layoutMinimizeMerge";
 import type { LayoutModel } from "./layoutModel";
@@ -35,12 +36,13 @@ export function mergeIntoMinimizedNeighbour(model: LayoutModel, nodeId: string):
     const moved = moveBlocksInStack(model, blockIds, targetBlockId);
     if (!moved) return false;
 
-    if (!reduceMotion && moved.length) {
+    if (moved.length) {
         const landedIn = model.treeState.rootNode && findNodeByBlockId(model.treeState.rootNode, targetBlockId);
-        if (landedIn) {
+        if (landedIn && !reduceMotion) {
             markLanded(moved, landedIn.id);
             if (from) travelPills(targetBlockId, moved, from);
         }
+        revealArrivals(targetBlockId, moved[moved.length - 1], reduceMotion);
     }
     return true;
 }
@@ -87,4 +89,29 @@ function travelPills(targetBlockId: string, movedIds: readonly string[], from: M
             });
         }
     });
+}
+
+/**
+ * Scroll the target's strip to the end, where the arrived pills are, when it overflows: the merge
+ * leaves the target's own tab visible, so the strip's selected-tab reveal never shows them. Runs
+ * after the landing bounce, when the strip's own reveal (which waits that out) has had its turn,
+ * and whether or not motion is reduced.
+ */
+function revealArrivals(targetBlockId: string, lastArrivedId: string, reduceMotion: boolean): void {
+    if (typeof document === "undefined") return;
+    setTimeout(() => {
+        const pane = paneElement(targetBlockId);
+        if (!pane) return;
+        for (const pill of pane.querySelectorAll<HTMLElement>("[data-tab-id]")) {
+            if (pill.dataset.tabId !== lastArrivedId) continue;
+            const strip = pill.closest<HTMLElement>(".pane-tab-strip");
+            if (strip) {
+                revealInStrip(strip, pill, true, {
+                    edgeClearance: STRIP_EDGE_FADE_PX,
+                    behavior: reduceMotion ? "instant" : "smooth",
+                });
+            }
+            return;
+        }
+    }, LANDING_BOUNCE_MS + 100);
 }
