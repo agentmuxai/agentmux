@@ -12,7 +12,6 @@ import { createSignal, onCleanup, Show, type Accessor, type JSX } from "solid-js
 import { Button } from "@/app/element/ui";
 import { useAccountEpisodes } from "@/app/store/account-availability";
 import { openOrFocusPaneByView } from "@/app/store/block-component-registry";
-import { setBlockMeta } from "@/app/store/block-meta";
 import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -108,7 +107,7 @@ export function useHeldTask(blockId: () => string): Accessor<HeldTask | null> {
     return () => held().get(blockId()) ?? null;
 }
 
-/** How many tasks need the operator (the same count as the Swarm's title on the Kanban), kept current while the
+/** How many tasks need the operator (the same count as the Kanban pane's title), kept current while the
  *  caller is mounted. An account episode counts once per account, however many agents it holds
  *  (SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §6.2); its `agent_ids` and `block_ids` say which holders it
  *  covers, so the Needs-you reason for a stuck task (#1847) skips those holders instead of counting them
@@ -119,15 +118,14 @@ export function useKanbanNeeds(): Accessor<number> {
     return () => needsCountOf(boardTasks(), episodes()) + episodes().length;
 }
 
-/** Open the Kanban (this tab's Swarm, or a new one) with this task's drawer open. */
+/** Open the Kanban (this tab's, or a new one) with this task's drawer open. */
 export function openKanbanTask(taskId: string): Promise<void> {
-    const meta = { "swarm:section": "kanban" as const, "kanban:open": taskId };
-    return openOrFocusPaneByView("swarm", { meta: { view: "swarm", ...meta } }, meta);
+    const meta = { "kanban:open": taskId };
+    return openOrFocusPaneByView("kanban", { meta: { view: "kanban", ...meta } }, meta);
 }
 
-/** "#12 Write the spec" under an agent in the Swarm; opens the task on the Kanban, in the Swarm
- *  the chip is in (`swarmBlockId`): the same pane flips to its Kanban section with the task open. */
-export function HeldTaskChip(props: { blockId: string; swarmBlockId?: string }): JSX.Element {
+/** "#12 Write the spec" under an agent in the Swarm; opens the task on the Kanban. */
+export function HeldTaskChip(props: { blockId: string }): JSX.Element {
     const task = useHeldTask(() => props.blockId);
     return (
         <Show when={task()}>
@@ -140,9 +138,7 @@ export function HeldTaskChip(props: { blockId: string; swarmBlockId?: string }):
                     title={`${t().waiting ? "Waiting on your answer: " : "On task "}#${t().num} ${t().title} (open it on the Kanban)`}
                     onClick={(e) => {
                         e.stopPropagation();
-                        void (props.swarmBlockId
-                            ? setBlockMeta(props.swarmBlockId, { "swarm:section": "kanban", "kanban:open": t().id })
-                            : openKanbanTask(t().id));
+                        void openKanbanTask(t().id);
                     }}
                 >
                     <span class="kanban-held-chip__text">

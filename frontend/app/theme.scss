@@ -307,7 +307,7 @@
     // (SPEC_KANBAN_STAGES_COLOURS_AND_NARROW_VIEW_2026_10_23.md §7.1). Aliases of
     // tokens each theme already tunes (the process kinds stay apart and readable),
     // so a theme overrides one only where two still meet, as
-    // view/warden-kanban/kanban-stage-colours.test.ts measures.
+    // view/kanban/kanban-stage-colours.test.ts measures.
     --kanban-stage-backlog: var(--secondary-text-color);
     --kanban-stage-research: var(--process-kind-agentmux);
     --kanban-stage-specd: var(--info-color);

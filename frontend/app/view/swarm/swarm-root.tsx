@@ -3,7 +3,7 @@
 
 import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
 import { holdPaneContent, trackPaneContent } from "@/app/store/pane-content-holds";
-import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, type Accessor, type JSX } from "solid-js";
+import { createEffect, createMemo, onCleanup, onMount, Show, type JSX } from "solid-js";
 import type { SwarmViewModel } from "./swarm-model";
 import { AccountAvailabilityStrip } from "@/app/view/account-availability/account-availability-strip";
 import { selectTrace } from "@/app/util/select-trace";
@@ -11,8 +11,6 @@ import { readZoom } from "@/app/store/zoom-factor";
 import { SwarmAgentList, useSwarmAgents, type SwarmAgents } from "./swarm-agent-list";
 import { ClearCompletedButton } from "./swarm-view";
 import { SwarmSectionBar } from "./swarm-section-bar";
-import { KanbanSection } from "@/app/view/warden-kanban/kanban-section";
-import { parseCollapsed } from "@/app/view/warden-kanban/kanban-columns";
 import { createSwarmSection, swarmDensityOf, type SwarmSection } from "./swarm-section";
 import { BroadcastDock } from "./swarm-broadcast";
 import { SupervisorSettingsBar } from "./swarm-supervisor-settings";
@@ -68,9 +66,6 @@ function SectionListNotes(props: { model: SwarmViewModel; agents: SwarmAgents })
 export function SwarmView(props: {
     model: SwarmViewModel;
     ctx: PaneTabHostContext;
-    /** The Kanban section's Needs-you count, for the pane's title (swarm-instance.tsx). */
-    kanbanNeeds?: Accessor<number>;
-    onKanbanNeeds?: (n: number) => void;
 }): JSX.Element {
     const model = props.model;
     const ctx = props.ctx;
@@ -86,36 +81,6 @@ export function SwarmView(props: {
     const zoomFactor = createMemo(() => readZoom(ctx.meta()));
     const section = createSwarmSection(ctx.meta);
     const density = createMemo(() => swarmDensityOf(section()));
-    // The Kanban mounts the first time its section is shown and stays mounted (its polling follows
-    // `visible`), as Warden's sections do. The agent list is never unmounted: it is hidden while the
-    // Kanban shows, so no row is remounted by a switch (#5208).
-    const [kanbanSeen, setKanbanSeen] = createSignal(section() === "kanban");
-    createEffect(() => {
-        if (section() === "kanban") setKanbanSeen(true);
-    });
-    const kanbanOpen = createMemo<string | null>(() => {
-        const id = ctx.meta()?.["kanban:open"];
-        return typeof id === "string" && id ? id : null;
-    });
-    // A card's agent: switch to the Supervisor and select that agent's row, scrolled into view. The
-    // meta write is asynchronous and the list is `display: none` until the section has changed, so the
-    // scroll waits for the section rather than for a frame.
-    const [scrollTo, setScrollTo] = createSignal<string | null>(null);
-    createEffect(() => {
-        const blockId = scrollTo();
-        if (!blockId || section() === "kanban") return;
-        setScrollTo(null);
-        requestAnimationFrame(() =>
-            [...(rootRef?.querySelectorAll<HTMLElement>(".swarm-agent-card") ?? [])]
-                .find((card) => card.dataset.blockId === blockId)
-                ?.scrollIntoView?.({ block: "nearest" })
-        );
-    });
-    const openAgent = (blockId: string) => {
-        model.selectAll([blockId]);
-        setScrollTo(blockId);
-        void ctx.setMeta({ "swarm:section": "supervisor" });
-    };
     // Trace presses on agent rows whose click never arrives (select-trace.ts).
     // Capture listeners on the root, which a rebuild of the rows never replaces.
     onMount(() => {
@@ -163,26 +128,11 @@ export function SwarmView(props: {
                         follows the section, the list itself is rendered once and never remounted
                         by a switch, which is what keeps a press on a row from being lost (#5208). */}
                     <div class="swarm-section-body">
-                        <div class="swarm-agents-pane" classList={{ "is-hidden": section() === "kanban" }}>
+                        <div class="swarm-agents-pane">
                             <SectionControls model={model} agents={agents} section={section()} />
                             <SectionListNotes model={model} agents={agents} />
                             <SwarmAgentList model={model} ctx={ctx} agents={agents} density={density} />
                         </div>
-                        <Show when={kanbanSeen()}>
-                            <div class="swarm-kanban-slot" classList={{ "is-hidden": section() !== "kanban" }}>
-                                <KanbanSection
-                                    visible={section() === "kanban"}
-                                    openRequest={kanbanOpen()}
-                                    onOpenHandled={() => void ctx.setMeta({ "kanban:open": null })}
-                                    onNeedsCount={(n) => props.onKanbanNeeds?.(n)}
-                                    lanes={ctx.meta()?.["kanban:lanes"] === true}
-                                    onLanes={(on) => void ctx.setMeta({ "kanban:lanes": on })}
-                                    collapsed={parseCollapsed(ctx.meta()?.["kanban:collapsed"])}
-                                    onCollapsed={(ids) => void ctx.setMeta({ "kanban:collapsed": ids })}
-                                    onOpenAgent={openAgent}
-                                />
-                            </div>
-                        </Show>
                     </div>
                 </SwarmSectionBar>
             </Show>

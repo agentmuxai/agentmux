@@ -12,7 +12,7 @@ export const paneTabItemType = "PANE_TAB_ITEM";
 /** A document tab (an Editor's or a Media pane's file): moves only between
  *  panes of the same type, and never tears off (PaneTabStrip's `docDrag`). */
 export const docTabItemType = "DOC_TAB_ITEM";
-/** A task card on the Swarm's Kanban: dropped on a backlog group (who it waits for) or an agent
+/** A task card on the Kanban: dropped on a backlog group (who it waits for) or an agent
  *  (start it there); never a tile or a tab (SPEC_WARDEN_KANBAN_2026_10_20.md §6.10). */
 export const kanbanCardItemType = "KANBAN_CARD";
 

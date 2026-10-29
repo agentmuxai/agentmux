@@ -19,7 +19,7 @@ import { useTick } from "@/app/hook/useTick";
 import { longRunningToolRows, type LongRunningToolRow } from "./swarm-longrunning";
 import { formatCompactNumber } from "@/util/format-count";
 import { formatElapsedClock, formatTimeLeft } from "@/util/format-time";
-import { HeldTaskChip } from "@/app/view/warden-kanban/kanban-held";
+import { HeldTaskChip } from "@/app/view/kanban/kanban-held";
 import { revealBlock } from "@/app/util/reveal-block";
 import { phaseToDisplayStatus, type AgentDisplayStatus } from "./swarm-display-status";
 import { BuildSlotNote, LongToolNote, UnavailableChip } from "./swarm-row-notes";
@@ -490,8 +490,8 @@ export function AgentRow({
                         row's tick, like the chip, so the words go when the reset passes. */}
                     {unavailable() ? unavailableLineText(unavailable()!, rowNow()) : node().line.text}
                 </div>
-                {/* The Kanban task this agent is on, which opens it there (SPEC_WARDEN_KANBAN_2026_10_20.md §6.14): this Swarm flips to its Kanban section. */}
-                <Show when={node().blockId}>{(blockId) => <HeldTaskChip blockId={blockId()} swarmBlockId={model.blockId} />}</Show>
+                {/* The Kanban task this agent is on, which opens it on the Kanban pane (SPEC_WARDEN_KANBAN_2026_10_20.md §6.14). */}
+                <Show when={node().blockId}>{(blockId) => <HeldTaskChip blockId={blockId()} />}</Show>
                 {/* The literal call in flight, next to the Haiku paraphrase
                     above it. Deliberately OUTSIDE the collapsed() guard: it is
                     one line, it is the most perishable thing on the card, and

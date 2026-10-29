@@ -46,7 +46,7 @@ import { closeHamburgerMenu } from "./hamburger-menu";
 import { PinnedWidgetFlyout } from "./pinned-widget-flyout";
 import { useWidgetBarResponsive } from "./use-widget-bar-responsive";
 import { useWidgetDragReorder } from "./use-widget-drag-reorder";
-import { KanbanNeedsBadge, opensKanban } from "@/app/view/warden-kanban/kanban-needs-badge";
+import { KanbanNeedsBadge, opensKanban } from "@/app/view/kanban/kanban-needs-badge";
 import "./action-widgets.scss";
 
 // ── ActionWidget ──────────────────────────────────────────────────────────────

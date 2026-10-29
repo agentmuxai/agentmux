@@ -40,20 +40,14 @@
     overflow: hidden;
 }
 
-// The agent list's side of the body (the Supervisor's and Broadcast's content) and the Kanban's slot
-// share it. Whichever is not shown is `display: none`, never unmounted.
-.swarm-agents-pane,
-.swarm-kanban-slot {
+// The agent list's side of the body: the Supervisor's and Broadcast's content, never unmounted by a switch.
+.swarm-agents-pane {
     display: flex;
     flex: 1 1 0;
     flex-direction: column;
     min-width: 0;
     min-height: 0;
     overflow: hidden;
-
-    &.is-hidden {
-        display: none;
-    }
 }
 
 // ── Loading / empty root ─────────────────────────────────────────────────

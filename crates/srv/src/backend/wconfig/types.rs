@@ -709,16 +709,17 @@ pub struct WidgetConfigType {
     pub block_def: BlockDef,
 }
 
-/// Sections that moved from one pane to another, as `(old view, section, new view)`. An entry that
-/// still names the old pair opens the pane that holds the section now. The frontend has the same
-/// table (`MOVED_SECTIONS` in `pane-sections.ts`).
-const MOVED_SECTIONS: &[(&str, &str, &str)] = &[("warden", "kanban", "swarm")];
+/// Sections that moved out of a pane, as `(old view, section, new view, new section)`. An entry that
+/// still names the old pair opens the pane that holds it now: a section of another pane, or (no new
+/// section) a pane of its own, as the Kanban is. The frontend has the same table (`MOVED_SECTIONS` in
+/// `pane-sections.ts`).
+const MOVED_SECTIONS: &[(&str, &str, &str, Option<&str>)] = &[("warden", "kanban", "kanban", None), ("swarm", "kanban", "kanban", None)];
 
 impl WidgetConfigType {
     /// Writes `section` into the blockdef's meta under `<view>:section`, and a
     /// sub-section under `<section>:section`. Nothing without a section or a view.
     /// A section that moved panes (`MOVED_SECTIONS`) is written for the pane it lives in now,
-    /// and the blockdef's `view` follows it.
+    /// and the blockdef's `view` follows it. One that became a pane of its own leaves no section.
     pub fn resolve_section(&mut self) {
         if self.section.is_empty() {
             return;
@@ -726,9 +727,16 @@ impl WidgetConfigType {
         let Some(mut view) = self.block_def.meta.get("view").and_then(|v| v.as_str()).map(str::to_owned) else {
             return;
         };
-        if let Some((_, _, to)) = MOVED_SECTIONS.iter().find(|(from, id, _)| *from == view && *id == self.section) {
+        if let Some((_, _, to, to_section)) = MOVED_SECTIONS.iter().find(|(from, id, _, _)| *from == view && *id == self.section) {
             view = (*to).to_owned();
             self.block_def.meta.insert("view".to_owned(), Value::String(view.clone()));
+            match to_section {
+                Some(section) => self.section = (*section).to_owned(),
+                None => {
+                    self.section.clear();
+                    return;
+                }
+            }
         }
         let (id, sub) = match self.section.split_once('/') {
             Some((id, sub)) => (id.to_owned(), Some(sub.to_owned())),
