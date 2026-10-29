@@ -368,6 +368,10 @@ describe("Maintenance on a Microsoft Store install", () => {
         expect(screen.queryByRole("button", { name: /Get v0\.58\.0/ })).toBeNull();
         expect(screen.queryByRole("button", { name: "Download" })).toBeNull();
         expect(openLink).not.toHaveBeenCalled();
+        // It says what to do instead, and links the page that explains it.
+        expect(screen.getByText(/install v0\.58\.0 from GitHub first/)).toBeTruthy();
+        fireEvent.click(screen.getByRole("button", { name: "How to move off the Store build" }));
+        expect(openLink).toHaveBeenCalledWith("https://docs.agentmux.ai/installation/#moving-off-the-microsoft-store-build");
     });
 
     it("other installs keep their Download button and no Store note", async () => {
