@@ -63,13 +63,22 @@ pub fn needs(_action: &str) -> &'static [&'static str] {
     &["gmail.readonly", "gmail.modify", "gmail.metadata"]
 }
 
+/// Google's full-mail scope, which every Gmail action accepts. AgentMux never asks for it, but an
+/// account connected with it elsewhere has it.
+const FULL_MAIL: &str = "https://mail.google.com/";
+
+/// Whether `granted` (full scope URLs, or bare names) has the Gmail scope `name` (`gmail.readonly`,
+/// ...), or the full-mail scope that covers them all.
+pub(super) fn has_scope(granted: &[String], name: &str) -> bool {
+    granted.iter().any(|g| g == FULL_MAIL || g.strip_prefix(SCOPE_PREFIX).unwrap_or(g) == name)
+}
+
 /// Whether `granted` (full scope URLs, or bare names) covers `action`. `gmail.metadata` can't
 /// search or read bodies, so it covers `list_labels` alone.
 pub fn granted_for(action: &str, granted: &[String]) -> bool {
-    let has = |n: &str| granted.iter().any(|g| g.strip_prefix(SCOPE_PREFIX).unwrap_or(g) == n);
     match action {
-        "list_labels" => needs(action).iter().any(|n| has(n)),
-        _ => has("gmail.readonly") || has("gmail.modify"),
+        "list_labels" => needs(action).iter().any(|n| has_scope(granted, n)),
+        _ => has_scope(granted, "gmail.readonly") || has_scope(granted, "gmail.modify"),
     }
 }
 

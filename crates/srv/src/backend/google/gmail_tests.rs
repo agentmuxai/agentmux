@@ -199,3 +199,10 @@ fn html_with_thousands_of_style_tags_is_read_in_one_pass_and_an_unclosed_script_
     assert_eq!(html_text("<DIV>a</DIV><STYLE>p{}</STYLE>b").trim(), "a
 b");
 }
+
+#[test]
+fn the_full_mail_scope_covers_every_read() {
+    for a in READ_ACTIONS {
+        assert!(granted_for(a, &["https://mail.google.com/".to_string()]), "{a}");
+    }
+}
