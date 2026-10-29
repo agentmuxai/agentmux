@@ -1164,6 +1164,7 @@ pub async fn run_sysinfo_loop(
         SCHEDULER_COALESCE_MS,
     );
     let mut watched = false;
+    let mut late_ticks = crate::backend::sampler::late_tick::LateTickLog::default();
     let mut current_interval = get_interval_secs(&config_watcher);
     sched.lease(HOLDER_TELEMETRY, SourceId::Machine, (current_interval * 1000.0) as u64, None, 0);
     sched.lease(HOLDER_JANITOR, SourceId::Panes, PANE_JANITOR_MS, None, 0);
@@ -1196,7 +1197,11 @@ pub async fn run_sysinfo_loop(
         if wake > now_ms {
             tokio::time::sleep_until(tokio::time::Instant::from_std(epoch + Duration::from_millis(wake))).await;
         }
-        let due = sched.due(since_epoch(Instant::now()));
+        let woke_ms = since_epoch(Instant::now());
+        if let Some(late) = late_ticks.check(wake, woke_ms) {
+            tracing::warn!(late_ms = late.late_ms, also_late = late.also, "sysinfo: a tick ran late; a chart breaks after 3 s without a sample");
+        }
+        let due = sched.due(woke_ms);
 
         if due.contains(&SourceId::Machine) {
             let run_started = Instant::now();
