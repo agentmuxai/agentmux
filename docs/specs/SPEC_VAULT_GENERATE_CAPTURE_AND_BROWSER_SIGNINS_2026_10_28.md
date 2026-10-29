@@ -1,6 +1,6 @@
 # SPEC: secrets nobody types. The Vault generates, captures, delivers and rotates them, and the browser saves, generates and fills sign-ins
 
-**Status:** Approved 2026-10-29. The operator's words, relayed by AgentY: "yes, password spec looks good, proceed". The recommended answers in §12 stand. Spec task #6760; build #6761, one PR per phase in §11's order.
+**Status:** active. Approved 2026-10-29; V1 is built. The operator's words, relayed by AgentY: "yes, password spec looks good, proceed". The recommended answers in §12 stand. Spec task #6760; build #6761, one PR per phase in §11's order.
 **Author:** Agent2-6 (Vault). **Browser side reviewed by:** Korp, 2026-10-29 (§13); corrections folded in.
 **Verified on:** `main` at `38d929fe6` (2026-10-28).
 **Extends:** `SPEC_VAULT_PANE_AGENTS_USE_SECRETS_UNSEEN_2026_10_19.md` (the Vault spec, "the Vault spec" below), and folds in its P8 (#133, "agents typing secrets they hold, or filling saved passwords").
