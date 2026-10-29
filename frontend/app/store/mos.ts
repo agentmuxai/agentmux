@@ -365,6 +365,49 @@ function updateMuxObject(update: MuxObjUpdate) {
     wov.holdTime = Date.now() + defaultHoldTime;
 }
 
+/**
+ * Re-fetch every cached object still in use and keep what is newer than the cache, for after
+ * srv dropped events for this window (`ws:eventsdropped`, store/resync.ts): the window is as
+ * stale as the last update it got. A fetched object only replaces the cached one when its
+ * version is higher, so a push that landed while the fetch was in flight is not overwritten;
+ * one srv no longer has (a dropped delete) is cleared. Fetches run a few at a time, since the
+ * machine that dropped events is one that is already struggling. Returns how many changed.
+ */
+async function resyncMuxObjects(concurrency = 4): Promise<number> {
+    const now = Date.now();
+    const orefs: string[] = [];
+    for (const [oref, wov] of muxObjectValueCache) {
+        if (wov.getData().value != null && (wov.refCount > 0 || wov.holdTime > now)) orefs.push(oref);
+    }
+    const fresh = new Map<string, MuxObj | null>();
+    let next = 0;
+    const worker = async () => {
+        while (next < orefs.length) {
+            const oref = orefs[next++];
+            try {
+                fresh.set(oref, await GetObject<MuxObj>(oref));
+            } catch (err) {
+                if (err instanceof Error && err.message.includes("not found: " + oref)) fresh.set(oref, null);
+                // Any other failure says nothing about the object: keep what is cached.
+            }
+        }
+    };
+    await Promise.all(Array.from({ length: Math.min(concurrency, orefs.length) }, worker));
+    let changed = 0;
+    batch(() => {
+        for (const [oref, val] of fresh) {
+            const wov = muxObjectValueCache.get(oref);
+            const cur = wov?.getData().value;
+            if (wov == null || cur == null) continue;
+            if (val == null || val.version > cur.version) {
+                wov.setData({ value: val, loading: false });
+                changed++;
+            }
+        }
+    });
+    return changed;
+}
+
 function updateMuxObjects(vals: MuxObjUpdate[]) {
     // batch() so a single RPC response carrying multiple related updates
     // (e.g. CloseTab's [delete Tab, update Workspace] pair) applies as one
@@ -439,6 +482,7 @@ export {
     loadAndPinMuxObject,
     makeORef,
     reloadMuxObject,
+    resyncMuxObjects,
     setObjectValue,
     updateMuxObject,
     updateMuxObjects,

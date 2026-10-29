@@ -7,6 +7,7 @@
 
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
@@ -57,6 +58,72 @@ const BACKGROUND_LANE_CAPACITY: usize = 256;
 pub struct WsReceivers {
     pub priority: tokio::sync::mpsc::Receiver<serde_json::Value>,
     pub background: tokio::sync::mpsc::Receiver<serde_json::Value>,
+    /// What the connection's lanes dropped; the egress loop reports it (`server/ws_resync.rs`).
+    pub drops: Arc<LaneDrops>,
+}
+
+/// One lane's drops, for the log: a full lane drops one event per publish, so a stalled window
+/// logged 768 lines a minute (narko, 0.60.6) while saying neither which lane nor which event.
+#[derive(Default)]
+struct LaneCount {
+    since_warn: AtomicU64,
+    last_warn_ms: AtomicU64,
+}
+
+/// A warn about a full lane at most this often per connection and lane.
+const DROP_WARN_EVERY_MS: u64 = 5_000;
+
+/// What one connection's lanes have dropped because its consumer wasn't keeping up.
+///
+/// A dropped priority event is state the window never got (an object update, a block's
+/// output, an agent event), so the egress loop tells the window with `ws:eventsdropped` and the
+/// window re-fetches what it shows. A dropped background event is a telemetry reading the
+/// next one replaces, so it is only counted.
+#[derive(Default)]
+pub struct LaneDrops {
+    priority: LaneCount,
+    background: LaneCount,
+    /// Priority events dropped since the window was last told.
+    unreported: AtomicU64,
+}
+
+impl LaneDrops {
+    /// Count one dropped event; `Some(n)` when a warn is due, with the `n` dropped since the last.
+    fn record(&self, lane: Lane, now_ms: u64) -> Option<u64> {
+        let count = match lane {
+            Lane::Priority => {
+                self.unreported.fetch_add(1, Ordering::Relaxed);
+                &self.priority
+            }
+            Lane::Background => &self.background,
+        };
+        count.since_warn.fetch_add(1, Ordering::Relaxed);
+        let last = count.last_warn_ms.load(Ordering::Relaxed);
+        if now_ms.saturating_sub(last) < DROP_WARN_EVERY_MS
+            || count.last_warn_ms.compare_exchange(last, now_ms, Ordering::Relaxed, Ordering::Relaxed).is_err()
+        {
+            return None;
+        }
+        Some(count.since_warn.swap(0, Ordering::Relaxed))
+    }
+
+    /// Whether the window has missed priority events it hasn't been told about.
+    pub fn has_unreported(&self) -> bool {
+        self.unreported.load(Ordering::Relaxed) > 0
+    }
+
+    /// The priority events dropped since the last call; the window is told about them now.
+    pub fn take_unreported(&self) -> u64 {
+        self.unreported.swap(0, Ordering::Relaxed)
+    }
+}
+
+/// The `ws:eventsdropped` event: srv dropped events for this window (its WebSocket lane was
+/// full), so what it shows may be stale. The window re-fetches what it shows.
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct EventsDroppedEvent {
+    pub dropped: u32,
 }
 
 // ---- Types ----
@@ -77,6 +144,7 @@ struct WindowWatchData {
     background: tokio::sync::mpsc::Sender<serde_json::Value>,
     #[allow(dead_code)]
     tab_id: String,
+    drops: Arc<LaneDrops>,
 }
 
 impl WindowWatchData {
@@ -105,6 +173,7 @@ impl EventBus {
     pub fn register_ws(&self, conn_id: &str, tab_id: &str) -> WsReceivers {
         let (priority_tx, priority_rx) = tokio::sync::mpsc::channel(PRIORITY_LANE_CAPACITY);
         let (background_tx, background_rx) = tokio::sync::mpsc::channel(BACKGROUND_LANE_CAPACITY);
+        let drops = Arc::new(LaneDrops::default());
         let mut watches = self.watches.lock().unwrap();
         watches.insert(
             conn_id.to_string(),
@@ -112,11 +181,13 @@ impl EventBus {
                 priority: priority_tx,
                 background: background_tx,
                 tab_id: tab_id.to_string(),
+                drops: drops.clone(),
             },
         );
         WsReceivers {
             priority: priority_rx,
             background: background_rx,
+            drops,
         }
     }
 
@@ -172,7 +243,7 @@ impl EventBus {
     pub fn send_value_to_conn_lane(&self, conn_id: &str, data: serde_json::Value, lane: Lane) {
         let watches = self.watches.lock().unwrap();
         if let Some(watch) = watches.get(conn_id) {
-            Self::try_send_lane(conn_id, watch.sender(lane), data);
+            Self::try_send_lane(conn_id, watch, lane, data);
         }
     }
 
@@ -262,7 +333,7 @@ impl EventBus {
     pub fn broadcast_value_lane(&self, data: serde_json::Value, lane: Lane) {
         let watches = self.watches.lock().unwrap();
         for (conn_id, watch) in watches.iter() {
-            Self::try_send_lane(conn_id, watch.sender(lane), data.clone());
+            Self::try_send_lane(conn_id, watch, lane, data.clone());
         }
     }
 
@@ -270,18 +341,19 @@ impl EventBus {
     /// (stalled/hidden-renderer consumer — see `PRIORITY_LANE_CAPACITY` /
     /// `BACKGROUND_LANE_CAPACITY`) vs. a closed one (connection already
     /// gone). Never blocks the caller — callers hold the `watches` lock.
-    fn try_send_lane(
-        conn_id: &str,
-        sender: &tokio::sync::mpsc::Sender<serde_json::Value>,
-        data: serde_json::Value,
-    ) {
-        match sender.try_send(data) {
+    fn try_send_lane(conn_id: &str, watch: &WindowWatchData, lane: Lane, data: serde_json::Value) {
+        match watch.sender(lane).try_send(data) {
             Ok(()) => {}
-            Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
-                tracing::warn!(
-                    "ws egress lane full for conn {} — consumer stalled, dropping event",
-                    conn_id
-                );
+            Err(tokio::sync::mpsc::error::TrySendError::Full(dropped)) => {
+                if let Some(n) = watch.drops.record(lane, agentmux_common::time::now_ms() as u64) {
+                    tracing::warn!(
+                        "ws egress {:?} lane full for conn {} — consumer stalled, dropped {} events (latest: {})",
+                        lane,
+                        conn_id,
+                        n,
+                        dropped_event_name(&dropped)
+                    );
+                }
             }
             Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
                 tracing::warn!("failed to send event to conn {}", conn_id);
@@ -302,7 +374,7 @@ impl EventBus {
         let watches = self.watches.lock().unwrap();
         for (conn_id, watch) in watches.iter() {
             if watch.tab_id == tab_id {
-                Self::try_send_lane(conn_id, watch.sender(Lane::Priority), data.clone());
+                Self::try_send_lane(conn_id, watch, Lane::Priority, data.clone());
             }
         }
     }
@@ -317,6 +389,12 @@ impl Default for EventBus {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// The name of a queued frame, for the log: the broker event inside an RPC `eventrecv`, else the
+/// frame's own `eventtype`.
+fn dropped_event_name(frame: &serde_json::Value) -> &str {
+    frame["data"]["data"]["event"].as_str().or_else(|| frame["eventtype"].as_str()).unwrap_or("?")
 }
 
 /// Bridge from MPS Broker to EventBus.
@@ -616,5 +694,66 @@ mod tests {
         assert_eq!(got["eventtype"], "rpc");
         assert_eq!(got["data"]["command"], "eventrecv");
         assert_eq!(got["data"]["data"]["data"]["k"], "v");
+    }
+
+    fn update_frame(n: usize) -> WSEventType {
+        WSEventType { eventtype: "waveobj:update".into(), oref: format!("block:{n}"), data: None }
+    }
+
+    /// A stalled window: the priority lane fills and every later event is dropped. The window
+    /// must be able to learn it missed them (`take_unreported`), and the log must not carry one
+    /// line per dropped event (narko logged 768 a minute).
+    #[test]
+    fn a_full_priority_lane_is_counted_so_the_window_can_be_told() {
+        let bus = EventBus::new();
+        let rx = bus.register_ws("conn-1", "tab-1"); // never drained: the consumer is stalled
+        assert!(!rx.drops.has_unreported());
+        let sent = PRIORITY_LANE_CAPACITY + 1_808;
+        for n in 0..sent {
+            bus.send_to_conn_lane("conn-1", &update_frame(n), Lane::Priority);
+        }
+        assert!(rx.drops.has_unreported());
+        assert_eq!(rx.drops.take_unreported(), 1_808);
+        assert!(!rx.drops.has_unreported(), "taking the count tells the window once");
+    }
+
+    /// Telemetry readings are replaced by the next one: dropping them must not make the window
+    /// re-fetch anything.
+    #[test]
+    fn a_full_background_lane_is_not_a_missed_event() {
+        let bus = EventBus::new();
+        let rx = bus.register_ws("conn-1", "tab-1");
+        for n in 0..BACKGROUND_LANE_CAPACITY + 50 {
+            bus.send_to_conn_lane("conn-1", &update_frame(n), Lane::Background);
+        }
+        assert!(!rx.drops.has_unreported());
+    }
+
+    #[test]
+    fn drops_warn_once_per_window_and_say_how_many() {
+        let d = LaneDrops::default();
+        let t0 = 1_000_000;
+        assert_eq!(d.record(Lane::Priority, t0), Some(1), "the first drop warns at once");
+        let quiet = (1..1_808).filter_map(|i| d.record(Lane::Priority, t0 + i % 4_000)).count();
+        assert_eq!(quiet, 0, "no more warns inside {DROP_WARN_EVERY_MS} ms");
+        assert_eq!(d.record(Lane::Priority, t0 + DROP_WARN_EVERY_MS), Some(1_808), "then one, with the count");
+        // The lanes are counted apart.
+        assert_eq!(d.record(Lane::Background, t0 + 10), Some(1));
+    }
+
+    #[test]
+    fn a_dropped_event_is_named_in_the_log() {
+        let rpc = rpc_eventrecv_value(&MuxEvent {
+            event: "agent:status".into(),
+            scopes: vec![],
+            sender: String::new(),
+            persist: 0,
+            data: None,
+        })
+        .unwrap();
+        assert_eq!(dropped_event_name(&rpc), "agent:status");
+        let raw = serde_json::to_value(update_frame(1)).unwrap();
+        assert_eq!(dropped_event_name(&raw), "waveobj:update");
+        assert_eq!(dropped_event_name(&serde_json::json!({})), "?");
     }
 }
