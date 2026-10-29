@@ -51,7 +51,7 @@ pub(crate) async fn record_running_at_exit(state: &AppState, ids: &[String]) {
         let Ok(blocks) = super::app_api::agent_block::blocks_in_tabs_or_parked(&st.mstore) else {
             return Vec::new();
         };
-        let mut uids: Vec<String> = blocks
+        let uids: Vec<String> = blocks
             .into_iter()
             .filter(|(block, tab)| tab.is_none() && ids.contains(&block.oid))
             .filter(|(block, _)| blockcontroller::get_controller(&block.oid).is_some_and(|c| c.get_runtime_status().shellprocstatus == blockcontroller::STATUS_RUNNING))
@@ -64,7 +64,7 @@ pub(crate) async fn record_running_at_exit(state: &AppState, ids: &[String]) {
     .unwrap_or_default();
     let running = with_pending(running, &PENDING.lock().unwrap_or_else(|e| e.into_inner()));
     if let Some(paths) = agentmux_common::DataPaths::from_env() {
-        write_running(&paths.instance_dir, &running);
+        save_exit_snapshot(&EXIT_SNAPSHOT, &paths.instance_dir, &running);
     }
 }
 
@@ -104,6 +104,27 @@ fn clear_running(dir: &Path) {
     let _ = std::fs::remove_file(dir.join(RUNNING_FILE));
 }
 
+/// Whether this run's exit has already written its own list. Held while the file is written or
+/// removed, so the resume's cleanup and an exit's write never interleave.
+static EXIT_SNAPSHOT: Mutex<bool> = Mutex::new(false);
+
+/// An exit's list: written, and from now on the resume's cleanup leaves the file alone (an exit that
+/// overlaps the delayed resume would otherwise lose the list it just saved).
+fn save_exit_snapshot(recorded: &Mutex<bool>, dir: &Path, uids: &[String]) {
+    let mut recorded = recorded.lock().unwrap_or_else(|e| e.into_inner());
+    write_running(dir, uids);
+    *recorded = true;
+}
+
+/// The resume has run, so the list this start read is spent: removed unless an exit has written
+/// its own list since, which is the next start's.
+fn spend_start_snapshot(recorded: &Mutex<bool>, dir: &Path) {
+    let recorded = recorded.lock().unwrap_or_else(|e| e.into_inner());
+    if !*recorded {
+        clear_running(dir);
+    }
+}
+
 /// Resume once, [`DELAY`] after startup.
 pub(crate) fn install(state: &AppState) {
     let state = state.clone();
@@ -117,7 +138,7 @@ pub(crate) fn install(state: &AppState) {
         let n = run_once_with(&state, &running_at_exit).await;
         PENDING.lock().unwrap_or_else(|e| e.into_inner()).clear();
         if let Some(dir) = &dir {
-            clear_running(dir);
+            spend_start_snapshot(&EXIT_SNAPSHOT, dir);
         }
         if n > 0 {
             tracing::info!(resumed = n, "restart resume: started the parked agents that were running");

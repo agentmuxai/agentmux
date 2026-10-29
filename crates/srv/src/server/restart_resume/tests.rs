@@ -299,6 +299,28 @@ fn the_agents_running_at_exit_stay_on_file_until_the_resume_has_run() {
 }
 
 #[test]
+fn an_exit_that_overlaps_the_resume_keeps_its_own_list() {
+    let dir = tempfile::tempdir().unwrap();
+    // No exit meanwhile: the resume spends the list this start read.
+    let recorded = Mutex::new(false);
+    write_running(dir.path(), &["a".to_string()]);
+    spend_start_snapshot(&recorded, dir.path());
+    assert!(read_running(dir.path()).is_empty(), "spent");
+    // An exit writes its list while the delayed resume is still going; the resume's cleanup then
+    // arrives and must not delete the next start's list.
+    let recorded = Mutex::new(false);
+    write_running(dir.path(), &["a".to_string()]);
+    save_exit_snapshot(&recorded, dir.path(), &["a".to_string(), "b".to_string()]);
+    spend_start_snapshot(&recorded, dir.path());
+    assert_eq!(read_running(dir.path()), vec!["a".to_string(), "b".to_string()]);
+    // An exit with nothing running still removes the file, and still counts as the exit's write.
+    let recorded = Mutex::new(false);
+    save_exit_snapshot(&recorded, dir.path(), &[]);
+    assert!(read_running(dir.path()).is_empty());
+    assert!(*recorded.lock().unwrap());
+}
+
+#[test]
 fn an_exit_before_the_resume_ran_carries_the_agents_still_waiting() {
     let running = vec!["c".to_string(), "a".to_string()];
     let pending = vec!["b".to_string(), "a".to_string()];
