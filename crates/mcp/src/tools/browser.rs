@@ -62,13 +62,14 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 ""
             };
             // What srv says the pane browses as; for an older srv that doesn't say, what was asked for.
-            let browsing_as = match body.get("data").and_then(|d| d.get("browsing_as")).and_then(|b| b.as_str()).or(profile.as_deref()) {
-                Some("incognito") => {
+            let said = body.get("data").and_then(|d| d.get("browsing_as")).and_then(|b| b.as_str()).or(profile.as_deref()).unwrap_or("");
+            let browsing_as = match said {
+                "" => String::new(),
+                s if s.eq_ignore_ascii_case("incognito") => {
                     " It browses Incognito: signed in nowhere, and what it keeps is gone when it closes.".to_string()
                 }
-                Some("personal") => " It browses as the user's own Personal profile, with their sign-ins.".to_string(),
-                Some(p) => format!(" It browses as the user's {:?} profile.", p.strip_prefix("profile:").unwrap_or(p)),
-                None => String::new(),
+                s if s.eq_ignore_ascii_case("personal") => " It browses as the user's own Personal profile, with their sign-ins.".to_string(),
+                p => format!(" It browses as the user's {:?} profile.", p.strip_prefix("profile:").unwrap_or(p)),
             };
             Ok(format!(
                 "Opened a browser pane at {url:?}.{browsing_as}{limit} Its pane id is {pane}: pass pane: \"{pane}\" to \
