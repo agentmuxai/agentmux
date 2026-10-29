@@ -92,10 +92,21 @@ fn uid_of(state: &AppState, named: &str, what: &str) -> Result<String, Refusal> 
 /// The agents on other machines this one sees on the LAN, as `Name@host`: the leads a seat may name
 /// besides this machine's own agents.
 fn known_remote_agents(state: &AppState) -> Vec<String> {
+    let peers = state.lan_discovery.get_instances().into_iter().map(|lan| (lan.hostname, lan.agents));
+    remote_agents_on(peers, &crate::backend::reactive::registry::local_host_label())
+}
+
+/// `peers` (host, agent names) as `Name@host`, without the ones on `own_host`: another channel on this
+/// machine shares its agents, which are named by their local id, and `Name@host` would only be a second
+/// spelling of a local agent that the self-lead and cycle checks do not see.
+fn remote_agents_on(peers: impl IntoIterator<Item = (String, Vec<String>)>, own_host: &str) -> Vec<String> {
     let mut known: Vec<String> = Vec::new();
-    for lan in state.lan_discovery.get_instances() {
-        for name in &lan.agents {
-            let agent = format!("{name}@{}", lan.hostname);
+    for (host, agents) in peers {
+        if host.trim().eq_ignore_ascii_case(own_host.trim()) {
+            continue;
+        }
+        for name in &agents {
+            let agent = format!("{name}@{host}");
             if !known.contains(&agent) {
                 known.push(agent);
             }

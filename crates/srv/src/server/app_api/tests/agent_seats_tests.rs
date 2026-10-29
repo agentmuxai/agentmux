@@ -191,6 +191,18 @@ async fn a_lead_on_another_machine_is_accepted_when_the_lan_lists_it_and_shown_a
     assert!(body["error"].as_str().unwrap().contains("Known now: none right now"), "{body}");
 }
 
+/// A sibling channel on this machine is on the LAN list too, but its agents are this machine's own: they
+/// are named by their local id, not offered as `Name@host`.
+#[test]
+fn an_agent_on_this_host_is_not_a_remote_lead() {
+    let peers = vec![
+        ("narko".to_string(), vec!["AgentY".to_string(), "AgentX".to_string()]),
+        ("Area54".to_string(), vec!["Manoz".to_string()]),
+        ("starpower".to_string(), vec!["Manoz".to_string()]),
+    ];
+    assert_eq!(remote_agents_on(peers, "area54"), vec!["AgentY@narko", "AgentX@narko", "Manoz@starpower"]);
+}
+
 /// The answer for a batch doesn't depend on the order of its changes: it is
 /// judged against the leads as they will stand once every change is written.
 #[tokio::test]
