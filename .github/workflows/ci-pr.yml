@@ -530,7 +530,10 @@ jobs:
           }
       - uses: Swatinem/rust-cache@v2
         with:
-          key: all
+          # The key the single Windows job used (`all` + the job id `rust-windows`),
+          # spelled out: the default would add this job's own id, so the build would
+          # miss main's warm cache and compile ~420 crates (18 min instead of 11).
+          shared-key: all-rust-windows
           # While tests fail the job is red; without this the cache would never
           # be saved and every run would build cold (~10 min).
           cache-on-failure: true
@@ -627,7 +630,8 @@ jobs:
           }
       - uses: Swatinem/rust-cache@v2
         with:
-          key: host
+          # As above: the old matrix leg's key, so main's warm cache is found.
+          shared-key: host-rust-windows
           cache-on-failure: true
       - name: Install cargo-nextest
         uses: taiki-e/install-action@nextest
