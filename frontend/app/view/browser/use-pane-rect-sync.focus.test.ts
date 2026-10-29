@@ -19,6 +19,7 @@ vi.stubGlobal(
     "ResizeObserver",
     class {
         observe() {}
+        unobserve() {}
         disconnect() {}
     },
 );
