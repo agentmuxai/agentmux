@@ -2261,7 +2261,7 @@ pub(super) struct RegistrationFlag {
 }
 
 /// `reactive.registration_flags`: the agents with a registration problem, for the Swarm's row badge
-/// (docs/specs/SPEC_WARDEN_SPLIT_INTO_VAULT_HISTORY_AUDIT_2026_10_28.md §5). A healthy agent is not
+/// (the Warden split spec, #5776). A healthy agent is not
 /// listed, so one call every few seconds covers every row.
 #[derive(serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
