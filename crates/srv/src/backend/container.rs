@@ -2077,7 +2077,7 @@ mod tests {
         // Simulate a real registration (what `handle_register_dev_server`
         // does) so we can prove `remove` actually clears it below.
         let addr: std::net::SocketAddr = format!("{ip}:3000").parse().expect("valid addr");
-        registry.register("itest-proj", "itest-devproxy", addr).await;
+        registry.register_from("itest-proj", "itest-devproxy", Some(name), addr).await;
         assert_eq!(
             registry.lookup("itest-proj-itest-devproxy").await,
             Some(addr.into()),

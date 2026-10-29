@@ -235,6 +235,8 @@ pub async fn start(cm: &ContainerManager, spec: &Spec) -> Result<(), String> {
         .ok()
         .map(|c| format!("{}@{}", c.id.unwrap_or_default(), c.state.and_then(|s| s.started_at).unwrap_or_default()))
         .unwrap_or_default();
+    // And what was started: another port, command or folder is a different launch, not one still starting.
+    let incarnation = format!("{incarnation}|{}|{}|{}", spec.port, spec.command, spec.dir);
     if cm.port_listening(&spec.container, spec.port).await || started_recently(&spec.container, &spec.project, &incarnation, false) {
         return Ok(());
     }
@@ -477,6 +479,10 @@ mod tests {
         bring_up(&cm, &spec).await.expect("started");
         assert!(cm.port_listening(name, 7000).await);
         bring_up(&cm, &spec).await.expect("already up: nothing is started twice");
+        // The same project on another port straight away is another launch, not the first one still starting.
+        let moved = Spec { port: 7001, command: spec.command.replace("7000", "7001"), ..spec.clone() };
+        bring_up(&cm, &moved).await.expect("the new port is started at once");
+        assert!(cm.port_listening(name, 7001).await);
         // The container is recreated: the server is gone, and comes back.
         fresh(docker, image, name, network).await;
         assert!(!cm.port_listening(name, 7000).await, "a recreated container starts empty");
