@@ -103,6 +103,20 @@ describe("package-lock.json", () => {
     it("refuses a registry package at a new version", () => {
         expect(packageLockVersionOnly(lock("0.60.6"), lock("0.60.7", { left: "1.0.1" }))).toBe(false);
     });
+    it("refuses a dependency under node_modules even when it has no resolved or integrity", () => {
+        const stripped = (v) => {
+            const l = JSON.parse(lock("0.60.7"));
+            l.packages["node_modules/left"] = { version: v };
+            return JSON.stringify(l);
+        };
+        expect(packageLockVersionOnly(stripped("1.0.0"), stripped("1.0.1"))).toBe(false);
+        const nested = (v) => {
+            const l = JSON.parse(lock("0.60.7"));
+            l.packages["packages/sdk/node_modules/left"] = { version: v };
+            return JSON.stringify(l);
+        };
+        expect(packageLockVersionOnly(nested("1.0.0"), nested("1.0.1"))).toBe(false);
+    });
     it("refuses a new dependency entry", () => {
         const next = JSON.parse(lock("0.60.7"));
         next.packages["node_modules/evil"] = { version: "1.0.0", resolved: "https://example.test/evil.tgz", integrity: "sha512-y" };
@@ -119,6 +133,13 @@ describe("Cargo.toml", () => {
     });
     it("refuses an added line", () => {
         expect(cargoTomlVersionOnly(cargoToml("0.60.6"), `${cargoToml("0.60.7")}extra = 1\n`)).toBe(false);
+    });
+    it("reads a table header that has a trailing comment, so a dependency's version is still refused", () => {
+        const base = '[package]\nname = "a"\nversion = "0.1.0"\n\n[dependencies.serde] # pinned\nversion = "1.0.0"\n';
+        expect(cargoTomlVersionOnly(base, base.replace('"1.0.0"', '"1.0.1"'))).toBe(false);
+        expect(cargoTomlVersionOnly(base, base.replace('"0.1.0"', '"0.1.1"'))).toBe(true);
+        const odd = '[package]\nversion = "0.1.0"\n\n[dependencies."x[1]"]\nversion = "1.0.0"\n';
+        expect(cargoTomlVersionOnly(odd, odd.replace('"1.0.0"', '"1.0.1"'))).toBe(false);
     });
 });
 

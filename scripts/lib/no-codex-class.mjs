@@ -95,14 +95,19 @@ export function packageJsonVersionOnly(base, head) {
     return deepEqual(restA, restB);
 }
 
-/** A local package is an entry with no registry `resolved` URL, no bundle flag and no link. */
-const isLocalPackage = (entry) => isObject(entry) && entry.resolved === undefined && !entry.inBundle && !entry.link;
+/**
+ * A local package is the root ("") or an entry outside node_modules (a workspace member), with no
+ * registry `resolved` URL, no bundle flag and no link. Anything under node_modules is a dependency,
+ * whatever keys it has or lacks.
+ */
+const isLocalPackage = (key, entry) =>
+    isObject(entry) && entry.resolved === undefined && !entry.inBundle && !entry.link && (key === "" || !key.split("/").includes("node_modules"));
 
 function withoutLocalVersions(lock) {
     const packages = {};
     let changedKeys = 0;
     for (const [key, entry] of Object.entries(lock.packages ?? {})) {
-        if (isLocalPackage(entry) && "version" in entry) {
+        if (isLocalPackage(key, entry) && "version" in entry) {
             const { version: _v, ...rest } = entry;
             packages[key] = rest;
             changedKeys += 1;
@@ -119,7 +124,11 @@ export function packageLockVersionOnly(base, head) {
     const a = parseJson(base);
     const b = parseJson(head);
     if (!a || !b || a.lockfileVersion === undefined || a.lockfileVersion !== b.lockfileVersion) return false;
-    const versions = [a.version, b.version, ...Object.values(b.packages ?? {}).filter(isLocalPackage).map((e) => e.version)];
+    const versions = [
+        a.version,
+        b.version,
+        ...Object.entries(b.packages ?? {}).filter(([k, e]) => isLocalPackage(k, e)).map(([, e]) => e.version),
+    ];
     if (versions.some((v) => v !== undefined && !SEMVER_RE.test(String(v)))) return false;
     return deepEqual(withoutLocalVersions(a).rest, withoutLocalVersions(b).rest);
 }
@@ -134,8 +143,12 @@ export function cargoTomlVersionOnly(base, head) {
     let table = "";
     let changed = 0;
     for (let i = 0; i < b.length; i++) {
-        const header = /^\s*\[\[?([^\]]+)\]\]?\s*$/.exec(b[i]);
-        if (header) table = header[1].trim();
+        // Any line that opens with a bracket may start a table: one this can't read (a trailing
+        // comment, an odd form) leaves the table unknown, and nothing is accepted under an unknown table.
+        if (/^\s*\[/.test(b[i])) {
+            const header = /^\s*\[\[?([^\]]+)\]\]?\s*(#.*)?$/.exec(b[i]);
+            table = header ? header[1].trim() : "?";
+        }
         if (a[i] === b[i]) continue;
         if (table !== "package" && table !== "workspace.package") return false;
         if (!CARGO_VERSION_LINE.test(a[i]) || !CARGO_VERSION_LINE.test(b[i])) return false;
