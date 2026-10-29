@@ -148,6 +148,7 @@ pub(super) async fn spawn_many(
     // that has to be started for its brief is charged when the brief is delivered, as for one worker.
     crate::server::agent_lifecycle::admit_batch(state, &wanted, true).await.map_err(|e| refuse(StatusCode::CONFLICT, e))?;
 
+    let tab_id = super::team::team_tab(state, &leader, &tab_id).await;
     let mut launched: Vec<(AgentDefinition, AgentOpenResult)> = Vec::with_capacity(n);
     // The names the batch asked for: a generated name must not take one a later worker named.
     let asked: std::collections::HashSet<String> = planned.iter().filter_map(|p| p.name.as_ref()).map(|n| n.to_lowercase()).collect();

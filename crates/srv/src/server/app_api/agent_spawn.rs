@@ -26,6 +26,7 @@ use agentmux_common::api_types::SpawnAgentRequest;
 use super::*;
 
 mod many;
+mod team;
 pub(crate) use many::handle_agent_spawn_many;
 
 /// The worker pane's leader, `{agent, id, block_id}`: the leader's name, its
@@ -171,6 +172,7 @@ async fn spawn_with(
         Some(n) => n.to_string(),
         None => next_worker_name(&state.mstore, &leader.def.name, &std::collections::HashSet::new()),
     };
+    let tab_id = team::team_tab(state, &leader, &tab_id).await;
     let (worker, opened) = launch(state, &leader, &name, &tab_id, &runtime, &account, None).await?;
     tracing::info!(
         leader = %leader.def.name,
@@ -788,13 +790,15 @@ async fn open_worker(
         COACHED_BY_META_KEY.to_string(),
         json!({ "agent": leader.def.name, "id": leader.def.id, "block_id": leader.block_id }),
     );
+    let beside = resolve_tab_id_for_block(&state.mstore, &leader.block_id).is_ok_and(|t| t == tab_id);
     super::agent_open::open_agent_inner(
         state,
         CommandAgentOpenData {
             agent_id: worker.id.clone(),
             tab_id: Some(tab_id.to_string()),
-            split_direction: Some("right".to_string()),
-            split_reference_block_id: Some(leader.block_id.clone()),
+            // Beside the leader's pane only when it is in the tab: a team tab has its own layout.
+            split_direction: beside.then(|| "right".to_string()),
+            split_reference_block_id: beside.then(|| leader.block_id.clone()),
             focus: Some(false),
         },
         None,

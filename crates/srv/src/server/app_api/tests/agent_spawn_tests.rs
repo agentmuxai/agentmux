@@ -706,3 +706,34 @@ async fn a_generated_worker_name_skips_the_names_a_batch_asked_for() {
     assert_eq!(next_worker_name(&state.mstore, "Lead", &asked), "Lead worker 2");
     assert_eq!(next_worker_name(&state.mstore, "Lead", &Default::default()), "Lead worker 1");
 }
+
+/// A leader's workers open in "<Leader> team" in the leader's workspace: made the first time, reused
+/// after, one per leader, and the user's own tab is left alone.
+#[tokio::test]
+async fn a_leaders_workers_open_in_its_own_team_tab_made_once() {
+    let state = test_state();
+    let (def, tab, block_id) = seed_leader(&state, "claude", "host", json!({})).await;
+    let leader = leader_in(&state, &def, &block_id);
+
+    let team = team::team_tab(&state, &leader, &tab).await;
+    assert_ne!(team, tab, "not the tab the leader is in");
+    let made: Tab = state.mstore.must_get(&team).unwrap();
+    assert_eq!(made.name, format!("{} team", def.name));
+    let workspace = state.mstore.get_all::<crate::backend::obj::Workspace>().unwrap().into_iter().find(|w| w.tabids.contains(&tab)).unwrap();
+    assert!(workspace.tabids.contains(&team), "in the leader's workspace");
+    assert_eq!(team::team_tab(&state, &leader, &tab).await, team, "the next worker uses it");
+    assert_eq!(workspace.tabids.len(), 2, "one team tab, however many workers");
+
+    let other = test_agent_def("other-id", "Other", "claude", "host", 1, "");
+    let other_leader = Leader { block_id: block_id.clone(), def: other };
+    assert_ne!(team::team_tab(&state, &other_leader, &tab).await, team, "each leader has its own");
+}
+
+/// With no workspace to make a tab in, the worker opens where the leader is, as before.
+#[tokio::test]
+async fn without_a_workspace_to_make_a_team_tab_in_the_worker_opens_beside_the_leader() {
+    let state = test_state();
+    let (def, _tab, block_id) = seed_leader(&state, "claude", "host", json!({})).await;
+    let leader = leader_in(&state, &def, &block_id);
+    assert_eq!(team::team_tab(&state, &leader, "no-such-tab").await, "no-such-tab");
+}
