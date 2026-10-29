@@ -29,6 +29,7 @@ import {
     LayoutTreeSetPendingAction,
     LayoutTreeState,
     LayoutTreeSwapNodeAction,
+    BeforeDeleteHooks,
     NavigateDirection,
     NavigationResult,
     NodeModel,
@@ -182,7 +183,7 @@ export class LayoutModel {
      * (SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md §4.6). `data`
      * is the closing leaf's data, or `{ blockId }` for one stack member.
      */
-    beforeNodeDelete?: (data: TabLayoutData) => Promise<boolean>;
+    beforeNodeDelete?: (data: TabLayoutData, hooks?: BeforeDeleteHooks) => Promise<boolean>;
     /**
      * The size of the gap between nodes in CSS pixels.
      */

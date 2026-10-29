@@ -86,7 +86,7 @@ vi.mock("@/app/store/services", () => ({
     },
 }));
 
-import { revealBlock, showBlockInPane, showBlockWithoutFocus } from "./reveal-block";
+import { findOpenBlockByView, revealBlock, showBlockInPane, showBlockWithoutFocus } from "./reveal-block";
 
 /** A layout model whose one pane holds `members` as tabs. */
 function modelWithPane(nodeId: string, members: string[], magnified?: string, minimized = false) {
@@ -207,6 +207,35 @@ describe("revealBlock in this window only", () => {
             "focusNode:pane",
             "caret:agentB",
         ]);
+    });
+});
+
+describe("findOpenBlockByView — an open pane the component registry does not list", () => {
+    beforeEach(() => {
+        // Block objects share the tab id space of the MOS double.
+        tabs.m1 = { meta: { view: "memory" } } as never;
+        tabs.m2 = { meta: { view: "memory" } } as never;
+        tabs.t1 = { blockids: ["a", "m1"] };
+        tabs.t2 = { blockids: ["agentA", "agentB", "m2"] };
+    });
+
+    it("finds an inactive tab of a pane's stack by its block's view", async () => {
+        expect(await findOpenBlockByView("memory")).toBe("m1");
+    });
+
+    it("prefers the shown window tab, then looks in the others", async () => {
+        win.activeTab = "t2";
+        expect(await findOpenBlockByView("memory")).toBe("m2");
+        tabs.t2 = { blockids: ["agentA", "agentB"] };
+        expect(await findOpenBlockByView("memory")).toBe("m1");
+        win.activeTab = "t1";
+        tabs.t1 = { blockids: ["a"] };
+        tabs.t2 = { blockids: ["agentA", "m2"] };
+        expect(await findOpenBlockByView("memory")).toBe("m2");
+    });
+
+    it("is null when no pane of that view is open", async () => {
+        expect(await findOpenBlockByView("settings")).toBeNull();
     });
 });
 

@@ -44,6 +44,9 @@ import type { LayoutModel } from "./layoutModel";
 import { focusNode } from "./layoutFocus";
 import { closeNode, removeLeafEmptiedByMove } from "./layoutMagnify";
 import { sendStackCommand } from "./layoutPersistence";
+import { beginClosingBlock, endClosingBlock, isBlockClosing } from "./layoutClosing";
+import { afterFrame, closeTraceRing, type CloseTrace } from "./closeTrace";
+import type { BeforeDeleteHooks } from "./types";
 import {
     activateMemberInStack,
     effectiveStack,
@@ -230,10 +233,48 @@ export async function closeBlockInStack(
         return;
     }
 
+    // One tab closes once at a time, and its pill says so from this frame on.
+    if (isBlockClosing(model, blockId)) return;
+    beginClosingBlock(model, blockId);
+    const trace = closeTraceRing.start(`tab ${blockId.slice(0, 4)} of ${stack.length}`);
+    try {
+        await closeTabOfStack(model, nodeId, node.data, blockId, opts, trace);
+    } catch (err) {
+        trace.end("failed");
+        throw err;
+    } finally {
+        trace.end("kept");
+        endClosingBlock(model, blockId);
+    }
+}
+
+async function closeTabOfStack(
+    model: LayoutModel,
+    nodeId: string,
+    nodeData: TabLayoutData,
+    blockId: string,
+    opts: { confirmed?: boolean } | undefined,
+    trace: CloseTrace
+): Promise<void> {
     // Same confirmation as closing the whole pane, scoped to this one tab.
-    let leafData = node.data;
+    let leafData = nodeData;
     if (model.beforeNodeDelete && !opts?.confirmed) {
-        if (!(await model.beforeNodeDelete({ blockId } as TabLayoutData))) return;
+        let probed = false;
+        const hooks: BeforeDeleteHooks = {
+            async asking(answer) {
+                if (!probed) trace.mark("probes");
+                probed = true;
+                endClosingBlock(model, blockId);
+                const yes = await answer;
+                if (yes) beginClosingBlock(model, blockId);
+                trace.mark("prompt");
+                return yes;
+            },
+        };
+        const proceed = await model.beforeNodeDelete({ blockId } as TabLayoutData, hooks);
+        if (!proceed) trace.mark("kept");
+        else if (!probed) trace.mark("probes");
+        if (!proceed) return;
         // The tree may have changed while the prompt was open. Re-find by node
         // id, not object identity (`balanceNode` can swap the object when an
         // unrelated pane closes — reagent P1 on #3422), and act on the
@@ -254,12 +295,20 @@ export async function closeBlockInStack(
     removeMemberFromStack(leafData, blockId);
     model.updateTree(false);
     model.setter(model.localTreeStateAtom, { ...model.treeState });
+    trace.mark("reducer");
+    afterFrame(() => trace.mark("gone"));
     // Out of the stored pane before ClosePane deletes the block.
     await sendStackCommand(model, "pane.removeTab", (action_id) =>
         RpcApi.PaneRemoveTabCommand(TabRpcClient, { block_id: blockId, action_id }, {})
     );
 
-    await model.onNodeDelete?.({ blockId } as TabLayoutData);
+    try {
+        await model.onNodeDelete?.({ blockId } as TabLayoutData);
+        trace.mark("closePane");
+    } catch (err) {
+        trace.mark("failed");
+        throw err;
+    }
 }
 
 /**

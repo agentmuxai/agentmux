@@ -32,6 +32,16 @@ export interface PaneCloseProbe {
 }
 
 /**
+ * The members worth asking srv about before a pane closes: the agents that are not parked. Only an
+ * agent has a turn in progress or tracked processes, so an editor, a terminal or any other pane has
+ * nothing to ask, and a pane of those leaves in the same frame with no round trip
+ * (SPEC_PANE_CLOSING_INDICATOR_AND_FASTER_CLOSE_2026_10_28.md §3).
+ */
+export function membersToProbe(blockIds: string[], isAgent: (blockId: string) => boolean, isParked: (blockId: string) => boolean): string[] {
+    return blockIds.filter((id) => !isParked(id) && isAgent(id));
+}
+
+/**
  * Members that would lose work if the pane closed now. A probe that fails
  * counts as "not busy": a broken status lookup must never make a pane
  * impossible to close.

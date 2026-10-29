@@ -1,0 +1,64 @@
+// Memory → Skills: the agents × skills grid.
+.skill-matrix-scroll {
+    overflow: auto;
+    max-height: 60vh;
+}
+
+.skill-matrix-table {
+    border-collapse: collapse;
+    font-size: var(--text-xs);
+    color: var(--main-text-color);
+
+    th,
+    td {
+        padding: var(--space-1) var(--space-1-5);
+        border-bottom: 1px solid var(--border-color);
+        text-align: left;
+        white-space: nowrap;
+    }
+
+    thead th {
+        position: sticky;
+        top: 0;
+        background: var(--block-bg-color);
+    }
+}
+
+.skill-matrix-corner,
+.skill-matrix-agent {
+    position: sticky;
+    left: 0;
+    background: var(--block-bg-color);
+    max-width: 160px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.skill-matrix-skill-name {
+    display: inline-block;
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    vertical-align: bottom;
+}
+
+.skill-matrix-cell {
+    min-width: 88px;
+
+    &[data-state="bound"] {
+        color: var(--accent-color);
+    }
+
+    &[data-state="reach-all"],
+    &[data-state="reach-new"] {
+        color: var(--success-text-color);
+    }
+
+    &[data-state="opted-out"] {
+        color: var(--error-text-color);
+    }
+
+    &[data-state="none"] {
+        color: var(--secondary-text-color);
+    }
+}

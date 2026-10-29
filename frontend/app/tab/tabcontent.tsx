@@ -9,9 +9,10 @@ import { ModalLayer } from "@/element/ModalLayer";
 import { CenteredDiv } from "@/element/quickelems";
 import logoUrl from "@/app/asset/logo-brain.svg?url";
 import { ContentRenderer, NodeModel, PreviewRenderer, TileLayout } from "@/layout/index";
+import type { BeforeDeleteHooks } from "@/layout/lib/types";
 import { effectiveStack } from "@/layout/lib/layoutStack";
 import { TileLayoutContents } from "@/layout/lib/types";
-import { atoms, createBlock, getApi, getHostName, getUserName, isDev } from "@/store/global";
+import { atoms, createBlock, getApi, getHostName, getUserName, isDev, pushNotification } from "@/store/global";
 import * as services from "@/store/services";
 import * as MOS from "@/store/mos";
 import { buildPaneWidgetMenuItems } from "@/app/window/action-widgets-config";
@@ -20,6 +21,7 @@ import {
     busyMembers,
     closesWithShutdownLog,
     describeBusyMember,
+    membersToProbe,
     type BusyMember,
     type PaneCloseProbe,
 } from "@/app/tab/pane-close-guard";
@@ -62,6 +64,18 @@ const paneCloseProbe: PaneCloseProbe = {
         return (meta?.["agentName"] as string) || (meta?.["agentId"] as string) || "An agent";
     },
 };
+
+/** The quiet notice for a pane that stays open because the person answered No. */
+function notKept(why: string): void {
+    pushNotification({
+        icon: "fa-triangle-exclamation",
+        title: "Not closed",
+        message: why,
+        timestamp: new Date().toISOString(),
+        type: "info",
+        expiration: Date.now() + 5000,
+    });
+}
 
 /** Through the view aliases (legacy "forge" is an agent pane too), as
  *  block.tsx requires — not a raw `meta.view === "agent"` check. */
@@ -173,7 +187,12 @@ function TabContent(props: { tabId: string }): JSX.Element {
         // from removing it now; srv removes it once its agents are down.
         // While agents keep running (the default) a close only takes the pane away: srv parks the
         // agent, so there is no busy prompt and no shutdown log, just a note that it runs on.
-        async function beforeNodeDelete(data: TabLayoutData): Promise<boolean> {
+        //
+        // Only what can be answered is asked: an agent for a turn in progress, a browser for "Leave
+        // site?". Every other pane has nothing to ask, so its close makes no srv call and the pane
+        // leaves in the same frame (SPEC_PANE_CLOSING_INDICATOR_AND_FASTER_CLOSE_2026_10_28.md §3).
+        // `hooks.asking` marks a person's answer being awaited, when the prompt is the indicator.
+        async function beforeNodeDelete(data: TabLayoutData, hooks?: BeforeDeleteHooks): Promise<boolean> {
             const blockIds = effectiveStack(data).filter(Boolean);
             // Already closing (an agent winding down under its shutdown log): a second click
             // neither probes srv again nor asks the prompts again.
@@ -181,19 +200,21 @@ function TabContent(props: { tabId: string }): JSX.Element {
             const parked = new Map(
                 agentsKeepRunning() ? blockIds.flatMap((id) => { const a = parkedAgentOf(id); return a ? [[id, a] as const] : []; }) : []
             );
-            const busy = await busyMembers(blockIds.filter((id) => !parked.has(id)), paneCloseProbe);
+            const busy = await busyMembers(membersToProbe(blockIds, isAgentBlock, (id) => parked.has(id)), paneCloseProbe);
             if (busy.length > 0) {
-                const confirmed = await new Promise<boolean>((resolve) =>
-                    setPendingCloses((q) => [...q, { busy, resolve }])
-                );
-                if (!confirmed) return false;
+                const answer = new Promise<boolean>((resolve) => setPendingCloses((q) => [...q, { busy, resolve }]));
+                if (!(await (hooks ? hooks.asking(answer) : answer))) {
+                    notKept(busy.map(describeBusyMember).join("; "));
+                    return false;
+                }
             }
             const leaving = await leavePrompts(blockIds, leaveProbe);
             if (leaving.length > 0) {
-                const confirmed = await new Promise<boolean>((resolve) =>
-                    setPendingLeaves((q) => [...q, { leaving, resolve }])
-                );
-                if (!confirmed) return false;
+                const answer = new Promise<boolean>((resolve) => setPendingLeaves((q) => [...q, { leaving, resolve }]));
+                if (!(await (hooks ? hooks.asking(answer) : answer))) {
+                    notKept(describeLeave(leaving));
+                    return false;
+                }
             }
             // The agents srv parks close at once; any other agent block still winds down under its log.
             const winds = (id: string) => isAgentBlock(id) && !parked.has(id);

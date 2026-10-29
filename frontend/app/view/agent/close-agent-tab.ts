@@ -33,6 +33,7 @@
 import { MOS } from "@/app/store/global";
 import { holdLeafRevealGate, scheduleLeafRevealLift } from "@/app/store/tab-reveal";
 import { addWidgetAsPaneTab, closeBlockInStack } from "@/layout/index";
+import { beginClosingBlock, endClosingBlock } from "@/layout/lib/layoutClosing";
 import type { LayoutModel } from "@/layout/lib/layoutModel";
 import { agentPickerBlockDef } from "./agent-picker-blockdef";
 
@@ -60,14 +61,34 @@ async function closeAgentTabImpl({ layoutModel, ownNodeId, blockId }: CloseAgent
         return;
     }
 
-    if (layoutModel.beforeNodeDelete && !(await layoutModel.beforeNodeDelete({ blockId } as TabLayoutData))) return;
+    // The tab says it is closing from the click, through the asks and the picker tab being added;
+    // a prompt shows the normal look while it is open (SPEC_PANE_CLOSING_INDICATOR_AND_FASTER_CLOSE_2026_10_28.md §2).
+    beginClosingBlock(layoutModel, blockId);
+    try {
+        if (layoutModel.beforeNodeDelete) {
+            const hooks = {
+                async asking(answer: Promise<boolean>) {
+                    endClosingBlock(layoutModel, blockId);
+                    const yes = await answer;
+                    if (yes) beginClosingBlock(layoutModel, blockId);
+                    return yes;
+                },
+            };
+            if (!(await layoutModel.beforeNodeDelete({ blockId } as TabLayoutData, hooks))) return;
+        }
+        await swapForPickerAndClose(layoutModel, node.id, blockId);
+    } finally {
+        endClosingBlock(layoutModel, blockId);
+    }
+}
 
+async function swapForPickerAndClose(layoutModel: LayoutModel, nodeId: string, blockId: string): Promise<void> {
     // Hide the leaf while the stack swaps members — same flicker guard as
     // openOrFocusHistoryTab (SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md).
-    const revealGen = holdLeafRevealGate(node.id);
+    const revealGen = holdLeafRevealGate(nodeId);
     try {
         try {
-            await addWidgetAsPaneTab(layoutModel, node.id, agentPickerBlockDef());
+            await addWidgetAsPaneTab(layoutModel, nodeId, agentPickerBlockDef());
         } catch (e) {
             // Couldn't create the replacement — fall back to today's
             // behavior rather than leaving the tab un-closable.
@@ -77,9 +98,11 @@ async function closeAgentTabImpl({ layoutModel, ownNodeId, blockId }: CloseAgent
         // flight. If it has, the old block went with it.
         const freshNode = layoutModel.getNodeByBlockId(blockId);
         if (!freshNode) return;
+        // closeBlockInStack marks the tab closing itself and ignores one already marked.
+        endClosingBlock(layoutModel, blockId);
         await closeBlockInStack(layoutModel, freshNode.id, blockId, { confirmed: true });
     } finally {
-        scheduleLeafRevealLift(node.id, revealGen);
+        scheduleLeafRevealLift(nodeId, revealGen);
     }
 }
 

@@ -37,6 +37,7 @@ import { remoteDisplay } from "@/app/store/remote-display";
 import { readSwarmSummary } from "@/app/store/activitySummary";
 import { readSeatMeta, seatTooltipLine } from "@/app/view/agent/seat-format";
 import { ErrorBoundary } from "@/element/errorboundary";
+import { isBlockClosing } from "@/layout/lib/layoutClosing";
 import { closeBlockInStack, moveBlockInStack, moveBlocksInStack, setActiveBlockInStack, type NodeModel } from "@/layout/index";
 import { paneStackIds } from "@/layout/lib/layoutNodeModels";
 import { allBlockIds } from "@/layout/lib/stackOrder";
@@ -527,6 +528,12 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
         onCleanup(() => vm?.setProgressBarMount?.(null));
     });
 
+    let bodyEl: HTMLDivElement | undefined;
+    createEffect(() => {
+        const closing = nodeModel.isClosing?.() ?? false;
+        if (bodyEl) bodyEl.inert = closing;
+    });
+
     const renderHeader = (viewModel: ViewModel | null): JSX.Element => (
         <PaneHeaderTabStrip
             tabs={tabIds()}
@@ -539,6 +546,7 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
             getColor={(id) => tabColors().get(id)}
             useProgress={usePaneTabProgress}
             collapsed={() => nodeModel.isMinimized?.() ?? false}
+            isClosing={(id) => (nodeModel.isClosing?.() ?? false) || isBlockClosing(layoutModel, id)}
             headerBgOverride={headerTailBg()}
             onActivate={handleActivate}
             onSelect={handleSelect}
@@ -601,6 +609,8 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
                 // A collapsed pane shows no border animation, whichever tab is selected: its
                 // pills' progress lines say who works (PaneChrome.scss, SPEC_PANE_TAB_PROGRESS_LINE §3.4).
                 "pane-stack-collapsed": nodeModel.isMinimized?.() ?? false,
+                // From the click on X until the pane is gone: dimmed and inert, "Closing…" in the header.
+                "pane-stack-closing": nodeModel.isClosing?.() ?? false,
                 ...(model()?.rootClass ? { [model()!.rootClass]: true } : {}),
             }}
             style={{ "--pane-ring-color": ringBorderColor(), "--pane-remote-color": remoteColor() }}
@@ -614,7 +624,9 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
             </ErrorBoundary>
             {model()?.renderBelowHeader?.()}
             <div class="pane-progress-bar-slot" ref={setProgressSlotEl} />
-            <div class={`pane-stack-body${model()?.bodyClass ? ` ${model()!.bodyClass}` : ""}`}>
+            {/* `inert`, not only pointer-events: the kept-alive content slot takes pointer events back
+                and a focused field would still take keys, for a pane that is about to be deleted. */}
+            <div class={`pane-stack-body${model()?.bodyClass ? ` ${model()!.bodyClass}` : ""}`} ref={(el) => (bodyEl = el)}>
                 {model()?.renderBehindContent?.()}
                 {contentRegion}
             </div>

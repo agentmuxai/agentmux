@@ -22,6 +22,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getCliCatalogEntry } from "../defaults/cli-catalog";
 import { containerImageNote, shouldPreselectContainer, type ContainerImageState } from "../defaults/container-default";
+import { loadLastRuntime, storeLastRuntime } from "../defaults/runtime-choice";
 import { PROVIDERS } from "../providers/catalog";
 import { familyKey, getProvider } from "../providers";
 import { resolveEffectiveLaunchProvider } from "../agent-launch-env";
@@ -205,6 +206,8 @@ export const AgentCreateForm = (props: AgentCreateFormProps): JSX.Element => {
         })();
     });
 
+    // What the person chose last time, read once as the form opens.
+    const lastRuntime = loadLastRuntime();
     // Default the runtime once the probes land, never to a mode that can't
     // run, until the user chooses.
     createEffect(() => {
@@ -215,6 +218,7 @@ export const AgentCreateForm = (props: AgentCreateFormProps): JSX.Element => {
                 containerSupported: containerSupported(),
                 dockerAvailable: isAvailable("docker"),
                 image: imageAccess(),
+                lastChoice: lastRuntime,
             })
                 ? "container"
                 : "host",
@@ -223,6 +227,8 @@ export const AgentCreateForm = (props: AgentCreateFormProps): JSX.Element => {
     const pickRuntime = (v: "host" | "container") => {
         draft.runtimeTouched = true;
         draft.setRuntime(v);
+        // Only a choice the person makes is remembered, not the default the probes picked.
+        storeLastRuntime(v);
     };
 
     // Accounts and bundles. An empty account ("No auth") is allowed: the agent
@@ -347,16 +353,9 @@ export const AgentCreateForm = (props: AgentCreateFormProps): JSX.Element => {
                         {canPickContainer() ? "" : " — Docker not detected"}
                     </option>
                 </Select>
-                <Show when={draft.runtime() === "host"}>
-                    <span class="agent-create-form-note">
-                        Runs directly on your machine with full access to your files, environment, and credentials.
-                    </span>
-                </Show>
-                <Show when={draft.runtime() === "container"}>
-                    <span class="agent-create-form-note">
-                        Isolated in a Docker container — the agent only sees its workspace.
-                    </span>
-                </Show>
+                <span class="agent-create-form-note" data-testid="create-from-template-runtime-note">
+                    Container: runs in Docker, sandboxed. Native: runs on this computer with your files and tools.
+                </span>
                 <Show when={containerSupported() && containerImageNote(imageAccess())}>
                     {(note) => (
                         <span class="agent-create-form-note" data-testid="create-from-template-image-note">

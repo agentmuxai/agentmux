@@ -232,6 +232,12 @@ export async function openOrFocusPaneIdByView(
             }
         }
     }
+    // Not among the mounted panes: an inactive tab of a pane's stack is not mounted, so look in the window's
+    // tabs too. The reveal below makes it its pane's active tab (and restores it, and switches window tab).
+    if (!elsewhere) {
+        const { findOpenBlockByView } = await import("@/app/util/reveal-block");
+        elsewhere = (await findOpenBlockByView(viewType)) ?? undefined;
+    }
     if (elsewhere) {
         if (focusMeta != null) await setBlockMeta(elsewhere, focusMeta);
         const { revealBlock } = await import("@/app/util/reveal-block");

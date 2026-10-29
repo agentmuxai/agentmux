@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Candidate accounts for the agent-pane failure row's "Bind account" action
+ * Candidate accounts for the agent-pane failure row's "Use account…" action
  * — SPEC_AGENT_LOGIN_FLOW_TIGHTENING_2026_09_04.md §3.3.
  *
  * One agent → many accounts, the failure row's perspective (Connectors → Accounts

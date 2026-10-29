@@ -53,6 +53,8 @@ import type { AskSideQuestionResult } from "@/types/rpc/AskSideQuestionResult";
 import type { AttachmentsCopyToWorkdirResult } from "@/types/rpc/AttachmentsCopyToWorkdirResult";
 import type { AttachmentsInfoResult } from "@/types/rpc/AttachmentsInfoResult";
 import type { AttachmentsIngestResult } from "@/types/rpc/AttachmentsIngestResult";
+import type { AuditQueryReq } from "@/types/rpc/AuditQueryReq";
+import type { AuditQueryResult } from "@/types/rpc/AuditQueryResult";
 import type { BackgroundTaskView } from "@/types/rpc/BackgroundTaskView";
 import type { BlockRevealParams } from "@/types/rpc/BlockRevealParams";
 import type { BlockRevealResult } from "@/types/rpc/BlockRevealResult";
@@ -229,6 +231,7 @@ import type { CommandShellStopData } from "@/types/rpc/CommandShellStopData";
 import type { CommandSkillCatalogBindAllData } from "@/types/rpc/CommandSkillCatalogBindAllData";
 import type { CommandSkillCatalogImportCommitData } from "@/types/rpc/CommandSkillCatalogImportCommitData";
 import type { CommandSkillCatalogImportPreviewData } from "@/types/rpc/CommandSkillCatalogImportPreviewData";
+import type { CommandSkillCatalogSetOptOutData } from "@/types/rpc/CommandSkillCatalogSetOptOutData";
 import type { CommandSkillCatalogSetReachData } from "@/types/rpc/CommandSkillCatalogSetReachData";
 import type { CommandSkillCatalogUpsertData } from "@/types/rpc/CommandSkillCatalogUpsertData";
 import type { CommandSkillCatalogUpsertForBundleData } from "@/types/rpc/CommandSkillCatalogUpsertForBundleData";
@@ -2332,6 +2335,14 @@ export const GeneratedApi = {
   ): Promise<Array<SkillBundleListItem>> {
     return client.rpcCall("skill.catalog.list_for_bundle", data, opts);
   },
+  // command "skill.catalog.set_opt_out"
+  SkillCatalogSetOptOutCommand(
+    client: RpcClient,
+    data: CommandSkillCatalogSetOptOutData,
+    opts?: RpcOpts
+  ): Promise<void> {
+    return client.rpcCall("skill.catalog.set_opt_out", data, opts);
+  },
   // command "skill.catalog.set_reach"
   SkillCatalogSetReachCommand(
     client: RpcClient,
@@ -2492,6 +2503,10 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<HistoryAgentSessions> {
     return client.rpcCall("history.agent_sessions", data, opts);
+  },
+  // command "audit.query"
+  AuditQueryCommand(client: RpcClient, data: AuditQueryReq, opts?: RpcOpts): Promise<AuditQueryResult> {
+    return client.rpcCall("audit.query", data, opts);
   },
   // command "history.locate"
   HistoryLocateCommand(client: RpcClient, data: HistoryLocateReq, opts?: RpcOpts): Promise<HistoryLocation> {

@@ -193,3 +193,37 @@
     // slot also stops the animation, so a collapsed busy pane costs nothing for it.
     display: none;
 }
+
+// A pane whose close was clicked, until it is gone or the close is kept: the content is dimmed and
+// inert, and the header says "Closing…" (SPEC_PANE_CLOSING_INDICATOR_AND_FASTER_CLOSE_2026_10_28.md §2).
+.pane-stack-closing {
+    cursor: progress;
+
+    .pane-stack-body {
+        opacity: 0.5;
+        pointer-events: none;
+    }
+}
+
+.block-frame-closing {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1-5);
+    min-width: 1.5em;
+    padding: 0 var(--space-2);
+    overflow: hidden;
+    color: var(--secondary-text-color);
+    font-size: var(--text-xs);
+    white-space: nowrap;
+    cursor: progress;
+
+    i {
+        flex-shrink: 0;
+    }
+
+    .block-frame-closing-text {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: clip;
+    }
+}

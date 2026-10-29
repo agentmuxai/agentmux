@@ -7,8 +7,8 @@
 //!
 //! - [`Service`]: each service's scopes, by grant level (§3.2).
 //! - [`GoogleHttp`]: Google's REST APIs, behind a trait so tests stub them.
-//! - [`calendar`]: the `Calendar` tool's actions, as requests and trimmed
-//!   answers.
+//! - [`calendar`], [`drive`]: the `Calendar` and `Drive` tools' actions, as
+//!   requests and trimmed answers.
 
 use std::future::Future;
 
@@ -20,6 +20,7 @@ use crate::identity::oauth_tokens::HttpReply;
 pub mod access;
 pub mod calendar;
 pub mod calls;
+pub mod drive;
 
 const SCOPE_PREFIX: &str = "https://www.googleapis.com/auth/";
 
@@ -27,12 +28,14 @@ const SCOPE_PREFIX: &str = "https://www.googleapis.com/auth/";
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Service {
     Calendar,
+    Drive,
 }
 
 impl Service {
     pub fn as_str(self) -> &'static str {
         match self {
             Service::Calendar => "calendar",
+            Service::Drive => "drive",
         }
     }
 
@@ -48,6 +51,9 @@ impl Service {
                 "calendar.events.freebusy",
                 "calendar.events",
             ],
+            // `drive.file` is the one non-sensitive Drive scope: the files the person picked
+            // and the ones AgentMux made. Reading and writing them is the same scope.
+            (Service::Drive, _) => &["drive.file"],
         };
         names.iter().map(|n| format!("{SCOPE_PREFIX}{n}")).collect()
     }
@@ -60,7 +66,13 @@ pub struct GoogleRequest {
     pub url: String,
     pub query: Vec<(&'static str, String)>,
     pub body: Option<Value>,
+    /// Read the answer as text (an export or a file's bytes), at most [`TEXT_CAP`] bytes of
+    /// it, instead of as JSON. It comes back as `{ "text", "truncated" }`.
+    pub text: bool,
 }
+
+/// The most bytes of a file `read_file_content` takes from Google.
+pub const TEXT_CAP: usize = 200_000;
 
 /// Google's REST APIs.
 pub trait GoogleHttp: Sync {
@@ -75,13 +87,28 @@ impl GoogleHttp for LiveGoogleHttp {
         let mut b = crate::identity::oauth_client::http()
             .request(req.method.clone(), &req.url)
             .bearer_auth(token)
-            .header("Accept", "application/json")
+            .header("Accept", if req.text { "*/*" } else { "application/json" })
             .query(&req.query);
         if let Some(body) = &req.body {
             b = b.json(body);
         }
-        let resp = b.send().await.map_err(|e| format!("request failed: {}", e.without_url()))?;
+        let mut resp = b.send().await.map_err(|e| format!("request failed: {}", e.without_url()))?;
         let status = resp.status().as_u16();
+        if req.text && (200..300).contains(&status) {
+            let mut buf: Vec<u8> = Vec::new();
+            let mut truncated = false;
+            while let Some(chunk) = resp.chunk().await.map_err(|e| format!("request failed: {}", e.without_url()))? {
+                let room = TEXT_CAP - buf.len();
+                if chunk.len() > room {
+                    buf.extend_from_slice(&chunk[..room]);
+                    truncated = true;
+                    break;
+                }
+                buf.extend_from_slice(&chunk);
+            }
+            let text = String::from_utf8_lossy(&buf).into_owned();
+            return Ok(HttpReply { status, body: serde_json::json!({ "text": text, "truncated": truncated }) });
+        }
         let body = resp.json().await.unwrap_or_else(|_| serde_json::json!({}));
         Ok(HttpReply { status, body })
     }
@@ -96,7 +123,7 @@ pub fn google_error(reply: &HttpReply) -> String {
         (403, _) if reason.contains("insufficient") || msg.contains("insufficient") => {
             "the account hasn't granted the permission this needs; turn the service on again in Connectors".to_string()
         }
-        (404, _) => "Google found no such calendar or event (or the account can't see it)".to_string(),
+        (404, _) => "Google found no such calendar, event or file (or the account can't see it)".to_string(),
         (429, _) => "Google is rate-limiting this account; try again in a minute".to_string(),
         (s, false) => format!("Google answered HTTP {s}: {}", msg.chars().take(300).collect::<String>()),
         (s, true) => format!("Google answered HTTP {s}"),
