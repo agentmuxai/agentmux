@@ -120,6 +120,79 @@ describe("Tooltip layer", () => {
     });
 });
 
+/** The default: near-instant, warm between neighbours, a short grace on leave. */
+describe("Tooltip default timing", () => {
+    const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+    const overlays = () => [...document.body.querySelectorAll<HTMLElement>("[data-pane-overlay]")];
+
+    afterEach(() => {
+        cleanup();
+        vi.useRealTimers();
+    });
+
+    function two() {
+        render(() => (
+            <>
+                <Tooltip content={<span>first</span>}>
+                    <span>anchor-first</span>
+                </Tooltip>
+                <Tooltip content={<span>second</span>}>
+                    <span>anchor-second</span>
+                </Tooltip>
+            </>
+        ));
+        return [screen.getByText("anchor-first").parentElement!, screen.getByText("anchor-second").parentElement!];
+    }
+
+    it("shows well under the old 300 ms, not at the very instant of entering", async () => {
+        const [a] = two();
+        // Let the previous test's close count as long ago.
+        await wait(450);
+        fireEvent.mouseEnter(a);
+        await tick();
+        expect(overlays()[0].getAttribute("style")).toContain("opacity: 0");
+        await wait(100);
+        expect(overlays()[0].getAttribute("style")).toContain("opacity: 1");
+    });
+
+    it("lingers briefly after the pointer leaves, then goes", async () => {
+        const [a] = two();
+        await wait(450);
+        fireEvent.mouseEnter(a);
+        await wait(100);
+        fireEvent.mouseLeave(a);
+        await wait(30);
+        expect(screen.queryByText("first")).toBeInTheDocument();
+        await wait(150);
+        expect(screen.queryByText("first")).toBeNull();
+    });
+
+    it("shows the next tooltip at once when moving from one anchor to the next, and closes the first", async () => {
+        vi.useFakeTimers();
+        const [a, b] = two();
+        fireEvent.mouseEnter(a);
+        await vi.advanceTimersByTimeAsync(500);
+        fireEvent.mouseLeave(a);
+        fireEvent.mouseEnter(b);
+        // One frame to place it: less than the 40 ms rest a cold tooltip waits.
+        await vi.advanceTimersByTimeAsync(20);
+        expect(screen.queryByText("first")).toBeNull();
+        const second = screen.getByText("second").closest("[data-pane-overlay]") as HTMLElement;
+        expect(second.getAttribute("style")).toContain("opacity: 1");
+    });
+
+    it("waits the short rest when no tooltip has been open lately", async () => {
+        vi.useFakeTimers();
+        const [a] = two();
+        await vi.advanceTimersByTimeAsync(1000);
+        fireEvent.mouseEnter(a);
+        await vi.advanceTimersByTimeAsync(20);
+        expect(overlays()[0].getAttribute("style")).toContain("opacity: 0");
+        await vi.advanceTimersByTimeAsync(40);
+        expect(overlays()[0].getAttribute("style")).toContain("opacity: 1");
+    });
+});
+
 /**
  * `immediate`: no delay and no fade. The panel node mounts synchronously on hover
  * whatever the delay, so these assert on its own opacity and transition (reached
@@ -135,7 +208,7 @@ describe("Tooltip immediate", () => {
         vi.mocked(computePosition).mockImplementation(() => Promise.resolve({ x: 0, y: 0 }) as never);
     });
 
-    it("is fully visible one frame after hover, with no fade, where the default is still hidden", async () => {
+    it("is fully visible one frame after hover, with no fade, where the default has its short fade", async () => {
         render(() => (
             <Tooltip immediate content={<span>now</span>}>
                 <span>anchor-now</span>
@@ -153,9 +226,9 @@ describe("Tooltip immediate", () => {
         const later = screen.getByText("later").closest("[data-pane-overlay]") as HTMLElement;
         expect(now.getAttribute("style")).toContain("opacity: 1");
         expect(now.getAttribute("style")).toContain("transition: none");
-        // 60 ms is far under the default's 300 ms show delay.
-        expect(later.getAttribute("style")).toContain("opacity: 0");
-        expect(later.getAttribute("style")).toContain("opacity 200ms");
+        // The default shows after its 40 ms rest, with the short fade token.
+        expect(later.getAttribute("style")).toContain("opacity: 1");
+        expect(later.getAttribute("style")).toContain("opacity var(--duration-instant)");
     });
 
     it("is gone the moment the pointer leaves, where the default lingers for its delay", async () => {
