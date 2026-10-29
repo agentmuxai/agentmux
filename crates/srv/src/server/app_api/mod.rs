@@ -336,30 +336,77 @@ pub(super) fn resolve_tab_id_for_block(mstore: &Store, block_id: &str) -> Result
     Err(format!("resolve_tab_id_for_block: block {block_id} not found in any tab"))
 }
 
-/// Find an Editor-view block the tab shows ([`shown_block_ids`]: in front
-/// of its stack, not minimized, not hidden behind a magnified pane) on
-/// `connection` (its meta `connection`; absent and `local` are this
-/// computer), if any. Direct sibling of `find_agent_block` above, checking
-/// `meta.view == "editor"` instead of `meta.agentId`. An editor on another
-/// connection is never it: its reads and saves go there (remote terminals
-/// spec §6.3).
-pub(super) fn find_editor_block(mstore: &Store, tab_id: &str, connection: &str) -> Result<Option<Block>, String> {
+/// An Editor pane found in a tab for an agent's open to reuse.
+pub(super) struct EditorFound {
+    pub block: Block,
+    /// It is a background tab of a multi-tab pane: srv switches the pane to it before queueing the
+    /// file, because a tab that is not showing is not mounted and so would never take the file.
+    pub needs_activation: bool,
+}
+
+/// Find the Editor-view block in `tab_id` an agent's open should reuse, on `connection` (its meta
+/// `connection`; absent and `local` are this computer), if any. Direct sibling of `find_agent_block`
+/// above, checking `meta.view == "editor"` instead of `meta.agentId`. An editor on another
+/// connection is never it: its reads and saves go there (remote terminals spec §6.3).
+///
+/// One the tab shows ([`shown_block_ids`]) wins. Otherwise any Editor the tab holds does: a
+/// minimized pane, a background tab of a pane stack, or a pane behind a magnified one. The open
+/// then shows it (`showBlockWithoutFocus`, when the editor takes the file), instead of making a
+/// second Editor pane because the first was out of sight.
+pub(super) fn find_editor_block(mstore: &Store, tab_id: &str, connection: &str) -> Result<Option<EditorFound>, String> {
     let tab: Tab = mstore.must_get(tab_id)
         .map_err(|e| format!("TAB_NOT_FOUND: {e}"))?;
     let Ok(layout) = mstore.must_get::<obj::LayoutState>(&tab.layoutstate) else {
         return Ok(None);
     };
+    let is_editor = |block_id: &str| -> Option<Block> {
+        let block = mstore.get::<Block>(block_id).ok().flatten()?;
+        (obj::meta_get_string(&block.meta, "view", "") == "editor"
+            && same_pane_connection(&obj::meta_get_string(&block.meta, "connection", ""), connection))
+        .then_some(block)
+    };
 
-    for block_id in shown_block_ids(&layout) {
-        if let Ok(Some(block)) = mstore.get::<Block>(&block_id) {
-            if obj::meta_get_string(&block.meta, "view", "") == "editor"
-                && same_pane_connection(&obj::meta_get_string(&block.meta, "connection", ""), connection)
-            {
-                return Ok(Some(block));
-            }
+    let shown = shown_block_ids(&layout);
+    if let Some(block) = shown.iter().find_map(|id| is_editor(id)) {
+        return Ok(Some(EditorFound { block, needs_activation: false }));
+    }
+    let Some(root) = &layout.rootnode else { return Ok(None) };
+    for block_id in member_block_ids(root) {
+        if let Some(block) = is_editor(&block_id) {
+            // A member that is its pane's front tab (a minimized or covered pane) is mounted;
+            // a background tab is not.
+            let needs_activation = !shown.contains(&block_id)
+                && crate::backend::layout::find_leaf_containing_block(root, &block_id)
+                    .and_then(|leaf| leaf.data.as_ref())
+                    .is_some_and(|d| d.block_stack.len() > 1 && d.block_id != block_id);
+            return Ok(Some(EditorFound { block, needs_activation }));
         }
     }
     Ok(None)
+}
+
+/// Every block a layout holds: each pane's whole stack, shown or not.
+fn member_block_ids(root: &agentmux_common::LayoutNode) -> Vec<String> {
+    fn walk(node: &agentmux_common::LayoutNode, out: &mut Vec<String>) {
+        if node.children.is_empty() {
+            if let Some(data) = &node.data {
+                if data.block_stack.is_empty() {
+                    if !data.block_id.is_empty() {
+                        out.push(data.block_id.clone());
+                    }
+                } else {
+                    out.extend(data.block_stack.iter().cloned());
+                }
+            }
+            return;
+        }
+        for child in &node.children {
+            walk(child, out);
+        }
+    }
+    let mut out = Vec::new();
+    walk(root, &mut out);
+    out
 }
 
 /// The blocks a tab's layout shows: each pane's active member (the tab
