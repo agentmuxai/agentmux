@@ -9,7 +9,7 @@
 // Tab strip can use the SAME look instead of a copy that drifts
 // (SPEC_PANE_TAB_DRAG_LANDING_FLASH_AND_LAST_TAB_CLOSE_2026_09_24.md §3).
 //
-// Mixins only. Their @keyframes (`tab-drop-pulse`, `tab-bounce`,
+// Mixins only. Their @keyframes (`tab-drop-pulse`,
 // `tab-drop-invert-strobe`) live in drag/drop-indicators.scss, which is
 // loaded once, so they're emitted once however many files `@use` this.
 
@@ -134,10 +134,4 @@ $drop-pulse-reduced: tab-drop-pulse 0.4s ease-in-out infinite alternate;
             animation: none;
         }
     }
-}
-
-// Landing bounce on a tab that was just dropped into place.
-@mixin landing-bounce {
-    animation: tab-bounce 300ms var(--ease-bounce) forwards;
-    transform-origin: center bottom;
 }
