@@ -92,3 +92,19 @@ fn only_public_https_sources_and_plain_ref_names_are_accepted() {
     assert!(valid_git_ref("main") && valid_git_ref("release/1.2") && valid_git_ref("v1.0.0"));
     assert!(!valid_git_ref("--upload-pack=x") && !valid_git_ref("a..b") && !valid_git_ref("a b") && !valid_git_ref(""));
 }
+
+#[test]
+fn a_root_skill_without_a_name_takes_the_name_it_is_given_and_a_cut_off_pack_says_so() {
+    let d = tempfile::tempdir().unwrap();
+    write(d.path(), "SKILL.md", "---\ndescription: d\n---\nbody");
+    let s = scan_dir_named(d.path(), "from-the-repo").unwrap();
+    assert_eq!(s.candidates[0].name, "from-the-repo");
+
+    let pack = tempfile::tempdir().unwrap();
+    for i in 0..=MAX_CANDIDATES {
+        write(pack.path(), &format!("s{i:03}/SKILL.md"), "---\nname: x\ndescription: d\n---\nb");
+    }
+    let s = scan_dir(pack.path()).unwrap();
+    assert_eq!(s.candidates.len(), MAX_CANDIDATES);
+    assert!(s.warnings.iter().any(|w| w.contains("only the first")), "{:?}", s.warnings);
+}

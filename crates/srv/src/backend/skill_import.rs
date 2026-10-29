@@ -30,6 +30,8 @@ pub struct Candidate {
 pub struct Scan {
     pub candidates: Vec<Candidate>,
     pub warnings: Vec<String>,
+    /// More skills were found than [`MAX_CANDIDATES`]; the rest were left out.
+    capped: bool,
 }
 
 const MAX_FILE_BYTES: u64 = 256 * 1024;
@@ -125,6 +127,13 @@ fn read_candidate(file: &Path, key: &str, fallback_name: &str, warnings: &mut Ve
 /// Every `SKILL.md` under `root` (a skill folder, a pack of them, or one markdown file). A folder
 /// with its own `SKILL.md` is one skill and is not searched further. Symlinks are not followed.
 pub fn scan_dir(root: &Path) -> Result<Scan, String> {
+    let root_name = root.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+    scan_dir_named(root, &root_name)
+}
+
+/// [`scan_dir`] with the name a root-level `SKILL.md` without a `name` takes (the folder's own
+/// name is no use when the folder is a scratch clone).
+fn scan_dir_named(root: &Path, root_name: &str) -> Result<Scan, String> {
     let meta = std::fs::symlink_metadata(root).map_err(|e| format!("{}: {e}", root.display()))?;
     let mut scan = Scan::default();
     if meta.file_type().is_symlink() {
@@ -140,18 +149,21 @@ pub fn scan_dir(root: &Path) -> Result<Scan, String> {
         scan.candidates.extend(read_candidate(root, "", &fallback, &mut scan.warnings));
         return Ok(scan);
     }
-    let root_name = root.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
-    walk(root, root, &root_name, 0, &mut scan);
+    walk(root, root, root_name, 0, &mut scan);
+    if scan.capped {
+        scan.warnings.push(format!("only the first {MAX_CANDIDATES} skills are shown; import the rest from a smaller folder"));
+    }
     scan.candidates.sort_by(|a, b| a.key.cmp(&b.key));
     Ok(scan)
 }
 
 fn walk(root: &Path, dir: &Path, dir_name: &str, depth: usize, scan: &mut Scan) {
-    if scan.candidates.len() >= MAX_CANDIDATES {
-        return;
-    }
     let skill_md = dir.join("SKILL.md");
     if std::fs::symlink_metadata(&skill_md).map(|m| m.is_file()).unwrap_or(false) {
+        if scan.candidates.len() >= MAX_CANDIDATES {
+            scan.capped = true;
+            return;
+        }
         let key = dir.strip_prefix(root).map(|p| p.to_string_lossy().replace('\\', "/")).unwrap_or_default();
         scan.candidates.extend(read_candidate(&skill_md, &key, dir_name, &mut scan.warnings));
         return;
@@ -291,7 +303,7 @@ pub async fn fetch_url(raw: &str) -> Result<Scan, String> {
     let stem = last.strip_suffix(".md").unwrap_or(last);
     let fallback = if stem.eq_ignore_ascii_case("skill") && segments.len() >= 2 { segments[segments.len() - 2] } else { stem };
     let (name, description, content) = parse_skill_md(&text, fallback);
-    Ok(Scan { candidates: vec![Candidate { key: String::new(), name, description, content }], warnings: vec![] })
+    Ok(Scan { candidates: vec![Candidate { key: String::new(), name, description, content }], warnings: vec![], capped: false })
 }
 
 fn valid_git_ref(r: &str) -> bool {
@@ -331,13 +343,22 @@ pub async fn fetch_git(raw: &str, git_ref: &str) -> Result<Scan, String> {
     if !git_ref.is_empty() && !valid_git_ref(git_ref) {
         return Err("that branch or tag name is not accepted".to_string());
     }
+    // git resolves the name itself, so look at what it will be given first and refuse a name that
+    // points at a local address. (Redirects are off for the clone.)
+    if let Some(url::Host::Domain(host)) = parsed.host() {
+        let found = tokio::net::lookup_host((host, 443)).await.map_err(|e| format!("could not find {host}: {e}"))?;
+        if found.into_iter().any(|a| blocked_ip(a.ip())) {
+            return Err("that name points at a local address, which is not accepted".to_string());
+        }
+    }
     let dir = std::env::temp_dir().join(format!("agentmux-skill-import-{}", uuid::Uuid::new_v4()));
     let mut cmd = tokio::process::Command::new("git");
+    crate::backend::pane_env::sanitize_external_command(&mut cmd);
     cmd.no_window()
         .kill_on_drop(true)
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GIT_ASKPASS", "")
-        .args(["-c", "protocol.allow=never", "-c", "protocol.https.allow=always"])
+        .args(["-c", "protocol.allow=never", "-c", "protocol.https.allow=always", "-c", "http.followRedirects=false"])
         .args(["clone", "--depth", "1", "--single-branch", "--no-tags"]);
     if !git_ref.is_empty() {
         cmd.args(["--branch", git_ref]);
@@ -375,7 +396,8 @@ pub async fn fetch_git(raw: &str, git_ref: &str) -> Result<Scan, String> {
             let said = said.await.unwrap_or_default();
             return Err(format!("git clone failed: {}", said.trim().lines().last().unwrap_or("")));
         }
-        scan_dir(&dir)
+        let repo = parsed.path_segments().and_then(|s| s.filter(|p| !p.is_empty()).last()).unwrap_or("skill");
+        scan_dir_named(&dir, repo.strip_suffix(".git").unwrap_or(repo))
     }
     .await;
     let _ = std::fs::remove_dir_all(&dir);
