@@ -28,9 +28,10 @@ fn remote_claims(state: &AppState, agent_id: &str) -> Vec<RemoteRegistrationEntr
         .unwrap_or_default()
 }
 
-/// The newest refusal by the recipient identity guard in `audit` (newest first) for `agent_id` or
-/// for `block_id`. A message addressed by uid or alias is logged under that address, not the
-/// display name, but always with the block it resolved to.
+/// The newest refusal by the recipient identity guard in `audit` (newest first). A refusal is
+/// logged with the block the message resolved to, but under the address it used (uid, alias or
+/// name), so with a `block_id` it matches on the block alone: a name reused by a newer block must
+/// not inherit the old block's refusal. Without one it falls back to the name.
 pub(super) fn recent_mismatch_for(
     audit: &[crate::backend::reactive::AuditLogEntry],
     agent_id: &str,
@@ -41,8 +42,10 @@ pub(super) fn recent_mismatch_for(
         .iter()
         .find(|e| {
             e.outcome.as_deref() == Some("identity-mismatch")
-                && (e.target_agent.to_lowercase() == target_lower
-                    || block_id.is_some_and(|b| e.block_id == b))
+                && match block_id {
+                    Some(b) => e.block_id == b,
+                    None => e.target_agent.to_lowercase() == target_lower,
+                }
         })
         .map(|e| MismatchAuditSummary {
             timestamp: e.timestamp,

@@ -57,3 +57,10 @@ fn a_refusal_of_a_message_addressed_by_uid_is_found_through_the_block_it_resolve
     let found = recent_mismatch_for(&audit, "ann", Some("b-ann")).expect("ann's refusal by block");
     assert_eq!(found.timestamp, 20);
 }
+
+#[test]
+fn a_name_reused_by_a_newer_block_does_not_inherit_the_old_blocks_refusal() {
+    let audit = vec![line(10, "ann", Some("identity-mismatch"), "b-old")];
+    assert!(recent_mismatch_for(&audit, "ann", Some("b-new")).is_none());
+    assert!(recent_mismatch_for(&audit, "ann", Some("b-old")).is_some());
+}
