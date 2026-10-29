@@ -591,7 +591,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 .await
                 .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
             let starting = if body.starting {
-                format!(" The server is still starting, so the URL works once it is listening; its output is in /tmp/amx-dev-{project}.log in your container.")
+                format!(" The server is still starting, so the URL works once it is listening; its output is in /tmp/amx-dev-{}.log in your container.", project.trim().to_lowercase())
             } else {
                 String::new()
             };

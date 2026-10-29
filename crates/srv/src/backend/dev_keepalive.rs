@@ -15,6 +15,7 @@ use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
+use agentmux_common::time::now_secs_u64;
 use serde::{Deserialize, Serialize};
 
 use crate::backend::container::ContainerManager;
@@ -27,13 +28,10 @@ const MAX_PER_CONTAINER: usize = 8;
 /// A command is a line or a short script.
 const MAX_COMMAND_BYTES: usize = 4096;
 /// How long a freshly started server gets to begin listening.
-const STARTUP_WAIT: Duration = Duration::from_secs(90);
+const STARTUP_WAIT_SECS: u64 = 90;
+const STARTUP_WAIT: Duration = Duration::from_secs(STARTUP_WAIT_SECS);
 /// A server nobody has run a turn beside for this long is no longer kept up.
 const FORGET_AFTER_SECS: u64 = 30 * 24 * 3600;
-
-fn now_secs() -> u64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs())
-}
 
 /// One dev server to keep up.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -101,7 +99,7 @@ impl Store {
             .and_then(|p| std::fs::read_to_string(p).ok())
             .and_then(|text| serde_json::from_str(&text).ok())
             .unwrap_or_default();
-        let now = now_secs();
+        let now = now_secs_u64();
         specs.retain(|s| s.seen == 0 || now.saturating_sub(s.seen) < FORGET_AFTER_SECS);
         Self { path, specs: Mutex::new(specs) }
     }
@@ -135,7 +133,7 @@ impl Store {
     /// Keep `spec` up, replacing the one for the same project in the same container.
     pub fn keep(&self, mut spec: Spec) -> Result<(), String> {
         self.can_keep(&spec)?;
-        spec.seen = now_secs();
+        spec.seen = now_secs_u64();
         let mut specs = self.lock();
         specs.retain(|s| !(s.container == spec.container && s.project == spec.project));
         specs.push(spec);
@@ -146,10 +144,12 @@ impl Store {
     /// `container` ran a turn: what is kept up in it is in use.
     fn touch(&self, container: &str) {
         let mut specs = self.lock();
-        let now = now_secs();
+        let now = now_secs_u64();
         for s in specs.iter_mut().filter(|s| s.container == container) {
             s.seen = now;
         }
+        // And those nobody has used for a month: this runs on every turn, so a long-lived srv lets them go too.
+        specs.retain(|s| s.seen == 0 || now.saturating_sub(s.seen) < FORGET_AFTER_SECS);
         self.save(&specs);
     }
 
@@ -252,7 +252,7 @@ pub async fn bring_up(cm: &ContainerManager, spec: &Spec) -> Result<(), String> 
     if wait_listening(cm, spec, STARTUP_WAIT).await {
         return Ok(());
     }
-    Err(format!("{:?} didn't start listening on port {} within {}s; its output is in {} in the container", spec.command, spec.port, STARTUP_WAIT.as_secs(), spec.log()))
+    Err(format!("{:?} didn't start listening on port {} within {}s; its output is in {} in the container", spec.command, spec.port, STARTUP_WAIT_SECS, spec.log()))
 }
 
 /// Register `spec`'s route once its server listens, in the background; for a server too slow to wait for in a request.
@@ -394,7 +394,7 @@ mod tests {
     fn a_server_nobody_has_run_a_turn_beside_for_a_month_is_let_go() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("dev-servers.json");
-        let (old, fresh) = (Spec { seen: now_secs() - FORGET_AFTER_SECS - 10, ..spec("c1", "old") }, Spec { seen: now_secs(), ..spec("c1", "fresh") });
+        let (old, fresh) = (Spec { seen: now_secs_u64() - FORGET_AFTER_SECS - 10, ..spec("c1", "old") }, Spec { seen: now_secs_u64(), ..spec("c1", "fresh") });
         std::fs::write(&path, serde_json::to_vec(&[old, fresh]).unwrap()).unwrap();
         let store = Store::open(Some(path));
         assert_eq!(store.for_container("c1").iter().map(|s| s.project.as_str()).collect::<Vec<_>>(), ["fresh"]);
