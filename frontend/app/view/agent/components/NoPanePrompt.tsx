@@ -3,8 +3,9 @@
 
 /**
  * NoPanePrompt: what My Agents asks when the user clicks an agent that runs with no pane
- * (always-available, parked). "Open it" attaches it to this pane, "Fork" makes a named copy.
- * It sits in the row's fork popover, next to the already-open prompt's buttons.
+ * (always-available, parked). "Open it" attaches it to this pane, "Fork…" makes a named copy.
+ * It sits in the row's fork popover, next to the already-open prompt's buttons; the popover
+ * owns the close button (top right) and the click-outside and Escape dismissal for both prompts.
  */
 
 import { Button } from "@/app/element/ui";
@@ -15,7 +16,6 @@ interface NoPanePromptProps {
     name: string;
     onOpen: () => void;
     onFork: () => void;
-    onCancel: () => void;
 }
 
 export const NoPanePrompt = (props: NoPanePromptProps): JSX.Element => (
@@ -33,10 +33,7 @@ export const NoPanePrompt = (props: NoPanePromptProps): JSX.Element => (
                 Open it
             </Button>
             <Button class="agent-fork-btn agent-fork-btn--secondary" onClick={props.onFork} data-testid="agent-fork-fork">
-                Fork
-            </Button>
-            <Button tone="quiet" class="agent-fork-btn agent-fork-btn--ghost" onClick={props.onCancel} aria-label="Cancel">
-                ✕
+                Fork…
             </Button>
         </div>
     </>
