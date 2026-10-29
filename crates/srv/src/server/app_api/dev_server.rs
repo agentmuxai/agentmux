@@ -129,6 +129,10 @@ pub(crate) async fn handle_register_dev_server(
         }
     }
     if let (true, Some(spec)) = (starting, &keep) {
+        // Kept before the task that routes it can look, so it can tell the project is still wanted.
+        if let Err(e) = remember(&keep, &container_name, &project) {
+            return (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response();
+        }
         route_when_listening(&cm, spec.clone());
     } else {
         // Where the proxy reaches it. On Linux the container's own address; where the daemon runs in a VM
@@ -156,17 +160,10 @@ pub(crate) async fn handle_register_dev_server(
             }
         };
         state.dev_proxy.register_from(&project, &agent_id, Some(&container_name), target).await;
-    }
-    // Registered again without a command: not kept up any more.
-    match keep {
-        Some(spec) => {
-            if let Err(e) = dev_keepalive::store().keep(spec) {
-                return (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response();
-            }
+        if let Err(e) = remember(&keep, &container_name, &project) {
+            return (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response();
         }
-        None => dev_keepalive::store().drop_project(&container_name, &project),
     }
-
     // Lowercased to match the actual routing key (`DevProxyRegistry::routing_key`
     // lowercases both halves) — this is what a browser should actually be
     // pointed at, not necessarily `agent_id`'s on-disk casing.
@@ -175,6 +172,18 @@ pub(crate) async fn handle_register_dev_server(
         agent_id.to_lowercase()
     );
     (StatusCode::OK, Json(RegisterDevServerResponse { url, starting })).into_response()
+}
+
+/// What is kept up for `project` in `container` after this registration: the spec if there is a command; registered
+/// again without one, nothing.
+fn remember(keep: &Option<Spec>, container: &str, project: &str) -> Result<(), String> {
+    match keep {
+        Some(spec) => dev_keepalive::store().keep(spec.clone()),
+        None => {
+            dev_keepalive::store().drop_project(container, project);
+            Ok(())
+        }
+    }
 }
 
 /// The container the verified pane `block_id` runs in.

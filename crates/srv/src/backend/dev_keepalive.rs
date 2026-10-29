@@ -163,6 +163,13 @@ impl Store {
         }
     }
 
+    /// Whether `spec` is still what is kept for its project: not dropped, and not replaced by another command or port.
+    pub fn is_current(&self, spec: &Spec) -> bool {
+        self.lock().iter().any(|s| {
+            (&s.container, &s.project, s.port, &s.command, &s.dir) == (&spec.container, &spec.project, spec.port, &spec.command, &spec.dir)
+        })
+    }
+
     pub fn for_container(&self, container: &str) -> Vec<Spec> {
         self.lock().iter().filter(|s| s.container == container).cloned().collect()
     }
@@ -220,7 +227,14 @@ fn started_recently(container: &str, project: &str, incarnation: &str, set: bool
 pub async fn start(cm: &ContainerManager, spec: &Spec) -> Result<(), String> {
     let lock = start_lock(&spec.container);
     let _one_at_a_time = lock.lock().await;
-    let incarnation = cm.docker().inspect_container(&spec.container, None).await.ok().and_then(|c| c.id).unwrap_or_default();
+    // The container's Docker id and when it last started: a stopped container that starts again keeps its id.
+    let incarnation = cm
+        .docker()
+        .inspect_container(&spec.container, None)
+        .await
+        .ok()
+        .map(|c| format!("{}@{}", c.id.unwrap_or_default(), c.state.and_then(|s| s.started_at).unwrap_or_default()))
+        .unwrap_or_default();
     if cm.port_listening(&spec.container, spec.port).await || started_recently(&spec.container, &spec.project, &incarnation, false) {
         return Ok(());
     }
@@ -264,11 +278,13 @@ pub fn route_when_listening(cm: &ContainerManager, spec: Spec) {
             return;
         }
         match route_target(&cm, &spec.container, spec.port).await {
-            Ok(target) => {
+            // Only if the agent hasn't registered the project again, or dropped it, while this waited.
+            Ok(target) if store().is_current(&spec) => {
                 if let Some(registry) = cm.dev_proxy_registry() {
                     registry.register_from(&spec.project, &spec.agent_id, Some(&spec.container), target).await;
                 }
             }
+            Ok(_) => {}
             Err(e) => tracing::warn!(container = %spec.container, error = ?e, "[dev-keepalive] no route to the dev server"),
         }
     });
@@ -302,7 +318,10 @@ pub fn restore_in_background(cm: &ContainerManager, container: &str) {
                 bring_up(&cm, spec).await?;
                 let target = route_target(&cm, &spec.container, spec.port).await.map_err(|e| format!("{e:?}"))?;
                 let registry = cm.dev_proxy_registry().ok_or("no dev proxy")?;
-                registry.register_from(&spec.project, &spec.agent_id, Some(&spec.container), target).await;
+                // Only if it is still what the agent wants kept: it may have registered the project again while this ran.
+                if store().is_current(spec) {
+                    registry.register_from(&spec.project, &spec.agent_id, Some(&spec.container), target).await;
+                }
                 Ok::<(), String>(())
             }
             .await;
@@ -374,6 +393,20 @@ mod tests {
         store.drop_project("c1", "landing");
         assert!(store.for_container("c1").iter().all(|s| s.project != "landing"));
         assert_eq!(store.for_container("c2").len(), 1, "another container's servers are untouched");
+    }
+
+    #[test]
+    fn a_spec_is_current_only_until_the_project_is_registered_again_or_dropped() {
+        let store = Store::open(None);
+        store.keep(spec("c1", "landing")).unwrap();
+        assert!(store.is_current(&spec("c1", "landing")));
+        let mut moved = spec("c1", "landing");
+        moved.port = 5000;
+        store.keep(moved.clone()).unwrap();
+        assert!(!store.is_current(&spec("c1", "landing")), "the old port is no longer wanted");
+        assert!(store.is_current(&moved));
+        store.drop_project("c1", "landing");
+        assert!(!store.is_current(&moved));
     }
 
     #[test]
