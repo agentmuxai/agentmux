@@ -301,7 +301,7 @@ export interface TileLayoutContents {
     renderPreview?: PreviewRenderer;
     onNodeDelete?: (data: TabLayoutData) => Promise<void>;
     /** See `LayoutModel.beforeNodeDelete`. */
-    beforeNodeDelete?: (data: TabLayoutData) => Promise<boolean>;
+    beforeNodeDelete?: (data: TabLayoutData, hooks?: BeforeDeleteHooks) => Promise<boolean>;
     getCursorPoint?: () => Point;
 }
 
@@ -353,6 +353,13 @@ export interface LayoutNodeAdditionalProps {
  * NodeModel — reactive accessors replace Jotai atoms.
  * All Atom<T> fields become Accessor<T> (SolidJS signal getters — call them as functions).
  */
+/** What the close gives `beforeNodeDelete` to tell the pane what it is waiting for. */
+export interface BeforeDeleteHooks {
+    /** A person's answer to a prompt is awaited: the prompt is the indicator, so the pane shows its
+     *  normal look meanwhile and goes back to closing if the answer is yes. */
+    asking(answer: Promise<boolean>): Promise<boolean>;
+}
+
 export interface NodeModel {
     additionalProps: Accessor<LayoutNodeAdditionalProps>;
     innerRect: Accessor<CSSProperties>;
@@ -459,6 +466,10 @@ export interface NodeModel {
     isFocused: Accessor<boolean>;
     isMagnified: Accessor<boolean>;
     isMinimized: Accessor<boolean>;
+    /** The pane's close was clicked and has not finished (`layoutClosing.ts`). */
+    isClosing?: Accessor<boolean>;
+    /** How many tabs the closing pane holds (0 when it is not closing); the header says "Closing 5 tabs…". */
+    closingTabs?: Accessor<number>;
     /**
      * False when this pane is the LAST expanded (non-minimized) pane in the
      * layout — the window must always keep at least one expanded pane, so the

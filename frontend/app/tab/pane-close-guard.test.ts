@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { busyMembers, closesWithShutdownLog, describeBusyMember, isAllBlocksGoneError, type PaneCloseProbe } from "./pane-close-guard";
+import { busyMembers, closesWithShutdownLog, describeBusyMember, isAllBlocksGoneError, membersToProbe, type PaneCloseProbe } from "./pane-close-guard";
 
 function probe(state: Record<string, { turn?: boolean | null; procs?: number; fail?: boolean }>): PaneCloseProbe {
     return {
@@ -61,5 +61,22 @@ describe("closesWithShutdownLog (SPEC_AGENT_SELF_QUIT §5.5)", () => {
     it("closes terminal/editor/browser panes at once, as before", () => {
         expect(closesWithShutdownLog(["term-1", "editor-1"], isAgent)).toBe(false);
         expect(closesWithShutdownLog([], isAgent)).toBe(false);
+    });
+});
+
+describe("membersToProbe (close asks only what can be answered)", () => {
+    const agents = new Set(["agent1", "agent2", "parked"]);
+    const isAgent = (id: string) => agents.has(id);
+
+    it("a pane of an editor and a terminal asks nobody: no round trip before it leaves", () => {
+        expect(membersToProbe(["editor", "term"], isAgent, () => false)).toEqual([]);
+    });
+
+    it("a mixed pane asks its agents only", () => {
+        expect(membersToProbe(["editor", "agent1", "term", "agent2"], isAgent, () => false)).toEqual(["agent1", "agent2"]);
+    });
+
+    it("an agent srv parks on close is not asked", () => {
+        expect(membersToProbe(["agent1", "parked"], isAgent, (id) => id === "parked")).toEqual(["agent1"]);
     });
 });
