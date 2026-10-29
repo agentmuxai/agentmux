@@ -476,7 +476,7 @@
         border: 1px solid var(--warning-line);
 
         .nodejs-notice-icon {
-            font-size: 18px;
+            font-size: var(--text-xl);
             color: var(--warning-text-color);
             flex-shrink: 0;
             padding-top: var(--space-0-5);
