@@ -44,6 +44,7 @@ pub mod bundle_versions;
 pub mod migrations;
 pub mod muxbus;
 pub mod registry_mirror;
+pub mod builtin_seeds;
 pub mod skill_reach;
 pub mod skills;
 pub mod snapshot;

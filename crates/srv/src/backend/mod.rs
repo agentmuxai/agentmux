@@ -127,6 +127,8 @@ pub mod global_memory_record;
 pub mod agent_bundle_sidecar;
 pub mod continuity_state;
 pub mod memory_delivery;
+/// Skills that ship with AgentMux, seeded into the catalog once.
+pub mod builtin_skills;
 pub mod shellexec;
 pub mod transcript;
 pub mod transcript_backfill;
