@@ -5,10 +5,12 @@ name: Headless srv image
 # image is published.
 #
 # Not a required check, so workflow-level `paths:` is fine here (ci-pr.yml bans
-# it only for required workflows, which would sit Pending forever). It runs when
-# anything the image is built from changes: the crates it compiles (and
-# agentmux-common, which they share), the workspace manifests, lockfile and Cargo
-# config, the repo-root files srv embeds, and the Docker inputs. Plus on demand.
+# it only for required workflows, which would sit Pending forever). It runs
+# nightly (on main), on demand, and on a PR only when that PR changes what the
+# image is built from by hand: the Dockerfile, .dockerignore or this workflow.
+# It used to run on every PR touching crates/srv, which took about 56 runner
+# hours in 18 h for a build whose inputs those PRs do not change. A srv change
+# that breaks the image is seen the next night.
 
 on:
   pull_request:
@@ -16,66 +18,15 @@ on:
       - 'docker/Dockerfile.srv'
       - '.dockerignore'
       - '.github/workflows/srv-image.yml'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - '.cargo/**'
-      - '*/Cargo.toml'
-      - 'crates/srv/**'
-      - 'crates/common/**'
-      - 'crates/mcp/**'
-      - 'crates/bashwrap/**'
-      - 'schema/**'
-      - 'settings-template.jsonc'
+  schedule:
+    - cron: '30 5 * * *' # 05:30 UTC daily, before the nightly artifacts at 06:00
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  # A release PR touches Cargo.toml and Cargo.lock, which the paths above
-  # match, but only moves the version: nothing the image is built from. The
-  # same classifier ci-pr.yml uses proves that from the diff (R7 in
-  # scripts/ci-classify-changes.mjs) and skips the image build. Anything it
-  # can't prove, including an API or classifier failure, builds.
-  changes:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: read
-    outputs:
-      version_only: ${{ steps.classify.outputs.version_only }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          sparse-checkout: |
-            scripts/ci-classify-changes.mjs
-            scripts/lib/is-main.mjs
-          sparse-checkout-cone-mode: false
-      - id: classify
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          # gh's status on its own (see ci-pr.yml): a pipeline would report
-          # jq's, so a failed later page could leave a partial list.
-          FILES=""
-          if RAW="$(gh api \
-               "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
-               --paginate --jq '.[] | {filename, patch}' 2>/dev/null)"; then
-            FILES="$(printf '%s' "$RAW" | jq -s '.')" || FILES=""
-          fi
-          if printf '%s\n' "$FILES" | node scripts/ci-classify-changes.mjs >/tmp/classify.out 2>/tmp/classify.err; then
-            grep '^version_only=' /tmp/classify.out >> "$GITHUB_OUTPUT"
-            echo "::notice::$(cat /tmp/classify.err)"
-          else
-            echo "version_only=false" >> "$GITHUB_OUTPUT"
-          fi
-
   build-and-smoke:
-    needs: changes
-    # Runs unless the PR is proven version-only; on workflow_dispatch `changes`
-    # is skipped, and this still runs.
-    if: ${{ !cancelled() && needs.changes.outputs.version_only != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
