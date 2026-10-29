@@ -11,6 +11,7 @@
 
 import { onMuxEvent } from "@/app/store/mps";
 import { windowId } from "@/app/store/window-identity";
+import { isFailure } from "@/app/selection/selection-machine";
 import { revealBlock } from "@/app/util/reveal-block";
 import type { BlockRevealEvent } from "@/types/rpc/BlockRevealEvent";
 
@@ -25,8 +26,12 @@ export function shouldRevealHere(d: Partial<BlockRevealEvent> | undefined, myWin
 /** Handle one `block:reveal` payload. Returns whether this window revealed it. */
 export async function handleBlockReveal(d: Partial<BlockRevealEvent> | undefined, myWindowId: string): Promise<boolean> {
     if (!shouldRevealHere(d, myWindowId)) return false;
-    const revealed = (await revealBlock(d!.block_id!, { tabId: d!.tab_id, source: "remote-window", localOnly: true })).ok;
-    if (!revealed) console.warn("[reveal-block] block:reveal: block not in this window", d);
+    const result = await revealBlock(d!.block_id!, { tabId: d!.tab_id, source: "remote-window", localOnly: true });
+    const revealed = !isFailure(result);
+    if (isFailure(result)) {
+        const why = result.reason === "not-found" || result.reason === "gone" ? "block not in this window" : `could not show it (${result.reason})`;
+        console.warn(`[reveal-block] block:reveal: ${why}`, d);
+    }
     return revealed;
 }
 
