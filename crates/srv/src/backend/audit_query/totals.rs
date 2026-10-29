@@ -55,7 +55,7 @@ pub(super) fn of(src: &Sources, filter: &Filter) -> AuditTotals {
     let wants_file = [KIND_JEKT, KIND_ACTION, KIND_REGISTRY].iter().any(|k| filter.kinds.contains(*k));
     let Some(path) = src.jekt_file.filter(|_| wants_file) else { return sum };
     let key = format!("{}|{}", path.display(), filter.key());
-    let (mut read, mut from_file) = (0, AuditTotals::default());
+    let (mut read, mut from_file) = (0u64, AuditTotals::default());
     let mut guard = KEPT_SUMS.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(kept) = guard.as_mut().and_then(|m| m.get(&key)) {
         // A file shorter than what was read was replaced: start again.
@@ -64,17 +64,25 @@ pub(super) fn of(src: &Sources, filter: &Filter) -> AuditTotals {
         }
     }
     drop(guard);
-    scan_into(path, read, filter, &mut from_file).map_or((), |end| read = end);
-    let mut guard = KEPT_SUMS.lock().unwrap_or_else(|e| e.into_inner());
-    let map = guard.get_or_insert_with(HashMap::new);
-    if map.len() >= KEPT && !map.contains_key(&key) {
-        if let Some(oldest) = map.iter().min_by_key(|(_, k)| k.used).map(|(k, _)| k.clone()) {
-            map.remove(&oldest);
+    // The scan's sum is kept with where it ended only if it ended cleanly: one that failed partway would
+    // otherwise be counted again from the old position next time.
+    let mut scanned = from_file.clone();
+    match scan_into(path, read, filter, &mut scanned) {
+        Some(end) => {
+            let (read, from_file_now) = (end, scanned);
+            let mut guard = KEPT_SUMS.lock().unwrap_or_else(|e| e.into_inner());
+            let map = guard.get_or_insert_with(HashMap::new);
+            if map.len() >= KEPT && !map.contains_key(&key) {
+                if let Some(oldest) = map.iter().min_by_key(|(_, k)| k.used).map(|(k, _)| k.clone()) {
+                    map.remove(&oldest);
+                }
+            }
+            let used = map.values().map(|k| k.used).max().unwrap_or(0) + 1;
+            map.insert(key, Kept { read, sum: from_file_now.clone(), used });
+            from_file = from_file_now;
         }
+        None => tracing::warn!(path = %path.display(), "audit.query totals: the audit file couldn't be read to its end; answering from what was read before"),
     }
-    let used = map.values().map(|k| k.used).max().unwrap_or(0) + 1;
-    map.insert(key, Kept { read, sum: from_file.clone(), used });
-    drop(guard);
     sum.entries += from_file.entries;
     sum.input += from_file.input;
     sum.cache_read += from_file.cache_read;
