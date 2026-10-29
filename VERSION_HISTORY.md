@@ -1,5 +1,83 @@
 # AgentMux Version History
 
+## 0.60.7 — 2026-10-29
+
+- Agents can read the Google Drive files you pick for them: a Drive tool (search, details, text of Docs, Sheets, Slides and text files) on the non-sensitive drive.file permission, a Drive switch on a Google account, and Give agents files from Drive, which opens Google's file picker
+- A seat's lead can be an agent on another machine: set_seat takes Name@host from the LAN list, and Agents list and the Swarm show it as AgentY@narko
+- A container agent can install a widget it built under /workspace (each file is checked as it is copied), and its file watchers poll on Docker Desktop shares
+- An agent's editor open goes into the Editor pane the tab already has even with collapse_tree, and reuses one that is minimized or behind another tab of its pane
+- Settings search results show where each setting lives (Sounds › Tool-call tones › Volume), so settings with the same name can be told apart, and the path is searched too.
+- Open history on an agent no longer opens a second, live pane: the history reader is no longer taken for the agent's own pane
+- Minimized panes count as hidden, so a row of minimized agent panes no longer does the work of visible ones
+- Starting an agent that has two blocks resumes the one that holds its conversation, not one that was refused for it being open in another pane
+- Minimizing a pane next to a minimized pane of the same split merges its tabs into that pane, with a landing animation
+- Kanban columns collapse to a thin strip: a control in each column's header folds it to a strip with the column's name written down it and its count, held tasks and oldest age; click the strip to open it again; the choice is kept per Swarm pane
+- The Swarm's Broadcast composer sits above the agent list, and the Supervisor and Broadcast controls share one theme-aware compartment apart from the list
+- A parked leader's workers open in the tab the leader was parked from (or where its workers already are), not in the tab the user is looking at
+- Agents spawn opens a leader's workers in a "<Leader> team" tab of its workspace (made once, reused), not in the tab the leader is in
+- A layout row's queue of actions for windows drops what is more than ten minutes old, so it no longer fills up and stays full
+- The Kanban is its own pane in the widget bar, out of the Swarm: one per tab, with the board, agent strip and collapsible columns as before; old Kanban links and saved panes open it
+- A restart brings back the parked agents that were running when AgentMux exited, and those the idle sweep keeps running, not only the recently active
+- Container agents' commits read Agent: name@host and are the bot's, git trusts every clone in the container, and gh auth status says how gh is signed in
+- A container agent's OpenBrowser answer says whose sign-ins the pane browses with (its own Incognito jar by default), and the agent image gains pip, venv and core.autocrlf=input
+- Skills reach agents that are restarted or resumed: the bound skill files are written whenever an agent's controller starts, not only at its first launch
+- Stop pane, a paired device's pane list, seat patching and opening an agent into a tab no longer take the agent's history reader for its pane
+- A batched reactive.registration_flags call lists the agents another instance also claims or whose messages were refused by the identity guard, for the Swarm's row badge
+- A Swarm row shows a badge when another instance on the host claims the agent or a message to it was refused, and its menu offers Stop receiving messages
+- RegisterDevServer takes the command that starts the server: AgentMux starts it, keeps it up and re-registers it when the container is recreated; a stopped container's dev routes are now cleared
+- Agents can create a secret nobody types: the Vault's new generate action makes a strong API key, password or note, and a command can now get a Vault value on its stdin or in a private file, not only in its environment
+- A cancelled sign-in to a connected service stays cancelled: its flow stops, can no longer report success, and writes no account
+- Fix a clippy error (while_immutable_condition) in the fork-history transcript scan so cargo clippy --tests compiles again
+- The main window now reopens where you left it, and maximized if it was, after a quit, a crash or an upgrade (macOS).
+- Old version folders and unpacked portables an upgrade leaves behind are listed daily (GET /agentmux/old-versions) and, on a host that turns oldversions:clean on, cleared, always keeping the running version, the newest previous one and anything in use
+- A widget click brings back the pane already open for management panes such as Swarm, Memory and Settings, and opens a new one for work panes; Shift-click always opens a new one
+- Motion primitives: one shared module (play, move, travel, mergeInto, enter, exit, pulse, glide) for animations that code measures or starts, with a CI guard against new hand-rolled ones; the Swarm row slide now uses it
+- An isolated test or dev instance no longer creates agent workspaces under the real ~/.agentmux/agents: ~/.agentmux paths follow its home override
+- fix(agent): an agent pane scrolled up keeps its place when it is unmounted behind another tab or closed and reopened (it went back to the bottom)
+- Connect GitHub says 'Sign in to AgentMux Cloud to connect GitHub' with a sign-in button when there is no Cloud sign-in
+- The minimize merge's pill flight now runs on the shared motion primitives; same look
+- A container agent can open an editor or media pane on a file in its workspace: the pane shows a read-only snapshot of the file (titled with its path and time), kept in a folder srv sweeps; a path outside the workspace, a terminal, another machine and a folder are refused with what to do instead
+- The release pipeline can submit the Microsoft Store update itself (off until a repository variable turns it on)
+- Message send to a stopped agent says it is being started and delivered, not that it is held for later
+- ui: every corner radius comes from a --radius-* token (square corners, round pills), taking the off-token count to zero
+- ui: 20 more font sizes come from the --text-* scale
+- ui: dropped the fallbacks on custom properties that are always defined, so a wrong fallback can't mislead
+- A session start with no memory to deliver is answered once for all its parts instead of re-reading the memory for each; a flaky handle-leak test no longer fails under parallel test runs.
+- A Microsoft Store install older than the upgrade floor says how to move to the GitHub build, with a link
+- CI: the macOS and Windows builds and the landing dispatch get their GitHub token from the actions broker instead of a stored App key
+- UI record: an agent can record a short animated GIF of its own pane (up to 30 seconds), with secret fields blacked out, to attach to a Kanban task
+- Browser panes follow a window resize on a busy page: Windows moves them with the window, and the rect path no longer waits on the page's task queue
+- Swarm row slide: measure every row before starting any animation, so a reorder forces one layout instead of one per row
+- Every split (pane menu, shortcuts, palette) opens a Shortcuts pane: tiles for every pane type and widget, last used first; Terminal and Hangar tiles start where the split pane was
+- ui: the Memory pane's back, Adopt, Release, Revert and Bring buttons use the shared line-style Button
+- An agent that asks for a Vault entry again, for example after its session restarted while it waited, no longer opens a second form: it joins the open request or gets the entry the person already saved
+- CI: the headless srv image build runs nightly, on demand and when the Dockerfile, .dockerignore or its workflow change, not on every PR touching crates/srv
+- feat(agent): a container agent's pane shows a Preparing… line with the phase (image download, container start, CLI install) while its container starts in the background
+- CI: the required Ubuntu Rust leg no longer runs a separate cargo check before its nextest build (about 2.5 min off every PR); the ts-rs serde check reads that build's warnings
+- Keep UI calls responsive while agents saturate the machine: transcript and conversations reads take a bounded tail off the async workers
+- Fix an agent flipping between two accounts when reopened from My agents after an account switch, stop a resume the CLI can't find from showing as an error, and keep a pane off another channel's identities folder
+- On Linux the main window reopens where it was, and maximized if it was, like on Windows and macOS (on native Wayland only its size and maximized state: the compositor places windows there)
+- Memory > Skills can import a skill from a folder, a git repository or a URL: you read the whole text first, an imported skill starts bound to nobody, and "Check for changes" shows a diff against its source and waits for your approval
+- The Add account form no longer suggests a retired per-agent GitHub App name as its example
+- The Swarm has a filter bar: narrow the agent list by name or by what an agent is working on, with a count, highlighted matches and Select all of the shown agents
+- LAN keys: a changed key for a pinned agent name is accepted on its own when the install that hosts the agent vouches for it, and an agent can accept a vouched key (docs/specs/SPEC_LAN_KEY_CONTINUITY_2026_10_29.md)
+- Fix a pane-bounds unit test that did not compile on Linux
+- Every way of showing a pane goes through the selection machine; the token popover's agent rows keep their button when a turn lands, so a click is not lost
+- A singleton tile in the Shortcuts pane (Memory, Connectors...) brings back the open pane and closes the Shortcuts pane; Shift opens a new one
+- fix(srv): the agent-resources test of an exited process no longer fails on Windows when the OS reuses or lingers on the PID
+- Showing a pane that lives in another window waits for that window's answer, so a failure there is reported instead of silent
+- ui: the ratchet counts colour literals in .ts/.tsx too (a baseline that may only shrink), and 12 fallbacks that could never apply are gone
+- Closing a pane shows Closing… from the click on X, on an expanded or minimized pane and on a single tab, and a pane with nothing to ask (editor, terminal) closes without a round trip to the server
+- A widget or Shortcuts tile brings back an open singleton pane that is an inactive tab of a pane's stack instead of opening a copy
+- Audit.query: the Audit's list of jekts, actions, registrations and agent starts and ends, newest first, read from the durable audit file and the segment ledger
+- feat(srv): the sampler logs a warning when its tick runs more than 2 s late, so a chart gap can be counted
+- The network pill's LAN peers open to show address, OS, channel, agents, last seen and a changed-key warning
+- CI: the Windows full nextest leg builds once, archives the test binaries and runs them on three runners instead of one job of 21-31 min
+- The new-agent form remembers the Container or Native runtime you last chose and explains the difference in the runtime row
+- fix(agent): the failure row's account button says Use account… / Use <name>: an account is a selection, not a bind step
+- A narrow pane header that can take a dragged tab always flashes when the pill is over it, not only the first one the pointer reaches
+- CI: the Windows nextest build and host jobs reuse main's warm cache (the old job's keys), so the build takes about 11 minutes instead of 18
+
 ## 0.60.6 — 2026-10-28
 
 - Agents can read a Google Calendar you connect: choose which agents may use it in the account's details, and see what they did
