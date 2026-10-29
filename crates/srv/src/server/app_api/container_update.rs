@@ -92,6 +92,19 @@ fn image_blocks_update(configured: &str) -> Option<String> {
     None
 }
 
+/// Whether version `running` is older than `current`, comparing their numeric dotted parts (`0.59.41` < `0.60.2`).
+/// A version that does not parse is not older: it is left alone rather than replaced.
+fn is_older(running: &str, current: &str) -> bool {
+    fn parts(v: &str) -> Option<Vec<u64>> {
+        let core = v.trim().trim_start_matches('v').split(['-', '+']).next()?;
+        core.split('.').map(|p| p.parse::<u64>().ok()).collect()
+    }
+    match (parts(running), parts(current)) {
+        (Some(r), Some(c)) => r < c,
+        _ => false,
+    }
+}
+
 /// Moves an idle agent's container to this AgentMux's agent image: when it runs an older one, the agent follows
 /// the default image (no pin, no image of its own), the current image can be had, and no turn is using the
 /// container. The container is removed (workspace, memory and the CLI volume stay; tools installed inside it are
@@ -115,7 +128,9 @@ pub(crate) async fn update_if_idle(
         return false;
     }
     let Some(running) = cm.base_image_version(container_name).await else { return false };
-    if running == CURRENT || !current_image_available_cached(cm).await {
+    // Only forward: after a downgrade the container is on a NEWER image, which a banner reports but an update would
+    // replace with an older one.
+    if !is_older(&running, CURRENT) || !current_image_available_cached(cm).await {
         return false;
     }
     let gate = crate::backend::container::drift::update_gate(container_name);
@@ -225,6 +240,17 @@ mod tests {
         assert!(err.contains("pinned to ghcr.io/agentmuxai/agent-base@sha256:abc"), "{err}");
 
         assert!(update_for_block(&state, "no-such-block").await.unwrap_err().contains("no such pane"));
+    }
+
+    #[test]
+    fn only_an_older_image_is_moved_forward() {
+        assert!(is_older("0.59.41", "0.60.2"));
+        assert!(is_older("0.60.5", "0.60.6"));
+        assert!(is_older("0.9.0", "0.10.0"), "numeric, not text");
+        assert!(!is_older("0.60.6", "0.60.6"), "the same");
+        assert!(!is_older("0.60.7", "0.60.6"), "newer: after a downgrade it is left alone");
+        assert!(!is_older("latest", "0.60.6"), "unparseable: left alone");
+        assert!(!is_older("", "0.60.6"));
     }
 
     #[test]
