@@ -19,7 +19,7 @@
 import { giveBlockFocus } from "@/app/store/focusManager";
 import { createEffect, createRoot } from "solid-js";
 import { createRequestedTabs, createSelectionRunner, type SelectionDeps } from "@/app/selection/selection-effects";
-import { isFailure, type Intent, type SelectionResult } from "@/app/selection/selection-machine";
+import { isFailure, type Intent, type RemoteOutcome, type SelectionResult } from "@/app/selection/selection-machine";
 import { createSelectionTrace } from "@/app/selection/selection-trace";
 import { atoms, getApi, MOS, pushNotification, setActiveTab, workspace } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -41,6 +41,8 @@ export interface RevealOptions {
     source?: string;
     /** This window only: a block that is not here is not found, and no other window is asked. */
     localOnly?: boolean;
+    /** No failure notice: whoever handed this request over tells the user. */
+    quiet?: boolean;
 }
 
 /** The tab in THIS window's workspace whose `blockids` include `blockId`.
@@ -106,6 +108,7 @@ const FAIL_TEXT: Record<string, string> = {
     mismatch: "it did not come to the front",
     stuck: "it did not respond in time",
     "remote-timeout": "the other window did not answer",
+    "remote-failed": "the other window could not show it",
     gone: "it was just closed",
     error: "something went wrong",
 };
@@ -178,7 +181,7 @@ const liveDeps: SelectionDeps = {
     notify(intent: Intent, reason: string) {
         // A block that is not in this window, asked for in this window only, is not a failure to tell the
         // user about: the caller has the answer (false) and may look elsewhere.
-        if (intent.localOnly && reason === "not-found") return;
+        if (intent.quiet || (intent.localOnly && reason === "not-found")) return;
         pushNotification({
             icon: "fa-triangle-exclamation",
             title: `Couldn't show ${blockName(intent.blockId)}`,
@@ -233,24 +236,30 @@ export async function revealBlock(blockId: string, opts: RevealOptions = {}): Pr
         tabHint: opts.tabId,
         focusCaret: opts.focusCaret,
         localOnly: opts.localOnly,
+        quiet: opts.quiet,
     });
     done(!isFailure(result) || result.reason === "superseded", isFailure(result) ? result.reason : undefined);
     return result;
 }
 
-/** Whether another window (or workspace) was found to hold the block. */
-async function revealInOtherWindow(blockId: string): Promise<boolean> {
+/**
+ * Hand the block to the window that shows it and wait for that window's answer (`block:revealed`, through srv):
+ * it showed the pane, could not, or did not say in time.
+ */
+async function revealInOtherWindow(blockId: string): Promise<{ outcome: RemoteOutcome; reason?: string }> {
     try {
-        const r = await RpcApi.BlockRevealCommand(TabRpcClient, { block_id: blockId });
+        const r = await RpcApi.BlockRevealCommand(TabRpcClient, { block_id: blockId, await_ack: true });
         if (r?.found && r.window_id) {
             await raiseWindowById(r.window_id);
-            return true;
+            if (r.revealed === true) return { outcome: "revealed" };
+            if (r.revealed === false) return { outcome: "failed", reason: r.reason };
+            return { outcome: "timeout" };
         }
     } catch (e) {
         // An older srv without block.reveal: fall back below.
         console.warn("[reveal-block] block.reveal failed", { blockId, error: String(e) });
     }
-    return activateTabInOtherWorkspace(blockId);
+    return { outcome: (await activateTabInOtherWorkspace(blockId)) ? "revealed" : "not-found" };
 }
 
 /** Raise the window whose `Window` oid is `windowId`. */

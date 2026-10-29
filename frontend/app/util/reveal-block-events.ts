@@ -11,7 +11,9 @@
 
 import { onMuxEvent } from "@/app/store/mps";
 import { windowId } from "@/app/store/window-identity";
-import { isFailure } from "@/app/selection/selection-machine";
+import { isFailure, type SelectionResult } from "@/app/selection/selection-machine";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 import { revealBlock } from "@/app/util/reveal-block";
 import type { BlockRevealEvent } from "@/types/rpc/BlockRevealEvent";
 
@@ -23,15 +25,31 @@ export function shouldRevealHere(d: Partial<BlockRevealEvent> | undefined, myWin
     return !!d?.block_id && !!myWindowId && d.window_id === myWindowId;
 }
 
+/** Tell srv how the request went, for the window that waits on it. */
+async function answer(requestId: string, result: SelectionResult): Promise<void> {
+    try {
+        await RpcApi.BlockRevealedCommand(TabRpcClient, {
+            request_id: requestId,
+            ok: !isFailure(result),
+            reason: isFailure(result) ? result.reason : undefined,
+        });
+    } catch (e) {
+        console.warn("[reveal-block] block.revealed failed", String(e));
+    }
+}
+
 /** Handle one `block:reveal` payload. Returns whether this window revealed it. */
 export async function handleBlockReveal(d: Partial<BlockRevealEvent> | undefined, myWindowId: string): Promise<boolean> {
     if (!shouldRevealHere(d, myWindowId)) return false;
-    const result = await revealBlock(d!.block_id!, { tabId: d!.tab_id, source: "remote-window", localOnly: true });
+    const asked = !!d!.request_id;
+    // A caller that waits tells the user itself when this fails; one that does not (an agent's pane open) leaves it to us.
+    const result = await revealBlock(d!.block_id!, { tabId: d!.tab_id, source: "remote-window", localOnly: true, quiet: asked });
     const revealed = !isFailure(result);
     if (isFailure(result)) {
         const why = result.reason === "not-found" || result.reason === "gone" ? "block not in this window" : `could not show it (${result.reason})`;
         console.warn(`[reveal-block] block:reveal: ${why}`, d);
     }
+    if (asked) await answer(d!.request_id!, result);
     return revealed;
 }
 

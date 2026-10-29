@@ -22,6 +22,8 @@ export interface Intent {
     focusCaret: boolean;
     /** Look in this window only: a block that is not here is not found, and no other window is asked. */
     localOnly: boolean;
+    /** No failure notice: whoever handed the request over tells the user. */
+    quiet: boolean;
 }
 
 /** Why a pane could not be shown, in the words of the notice (selection-trace and notice text map them). */
@@ -33,6 +35,7 @@ export type FailReason =
     | "stuck"
     | "mismatch"
     | "remote-timeout"
+    | "remote-failed"
     | "gone"
     | "error";
 
@@ -62,6 +65,10 @@ export type SelectionState =
 
 export type SelectionStateKind = SelectionState["kind"];
 
+/** How the window that was handed the request ended it: it showed the pane, there was no such pane or window,
+ *  it could not show it (`reason` is its word for why), or it did not answer in time. */
+export type RemoteOutcome = "revealed" | "not-found" | "failed" | "timeout";
+
 export type SelectionEvent =
     | { type: "select"; intent: Intent }
     | { type: "resolved"; intentId: number; where: "here"; tabId: string; active: boolean }
@@ -72,7 +79,7 @@ export type SelectionEvent =
     | { type: "shown"; intentId: number }
     | { type: "focused"; intentId: number }
     | { type: "verified"; intentId: number; ok: boolean; detail?: string }
-    | { type: "remoteDone"; intentId: number; found: boolean }
+    | { type: "remoteDone"; intentId: number; outcome: RemoteOutcome; reason?: string }
     | { type: "effectFailed"; intentId: number; detail: string }
     | { type: "deadline"; intentId: number; step: number }
     | { type: "blockGone"; intentId: number }
@@ -214,9 +221,17 @@ export function transition(state: SelectionState, event: SelectionEvent): Transi
             return mismatch(state, intent, event.detail ?? "it did not come to the front");
         case "remoteDone":
             if (state.kind !== "handoff") return same(state);
-            return event.found
-                ? enter(state, intent, { kind: "settled" }, [{ type: "finish", intentId: intent.id, result: { ok: true } }])
-                : fail(state, intent, "not-found");
+            switch (event.outcome) {
+                case "revealed":
+                    return enter(state, intent, { kind: "settled" }, [{ type: "finish", intentId: intent.id, result: { ok: true } }]);
+                case "not-found":
+                    return fail(state, intent, "not-found");
+                case "timeout":
+                    return fail(state, intent, "remote-timeout");
+                case "failed":
+                    return fail(state, intent, "remote-failed", event.reason);
+            }
+            return same(state);
         case "blockGone":
             return fail(state, intent, "gone");
         case "effectFailed":

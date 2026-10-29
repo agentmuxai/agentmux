@@ -7,4 +7,8 @@ export type BlockRevealEvent = { block_id: string, tab_id: string,
 /**
  * The open window showing the block's workspace; only it acts.
  */
-window_id: string, };
+window_id: string, 
+/**
+ * Set when the caller waits for the window's answer (`block.revealed`).
+ */
+request_id?: string, };

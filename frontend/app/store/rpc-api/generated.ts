@@ -56,6 +56,8 @@ import type { AttachmentsIngestResult } from "@/types/rpc/AttachmentsIngestResul
 import type { BackgroundTaskView } from "@/types/rpc/BackgroundTaskView";
 import type { BlockRevealParams } from "@/types/rpc/BlockRevealParams";
 import type { BlockRevealResult } from "@/types/rpc/BlockRevealResult";
+import type { BlockRevealedParams } from "@/types/rpc/BlockRevealedParams";
+import type { BlockRevealedResult } from "@/types/rpc/BlockRevealedResult";
 import type { BlockStatsDetail } from "@/types/rpc/BlockStatsDetail";
 import type { BlockStatsDetailReq } from "@/types/rpc/BlockStatsDetailReq";
 import type { BlockfileLineCountResult } from "@/types/rpc/BlockfileLineCountResult";
@@ -927,6 +929,10 @@ export const GeneratedApi = {
   // command "block.reveal"
   BlockRevealCommand(client: RpcClient, data: BlockRevealParams, opts?: RpcOpts): Promise<BlockRevealResult> {
     return client.rpcCall("block.reveal", data, opts);
+  },
+  // command "block.revealed"
+  BlockRevealedCommand(client: RpcClient, data: BlockRevealedParams, opts?: RpcOpts): Promise<BlockRevealedResult> {
+    return client.rpcCall("block.revealed", data, opts);
   },
   // command "bundle.import.commit"
   BundleImportCommitCommand(
