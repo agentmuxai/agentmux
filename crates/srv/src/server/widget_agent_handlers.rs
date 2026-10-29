@@ -147,12 +147,32 @@ pub(super) struct InstallBody {
 /// sensitive request to install it (answered at once with the request's id; the agent is told as
 /// it goes). Without a verified agent, ask the user and answer when they do (or when the wait
 /// runs out, with the request left for them to answer later in Settings → Widgets).
-pub(super) async fn handle_widgets_install(State(state): State<AppState>, Json(body): Json<InstallBody>) -> Response {
+pub(super) async fn handle_widgets_install(
+    State(state): State<AppState>,
+    grant: Option<axum::Extension<crate::backend::container_credential::ContainerGrant>>,
+    Json(mut body): Json<InstallBody>,
+) -> Response {
     let Some(svc) = widget_packages::service() else {
         return error(StatusCode::SERVICE_UNAVAILABLE, "widget packages aren't available on this AgentMux");
     };
+    // A container agent builds the widget under its `/workspace`, a folder of the host's; nothing else of the host's is read,
+    // and the copy checks every file it opens against that folder (`install_within`).
+    let mut workspace = None;
+    if let Some(axum::Extension(grant)) = grant {
+        let host_path = super::container_workspace::workspace_of(&state, &grant.block_id)
+            .ok_or_else(|| "this container agent has no workspace folder to install from".to_string())
+            .and_then(|w| super::container_workspace::inside(&w, &body.path).map(|p| (w, p)));
+        match host_path {
+            Ok((w, p)) => (workspace, body.path) = (Some(w), p),
+            Err(e) => return error(StatusCode::FORBIDDEN, format!("{e} Build the widget under /workspace and install it from there.")),
+        }
+    }
     let (dir, source) = (svc.widgets_dir.clone(), std::path::PathBuf::from(&body.path));
-    let installed = tokio::task::spawn_blocking(move || widget_packages::install(&dir, &source, body.replace)).await;
+    let installed = tokio::task::spawn_blocking(move || match workspace {
+        Some(root) => widget_packages::install_within(&dir, &source, body.replace, &root),
+        None => widget_packages::install(&dir, &source, body.replace),
+    })
+    .await;
     let id = match installed {
         Ok(Ok(id)) => id,
         Ok(Err(e)) => return error(StatusCode::BAD_REQUEST, e),
@@ -317,5 +337,41 @@ mod tests {
         let listed = widget_packages::service().unwrap().list().into_iter().find(|p| p.id == "acme.agentmade").unwrap();
         assert_eq!(listed.state, WidgetState::Approved);
         assert!(widget_requests::requests().list().iter().all(|r| r.id != "acme.agentmade"));
+    }
+    // A container agent installs from its `/workspace` (a folder of the host's) and from nowhere else on the host.
+    #[tokio::test]
+    async fn a_container_agent_installs_only_from_its_workspace() {
+        widget_packages::WidgetPackages::for_tests();
+        let tmp = tempfile::tempdir().unwrap();
+        let (ws, outside) = (tmp.path().join("ws"), tmp.path().join("outside"));
+        std::fs::create_dir_all(ws.join("mine")).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        let state = crate::server::tests::test_state();
+        let mut meta = crate::backend::obj::MetaMapType::new();
+        meta.insert("cmd:cwd".to_string(), json!(ws.to_string_lossy()));
+        let mut block = crate::backend::obj::Block { oid: uuid::Uuid::new_v4().to_string(), meta, ..Default::default() };
+        state.mstore.insert(&mut block).unwrap();
+        let token = crate::backend::container_credential::token_for_block(&block.oid, Some("agent-tok"));
+        let app = crate::server::build_router(state);
+        let install = |path: String| {
+            let app = app.clone();
+            let token = token.clone();
+            async move {
+                let req = Request::builder()
+                    .uri("/api/v1/widgets/install")
+                    .method("POST")
+                    .header("X-AuthKey", token)
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(json!({ "path": path }).to_string()))
+                    .unwrap();
+                send(&app, req).await
+            }
+        };
+        let (status, body) = install(outside.to_string_lossy().into_owned()).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+        assert!(body.to_string().contains("under /workspace"), "{body}");
+        // Its own name for the folder reaches the install itself, which finds no widget in it.
+        let (status, body) = install("/workspace/mine".to_string()).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
     }
 }

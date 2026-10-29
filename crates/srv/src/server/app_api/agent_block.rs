@@ -22,9 +22,10 @@ pub(crate) struct AgentBlock {
 /// A block launched from a template keeps the template's id in `agentId` and binds its agent through
 /// `agentInstanceId`, so the bound instance counts too.
 fn is_agent_block_of(mstore: &Store, block: &Block, agent_uid: &str) -> bool {
-    ["agentId", "agent:id"].iter().any(|key| obj::meta_get_string(&block.meta, key, "") == agent_uid)
-        || (obj::meta_get_string(&block.meta, "view", "") == "agent"
-            && mstore.instance_get_by_block_id(&block.oid).ok().flatten().is_some_and(|i| i.id == agent_uid))
+    !obj::is_history_reader(&block.meta)
+        && (["agentId", "agent:id"].iter().any(|key| obj::meta_get_string(&block.meta, key, "") == agent_uid)
+            || (obj::meta_get_string(&block.meta, "view", "") == "agent"
+                && mstore.instance_get_by_block_id(&block.oid).ok().flatten().is_some_and(|i| i.id == agent_uid)))
 }
 
 fn is_parked(block: &Block) -> bool {
@@ -86,14 +87,14 @@ pub(crate) fn blocks_in_tabs_or_parked(mstore: &Store) -> Result<Vec<(Block, Opt
     for tab in &tabs {
         for block_id in &tab.blockids {
             if let Ok(Some(block)) = mstore.get::<Block>(block_id) {
-                if seen.insert(block.oid.clone()) {
+                if !obj::is_history_reader(&block.meta) && seen.insert(block.oid.clone()) {
                     out.push((block, Some(tab.oid.clone())));
                 }
             }
         }
     }
     for block in mstore.get_all::<Block>().map_err(|e| format!("list blocks: {e}"))? {
-        if is_parked(&block) && seen.insert(block.oid.clone()) {
+        if is_parked(&block) && !obj::is_history_reader(&block.meta) && seen.insert(block.oid.clone()) {
             out.push((block, None));
         }
     }
@@ -216,6 +217,26 @@ mod tests {
         insert_tab(&store, &[&holder, &refused]);
         let found = find_agent_block_by_uid(&store, "ann").unwrap().unwrap();
         assert_eq!(found.block.oid, holder);
+    }
+
+    /// The history reader carries the agent's id like its pane does, and is not the pane: with the agent
+    /// parked, a reader in a tab must not be taken for it.
+    #[test]
+    fn a_history_reader_is_not_the_agents_block() {
+        let store = Store::open_in_memory().unwrap();
+        let parked = insert_block(&store, "ann", true);
+        let mut meta = MetaMapType::new();
+        meta.insert("view".to_string(), serde_json::json!("agent"));
+        meta.insert("agentId".to_string(), serde_json::json!("ann"));
+        meta.insert(obj::HISTORY_READER_META_KEY.to_string(), serde_json::json!("ann"));
+        let mut reader = Block { oid: uuid::Uuid::new_v4().to_string(), meta, ..Default::default() };
+        store.insert(&mut reader).unwrap();
+        insert_tab(&store, &[&reader.oid]);
+        let found = find_agent_block_by_uid(&store, "ann").unwrap().unwrap();
+        assert_eq!((found.block.oid.as_str(), found.tab_id), (parked.as_str(), None), "the parked block, not the reader in the tab");
+        assert!(blocks_in_tabs_or_parked(&store).unwrap().iter().all(|(b, _)| b.oid != reader.oid));
+        assert!(obj::is_history_reader(&reader.meta));
+        assert!(!obj::is_history_reader(&MetaMapType::new()));
     }
 
     #[test]
