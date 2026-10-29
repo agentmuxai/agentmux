@@ -65,10 +65,10 @@ const PERMISSION_TEXT_COLORS: Record<PermissionMode, string> = {
 };
 
 const PERMISSION_COLORS: Record<PermissionMode, string> = {
-    bypass: "var(--error-color, #ef4444)",
-    auto: "var(--accent-color, #3b82f6)",
-    acceptEdits: "var(--warning-color, #eab308)",
-    plan: "var(--success-color, #22c55e)",
+    bypass: "var(--error-color)",
+    auto: "var(--accent-color)",
+    acceptEdits: "var(--warning-color)",
+    plan: "var(--success-color)",
     default: "var(--main-text-color)",
 };
 

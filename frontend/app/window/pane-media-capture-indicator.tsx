@@ -113,7 +113,7 @@ export function PaneMediaCaptureIndicator(): JSX.Element {
                                     gap: "10px",
                                     padding: "6px 10px",
                                     "border-radius": "6px",
-                                    background: "var(--error-color, #c22a2a)",
+                                    background: "var(--error-color)",
                                     color: "#fff",
                                     "font-size": "12px",
                                     "box-shadow": "0 2px 8px rgba(0,0,0,0.35)",
