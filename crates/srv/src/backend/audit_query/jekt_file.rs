@@ -80,13 +80,12 @@ impl Iterator for ReverseLines {
     }
 }
 
-/// An entry of the file, and where its line starts.
-pub(super) fn entries(path: &Path, end: Option<u64>) -> impl Iterator<Item = (u64, AuditLogEntry)> {
-    ReverseLines::open(path, end)
-        .into_iter()
-        .flatten()
-        .filter_map(Result::ok)
-        .filter_map(|line| serde_json::from_slice::<AuditLogEntry>(&line.bytes).ok().map(|e| (line.start, e)))
+/// An entry of the file, with where its line starts and where it ends (the next line's start).
+pub(super) fn entries(path: &Path, end: Option<u64>) -> impl Iterator<Item = (u64, u64, AuditLogEntry)> {
+    ReverseLines::open(path, end).into_iter().flatten().filter_map(Result::ok).filter_map(|line| {
+        let to = line.start + line.bytes.len() as u64 + 1;
+        serde_json::from_slice::<AuditLogEntry>(&line.bytes).ok().map(|e| (line.start, to, e))
+    })
 }
 
 #[cfg(test)]

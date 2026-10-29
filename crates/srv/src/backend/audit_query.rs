@@ -10,6 +10,7 @@
 //! holds is not copied. Tool calls and thoughts are not recorded anywhere yet, so asking for them says so.
 
 mod jekt_file;
+mod ordered;
 mod segments;
 
 use std::collections::HashSet;
@@ -32,9 +33,6 @@ const RECORDED: [&str; 5] = [KIND_JEKT, KIND_ACTION, KIND_REGISTRY, KIND_AGENT_S
 const NOT_RECORDED: [&str; 2] = [KIND_TOOL, KIND_THOUGHT];
 const DEFAULT_LIMIT: usize = 50;
 const MAX_LIMIT: usize = 200;
-/// The audit file is nearly in time order, not exactly (several srvs append to it): reading back stops this far
-/// past the start of the range.
-const ORDER_SLACK_MS: u64 = 10 * 60 * 1000;
 
 /// What the entries' links are made from: the live state of the app.
 pub struct Ctx<'a> {
@@ -62,33 +60,44 @@ pub(crate) fn same_agent(a: &str, b: &str) -> bool {
     !a.is_empty() && a == b
 }
 
-/// Where in the query a page stopped, in each store: the last ledger entry given, and where the audit file's next
-/// line ends. (The audit file is only roughly in time order, so one time and id for both would repeat or lose entries.)
+/// Where in the query a page stopped, in each store: the last entry given from it, and for the audit file where
+/// reading starts again. (The two stores' entries are not in one sequence, so one position for both would repeat
+/// or lose entries.)
 struct Cursor {
     ledger: Option<(u64, String)>,
+    jekt: Option<(u64, String)>,
     jekt_end: Option<u64>,
 }
 
 impl Cursor {
     fn encode(&self) -> String {
-        let (ts, id) = self.ledger.as_ref().map_or(("-".to_string(), ""), |(ts, id)| (ts.to_string(), id.as_str()));
-        format!("2|{ts}|{}|{id}", self.jekt_end.map_or("-".to_string(), |e| e.to_string()))
+        let pair = |p: &Option<(u64, String)>| p.as_ref().map_or(("-".to_string(), String::new()), |(ts, id)| (ts.to_string(), id.clone()));
+        let (lts, lid) = pair(&self.ledger);
+        let (jts, jid) = pair(&self.jekt);
+        format!("3|{lts}|{lid}|{jts}|{jid}|{}", self.jekt_end.map_or("-".to_string(), |e| e.to_string()))
     }
 
     fn decode(text: &str) -> Result<Self, String> {
         let bad = || "audit.query: that cursor isn't one this query gave".to_string();
-        let mut parts = text.splitn(4, '|');
-        if parts.next() != Some("2") {
+        let mut parts = text.splitn(6, '|');
+        if parts.next() != Some("3") {
             return Err(bad());
         }
-        let ts = parts.next().ok_or_else(bad)?;
+        let mut pair = || -> Result<Option<(u64, String)>, String> {
+            let ts = parts.next().ok_or_else(bad)?;
+            let id = parts.next().ok_or_else(bad)?.to_string();
+            if ts == "-" {
+                Ok(None)
+            } else {
+                Ok(Some((ts.parse().map_err(|_| bad())?, id)))
+            }
+        };
+        let (ledger, jekt) = (pair()?, pair()?);
         let jekt_end = match parts.next().ok_or_else(bad)? {
             "-" => None,
             n => Some(n.parse().map_err(|_| bad())?),
         };
-        let id = parts.next().ok_or_else(bad)?.to_string();
-        let ledger = if ts == "-" { None } else { Some((ts.parse().map_err(|_| bad())?, id)) };
-        Ok(Self { ledger, jekt_end })
+        Ok(Self { ledger, jekt, jekt_end })
     }
 }
 
@@ -231,16 +240,14 @@ fn newer(a: &AuditEntry, b: &AuditEntry) -> bool {
     (a.ts_ms, &a.id) > (b.ts_ms, &b.id)
 }
 
-/// The audit file's entries that pass `filter`, newest first, with the offset of each one's line.
-fn jekt_stream<'a>(src: &'a Sources, filter: &'a Filter, end: Option<u64>) -> impl Iterator<Item = (u64, AuditEntry)> + 'a {
-    let path = src.jekt_file;
+/// The audit file's entries that pass `filter`, newest first.
+fn jekt_stream<'a>(src: &'a Sources, filter: &'a Filter, cursor: Option<&Cursor>) -> ordered::Ordered<'a> {
     let wants_any = [KIND_JEKT, KIND_ACTION, KIND_REGISTRY].iter().any(|k| filter.kinds.contains(*k));
-    path.filter(|_| wants_any)
-        .into_iter()
-        .flat_map(move |p| jekt_file::entries(p, end))
-        .take_while(move |(_, e)| e.timestamp.saturating_add(ORDER_SLACK_MS) >= filter.since)
-        .map(move |(at, e)| (at, from_audit(at, &e, &src.ctx)))
-        .filter(move |(_, e)| filter.keep(e))
+    let lines: Box<dyn Iterator<Item = _>> = match src.jekt_file.filter(|_| wants_any) {
+        Some(path) => Box::new(jekt_file::entries(path, cursor.and_then(|c| c.jekt_end))),
+        None => Box::new(std::iter::empty()),
+    };
+    ordered::Ordered::new(lines, move |at, e| from_audit(at, e, &src.ctx), move |e| filter.keep(e), filter.since, cursor.and_then(|c| c.jekt.clone()))
 }
 
 /// A page of the Audit.
@@ -248,7 +255,6 @@ pub fn query(src: &Sources, req: &AuditQueryReq) -> Result<AuditQueryResult, Str
     let filter = Filter::of(req)?;
     let limit = (req.limit.map_or(DEFAULT_LIMIT, |l| l as usize)).clamp(1, MAX_LIMIT);
     let cursor = req.cursor.as_deref().map(Cursor::decode).transpose()?;
-    let jekt_from = cursor.as_ref().and_then(|c| c.jekt_end);
 
     // The ledger is small: every start and end, newest first, those past the cursor dropped.
     let mut ledger: Vec<AuditEntry> = if filter.kinds.contains(KIND_AGENT_START) || filter.kinds.contains(KIND_AGENT_END) {
@@ -260,18 +266,18 @@ pub fn query(src: &Sources, req: &AuditQueryReq) -> Result<AuditQueryResult, Str
     ledger.retain(|e| filter.keep(e) && past.as_ref().is_none_or(|(ts, id)| (e.ts_ms, e.id.as_str()) < (*ts, id.as_str())));
     ledger.sort_by(|a, b| (b.ts_ms, &b.id).cmp(&(a.ts_ms, &a.id)));
     let mut ledger = ledger.into_iter().peekable();
-    let mut jekts = jekt_stream(src, &filter, jekt_from).peekable();
+    let mut jekts = jekt_stream(src, &filter, cursor.as_ref());
 
     let mut entries: Vec<AuditEntry> = Vec::new();
-    let mut jekt_end = jekt_from;
     let mut ledger_last = past;
+    let mut jekt_last = cursor.as_ref().and_then(|c| c.jekt.clone());
     let mut more = false;
     loop {
         let take_ledger = match (ledger.peek(), jekts.peek()) {
             (None, None) => break,
             (Some(_), None) => true,
             (None, Some(_)) => false,
-            (Some(l), Some((_, j))) => newer(l, j),
+            (Some(l), Some(j)) => newer(l, j),
         };
         if entries.len() == limit {
             more = true;
@@ -282,12 +288,12 @@ pub fn query(src: &Sources, req: &AuditQueryReq) -> Result<AuditQueryResult, Str
                 ledger_last = Some((entry.ts_ms, entry.id.clone()));
                 entries.push(entry);
             }
-        } else if let Some((at, entry)) = jekts.next() {
-            jekt_end = Some(at);
+        } else if let Some(entry) = jekts.pop() {
+            jekt_last = Some((entry.ts_ms, entry.id.clone()));
             entries.push(entry);
         }
     }
-    let next_cursor = more.then(|| Cursor { ledger: ledger_last, jekt_end }.encode());
+    let next_cursor = more.then(|| Cursor { ledger: ledger_last, jekt: jekt_last, jekt_end: jekts.resume(cursor.as_ref().and_then(|c| c.jekt_end)) }.encode());
     let not_recorded = NOT_RECORDED.iter().filter(|k| filter.kinds.contains(**k)).map(|k| k.to_string()).collect();
     Ok(AuditQueryResult { entries, next_cursor, not_recorded })
 }

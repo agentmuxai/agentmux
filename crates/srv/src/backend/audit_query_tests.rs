@@ -266,8 +266,9 @@ fn a_file_out_of_time_order_neither_repeats_nor_loses_entries_across_pages() {
     let world = World::new(&[audit_entry(110, "Korp", "Opaz"), audit_entry(100, "Korp", "Opaz"), audit_entry(90, "Korp", "Opaz")]);
     let l = ledger::record_start(&world.store, start("a1", 105, 0)).unwrap();
     ledger::record_end(&world.store, "a1", &l, EndReason::Closed, None, 95).unwrap();
-    let whole = ids(&world.all(AuditQueryReq::default()));
-    assert_eq!(whole.len(), 5);
+    let all = world.all(AuditQueryReq::default());
+    assert_eq!(all.iter().map(|e| e.ts_ms).collect::<Vec<_>>(), [110, 105, 100, 95, 90], "newest first however the file is ordered");
+    let whole = ids(&all);
     for limit in 1..=4u32 {
         let mut seen = Vec::new();
         let mut cursor = None;
@@ -279,10 +280,32 @@ fn a_file_out_of_time_order_neither_repeats_nor_loses_entries_across_pages() {
                 break;
             }
         }
-        let mut sorted = seen.clone();
-        sorted.sort();
-        sorted.dedup();
-        assert_eq!(sorted.len(), 5, "limit {limit}: {seen:?}");
-        assert_eq!(seen.len(), 5, "limit {limit} repeated one: {seen:?}");
+        assert_eq!(seen, whole, "limit {limit}");
     }
+}
+
+#[test]
+fn many_lines_a_few_seconds_out_of_order_still_page_newest_first() {
+    // Several srvs append, each a little behind or ahead of the others.
+    let entries: Vec<AuditLogEntry> = (0..200u64).map(|n| audit_entry(1_000_000 + n * 1_000 + (n * 7919) % 9_000, "Korp", "Opaz")).collect();
+    let world = World::new(&entries);
+    let mut want: Vec<u64> = entries.iter().map(|e| e.timestamp).collect();
+    want.sort_by(|a, b| b.cmp(a));
+    assert_eq!(world.all(AuditQueryReq::default()).iter().map(|e| e.ts_ms).collect::<Vec<_>>(), want);
+    for limit in [1u32, 7, 33] {
+        let mut seen = Vec::new();
+        let mut cursor = None;
+        loop {
+            let page = world.run(AuditQueryReq { limit: Some(limit), cursor, ..Default::default() }).unwrap();
+            seen.extend(page.entries.iter().map(|e| e.ts_ms));
+            cursor = page.next_cursor;
+            if cursor.is_none() {
+                break;
+            }
+        }
+        assert_eq!(seen, want, "limit {limit}");
+    }
+    // A range reads back only as far as it needs, and still has all of it.
+    let range = world.all(AuditQueryReq { since_ms: Some(1_100_000), until_ms: Some(1_110_000), ..Default::default() });
+    assert_eq!(range.iter().map(|e| e.ts_ms).collect::<Vec<_>>(), want.iter().copied().filter(|t| (1_100_000..=1_110_000).contains(t)).collect::<Vec<_>>());
 }
