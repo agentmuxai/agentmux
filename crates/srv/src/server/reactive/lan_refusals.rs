@@ -28,6 +28,7 @@ fn refusals() -> std::sync::MutexGuard<'static, HashMap<String, Refusal>> {
 
 /// A message signed by `observed_key_b64` for `agent` was refused because
 /// the name is pinned to another key: log it and remember the key.
+#[cfg(test)]
 pub(crate) fn pin_mismatch(agent: &str, observed_key_b64: &str) {
     pin_mismatch_with(agent, observed_key_b64, None, None);
 }

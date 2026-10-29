@@ -86,6 +86,8 @@ async fn an_impostor_key_with_no_certificate_is_refused_and_the_pin_stays() {
     assert!(err.contains("no certificate"), "{err}");
     assert_eq!(pinned(&state, "maop-i"), BASE64.encode(old));
     assert!(audited_for("maop-i").is_empty(), "nothing moved, nothing audited");
+    // A peer that keeps showing the key is not looked into again for a minute, and the reason stays the real one.
+    assert_eq!(move_if_vouched(&state, "maop-i", &impostor, None, "automatic", false).await.unwrap_err(), err);
 }
 
 #[tokio::test]

@@ -113,7 +113,7 @@ async fn instance_trust(state: &AppState, instance_id: &str) -> Result<Path, Str
     let Some(scheduler) = crate::broker::get_global() else {
         return Err("the install is not pinned here and this machine is not signed in to ask the account's directory".to_string());
     };
-    let Some(token) = crate::muxbus::cloud_subscriber::load_valid_token(&state.mstore, &scheduler).await else {
+    let Some(token) = crate::muxbus::cloud_subscriber::load_valid_token(&state.id_store, &scheduler).await else {
         return Err("the install is not pinned here and this machine is not signed in to ask the account's directory".to_string());
     };
     let base_url = crate::muxbus::relay::rest_base_url();
@@ -130,9 +130,9 @@ async fn instance_trust(state: &AppState, instance_id: &str) -> Result<Path, Str
     }
 }
 
-static UNVOUCHED: LazyLock<Mutex<HashMap<(String, String), i64>>> = LazyLock::new(Default::default);
+static UNVOUCHED: LazyLock<Mutex<HashMap<(String, String), (i64, String)>>> = LazyLock::new(Default::default);
 
-fn unvouched() -> std::sync::MutexGuard<'static, HashMap<(String, String), i64>> {
+fn unvouched() -> std::sync::MutexGuard<'static, HashMap<(String, String), (i64, String)>> {
     UNVOUCHED.lock().unwrap_or_else(|e| e.into_inner())
 }
 
@@ -155,16 +155,19 @@ pub(crate) async fn move_if_vouched(
     let now = agentmux_common::time::now_secs();
     let observed_b64 = BASE64.encode(observed_key);
     let marker = (agent.to_lowercase(), observed_b64.clone());
-    if !force && unvouched().get(&marker).is_some_and(|at| now - at < RECHECK_AFTER_SECS) {
-        return Err("not vouched a moment ago".to_string());
+    // Asked a moment ago and not vouched: say the same reason again, without asking again.
+    if !force {
+        if let Some((_, why)) = unvouched().get(&marker).filter(|(at, _)| now - at < RECHECK_AFTER_SECS) {
+            return Err(why.clone());
+        }
     }
     let result = vouch(state, agent, observed_key, cert, now).await;
     match &result {
         Ok(_) => {
             unvouched().remove(&marker);
         }
-        Err(_) => {
-            unvouched().insert(marker, now);
+        Err(why) => {
+            unvouched().insert(marker, (now, why.clone()));
         }
     }
     let (path, cert) = result?;
