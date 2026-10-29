@@ -331,6 +331,15 @@ describe("tsColourLiterals", () => {
         expect(literals(source)).toEqual(["4 #34A853"]);
     });
 
+    it("keeps line numbers when a comment follows a blank line", () => {
+        const source = '\n// Introductory comment\nconst brand = "#EA4335"; // colour: fixed\nconst other = "#112233";';
+        expect(literals(source)).toEqual(["4 #112233"]);
+    });
+
+    it("leaves channels built from variables alone", () => {
+        expect(literals("const a = `rgba(${r}, ${g}, ${b}, ${alpha})`; const b = `rgba(${rgb[1]}, 0, 0, 1)`; const c = 'rgb(10, 20, 30)';")).toEqual(["1 rgb(10, 20, 30)"]);
+    });
+
     it("leaves colours built from a token alone", () => {
         expect(literals('const a = "var(--x, red)"; const b = "rgb(from var(--y) r g b / 0.5)";')).toEqual([]);
     });

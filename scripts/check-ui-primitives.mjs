@@ -261,7 +261,7 @@ export function definedVars(source, kind) {
  * `var(--x, …)` must not count as a use.
  */
 export function stripScriptComments(source) {
-    return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
 }
 
 export function usedVars(source) {
@@ -368,8 +368,9 @@ export function colourLiterals(scss) {
 }
 
 // A hex colour (3, 6 or 8 digits: not an issue number like `#1057`, which has 4) or a colour
-// function with literal channels, in a script's code.
-const TS_COLOUR = /(?<![\w&/#-])#(?:[0-9a-f]{8}|[0-9a-f]{6}|[0-9a-f]{3})\b(?![\w-])|\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch)\((?!\s*(?:var\(|from\b))[^)]*\)/gi;
+// function whose channels are literal numbers (`rgba(${r}, ${g}, 0)` and `rgb(from var(--x) r g b)`
+// are built from something else), in a script's code.
+const TS_COLOUR = /(?<![\w&/#-])#(?:[0-9a-f]{8}|[0-9a-f]{6}|[0-9a-f]{3})\b(?![\w-])|\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch)\((?=\s*[\d.])[^)$]*\)/gi;
 
 /**
  * Colour literals in a script's code, other than pure black and white, comments, and lines the
@@ -377,7 +378,7 @@ const TS_COLOUR = /(?<![\w&/#-])#(?:[0-9a-f]{8}|[0-9a-f]{6}|[0-9a-f]{3})\b(?![\w
  */
 export function tsColourLiterals(source) {
     // Comments blanked, line numbers kept, so the markers below still point at the right line.
-    const code = source.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, "")).replace(/^\s*\/\/.*$/gm, "");
+    const code = source.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, "")).replace(/^[ \t]*\/\/.*$/gm, "");
     const marked = new Set();
     source.split("\n").forEach((text, i) => {
         if (!/colour:\s*fixed/.test(text)) return;
