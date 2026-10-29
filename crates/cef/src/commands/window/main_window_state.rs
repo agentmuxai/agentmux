@@ -13,15 +13,19 @@
 //! anything, and a hard kill still leaves the last place it was at.
 //!
 //! On Windows positions are physical pixels, as `GetWindowRect` reports them; on
-//! macOS they are points (DIP), as CEF Views reports them in screen coordinates
-//! with the origin at the top-left of the primary display. [`fit`] puts a saved
-//! rect back inside a monitor's work area: a monitor that has been unplugged
+//! macOS and Linux they are points (DIP), as CEF Views reports them in screen
+//! coordinates with the origin at the top-left of the primary display. [`fit`] puts
+//! a saved rect back inside a monitor's work area: a monitor that has been unplugged
 //! since, or a resolution that shrank, never leaves the window off screen.
-//! Windows and macOS record the position; elsewhere the main window opens as it
-//! always did.
+//! Windows, macOS and Linux record the position.
+//!
+//! **Linux on Wayland** (the native-Wayland backend, `--ozone-platform=wayland`)
+//! cannot place a window: the compositor decides. There only the size and whether
+//! it was maximized are restored ([`fit_size_only`]); the position is saved
+//! but not used. On X11, including XWayland, the position is restored as well.
 
-// Only Windows and macOS record and restore the place; the pure parts are tested everywhere.
-#![cfg_attr(not(any(target_os = "windows", target_os = "macos")), allow(dead_code))]
+// Only Windows, macOS and Linux record and restore the place; the pure parts are tested everywhere.
+#![cfg_attr(not(any(target_os = "windows", target_os = "macos", target_os = "linux")), allow(dead_code))]
 
 use std::path::PathBuf;
 
@@ -76,10 +80,32 @@ pub fn fit(state: &MainWindowState, work_area_at: impl Fn(i32, i32) -> Option<Wo
     Some((x, y, width, height))
 }
 
+/// Where the saved rect goes when the position can't be chosen (native Wayland): the
+/// saved size, shrunk to fit `work`, centred in it. `(x, y, width, height)`; the
+/// compositor ignores the position, it is only a well-formed one.
+#[cfg(any(target_os = "linux", test))]
+pub fn fit_size_only(state: &MainWindowState, work: WorkArea) -> Option<(i32, i32, i32, i32)> {
+    let (wx, wy, ww, wh) = work;
+    if ww <= 0 || wh <= 0 {
+        return None;
+    }
+    let width = state.width.min(ww);
+    let height = state.height.min(wh);
+    Some((wx + (ww - width) / 2, wy + (wh - height) / 2, width, height))
+}
+
+/// Whether windows can be put where we say on the ozone platform this process runs on
+/// (`None`: nothing was appended, Chromium's X11 default). Native Wayland can't.
+#[cfg(any(target_os = "linux", test))]
+pub fn places_windows(ozone_platform: Option<&str>) -> bool {
+    ozone_platform != Some("wayland")
+}
+
 /// Whether `rect` (`left, top, right, bottom`) fills `work` (give or take a point
 /// or two): how a macOS window that was zoomed looks, before CEF reports it as
-/// maximized. NSWindow's zoom sets the frame to the display's visible frame.
-#[cfg(any(target_os = "macos", test))]
+/// maximized (NSWindow's zoom sets the frame to the display's visible frame), and
+/// how a Linux window the window manager maximized looks before CEF says so.
+#[cfg(any(target_os = "macos", target_os = "linux", test))]
 pub fn fills_work_area(rect: &agentmux_common::ipc::Rect, work: WorkArea) -> bool {
     const SLACK: i32 = 2;
     let (wx, wy, ww, wh) = work;
@@ -116,7 +142,7 @@ pub fn save(state: &MainWindowState) {
     }
 }
 
-#[cfg(any(target_os = "windows", target_os = "macos"))]
+#[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
 mod live {
     use super::{fit, load, save, MainWindowState, WorkArea};
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -153,19 +179,19 @@ mod live {
         }
     }
 
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     fn work_area_at(x: i32, y: i32) -> Option<WorkArea> {
         crate::app::display_work_area_at(x, y)
     }
 
     /// DIP per saved unit at `(x, y)`: the saved rect is physical on Windows and
-    /// already in DIP (points) on macOS.
+    /// already in DIP (points) on macOS and Linux.
     #[cfg(target_os = "windows")]
     fn dip_scale(x: i32, y: i32) -> f32 {
         crate::app::dpi_scale_at(x, y)
     }
 
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     fn dip_scale(_x: i32, _y: i32) -> f32 {
         1.0
     }
@@ -173,18 +199,34 @@ mod live {
     /// Whether the main window's `rect` (points) fills the work area of the display
     /// it is on. CEF's `is_maximized()` lags the frame while NSWindow's zoom settles
     /// (it still says no after a zoom and still says yes after a restore), so a
-    /// zoomed frame is recognised by its size.
-    #[cfg(target_os = "macos")]
+    /// zoomed frame is recognised by its size. Linux window managers are the same.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     pub fn fills_its_display(rect: &agentmux_common::ipc::Rect) -> bool {
         let (cx, cy) = ((rect.left + rect.right) / 2, (rect.top + rect.bottom) / 2);
         work_area_at(cx, cy).is_some_and(|work| super::fills_work_area(rect, work))
+    }
+
+    /// Where the saved rect goes now. Native Wayland can't place a window, so there
+    /// it is the saved size centred on the primary display; everywhere else, [`fit`].
+    #[cfg(target_os = "linux")]
+    fn place(state: &MainWindowState) -> Option<(i32, i32, i32, i32)> {
+        if super::places_windows(crate::app::window_settings::SELECTED_OZONE_PLATFORM.get().map(String::as_str)) {
+            fit(state, work_area_at)
+        } else {
+            super::fit_size_only(state, crate::app::primary_work_area()?)
+        }
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    fn place(state: &MainWindowState) -> Option<(i32, i32, i32, i32)> {
+        fit(state, work_area_at)
     }
 
     /// Where the main window opens, `(x, y, width, height)` in DIP as CEF Views
     /// wants it, or `None` for the default (no saved place, or its monitor is gone).
     pub fn initial_bounds() -> Option<(i32, i32, i32, i32)> {
         let state = load()?;
-        let (x, y, w, h) = fit(&state, work_area_at)?;
+        let (x, y, w, h) = place(&state)?;
         *NORMAL.lock().unwrap() = Some(MainWindowState { x, y, width: w, height: h, maximized: false });
         START_MAXIMIZED.store(state.maximized, Ordering::Relaxed);
         // A new window is placed in DIP; on Windows the rect is physical on the monitor it is on.
@@ -227,18 +269,18 @@ mod live {
     }
 }
 
-#[cfg(any(target_os = "windows", target_os = "macos"))]
+#[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
 pub(crate) use live::{initial_bounds, note_position, take_start_maximized};
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 pub(crate) use live::fills_its_display;
 
-/// Where the main window opens: not recorded off Windows and macOS.
-#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+/// Where the main window opens: not recorded off Windows, macOS and Linux.
+#[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
 pub(crate) fn initial_bounds() -> Option<(i32, i32, i32, i32)> {
     None
 }
 
-#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+#[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
 pub(crate) fn take_start_maximized() -> bool {
     false
 }
@@ -286,6 +328,47 @@ mod tests {
     fn a_rect_bigger_than_the_monitor_shrinks_to_its_work_area() {
         // The monitor got smaller since: 3000x2000 on a 1920x1040 work area.
         assert_eq!(fit(&state(0, 0, 3000, 2000), two), Some((0, 0, 1920, 1040)));
+    }
+
+    #[test]
+    fn native_wayland_restores_the_size_and_not_the_position() {
+        // The compositor places windows there: the platform says so, and the saved size is
+        // centred on the primary display whatever x and y were saved.
+        assert!(!places_windows(Some("wayland")));
+        assert!(places_windows(Some("x11")));
+        assert!(places_windows(None));
+        let primary: WorkArea = (0, 30, 1920, 1050);
+        let at = |x, y, w, h| MainWindowState { x, y, width: w, height: h, maximized: false };
+        assert_eq!(fit_size_only(&at(5000, -400, 1000, 700), primary), Some((460, 205, 1000, 700)));
+        assert_eq!(fit_size_only(&at(0, 0, 1000, 700), primary), Some((460, 205, 1000, 700)));
+        // A size the display can't hold shrinks to it; a display with no area gives nothing.
+        assert_eq!(fit_size_only(&at(10, 10, 4000, 3000), primary), Some((0, 30, 1920, 1050)));
+        assert_eq!(fit_size_only(&at(10, 10, 1000, 700), (0, 0, 0, 0)), None);
+    }
+
+    #[test]
+    fn a_saved_window_on_a_display_that_is_gone_opens_where_a_new_one_goes() {
+        let state = at_default();
+        // Saved on a second display that has been unplugged: no work area for its centre.
+        let only_primary = |x: i32, y: i32| (0..1920).contains(&x).then_some(()).and((0..1080).contains(&y).then_some((0, 0, 1920, 1080)));
+        let gone = MainWindowState { x: 2000, y: 100, width: 900, height: 600, maximized: true };
+        assert_eq!(fit(&gone, only_primary), None);
+        // Still on the primary: kept, and clamped inside it when it ran off an edge.
+        assert_eq!(fit(&state, only_primary), Some((state.x, state.y, state.width, state.height)));
+        let partly_off = MainWindowState { x: 1200, y: 700, width: 900, height: 600, maximized: false };
+        assert_eq!(fit(&partly_off, only_primary), Some((1020, 480, 900, 600)));
+    }
+
+    fn at_default() -> MainWindowState {
+        MainWindowState { x: 100, y: 80, width: 1000, height: 700, maximized: false }
+    }
+
+    #[test]
+    fn a_corrupt_or_missing_state_file_opens_the_default() {
+        for text in ["", "not json", "{}", "{\"x\":1}", "{\"x\":1,\"y\":1,\"width\":5,\"height\":5}", "{\"x\":1,\"y\":1,\"width\":900,\"height\":600,\"maximized\":\"yes\"}"] {
+            assert_eq!(parse(text), None, "{text:?}");
+        }
+        assert!(parse("{\"x\":1,\"y\":1,\"width\":900,\"height\":600}").is_some());
     }
 
     #[test]

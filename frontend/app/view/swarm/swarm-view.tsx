@@ -36,6 +36,8 @@ import { remoteAgentKey } from "./swarm-fleet-targets";
 import { remoteSeatInfo } from "./swarm-seat-groups";
 import { remoteChip, remoteLine, seenAgo, type RemoteRow } from "./swarm-remote";
 import { SwarmSeatBadge, SwarmSeatPill } from "./swarm-seats";
+import { Highlight } from "./swarm-filter-bar";
+import { highlightWords } from "./swarm-filter-state";
 import "./swarm-view.scss";
 
 /** The block shown in the focused pane — for a multi-tab pane, its active
@@ -111,7 +113,7 @@ export function RemoteAgentRow(props: { model: SwarmViewModel; row: RemoteRow })
                     title={section().stale ? "Not seen recently, so it can't be selected" : "Select for a fleet action (broadcast/stop)"}
                 />
                 <SwarmProviderIcon provider={props.row.agent.provider} unknownTitle={REMOTE_PROVIDER_UNKNOWN} />
-                <span class="swarm-remote-agent-name">{props.row.agent.name}</span>
+                <span class="swarm-remote-agent-name"><Highlight text={props.row.agent.name} words={highlightWords(props.model, "name")} /></span>
                 <SwarmSeatPill seat={remoteSeatInfo(props.row).seat} />
                 <span class="swarm-remote-where">
                     <span class="swarm-remote-title">{section().title}</span>
@@ -137,7 +139,11 @@ export function RemoteAgentRow(props: { model: SwarmViewModel; row: RemoteRow })
                 </Show>
             </div>
             <Show when={remoteLine(props.row.agent.line, section().stale)}>
-                {(line) => <div class="swarm-remote-agent-line">{line()}</div>}
+                {(line) => (
+                    <div class="swarm-remote-agent-line">
+                        <Highlight text={line()} words={highlightWords(props.model, "work")} />
+                    </div>
+                )}
             </Show>
         </div>
     );
@@ -436,7 +442,9 @@ export function AgentRow({
                     <span class="swarm-agent-icon">
                         <SwarmProviderIcon provider={node().agentProvider} unknownTitle={LOCAL_PROVIDER_UNKNOWN} />
                     </span>
-                    <span class="swarm-agent-label">{node().agentName}</span>
+                    <span class="swarm-agent-label">
+                        <Highlight text={node().agentName} words={highlightWords(model, "name")} />
+                    </span>
                     <SwarmSeatBadge meta={blockMeta()} />
                     {/* Turns this agent didn't get from you that finished
                         unseen: the same mark as its pane header (UnseenTurnsDot). */}
@@ -488,7 +496,11 @@ export function AgentRow({
                 >
                     {/* An agent that can't start a turn says so ahead of any title. Read from the
                         row's tick, like the chip, so the words go when the reset passes. */}
-                    {unavailable() ? unavailableLineText(unavailable()!, rowNow()) : node().line.text}
+                    {unavailable() ? (
+                        unavailableLineText(unavailable()!, rowNow())
+                    ) : (
+                        <Highlight text={node().line.text} words={highlightWords(model, "work")} />
+                    )}
                 </div>
                 {/* The Kanban task this agent is on, which opens it on the Kanban pane (SPEC_WARDEN_KANBAN_2026_10_20.md §6.14). */}
                 <Show when={node().blockId}>{(blockId) => <HeldTaskChip blockId={blockId()} />}</Show>

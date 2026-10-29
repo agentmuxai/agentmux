@@ -24,6 +24,8 @@ import { stoppedAgents } from "./swarm-runtime";
 import { openAgentInActiveTab, sharedAgentRuntime, startAgent } from "@/app/store/agent-runtime-live";
 import { SwarmGroupByControl, SwarmSeatList, useSwarmSeats } from "./swarm-seats";
 import type { SwarmDensity } from "./swarm-section";
+import { SwarmFilterBar, SwarmFilterEmpty, type SwarmFilterFocus } from "./swarm-filter-bar";
+import { useSwarmFilter, type SwarmFilterState } from "./swarm-filter-state";
 import { chipStatus } from "./swarm-status-chip";
 import { StoppedAgents } from "./swarm-stopped-agents";
 import { AgentRowHost, RemoteAgentRowHost, agentRowKey, focusedActiveBlockId } from "./swarm-view";
@@ -45,6 +47,10 @@ export interface SwarmAgents {
     /** Everything a checkbox can select: this instance's agents, then the remote ones not gone
      *  stale. Select all and the selection both follow it. */
     selectableKeys: Accessor<string[]>;
+    /** `selectableKeys` the filter shows: what Select all selects (all of them with no filter). */
+    shownSelectableKeys: Accessor<string[]>;
+    /** The filter bar's state (swarm-filter-state.ts). */
+    filter: SwarmFilterState;
 }
 
 export function useSwarmAgents(model: SwarmViewModel, ctx: PaneTabHostContext): SwarmAgents {
@@ -83,12 +89,17 @@ export function useSwarmAgents(model: SwarmViewModel, ctx: PaneTabHostContext): 
         ...localKeys(),
         ...remote().flatMap((r) => (r.section.stale ? [] : [remoteAgentKey(r.section, r.agent)])),
     ]);
+    const filter = useSwarmFilter(model, ctx, { keyedRows, remote, stopped });
+    const shownSelectableKeys = createMemo(() => {
+        const shown = filter.shown();
+        return shown ? selectableKeys().filter((key) => shown.has(key)) : selectableKeys();
+    });
     // An agent that leaves the list leaves the selection, so the toolbar never
     // counts one no checkbox shows (docs/specs/SPEC_SWARM_REFINEMENTS_2026_10_17.md §2).
     createEffect(() => {
         if (!model.loadingAtom()) model.pruneSelection(localKeys());
     });
-    return { tree, keyedRows, rowsByKey, remote, remoteByKey, clearableCount, stopped, selectableKeys };
+    return { tree, keyedRows, rowsByKey, remote, remoteByKey, clearableCount, stopped, selectableKeys, shownSelectableKeys, filter };
 }
 
 export function SwarmAgentList(props: {
@@ -97,6 +108,8 @@ export function SwarmAgentList(props: {
     agents: SwarmAgents;
     /** Full rows in the Supervisor section, compact ones in Broadcast. */
     density: Accessor<SwarmDensity>;
+    /** Gets the filter box's focus handle, for the pane's Find. */
+    filterFocusRef?: (focus: SwarmFilterFocus) => void;
 }): JSX.Element {
     const model = props.model;
     const { keyedRows, rowsByKey, remote, remoteByKey, tree } = props.agents;
@@ -132,6 +145,15 @@ export function SwarmAgentList(props: {
         ],
     });
     const seats = useSwarmSeats(props.ctx, keyedRows, remoteByKey); // Group by lead (swarm-seats.tsx)
+    // The filter keeps the rows it shows, in the order the list holds: it never re-settles the
+    // order, and a change of the filter text is not held (the person asked for it).
+    const filter = props.agents.filter;
+    const shownOrder = createMemo(() => {
+        const shown = filter.shown();
+        const order = swarmOrder.order();
+        return shown ? order.filter((key) => shown.has(key)) : order;
+    });
+    const listed = () => tree().length > 0 || remote().length > 0 || props.agents.stopped().length > 0;
 
     // Derive the currently-focused block ID from the active tab's layout model.
     // Switching a multi-tab pane to another tab keeps the SAME focused node and
@@ -153,6 +175,13 @@ export function SwarmAgentList(props: {
         // One list: this instance's agents and the other instances', working ones
         // first (swarm-order.ts; docs/specs/SPEC_SWARM_REFINEMENTS_2026_10_17.md §5).
         <>
+            {/* Outside the list element: the order is held while the list is used, not while this is. */}
+            <Show when={listed() || filter.text().trim() !== ""}>
+                <SwarmFilterBar filter={filter} focusRef={props.filterFocusRef} />
+            </Show>
+            <Show when={filter.text().trim() !== "" && filter.counts().shown === 0}>
+                <SwarmFilterEmpty filter={filter} />
+            </Show>
             <Show when={tree().length > 0 || remote().length > 0}>
                 <SwarmGroupByControl seats={seats} />
                 <div
@@ -164,7 +193,7 @@ export function SwarmAgentList(props: {
                     }}
                     {...swarmOrder.listHandlers}
                 >
-                    <SwarmSeatList seats={seats} order={swarmOrder.order}>
+                    <SwarmSeatList seats={seats} order={shownOrder}>
                         {(key) =>
                             // Which kind of row it is comes from the maps the rows are read from. A key in
                             // neither (the agent just left) has no row to show.
@@ -183,7 +212,7 @@ export function SwarmAgentList(props: {
                 </div>
             </Show>
             <StoppedAgents
-                agents={props.agents.stopped}
+                agents={filter.stopped}
                 hasLive={() => tree().length > 0 || remote().length > 0}
                 onOpen={openAgentInActiveTab}
                 onStart={startAgent}

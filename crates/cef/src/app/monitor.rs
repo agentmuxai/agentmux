@@ -283,6 +283,47 @@ pub fn display_work_area_at(px: i32, py: i32) -> Option<(i32, i32, i32, i32)> {
     work_area_on_a_display(&appkit_screens(), px, py)
 }
 
+/// One display as CEF reports it: `(bounds, work area)`, each `(x, y, width, height)` in DIP
+/// screen coordinates.
+#[cfg(any(target_os = "linux", test))]
+type DisplayRects = ((i32, i32, i32, i32), (i32, i32, i32, i32));
+
+/// The work area of the display whose bounds contain `(px, py)`, `None` when no display does
+/// (a window saved on a display that has been unplugged since is not "on" the primary).
+#[cfg(any(target_os = "linux", test))]
+fn work_area_in_displays(displays: &[DisplayRects], px: i32, py: i32) -> Option<(i32, i32, i32, i32)> {
+    displays
+        .iter()
+        .find(|((x, y, w, h), _)| px >= *x && px < x + w && py >= *y && py < y + h)
+        .map(|(_, work)| *work)
+}
+
+/// Every attached display, primary first. Must run on the UI thread, after CEF is initialised.
+#[cfg(target_os = "linux")]
+fn cef_displays() -> Vec<DisplayRects> {
+    use cef::ImplDisplay;
+    let rect = |r: cef::Rect| (r.x, r.y, r.width, r.height);
+    let mut all = vec![None; cef::display_get_count()];
+    cef::display_get_alls(Some(&mut all));
+    all.into_iter().flatten().map(|d| (rect(d.bounds()), rect(d.work_area()))).collect()
+}
+
+/// Work area of the display containing `(px, py)`, in DIP like CEF Views' window bounds, but
+/// `None` when no display has that point. CEF's own display list answers (X11: RandR and
+/// `_NET_WORKAREA` per display, scale factor applied), so a scaled display needs no conversion
+/// here. Used for the main window's saved place (`main_window_state`); `get_monitor_work_area`
+/// below is the older stub the other windows' sizing still goes by.
+#[cfg(target_os = "linux")]
+pub fn display_work_area_at(px: i32, py: i32) -> Option<(i32, i32, i32, i32)> {
+    work_area_in_displays(&cef_displays(), px, py)
+}
+
+/// Work area of the primary display, in DIP.
+#[cfg(target_os = "linux")]
+pub fn primary_work_area() -> Option<(i32, i32, i32, i32)> {
+    cef_displays().first().map(|(_, work)| *work)
+}
+
 #[cfg(target_os = "linux")]
 pub fn get_monitor_work_area(_px: i32, _py: i32) -> Option<(i32, i32, i32, i32)> {
     // X11: XDisplayWidth/XDisplayHeight on the default screen.
@@ -351,6 +392,21 @@ mod tests {
         // On a display, both agree.
         assert_eq!(work_area_on_a_display(&screens, 2000, 100), work_area_at(&screens, 2000, 100));
         assert_eq!(work_area_on_a_display(&[], 0, 0), None);
+    }
+
+    #[test]
+    fn a_work_area_is_found_only_for_a_point_on_a_display() {
+        // A 1920x1080 primary with a 30-point panel on top, and a second display to its right.
+        let displays: [DisplayRects; 2] = [((0, 0, 1920, 1080), (0, 30, 1920, 1050)), ((1920, 0, 1280, 1024), (1920, 0, 1280, 1024))];
+        assert_eq!(work_area_in_displays(&displays, 100, 100), Some((0, 30, 1920, 1050)));
+        assert_eq!(work_area_in_displays(&displays, 1919, 1079), Some((0, 30, 1920, 1050)));
+        assert_eq!(work_area_in_displays(&displays, 1920, 0), Some((1920, 0, 1280, 1024)));
+        // Where a third display used to be, and past the edges: nowhere.
+        assert_eq!(work_area_in_displays(&displays, 3200, 0), None);
+        assert_eq!(work_area_in_displays(&displays, 1920, 1080), None);
+        assert_eq!(work_area_in_displays(&displays, 1000, 1080), None);
+        assert_eq!(work_area_in_displays(&displays, -1, 0), None);
+        assert_eq!(work_area_in_displays(&[], 0, 0), None);
     }
 
     #[test]

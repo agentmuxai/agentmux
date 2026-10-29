@@ -366,7 +366,7 @@ fn only_agentmuxs_own_github_app_runs_through_the_broker() {
     // The broker exchanges the code with AgentMux's App secret: the person's own app can't use it.
     assert!(!runs_through_broker("github", true, &client(ClientMode::Byo)));
     assert!(!runs_through_broker("github", true, &client(ClientMode::Workspace)));
-    // Signed out of AgentMux Cloud: the device flow; other providers never use the broker.
+    // Signed out of AgentMux Cloud: no broker; other providers never use it.
     assert!(!runs_through_broker("github", false, &client(ClientMode::Builtin)));
     assert!(!runs_through_broker("google", true, &client(ClientMode::Builtin)));
 }
@@ -455,4 +455,27 @@ async fn the_timeout_sweep_is_final_and_stops_the_flow() {
     tokio::time::timeout(Duration::from_secs(1), stop.stopped()).await.expect("a timed-out flow is told to stop");
     assert!(!m.set_status(&id, success()), "a flow that wakes up late cannot report success");
     assert!(!m.begin_commit(&id));
+}
+
+#[test]
+fn only_a_missing_sign_in_is_answered_with_the_sign_in_prompt() {
+    use crate::muxbus::github_broker::{BrokerError, NO_VALID_SIGN_IN};
+    assert!(BrokerError::NotSignedIn(NO_VALID_SIGN_IN.into()).needs_sign_in());
+    // Not running yet, or a key that can't be read: signing in changes nothing.
+    assert!(!BrokerError::NotSignedIn("AgentMux Cloud isn't running yet".into()).needs_sign_in());
+    assert!(!BrokerError::NotSignedIn("this install's key can't be read: x".into()).needs_sign_in());
+    assert!(!BrokerError::NotConnected.needs_sign_in());
+}
+
+#[test]
+fn github_through_agentmuxs_own_app_needs_a_cloud_sign_in() {
+    let client = |mode| ResolvedClient { client_id: "id".into(), client_secret: None, mode };
+    // No sign-in: AgentMux's own App stops with the code the UI turns into a sign-in prompt.
+    assert!(needs_cloud_sign_in("github", false, &client(ClientMode::Builtin)));
+    assert!(!needs_cloud_sign_in("github", true, &client(ClientMode::Builtin)));
+    // The person's own app costs AgentMux nothing, and other providers are not GitHub Connect.
+    assert!(!needs_cloud_sign_in("github", false, &client(ClientMode::Byo)));
+    assert!(!needs_cloud_sign_in("github", false, &client(ClientMode::Workspace)));
+    assert!(!needs_cloud_sign_in("google", false, &client(ClientMode::Builtin)));
+    assert_eq!(NEEDS_CLOUD_SIGN_IN, "needs-cloud-sign-in");
 }

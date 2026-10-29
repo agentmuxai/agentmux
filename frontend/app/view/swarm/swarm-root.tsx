@@ -9,6 +9,7 @@ import { AccountAvailabilityStrip } from "@/app/view/account-availability/accoun
 import { selectTrace } from "@/app/util/select-trace";
 import { readZoom } from "@/app/store/zoom-factor";
 import { SwarmAgentList, useSwarmAgents, type SwarmAgents } from "./swarm-agent-list";
+import type { SwarmFilterFocus } from "./swarm-filter-bar";
 import { ClearCompletedButton } from "./swarm-view";
 import { SwarmSectionBar } from "./swarm-section-bar";
 import { createSwarmSection, swarmDensityOf, type SwarmSection } from "./swarm-section";
@@ -34,7 +35,7 @@ function SectionControls(props: { model: SwarmViewModel; agents: SwarmAgents; se
             {/* Outside the tree's own Show: agents on other instances can be selected
                 when this instance has none, and the toolbar is what acts on them. It
                 shows itself only when there is something to select or act on. */}
-            <FleetToolbar model={model} allBlockIds={agents.selectableKeys} section={props.section} />
+            <FleetToolbar model={model} allBlockIds={agents.shownSelectableKeys} section={props.section} />
             <FleetResultPanel model={model} quietWhenClean={props.section === "broadcast"} />
         </div>
     );
@@ -66,6 +67,8 @@ function SectionListNotes(props: { model: SwarmViewModel; agents: SwarmAgents })
 export function SwarmView(props: {
     model: SwarmViewModel;
     ctx: PaneTabHostContext;
+    /** Gets the filter box's focus handle, for the pane's Find (Ctrl/Cmd+F). */
+    filterFocusRef?: (focus: SwarmFilterFocus) => void;
 }): JSX.Element {
     const model = props.model;
     const ctx = props.ctx;
@@ -131,7 +134,7 @@ export function SwarmView(props: {
                         <div class="swarm-agents-pane">
                             <SectionControls model={model} agents={agents} section={section()} />
                             <SectionListNotes model={model} agents={agents} />
-                            <SwarmAgentList model={model} ctx={ctx} agents={agents} density={density} />
+                            <SwarmAgentList model={model} ctx={ctx} agents={agents} density={density} filterFocusRef={props.filterFocusRef} />
                         </div>
                     </div>
                 </SwarmSectionBar>

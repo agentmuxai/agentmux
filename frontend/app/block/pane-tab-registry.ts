@@ -160,6 +160,9 @@ export interface PaneTabManifest {
      *  load: the view it stands in for. It takes that view's color and isn't
      *  offered as a widget of its own (Settings doesn't list it). */
     legacyOf?: string;
+    /** A pane a person manages, of which one is the point: opening it brings back the one already
+     *  open (an extension's `singleton`; built-in widgets say so in the widget config). */
+    singleton?: boolean;
     capabilities?: PaneTabCapabilities;
     /** The pane's sections, when it is a row of them; the selected one is in
      *  meta under `<view>:section` (pane-sections.ts). */

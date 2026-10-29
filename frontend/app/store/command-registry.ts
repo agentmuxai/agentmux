@@ -22,6 +22,7 @@ import { fireAndForget } from "@/util/util";
 import { openModal } from "@/app/store/modalmodel";
 import { CommandPaletteModal } from "@/app/modals/command-palette";
 import { zoomIn, zoomOut, zoomReset } from "@/app/store/zoom";
+import { isSingletonView } from "@/app/store/widget-singleton";
 import { openNewWindowFromHere } from "@/app/store/window-appearance";
 import { redockThisFloater } from "@/app/block/floating-redock";
 import { userInThisWindow } from "@/app/store/input-owner";
@@ -52,7 +53,8 @@ export interface CommandEntry {
      *  and each time `run` is asked (dev mode, for the developer commands). */
     when?: () => boolean;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    execute: () => void | Promise<any>;
+    /** `forceNew`: the person held Shift (opens a new pane even for a singleton). */
+    execute: (opts?: { forceNew?: boolean }) => void | Promise<any>;
 }
 
 /** Can `entry` run on this host? */
@@ -133,6 +135,16 @@ function switchTab(offset: number) {
 // Registration
 // ---------------------------------------------------------------------------
 
+/**
+ * Open the pane `blockdef` describes: a singleton view (the widget config's `singleton`) brings back
+ * the one already open, anything else, or `forceNew`, opens a new one. The same rule as the widget bar.
+ */
+function openPane(blockdef: BlockDef, forceNew = false): Promise<unknown> {
+    const view = blockdef.meta?.["view"] as string | undefined;
+    if (view && !forceNew && isSingletonView(view)) return openOrFocusPaneByView(view, blockdef);
+    return createBlock(blockdef);
+}
+
 export function registerDefaultCommands(): void {
     // ---- open ----
     commandRegistry.register({
@@ -163,15 +175,28 @@ export function registerDefaultCommands(): void {
         label: "Open Tower (Task Manager)",
         category: "Open",
         icon: "tower-observation",
-        execute: () => createBlock({ meta: { view: "tower" } }),
+        execute: (opts) => openPane({ meta: { view: "tower" } }, opts?.forceNew),
+    });
+    commandRegistry.register({
+        id: "new:tower",
+        label: "New Tower (Task Manager)",
+        category: "Open",
+        icon: "tower-observation",
+        execute: () => openPane({ meta: { view: "tower" } }, true),
     });
     commandRegistry.register({
         id: "open:kanban",
         label: "Open Kanban",
         category: "Open",
         icon: "table-columns",
-        // The tab's Kanban, or a new one (the store layer doesn't import views).
-        execute: () => openOrFocusPaneByView("kanban", { meta: { view: "kanban" } }),
+        execute: (opts) => openPane({ meta: { view: "kanban" } }, opts?.forceNew),
+    });
+    commandRegistry.register({
+        id: "new:kanban",
+        label: "New Kanban",
+        category: "Open",
+        icon: "table-columns",
+        execute: () => openPane({ meta: { view: "kanban" } }, true),
     });
     commandRegistry.register({
         id: "open:vault",
@@ -187,7 +212,14 @@ export function registerDefaultCommands(): void {
         label: "Open Help",
         category: "Open",
         icon: "circle-question",
-        execute: () => createBlock({ meta: { view: "help" } }),
+        execute: (opts) => openPane({ meta: { view: "help" } }, opts?.forceNew),
+    });
+    commandRegistry.register({
+        id: "new:help",
+        label: "New Help",
+        category: "Open",
+        icon: "circle-question",
+        execute: () => openPane({ meta: { view: "help" } }, true),
     });
     commandRegistry.register({
         id: "open:swarm",
@@ -195,7 +227,15 @@ export function registerDefaultCommands(): void {
         category: "Open",
         icon: "people-group",
         iconColor: "#f59e0b",
-        execute: () => createBlock({ meta: { view: "swarm" } }),
+        execute: (opts) => openPane({ meta: { view: "swarm" } }, opts?.forceNew),
+    });
+    commandRegistry.register({
+        id: "new:swarm",
+        label: "New Swarm",
+        category: "Open",
+        icon: "people-group",
+        iconColor: "#f59e0b",
+        execute: () => openPane({ meta: { view: "swarm" } }, true),
     });
     commandRegistry.register({
         id: "open:files",
