@@ -151,4 +151,5 @@ fn the_disk_cleanup_skill_says_to_ask_first_and_what_never_to_touch() {
         assert!(c.contains(protected), "{protected}");
     }
     assert!(c.contains("measure"));
+    assert!(c.contains("confirm it with the user"), "the home is confirmed, not assumed from an unset variable");
 }
