@@ -644,8 +644,8 @@ async fn open_editor_creates_new_pane_when_none_exists_in_tab() {
 }
 
 /// An agent that always passes `collapse_tree` (`tree_expanded: Some(false)`) still gets the
-/// Editor pane its tab has: the option shapes only a pane the call creates. It used to bypass reuse
-/// (reagent P2 on PR #2404), which made a new Editor pane on every open.
+/// Editor pane its tab has: the option shapes only a pane the call creates (it once bypassed reuse,
+/// which made a new Editor pane on every open).
 #[tokio::test]
 async fn open_editor_reuses_the_pane_even_with_collapse_tree() {
     let (state, tab_id, caller, existing_editor) = tab_with_caller_and_editor().await;

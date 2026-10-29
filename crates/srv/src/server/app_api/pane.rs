@@ -1153,10 +1153,9 @@ pub async fn open_pane(state: &AppState, mut cmd: CommandPaneOpenData) -> Result
     // requests into a reused docked pane).
     //
     // An explicit `tree_expanded` (`OpenEditor`'s `collapse_tree`) does NOT
-    // bypass reuse: a reused pane keeps its own tree state, and the option only
-    // shapes a pane this call creates. (It used to bypass reuse, on reagent's P2
-    // on PR #2404 that a reused pane has no live way to take a new tree state;
-    // the cost was a new pane on every open of an agent that always passes it.)
+    // bypass reuse: a reused pane keeps its own tree state (it has no live way
+    // to take a new one), and the option only shapes a pane this call creates.
+    // Bypassing reuse made a new pane on every open of an agent that always passes it.
     if cmd.view == "editor" && cmd.reuse_editor_pane == Some(true) && cmd.floating != Some(true) {
         if let (Some(caller_block_id), Some(file)) =
             (cmd.split_reference_block_id.as_deref(), cmd.file.as_deref())
