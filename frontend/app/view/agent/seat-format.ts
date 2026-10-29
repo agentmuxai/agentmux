@@ -85,7 +85,8 @@ export function seatsByAgent(
         seats.set(d.id, {
             role: d.seat.role,
             qualifier: optionalText(d.seat.qualifier),
-            lead: leadId ? { id: leadId, name: optionalText(names.get(leadId)) } : null,
+            // A lead on another machine is named as it was set ("AgentY@narko"), like srv's own summaries.
+            lead: leadId ? { id: leadId, name: optionalText(names.get(leadId)) ?? (leadId.includes("@") ? leadId : null) } : null,
             area: optionalText(d.seat.area),
         });
     }
