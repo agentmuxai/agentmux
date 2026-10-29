@@ -27,7 +27,7 @@ import { oauthInfo } from "./oauth-catalog";
 import { isBlockedError, setOAuthNote } from "./oauth-account-state";
 import { createOAuthClientState, OAuthClientSection } from "./OAuthClientSection";
 import { Button } from "@/app/element/ui";
-import { muxbusDelivery } from "@/store/muxbus-delivery";
+import { muxbusDelivery, muxbusOffersSignIn } from "@/store/muxbus-delivery";
 import { githubNeedsCloudSignIn, isNeedsCloudSignInError } from "./github-cloud-gate";
 import { GithubCloudSignIn } from "./GithubCloudSignIn";
 import "./oauth-connect.scss";
@@ -208,6 +208,16 @@ export function OAuthConnectPanel(props: OAuthConnectPanelProps): JSX.Element {
         setLocalError(null);
         opened = false;
     };
+
+    // The person signed in from the prompt: the answer that sent them there no longer holds.
+    createEffect(
+        on(muxbusDelivery, (delivery) => {
+            if (delivery == null || muxbusOffersSignIn(delivery)) return;
+            if (isNeedsCloudSignInError(localError())) setLocalError(null);
+            const s = status();
+            if (s?.status === "failed" && isNeedsCloudSignInError(s.error)) setStatus(null);
+        }),
+    );
 
     const label = PROVIDER_LABELS[props.provider] ?? props.provider;
     // GitHub through AgentMux's own App needs the Cloud sign-in: say so, with the sign-in, in place of Connect.

@@ -285,6 +285,20 @@ describe("Connect GitHub without an AgentMux Cloud sign-in", () => {
         expect(screen.queryByText("needs-cloud-sign-in")).toBeNull();
     });
 
+    it("drops the prompt that srv's answer raised once the person has signed in", async () => {
+        rpc.AccountOAuthClientGetCommand.mockResolvedValue(GITHUB_BUILTIN);
+        rpc.AccountOAuthStartCommand.mockResolvedValue({ error: "needs-cloud-sign-in" });
+        delivery("connected");
+        render(() => <OAuthConnectPanel provider="github" name={() => "work"} onConnected={() => {}} />);
+        fireEvent.click(await screen.findByRole("button", { name: "Connect GitHub" }));
+        expect(await screen.findByText("Sign in to AgentMux Cloud to connect GitHub")).toBeTruthy();
+        // The sign-in lapsed, then the person signed in again from the prompt.
+        acceptMuxbusDelivery({ state: "signed_out", since_ms: 2 });
+        acceptMuxbusDelivery({ state: "connected", since_ms: 3 });
+        await waitFor(() => expect(screen.queryByText("Sign in to AgentMux Cloud to connect GitHub")).toBeNull());
+        expect(screen.getByRole("button", { name: "Connect GitHub" })).toBeTruthy();
+    });
+
     it("leaves the person's own saved app alone", async () => {
         rpc.AccountOAuthClientGetCommand.mockResolvedValue({ saved: true, clientId: "Iv1.abc", hasSecret: false, mode: "byo", builtinAvailable: true });
         delivery("signed_out");
