@@ -66,18 +66,27 @@ fn parse_user_id(body: &[u8]) -> Option<u64> {
     serde_json::from_slice::<User>(body).ok().map(|u| u.id)
 }
 
-/// The user id of the bot `<slug>[bot]`, which `gh-agent` doesn't say: a commit's author email is
-/// `<id>+<slug>[bot]@users.noreply.github.com`. A public lookup, asked once per bot and kept; `None`
-/// when GitHub can't be reached, and then the commit keeps its own author.
-pub async fn bot_user_id(slug: &str) -> Option<u64> {
-    static KNOWN: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, u64>>> = std::sync::OnceLock::new();
-    let known = KNOWN.get_or_init(Default::default);
-    if let Some(id) = known.lock().unwrap_or_else(|e| e.into_inner()).get(slug) {
-        return Some(*id);
+/// How long a failed lookup is not repeated: offline, or GitHub's unauthenticated rate limit, would
+/// otherwise cost every token request the whole timeout.
+const LOOKUP_RETRY: Duration = Duration::from_secs(60);
+
+/// What is known of a bot's id: found for good, or failed at `Instant`.
+#[derive(Clone, Copy)]
+enum Lookup {
+    Found(u64),
+    Failed(std::time::Instant),
+}
+
+/// The answer to give without asking again, if there is one.
+fn remembered(entry: Option<Lookup>, now: std::time::Instant) -> Option<Option<u64>> {
+    match entry? {
+        Lookup::Found(id) => Some(Some(id)),
+        Lookup::Failed(at) if now.saturating_duration_since(at) < LOOKUP_RETRY => Some(None),
+        Lookup::Failed(_) => None,
     }
-    if !is_name(slug) {
-        return None;
-    }
+}
+
+async fn fetch_bot_user_id(slug: &str) -> Option<u64> {
     let client = reqwest::Client::builder().timeout(Duration::from_secs(5)).user_agent("agentmux-srv").build().ok()?;
     let resp = client
         .get(format!("https://api.github.com/users/{slug}%5Bbot%5D"))
@@ -87,9 +96,26 @@ pub async fn bot_user_id(slug: &str) -> Option<u64> {
         .ok()?
         .error_for_status()
         .ok()?;
-    let id = parse_user_id(&resp.bytes().await.ok()?)?;
-    known.lock().unwrap_or_else(|e| e.into_inner()).insert(slug.to_string(), id);
-    Some(id)
+    parse_user_id(&resp.bytes().await.ok()?)
+}
+
+/// The user id of the bot `<slug>[bot]`, which `gh-agent` doesn't say: a commit's author email is
+/// `<id>+<slug>[bot]@users.noreply.github.com`. A public lookup, asked once per bot and kept; `None`
+/// when GitHub can't be reached (not asked again for a minute), and then the commit keeps its own author.
+pub async fn bot_user_id(slug: &str) -> Option<u64> {
+    static KNOWN: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, Lookup>>> = std::sync::OnceLock::new();
+    let known = KNOWN.get_or_init(Default::default);
+    let entry = known.lock().unwrap_or_else(|e| e.into_inner()).get(slug).copied();
+    if let Some(answer) = remembered(entry, std::time::Instant::now()) {
+        return answer;
+    }
+    if !is_name(slug) {
+        return None;
+    }
+    let id = fetch_bot_user_id(slug).await;
+    let outcome = id.map_or_else(|| Lookup::Failed(std::time::Instant::now()), Lookup::Found);
+    known.lock().unwrap_or_else(|e| e.into_inner()).insert(slug.to_string(), outcome);
+    id
 }
 
 /// A token for `owner/repo`, minted for the agent `slug`.
@@ -138,6 +164,18 @@ mod tests {
         assert_eq!(parse_user_id(br#"{"login":"muxagent[bot]","id":331051269,"type":"Bot"}"#), Some(331051269));
         assert_eq!(parse_user_id(br#"{"message":"Not Found"}"#), None);
         assert_eq!(parse_user_id(b"x"), None);
+    }
+
+    #[test]
+    fn a_failed_lookup_is_not_repeated_for_a_minute() {
+        let now = std::time::Instant::now();
+        assert_eq!(remembered(None, now), None);
+        assert_eq!(remembered(Some(Lookup::Found(7)), now), Some(Some(7)));
+        assert_eq!(remembered(Some(Lookup::Failed(now)), now), Some(None));
+        if let Some(later) = now.checked_add(LOOKUP_RETRY + Duration::from_secs(1)) {
+            assert_eq!(remembered(Some(Lookup::Failed(now)), later), None);
+            assert_eq!(remembered(Some(Lookup::Found(7)), later), Some(Some(7)));
+        }
     }
 
     #[test]
