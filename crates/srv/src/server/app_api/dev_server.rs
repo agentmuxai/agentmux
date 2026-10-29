@@ -20,7 +20,6 @@ use serde_json::json;
 
 use agentmux_common::api_types::{RegisterDevServerRequest, RegisterDevServerResponse};
 
-use crate::backend::container::container_name_for_slug;
 use crate::backend::dev_proxy::DEV_PROXY_PORT;
 
 use super::AppState;
@@ -30,15 +29,12 @@ pub(crate) async fn handle_register_dev_server(
     caller: Option<axum::Extension<crate::server::caller::Caller>>,
     Json(req): Json<RegisterDevServerRequest>,
 ) -> impl IntoResponse {
-    // Verifies `req.auth`'s signature against the claimed agent_id's own
-    // key on file. We don't need the returned block_id — the signature
-    // check succeeding is itself the proof that `req.auth.agent_id` is who
-    // it claims to be. See this module's doc comment.
-    if let Err(e) =
-        crate::server::ui_handlers::verified_block_id(&state, caller.as_deref(), &req.auth)
-    {
-        return (StatusCode::UNAUTHORIZED, Json(json!({ "error": e }))).into_response();
-    }
+    // Verifies `req.auth`'s signature against the claimed agent_id's own key on file; the pane it
+    // proves is the one whose container this registers. See this module's doc comment.
+    let block_id = match crate::server::ui_handlers::verified_block_id(&state, caller.as_deref(), &req.auth) {
+        Ok(b) => b,
+        Err(e) => return (StatusCode::UNAUTHORIZED, Json(json!({ "error": e }))).into_response(),
+    };
     let agent_id = req.auth.agent_id.clone();
 
     let project = req.project.trim().to_lowercase();
@@ -92,7 +88,17 @@ pub(crate) async fn handle_register_dev_server(
             .into_response();
     };
 
-    let container_name = container_name_for_slug(&agent_id);
+    // Named from the pane's `agentId` (the definition's uuid), as the launch path names it; the
+    // slug in `auth.agent_id` names no container.
+    let Some(container_name) = container_of_pane(&state, &block_id) else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({
+                "error": "RegisterDevServer only works from inside a container-type agent's own container"
+            })),
+        )
+            .into_response();
+    };
     let Some(ip) = cm.agent_network_ip(&container_name).await else {
         return (
             StatusCode::NOT_FOUND,
@@ -146,4 +152,37 @@ pub(crate) async fn handle_register_dev_server(
         agent_id.to_lowercase()
     );
     (StatusCode::OK, Json(RegisterDevServerResponse { url })).into_response()
+}
+
+/// The container the verified pane `block_id` runs in.
+fn container_of_pane(state: &AppState, block_id: &str) -> Option<String> {
+    let block = state.mstore.get::<crate::backend::obj::Block>(block_id).ok().flatten()?;
+    crate::server::agent_resources::container_of(&block)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pane(state: &AppState, meta: &[(&str, &str)]) -> String {
+        let meta = meta.iter().map(|(k, v)| (k.to_string(), json!(v))).collect();
+        let mut block = crate::backend::obj::Block { oid: uuid::Uuid::new_v4().to_string(), meta, ..Default::default() };
+        state.mstore.insert(&mut block).unwrap();
+        block.oid
+    }
+
+    #[tokio::test]
+    async fn the_container_is_named_from_the_panes_definition_id_not_the_slug() {
+        let state = crate::server::tests::test_state();
+        let block = pane(&state, &[("agentMode", "container"), ("agentId", "5d2c7e1a-0000-4000-8000-000000000001")]);
+        assert_eq!(container_of_pane(&state, &block).as_deref(), Some("agentmux-5d2c7e1a-0000-4000-8000-000000000001"));
+    }
+
+    #[tokio::test]
+    async fn a_host_agent_or_an_unknown_pane_has_no_container() {
+        let state = crate::server::tests::test_state();
+        let host = pane(&state, &[("agentMode", "host"), ("agentId", "lark")]);
+        assert_eq!(container_of_pane(&state, &host), None);
+        assert_eq!(container_of_pane(&state, "no-such-pane"), None);
+    }
 }
