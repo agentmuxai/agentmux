@@ -67,6 +67,16 @@ describe("widgetKeyForBlockDef", () => {
         expect(widgetKeyForBlockDef(widgets(), { meta: { view: "warden", "warden:section": "vault" } })).toBe("defwidget@vault");
     });
 
+    it("the most specific entry that matches, not the generic one that comes first", () => {
+        const wmap = {
+            "defwidget@browser": w("browser"),
+            "defwidget@discord": w("browser", { url: "https://discord.com/app" }),
+        };
+        expect(widgetKeyForBlockDef(wmap, { meta: { view: "browser", url: "https://discord.com/app" } })).toBe("defwidget@discord");
+        // A plain browser pane is the generic entry's.
+        expect(widgetKeyForBlockDef(wmap, { meta: { view: "browser" } })).toBe("defwidget@browser");
+    });
+
     it("is none for the Shortcuts pane itself, a group, a view with no entry or no view", () => {
         expect(widgetKeyForBlockDef(widgets(), { meta: { view: "shortcuts" } })).toBeUndefined();
         expect(widgetKeyForBlockDef(widgets(), { meta: { view: "launcher" } })).toBeUndefined();

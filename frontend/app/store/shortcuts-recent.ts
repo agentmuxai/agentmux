@@ -46,8 +46,9 @@ export function orderByRecent<T>(entries: readonly (readonly [string, T])[], rec
 
 /**
  * The widget entry a block of `blockDef` was opened from: the entry whose view is the block's,
- * and where several entries share a view (Warden's sections, say), the first whose own meta the
- * block's meta carries. Undefined for a block no entry stands for. Pure.
+ * and where several entries share a view (Warden's sections; the Browser and a site's widget),
+ * the most specific one whose own meta the block's meta carries (the one naming the most keys), the
+ * first when none is carried. Undefined for a block no entry stands for. Pure.
  */
 export function widgetKeyForBlockDef(wmap: Record<string, WidgetConfigType> | undefined, blockDef: BlockDef | undefined): string | undefined {
     const meta = blockDef?.meta as Record<string, unknown> | undefined;
@@ -57,10 +58,13 @@ export function widgetKeyForBlockDef(wmap: Record<string, WidgetConfigType> | un
         ([, w]) => !w.children?.length && (w.blockdef?.meta as Record<string, unknown> | undefined)?.["view"] === view
     );
     if (sameView.length <= 1) return sameView[0]?.[0];
-    const carried = sameView.find(([, w]) =>
-        Object.entries((w.blockdef?.meta ?? {}) as Record<string, unknown>).every(([k, v]) => JSON.stringify(meta?.[k]) === JSON.stringify(v))
-    );
-    return (carried ?? sameView[0])[0];
+    let best: [string, number] | undefined;
+    for (const [key, w] of sameView) {
+        const own = Object.entries((w.blockdef?.meta ?? {}) as Record<string, unknown>);
+        if (!own.every(([k, v]) => JSON.stringify(meta?.[k]) === JSON.stringify(v))) continue;
+        if (!best || own.length > best[1]) best = [key, own.length];
+    }
+    return (best ? best[0] : sameView[0][0]);
 }
 
 /**
