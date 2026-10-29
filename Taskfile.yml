@@ -19,10 +19,6 @@ vars:
     DATE: '{{if eq OS "windows"}}pwsh -Command Get-Date -UFormat{{else}}date{{end}}'
     ARTIFACTS_BUCKET: agentmux-github-artifacts/staging
     RELEASES_BUCKET: dl.agentmux.ai/releases
-    # WinGet PackageIdentifier — distinct from the already-published MSIX/Store
-    # identity (AgentMux.AgentMux, Store ID 9P9QCXNNCRK3). Never submitted to
-    # winget-pkgs yet, so free to pick; see
-    # docs/specs/SPEC_WINGET_PACKAGE_BOOTSTRAP_2026_09_10.md.
     # Cargo settings for DEV builds only (`task dev`, `dev:standalone`): the release profile is full LTO with
     # one codegen unit, which is slow and takes several GB of commit to link; that is right for a release and
     # wrong for a build someone is going to run once and edit. The profile stays `release` (so every
@@ -30,6 +26,10 @@ vars:
     # the environment; package and release builds do not pass this and keep Cargo.toml's profile.
     # Empty for any build that does not ask: `{{.CARGO_ENV}}` below renders nothing.
     DEV_CARGO_ENV: 'export CARGO_PROFILE_RELEASE_LTO=off CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 CARGO_PROFILE_RELEASE_OPT_LEVEL=1 CARGO_PROFILE_RELEASE_INCREMENTAL=true; '
+    # WinGet PackageIdentifier — distinct from the already-published MSIX/Store
+    # identity (AgentMux.AgentMux, Store ID 9P9QCXNNCRK3). Never submitted to
+    # winget-pkgs yet, so free to pick; see
+    # docs/specs/SPEC_WINGET_PACKAGE_BOOTSTRAP_2026_09_10.md.
     WINGET_PACKAGE: AgentMux.AI
 
 tasks:
