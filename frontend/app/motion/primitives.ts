@@ -224,7 +224,11 @@ export interface MoveOptions {
 /**
  * Slide every element that is now somewhere else from where `before` had it. An element whose
  * key is missing from `before` is new (`onNew` says what to do with it); a key that vanished
- * is skipped.
+ * is skipped. Nothing moves, and nothing is measured, when the policy asks for no motion.
+ *
+ * All the writes that could change layout come first (cancelling a slide still running, whose
+ * transform would be in the measurement), then every measurement, then the animations: reading
+ * a rectangle after an `animate()` forces a layout per element, which on a long list is a long task.
  */
 export function move(
     before: Snapshot,
@@ -234,25 +238,28 @@ export function move(
 ): MotionHandle {
     const { axis = "both", threshold = 1, zoom = 1, onNew } = opts;
     const category = opts.category ?? MOTION.move.category;
-    const handles: MotionHandle[] = [];
+    if (!motionAllowed(category)) return finishedHandle();
+    const moving: Array<{ el: Element; was: { left: number; top: number } }> = [];
+    const fresh: Element[] = [];
     for (const el of els) {
         const key = keyOf(el);
         if (!key) continue;
         const was = before.get(key);
-        if (!was) {
-            if (onNew) handles.push(enter(el, onNew));
-            continue;
-        }
-        // A slide still running would be in the measurement; the captured place is where it starts.
-        cancelRunning(el, "move");
-        const now = el.getBoundingClientRect();
-        const dx = axis === "y" ? 0 : (was.left - now.left) / (zoom || 1);
-        const dy = axis === "x" ? 0 : (was.top - now.top) / (zoom || 1);
-        if (Math.abs(dx) < threshold && Math.abs(dy) < threshold) continue;
+        if (was) moving.push({ el, was });
+        else fresh.push(el);
+    }
+    for (const { el } of moving) cancelRunning(el, "move");
+    const now = moving.map(({ el }) => el.getBoundingClientRect());
+    const handles: MotionHandle[] = [];
+    moving.forEach(({ el, was }, i) => {
+        const dx = axis === "y" ? 0 : (was.left - now[i].left) / (zoom || 1);
+        const dy = axis === "x" ? 0 : (was.top - now[i].top) / (zoom || 1);
+        if (Math.abs(dx) < threshold && Math.abs(dy) < threshold) return;
         const from =
             axis === "x" ? `translateX(${dx}px)` : axis === "y" ? `translateY(${dy}px)` : `translate(${dx}px, ${dy}px)`;
         handles.push(play(el, [{ transform: from }, { transform: "none" }], { ...MOTION.move, category, key: "move" }));
-    }
+    });
+    if (onNew) for (const el of fresh) handles.push(enter(el, onNew));
     return groupHandle(handles);
 }
 
