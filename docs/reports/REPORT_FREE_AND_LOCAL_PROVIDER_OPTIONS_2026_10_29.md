@@ -1,5 +1,7 @@
 # Free and local options for the 19 catalog providers
 
+**Status:** analysis — the research behind `docs/specs/SPEC_PROVIDER_CARD_TAGS_FREE_LOCAL_2026_10_29.md`; claims verified 2026-10-29 and going stale from then.
+
 Task #10963 (research). Written by Korp@narko, 2026-10-29. It ships with the first PR of the build that cites it.
 
 ## How to read this
@@ -26,7 +28,7 @@ Anything I did not or could not confirm is marked **unverified** and says why. I
    - **OpenRouter:** has a beta, stateless Responses API. Whether it works with `:free` models is unverified.
    - **Gemini, Mistral, Cerebras, NVIDIA:** no Responses API documented, so no Codex.
    - So the only free route I can call verified for Codex is local.
-3. **Local models.** Ollama 0.40.11 was serving on the operator's machine with **no models pulled**, and `lms` is installed. Only Mux Code lists `ollama` in `supportedVendors` today. 16 of the 19 providers can talk to a local model through some config; 3 cannot (Gemini CLI, Antigravity, Muse). See the table and the wiring list.
+3. **Local models.** Ollama can be serving with **no models pulled** (a fresh install), and LM Studio's `lms` CLI can be installed without a model. Only Mux Code lists `ollama` in `supportedVendors` today. 16 of the 19 providers can talk to a local model through some config; 3 cannot (Gemini CLI, Antigravity, Muse). See the table and the wiring list.
 
 ## What I tested myself (Codex 0.166.0, scratch install, no spend)
 
@@ -90,7 +92,7 @@ These are the first steps AgentMux's guide would show.
 
 ## Local models: "free if your machine can run it"
 
-On the operator's machine: Ollama 0.40.11 was serving on 127.0.0.1:11434 with **no models** (`/api/tags` returned `{"models":[]}`), and the LM Studio CLI `lms` is installed. I pulled nothing and did not test any model on this machine. Sources for the model facts are the Ollama library pages, fetched 2026-10-29.
+A fresh Ollama install serves on 127.0.0.1:11434 with **no models** (`/api/tags` returns `{"models":[]}`). I pulled nothing and did not test any model. Sources for the model facts are the Ollama library pages, fetched 2026-10-29.
 
 ### Models to pull, and sizes
 
@@ -180,7 +182,7 @@ Today only `claude` has `baseUrlEnvVar`, and only Mux Code has `supportedVendors
 - Free-tier training terms for Antigravity, Copilot Free, Grok and OpenRouter free models.
 - Muse Code's plan prices (from Meta's own page; I only have a third-party figure).
 - Whether Codex runs well against OpenRouter `:free` or Groq.
-- Local model speed on the operator's machine, and whether it has a GPU.
+- Local model speed on a given machine, and whether it has a GPU.
 - Whether OpenCode free models work signed out on v2 (docs conflict).
 
 ## Things that will go stale
