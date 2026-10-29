@@ -113,6 +113,8 @@ pub fn commit_env(granted: &Granted) -> Vec<(String, String)> {
 /// Who the agent works for, for the commit trailer (set by `git-env`, read by the hook).
 const OWNER_ID_ENV: &str = "AGENTMUX_OWNER_GITHUB_ID";
 const OWNER_LOGIN_ENV: &str = "AGENTMUX_OWNER_GITHUB_LOGIN";
+/// The machine AgentMux runs on, for the commit trailer's `agent@host` (set by srv with the git setup).
+pub const GIT_HOST_ENV: &str = "AGENTMUX_GIT_HOST";
 
 /// `git-env -- <git args>`: refuse, or print `KEY=VALUE` lines for the shell function to run git with.
 pub fn run_git_env(args: &[String]) -> i32 {
@@ -281,10 +283,14 @@ fn pre_push(args: &[String]) -> i32 {
 }
 
 /// The trailers a commit of an agent carries: who wrote it, and whose agent that is.
-pub fn trailers(agent: Option<&str>, owner_id: Option<&str>, owner_login: Option<&str>) -> Vec<String> {
+pub fn trailers(agent: Option<&str>, host: Option<&str>, owner_id: Option<&str>, owner_login: Option<&str>) -> Vec<String> {
     let mut out = Vec::new();
     if let Some(agent) = agent.filter(|a| !a.is_empty()) {
-        out.push(format!("Agent: {}", agent.to_ascii_lowercase()));
+        // `agent@host` like a native agent's: the host is the machine AgentMux runs on, not a container's own.
+        match host.filter(|h| !h.is_empty()) {
+            Some(host) => out.push(format!("Agent: {}@{}", agent.to_ascii_lowercase(), host.to_ascii_lowercase())),
+            None => out.push(format!("Agent: {}", agent.to_ascii_lowercase())),
+        }
     }
     if let (Some(id), Some(login)) = (owner_id.filter(|v| !v.is_empty()), owner_login.filter(|v| !v.is_empty())) {
         out.push(format!("Co-authored-by: {login} <{id}+{login}@users.noreply.github.com>"));
@@ -302,7 +308,12 @@ fn prepare_commit_msg(args: &[String]) -> i32 {
     }
     let Some(file) = args.first() else { return 0 };
     let env = |k: &str| std::env::var(k).ok();
-    let lines = trailers(env("AGENTMUX_AGENT_ID").as_deref(), env(OWNER_ID_ENV).as_deref(), env(OWNER_LOGIN_ENV).as_deref());
+    let lines = trailers(
+        env("AGENTMUX_AGENT_ID").as_deref(),
+        env(GIT_HOST_ENV).as_deref(),
+        env(OWNER_ID_ENV).as_deref(),
+        env(OWNER_LOGIN_ENV).as_deref(),
+    );
     if lines.is_empty() {
         return 0;
     }
@@ -504,10 +515,13 @@ key = {token}
     #[test]
     fn the_trailers_name_the_agent_and_credit_the_owner() {
         assert_eq!(
-            trailers(Some("Korp"), Some("42"), Some("octo")),
+            trailers(Some("Korp"), None, Some("42"), Some("octo")),
             vec!["Agent: korp".to_string(), "Co-authored-by: octo <42+octo@users.noreply.github.com>".to_string()]
         );
-        assert_eq!(trailers(Some("korp"), None, None), vec!["Agent: korp".to_string()]);
-        assert!(trailers(None, Some("42"), None).is_empty());
+        assert_eq!(trailers(Some("korp"), None, None, None), vec!["Agent: korp".to_string()]);
+        // On a machine with a name the agent is `agent@host`, lower case like a native agent's.
+        assert_eq!(trailers(Some("KCont"), Some("Narko"), None, None), vec!["Agent: kcont@narko".to_string()]);
+        assert_eq!(trailers(Some("kcont"), Some(""), None, None), vec!["Agent: kcont".to_string()]);
+        assert!(trailers(None, Some("narko"), Some("42"), None).is_empty());
     }
 }
