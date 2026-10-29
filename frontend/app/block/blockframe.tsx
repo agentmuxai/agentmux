@@ -27,6 +27,7 @@ import { computeMenuPosition } from "@/app/util/menu-position";
 import { remoteSettingsMenuItems } from "@/app/view/remotes/open-remotes";
 import { BlockStatsBadge, statsBadgeShown } from "@/element/blockstats";
 import { ErrorBoundary } from "@/element/errorboundary";
+import { ClosingLabel } from "./closing-label";
 import { IconButton, ToggleIconButton } from "@/element/iconbutton";
 import { MenuButton } from "@/element/menubutton";
 import { NodeModel } from "@/layout/index";
@@ -391,8 +392,10 @@ function EndIcons(props: {
         click: props.nodeModel.onClose,
     };
 
+    const closing = () => props.nodeModel.isClosing?.() ?? false;
+
     return (
-        <>
+        <Show when={!closing()} fallback={<ClosingLabel tabs={props.nodeModel.closingTabs?.() ?? 1} />}>
             <Show when={(endIconButtons()?.length ?? 0) > 0}>
                 <For each={endIconButtons()}>
                     {(button) =>
@@ -459,7 +462,7 @@ function EndIcons(props: {
                 />
             </Show>
             <IconButton decl={closeDecl} className="block-frame-default-close" />
-        </>
+        </Show>
     );
 }
 

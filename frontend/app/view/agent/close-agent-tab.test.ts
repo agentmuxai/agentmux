@@ -10,6 +10,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 // vi.mock calls below are hoisted above this import (see open-history-tab.test.ts).
 import { closeAgentTab } from "./close-agent-tab";
+import { isBlockClosing } from "@/layout/lib/layoutClosing";
 
 type FakeNode = { id: string; data: { blockId: string; blockStack?: string[] } };
 let nodes: FakeNode[] = [];
@@ -196,7 +197,7 @@ describe("closeAgentTab", () => {
         await closeAgentTab({ layoutModel: layoutModel as any, ownNodeId: "node-A", blockId: "agent-1" });
 
         expect(beforeNodeDelete).toHaveBeenCalledTimes(1);
-        expect(beforeNodeDelete).toHaveBeenCalledWith({ blockId: "agent-1" });
+        expect(beforeNodeDelete).toHaveBeenCalledWith({ blockId: "agent-1" }, expect.anything());
         expect(beforeNodeDelete.mock.invocationCallOrder[0]).toBeLessThan(
             addWidgetAsPaneTab.mock.invocationCallOrder[0]
         );
@@ -213,5 +214,27 @@ describe("closeAgentTab", () => {
         expect(closeBlockInStack).not.toHaveBeenCalled();
         expect(holdLeafRevealGate).not.toHaveBeenCalled();
         expect(nodes[0].data.blockStack).toEqual(["agent-1"]);
+    });
+
+    it("the tab is closing from the click, through the asks and the picker tab, and not once it is done or kept", async () => {
+        nodes = [{ id: "node-A", data: { blockId: "agent-1", blockStack: ["agent-1"] } }];
+        metaByBlock["agent-1"] = { view: "agent", agentId: "def-1" };
+        const seen: boolean[] = [];
+        let finishAsks!: () => void;
+        beforeNodeDelete.mockImplementation(() => new Promise<boolean>((resolve) => (finishAsks = () => resolve(true))));
+        addWidgetAsPaneTab.mockImplementation(async () => {
+            seen.push(isBlockClosing(layoutModel as any, "agent-1"));
+        });
+
+        const closing = closeAgentTab({ layoutModel: layoutModel as any, ownNodeId: "node-A", blockId: "agent-1" });
+        expect(isBlockClosing(layoutModel as any, "agent-1")).toBe(true); // slow asks: feedback already
+        finishAsks();
+        await closing;
+        expect(seen).toEqual([true]); // still closing while the picker tab is added
+        expect(isBlockClosing(layoutModel as any, "agent-1")).toBe(false);
+
+        beforeNodeDelete.mockImplementation(async () => false);
+        await closeAgentTab({ layoutModel: layoutModel as any, ownNodeId: "node-A", blockId: "agent-1" });
+        expect(isBlockClosing(layoutModel as any, "agent-1")).toBe(false); // kept
     });
 });
