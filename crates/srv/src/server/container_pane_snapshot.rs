@@ -55,8 +55,18 @@ impl Snapshot {
 
     /// The pane didn't open: the copy goes.
     pub fn discard(&self) {
-        let _ = std::fs::remove_dir_all(&self.dir);
+        remove_snapshot(&self.dir);
     }
+}
+
+/// Removes a snapshot's folder. Its copy is read-only, which Windows won't delete until that is cleared.
+fn remove_snapshot(dir: &Path) {
+    if let Ok(files) = std::fs::read_dir(dir.join("copy")) {
+        for f in files.flatten() {
+            let _ = crate::backend::fs_ops::platform::remove_file_force(&f.path());
+        }
+    }
+    let _ = std::fs::remove_dir_all(dir);
 }
 
 /// Where the copies are kept.
@@ -68,6 +78,8 @@ fn root() -> Option<PathBuf> {
 /// nothing the caller set beyond the checked fields, and the snapshot if there is one.
 pub(crate) fn prepare(workspace: &Path, root: Option<&Path>, req: CommandPaneOpenData) -> Result<(CommandPaneOpenData, Option<Snapshot>), String> {
     let limit = match req.view.as_str() {
+        // OpenMedia reaches srv as an editor pane that follows its folder.
+        "editor" if req.follow_folder == Some(true) => MEDIA_LIMIT,
         "editor" => EDITOR_LIMIT,
         "media" => MEDIA_LIMIT,
         "sysinfo" | "help" | "tower" => 0,
@@ -89,7 +101,7 @@ pub(crate) fn prepare(workspace: &Path, root: Option<&Path>, req: CommandPaneOpe
         focus: req.focus,
         line: req.line,
         tree_expanded: req.tree_expanded,
-        follow_folder: (req.view == "media").then_some(true),
+        follow_folder: (req.view == "media" || req.follow_folder == Some(true)).then_some(true),
         ..Default::default()
     };
     if limit == 0 {
@@ -106,9 +118,7 @@ pub(crate) fn prepare(workspace: &Path, root: Option<&Path>, req: CommandPaneOpe
     }
     let dir = root.join(uuid::Uuid::new_v4().to_string());
     // The copy is in a folder of its own, so a workspace file named like the marker can't take its place.
-    let copy = crate::backend::workspace_copy::copy_file(&workspace_real, &real, &dir.join("copy"), limit).inspect_err(|_| {
-        let _ = std::fs::remove_dir_all(&dir);
-    })?;
+    let copy = crate::backend::workspace_copy::copy_file(&workspace_real, &real, &dir.join("copy"), limit).inspect_err(|_| remove_snapshot(&dir))?;
     let taken = chrono::Local::now().format("%H:%M").to_string();
     open.file = Some(copy.to_string_lossy().into_owned());
     open.title = Some(format!("{of} (read-only snapshot, {taken})"));
@@ -145,7 +155,7 @@ fn remove_where(root: &Path, gone: impl Fn(Option<&str>) -> bool) {
     for entry in entries.flatten() {
         let noted = std::fs::read_to_string(entry.path().join(MARKER)).ok().map(|b| b.trim().to_string()).filter(|b| !b.is_empty());
         if gone(noted.as_deref()) {
-            let _ = std::fs::remove_dir_all(entry.path());
+            remove_snapshot(&entry.path());
         }
     }
 }
@@ -267,6 +277,19 @@ mod tests {
             std::fs::create_dir_all(root.join(format!("s{i}"))).unwrap();
         }
         assert!(prepare(&ws, Some(&root), open("editor", Some("docs/notes.md"))).unwrap_err().contains("close some of those panes"));
+    }
+
+    #[test]
+    fn a_recording_is_held_to_the_media_limit_however_the_tool_names_the_view() {
+        let (_tmp, ws, root) = setup();
+        std::fs::write(ws.join("take.webm"), vec![b'x'; (EDITOR_LIMIT + 1) as usize]).unwrap();
+        // OpenEditor and OpenMedia both reach srv as an editor pane; OpenMedia also follows its folder.
+        assert!(prepare(&ws, Some(&root), open("editor", Some("take.webm"))).is_err());
+        let media = CommandPaneOpenData { follow_folder: Some(true), ..open("editor", Some("take.webm")) };
+        let (checked, snap) = prepare(&ws, Some(&root), media).unwrap();
+        assert_eq!(checked.follow_folder, Some(true));
+        snap.unwrap().discard();
+        assert!(prepare(&ws, Some(&root), open("media", Some("take.webm"))).is_ok());
     }
 
     #[test]
