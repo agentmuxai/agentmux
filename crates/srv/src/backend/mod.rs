@@ -29,6 +29,8 @@ pub mod widget_access;
 pub mod widget_net;
 pub mod widget_catalog;
 pub mod widget_packages;
+#[cfg(unix)]
+mod widget_beneath;
 pub mod widget_signature;
 pub mod widget_requests;
 pub mod job_templates;

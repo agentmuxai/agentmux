@@ -41,6 +41,7 @@ export const WIDGET_BAR_SETTINGS = {
         label: "Show icons only",
         description: "Icons without text labels on the widget bar",
         section: "widgets",
+        group: "Widget bar",
         keywords: ["compact widget bar", "hide labels", "icon-only", "widget:icononly"],
     },
     reset: {
@@ -48,6 +49,7 @@ export const WIDGET_BAR_SETTINGS = {
         label: "Reset widget bar",
         description: "Back to the default pinned widgets, with nothing hidden",
         section: "widgets",
+        group: "Widget bar",
         keywords: ["default widgets", "restore", "unhide all"],
     },
 } satisfies Record<string, SettingsIndexEntry>;

@@ -126,6 +126,20 @@ pub fn route_needs_identity(path: &str) -> bool {
     path.starts_with("/api/v1/agent/memory/") || !accepted_without_identity(path)
 }
 
+/// File watchers poll where the workspace is a file-sharing mount that sends no change events:
+/// Docker Desktop on Windows and macOS (a 9p or virtiofs share). On Linux a bind mount reports changes
+/// and polling would only cost CPU. What the agent's own environment already sets is left alone.
+pub(crate) fn watcher_polling_env(shared_mount: bool, set: &[(String, String)]) -> Vec<(String, String)> {
+    if !shared_mount {
+        return Vec::new();
+    }
+    [("CHOKIDAR_USEPOLLING", "1"), ("CHOKIDAR_INTERVAL", "300"), ("WATCHPACK_POLLING", "true")]
+        .into_iter()
+        .filter(|(k, _)| !set.iter().any(|(have, _)| have == k))
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect()
+}
+
 /// A container turn's `docker exec` env: the container denylist applied, and
 /// the instance key replaced by this block's container token.
 pub fn container_exec_env(block_id: &str, env_vars: &HashMap<String, String>) -> Vec<(String, String)> {
@@ -160,6 +174,7 @@ pub fn container_exec_env(block_id: &str, env_vars: &HashMap<String, String>) ->
     // A hint for the client only: the in-container MCP doesn't ask srv for signing keys it is refused. srv
     // never trusts this variable for anything (it comes from the container's own environment).
     out.push(("AGENTMUX_IN_CONTAINER".to_string(), "1".to_string()));
+    out.extend(watcher_polling_env(cfg!(any(windows, target_os = "macos")), &out));
     // On Linux a container cannot reach srv's loopback; when srv listens on the agents network's
     // gateway that is where the container is pointed.
     crate::backend::container_listener::point_env_at_listener(&mut out);
@@ -219,6 +234,8 @@ mod tests {
             "/api/v1/ui/shortcuts/list",
             "/agentmux/cron",
             "/api/v1/agent/open",
+            "/api/v1/attachments/upload",
+            "/api/v1/widgets/install",
         ] {
             assert!(container_route_allowed(ok), "{ok} should be allowed");
         }
@@ -228,8 +245,8 @@ mod tests {
             "/agentmux/stream-local-file",
             "/agentmux/service",
             "/ws",
+            "/api/v1/ui/browser/set_files",
             "/api/v1/pane/open",
-            "/api/v1/attachments/upload",
             "/api/v1/host/browser_bypass",
             "/api/v1/agent/desktop/authorize",
             "/api/v1/agent/globalmemory/write",
@@ -251,6 +268,17 @@ mod tests {
         for new in ["/api/v1/agent/memory/session-start/part", "/api/v1/agent/memory/write", "/api/v1/agent/dev_server/register", "/api/v1/github/token", "/api/v1/vault", "/api/v1/ui/browser/open", "/api/v1/ui/screenshot", "/agentmux/cron", "/api/v1/agent/open", "/agentmux/work/7f3a/hold"] {
             assert!(route_needs_identity(new), "{new}");
         }
+    }
+
+    #[test]
+    fn file_watchers_poll_only_where_the_workspace_is_a_file_sharing_mount() {
+        assert!(watcher_polling_env(false, &[]).is_empty(), "a Linux bind mount reports changes");
+        let on = watcher_polling_env(true, &[]);
+        let get = |k: &str| on.iter().find(|(n, _)| n == k).map(|(_, v)| v.as_str());
+        assert_eq!((get("CHOKIDAR_USEPOLLING"), get("CHOKIDAR_INTERVAL"), get("WATCHPACK_POLLING")), (Some("1"), Some("300"), Some("true")));
+        // The agent's own choice wins.
+        let own = watcher_polling_env(true, &[("CHOKIDAR_USEPOLLING".into(), "0".into())]);
+        assert!(own.iter().all(|(k, _)| k != "CHOKIDAR_USEPOLLING") && own.len() == 2);
     }
 
     #[test]
