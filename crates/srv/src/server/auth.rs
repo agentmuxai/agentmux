@@ -118,12 +118,12 @@ pub(super) async fn admit_container_agent(
     mut req: Request<Body>,
     next: Next,
 ) -> Response {
-    use crate::backend::container_credential::{container_route_allowed, route_needs_identity};
+    use crate::backend::container_credential::route_needs_identity;
     let path = req.uri().path().to_string();
-    let refused = if !container_route_allowed(&path) {
-        Some("this route is not available to container agents")
+    let refused = if let Some(why) = crate::backend::container_routes::refusal_message(&path) {
+        Some(why)
     } else if route_needs_identity(&path) && grant.agent_token.is_none() {
-        Some("this container agent has no identity token")
+        Some("this container agent has no identity token".to_string())
     } else {
         None
     };
