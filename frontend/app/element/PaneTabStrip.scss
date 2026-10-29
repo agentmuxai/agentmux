@@ -556,7 +556,7 @@
     height: 16px;
     @include mixins.flex-center(inline-flex);
     @include mixins.button-reset;
-    border-radius: 3px;
+    border-radius: var(--radius-sm);
     color: inherit;
     cursor: default;
     font-size: var(--text-md);
