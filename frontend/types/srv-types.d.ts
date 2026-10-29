@@ -530,6 +530,8 @@ declare global {
         /** The node id srv gave the leaf it placed (insert, split): the
          *  frontend's mirror uses it, so both trees name it alike. */
         nodeid?: string;
+        /** When srv queued the action (ms since the epoch); srv drops the old ones. */
+        queuedat?: number;
     };
 
     // waveobj.LayoutState

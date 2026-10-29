@@ -126,6 +126,7 @@ pub(crate) async fn queue_target_stack_push(
         targetblockid: target_block_id.to_string(),
         position: String::new(),
         nodeid: None,
+        queuedat: None,
     };
     super::reducer_helpers::queue_layout_actions_via_reducer(state, tab_id, vec![action]).await
 }
@@ -165,6 +166,7 @@ pub(crate) async fn queue_target_stack_move(
         targetblockid: target_block_id.to_string(),
         position: position.to_string(),
         nodeid: None,
+        queuedat: None,
     };
     super::reducer_helpers::queue_layout_actions_via_reducer(state, tab_id, vec![action]).await
 }
@@ -201,6 +203,7 @@ pub(crate) async fn queue_target_stack_moves(
             targetblockid: target_block_id.to_string(),
             position: "end".to_string(),
             nodeid: None,
+            queuedat: None,
         })
         .collect();
     if let Some(active) = activate_block_id.filter(|a| !block_ids.iter().any(|b| b == a)) {
@@ -329,6 +332,7 @@ pub(crate) fn source_delete_action(block_id: &str) -> LayoutActionData {
         targetblockid: String::new(),
         position: String::new(),
         nodeid: None,
+        queuedat: None,
     }
 }
 

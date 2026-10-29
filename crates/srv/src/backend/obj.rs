@@ -320,6 +320,10 @@ pub struct LayoutActionData {
     /// frontend's mirror of the action builds the same tree.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub nodeid: Option<String>,
+    /// When srv put the action on a layout row's queue (ms since the epoch). Stamped at the queue,
+    /// not by the writers; an action without one was queued by an older srv.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queuedat: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
