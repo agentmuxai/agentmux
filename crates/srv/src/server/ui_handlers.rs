@@ -754,11 +754,11 @@ pub(crate) async fn handle_ui_browser_open(
         Ok(m) => m,
         Err(e) => return err_response(StatusCode::BAD_REQUEST, e),
     };
-    meta.insert(crate::server::browser_owner::OWNER_META_KEY.to_string(), json!(req.auth.agent_id));
-    crate::server::browser_allowlist::mirror(&mut meta, allowed.as_deref());
-    if let Err(e) = crate::server::browser_identity::for_agent_open(&state, &mut meta, req.profile.as_deref(), grant.is_some()) {
-        return err_response(StatusCode::BAD_REQUEST, e);
-    }
+    let opened = (req.auth.agent_id.as_str(), allowed.as_deref(), req.profile.as_deref(), grant.is_some());
+    let browsing_as = match crate::server::browser_identity::for_agent_pane(&state, &mut meta, opened) {
+        Ok(b) => b,
+        Err(e) => return err_response(StatusCode::BAD_REQUEST, e),
+    };
     cmd.meta = Some(meta);
     let result = match crate::server::app_api::open_pane(&state, cmd).await {
         Ok(r) => r,
@@ -772,7 +772,7 @@ pub(crate) async fn handle_ui_browser_open(
     );
     (
         StatusCode::OK,
-        Json(json!({ "ok": true, "data": { "pane": result.block_id } })),
+        Json(json!({ "ok": true, "data": { "pane": result.block_id, "browsing_as": browsing_as } })),
     )
         .into_response()
 }
