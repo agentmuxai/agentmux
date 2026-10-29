@@ -185,8 +185,11 @@ fn last_session(gfs: &FileStore, zone: &str, field: &str) -> Result<Option<Strin
     let Some(file) = gfs.stat(zone, OUTPUT_FILE).map_err(|e| format!("stat transcript: {e}"))? else {
         return Ok(None);
     };
+    if file.size == 0 {
+        return Ok(None);
+    }
     let mut window = LAST_SESSION_TAIL_BYTES;
-    while file.size > 0 {
+    loop {
         let offset = (file.size - window).max(0);
         let (at, tail) = gfs
             .read_at(zone, OUTPUT_FILE, offset, file.size - offset)
