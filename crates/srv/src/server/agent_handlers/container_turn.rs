@@ -351,6 +351,20 @@ impl ContainerStartup {
                 StartEvent::Starting => start_row(ContainerStartState::Starting, None, &image, None),
             }
         };
+        // An idle agent (no turn holds the container: the pre-start) whose container runs an older agent image than
+        // this AgentMux moves to the current one before it starts, and the pane says so. The start below then
+        // creates the container from the current image.
+        crate::server::app_api::container_update::update_if_idle(
+            &self.cm,
+            &self.container_name,
+            &self.image,
+            &self.provider_id,
+            &self.block_id,
+            &self.broker,
+            &self.filestore,
+            &self.mstore,
+        )
+        .await;
         if let Err(e) = self
             .cm
             .ensure_running_observed(&self.container_name, &image, &self.volumes, &[], &self.mount_spec, &observe)

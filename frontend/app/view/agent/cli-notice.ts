@@ -20,7 +20,8 @@
  *   message to start", so the pane never ends a start-up silent.
  * - `agentmux_container_image` — the container runs an older agent image than this AgentMux:
  *   "This container uses the 0.59.41 image" with an Update container button, then (one row, updated
- *   in place) "Container removed. The next message starts it from the 0.60.2 image".
+ *   in place) "Container removed. The next message starts it from the 0.60.2 image", or, when AgentMux moved
+ *   an idle agent's container itself, "Updated the container to the 0.60.2 image".
  * - `agentmux_mcp_health` — the agent's AgentMux MCP server didn't connect and
  *   AgentMux is repairing it (`crates/srv/src/backend/mcp_health.rs`). Every
  *   frame of one episode shares an `episode`, so it is one row that updates.
@@ -141,7 +142,7 @@ export function parseCliNoticeFrame(rawEvent: unknown, now: number): CliNoticeNo
         };
     }
     if (e.subtype === CONTAINER_IMAGE_SUBTYPE) {
-        const imageState = e.state === "outdated" || e.state === "updated" ? e.state : null;
+        const imageState = e.state === "outdated" || e.state === "updated" || e.state === "auto_updated" ? e.state : null;
         const blockId = str(e.block_id);
         const current = str(e.current);
         if (!imageState || !blockId || !current) return null;
@@ -199,14 +200,14 @@ function cliDisplayName(provider: string): string {
 export type CliNoticeTone = "info" | "warn" | "error";
 
 /** What the row says: a short label, an optional detail line, and its tone. */
-export function cliNoticeText(node: CliNoticeNode): { label: string; detail: string | null; tone: CliNoticeTone } {
+export function cliNoticeText(node: CliNoticeNode, appVersion?: string): { label: string; detail: string | null; tone: CliNoticeTone } {
     const name = cliDisplayName(node.provider);
     if (node.kind === "compaction_failed") {
         return { label: `${name} couldn't compact the conversation`, detail: node.error ?? null, tone: "error" };
     }
     if (node.kind === "mcp_health") return mcpHealthText(node);
     if (node.kind === "container_start") return containerStartText(node);
-    if (node.kind === "container_image") return containerImageText(node);
+    if (node.kind === "container_image") return containerImageText(node, appVersion);
     if (node.kind === "agent_ready") {
         const took = node.seconds != null ? ` (${Math.max(1, Math.round(node.seconds))} s)` : "";
         return { label: `Ready${took}: send a message to start`, detail: `${name} is installed and the container is running`, tone: "info" };
@@ -232,7 +233,14 @@ export function cliNoticeText(node: CliNoticeNode): { label: string; detail: str
 }
 
 /** The container's agent image against this AgentMux's, one row per pane. */
-function containerImageText(node: CliNoticeNode): { label: string; detail: string | null; tone: CliNoticeTone } {
+function containerImageText(node: CliNoticeNode, appVersion?: string): { label: string; detail: string | null; tone: CliNoticeTone } {
+    if (node.imageState === "auto_updated") {
+        return {
+            label: `Updated the container to the ${node.current} image`,
+            detail: `It was on the ${node.running ?? "older"} image. Tools installed inside it are installed again; the workspace and memory are kept`,
+            tone: "info",
+        };
+    }
     if (node.imageState === "updated") {
         return {
             label: "Container removed",
@@ -242,7 +250,8 @@ function containerImageText(node: CliNoticeNode): { label: string; detail: strin
     }
     return {
         label: `This container uses the ${node.running ?? "older"} image`,
-        detail: `This AgentMux runs ${node.current}. Updating resets tools installed inside the container; the workspace and memory are kept`,
+        // The row is kept in the conversation; the AgentMux that wrote it may be an older one than the one showing it.
+        detail: `This AgentMux runs ${appVersion || node.current}. Updating resets tools installed inside the container; the workspace and memory are kept`,
         tone: "warn",
     };
 }

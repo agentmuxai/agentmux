@@ -175,8 +175,9 @@ pub fn agent_ready_frame(ready_id: &str, provider: &str, seconds: f64) -> Value 
 }
 
 /// An `agentmux_container_image` frame: the container runs an older agent image than this
-/// AgentMux (`state` `outdated`), or has just been removed so the next message starts it from
-/// the current one (`updated`).
+/// AgentMux (`state` `outdated`), has just been removed on request so the next message starts it from
+/// the current one (`updated`), or was moved to the current one by AgentMux itself while the agent was idle
+/// (`auto_updated`).
 pub fn container_image_frame(provider: &str, block_id: &str, state: &str, running: &str, current: &str) -> Value {
     json!({
         "type": "system",
