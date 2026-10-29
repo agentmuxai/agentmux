@@ -884,6 +884,28 @@
     }
 }
 
+// An agent another instance claims, or whose message was refused: the row's one warning (swarm-row-registration.tsx).
+.swarm-reg-badge {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 1;
+    min-width: 0;
+    overflow: hidden;
+    font-size: var(--text-xs);
+    white-space: nowrap;
+    color: var(--warning-text-color);
+
+    .swarm-reg-badge-icon {
+        font-size: var(--text-2xs);
+    }
+
+    .swarm-reg-badge-label {
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+}
+
 // A tool call that has been running a while, on the row of the agent running it. Information only.
 .swarm-long-tool,
 .swarm-build-slot {

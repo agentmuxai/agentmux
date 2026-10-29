@@ -308,13 +308,19 @@ export interface CopyMenuEntry {
  * an empty menu. Otherwise the event is claimed (preventDefault +
  * stopPropagation) so the pane menu does not also appear.
  *
+ * `extra` entries follow the copy ones, after a separator (a row's own action, say).
+ *
  * Returns whether a menu was shown.
  */
-function showCopyContextMenu(entries: CopyMenuEntry[], e: MouseEvent): boolean {
+function showCopyContextMenu(entries: CopyMenuEntry[], e: MouseEvent, extra: ContextMenuItem[] = []): boolean {
     const menu: ContextMenuItem[] = [];
     for (const { label, value } of entries) {
         if (!value) continue;
         menu.push({ label, icon: MENU_ICON.copy, click: () => void clipboardWriteText(value) });
+    }
+    if (extra.length > 0) {
+        if (menu.length > 0) menu.push({ type: "separator" });
+        menu.push(...extra);
     }
     if (menu.length === 0) return false;
     e.preventDefault();

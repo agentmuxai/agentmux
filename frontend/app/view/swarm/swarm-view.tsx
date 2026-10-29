@@ -23,6 +23,7 @@ import { HeldTaskChip } from "@/app/view/kanban/kanban-held";
 import { revealBlock } from "@/app/util/reveal-block";
 import { phaseToDisplayStatus, type AgentDisplayStatus } from "./swarm-display-status";
 import { BuildSlotNote, LongToolNote, UnavailableChip } from "./swarm-row-notes";
+import { RegistrationBadge, stopReceivingItems, useRegistrationFlag } from "./swarm-row-registration";
 import { AgentStatusChip } from "./swarm-status-chip";
 import { unavailableLineText, unavailableOfMeta, unavailableTitle } from "@/app/store/agent-unavailable";
 import { BackgroundTaskBucket, SubagentBackgroundTasks, visibleBackgroundTasks } from "./swarm-background-tasks";
@@ -326,13 +327,16 @@ export function AgentRow({
         const control = (e.target as Element | null)?.closest("input, button, select, textarea, a[href], [tabindex]");
         return !!control && control !== e.currentTarget && e.currentTarget.contains(control);
     };
+    // What srv flags for this agent's registration (another instance claiming it, a refused jekt).
+    const registrationFlag = useRegistrationFlag(() => node().blockId);
     const handleAgentRowContextMenu = (e: MouseEvent) => {
         showCopyContextMenu(
             [
                 { label: "Copy agent name", value: node().agentName },
                 { label: "Copy block ID", value: node().blockId },
             ],
-            e
+            e,
+            stopReceivingItems(registrationFlag())
         );
     };
 
@@ -462,6 +466,7 @@ export function AgentRow({
                     </Show>
                     <LongToolNote rows={longRunningRows} live={() => node().agentStatus === "running"} now={rowNow} />
                     <BuildSlotNote blockId={node().blockId} now={rowNow} />
+                    <RegistrationBadge flag={registrationFlag} />
                     <Show
                         when={unavailable()}
                         fallback={
