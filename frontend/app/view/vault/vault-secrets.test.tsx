@@ -25,7 +25,7 @@ const vault = vi.fn(async (op: string, _args?: Record<string, unknown>): Promise
 });
 vi.mock("@/app/store/app-api", () => ({ getApi: () => ({ approvals: { vault } }) }));
 
-import { WardenSecrets } from "./vault-warden";
+import { VaultSecrets } from "./vault-secrets";
 
 const entry = (over: Partial<VaultEntryInfo> = {}): VaultEntryInfo => ({
     id: "api-key-stripe",
@@ -59,9 +59,9 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-describe("Secrets in Warden's Audit section", () => {
+describe("Secrets in the Vault's Audit section", () => {
     it("lists what agents did, not the person's own doings, with the outcome", async () => {
-        render(() => <WardenSecrets />);
+        render(() => <VaultSecrets />);
         const table = await screen.findByRole("table", { name: "Agents' use of secrets" });
         expect(table.textContent).toContain("Agent1");
         expect(table.textContent).toContain("stripe balance retrieve");
@@ -76,7 +76,7 @@ describe("Secrets in Warden's Audit section", () => {
 
     it("loads nothing from the Vault until it is shown", async () => {
         const [shown, setShown] = createSignal(false);
-        render(() => <WardenSecrets visible={shown()} />);
+        render(() => <VaultSecrets visible={shown()} />);
         await new Promise((r) => setTimeout(r, 20));
         expect(vault).not.toHaveBeenCalled();
         setShown(true);
@@ -87,7 +87,7 @@ describe("Secrets in Warden's Audit section", () => {
     });
 
     it("lists the standing permissions, sites and commands apart, and stops one", async () => {
-        render(() => <WardenSecrets />);
+        render(() => <VaultSecrets />);
         const table = await screen.findByRole("table", { name: "Standing permissions" });
         expect(table.textContent).toContain("dashboard.stripe.com");
         expect(table.textContent).toContain("runs commands: Agent1 (value)");
@@ -97,19 +97,18 @@ describe("Secrets in Warden's Audit section", () => {
     });
 
     it("links to the Vault's activity", async () => {
-        render(() => <WardenSecrets />);
+        render(() => <VaultSecrets />);
         fireEvent.click(await screen.findByRole("button", { name: "Open the Vault" }));
         await waitFor(() => expect(openOrFocus).toHaveBeenCalled());
         const args = openOrFocus.mock.calls[0] as unknown as [string, { meta: Record<string, string> }, Record<string, string>];
-        // The Vault is Warden's Vault section: the same Warden switches there.
-        expect(args[0]).toBe("warden");
-        expect(args[2]).toEqual({ "warden:section": "vault", "vault:section": "activity" });
+        expect(args[0]).toBe("vault");
+        expect(args[2]).toEqual({ "vault:section": "activity" });
     });
 
     it("says so when no agent has used a secret", async () => {
         activity = [row({ actor: "you" })];
         entries = [];
-        render(() => <WardenSecrets />);
+        render(() => <VaultSecrets />);
         expect(await screen.findByText("No agent has used a secret yet.")).toBeInTheDocument();
         expect(screen.queryByRole("table", { name: "Standing permissions" })).toBeNull();
     });

@@ -9,11 +9,13 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { SETTINGS_SECTIONS } from "@/app/view/settings/settings-model";
 import { CONNECTORS_SECTIONS, MEMORY_SECTIONS } from "@/app/view/section-pane/panes";
 import { WARDEN_SECTIONS } from "@/app/view/warden/warden-model";
+import { VAULT_SECTIONS } from "@/app/view/vault/vault-kinds";
 import { SWARM_SECTIONS } from "@/app/view/swarm/swarm-section";
 import {
     isSectionMeta,
     movedMeta,
     movedSection,
+    retiredSection,
     sectionKeyOf,
     sectionKeysIn,
     sectionLabelOf,
@@ -40,8 +42,8 @@ const BOARD: PaneSections<"todo" | "done"> = {
 let unregister: () => void = () => {};
 const unregisterReal: (() => void)[] = [];
 beforeAll(() => {
-    // Warden and the Swarm, as their manifests declare their sections.
-    for (const [view, sections] of [["warden", WARDEN_SECTIONS], ["swarm", SWARM_SECTIONS]] as const) {
+    // Warden, the Vault and the Swarm, as their manifests declare their sections.
+    for (const [view, sections] of [["warden", WARDEN_SECTIONS], ["vault", VAULT_SECTIONS], ["swarm", SWARM_SECTIONS]] as const) {
         unregisterReal.push(registerPaneTab({ apiVersion: 1, view, label: view, icon: "x", sections, create: () => ({ component: () => null }) }));
     }
     unregister = registerPaneTab({
@@ -99,8 +101,18 @@ describe("pane sections", () => {
         // The Kanban left Warden for the Swarm, then the Swarm for a pane of its own: both open that pane.
         expect(movedSection("warden", "kanban")).toEqual({ view: "kanban" });
         expect(movedSection("swarm", "kanban")).toEqual({ view: "kanban" });
-        expect(movedSection("warden", "host")).toBeNull();
+        // Warden's Vault, History, Audit and Host are panes of their own.
+        expect(movedSection("warden", "vault")).toEqual({ view: "vault" });
+        expect(movedSection("warden", "history")).toEqual({ view: "history" });
+        expect(movedSection("warden", "audit")).toEqual({ view: "audit" });
+        expect(movedSection("warden", "host")).toEqual({ view: "swarm" });
+        expect(movedSection("warden", "jobs")).toBeNull();
         expect(movedSection("swarm", "broadcast")).toBeNull();
+        // The Vault's own section carries over under the key the Vault pane reads.
+        expect(movedMeta({ view: "warden", "warden:section": "vault", "vault:section": "cards" })).toEqual({
+            view: "vault",
+            "vault:section": "cards",
+        });
         expect(movedMeta({ view: "warden", "warden:section": "kanban", "kanban:open": "t1" })).toEqual({
             view: "kanban",
             "kanban:open": "t1",
@@ -109,7 +121,7 @@ describe("pane sections", () => {
             view: "kanban",
             "kanban:lanes": true,
         });
-        const same = { view: "warden", "warden:section": "host" };
+        const same = { view: "warden", "warden:section": "jobs" };
         expect(movedMeta(same)).toBe(same);
         expect(movedMeta(undefined)).toBeUndefined();
         const broadcast = { view: "swarm", "swarm:section": "broadcast" };
@@ -120,7 +132,18 @@ describe("pane sections", () => {
         // Warden declares no Kanban section now, but an entry naming it still opens (MOVED_SECTIONS).
         expect(sectionProblem("warden", "kanban")).toBeNull();
         expect(sectionProblem("swarm", "kanban")).toBeNull();
+        expect(sectionProblem("warden", "vault/cards")).toBeNull();
+        expect(sectionProblem("warden", "history")).toBeNull();
         expect(sectionProblem("warden", "nope")).toMatch(/no "nope" section/);
+    });
+
+    it("says where a retired section went, and opens the pane with no section", () => {
+        expect(retiredSection("warden", "lan")).toMatch(/network pill/);
+        expect(retiredSection("warden", "ambient")).toMatch(/token popover/);
+        expect(retiredSection("warden", "internet")).toMatch(/MuxBus Cloud/);
+        expect(retiredSection("warden", "jobs")).toBeNull();
+        expect(sectionProblem("warden", "lan")).toMatch(/"lan" section is gone: LAN peers are in the status bar/);
+        expect(movedMeta({ view: "warden", "warden:section": "lan", "term:zoom": 1.2 })).toEqual({ view: "warden", "term:zoom": 1.2 });
     });
 
     it("lists the same sections in the widget SDK as the panes declare", () => {
@@ -133,8 +156,7 @@ describe("pane sections", () => {
         expect(sdk).toEqual({
             swarm: ids(SWARM_SECTIONS),
             warden: ids(WARDEN_SECTIONS),
-            // Not a view: Warden's Vault section's own sections.
-            vault: ids(WARDEN_SECTIONS.items.find((s) => s.id === "vault")!.sections!),
+            vault: ids(VAULT_SECTIONS),
             connectors: ids(CONNECTORS_SECTIONS),
             memory: ids(MEMORY_SECTIONS),
             settings: ids(SETTINGS_SECTIONS),

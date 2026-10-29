@@ -12,17 +12,17 @@
 import { cleanup, render, screen, waitFor } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { AuditEntry } from "./warden-audit-shared";
+import type { AuditEntry } from "./audit-shared";
 
-const mockFetchWardenAudit = vi.fn<() => Promise<AuditEntry[]>>();
+const mockFetchAudit = vi.fn<() => Promise<AuditEntry[]>>();
 
-vi.mock("./warden-audit-shared", () => ({
-    WARDEN_AUDIT_LIMIT: 50,
+vi.mock("./audit-shared", () => ({
+    AUDIT_LIMIT: 50,
     actionCommand: (e: { event_kind?: string; outcome?: string }) => (e.event_kind === "action" ? e.outcome : undefined),
-    fetchWardenAudit: () => mockFetchWardenAudit(),
+    fetchAudit: () => mockFetchAudit(),
 }));
 
-import { WardenAuditManager } from "./warden-audit-manager";
+import { AuditManager } from "./audit-manager";
 
 afterEach(() => {
     cleanup();
@@ -42,9 +42,9 @@ function entry(overrides: Partial<AuditEntry>): AuditEntry {
     };
 }
 
-describe("WardenAuditManager — fleet-action reason display", () => {
+describe("AuditManager — fleet-action reason display", () => {
     it("shows a successful fleet action's reason even though outcome is unset", async () => {
-        mockFetchWardenAudit.mockResolvedValue([
+        mockFetchAudit.mockResolvedValue([
             entry({
                 source_agent: "agent5",
                 target_agent: "loap2",
@@ -52,7 +52,7 @@ describe("WardenAuditManager — fleet-action reason display", () => {
                 reason: "closing a pane stuck in a broken render state",
             }),
         ]);
-        render(() => <WardenAuditManager />);
+        render(() => <AuditManager />);
 
         await waitFor(() => {
             expect(screen.getByText("closing a pane stuck in a broken render state")).toBeInTheDocument();
@@ -60,13 +60,13 @@ describe("WardenAuditManager — fleet-action reason display", () => {
     });
 
     it("still shows error_message, not reason, on a failed entry with no reason", async () => {
-        mockFetchWardenAudit.mockResolvedValue([
+        mockFetchAudit.mockResolvedValue([
             entry({
                 success: false,
                 error_message: "block not found",
             }),
         ]);
-        render(() => <WardenAuditManager />);
+        render(() => <AuditManager />);
 
         await waitFor(() => {
             expect(screen.getByText("block not found")).toBeInTheDocument();
@@ -74,14 +74,14 @@ describe("WardenAuditManager — fleet-action reason display", () => {
     });
 
     it("shows a delivery's size and status whatever its outcome", async () => {
-        mockFetchWardenAudit.mockResolvedValue([
+        mockFetchAudit.mockResolvedValue([
             entry({
                 success: true,
                 outcome: "held_delivered",
                 message_length: 42,
             }),
         ]);
-        render(() => <WardenAuditManager />);
+        render(() => <AuditManager />);
 
         await waitFor(() => {
             expect(screen.getByText("42b")).toBeInTheDocument();
@@ -90,7 +90,7 @@ describe("WardenAuditManager — fleet-action reason display", () => {
     });
 
     it("shows an action row with its command and who made it, and no size", async () => {
-        mockFetchWardenAudit.mockResolvedValue([
+        mockFetchAudit.mockResolvedValue([
             entry({
                 event_kind: "action",
                 source_agent: "agent:opaz",
@@ -101,7 +101,7 @@ describe("WardenAuditManager — fleet-action reason display", () => {
                 error_message: "FORBIDDEN",
             }),
         ]);
-        render(() => <WardenAuditManager />);
+        render(() => <AuditManager />);
 
         await waitFor(() => {
             expect(screen.getByText("agent.kill-tree")).toBeInTheDocument();
@@ -112,7 +112,7 @@ describe("WardenAuditManager — fleet-action reason display", () => {
     });
 
     it("shows why a failed action was refused next to the identifier it acted on", async () => {
-        mockFetchWardenAudit.mockResolvedValue([
+        mockFetchAudit.mockResolvedValue([
             entry({
                 event_kind: "action",
                 source_agent: "agent:opaz",
@@ -123,7 +123,7 @@ describe("WardenAuditManager — fleet-action reason display", () => {
                 error_message: "no such widget",
             }),
         ]);
-        render(() => <WardenAuditManager />);
+        render(() => <AuditManager />);
 
         await waitFor(() => {
             expect(screen.getByText("id=acme.missing")).toBeInTheDocument();
@@ -132,7 +132,7 @@ describe("WardenAuditManager — fleet-action reason display", () => {
     });
 
     it("shows a registration as a registration, not a blank delivery", async () => {
-        mockFetchWardenAudit.mockResolvedValue([
+        mockFetchAudit.mockResolvedValue([
             entry({
                 event_kind: "register",
                 target_agent: "loap2",
@@ -144,7 +144,7 @@ describe("WardenAuditManager — fleet-action reason display", () => {
             entry({ event_kind: "unregister", target_agent: "agent5", block_id: "12345678-0000", message_length: 0 }),
             entry({ event_kind: "swept", target_agent: "agent6", block_id: "55667788-0000", message_length: 0 }),
         ]);
-        render(() => <WardenAuditManager />);
+        render(() => <AuditManager />);
 
         const registered = (await screen.findByText("loap2")).closest("li")!;
         expect(registered).toHaveTextContent("loap2 registered");

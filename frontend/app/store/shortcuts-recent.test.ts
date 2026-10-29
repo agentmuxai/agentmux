@@ -18,8 +18,9 @@ const widgets = (): Record<string, WidgetConfigType> => ({
     "defwidget@agent": w("agent"),
     "defwidget@terminal": w("term"),
     "defwidget@files": w("files"),
-    "defwidget@vault": w("warden", { "warden:section": "vault" }),
-    "defwidget@history": w("warden", { "warden:section": "history" }),
+    "defwidget@vault": w("vault"),
+    "defwidget@history": w("history"),
+    "defwidget@kanban": w("kanban"),
     "defwidget@messengers": w("messengers", {}, { children: ["discord"] }),
     "ext@acme.board/main": w("ext:acme.board/main"),
 });
@@ -63,8 +64,13 @@ describe("widgetKeyForBlockDef", () => {
     });
 
     it("where entries share a view, the one whose own meta the block carries", () => {
-        expect(widgetKeyForBlockDef(widgets(), { meta: { view: "warden", "warden:section": "history" } })).toBe("defwidget@history");
-        expect(widgetKeyForBlockDef(widgets(), { meta: { view: "warden", "warden:section": "vault" } })).toBe("defwidget@vault");
+        const wmap = {
+            ...widgets(),
+            "section@vault-cards": w("vault", { "vault:section": "cards" }),
+        };
+        expect(widgetKeyForBlockDef(wmap, { meta: { view: "vault", "vault:section": "cards" } })).toBe("section@vault-cards");
+        expect(widgetKeyForBlockDef(wmap, { meta: { view: "vault", "vault:section": "logins" } })).toBe("defwidget@vault");
+        expect(widgetKeyForBlockDef(wmap, { meta: { view: "history" } })).toBe("defwidget@history");
     });
 
     it("the most specific entry that matches, not the generic one that comes first", () => {

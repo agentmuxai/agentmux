@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Warden's Ambient section (warden-ambient-manager.tsx): how AgentMux's own
+ * The token popover's AgentMux internal row (AmbientPurposes.tsx): how AgentMux's own
  * model calls (session titles, names, prompt suggestions, narration) have gone
  * since srv started, from `ambient.outcomes` (crates/srv/src/ambient/outcome.rs),
  * so "the swarm has been blank for an hour" is visible without copying a database.

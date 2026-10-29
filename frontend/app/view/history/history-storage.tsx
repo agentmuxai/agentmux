@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Warden — History section, Storage: where agent history is kept on this
+// The History pane, Storage: where agent history is kept on this
 // machine and how much (`history.usage`, the status bar total's numbers), and
 // what is kept for how long.
 
@@ -17,7 +17,7 @@ import type { HistoryUsage } from "@/types/rpc/HistoryUsage";
 import { formatBytes } from "@/util/format-bytes";
 
 import "@/app/view/warden-shared/warden-manager-chrome.scss";
-import "./warden-history.scss";
+import "./history.scss";
 
 /** How compressed the shared pane history is (`agent:transcriptframes`). */
 const CompressionLine = (props: { c: HistoryCompression }): JSX.Element => {
@@ -125,7 +125,7 @@ const ReclaimLine = (props: { c: HistoryCompression; onChange: (r: HistoryReclai
     );
 };
 
-export const WardenHistoryStorage = (props: { visible: boolean }): JSX.Element => {
+export const HistoryStorage = (props: { visible: boolean }): JSX.Element => {
     const [usage, setUsage] = createSignal<HistoryUsage | null>(null);
     const [error, setError] = createSignal<string | null>(null);
     const [loading, setLoading] = createSignal(false);
@@ -219,4 +219,4 @@ export const WardenHistoryStorage = (props: { visible: boolean }): JSX.Element =
     );
 };
 
-WardenHistoryStorage.displayName = "WardenHistoryStorage";
+HistoryStorage.displayName = "HistoryStorage";

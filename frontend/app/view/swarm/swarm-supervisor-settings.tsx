@@ -185,8 +185,8 @@ export function SupervisorSettingsBar(props: { blockId?: string }): JSX.Element 
                         )}
                     </For>
                     <div class="swarm-supervisor-settings-note">
-                        It judges each finished turn with Haiku 4.5 through the ambient gateway. Warden's Ambient section
-                        counts the judgements and failures.
+                        It judges each finished turn with Haiku 4.5 through the ambient gateway. The token popover's AgentMux
+                        internal row counts the judgements and failures.
                     </div>
                 </div>
             </Show>

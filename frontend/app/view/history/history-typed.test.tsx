@@ -28,7 +28,7 @@ vi.mock("@/app/view/agent/agent-input-history", () => ({
     restoreInputHistory: (...a: unknown[]) => restoreInputHistory(...a),
 }));
 
-import { WardenHistoryTyped } from "./warden-history-typed";
+import { HistoryTyped } from "./history-typed";
 
 const def = (id: string) => ({ id, name: id.toUpperCase() });
 
@@ -43,7 +43,7 @@ const item = (id: number, text: string, extra: Partial<InputHistoryItem> = {}): 
     ...extra,
 });
 
-describe("Warden History → Typed", () => {
+describe("History → Typed", () => {
     beforeEach(() => {
         vi.clearAllMocks();
         ListAgentDefinitionsCommand.mockResolvedValue([def("a2"), def("a1")]);
@@ -61,7 +61,7 @@ describe("Warden History → Typed", () => {
     it("lists what was forgotten with who did it, and Restore brings it back", async () => {
         const batch = { batch_id: "b-1", agent_id: "a1", deleted_at_ms: Date.UTC(2026, 9, 21, 9, 0, 0), deleted_by: "korp", count: 1, sample: "ship the fix" };
         AgentInputHistoryTrashCommand.mockResolvedValueOnce({ batches: [batch], retention_ms: 7 * 24 * 60 * 60 * 1000 });
-        const { container } = render(() => <WardenHistoryTyped visible={true} />);
+        const { container } = render(() => <HistoryTyped visible={true} />);
         await waitFor(() => expect(screen.getByText("ship the fix")).toBeInTheDocument());
         expect(AgentInputHistoryTrashCommand).toHaveBeenCalledWith({}, { agent_id: "a1" });
         expect(screen.getByText("by korp")).toBeInTheDocument();
@@ -75,18 +75,18 @@ describe("Warden History → Typed", () => {
     it("a cleared history shows as one restorable batch", async () => {
         const batch = { batch_id: "b-2", agent_id: "a1", deleted_at_ms: Date.UTC(2026, 9, 21, 9, 0, 0), deleted_by: "armory-ui", count: 3, sample: "hello" };
         AgentInputHistoryTrashCommand.mockResolvedValue({ batches: [batch], retention_ms: 7 * 24 * 60 * 60 * 1000 });
-        render(() => <WardenHistoryTyped visible={true} />);
+        render(() => <HistoryTyped visible={true} />);
         await waitFor(() => expect(screen.getByText("3 entries, from “hello”")).toBeInTheDocument());
     });
 
     it("loads nothing until it is shown", () => {
-        render(() => <WardenHistoryTyped visible={false} />);
+        render(() => <HistoryTyped visible={false} />);
         expect(ListAgentDefinitionsCommand).not.toHaveBeenCalled();
         expect(AgentInputHistoryCommand).not.toHaveBeenCalled();
     });
 
     it("lists every defined agent by name, hidden ones too, and shows the first one's entries newest first", async () => {
-        const { container } = render(() => <WardenHistoryTyped visible={true} />);
+        const { container } = render(() => <HistoryTyped visible={true} />);
         await waitFor(() => expect(screen.getByText("merge on approval")).toBeInTheDocument());
         expect(AgentInputHistoryCommand).toHaveBeenCalledWith({}, { agent_id: "a1", before_id: undefined, limit: 200 });
         const rows = Array.from(container.querySelectorAll("tr[data-entry]")).map((r) => r.getAttribute("data-entry"));
@@ -98,7 +98,7 @@ describe("Warden History → Typed", () => {
     });
 
     it("switching agent reads that agent, and says when nothing was typed", async () => {
-        const { container } = render(() => <WardenHistoryTyped visible={true} />);
+        const { container } = render(() => <HistoryTyped visible={true} />);
         await waitFor(() => expect(screen.getByText("hello")).toBeInTheDocument());
         fireEvent.change(container.querySelector("select")!, { target: { value: "a2" } });
         await waitFor(() => expect(screen.getByText("Nothing typed to this agent yet.")).toBeInTheDocument());
@@ -106,7 +106,7 @@ describe("Warden History → Typed", () => {
     });
 
     it("searches this agent's history", async () => {
-        render(() => <WardenHistoryTyped visible={true} />);
+        render(() => <HistoryTyped visible={true} />);
         await waitFor(() => expect(screen.getByText("hello")).toBeInTheDocument());
         fireEvent.input(screen.getByPlaceholderText("Search what was typed"), { target: { value: "merge" } });
         await waitFor(() => expect(AgentInputHistorySearchCommand).toHaveBeenCalledWith({}, { agent_id: "a1", query: "merge", limit: 200 }));
@@ -115,7 +115,7 @@ describe("Warden History → Typed", () => {
     });
 
     it("forgets one entry only after a second click", async () => {
-        render(() => <WardenHistoryTyped visible={true} />);
+        render(() => <HistoryTyped visible={true} />);
         await waitFor(() => expect(screen.getByText("hello")).toBeInTheDocument());
         fireEvent.click(screen.getAllByRole("button", { name: "Forget" })[2]);
         expect(forgetInputHistoryEntry).not.toHaveBeenCalled();
@@ -127,7 +127,7 @@ describe("Warden History → Typed", () => {
     });
 
     it("Cancel backs out of forgetting an entry", async () => {
-        render(() => <WardenHistoryTyped visible={true} />);
+        render(() => <HistoryTyped visible={true} />);
         await waitFor(() => expect(screen.getByText("hello")).toBeInTheDocument());
         fireEvent.click(screen.getAllByRole("button", { name: "Forget" })[0]);
         fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
@@ -136,7 +136,7 @@ describe("Warden History → Typed", () => {
     });
 
     it("clears an agent's whole history only after naming it and a second click", async () => {
-        render(() => <WardenHistoryTyped visible={true} />);
+        render(() => <HistoryTyped visible={true} />);
         await waitFor(() => expect(screen.getByText("hello")).toBeInTheDocument());
         fireEvent.click(screen.getByRole("button", { name: "Clear…" }));
         expect(clearInputHistory).not.toHaveBeenCalled();
@@ -148,7 +148,7 @@ describe("Warden History → Typed", () => {
     it("offers older entries when a full page came back", async () => {
         const page = Array.from({ length: 200 }, (_, i) => item(500 - i, `msg ${500 - i}`));
         AgentInputHistoryCommand.mockResolvedValueOnce({ entries: page }).mockResolvedValueOnce({ entries: [item(300, "msg 300 older")] });
-        render(() => <WardenHistoryTyped visible={true} />);
+        render(() => <HistoryTyped visible={true} />);
         await waitFor(() => expect(screen.getByText("msg 500")).toBeInTheDocument());
         fireEvent.click(screen.getByRole("button", { name: "Show older" }));
         await waitFor(() => expect(AgentInputHistoryCommand).toHaveBeenLastCalledWith({}, { agent_id: "a1", before_id: 301, limit: 200 }));
@@ -161,7 +161,7 @@ describe("Warden History → Typed", () => {
         }));
         let finish!: () => void;
         clearInputHistory.mockReturnValue(new Promise<void>((r) => (finish = r)));
-        const { container } = render(() => <WardenHistoryTyped visible={true} />);
+        const { container } = render(() => <HistoryTyped visible={true} />);
         await waitFor(() => expect(screen.getByText("for a1")).toBeInTheDocument());
         fireEvent.click(screen.getByRole("button", { name: "Clear…" }));
         fireEvent.click(screen.getByRole("button", { name: "Forget everything typed to A1" }));
@@ -176,7 +176,7 @@ describe("Warden History → Typed", () => {
 
     it("says why the agents can't be listed instead of staying on Loading", async () => {
         ListAgentDefinitionsCommand.mockRejectedValueOnce(new Error("srv is busy"));
-        render(() => <WardenHistoryTyped visible={true} />);
+        render(() => <HistoryTyped visible={true} />);
         await waitFor(() => expect(screen.getByText(/srv is busy/)).toBeInTheDocument());
         expect(screen.getByText("No agent to show.")).toBeInTheDocument();
         expect(screen.queryByText("Loading…")).toBeNull();
@@ -187,7 +187,7 @@ describe("Warden History → Typed", () => {
 
     it("says why when the history can't be read", async () => {
         AgentInputHistoryCommand.mockRejectedValue(new Error("srv is busy"));
-        render(() => <WardenHistoryTyped visible={true} />);
+        render(() => <HistoryTyped visible={true} />);
         await waitFor(() => expect(screen.getByText(/srv is busy/)).toBeInTheDocument());
     });
 });

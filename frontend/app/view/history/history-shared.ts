@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Warden — History section: the pure parts, testable without a DOM.
+// The History pane: the pure parts, testable without a DOM.
 
 import type { HistoryAgent } from "@/types/rpc/HistoryAgent";
 

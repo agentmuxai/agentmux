@@ -46,7 +46,7 @@ export function orderByRecent<T>(entries: readonly (readonly [string, T])[], rec
 
 /**
  * The widget entry a block of `blockDef` was opened from: the entry whose view is the block's,
- * and where several entries share a view (Warden's sections; the Browser and a site's widget),
+ * and where several entries share a view (a pane's sections pinned as widgets; the Browser and a site's widget),
  * the most specific one whose own meta the block's meta carries (the one naming the most keys), the
  * first when none is carried. Undefined for a block no entry stands for. Pure.
  */

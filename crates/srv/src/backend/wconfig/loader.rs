@@ -303,18 +303,21 @@ mod tests {
         assert!(kanban.get("kanban:section").is_none());
         assert!(config.widgets["defwidget@kanban"].section.is_empty());
 
+        // The Vault entry is whatever widgets.json holds; whichever pane that is, it carries no
+        // section of Warden's once resolved.
         let vault = &config.widgets["defwidget@vault"].block_def.meta;
-        assert_eq!(vault.get("view").and_then(|v| v.as_str()), Some("warden"));
-        assert_eq!(vault.get("warden:section").and_then(|v| v.as_str()), Some("vault"));
+        assert!(vault.get("warden:section").is_none());
 
-        // A section of a section: Warden on its Vault section, on the Vault's Cards.
+        // A section of a section: the Vault pane on its Cards. Warden is no longer in the way.
         let mut cards: WidgetConfigType = serde_json::from_str(
             r#"{"label":"Cards","section":"vault/cards","blockdef":{"meta":{"view":"warden"}}}"#,
         )
         .unwrap();
         cards.resolve_section();
-        assert_eq!(cards.block_def.meta.get("warden:section").and_then(|v| v.as_str()), Some("vault"));
+        assert_eq!(cards.block_def.meta.get("view").and_then(|v| v.as_str()), Some("vault"));
         assert_eq!(cards.block_def.meta.get("vault:section").and_then(|v| v.as_str()), Some("cards"));
+        assert!(cards.block_def.meta.get("warden:section").is_none());
+        assert!(cards.section.is_empty());
 
         // An entry that still names the Kanban as a section of Warden or of the Swarm (a user's own, or a
         // pin from before the moves) opens the Kanban pane.
@@ -329,6 +332,38 @@ mod tests {
             assert!(old.block_def.meta.get("warden:section").is_none());
             assert!(old.section.is_empty());
         }
+
+        // The Vault, History and Audit are panes of their own; Host is the Swarm.
+        for (section, view) in [("vault", "vault"), ("history", "history"), ("audit", "audit"), ("host", "swarm")] {
+            let mut old: WidgetConfigType = serde_json::from_str(&format!(
+                r#"{{"label":"X","section":"{section}","blockdef":{{"meta":{{"view":"warden","warden:section":"{section}"}}}}}}"#
+            ))
+            .unwrap();
+            old.resolve_section();
+            assert_eq!(old.block_def.meta.get("view").and_then(|v| v.as_str()), Some(view), "from {section}");
+            assert!(old.block_def.meta.get("warden:section").is_none(), "from {section}");
+            assert!(old.block_def.meta.get(&format!("{view}:section")).is_none(), "from {section}");
+            assert!(old.section.is_empty());
+        }
+
+        // A section with no pane any more is cleared and the entry stays on Warden.
+        for retired in ["lan", "internet", "ambient"] {
+            let mut old: WidgetConfigType = serde_json::from_str(&format!(
+                r#"{{"label":"X","section":"{retired}","blockdef":{{"meta":{{"view":"warden"}}}}}}"#
+            ))
+            .unwrap();
+            old.resolve_section();
+            assert_eq!(old.block_def.meta.get("view").and_then(|v| v.as_str()), Some("warden"), "from {retired}");
+            assert!(old.block_def.meta.get("warden:section").is_none(), "from {retired}");
+            assert!(old.section.is_empty());
+        }
+
+        // A section Warden still has is written as before.
+        let mut jobs: WidgetConfigType =
+            serde_json::from_str(r#"{"label":"Jobs","section":"jobs","blockdef":{"meta":{"view":"warden"}}}"#).unwrap();
+        jobs.resolve_section();
+        assert_eq!(jobs.block_def.meta.get("view").and_then(|v| v.as_str()), Some("warden"));
+        assert_eq!(jobs.block_def.meta.get("warden:section").and_then(|v| v.as_str()), Some("jobs"));
 
         // No view: nothing to key it by, so the meta is left alone.
         let mut orphan: WidgetConfigType = serde_json::from_str(r#"{"section":"cards"}"#).unwrap();

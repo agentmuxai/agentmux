@@ -9,7 +9,7 @@
  */
 
 import type { WidgetPackageInfo, WidgetPaneInfo } from "@/app/store/rpc-api/widgets";
-import { isSectionMeta, movedMeta } from "./pane-sections";
+import { isSectionMeta, movedMeta, retiredSection, sectionKeyOf } from "./pane-sections";
 import type { PaneTabHostContext } from "./pane-tab-registry";
 import type { StatusLook, StatusTone } from "./widget-panes";
 
@@ -335,8 +335,11 @@ async function answer(host: BridgeHost, state: BridgeState, method: string, para
             return ok(bridgeTheme(pkg));
         case "panes.open": {
             if (!str(p.view, 200)) return fail(ERR.INVALID_PARAMS, "panes.open needs { view }");
-            // A section that moved opens where it lives now (`panes.open("warden", { "warden:section": "kanban" })`).
+            // A section that moved opens where it lives now (`panes.open("warden", { "warden:section": "kanban" })`, or Warden's Vault, History, Audit and Host).
             const own = pkg.panes.some((pane) => pane.view === p.view);
+            // A section that is gone says where it went instead of opening something else.
+            const retiredNow = !own && isObj(p.meta) ? retiredSection(String(p.view), String(p.meta[sectionKeyOf(String(p.view))])) : null;
+            if (retiredNow) return fail(ERR.INVALID_PARAMS, `that section is gone: ${retiredNow}`);
             const moved = !own && isObj(p.meta) ? movedMeta({ ...p.meta, view: p.view }) : undefined;
             const { view: movedView, ...movedRest } = moved ?? {};
             const openView = moved && movedView !== p.view ? (movedView as string) : p.view;
