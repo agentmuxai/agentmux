@@ -23,6 +23,13 @@ vars:
     # identity (AgentMux.AgentMux, Store ID 9P9QCXNNCRK3). Never submitted to
     # winget-pkgs yet, so free to pick; see
     # docs/specs/SPEC_WINGET_PACKAGE_BOOTSTRAP_2026_09_10.md.
+    # Cargo settings for DEV builds only (`task dev`, `dev:standalone`): the release profile is full LTO with
+    # one codegen unit, which is slow and takes several GB of commit to link; that is right for a release and
+    # wrong for a build someone is going to run once and edit. The profile stays `release` (so every
+    # `target/release/...` path the dev flow reads is unchanged) with these four settings overridden through
+    # the environment; package and release builds do not pass this and keep Cargo.toml's profile.
+    # Empty for any build that does not ask: `{{.CARGO_ENV}}` below renders nothing.
+    DEV_CARGO_ENV: 'export CARGO_PROFILE_RELEASE_LTO=off CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 CARGO_PROFILE_RELEASE_OPT_LEVEL=1 CARGO_PROFILE_RELEASE_INCREMENTAL=true; '
     WINGET_PACKAGE: AgentMux.AI
 
 tasks:
@@ -77,7 +84,9 @@ tasks:
                   TITLE: '{{.TITLE}}'
         deps:
             - npm:install
-            - build:backend
+            - task: build:backend
+              vars:
+                  CARGO_ENV: '{{.DEV_CARGO_ENV}}'
             - copy:schema
         env:
             AGENTMUX_ENVFILE: "{{.ROOT_DIR}}/.env"
@@ -93,7 +102,9 @@ tasks:
             - task: dev:standalone:serve
         deps:
             - npm:install
-            - build:backend
+            - task: build:backend
+              vars:
+                  CARGO_ENV: '{{.DEV_CARGO_ENV}}'
             - copy:schema
         env:
             AGENTMUX_ENVFILE: "{{.ROOT_DIR}}/.env"
@@ -315,6 +326,8 @@ tasks:
         desc: Build the agentmux-srv Rust component.
         cmds:
             - task: build:backend:rust
+              vars:
+                  CARGO_ENV: '{{.CARGO_ENV}}'
 
     # ========================================
     # Rust Backend Build Tasks
@@ -324,12 +337,14 @@ tasks:
         desc: Build the agentmux-srv Rust backend binary.
         cmds:
             - task: build:backend:rust:{{OS}}
+              vars:
+                  CARGO_ENV: '{{.CARGO_ENV}}'
 
     build:backend:rust:darwin:
         internal: true
         platforms: [darwin]
         cmds:
-            - bash -c 'source "$HOME/.cargo/env" 2>/dev/null; PATH="$HOME/.cargo/bin:$PATH" cargo build --release -p agentmux-srv'
+            - bash -c '{{.CARGO_ENV}}source "$HOME/.cargo/env" 2>/dev/null; PATH="$HOME/.cargo/bin:$PATH" cargo build --release -p agentmux-srv'
             - mkdir -p dist/bin
             - cp target/release/agentmux-srv dist/bin/agentmux-srv-{{.VERSION}}-darwin.arm64
             - echo "✓ Built agentmux-srv for macOS (dist/bin/agentmux-srv-{{.VERSION}}-darwin.arm64)"
@@ -338,7 +353,7 @@ tasks:
         internal: true
         platforms: [linux]
         cmds:
-            - bash -c 'source "$HOME/.cargo/env" 2>/dev/null; PATH="$HOME/.cargo/bin:$PATH" cargo build --release -p agentmux-srv'
+            - bash -c '{{.CARGO_ENV}}source "$HOME/.cargo/env" 2>/dev/null; PATH="$HOME/.cargo/bin:$PATH" cargo build --release -p agentmux-srv'
             - mkdir -p dist/bin
             - cp target/release/agentmux-srv dist/bin/agentmux-srv-{{.VERSION}}-linux.x64
             - echo "✓ Built agentmux-srv for Linux (dist/bin/agentmux-srv-{{.VERSION}}-linux.x64)"
@@ -347,7 +362,7 @@ tasks:
         internal: true
         platforms: [windows]
         cmds:
-            - cargo build --release -p agentmux-srv
+            - '{{.CARGO_ENV}}cargo build --release -p agentmux-srv'
             # Read the version LIVE from package.json — `{{.VERSION}}` is frozen
             # at `task` invocation start, BEFORE `task package`'s auto-bump
             # runs, so it would stamp the binary with the stale (pre-bump)
@@ -491,6 +506,8 @@ tasks:
         desc: Build the host binary for the current platform.
         cmds:
             - task: build:host:{{OS}}
+              vars:
+                  CARGO_ENV: '{{.CARGO_ENV}}'
 
     build:host:windows:
         internal: true
@@ -500,7 +517,7 @@ tasks:
             # (see docs/retro/RETRO_CEF_BUILD_RACE_2026_04_24.md). If the first
             # build lost the race, cef_windows_x86_64/ is missing libcef_dll/ +
             # include/ + Resources/. Retry once after repair before failing hard.
-            - cmd: bash -c 'cargo build --release -p agentmux-cef -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp || { bash scripts/repair-cef-extract.sh && cargo build --release -p agentmux-cef -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp; }'
+            - cmd: bash -c '{{.CARGO_ENV}}cargo build --release -p agentmux-cef -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp || { bash scripts/repair-cef-extract.sh && cargo build --release -p agentmux-cef -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp; }'
             # Phase 3 sandbox: bootstrap.exe presence means the sandbox feature
             # was active (cef-dll-sys only emits it when cef/sandbox is ON).
             # The cdylib agentmux_cef.dll is emitted unconditionally by
@@ -528,7 +545,7 @@ tasks:
             # launcher now drives srv + host on macOS dev too, so build it
             # alongside the host. They co-locate in dist/cef-dev/ (flat
             # layout) — see dev:serve's Unix branch.
-            - bash -c 'source "$HOME/.cargo/env" 2>/dev/null; PATH="$HOME/.cargo/bin:$PATH" cargo build --release -p agentmux-cef -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp'
+            - bash -c '{{.CARGO_ENV}}source "$HOME/.cargo/env" 2>/dev/null; PATH="$HOME/.cargo/bin:$PATH" cargo build --release -p agentmux-cef -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp'
             - mkdir -p dist/cef
             - cp target/release/agentmux-cef dist/cef/agentmux-cef
             - cp target/release/agentmux-launcher dist/cef/agentmux-launcher
@@ -553,7 +570,7 @@ tasks:
             # + host + srv co-located in dist/cef-dev/) has it — same as
             # build:host:darwin. Without this, dev:serve's launcher-not-found
             # guard hard-fails on Linux.
-            - bash -c 'source "$HOME/.cargo/env" 2>/dev/null; PATH="$HOME/.cargo/bin:$PATH" cargo build --release -p agentmux-cef --features patched-libcef && PATH="$HOME/.cargo/bin:$PATH" cargo build --release -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp'
+            - bash -c '{{.CARGO_ENV}}source "$HOME/.cargo/env" 2>/dev/null; PATH="$HOME/.cargo/bin:$PATH" cargo build --release -p agentmux-cef --features patched-libcef && PATH="$HOME/.cargo/bin:$PATH" cargo build --release -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp'
             - mkdir -p dist/cef
             - cp target/release/agentmux-cef dist/cef/agentmux-cef
             - cp target/release/agentmux-launcher dist/cef/agentmux-launcher
@@ -893,6 +910,8 @@ tasks:
             VITE_DEV_TITLE: '{{.TITLE}}'
         cmds:
             - task: build:host
+              vars:
+                  CARGO_ENV: '{{.DEV_CARGO_ENV}}'
             - task: bundle
             - cmd: |
                 # Gate on successful bundle — don't launch stale binaries
@@ -1314,6 +1333,8 @@ tasks:
         desc: Dev escape hatch — flat layout, host invoked directly, launcher bypassed on all OSes.
         cmds:
             - task: build:host
+              vars:
+                  CARGO_ENV: '{{.DEV_CARGO_ENV}}'
             - task: bundle
             - cmd: |
                 if [ ! -f dist/cef/agentmux-cef{{exeExt}} ]; then
