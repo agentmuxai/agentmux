@@ -1111,6 +1111,33 @@ pub struct SpawnAgentRequest {
     pub user_instruction: String,
 }
 
+/// One worker of a `POST /api/v1/agent/spawn_many`: what `SpawnAgentRequest` asks of one.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpawnWorkerSpec {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account: Option<String>,
+    /// The worker's task, its first message.
+    pub brief: String,
+}
+
+/// `POST /api/v1/agent/spawn_many`: several workers at once, with one approval for all of them
+/// (`SPEC_COUNTDOWN_BUTTONS_AND_BATCH_AGENT_ACTIONS_2026_10_28.md` §5). All start or none do.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpawnManyRequest {
+    #[serde(flatten)]
+    pub auth: UiAutomationAuth,
+    pub workers: Vec<SpawnWorkerSpec>,
+    /// The user's own words in this turn asking for them, verbatim; empty when the user didn't ask.
+    #[serde(default)]
+    pub user_instruction: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClosePaneRequest {
     #[serde(flatten)]
