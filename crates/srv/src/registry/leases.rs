@@ -180,6 +180,11 @@ impl Lease {
         &self.instance_id
     }
 
+    /// The boot id of the process that holds this lease.
+    pub fn owner_boot_id(&self) -> &str {
+        &self.owner_boot_id
+    }
+
     /// The ownership generation this lease was granted under. Strictly
     /// greater than every earlier holder's for the same key.
     pub fn epoch(&self) -> u64 {
