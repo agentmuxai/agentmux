@@ -53,6 +53,8 @@ import type { AskSideQuestionResult } from "@/types/rpc/AskSideQuestionResult";
 import type { AttachmentsCopyToWorkdirResult } from "@/types/rpc/AttachmentsCopyToWorkdirResult";
 import type { AttachmentsInfoResult } from "@/types/rpc/AttachmentsInfoResult";
 import type { AttachmentsIngestResult } from "@/types/rpc/AttachmentsIngestResult";
+import type { AuditQueryReq } from "@/types/rpc/AuditQueryReq";
+import type { AuditQueryResult } from "@/types/rpc/AuditQueryResult";
 import type { BackgroundTaskView } from "@/types/rpc/BackgroundTaskView";
 import type { BlockRevealParams } from "@/types/rpc/BlockRevealParams";
 import type { BlockRevealResult } from "@/types/rpc/BlockRevealResult";
@@ -2492,6 +2494,10 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<HistoryAgentSessions> {
     return client.rpcCall("history.agent_sessions", data, opts);
+  },
+  // command "audit.query"
+  AuditQueryCommand(client: RpcClient, data: AuditQueryReq, opts?: RpcOpts): Promise<AuditQueryResult> {
+    return client.rpcCall("audit.query", data, opts);
   },
   // command "history.locate"
   HistoryLocateCommand(client: RpcClient, data: HistoryLocateReq, opts?: RpcOpts): Promise<HistoryLocation> {

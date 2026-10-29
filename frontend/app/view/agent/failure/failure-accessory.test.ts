@@ -361,7 +361,7 @@ describe("auth row: bind-account vs Connectors → Accounts (SPEC_AGENT_LOGIN_FL
         expect(action(row, "Connectors → Accounts")).toBeTruthy();
     });
 
-    it("replaces Connectors → Accounts with a named Bind action for exactly one candidate", () => {
+    it("replaces Connectors → Accounts with a named Use-account action for exactly one candidate", () => {
         const on = mkActions();
         const row = failureToRow(
             authFailure(),
@@ -369,14 +369,14 @@ describe("auth row: bind-account vs Connectors → Accounts (SPEC_AGENT_LOGIN_FL
             on,
         );
         expect(action(row, "Connectors → Accounts")).toBeUndefined();
-        const bind = action(row, "Bind: work-claude");
+        const bind = action(row, "Use work-claude");
         expect(bind).toBeTruthy();
         expect(bind?.icon).toBe("plug");
         bind?.onClick();
         expect(on._calls.bindAccount).toBe(1);
     });
 
-    it("shows a generic picker-opening Bind action for 2+ candidates", () => {
+    it("shows a generic picker-opening Use-account action for 2+ candidates", () => {
         const on = mkActions();
         const row = failureToRow(
             authFailure(),
@@ -389,8 +389,8 @@ describe("auth row: bind-account vs Connectors → Accounts (SPEC_AGENT_LOGIN_FL
             on,
         );
         expect(action(row, "Connectors → Accounts")).toBeUndefined();
-        expect(action(row, "Bind: work-claude")).toBeUndefined();
-        const bind = action(row, "Bind account");
+        expect(action(row, "Use work-claude")).toBeUndefined();
+        const bind = action(row, "Use account…");
         expect(bind).toBeTruthy();
         bind?.onClick();
         expect(on._calls.bindAccount).toBe(1);

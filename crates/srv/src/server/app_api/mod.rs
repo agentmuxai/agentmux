@@ -113,6 +113,7 @@ mod presence;
 pub(crate) mod tower_pane;
 mod blockstats;
 mod history_agents;
+mod audit_query;
 mod history_usage;
 mod shells;
 pub(crate) mod kanban;
@@ -155,6 +156,7 @@ pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     tower_pane::register(engine, state);
     blockstats::register(engine, state);
     history_agents::register(engine, state);
+    audit_query::register(engine, state);
     history_usage::register(engine, state);
     shells::register(engine, state);
     kanban::register(engine, state);

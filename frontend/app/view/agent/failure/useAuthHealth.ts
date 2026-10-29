@@ -143,7 +143,7 @@ export function useAuthHealth(opts: {
 
     // Auto-unblock: a bind can happen from ANYWHERE (Connectors → Accounts'
     // Bind-to-Agent menu, the per-agent Identity tab, or this pane's own
-    // "Bind account" above) — this pane must notice regardless of source.
+    // "Use account…" above) — this pane must notice regardless of source.
     // `agentidentities:changed:<agentId>` already fires on every one of
     // those; nothing previously listened for it here.
     //

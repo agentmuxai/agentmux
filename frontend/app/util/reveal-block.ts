@@ -62,6 +62,30 @@ export async function findTabHolding(blockId: string, hint?: string): Promise<st
 }
 
 /**
+ * A pane of `view` open in THIS window: the first of this window's tabs (the shown one first) whose blocks
+ * include one with that view. Read from the tabs' block lists, not from mounted components, so it also
+ * finds a pane that is an inactive member of a pane's stack (not mounted) and a minimized one.
+ * Null when none is open.
+ */
+export async function findOpenBlockByView(view: string): Promise<string | null> {
+    const ws = workspace();
+    if (!ws) return null;
+    const tabIds = [...(ws.pinnedtabids ?? []), ...(ws.tabids ?? [])];
+    const shown = atoms.activeTabId();
+    const ordered = tabIds.includes(shown) ? [shown, ...tabIds.filter((t) => t !== shown)] : tabIds;
+    for (const tabId of ordered) {
+        const tabRef = MOS.makeORef("tab", tabId);
+        const tab = MOS.getObjectValue<Tab>(tabRef) ?? (await MOS.reloadMuxObject<Tab>(tabRef));
+        for (const blockId of tab?.blockids ?? []) {
+            const blockRef = MOS.makeORef("block", blockId);
+            const block = MOS.getObjectValue<Block>(blockRef) ?? (await MOS.reloadMuxObject<Block>(blockRef));
+            if (block?.meta?.["view"] === view) return blockId;
+        }
+    }
+    return null;
+}
+
+/**
  * Make `blockId` visible within its layout without switching the window tab,
  * moving layout focus or the caret: restore its pane if minimized, un-magnify
  * another pane that would hide it, and switch its pane to it when it's a
