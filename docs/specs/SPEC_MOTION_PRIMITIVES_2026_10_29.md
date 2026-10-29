@@ -1,6 +1,6 @@
 # Motion primitives: one shared set of reusable animations on top of the motion policy and tokens
 
-**Status:** active. Approved 2026-10-29 by the operator ("yes, motion is good"): decisions 1-6 as recommended, 7 settled with Camper. Built in the order of §5, one PR per step, each updating this line. Step 1 (the module, its tests, the guard and the Swarm row slide) is #5781; the minimize merge is next.
+**Status:** active. Approved 2026-10-29 by the operator ("yes, motion is good"): decisions 1-6 as recommended, 7 settled with Camper. Built in the order of §5, one PR per step, each updating this line. Step 1 (the module, its tests, the guard and the Swarm row slide) is #5781, with #5798 batching `move`'s reads; step 2 (the minimize merge's flight on `mergeInto`) is the next PR, then the landing bounce.
 **Date:** 2026-10-29.
 **Requested by:** the operator, through AgentY. Their words (2026-10-28): "do we have a solid animations framework, where we can quickly reuse them in a DRY Manner? lets get that to a spec".
 **Author:** Agent1@narko.
@@ -172,7 +172,7 @@ How it runs: the thunk is resolved after one animation frame (the spot where tod
 
 `scripts/check-motion-gates.mjs` already enforces that `motion.ts` is the only reader of the OS motion setting. A second rule in the same script (so one CI step), with a baseline file like `scripts/check-file-sizes.baseline`:
 
-- `.animate(` and `startViewTransition(` outside `frontend/app/motion/`, `util/view-transition.ts` and the listed exception: **fails**, unless the file is in the baseline (3 files once the Swarm slide moved; they may only be removed).
+- `.animate(` and `startViewTransition(` outside `frontend/app/motion/`, `util/view-transition.ts` and the listed exception: **fails**, unless the file is in the baseline (2 files once the Swarm slide and the minimize merge moved; they may only be removed).
 - A new `@keyframes` outside `_keyframes.scss`: fails unless baselined (today's 23 in 17 files; the other 8 of the 31 are in `_keyframes.scss`).
 - A literal `<n>ms` in an `animation:` or `transition:` declaration (or their `-duration`/`-delay`) instead of `var(--duration-*)`: fails unless baselined (15 files when counted this way; §2's 13 was an earlier, looser count).
 

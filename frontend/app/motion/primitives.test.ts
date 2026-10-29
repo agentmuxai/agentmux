@@ -340,6 +340,25 @@ describe("travel", () => {
         expect(document.body.querySelectorAll("div")).toHaveLength(1);
     });
 
+    it("calls onArrive when the element is shown again, also with motion off, and not after a cancel", () => {
+        const arrived = vi.fn();
+        const el = at(200, 300);
+        travel(el, rectOf(20, 30), { onArrive: arrived });
+        expect(arrived).not.toHaveBeenCalled();
+        fake.calls[0].finish();
+        expect(arrived).toHaveBeenCalledTimes(1);
+        expect(el.style.visibility).toBe("");
+
+        const cancelled = vi.fn();
+        travel(el, rectOf(20, 30), { onArrive: cancelled }).cancel();
+        expect(cancelled).not.toHaveBeenCalled();
+
+        reduce.categories.add("transition");
+        const off = vi.fn();
+        travel(el, rectOf(20, 30), { onArrive: off });
+        expect(off).toHaveBeenCalledTimes(1);
+    });
+
     it("lets the caller adjust the copy", () => {
         const el = at(0, 0);
         el.className = "pill pill--landing";
@@ -396,6 +415,16 @@ describe("mergeInto", () => {
             [els[1], 1],
             [els[0], 0],
         ]);
+    });
+
+    it("lets the caller adjust each copy, and skips a hole in the destinations", () => {
+        const els = [undefined, at(300, 10)];
+        els[1]!.className = "pill pill--landing";
+        mergeInto([rectOf(0, 0), rectOf(0, 30)], els, {
+            onCopy: (copy) => copy.classList.remove("pill--landing"),
+        });
+        expect(fake.calls).toHaveLength(1);
+        expect((fake.calls[0].el as HTMLElement).className).toBe("pill");
     });
 
     it("staggers the copies by index", () => {

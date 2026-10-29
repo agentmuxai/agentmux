@@ -6,7 +6,6 @@
 # <rule> <path> <count>
 animate frontend/app/util/pane-locate.ts 1
 animate frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx 2
-animate frontend/layout/lib/layoutMinimizeMergeApply.ts 1
 keyframes frontend/app/block/block.scss 1
 keyframes frontend/app/drag/drop-indicators.scss 4
 keyframes frontend/app/element/BrainSpinner.scss 1

@@ -271,6 +271,8 @@ export interface TravelOptions {
     delay?: number;
     /** Adjust the copy before it is shown, e.g. drop a class that only makes sense on the real element. */
     onCopy?: (copy: HTMLElement) => void;
+    /** When the element is shown again at its place, also when motion is off; not when the travel is cancelled. */
+    onArrive?: () => void;
 }
 
 const flying = new WeakMap<Element, MotionHandle>();
@@ -282,7 +284,10 @@ const flying = new WeakMap<Element, MotionHandle>();
  */
 export function travel(el: HTMLElement, from: DOMRect, opts: TravelOptions = {}): MotionHandle {
     const category = opts.category ?? MOTION.travel.category;
-    if (!motionAllowed(category) || typeof document === "undefined") return finishedHandle();
+    if (!motionAllowed(category) || typeof document === "undefined") {
+        opts.onArrive?.();
+        return finishedHandle();
+    }
     // One flight per element: a second would clone the hidden element and restore it hidden.
     flying.get(el)?.cancel();
     const to = el.getBoundingClientRect();
@@ -301,7 +306,8 @@ export function travel(el: HTMLElement, from: DOMRect, opts: TravelOptions = {})
     const hiddenBefore = el.style.visibility;
     document.body.append(copy);
     el.style.visibility = "hidden";
-    const handle = play(
+    let handle: MotionHandle | undefined;
+    handle = play(
         copy,
         [
             { transform: "translate(0, 0)" },
@@ -314,6 +320,7 @@ export function travel(el: HTMLElement, from: DOMRect, opts: TravelOptions = {})
             cleanup: () => {
                 copy.remove();
                 el.style.visibility = hiddenBefore;
+                if (!handle?.cancelled) opts.onArrive?.();
             },
         }
     );
@@ -332,6 +339,8 @@ export interface MergeOptions {
     land?: (el: Element, index: number) => void;
     /** A pulse of each arrived piece. Default: false when `land` is given, else "bounce". */
     pulse?: "bounce" | "flash" | false;
+    /** Adjust each flying copy before it is shown (see `travel`). */
+    onCopy?: (copy: HTMLElement) => void;
 }
 
 /**
@@ -342,7 +351,7 @@ export interface MergeOptions {
  */
 export function mergeInto(
     sources: ReadonlyArray<DOMRect>,
-    dest: ReadonlyArray<Element> | (() => Element[]),
+    dest: ReadonlyArray<Element | undefined> | (() => Array<Element | undefined>),
     opts: MergeOptions = {}
 ): MotionHandle {
     const category = opts.category ?? MOTION.travel.category;
@@ -367,21 +376,16 @@ export function mergeInto(
     const run = () => {
         frame = undefined;
         const els = typeof dest === "function" ? dest() : dest;
-        const arrivals: Promise<void>[] = [];
         sources.forEach((from, i) => {
             const el = els[i];
             if (!el) return;
-            const flight =
-                el instanceof HTMLElement ? travel(el, from, { category, delay: i * stagger }) : finishedHandle();
-            flights.push(flight);
-            arrivals.push(
-                flight.finished.then(() => {
-                    if (!flight.cancelled && !cancelled) arrive(el, i);
-                })
-            );
+            const onArrive = () => arrive(el, i);
+            if (el instanceof HTMLElement)
+                flights.push(travel(el, from, { category, delay: i * stagger, onArrive, onCopy: opts.onCopy }));
+            else onArrive();
         });
         // Done when every piece has landed and its pulse has ended.
-        void Promise.all(arrivals)
+        void Promise.all(flights.map((f) => f.finished))
             .then(() => Promise.all(pulses.map((p) => p.finished)))
             .then(settle);
     };
