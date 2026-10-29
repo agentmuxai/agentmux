@@ -37,7 +37,9 @@ pub(crate) fn is_parkable(state: &AppState, block_id: &str) -> bool {
     let Ok(Some(block)) = state.mstore.get::<Block>(block_id) else {
         return false;
     };
-    obj::meta_get_string(&block.meta, "view", "") == "agent" && agent_of_block(state, block_id, &block).is_some()
+    obj::meta_get_string(&block.meta, "view", "") == "agent"
+        && !obj::is_history_reader(&block.meta)
+        && agent_of_block(state, block_id, &block).is_some()
 }
 
 /// Of the blocks being closed, the ones that are extra blocks of their agent and so are closed, not

@@ -118,6 +118,16 @@ pub fn block_meta_agent_id(meta: &MetaMapType) -> Option<&str> {
         .or_else(|| meta.get("agent:id").and_then(|v| v.as_str()))
 }
 
+/// The meta key of an agent's history reader: a `view: "agent"` block that carries the agent's id so
+/// the transcript can be read through it, and is never launched.
+pub const HISTORY_READER_META_KEY: &str = "agent:historyTabFor";
+
+/// Whether a block is an agent's history reader. It carries the agent's `agentId` like the agent's
+/// own pane, but it is not that pane: nothing that looks for "the agent's block" may take it.
+pub fn is_history_reader(meta: &MetaMapType) -> bool {
+    meta.get(HISTORY_READER_META_KEY).is_some_and(|v| v.as_str().is_some_and(|s| !s.is_empty()) || v.as_bool() == Some(true))
+}
+
 /// Helper to get a bool value from MetaMapType.
 pub fn meta_get_bool(meta: &MetaMapType, key: &str, default: bool) -> bool {
     meta.get(key).and_then(|v| v.as_bool()).unwrap_or(default)
