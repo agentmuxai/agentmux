@@ -245,6 +245,12 @@ fn only_agent_panes_whose_seat_changed_are_patched() {
         // Not an agent pane, or an empty one: never touched.
         pane("b5", "term", "a", None),
         pane("b6", "agent", "", None),
+        // An agent's history reader names it but is not its pane: never patched.
+        {
+            let mut reader = pane("b7", "agent", "a", None);
+            reader.meta.insert(crate::backend::obj::HISTORY_READER_META_KEY.into(), serde_json::json!("a"));
+            reader
+        },
     ];
     let mut asked = Vec::new();
     let stale = stale_seat_meta(&blocks, |id| {
