@@ -286,14 +286,22 @@ fn dir_size(dir: &Path) -> u64 {
     total
 }
 
-/// The newest write in `dir` and directly in its `data`, `logs` and `runtime` folders. A running
-/// version writes its logs; one that stopped has been still since.
+/// The newest write to any file or folder under `dir`, symlinks not followed. A running version
+/// writes its databases and logs; one that stopped has been still since. A folder's own time moves
+/// only when an entry is added or removed, so the files themselves are looked at.
 fn last_activity(dir: &Path) -> Option<SystemTime> {
-    let mut newest = std::fs::metadata(dir).and_then(|m| m.modified()).ok();
-    for sub in [dir.to_path_buf(), dir.join("data"), dir.join("logs"), dir.join("runtime")] {
-        let Ok(rd) = std::fs::read_dir(&sub) else { continue };
+    let mut newest: Option<SystemTime> = None;
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        if let Ok(t) = std::fs::symlink_metadata(&d).and_then(|m| m.modified()) {
+            newest = Some(newest.map_or(t, |n| n.max(t)));
+        }
+        let Ok(rd) = std::fs::read_dir(&d) else { continue };
         for e in rd.flatten() {
-            if let Ok(t) = e.metadata().and_then(|m| m.modified()) {
+            let Ok(meta) = e.metadata() else { continue };
+            if meta.is_dir() && !meta.file_type().is_symlink() {
+                stack.push(e.path());
+            } else if let Ok(t) = meta.modified() {
                 newest = Some(newest.map_or(t, |n| n.max(t)));
             }
         }
@@ -332,11 +340,11 @@ fn scan_dir(parent: &Path, kind: Kind, layout: &Layout, kept: &mut Vec<(PathBuf,
         let path = e.path();
         let name = e.file_name().to_string_lossy().into_owned();
         let Ok(meta) = std::fs::symlink_metadata(&path) else { continue };
-        if !meta.is_dir() {
-            continue;
-        }
         if meta.file_type().is_symlink() {
             kept.push((path, Keep::NotOurs));
+            continue;
+        }
+        if !meta.is_dir() {
             continue;
         }
         if name.contains(".removing-") {

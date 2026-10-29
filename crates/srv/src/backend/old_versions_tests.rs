@@ -158,6 +158,27 @@ fn a_folder_written_to_lately_stays() {
 }
 
 #[test]
+fn a_database_written_deep_in_the_folder_keeps_it_though_no_folder_time_moved() {
+    let root = tempfile::tempdir().unwrap();
+    let l = layout(root.path(), "0.60.6");
+    for v in ["0.60.1", "0.60.2", "0.60.5", "0.60.6"] {
+        version(&l, v);
+    }
+    // Two days on: everything was written long ago, except one existing database file, which was
+    // rewritten ten minutes ago. Writing a file moves its own time and not its folder's.
+    let judged_at = SystemTime::now() + Duration::from_secs(48 * 3600);
+    let db = l.versions_root.join("0.60.1/data/db");
+    std::fs::create_dir_all(&db).unwrap();
+    let file = db.join("objects.db");
+    std::fs::write(&file, b"x").unwrap();
+    std::fs::File::options().write(true).open(&file).unwrap().set_modified(judged_at - Duration::from_secs(600)).unwrap();
+    let day = Policy { idle: Duration::from_secs(24 * 3600), ..Policy::default() };
+    let p = plan(&l, &day, judged_at, &nothing_running());
+    assert_eq!(kept_as(&p, "0.60.1"), Some(Keep::RecentlyActive));
+    assert_eq!(removable(&p), ["0.60.2"], "the folder without recent writes goes");
+}
+
+#[test]
 fn names_that_are_not_plain_versions_and_symlinks_are_left_alone() {
     let root = tempfile::tempdir().unwrap();
     let l = layout(root.path(), "0.60.6");
