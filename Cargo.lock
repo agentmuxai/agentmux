@@ -305,6 +305,7 @@ dependencies = [
  "rusqlite",
  "rust-argon2",
  "rustls",
+ "same-file",
  "security-framework 2.11.1",
  "serde",
  "serde_json",

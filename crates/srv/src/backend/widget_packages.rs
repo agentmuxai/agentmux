@@ -1270,13 +1270,11 @@ fn open_within(path: &Path, within: Option<&Path>) -> Result<std::fs::File, Stri
         if !real.starts_with(root) {
             return Err(outside());
         }
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::MetadataExt;
-            let (opened, named) = (file.metadata().map_err(|e| e.to_string())?, std::fs::metadata(&real).map_err(|_| outside())?);
-            if (opened.dev(), opened.ino()) != (named.dev(), named.ino()) {
-                return Err(outside());
-            }
+        // The same file, on every platform (a Windows link is followed by the open, so the identity check is what catches it).
+        let named = same_file::Handle::from_path(&real).map_err(|_| outside())?;
+        let opened = same_file::Handle::from_file(file.try_clone().map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+        if named != opened {
+            return Err(outside());
         }
     }
     Ok(file)
