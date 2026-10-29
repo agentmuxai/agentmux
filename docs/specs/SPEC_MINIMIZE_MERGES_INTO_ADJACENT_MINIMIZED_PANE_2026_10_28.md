@@ -20,7 +20,7 @@ The operator's words (10-28): *"If a user minimizes a pane and that pane ends up
 3. **Only the person's act merges.** The header's Minimize button, the keyboard shortcut, the pane menu and the palette go through `minimizeNodeToggle` and merge. An agent's `Pane` minimize, a layout restore, an expanded pane being restored and minimized again by loading a saved layout, and a pane that was already minimized before this change never merge on their own: the next minimize of a pane that has a minimized neighbour is what merges (question 2).
 4. **Restoring and un-merging.** Expanding the merged pane expands it with all its tabs, as for any pane with a stack. A tab comes back out by dragging its pill, as today (to a split, to another pane). There is no undo (question 3).
 5. **What does not merge:** a pane that cannot minimize (the last expanded pane), a locked pane (`isNodeLocked`) and a floating pane. A maximized pane minimized from the header (`collapseMaximizedNode`) ends the maximize first and then follows the same rule.
-6. **Focus** goes where a minimize leaves it (the nearest expanded pane); the merged pane's visible tab is the target's, unchanged.
+6. **Focus** lands on the minimized pane that took the tabs (`moveBlocksInStack` focuses the pane that received them), as a plain minimize leaves focus on the chip it minimized; the merged pane's visible tab is the target's, unchanged.
 
 ## 3. The animation
 
