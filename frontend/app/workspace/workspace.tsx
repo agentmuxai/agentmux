@@ -30,6 +30,7 @@ import {
     tabWasShown,
 } from "@/store/tab-reveal";
 import { creatingTabId, switchIntentTabId } from "@/store/tab-actions";
+import { focusManager } from "@/store/focusManager";
 import { markLoadedTabsShownWhenSettled } from "@/app/tab/tab-content-settled";
 import { drainWhenIdle, installWindowResizeTracking, windowResizing } from "@/app/platform/window-resize";
 import { Button } from "@/app/element/ui/Button";
@@ -124,6 +125,9 @@ function WorkspaceElem(): JSX.Element {
                 );
             }
             setDisplayTabId(next);
+            // The caret goes with the content, in this same task: the backend's
+            // commit (and the focus net behind it) is a round trip away.
+            if (instant) focusManager.focusShownTab(next);
             if (tabSwitching()) scheduleRevealLift();
         };
         if (!instant && !shouldReduceMotion("transition")) {

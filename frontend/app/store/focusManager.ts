@@ -12,7 +12,7 @@ import { gatingNodeIds, tabSwitching } from "@/app/store/tab-reveal";
 import { caretInEditableOutsidePanes, focusedBlockId, userCaretInBlock } from "@/util/focusutil";
 import { userInThisWindow } from "@/app/store/input-owner";
 import { onPaneOverlayReleased, overlayCoversPane } from "@/app/platform/pane-overlay";
-import { getLayoutModelForStaticTab } from "@/layout/index";
+import { getLayoutModelForStaticTab, getLayoutModelForTabById } from "@/layout/index";
 
 /**
  * How many animation frames `giveBlockFocus` keeps trying a pane whose input
@@ -91,6 +91,24 @@ class FocusManager {
         if (!windowHasFocus()) return;
         const active = getLayoutModelForStaticTab();
         if (model != null && model !== active) return;
+        this.focusSelectionOf(active);
+    }
+
+    /**
+     * The caret goes to the selected pane of window tab `tabId`, which is being
+     * shown ahead of the backend's commit (a warm tab swapped in from the switch
+     * intent): the keys typed right after the click then land in the tab on
+     * screen, not in the one just left. The same guards as
+     * `ensureSelectionFocused`; the "tab-activated" net runs again once the
+     * commit lands and finds the caret already there.
+     * ANALYSIS_WINDOW_TAB_SWITCH_PAINT_2026_09_30.md §5.3.
+     */
+    focusShownTab(tabId: string): void {
+        if (!windowHasFocus()) return;
+        this.focusSelectionOf(getLayoutModelForTabById(tabId));
+    }
+
+    private focusSelectionOf(active: ReturnType<typeof getLayoutModelForStaticTab> | undefined): void {
         // A caret the user put in the tab-rename field, a search box outside
         // the panes, … stays there.
         if (caretInEditableOutsidePanes()) return;

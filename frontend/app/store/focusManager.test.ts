@@ -23,8 +23,11 @@ const activeLayoutModel = {
     focusedNode: () => focusedNode,
     focusNode: (id: string) => focusNode(id),
 };
+// Window tabs' own layout models, by tab id (a tab shown ahead of the commit).
+let shownTabModels: Record<string, typeof activeLayoutModel> = {};
 vi.mock("@/layout/index", () => ({
     getLayoutModelForStaticTab: () => activeLayoutModel,
+    getLayoutModelForTabById: (tabId: string) => shownTabModels[tabId],
 }));
 
 const giveFocus = vi.fn(() => true);
@@ -87,6 +90,7 @@ describe("focusManager", () => {
         giveFocus.mockClear().mockReturnValue(true);
         focusedNode = { id: "node-1", data: { blockId: "block-1" } };
         caretInBlock = null;
+        shownTabModels = {};
         caretOutsidePanes = false;
         overlayOver = null;
         frames = [];
@@ -209,6 +213,33 @@ describe("focusManager", () => {
 
     // SPEC_FOCUS_FOLLOWS_SELECTION_2026_10_08.md R1: one reconciler behind
     // every "the selection changed without the user placing the caret" path.
+    // ANALYSIS_WINDOW_TAB_SWITCH_PAINT_2026_09_30.md §5.3: a warm tab is shown
+    // from the switch intent, before the backend commits it as the active tab.
+    describe("focusShownTab", () => {
+        it("puts the caret in the shown tab's own selected pane, not the committed tab's", () => {
+            shownTabModels["tab-2"] = { focusedNode: () => ({ id: "n2", data: { blockId: "block-2" } }), focusNode: vi.fn() };
+            bcmForBlockId = { "block-2": { viewModel: { giveFocus } } };
+            focusManager.focusShownTab("tab-2");
+            expect(giveFocus).toHaveBeenCalledTimes(1);
+        });
+
+        it("does nothing for a tab with no layout model yet", () => {
+            focusManager.focusShownTab("tab-unknown");
+            expect(giveFocus).not.toHaveBeenCalled();
+        });
+
+        it("keeps a caret the user put outside the panes, and never runs in a background window", () => {
+            shownTabModels["tab-2"] = { focusedNode: () => ({ id: "n2", data: { blockId: "block-2" } }), focusNode: vi.fn() };
+            bcmForBlockId = { "block-2": { viewModel: { giveFocus } } };
+            caretOutsidePanes = true;
+            focusManager.focusShownTab("tab-2");
+            caretOutsidePanes = false;
+            vi.mocked(document.hasFocus).mockReturnValue(false);
+            focusManager.focusShownTab("tab-2");
+            expect(giveFocus).not.toHaveBeenCalled();
+        });
+    });
+
     describe("ensureSelectionFocused", () => {
         it("puts the caret in the active tab's selected pane", () => {
             focusManager.ensureSelectionFocused("selection", activeLayoutModel);
