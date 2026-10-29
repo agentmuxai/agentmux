@@ -141,17 +141,17 @@ Detection in `launchAgentDefinition()` (`agent-model.ts`):
 ┌──────────────────────────────────────────────────────────┐
 │ "Senior Dev" is already open in another pane.            │
 │                                                          │
-│  [Open new session]    [Switch to existing]              │
+│  [Fork…]               [Switch to existing]              │
 └──────────────────────────────────────────────────────────┘
 ```
 
-- **"Open new session"** → fork flow (§3.3)
+- **"Fork…"** → fork flow (§3.3). The close button sits in the panel's top-right corner; a click outside the panel or Escape closes it too (2026-10-29)
 - **"Switch to existing"** → focus the pane that already has the agent open
 
 ### 3.3 Fork Flow
 
 ```
-User clicks "Open new session"
+User clicks "Fork…"
   │
   ├─ 1. Backend: AgentDefinitionForkCommand({ source_id, branch_label })
   │      - Creates new AgentDefinition row:

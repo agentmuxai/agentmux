@@ -62,7 +62,8 @@ import { TransitionGroup } from "solid-transition-group";
 
 import { AnchoredPopover } from "@/app/element/anchored-popover";
 import { ModalLayerContext } from "@/app/element/modal-layer";
-import { Button, Pill } from "@/app/element/ui";
+import { Button, IconButton, Pill } from "@/app/element/ui";
+import { NamePrompt } from "./NamePrompt";
 import { NoPanePrompt } from "./NoPanePrompt";
 import { getOpenBlockIdsForDefinition } from "@/app/store/agent-pane-state-store";
 import { shouldReduceMotion } from "@/app/motion/motion";
@@ -255,80 +256,10 @@ export interface MyAgentsListProps {
 
 type ForkState =
     | { kind: "idle" }
-    | { kind: "prompt" } // showing "Open new session / Switch" buttons
-    | { kind: "promptNoPane" } // showing "Open it / Fork" buttons for an agent that runs with no pane
-    | { kind: "naming"; label: string; loading: boolean; error: string | null }; // name input expanded
-
-interface NamePromptProps {
-    /** Prompt above the input, e.g. "Rename to:". */
-    label: string;
-    placeholder: string;
-    value: string;
-    loading: boolean;
-    error: string | null;
-    /** Text on the confirm button; swapped for "…" while loading. */
-    submitLabel: string;
-    inputTestid: string;
-    submitTestid: string;
-    onInput: (value: string) => void;
-    onSubmit: () => void;
-    onCancel: () => void;
-}
-
-/**
- * The "type a name, Enter to confirm, Escape to back out" sub-panel, shared
- * by the fork prompt's session naming and the row menu's Rename
- * (docs/specs/SPEC_AGENT_DELETE_2026_09_16.md §4.3 — Rename was specified to
- * "reuse the existing fork-prompt naming sub-pattern", which until now meant
- * a second copy of the same markup, autofocus effect and key handling).
- * Purely presentational: every piece of state lives in the caller's own
- * per-row map.
- */
-const NamePrompt = (props: NamePromptProps): JSX.Element => (
-    <div class="agent-fork-naming">
-        <label class="agent-fork-label">{props.label}</label>
-        <div class="agent-fork-input-row">
-            <input
-                type="text"
-                class="agent-fork-input"
-                value={props.value}
-                disabled={props.loading}
-                placeholder={props.placeholder}
-                data-testid={props.inputTestid}
-                onInput={(e) => props.onInput(e.currentTarget.value)}
-                onKeyDown={(e) => {
-                    if (e.key === "Enter") props.onSubmit();
-                    if (e.key === "Escape") props.onCancel();
-                }}
-                ref={(el) => {
-                    createEffect(() => {
-                        if (!props.loading) el.focus();
-                    });
-                }}
-            />
-            <Button
-                tone="accent"
-                class="agent-fork-btn agent-fork-btn--primary"
-                disabled={props.loading || !props.value.trim()}
-                onClick={() => props.onSubmit()}
-                data-testid={props.submitTestid}
-            >
-                {props.loading ? "…" : props.submitLabel}
-            </Button>
-            <Button
-                tone="quiet"
-                class="agent-fork-btn agent-fork-btn--ghost"
-                onClick={() => props.onCancel()}
-                aria-label="Cancel"
-            >
-                ✕
-            </Button>
-        </div>
-        <Show when={props.error}>
-            <span class="agent-fork-error">{props.error}</span>
-        </Show>
-    </div>
-);
+    | { kind: "prompt" } // showing "Fork… / Switch to existing" buttons
+    | { kind: "promptNoPane" } // showing "Open it / Fork…" buttons for an agent that runs with no pane
+    // name input expanded; `edited`: the user changed the suggested name, so a click outside no longer dismisses it
+    | { kind: "naming"; label: string; loading: boolean; error: string | null; edited?: boolean };
 
 export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
     const filterId = createMemo(() => {
@@ -555,7 +486,7 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
         const fs = getForkState(row.definition_id);
         if (fs.kind !== "naming" || !fs.label.trim()) return;
         const label = fs.label.trim();
-        setForkState(row.definition_id, { kind: "naming", label, loading: true, error: null });
+        setForkState(row.definition_id, { kind: "naming", label, loading: true, error: null, edited: fs.edited });
         try {
             await props.onFork?.(row, label);
             setForkState(row.definition_id, { kind: "idle" });
@@ -565,12 +496,26 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                 label,
                 loading: false,
                 error: err instanceof Error ? err.message : String(err),
+                // A failed start keeps the panel (and its error) up whatever the name was.
+                edited: true,
             });
         }
     };
 
     const handleForkCancel = (definitionId: string) => {
         setForkState(definitionId, { kind: "idle" });
+    };
+
+    // A click outside a fork panel, or Escape, closes it like its close button. The naming step
+    // stays while a request is out or once the user has changed the suggested name: that is
+    // typing in progress, and a stray click must not throw it away. `exceptId` is the row the
+    // click landed on: its own tile opens or reopens the panel.
+    const dismissForkPanels = (exceptId?: string): void => {
+        for (const [id, fs] of forkStates()) {
+            if (id === exceptId || fs.kind === "idle") continue;
+            if (fs.kind === "naming" && (fs.loading || fs.edited)) continue;
+            handleForkCancel(id);
+        }
     };
 
     // Row actions menu (chevron-toggled, per row) — docs/specs/
@@ -608,15 +553,25 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
     // "elsewhere" — the blurred rows set `pointer-events: none`, so those
     // clicks reach the list container rather than a row.
     const onDocumentPointerDown = (e: MouseEvent) => {
-        if (openMenuId() === null) return;
         const target = e.target as Element | null;
+        // The fork panels float in a portal, so "inside" is the panel's own class.
+        if (!target?.closest?.(".agent-fork-prompt")) {
+            const row = target?.closest?.<HTMLElement>("[data-definition-id]");
+            dismissForkPanels(row?.dataset.definitionId);
+        }
+        if (openMenuId() === null) return;
         if (target?.closest?.(".agent-row-menu, .agent-recent-sessions-menu-toggle")) return;
         setOpenMenuId(null);
     };
     let rootRef: HTMLDivElement | undefined;
     const onDocumentKeyDown = (e: KeyboardEvent) => {
         // Escape in another pane must not close this pane's row menu.
-        if (e.key === "Escape" && eventBelongsToPaneOf(e, rootRef)) setOpenMenuId(null);
+        if (e.key !== "Escape" || !eventBelongsToPaneOf(e, rootRef)) return;
+        setOpenMenuId(null);
+        // A field inside a panel takes its own Escape (the name field cancels itself).
+        const t = e.target;
+        if (t instanceof HTMLElement && t.closest(".agent-fork-prompt") && t.matches("input, textarea")) return;
+        dismissForkPanels();
     };
     document.addEventListener("pointerdown", onDocumentPointerDown, true);
     document.addEventListener("keydown", onDocumentKeyDown);
@@ -1387,6 +1342,16 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                                 class="agent-fork-prompt"
                                             >
                                                 <div data-testid="agent-fork-prompt">
+                                                    <Show when={forkState().kind === "prompt" || forkState().kind === "promptNoPane"}>
+                                                        <IconButton
+                                                            icon="xmark"
+                                                            label="Cancel"
+                                                            tooltip={false}
+                                                            class="agent-fork-prompt-close"
+                                                            onClick={() => handleForkCancel(row.definition_id)}
+                                                            data-testid="agent-fork-close"
+                                                        />
+                                                    </Show>
                                                     {/* Only true when reached via the "already open" row
                                                     click (kind === "prompt") — Duplicate (this spec's
                                                     new entry point) jumps straight to "naming" without
@@ -1404,7 +1369,6 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                                             name={row.instance_name || row.definition_name}
                                                             onOpen={() => handleAttachNoPane(row)}
                                                             onFork={() => handleOpenNewSession(row)}
-                                                            onCancel={() => handleForkCancel(row.definition_id)}
                                                         />
                                                     </Show>
                                                     <Show when={forkState().kind === "prompt"}>
@@ -1415,7 +1379,7 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                                                 onClick={() => handleOpenNewSession(row)}
                                                                 data-testid="agent-fork-open-new"
                                                             >
-                                                                Open new session
+                                                                Fork…
                                                             </Button>
                                                             <Button
                                                                 class="agent-fork-btn agent-fork-btn--secondary"
@@ -1423,14 +1387,6 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                                                 data-testid="agent-fork-switch"
                                                             >
                                                                 Switch to existing
-                                                            </Button>
-                                                            <Button
-                                                                tone="quiet"
-                                                                class="agent-fork-btn agent-fork-btn--ghost"
-                                                                onClick={() => handleForkCancel(row.definition_id)}
-                                                                aria-label="Cancel"
-                                                            >
-                                                                ✕
                                                             </Button>
                                                         </div>
                                                     </Show>
@@ -1460,6 +1416,7 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                                                         label,
                                                                         loading: false,
                                                                         error: null,
+                                                                        edited: true,
                                                                     })
                                                                 }
                                                                 onSubmit={() => void handleForkStart(row)}
