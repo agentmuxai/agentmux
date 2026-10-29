@@ -801,6 +801,7 @@ partial list.
 | [`SPEC_WARDEN_SPLIT_INTO_VAULT_HISTORY_AUDIT_2026_10_28`](SPEC_WARDEN_SPLIT_INTO_VAULT_HISTORY_AUDIT_2026_10_28.md) | Spec: Warden goes; Vault, History and Audit become widgets of their own; Jobs go to Drone |
 | [`SPEC_WIDGET_BAR_VISIBILITY_SETTINGS_2026_10_12`](SPEC_WIDGET_BAR_VISIBILITY_SETTINGS_2026_10_12.md) | Widget bar visibility in Settings: pin, keep in More, or hide |
 | [`SPEC_WIDGET_SHARING_2026_10_10`](SPEC_WIDGET_SHARING_2026_10_10.md) | Sharing widgets: signed packages, widgets in agent bundles, a catalog |
+| [`SPEC_WIDGET_SINGLETON_FOCUS_OR_NEW_2026_10_28`](SPEC_WIDGET_SINGLETON_FOCUS_OR_NEW_2026_10_28.md) | A widget click brings back the pane you have, or opens a new one: one rule, set by a `singleton` flag |
 | [`SPEC_WINDOWS_LIFECYCLE_ROBUSTNESS_2026_06_26`](SPEC_WINDOWS_LIFECYCLE_ROBUSTNESS_2026_06_26.md) | Windows Lifecycle Robustness — Surviving External Termination |
 | [`SPEC_WINDOWS_PORTABLE_7Z_2026_10_11`](SPEC_WINDOWS_PORTABLE_7Z_2026_10_11.md) | Spec: ship the Windows portable as `.7z` instead of `.zip` |
 | [`SPEC_WINDOW_CHURN_RENDERER_LEAK_2026_10_13`](SPEC_WINDOW_CHURN_RENDERER_LEAK_2026_10_13.md) | Spec: opening and closing windows must not leave renderers behind |

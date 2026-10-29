@@ -188,7 +188,8 @@ export function refocusNode(blockId: string) {
  * If a block with the given viewType already exists in the current tab's layout,
  * show and focus it (restoring a minimized pane and switching to its tab in a stack),
  * first merging `focusMeta` into its meta (a section to show, say).
- * Otherwise create a new block using blockDef (defaults to `{ meta: { view: viewType } }`).
+ * One in another tab of this window is gone to (the tab switches, then it is shown and focused),
+ * not duplicated. Otherwise create a new block using blockDef (defaults to `{ meta: { view: viewType } }`).
  */
 export async function openOrFocusPaneByView(
     viewType: string,
@@ -205,6 +206,8 @@ export async function openOrFocusPaneIdByView(
     focusMeta?: MetaType
 ): Promise<string | undefined> {
     const layoutModel = getLayoutModelForStaticTab();
+    // In another tab of this window: the most recently registered one.
+    let elsewhere: string | undefined;
     for (const bcm of blockComponentModelMap.values()) {
         if (bcm.viewModel?.viewType === viewType) {
             const blockId = (bcm.viewModel as any).blockId as string | undefined;
@@ -221,9 +224,14 @@ export async function openOrFocusPaneIdByView(
                     giveBlockFocus(blockId);
                     return blockId;
                 }
-                // Block exists on another tab; fall through and open a fresh one here.
+                elsewhere = blockId;
             }
         }
+    }
+    if (elsewhere) {
+        if (focusMeta != null) await setBlockMeta(elsewhere, focusMeta);
+        const { revealBlockLocally } = await import("@/app/util/reveal-block");
+        if (await revealBlockLocally(elsewhere, { source: "widget" })) return elsewhere;
     }
     return await createBlock(blockDef ?? { meta: { view: viewType } });
 }

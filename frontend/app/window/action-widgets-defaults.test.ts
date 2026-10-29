@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const store = vi.hoisted(() => ({
     createBlock: vi.fn(),
     openOrFocusPaneByView: vi.fn(() => Promise.resolve()),
+    atoms: { fullConfigAtom: (): { widgets: Record<string, unknown> } => ({ widgets: {} }) },
 }));
 vi.mock("@/store/global", () => store);
 vi.mock("@/app/store/rpc-api", () => ({ RpcApi: { SetConfigCommand: vi.fn() } }));
@@ -19,9 +20,11 @@ vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 
 import defaults from "../../../crates/srv/src/config/widgets.json";
 import { registerPaneTab } from "@/app/block/pane-tab-registry";
-import { getMoreWidgets, getPinnedKeys, handleWidgetSelect } from "./action-widgets-config";
+import { BUILTIN_SINGLETON_VIEWS } from "@/app/store/widget-singleton";
+import { getMoreWidgets, getPinnedKeys, openWidget } from "./action-widgets-config";
 
 const wmap = defaults as unknown as Record<string, WidgetConfigType>;
+store.atoms.fullConfigAtom = () => ({ widgets: wmap });
 
 afterEach(() => {
     store.createBlock.mockClear();
@@ -68,21 +71,101 @@ describe("the default widget bar", () => {
     });
 });
 
-describe("handleWidgetSelect", () => {
-    it("focuses an open Connectors or Memory pane instead of opening another", async () => {
-        await handleWidgetSelect(wmap["defwidget@connectors"]);
-        await handleWidgetSelect(wmap["defwidget@memory"]);
-        expect(store.openOrFocusPaneByView.mock.calls.map((c) => (c as unknown[])[0])).toEqual(["connectors", "memory"]);
+describe("the singleton flag in the default widget config", () => {
+    const flagged = (w: WidgetConfigType) => w.singleton === true;
+    const keys = (pred: (w: WidgetConfigType) => boolean) =>
+        Object.entries(wmap)
+            .filter(([, w]) => pred(w))
+            .map(([k]) => k.replace("defwidget@", ""))
+            .sort();
+
+    it("marks the management panes", () => {
+        expect(keys(flagged)).toEqual(
+            ["connectors", "drone", "help", "kanban", "memory", "settings", "swarm", "toolchain", "tower", "vault", "warden"].sort()
+        );
+    });
+
+    it("the built-in policy list is the views those flags open", () => {
+        const flaggedViews = Object.values(wmap)
+            .filter(flagged)
+            .map((w) => (w.blockdef?.meta as Record<string, unknown>)["view"] as string);
+        expect([...BUILTIN_SINGLETON_VIEWS].sort()).toEqual([...new Set(flaggedViews)].sort());
+    });
+
+    it("leaves the work panes opening a new pane each time", () => {
+        for (const key of ["agent", "terminal", "browser", "editor", "files", "sysinfo", "discord", "slack"]) {
+            expect(wmap[`defwidget@${key}`]?.singleton, key).toBeUndefined();
+        }
+    });
+});
+
+describe("openWidget", () => {
+    it("brings back an open Connectors, Memory or Swarm pane instead of opening another", async () => {
+        await openWidget(wmap["defwidget@connectors"]);
+        await openWidget(wmap["defwidget@memory"]);
+        await openWidget(wmap["defwidget@swarm"]);
+        expect(store.openOrFocusPaneByView.mock.calls.map((c) => (c as unknown[])[0])).toEqual(["connectors", "memory", "swarm"]);
         expect(store.createBlock).not.toHaveBeenCalled();
     });
 
-    // The Kanban is a pane of its own: its button focuses the one open in this tab. An entry that still
+    it("opens a new pane for a singleton on a Shift-click", async () => {
+        await openWidget(wmap["defwidget@memory"], { forceNew: true });
+        expect(store.createBlock).toHaveBeenCalledTimes(1);
+        expect(store.openOrFocusPaneByView).not.toHaveBeenCalled();
+    });
+
+    it("opens a new pane for a magnified entry, which asked for a full-size one", async () => {
+        await openWidget({ ...wmap["defwidget@memory"], magnified: true });
+        expect(store.createBlock).toHaveBeenCalledTimes(1);
+        expect(store.openOrFocusPaneByView).not.toHaveBeenCalled();
+    });
+
+    it("a user's own singleton: false wins over the view's flag", async () => {
+        await openWidget({ ...wmap["defwidget@memory"], singleton: false });
+        expect(store.createBlock).toHaveBeenCalledTimes(1);
+        expect(store.openOrFocusPaneByView).not.toHaveBeenCalled();
+    });
+
+    it("an entry with no flag follows the view it opens (a user's own entry for a moved pane)", async () => {
+        const entry = { label: "Mine", blockdef: { meta: { view: "memory" } } } as unknown as WidgetConfigType;
+        await openWidget(entry);
+        expect(store.openOrFocusPaneByView).toHaveBeenCalledTimes(1);
+    });
+
+    it("a user's replacement of a built-in entry that leaves the flag out still brings back the pane", async () => {
+        const mine = { label: "Mem", blockdef: { meta: { view: "memory" } } } as unknown as WidgetConfigType;
+        // widgets.json replaces the whole entry, so the config no longer holds the flagged default.
+        store.atoms.fullConfigAtom = () => ({ widgets: { "defwidget@memory": mine } });
+        try {
+            await openWidget(mine);
+            expect(store.openOrFocusPaneByView).toHaveBeenCalledTimes(1);
+            expect(store.createBlock).not.toHaveBeenCalled();
+        } finally {
+            store.atoms.fullConfigAtom = () => ({ widgets: wmap });
+        }
+    });
+
+    it("an installed widget's pane follows the singleton its manifest declares", async () => {
+        const pane = (view: string, singleton: boolean) =>
+            registerPaneTab({ apiVersion: 1, view, label: view, icon: "puzzle-piece", singleton, create: () => ({}) as never });
+        const offA = pane("ext:acme.one/main", true);
+        const offB = pane("ext:acme.many/main", false);
+        const entry = (view: string) => ({ label: view, blockdef: { meta: { view } } }) as unknown as WidgetConfigType;
+        await openWidget(entry("ext:acme.one/main"));
+        expect(store.openOrFocusPaneByView).toHaveBeenCalledTimes(1);
+        await openWidget(entry("ext:acme.many/main"));
+        expect(store.createBlock).toHaveBeenCalledTimes(1);
+        offA();
+        offB();
+    });
+
+    // The Kanban is a pane of its own: its button focuses the one open. An entry that still
     // names the Kanban as a section of Warden or the Swarm (a user's own, from before the moves) does the same.
     it("focuses the open Kanban from its button, and from an entry that names an old section", async () => {
         const entry = (meta: Record<string, unknown>) => ({ label: "Kanban", blockdef: { meta } }) as unknown as WidgetConfigType;
-        await handleWidgetSelect(entry({ view: "kanban" }));
-        await handleWidgetSelect(entry({ view: "swarm", "swarm:section": "kanban" }));
-        await handleWidgetSelect(entry({ view: "warden", "warden:section": "kanban" }));
+        await openWidget(entry({ view: "kanban" }));
+        await openWidget(entry({ view: "swarm", "swarm:section": "kanban" }));
+        await openWidget(entry({ view: "warden", "warden:section": "kanban" }));
         expect(store.openOrFocusPaneByView.mock.calls).toEqual([
             ["kanban", { meta: { view: "kanban" } }, undefined],
             ["kanban", { meta: { view: "kanban" } }, undefined],
@@ -91,13 +174,12 @@ describe("handleWidgetSelect", () => {
         expect(store.createBlock).not.toHaveBeenCalled();
     });
 
-    it("still opens a new pane for every other widget", async () => {
-        // The Swarm's own button too: each opens another Swarm.
-        await handleWidgetSelect(wmap["defwidget@swarm"]);
+    it("still opens a new pane for the work panes", async () => {
+        await openWidget(wmap["defwidget@terminal"]);
         expect(store.createBlock).toHaveBeenCalledTimes(1);
-        store.createBlock.mockClear();
-        await handleWidgetSelect(wmap["defwidget@terminal"]);
-        expect(store.createBlock).toHaveBeenCalledTimes(1);
+        await openWidget(wmap["defwidget@agent"]);
+        await openWidget(wmap["defwidget@browser"]);
+        expect(store.createBlock).toHaveBeenCalledTimes(3);
         expect(store.openOrFocusPaneByView).not.toHaveBeenCalled();
     });
 });

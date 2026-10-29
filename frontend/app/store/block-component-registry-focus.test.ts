@@ -19,6 +19,7 @@ const layout = vi.hoisted(() => ({
 }));
 const createBlock = vi.hoisted(() => vi.fn(async () => "new-block"));
 const showBlockInPane = vi.hoisted(() => vi.fn());
+const revealBlockLocally = vi.hoisted(() => vi.fn(async (_id: string, _opts?: unknown) => true));
 
 vi.mock("@/layout/index", () => ({ getLayoutModelForStaticTab: () => layout.model }));
 vi.mock("./block-layout-actions", () => ({ createBlock }));
@@ -26,6 +27,10 @@ vi.mock("./block-meta", () => ({ setBlockMeta: vi.fn(async () => {}) }));
 vi.mock("./focusManager", () => ({ giveBlockFocus: (id: string) => void calls.push(`give:${id}`) }));
 vi.mock("./block-atom-cache", () => ({ cleanupBlockAtomCache: vi.fn() }));
 vi.mock("@/app/util/reveal-block", () => ({
+    revealBlockLocally: async (id: string, opts?: unknown) => {
+        calls.push(`reveal:${id}`);
+        return revealBlockLocally(id, opts);
+    },
     showBlockInPane: (...args: unknown[]) => {
         calls.push(`show:${(args[1] as { id: string }).id}:${args[2]}`);
         showBlockInPane(...args);
@@ -41,6 +46,8 @@ describe("openOrFocusPaneIdByView", () => {
     beforeEach(() => {
         calls.length = 0;
         showBlockInPane.mockClear();
+        revealBlockLocally.mockClear();
+        revealBlockLocally.mockResolvedValue(true);
         createBlock.mockClear();
     });
     afterEach(() => {
@@ -63,9 +70,30 @@ describe("openOrFocusPaneIdByView", () => {
         expect(calls[0]).toBe("show:stack-node:mem-1");
     });
 
-    it("opens a new pane when none is in this tab", async () => {
+    it("goes to a pane in another tab of this window instead of opening one here", async () => {
         register("warden-1", "warden");
+        expect(await openOrFocusPaneIdByView("warden")).toBe("warden-1");
+        expect(calls).toEqual(["reveal:warden-1"]);
+        expect(createBlock).not.toHaveBeenCalled();
+    });
+
+    it("prefers the pane in this tab over one in another tab", async () => {
+        register("warden-1", "warden");
+        register("warden-2", "warden");
+        layout.nodes.set("warden-2", { id: "node-2" });
+        expect(await openOrFocusPaneIdByView("warden")).toBe("warden-2");
+        expect(revealBlockLocally).not.toHaveBeenCalled();
+        unregisterBlockComponentModel("warden-2");
+    });
+
+    it("opens a new pane when the pane in another tab cannot be shown, or there is none", async () => {
+        register("warden-1", "warden");
+        revealBlockLocally.mockResolvedValue(false);
         expect(await openOrFocusPaneIdByView("warden")).toBe("new-block");
+        unregisterBlockComponentModel("warden-1");
+        createBlock.mockClear();
+        expect(await openOrFocusPaneIdByView("warden")).toBe("new-block");
+        expect(createBlock).toHaveBeenCalledTimes(1);
         expect(showBlockInPane).not.toHaveBeenCalled();
     });
 });
