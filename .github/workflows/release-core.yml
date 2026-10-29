@@ -629,9 +629,10 @@ jobs:
   # Off until the repository variable MSSTORE_SUBMIT_ENABLED is 'true'. Even then
   # the submission is left as a DRAFT in Partner Center (`--noCommit`) for a person
   # to check and send, until MSSTORE_COMMIT is also 'true' and it is sent by this
-  # job. The credentials (a Partner Center app registration's tenant, client and
-  # seller ids and its client secret) are secrets of the `release-store` environment,
-  # which is limited to `v*` tags; nothing about them is in this file.
+  # job. It holds no client secret: it asks for the run's identity token, which the
+  # Partner Center app registration accepts only for a job of THIS file on main (see
+  # "Get the identity token" below). Only the app's ids are secrets of the
+  # `release-store` environment, which is limited to `v*` tags.
   #
   # Not a need of `publish` or `sign-release`, and `continue-on-error`: a Store
   # problem never changes whether a release that is already published went out.
@@ -644,6 +645,7 @@ jobs:
     continue-on-error: true
     permissions:
       contents: read
+      id-token: write
     env:
       TAG: v${{ needs.gate.outputs.version }}
       # The Store listing's product id (the same one the app's "Update in the Store" opens).
@@ -684,15 +686,37 @@ jobs:
         with:
           version: v0.4.3
 
-      - name: Configure the CLI with the Store credentials
+      # No stored secret: the job proves what it is with the run's identity token,
+      # which the Partner Center app registration trusts only for this file on main
+      # (a federated credential matching job_workflow_ref and the repository). The
+      # claims are checked here first, with a clear message; the app registration
+      # checks them again. The token is short-lived, so it is fetched just before
+      # it is used, and never printed.
+      - name: Get the identity token for the Store app
+        shell: pwsh
+        run: |
+          $uri = "$($env:ACTIONS_ID_TOKEN_REQUEST_URL)&audience=api://AzureADTokenExchange"
+          $token = (Invoke-RestMethod -Uri $uri -Headers @{ Authorization = "bearer $($env:ACTIONS_ID_TOKEN_REQUEST_TOKEN)" }).value
+          Write-Host "::add-mask::$token"
+          $payload = $token.Split('.')[1].Replace('-', '+').Replace('_', '/')
+          $payload = $payload.PadRight($payload.Length + (4 - $payload.Length % 4) % 4, '=')
+          $claims = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($payload)) | ConvertFrom-Json
+          $want = "$($env:GITHUB_REPOSITORY)/.github/workflows/release-core.yml@refs/heads/main"
+          Write-Host "job_workflow_ref: $($claims.job_workflow_ref)"
+          if ($claims.job_workflow_ref -ne $want) {
+            Write-Error "the identity token's job_workflow_ref is '$($claims.job_workflow_ref)', not '$want'; the Store app trusts only the latter. Is release.yml calling release-core.yml@main?"
+            exit 1
+          }
+          "MSSTORE_CLIENT_ASSERTION=$token" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+
+      - name: Configure the CLI with the Store app
         shell: pwsh
         env:
           MSSTORE_TENANT_ID: ${{ secrets.MSSTORE_TENANT_ID }}
           MSSTORE_CLIENT_ID: ${{ secrets.MSSTORE_CLIENT_ID }}
-          MSSTORE_CLIENT_SECRET: ${{ secrets.MSSTORE_CLIENT_SECRET }}
           MSSTORE_SELLER_ID: ${{ secrets.MSSTORE_SELLER_ID }}
         run: |
-          foreach ($name in 'MSSTORE_TENANT_ID', 'MSSTORE_CLIENT_ID', 'MSSTORE_CLIENT_SECRET', 'MSSTORE_SELLER_ID') {
+          foreach ($name in 'MSSTORE_TENANT_ID', 'MSSTORE_CLIENT_ID', 'MSSTORE_SELLER_ID') {
             if (-not [Environment]::GetEnvironmentVariable($name)) {
               Write-Error "the release-store environment has no secret $name"
               exit 1
@@ -701,7 +725,7 @@ jobs:
           msstore reconfigure --tenantId $env:MSSTORE_TENANT_ID `
             --sellerId $env:MSSTORE_SELLER_ID `
             --clientId $env:MSSTORE_CLIENT_ID `
-            --clientSecret $env:MSSTORE_CLIENT_SECRET
+            --clientAssertion
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Submit to the Microsoft Store
