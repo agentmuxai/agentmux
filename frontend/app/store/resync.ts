@@ -1,14 +1,10 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Recovering from dropped events. When this window's WebSocket falls behind (a machine so busy
-// the renderer can't keep up), srv drops events from the full lane instead of queueing without
-// limit (crates/srv/src/backend/eventbus.rs), and then says so with `ws:eventsdropped`
-// (crates/srv/src/server/ws_resync.rs). The objects the window holds are as stale as the last
-// update it got, so it re-fetches them (`resyncMuxObjects`).
-//
-// Not covered: a pane's live stream (terminal output, an agent's turn) is not an object; a gap in
-// one stays until the pane reloads its history.
+// Recovering from dropped events: a window whose WebSocket falls behind has events dropped from
+// the full lane (eventbus.rs) and is told with `ws:eventsdropped` (ws_resync.rs). Its objects are
+// as stale as the last update it got, so it re-fetches them (`resyncMuxObjects`). A pane's live
+// stream (terminal output, an agent's turn) is not an object; a gap in one is not recovered here.
 
 import { resyncMuxObjects } from "./mos";
 

@@ -65,8 +65,7 @@ mod tests {
         assert_eq!(frame["data"]["data"]["data"]["dropped"], 12);
     }
 
-    /// Codex P2 on the first revision: the report went out while thousands of frames pulled out of
-    /// the lane by `fair_drain_priority` still waited in `pending_priority`.
+    /// Frames `fair_drain_priority` pulled out of the lane still sit ahead of the report (#5841).
     #[test]
     fn not_drained_while_frames_wait_in_the_lane_or_in_pending() {
         let (tx, rx) = tokio::sync::mpsc::channel(4);
