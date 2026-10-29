@@ -20,7 +20,7 @@ use crate::backend::storage::store::AgentDefinition;
 use crate::identity::oauth_tokens::{access_token_for, HttpReply, OAuthHttp, TokenSecrets};
 
 use super::access::{access_for, Access};
-use super::calls::{log_call, CallDeps};
+use super::calls::{load_external_text, log_call, CallDeps};
 use super::gmail::{self, GmailArgs};
 use super::gmail_write::{self as write, DraftView};
 use super::{google_error, GoogleHttp, Service};
@@ -98,7 +98,17 @@ async fn write_with<G: GoogleHttp, O: OAuthHttp, S: TokenSecrets, A: Approver>(
     // Plans are built before anything is asked or sent, so a bad argument costs the person nothing.
     match action {
         "create_draft" | "update_draft" => {
-            let req = write::draft_plan(action, args)?;
+            // A reply needs the thread's last message for its threading headers (Gmail threads by
+            // them, the subject and the thread id together).
+            let thread = args.thread_id.as_deref().map(str::trim).filter(|t| !t.is_empty());
+            let reply = match thread {
+                Some(t) => {
+                    let headers = send(deps, access, &write::reply_fetch_plan(t)?).await?.body;
+                    Some(write::reply_of(&headers).ok_or("that thread's last message has no Message-ID to reply to")?)
+                }
+                None => None,
+            };
+            let req = write::draft_plan(action, args, reply.as_ref())?;
             let reply = send(deps, access, &req).await?;
             Ok(shape_draft(&reply.body))
         }
@@ -214,14 +224,14 @@ async fn send_draft<G: GoogleHttp, O: OAuthHttp, S: TokenSecrets, A: Approver>(
 ) -> Result<Value, String> {
     let fetch = write::draft_fetch_plan(args)?;
     let _asking = reserve(deps, access, def, now, true)?;
-    let view = DraftView::of(&send(deps, access, &fetch).await?.body);
+    let view = read_draft(deps, access, &fetch).await?;
     if !view.has_recipient() {
         return Err("the draft has no recipient: update_draft it with to first".to_string());
     }
     let question = write::send_question(&def.name, &access.email(), &view);
     ask(approver, def, question, "Send", "Don't send", "sending").await?;
     // What the person said yes to is what goes: read the draft again and compare.
-    let again = DraftView::of(&send(deps, access, &fetch).await?.body);
+    let again = read_draft(deps, access, &fetch).await?;
     if again.digest() != view.digest() {
         return Err("the draft changed after the person approved it, so it was not sent. Call send_draft again to ask about the new text".to_string());
     }
@@ -231,6 +241,24 @@ async fn send_draft<G: GoogleHttp, O: OAuthHttp, S: TokenSecrets, A: Approver>(
         "message_id": reply.body.get("id").and_then(Value::as_str).unwrap_or(""),
         "thread_id": reply.body.get("threadId").and_then(Value::as_str).unwrap_or(""),
     }))
+}
+
+/// The draft as it is stored now, whole: text Gmail keeps outside the message is loaded first, and a
+/// draft whose text can't be loaded is not one the person can be shown, so it is refused.
+async fn read_draft<G: GoogleHttp, O: OAuthHttp, S: TokenSecrets>(
+    deps: &CallDeps<'_, G, O, S>,
+    access: &Access,
+    fetch: &super::GoogleRequest,
+) -> Result<DraftView, String> {
+    let mut draft = send(deps, access, fetch).await?.body;
+    let mut thread = json!({ "messages": [draft.get("message").cloned().unwrap_or(Value::Null)] });
+    let token = access_token_for(deps.oauth, deps.secrets, deps.id_store, deps.identity_store, &access.account, None).await?;
+    load_external_text(deps.google, &token, &mut thread).await;
+    draft["message"] = thread["messages"][0].clone();
+    if gmail::has_unloaded_text(draft.pointer("/message/payload").unwrap_or(&Value::Null)) {
+        return Err("part of this draft's text is too large to show the person, so it was not sent: send a shorter mail".to_string());
+    }
+    Ok(DraftView::of(&draft))
 }
 
 async fn trash_thread<G: GoogleHttp, O: OAuthHttp, S: TokenSecrets, A: Approver>(

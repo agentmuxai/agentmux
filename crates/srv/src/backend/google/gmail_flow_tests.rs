@@ -327,3 +327,54 @@ async fn questions_asked_at_once_count_against_the_limit_before_any_is_logged() 
     drop(held);
     assert!(reserve(&deps, &access, &w.def, now, false).is_ok());
 }
+
+#[tokio::test]
+async fn a_drafts_stored_text_is_loaded_before_the_person_is_asked() {
+    let w = world(WRITE_SCOPES, Some(GrantLevel::Write));
+    let stored = json!({ "id": "r-1", "message": { "id": "m-1", "payload": { "mimeType": "text/plain",
+        "headers": [{ "name": "To", "value": "bob@example.com" }, { "name": "Subject", "value": "Long" }],
+        "body": { "attachmentId": "ATT1", "size": 90000 } } } });
+    let data = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode("The full text of a long mail");
+    let google = StubGoogle::new(vec![
+        (200, stored.clone()),
+        (200, json!({ "data": data, "size": 28 })),
+        (200, stored),
+        (200, json!({ "data": data, "size": 28 })),
+        (200, json!({ "id": "m9", "threadId": "t9" })),
+    ]);
+    let person = Person::says(Answer::Yes);
+    let out = run(&w, &google, &person, "send_draft", json!({ "draft_id": "r-1" })).await.unwrap();
+    assert_eq!(out["result"]["sent"], true);
+    assert!(person.asked()[0].1.contains("The full text of a long mail"), "{}", person.asked()[0].1);
+}
+
+#[tokio::test]
+async fn a_draft_whose_text_cannot_be_loaded_is_not_put_to_the_person() {
+    let w = world(WRITE_SCOPES, Some(GrantLevel::Write));
+    let stored = json!({ "id": "r-1", "message": { "id": "m-1", "payload": { "mimeType": "text/plain",
+        "headers": [{ "name": "To", "value": "bob@example.com" }], "body": { "attachmentId": "ATT1", "size": 9000000 } } } });
+    let google = StubGoogle::new(vec![(200, stored), (500, json!({}))]);
+    let person = Person::says(Answer::Yes);
+    let e = run(&w, &google, &person, "send_draft", json!({ "draft_id": "r-1" })).await.unwrap_err();
+    assert!(e.contains("too large to show the person"), "{e}");
+    assert!(person.asked().is_empty());
+}
+
+#[tokio::test]
+async fn a_draft_replying_in_a_thread_gets_the_threads_headers() {
+    let w = world(WRITE_SCOPES, Some(GrantLevel::Write));
+    let headers = json!({ "messages": [{ "payload": { "headers": [{ "name": "Message-ID", "value": "<a@mail.example>" }, { "name": "Subject", "value": "Lunch?" }] } }] });
+    let google = StubGoogle::new(vec![(200, headers), (200, json!({ "id": "r-2", "message": { "threadId": "t1" } }))]);
+    let out = run(&w, &google, &Person::says(Answer::No), "create_draft", json!({ "thread_id": "t1", "to": ["a@example.com"], "body": "Noon" })).await.unwrap();
+    assert_eq!(out["result"]["thread_id"], "t1");
+    let seen = google.seen();
+    assert!(seen[0].0.url.ends_with("/threads/t1") && seen[1].0.url.ends_with("/users/me/drafts"));
+    let raw = seen[1].0.body.as_ref().unwrap().pointer("/message/raw").and_then(|v| v.as_str()).unwrap();
+    let mail = String::from_utf8(base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(raw).unwrap()).unwrap();
+    assert!(mail.contains("In-Reply-To: <a@mail.example>") && mail.contains("Subject: Re: Lunch?"), "{mail}");
+    // A thread with nothing to reply to is said so, and no draft is made.
+    let none = StubGoogle::new(vec![(200, json!({ "messages": [] }))]);
+    let e = run(&w, &none, &Person::says(Answer::No), "create_draft", json!({ "thread_id": "t1", "to": ["a@example.com"] })).await.unwrap_err();
+    assert!(e.contains("no Message-ID"), "{e}");
+    assert_eq!(none.seen().len(), 1);
+}

@@ -17,7 +17,7 @@ use base64::Engine as _;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
-use super::gmail::{body_text, get, header, id_arg, line, s, tidy, url_of, GmailArgs};
+use super::gmail::{attachments, body_text, get, header, html_alternative, id_arg, line, s, tidy, url_of, GmailArgs};
 use super::{clip, GoogleRequest};
 
 /// The write actions, in the order the tool lists them.
@@ -59,6 +59,10 @@ pub struct Outgoing {
     pub bcc: Vec<String>,
     pub subject: String,
     pub body: String,
+    /// A reply's `In-Reply-To` and `References` (Gmail threads a message by these, its subject and
+    /// its `threadId` together).
+    pub in_reply_to: Option<String>,
+    pub references: Option<String>,
 }
 
 /// An address an agent gave: `name@example.com`, or `Name <name@example.com>` with a plain name. No
@@ -107,7 +111,7 @@ pub fn outgoing(args: &GmailArgs) -> Result<Outgoing, String> {
     if subject.is_empty() && body.trim().is_empty() && to.is_empty() {
         return Err("a draft needs at least a recipient (to), a subject or a body".to_string());
     }
-    Ok(Outgoing { to, cc, bcc, subject, body })
+    Ok(Outgoing { to, cc, bcc, subject, body, in_reply_to: None, references: None })
 }
 
 fn b64_lines(bytes: &[u8]) -> String {
@@ -144,6 +148,12 @@ pub fn rfc822(o: &Outgoing) -> String {
         }
     }
     out.push_str(&format!("Subject: {}\r\n", subject_header(&o.subject)));
+    if let Some(id) = &o.in_reply_to {
+        out.push_str(&format!("In-Reply-To: {id}\r\n"));
+    }
+    if let Some(refs) = &o.references {
+        out.push_str(&format!("References: {refs}\r\n"));
+    }
     out.push_str("Content-Type: text/plain; charset=\"UTF-8\"\r\nContent-Transfer-Encoding: base64\r\n\r\n");
     out.push_str(&b64_lines(o.body.as_bytes()));
     out.push_str("\r\n");
@@ -163,10 +173,61 @@ fn post(url: String, body: Value) -> GoogleRequest {
     GoogleRequest { method: reqwest::Method::POST, url, query: Vec::new(), body: Some(body), text: false }
 }
 
+/// What a reply needs from the thread it answers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Reply {
+    pub in_reply_to: String,
+    pub references: String,
+    pub subject: String,
+}
+
+/// The request for the headers of the thread a draft replies to.
+pub fn reply_fetch_plan(thread_id: &str) -> Result<GoogleRequest, String> {
+    let id = id_arg("thread_id", Some(thread_id))?;
+    let mut q = vec![("format", "metadata".to_string())];
+    for h in ["Message-ID", "References", "Subject"] {
+        q.push(("metadataHeaders", h.to_string()));
+    }
+    Ok(get(url_of(&["threads", &id])?, q))
+}
+
+/// A message id header value: `<local@host>`, one line.
+fn message_id(v: &str) -> Option<String> {
+    let v = v.trim();
+    (v.len() >= 3 && v.len() <= 998 && v.starts_with('<') && v.ends_with('>') && !v.chars().any(|c| c.is_control() || c.is_whitespace())).then(|| v.to_string())
+}
+
+/// The reply headers for an answer to the last message of `thread` (Google's `threads.get`, format
+/// metadata); `None` when it has no usable `Message-ID`.
+pub fn reply_of(thread: &Value) -> Option<Reply> {
+    let last = thread.get("messages").and_then(Value::as_array)?.last()?;
+    let p = last.get("payload")?;
+    let id = message_id(header(p, "Message-ID"))?;
+    // The thread's references, then this message: the last few, so the header stays short.
+    let mut refs: Vec<String> = header(p, "References").split_whitespace().filter_map(message_id).collect();
+    refs.push(id.clone());
+    let keep = refs.len().saturating_sub(10);
+    let subject = line(header(p, "Subject"), SUBJECT_CHARS);
+    Some(Reply { in_reply_to: id, references: refs[keep..].join(" "), subject })
+}
+
+/// `o` as a reply: its threading headers, and the original subject (with `Re: `) when it has none.
+pub fn with_reply(o: &mut Outgoing, r: &Reply) {
+    o.in_reply_to = Some(r.in_reply_to.clone());
+    o.references = Some(r.references.clone());
+    if o.subject.is_empty() && !r.subject.is_empty() {
+        o.subject = if r.subject.to_ascii_lowercase().starts_with("re:") { r.subject.clone() } else { format!("Re: {}", r.subject) };
+    }
+}
+
 /// The request for `create_draft` (or, with a draft id, `update_draft`). A `thread_id` makes the
-/// draft a reply in that thread.
-pub fn draft_plan(action: &str, args: &GmailArgs) -> Result<GoogleRequest, String> {
-    let o = outgoing(args)?;
+/// draft a reply in that thread: `reply` is that thread's last message (see [`reply_of`]), which a
+/// reply needs for Gmail to thread it.
+pub fn draft_plan(action: &str, args: &GmailArgs, reply: Option<&Reply>) -> Result<GoogleRequest, String> {
+    let mut o = outgoing(args)?;
+    if let Some(r) = reply {
+        with_reply(&mut o, r);
+    }
     let thread = match args.thread_id.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
         Some(t) => Some(id_arg("thread_id", Some(t))?),
         None => None,
@@ -235,22 +296,54 @@ pub struct DraftView {
     pub bcc: String,
     pub subject: String,
     pub body: String,
+    /// The HTML version's text, when the draft has one that reads differently from `body`: what most
+    /// recipients' mail programs show.
+    pub html: String,
+    /// The files attached, as `name (size)`.
+    pub attachments: Vec<String>,
+    /// The stored message's id (Gmail makes a new one whenever a draft is saved) and a hash of its
+    /// whole payload without the attachment ids, which are not stable between reads.
+    version: String,
+}
+
+fn normalized(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// The payload without its `attachmentId`s, which Google may change between reads of the same message.
+fn without_attachment_ids(v: &Value) -> Value {
+    match v {
+        Value::Object(m) => Value::Object(m.iter().filter(|(k, _)| k.as_str() != "attachmentId").map(|(k, v)| (k.clone(), without_attachment_ids(v))).collect()),
+        Value::Array(a) => Value::Array(a.iter().map(without_attachment_ids).collect()),
+        other => other.clone(),
+    }
 }
 
 impl DraftView {
-    /// From Google's `drafts.get` answer (format full).
+    /// From Google's `drafts.get` answer (format full), with any text it keeps outside the message
+    /// already loaded (see `gmail_flow`).
     pub fn of(draft: &Value) -> DraftView {
         let msg = draft.get("message").unwrap_or(&Value::Null);
         let p = msg.get("payload").unwrap_or(&Value::Null);
         let h = |name: &str| header(p, name).split_whitespace().collect::<Vec<_>>().join(" ");
-        DraftView { id: s(draft, "/id").to_string(), to: h("To"), cc: h("Cc"), bcc: h("Bcc"), subject: h("Subject"), body: tidy(&body_text(p)) }
+        let body = tidy(&body_text(p));
+        let html = tidy(&html_alternative(p));
+        let html = if html.is_empty() || normalized(&html) == normalized(&body) { String::new() } else { html };
+        let attachments = attachments(p)
+            .iter()
+            .map(|a| format!("{} ({} bytes)", s(a, "/filename"), a.get("size").and_then(Value::as_u64).unwrap_or(0)))
+            .collect();
+        let mut hash = Sha256::new();
+        hash.update(without_attachment_ids(p).to_string().as_bytes());
+        let version = format!("{}:{}", s(msg, "/id"), hash.finalize().iter().map(|b| format!("{b:02x}")).collect::<String>());
+        DraftView { id: s(draft, "/id").to_string(), to: h("To"), cc: h("Cc"), bcc: h("Bcc"), subject: h("Subject"), body, html, attachments, version }
     }
 
-    /// A fingerprint of everything the person is asked about, so a draft changed after they said yes
-    /// is not sent.
+    /// A fingerprint of everything that would be sent, not only of what the person is shown, so a
+    /// draft changed after they said yes (its other version, a file, anything) is not sent.
     pub fn digest(&self) -> String {
         let mut h = Sha256::new();
-        for part in [&self.to, &self.cc, &self.bcc, &self.subject, &self.body] {
+        for part in [&self.to, &self.cc, &self.bcc, &self.subject, &self.body, &self.html, &self.attachments.join("\n"), &self.version] {
             h.update((part.len() as u64).to_le_bytes());
             h.update(part.as_bytes());
         }
@@ -265,14 +358,22 @@ impl DraftView {
 
 /// The title and text of the window that asks the person to send `view`.
 pub fn send_question(agent: &str, account: &str, view: &DraftView) -> (String, String) {
-    let shown = clip(&view.body, SHOWN_BODY_CHARS);
+    // With an HTML version that reads differently, both are shown, half the room each.
+    let room = if view.html.is_empty() { SHOWN_BODY_CHARS } else { SHOWN_BODY_CHARS / 2 };
     let field = |name: &str, v: &str| if v.is_empty() { String::new() } else { format!("{name}: {v}\n") };
+    let files = if view.attachments.is_empty() { String::new() } else { format!("Attached: {}\n", view.attachments.join(", ")) };
+    let html = if view.html.is_empty() {
+        String::new()
+    } else {
+        format!("\n\nThis mail also has an HTML version, which most people's mail programs show instead of the text above. It reads:\n\n{}", clip(&view.html, room))
+    };
     let message = format!(
-        "{agent} wants to send this email from {account}. It can't be taken back once it is sent.\n\n{}{}{}Subject: {}\n\n{shown}",
+        "{agent} wants to send this email from {account}. It can't be taken back once it is sent.\n\n{}{}{}{files}Subject: {}\n\n{}{html}",
         field("To", &view.to),
         field("Cc", &view.cc),
         field("Bcc", &view.bcc),
         if view.subject.is_empty() { "(none)" } else { &view.subject },
+        clip(&view.body, room),
     );
     (format!("{} wants to send an email", clip(&line(agent, 60), 60)), message)
 }

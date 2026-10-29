@@ -277,7 +277,7 @@ pub fn fill_external(thread: &mut Value, parts: &std::collections::HashMap<Strin
 
 /// Whether a text part of `payload` is still stored outside it (it could not be fetched, or was
 /// too large to).
-fn has_unloaded_text(payload: &Value) -> bool {
+pub(super) fn has_unloaded_text(payload: &Value) -> bool {
     is_external_text(payload) || payload.get("parts").and_then(Value::as_array).is_some_and(|ps| ps.iter().any(has_unloaded_text))
 }
 
@@ -333,8 +333,8 @@ fn finish_text(text: String) -> String {
     text.replace("&nbsp;", " ").replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&#39;", "'").replace("&amp;", "&")
 }
 
-/// The message's readable text: its `text/plain` parts, else its `text/html` parts as text.
-pub(super) fn body_text(payload: &Value) -> String {
+/// The decoded text of every readable part of `payload` of type `mime`, in order (files are not).
+pub(super) fn text_of_mime(payload: &Value, mime: &str) -> Vec<String> {
     fn collect(part: &Value, mime: &str, out: &mut Vec<String>) {
         if part.get("filename").and_then(Value::as_str).is_some_and(|f| !f.is_empty()) {
             return;
@@ -351,14 +351,23 @@ pub(super) fn body_text(payload: &Value) -> String {
             }
         }
     }
-    let mut plain = Vec::new();
-    collect(payload, "text/plain", &mut plain);
+    let mut out = Vec::new();
+    collect(payload, mime, &mut out);
+    out
+}
+
+/// The message's readable text: its `text/plain` parts, else its `text/html` parts as text.
+pub(super) fn body_text(payload: &Value) -> String {
+    let plain = text_of_mime(payload, "text/plain");
     if !plain.is_empty() {
         return plain.join("\n");
     }
-    let mut html = Vec::new();
-    collect(payload, "text/html", &mut html);
-    html_text(&html.join("\n"))
+    html_alternative(payload)
+}
+
+/// The message's `text/html` parts as text (empty when it has none).
+pub(super) fn html_alternative(payload: &Value) -> String {
+    html_text(&text_of_mime(payload, "text/html").join("\n"))
 }
 
 /// Blank lines collapsed to one and the ends trimmed.
@@ -381,7 +390,7 @@ pub(super) fn tidy(text: &str) -> String {
 }
 
 /// A message's attachments: name, type and size. Their bytes are not fetched.
-fn attachments(payload: &Value) -> Vec<Value> {
+pub(super) fn attachments(payload: &Value) -> Vec<Value> {
     fn walk(part: &Value, out: &mut Vec<Value>) {
         let name = s(part, "/filename");
         if !name.is_empty() && out.len() < ATTACHMENTS {

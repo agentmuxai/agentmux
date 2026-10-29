@@ -22,7 +22,7 @@ fn raw_of(req: &GoogleRequest) -> String {
 
 #[test]
 fn a_draft_is_a_mime_message_with_the_recipients_subject_and_a_base64_body() {
-    let req = draft_plan("create_draft", &args(json!({ "to": ["alice@example.com", "Bob Smith <bob@example.org>"], "cc": ["c@example.com"], "bcc": ["d@example.com"], "subject": "Lunch", "body": "Hi Alice,\nnoon?" }))).unwrap();
+    let req = draft_plan("create_draft", &args(json!({ "to": ["alice@example.com", "Bob Smith <bob@example.org>"], "cc": ["c@example.com"], "bcc": ["d@example.com"], "subject": "Lunch", "body": "Hi Alice,\nnoon?" })), None).unwrap();
     assert_eq!(req.method, reqwest::Method::POST);
     assert_eq!(req.url, "https://gmail.googleapis.com/gmail/v1/users/me/drafts");
     let mail = raw_of(&req);
@@ -34,16 +34,16 @@ fn a_draft_is_a_mime_message_with_the_recipients_subject_and_a_base64_body() {
 
 #[test]
 fn an_update_replaces_the_draft_by_id_and_a_reply_names_its_thread() {
-    let req = draft_plan("update_draft", &args(json!({ "draft_id": "r-123", "thread_id": "18c2", "to": ["a@example.com"], "body": "ok" }))).unwrap();
+    let req = draft_plan("update_draft", &args(json!({ "draft_id": "r-123", "thread_id": "18c2", "to": ["a@example.com"], "body": "ok" })), None).unwrap();
     assert_eq!(req.method, reqwest::Method::PUT);
     assert_eq!(req.url, "https://gmail.googleapis.com/gmail/v1/users/me/drafts/r-123");
     assert_eq!(req.body.as_ref().unwrap().pointer("/message/threadId").unwrap(), "18c2");
-    assert!(draft_plan("update_draft", &args(json!({ "to": ["a@example.com"] }))).unwrap_err().contains("draft_id"));
+    assert!(draft_plan("update_draft", &args(json!({ "to": ["a@example.com"] })), None).unwrap_err().contains("draft_id"));
 }
 
 #[test]
 fn a_non_ascii_subject_is_encoded_in_words_and_cannot_carry_a_header() {
-    let req = draft_plan("create_draft", &args(json!({ "to": ["a@example.com"], "subject": "Déjeuner à midi ? Très tôt, vraiment, on se retrouve au café près de la gare" }))).unwrap();
+    let req = draft_plan("create_draft", &args(json!({ "to": ["a@example.com"], "subject": "Déjeuner à midi ? Très tôt, vraiment, on se retrouve au café près de la gare" })), None).unwrap();
     let mail = raw_of(&req);
     let subject: Vec<&str> = mail.split("\r\n").skip_while(|l| !l.starts_with("Subject:")).take_while(|l| l.starts_with("Subject:") || l.starts_with(' ')).collect();
     assert!(subject.len() >= 2 && subject.iter().all(|l| l.contains("=?UTF-8?B?")), "{subject:?}");
@@ -173,4 +173,72 @@ fn the_full_mail_scope_covers_every_write() {
     for a in WRITE_ACTIONS {
         assert!(granted_for(a, &["https://mail.google.com/".to_string()]), "{a}");
     }
+}
+
+fn stored_with(headers: &[(&str, &str)], parts: serde_json::Value) -> serde_json::Value {
+    let hs: Vec<_> = headers.iter().map(|(n, v)| json!({ "name": n, "value": v })).collect();
+    json!({ "id": "r-1", "message": { "id": "m-1", "payload": { "mimeType": "multipart/mixed", "headers": hs, "parts": parts } } })
+}
+
+#[test]
+fn a_changed_attachment_or_html_version_or_stored_message_changes_the_digest() {
+    let text = json!({ "mimeType": "text/plain", "body": { "data": b64("Please see attached") } });
+    let pdf = |size: u64, id: &str| json!({ "mimeType": "application/pdf", "filename": "terms.pdf", "body": { "size": size, "attachmentId": id } });
+    let h = [("To", "a@example.com"), ("Subject", "Terms")];
+    let base = DraftView::of(&stored_with(&h, json!([text.clone(), pdf(100, "A1")])));
+    assert_eq!(base.attachments, ["terms.pdf (100 bytes)"]);
+    // Google may hand out another attachment id for the same file: not a change.
+    assert_eq!(base.digest(), DraftView::of(&stored_with(&h, json!([text.clone(), pdf(100, "A2")]))).digest());
+    // Another file, a replaced file, an added file are changes.
+    assert_ne!(base.digest(), DraftView::of(&stored_with(&h, json!([text.clone(), pdf(101, "A1")]))).digest());
+    assert_ne!(base.digest(), DraftView::of(&stored_with(&h, json!([text.clone()]))).digest());
+    // An HTML version added or changed behind an unchanged plain text.
+    let html = |t: &str| json!({ "mimeType": "text/html", "body": { "data": b64(t) } });
+    let with_html = DraftView::of(&stored_with(&h, json!([text.clone(), html("<p>Pay Mallory</p>")])));
+    assert_ne!(base.digest(), with_html.digest());
+    assert_ne!(with_html.digest(), DraftView::of(&stored_with(&h, json!([text.clone(), html("<p>Pay Eve</p>")]))).digest());
+    // A new stored version of the draft (Gmail gives each save a new message id).
+    let mut resaved = stored_with(&h, json!([text, pdf(100, "A1")]));
+    resaved["message"]["id"] = json!("m-2");
+    assert_ne!(base.digest(), DraftView::of(&resaved).digest());
+}
+
+#[test]
+fn the_person_is_shown_the_files_and_an_html_version_that_reads_differently() {
+    let h = [("To", "a@example.com"), ("Subject", "Terms")];
+    let text = json!({ "mimeType": "text/plain", "body": { "data": b64("Please see attached") } });
+    let html = json!({ "mimeType": "text/html", "body": { "data": b64("<p>Wire the money to Mallory</p>") } });
+    let pdf = json!({ "mimeType": "application/pdf", "filename": "terms.pdf", "body": { "size": 4096, "attachmentId": "A" } });
+    let (_, message) = send_question("Naki", "me@example.com", &DraftView::of(&stored_with(&h, json!([text.clone(), html, pdf.clone()]))));
+    assert!(message.contains("Attached: terms.pdf (4096 bytes)"), "{message}");
+    assert!(message.contains("HTML version") && message.contains("Wire the money to Mallory"), "{message}");
+    // An HTML version that says the same is not repeated.
+    let same = json!({ "mimeType": "text/html", "body": { "data": b64("<p>Please see attached</p>") } });
+    let (_, message) = send_question("Naki", "me@example.com", &DraftView::of(&stored_with(&h, json!([text, same, pdf]))));
+    assert!(!message.contains("HTML version"), "{message}");
+}
+
+#[test]
+fn a_reply_carries_the_threads_message_ids_and_the_original_subject() {
+    let thread = json!({ "messages": [
+        { "payload": { "headers": [{ "name": "Message-ID", "value": "<a@mail.example>" }, { "name": "Subject", "value": "Lunch?" }] } },
+        { "payload": { "headers": [{ "name": "Message-Id", "value": "<b@mail.example>" }, { "name": "References", "value": "<a@mail.example>" }, { "name": "Subject", "value": "Re: Lunch?" }] } }
+    ] });
+    let r = reply_of(&thread).unwrap();
+    assert_eq!((r.in_reply_to.as_str(), r.references.as_str(), r.subject.as_str()), ("<b@mail.example>", "<a@mail.example> <b@mail.example>", "Re: Lunch?"));
+    let req = draft_plan("create_draft", &args(json!({ "thread_id": "t1", "to": ["a@example.com"], "body": "Noon works" })), Some(&r)).unwrap();
+    let mail = raw_of(&req);
+    assert!(mail.contains("\r\nIn-Reply-To: <b@mail.example>\r\nReferences: <a@mail.example> <b@mail.example>\r\n"), "{mail}");
+    assert!(mail.contains("\r\nSubject: Re: Lunch?\r\n"), "no subject given: the original's, as a reply");
+    assert_eq!(req.body.as_ref().unwrap().pointer("/message/threadId").unwrap(), "t1");
+    // The agent's own subject is kept, and a reply to a first message gets "Re: ".
+    let own = draft_plan("create_draft", &args(json!({ "thread_id": "t1", "to": ["a@example.com"], "subject": "Different" })), Some(&r)).unwrap();
+    assert!(raw_of(&own).contains("\r\nSubject: Different\r\n"));
+    let first = json!({ "messages": [{ "payload": { "headers": [{ "name": "Message-ID", "value": "<a@mail.example>" }, { "name": "Subject", "value": "Lunch?" }] } }] });
+    let mut o = outgoing(&args(json!({ "to": ["a@example.com"] }))).unwrap();
+    with_reply(&mut o, &reply_of(&first).unwrap());
+    assert_eq!(o.subject, "Re: Lunch?");
+    // A thread whose last message has no usable id can't be replied to.
+    assert!(reply_of(&json!({ "messages": [{ "payload": { "headers": [{ "name": "Message-ID", "value": "not an id" }] } }] })).is_none());
+    assert!(reply_fetch_plan("t1").unwrap().url.ends_with("/threads/t1"));
 }
