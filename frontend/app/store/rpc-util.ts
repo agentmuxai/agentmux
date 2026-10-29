@@ -10,6 +10,7 @@ import { addWSReconnectHandler, globalWS, initGlobalWS, WSControl } from "./ws";
 import { DefaultRouter, setDefaultRouter } from "./rpc-util-base";
 import { getApi } from "./global";
 import { noteSrvConnectionOpened, noteSrvInfoMessage } from "./srv-info";
+import { noteEventsDroppedMessage } from "./resync";
 import { expectOperatorProof, proveOperatorConnection } from "./operator-proof";
 import { RpcApi } from "./rpc-api";
 
@@ -21,6 +22,7 @@ function initWshrpc(tabId: string): WSControl {
     const handleFn = (event: WSEventType) => {
         if (event.data == null) return;
         noteSrvInfoMessage(event.data);
+        noteEventsDroppedMessage(event.data);
         DefaultRouter.recvRpcMessage(event.data);
     };
 

@@ -35,6 +35,7 @@ import type { DesktopEvent } from "@/types/rpc/DesktopEvent";
 import type { DispatchActivityEvent } from "@/types/rpc/DispatchActivityEvent";
 import type { DispatchUpdatedEvent } from "@/types/rpc/DispatchUpdatedEvent";
 import type { DockClearEvent } from "@/types/rpc/DockClearEvent";
+import type { EventsDroppedEvent } from "@/types/rpc/EventsDroppedEvent";
 import type { FilesChangedEvent } from "@/types/rpc/FilesChangedEvent";
 import type { FsOpEvent } from "@/types/rpc/FsOpEvent";
 import type { IncidentEvent } from "@/types/rpc/IncidentEvent";
@@ -196,6 +197,7 @@ export type MuxEventPayloads = {
   widgetrequests: WidgetRequestsEvent;
   widgetstorage: WidgetStorageEvent;
   "workqueue:changed": null;
+  "ws:eventsdropped": EventsDroppedEvent;
   [event: `agent:memory:changed:${string}`]: null;
   [event: `agent_event:${string}`]: AgentEvent;
   [event: `agentcredentials:revoked:${string}`]: CredentialsRevokedEvent;
@@ -308,6 +310,7 @@ export const TYPED_MUX_EVENTS = [
   "widgetrequests",
   "widgetstorage",
   "workqueue:changed",
+  "ws:eventsdropped",
 ] as const;
 
 /** Whether a typed event carries no payload: srv sends it with no `data`. */

@@ -173,6 +173,8 @@ events! {
     AppServerOutput: "output" => ProtocolFrame,
     /// srv's version and machine, sent once on every WebSocket connect.
     SrvInfo: "srvinfo" => crate::srv_info::SrvInfo,
+    /// srv dropped events for this window (its WebSocket lane was full): it re-fetches what it shows.
+    EventsDropped: "ws:eventsdropped" => super::eventbus::EventsDroppedEvent,
     /// The full config, redacted for the renderer: on connect, and when it changes.
     Config: super::mps::EVENT_CONFIG => ConfigEvent,
     /// An incident srv recorded (`backend::transcript::damage`): the window shows its notice now.
