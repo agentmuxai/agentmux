@@ -11,7 +11,8 @@
 //! An agent's session can end while it waits (a restart, a resume, an upgrade),
 //! and the agent then asks again. The same verified agent asking for the same
 //! kind and label is that retry, so it joins the request already open, or gets
-//! the answer the person already gave, rather than opening a second form.
+//! the entry the person already saved, rather than opening a second form. A
+//! dismissed form isn't kept: asking again after it opens a new one.
 
 use std::sync::{Mutex, OnceLock};
 
@@ -61,10 +62,17 @@ struct Answered {
     at_ms: u64,
 }
 
+/// Both lists under one lock, so a retry never falls between a request leaving
+/// `pending` and its answer reaching `answered`.
+#[derive(Default)]
+struct Lists {
+    pending: Vec<Pending>,
+    answered: Vec<Answered>,
+}
+
 #[derive(Default)]
 pub struct Requests {
-    pending: Mutex<Vec<Pending>>,
-    answered: Mutex<Vec<Answered>>,
+    lists: Mutex<Lists>,
 }
 
 pub fn requests() -> &'static Requests {
@@ -91,16 +99,16 @@ impl Requests {
     /// only then is an ask for the same kind and label taken as a retry, since
     /// every unverified caller shares one name.
     pub fn ask(&self, req: VaultRequest, verified: bool) -> Asked {
+        let mut lists = self.lists.lock().unwrap_or_else(|p| p.into_inner());
+        let now = now();
+        lists.answered.retain(|a| now.saturating_sub(a.at_ms) < MAX_AGE_MS);
         if verified {
-            let mut answered = self.answered.lock().unwrap_or_else(|p| p.into_inner());
-            answered.retain(|a| now().saturating_sub(a.at_ms) < MAX_AGE_MS);
-            if let Some(a) = answered.iter().rev().find(|a| same(&a.req, &req)) {
+            if let Some(a) = lists.answered.iter().rev().find(|a| same(&a.req, &req)) {
                 return Asked::Answered { request_id: a.req.id.clone(), answer: a.answer.clone() };
             }
         }
         let (tx, rx) = oneshot::channel();
-        let mut pending = self.pending.lock().unwrap_or_else(|p| p.into_inner());
-        let now = now();
+        let pending = &mut lists.pending;
         pending.retain(|p| now.saturating_sub(p.req.requested_ms) < MAX_AGE_MS);
         if verified {
             if let Some(open) = pending.iter_mut().find(|p| p.joinable && same(&p.req, &req)) {
@@ -120,40 +128,44 @@ impl Requests {
     }
 
     /// The person's answer; false if nothing waits under `id`. Every agent waiting
-    /// on it hears it, and a retry within the hour finds it.
+    /// on it hears it, and a retry within the hour finds the entry it made. A
+    /// dismissal isn't kept, so the agent can ask for the form again.
     pub fn answer(&self, id: &str, answer: Answer) -> bool {
-        let open = {
-            let mut pending = self.pending.lock().unwrap_or_else(|p| p.into_inner());
-            let Some(i) = pending.iter().position(|p| p.req.id == id) else {
-                return false;
-            };
-            pending.remove(i)
+        let mut lists = self.lists.lock().unwrap_or_else(|p| p.into_inner());
+        let Some(i) = lists.pending.iter().position(|p| p.req.id == id) else {
+            return false;
         };
+        let open = lists.pending.remove(i);
         for w in open.waiters {
             let _ = w.send(answer.clone());
         }
-        if open.joinable {
-            let mut answered = self.answered.lock().unwrap_or_else(|p| p.into_inner());
-            if answered.len() >= MAX_ANSWERED {
-                answered.remove(0);
+        if open.joinable && matches!(answer, Answer::Created(_)) {
+            if lists.answered.len() >= MAX_ANSWERED {
+                lists.answered.remove(0);
             }
-            answered.push(Answered { req: open.req, answer, at_ms: now() });
+            lists.answered.push(Answered { req: open.req, answer, at_ms: now() });
         }
         true
     }
 
+    /// The entry `id` was deleted: a retry must not be told it exists.
+    pub fn forget_entry(&self, id: &str) {
+        let mut lists = self.lists.lock().unwrap_or_else(|p| p.into_inner());
+        lists.answered.retain(|a| a.answer != Answer::Created(id.to_string()));
+    }
+
     pub fn get(&self, id: &str) -> Option<VaultRequest> {
-        let pending = self.pending.lock().unwrap_or_else(|p| p.into_inner());
-        pending.iter().find(|p| p.req.id == id).map(|p| p.req.clone())
+        let lists = self.lists.lock().unwrap_or_else(|p| p.into_inner());
+        lists.pending.iter().find(|p| p.req.id == id).map(|p| p.req.clone())
     }
 
     /// The requests still open. One stays after its agent stops waiting (the
     /// agent finds the entry with `list`, or by asking again), until it is an hour old.
     pub fn list(&self) -> Vec<VaultRequest> {
-        let mut pending = self.pending.lock().unwrap_or_else(|p| p.into_inner());
+        let mut lists = self.lists.lock().unwrap_or_else(|p| p.into_inner());
         let now = now();
-        pending.retain(|p| now.saturating_sub(p.req.requested_ms) < MAX_AGE_MS);
-        pending.iter().map(|p| p.req.clone()).collect()
+        lists.pending.retain(|p| now.saturating_sub(p.req.requested_ms) < MAX_AGE_MS);
+        lists.pending.iter().map(|p| p.req.clone()).collect()
     }
 }
 
@@ -234,6 +246,23 @@ mod tests {
             other => panic!("expected the earlier answer, got {other:?}"),
         }
         assert!(r.list().is_empty(), "nothing new is opened");
+    }
+
+    #[test]
+    fn a_dismissed_form_can_be_asked_for_again() {
+        let r = Requests::default();
+        drop(r.ask(req("q1"), true));
+        r.answer("q1", Answer::Declined);
+        assert!(waiting(r.ask(req("q2"), true)).1, "a new form, not the old no");
+    }
+
+    #[test]
+    fn a_deleted_entry_is_not_handed_to_a_retry() {
+        let r = Requests::default();
+        drop(r.ask(req("q1"), true));
+        r.answer("q1", Answer::Created("api-key-stripe".into()));
+        r.forget_entry("api-key-stripe");
+        assert!(waiting(r.ask(req("q2"), true)).1, "the entry is gone: ask the person again");
     }
 
     #[test]

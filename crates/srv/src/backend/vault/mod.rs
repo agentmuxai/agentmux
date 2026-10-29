@@ -429,6 +429,8 @@ pub fn value_for_fill(store: &Store, id: &str, created_at: i64, part: &str) -> R
 pub fn delete(store: &Store, id: &str) -> Result<(), String> {
     let row = store.vault_get(id).map_err(|e| e.to_string())?.ok_or_else(|| format!("no entry {id}"))?;
     store.vault_delete(id).map_err(|e| e.to_string())?;
+    // An agent asking again for the entry it was given must not get this id.
+    requests::requests().forget_entry(id);
     record(store, id, &row.label, PERSON, "deleted", "", "done");
     Ok(())
 }
