@@ -21,6 +21,9 @@ import { Button } from "@/app/element/ui";
 // The host opens exactly this link (`external_url_allowed` in the CEF host).
 const MS_STORE_PAGE_URL = "ms-windows-store://pdp/?productid=9P9QCXNNCRK3";
 
+// What to do with a Store install older than the release's upgrade floor.
+const STORE_MOVE_OFF_URL = "https://docs.agentmux.ai/installation/#moving-off-the-microsoft-store-build";
+
 // ── Component ────────────────────────────────────────────────────────────────
 
 export const MaintenanceSection = (): JSX.Element => {
@@ -308,8 +311,11 @@ export const MaintenanceSection = (): JSX.Element => {
             </Show>
             <Show when={storeBelowFloor()}>
                 <div class="maintenance-row-text maintenance-row-text--warn">
-                    {`This version is older than v${updaterVersion()} upgrades from (v${installFirst()} or later). The Microsoft Store can only install the latest version, so AgentMux does not offer the update here.`}
+                    {`This version is older than v${updaterVersion()} upgrades from (v${installFirst()} or later). The Microsoft Store can only install the latest version, so AgentMux does not offer the update here. To update, move to the GitHub build: install v${installFirst()} from GitHub first, then the latest.`}
                 </div>
+                <Button density="compact" class="maintenance-btn" onClick={() => void openLink(STORE_MOVE_OFF_URL)}>
+                    How to move off the Store build
+                </Button>
             </Show>
             <Show when={startError()}>
                 <div class="maintenance-row-text maintenance-row-text--error">{startError()}</div>
