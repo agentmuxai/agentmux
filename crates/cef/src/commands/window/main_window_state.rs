@@ -12,14 +12,16 @@
 //! it. It is the host's own file: the main window is placed before srv has said
 //! anything, and a hard kill still leaves the last place it was at.
 //!
-//! Positions are physical pixels, as `GetWindowRect` reports them. [`fit`] puts a
-//! saved rect back inside a monitor's work area: a monitor that has been
-//! unplugged since, or a resolution that shrank, never leaves the window
-//! off screen. Only Windows records the position today (the position stream is a
-//! Windows one); elsewhere the main window opens as it always did.
+//! On Windows positions are physical pixels, as `GetWindowRect` reports them; on
+//! macOS they are points (DIP), as CEF Views reports them in screen coordinates
+//! with the origin at the top-left of the primary display. [`fit`] puts a saved
+//! rect back inside a monitor's work area: a monitor that has been unplugged
+//! since, or a resolution that shrank, never leaves the window off screen.
+//! Windows and macOS record the position; elsewhere the main window opens as it
+//! always did.
 
-// Only Windows records and restores the place; the pure parts are tested everywhere.
-#![cfg_attr(not(target_os = "windows"), allow(dead_code))]
+// Only Windows and macOS record and restore the place; the pure parts are tested everywhere.
+#![cfg_attr(not(any(target_os = "windows", target_os = "macos")), allow(dead_code))]
 
 use std::path::PathBuf;
 
@@ -74,6 +76,20 @@ pub fn fit(state: &MainWindowState, work_area_at: impl Fn(i32, i32) -> Option<Wo
     Some((x, y, width, height))
 }
 
+/// Whether `rect` (`left, top, right, bottom`) fills `work` (give or take a point
+/// or two): how a macOS window that was zoomed looks, before CEF reports it as
+/// maximized. NSWindow's zoom sets the frame to the display's visible frame.
+pub fn fills_work_area(rect: &agentmux_common::ipc::Rect, work: WorkArea) -> bool {
+    const SLACK: i32 = 2;
+    let (wx, wy, ww, wh) = work;
+    ww > 0
+        && wh > 0
+        && (rect.left - wx).abs() <= SLACK
+        && (rect.top - wy).abs() <= SLACK
+        && (rect.right - (wx + ww)).abs() <= SLACK
+        && (rect.bottom - (wy + wh)).abs() <= SLACK
+}
+
 /// The state file, in the channel's config folder.
 fn path() -> Option<PathBuf> {
     let dir = std::env::var_os("AGENTMUX_CONFIG_DIR")
@@ -99,8 +115,8 @@ pub fn save(state: &MainWindowState) {
     }
 }
 
-#[cfg(target_os = "windows")]
-mod win {
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+mod live {
     use super::{fit, load, save, MainWindowState, WorkArea};
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Mutex;
@@ -116,7 +132,9 @@ mod win {
     /// The window opens maximized: read by its delegate once it is created.
     static START_MAXIMIZED: AtomicBool = AtomicBool::new(false);
 
-    /// The work area of the monitor at a physical point, `None` when no monitor has it.
+    /// The work area of the monitor at a point in the saved rect's units, `None`
+    /// when no monitor has it.
+    #[cfg(target_os = "windows")]
     fn work_area_at(x: i32, y: i32) -> Option<WorkArea> {
         use windows_sys::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTONULL};
         unsafe {
@@ -134,6 +152,33 @@ mod win {
         }
     }
 
+    #[cfg(target_os = "macos")]
+    fn work_area_at(x: i32, y: i32) -> Option<WorkArea> {
+        crate::app::display_work_area_at(x, y)
+    }
+
+    /// DIP per saved unit at `(x, y)`: the saved rect is physical on Windows and
+    /// already in DIP (points) on macOS.
+    #[cfg(target_os = "windows")]
+    fn dip_scale(x: i32, y: i32) -> f32 {
+        crate::app::dpi_scale_at(x, y)
+    }
+
+    #[cfg(target_os = "macos")]
+    fn dip_scale(_x: i32, _y: i32) -> f32 {
+        1.0
+    }
+
+    /// Whether the main window's `rect` (points) fills the work area of the display
+    /// it is on. CEF's `is_maximized()` lags the frame while NSWindow's zoom settles
+    /// (it still says no after a zoom and still says yes after a restore), so a
+    /// zoomed frame is recognised by its size.
+    #[cfg(target_os = "macos")]
+    pub fn fills_its_display(rect: &agentmux_common::ipc::Rect) -> bool {
+        let (cx, cy) = ((rect.left + rect.right) / 2, (rect.top + rect.bottom) / 2);
+        work_area_at(cx, cy).is_some_and(|work| super::fills_work_area(rect, work))
+    }
+
     /// Where the main window opens, `(x, y, width, height)` in DIP as CEF Views
     /// wants it, or `None` for the default (no saved place, or its monitor is gone).
     pub fn initial_bounds() -> Option<(i32, i32, i32, i32)> {
@@ -141,8 +186,8 @@ mod win {
         let (x, y, w, h) = fit(&state, work_area_at)?;
         *NORMAL.lock().unwrap() = Some(MainWindowState { x, y, width: w, height: h, maximized: false });
         START_MAXIMIZED.store(state.maximized, Ordering::Relaxed);
-        // A new window is placed in DIP; the rect is physical on the monitor it is on.
-        let scale = crate::app::dpi_scale_at(x, y);
+        // A new window is placed in DIP; on Windows the rect is physical on the monitor it is on.
+        let scale = dip_scale(x, y);
         let dip = |v: i32| (v as f32 / scale).round() as i32;
         tracing::info!(x, y, w, h, scale, maximized = state.maximized, "[window] opening the main window where it was");
         Some((dip(x), dip(y), dip(w), dip(h)))
@@ -153,9 +198,10 @@ mod win {
         START_MAXIMIZED.swap(false, Ordering::Relaxed)
     }
 
-    /// The main window moved or was resized: `rect` is its `GetWindowRect`, physical
-    /// pixels. A maximized window keeps the last normal rect and records that it is
-    /// maximized. Written once the window has been still for a moment.
+    /// The main window moved or was resized: `rect` is its screen rect (physical
+    /// pixels on Windows, `GetWindowRect`; points on macOS). A maximized window
+    /// keeps the last normal rect and records that it is maximized. Written once
+    /// the window has been still for a moment.
     pub fn note_position(maximized: bool, rect: agentmux_common::ipc::Rect) {
         let mut normal = NORMAL.lock().unwrap();
         let next = if maximized {
@@ -180,16 +226,18 @@ mod win {
     }
 }
 
-#[cfg(target_os = "windows")]
-pub(crate) use win::{initial_bounds, note_position, take_start_maximized};
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+pub(crate) use live::{initial_bounds, note_position, take_start_maximized};
+#[cfg(target_os = "macos")]
+pub(crate) use live::fills_its_display;
 
-/// Where the main window opens: not recorded off Windows.
-#[cfg(not(target_os = "windows"))]
+/// Where the main window opens: not recorded off Windows and macOS.
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 pub(crate) fn initial_bounds() -> Option<(i32, i32, i32, i32)> {
     None
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 pub(crate) fn take_start_maximized() -> bool {
     false
 }
@@ -237,6 +285,19 @@ mod tests {
     fn a_rect_bigger_than_the_monitor_shrinks_to_its_work_area() {
         // The monitor got smaller since: 3000x2000 on a 1920x1040 work area.
         assert_eq!(fit(&state(0, 0, 3000, 2000), two), Some((0, 0, 1920, 1040)));
+    }
+
+    #[test]
+    fn a_rect_filling_the_work_area_is_a_zoomed_window() {
+        use agentmux_common::ipc::Rect;
+        let work: WorkArea = (51, 40, 1659, 1072);
+        let r = |l, t, rr, b| Rect { left: l, top: t, right: rr, bottom: b };
+        assert!(fills_work_area(&r(51, 40, 1710, 1112), work));
+        // A point or two off still counts; a real margin does not.
+        assert!(fills_work_area(&r(52, 41, 1709, 1111), work));
+        assert!(!fills_work_area(&r(150, 120, 1050, 740), work));
+        assert!(!fills_work_area(&r(51, 40, 1710, 1000), work));
+        assert!(!fills_work_area(&r(0, 0, 10, 10), (0, 0, 0, 0)));
     }
 
     #[test]
