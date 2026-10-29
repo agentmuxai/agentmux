@@ -17,6 +17,7 @@
         }
     },
     "defwidget@swarm": {
+        "singleton": true,
         "display:order": 2,
         "display:pinned": true,
         "icon": "people-group",
@@ -90,6 +91,7 @@
         }
     },
     "defwidget@tower": {
+        "singleton": true,
         "display:order": 18,
         "display:pinned": false,
         "icon": "tower-observation",
@@ -102,6 +104,7 @@
         }
     },
     "defwidget@drone": {
+        "singleton": true,
         "display:order": 14,
         "display:pinned": false,
         "icon": "diagram-project",
@@ -114,6 +117,7 @@
         }
     },
     "defwidget@help": {
+        "singleton": true,
         "display:order": 8,
         "display:pinned": true,
         "icon": "circle-question",
@@ -126,6 +130,7 @@
         }
     },
     "defwidget@kanban": {
+        "singleton": true,
         "display:order": 9,
         "display:pinned": false,
         "icon": "table-columns",
@@ -138,6 +143,7 @@
         }
     },
     "defwidget@warden": {
+        "singleton": true,
         "display:order": 15,
         "display:pinned": false,
         "icon": "shield-halved",
@@ -150,6 +156,7 @@
         }
     },
     "defwidget@vault": {
+        "singleton": true,
         "display:order": 16,
         "display:pinned": false,
         "icon": "lock",
@@ -251,6 +258,7 @@
         }
     },
     "defwidget@toolchain": {
+        "singleton": true,
         "display:order": 17,
         "display:pinned": false,
         "icon": "wrench",
@@ -263,6 +271,7 @@
         }
     },
     "defwidget@connectors": {
+        "singleton": true,
         "display:order": 4,
         "display:pinned": true,
         "icon": "plug",
@@ -275,6 +284,7 @@
         }
     },
     "defwidget@memory": {
+        "singleton": true,
         "display:order": 3,
         "display:pinned": true,
         "icon": "brain",
@@ -287,6 +297,7 @@
         }
     },
     "defwidget@settings": {
+        "singleton": true,
         "display:order": 7,
         "display:pinned": true,
         "icon": "cog",

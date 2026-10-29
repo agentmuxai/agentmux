@@ -117,6 +117,7 @@ export function trustedPaneManifest(exported: unknown, pkg: WidgetPackageInfo, p
         label: typeof m.label === "string" && m.label ? m.label : pane.label,
         icon: typeof m.icon === "string" && m.icon ? m.icon : pane.icon,
         defaultHue: m.defaultHue ?? pkg.default_hue ?? undefined,
+        singleton: m.singleton ?? pane.singleton,
     };
 }
 
