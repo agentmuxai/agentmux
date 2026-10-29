@@ -591,6 +591,12 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/api/v1/github/token", post(app_api::github_token::handle_github_token))
         // An agent sets or clears seats, several at once; recorded under its name.
         .route("/api/v1/agent/seats", post(app_api::agent_seats::handle_agent_seats))
+        // An agent asks for the shared pane-history store's free space to be given back at the next
+        // start, withdraws that, or reads where it stands (`App history_reclaim`).
+        .route(
+            "/api/v1/agent/history/reclaim",
+            post(app_api::agent_history_reclaim::handle_history_reclaim).get(app_api::agent_history_reclaim::handle_history_reclaim_status),
+        )
         // The outcome of a shutdown waiting on the user's override (§6.5):
         // the MCP tools poll it after their 202.
         // axum 0.7: a path parameter is `:name`; `{name}` would be a literal.
