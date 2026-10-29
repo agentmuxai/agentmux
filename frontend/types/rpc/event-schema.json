@@ -943,5 +943,14 @@
       "imports": [],
       "name": "null"
     }
+  },
+  {
+    "event": "ws:eventsdropped",
+    "payloadTs": {
+      "imports": [
+        "EventsDroppedEvent"
+      ],
+      "name": "EventsDroppedEvent"
+    }
   }
 ]

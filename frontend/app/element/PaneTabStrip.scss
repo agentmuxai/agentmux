@@ -404,6 +404,18 @@
         }
     }
 
+    // The tab's close was clicked and has not finished: dimmed and inert, a spinner where its ×
+    // was (SPEC_PANE_CLOSING_INDICATOR_AND_FASTER_CLOSE_2026_10_28.md §2).
+    &--closing {
+        opacity: 0.55;
+        pointer-events: none;
+        cursor: progress;
+
+        .pane-tab-close {
+            opacity: 1;
+        }
+    }
+
     // Same-pane drag-reorder (SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md
     // §3.2, Phase 3) — deliberately minimal (a dimmed source, a solid
     // insertion-line on the hovered side), matching this codebase's pattern
@@ -419,16 +431,6 @@
 
     &--drop-after {
         box-shadow: inset -2px 0 0 0 var(--drop-target-border);
-    }
-
-    // A tab that was just dropped into place — from another pane, or
-    // reordered within this one — plays the Window Tab landing bounce
-    // (drop-feedback.scss). Toggled by PaneTabStrip.tsx's `landedTab` (id + destination pane).
-    // Sits on the pill, not its `.pane-tab-tip` wrapper: the wrapper owns
-    // the flex sizing, so a transform here never moves its neighbours.
-    // SPEC_PANE_TAB_DRAG_LANDING_FLASH_AND_LAST_TAB_CLOSE_2026_09_24.md §3.4.
-    &--landing {
-        @include drop.landing-bounce;
     }
 
     // Picked with Ctrl/Cmd+click, to be dragged into one pane together

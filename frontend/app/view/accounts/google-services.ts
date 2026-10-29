@@ -7,10 +7,12 @@
 // through the host (`approvals.google`), never an RPC an agent could call.
 
 import { getApi } from "@/app/store/app-api";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 
 const PREFIX = "https://www.googleapis.com/auth/";
 
-export type GoogleService = "calendar";
+export type GoogleService = "calendar" | "drive" | "gmail";
 export type GrantLevel = "read" | "write";
 
 export interface ServiceInfo {
@@ -20,6 +22,9 @@ export interface ServiceInfo {
     line: string;
     /** The scopes "Turn on" asks for (srv's `Service::scopes` at read). */
     readScopes: string[];
+    /** Offered only on a client the person brought (their own, or their organization's internal one):
+     *  Google's restricted scopes are reviewed per app, and AgentMux's own client has not been. */
+    needsOwnClient?: boolean;
 }
 
 export const SERVICES: ServiceInfo[] = [
@@ -31,7 +36,26 @@ export const SERVICES: ServiceInfo[] = [
             (s) => PREFIX + s
         ),
     },
+    {
+        service: "drive",
+        label: "Drive",
+        line: "Agents you allow can read the files you pick for them in Google's file picker, and the ones AgentMux makes. Never the rest of your Drive.",
+        readScopes: [PREFIX + "drive.file"],
+    },
+    {
+        service: "gmail",
+        label: "Gmail",
+        line: "Agents you allow can search and read your mail. They can't send, delete or change anything.",
+        readScopes: [PREFIX + "gmail.readonly"],
+        needsOwnClient: true,
+    },
 ];
+
+/** Why Gmail can't be turned on for this account's client, or null when it can (or isn't Gmail). */
+export function ownClientNeeded(info: ServiceInfo, clientMode: string | undefined): string | null {
+    if (!info.needsOwnClient || clientMode === "byo" || clientMode === "workspace") return null;
+    return `${info.label} needs your own Google client, or your organization's internal one: Google reviews apps that read mail, and AgentMux's own client hasn't been through that yet. Connect a Google account with your own client to use it.`;
+}
 
 /** Whether the account's token covers a service: all, some or none of its scopes. */
 export function serviceState(info: ServiceInfo, granted: readonly string[]): "on" | "partly" | "off" {
@@ -93,4 +117,35 @@ export async function setGoogleGrant(
     const r = relay();
     if (!r) throw new Error("Open AgentMux's desktop app to choose which agents use this account.");
     await r("set", { account_id: accountId, agent_id: agentId, service, level });
+}
+
+
+/** How often the picker's session is asked whether the person has chosen, and for how long. */
+const PICK_POLL_MS = 1500;
+const PICK_WAIT_MS = 6 * 60 * 1000;
+
+/**
+ * Open Google's file picker for `accountId` in the system browser and wait for the person to
+ * choose. Resolves with the ids picked (none if they closed it without choosing); rejects with
+ * a sentence when it can't start or Google refuses. `cancelled()` is asked between polls.
+ */
+export async function pickDriveFiles(accountId: string, cancelled: () => boolean = () => false): Promise<string[]> {
+    const r = relay();
+    if (!r) throw new Error("Open AgentMux's desktop app to give agents files from Drive.");
+    const started = (await r("pick", { account_id: accountId })) as { session_id?: string } | null;
+    const sessionId = started?.session_id;
+    if (!sessionId) throw new Error("Google's file picker didn't open.");
+    const until = Date.now() + PICK_WAIT_MS;
+    while (Date.now() < until) {
+        if (cancelled()) {
+            void RpcApi.AccountOAuthCancelCommand(TabRpcClient, { sessionId });
+            return [];
+        }
+        const s = (await RpcApi.AccountOAuthPollCommand(TabRpcClient, { sessionId })) as { status: string; fileIds?: string[]; error?: string };
+        if (s.status === "picked") return s.fileIds ?? [];
+        if (s.status === "failed") throw new Error(s.error || "Google's file picker failed.");
+        await new Promise((resolve) => setTimeout(resolve, PICK_POLL_MS));
+    }
+    void RpcApi.AccountOAuthCancelCommand(TabRpcClient, { sessionId });
+    throw new Error("Nothing was picked in time. Try again.");
 }

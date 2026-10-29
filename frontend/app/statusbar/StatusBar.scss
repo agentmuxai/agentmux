@@ -10,6 +10,7 @@
 @use "./maintenance-section";
 @use "./health-notices";
 @use "./ambient-purposes";
+@use "./lan-peer-row";
 @use "../mixins.scss";
 
 .status-bar {

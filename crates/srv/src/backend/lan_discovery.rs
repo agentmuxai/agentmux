@@ -1467,6 +1467,9 @@ struct LanPubkeyCacheEntry {
     /// Identity M4d-6: the UID and UID key from the same peer's answer, when
     /// it gave both.
     uid_key: Option<(String, Vec<u8>)>,
+    /// The hosting install's certificate for the name key (`lan_cert`), when
+    /// its answer had one (docs/specs/SPEC_LAN_KEY_CONTINUITY_2026_10_29.md).
+    cert: Option<agentmux_common::jekt_sign::WanKeyRecord>,
     expires: std::time::Instant,
 }
 
@@ -1743,12 +1746,14 @@ impl LanDiscoveryController {
                 tracing::debug!(agent_id, peer_url = %peer_url, "LAN agent pubkey found on peer");
                 let uid = body.get("uid").and_then(|v| v.as_str()).filter(|u| !u.is_empty());
                 let uid_key = body.get("uid_public_key").and_then(|v| v.as_str()).and_then(|k| BASE64.decode(k).ok());
+                let cert = body.get("lan_cert").and_then(|v| serde_json::from_value(v.clone()).ok());
                 if let Ok(mut cache) = self.pubkey_cache.write() {
                     cache.insert(
                         agent_id.to_string(),
                         LanPubkeyCacheEntry {
                             public_key: Some(pubkey_bytes.clone()),
                             uid_key: uid.zip(uid_key).map(|(u, k)| (u.to_string(), k)),
+                            cert,
                             expires: std::time::Instant::now()
                                 + std::time::Duration::from_secs(LAN_AGENT_CACHE_TTL_SECS),
                         },
@@ -1770,6 +1775,7 @@ impl LanDiscoveryController {
                 LanPubkeyCacheEntry {
                     public_key: None,
                     uid_key: None,
+                    cert: None,
                     expires: std::time::Instant::now()
                         + std::time::Duration::from_secs(LAN_AGENT_CACHE_TTL_SECS),
                 },
@@ -1795,6 +1801,7 @@ impl LanDiscoveryController {
             LanPubkeyCacheEntry {
                 public_key: Some(public_key),
                 uid_key,
+                cert: None,
                 expires: std::time::Instant::now() + std::time::Duration::from_secs(LAN_AGENT_CACHE_TTL_SECS),
             },
         );

@@ -1303,6 +1303,10 @@
             "method": "SkillCatalogListForBundleCommand"
         },
         {
+            "command": "skill.catalog.set_opt_out",
+            "method": "SkillCatalogSetOptOutCommand"
+        },
+        {
             "command": "skill.catalog.set_reach",
             "method": "SkillCatalogSetReachCommand"
         },
@@ -1422,6 +1426,10 @@
         {
             "command": "history.agent_sessions",
             "method": "HistoryAgentSessionsCommand"
+        },
+        {
+            "command": "audit.query",
+            "method": "AuditQueryCommand"
         },
         {
             "command": "history.locate",

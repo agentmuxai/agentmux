@@ -155,7 +155,7 @@ pub(super) fn needs_login_refusal(body: serde_json::Value) -> serde_json::Value 
 
 /// "Sun 7:00 PM": a reset time in this machine's zone, as the Kanban and
 /// Swarm show it (`agent_state::Unavailable::reason`).
-fn local_time_label(ms: u64) -> Option<String> {
+pub(super) fn local_time_label(ms: u64) -> Option<String> {
     let t = chrono::DateTime::from_timestamp_millis(i64::try_from(ms).ok()?)?;
     Some(t.with_timezone(&chrono::Local).format("%a %-I:%M %p").to_string())
 }

@@ -5,7 +5,16 @@
 import logoUrl from "@/app/asset/logo.svg?url";
 import { atoms, MOS, replaceBlock } from "@/app/store/global";
 import { closeBlockInStack, getLayoutModelForStaticTab } from "@/layout/index";
-import { getChildWidgets, getHiddenKeys, getPinnedKeys, isWidgetHidden, widgetEntryColor } from "@/app/window/action-widgets-config";
+import { findOpenBlockByView } from "@/app/util/reveal-block";
+import { isSingletonView } from "@/app/store/widget-singleton";
+import {
+    getChildWidgets,
+    getHiddenKeys,
+    getPinnedKeys,
+    isWidgetHidden,
+    openWidget,
+    widgetEntryColor,
+} from "@/app/window/action-widgets-config";
 import { checkKeyPressed, keydownWrapper } from "@/util/keyutil";
 import { isBlank, makeIconClass, createSignalAtom } from "@/util/util";
 import type { SignalAtom } from "@/util/util";
@@ -24,6 +33,9 @@ function sortByDisplayOrder(
     entries.sort(([, a], [, b]) => (a["display:order"] ?? 0) - (b["display:order"] ?? 0));
     return entries;
 }
+
+/** Whether a pane of `view` is open in this window, mounted or not (an inactive tab of a pane's stack is not). */
+const isViewOpen = async (view: string): Promise<boolean> => (await findOpenBlockByView(view)) != null;
 
 type GridLayoutType = { columns: number; tileWidth: number; tileHeight: number; showLabel: boolean };
 
@@ -159,9 +171,12 @@ export class ShortcutsViewModel {
             }
             return true;
         }
-        if (checkKeyPressed(e, "Enter")) {
+        // Shift+Enter opens a new pane for a singleton instead of bringing the open one back, as a Shift-click does.
+        if (checkKeyPressed(e, "Enter") || checkKeyPressed(e, "Shift:Enter")) {
             if (filteredWidgets.length == 0) return true;
-            if (filteredWidgets[selectedIndex]) this.handleWidgetSelect(filteredWidgets[selectedIndex]);
+            if (filteredWidgets[selectedIndex]) {
+                void this.handleWidgetSelect(filteredWidgets[selectedIndex], { forceNew: e.shift === true });
+            }
             return true;
         }
         if (checkKeyPressed(e, "Escape")) {
@@ -172,7 +187,7 @@ export class ShortcutsViewModel {
             if (this.searchTerm() === "" && this.activeParent() !== null) {
                 this.goBack();
             } else if (this.searchTerm() === "" && this.openedBySplit()) {
-                this.closeSelf();
+                void this.closeSelf();
             } else {
                 this.searchTerm._set("");
                 this.selectedIndex._set(0);
@@ -202,15 +217,31 @@ export class ShortcutsViewModel {
     /** Closes this tab. It has no content to lose, so nothing is asked and the neighbour takes its
      *  space. Only this block goes: when it was stacked with other panes the rest stay, and when it
      *  is the pane's last tab the pane closes. */
-    closeSelf(): void {
+    async closeSelf(): Promise<void> {
         const layoutModel = getLayoutModelForStaticTab();
         const node = layoutModel.getNodeByBlockId(this.blockId);
-        if (node) void closeBlockInStack(layoutModel, node.id, this.blockId);
+        if (node) await closeBlockInStack(layoutModel, node.id, this.blockId);
     }
 
-    async handleWidgetSelect(widget: WidgetConfigType) {
+    /**
+     * A tile for a singleton view (Memory, Connectors...) whose pane is already open brings that pane
+     * back, as the widget bar does, and this pane closes: it was a question and has been answered.
+     * `forceNew` (Shift) opens a new pane in this one's place instead, and so does a singleton that is not open.
+     */
+    async handleWidgetSelect(widget: WidgetConfigType, opts: { forceNew?: boolean } = {}) {
         if (this.isParentWidget(widget)) {
             this.drillInto(widget);
+            return;
+        }
+        const view = widget.blockdef?.meta?.["view"] as string | undefined;
+        if (view && !opts.forceNew && !widget.magnified && (widget.singleton ?? isSingletonView(view)) && (await isViewOpen(view))) {
+            try {
+                // This pane first: closing it afterwards would hand the focus to its neighbour.
+                await this.closeSelf();
+                await openWidget(widget);
+            } catch (error) {
+                console.error("Error bringing back the open pane:", error);
+            }
             return;
         }
         try {
@@ -348,7 +379,7 @@ function ShortcutsView(props: { model: ShortcutsViewModel }): JSX.Element {
                 <For each={filteredWidgets()}>
                     {(widget, index) => (
                         <div
-                            onClick={() => model.handleWidgetSelect(widget)}
+                            onClick={(e) => void model.handleWidgetSelect(widget, { forceNew: e.shiftKey })}
                             title={widget.description || widget.label}
                             class={clsx(
                                 "flex flex-col items-center justify-center rounded-md p-2 text-center",

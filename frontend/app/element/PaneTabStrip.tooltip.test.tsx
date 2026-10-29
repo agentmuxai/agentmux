@@ -62,7 +62,7 @@ describe("PaneTabStrip tooltip detail", () => {
         expect(tip.getAttribute("style")).toContain("transition: none");
     });
 
-    it("leaves a tab with no summary exactly as it was: just the label, after the usual delay", async () => {
+    it("leaves a tab with no summary exactly as it was: just the label, with the default fade", async () => {
         const { container } = renderStrip((t) => (t.id === "agent" ? "Fixing login" : undefined));
         const pill = container.querySelectorAll(".pane-tab-tip")[1] as HTMLElement;
         fireEvent.mouseEnter(pill);
@@ -70,8 +70,8 @@ describe("PaneTabStrip tooltip detail", () => {
         const tip = overlay()!;
         expect(tip.textContent).toBe("Terminal");
         expect(tip.querySelector(".pane-tab-tip-summary")).toBeNull();
-        // The default 300 ms show delay has not elapsed after 60 ms.
-        expect(tip.getAttribute("style")).toContain("opacity: 0");
+        // The default (not `immediate`) keeps its short fade rather than "none".
+        expect(tip.getAttribute("style")).toContain("opacity var(--duration-instant)");
     });
 
     it("goes away the moment the pointer leaves", async () => {

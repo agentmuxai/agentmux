@@ -77,6 +77,82 @@ pub(crate) async fn note_outdated(
     cli_notice::append_to_pane(broker, filestore, mstore, block_id, &frame);
 }
 
+/// Why an agent configured with `configured` (its stored `agent:container_image`, empty for the default) can't be
+/// moved to this AgentMux's agent image: it runs its own image, or is pinned to another version.
+fn image_blocks_update(configured: &str) -> Option<String> {
+    let image = resolve_container_image(configured);
+    if !is_agent_base_image(&image) {
+        return Some(format!("this agent runs its own image ({image}); updating the container would start it from the same image"));
+    }
+    // `resolve_container_image` turns the default and `:latest` into this version's tag, so any
+    // other reference (another version, a digest, another tag) is a pin the update would keep.
+    if image != versioned_agent_image() {
+        return Some(format!("this agent is pinned to {image}; change its container image to update it"));
+    }
+    None
+}
+
+/// Whether version `running` is older than `current`, comparing their numeric dotted parts (`0.59.41` < `0.60.2`).
+/// A version that does not parse is not older: it is left alone rather than replaced.
+fn is_older(running: &str, current: &str) -> bool {
+    fn parts(v: &str) -> Option<Vec<u64>> {
+        let core = v.trim().trim_start_matches('v').split(['-', '+']).next()?;
+        core.split('.').map(|p| p.parse::<u64>().ok()).collect()
+    }
+    match (parts(running), parts(current)) {
+        (Some(r), Some(c)) => r < c,
+        _ => false,
+    }
+}
+
+/// The container's update gate taken exclusively, or None while a turn (or another update) holds it.
+fn take_update_gate(container_name: &str) -> Option<tokio::sync::OwnedRwLockWriteGuard<()>> {
+    crate::backend::container::drift::update_gate(container_name).try_write_owned().ok()
+}
+
+/// Moves an idle agent's container to this AgentMux's agent image: when it runs an older one, the agent follows
+/// the default image (no pin, no image of its own), the current image is already on this machine, and no turn is
+/// using the container. The container is removed (workspace, memory and the CLI volume stay; tools installed inside it are
+/// installed again) and the pane is told; the start that follows creates it from the current image. Returns whether
+/// it did. Anything else leaves the "outdated" row and its button as they are.
+///
+/// Run where nothing is mid-turn (the pre-start): a turn holds the update gate shared for its whole length, so
+/// called from inside a turn this finds the gate taken and does nothing.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn update_if_idle(
+    cm: &ContainerManager,
+    container_name: &str,
+    configured_image: &str,
+    provider: &str,
+    block_id: &str,
+    broker: &Arc<crate::backend::mps::Broker>,
+    filestore: &Arc<crate::backend::storage::filestore::FileStore>,
+    mstore: &Arc<crate::backend::storage::store::Store>,
+) -> bool {
+    if image_blocks_update(configured_image).is_some() {
+        return false;
+    }
+    // Taken first: a turn holds the gate shared, and then nothing below is worth asking the daemon.
+    let Some(_updating) = take_update_gate(container_name) else { return false };
+    let Some(running) = cm.base_image_version(container_name).await else { return false };
+    // Only forward: after a downgrade the container is on a NEWER image, which a banner reports but an update would
+    // replace with an older one. And only to an image already on this machine: the container is removed before the
+    // start pulls anything, so a download that then failed (offline, a slow registry) would leave an agent that
+    // used to run with nothing to run. When the image is not here yet, the banner and its button stay.
+    if !is_older(&running, CURRENT) || !cm.has_image_locally(&versioned_agent_image()).await {
+        return false;
+    }
+    if let Err(e) = cm.update_container(container_name).await {
+        tracing::warn!(container = container_name, error = %e.user_message(), "could not move an idle container to the current agent image");
+        return false;
+    }
+    told().retain(|k| !k.starts_with(&format!("{container_name}@")));
+    let frame = cli_notice::container_image_frame(provider, block_id, "auto_updated", &running, CURRENT);
+    cli_notice::append_to_pane(broker, filestore, mstore, block_id, &frame);
+    tracing::info!(block_id, container = container_name, from = %running, to = CURRENT, "idle container moved to the current agent image");
+    true
+}
+
 /// Removes `block_id`'s container so its next message starts it from this AgentMux's agent
 /// image. Only between turns. Returns the image version the next start uses.
 pub(crate) async fn update_for_block(state: &AppState, block_id: &str) -> Result<String, String> {
@@ -85,14 +161,8 @@ pub(crate) async fn update_for_block(state: &AppState, block_id: &str) -> Result
     if meta_get_string(&block.meta, "agentMode", "host") != "container" {
         return Err("this agent does not run in a container".into());
     }
-    let image = resolve_container_image(&meta_get_string(&block.meta, "agent:container_image", ""));
-    if !is_agent_base_image(&image) {
-        return Err(format!("this agent runs its own image ({image}); updating the container would start it from the same image"));
-    }
-    // `resolve_container_image` turns the default and `:latest` into this version's tag, so any
-    // other reference (another version, a digest, another tag) is a pin the update would keep.
-    if image != versioned_agent_image() {
-        return Err(format!("this agent is pinned to {image}; change its container image to update it"));
+    if let Some(why) = image_blocks_update(&meta_get_string(&block.meta, "agent:container_image", "")) {
+        return Err(why);
     }
     let agent_id = meta_get_string(&block.meta, "agentId", "");
     let container_name = crate::backend::container::container_name_for_slug(&agent_id);
@@ -177,6 +247,40 @@ mod tests {
         assert!(err.contains("pinned to ghcr.io/agentmuxai/agent-base@sha256:abc"), "{err}");
 
         assert!(update_for_block(&state, "no-such-block").await.unwrap_err().contains("no such pane"));
+    }
+
+    #[test]
+    fn a_turn_holding_the_gate_stops_the_update_and_an_idle_agent_does_not() {
+        let name = "agentmux-test-gate-for-update-if-idle";
+        let turn = crate::backend::container::drift::update_gate(name).try_read_owned().expect("a turn takes the gate shared");
+        assert!(take_update_gate(name).is_none(), "an update must not start under a turn");
+        drop(turn);
+        let updating = take_update_gate(name).expect("no turn: the update takes the gate");
+        assert!(
+            crate::backend::container::drift::update_gate(name).try_read_owned().is_err(),
+            "a turn must not start inside an update"
+        );
+        drop(updating);
+    }
+
+    #[test]
+    fn only_an_older_image_is_moved_forward() {
+        assert!(is_older("0.59.41", "0.60.2"));
+        assert!(is_older("0.60.5", "0.60.6"));
+        assert!(is_older("0.9.0", "0.10.0"), "numeric, not text");
+        assert!(!is_older("0.60.6", "0.60.6"), "the same");
+        assert!(!is_older("0.60.7", "0.60.6"), "newer: after a downgrade it is left alone");
+        assert!(!is_older("latest", "0.60.6"), "unparseable: left alone");
+        assert!(!is_older("", "0.60.6"));
+    }
+
+    #[test]
+    fn only_an_agent_on_the_default_image_follows_it() {
+        assert!(image_blocks_update("").is_none(), "the default image");
+        assert!(image_blocks_update("ghcr.io/agentmuxai/agent-base:latest").is_none(), ":latest follows the version");
+        assert!(image_blocks_update("my/own:1").unwrap().contains("runs its own image (my/own:1)"));
+        assert!(image_blocks_update("ghcr.io/agentmuxai/agent-base:0.59.41").unwrap().contains("pinned to"));
+        assert!(image_blocks_update("ghcr.io/agentmuxai/agent-base@sha256:abc").unwrap().contains("pinned to"));
     }
 
     #[test]

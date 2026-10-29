@@ -38,6 +38,9 @@ export const WpsEvent = {
     // machine (crates/srv/src/srv_info.rs). Handled as it arrives, before any
     // subscription exists (app/store/srv-info.ts noteSrvInfoMessage).
     SrvInfo: "srvinfo",
+    // srv dropped events for this window (its WebSocket lane was full); sent straight to the socket,
+    // so handled as it arrives (app/store/resync.ts noteEventsDroppedMessage).
+    EventsDropped: "ws:eventsdropped",
     UserInput: "userinput",
     AgentMessageAccepted: "agent-message-accepted",
     // Image attachment processing, scoped `block:<id>` of the pane that

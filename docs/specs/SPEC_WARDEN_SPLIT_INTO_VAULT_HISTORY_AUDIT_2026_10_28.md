@@ -128,6 +128,23 @@ So the operator's question, "can a jekt open the exact agent pane?": **yes to th
 
 The Swarm gains one entry point: a row's menu "Audit for this agent" opens the Audit pre-filtered to that agent.
 
+### Estimated token cost on every entry
+
+The operator asked that every entry, jekt included, show what it cost in tokens. Each entry carries `cost?: { input, cache_read, output, usd, basis }`, with `basis` either `measured` (the provider reported it) or `estimated` (the UI shows it with a "~"). An entry that cost nothing has no `cost`; a held or refused jekt shows "~0" rather than a gap.
+
+| Entry | What it costs | Basis |
+|---|---|---|
+| Agent turn (tool call, thought) | The usage on the assistant message that produced it, split across the tool calls and thoughts that message holds in proportion to their length | measured for Claude (each assistant message carries `usage`); estimated for a provider that reports none |
+| Jekt | What it cost the receiver: the injected text's input tokens, estimated from its length, plus, when it started a turn, that turn's measured usage (linked to the turn). The sender's row repeats the number: "this message cost the receiver ~N tokens". | estimated for the text; measured for the turn it started |
+| Agent start | The startup context loaded: startup file, Global Memory, skills, as estimated input tokens | estimated |
+| Agent end, action, failure | none | |
+
+**Why measured at the source, not summed in the pane.** The status-bar token pill is session-local in the frontend (`token-usage.ts`, reset on restart), and the Audit is durable, so the Audit cannot read its numbers back. The numbers still have to agree with the pill's: both take the provider's own figures (`usage` and `total_cost_usd` on the Claude `result` frame, which srv already reads in `PassStats::from_result_frame`) and a text length is turned into tokens by one shared function in srv. The pill keeps its own store; when it shows a number for the same turn it is the same number, not a second estimator. The first slice records per turn what the pill already receives (`input`, `cache_read`, `output`, `usd`) in the event index next to the entry it belongs to, so the Audit stays a read of three stores plus that index.
+
+**Totals.** The Audit header shows tokens and cost for the current filter (all agents, one agent, a time range), summed by srv over the same filtered set the page is cut from, so a total does not depend on how far the list is scrolled. A total that includes any `estimated` entry is shown with a "~".
+
+**Fields agreed with the server owner (Maricon-2).** `audit.query` entries gain the optional `cost` above, and the result gains `totals: { input, cache_read, output, usd, estimated: boolean }` for the filter. Providers with no usage data have `basis: "estimated"` throughout. This is phase 4, with the event index.
+
 ### Cost and ownership
 
 The three small changes in srv: the `audit.query` RPC and its merge; reading `jekt-audit.jsonl` with a cursor and filters (it is a plain JSON-lines file, newest at the end); the event index written by the history adapter. Agent5 owns the history store and its indexing (`shell/indexing.rs`, `stamps.rs`, `history/`), AgentY the jekt audit (`reactive/`); the Audit pane itself is the build owner's. The Audit stays an operator-facing view; the entry kinds carry no message text, so nothing in it is more sensitive than what the audit file already holds.

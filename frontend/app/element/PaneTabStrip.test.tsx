@@ -326,7 +326,7 @@ describe("PaneTabStrip", () => {
     // nothing. Asserting on the floating div's own `opacity` (via its
     // `data-pane-overlay` marker, tooltip.tsx's own hook for this exact
     // node) is what actually distinguishes delayMs={0} from the default.
-    it("shows the + button's tooltip almost immediately (delayMs={0}) — opacity flips well under the 300ms default", () => {
+    it("shows the + button's tooltip almost immediately (delayMs={0}) — opacity flips as soon as the panel is placed", async () => {
         vi.useFakeTimers();
         try {
             const { container } = render(() => (
@@ -350,11 +350,9 @@ describe("PaneTabStrip", () => {
             let tip = document.body.querySelector("[data-pane-overlay]") as HTMLElement;
             expect(tip).not.toBeNull();
             expect(tip.getAttribute("style")).toContain("opacity: 0");
-            // Advance far less than the Tooltip's own 300ms default — with
-            // delayMs={0} this is enough for the showTimeout to fire; with
-            // the default it would not be, which is exactly what this test
-            // guards against regressing to.
-            vi.advanceTimersByTime(10);
+            // One frame is enough for the placement (the panel stays invisible until it is
+            // placed, so it never flashes at the top-left corner).
+            await vi.advanceTimersByTimeAsync(20);
             tip = document.body.querySelector("[data-pane-overlay]") as HTMLElement;
             expect(tip.getAttribute("style")).toContain("opacity: 1");
         } finally {

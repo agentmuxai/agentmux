@@ -12,7 +12,7 @@ import { gatingNodeIds, tabSwitching } from "@/app/store/tab-reveal";
 import { caretInEditableOutsidePanes, focusedBlockId, userCaretInBlock } from "@/util/focusutil";
 import { userInThisWindow } from "@/app/store/input-owner";
 import { onPaneOverlayReleased, overlayCoversPane } from "@/app/platform/pane-overlay";
-import { getLayoutModelForStaticTab } from "@/layout/index";
+import { getLayoutModelForStaticTab, getLayoutModelForTabById } from "@/layout/index";
 
 /**
  * How many animation frames `giveBlockFocus` keeps trying a pane whose input
@@ -91,6 +91,24 @@ class FocusManager {
         if (!windowHasFocus()) return;
         const active = getLayoutModelForStaticTab();
         if (model != null && model !== active) return;
+        this.focusSelectionOf(active);
+    }
+
+    /**
+     * The caret goes to the selected pane of window tab `tabId`, which is being
+     * shown ahead of the backend's commit (a warm tab swapped in from the switch
+     * intent): the keys typed right after the click then land in the tab on
+     * screen, not in the one just left. The same guards as
+     * `ensureSelectionFocused`; the "tab-activated" net runs again once the
+     * commit lands and finds the caret already there.
+     * ANALYSIS_WINDOW_TAB_SWITCH_PAINT_2026_09_30.md §5.3.
+     */
+    focusShownTab(tabId: string): void {
+        if (!windowHasFocus()) return;
+        this.focusSelectionOf(getLayoutModelForTabById(tabId));
+    }
+
+    private focusSelectionOf(active: LayoutModelLike): void {
         // A caret the user put in the tab-rename field, a search box outside
         // the panes, … stays there.
         if (caretInEditableOutsidePanes()) return;
@@ -102,7 +120,10 @@ class FocusManager {
         // Escape and the arrows going to the page and the menu open. The
         // caret comes back when the menu is released (installFocusFollowsSelection).
         if (overlayCoversPane(blockId)) return;
-        giveBlockFocus(blockId);
+        // The model is passed on so a retry (and a press deferred to its end)
+        // keeps checking the selection of the tab it was asked for, which is not
+        // the committed tab while a warm tab is shown ahead of the backend.
+        giveBlockFocus(blockId, active);
     }
 
     /**
@@ -143,7 +164,7 @@ class FocusManager {
  * had, and ate the first click on any input in an unselected pane
  * (SPEC_PANE_CLICK_THROUGH_INPUT_FOCUS_2026_09_23.md).
  */
-export function giveBlockFocus(blockId: string): void {
+export function giveBlockFocus(blockId: string, model?: LayoutModelLike): void {
     cancelFocusRetry();
     if (userCaretInBlock(blockId)) return;
     if (pressOnDraggable) {
@@ -152,7 +173,7 @@ export function giveBlockFocus(blockId: string): void {
         // first press would only select and a second one drag. The caret
         // comes when the press ends, if the pane is still the selection.
         afterPress = () => {
-            if (getLayoutModelForStaticTab()?.focusedNode?.()?.data?.blockId === blockId) giveBlockFocus(blockId);
+            if (selectedBlockId(model) === blockId) giveBlockFocus(blockId, model);
         };
         return;
     }
@@ -161,7 +182,15 @@ export function giveBlockFocus(blockId: string): void {
     // pane (its shortcuts work) instead of on <body>, and the target is tried
     // again on the next frames in case the view is still mounting.
     document.getElementById(`${blockId}-dummy-focus`)?.focus({ preventScroll: true });
-    scheduleFocusRetry(blockId);
+    scheduleFocusRetry(blockId, model);
+}
+
+/** A tab's layout model, as far as the selection is concerned. */
+type LayoutModelLike = ReturnType<typeof getLayoutModelForStaticTab> | undefined;
+
+/** The pane selected in `model`'s tab; the active tab's when no model is given. */
+function selectedBlockId(model?: LayoutModelLike): string | undefined {
+    return (model ?? getLayoutModelForStaticTab())?.focusedNode?.()?.data?.blockId;
 }
 
 /**
@@ -263,13 +292,13 @@ function cancelFocusRetry(): void {
 }
 
 /** Keep trying `blockId`'s target while it is still the selection and the caret is still parked. */
-function scheduleFocusRetry(blockId: string): void {
+function scheduleFocusRetry(blockId: string, model?: LayoutModelLike): void {
     if (typeof requestAnimationFrame !== "function") return;
     let frames = FOCUS_RETRY_FRAMES;
     const tick = (): void => {
         focusRetry = null;
         if (--frames < 0) return;
-        if (getLayoutModelForStaticTab()?.focusedNode?.()?.data?.blockId !== blockId) return;
+        if (selectedBlockId(model) !== blockId) return;
         const active = document.activeElement;
         // Parked: on <body>, on this block's dummy, still in the pane the
         // selection just left (Cmd+, from a terminal opens Settings while the

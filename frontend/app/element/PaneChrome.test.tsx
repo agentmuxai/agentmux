@@ -1360,3 +1360,25 @@ describe("renderPaneChromeShell — progress lines and the collapsed pane", () =
         expect(pane.classList.contains("pane-stack-collapsed")).toBe(false);
     });
 });
+
+// SPEC_PANE_CLOSING_INDICATOR_AND_FASTER_CLOSE_2026_10_28.md §2: a closing pane is dimmed and inert.
+describe("renderPaneChromeShell — a closing pane", () => {
+    it("marks the pane and makes its body inert while the close runs, and live again when it is kept", () => {
+        const [closing, setClosing] = createSignal(false);
+        mockLayoutModel = fakeLayoutModel(["b1"]);
+        const { container } = render(() =>
+            renderPaneChromeShell(fakeNodeModel({ activeBlockId: () => "b1", isClosing: closing }), (<div />) as any)
+        );
+        const pane = container.querySelector(".pane-stack")!;
+        const body = container.querySelector<HTMLElement>(".pane-stack-body")!;
+        expect(pane.classList.contains("pane-stack-closing")).toBe(false);
+        expect(body.inert).toBe(false);
+        setClosing(true);
+        expect(pane.classList.contains("pane-stack-closing")).toBe(true);
+        expect(body.inert).toBe(true);
+        expect(headerCalls[headerCalls.length - 1].isClosing("b1")).toBe(true);
+        setClosing(false);
+        expect(pane.classList.contains("pane-stack-closing")).toBe(false);
+        expect(body.inert).toBe(false);
+    });
+});

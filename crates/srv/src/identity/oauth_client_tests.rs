@@ -371,6 +371,100 @@ fn only_agentmuxs_own_github_app_runs_through_the_broker() {
     assert!(!runs_through_broker("google", true, &client(ClientMode::Builtin)));
 }
 
+
+#[test]
+fn the_pickers_url_asks_for_drive_file_alone_and_opens_the_picker() {
+    let cfg = config_for("google").unwrap();
+    let url = build_picker_url(&cfg, "cid", "http://127.0.0.1:5555/callback", "st", "ch", Some("me@example.com"));
+    let q = query(&url);
+    let get = |k: &str| q.iter().find(|(n, _)| n == k).map(|(_, v)| v.as_str());
+    assert!(url.starts_with("https://accounts.google.com/o/oauth2/v2/auth?"));
+    assert_eq!(get("scope"), Some("https://www.googleapis.com/auth/drive.file"), "no other scope may ride along");
+    assert_eq!(get("trigger_onepick"), Some("true"));
+    assert_eq!(get("prompt"), Some("consent"));
+    assert_eq!(get("allow_multiple"), Some("true"));
+    assert_eq!(get("login_hint"), Some("me@example.com"), "the account's own Google user is offered first");
+    assert_eq!(get("state"), Some("st"));
+    assert_eq!(get("code_challenge_method"), Some("S256"));
+    for k in ["include_granted_scopes", "access_type"] {
+        assert_eq!(get(k), None, "{k} would combine the picker with other grants");
+    }
+}
+
+#[test]
+fn the_pickers_files_come_from_the_callback_and_only_real_ids_survive() {
+    let cb = parse_callback("GET /callback?code=c&state=s&picked_file_ids=1AbC_d-9%2Cfile2,../x,%3Cscript%3E,, HTTP/1.1\r\n\r\n");
+    assert_eq!(picked_ids(cb.picked_file_ids.as_deref()), ["1AbC_d-9", "file2"]);
+    assert!(picked_ids(None).is_empty());
+    let many: String = (0..150).map(|i| format!("id{i}")).collect::<Vec<_>>().join(",");
+    assert_eq!(picked_ids(Some(&many)).len(), MAX_PICKED);
+    // The picker's callback with no files (closed without choosing) is not an error.
+    assert!(picked_ids(parse_callback("GET /callback?code=c&state=s HTTP/1.1\r\n\r\n").picked_file_ids.as_deref()).is_empty());
+}
+
+#[test]
+fn the_picker_needs_drive_turned_on_and_the_account_s_own_client() {
+    let store = Arc::new(Store::open_in_memory().unwrap());
+    store.apply_identity_schema_for_tests().unwrap();
+    let mut acct = oauth_account("acc-1", "google", "cid");
+    acct.context["granted_scopes"] = serde_json::json!(["https://www.googleapis.com/auth/calendar.events.readonly"]);
+    let client = ResolvedClient { client_id: "cid".into(), client_secret: Some("csec".into()), mode: ClientMode::Byo };
+    let e = start_picker(acct, client, store.clone(), store).unwrap_err();
+    assert!(e.contains("turn Drive on"), "{e}");
+}
+
+#[tokio::test]
+async fn the_picker_runs_as_the_client_the_account_was_made_with() {
+    let mut acct = oauth_account("acc-1", "google", "cid-9");
+    acct.context["oauth_client"] = serde_json::json!({ "mode": "byo", "client_id": "cid-9" });
+    let secrets = MemSecrets::with("acc-1", &serde_json::json!({ "access_token": "a", "refresh_token": "r", "client_secret": "csec-9" }).to_string());
+    let c = picker_client(&secrets, &acct).await.unwrap();
+    assert_eq!((c.client_id.as_str(), c.client_secret.as_deref(), c.mode), ("cid-9", Some("csec-9"), ClientMode::Byo));
+    acct.context.as_object_mut().unwrap().remove("oauth_client");
+    assert!(picker_client(&secrets, &acct).await.unwrap_err().contains("connect it again"));
+}
+
+
+#[test]
+fn a_picker_used_as_another_google_user_is_refused_and_an_unknown_user_is_not() {
+    let e = picker_user_mismatch(Some("me@example.com"), Some("other@example.com")).unwrap();
+    assert!(e.contains("other@example.com") && e.contains("me@example.com") && e.contains("pick again"), "{e}");
+    assert!(picker_user_mismatch(Some("Me@Example.com"), Some("me@example.com")).is_none());
+    assert!(picker_user_mismatch(Some("me@example.com"), None).is_none(), "Google didn't say: the check can't run");
+    assert!(picker_user_mismatch(None, Some("x@example.com")).is_none());
+    let hintless = build_picker_url(&config_for("google").unwrap(), "cid", "http://127.0.0.1:1/callback", "s", "c", None);
+    assert!(!hintless.contains("login_hint"));
+}
+
+#[tokio::test]
+async fn a_callback_with_a_hundred_picked_files_is_read_whole() {
+    use tokio::io::AsyncWriteExt;
+    let ids: Vec<String> = (0..100).map(|i| format!("{:0>44}", i)).collect();
+    let line = format!("GET /callback?picked_file_ids={}&code=the-code&state=the-state HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n", ids.join(","));
+    assert!(line.len() > 4096, "longer than the old single read");
+    let (mut tx, mut rx) = tokio::io::duplex(512);
+    let sent = line.clone();
+    let writer = tokio::spawn(async move {
+        for part in sent.as_bytes().chunks(700) {
+            tx.write_all(part).await.unwrap();
+        }
+    });
+    let req = read_request_line(&mut rx).await;
+    writer.await.unwrap();
+    let cb = parse_callback(&req);
+    assert_eq!(cb.code.as_deref(), Some("the-code"));
+    assert_eq!(cb.state.as_deref(), Some("the-state"));
+    assert_eq!(picked_ids(cb.picked_file_ids.as_deref()).len(), 100);
+}
+
+#[tokio::test]
+async fn a_request_that_never_ends_its_line_is_cut_at_the_limit() {
+    let endless = vec![b'a'; MAX_REQUEST_LINE * 2];
+    let mut r = &endless[..];
+    let got = read_request_line(&mut r).await;
+    assert!(got.len() >= MAX_REQUEST_LINE && got.len() < MAX_REQUEST_LINE + 4096);
+}
+
 // ── Sessions: cancel is final, and per flow ─────────────────────────────────
 
 fn success() -> OAuthStatus {
@@ -478,4 +572,20 @@ fn github_through_agentmuxs_own_app_needs_a_cloud_sign_in() {
     assert!(!needs_cloud_sign_in("github", false, &client(ClientMode::Workspace)));
     assert!(!needs_cloud_sign_in("google", false, &client(ClientMode::Builtin)));
     assert_eq!(NEEDS_CLOUD_SIGN_IN, "needs-cloud-sign-in");
+}
+
+#[test]
+fn gmail_is_asked_only_on_a_client_the_person_brought() {
+    let client = |mode| ResolvedClient { client_id: "id".into(), client_secret: None, mode };
+    let gmail = vec!["https://www.googleapis.com/auth/gmail.readonly".to_string()];
+    let why = restricted_scope_needs_own_client("google", &gmail, &client(ClientMode::Builtin)).unwrap();
+    assert!(why.contains("your own Google client"), "{why}");
+    assert!(restricted_scope_needs_own_client("google", &gmail, &client(ClientMode::Byo)).is_none());
+    assert!(restricted_scope_needs_own_client("google", &gmail, &client(ClientMode::Workspace)).is_none());
+    // Full mail access is restricted too; Calendar and Drive's file scope are not.
+    let full = vec!["https://mail.google.com/".to_string()];
+    assert!(restricted_scope_needs_own_client("google", &full, &client(ClientMode::Builtin)).is_some());
+    let others = vec!["https://www.googleapis.com/auth/calendar.events.readonly".to_string(), "https://www.googleapis.com/auth/drive.file".to_string()];
+    assert!(restricted_scope_needs_own_client("google", &others, &client(ClientMode::Builtin)).is_none());
+    assert!(restricted_scope_needs_own_client("github", &gmail, &client(ClientMode::Builtin)).is_none());
 }

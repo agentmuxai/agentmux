@@ -139,7 +139,7 @@ export interface UseAgentFailureOptions {
      * Already-authenticated accounts for this agent's provider that could be
      * bound in one click — see `computeAccountBindCandidates`
      * (bind-account-candidates.ts). Reactive: the row re-derives its
-     * "Bind: <name>" / "Bind account" vs. "Connectors → Accounts" action every
+     * "Use <name>" / "Use account…" vs. "Connectors → Accounts" action every
      * time this changes. Optional so callers that haven't wired the account
      * cache yet (e.g. tests) fall back to the pre-existing Connectors-only
      * behavior. See docs/specs/SPEC_AGENT_LOGIN_FLOW_TIGHTENING_2026_09_04.md §3.

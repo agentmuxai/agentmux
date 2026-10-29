@@ -198,6 +198,94 @@ pub fn build_auth_url(
     url
 }
 
+/// The email of the account a flow is for, when it already has one.
+fn account_email(ctx: &FlowCtx) -> Option<String> {
+    match &ctx.target {
+        FlowTarget::Existing(a) => a.context.get("email").and_then(|v| v.as_str()).map(str::to_string),
+        FlowTarget::New { .. } => None,
+    }
+}
+
+/// The scope Google's desktop picker takes, and the only one it takes: the request
+/// can't be combined with other scopes (spec §3.3).
+pub const PICKER_SCOPE: &str = "https://www.googleapis.com/auth/drive.file";
+
+/// The authorization URL that opens Google's file picker in the browser:
+/// `drive.file` alone, `trigger_onepick` and `prompt=consent`, no refresh
+/// token and no earlier scopes asked for (spec §3.3, Google's "Picker for
+/// desktop and mobile apps").
+pub fn build_picker_url(
+    cfg: &ServiceOAuthConfig,
+    client_id: &str,
+    redirect_uri: &str,
+    state: &str,
+    code_challenge: &str,
+    login_hint: Option<&str>,
+) -> String {
+    let mut url = format!(
+        "{}?response_type=code&client_id={}&redirect_uri={}&scope={}&state={}&code_challenge={}&code_challenge_method=S256&prompt=consent&trigger_onepick=true&allow_multiple=true",
+        cfg.auth_url,
+        enc(client_id),
+        enc(redirect_uri),
+        enc(PICKER_SCOPE),
+        enc(state),
+        enc(code_challenge),
+    );
+    // The account the files are for, so Google offers that one first.
+    if let Some(hint) = login_hint.map(str::trim).filter(|h| !h.is_empty()) {
+        url.push_str(&format!("&login_hint={}", enc(hint)));
+    }
+    url
+}
+
+/// The Google user a picker's token belongs to, from Drive's `about` (answered to `drive.file`).
+/// None when Google doesn't say; the check then can't run.
+async fn picker_user(access_token: &str) -> Option<String> {
+    let reply = http()
+        .get("https://www.googleapis.com/drive/v3/about")
+        .query(&[("fields", "user(emailAddress)")])
+        .bearer_auth(access_token)
+        .send()
+        .await
+        .ok()?;
+    if !reply.status().is_success() {
+        return None;
+    }
+    let body: serde_json::Value = reply.json().await.ok()?;
+    body.pointer("/user/emailAddress")?.as_str().map(str::to_string)
+}
+
+/// A sentence when the picker was used as another Google user than the account's, so the
+/// files are not the account's to read. Nothing when they agree or either is unknown.
+fn picker_user_mismatch(expected: Option<&str>, got: Option<&str>) -> Option<String> {
+    match (expected.map(str::trim).filter(|s| !s.is_empty()), got) {
+        (Some(want), Some(got)) if !want.eq_ignore_ascii_case(got) => Some(format!(
+            "the file picker was used as {got}, but this AgentMux account is {want}: pick again, signed in to Google as {want}"
+        )),
+        _ => None,
+    }
+}
+
+/// The request line of an HTTP request read from `r`: everything up to the first line end,
+/// at most [`MAX_REQUEST_LINE`] bytes. The picker's callback carries every picked file id in
+/// its query, which a single small read can cut off.
+async fn read_request_line<R: tokio::io::AsyncRead + Unpin>(r: &mut R) -> String {
+    use tokio::io::AsyncReadExt;
+    let mut buf: Vec<u8> = Vec::with_capacity(4096);
+    let mut chunk = [0u8; 4096];
+    while buf.len() < MAX_REQUEST_LINE && !buf.contains(&b'\n') {
+        match r.read(&mut chunk).await {
+            Ok(0) | Err(_) => break,
+            Ok(n) => buf.extend_from_slice(&chunk[..n]),
+        }
+    }
+    String::from_utf8_lossy(&buf).into_owned()
+}
+
+/// The longest callback request line read: room for [`MAX_PICKED`] file ids with the code and
+/// the state.
+const MAX_REQUEST_LINE: usize = 32 * 1024;
+
 // ── PKCE + state helpers (RFC 7636 §4, RFC 8252 §8.9) ───────────────────────
 
 /// A PKCE verifier/challenge pair. `challenge = BASE64URL(SHA256(verifier))`.
@@ -254,6 +342,9 @@ pub enum OAuthStatus {
         email: Option<String>,
     },
     Failed { error: String },
+    /// Google's file picker finished: the Drive files the person picked for this
+    /// account's client (spec §3.3). The account's tokens are untouched.
+    Picked { account_id: String, file_ids: Vec<String> },
     /// A brokered connect for another GitHub user than the account is connected as:
     /// the flow stopped, and the frontend asks, then starts again with `replace_user`.
     ConfirmUser { current_login: String, current_id: u64, new_login: String, new_id: u64 },
@@ -261,7 +352,10 @@ pub enum OAuthStatus {
 
 impl OAuthStatus {
     pub fn is_terminal(&self) -> bool {
-        matches!(self, OAuthStatus::Success { .. } | OAuthStatus::Failed { .. } | OAuthStatus::ConfirmUser { .. })
+        matches!(
+            self,
+            OAuthStatus::Success { .. } | OAuthStatus::Failed { .. } | OAuthStatus::ConfirmUser { .. } | OAuthStatus::Picked { .. }
+        )
     }
 }
 
@@ -738,12 +832,52 @@ pub fn start(
     if needs_cloud_sign_in(ctx.cfg.provider, opts.cloud_signed_in, &ctx.client) {
         return Err(NEEDS_CLOUD_SIGN_IN.to_string());
     }
+    if let Some(why) = restricted_scope_needs_own_client(ctx.cfg.provider, &ctx.requested, &ctx.client) {
+        return Err(why);
+    }
     let brokered = runs_through_broker(ctx.cfg.provider, opts.cloud_signed_in, &ctx.client);
     match ctx.cfg.flow {
-        OAuthFlow::AuthCodePkce => start_code_flow(ctx, None),
-        OAuthFlow::Device if brokered => start_code_flow(ctx, Some(BrokerLeg { replace: opts.replace_user })),
+        OAuthFlow::AuthCodePkce => start_code_flow(ctx, None, false),
+        OAuthFlow::Device if brokered => start_code_flow(ctx, Some(BrokerLeg { replace: opts.replace_user }), false),
         OAuthFlow::Device => start_device_flow(ctx),
     }
+}
+
+/// Open Google's file picker for `account` in the system browser, with the client the
+/// account was made with (a picked file is the client's to read, so no other client
+/// will do). The result is [`OAuthStatus::Picked`]; the account's tokens are not
+/// changed. Needs Drive turned on for the account (`drive.file` granted).
+pub fn start_picker(
+    account: IdentityAccount,
+    client: ResolvedClient,
+    mstore: Arc<Store>,
+    identity_store: Arc<Store>,
+) -> Result<(String, OAuthStatus), String> {
+    check_reauth_target(&account, "google")?;
+    let granted = account.context.get("granted_scopes").and_then(|v| v.as_array());
+    if !granted.is_some_and(|g| g.iter().any(|s| s.as_str() == Some(PICKER_SCOPE))) {
+        return Err("turn Drive on for this account first: it hasn't granted the Drive permission".to_string());
+    }
+    let cfg = config_for("google").ok_or("unknown OAuth provider: google")?;
+    let ctx = FlowCtx {
+        cfg,
+        client,
+        target: FlowTarget::Existing(account),
+        requested: vec![PICKER_SCOPE.to_string()],
+        save_client: false,
+        mstore,
+        identity_store,
+    };
+    start_code_flow(ctx, None, true)
+}
+
+/// The client `account` was made with, secret included (its token blob keeps a copy, D8):
+/// the picker has to run as that client.
+pub async fn picker_client<S: TokenSecrets>(secrets: &S, account: &IdentityAccount) -> Result<ResolvedClient, String> {
+    let (mode, client_id) = oauth_tokens::account_client(account)
+        .ok_or("this account doesn't record which OAuth client it was made with: connect it again first")?;
+    let client_secret = secrets.get(&account.id).await?.and_then(|raw| TokenBlob::parse(&raw)).and_then(|b| b.client_secret.clone());
+    Ok(ResolvedClient { client_id, client_secret, mode })
 }
 
 /// What a GitHub connect answers when the person isn't signed in to AgentMux Cloud: a code the UI
@@ -756,6 +890,21 @@ pub const NEEDS_CLOUD_SIGN_IN: &str = "needs-cloud-sign-in";
 /// in to AgentMux Cloud. A client the person brought is their own App and costs us nothing.
 fn needs_cloud_sign_in(provider: &str, cloud_signed_in: bool, client: &ResolvedClient) -> bool {
     provider == github_connect::PROVIDER && !cloud_signed_in && client.mode == ClientMode::Builtin
+}
+
+/// Google's restricted Gmail scopes (every `gmail.*` one, and full mail access): Google reviews an
+/// app that asks for them and, for a server-side app, requires a yearly security assessment. Until
+/// AgentMux's own client has been through that, they are asked only on a client the person brought
+/// (their own, or their organization's internal one).
+fn is_restricted_gmail_scope(scope: &str) -> bool {
+    scope == "https://mail.google.com/" || scope.starts_with("https://www.googleapis.com/auth/gmail.")
+}
+
+/// Why `requested` can't be asked on `client`, if it can't.
+fn restricted_scope_needs_own_client(provider: &str, requested: &[String], client: &ResolvedClient) -> Option<String> {
+    (provider == "google" && client.mode == ClientMode::Builtin && requested.iter().any(|s| is_restricted_gmail_scope(s))).then(|| {
+        "Gmail can't be turned on with AgentMux's own Google client yet: it needs Google's review for mail access. Connect with your own Google client (or your organization's internal one) to use Gmail".to_string()
+    })
 }
 
 /// Whether a GitHub connect goes through AgentMux Cloud's broker: the person is signed in to
@@ -795,8 +944,8 @@ async fn broker_exchange(ctx: &FlowCtx, code: &str, verifier: &str, redirect_uri
     }
 }
 
-fn start_code_flow(ctx: FlowCtx, broker: Option<BrokerLeg>) -> Result<(String, OAuthStatus), String> {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+fn start_code_flow(ctx: FlowCtx, broker: Option<BrokerLeg>, picker: bool) -> Result<(String, OAuthStatus), String> {
+    use tokio::io::AsyncWriteExt;
     use tokio::net::TcpListener;
 
     let pkce = pkce_pair();
@@ -818,8 +967,11 @@ fn start_code_flow(ctx: FlowCtx, broker: Option<BrokerLeg>) -> Result<(String, O
         let port = listener.local_addr().map(|a| a.port()).unwrap_or(0);
         let redirect_uri = format!("http://127.0.0.1:{port}/callback");
 
-        let auth_url =
-            build_auth_url(&ctx.cfg, &ctx.client.client_id, &redirect_uri, &ctx.requested, &state, &pkce.challenge);
+        let auth_url = if picker {
+            build_picker_url(&ctx.cfg, &ctx.client.client_id, &redirect_uri, &state, &pkce.challenge, account_email(&ctx).as_deref())
+        } else {
+            build_auth_url(&ctx.cfg, &ctx.client.client_id, &redirect_uri, &ctx.requested, &state, &pkce.challenge)
+        };
         manager().set_status(&sid, OAuthStatus::UrlAvailable { auth_url: auth_url.clone() });
         open_browser(&auth_url);
 
@@ -837,9 +989,7 @@ fn start_code_flow(ctx: FlowCtx, broker: Option<BrokerLeg>) -> Result<(String, O
                 return;
             }
         };
-        let mut buf = [0u8; 4096];
-        let n = stream.read(&mut buf).await.unwrap_or(0);
-        let req = String::from_utf8_lossy(&buf[..n]);
+        let req = read_request_line(&mut stream).await;
         let callback = parse_callback(&req);
         let _ = stream
             .write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n<html><body>You can close this tab and return to AgentMux.</body></html>")
@@ -852,6 +1002,44 @@ fn start_code_flow(ctx: FlowCtx, broker: Option<BrokerLeg>) -> Result<(String, O
         }
         if let Some(code) = callback.error.as_deref() {
             manager().set_status(&sid, OAuthStatus::Failed { error: callback_error_message(ctx.cfg.provider, code) });
+            return;
+        }
+        // The picker's answer is the files. A code that comes with them is exchanged only so
+        // Google finishes the grant; its tokens are dropped (the account keeps its own).
+        if picker {
+            let file_ids = picked_ids(callback.picked_file_ids.as_deref());
+            if let Some(code) = callback.code.clone() {
+                let mut params = vec![
+                    ("grant_type", "authorization_code".to_string()),
+                    ("client_id", ctx.client.client_id.clone()),
+                    ("code", code),
+                    ("redirect_uri", redirect_uri.clone()),
+                    ("code_verifier", pkce.verifier.clone()),
+                ];
+                if let Some(secret) = ctx.client.client_secret.as_ref() {
+                    params.push(("client_secret", secret.clone()));
+                }
+                match exchange(ctx.cfg.token_url, &params).await {
+                    Ok(tokens) => {
+                        let user = match tokens.get("access_token").and_then(|v| v.as_str()) {
+                            Some(t) => picker_user(t).await,
+                            None => None,
+                        };
+                        if let Some(error) = picker_user_mismatch(account_email(&ctx).as_deref(), user.as_deref()) {
+                            manager().set_status(&sid, OAuthStatus::Failed { error });
+                            return;
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(target: "identity", error = %e, "identity.oauth: the picker's code wasn't exchanged; the picked files may still be usable");
+                    }
+                }
+            }
+            let account_id = match &ctx.target {
+                FlowTarget::Existing(a) => a.id.clone(),
+                FlowTarget::New { .. } => String::new(),
+            };
+            manager().set_status(&sid, OAuthStatus::Picked { account_id, file_ids });
             return;
         }
         let code = match callback.code {
@@ -1003,6 +1191,22 @@ struct Callback {
     state: Option<String>,
     /// The OAuth `error` (RFC 6749 §4.1.2.1), kept to `[a-z_]`.
     error: Option<String>,
+    /// Google's picker: the ids of the files the person picked, comma separated.
+    picked_file_ids: Option<String>,
+}
+
+/// The most files one pick returns.
+const MAX_PICKED: usize = 100;
+
+/// Drive file ids from the picker's `picked_file_ids`: letters, digits, `-` and `_` only.
+fn picked_ids(raw: Option<&str>) -> Vec<String> {
+    raw.unwrap_or("")
+        .split(',')
+        .map(str::trim)
+        .filter(|id| !id.is_empty() && id.len() <= 128 && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'))
+        .take(MAX_PICKED)
+        .map(str::to_string)
+        .collect()
 }
 
 /// Extract `code`, `state` and `error` from a raw HTTP request line
@@ -1017,6 +1221,7 @@ fn parse_callback(req: &str) -> Callback {
         match (it.next(), it.next()) {
             (Some("code"), Some(v)) => out.code = Some(percent_decode(v)),
             (Some("state"), Some(v)) => out.state = Some(percent_decode(v)),
+            (Some("picked_file_ids"), Some(v)) => out.picked_file_ids = Some(percent_decode(v)),
             (Some("error"), Some(v)) => {
                 let clean: String = percent_decode(v)
                     .chars()

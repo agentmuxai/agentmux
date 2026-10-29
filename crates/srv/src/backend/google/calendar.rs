@@ -125,7 +125,7 @@ fn page(args: &CalendarArgs, query: &mut Vec<(&'static str, String)>) {
 
 /// The request to Google for a read action.
 pub fn plan(action: &str, args: &CalendarArgs, now: DateTime<Utc>) -> Result<GoogleRequest, String> {
-    let get = |url: String, query| GoogleRequest { method: reqwest::Method::GET, url, query, body: None };
+    let get = |url: String, query| GoogleRequest { method: reqwest::Method::GET, url, query, body: None, text: false };
     let tz = args.time_zone.as_deref().map(str::trim).filter(|s| !s.is_empty());
     match action {
         "list_calendars" => {
@@ -174,7 +174,7 @@ pub fn plan(action: &str, args: &CalendarArgs, now: DateTime<Utc>) -> Result<Goo
             if let Some(tz) = tz {
                 body["timeZone"] = json!(tz);
             }
-            Ok(GoogleRequest { method: reqwest::Method::POST, url: format!("{API}/freeBusy"), query: Vec::new(), body: Some(body) })
+            Ok(GoogleRequest { method: reqwest::Method::POST, url: format!("{API}/freeBusy"), query: Vec::new(), body: Some(body), text: false })
         }
         other => Err(format!("Calendar has no action \"{other}\"; one of {}", READ_ACTIONS.join(", "))),
     }

@@ -7,6 +7,19 @@
 use super::*;
 
 impl PersistentSubprocessController {
+    /// A lease handle of this pane found its lease gone. When the pane's current handle still holds it, the
+    /// loss is an older handle's, superseded by this pane's own newer claim (a start that overlapped an
+    /// earlier one, 2026-10-29): the current process is not the one that lost the agent, so it keeps
+    /// running. Otherwise the pane lost the agent and stops.
+    pub(super) fn on_lease_lost(inner: &Arc<Mutex<PersistentInner>>, block_id: &str, why: &str) {
+        let current = inner.lock().unwrap().agent_lease.clone();
+        if current.is_some_and(|l| l.verify().is_ok()) {
+            tracing::warn!(block_id, why, "agent_admission: an older lease handle of this pane was superseded by its own newer claim — the current process is kept");
+            return;
+        }
+        Self::stop_after_lease_loss(inner, block_id, why);
+    }
+
     pub fn stop_process(&self, force: bool) -> Result<(), String> {
         let request = if force {
             KillRequest::Force

@@ -42,6 +42,7 @@ import { cancelFlashPattern, flashElement, onActivityFlash } from "@/app/notific
 import { LOCATE_PILL_FLASH, onPaneLocate, onPaneLocatePlay } from "@/app/util/pane-locate";
 import { shouldReduceMotion } from "@/app/motion/motion";
 import { DURATION_BASE_MS, EASE_OUT } from "@/app/motion/tokens";
+import { usePulseWhen } from "@/app/motion/solid";
 import { isModKey, isWindows } from "@/util/platformutil";
 import { Tooltip } from "./tooltip";
 import { classifyPillClick, markPillDragEnded, msSinceLastPillDrag } from "./pane-tab-gesture";
@@ -256,6 +257,8 @@ export interface PaneTabStripProps<T> {
     /** The pane is collapsed. The selected pill of an expanded pane shows no line (its
      *  pane's border and transcript already say it); in a collapsed pane it does. */
     collapsed?: Accessor<boolean>;
+    /** This tab's close is under way: its pill dims and shows a spinner in place of its ×. */
+    isClosing?: (tab: T) => boolean;
 
     onActivate: (id: string) => void;
     /** A plain left-click on a pill, active or not, before `onActivate` (which a
@@ -408,9 +411,15 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
     // `foreignHover`, so the class toggles are applied in the same frame.
     const [flash, setFlash] = createSignal<HoverFlash>("blink");
     let hover: Hover | null = null;
+    // The element that flashes, to size the hover against the flash rule (drop-blink-clock.ts).
+    let flashEl: HTMLElement | undefined;
+    const flashArea = (): number | undefined => {
+        const r = flashEl?.getBoundingClientRect();
+        return r ? r.width * r.height : undefined;
+    };
     const beginForeignHover = () => {
         hover?.end();
-        hover = beginHover();
+        hover = beginHover(performance.now(), flashArea());
         batch(() => {
             setFlash(hover!.kind);
             setForeignHover(true);
@@ -438,6 +447,7 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
         const el = foreignDropRootFor(strip);
         // The flash goes on the header either way (`foreignDropHighlightFor`).
         const highlightEl = foreignDropHighlightFor(strip);
+        flashEl = highlightEl;
         if (highlightEl !== strip) {
             setHighlightStrip(false);
             // `highlightEl` is blockframe.tsx's element, outside this
@@ -684,6 +694,7 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
                             flashOnActivity={props.flashOnActivity}
                             useProgress={props.useProgress}
                             collapsed={props.collapsed}
+                            isClosing={props.isClosing}
                             onActivate={props.onActivate}
                             onSelect={props.onSelect}
                             selection={props.selection}
@@ -741,6 +752,7 @@ interface PaneTabStripItemProps<T> {
     flashOnActivity?: boolean;
     useProgress?: (tab: T) => Accessor<PaneTabProgress | null>;
     collapsed?: Accessor<boolean>;
+    isClosing?: (tab: T) => boolean;
     onActivate: (id: string) => void;
     onSelect?: (id: string) => void;
     selection?: PaneTabSelectionApi;
@@ -769,6 +781,13 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
     const id = () => props.getId(props.tab);
     const attention = () => props.getAttention?.(props.tab) ?? false;
     let pillRef: HTMLDivElement | undefined;
+    // The pill that just landed plays the landing bounce (`.pane-tab--landing` marks it while it
+    // does, for the strip's reveal to wait out). On the pill, not its `.pane-tab-tip` wrapper: the
+    // wrapper owns the flex sizing, so a transform here never moves its neighbours.
+    usePulseWhen(
+        () => pillRef,
+        () => !!landedTab()?.ids.has(id()) && landedTab()?.paneKey === landingKey()
+    );
     // The pane a landing bounce is for: the block, for document tabs.
     const landingKey = () => props.docDrag?.blockId ?? props.paneKey;
     const isDragging = () =>
@@ -1039,8 +1058,10 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
         props.onDoubleClick?.(props.tab);
     };
 
+    const closing = () => props.isClosing?.(props.tab) ?? false;
     const onCloseClick = (e: MouseEvent) => {
         e.stopPropagation();
+        if (closing()) return;
         props.onClose?.(id());
     };
 
@@ -1097,6 +1118,7 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
                 classList={{
                     "pane-tab--active": props.active,
                     "pane-tab--attention": attention(),
+                    "pane-tab--closing": closing(),
                     "pane-tab--dragging": isDragging(),
                     "pane-tab--drop-before": dropSide() === "before",
                     "pane-tab--drop-after": dropSide() === "after",
@@ -1153,13 +1175,14 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
                     <button
                         class="pane-tab-close"
                         onClick={onCloseClick}
-                        title={attention() ? "Close (unsaved changes)" : "Close"}
-                        aria-label="Close tab"
+                        title={closing() ? "Closing…" : attention() ? "Close (unsaved changes)" : "Close"}
+                        aria-label={closing() ? "Closing tab" : "Close tab"}
+                        disabled={closing()}
                     >
                         {/* Always in the DOM for attention tabs (closing
                             those may need confirmation); hover-shown
                             otherwise, purely via CSS opacity. */}
-                        <i class="fa-solid fa-xmark" aria-hidden="true" />
+                        <i class={closing() ? "fa-solid fa-spinner fa-spin" : "fa-solid fa-xmark"} aria-hidden="true" />
                     </button>
                 </Show>
             </div>

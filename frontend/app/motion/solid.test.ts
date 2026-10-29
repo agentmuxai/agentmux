@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("./motion", () => ({ shouldReduceMotion: () => false }));
 
-import { useMotion } from "./solid";
+import { useMotion, usePulseWhen } from "./solid";
 import { installFakeAnimate, type FakeAnimate } from "./test-utils";
 
 let fake: FakeAnimate;
@@ -49,5 +49,40 @@ describe("useMotion", () => {
         await Promise.resolve();
         dispose();
         expect(cleanup).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe("usePulseWhen", () => {
+    it("pulses the element each time the flag turns true, and not while it stays true", async () => {
+        const { createSignal } = await import("solid-js");
+        const el = document.body.appendChild(document.createElement("div"));
+        const [flag, setFlag] = createSignal(false);
+        const dispose = createRoot((dispose) => {
+            usePulseWhen(() => el, flag);
+            return dispose;
+        });
+        expect(fake.calls).toHaveLength(0);
+        setFlag(true);
+        expect(fake.calls).toHaveLength(1);
+        expect(fake.calls[0].el).toBe(el);
+        expect(fake.calls[0].keyframes[0]).toMatchObject({ transform: "scaleX(0.88)" });
+        setFlag(false);
+        setFlag(true);
+        expect(fake.calls).toHaveLength(2);
+        dispose();
+    });
+
+    it("pulses at once when the flag starts true, and cancels the pulse with its owner", () => {
+        const el = document.body.appendChild(document.createElement("div"));
+        const dispose = createRoot((dispose) => {
+            usePulseWhen(
+                () => el,
+                () => true
+            );
+            return dispose;
+        });
+        expect(fake.calls).toHaveLength(1);
+        dispose();
+        expect(fake.calls[0].ended).toBe(true);
     });
 });

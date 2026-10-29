@@ -315,6 +315,20 @@ impl ContainerStartup {
     /// [`run`](Self::run) for a start nobody asked for yet (the pre-start): a failure shows as its start or
     /// install row, with no error result on the pane, since no turn is there to end with one.
     pub(crate) async fn run_quietly(&self) -> Result<(), String> {
+        // No turn holds the container here, so an agent whose container runs an older agent image than this
+        // AgentMux moves to the current one before it starts, and the pane says so. (A turn's own start holds the
+        // update gate shared for the whole turn, so it cannot do this: it would always find the gate taken.)
+        crate::server::app_api::container_update::update_if_idle(
+            &self.cm,
+            &self.container_name,
+            &self.image,
+            &self.provider_id,
+            &self.block_id,
+            &self.broker,
+            &self.filestore,
+            &self.mstore,
+        )
+        .await;
         self.run_reporting(false).await
     }
 

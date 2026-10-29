@@ -78,6 +78,7 @@ const createResponse = { definition_id: "def-1", identity_id: "id-work", memory_
 
 beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
     // toolchain-capabilities is a module-level singleton shared across every
     // test in this file (and every real consumer in the app) — reset it so
     // one test's mocked ContainerRuntimeAvailableCommand result can't leak
@@ -251,6 +252,59 @@ describe("AgentCreateForm", () => {
         expect(containerOpt.disabled).toBe(false);
         await settle();
         expect((await submitAndGetPayload()).agent_type).toBe("container");
+    });
+
+    describe("the remembered runtime", () => {
+        const containerTemplate = { ...template, agent_type: "container" } as AgentDefinition;
+
+        it("remembers an explicit Native over the template's container default", async () => {
+            vi.mocked(RpcApi.ContainerRuntimeAvailableCommand).mockResolvedValue({ available: true });
+            renderForm({ tpl: containerTemplate });
+            const select = screen.getByTestId("create-from-template-runtime-select") as HTMLSelectElement;
+            await waitFor(() => expect(select.value).toBe("container"));
+            fireEvent.change(select, { target: { value: "host" } });
+            cleanup();
+            renderForm({ tpl: containerTemplate });
+            const next = screen.getByTestId("create-from-template-runtime-select") as HTMLSelectElement;
+            await waitFor(() => expect(RpcApi.ContainerImageCheckCommand).toHaveBeenCalled());
+            await settle();
+            expect(next.value).toBe("host");
+        });
+
+        it("remembers an explicit Container for a template that suggests Native", async () => {
+            vi.mocked(RpcApi.ContainerRuntimeAvailableCommand).mockResolvedValue({ available: true });
+            renderForm({ tpl: template });
+            const select = screen.getByTestId("create-from-template-runtime-select") as HTMLSelectElement;
+            await waitFor(() => expect(Array.from(select.options).find((o) => o.value === "container")!.disabled).toBe(false));
+            fireEvent.change(select, { target: { value: "container" } });
+            cleanup();
+            renderForm({ tpl: template });
+            const next = screen.getByTestId("create-from-template-runtime-select") as HTMLSelectElement;
+            await waitFor(() => expect(next.value).toBe("container"));
+        });
+
+        it("falls back to Native when the remembered Container can't run", async () => {
+            localStorage.setItem("agentCreate:lastRuntime", "container");
+            renderForm({ tpl: containerTemplate });
+            const select = screen.getByTestId("create-from-template-runtime-select") as HTMLSelectElement;
+            await settle();
+            expect(select.value).toBe("host");
+        });
+
+        it("does not remember a default it picked itself", async () => {
+            vi.mocked(RpcApi.ContainerRuntimeAvailableCommand).mockResolvedValue({ available: true });
+            renderForm({ tpl: containerTemplate });
+            const select = screen.getByTestId("create-from-template-runtime-select") as HTMLSelectElement;
+            await waitFor(() => expect(select.value).toBe("container"));
+            expect(localStorage.getItem("agentCreate:lastRuntime")).toBeNull();
+        });
+
+        it("explains Container and Native in the runtime row", () => {
+            renderForm({ tpl: template });
+            expect(screen.getByTestId("create-from-template-runtime-note").textContent).toBe(
+                "Container: runs in Docker, sandboxed. Native: runs on this computer with your files and tools.",
+            );
+        });
     });
 
     describe("when the container image can't be had", () => {

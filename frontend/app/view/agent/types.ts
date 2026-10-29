@@ -725,10 +725,11 @@ export interface CliNoticeNode {
     percent?: number;
     /** `container_start`: the image being started. */
     image?: string;
-    /** `container_image`: the container runs an older agent image (`outdated`), or has been removed so
-     *  the next message starts it from the current one (`updated`). `running` and `current` are the
+    /** `container_image`: the container runs an older agent image (`outdated`), has been removed so
+     *  the next message starts it from the current one (`updated`), or was moved to the current one by AgentMux
+     *  while the agent was idle (`auto_updated`). `running` and `current` are the
      *  image versions; `blockId` is the pane the update acts on. */
-    imageState?: "outdated" | "updated";
+    imageState?: "outdated" | "updated" | "auto_updated";
     running?: string;
     current?: string;
     blockId?: string;
