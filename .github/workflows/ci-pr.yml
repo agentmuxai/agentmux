@@ -585,8 +585,12 @@ jobs:
           path: ${{ runner.temp }}\nextest-archive
       # The archive holds the test binaries; the checkout is where they run
       # (their working folder, the nextest profile and the test data files).
+      # `--extract-to` must name a folder that already exists (nextest resolves it
+      # before extracting), so it is made first.
       - name: cargo nextest (CEF-free crates, one third)
-        run: cargo nextest run --profile ci --archive-file "$env:RUNNER_TEMP\nextest-archive\nextest-windows.tar.zst" --extract-to "$env:RUNNER_TEMP\nextest-extracted" --workspace-remap "$env:GITHUB_WORKSPACE" --partition count:${{ matrix.shard }}/3
+        run: |
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\nextest-extracted" | Out-Null
+          cargo nextest run --profile ci --archive-file "$env:RUNNER_TEMP\nextest-archive\nextest-windows.tar.zst" --extract-to "$env:RUNNER_TEMP\nextest-extracted" --workspace-remap "$env:GITHUB_WORKSPACE" --partition count:${{ matrix.shard }}/3
 
   # Everything but srv, the crate that takes most of the build: the quick
   # signal for the other crates, which the shards above also run.
