@@ -756,6 +756,7 @@ partial list.
 | [`SPEC_PER_WINDOW_THEME_AND_OPACITY_2026_10_12`](SPEC_PER_WINDOW_THEME_AND_OPACITY_2026_10_12.md) | Per-window theme and opacity: one opacity per window, a theme per window, new windows inherit |
 | [`SPEC_POOL_ADOPTION_AND_WINDOW_ROW_CRUMB_2026_07_11`](SPEC_POOL_ADOPTION_AND_WINDOW_ROW_CRUMB_2026_07_11.md) | SPEC: Pool adoption for foreign labels + srv window-row label crumb + non-Windows close verification |
 | [`SPEC_PROCESS_AND_TURN_STATE_TRACKING_CONSOLIDATION_2026_07_31`](SPEC_PROCESS_AND_TURN_STATE_TRACKING_CONSOLIDATION_2026_07_31.md) | SPEC — Process & Turn-State Tracking: This Session's Findings, and the Case for a Unified State Machine |
+| [`SPEC_PROVIDER_CARD_TAGS_FREE_LOCAL_2026_10_29`](SPEC_PROVIDER_CARD_TAGS_FREE_LOCAL_2026_10_29.md) | SPEC: provider-card tags (Free, Local), card filters, and a free-signup guide |
 | [`SPEC_PROVIDER_LOGIN_THROUGH_SRV_2026_10_09`](SPEC_PROVIDER_LOGIN_THROUGH_SRV_2026_10_09.md) | SPEC: One provider-login implementation, in srv |
 | [`SPEC_REAUTH_FROM_AUTH_ERROR_2026_06_20`](SPEC_REAUTH_FROM_AUTH_ERROR_2026_06_20.md) | SPEC: Re-authentication from Agent Auth Failure |
 | [`SPEC_RECOVERY_NOTICES_AND_TOASTS_2026_10_16`](SPEC_RECOVERY_NOTICES_AND_TOASTS_2026_10_16.md) | Spec: tell the user what happened after AgentMux recovers, and fix the toasts that carry it |
@@ -939,7 +940,6 @@ partial list.
 | [`SPEC_PILLAR1_STEP3_WINDOW_TOPOLOGY_2026_07_07`](SPEC_PILLAR1_STEP3_WINDOW_TOPOLOGY_2026_07_07.md) | Pillar 1 Step 3 — Persist Window Kind + Parent Linkage to srv |
 | [`SPEC_PILLAR1_STEP4_CRASH_REPROJECT_2026_07_07`](SPEC_PILLAR1_STEP4_CRASH_REPROJECT_2026_07_07.md) | Pillar 1 Step 4 — Crash Reproject: Automatic Multi-Window Reconstruction |
 | [`SPEC_POOL_WINDOW_HWND_NULL_2026_05_06`](SPEC_POOL_WINDOW_HWND_NULL_2026_05_06.md) | Pool window HWND-null at promote time |
-| [`SPEC_PROVIDER_CARD_TAGS_FREE_LOCAL_2026_10_29`](SPEC_PROVIDER_CARD_TAGS_FREE_LOCAL_2026_10_29.md) | SPEC: provider-card tags (Free, Local), card filters, and a free-signup guide |
 | [`SPEC_PROVIDER_CLI_VERSION_UPGRADE_2026_09_06`](SPEC_PROVIDER_CLI_VERSION_UPGRADE_2026_09_06.md) | Provider CLI version upgrade (2026-09-06 drift report) |
 | [`SPEC_PROVIDER_ISOLATION_2026_06_20`](SPEC_PROVIDER_ISOLATION_2026_06_20.md) | SPEC: Provider environment isolation — never touch the user's `~/.claude` or global CLI |
 | [`SPEC_RELEASE_CICD_CORRECTION_2026_06_30`](SPEC_RELEASE_CICD_CORRECTION_2026_06_30.md) | Release CI/CD Correction — remove the `dl.agentmux.ai` fabrication |

@@ -1,6 +1,6 @@
 # SPEC: provider-card tags (Free, Local), card filters, and a free-signup guide
 
-**Status:** proposed — approved by the operator on 2026-10-29 ("sounds good, go with recommendations"); nothing visible has shipped, the first PR adds only the access data (§5). Owner: Korp@narko. Written 2026-10-29 against origin/main `ff3eff050`.
+**Status:** active — approved by the operator on 2026-10-29 ("sounds good, go with recommendations"). Shipped in PR #5849: the access data, its freshness rules and the card filters' logic (§5, §6 as pure functions), with tests. Remains: the card tags on the kit's `Tag` primitive, the filter chips, the "Get started free" step, and the follow-ups in §10. Owner: Korp@narko. Written 2026-10-29 against origin/main `ff3eff050`.
 Inputs: `docs/reports/REPORT_FREE_AND_LOCAL_PROVIDER_OPTIONS_2026_10_29.md` (every claim in the data file below comes from it, with its source and date) and Camper-2's `SPEC_UI_PANEL_PRIMITIVE_2026_10_29.md` §9 (the `Tag` primitive this builds on).
 Mock (rendered from real tokens, not built): `docs/specs/mock-10964/cards.png`, source `cards.html` next to it.
 
