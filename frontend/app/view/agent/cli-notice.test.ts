@@ -152,6 +152,23 @@ describe("a container that runs an older agent image", () => {
         expect(updated).toMatchObject({ imageState: "updated", current: "0.60.2" });
     });
 
+    it("says what AgentMux did when it moved an idle agent's container itself, and which version it was on", () => {
+        const auto = cliNoticeText(parseCliNoticeFrame(containerImage("auto_updated"), 0) as CliNoticeNode);
+        expect(auto).toMatchObject({ label: "Updated the container to the 0.60.2 image", tone: "info" });
+        expect(auto.detail).toContain("0.59.41");
+        expect(auto.detail).toContain("the workspace and memory are kept");
+        const row = parseCliNoticeFrame(containerImage("auto_updated"), 0);
+        expect(row).toMatchObject({ kind: "container_image", imageState: "auto_updated" });
+        expect(row?.id).toBe(parseCliNoticeFrame(containerImage("outdated"), 0)?.id);
+    });
+
+    it("names the AgentMux that is running now, not the one that wrote the row", () => {
+        const row = parseCliNoticeFrame(containerImage("outdated"), 0) as CliNoticeNode; // written by 0.60.2
+        expect(cliNoticeText(row).detail).toContain("This AgentMux runs 0.60.2.");
+        expect(cliNoticeText(row, "0.60.6").detail).toContain("This AgentMux runs 0.60.6.");
+        expect(cliNoticeText(row, "").detail).toContain("This AgentMux runs 0.60.2.");
+    });
+
     it("says which image it uses and what updating costs, then that the container is gone", () => {
         const text = (state: string, extra: Record<string, unknown> = {}) =>
             cliNoticeText(parseCliNoticeFrame(containerImage(state, extra), 0) as CliNoticeNode);

@@ -36,6 +36,10 @@ pub struct AuditQueryReq {
     #[serde(default)]
     #[ts(optional)]
     pub limit: Option<u32>,
+    /// Also answer `totals` over every entry the filter matches, not only this page.
+    #[serde(default)]
+    #[ts(optional)]
+    pub totals: Option<bool>,
 }
 
 /// Where an entry can be opened in the agent's history: `HistoryNavigator.locate({ at_ms | at_byte })`.
@@ -141,6 +145,27 @@ pub struct AuditEntry {
     pub links: AuditLinks,
 }
 
+/// The cost of every entry a filter matches (all of them, not a page).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct AuditTotals {
+    /// Entries that match.
+    #[ts(type = "number")]
+    pub entries: u64,
+    #[ts(type = "number")]
+    pub input: u64,
+    #[ts(type = "number")]
+    pub cache_read: u64,
+    #[ts(type = "number")]
+    pub output: u64,
+    /// Absent when no matching entry has a price.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub usd: Option<f64>,
+    /// Some of what is summed is estimated.
+    pub estimated: bool,
+}
+
 /// What `audit.query` answers: newest first.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
@@ -153,4 +178,8 @@ pub struct AuditQueryResult {
     /// Requested kinds that aren't recorded yet (`tool`, `thought`).
     #[serde(default)]
     pub not_recorded: Vec<String>,
+    /// When asked for (`totals`): over everything the filter matches.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub totals: Option<AuditTotals>,
 }

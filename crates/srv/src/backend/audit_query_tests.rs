@@ -340,3 +340,45 @@ fn a_start_or_end_points_at_the_zone_its_bytes_are_in_after_new_conversation_arc
         ]
     );
 }
+
+#[test]
+fn totals_cover_everything_the_filter_matches_not_the_page_and_only_when_asked() {
+    let world = World::new(&many());
+    assert!(world.run(AuditQueryReq::default()).unwrap().totals.is_none());
+    let page = world.run(AuditQueryReq { limit: Some(5), totals: Some(true), ..Default::default() }).unwrap();
+    assert_eq!(page.entries.len(), 5);
+    let all = page.totals.unwrap();
+    assert_eq!((all.entries, all.input, all.cache_read, all.output, all.usd, all.estimated), (120, 12_000, 0, 0, None, true));
+    let opaz = world.run(AuditQueryReq { agent_id: Some("opaz".into()), totals: Some(true), ..Default::default() }).unwrap().totals.unwrap();
+    assert_eq!((opaz.entries, opaz.input), (60, 6_000));
+    let range = world.run(AuditQueryReq { since_ms: Some(1_100), totals: Some(true), ..Default::default() }).unwrap().totals.unwrap();
+    assert_eq!(range.entries, 20);
+}
+
+#[test]
+fn totals_carry_on_from_where_the_last_scan_stopped_and_start_again_for_a_new_file() {
+    let world = World::new(&many());
+    let totals = |world: &World| world.run(AuditQueryReq { totals: Some(true), ..Default::default() }).unwrap().totals.unwrap();
+    assert_eq!(totals(&world).entries, 120);
+    // More is appended, and a line the writer hasn't finished isn't counted yet.
+    let mut text = std::fs::read_to_string(&world.jekts).unwrap();
+    for e in [audit_entry(2_000, "Korp", "Opaz"), audit_entry(2_001, "Korp", "Opaz")] {
+        text.push_str(&serde_json::to_string(&e).unwrap());
+        text.push('\n');
+    }
+    text.push_str("{\"timestamp\":2002");
+    std::fs::write(&world.jekts, &text).unwrap();
+    assert_eq!(totals(&world).entries, 122);
+    assert_eq!(totals(&world).input, 12_200);
+    // The file replaced by a shorter one is read from its start.
+    std::fs::write(&world.jekts, format!("{}\n", serde_json::to_string(&audit_entry(5, "Korp", "Opaz")).unwrap())).unwrap();
+    assert_eq!(totals(&world).entries, 1);
+}
+
+#[test]
+fn totals_count_a_started_agent_but_cost_it_nothing() {
+    let world = World::new(&[audit_entry(1_000, "Korp", "Opaz")]);
+    ledger::record_start(&world.store, start("a1", 500, 0)).unwrap();
+    let got = world.run(AuditQueryReq { totals: Some(true), ..Default::default() }).unwrap().totals.unwrap();
+    assert_eq!((got.entries, got.input), (2, 100));
+}

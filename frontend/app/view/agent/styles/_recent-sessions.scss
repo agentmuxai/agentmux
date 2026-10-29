@@ -585,6 +585,7 @@
 // distinct from the actions menu.
 .agent-fork-prompt {
     @include agent-panel-text;
+    position: relative;
     width: 360px;
     max-width: 90vw;
     display: flex;
@@ -600,6 +601,19 @@
     font-size: var(--text-sm);
     color: var(--secondary-text-color);
     line-height: 1.4;
+}
+
+// The close button of the already-open and no-pane prompts: the panel's top-right corner, outside
+// the button row. The message leaves room for it.
+.agent-fork-prompt-close {
+    position: absolute;
+    top: var(--space-1);
+    right: var(--space-1);
+}
+
+.agent-fork-prompt:has(.agent-fork-prompt-close) .agent-fork-prompt-msg {
+    display: block;
+    padding-right: var(--space-8);
 }
 
 .agent-fork-prompt-actions {

@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! The Google connectors' tools: `Calendar` and `Drive` (then `Gmail`), each
+//! The Google connectors' tools: `Calendar`, `Drive` and `Gmail`, each
 //! listed only for an agent with a grant on its service
 //! (docs/specs/SPEC_GOOGLE_CONNECTORS_GMAIL_CALENDAR_DRIVE_2026_10_14.md D3,
 //! D4). srv makes the call with the account's token; this only forwards the
@@ -47,7 +47,7 @@ fn untrusted(tool: &str, body: &Value) -> String {
 
 pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     match name {
-        "Calendar" | "Drive" => {
+        "Calendar" | "Drive" | "Gmail" => {
             if cx.local_url.is_empty() || cx.auth_key.is_empty() {
                 anyhow::bail!("{name}: AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. Is this agent pane opened via AgentMux?");
             }
@@ -90,6 +90,8 @@ mod tests {
         assert!(!names(&["calendar"]).contains(&"Drive".to_string()));
         assert!(names(&["drive"]).contains(&"Drive".to_string()));
         assert!(!names(&["drive"]).contains(&"Calendar".to_string()));
-        assert_eq!(names(&["gmail"]).len(), names(&[]).len(), "no tool for a service not built yet");
+        assert!(names(&["gmail"]).contains(&"Gmail".to_string()));
+        assert!(!names(&["gmail"]).contains(&"Calendar".to_string()));
+        assert_eq!(names(&["mail"]).len(), names(&[]).len(), "no tool for a service not built");
     }
 }

@@ -88,6 +88,7 @@ jobs:
             scripts/ci-codex-review-gate.mjs
             scripts/lib/github-rest.mjs
             scripts/lib/is-main.mjs
+            scripts/lib/no-codex-class.mjs
           sparse-checkout-cone-mode: false
           persist-credentials: false
 

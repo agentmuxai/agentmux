@@ -7,7 +7,7 @@
 //!
 //! - [`Service`]: each service's scopes, by grant level (§3.2).
 //! - [`GoogleHttp`]: Google's REST APIs, behind a trait so tests stub them.
-//! - [`calendar`], [`drive`]: the `Calendar` and `Drive` tools' actions, as
+//! - [`calendar`], [`drive`], [`gmail`]: the `Calendar`, `Drive` and `Gmail` tools' actions, as
 //!   requests and trimmed answers.
 
 use std::future::Future;
@@ -21,6 +21,7 @@ pub mod access;
 pub mod calendar;
 pub mod calls;
 pub mod drive;
+pub mod gmail;
 
 const SCOPE_PREFIX: &str = "https://www.googleapis.com/auth/";
 
@@ -29,6 +30,7 @@ const SCOPE_PREFIX: &str = "https://www.googleapis.com/auth/";
 pub enum Service {
     Calendar,
     Drive,
+    Gmail,
 }
 
 impl Service {
@@ -36,6 +38,7 @@ impl Service {
         match self {
             Service::Calendar => "calendar",
             Service::Drive => "drive",
+            Service::Gmail => "gmail",
         }
     }
 
@@ -54,6 +57,9 @@ impl Service {
             // `drive.file` is the one non-sensitive Drive scope: the files the person picked
             // and the ones AgentMux made. Reading and writing them is the same scope.
             (Service::Drive, _) => &["drive.file"],
+            // Reading mail is `gmail.readonly`, a restricted scope: only a client the person brought
+            // (their own, or their organization's internal one) is offered it (spec G3).
+            (Service::Gmail, _) => &["gmail.readonly"],
         };
         names.iter().map(|n| format!("{SCOPE_PREFIX}{n}")).collect()
     }

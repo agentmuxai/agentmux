@@ -433,16 +433,6 @@
         box-shadow: inset -2px 0 0 0 var(--drop-target-border);
     }
 
-    // A tab that was just dropped into place — from another pane, or
-    // reordered within this one — plays the Window Tab landing bounce
-    // (drop-feedback.scss). Toggled by PaneTabStrip.tsx's `landedTab` (id + destination pane).
-    // Sits on the pill, not its `.pane-tab-tip` wrapper: the wrapper owns
-    // the flex sizing, so a transform here never moves its neighbours.
-    // SPEC_PANE_TAB_DRAG_LANDING_FLASH_AND_LAST_TAB_CLOSE_2026_09_24.md §3.4.
-    &--landing {
-        @include drop.landing-bounce;
-    }
-
     // Picked with Ctrl/Cmd+click, to be dragged into one pane together
     // (docs/specs/SPEC_PANE_TAB_MULTI_SELECT_MOVE_AND_COLLAPSED_EXPAND_2026_10_24.md §4.2).
     // A channel no other pill state uses: the active tab's underline is an inset

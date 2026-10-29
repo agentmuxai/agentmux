@@ -22,7 +22,7 @@ import { GoogleServicesSection } from "./GoogleServicesSection";
 
 const P = "https://www.googleapis.com/auth/";
 
-function account(scopes: string[]): Account {
+function account(scopes: string[], clientMode?: "byo" | "workspace" | "builtin"): Account {
     return {
         id: "g1",
         name: "google",
@@ -30,7 +30,11 @@ function account(scopes: string[]): Account {
         kind: "oauth",
         display_name: "me@example.com",
         secret_ref: { backend: "keychain", service: "agentmux", account: "g1" },
-        context: { email: "me@example.com", granted_scopes: ["openid", ...scopes.map((s) => P + s)] },
+        context: {
+            email: "me@example.com",
+            granted_scopes: ["openid", ...scopes.map((s) => P + s)],
+            ...(clientMode ? { oauth_client: { mode: clientMode } } : {}),
+        },
         status: "valid",
         created_at: 0,
         updated_at: 0,
@@ -47,7 +51,7 @@ beforeEach(() => {
     panel = {
         agents: [{ agentId: "def-1", name: "Naki", levels: {} }],
         calls: [{ at: 1_700_000_000_000, agent_id: "def-1", agent_name: "Naki", service: "calendar", action: "list_events", ids: "primary", outcome: "ok" }],
-        services: ["calendar", "drive"],
+        services: ["calendar", "drive", "gmail"],
     };
     google.mockImplementation(async (op: string) => (op === "account" ? panel : true));
 });
@@ -108,7 +112,22 @@ describe("GoogleServicesSection", () => {
         render(() => <GoogleServicesSection account={account([])} />);
         expect(await screen.findByRole("button", { name: "Turn on Calendar" })).toBeTruthy();
         expect(screen.getByRole("button", { name: "Turn on Drive" })).toBeTruthy();
-        expect(screen.getAllByText("Off").length).toBe(2);
+        expect(screen.getAllByText("Off").length).toBe(3);
+    });
+
+    it("offers Gmail only on a client the person brought", async () => {
+        const { unmount } = render(() => <GoogleServicesSection account={account([], "byo")} />);
+        expect(await screen.findByRole("button", { name: "Turn on Gmail" })).toBeTruthy();
+        unmount();
+        render(() => <GoogleServicesSection account={account([], "workspace")} />);
+        expect(await screen.findByRole("button", { name: "Turn on Gmail" })).toBeTruthy();
+    });
+
+    it("says why Gmail can't be turned on with AgentMux's own client", async () => {
+        render(() => <GoogleServicesSection account={account([], "builtin")} />);
+        expect(await screen.findByText(/Gmail needs your own Google client/)).toBeTruthy();
+        expect(screen.queryByRole("button", { name: "Turn on Gmail" })).toBeNull();
+        expect(screen.getByRole("button", { name: "Turn on Calendar" })).toBeTruthy();
     });
 
     it("shows srv's refusal", async () => {

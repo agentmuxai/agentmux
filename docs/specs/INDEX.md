@@ -756,6 +756,7 @@ partial list.
 | [`SPEC_PER_WINDOW_THEME_AND_OPACITY_2026_10_12`](SPEC_PER_WINDOW_THEME_AND_OPACITY_2026_10_12.md) | Per-window theme and opacity: one opacity per window, a theme per window, new windows inherit |
 | [`SPEC_POOL_ADOPTION_AND_WINDOW_ROW_CRUMB_2026_07_11`](SPEC_POOL_ADOPTION_AND_WINDOW_ROW_CRUMB_2026_07_11.md) | SPEC: Pool adoption for foreign labels + srv window-row label crumb + non-Windows close verification |
 | [`SPEC_PROCESS_AND_TURN_STATE_TRACKING_CONSOLIDATION_2026_07_31`](SPEC_PROCESS_AND_TURN_STATE_TRACKING_CONSOLIDATION_2026_07_31.md) | SPEC — Process & Turn-State Tracking: This Session's Findings, and the Case for a Unified State Machine |
+| [`SPEC_PROVIDER_CARD_TAGS_FREE_LOCAL_2026_10_29`](SPEC_PROVIDER_CARD_TAGS_FREE_LOCAL_2026_10_29.md) | SPEC: provider-card tags (Free, Local), card filters, and a free-signup guide |
 | [`SPEC_PROVIDER_LOGIN_THROUGH_SRV_2026_10_09`](SPEC_PROVIDER_LOGIN_THROUGH_SRV_2026_10_09.md) | SPEC: One provider-login implementation, in srv |
 | [`SPEC_REAUTH_FROM_AUTH_ERROR_2026_06_20`](SPEC_REAUTH_FROM_AUTH_ERROR_2026_06_20.md) | SPEC: Re-authentication from Agent Auth Failure |
 | [`SPEC_RECOVERY_NOTICES_AND_TOASTS_2026_10_16`](SPEC_RECOVERY_NOTICES_AND_TOASTS_2026_10_16.md) | Spec: tell the user what happened after AgentMux recovers, and fix the toasts that carry it |

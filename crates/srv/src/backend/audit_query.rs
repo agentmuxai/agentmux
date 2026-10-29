@@ -12,6 +12,7 @@
 mod jekt_file;
 mod ordered;
 mod segments;
+mod totals;
 
 use std::collections::HashSet;
 use std::path::Path;
@@ -125,6 +126,13 @@ impl Filter {
             until: req.until_ms.unwrap_or(u64::MAX),
             text: req.text.as_deref().map(|t| t.trim().to_lowercase()).unwrap_or_default(),
         })
+    }
+
+    /// What the totals kept for this filter are filed under: the page isn't part of it.
+    fn key(&self) -> String {
+        let mut kinds: Vec<&str> = self.kinds.iter().map(String::as_str).collect();
+        kinds.sort_unstable();
+        format!("{:?}|{}|{}|{}|{}", self.agent.as_deref().map(route), kinds.join(","), self.since, self.until, self.text)
     }
 
     fn keep(&self, e: &AuditEntry) -> bool {
@@ -295,7 +303,8 @@ pub fn query(src: &Sources, req: &AuditQueryReq) -> Result<AuditQueryResult, Str
     }
     let next_cursor = more.then(|| Cursor { ledger: ledger_last, jekt: jekt_last, jekt_end: jekts.resume(cursor.as_ref().and_then(|c| c.jekt_end)) }.encode());
     let not_recorded = NOT_RECORDED.iter().filter(|k| filter.kinds.contains(**k)).map(|k| k.to_string()).collect();
-    Ok(AuditQueryResult { entries, next_cursor, not_recorded })
+    let totals = req.totals.unwrap_or(false).then(|| totals::of(src, &filter));
+    Ok(AuditQueryResult { entries, next_cursor, not_recorded, totals })
 }
 
 #[cfg(test)]
