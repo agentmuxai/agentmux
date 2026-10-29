@@ -285,18 +285,6 @@
 
 .native-memory-manager-back {
     flex-shrink: 0;
-    padding: var(--space-1) var(--space-2);
-    border: 1px solid var(--border-color);
-    border-radius: 0;
-    background: transparent;
-    color: var(--main-text-color);
-    font-size: var(--text-xs);
-    cursor: default;
-
-    &:hover {
-        border-color: var(--accent-color);
-        background: var(--accent-bg);
-    }
 }
 
 .native-memory-manager-agent-name {
@@ -640,20 +628,6 @@
 .memory-adoption-panel-actions {
     display: flex;
     justify-content: flex-end;
-}
-
-.memory-adoption-panel-adopt {
-    padding: var(--space-1) var(--space-2);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-sm);
-    background: var(--main-bg-color);
-    color: var(--main-text-color);
-    font-size: var(--text-sm);
-    cursor: default;
-
-    &:disabled {
-        opacity: 0.5;
-    }
 }
 
 .memory-adoption-panel-hint,

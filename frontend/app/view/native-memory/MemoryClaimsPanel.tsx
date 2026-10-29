@@ -17,6 +17,7 @@ import { createEffect, createSignal, For, on, onCleanup, Show, type JSX } from "
 import { RpcApi, type NativeMemoryClaimList, type NativeMemoryClaimedFolder } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getApi } from "@/store/global";
+import { Button } from "@/app/element/ui";
 
 interface MemoryClaimsPanelProps {
     agentId: string;
@@ -122,14 +123,9 @@ export const MemoryClaimsPanel = (props: MemoryClaimsPanelProps): JSX.Element =>
                                         {claimedSince(f.claimed_at_ms)}
                                         {f.others > 0 ? ` · shared with ${f.others} other agent${f.others === 1 ? "" : "s"}` : ""}
                                     </span>
-                                    <button
-                                        type="button"
-                                        class="memory-adoption-panel-adopt"
-                                        disabled={waiting() !== null}
-                                        onClick={() => void release(f)}
-                                    >
+                                    <Button disabled={waiting() !== null} onClick={() => void release(f)}>
                                         {waiting() === f.index ? "Waiting…" : "Release…"}
-                                    </button>
+                                    </Button>
                                 </div>
                             )}
                         </For>
