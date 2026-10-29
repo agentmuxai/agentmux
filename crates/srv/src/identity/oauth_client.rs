@@ -778,8 +778,9 @@ async fn broker_exchange(ctx: &FlowCtx, code: &str, verifier: &str, redirect_uri
     use crate::muxbus::github_broker::{self, BrokerError};
     let who = match github_broker::caller(&ctx.mstore).await {
         Ok(who) => who,
-        // A sign-in that lapsed since the connect began is the same question as none.
-        Err(BrokerError::NotSignedIn(_)) => return OAuthStatus::Failed { error: NEEDS_CLOUD_SIGN_IN.to_string() },
+        // A sign-in that lapsed since the connect began is the same question as none. The other
+        // reasons ("not running yet", "the key can't be read") are not fixed by signing in.
+        Err(e) if e.needs_sign_in() => return OAuthStatus::Failed { error: NEEDS_CLOUD_SIGN_IN.to_string() },
         Err(e) => return OAuthStatus::Failed { error: e.to_string() },
     };
     match github_broker::exchange_code(http(), &who, code, verifier, redirect_uri, replace).await {

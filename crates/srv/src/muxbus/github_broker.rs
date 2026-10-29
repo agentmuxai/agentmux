@@ -63,6 +63,18 @@ impl std::fmt::Debug for Caller {
     }
 }
 
+/// What `caller` says when there is no valid AgentMux Cloud sign-in: the one
+/// `NotSignedIn` that signing in fixes.
+pub const NO_VALID_SIGN_IN: &str = "no valid sign-in";
+
+impl BrokerError {
+    /// Whether signing in to AgentMux Cloud is what fixes it. The other
+    /// `NotSignedIn` reasons ("not running yet", "the key can't be read") are not.
+    pub fn needs_sign_in(&self) -> bool {
+        matches!(self, Self::NotSignedIn(why) if why == NO_VALID_SIGN_IN)
+    }
+}
+
 /// Why a broker call gave no answer. The variants are what the desktop does
 /// next, not what the broker said.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -435,7 +447,7 @@ pub async fn caller(mstore: &std::sync::Arc<crate::backend::storage::store::Stor
     let scheduler = crate::broker::get_global().ok_or_else(|| BrokerError::NotSignedIn("AgentMux Cloud isn't running yet".to_string()))?;
     let bearer = crate::muxbus::cloud_subscriber::load_valid_token(mstore, &scheduler)
         .await
-        .ok_or_else(|| BrokerError::NotSignedIn("no valid sign-in".to_string()))?;
+        .ok_or_else(|| BrokerError::NotSignedIn(NO_VALID_SIGN_IN.to_string()))?;
     // The install's identity is attached to the channel's own store, and installed process-wide;
     // `mstore` is often the shared account store, which doesn't carry it.
     let wan = mstore

@@ -181,15 +181,21 @@ export function OAuthConnectPanel(props: OAuthConnectPanelProps): JSX.Element {
         }
     };
 
-    // A Reconnect starts by itself once it knows it has a client to use.
+    // GitHub through AgentMux's own App needs the Cloud sign-in: say so, with the sign-in, in place of Connect.
+    const needsCloud = () =>
+        githubNeedsCloudSignIn(
+            props.provider,
+            client.state.loaded() && !client.state.showFields() && client.state.info()?.saved !== true,
+            muxbusDelivery(),
+        );
+
+    // A Reconnect starts by itself once it knows it has a client to use, and, for GitHub, a Cloud sign-in.
     let autoStarted = false;
-    createEffect(
-        on(client.state.loaded, (loaded) => {
-            if (!props.autoStart || autoStarted || !loaded || client.state.showFields()) return;
-            autoStarted = true;
-            void connect();
-        }),
-    );
+    createEffect(() => {
+        if (!props.autoStart || autoStarted || !client.state.loaded() || client.state.showFields() || needsCloud()) return;
+        autoStarted = true;
+        void connect();
+    });
 
     // The person agreed to replace the GitHub user this account is connected as.
     const replaceUser = () => {
@@ -220,18 +226,12 @@ export function OAuthConnectPanel(props: OAuthConnectPanelProps): JSX.Element {
     );
 
     const label = PROVIDER_LABELS[props.provider] ?? props.provider;
-    // GitHub through AgentMux's own App needs the Cloud sign-in: say so, with the sign-in, in place of Connect.
-    const needsCloud = () =>
-        githubNeedsCloudSignIn(
-            props.provider,
-            client.state.loaded() && !client.state.showFields() && client.state.info()?.saved !== true,
-            muxbusDelivery(),
-        );
 
     return (
         <div class="oauth-connect">
-            <Show when={localError()}>
-                {(err) => <FlowError error={err()} />}
+            {/* srv's sign-in answer is the prompt below when the gate shows it already: not twice. */}
+            <Show when={localError() && !(needsCloud() && isNeedsCloudSignInError(localError()))}>
+                <FlowError error={localError()!} />
             </Show>
 
             {/* Idle: the client + Connect */}

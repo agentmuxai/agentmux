@@ -299,6 +299,29 @@ describe("Connect GitHub without an AgentMux Cloud sign-in", () => {
         expect(screen.getByRole("button", { name: "Connect GitHub" })).toBeTruthy();
     });
 
+    it("a Reconnect while signed out shows the prompt once and starts nothing, then starts when signed in", async () => {
+        rpc.AccountOAuthClientGetCommand.mockResolvedValue(GITHUB_BUILTIN);
+        rpc.AccountOAuthStartCommand.mockResolvedValue({ error: "needs-cloud-sign-in" });
+        delivery("signed_out");
+        render(() => <OAuthConnectPanel provider="github" accountId="acc-1" autoStart onConnected={() => {}} />);
+        expect(await screen.findByText("Sign in to AgentMux Cloud to connect GitHub")).toBeTruthy();
+        expect(screen.getAllByText("Sign in to AgentMux Cloud to connect GitHub")).toHaveLength(1);
+        expect(rpc.AccountOAuthStartCommand).not.toHaveBeenCalled();
+        acceptMuxbusDelivery({ state: "connected", since_ms: 5 });
+        await waitFor(() => expect(rpc.AccountOAuthStartCommand).toHaveBeenCalledTimes(1));
+    });
+
+    it("shows srv's answer once when the state was not known yet and the gate shows the prompt", async () => {
+        rpc.AccountOAuthClientGetCommand.mockResolvedValue(GITHUB_BUILTIN);
+        rpc.AccountOAuthStartCommand.mockResolvedValue({ error: "needs-cloud-sign-in" });
+        delivery("connected");
+        render(() => <OAuthConnectPanel provider="github" name={() => "work"} onConnected={() => {}} />);
+        fireEvent.click(await screen.findByRole("button", { name: "Connect GitHub" }));
+        expect(await screen.findByText("Sign in to AgentMux Cloud to connect GitHub")).toBeTruthy();
+        acceptMuxbusDelivery({ state: "signed_out", since_ms: 6 });
+        await waitFor(() => expect(screen.getAllByText("Sign in to AgentMux Cloud to connect GitHub")).toHaveLength(1));
+    });
+
     it("leaves the person's own saved app alone", async () => {
         rpc.AccountOAuthClientGetCommand.mockResolvedValue({ saved: true, clientId: "Iv1.abc", hasSecret: false, mode: "byo", builtinAvailable: true });
         delivery("signed_out");

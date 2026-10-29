@@ -458,6 +458,16 @@ async fn the_timeout_sweep_is_final_and_stops_the_flow() {
 }
 
 #[test]
+fn only_a_missing_sign_in_is_answered_with_the_sign_in_prompt() {
+    use crate::muxbus::github_broker::{BrokerError, NO_VALID_SIGN_IN};
+    assert!(BrokerError::NotSignedIn(NO_VALID_SIGN_IN.into()).needs_sign_in());
+    // Not running yet, or a key that can't be read: signing in changes nothing.
+    assert!(!BrokerError::NotSignedIn("AgentMux Cloud isn't running yet".into()).needs_sign_in());
+    assert!(!BrokerError::NotSignedIn("this install's key can't be read: x".into()).needs_sign_in());
+    assert!(!BrokerError::NotConnected.needs_sign_in());
+}
+
+#[test]
 fn github_through_agentmuxs_own_app_needs_a_cloud_sign_in() {
     let client = |mode| ResolvedClient { client_id: "id".into(), client_secret: None, mode };
     // No sign-in: AgentMux's own App stops with the code the UI turns into a sign-in prompt.
