@@ -196,6 +196,31 @@ impl Store {
         Ok(())
     }
 
+    /// How many log lines `agent_id` has for `service`'s `actions` on the account since `since_ms`,
+    /// of which `ok` ones were not refused or failed. Counted in the store, so what other agents and
+    /// other actions logged cannot push a line out of it.
+    pub fn google_calls_count(
+        &self,
+        account_id: &str,
+        agent_id: &str,
+        service: &str,
+        actions: &[&str],
+        since_ms: i64,
+        only_ok: bool,
+    ) -> Result<usize, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        let marks = vec!["?"; actions.len()].join(",");
+        let sql = format!(
+            "SELECT COUNT(*) FROM db_google_calls WHERE account_id = ? AND agent_id = ? AND service = ? AND at > ?
+               AND action IN ({marks}){}",
+            if only_ok { " AND outcome = 'ok'" } else { "" }
+        );
+        let mut args: Vec<rusqlite::types::Value> = vec![account_id.to_string().into(), agent_id.to_string().into(), service.to_string().into(), since_ms.into()];
+        args.extend(actions.iter().map(|a| rusqlite::types::Value::from(a.to_string())));
+        let n: i64 = conn.query_row(&sql, rusqlite::params_from_iter(args), |r| r.get(0))?;
+        Ok(n.max(0) as usize)
+    }
+
     /// An account's newest log lines first.
     pub fn google_calls(&self, account_id: &str, limit: usize) -> Result<Vec<GoogleCall>, StoreError> {
         let conn = self.conn().lock().unwrap();

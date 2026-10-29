@@ -279,3 +279,51 @@ async fn an_unknown_write_action_is_refused_before_anything_is_read() {
     assert!(e.contains("one of create_draft"), "{e}");
     assert!(log(&w).is_empty());
 }
+
+#[tokio::test]
+async fn five_hundred_reads_do_not_push_the_sends_out_of_the_count() {
+    let w = world(WRITE_SCOPES, Some(GrantLevel::Write));
+    let now = chrono::Utc::now().timestamp_millis();
+    let line = |agent: &str, action: &str, outcome: &str, at: i64| crate::backend::storage::google_grants::GoogleCall {
+        at,
+        agent_id: agent.into(),
+        agent_name: agent.into(),
+        service: "gmail".into(),
+        action: action.into(),
+        ids: String::new(),
+        outcome: outcome.into(),
+    };
+    for i in 0..20 {
+        w.store.google_call_log("acc-1", &line("def-1", "send_draft", "ok", now - 2 * 3_600_000 - i)).unwrap();
+    }
+    // Newer lines, many more than the old window of 500: reads by this agent, anything by another.
+    for i in 0..600 {
+        w.store.google_call_log("acc-1", &line("def-1", "search_threads", "ok", now - 1000 + i)).unwrap();
+        w.store.google_call_log("acc-1", &line("other", "send_draft", "ok", now - 1000 + i)).unwrap();
+    }
+    let e = run(&w, &StubGoogle::new(vec![]), &Person::says(Answer::Yes), "send_draft", json!({ "draft_id": "r-1" })).await.unwrap_err();
+    assert!(e.contains("20 mails"), "{e}");
+    // Another agent's sends and a failed one of this agent's are not this agent's sent mails.
+    let w2 = world(WRITE_SCOPES, Some(GrantLevel::Write));
+    for i in 0..30 {
+        w2.store.google_call_log("acc-1", &line("other", "send_draft", "ok", now - 5000 - i)).unwrap();
+        w2.store.google_call_log("acc-1", &line("def-1", "send_draft", "error: no", now - 5000 - i)).unwrap();
+    }
+    assert_eq!(w2.store.google_calls_count("acc-1", "def-1", "gmail", &["send_draft"], now - 86_400_000, true).unwrap(), 0);
+}
+
+#[tokio::test]
+async fn questions_asked_at_once_count_against_the_limit_before_any_is_logged() {
+    let w = world(WRITE_SCOPES, Some(GrantLevel::Write));
+    let oauth = StubHttp::default();
+    let google = StubGoogle::new(vec![]);
+    let deps = CallDeps { google: &google, oauth: &oauth, secrets: &w.secrets, mstore: &w.store, id_store: &w.store, identity_store: &w.store };
+    let access = access_for(deps.mstore, deps.id_store, deps.identity_store, &w.def, Service::Gmail, None).unwrap();
+    let now = chrono::Utc::now();
+    // Ten are waiting for the person; the eleventh is refused, and when one ends there is room again.
+    let held: Vec<_> = (0..ASKS_PER_HOUR).map(|_| reserve(&deps, &access, &w.def, now, false).unwrap()).collect();
+    let e = reserve(&deps, &access, &w.def, now, false).err().unwrap();
+    assert!(e.contains("10 times in the last hour"), "{e}");
+    drop(held);
+    assert!(reserve(&deps, &access, &w.def, now, false).is_ok());
+}

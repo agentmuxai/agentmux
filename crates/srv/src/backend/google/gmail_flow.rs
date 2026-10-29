@@ -146,15 +146,54 @@ fn shape_draft(body: &Value) -> Value {
     })
 }
 
-/// How many questions (`send_draft`, `trash_thread`) this agent has put on this account in the last
-/// hour, and how many mails it has sent in the last day, from the account's log.
-fn recent(deps: &CallDeps<'_, impl GoogleHttp, impl OAuthHttp, impl TokenSecrets>, access: &Access, def: &AgentDefinition, now: DateTime<Utc>) -> (usize, usize) {
-    let calls = deps.identity_store.google_calls(&access.account.id, 500).unwrap_or_default();
+/// Questions in flight, per account and agent: a call is logged only when it ends, so calls made at
+/// once would all pass the limits before any was counted.
+fn in_flight() -> std::sync::MutexGuard<'static, std::collections::HashMap<(usize, String, String), usize>> {
+    use std::sync::{Mutex, OnceLock};
+    static PENDING: OnceLock<Mutex<std::collections::HashMap<(usize, String, String), usize>>> = OnceLock::new();
+    PENDING.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// A question counted while it is being asked.
+struct Asking(Option<(usize, String, String)>);
+
+impl Drop for Asking {
+    fn drop(&mut self) {
+        if let Some(key) = self.0.take() {
+            let mut m = in_flight();
+            if let Some(n) = m.get_mut(&key) {
+                *n = n.saturating_sub(1);
+                if *n == 0 {
+                    m.remove(&key);
+                }
+            }
+        }
+    }
+}
+
+/// Take the limits' check and, if it passes, a place among the questions in flight until the
+/// returned guard is dropped. `send` is whether the call is a `send_draft`. The logged questions of
+/// the last hour and mails sent in the last day come from the store, for this agent and this
+/// account only.
+fn reserve(deps: &CallDeps<'_, impl GoogleHttp, impl OAuthHttp, impl TokenSecrets>, access: &Access, def: &AgentDefinition, now: DateTime<Utc>, send: bool) -> Result<Asking, String> {
     let ms = now.timestamp_millis();
-    let mine = |c: &&crate::backend::storage::google_grants::GoogleCall| c.agent_id == def.id && c.service == "gmail";
-    let asks = calls.iter().filter(mine).filter(|c| write::always_asks(&c.action) && c.at > ms - 3_600_000).count();
-    let sends = calls.iter().filter(mine).filter(|c| c.action == "send_draft" && c.outcome == "ok" && c.at > ms - 86_400_000).count();
-    (asks, sends)
+    let count = |actions: &[&str], since: i64, ok: bool| {
+        deps.identity_store.google_calls_count(&access.account.id, &def.id, "gmail", actions, since, ok).map_err(|e| format!("store: {e}"))
+    };
+    let asked = count(&["send_draft", "trash_thread"], ms - 3_600_000, false)?;
+    let sent = if send { count(&["send_draft"], ms - 86_400_000, true)? } else { 0 };
+    // Per store as well as account and agent: one store in srv, one per test.
+    let key = (std::sync::Arc::as_ptr(deps.identity_store) as usize, access.account.id.clone(), def.id.clone());
+    let mut pending = in_flight();
+    let waiting = pending.get(&key).copied().unwrap_or(0);
+    if send && sent + waiting >= SENDS_PER_DAY {
+        return Err(format!("you have sent {SENDS_PER_DAY} mails from this account today, the most an agent may: wait until tomorrow"));
+    }
+    if asked + waiting >= ASKS_PER_HOUR {
+        return Err(format!("you have asked the person {ASKS_PER_HOUR} times in the last hour to send or trash mail: wait before asking again"));
+    }
+    *pending.entry(key.clone()).or_insert(0) += 1;
+    Ok(Asking(Some(key)))
 }
 
 async fn ask<A: Approver>(approver: &A, def: &AgentDefinition, (title, message): (String, String), yes: &str, no: &str, what: &str) -> Result<(), String> {
@@ -174,13 +213,7 @@ async fn send_draft<G: GoogleHttp, O: OAuthHttp, S: TokenSecrets, A: Approver>(
     now: DateTime<Utc>,
 ) -> Result<Value, String> {
     let fetch = write::draft_fetch_plan(args)?;
-    let (asks, sends) = recent(deps, access, def, now);
-    if sends >= SENDS_PER_DAY {
-        return Err(format!("you have sent {SENDS_PER_DAY} mails from this account today, the most an agent may: wait until tomorrow"));
-    }
-    if asks >= ASKS_PER_HOUR {
-        return Err(format!("you have asked the person {ASKS_PER_HOUR} times in the last hour to send or trash mail: wait before asking again"));
-    }
+    let _asking = reserve(deps, access, def, now, true)?;
     let view = DraftView::of(&send(deps, access, &fetch).await?.body);
     if !view.has_recipient() {
         return Err("the draft has no recipient: update_draft it with to first".to_string());
@@ -210,10 +243,7 @@ async fn trash_thread<G: GoogleHttp, O: OAuthHttp, S: TokenSecrets, A: Approver>
 ) -> Result<Value, String> {
     let trash = write::trash_plan(args)?;
     let summary = gmail::summary_plan(args.thread_id.as_deref().unwrap_or(""))?;
-    let (asks, _) = recent(deps, access, def, now);
-    if asks >= ASKS_PER_HOUR {
-        return Err(format!("you have asked the person {ASKS_PER_HOUR} times in the last hour to send or trash mail: wait before asking again"));
-    }
+    let _asking = reserve(deps, access, def, now, false)?;
     let headers = send(deps, access, &summary).await?.body;
     let question = write::trash_question(&def.name, &access.email(), &headers);
     ask(approver, def, question, "Move to trash", "Keep it", "trashing").await?;
