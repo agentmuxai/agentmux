@@ -14,6 +14,7 @@ const OPERATOR_COMMANDS: ReadonlySet<string> = new Set([
     "agent.setSeat",
     "agent.takeover",
     "agent.move-here",
+    "audit.query",
     "blockstats.detail",
     "browser_profiles.create",
     "browser_profiles.delete",

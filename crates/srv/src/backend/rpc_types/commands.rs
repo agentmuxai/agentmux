@@ -601,6 +601,8 @@ pub const COMMAND_HISTORY_AGENTS: &str = "history.agents";
 pub const COMMAND_HISTORY_AGENT_SESSIONS: &str = "history.agent_sessions";
 // The line the Agent History view loads up to for a time or a session's end.
 pub const COMMAND_HISTORY_LOCATE: &str = "history.locate";
+// The Audit view's merged list of jekts, actions, registrations and agent starts and ends (backend::audit_query). The window's, not an agent API.
+pub const COMMAND_AUDIT_QUERY: &str = "audit.query";
 /// The shells installed here, and which one a new local terminal starts with (`backend::shells`).
 pub const COMMAND_SHELL_LIST: &str = "shell.list";
 
