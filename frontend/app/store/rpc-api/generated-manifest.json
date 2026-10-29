@@ -1424,6 +1424,10 @@
             "method": "HistoryAgentSessionsCommand"
         },
         {
+            "command": "audit.query",
+            "method": "AuditQueryCommand"
+        },
+        {
             "command": "history.locate",
             "method": "HistoryLocateCommand"
         },
