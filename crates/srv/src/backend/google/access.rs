@@ -100,5 +100,6 @@ fn service_name(service: Service) -> &'static str {
     match service {
         Service::Calendar => "Calendar",
         Service::Drive => "Drive",
+        Service::Gmail => "Gmail",
     }
 }

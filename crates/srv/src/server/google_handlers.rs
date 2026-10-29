@@ -9,6 +9,7 @@
 //! - `POST /api/v1/google/calendar`: one `Calendar` action.
 //! - `POST /api/v1/google/drive`: one `Drive` action (`pick_files` opens Google's file picker
 //!   for the person).
+//! - `POST /api/v1/google/gmail`: one `Gmail` action.
 //!
 //! Both need an attributed caller (the agent's own `X-Agent-Token`): a grant
 //! belongs to an agent, so a request that names none has none.
@@ -24,8 +25,9 @@ use super::app_api::bundle::SelfOwner;
 use super::caller::Caller;
 use super::AppState;
 use crate::backend::google::calendar::CalendarArgs;
-use crate::backend::google::calls::{calendar_read, drive_read, log_call, CallDeps};
+use crate::backend::google::calls::{calendar_read, drive_read, gmail_read, log_call, CallDeps};
 use crate::backend::google::drive::DriveArgs;
+use crate::backend::google::gmail::GmailArgs;
 use crate::backend::google::{access, LiveGoogleHttp, Service};
 use crate::backend::storage::store::AgentDefinition;
 use crate::identity::oauth_tokens::{KeychainSecrets, LiveHttp};
@@ -145,6 +147,41 @@ pub(crate) async fn handle_google_drive(
     }
 }
 
+#[derive(Debug, Deserialize)]
+pub(crate) struct GmailBody {
+    action: String,
+    /// The account's email, when the agent names one.
+    #[serde(default)]
+    account: Option<String>,
+    #[serde(flatten)]
+    args: GmailArgs,
+}
+
+/// `POST /api/v1/google/gmail`: `{ account, result }`, or `{ error }` with a sentence the agent
+/// can act on.
+pub(crate) async fn handle_google_gmail(
+    State(state): State<AppState>,
+    caller: Option<Extension<Caller>>,
+    Json(body): Json<GmailBody>,
+) -> Response {
+    let def = match calling_agent(&state, caller.as_deref()) {
+        Ok(d) => d,
+        Err(e) => return error(StatusCode::FORBIDDEN, e),
+    };
+    let deps = CallDeps {
+        google: &LiveGoogleHttp,
+        oauth: &LiveHttp,
+        secrets: &KeychainSecrets,
+        mstore: &state.mstore,
+        id_store: &state.id_store,
+        identity_store: &state.identity_store,
+    };
+    match gmail_read(&deps, &def, body.action.trim(), &body.args, body.account.as_deref(), chrono::Utc::now()).await {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => error(StatusCode::UNPROCESSABLE_ENTITY, e),
+    }
+}
+
 /// The least time between two pickers opened for one account by agents, so a loop of
 /// `pick_files` calls can't fill the person's browser with tabs.
 const PICK_GAP: std::time::Duration = std::time::Duration::from_secs(60);
@@ -221,7 +258,7 @@ async fn start_picker_for(state: &AppState, account: &crate::backend::storage::s
 }
 
 /// The services a grant can be set on today; the rest come with their stage.
-const BUILT_SERVICES: [&str; 2] = ["calendar", "drive"];
+const BUILT_SERVICES: [&str; 3] = ["calendar", "drive", "gmail"];
 
 /// How many log lines the account panel shows.
 const PANEL_CALLS: usize = 100;

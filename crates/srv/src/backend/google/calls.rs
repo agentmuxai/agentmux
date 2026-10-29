@@ -18,6 +18,7 @@ use crate::identity::oauth_tokens::{access_token_for, HttpReply, OAuthHttp, Toke
 use super::access::{access_for, Access};
 use super::calendar::{self, CalendarArgs};
 use super::drive::{self, DriveArgs};
+use super::gmail::{self, GmailArgs};
 use super::{google_error, GoogleHttp, Service};
 
 /// What a call needs from srv.
@@ -152,6 +153,73 @@ async fn drive_read_with<G: GoogleHttp, O: OAuthHttp, S: TokenSecrets>(
         return Err(drive_error(&content, action));
     }
     Ok(drive::shape_content(&meta, &content.body))
+}
+
+/// A `Gmail` read action for agent `def`.
+pub async fn gmail_read<G: GoogleHttp, O: OAuthHttp, S: TokenSecrets>(
+    deps: &CallDeps<'_, G, O, S>,
+    def: &AgentDefinition,
+    action: &str,
+    args: &GmailArgs,
+    account: Option<&str>,
+    now: DateTime<Utc>,
+) -> Result<Value, String> {
+    if !gmail::READ_ACTIONS.contains(&action) {
+        return Err(format!("Gmail has no action \"{action}\"; one of {}", gmail::READ_ACTIONS.join(", ")));
+    }
+    let access = access_for(deps.mstore, deps.id_store, deps.identity_store, def, Service::Gmail, account)?;
+    let ids = gmail::logged_ids(action, args);
+    let result = gmail_read_with(deps, &access, action, args).await;
+    log_call(deps, &access, def, Service::Gmail, action, ids, &result, now);
+    result.map(|r| json!({ "account": access.email(), "result": r }))
+}
+
+async fn gmail_read_with<G: GoogleHttp, O: OAuthHttp, S: TokenSecrets>(
+    deps: &CallDeps<'_, G, O, S>,
+    access: &Access,
+    action: &str,
+    args: &GmailArgs,
+) -> Result<Value, String> {
+    debug_assert!(access.level >= GrantLevel::Read);
+    if !gmail::granted_for(action, &access.granted_scopes()) {
+        return Err(format!(
+            "{} hasn't granted the Gmail permission {action} needs. The person can turn Gmail on again for the account in Connectors",
+            access.email()
+        ));
+    }
+    let req = gmail::plan(action, args)?;
+    let token = access_token_for(deps.oauth, deps.secrets, deps.id_store, deps.identity_store, &access.account, None).await?;
+    let reply = deps.google.send(&req, &token).await?;
+    if !(200..300).contains(&reply.status) {
+        return Err(gmail_error(&reply));
+    }
+    if action != "search_threads" {
+        return Ok(gmail::shape(action, &reply.body));
+    }
+    // Google's search lists ids and snippets; the first few threads get their headers, one
+    // request each. A thread whose headers can't be had is listed without them.
+    let mut summaries = Vec::new();
+    let threads = reply.body.get("threads").and_then(Value::as_array).cloned().unwrap_or_default();
+    for t in threads.iter().take(gmail::SUMMARIZED) {
+        let id = t.get("id").and_then(Value::as_str).unwrap_or("");
+        let one = match gmail::summary_plan(id) {
+            Ok(r) => deps.google.send(&r, &token).await.ok().filter(|r| (200..300).contains(&r.status)).map(|r| r.body),
+            Err(_) => None,
+        };
+        summaries.push(one.unwrap_or(Value::Null));
+    }
+    Ok(gmail::shape_search(&reply.body, &summaries))
+}
+
+/// Google's refusal of a Gmail call. A 404 is a thread that isn't there.
+fn gmail_error(reply: &HttpReply) -> String {
+    match reply.status {
+        404 => "Google found no such thread for this account (the id may be from another account, or the thread was deleted)".to_string(),
+        403 if reply.body.pointer("/error/message").and_then(Value::as_str).is_some_and(|m| m.contains("has not been used") || m.contains("is disabled")) => {
+            "the Gmail API isn't turned on in the Google Cloud project of this account's OAuth client: the person can enable it in the Google Cloud console (APIs & Services)".to_string()
+        }
+        _ => google_error(reply),
+    }
 }
 
 /// Google's refusal of a Drive call. A 404 on `drive.file` is usually a file the person

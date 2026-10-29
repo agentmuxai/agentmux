@@ -63,8 +63,10 @@ async fn a_grant_needs_the_agent_bound_and_a_built_service() {
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     assert!(body["error"].as_str().unwrap().contains("bind it first"), "{body}");
     state.identity_store.agent_identity_link("def-1", "acc-1", "google").unwrap();
-    let (_, body) = host(&state, HOST_TOKEN, set("gmail")).await;
+    let (_, body) = host(&state, HOST_TOKEN, set("slides")).await;
     assert!(body["error"].as_str().unwrap().contains("yet"), "{body}");
+    let (status, body) = host(&state, HOST_TOKEN, set("gmail")).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
 }
 
 #[tokio::test]
@@ -141,12 +143,12 @@ async fn pick_files_needs_a_drive_grant_and_the_drive_route_needs_an_agent_token
 }
 
 #[tokio::test]
-async fn a_grant_can_be_set_on_drive_and_the_panel_lists_both_services() {
+async fn a_grant_can_be_set_on_drive_and_the_panel_lists_the_built_services() {
     let state = state_with_agent().await;
     state.identity_store.agent_identity_link("def-1", "acc-1", "google").unwrap();
     let (status, body) = host(&state, HOST_TOKEN, json!({ "op": "set", "account_id": "acc-1", "agent_id": "def-1", "service": "drive", "level": "read" })).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let (_, body) = host(&state, HOST_TOKEN, json!({ "op": "account", "account_id": "acc-1" })).await;
-    assert_eq!(body["data"]["services"], json!(["calendar", "drive"]));
+    assert_eq!(body["data"]["services"], json!(["calendar", "drive", "gmail"]));
     assert_eq!(body["data"]["agents"][0]["levels"]["drive"], "read");
 }
