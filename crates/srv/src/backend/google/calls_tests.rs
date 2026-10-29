@@ -213,3 +213,98 @@ async fn drive_needs_its_own_grant_and_its_own_scope() {
     assert!(e.contains("hasn't granted the Drive permission"), "{e}");
     assert!(google.seen().is_empty());
 }
+
+const MAIL: &[&str] = &["gmail.readonly"];
+
+/// [`world`], with Gmail at `level` instead of Calendar.
+fn gmail_world(scopes: &[&str], level: Option<GrantLevel>) -> World {
+    let w = world(scopes, None, true);
+    w.store.google_grant_set("def-1", "acc-1", "gmail", level, 1).unwrap();
+    w
+}
+
+async fn gmail_call(w: &World, google: &StubGoogle, action: &str, args: GmailArgs) -> Result<Value, String> {
+    let oauth = StubHttp::default();
+    let deps = CallDeps { google, oauth: &oauth, secrets: &w.secrets, mstore: &w.store, id_store: &w.store, identity_store: &w.store };
+    gmail_read(&deps, &w.def, action, &args, None, chrono::Utc::now()).await
+}
+
+fn replies(list: Vec<(u16, Value)>) -> StubGoogle {
+    StubGoogle { replies: Mutex::new(list.into_iter().map(|(status, body)| HttpReply { status, body }).collect()), ..Default::default() }
+}
+
+#[tokio::test]
+async fn a_mail_search_lists_threads_then_asks_for_each_ones_headers_and_logs_no_search_words() {
+    let w = gmail_world(MAIL, Some(GrantLevel::Read));
+    let summary = |subject: &str| json!({ "messages": [{ "payload": { "headers": [{ "name": "Subject", "value": subject }] } }] });
+    let google = replies(vec![
+        (200, json!({ "threads": [{ "id": "t1", "snippet": "a" }, { "id": "t2", "snippet": "b" }] })),
+        (200, summary("First")),
+        (500, json!({})),
+    ]);
+    let args = GmailArgs { query: Some("from:my-lawyer".into()), ..Default::default() };
+    let out = gmail_call(&w, &google, "search_threads", args).await.unwrap();
+    assert_eq!(out["account"], "me@example.com");
+    assert_eq!(out["result"]["threads"][0]["subject"], "First");
+    assert!(out["result"]["threads"][1].get("subject").is_none(), "a thread whose headers failed is still listed");
+    let seen = google.seen();
+    assert_eq!(seen.len(), 3);
+    assert!(seen[0].0.url.ends_with("/users/me/threads") && seen[1].0.url.ends_with("/threads/t1") && seen[2].0.url.ends_with("/threads/t2"));
+    assert!(seen.iter().all(|(_, t)| t == "a-live"), "srv's token, never the agent's");
+    let log = w.store.google_calls("acc-1", 10).unwrap();
+    assert_eq!((log[0].service.as_str(), log[0].action.as_str(), log[0].ids.as_str(), log[0].outcome.as_str()), ("gmail", "search_threads", "", "ok"));
+    assert!(!format!("{log:?}").contains("lawyer"), "the search words stay out of the log");
+}
+
+#[tokio::test]
+async fn reading_a_thread_logs_its_id_and_a_missing_one_says_so() {
+    let w = gmail_world(MAIL, Some(GrantLevel::Read));
+    let google = replies(vec![(200, json!({ "id": "t9", "messages": [] }))]);
+    let out = gmail_call(&w, &google, "get_thread", GmailArgs { thread_id: Some("t9".into()), ..Default::default() }).await.unwrap();
+    assert_eq!(out["result"]["id"], "t9");
+    assert_eq!(w.store.google_calls("acc-1", 10).unwrap()[0].ids, "t9");
+
+    let google = replies(vec![(404, json!({ "error": { "message": "Requested entity was not found." } }))]);
+    let e = gmail_call(&w, &google, "get_thread", GmailArgs { thread_id: Some("gone".into()), ..Default::default() }).await.unwrap_err();
+    assert!(e.contains("no such thread"), "{e}");
+}
+
+#[tokio::test]
+async fn gmail_needs_its_own_grant_and_its_own_scope() {
+    let google = StubGoogle::default();
+    let off = gmail_world(MAIL, None);
+    let e = gmail_call(&off, &google, "list_labels", GmailArgs::default()).await.unwrap_err();
+    assert!(e.contains("Gmail is off for you"), "{e}");
+    // A Drive grant is not a Gmail grant; compose alone reads nothing.
+    let drive_only = drive_world(DRIVE, Some(GrantLevel::Read));
+    let e = gmail_call(&drive_only, &google, "list_labels", GmailArgs::default()).await.unwrap_err();
+    assert!(e.contains("Gmail is off for you"), "{e}");
+    let compose_only = gmail_world(&["gmail.compose"], Some(GrantLevel::Read));
+    let e = gmail_call(&compose_only, &google, "search_threads", GmailArgs::default()).await.unwrap_err();
+    assert!(e.contains("hasn't granted the Gmail permission"), "{e}");
+    let e = gmail_call(&gmail_world(MAIL, Some(GrantLevel::Read)), &google, "send_message", GmailArgs::default()).await.unwrap_err();
+    assert!(e.contains("one of search_threads"), "{e}");
+    assert!(google.seen().is_empty());
+}
+
+#[tokio::test]
+async fn a_gmail_api_that_is_not_enabled_in_the_clients_project_says_what_to_do() {
+    let w = gmail_world(MAIL, Some(GrantLevel::Read));
+    let google = replies(vec![(403, json!({ "error": { "message": "Gmail API has not been used in project 123 before or it is disabled." } }))]);
+    let e = gmail_call(&w, &google, "list_labels", GmailArgs::default()).await.unwrap_err();
+    assert!(e.contains("Gmail API isn't turned on"), "{e}");
+}
+
+#[tokio::test]
+async fn a_long_mails_stored_text_is_fetched_with_the_thread() {
+    use base64::Engine as _;
+    let w = gmail_world(MAIL, Some(GrantLevel::Read));
+    let data = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode("The whole long mail.");
+    let thread = json!({ "id": "t1", "messages": [{ "id": "m1", "payload": { "mimeType": "text/plain", "body": { "attachmentId": "ATT1", "size": 5 } } }] });
+    let google = replies(vec![(200, thread), (200, json!({ "data": data, "size": 20 }))]);
+    let out = gmail_call(&w, &google, "get_thread", GmailArgs { thread_id: Some("t1".into()), ..Default::default() }).await.unwrap();
+    assert_eq!(out["result"]["messages"][0]["body"], "The whole long mail.");
+    let seen = google.seen();
+    assert_eq!(seen.len(), 2);
+    assert!(seen[1].0.url.ends_with("/messages/m1/attachments/ATT1"));
+}

@@ -573,3 +573,19 @@ fn github_through_agentmuxs_own_app_needs_a_cloud_sign_in() {
     assert!(!needs_cloud_sign_in("google", false, &client(ClientMode::Builtin)));
     assert_eq!(NEEDS_CLOUD_SIGN_IN, "needs-cloud-sign-in");
 }
+
+#[test]
+fn gmail_is_asked_only_on_a_client_the_person_brought() {
+    let client = |mode| ResolvedClient { client_id: "id".into(), client_secret: None, mode };
+    let gmail = vec!["https://www.googleapis.com/auth/gmail.readonly".to_string()];
+    let why = restricted_scope_needs_own_client("google", &gmail, &client(ClientMode::Builtin)).unwrap();
+    assert!(why.contains("your own Google client"), "{why}");
+    assert!(restricted_scope_needs_own_client("google", &gmail, &client(ClientMode::Byo)).is_none());
+    assert!(restricted_scope_needs_own_client("google", &gmail, &client(ClientMode::Workspace)).is_none());
+    // Full mail access is restricted too; Calendar and Drive's file scope are not.
+    let full = vec!["https://mail.google.com/".to_string()];
+    assert!(restricted_scope_needs_own_client("google", &full, &client(ClientMode::Builtin)).is_some());
+    let others = vec!["https://www.googleapis.com/auth/calendar.events.readonly".to_string(), "https://www.googleapis.com/auth/drive.file".to_string()];
+    assert!(restricted_scope_needs_own_client("google", &others, &client(ClientMode::Builtin)).is_none());
+    assert!(restricted_scope_needs_own_client("github", &gmail, &client(ClientMode::Builtin)).is_none());
+}

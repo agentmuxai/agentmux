@@ -12,7 +12,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 
 const PREFIX = "https://www.googleapis.com/auth/";
 
-export type GoogleService = "calendar" | "drive";
+export type GoogleService = "calendar" | "drive" | "gmail";
 export type GrantLevel = "read" | "write";
 
 export interface ServiceInfo {
@@ -22,6 +22,9 @@ export interface ServiceInfo {
     line: string;
     /** The scopes "Turn on" asks for (srv's `Service::scopes` at read). */
     readScopes: string[];
+    /** Offered only on a client the person brought (their own, or their organization's internal one):
+     *  Google's restricted scopes are reviewed per app, and AgentMux's own client has not been. */
+    needsOwnClient?: boolean;
 }
 
 export const SERVICES: ServiceInfo[] = [
@@ -39,7 +42,20 @@ export const SERVICES: ServiceInfo[] = [
         line: "Agents you allow can read the files you pick for them in Google's file picker, and the ones AgentMux makes. Never the rest of your Drive.",
         readScopes: [PREFIX + "drive.file"],
     },
+    {
+        service: "gmail",
+        label: "Gmail",
+        line: "Agents you allow can search and read your mail. They can't send, delete or change anything.",
+        readScopes: [PREFIX + "gmail.readonly"],
+        needsOwnClient: true,
+    },
 ];
+
+/** Why Gmail can't be turned on for this account's client, or null when it can (or isn't Gmail). */
+export function ownClientNeeded(info: ServiceInfo, clientMode: string | undefined): string | null {
+    if (!info.needsOwnClient || clientMode === "byo" || clientMode === "workspace") return null;
+    return `${info.label} needs your own Google client, or your organization's internal one: Google reviews apps that read mail, and AgentMux's own client hasn't been through that yet. Connect a Google account with your own client to use it.`;
+}
 
 /** Whether the account's token covers a service: all, some or none of its scopes. */
 export function serviceState(info: ServiceInfo, granted: readonly string[]): "on" | "partly" | "off" {
