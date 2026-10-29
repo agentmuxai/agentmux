@@ -205,6 +205,33 @@ describe("Tooltip default timing", () => {
         expect(overlays()[0].getAttribute("style")).toContain("opacity: 0");
     });
 
+    it("does not stay 'warm' after an immediate tooltip closed the open default one", async () => {
+        vi.useFakeTimers();
+        render(() => (
+            <>
+                <Tooltip content={<span>first</span>}>
+                    <span>anchor-first</span>
+                </Tooltip>
+                <Tooltip immediate content={<span>quick</span>}>
+                    <span>anchor-quick</span>
+                </Tooltip>
+                <Tooltip content={<span>third</span>}>
+                    <span>anchor-third</span>
+                </Tooltip>
+            </>
+        ));
+        const [first, quick, third] = ["first", "quick", "third"].map((n) => screen.getByText(`anchor-${n}`).parentElement!);
+        fireEvent.mouseEnter(first);
+        await vi.advanceTimersByTimeAsync(100);
+        fireEvent.mouseLeave(first);
+        fireEvent.mouseEnter(quick);
+        await vi.advanceTimersByTimeAsync(1000);
+        fireEvent.mouseLeave(quick);
+        fireEvent.mouseEnter(third);
+        await vi.advanceTimersByTimeAsync(20);
+        expect(screen.getByText("third").closest("[data-pane-overlay]")!.getAttribute("style")).toContain("opacity: 0");
+    });
+
     it("is invisible again until it has been placed when it reopens", async () => {
         vi.useFakeTimers();
         const [a] = two();

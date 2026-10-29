@@ -86,7 +86,7 @@ function TooltipInner(props: TooltipProps): JSX.Element {
     const self = {
         close: () => {
             clearTimeouts();
-            lastClosedAt = performance.now();
+            markClosed();
             setIsOpen(false);
             setIsVisible(false);
             setIsPositioned(false);
