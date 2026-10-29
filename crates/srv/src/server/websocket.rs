@@ -142,17 +142,12 @@ async fn handle_ws_connection(mut socket: WebSocket, state: AppState) {
     let mut ping_interval = tokio::time::interval(std::time::Duration::from_secs(10));
     ping_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
-    // Fairly-ordered priority-lane events awaiting their turn to be sent, one
-    // per `'ws` loop iteration (see the priority-lane branch below and the
-    // pending-priority-flush branch after it). Reagent P1 on this PR's first
-    // revision: forwarding an entire drained batch inside one `select!`
-    // branch body — even a fairly-ordered one — starves `socket.recv()`
-    // (this connection's OWN incoming keystrokes) for the whole batch, since
-    // `select!` only re-polls sibling branches after the chosen branch's body
-    // returns. Trickling the batch out one event per iteration keeps every
-    // send interleaved with a fresh `socket.recv()` poll, exactly like the
-    // pre-fix one-event-per-iteration cadence, while still applying the fair
-    // pane ordering to however the batch is drained.
+    // Fairly-ordered priority-lane events awaiting their turn, sent one per `'ws` loop iteration
+    // (priority-lane branch below, then the flush branch). Forwarding a whole drained batch inside
+    // one `select!` branch body would starve `socket.recv()` (this connection's OWN keystrokes)
+    // for the batch, since `select!` re-polls siblings only when a body returns; one event per
+    // iteration keeps each send interleaved with a fresh `socket.recv()` poll, while the batch
+    // keeps its fair pane ordering.
     let mut pending_priority: std::collections::VecDeque<serde_json::Value> =
         std::collections::VecDeque::new();
 
@@ -247,8 +242,7 @@ async fn handle_ws_connection(mut socket: WebSocket, state: AppState) {
                 if forward_event(&mut socket, first).await {
                     break 'ws;
                 }
-                // Once the lane has drained, tell the window about events dropped from it.
-                if priority_rx.is_empty() && drops.has_unreported() && super::ws_resync::report_drops(&mut socket, &drops).await {
+                if super::ws_resync::report_when_drained(&mut socket, &drops, &priority_rx, &pending_priority).await {
                     break 'ws;
                 }
             }
@@ -259,7 +253,9 @@ async fn handle_ws_connection(mut socket: WebSocket, state: AppState) {
             // is its own branch instead of a loop in the arm above.
             _ = std::future::ready(()), if !pending_priority.is_empty() => {
                 let ev = pending_priority.pop_front().expect("guarded non-empty");
-                if forward_event(&mut socket, ev).await {
+                if forward_event(&mut socket, ev).await
+                    || super::ws_resync::report_when_drained(&mut socket, &drops, &priority_rx, &pending_priority).await
+                {
                     break 'ws;
                 }
             }
@@ -288,7 +284,7 @@ async fn handle_ws_connection(mut socket: WebSocket, state: AppState) {
 
             // Periodic ping
             _ = ping_interval.tick() => {
-                if drops.has_unreported() && super::ws_resync::report_drops(&mut socket, &drops).await {
+                if super::ws_resync::report_when_drained(&mut socket, &drops, &priority_rx, &pending_priority).await {
                     break;
                 }
                 let now = agentmux_common::time::now_ms();

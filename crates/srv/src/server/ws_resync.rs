@@ -8,7 +8,10 @@
 //! lane) once the window is reading again, and the window re-fetches what it shows
 //! (`frontend/app/store/resync.ts`).
 
+use std::collections::VecDeque;
+
 use axum::extract::ws::{Message, WebSocket};
+use tokio::sync::mpsc::Receiver;
 
 use crate::backend::eventbus::{EventBus, EventsDroppedEvent, LaneDrops};
 use crate::backend::mps_events::EventsDropped;
@@ -19,9 +22,25 @@ pub(super) fn events_dropped_frame(dropped: u64) -> serde_json::Value {
     EventBus::typed_frame::<EventsDropped>(&EventsDroppedEvent { dropped })
 }
 
-/// Tell the window about any events dropped since it last heard. Returns `true` if the send
-/// failed (the caller should end the connection).
-pub(super) async fn report_drops(socket: &mut WebSocket, drops: &LaneDrops) -> bool {
+/// Whether the egress loop has none of the window's priority events left to send: none in the
+/// lane and none already pulled out of it for fair ordering (`pending_priority`).
+fn drained(priority_rx: &Receiver<serde_json::Value>, pending: &VecDeque<serde_json::Value>) -> bool {
+    priority_rx.is_empty() && pending.is_empty()
+}
+
+/// Tell the window about any events dropped since it last heard, once everything queued ahead of
+/// the report has been sent: the window re-fetches on hearing it, and a queued older update that
+/// arrived after the re-fetch could put back an object the re-fetch had just cleared. Returns
+/// `true` if the send failed (the caller should end the connection).
+pub(super) async fn report_when_drained(
+    socket: &mut WebSocket,
+    drops: &LaneDrops,
+    priority_rx: &Receiver<serde_json::Value>,
+    pending: &VecDeque<serde_json::Value>,
+) -> bool {
+    if !drops.has_unreported() || !drained(priority_rx, pending) {
+        return false;
+    }
     let dropped = drops.take_unreported();
     if dropped == 0 {
         return false;
@@ -44,6 +63,20 @@ mod tests {
         assert_eq!(frame["data"]["command"], "eventrecv");
         assert_eq!(frame["data"]["data"]["event"], "ws:eventsdropped");
         assert_eq!(frame["data"]["data"]["data"]["dropped"], 12);
+    }
+
+    /// Codex P2 on the first revision: the report went out while thousands of frames pulled out of
+    /// the lane by `fair_drain_priority` still waited in `pending_priority`.
+    #[test]
+    fn not_drained_while_frames_wait_in_the_lane_or_in_pending() {
+        let (tx, rx) = tokio::sync::mpsc::channel(4);
+        let mut pending = VecDeque::new();
+        assert!(drained(&rx, &pending));
+        pending.push_back(serde_json::json!({}));
+        assert!(!drained(&rx, &pending), "a frame waits in pending_priority");
+        pending.clear();
+        tx.try_send(serde_json::json!({})).unwrap();
+        assert!(!drained(&rx, &pending), "a frame waits in the lane");
     }
 
     #[test]
