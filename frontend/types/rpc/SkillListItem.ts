@@ -11,4 +11,8 @@ export type SkillListItem = { bound_to_agent: boolean,
  * This agent gets the skill without a bind, through its reach (`skill_reach::SkillReach`). Only the
  * catalog-tier list for an agent (`skill_list_global_for_agent`) says so; false elsewhere.
  */
-reached: boolean, id: string, name: string, trigger: string, skill_type: string, description: string, content: string, is_global: boolean, created_at: number, updated_at: number, };
+reached: boolean, 
+/**
+ * This agent opted out of the skill's reach (`skill_optout`), so `reached` is false.
+ */
+opted_out: boolean, id: string, name: string, trigger: string, skill_type: string, description: string, content: string, is_global: boolean, created_at: number, updated_at: number, };

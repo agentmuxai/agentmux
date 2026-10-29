@@ -1303,6 +1303,10 @@
             "method": "SkillCatalogListForBundleCommand"
         },
         {
+            "command": "skill.catalog.set_opt_out",
+            "method": "SkillCatalogSetOptOutCommand"
+        },
+        {
             "command": "skill.catalog.set_reach",
             "method": "SkillCatalogSetReachCommand"
         },

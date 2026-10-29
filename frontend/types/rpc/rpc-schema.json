@@ -6477,6 +6477,23 @@
     }
   },
   {
+    "command": "skill.catalog.set_opt_out",
+    "request": "agentmux_srv::backend::rpc_types::skill::CommandSkillCatalogSetOptOutData",
+    "requestName": "CommandSkillCatalogSetOptOutData",
+    "requestTs": {
+      "imports": [
+        "CommandSkillCatalogSetOptOutData"
+      ],
+      "name": "CommandSkillCatalogSetOptOutData"
+    },
+    "response": "()",
+    "responseName": "()",
+    "responseTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
     "command": "skill.catalog.set_reach",
     "request": "agentmux_srv::backend::rpc_types::skill::CommandSkillCatalogSetReachData",
     "requestName": "CommandSkillCatalogSetReachData",

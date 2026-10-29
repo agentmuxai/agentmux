@@ -302,6 +302,8 @@ pub struct SkillListItem {
     /// catalog-tier list for an agent (`skill_list_global_for_agent`) says so; false elsewhere.
     #[serde(default)]
     pub reached: bool,
+    /// This agent opted out of the skill's reach (`skill_optout`), so `reached` is false.
+    pub opted_out: bool,
 }
 
 /// `skill_list_global`'s response shape: the skill plus how many agents
@@ -343,7 +345,7 @@ impl Store {
         Ok(self
             .managed_list::<Skill>(catalog, Owner::Agent, agent_id)?
             .into_iter()
-            .map(|(skill, bound_to_agent)| SkillListItem { skill, bound_to_agent, reached: false })
+            .map(|(skill, bound_to_agent)| SkillListItem { skill, bound_to_agent, reached: false, opted_out: false })
             .collect())
     }
 
@@ -372,7 +374,7 @@ impl Store {
     /// standalone Skill primitive via the RPC layer at all).
     pub fn effective_skills(&self, catalog: &Store, agent_id: &str) -> Vec<AgentSkill> {
         let legacy_skills = self.agent_skill_list(agent_id).unwrap_or_default();
-        let reach = catalog.skill_reach_map().unwrap_or_default();
+        let (reach, optout) = (catalog.skill_reach_map().unwrap_or_default(), catalog.skill_optout_set_all().unwrap_or_default());
         let agent_created_at = self.agent_def_get(agent_id).ok().flatten().map_or(0, |d| d.created_at);
         let mut visible_skills: Vec<Skill> = self
             .skill_list(catalog, agent_id)
@@ -381,7 +383,8 @@ impl Store {
             .filter(|item| {
                 item.bound_to_agent
                     || !item.skill.is_global
-                    || reach.get(&item.skill.id).is_some_and(|r| r.reaches(agent_created_at))
+                    || (reach.get(&item.skill.id).is_some_and(|r| r.reaches(agent_created_at))
+                        && !optout.contains(&(item.skill.id.clone(), agent_id.to_string())))
             })
             .map(|item| item.skill)
             .collect();
@@ -448,14 +451,15 @@ impl Store {
     /// Skills) — so exposing them alongside a caller-chosen agent's bind
     /// status is safe. reagentx P0 on PR #2329.
     pub fn skill_list_global_for_agent(&self, catalog: &Store, agent_id: &str) -> Result<Vec<SkillListItem>, StoreError> {
-        let reach = catalog.skill_reach_map()?;
+        let (reach, optout) = (catalog.skill_reach_map()?, catalog.skill_optout_set_all()?);
         let agent_created_at = self.agent_def_get(agent_id).ok().flatten().map_or(0, |d| d.created_at);
         Ok(self
             .managed_list_global_for_agent::<Skill>(catalog, agent_id)?
             .into_iter()
             .map(|(skill, bound_to_agent)| {
-                let reached = reach.get(&skill.id).is_some_and(|r| r.reaches(agent_created_at));
-                SkillListItem { skill, bound_to_agent, reached }
+                let reaches = reach.get(&skill.id).is_some_and(|r| r.reaches(agent_created_at));
+                let opted_out = reaches && optout.contains(&(skill.id.clone(), agent_id.to_string()));
+                SkillListItem { skill, bound_to_agent, reached: reaches && !opted_out, opted_out }
             })
             .collect())
     }
@@ -472,6 +476,7 @@ impl Store {
         // Its reach goes with it.
         catalog.skill_reach_forget(id)?;
         catalog.skill_source_forget(id)?;
+        catalog.skill_optout_forget(id)?;
         Ok(deleted)
     }
 
