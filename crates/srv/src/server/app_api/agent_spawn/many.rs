@@ -171,6 +171,11 @@ pub(super) async fn spawn_many(
         }
     }
     crate::server::agent_lifecycle::release_batch(state, &wanted);
+    // Their rooms were rekeyed to the workers' own ids as they were made, and the open that followed took no
+    // admission, so no claim is left to be used: give them back.
+    for (worker, _) in &launched {
+        crate::server::agent_lifecycle::release_start(state, &worker.id);
+    }
     tracing::info!(leader = %leader.def.name, workers = n, asked_user, "agent.spawn_many: the workers were launched");
     Ok(launched
         .into_iter()

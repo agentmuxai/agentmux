@@ -366,6 +366,7 @@ async fn a_spawned_workers_start_uses_its_own_room_not_the_stand_ins() {
     rekey_reservation(&state, "stand-in-1", "worker-1");
     admit_start_without_eviction(&state, "worker-1").await.expect("and so is the second's");
     release_batch(&state, &wanted(&["stand-in-0", "stand-in-1", "worker-0", "worker-1"]));
+    assert!(!batch_held().lock().unwrap().contains(&pending_key(&state, "worker-0")), "released: no claim is left behind");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
