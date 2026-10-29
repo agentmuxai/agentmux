@@ -408,3 +408,21 @@ async fn only_calls_that_put_a_question_to_the_person_count_toward_the_hourly_li
     let e = run(&w, &StubGoogle::new(vec![]), &Person::says(Answer::Yes), "send_draft", json!({ "draft_id": "../x" })).await.unwrap_err();
     assert!(e.contains("isn't a Gmail id"), "{e}");
 }
+
+#[tokio::test]
+async fn a_failure_after_the_yes_counts_as_a_question_asked() {
+    let w = world(WRITE_SCOPES, Some(GrantLevel::Write));
+    // The draft changes after the yes: a window was shown, so the line counts toward the hourly limit.
+    let google = StubGoogle::new(vec![(200, stored_draft("bob@example.com", "one")), (200, stored_draft("bob@example.com", "two"))]);
+    let e = run(&w, &google, &Person::says(Answer::Yes), "send_draft", json!({ "draft_id": "r-1" })).await.unwrap_err();
+    assert!(e.starts_with("the person said yes, but the draft changed"), "{e}");
+    // So does a Google error on the send itself, and on the trash.
+    let google = StubGoogle::new(vec![(200, stored_draft("bob@example.com", "x")), (200, stored_draft("bob@example.com", "x")), (500, json!({}))]);
+    let e = run(&w, &google, &Person::says(Answer::Yes), "send_draft", json!({ "draft_id": "r-1" })).await.unwrap_err();
+    assert!(e.starts_with("the person said yes, but "), "{e}");
+    let google = StubGoogle::new(vec![(200, json!({ "messages": [] })), (500, json!({}))]);
+    let e = run(&w, &google, &Person::says(Answer::Yes), "trash_thread", json!({ "thread_id": "t1" })).await.unwrap_err();
+    assert!(e.starts_with("the person said yes, but "), "{e}");
+    let asked = w.store.google_calls_count("acc-1", "def-1", "gmail", &["send_draft", "trash_thread"], 0, CallsCounted::Asked).unwrap();
+    assert_eq!(asked, 3);
+}

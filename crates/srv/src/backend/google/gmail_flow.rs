@@ -39,6 +39,10 @@ pub trait Approver: Sync {
     fn ask(&self, def: &AgentDefinition, title: String, message: String, yes: &str, no: &str) -> impl Future<Output = Result<Answer, String>> + Send;
 }
 
+/// What a failure after the person's yes begins with. The log's hourly count of questions
+/// (`CallsCounted::Asked`) takes the lines that begin `error: the person `, so it takes these.
+const ANSWERED_YES: &str = "the person said yes, but ";
+
 /// Sends an agent can complete in a day, and questions it can put in an hour: a backstop in case a
 /// tricked agent asks over and over (§6).
 const SENDS_PER_DAY: usize = 20;
@@ -230,17 +234,22 @@ async fn send_draft<G: GoogleHttp, O: OAuthHttp, S: TokenSecrets, A: Approver>(
     }
     let question = write::send_question(&def.name, &access.email(), &view);
     ask(approver, def, question, "Send", "Don't send", "sending").await?;
-    // What the person said yes to is what goes: read the draft again and compare.
-    let again = read_draft(deps, access, &fetch).await?;
-    if again.digest() != view.digest() {
-        return Err("the draft changed after the person approved it, so it was not sent. Call send_draft again to ask about the new text".to_string());
-    }
-    let reply = send(deps, access, &write::send_plan(&view.id)?).await?;
-    Ok(json!({
-        "sent": true,
-        "message_id": reply.body.get("id").and_then(Value::as_str).unwrap_or(""),
-        "thread_id": reply.body.get("threadId").and_then(Value::as_str).unwrap_or(""),
-    }))
+    // What the person said yes to is what goes: read the draft again and compare. A window was shown,
+    // so whatever ends the call from here is logged as an answered question (it counts toward the
+    // hourly limit, as a no does).
+    let after_yes = async {
+        let again = read_draft(deps, access, &fetch).await?;
+        if again.digest() != view.digest() {
+            return Err("the draft changed after the person approved it, so it was not sent. Call send_draft again to ask about the new text".to_string());
+        }
+        let reply = send(deps, access, &write::send_plan(&view.id)?).await?;
+        Ok(json!({
+            "sent": true,
+            "message_id": reply.body.get("id").and_then(Value::as_str).unwrap_or(""),
+            "thread_id": reply.body.get("threadId").and_then(Value::as_str).unwrap_or(""),
+        }))
+    };
+    after_yes.await.map_err(|e: String| format!("{ANSWERED_YES}{e}"))
 }
 
 /// The draft as it is stored now, whole: text Gmail keeps outside the message is loaded first, and a
@@ -275,7 +284,7 @@ async fn trash_thread<G: GoogleHttp, O: OAuthHttp, S: TokenSecrets, A: Approver>
     let headers = send(deps, access, &summary).await?.body;
     let question = write::trash_question(&def.name, &access.email(), &headers);
     ask(approver, def, question, "Move to trash", "Keep it", "trashing").await?;
-    let reply = send(deps, access, &trash).await?;
+    let reply = send(deps, access, &trash).await.map_err(|e| format!("{ANSWERED_YES}{e}"))?;
     Ok(json!({ "thread_id": reply.body.get("id").and_then(Value::as_str).unwrap_or(""), "trashed": true }))
 }
 
