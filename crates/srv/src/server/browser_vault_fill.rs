@@ -114,7 +114,7 @@ fn record(state: &AppState, block_id: &str, target: &FillTarget, agent: &str, wh
     crate::backend::vault::record(&state.identity_store, &target.id, &target.label, agent, "filled a web form", where_, outcome);
     // The pane's own Log shows it too, with what was filled and never its value.
     note(block_id, agent, Kind::Fill).detail(&format!("{} from the Vault", target.what)).how(how_of(outcome)).record(state);
-    // Every window's Vault and Warden views show the new line of the record.
+    // Every window's Vault pane shows the new line of the record.
     super::vault_handlers::publish(state);
 }
 

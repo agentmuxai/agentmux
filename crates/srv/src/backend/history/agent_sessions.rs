@@ -1,14 +1,14 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! One agent's sessions from its record, for Warden's History section
+//! One agent's sessions from its record, for the History pane
 //! (`history.agent_sessions`).
 
 use super::HistoryService;
 
 impl HistoryService {
-    /// Agent `uid`'s sessions as its record holds them (Warden's History
-    /// section, `history.agent_sessions`), most recent first. The first read
+    /// Agent `uid`'s sessions as its record holds them (the History
+    /// pane, `history.agent_sessions`), most recent first. The first read
     /// of a zone scans it; later reads only what was appended.
     pub fn agent_sessions(&self, uid: &str) -> crate::backend::rpc_types::HistoryAgentSessions {
         let (sessions, problems) = self.records.sessions_of(uid);

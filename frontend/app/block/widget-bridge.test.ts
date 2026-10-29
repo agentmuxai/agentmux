@@ -14,7 +14,7 @@ import { registerPaneTab } from "./pane-tab-registry";
 // Two sectioned panes, as their manifests declare them (pane-sections.ts).
 const unregister: (() => void)[] = [];
 beforeAll(() => {
-    for (const [view, ids] of [["warden", ["jobs", "host"]], ["swarm", ["supervisor", "broadcast"]], ["memory", ["global", "skills"]]] as const) {
+    for (const [view, ids] of [["warden", ["jobs"]], ["vault", ["cards", "logins"]], ["swarm", ["supervisor", "broadcast"]], ["memory", ["global", "skills"]]] as const) {
         unregister.push(
             registerPaneTab({
                 apiVersion: 1,
@@ -24,11 +24,7 @@ beforeAll(() => {
                 icon: "x",
                 sections: {
                     default: ids[0],
-                    items: [
-                        ...ids.map((id) => ({ id, label: id, icon: "x" })),
-                        // A section with sections of its own, like Warden's Vault.
-                        ...(view === "warden" ? [{ id: "vault", label: "Vault", icon: "x", sections: { default: "cards", items: [{ id: "cards", label: "Cards", icon: "x" }] } }] : []),
-                    ],
+                    items: ids.map((id) => ({ id, label: id, icon: "x" })),
                 },
                 create: () => ({ component: () => null }),
             })
@@ -249,8 +245,14 @@ describe("permissions", () => {
         expect(h.openPane).toHaveBeenLastCalledWith("kanban", {}, "right");
         await handleBridgeRequest(h, state, "panes.open", { view: "swarm", meta: { "swarm:section": "kanban" } });
         expect(h.openPane).toHaveBeenLastCalledWith("kanban", {}, "right");
+        // Warden's Vault, History and Audit sections are panes of their own now, and the Vault's section carries over.
         await handleBridgeRequest(h, state, "panes.open", { view: "warden", meta: { "warden:section": "vault", "vault:section": "cards" } });
-        expect(h.openPane).toHaveBeenLastCalledWith("warden", { "warden:section": "vault", "vault:section": "cards" }, "right");
+        expect(h.openPane).toHaveBeenLastCalledWith("vault", { "vault:section": "cards" }, "right");
+        await handleBridgeRequest(h, state, "panes.open", { view: "warden", meta: { "warden:section": "audit" } });
+        expect(h.openPane).toHaveBeenLastCalledWith("audit", {}, "right");
+        // A retired section says where it went instead of opening something else.
+        const gone = await handleBridgeRequest(h, state, "panes.open", { view: "warden", meta: { "warden:section": "lan" } });
+        expect(JSON.stringify(gone)).toMatch(/that section is gone: LAN peers are in the status bar/);
         await handleBridgeRequest(h, state, "panes.open", { view: "warden", meta: { "vault:section": "nope", "vault:request": "r1" } });
         expect(h.openPane).toHaveBeenLastCalledWith("warden", {}, "right");
         // Through an old view name, the section would land under a key the pane doesn't read: dropped.

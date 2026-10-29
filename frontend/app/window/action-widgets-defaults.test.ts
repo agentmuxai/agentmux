@@ -54,10 +54,11 @@ describe("the default widget bar", () => {
             "messengers",
             "sysinfo",
             "drone",
-            "warden",
             "vault",
+            "history",
             "toolchain",
             "tower",
+            "audit",
         ]);
     });
 
@@ -81,7 +82,7 @@ describe("the singleton flag in the default widget config", () => {
 
     it("marks the management panes", () => {
         expect(keys(flagged)).toEqual(
-            ["connectors", "drone", "help", "kanban", "memory", "settings", "swarm", "toolchain", "tower", "vault", "warden"].sort()
+            ["audit", "connectors", "drone", "help", "history", "kanban", "memory", "settings", "swarm", "toolchain", "tower", "vault"].sort()
         );
     });
 

@@ -169,7 +169,7 @@ pub(super) async fn inject(
     }
     let record = |t: &FillTarget, outcome: &str| {
         vault::record(&state.identity_store, &t.id, &t.label, &agent, "ran a command", &clip(cmd, 160), outcome);
-        // Every window's Vault and Warden views show the new line of the record.
+        // Every window's Vault pane shows the new line of the record.
         super::vault_handlers::publish(state);
     };
 

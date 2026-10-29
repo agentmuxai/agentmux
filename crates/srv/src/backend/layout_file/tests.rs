@@ -674,17 +674,37 @@ fn connectors_and_memory_are_written_with_their_section() {
         (json!({ "view": "knowledge", "memory:section": "bundles", "knowledge:section": "skills" }), "memory", "bundles"),
         // Remotes became a section of Connectors; a block saved before is written as that.
         (json!({ "view": "remotes", "remotes:expand": "db1" }), "connectors", "remotes"),
-        (json!({ "view": "warden", "warden:section": "host" }), "warden", "host"),
+        (json!({ "view": "warden", "warden:section": "jobs" }), "warden", "jobs"),
         (json!({ "view": "settings", "settings:section": "widgets" }), "settings", "widgets"),
-        // The Vault became a section of Warden; a block saved before is written as that.
-        (json!({ "view": "vault", "vault:section": "cards" }), "warden", "vault/cards"),
-        (json!({ "view": "vault" }), "warden", "vault"),
-        // On Warden's Vault section, the Vault's own section goes with it.
-        (json!({ "view": "warden", "warden:section": "vault", "vault:section": "logins" }), "warden", "vault/logins"),
+        // The Vault is a pane of its own and keeps its own section.
+        (json!({ "view": "vault", "vault:section": "cards" }), "vault", "cards"),
+        // A block still saved as Warden's Vault section is written as the Vault.
+        (json!({ "view": "warden", "warden:section": "vault", "vault:section": "logins" }), "vault", "logins"),
     ] {
         let v = view_from_block(&store, &meta(m), &ctx(false), &mut Vec::new());
         assert_eq!(v.view_type, kind);
         assert_eq!(v.config, json!({ "section": section }).as_object().unwrap().clone());
+    }
+}
+
+#[test]
+fn wardens_other_sections_are_written_as_the_panes_that_replaced_them() {
+    let store = Store::open_in_memory().unwrap();
+    for (m, kind) in [
+        (json!({ "view": "vault" }), "vault"),
+        (json!({ "view": "warden", "warden:section": "vault" }), "vault"),
+        (json!({ "view": "warden", "warden:section": "history" }), "history"),
+        (json!({ "view": "warden", "warden:section": "audit" }), "audit"),
+        (json!({ "view": "warden", "warden:section": "host" }), "swarm"),
+        (json!({ "view": "warden" }), "swarm"),
+        (json!({ "view": "warden", "warden:section": "kanban" }), "kanban"),
+        (json!({ "view": "warden", "warden:section": "lan" }), "audit"),
+        (json!({ "view": "warden", "warden:section": "internet" }), "audit"),
+        (json!({ "view": "warden", "warden:section": "ambient" }), "audit"),
+    ] {
+        let v = view_from_block(&store, &meta(m.clone()), &ctx(false), &mut Vec::new());
+        assert_eq!(v.view_type, kind, "{m}");
+        assert!(v.config.is_empty(), "{m}: {:?}", v.config);
     }
 }
 
@@ -716,10 +736,9 @@ fn connectors_memory_and_old_armory_or_knowledge_entries_open_the_new_panes() {
         (json!({ "type": "armory" }), "connectors", "connectors:section", "accounts"),
         // Files saved before Remotes became a section of Connectors say "remotes".
         (json!({ "type": "remotes" }), "connectors", "connectors:section", "remotes"),
-        (json!({ "type": "warden", "config": { "section": "host" } }), "warden", "warden:section", "host"),
+        (json!({ "type": "warden", "config": { "section": "jobs" } }), "warden", "warden:section", "jobs"),
         (json!({ "type": "settings", "config": { "section": "browser" } }), "settings", "settings:section", "browser"),
-        // Files saved before the Vault became a section of Warden say "vault".
-        (json!({ "type": "vault" }), "warden", "warden:section", "vault"),
+        (json!({ "type": "vault", "config": { "section": "cards" } }), "vault", "vault:section", "cards"),
     ] {
         let plan = plan_from_doc(&store, &one_pane(view.clone()), &opts(home.path(), false));
         let m = block_meta(&plan, 0, 0);
@@ -731,17 +750,47 @@ fn connectors_memory_and_old_armory_or_knowledge_entries_open_the_new_panes() {
 }
 
 #[test]
-fn wardens_vault_section_reopens_on_the_vaults_own_section() {
+fn a_vault_file_stays_a_vault_pane_on_the_vaults_own_section() {
     let home = tempfile::tempdir().unwrap();
     let store = Store::open_in_memory().unwrap();
     for view in [
+        // Files saved while the Vault was a section of Warden name `vault/<its section>`.
         json!({ "type": "warden", "config": { "section": "vault/cards" } }),
-        // A file saved when the Vault was a pane of its own names only the Vault's section.
         json!({ "type": "vault", "config": { "section": "cards" } }),
     ] {
         let plan = plan_from_doc(&store, &one_pane(view.clone()), &opts(home.path(), false));
         let m = block_meta(&plan, 0, 0);
-        assert_eq!((m["view"].as_str(), m["warden:section"].as_str(), m["vault:section"].as_str()), (Some("warden"), Some("vault"), Some("cards")), "{view}");
+        assert_eq!((m["view"].as_str(), m["vault:section"].as_str()), (Some("vault"), Some("cards")), "{view}");
+        assert!(!m.contains_key("warden:section"), "{view}");
+    }
+    let plan = plan_from_doc(&store, &one_pane(json!({ "type": "vault" })), &opts(home.path(), false));
+    let m = block_meta(&plan, 0, 0);
+    assert_eq!(m["view"], "vault");
+    assert!(!m.contains_key("vault:section") && !m.contains_key("warden:section"));
+}
+
+#[test]
+fn old_warden_files_open_the_panes_that_replaced_its_sections() {
+    let home = tempfile::tempdir().unwrap();
+    let store = Store::open_in_memory().unwrap();
+    for (view, pane) in [
+        (json!({ "type": "warden", "config": { "section": "vault" } }), "vault"),
+        (json!({ "type": "warden", "config": { "section": "history" } }), "history"),
+        (json!({ "type": "warden", "config": { "section": "audit" } }), "audit"),
+        (json!({ "type": "warden", "config": { "section": "host" } }), "swarm"),
+        (json!({ "type": "warden" }), "swarm"),
+        (json!({ "type": "warden", "config": { "section": "kanban" } }), "kanban"),
+        (json!({ "type": "warden", "config": { "section": "lan" } }), "audit"),
+        (json!({ "type": "warden", "config": { "section": "internet" } }), "audit"),
+        (json!({ "type": "warden", "config": { "section": "ambient" } }), "audit"),
+        (json!({ "type": "history" }), "history"),
+        (json!({ "type": "audit" }), "audit"),
+    ] {
+        let plan = plan_from_doc(&store, &one_pane(view.clone()), &opts(home.path(), false));
+        let m = block_meta(&plan, 0, 0);
+        assert_eq!(m["view"], pane, "{view}");
+        assert!(!m.contains_key("warden:section"), "{view}");
+        assert!(plan.notes.is_empty(), "{view}: {:?}", plan.notes);
     }
 }
 

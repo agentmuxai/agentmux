@@ -1,10 +1,10 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// The oversight half of the Vault, in Warden's Audit section
+// The oversight half of the Vault, in the Audit pane
 // (docs/specs/SPEC_VAULT_PANE_AGENTS_USE_SECRETS_UNSEEN_2026_10_19.md §5.6): what
 // agents did with the person's secrets, and where they may use them without asking,
-// with a way to stop each. The entries themselves are in Warden's Vault section, which
+// with a way to stop each. The entries themselves are in the Vault pane, which
 // this links to, and which links back.
 
 import { createEffect, createSignal, For, on, Show, type JSX } from "solid-js";
@@ -27,7 +27,7 @@ export const isAgentUse = (a: VaultActivity): boolean => a.actor !== "you" && US
 
 /** `visible`: this is the Audit section's shown. Opening the Vault's list opens its key and can ask the
  *  person (a keychain, a locked keyring), so nothing is loaded until the section is looked at. */
-export function WardenSecrets(props: { visible?: boolean }): JSX.Element {
+export function VaultSecrets(props: { visible?: boolean }): JSX.Element {
     if (!vaultAvailable()) return <></>;
     const visible = () => props.visible ?? true;
     const [rows, setRows] = createSignal<VaultActivity[] | null>(null);
@@ -62,7 +62,7 @@ export function WardenSecrets(props: { visible?: boolean }): JSX.Element {
     const grantText = (g: string) => (g.startsWith(COMMAND_GRANT) ? `runs commands: ${commandGrantLabel(g)}` : siteOf(g));
 
     return (
-        <section class="warden-secrets" aria-label="Secrets">
+        <section class="vault-secrets" aria-label="Secrets">
             <h3 class="warden-manager-summary">Secrets: what agents did with them</h3>
             <p class="warden-manager-dim">
                 Every use of a Vault entry by an agent, and where each may use one without asking. Never a value.{" "}

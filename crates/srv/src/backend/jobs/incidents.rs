@@ -630,7 +630,7 @@ pub fn task_body(run: &JobRun) -> String {
         lines.push(format!("- Summary, as the run reported it: {}", one_line(&run.summary)));
     }
     if let Some(block) = run.links.pointer("/transcript/block_id").and_then(|v| v.as_str()) {
-        lines.push(format!("- Transcript: the agent pane {block} (Warden > History)"));
+        lines.push(format!("- Transcript: the agent pane {block} (History)"));
     }
     if let Some(reported) = run.links.get("reported").and_then(|v| v.as_array()) {
         for link in reported.iter().take(5) {

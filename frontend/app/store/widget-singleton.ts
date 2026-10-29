@@ -17,16 +17,18 @@ import { atoms } from "@/app/store/global";
  * the fallback: such an entry keeps doing what it did (a test keeps this list equal to the flags).
  */
 export const BUILTIN_SINGLETON_VIEWS: ReadonlySet<string> = new Set([
+    "audit",
     "connectors",
     "drone",
     "help",
+    "history",
     "kanban",
     "memory",
     "settings",
     "swarm",
     "toolchain",
     "tower",
-    "warden",
+    "vault",
 ]);
 
 /** Whether opening `view` brings back the pane already open: a widget entry for it says so, it is a built-in management pane, or its extension pane says so. */

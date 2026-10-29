@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Warden — History section, Agents: every agent whose history AgentMux keeps,
+// The History pane, Agents: every agent whose history AgentMux keeps,
 // forks under the agent they were forked from, deleted agents included. A row
 // opens the agent's sessions from its record, and its Agent History tab.
 
@@ -16,14 +16,14 @@ import { ageMs, formatAge } from "@/app/view/warden-shared/warden-shared";
 import type { HistoryAgent } from "@/types/rpc/HistoryAgent";
 import type { HistoryAgentSessions } from "@/types/rpc/HistoryAgentSessions";
 import { formatBytes } from "@/util/format-bytes";
-import { agentRows, formatWhen, historyTotals } from "./warden-history-shared";
+import { agentRows, formatWhen, historyTotals } from "./history-shared";
 
 import "@/app/view/warden-shared/warden-manager-chrome.scss";
-import "./warden-history.scss";
+import "./history.scss";
 
 type Sessions = { loading: true } | { loading: false; data?: HistoryAgentSessions; error?: string };
 
-export const WardenHistoryAgents = (props: { wardenBlockId: string; visible: boolean }): JSX.Element => {
+export const HistoryAgents = (props: { paneBlockId: string; visible: boolean }): JSX.Element => {
     const [agents, setAgents] = createSignal<HistoryAgent[] | null>(null);
     const [error, setError] = createSignal<string | null>(null);
     const [loading, setLoading] = createSignal(false);
@@ -67,7 +67,7 @@ export const WardenHistoryAgents = (props: { wardenBlockId: string; visible: boo
 
     const openHistory = (a: HistoryAgent) =>
         void openOrFocusHistoryTab({
-            currentBlockId: props.wardenBlockId,
+            currentBlockId: props.paneBlockId,
             agentId: a.definition_id,
             provider: a.provider,
             agentName: a.name || a.definition_id,
@@ -226,4 +226,4 @@ const SessionList = (props: { sessions: Sessions }): JSX.Element => (
     </Show>
 );
 
-WardenHistoryAgents.displayName = "WardenHistoryAgents";
+HistoryAgents.displayName = "HistoryAgents";

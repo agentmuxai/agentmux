@@ -913,20 +913,20 @@ declare global {
         "subagent:parent"?: string;
         "subagent:session"?: string;
         // Selected section of a sectioned pane, meta-backed so it survives a
-        // block remount and names the pane (section-pane.tsx, warden-model.ts).
+        // block remount and names the pane (section-pane.tsx).
         "connectors:section"?: "accounts" | "mcp" | "remotes";
         /** The block id of the pane that was split to open this Shortcuts pane: its Terminal and Hangar tiles start where that pane was. */
         "shortcuts:from"?: string;
         "memory:section"?: "global" | "personal" | "skills" | "bundles";
         "swarm:section"?: "supervisor" | "broadcast";
-        "warden:section"?: "jobs" | "vault" | "host" | "lan" | "internet" | "audit" | "history" | "ambient";
+        "warden:section"?: "jobs";
         /** A Kanban task to open in the drawer, set by a link from elsewhere (a Swarm row's task chip) and cleared once opened. Read by the Kanban pane. */
         "kanban:open"?: string | null;
         /** The Kanban pane shows one lane per repository. */
         "kanban:lanes"?: boolean;
         /** The Kanban's columns folded to a strip, by column id (kanban-columns.ts). */
         "kanban:collapsed"?: string[];
-        // The Vault's own section, within Warden's Vault section (vault-in-warden.ts).
+        // The Vault's own section, within the Vault pane.
         "vault:section"?: "personal" | "cards" | "api-keys" | "logins" | "notes" | "kept" | "activity";
         // An agent's Vault request to open the form for (vault-model.ts); cleared once shown.
         "vault:request"?: string | null;

@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! The agents Warden's History section lists (`history.agents`): every agent
+//! The agents the History pane lists (`history.agents`): every agent
 //! whose history the global transcript store holds, with how much of it is
 //! current and how much archived. Read from the store's file records only,
 //! never the transcripts, so it stays fast however large they are. An agent

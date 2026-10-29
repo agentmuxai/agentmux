@@ -23,7 +23,7 @@ vi.mock("@/app/view/agent/open-history-tab", () => ({
     openOrFocusHistoryTab: (...a: unknown[]) => openOrFocusHistoryTab(...a),
 }));
 
-import { WardenHistoryManager } from "./warden-history-manager";
+import { HistoryManager } from "./history-manager";
 
 const agent = (id: string, extra: Partial<HistoryAgent> = {}): HistoryAgent => ({
     definition_id: id,
@@ -39,7 +39,7 @@ const agent = (id: string, extra: Partial<HistoryAgent> = {}): HistoryAgent => (
     ...extra,
 });
 
-describe("Warden History section", () => {
+describe("History pane", () => {
     beforeEach(() => {
         vi.clearAllMocks();
         HistoryAgentsCommand.mockResolvedValue({
@@ -63,12 +63,12 @@ describe("Warden History section", () => {
     afterEach(() => cleanup());
 
     it("loads nothing until it is shown", () => {
-        render(() => <WardenHistoryManager wardenBlockId="warden-1" visible={false} />);
+        render(() => <HistoryManager paneBlockId="warden-1" visible={false} />);
         expect(HistoryAgentsCommand).not.toHaveBeenCalled();
     });
 
     it("lists every agent with history, forks under their parent, deleted agents included", async () => {
-        const { container } = render(() => <WardenHistoryManager wardenBlockId="warden-1" visible={true} />);
+        const { container } = render(() => <HistoryManager paneBlockId="warden-1" visible={true} />);
         await waitFor(() => expect(screen.getByText("Parent")).toBeInTheDocument());
         const rows = Array.from(container.querySelectorAll("tr[data-agent]")).map((r) => r.getAttribute("data-agent"));
         expect(rows).toEqual(["parent-1", "fork-1", "gone-123456"]);
@@ -78,7 +78,7 @@ describe("Warden History section", () => {
     });
 
     it("shows an agent's sessions from its record", async () => {
-        render(() => <WardenHistoryManager wardenBlockId="warden-1" visible={true} />);
+        render(() => <HistoryManager paneBlockId="warden-1" visible={true} />);
         await waitFor(() => expect(screen.getByText("Parent")).toBeInTheDocument());
         fireEvent.click(screen.getAllByRole("button", { name: "Show sessions" })[0]);
         await waitFor(() => expect(screen.getByText("s1234567")).toBeInTheDocument());
@@ -87,8 +87,8 @@ describe("Warden History section", () => {
         expect(screen.getByText("/work/a")).toBeInTheDocument();
     });
 
-    it("opens an agent's history in the Warden pane", async () => {
-        render(() => <WardenHistoryManager wardenBlockId="warden-1" visible={true} />);
+    it("opens an agent's history in the History pane", async () => {
+        render(() => <HistoryManager paneBlockId="warden-1" visible={true} />);
         await waitFor(() => expect(screen.getByText("Parent")).toBeInTheDocument());
         fireEvent.click(screen.getAllByRole("button", { name: "Open history" })[0]);
         expect(openOrFocusHistoryTab).toHaveBeenCalledWith({
@@ -100,7 +100,7 @@ describe("Warden History section", () => {
     });
 
     it("Storage shows where history is kept and that it is kept forever", async () => {
-        render(() => <WardenHistoryManager wardenBlockId="warden-1" visible={true} />);
+        render(() => <HistoryManager paneBlockId="warden-1" visible={true} />);
         fireEvent.click(screen.getByRole("radio", { name: "Storage" }));
         await waitFor(() => expect(screen.getByText("Pane history")).toBeInTheDocument());
         expect(HistoryUsageCommand).toHaveBeenCalledWith({}, { refresh: false });
@@ -118,7 +118,7 @@ describe("Warden History section", () => {
             computed_at_ms: Date.now(),
             compression: { enabled: true, frames: 13321, logical_bytes: 6_600, stored_bytes: 1_000, waiting: "agentmux-srv.exe (pid 7) can't read compressed history" },
         });
-        render(() => <WardenHistoryManager wardenBlockId="warden-1" visible={true} />);
+        render(() => <HistoryManager paneBlockId="warden-1" visible={true} />);
         fireEvent.click(screen.getByRole("radio", { name: "Storage" }));
         const line = await screen.findByTestId("history-compression");
         expect(line.textContent).toMatch(/Pane history compressed: .* of transcript in .* \(6\.6×\), 13,321 frames\./);
@@ -133,7 +133,7 @@ describe("Warden History section", () => {
             computed_at_ms: Date.now(),
             compression: { enabled: false, frames: 0, logical_bytes: 0, stored_bytes: 0 },
         });
-        render(() => <WardenHistoryManager wardenBlockId="warden-1" visible={true} />);
+        render(() => <HistoryManager paneBlockId="warden-1" visible={true} />);
         fireEvent.click(screen.getByRole("radio", { name: "Storage" }));
         expect((await screen.findByTestId("history-compression")).textContent).toBe("Pane history compression is turned off (agent:transcriptframes is false).");
     });
@@ -160,7 +160,7 @@ describe("Warden History section", () => {
     it("Storage offers the free space back, and asks for it at the next start once confirmed", async () => {
         HistoryUsageCommand.mockResolvedValue(reclaimable({}));
         HistoryReclaimCommand.mockResolvedValue({ pending: true, last_done_ms: 0, last_before_bytes: 0, last_after_bytes: 0 });
-        render(() => <WardenHistoryManager wardenBlockId="warden-1" visible={true} />);
+        render(() => <HistoryManager paneBlockId="warden-1" visible={true} />);
         fireEvent.click(screen.getByRole("radio", { name: "Storage" }));
         const line = await screen.findByTestId("history-reclaim");
         expect(line.textContent).toMatch(/free space AgentMux can give back/);
@@ -173,7 +173,7 @@ describe("Warden History section", () => {
 
     it("Storage doesn't offer it while compression is still catching up, or once the store gives space back by itself", async () => {
         HistoryUsageCommand.mockResolvedValue(reclaimable({}, { steady: false }));
-        render(() => <WardenHistoryManager wardenBlockId="warden-1" visible={true} />);
+        render(() => <HistoryManager paneBlockId="warden-1" visible={true} />);
         fireEvent.click(screen.getByRole("radio", { name: "Storage" }));
         await screen.findByTestId("history-compression");
         expect(screen.queryByRole("button", { name: /^Reclaim / })).toBeNull();
@@ -182,7 +182,7 @@ describe("Warden History section", () => {
     it("Storage says why a pending reclaim waits, and can withdraw it", async () => {
         HistoryUsageCommand.mockResolvedValue(reclaimable({ pending: true, waiting_for: "agentmux-srv.exe (pid 9) is running" }));
         HistoryReclaimCommand.mockResolvedValue({ pending: false, last_done_ms: 0, last_before_bytes: 0, last_after_bytes: 0 });
-        render(() => <WardenHistoryManager wardenBlockId="warden-1" visible={true} />);
+        render(() => <HistoryManager paneBlockId="warden-1" visible={true} />);
         fireEvent.click(screen.getByRole("radio", { name: "Storage" }));
         const line = await screen.findByTestId("history-reclaim");
         expect(line.textContent).toMatch(/Last start: agentmux-srv\.exe \(pid 9\) is running/);
@@ -194,7 +194,7 @@ describe("Warden History section", () => {
         HistoryUsageCommand.mockResolvedValue(
             reclaimable({ last_done_ms: Date.now(), last_before_bytes: 15_500_000_000, last_after_bytes: 3_600_000_000 }, { incremental: true, free_bytes: 0 }),
         );
-        render(() => <WardenHistoryManager wardenBlockId="warden-1" visible={true} />);
+        render(() => <HistoryManager paneBlockId="warden-1" visible={true} />);
         fireEvent.click(screen.getByRole("radio", { name: "Storage" }));
         expect((await screen.findByTestId("history-reclaim")).textContent).toMatch(/Gave back .* on .*; freed space now goes back by itself\./);
     });
