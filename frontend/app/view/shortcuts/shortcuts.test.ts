@@ -14,6 +14,11 @@ const h = vi.hoisted(() => {
     const state = {
         replaceBlock: vi.fn(async (..._a: unknown[]) => "new-block"),
         closeBlockInStack: vi.fn(async (..._a: unknown[]) => undefined),
+        openOrFocusPaneByView: vi.fn(async (..._a: unknown[]) => undefined),
+        createBlock: vi.fn(async (..._a: unknown[]) => "created"),
+        /** The views with a pane open in this window. */
+        openViews: new Set<string>(),
+        order: [] as string[],
         blocks: {} as Record<string, { meta: Record<string, unknown> }>,
         globalMock: undefined as unknown as () => Promise<Record<string, unknown>>,
     };
@@ -22,8 +27,8 @@ const h = vi.hoisted(() => {
         return {
             atoms: { fullConfigAtom: signals.fullConfigAtom },
             replaceBlock: state.replaceBlock,
-            createBlock: vi.fn(),
-            openOrFocusPaneByView: vi.fn(),
+            createBlock: state.createBlock,
+            openOrFocusPaneByView: state.openOrFocusPaneByView,
             MOS: { makeORef: (_t: string, id: string) => id, getMuxObjectAtom: (id: string) => () => state.blocks[id] },
         };
     };
@@ -37,6 +42,9 @@ vi.mock("@/store/global", () => h.globalMock());
 const layoutModel = {
     getNodeByBlockId: (blockId: string) => (h.blocks[blockId] ? { id: `node-of-${blockId}` } : undefined),
 };
+vi.mock("@/app/store/block-component-registry", () => ({
+    getAllBlockComponentModels: () => [...h.openViews].map((viewType) => ({ viewModel: { viewType } })),
+}));
 vi.mock("@/layout/index", () => ({
     getLayoutModelForStaticTab: () => layoutModel,
     closeBlockInStack: h.closeBlockInStack,
@@ -64,6 +72,7 @@ const escape = () => adaptFromReactOrNativeKeyEvent(new KeyboardEvent("keydown",
 beforeEach(() => {
     vi.clearAllMocks();
     h.blocks = {};
+    h.openViews.clear();
 });
 
 describe("Shortcuts pane: the manifest", () => {
@@ -153,6 +162,81 @@ describe("Shortcuts pane: choosing a tile", () => {
             await m.handleWidgetSelect(tile(m, "Terminal"));
         }
         expect(h.replaceBlock.mock.calls.map((c) => c[1])).toEqual([widgets()["defwidget@terminal"].blockdef, widgets()["defwidget@terminal"].blockdef]);
+    });
+});
+
+describe("Shortcuts pane: a singleton tile", () => {
+    const tile = (m: ShortcutsViewModel, label: string) => m.filteredWidgets().find((x) => x.label === label)!;
+    function open(singletons: Record<string, boolean> = {}) {
+        setFullConfigAtom({
+            settings: {},
+            widgets: {
+                "defwidget@memory": w("Memory", 1, "memory", { singleton: singletons.memory }),
+                "defwidget@terminal": w("Terminal", 2, "term"),
+                "defwidget@agent": w("Agent", 3),
+            },
+        } as unknown as FullConfigType);
+        h.blocks.sc = { meta: { view: "shortcuts", "shortcuts:from": "src" } };
+        h.order.length = 0;
+        h.closeBlockInStack.mockImplementation(async () => void h.order.push("close"));
+        h.openOrFocusPaneByView.mockImplementation(async () => void h.order.push("focus"));
+        return new ShortcutsViewModel("sc");
+    }
+
+    it("brings back the open pane and closes this one, this one first so the focus is not handed on after", async () => {
+        h.openViews.add("memory");
+        const m = open();
+        await m.handleWidgetSelect(tile(m, "Memory"));
+        expect(h.openOrFocusPaneByView).toHaveBeenCalledWith("memory", { meta: { view: "memory" } }, undefined);
+        expect(h.closeBlockInStack).toHaveBeenCalledWith(layoutModel, "node-of-sc", "sc");
+        expect(h.order).toEqual(["close", "focus"]);
+        expect(h.replaceBlock).not.toHaveBeenCalled();
+    });
+
+    it("the entry's own singleton flag decides, then the view's policy", async () => {
+        h.openViews.add("term").add("browser");
+        const m = open();
+        // Terminal is not one (no flag, not a built-in singleton): in place.
+        await m.handleWidgetSelect(tile(m, "Terminal"));
+        expect(h.replaceBlock).toHaveBeenCalledOnce();
+        expect(h.openOrFocusPaneByView).not.toHaveBeenCalled();
+        h.replaceBlock.mockClear();
+        // A flag on the entry makes it one.
+        const m2 = open({ memory: true });
+        h.openViews.add("memory");
+        await m2.handleWidgetSelect(tile(m2, "Memory"));
+        expect(h.openOrFocusPaneByView).toHaveBeenCalledOnce();
+    });
+
+    it("a singleton that is not open opens in this pane's place", async () => {
+        const m = open();
+        await m.handleWidgetSelect(tile(m, "Memory"));
+        expect(h.replaceBlock).toHaveBeenCalledOnce();
+        expect(h.openOrFocusPaneByView).not.toHaveBeenCalled();
+        expect(h.closeBlockInStack).not.toHaveBeenCalled();
+    });
+
+    it("Shift (forceNew) opens a new pane in place even when one is open", async () => {
+        h.openViews.add("memory");
+        const m = open();
+        await m.handleWidgetSelect(tile(m, "Memory"), { forceNew: true });
+        expect(h.replaceBlock).toHaveBeenCalledOnce();
+        expect(h.openOrFocusPaneByView).not.toHaveBeenCalled();
+        expect(h.closeBlockInStack).not.toHaveBeenCalled();
+    });
+
+    it("Enter on the chosen tile brings it back; Shift+Enter opens a new one", async () => {
+        h.openViews.add("memory");
+        const m = open();
+        m.gridLayout = { columns: 3, tileWidth: 90, tileHeight: 90, showLabel: true };
+        m.selectedIndex._set(m.filteredWidgets().findIndex((x) => x.label === "Memory"));
+        m.keyDownHandler(adaptFromReactOrNativeKeyEvent({ type: "keydown", key: "Enter", code: "Enter" } as KeyboardEvent));
+        await vi.waitFor(() => expect(h.openOrFocusPaneByView).toHaveBeenCalledOnce());
+        m.keyDownHandler(
+            adaptFromReactOrNativeKeyEvent({ type: "keydown", key: "Enter", code: "Enter", shiftKey: true } as KeyboardEvent)
+        );
+        await vi.waitFor(() => expect(h.replaceBlock).toHaveBeenCalledOnce());
+        expect(h.openOrFocusPaneByView).toHaveBeenCalledOnce();
     });
 });
 
