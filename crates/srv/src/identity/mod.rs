@@ -36,6 +36,7 @@ pub mod auth_session;
 pub mod browser_credential_store;
 pub mod cleanup;
 pub mod credential_watch;
+pub mod foreign_dir;
 pub mod github_connect;
 pub mod gh_agent_token;
 pub mod github_hooks;

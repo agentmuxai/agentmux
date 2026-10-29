@@ -285,7 +285,11 @@ export class ClaudeTranslator implements OutputTranslator {
                         : typeof rawEvent.error === "string"
                             ? rawEvent.error
                             : firstError ?? (code > 0 ? `API error ${code}` : "Agent encountered an error");
-                events.push({ type: "error_result", code, message });
+                // A `--resume` the CLI can't find (the session was recorded under another account or
+                // config dir) is not a failure of the turn: srv clears the id and starts the agent
+                // fresh with its record, and the pane's resume notice says so. No error row.
+                const unresumable = typeof rawEvent.result !== "string" && /^No conversation found with session ID/.test(message);
+                if (!unresumable) events.push({ type: "error_result", code, message });
             }
             const stats: SessionStats = {};
             if (typeof rawEvent.cost_usd === "number") stats.cost_usd = rawEvent.cost_usd;
