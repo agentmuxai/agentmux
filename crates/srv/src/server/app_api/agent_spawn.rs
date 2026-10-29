@@ -169,7 +169,7 @@ async fn spawn_with(
 
     let name = match name {
         Some(n) => n.to_string(),
-        None => next_worker_name(&state.mstore, &leader.def.name),
+        None => next_worker_name(&state.mstore, &leader.def.name, &std::collections::HashSet::new()),
     };
     let (worker, opened) = launch(state, &leader, &name, &tab_id, &runtime, &account, None).await?;
     tracing::info!(
@@ -572,9 +572,10 @@ fn account_matches(a: &IdentityAccount, wanted: &str, all: &[IdentityAccount]) -
 }
 
 /// "<Leader> worker N", the first N no agent is named.
-fn next_worker_name(mstore: &Store, leader: &str) -> String {
-    let taken: std::collections::HashSet<String> =
+fn next_worker_name(mstore: &Store, leader: &str, also_taken: &std::collections::HashSet<String>) -> String {
+    let mut taken: std::collections::HashSet<String> =
         mstore.agent_def_list().unwrap_or_default().into_iter().map(|d| d.name.to_lowercase()).collect();
+    taken.extend(also_taken.iter().cloned());
     (1..)
         .map(|n| format!("{leader} worker {n}"))
         .find(|n| !taken.contains(&n.to_lowercase()))

@@ -697,3 +697,12 @@ fn the_one_prompt_lists_every_worker() {
     assert!(m.contains("• a new agent on sonnet, account me@example.com: second task"), "{m}");
     assert!(m.contains("Start them?"), "{m}");
 }
+
+/// A name made for an unnamed worker skips the ones the same batch gave to later workers.
+#[tokio::test]
+async fn a_generated_worker_name_skips_the_names_a_batch_asked_for() {
+    let state = test_state();
+    let asked: std::collections::HashSet<String> = ["lead worker 1".to_string()].into();
+    assert_eq!(next_worker_name(&state.mstore, "Lead", &asked), "Lead worker 2");
+    assert_eq!(next_worker_name(&state.mstore, "Lead", &Default::default()), "Lead worker 1");
+}

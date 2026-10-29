@@ -4,7 +4,7 @@
 //! `POST /api/v1/agent/spawn_many`, the `Agents` tool's `spawn` with `workers`
 //! (`SPEC_COUNTDOWN_BUTTONS_AND_BATCH_AGENT_ACTIONS_2026_10_28.md` §5): several workers at once, one
 //! approval for all of them, and all of them or none. Everything that can be checked is checked before
-//! the first worker is made (the briefs, the names, the accounts, the leader's limit, the start rate,
+//! the first worker is made (the briefs, the names, the accounts, the leader's limit,
 //! the room under the agent cap); a launch that still fails removes the workers already launched.
 //! The MCP process sends the briefs only after srv answers that all of them are open.
 
@@ -144,16 +144,15 @@ pub(super) async fn spawn_many(
         false
     };
 
-    // The room is claimed now and the start counted, as one step each; a refusal starts nothing.
+    // The room is claimed now; a refusal starts nothing. The start limit is not charged here: a worker
+    // that has to be started for its brief is charged when the brief is delivered, as for one worker.
     crate::server::agent_lifecycle::admit_batch(state, &wanted, true).await.map_err(|e| refuse(StatusCode::CONFLICT, e))?;
-    if let Err(e) = crate::server::start_rate::allow_n(state, &leader.def.id, n) {
-        crate::server::agent_lifecycle::release_batch(state, &wanted);
-        return Err(refuse(StatusCode::TOO_MANY_REQUESTS, e));
-    }
 
     let mut launched: Vec<(AgentDefinition, AgentOpenResult)> = Vec::with_capacity(n);
+    // The names the batch asked for: a generated name must not take one a later worker named.
+    let asked: std::collections::HashSet<String> = planned.iter().filter_map(|p| p.name.as_ref()).map(|n| n.to_lowercase()).collect();
     for (i, p) in planned.iter().enumerate() {
-        let name = p.name.clone().unwrap_or_else(|| next_worker_name(&state.mstore, &leader.def.name));
+        let name = p.name.clone().unwrap_or_else(|| next_worker_name(&state.mstore, &leader.def.name, &asked));
         match launch(state, &leader, &name, &tab_id, &p.runtime, &p.account, Some(wanted[i].key.as_str())).await {
             Ok(done) => launched.push(done),
             Err(e) => {
