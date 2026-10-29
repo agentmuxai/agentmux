@@ -1519,6 +1519,7 @@ pub(super) async fn handle_reactive_register(
                 &state.identity_store,
                 &req.block_id,
             );
+            crate::identity::foreign_dir::heal_block_config_dir_env(&state.mstore, block.as_ref(), bound_dir.as_deref());
             let config_dir = subagent_watcher::resolve_claude_config_dir(
                 block.as_ref().map(|b| &b.meta).unwrap_or(&empty_meta),
                 &req.agent_id,

@@ -491,7 +491,20 @@ describe("ClaudeTranslator", () => {
             expect((events[0] as any).message).toBe("plain string error detail");
         });
 
-        it("surfaces the CLI's errors list when it is the only detail (a stale --resume)", () => {
+        it("surfaces the CLI's errors list when it is the only detail", () => {
+            const t = new ClaudeTranslator();
+            const events = t.translate({
+                type: "result",
+                is_error: true,
+                subtype: "error_during_execution",
+                num_turns: 0,
+                errors: ["Error [ede_diagnostic] result_type=assistant stop_reason=end_turn"],
+            });
+            expect(events[0].type).toBe("error_result");
+            expect((events[0] as any).message).toBe("Error [ede_diagnostic] result_type=assistant stop_reason=end_turn");
+        });
+
+        it("shows a --resume the CLI can't find as no error: the agent starts fresh", () => {
             const t = new ClaudeTranslator();
             const events = t.translate({
                 type: "result",
@@ -500,8 +513,10 @@ describe("ClaudeTranslator", () => {
                 num_turns: 0,
                 errors: ["No conversation found with session ID: 4973c054"],
             });
-            expect(events[0].type).toBe("error_result");
-            expect((events[0] as any).message).toBe("No conversation found with session ID: 4973c054");
+            expect(events.map((e) => e.type)).not.toContain("error_result");
+            // A real failure that merely mentions it stays one.
+            const quoted = t.translate({ type: "result", is_error: true, result: "No conversation found with session ID: x" });
+            expect(quoted[0].type).toBe("error_result");
         });
 
         it("prefers result over error.message when both are present", () => {

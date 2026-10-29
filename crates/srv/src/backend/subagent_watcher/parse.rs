@@ -567,13 +567,16 @@ pub fn resolve_claude_config_dir(
     agent_id: &str,
     bound_dir: Option<PathBuf>,
 ) -> Option<PathBuf> {
-    bound_dir
-        .or_else(|| {
-            crate::backend::blockcontroller::cmd_env_of(meta)
-                .remove("CLAUDE_CONFIG_DIR")
-                .map(PathBuf::from)
-        })
-        .or_else(|| derive_claude_config_dir(agent_id))
+    if bound_dir.is_some() {
+        return bound_dir;
+    }
+    match crate::backend::blockcontroller::cmd_env_of(meta).remove("CLAUDE_CONFIG_DIR").map(PathBuf::from) {
+        // A snapshot left by a build that kept its accounts under its own channel: not a dir this
+        // agent runs in, and not one to guess a replacement for either. `None` leaves the watch where it is.
+        Some(dir) if crate::identity::foreign_dir::is_foreign_to_this_channel(&dir) => None,
+        Some(dir) => Some(dir),
+        None => derive_claude_config_dir(agent_id),
+    }
 }
 
 #[cfg(test)]
