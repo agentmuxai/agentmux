@@ -23,6 +23,9 @@
 //!   the host's pace without ever waiting on a stuck UI thread.
 //! - A pane is moved only while it is live and still in the window that sent
 //!   the batch: a rect from a window a pane was torn off from is dropped.
+//! - On every platform the host also moves shown panes itself when their window
+//!   resizes, ahead of the page (`LayoutBase`): Windows `follow_window_resize`
+//!   (from the window's `WM_SIZE`), macOS `follow_window_resize`, Linux `window_resized`.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, LazyLock};
@@ -96,14 +99,12 @@ pub(crate) fn parse_set_rects_args(args: &serde_json::Value) -> Result<(String, 
 /// the tile layout keeps its insets from the window's edges and every pane
 /// scales with it. The page's own rect for the new size replaces the guess.
 #[derive(Debug, Clone, Copy, PartialEq)]
-#[cfg_attr(target_os = "windows", allow(dead_code))]
 pub(crate) struct LayoutBase {
     viewport: (i32, i32),
     /// x, y, width, height of the tile layout; the whole viewport if unknown.
     layout: (i32, i32, i32, i32),
 }
 
-#[cfg_attr(target_os = "windows", allow(dead_code))]
 impl LayoutBase {
     /// `{ viewport: { width, height }, layout?: { x, y, width, height } }` from a batch.
     pub(crate) fn parse(args: &serde_json::Value) -> Option<Self> {
@@ -122,6 +123,7 @@ impl LayoutBase {
     }
 
     /// The width of the viewport the batch was laid out in.
+    #[cfg_attr(target_os = "windows", allow(dead_code))]
     pub(crate) fn viewport_width(&self) -> i32 {
         self.viewport.0
     }
@@ -144,12 +146,10 @@ impl LayoutBase {
 /// per pane, not per window: a batch can carry only some of a window's panes
 /// (a display's scale changed and only some panes' timers have reported), and
 /// a pane's rect must always be read against the base it was measured with.
-#[cfg_attr(target_os = "windows", allow(dead_code))]
 static LAYOUT_BASES: LazyLock<Mutex<HashMap<String, LayoutBase>>> = LazyLock::new(Default::default);
 
 /// Remember what pane `label`'s rect was laid out against (`None`: a rect
 /// with no base, which is used as sent). UI thread, as the rect is applied.
-#[cfg_attr(target_os = "windows", allow(dead_code))]
 pub(crate) fn note_layout_base(label: &str, base: Option<LayoutBase>) {
     let mut bases = LAYOUT_BASES.lock();
     match base {
@@ -158,7 +158,6 @@ pub(crate) fn note_layout_base(label: &str, base: Option<LayoutBase>) {
     };
 }
 
-#[cfg_attr(target_os = "windows", allow(dead_code))]
 pub(crate) fn layout_base(label: &str) -> Option<LayoutBase> {
     LAYOUT_BASES.lock().get(label).copied()
 }
@@ -250,6 +249,183 @@ pub(crate) fn window_client_px(window: &Window) -> (i32, i32) {
     ((client.width as f64 * scale).round() as i32, (client.height as f64 * scale).round() as i32)
 }
 
+/// How long after a window's last size change the page's rects count as
+/// settled: they were laid out for the size the window has now.
+#[cfg(any(target_os = "windows", test))]
+const SETTLE: Duration = Duration::from_millis(250);
+
+/// A page's viewport is `innerWidth * devicePixelRatio` rounded, so at a
+/// fractional display scale it can differ from the window's client area by a
+/// pixel or two with nothing resizing. That is noise, not a stale layout.
+#[cfg(any(target_os = "windows", test))]
+const ROUNDING_PX: i32 = 2;
+
+/// Where the page's `rect` goes while the window's client area is `client`.
+/// `offset` is what the client area exceeds the page's viewport by when the
+/// two agree (`WindowSize`).
+#[cfg(any(target_os = "windows", test))]
+fn follow_rect(base: &LayoutBase, rect: &Rect, client: (i32, i32), offset: (i32, i32)) -> Rect {
+    let (width, height) = (client.0 - offset.0, client.1 - offset.1);
+    if (width - base.viewport.0).abs() <= ROUNDING_PX && (height - base.viewport.1).abs() <= ROUNDING_PX {
+        return Rect { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+    }
+    base.predict(rect, width, height)
+}
+
+/// Each pane's rect as the page last sent it (Windows), by pane label, with the
+/// window it sits in: what `follow_window_resize` stretches. macOS and Linux
+/// read `browser_pane_physical_rects`, which is `cfg(not(windows))`.
+#[cfg(any(target_os = "windows", test))]
+type PageRects = HashMap<String, (String, (i32, i32, i32, i32))>;
+
+#[cfg(target_os = "windows")]
+static PAGE_RECTS: LazyLock<Mutex<PageRects>> = LazyLock::new(Default::default);
+
+/// Where each of `window_label`'s shown panes that has a layout base goes in a
+/// client area of `client`, by label.
+#[cfg(any(target_os = "windows", test))]
+fn plan_follow(
+    rects: &PageRects,
+    window_label: &str,
+    base_of: impl Fn(&str) -> Option<LayoutBase>,
+    client: (i32, i32),
+    offset: (i32, i32),
+) -> Vec<(String, Rect)> {
+    let mut plan: Vec<(String, Rect)> = rects
+        .iter()
+        .filter(|(_, (w, (_, _, width, height)))| w == window_label && *width > 0 && *height > 0)
+        .filter_map(|(label, (_, (x, y, width, height)))| {
+            let base = base_of(label)?;
+            let rect = Rect { x: *x, y: *y, width: *width, height: *height };
+            Some((label.clone(), follow_rect(&base, &rect, client, offset)))
+        })
+        .collect();
+    plan.sort_by(|a, b| a.0.cmp(&b.0));
+    plan
+}
+
+/// What the host knows about a window's size (Windows), by window label.
+#[cfg(target_os = "windows")]
+#[derive(Clone, Copy, Default)]
+struct WindowSize {
+    /// When the window's size last changed.
+    changed: Option<std::time::Instant>,
+    /// The client area minus the page's viewport, as of the last time the page
+    /// had caught up with the window.
+    offset: (i32, i32),
+}
+
+#[cfg(target_os = "windows")]
+static WINDOW_SIZES: LazyLock<Mutex<HashMap<String, WindowSize>>> = LazyLock::new(Default::default);
+
+/// A pane wrappers' parent window's client area in physical pixels, if it has one.
+#[cfg(target_os = "windows")]
+fn client_size(parent: isize) -> Option<(i32, i32)> {
+    use windows_sys::Win32::Foundation::RECT;
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetClientRect;
+
+    let mut r = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+    let ok = unsafe { GetClientRect(parent as *mut std::ffi::c_void, &mut r) };
+    let (w, h) = (r.right - r.left, r.bottom - r.top);
+    (ok != 0 && w > 0 && h > 0).then_some((w, h))
+}
+
+/// The window `window_label` changed size: move its shown panes to where the
+/// page will put them, without waiting for the page. The page's own rects for
+/// the new size replace the guess (`apply`). UI thread only (the window's
+/// `WM_SIZE`, after CEF has handled it).
+#[cfg(target_os = "windows")]
+pub(crate) fn follow_window_resize(window_label: &str) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetParent, SWP_NOACTIVATE, SWP_NOZORDER};
+
+    let started = std::time::Instant::now();
+    let offset = {
+        let mut sizes = WINDOW_SIZES.lock();
+        let size = sizes.entry(window_label.to_string()).or_default();
+        size.changed = Some(started);
+        size.offset
+    };
+    let rects: PageRects =
+        PAGE_RECTS.lock().iter().filter(|(_, (w, _))| w == window_label).map(|(l, v)| (l.clone(), v.clone())).collect();
+    let mut by_parent: Vec<(isize, Vec<(isize, Rect)>)> = Vec::new();
+    let mut moved = 0;
+    // One pane at a time: each wrapper has its own parent to measure.
+    for label in rects.keys() {
+        // A pane whose wrapper is gone (closed, hibernated) is forgotten here.
+        let Some(wrapper) = crate::browser_pane::wrapper::peek_wrapper_hwnd(label) else {
+            PAGE_RECTS.lock().remove(label);
+            continue;
+        };
+        let parent = unsafe { GetParent(wrapper as *mut std::ffi::c_void) } as isize;
+        let Some(client) = client_size(parent) else { continue };
+        let one: PageRects = rects.iter().filter(|(l, _)| *l == label).map(|(l, v)| (l.clone(), v.clone())).collect();
+        let Some((_, to)) = plan_follow(&one, window_label, layout_base, client, offset).into_iter().next() else {
+            continue;
+        };
+        match by_parent.iter_mut().find(|(p, _)| *p == parent) {
+            Some((_, v)) => v.push((wrapper, to)),
+            None => by_parent.push((parent, vec![(wrapper, to)])),
+        }
+        moved += 1;
+    }
+    for (_, wrappers) in &by_parent {
+        defer_move(wrappers, SWP_NOACTIVATE | SWP_NOZORDER);
+    }
+    if moved > 0 {
+        tracing::debug!(
+            window = window_label,
+            panes = moved,
+            ms = started.elapsed().as_secs_f64() * 1000.0,
+            "[pane-bounds] followed"
+        );
+    }
+}
+
+/// Which batch of a page's rects a request is: the page's start and a count
+/// within its life. The page sends a second batch before the host has answered
+/// the first, and two requests can arrive in either order; a pane's rect from
+/// an older batch must not replace the newer one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct RectsOrder {
+    epoch: u64,
+    seq: u64,
+}
+
+impl RectsOrder {
+    /// `{ epoch, seq }` from a batch; `None` from a page that doesn't send them.
+    pub(crate) fn parse(args: &serde_json::Value) -> Option<Self> {
+        Some(Self { epoch: args.get("epoch")?.as_u64()?, seq: args.get("seq")?.as_u64()? })
+    }
+}
+
+/// The newest batch each pane in each window has had a rect from, by window
+/// and block. Per window: a pane torn off into a window whose page started
+/// earlier is a new sequence, not a stale one.
+type NewestBatch = HashMap<(String, String), RectsOrder>;
+
+static NEWEST_BATCH: LazyLock<Mutex<NewestBatch>> = LazyLock::new(Default::default);
+
+/// `rects` without the panes a newer batch has already sent a rect for.
+fn drop_superseded(
+    newest: &mut NewestBatch,
+    window: &str,
+    rects: Vec<PaneBounds>,
+    order: Option<RectsOrder>,
+) -> Vec<PaneBounds> {
+    let Some(order) = order else { return rects };
+    rects
+        .into_iter()
+        .filter(|r| {
+            let seen = newest.entry((window.to_string(), r.block_id.clone())).or_insert(order);
+            if order < *seen {
+                return false;
+            }
+            *seen = order;
+            true
+        })
+        .collect()
+}
+
 /// A window's rects waiting for the UI thread, and who is waiting on them.
 #[derive(Default)]
 struct Pending {
@@ -305,7 +481,9 @@ impl BrowserPaneManager {
         window_label: &str,
         rects: Vec<PaneBounds>,
         base: Option<LayoutBase>,
+        order: Option<RectsOrder>,
     ) {
+        let rects = drop_superseded(&mut NEWEST_BATCH.lock(), window_label, rects, order);
         if rects.is_empty() {
             return;
         }
@@ -363,7 +541,7 @@ fn apply(state: &Arc<AppState>, window_label: &str, rects: &[(PaneBounds, Option
     }
     #[cfg(target_os = "windows")]
     {
-        apply_windows(state, &live);
+        apply_windows(state, window_label, &live);
         // A pane laid out at 0×0 is on a tab that isn't the visible one; the
         // input owner gives the app the keyboard if that pane had it.
         for (r, _) in &live {
@@ -450,58 +628,95 @@ pub(crate) fn forget_hidden(browser_id: i32) {
 /// flags `wrapper::resize_wrapper` uses (`SWP_NOACTIVATE`, insert-after null =
 /// top, so a moved pane is raised as before). Each wrapper's own `WM_SIZE`
 /// then sizes CEF's HWND inside it.
+///
+/// A rect the page laid out for an older window size is stretched to the
+/// window's size now (`follow_rect`), so a late batch for the old size doesn't
+/// pull a pane back after `follow_window_resize` moved it. The page's rect is
+/// also kept for the next resize.
 #[cfg(target_os = "windows")]
-fn apply_windows(state: &Arc<AppState>, live: &[(&PaneBounds, String)]) {
-    use windows_sys::Win32::UI::WindowsAndMessaging::{
-        BeginDeferWindowPos, DeferWindowPos, EndDeferWindowPos, GetParent, SWP_NOACTIVATE,
-    };
+fn apply_windows(state: &Arc<AppState>, window_label: &str, live: &[(&PaneBounds, String)]) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetParent, SWP_NOACTIVATE};
 
     let started = std::time::Instant::now();
     let mut by_parent: Vec<(isize, Vec<(isize, Rect)>)> = Vec::new();
     let mut moved: Vec<&str> = Vec::new();
+    {
+        let mut kept = PAGE_RECTS.lock();
+        for (r, label) in live {
+            kept.insert(label.clone(), (window_label.to_string(), (r.x, r.y, r.width, r.height)));
+        }
+    }
     for (r, label) in live {
         let Some(wrapper) = crate::browser_pane::wrapper::peek_wrapper_hwnd(label) else { continue };
         let parent = unsafe { GetParent(wrapper as *mut std::ffi::c_void) } as isize;
+        let rect = match (r.width > 0 && r.height > 0, layout_base(label), client_size(parent)) {
+            (true, Some(base), Some(client)) => {
+                let offset = window_offset(window_label, &base, client);
+                follow_rect(&base, &r.rect(), client, offset)
+            }
+            _ => r.rect(),
+        };
         match by_parent.iter_mut().find(|(p, _)| *p == parent) {
-            Some((_, v)) => v.push((wrapper, r.rect())),
-            None => by_parent.push((parent, vec![(wrapper, r.rect())])),
+            Some((_, v)) => v.push((wrapper, rect)),
+            None => by_parent.push((parent, vec![(wrapper, rect)])),
         }
         moved.push(label);
     }
 
     for (_, wrappers) in &by_parent {
-        let mut hdwp = unsafe { BeginDeferWindowPos(wrappers.len() as i32) };
-        for (hwnd, rect) in wrappers {
-            if hdwp.is_null() {
-                break;
-            }
-            hdwp = unsafe {
-                DeferWindowPos(
-                    hdwp,
-                    *hwnd as *mut std::ffi::c_void,
-                    std::ptr::null_mut(),
-                    rect.x,
-                    rect.y,
-                    rect.width,
-                    rect.height,
-                    SWP_NOACTIVATE,
-                )
-            };
-        }
-        // A failed DeferWindowPos frees the batch and returns null: move each
-        // wrapper on its own instead, which is what this replaced.
-        if hdwp.is_null() || unsafe { EndDeferWindowPos(hdwp) } == 0 {
-            tracing::warn!(panes = wrappers.len(), "[pane-bounds] deferred move failed; moving one by one");
-            for (hwnd, rect) in wrappers {
-                crate::browser_pane::wrapper::resize_wrapper(*hwnd as *mut std::ffi::c_void, rect);
-            }
-        }
+        defer_move(wrappers, SWP_NOACTIVATE);
     }
 
     tracing::debug!(panes = moved.len(), ms = started.elapsed().as_secs_f64() * 1000.0, "[pane-bounds] moved");
     for label in moved {
         if let Some(host) = state.get_browser(label).and_then(|b| b.host()) {
             host.notify_move_or_resize_started();
+        }
+    }
+}
+
+/// The offset between `window_label`'s client area and its page's viewport. It
+/// is learned whenever the window hasn't changed size for `SETTLE`, which is
+/// when the page's viewport is the window's.
+#[cfg(target_os = "windows")]
+fn window_offset(window_label: &str, base: &LayoutBase, client: (i32, i32)) -> (i32, i32) {
+    let mut sizes = WINDOW_SIZES.lock();
+    let size = sizes.entry(window_label.to_string()).or_default();
+    if size.changed.is_none_or(|t| t.elapsed() > SETTLE) {
+        size.offset = (client.0 - base.viewport.0, client.1 - base.viewport.1);
+    }
+    size.offset
+}
+
+/// Move wrappers of one parent together with one `DeferWindowPos` batch.
+#[cfg(target_os = "windows")]
+fn defer_move(wrappers: &[(isize, Rect)], flags: u32) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{BeginDeferWindowPos, DeferWindowPos, EndDeferWindowPos};
+
+    let mut hdwp = unsafe { BeginDeferWindowPos(wrappers.len() as i32) };
+    for (hwnd, rect) in wrappers {
+        if hdwp.is_null() {
+            break;
+        }
+        hdwp = unsafe {
+            DeferWindowPos(
+                hdwp,
+                *hwnd as *mut std::ffi::c_void,
+                std::ptr::null_mut(),
+                rect.x,
+                rect.y,
+                rect.width,
+                rect.height,
+                flags,
+            )
+        };
+    }
+    // A failed DeferWindowPos frees the batch and returns null: move each
+    // wrapper on its own instead, which is what this replaced.
+    if hdwp.is_null() || unsafe { EndDeferWindowPos(hdwp) } == 0 {
+        tracing::warn!(panes = wrappers.len(), "[pane-bounds] deferred move failed; moving one by one");
+        for (hwnd, rect) in wrappers {
+            crate::browser_pane::wrapper::resize_wrapper(*hwnd as *mut std::ffi::c_void, rect);
         }
     }
 }
@@ -610,6 +825,88 @@ mod tests {
             p.take("main").rects,
             vec![(b("x", 1), Some(base())), (b("y", 2), newer), (b("z", 3), None)]
         );
+    }
+
+    fn page_rects() -> PageRects {
+        let mut m = PageRects::new();
+        m.insert("right".into(), ("main".into(), (500, 100, 500, 300)));
+        m.insert("left".into(), ("main".into(), (0, 100, 500, 300)));
+        m.insert("hidden".into(), ("main".into(), (0, 0, 0, 0)));
+        m.insert("elsewhere".into(), ("floating-1".into(), (500, 100, 500, 300)));
+        m
+    }
+
+    fn plan(client: (i32, i32), offset: (i32, i32)) -> Vec<(String, (i32, i32, i32, i32))> {
+        plan_follow(&page_rects(), "main", |_| Some(base()), client, offset)
+            .into_iter()
+            .map(|(l, r)| (l, t(r)))
+            .collect()
+    }
+
+    #[test]
+    fn a_window_resize_moves_its_shown_panes_and_leaves_the_rest() {
+        assert_eq!(
+            plan((800, 800), (0, 0)),
+            vec![("left".to_string(), (0, 100, 400, 300)), ("right".to_string(), (400, 100, 400, 300))]
+        );
+    }
+
+    #[test]
+    fn a_pane_without_a_layout_base_is_left_where_it_is() {
+        let planned = plan_follow(&page_rects(), "main", |l| (l == "left").then(base), (800, 800), (0, 0));
+        assert_eq!(planned.len(), 1);
+        assert_eq!(planned[0].0, "left");
+    }
+
+    #[test]
+    fn the_pages_own_rounding_is_not_a_resize() {
+        // At a fractional display scale the viewport is a pixel or two off the client area.
+        let r = Rect { x: 500, y: 100, width: 500, height: 300 };
+        assert_eq!(t(follow_rect(&base(), &r, (1001, 799), (0, 0))), t(r));
+        // And a client area that is always 3 px wider than the page's viewport is the offset.
+        assert_eq!(t(follow_rect(&base(), &r, (1003, 800), (3, 0))), t(r));
+        assert_eq!(t(follow_rect(&base(), &r, (803, 800), (3, 0))), (400, 100, 400, 300));
+    }
+
+    fn order(epoch: u64, seq: u64) -> Option<RectsOrder> {
+        Some(RectsOrder { epoch, seq })
+    }
+
+    fn ids(rects: &[PaneBounds]) -> Vec<&str> {
+        rects.iter().map(|r| r.block_id.as_str()).collect()
+    }
+
+    #[test]
+    fn a_batch_that_arrives_late_loses_only_the_panes_a_newer_one_replaced() {
+        let mut newest = NewestBatch::new();
+        let second = drop_superseded(&mut newest, "main", vec![b("x", 2)], order(7, 2));
+        assert_eq!(ids(&second), ["x"]);
+        // The first batch (a: x and y) arrives after the second: y was only in it.
+        let first = drop_superseded(&mut newest, "main", vec![b("x", 1), b("y", 1)], order(7, 1));
+        assert_eq!(ids(&first), ["y"]);
+    }
+
+    #[test]
+    fn a_reloaded_page_and_a_page_that_sends_no_order_are_never_superseded() {
+        let mut newest = NewestBatch::new();
+        drop_superseded(&mut newest, "main", vec![b("x", 1)], order(7, 50));
+        assert_eq!(ids(&drop_superseded(&mut newest, "main", vec![b("x", 2)], order(8, 1))), ["x"]);
+        assert_eq!(ids(&drop_superseded(&mut newest, "main", vec![b("x", 3)], None)), ["x"]);
+    }
+
+    #[test]
+    fn a_pane_in_another_window_has_its_own_sequence() {
+        let mut newest = NewestBatch::new();
+        drop_superseded(&mut newest, "floating-1", vec![b("x", 1)], order(9, 40));
+        // The pane is torn off into a window whose page started earlier.
+        assert_eq!(ids(&drop_superseded(&mut newest, "main", vec![b("x", 2)], order(7, 3))), ["x"]);
+    }
+
+    #[test]
+    fn the_order_comes_from_the_batch_when_it_has_one() {
+        let args = serde_json::json!({ "epoch": 1_793_000_000_000u64, "seq": 4 });
+        assert_eq!(RectsOrder::parse(&args), order(1_793_000_000_000, 4));
+        assert_eq!(RectsOrder::parse(&serde_json::json!({ "seq": 4 })), None);
     }
 
     #[test]
