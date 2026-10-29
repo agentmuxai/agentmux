@@ -1,6 +1,6 @@
 # Spec: two buttons on every countdown, and agents stopped, opened and spawned as a batch
 
-**Status:** active: approved by the operator on 2026-10-28 ("yes, good for all 4"). S1 (part 1) is built in #5733, S2 (part 2) in #5735 and S3 (part 3) in #5749; S4 is not.
+**Status:** active: approved by the operator on 2026-10-28 ("yes, good for all 4"). S1 (part 1) is built in #5733, S2 (part 2) in #5735 and S3 (part 3) in #5749 and S4 (part 4) in #5764; all four are built.
 **Date:** 2026-10-28
 **Author:** Manoz@Area54 (agent-pane lifecycle), for AgentY, from the operator's own asks of 2026-10-28.
 **Verified against:** `origin/main` @ `bd2aa677f`, by reading code. Not checked: the macOS toast (the launcher has no macOS notify module yet; it is #1267) and a run of any of this.
@@ -104,6 +104,7 @@ Added 2026-10-28 at the operator's word ("keep the leader on external machine po
 - **Checks.** `validate` gets a second predicate, `is_remote_lead`. A remote lead cannot be a cycle: its own leads live on its machine, so `no_cycle` stops at it. An agent cannot lead itself still holds.
 - **Shown.** `SeatLead` already allows `name: null` for an agent this machine does not know (`summarize`'s `name_of`); for a remote lead `name_of` answers "AgentY@narko" (the peer's agent name and machine name), so `Agents list` and the Swarm show it, never "no agent". When the peer is offline the stored `slug@host` is shown as it is.
 - **Not changed.** Nothing is sent to the lead's machine: the seat is this machine's record of who the agent reports to, as for an operator lead. Seats a peer sends (`sanitize_peer_summary`) keep their bounds.
+- **Built as:** `agent_seat::is_remote_lead` (a lead holding an `@`), `agent_seats::known_remote_agents` (the LAN directory's agents as `Name@host`) and `remote_lead` (matched without case, refused with the known list), and `plan_seats(…, remote)` so `validate` accepts a lead the caller already checked. A lead on another machine is shown under the name it was set with, "AgentY@narko". Only the LAN list applies; a WAN agent name carries no machine name.
 - **Touch.** `backend/agent_seat.rs` (`validate`, `summarize`), `server/app_api/agent_seats.rs` and `server/agent_handlers/seat.rs` (resolve a lead that is `slug@host` against the peer lists), the `set_seat` text in `crates/mcp/src/tool_schemas.rs`, a test for each of: accepted when known, refused when unknown with the known list, no cycle through it, shown as "AgentY@narko".
 
 ## 9. Not covered
