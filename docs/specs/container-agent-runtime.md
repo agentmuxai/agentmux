@@ -248,10 +248,9 @@ container agents: <why, and what to do instead>`.
 | `/api/v1/pane/open` | yes, confined | only the views that show files (editor, media, files, sysinfo, help, tower), on paths inside the agent's own workspace (`/workspace/...` or relative); no terminal (runs on the host), no connection to another machine, no browser (the Browser tool opens one in the agent's Incognito jar) |
 | `/api/v1/agent/globalmemory/{write,remove,revert}` | no | Global Memory is composed into every native agent's context at launch; a container reads it, a native agent writes it |
 | `/api/v1/agent/self/upgrade` | no | replaces the app on the host |
-| `/api/v1/github/token` | no | the host's GitHub tokens are for native agents |
 | `/agentmux/agents/self/keys`, `/api/v1/agent/self/mcp-beat`, `/agentmux/reactive/register` | no | srv does this for a container agent itself |
 | `/agentmux/jobs/stop-run`, `/agentmux/viewer/*`, `/.well-known/*` | no | between AgentMux instances |
-| Everything else: Presence, Vault (with the user's approvals), Browser and UI (open, snapshot, find, act, navigate, eval, screenshot, query, click, shortcuts), Tasks, Schedule, Memory, Message, Agents, Widget, Google, RegisterDevServer, … | yes | what a native agent has |
+| Everything else: Presence, Vault (with the user's approvals), Browser and UI (open, snapshot, find, act, navigate, eval, screenshot, query, click, shortcuts), Tasks, Schedule, Memory, Message, Agents, Widget (installing one from a folder in `/workspace`, which the handler maps to the host's), the GitHub token for the agent's own git, Google, RegisterDevServer, … | yes | what a native agent has |
 
 Two things stay true for the routes that are open. A request is attributed to the agent the token
 was minted for, whatever the body says, and every route opened since the denylist needs that

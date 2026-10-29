@@ -749,6 +749,8 @@ async fn forward_stop_pending(
         deadline_ms: p["deadline_ms"].as_i64().unwrap_or_default(),
         status: "pending",
         error: None,
+        blocks: None,
+        outcomes: None,
         joined: p["joined"].as_bool().unwrap_or(false),
     })
 }
@@ -898,8 +900,9 @@ async fn ask_other_instances(
 /// `Stop agents`, from an agent: close each target agent's tab, as the user's
 /// tab × does, after the same 30 s override window as any other shutdown the
 /// user didn't ask for (docs/specs/SPEC_STOP_AN_AGENT_ONE_WAY_AND_SHUTDOWN_TOAST_2026_10_23.md
-/// §3.1). One window per target, all in parallel; only that agent's tab
-/// closes, so an agent stacked in the same pane keeps running.
+/// §3.1). The targets no request covers yet share one window, with one notification and one audit
+/// entry (`request_batch`), and the user can keep any one of them; a target that already has a window
+/// joins it. Only that agent's tab closes, so an agent stacked in the same pane keeps running.
 ///
 /// Refused up front, as `failed` with a pointer: the caller's own block (that
 /// is `Stop self`), and a block that is not an agent's (that is `Stop pane`).
@@ -915,6 +918,7 @@ pub(crate) async fn fleet_close_agents_with_override(
     let mut now = FleetActionResult::default();
     let mut pending: Vec<crate::sagas::pending_shutdown::PendingView> = Vec::new();
     let mut forwards = Vec::new();
+    let mut agents: Vec<String> = Vec::new();
     let mut seen = std::collections::HashSet::new();
     for block_id in targets {
         if !seen.insert(block_id.clone()) {
@@ -942,26 +946,32 @@ pub(crate) async fn fleet_close_agents_with_override(
             });
             continue;
         }
-        let target = state
-            .reactive_handler
-            .get_agent_by_block(&block_id)
-            .map(|a| a.agent_id)
-            .unwrap_or_else(|| block_id.clone());
-        let mut v = crate::sagas::pending_shutdown::request(
-            state,
-            &block_id,
-            by,
-            "FleetBulkStop",
-            "",
-            crate::sagas::pending_shutdown::Action::CloseTab { detail: format!("asked by {by} (Stop agents)") },
-        );
-        state.reactive_handler.log_fleet_action_audit(
-            Some(by), &target, &block_id, FLEET_BULK_STOP_AUDIT_ACTION,
-            true, None, &v.request_id, Some(&crate::sagas::pending_shutdown::audit_note(state, &v, by, "FleetBulkStop")),
-        );
+        agents.push(block_id);
+    }
+    // One window for the agents no request covers yet (a batch); a target that has one joins it.
+    let detail = format!("asked by {by} (Stop agents)");
+    let mut audited = std::collections::HashSet::new();
+    for (block_id, mut v) in agents.clone().into_iter().zip(crate::sagas::pending_shutdown::request_batch(state, &agents, by, "", &detail)) {
+        let target = state.reactive_handler.get_agent_by_block(&block_id).map(|a| a.agent_id).unwrap_or_else(|| block_id.clone());
+        // One entry per window: a batch is one `FleetBulkStop` naming every agent in it.
+        if v.blocks.is_none() || audited.insert(v.request_id.clone()) {
+            let (named, note) = match v.blocks.as_ref() {
+                Some(blocks) => (
+                    v.target.clone(),
+                    format!(
+                        "{} | closing {} agents: {}",
+                        crate::sagas::pending_shutdown::audit_note(state, &v, by, "FleetBulkStop"),
+                        blocks.len(),
+                        blocks.iter().map(|b| b.block_id.as_str()).collect::<Vec<_>>().join(", ")
+                    ),
+                ),
+                None => (target.clone(), crate::sagas::pending_shutdown::audit_note(state, &v, by, "FleetBulkStop")),
+            };
+            state.reactive_handler.log_fleet_action_audit(Some(by), &named, &block_id, FLEET_BULK_STOP_AUDIT_ACTION, true, None, &v.request_id, Some(&note));
+        }
         // A target can join a request opened for another block (its pane's
         // close, via a sibling tab): report it under the block named.
-        v.block_id = block_id.clone();
+        v.block_id = block_id;
         v.target = target;
         pending.push(v);
     }

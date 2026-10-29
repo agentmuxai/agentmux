@@ -88,18 +88,21 @@ fn is_no_verify(arg: &str) -> bool {
     name.len() >= "--no-v".len() && "--no-verify".starts_with(name)
 }
 
-/// The environment a commit made for `granted` needs: the App's bot as author and committer, the
-/// owner for the trailer. Empty when srv didn't say who the bot is.
+/// The environment a commit made for `granted` needs: the App's bot as author and committer when srv
+/// said who the bot is, and the owner for the trailer when it said who the agent works for. Each is
+/// on its own: a token without the bot's user id still carries the owner's credit.
 pub fn commit_env(granted: &Granted) -> Vec<(String, String)> {
-    let (Some(slug), Some(bot_id)) = (granted.bot_slug.as_deref(), granted.bot_user_id) else { return Vec::new() };
-    let name = format!("{slug}[bot]");
-    let email = format!("{bot_id}+{slug}[bot]@users.noreply.github.com");
-    let mut env = vec![
-        ("GIT_AUTHOR_NAME".to_string(), name.clone()),
-        ("GIT_AUTHOR_EMAIL".to_string(), email.clone()),
-        ("GIT_COMMITTER_NAME".to_string(), name),
-        ("GIT_COMMITTER_EMAIL".to_string(), email),
-    ];
+    let mut env = Vec::new();
+    if let (Some(slug), Some(bot_id)) = (granted.bot_slug.as_deref(), granted.bot_user_id) {
+        let name = format!("{slug}[bot]");
+        let email = format!("{bot_id}+{slug}[bot]@users.noreply.github.com");
+        env.extend([
+            ("GIT_AUTHOR_NAME".to_string(), name.clone()),
+            ("GIT_AUTHOR_EMAIL".to_string(), email.clone()),
+            ("GIT_COMMITTER_NAME".to_string(), name),
+            ("GIT_COMMITTER_EMAIL".to_string(), email),
+        ]);
+    }
     if let (Some(id), Some(login)) = (granted.owner_github_id, granted.owner_login.as_deref()) {
         env.push((OWNER_ID_ENV.to_string(), id.to_string()));
         env.push((OWNER_LOGIN_ENV.to_string(), login.to_string()));
@@ -399,8 +402,12 @@ mod tests {
         assert_eq!(env["GIT_AUTHOR_NAME"], "muxagent[bot]");
         assert_eq!(env["GIT_COMMITTER_EMAIL"], "77+muxagent[bot]@users.noreply.github.com");
         assert_eq!((env[OWNER_ID_ENV].as_str(), env[OWNER_LOGIN_ENV].as_str()), ("42", "octo"));
-        // Without the bot's identity there is nothing to set, and the commit stays as it is.
-        assert!(commit_env(&Granted { bot_slug: None, ..granted }).is_empty());
+        // Without the bot's user id the commit keeps its author, and still carries the owner.
+        let no_bot: std::collections::HashMap<_, _> = commit_env(&Granted { bot_user_id: None, ..granted.clone() }).into_iter().collect();
+        assert!(!no_bot.contains_key("GIT_AUTHOR_NAME"));
+        assert_eq!((no_bot[OWNER_ID_ENV].as_str(), no_bot[OWNER_LOGIN_ENV].as_str()), ("42", "octo"));
+        // Neither the bot nor an owner: nothing to set, and the commit stays as it is.
+        assert!(commit_env(&Granted { bot_slug: None, owner_github_id: None, ..granted }).is_empty());
     }
 
     fn git(dir: &Path, args: &[&str]) -> String {

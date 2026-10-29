@@ -571,6 +571,10 @@ jobs:
         run: node scripts/check-workdir-writes.mjs
       - name: No CEF/Chromium version in the README or overview diagrams
         run: bash scripts/check-no-cef-version-in-overview.sh
+      # Seed agents, operator-config entries and built-in skills go to every install:
+      # none of it may name one deployment's own tooling, hosts or repositories.
+      - name: Shipped agent text names no private setup
+        run: node scripts/check-product-text.mjs
 
       # The ratchet half of the same rule set. check-doc-status.sh is scoped to
       # CHANGED FILES on purpose (a repo-wide gate would fail every PR on the

@@ -398,8 +398,9 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 let mut outcomes = Vec::with_capacity(pending.len());
                 for p in &pending {
                     let request_id = p["request_id"].as_str().unwrap_or_default();
+                    let block = p["block_id"].as_str().unwrap_or_default().to_string();
                     let now = await_shutdown(client, local_url, auth_key, request_id, true).await;
-                    outcomes.push((p["block_id"].as_str().unwrap_or_default().to_string(), now));
+                    outcomes.push((block.clone(), own_outcome(now, &block)));
                 }
                 let note = result["note"].as_str().map(str::to_string);
                 result = merge_bulk_stop_outcomes(result, outcomes);

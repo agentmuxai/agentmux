@@ -140,10 +140,10 @@ async fn stop_agents_closes_one_agent_s_tab_and_leaves_the_agent_beside_it() {
     assert_eq!(members, vec![visible.clone()], "the pane keeps only the other agent");
 }
 
-/// The user keeps one agent: it stays, and its neighbour's own window is
-/// not affected (one request per tab, spec §3.5).
+/// Several agents are one window (countdown buttons spec §4): the user keeps one from its own
+/// banner and it stays; the other still closes when the window runs out.
 #[tokio::test]
-async fn stop_agents_gives_each_tab_its_own_window() {
+async fn stop_agents_is_one_window_and_the_user_can_keep_one() {
     let state = test_state();
     let (_, visible, background) = seed_two_agent_pane(&state).await;
     let (_, pending, _) = super::fleet::fleet_close_agents_with_override(
@@ -154,12 +154,14 @@ async fn stop_agents_gives_each_tab_its_own_window() {
     )
     .await;
     assert_eq!(pending.len(), 2);
-    assert_ne!(pending[0].request_id, pending[1].request_id, "two tabs, two windows");
+    assert_eq!(pending[0].request_id, pending[1].request_id, "two tabs, one window");
     let (keep, close) = if pending[0].block_id == visible { (&pending[0], &pending[1]) } else { (&pending[1], &pending[0]) };
     assert_eq!(crate::sagas::pending_shutdown::keep(&state, &keep.block_id, &keep.request_id), "kept_by_user");
     crate::sagas::pending_shutdown::expire_now(&close.request_id);
-    assert_eq!(crate::sagas::pending_shutdown::settled(&close.request_id).await.status, "shut_down");
-    assert_eq!(crate::sagas::pending_shutdown::settled(&keep.request_id).await.status, "kept_by_user");
+    let done = crate::sagas::pending_shutdown::settled(&close.request_id).await;
+    assert_eq!(done.status, "shut_down");
+    let outcome = |b: &str| done.outcomes.iter().flatten().find(|o| o.block_id == b).map(|o| o.outcome);
+    assert_eq!((outcome(&keep.block_id), outcome(&close.block_id)), (Some("kept_by_user"), Some("shut_down")));
     let s = state.srv_state.lock().await;
     assert!(s.blocks.contains_key(&keep.block_id), "the one the user kept");
     assert!(!s.blocks.contains_key(&close.block_id));

@@ -16,7 +16,7 @@ const pending = {
 
 describe("shutdown-pending (SPEC_AGENT_SELF_QUIT §6.5)", () => {
     it("parses the event and rejects one without an id or deadline", () => {
-        expect(parsePending(pending)).toEqual(pending);
+        expect(parsePending(pending)).toEqual({ ...pending, others: 0 });
         expect(parsePending({ request_id: "r1" })).toBeNull();
         expect(parsePending(null)).toBeNull();
         expect(clearedRequestId({ request_id: "r1", outcome: "kept_by_user" })).toBe("r1");
@@ -40,6 +40,22 @@ describe("shutdown-pending (SPEC_AGENT_SELF_QUIT §6.5)", () => {
         expect(pendingTitle(p, "camper", "Camper")).toBe("Korp asked to close Camper: task finished");
         expect(pendingTitle({ ...p, by: "camper" }, "camper", "Camper")).toBe("Camper asked to close itself: task finished");
         expect(pendingTitle({ ...p, reason: "" }, "camper", "Camper")).toBe("Korp asked to close Camper");
+    });
+
+    it("a request over several agents says how many others close with this one", () => {
+        const batch = {
+            ...pending,
+            via: "FleetBulkStop",
+            blocks: [{ block_id: "b1", name: "A" }, { block_id: "b2", name: "B" }, { block_id: "b3", name: "C" }],
+        };
+        const p = parsePending(batch, "b1")!;
+        expect(p.others).toBe(2);
+        expect(pendingTitle(p, "camper", "Camper")).toBe("Korp asked to close Camper and 2 others: task finished");
+        expect(pendingTitle(parsePending(batch, "b3")!, "c", "C")).toContain("and 2 others");
+        const two = parsePending({ ...batch, blocks: batch.blocks.slice(0, 2) }, "b1")!;
+        expect(pendingTitle(two, "camper", "Camper")).toContain("and 1 other:");
+        expect(parsePending(pending, "b1")!.others).toBe(0);
+        expect(replayPending(batch, null, 10_000, "b2")?.others).toBe(2);
     });
 
     it("says stop only for the internal stop that keeps the pane", () => {

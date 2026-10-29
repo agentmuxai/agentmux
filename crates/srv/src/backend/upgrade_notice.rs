@@ -44,6 +44,9 @@ const SETTLE: Duration = Duration::from_secs(1);
 /// note that finds none is tried again, this often, up to [`RETRIES`] times.
 pub(crate) const RETRY_GAP: Duration = Duration::from_secs(2);
 pub(crate) const RETRIES: u32 = 15;
+/// The agents whose turn was running when AgentMux last quit, in the channel
+/// folder ([`record_interrupted`]).
+pub const INTERRUPTED_FILE: &str = "agentmux-interrupted-turns.json";
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 struct Record {
@@ -57,6 +60,15 @@ struct Record {
     /// Panes already told about it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     notified: Vec<String>,
+}
+
+/// The agents (by definition id, `agentId` in their pane's meta) whose turn
+/// was in flight when the last quit began, and when. A pane's block id is new
+/// after a restore, the agent's id is not.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+struct Interrupted {
+    at: i64,
+    agents: Vec<String>,
 }
 
 /// This start is (still announcing) an upgrade from `from` to `to`, made at
@@ -120,6 +132,61 @@ pub fn observe_start(dir: &Path, version: &str, now_ms: i64) -> Option<Upgraded>
     })
 }
 
+/// At quit, as each agent is closed (or all that are left when srv exits): add
+/// the ones with a turn in flight (`agents`, their ids) to the list the next
+/// start tells to carry on. A quit closes its agents one by one, so this adds
+/// to what the quit has recorded so far (a list over an hour old is dropped
+/// first). Unlike a note held for a turn, an interrupted turn is never
+/// continued by the CLI by itself on `--resume`.
+pub fn record_interrupted(dir: &Path, agents: &[String], now_ms: i64) {
+    if agents.is_empty() {
+        return;
+    }
+    let _guard = RECORD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut record = read_interrupted(dir, now_ms);
+    for agent in agents {
+        if !record.agents.contains(agent) {
+            record.agents.push(agent.clone());
+        }
+    }
+    record.at = now_ms;
+    write_interrupted(dir, &record);
+}
+
+fn write_interrupted(dir: &Path, record: &Interrupted) {
+    let path = dir.join(INTERRUPTED_FILE);
+    let tmp = path.with_extension("json.tmp");
+    let written = serde_json::to_vec_pretty(record)
+        .map_err(|e| e.to_string())
+        .and_then(|bytes| std::fs::write(&tmp, bytes).map_err(|e| e.to_string()))
+        .and_then(|()| std::fs::rename(&tmp, &path).map_err(|e| e.to_string()));
+    if let Err(e) = written {
+        tracing::warn!(path = %path.display(), error = %e, "upgrade notice: could not save the interrupted turns");
+    }
+}
+
+/// The list [`record_interrupted`] left, if it is less than [`PENDING_FOR`]
+/// old; empty otherwise (a quit long ago is not news).
+fn read_interrupted(dir: &Path, now_ms: i64) -> Interrupted {
+    read_interrupted_any_age(dir).filter(|r| now_ms - r.at < PENDING_FOR.as_millis() as i64).unwrap_or_default()
+}
+
+fn read_interrupted_any_age(dir: &Path) -> Option<Interrupted> {
+    std::fs::read(dir.join(INTERRUPTED_FILE)).ok().and_then(|b| serde_json::from_slice(&b).ok())
+}
+
+/// `agent` has been told to carry on: take it off the list.
+fn record_continued(dir: &Path, agent: &str) {
+    let _guard = RECORD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut record = read_interrupted_any_age(dir).unwrap_or_default();
+    record.agents.retain(|a| a != agent);
+    if record.agents.is_empty() {
+        let _ = std::fs::remove_file(dir.join(INTERRUPTED_FILE));
+    } else {
+        write_interrupted(dir, &record);
+    }
+}
+
 /// Serializes read-modify-write of the record: panes resume together.
 static RECORD_LOCK: Mutex<()> = Mutex::new(());
 
@@ -134,53 +201,115 @@ fn record_notified(dir: &Path, block_id: &str) {
     }
 }
 
+/// " at 14:17", the local time of `ms`.
+fn at_text(ms: i64) -> String {
+    chrono::DateTime::from_timestamp_millis(ms)
+        .map(|t| t.with_timezone(&chrono::Local).format(" at %H:%M").to_string())
+        .unwrap_or_default()
+}
+
+/// The tools line: the resumed conversation still holds any tool description
+/// the agent loaded before the upgrade (a deferred tool's schema is a message
+/// in it), while the tool itself is the new version's: the list of actions it
+/// read can be missing new ones (browser driver roadblocks, R8).
+const TOOLS_MAY_HAVE_CHANGED: &str = "Its tools may have changed: a tool description you loaded before the upgrade can be out of date, so load it again before relying on the actions it lists.";
+
 /// The note, with the upgrade's local time.
 pub fn note_text(u: &Upgraded) -> String {
-    let at = chrono::DateTime::from_timestamp_millis(u.at_ms)
-        .map(|t| t.with_timezone(&chrono::Local).format(" at %H:%M").to_string())
-        .unwrap_or_default();
-    // The resumed conversation still holds any tool description the agent
-    // loaded before the upgrade (a deferred tool's schema is a message in
-    // it), while the tool itself is the new version's: the list of actions it
-    // read can be missing new ones (browser driver roadblocks, R8).
     format!(
-        "[AgentMux] AgentMux was upgraded from {} to {}{at}. Your session resumed; nothing is needed from you. \
-         Its tools may have changed: a tool description you loaded before the upgrade can be out of date, so \
-         load it again before relying on the actions it lists.",
-        u.from, u.to
+        "[AgentMux] AgentMux was upgraded from {} to {}{}. Your session resumed; nothing is needed from you. {TOOLS_MAY_HAVE_CHANGED}",
+        u.from,
+        u.to,
+        at_text(u.at_ms)
     )
 }
 
+/// What an agent whose turn was cut off by the quit is told: unlike
+/// [`note_text`], it asks something of it, so it starts a turn. `upgrade` is
+/// the upgrade this start made, if any; `quit_ms` when AgentMux quit.
+pub fn continue_text(upgrade: Option<&Upgraded>, quit_ms: i64) -> String {
+    match upgrade {
+        Some(u) => format!(
+            "[AgentMux] AgentMux was upgraded from {} to {}{} while you were working; your last turn was cut off mid-tool. {TOOLS_MAY_HAVE_CHANGED} Check the state of what you were doing and carry on.",
+            u.from,
+            u.to,
+            at_text(u.at_ms)
+        ),
+        None => format!(
+            "[AgentMux] AgentMux restarted{} while you were working; your last turn was cut off mid-tool. Check the state of what you were doing and carry on.",
+            at_text(quit_ms)
+        ),
+    }
+}
+
 struct State {
-    upgraded: Upgraded,
+    /// The upgrade being announced, if this start made one (or one soon before).
+    upgraded: Option<Upgraded>,
+    /// The agents whose turn the last quit cut off, not yet told to carry on,
+    /// and when it quit.
+    interrupted: Mutex<HashSet<String>>,
+    quit_ms: i64,
     dir: PathBuf,
     /// Where a pane's block says whether it has a session ([`has_session`]).
     store: Arc<crate::backend::storage::store::Store>,
     noted: Mutex<HashSet<String>>,
+    /// Panes being (or already) told to carry on. Apart from `noted`: a pane
+    /// told of an upgrade earlier (and kept across a later restart on the
+    /// same version) still gets told its turn was cut off.
+    continuing: Mutex<HashSet<String>>,
 }
 
 static STATE: OnceLock<Option<State>> = OnceLock::new();
 
 /// At srv start (`bootstrap::background`): record this version and remember
-/// whether an upgrade is being announced.
+/// whether an upgrade is being announced and which agents' turns the last quit
+/// cut off.
 pub fn init(store: Arc<crate::backend::storage::store::Store>) {
     let state = agentmux_common::DataPaths::from_env().and_then(|paths| {
         let dir = paths.instance_dir.clone();
         let now = agentmux_common::time::now_ms();
-        let upgraded = observe_start(&dir, env!("CARGO_PKG_VERSION"), now)?;
-        tracing::info!(from = %upgraded.from, to = %upgraded.to, "upgrade notice: resumed agents will be told of the upgrade");
-        // This start made the upgrade: its data must be the previous version's,
-        // or nothing that version's quit saved (windows, tabs, panes) comes back.
-        if upgraded.at_ms == now {
-            let db_dir = paths.data_dir.join("db");
-            if let Some(problem) = crate::bootstrap::carry_forward::continuity_problem(&db_dir, &upgraded.from) {
-                tracing::error!(from = %upgraded.from, to = %upgraded.to, "upgrade continuity: {problem}");
+        let upgraded = observe_start(&dir, env!("CARGO_PKG_VERSION"), now);
+        let cut_off = read_interrupted(&dir, now);
+        if upgraded.is_none() && cut_off.agents.is_empty() {
+            return None;
+        }
+        if let Some(upgraded) = &upgraded {
+            tracing::info!(from = %upgraded.from, to = %upgraded.to, "upgrade notice: resumed agents will be told of the upgrade");
+            // This start made the upgrade: its data must be the previous version's,
+            // or nothing that version's quit saved (windows, tabs, panes) comes back.
+            if upgraded.at_ms == now {
+                let db_dir = paths.data_dir.join("db");
+                if let Some(problem) = crate::bootstrap::carry_forward::continuity_problem(&db_dir, &upgraded.from) {
+                    tracing::error!(from = %upgraded.from, to = %upgraded.to, "upgrade continuity: {problem}");
+                }
             }
         }
-        let noted = Mutex::new(upgraded.notified.iter().cloned().collect());
-        Some(State { upgraded, dir, store, noted })
+        if !cut_off.agents.is_empty() {
+            tracing::info!(count = cut_off.agents.len(), "upgrade notice: agents whose turn the last quit cut off will be told to carry on");
+        }
+        let noted = Mutex::new(upgraded.iter().flat_map(|u| u.notified.iter().cloned()).collect());
+        Some(State {
+            upgraded,
+            interrupted: Mutex::new(cut_off.agents.into_iter().collect()),
+            quit_ms: cut_off.at,
+            dir,
+            store,
+            noted,
+            continuing: Mutex::new(HashSet::new()),
+        })
     });
     let _ = STATE.set(state);
+}
+
+/// The agent definition a pane runs (`agentId` in its meta); empty for a pane
+/// that is no agent's.
+fn agent_id_of(store: &crate::backend::storage::store::Store, block_id: &str) -> String {
+    store
+        .get::<crate::backend::obj::Block>(block_id)
+        .ok()
+        .flatten()
+        .map(|b| crate::backend::obj::meta_get_string(&b.meta, "agentId", "").trim().to_string())
+        .unwrap_or_default()
 }
 
 /// Whether the pane `block_id` has a session (`agent:sessionid`) now: it is a
@@ -225,15 +354,22 @@ pub(crate) async fn deliver_with_retry(
 }
 
 /// An agent registered in `block_id` (any controller). If an upgrade is being
-/// announced and the pane is a resumed one not yet told, tell it, once.
-/// Called under the handler lock: no I/O here (the pane's block is read, and
-/// the note sent, from a task of its own).
+/// announced and the pane is a resumed one not yet told, tell it, once; if its
+/// turn was cut off by the quit, tell it to carry on instead, which starts a
+/// turn. Called under the handler lock: no I/O here (the pane's block is read,
+/// and the note sent, from a task of its own).
 pub fn on_registered(block_id: &str) {
     let Some(Some(state)) = STATE.get() else { return };
-    if agentmux_common::time::now_ms() - state.upgraded.at_ms >= PENDING_FOR.as_millis() as i64 {
+    let now = agentmux_common::time::now_ms();
+    let open = |at_ms: i64| now - at_ms < PENDING_FOR.as_millis() as i64;
+    let upgrade_open = state.upgraded.as_ref().is_some_and(|u| open(u.at_ms));
+    let cut_off_open = open(state.quit_ms) && !state.interrupted.lock().unwrap_or_else(|e| e.into_inner()).is_empty();
+    if !upgrade_open && !cut_off_open {
         return;
     }
-    if !state.noted.lock().unwrap_or_else(|e| e.into_inner()).insert(block_id.to_string()) {
+    let want_note = upgrade_open && state.noted.lock().unwrap_or_else(|e| e.into_inner()).insert(block_id.to_string());
+    let want_continue = cut_off_open && state.continuing.lock().unwrap_or_else(|e| e.into_inner()).insert(block_id.to_string());
+    if !want_note && !want_continue {
         return;
     }
     let block_id = block_id.to_string();
@@ -241,10 +377,29 @@ pub fn on_registered(block_id: &str) {
         let Some(Some(state)) = STATE.get() else { return };
         // A new pane: no session yet, and no note; one that registers again
         // later, with a session by then, is told then.
+        let forget = |note: bool, cont: bool| {
+            if note {
+                state.noted.lock().unwrap_or_else(|e| e.into_inner()).remove(&block_id);
+            }
+            if cont {
+                state.continuing.lock().unwrap_or_else(|e| e.into_inner()).remove(&block_id);
+            }
+        };
         if !has_session(&state.store, &block_id) {
-            state.noted.lock().unwrap_or_else(|e| e.into_inner()).remove(&block_id);
+            forget(want_note, want_continue);
             return;
         }
+        let agent = agent_id_of(&state.store, &block_id);
+        let cut_off = want_continue && !agent.is_empty() && state.interrupted.lock().unwrap_or_else(|e| e.into_inner()).contains(&agent);
+        let upgrade = state.upgraded.as_ref().filter(|_| upgrade_open);
+        let text = if cut_off {
+            continue_text(upgrade, state.quit_ms)
+        } else if let (true, Some(u)) = (want_note, upgrade) {
+            note_text(u)
+        } else {
+            forget(want_note, want_continue);
+            return;
+        };
         tokio::time::sleep(SETTLE).await;
         let handler = crate::backend::reactive::get_global_handler();
         let delivered = deliver_with_retry(
@@ -255,7 +410,10 @@ pub fn on_registered(block_id: &str) {
                     .find(|r| r.block_id == block_id)
                     .map(|r| r.uid.unwrap_or(r.agent_id))
                     .ok_or_else(|| Undelivered::Gone("not registered any more".to_string()))?;
-                handler.hold_system_note(&target, NOTE_KEY, &note_text(&state.upgraded)).map_err(Undelivered::Retry)
+                // A turn cut off is continued now; a resumed idle agent is
+                // told with its next message.
+                let sent = if cut_off { handler.deliver_system_note(&target, &text) } else { handler.hold_system_note(&target, NOTE_KEY, &text) };
+                sent.map_err(Undelivered::Retry)
             },
             RETRIES,
             RETRY_GAP,
@@ -263,12 +421,19 @@ pub fn on_registered(block_id: &str) {
         .await;
         match delivered {
             Ok(()) => {
-                tracing::info!(block_id = %block_id, "upgrade notice: delivered");
-                record_notified(&state.dir, &block_id);
+                tracing::info!(block_id = %block_id, cut_off, "upgrade notice: delivered");
+                if state.upgraded.is_some() {
+                    record_notified(&state.dir, &block_id);
+                }
+                if cut_off {
+                    state.interrupted.lock().unwrap_or_else(|e| e.into_inner()).remove(&agent);
+                    record_continued(&state.dir, &agent);
+                }
             }
             Err(e) => {
                 tracing::info!(block_id = %block_id, error = %e, "upgrade notice: not delivered; the next registration tries again");
-                state.noted.lock().unwrap_or_else(|e| e.into_inner()).remove(&block_id);
+                // Not told: the next registration tries again.
+                forget(want_note, want_continue);
             }
         }
     });
@@ -386,5 +551,72 @@ mod tests {
         assert!(text.starts_with("[AgentMux] AgentMux was upgraded from 0.59.26 to 0.59.27 at "), "{text}");
         assert!(text.contains("Your session resumed; nothing is needed from you. Its tools may have changed: "), "{text}");
         assert!(text.ends_with("load it again before relying on the actions it lists."), "{text}");
+    }
+
+    #[test]
+    fn the_agents_a_quit_cut_off_are_kept_for_an_hour_and_each_leaves_the_list_once_told() {
+        let dir = tempfile::tempdir().unwrap();
+        let hour = PENDING_FOR.as_millis() as i64;
+        // Nothing recorded: nothing to say.
+        assert_eq!(read_interrupted(dir.path(), 5), Interrupted::default());
+        record_interrupted(dir.path(), &["agent-a".into(), "agent-b".into()], 1_000);
+        assert_eq!(read_interrupted(dir.path(), 2_000).agents, vec!["agent-a".to_string(), "agent-b".to_string()]);
+        assert_eq!(read_interrupted(dir.path(), 2_000).at, 1_000);
+        // Told: it leaves the list, the other stays, and the file goes with the last one.
+        record_continued(dir.path(), "agent-a");
+        assert_eq!(read_interrupted(dir.path(), 2_000).agents, vec!["agent-b".to_string()]);
+        record_continued(dir.path(), "agent-b");
+        assert!(!dir.path().join(INTERRUPTED_FILE).exists());
+        // An hour later a list is stale.
+        record_interrupted(dir.path(), &["agent-a".into()], 1_000);
+        assert_eq!(read_interrupted(dir.path(), 1_000 + hour), Interrupted::default());
+        record_continued(dir.path(), "agent-a");
+        // A quit closes its agents one by one: each adds to the list, and none changes nothing.
+        record_interrupted(dir.path(), &["agent-b".into()], 5_000);
+        record_interrupted(dir.path(), &["agent-c".into(), "agent-b".into()], 5_100);
+        record_interrupted(dir.path(), &[], 5_200);
+        let list = read_interrupted(dir.path(), 5_300);
+        assert_eq!(list.agents, vec!["agent-b".to_string(), "agent-c".to_string()]);
+        assert_eq!(list.at, 5_100);
+    }
+
+    #[test]
+    fn an_unreadable_interrupted_list_is_none() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(INTERRUPTED_FILE), b"not json").unwrap();
+        assert_eq!(read_interrupted(dir.path(), 1), Interrupted::default());
+    }
+
+    #[test]
+    fn a_cut_off_turn_is_told_to_carry_on_and_says_why() {
+        let upgraded = up("0.60.3", "0.60.4", 1_792_000_000_000, &[]).unwrap();
+        let after_upgrade = continue_text(Some(&upgraded), 1_792_000_000_000);
+        assert!(after_upgrade.starts_with("[AgentMux] AgentMux was upgraded from 0.60.3 to 0.60.4 at "), "{after_upgrade}");
+        assert!(after_upgrade.contains(" while you were working; your last turn was cut off mid-tool. "), "{after_upgrade}");
+        assert!(after_upgrade.contains("load it again before relying on the actions it lists."), "{after_upgrade}");
+        assert!(after_upgrade.ends_with("Check the state of what you were doing and carry on."), "{after_upgrade}");
+        assert!(!after_upgrade.contains("nothing is needed from you"), "{after_upgrade}");
+        let after_restart = continue_text(None, 1_792_000_000_000);
+        assert!(after_restart.starts_with("[AgentMux] AgentMux restarted at "), "{after_restart}");
+        assert!(after_restart.ends_with("Check the state of what you were doing and carry on."), "{after_restart}");
+        assert!(!after_restart.contains("upgraded"), "{after_restart}");
+        // Read by the agent as written: one space between words.
+        for text in [&after_upgrade, &after_restart, &note_text(&upgraded)] {
+            assert!(!text.contains("  "), "{text}");
+        }
+    }
+
+    #[tokio::test]
+    async fn the_agent_a_pane_runs_is_read_from_its_block() {
+        use crate::backend::obj::Block;
+        let state = crate::server::tests::test_state();
+        let mut agent = Block { oid: "with-agent".into(), ..Default::default() };
+        agent.meta.insert("agentId".into(), serde_json::json!(" def-1 "));
+        state.mstore.insert(&mut agent).unwrap();
+        let mut shell = Block { oid: "shell".into(), ..Default::default() };
+        state.mstore.insert(&mut shell).unwrap();
+        assert_eq!(agent_id_of(&state.mstore, "with-agent"), "def-1");
+        assert_eq!(agent_id_of(&state.mstore, "shell"), "");
+        assert_eq!(agent_id_of(&state.mstore, "no-such-block"), "");
     }
 }

@@ -19,7 +19,7 @@
 1639 crates/srv/src/backend/blockcontroller/persistent/mod.rs
 3048 crates/srv/src/backend/blockcontroller/shell/lifecycle.rs
 1501 crates/srv/src/backend/bundle_import.rs
-2108 crates/srv/src/backend/container.rs
+2113 crates/srv/src/backend/container.rs
 1774 crates/srv/src/backend/fs_ops/host_jobs.rs
 2217 crates/srv/src/backend/history/index.rs
 1903 crates/srv/src/backend/history/mod.rs
@@ -37,7 +37,7 @@
 2108 crates/srv/src/server/muxspect_handlers.rs
 1558 crates/srv/src/server/native_memory_handlers.rs
 2399 crates/srv/src/server/reactive.rs
-1518 crates/srv/src/server/ui_handlers.rs
+1521 crates/srv/src/server/ui_handlers.rs
 2233 crates/srv/src/server/websocket.rs
 1976 frontend/app/store/agent-pane-state/reducer.ts
 1566 frontend/app/view/agent/components/AgentComposerStrip.tsx
