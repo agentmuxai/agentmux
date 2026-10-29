@@ -294,3 +294,17 @@ async fn a_gmail_api_that_is_not_enabled_in_the_clients_project_says_what_to_do(
     let e = gmail_call(&w, &google, "list_labels", GmailArgs::default()).await.unwrap_err();
     assert!(e.contains("Gmail API isn't turned on"), "{e}");
 }
+
+#[tokio::test]
+async fn a_long_mails_stored_text_is_fetched_with_the_thread() {
+    use base64::Engine as _;
+    let w = gmail_world(MAIL, Some(GrantLevel::Read));
+    let data = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode("The whole long mail.");
+    let thread = json!({ "id": "t1", "messages": [{ "id": "m1", "payload": { "mimeType": "text/plain", "body": { "attachmentId": "ATT1", "size": 5 } } }] });
+    let google = replies(vec![(200, thread), (200, json!({ "data": data, "size": 20 }))]);
+    let out = gmail_call(&w, &google, "get_thread", GmailArgs { thread_id: Some("t1".into()), ..Default::default() }).await.unwrap();
+    assert_eq!(out["result"]["messages"][0]["body"], "The whole long mail.");
+    let seen = google.seen();
+    assert_eq!(seen.len(), 2);
+    assert!(seen[1].0.url.ends_with("/messages/m1/attachments/ATT1"));
+}

@@ -35,6 +35,9 @@ const THREAD_CHARS: usize = 120_000;
 const SNIPPET_CHARS: usize = 300;
 const ADDRESS_CHARS: usize = 300;
 const ATTACHMENTS: usize = 20;
+/// Stored text parts one `get_thread` fetches, and the longest one it takes (base64 characters).
+pub const EXTERNAL_PARTS: usize = 10;
+pub const EXTERNAL_PART_CHARS: usize = 3_000_000;
 
 /// The arguments the read actions take. Unknown fields are ignored.
 #[derive(Debug, Default, Clone, Deserialize)]
@@ -185,6 +188,71 @@ pub fn shape_search(list: &Value, summaries: &[Value]) -> Value {
     Value::Object(out)
 }
 
+/// A readable text part (not a file) whose text Gmail keeps outside the message, as an
+/// `attachmentId`, instead of in `body.data`: a long mail can be stored this way.
+fn is_external_text(part: &Value) -> bool {
+    part.get("filename").and_then(Value::as_str).is_none_or(str::is_empty)
+        && matches!(s(part, "/mimeType"), "text/plain" | "text/html")
+        && s(part, "/body/data").is_empty()
+        && !s(part, "/body/attachmentId").is_empty()
+}
+
+/// The `(message id, attachment id)` of every readable text part of `thread` whose text must be
+/// fetched separately, at most [`EXTERNAL_PARTS`].
+pub fn external_text_parts(thread: &Value) -> Vec<(String, String)> {
+    fn walk(part: &Value, mid: &str, out: &mut Vec<(String, String)>) {
+        if out.len() < EXTERNAL_PARTS && is_external_text(part) {
+            out.push((mid.to_string(), s(part, "/body/attachmentId").to_string()));
+        }
+        for p in part.get("parts").and_then(Value::as_array).into_iter().flatten() {
+            walk(p, mid, out);
+        }
+    }
+    let mut out = Vec::new();
+    for m in thread.get("messages").and_then(Value::as_array).into_iter().flatten() {
+        walk(m.get("payload").unwrap_or(&Value::Null), s(m, "/id"), &mut out);
+    }
+    out
+}
+
+/// The request for one stored text part.
+pub fn part_plan(message_id: &str, attachment_id: &str) -> Result<GoogleRequest, String> {
+    let m = id_arg("message id", Some(message_id))?;
+    // An attachment id is long and URL-safe base64-ish; it is a path segment, so no `/` or `..`.
+    if attachment_id.is_empty() || attachment_id.len() > 2048 || !attachment_id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_') {
+        return Err("not an attachment id".to_string());
+    }
+    Ok(get(url_of(&["messages", &m, "attachments", attachment_id])?, Vec::new()))
+}
+
+/// Put the fetched text (`parts`: attachment id to the part's base64url data) into the thread's
+/// parts that name it.
+pub fn fill_external(thread: &mut Value, parts: &std::collections::HashMap<String, String>) {
+    fn walk(part: &mut Value, parts: &std::collections::HashMap<String, String>) {
+        if is_external_text(part) {
+            if let Some(data) = parts.get(s(part, "/body/attachmentId")).cloned() {
+                part["body"]["data"] = json!(data);
+            }
+        }
+        if let Some(children) = part.get_mut("parts").and_then(Value::as_array_mut) {
+            for p in children {
+                walk(p, parts);
+            }
+        }
+    }
+    for m in thread.get_mut("messages").and_then(Value::as_array_mut).into_iter().flatten() {
+        if let Some(p) = m.get_mut("payload") {
+            walk(p, parts);
+        }
+    }
+}
+
+/// Whether a text part of `payload` is still stored outside it (it could not be fetched, or was
+/// too large to).
+fn has_unloaded_text(payload: &Value) -> bool {
+    is_external_text(payload) || payload.get("parts").and_then(Value::as_array).is_some_and(|ps| ps.iter().any(has_unloaded_text))
+}
+
 /// Gmail's text parts are base64url; decode one, lossily.
 fn decode(data: &str) -> String {
     base64::engine::general_purpose::URL_SAFE_NO_PAD
@@ -308,6 +376,9 @@ fn shape_message(m: &Value, budget: &mut usize) -> Value {
     let files = attachments(p);
     if !files.is_empty() {
         out.insert("attachments".into(), json!(files));
+    }
+    if has_unloaded_text(p) {
+        out.insert("body_note".into(), json!("part of this mail's text is stored outside the message and was not loaded (too large, or Google did not return it)"));
     }
     Value::Object(out)
 }

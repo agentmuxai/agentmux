@@ -193,6 +193,23 @@ async fn gmail_read_with<G: GoogleHttp, O: OAuthHttp, S: TokenSecrets>(
     if !(200..300).contains(&reply.status) {
         return Err(gmail_error(&reply));
     }
+    if action == "get_thread" {
+        // A long mail's text can be stored outside the message: fetch those parts (not files) first.
+        let mut thread = reply.body;
+        let mut parts = std::collections::HashMap::new();
+        for (mid, aid) in gmail::external_text_parts(&thread) {
+            let Ok(r) = gmail::part_plan(&mid, &aid) else { continue };
+            let Some(body) = deps.google.send(&r, &token).await.ok().filter(|r| (200..300).contains(&r.status)).map(|r| r.body) else { continue };
+            match body.get("data").and_then(Value::as_str) {
+                Some(d) if d.len() <= gmail::EXTERNAL_PART_CHARS => {
+                    parts.insert(aid, d.to_string());
+                }
+                _ => {}
+            }
+        }
+        gmail::fill_external(&mut thread, &parts);
+        return Ok(gmail::shape(action, &thread));
+    }
     if action != "search_threads" {
         return Ok(gmail::shape(action, &reply.body));
     }

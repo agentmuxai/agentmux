@@ -143,3 +143,27 @@ fn the_log_names_the_thread_and_never_the_search_words() {
     assert_eq!(logged_ids("get_thread", &args(json!({ "thread_id": " t1 " }))), "t1");
     assert_eq!(logged_ids("search_threads", &args(json!({ "query": "from:my-lawyer" }))), "");
 }
+
+#[test]
+fn text_stored_outside_the_message_is_fetched_and_a_file_is_not() {
+    let mut thread = json!({ "id": "t", "messages": [{ "id": "m1", "payload": { "mimeType": "multipart/mixed", "parts": [
+        { "mimeType": "text/plain", "body": { "attachmentId": "ATT_text-1", "size": 90000 } },
+        { "mimeType": "application/pdf", "filename": "a.pdf", "body": { "attachmentId": "ATT_file", "size": 10 } }
+    ] } }] });
+    assert_eq!(external_text_parts(&thread), vec![("m1".to_string(), "ATT_text-1".to_string())], "the file's bytes are never fetched");
+    // Until it is loaded, the answer says so.
+    assert!(shape("get_thread", &thread)["messages"][0]["body_note"].as_str().unwrap().contains("not loaded"));
+    let parts = std::collections::HashMap::from([("ATT_text-1".to_string(), b64("A long mail."))]);
+    fill_external(&mut thread, &parts);
+    assert!(external_text_parts(&thread).is_empty());
+    let out = shape("get_thread", &thread);
+    assert_eq!(out["messages"][0]["body"], "A long mail.");
+    assert!(out["messages"][0].get("body_note").is_none());
+}
+
+#[test]
+fn a_stored_part_is_asked_for_by_message_and_attachment_id_and_a_path_is_refused() {
+    let r = part_plan("m1", "ATT_text-1").unwrap();
+    assert_eq!(r.url, "https://gmail.googleapis.com/gmail/v1/users/me/messages/m1/attachments/ATT_text-1");
+    assert!(part_plan("m1", "../x").is_err() && part_plan("m1", "").is_err() && part_plan("../m", "a").is_err());
+}
