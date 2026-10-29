@@ -489,28 +489,29 @@ jobs:
   # Windows test EXECUTION on the PR (SPEC_CI_CHECK_PLACEMENT_PROTOCOL_2026_09_21.md
   # §6 said to restore a targeted Windows subset if Windows-only runtime
   # regressions reached main; #5556 and #5592 merged with tests that fail on
-  # windows-latest and were found by the next nightly). A job of its own, not a
-  # step of the `rust` matrix leg: it runs beside that leg's compile check
+  # windows-latest and were found by the next nightly). Jobs of their own, not a
+  # step of the `rust` matrix leg: they run beside that leg's compile check
   # instead of after it, and `continue-on-error` keeps a failure from blocking a
-  # merge until its wall time and flake rate are measured (same stance as
+  # merge until their wall time and flake rate are measured (same stance as
   # `rust-macos`). Not in `CI required`'s `needs` for the same reason.
-  rust-windows:
-    name: nextest (windows-latest, ${{ matrix.scope }})
+  #
+  # The full suite is built once (`rust-windows-build`, ~11 min, most of the leg)
+  # and archived, and three runners each run a third of its tests from the
+  # archive (`rust-windows`, ~4.5 min each) instead of one runner doing both in
+  # 21-31 min. nextest numbers the tests in one fixed order, so the three
+  # partitions are disjoint and together are the whole suite.
+  rust-windows-build:
+    name: nextest build (windows-latest)
     needs: changes
     # Same condition as `rust`, for the same reasons (see its comment).
     if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' && needs.changes.outputs.queue != 'true' }}
     runs-on: windows-latest
     continue-on-error: true
+    # `continue-on-error` makes this job's `result` read `success` to `needs` even
+    # when it failed, so the shards test this output, set only after the upload.
+    outputs:
+      archived: ${{ steps.archived.outputs.archived }}
     timeout-minutes: 35
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - scope: all
-            packages: -p agentmux-common -p agentmux-srv -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats
-          # Everything but srv, the crate that takes most of the build.
-          - scope: host
-            packages: -p agentmux-common -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats
     env:
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
       CARGO_PROFILE_TEST_DEBUG: line-tables-only
@@ -529,15 +530,109 @@ jobs:
           }
       - uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.scope }}
+          key: all
           # While tests fail the job is red; without this the cache would never
           # be saved and every run would build cold (~10 min).
           cache-on-failure: true
       - name: Install cargo-nextest
         uses: taiki-e/install-action@nextest
-      # The `all` scope's list is identical to the `rust` job's.
-      - name: cargo nextest (CEF-free crates)
-        run: cargo nextest run --profile ci ${{ matrix.packages }}
+      # The same crate list as the `rust` job's.
+      - name: cargo nextest archive (CEF-free crates)
+        run: cargo nextest archive -p agentmux-common -p agentmux-srv -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats --archive-file "$env:RUNNER_TEMP\nextest-windows.tar.zst"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nextest-windows-archive
+          path: ${{ runner.temp }}\nextest-windows.tar.zst
+          # Only this run's shards read it.
+          retention-days: 1
+          compression-level: 0
+      - name: The archive is uploaded
+        id: archived
+        shell: bash
+        run: echo "archived=true" >> "$GITHUB_OUTPUT"
+
+  rust-windows:
+    name: nextest (windows-latest, all ${{ matrix.shard }}/3)
+    needs: [changes, rust-windows-build]
+    # Only when the build got as far as uploading the archive; if it did not, its
+    # own job is the red one and these would only fail at the download.
+    if: ${{ !cancelled() && needs.rust-windows-build.outputs.archived == 'true' }}
+    runs-on: windows-latest
+    continue-on-error: true
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      # The same exclusions as the `rust` job's step of this name.
+      - name: Exclude build paths + toolchain processes from Windows Defender
+        shell: powershell
+        run: |
+          foreach ($exe in @("node.exe", "cargo.exe", "rustc.exe", "link.exe")) {
+            try { Add-MpPreference -ExclusionProcess $exe -ErrorAction Stop } catch { Write-Warning "Defender exclusion failed ($exe): $_" }
+          }
+          foreach ($path in @("C:\Program Files\Microsoft Visual Studio", "C:\Program Files (x86)\Microsoft Visual Studio", $env:GITHUB_WORKSPACE, $env:RUNNER_TEMP, "$env:USERPROFILE\.cargo", "$env:USERPROFILE\.rustup")) {
+            try { Add-MpPreference -ExclusionPath $path -ErrorAction Stop } catch { Write-Warning "Defender exclusion failed ($path): $_" }
+          }
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+      - uses: actions/download-artifact@v4
+        with:
+          name: nextest-windows-archive
+          path: ${{ runner.temp }}\nextest-archive
+      # A debug build of some dependencies reads their files from the cargo
+      # registry source folder it was compiled from (age's message files, via
+      # rust-embed), so a test fails here, where nothing was compiled, unless the
+      # sources are in that same folder.
+      - name: Fetch the crate sources the tests read at run time
+        run: cargo fetch --locked --target x86_64-pc-windows-msvc
+      # The archive holds the test binaries; the checkout is where they run
+      # (their working folder, the nextest profile and the test data files).
+      # It is unpacked into the checkout, not beside it: the integration tests
+      # spawn the crates' binaries by the absolute `target\debug` path the build
+      # runner compiled into them (`env!("CARGO_BIN_EXE_...")`), and this runner's
+      # checkout has the same path, so the binaries must land there. The folder
+      # exists, which `--extract-to` needs.
+      - name: cargo nextest (CEF-free crates, one third)
+        run: cargo nextest run --profile ci --archive-file "$env:RUNNER_TEMP\nextest-archive\nextest-windows.tar.zst" --extract-to "$env:GITHUB_WORKSPACE" --workspace-remap "$env:GITHUB_WORKSPACE" --partition count:${{ matrix.shard }}/3
+
+  # Everything but srv, the crate that takes most of the build: the quick
+  # signal for the other crates, which the shards above also run.
+  rust-windows-host:
+    name: nextest (windows-latest, host)
+    needs: changes
+    # Same condition as `rust`, for the same reasons (see its comment).
+    if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' && needs.changes.outputs.queue != 'true' }}
+    runs-on: windows-latest
+    continue-on-error: true
+    timeout-minutes: 35
+    env:
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+      CARGO_PROFILE_TEST_DEBUG: line-tables-only
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      # The same exclusions as the `rust` job's step of this name.
+      - name: Exclude build paths + toolchain processes from Windows Defender
+        shell: powershell
+        run: |
+          foreach ($exe in @("node.exe", "cargo.exe", "rustc.exe", "link.exe")) {
+            try { Add-MpPreference -ExclusionProcess $exe -ErrorAction Stop } catch { Write-Warning "Defender exclusion failed ($exe): $_" }
+          }
+          foreach ($path in @("C:\Program Files\Microsoft Visual Studio", "C:\Program Files (x86)\Microsoft Visual Studio", $env:GITHUB_WORKSPACE, $env:RUNNER_TEMP, "$env:USERPROFILE\.cargo", "$env:USERPROFILE\.rustup")) {
+            try { Add-MpPreference -ExclusionPath $path -ErrorAction Stop } catch { Write-Warning "Defender exclusion failed ($path): $_" }
+          }
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: host
+          cache-on-failure: true
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+      - name: cargo nextest (CEF-free crates but srv)
+        run: cargo nextest run --profile ci -p agentmux-common -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats
 
   docs:
     name: doc status + grep gates
