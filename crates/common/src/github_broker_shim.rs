@@ -14,10 +14,11 @@ pub const GH_FUNCTION_NAME: &str = "BASH_FUNC_gh%%";
 /// `AGENTMUX_GITHUB_BROKER` for those): the command runs with the GitHub App's token for the
 /// repository it is about, or with no token at all, never with one the environment happened to
 /// carry. `gh pr create` and `gh pr edit` carry the owner tag in the PR's body. `gh auth status`
-/// says so, instead of "not logged into any GitHub hosts". Without the variable it is plain `gh`.
+/// says so, instead of "not logged into any GitHub hosts" (the bare command only: with flags such as
+/// `--json` it is gh's own output a caller parses). Without the variable it is plain `gh`.
 pub const GH_FUNCTION_BODY: &str = r#"() {  if [ -n "${AGENTMUX_GITHUB_BROKER:-}" ]; then
     local _amx_t _amx_x _amx_a=();
-    if [ "$1" = auth ] && [ "$2" = status ]; then
+    if [ "$1" = auth ] && [ "$2" = status ] && [ "$#" -eq 2 ]; then
       printf '%s
 ' 'github.com' '  AgentMux signs gh in per repository: each gh command in a repository gets a short-lived token for it' '  (the AgentMux GitHub App, acting for your user). There is no stored login, so gh auth does not list one.';
       return 0;

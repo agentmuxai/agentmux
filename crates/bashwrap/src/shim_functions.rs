@@ -142,6 +142,8 @@ esac"#,
         assert!(said.starts_with("github.com") && said.contains("per repository") && !said.contains("gh args="), "{said}");
         assert_eq!(code, Some(0));
         assert_eq!(run("gh auth status", "", "", "").0, "gh args=auth status");
+        // With flags it is gh's own output, which a caller may parse.
+        assert_eq!(run("gh auth status --json hosts", "1", "", "").0, "gh args=auth status --json hosts");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
