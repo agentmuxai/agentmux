@@ -633,6 +633,9 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
 
     // No starter Skills are seeded: migrations::m0015_seed_starter_skills is
     // retired, and 0041 removed the ones it had left in existing catalogs.
+    // The skills AgentMux ships are a different thing: a few, each created once and then the
+    // user's (`backend::builtin_skills`).
+    backend::builtin_skills::seed_on_startup(&identity_store);
 
     // Gap-repair (backfilling a db_agent_definitions row missing its
     // db_agents mirror) is gone as of the definition flip: every
