@@ -746,11 +746,7 @@ fn apply_layout_tree_replaced(
             Some(v) if !v.is_null() => Some(serde_json::from_value(v.clone())?),
             _ => None,
         },
-        // A layout edit also drops the queue's stale actions (layout_queue::prune_stale).
-        None => layout.pendingbackendactions.clone().map(|mut queue| {
-            layout_queue::prune_stale(&mut queue, agentmux_common::time::now_ms());
-            queue
-        }).filter(|queue| !queue.is_empty()),
+        None => layout_queue::without_stale(layout.pendingbackendactions.clone()),
     };
 
     let already = layout.rootnode == *new_tree
@@ -1614,8 +1610,7 @@ mod tests {
                 ephemeral: false,
                 targetblockid: String::new(),
                 position: String::new(),
-                nodeid: None,
-                queuedat: None,
+                ..Default::default()
             }]);
             s.update(&mut layout).unwrap();
         }
@@ -1658,8 +1653,7 @@ mod tests {
                         "blockid": "b2",
                         "focused": false,
                         "magnified": false,
-                        "ephemeral": false,
-                        "queuedat": agentmux_common::time::now_ms(),
+                        "ephemeral": false, "queuedat": agentmux_common::time::now_ms(),
                     }])),
                 )),
                 version: 3,
@@ -1687,45 +1681,6 @@ mod tests {
             layout.pendingbackendactions.is_some(),
             "pending queue untouched by tree-only write"
         );
-    }
-
-    #[test]
-    fn a_tree_only_write_drops_the_queue_actions_that_have_gone_stale() {
-        // A layout edit rewrites the row; the queue it carries loses what no window can still need
-        // (layout_queue::prune_stale): undated legacy actions and ones past their age.
-        let s = store();
-        let tab = ws_tab(&s);
-        {
-            let t = s.get::<Tab>(&tab).unwrap().unwrap();
-            let mut layout = s.get::<PersistedLayoutState>(&t.layoutstate).unwrap().unwrap();
-            let now = agentmux_common::time::now_ms();
-            let queued = |id: &str, queuedat: Option<i64>| LayoutActionData {
-                actiontype: "delete".into(),
-                actionid: id.into(),
-                blockid: "b".into(),
-                queuedat,
-                ..Default::default()
-            };
-            layout.pendingbackendactions = Some(vec![
-                queued("legacy", None),
-                queued("old", Some(now - layout_queue::QUEUE_MAX_AGE_MS - 1000)),
-                queued("fresh", Some(now)),
-            ]);
-            s.update(&mut layout).unwrap();
-        }
-        apply_event_to_mstore(
-            &Event::LayoutTreeReplaced {
-                tab_id: tab.clone(),
-                new_tree: Some(leaf("n1", "b1")),
-                correlation_id: "c".into(),
-                slices: None,
-                version: 4,
-            },
-            &s,
-        )
-        .unwrap();
-        let ids: Vec<String> = layout_of(&s, &tab).pendingbackendactions.unwrap().into_iter().map(|a| a.actionid).collect();
-        assert_eq!(ids, ["fresh"]);
     }
 
     #[test]
@@ -2125,8 +2080,7 @@ mod tests {
             ephemeral: false,
             targetblockid: String::new(),
             position: String::new(),
-            nodeid: None,
-            queuedat: None,
+            ..Default::default()
         }
     }
 

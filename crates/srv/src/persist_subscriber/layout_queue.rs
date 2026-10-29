@@ -23,6 +23,17 @@ pub(super) fn prune_stale(queue: &mut Vec<LayoutActionData>, now_ms: i64) -> boo
     queue.len() != before
 }
 
+/// A queue as a layout edit stores it: without its stale actions, and none when nothing is left.
+/// A layout edit rewrites the row, so an old queue clears the next time its tab is touched.
+pub(super) fn without_stale(queue: Option<Vec<LayoutActionData>>) -> Option<Vec<LayoutActionData>> {
+    queue
+        .map(|mut queue| {
+            prune_stale(&mut queue, agentmux_common::time::now_ms());
+            queue
+        })
+        .filter(|queue| !queue.is_empty())
+}
+
 /// SPEC_864 Phase 4 — apply a `LayoutBackendActionsQueued` event:
 /// APPEND the reducer-validated actions to
 /// `LayoutState.pendingbackendactions`, keeping the latest `QUEUE_LIMIT`.
@@ -120,6 +131,37 @@ mod tests {
         assert_eq!(queue.len(), 1, "the undated legacy queue is gone");
         assert_eq!(queue[0].actionid, "new");
         assert!(queue[0].queuedat.is_some(), "srv stamps the action when it queues it");
+    }
+
+    #[test]
+    fn a_layout_edit_drops_the_stale_actions_and_keeps_the_fresh_ones() {
+        let s = Store::open_in_memory().expect("in-memory mstore");
+        apply_event_to_mstore(&Event::WorkspaceCreated { workspace_id: "ws".into(), name: "W".into(), version: 1 }, &s).unwrap();
+        apply_event_to_mstore(&Event::TabCreated { workspace_id: "ws".into(), tab_id: "tab".into(), name: "T".into(), version: 2 }, &s).unwrap();
+        let tab = s.get::<Tab>("tab").unwrap().unwrap();
+        let now = agentmux_common::time::now_ms();
+        let mut layout = s.get::<PersistedLayoutState>(&tab.layoutstate).unwrap().unwrap();
+        layout.pendingbackendactions =
+            Some(vec![action("legacy", None), action("old", Some(now - QUEUE_MAX_AGE_MS - 1000)), action("fresh", Some(now))]);
+        s.update(&mut layout).unwrap();
+
+        // A tree-only edit rewrites the row (slices: None), and its queue with it.
+        let edit = Event::LayoutTreeReplaced {
+            tab_id: "tab".into(),
+            new_tree: Some(agentmux_common::LayoutNode { id: "n1".into(), ..Default::default() }),
+            correlation_id: "c".into(),
+            slices: None,
+            version: 3,
+        };
+        apply_event_to_mstore(&edit, &s).unwrap();
+        let queue = s.get::<PersistedLayoutState>(&tab.layoutstate).unwrap().unwrap().pendingbackendactions.unwrap();
+        assert_eq!(queue.iter().map(|a| a.actionid.as_str()).collect::<Vec<_>>(), ["fresh"]);
+    }
+
+    #[test]
+    fn without_stale_stores_an_emptied_queue_as_none() {
+        assert_eq!(without_stale(Some(vec![action("undated", None)])), None);
+        assert_eq!(without_stale(None), None);
     }
 
     #[test]
