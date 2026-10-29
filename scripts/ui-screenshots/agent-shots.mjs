@@ -225,10 +225,10 @@ export async function createAgent(session, name, { settled = true, maximized = t
     await maximize(session, agentPane);
     if (settled) {
         // The panel binds the demo account, so the pane usually signs in by
-        // itself; if it offers "Bind: dev@acme.example" instead, click it.
+        // itself; if it offers "Use dev@acme.example" instead, click it.
         await waitFor(
             session,
-            `${paneText(agentPane, "Logged in")} || [...document.querySelectorAll(${JSON.stringify(`${agentPane} button`)})].some((b) => b.offsetParent && b.innerText.includes("Bind:"))`,
+            `${paneText(agentPane, "Logged in")} || [...document.querySelectorAll(${JSON.stringify(`${agentPane} button`)})].some((b) => b.offsetParent && b.innerText.includes("Use dev@acme.example"))`,
             `${name} to sign in or offer to bind the account`,
             30000
         );
@@ -236,7 +236,7 @@ export async function createAgent(session, name, { settled = true, maximized = t
         for (let attempt = 0; attempt < 4 && !(await session.evaluate(paneText(agentPane, "Logged in"))); attempt++) {
             await session.wait(600);
             const bindAt = await session.evaluate(`(() => {
-                const b = [...document.querySelectorAll(${JSON.stringify(`${agentPane} button`)})].find((e) => e.offsetParent && e.innerText.includes("Bind:"));
+                const b = [...document.querySelectorAll(${JSON.stringify(`${agentPane} button`)})].find((e) => e.offsetParent && e.innerText.includes("Use dev@acme.example"));
                 if (!b) return null;
                 const r = b.getBoundingClientRect();
                 return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
@@ -436,7 +436,7 @@ export const shots = [
         inPane: async (session, pane) => {
             await waitFor(session, paneText(pane, "Not signed in"), "the Not signed in row", 30000);
         },
-        verify: async (session) => (await session.evaluate(visibleText("Bind: dev@acme.example"))) || "no Bind button",
+        verify: async (session) => (await session.evaluate(visibleText("Use dev@acme.example"))) || "no Use button",
     }),
     conversationShot({
         id: "agent-conversation",
