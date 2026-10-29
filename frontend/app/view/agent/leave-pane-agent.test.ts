@@ -33,6 +33,26 @@ describe("leavePaneAgent: an agent taken out of its pane in place", () => {
         }
     });
 
+    it("a container agent's pane, after Back, holds no mode, image, command or environment of it (the merge srv does on SetMeta)", async () => {
+        // srv's merge_meta: a null deletes the key, anything else is set.
+        let meta: Record<string, unknown> = {
+            agentId: "jcont-def", agentName: "JCont", agentMode: "container", controller: "subprocess",
+            "agent:container_image": "ghcr.io/agentmuxai/agent-claude:latest", "agent:container_volumes": "[]", "agent:container_command": "claude",
+            cmd: "claude.cmd", "cmd:args": ["--print"], "cmd:cwd": "C:/agents/jcont", "cmd:env": { CLAUDE_CONFIG_DIR: "C:/shared/providers/claude" },
+            "agent:sessionid": "5cd602f7", "agent:runtime": { model: "opus" },
+            "frame:title": "Control Center", "agent:stashheight": 240,
+        };
+        await leavePaneAgent("blk", {
+            stop: async () => {},
+            setMeta: async (m) => {
+                const next = { ...meta };
+                for (const [k, v] of Object.entries(m)) v === null ? delete next[k] : (next[k] = v);
+                meta = next;
+            },
+        });
+        expect(Object.keys(meta).sort()).toEqual(["agent:stashheight", "frame:title"]);
+    });
+
     it("only deletes: nothing in it sets a value", () => {
         expect(Object.values(LEFT_AGENT_META).every((v) => v === null)).toBe(true);
         expect(Object.values(CONTAINER_META_CLEARED_BY_A_HOST_LAUNCH).every((v) => v === null)).toBe(true);
