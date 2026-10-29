@@ -245,7 +245,7 @@ container agents: <why, and what to do instead>`.
 | `/agentmux/service`, `/ws`, `/agentmux/wps/publish` | no | generic gateways to everything else |
 | `/agentmux/stream-local-file`, `/agentmux/file`, `/agentmux/file-icon` | no | read host files for the app's windows; a container agent reads its own files in `/workspace` directly |
 | `/api/v1/ui/browser/set_files` | no, for now | uploads from a path; needs the container's `/workspace` mapped to the host folder first |
-| `/api/v1/pane/open` | yes, confined | only the views that show files (editor, media, files, sysinfo, help, tower), on paths inside the agent's own workspace (`/workspace/...` or relative); no terminal (runs on the host), no connection to another machine, no browser (the Browser tool opens one in the agent's Incognito jar) |
+| `/api/v1/pane/open` | no, for now | a pane shows a host file in the user's windows, which read the path they are given; a container agent reads its own files in `/workspace` directly, or asks a native agent to open one |
 | `/api/v1/agent/globalmemory/{write,remove,revert}` | no | Global Memory is composed into every native agent's context at launch; a container reads it, a native agent writes it |
 | `/api/v1/agent/self/upgrade` | no | replaces the app on the host |
 | `/agentmux/agents/self/keys`, `/api/v1/agent/self/mcp-beat`, `/agentmux/reactive/register` | no | srv does this for a container agent itself |

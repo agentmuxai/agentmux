@@ -14,19 +14,8 @@ use super::*;
 /// so the frontend renders the pane. Body is `CommandPaneOpenData`.
 pub(super) async fn handle_pane_open(
     State(state): State<AppState>,
-    grant: Option<axum::Extension<crate::backend::container_credential::ContainerGrant>>,
     Json(mut req): Json<crate::backend::rpc_types::CommandPaneOpenData>,
 ) -> impl IntoResponse {
-    // A container agent: only the views that show files, on paths in its own workspace.
-    if let Some(axum::Extension(grant)) = grant {
-        let confined = match super::container_pane_open::workspace_of(&state, &grant.block_id) {
-            Some(workspace) => super::container_pane_open::confine(&mut req, &workspace),
-            None => Err("this container agent has no workspace folder to open files from".to_string()),
-        };
-        if let Err(e) = confined {
-            return (StatusCode::FORBIDDEN, Json(json!({ "error": e }))).into_response();
-        }
-    }
     if let Some(meta) = req.meta.as_mut() {
         crate::server::browser_owner::strip_srv_only_keys(meta);
         // Agents call this route: a named profile only if the user lets them.

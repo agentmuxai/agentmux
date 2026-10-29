@@ -155,18 +155,24 @@ pub(super) async fn handle_widgets_install(
     let Some(svc) = widget_packages::service() else {
         return error(StatusCode::SERVICE_UNAVAILABLE, "widget packages aren't available on this AgentMux");
     };
-    // A container agent builds the widget under its `/workspace`, a folder of the host's; nothing else of the host's is read.
+    // A container agent builds the widget under its `/workspace`, a folder of the host's; nothing else of the host's is read,
+    // and the copy checks every file it opens against that folder (`install_within`).
+    let mut workspace = None;
     if let Some(axum::Extension(grant)) = grant {
-        let host_path = super::container_pane_open::workspace_of(&state, &grant.block_id)
+        let host_path = super::container_workspace::workspace_of(&state, &grant.block_id)
             .ok_or_else(|| "this container agent has no workspace folder to install from".to_string())
-            .and_then(|workspace| super::container_pane_open::inside(&workspace, &body.path));
+            .and_then(|w| super::container_workspace::inside(&w, &body.path).map(|p| (w, p)));
         match host_path {
-            Ok(p) => body.path = p,
+            Ok((w, p)) => (workspace, body.path) = (Some(w), p),
             Err(e) => return error(StatusCode::FORBIDDEN, format!("{e} Build the widget under /workspace and install it from there.")),
         }
     }
     let (dir, source) = (svc.widgets_dir.clone(), std::path::PathBuf::from(&body.path));
-    let installed = tokio::task::spawn_blocking(move || widget_packages::install(&dir, &source, body.replace)).await;
+    let installed = tokio::task::spawn_blocking(move || match workspace {
+        Some(root) => widget_packages::install_within(&dir, &source, body.replace, &root),
+        None => widget_packages::install(&dir, &source, body.replace),
+    })
+    .await;
     let id = match installed {
         Ok(Ok(id)) => id,
         Ok(Err(e)) => return error(StatusCode::BAD_REQUEST, e),
