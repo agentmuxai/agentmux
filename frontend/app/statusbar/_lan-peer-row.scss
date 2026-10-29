@@ -1,0 +1,57 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+.lan-peer {
+    padding-left: var(--space-5);
+}
+
+.lan-peer-head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    width: 100%;
+    padding: var(--space-0-5) 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.lan-peer-chevron {
+    width: 0.8em;
+    opacity: 0.5;
+    font-size: 0.75em;
+}
+
+.lan-peer-name {
+    opacity: 0.7;
+}
+
+.lan-peer-version {
+    opacity: 0.5;
+}
+
+.lan-peer-warn {
+    color: var(--warning-text-color);
+}
+
+.lan-peer-body {
+    padding-left: var(--space-4);
+}
+
+.lan-peer-link {
+    border: 0;
+    background: none;
+    color: var(--accent-color);
+    font: inherit;
+    cursor: pointer;
+    text-decoration: underline;
+}
+
+.lan-peer-key-warning {
+    padding: var(--space-1) 0;
+    font-size: 0.85em;
+    color: var(--warning-text-color);
+}
