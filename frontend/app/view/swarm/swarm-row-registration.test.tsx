@@ -11,12 +11,15 @@ import { createSignal, Show } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-    rpcCall: vi.fn(),
+    readFlags: vi.fn(),
     unregister: vi.fn(async () => {}),
 }));
 
-vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: { rpcCall: mocks.rpcCall } }));
-vi.mock("@/app/store/rpc-api", () => ({ RpcApi: { AgentPaneUnregisterCommand: mocks.unregister } }));
+const client = vi.hoisted(() => ({ id: "tab-client" }));
+vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: client }));
+vi.mock("@/app/store/rpc-api", () => ({
+    RpcApi: { GetReactiveRegistrationFlagsCommand: mocks.readFlags, AgentPaneUnregisterCommand: mocks.unregister },
+}));
 // The real modal pulls in the whole dialog stack; its answer is all that matters here.
 vi.mock("@/app/element/confirm-modal", () => ({
     ConfirmModal: (props: any) => (
@@ -56,7 +59,7 @@ const refused: RegistrationFlag = {
 };
 
 beforeEach(() => {
-    mocks.rpcCall.mockReset();
+    mocks.readFlags.mockReset();
     mocks.unregister.mockClear();
 });
 
@@ -83,15 +86,15 @@ describe("the words", () => {
 
 describe("readRegistrationFlags", () => {
     it("returns what srv flags", async () => {
-        mocks.rpcCall.mockResolvedValue({ flags: [claimed] });
+        mocks.readFlags.mockResolvedValue({ flags: [claimed] });
         expect(await readRegistrationFlags()).toEqual([claimed]);
-        expect(mocks.rpcCall).toHaveBeenCalledWith("reactive.registration_flags", {}, {});
+        expect(mocks.readFlags).toHaveBeenCalledWith(client, {});
     });
 
     it("is empty when srv does not know the command, or answers nothing", async () => {
-        mocks.rpcCall.mockRejectedValue(new Error("unknown command"));
+        mocks.readFlags.mockRejectedValue(new Error("unknown command"));
         expect(await readRegistrationFlags()).toEqual([]);
-        mocks.rpcCall.mockResolvedValue(null);
+        mocks.readFlags.mockResolvedValue(null);
         expect(await readRegistrationFlags()).toEqual([]);
     });
 });
@@ -122,7 +125,7 @@ describe("the row", () => {
     }
 
     it("badges the flagged rows only, by block, with the detail on hover", async () => {
-        mocks.rpcCall.mockResolvedValue({ flags: [claimed, refused] });
+        mocks.readFlags.mockResolvedValue({ flags: [claimed, refused] });
         renderRows();
 
         await waitFor(() => expect(screen.getAllByText(/instance claims|identity mismatch/)).toHaveLength(2));
@@ -134,14 +137,14 @@ describe("the row", () => {
     });
 
     it("offers Stop receiving messages on a badged row and not on a healthy one", async () => {
-        mocks.rpcCall.mockResolvedValue({ flags: [claimed] });
+        mocks.readFlags.mockResolvedValue({ flags: [claimed] });
         renderRows();
         await waitFor(() => expect(screen.getByTestId("items-block-claimed").textContent).toBe("1"));
         expect(screen.getByTestId("items-block-healthy").textContent).toBe("0");
     });
 
     it("unregisters the row's agent and block after the person confirms", async () => {
-        mocks.rpcCall.mockResolvedValue({ flags: [claimed] });
+        mocks.readFlags.mockResolvedValue({ flags: [claimed] });
         renderRows();
         await waitFor(() => expect(screen.getByTestId("items-block-claimed").textContent).toBe("1"));
 
@@ -151,6 +154,6 @@ describe("the row", () => {
 
         screen.getByTestId("confirm-yes").click();
         await waitFor(() => expect(mocks.unregister).toHaveBeenCalledTimes(1));
-        expect(mocks.unregister).toHaveBeenCalledWith({ rpcCall: mocks.rpcCall }, { agent_id: "camper", block_id: "block-claimed" });
+        expect(mocks.unregister).toHaveBeenCalledWith(client, { agent_id: "camper", block_id: "block-claimed" });
     });
 });
