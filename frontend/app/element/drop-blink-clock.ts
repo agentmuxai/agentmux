@@ -37,7 +37,9 @@
 
 /** A flashing area (CSS px²) at or under which a hover is outside the flash rule: half of the threshold
  *  (341 by 256 px), because the pane the pointer left changes in the same frame as the one it enters. */
-export const EXEMPT_AREA_PX2 = (341 * 256) / 2;/** Blinks in a burst. Must equal `$drop-blink-count` in drop-feedback.scss (a test checks). */
+export const EXEMPT_AREA_PX2 = (341 * 256) / 2;
+
+/** Blinks in a burst. Must equal `$drop-blink-count` in drop-feedback.scss (a test checks). */
 export const BLINK_COUNT = 2;
 
 /** One phase of a blink: half of `$drop-blink-cycle` (a test checks). */
