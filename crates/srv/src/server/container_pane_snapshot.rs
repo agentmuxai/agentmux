@@ -113,10 +113,16 @@ pub(crate) fn prepare(workspace: &Path, root: Option<&Path>, req: CommandPaneOpe
     let workspace_real = crate::server::browser_uploads::canonical(workspace).map_err(|e| format!("the agent's workspace can't be read: {e}"))?;
     let of = container_path(&workspace_real, &real).ok_or_else(|| format!("{raw} is outside this agent's workspace"))?;
     let root = root.ok_or("srv has no folder to keep snapshots in")?;
-    if std::fs::read_dir(root).map(|d| d.count()).unwrap_or(0) >= MAX_SNAPSHOTS {
-        return Err(format!("there are {MAX_SNAPSHOTS} snapshots open already: close some of those panes first"));
-    }
     let dir = root.join(uuid::Uuid::new_v4().to_string());
+    {
+        // Counting the folders and making this one is a single step, so requests at once can't pass the count together.
+        static RESERVING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _reserving = RESERVING.lock().unwrap_or_else(|e| e.into_inner());
+        if std::fs::read_dir(root).map(|d| d.count()).unwrap_or(0) >= MAX_SNAPSHOTS {
+            return Err(format!("there are {MAX_SNAPSHOTS} snapshots open already: close some of those panes first"));
+        }
+        std::fs::create_dir_all(&dir).map_err(|e| format!("srv can't keep a snapshot: {e}"))?;
+    }
     // The copy is in a folder of its own, so a workspace file named like the marker can't take its place.
     let copy = crate::backend::workspace_copy::copy_file(&workspace_real, &real, &dir.join("copy"), limit).inspect_err(|_| remove_snapshot(&dir))?;
     let taken = chrono::Local::now().format("%H:%M").to_string();
@@ -277,6 +283,21 @@ mod tests {
             std::fs::create_dir_all(root.join(format!("s{i}"))).unwrap();
         }
         assert!(prepare(&ws, Some(&root), open("editor", Some("docs/notes.md"))).unwrap_err().contains("close some of those panes"));
+    }
+
+    #[test]
+    fn requests_at_once_cannot_take_more_than_the_snapshots_left() {
+        let (_tmp, ws, root) = setup();
+        std::fs::create_dir_all(&root).unwrap();
+        for i in 0..MAX_SNAPSHOTS - 2 {
+            std::fs::create_dir_all(root.join(format!("s{i}"))).unwrap();
+        }
+        let taken = std::thread::scope(|scope| {
+            let tries: Vec<_> = (0..12).map(|_| scope.spawn(|| prepare(&ws, Some(&root), open("editor", Some("docs/notes.md"))).is_ok())).collect();
+            tries.into_iter().map(|t| t.join().unwrap()).filter(|ok| *ok).count()
+        });
+        assert_eq!(taken, 2, "two were left");
+        assert_eq!(std::fs::read_dir(&root).unwrap().count(), MAX_SNAPSHOTS);
     }
 
     #[test]
