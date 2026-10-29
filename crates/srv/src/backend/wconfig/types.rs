@@ -682,9 +682,10 @@ pub struct WidgetConfigType {
 
     /// A pane a person manages, of which one is the point (Memory, Connectors, Settings...): a click
     /// on this entry brings back the one already open (restores it, switches to its tab, focuses it)
-    /// instead of opening another. Off, an entry opens a new pane each time.
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub singleton: bool,
+    /// instead of opening another. Off, an entry opens a new pane each time. Absent, it follows the
+    /// view it opens; a user's `false` is kept, so it can switch a built-in entry off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub singleton: Option<bool>,
 
     /// Ordered short-names (no "defwidget@" prefix, same convention as
     /// `widget:pinned`) of this widget's children. A non-empty `children`
