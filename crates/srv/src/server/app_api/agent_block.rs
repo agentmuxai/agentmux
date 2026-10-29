@@ -204,17 +204,23 @@ mod tests {
     }
 
     /// Two blocks of one agent (an old layout): the one refused for a conversation open in another pane does
-    /// not hold it, so a start resumes the other, even when the refused one has a controller and the other's
-    /// has ended.
+    /// not hold it, so a start resumes the other. The refused block's id sorts first, so without the rule the
+    /// last tie-break (the id) would pick it.
     #[test]
     fn a_block_refused_for_an_open_conversation_is_not_picked_over_the_holder() {
         let store = Store::open_in_memory().unwrap();
-        let holder = insert_block(&store, "ann", false);
-        let refused = insert_block(&store, "ann", false);
-        let mut block = store.get::<Block>(&refused).unwrap().unwrap();
-        block.meta.insert(blockcontroller::core::META_LAST_FAILURE.to_string(), serde_json::json!({ "code": "open_in_other_pane", "holderBlockId": holder }));
-        store.update(&mut block).unwrap();
-        insert_tab(&store, &[&holder, &refused]);
+        let with_id = |oid: &str| {
+            let mut meta = MetaMapType::new();
+            meta.insert("agentId".to_string(), serde_json::json!("ann"));
+            let mut block = Block { oid: oid.to_string(), meta, ..Default::default() };
+            store.insert(&mut block).unwrap();
+            block
+        };
+        let holder = with_id("b-holder").oid;
+        let mut refused = with_id("a-refused");
+        refused.meta.insert(blockcontroller::core::META_LAST_FAILURE.to_string(), serde_json::json!({ "code": "open_in_other_pane", "holderBlockId": holder }));
+        store.update(&mut refused).unwrap();
+        insert_tab(&store, &[&holder, &refused.oid]);
         let found = find_agent_block_by_uid(&store, "ann").unwrap().unwrap();
         assert_eq!(found.block.oid, holder);
     }
