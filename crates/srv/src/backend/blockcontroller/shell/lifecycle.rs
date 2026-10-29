@@ -61,7 +61,7 @@ struct PtyReadChunk {
 /// activity, and (for agent panes) feed the JSON-stream translator. Called
 /// once per coalesced batch instead of once per (up to 4KB) PTY read.
 #[allow(clippy::too_many_arguments)]
-fn flush_pty_batch(
+pub(super) fn flush_pty_batch(
     broker: &mps::Broker,
     block_id: &str,
     data: &[u8],

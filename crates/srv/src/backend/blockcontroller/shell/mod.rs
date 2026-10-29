@@ -50,6 +50,8 @@ pub(crate) use indexing::{extend_output_idx, lines_before_byte, output_index, ou
 pub(crate) use indexing::rebuild_output_idx;
 
 #[cfg(test)]
+mod flood_cost_tests;
+#[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod tests_transcript;
