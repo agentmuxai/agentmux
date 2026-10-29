@@ -80,8 +80,12 @@ pub(crate) async fn handle_github_token(
                     "token": host.token.as_str(),
                     "expiresAt": if host.expires_at > now { host.expires_at } else { now + 300 },
                     "botSlug": host.bot_slug,
-                    // gh-agent doesn't say the bot's user id, so commits keep their own author; the owner
-                    // is the connected account's, when there is one.
+                    // gh-agent doesn't say the bot's user id: it is looked up (once), so a commit is the
+                    // bot's like a native agent's; the owner is the connected account's, when there is one.
+                    "botUserId": match host.bot_slug.as_deref() {
+                        Some(bot) => crate::identity::gh_agent_token::bot_user_id(bot).await,
+                        None => None,
+                    },
                     "ownerGithubId": owner.as_ref().map(|(id, _)| *id),
                     "ownerLogin": owner.as_ref().map(|(_, login)| login.as_str()),
                 }))

@@ -148,7 +148,7 @@
     font-size: var(--text-xs);
     line-height: 1;
     padding: 2px 6px;
-    border-radius: 3px;
+    border-radius: var(--radius-sm);
     cursor: default;
     opacity: 0.55;
     transition:
@@ -323,10 +323,10 @@
     border: 1px solid transparent;
     background: transparent;
     color: var(--main-text-color);
-    font-size: 22px;
+    font-size: var(--text-2xl);
     line-height: 1;
     padding: 0 9px;
-    border-radius: 6px;
+    border-radius: var(--radius-md);
     cursor: default;
     opacity: 0.75;
     transition:

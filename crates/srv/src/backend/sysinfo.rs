@@ -740,39 +740,36 @@ mod handle_anomaly_tests {
     /// count — a fixed `sysinfo` leaks ~0 handles/call; the broken 0.34.2
     /// leaked exactly 1/call, so 500 calls would have shown +500, not "a
     /// small bounded amount from unrelated one-time OS/runtime activity."
+    ///
+    /// The tests of one `cargo test` run share this process, so another test's
+    /// handles can inflate a window (nextest isolates them). A leak grows every
+    /// window, noise only some: it passes on the first window under the bar.
     #[test]
     fn refresh_processes_specifics_does_not_leak_a_handle_per_call() {
         let pid = std::process::id();
         let mut sys = sysinfo::System::new();
+        let mut refresh = |n: u32| {
+            for _ in 0..n {
+                sys.refresh_processes_specifics(ProcessesToUpdate::All, false, ProcessRefreshKind::nothing());
+            }
+        };
         // Warm up: first call(s) can allocate one-time bookkeeping (e.g. the
         // process list's initial capacity) that isn't part of the per-call
         // leak this test is checking for.
-        for _ in 0..5 {
-            sys.refresh_processes_specifics(
-                ProcessesToUpdate::All,
-                false,
-                ProcessRefreshKind::nothing(),
-            );
-        }
-        let before = process_handle_count(pid).expect("own handle count must be queryable");
-
+        refresh(5);
         const CALLS: u32 = 500;
-        for _ in 0..CALLS {
-            sys.refresh_processes_specifics(
-                ProcessesToUpdate::All,
-                false,
-                ProcessRefreshKind::nothing(),
-            );
+        let mut growth = Vec::new();
+        for _ in 0..3 {
+            let before = process_handle_count(pid).expect("own handle count must be queryable");
+            refresh(CALLS);
+            let after = process_handle_count(pid).expect("own handle count must be queryable");
+            let grew_by = after.saturating_sub(before);
+            if grew_by < CALLS / 2 {
+                return;
+            }
+            growth.push(grew_by);
         }
-        let after = process_handle_count(pid).expect("own handle count must be queryable");
-
-        let grew_by = after.saturating_sub(before);
-        assert!(
-            grew_by < CALLS / 2,
-            "handle count grew by {grew_by} over {CALLS} refresh_processes_specifics calls \
-             (before={before}, after={after}) — consistent with a per-call handle leak \
-             (the fixed-in-0.35.0 CreateToolhelp32Snapshot bug leaked exactly 1/call)"
-        );
+        panic!("handle count grew by {growth:?} over three windows of {CALLS} refresh_processes_specifics calls: a per-call handle leak (the CreateToolhelp32Snapshot bug fixed in sysinfo 0.35.0 leaked exactly 1/call)");
     }
 
     fn anomaly(pid: u32) -> HandleAnomaly {

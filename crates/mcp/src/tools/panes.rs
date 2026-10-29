@@ -568,6 +568,8 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 .filter(|p| *p > 0 && *p <= u16::MAX as u64)
                 .ok_or_else(|| anyhow::anyhow!("missing or invalid required parameter: port (must be 1-65535)"))?
                 as u16;
+            let text = |key: &str| arguments.get(key).and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty()).map(str::to_string);
+            let (command, dir) = (text("command"), text("dir"));
             let url = format!(
                 "{}/api/v1/agent/dev_server/register",
                 local_url.trim_end_matches('/')
@@ -575,7 +577,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let resp = client
                 .post(&url)
                 .header(AUTH_KEY_HEADER, auth_key)
-                .json(&RegisterDevServerRequest { auth, project, port })
+                .json(&RegisterDevServerRequest { auth, project: project.clone(), port, command, dir })
                 .send()
                 .await
                 .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
@@ -588,7 +590,12 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 .json()
                 .await
                 .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
-            Ok(format!("Registered. Browse to: {}", body.url))
+            let starting = if body.starting {
+                format!(" The server is still starting, so the URL works once it is listening; its output is in /tmp/amx-dev-{}.log in your container.", project.trim().to_lowercase())
+            } else {
+                String::new()
+            };
+            Ok(format!("Registered. Browse to: {}{starting}", body.url))
         }
         _ => Err(not_in_family()),
     }

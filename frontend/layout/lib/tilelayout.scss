@@ -194,7 +194,7 @@
     .magnify-container {
         position: absolute;
         z-index: var(--z-layout-magnify);
-        border-radius: var(--block-border-radius);
+        border-radius: var(--radius-md);
         overflow: clip; // see .tile-node
     }
 

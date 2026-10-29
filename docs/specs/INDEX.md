@@ -732,6 +732,7 @@ partial list.
 | [`SPEC_MESSAGE_ORIGIN_AND_ONE_CONTAINER_2026_10_25`](SPEC_MESSAGE_ORIGIN_AND_ONE_CONTAINER_2026_10_25.md) | SPEC: Only the human's own words look like the human: one message origin, set by srv, and one container for everything else |
 | [`SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03`](SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md) | Migration System Audit & Hardening Plan |
 | [`SPEC_MINIMIZE_MERGES_INTO_ADJACENT_MINIMIZED_PANE_2026_10_28`](SPEC_MINIMIZE_MERGES_INTO_ADJACENT_MINIMIZED_PANE_2026_10_28.md) | Minimizing a pane next to a minimized pane merges its tabs into that pane |
+| [`SPEC_MOTION_PRIMITIVES_2026_10_29`](SPEC_MOTION_PRIMITIVES_2026_10_29.md) | Motion primitives: one shared set of reusable animations on top of the motion policy and tokens |
 | [`SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15`](SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15.md) | SPEC: two motion tiers, one motion policy, and a DRY pass over the stylesheets |
 | [`SPEC_MUXAPI_TOOL_CONSOLIDATION_2026_10_15`](SPEC_MUXAPI_TOOL_CONSOLIDATION_2026_10_15.md) | SPEC: MuxAPI in fourteen tools: one per family, with actions |
 | [`SPEC_MUXBUS_MULTI_TIER_DISCOVERY_AND_REMOTE_INVOCATION_2026_07_29`](SPEC_MUXBUS_MULTI_TIER_DISCOVERY_AND_REMOTE_INVOCATION_2026_07_29.md) | Spec: multi-tier discovery + remote API invocation over muxbus |
@@ -797,6 +798,7 @@ partial list.
 | [`SPEC_WAN_JEKT_VERIFICATION_2026_09_24`](SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md) | SPEC: WAN jekt verification — same-account agent jekts verified end to end over the cloud relay |
 | [`SPEC_WARDEN_HISTORY_SECTION_2026_10_18`](SPEC_WARDEN_HISTORY_SECTION_2026_10_18.md) | SPEC: agent history in Warden — the History section |
 | [`SPEC_WARDEN_KANBAN_2026_10_20`](SPEC_WARDEN_KANBAN_2026_10_20.md) | Spec: a Kanban section in Warden, where agents keep their work current and the operator follows it |
+| [`SPEC_WARDEN_SPLIT_INTO_VAULT_HISTORY_AUDIT_2026_10_28`](SPEC_WARDEN_SPLIT_INTO_VAULT_HISTORY_AUDIT_2026_10_28.md) | Spec: Warden goes; Vault, History and Audit become widgets of their own; Jobs go to Drone |
 | [`SPEC_WIDGET_BAR_VISIBILITY_SETTINGS_2026_10_12`](SPEC_WIDGET_BAR_VISIBILITY_SETTINGS_2026_10_12.md) | Widget bar visibility in Settings: pin, keep in More, or hide |
 | [`SPEC_WIDGET_SHARING_2026_10_10`](SPEC_WIDGET_SHARING_2026_10_10.md) | Sharing widgets: signed packages, widgets in agent bundles, a catalog |
 | [`SPEC_WINDOWS_LIFECYCLE_ROBUSTNESS_2026_06_26`](SPEC_WINDOWS_LIFECYCLE_ROBUSTNESS_2026_06_26.md) | Windows Lifecycle Robustness — Surviving External Termination |

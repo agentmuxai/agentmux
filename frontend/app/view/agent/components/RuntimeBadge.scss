@@ -5,7 +5,7 @@
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     font-weight: 500;
     white-space: nowrap;
     flex-shrink: 0;

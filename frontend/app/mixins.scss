@@ -227,7 +227,7 @@
             @include flex-center;
             width: 26px;
             padding: var(--space-1) var(--space-1-5);
-            font-size: 18px;
+            font-size: var(--text-xl);
         }
 
         // The window controls take the whole 26px with no padding, so an SVG
@@ -368,7 +368,7 @@
     &.size-lg {
         width: 45px;
         height: 45px;
-        font-size: 16px; // 18px * (45 / 50)
+        font-size: var(--text-lg); // 18px * (45 / 50)
 
         .status-indicator {
             width: 10px;
@@ -379,7 +379,7 @@
     &.size-xl {
         width: 50px;
         height: 50px;
-        font-size: 18px; // base size
+        font-size: var(--text-xl); // base size
 
         .status-indicator {
             width: 12px;
