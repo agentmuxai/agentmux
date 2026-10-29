@@ -103,7 +103,7 @@
                     align-self: center;
                     width: 4px;
                     height: 12px;
-                    border-radius: 2px;
+                    border-radius: var(--radius-sm);
                 }
 
                 .typeahead-detail {
