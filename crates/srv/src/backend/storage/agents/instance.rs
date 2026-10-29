@@ -941,7 +941,7 @@ impl Store {
             }
             // Identity M4a: read the names before the row goes.
             tombstone_key_names(&conn, id, &shared)?;
-            purge_name_keyed_keys(&conn, id, self.wan_identity().as_deref(), &shared)?;
+            purge_name_keyed_keys(&conn, id, self.wan_identity().as_deref(), self.host_lan_keys().as_deref(), &shared)?;
             let rows =
                 conn.execute("DELETE FROM db_agents WHERE id = ?1 AND is_template = 0", params![id])?;
             // Same dependent purge `agent_def_delete` runs, and
