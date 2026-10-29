@@ -706,6 +706,7 @@ pub(crate) async fn handle_ui_browser_focus_info(
 pub(crate) async fn handle_ui_browser_open(
     State(state): State<AppState>,
     caller: Option<axum::Extension<crate::server::caller::Caller>>,
+    grant: Option<axum::Extension<crate::backend::container_credential::ContainerGrant>>,
     Json(req): Json<UiBrowserOpenRequest>,
 ) -> impl IntoResponse {
     let own = match verified_block_id(&state, caller.as_deref(), &req.auth) {
@@ -755,7 +756,7 @@ pub(crate) async fn handle_ui_browser_open(
     };
     meta.insert(crate::server::browser_owner::OWNER_META_KEY.to_string(), json!(req.auth.agent_id));
     crate::server::browser_allowlist::mirror(&mut meta, allowed.as_deref());
-    if let Err(e) = crate::server::browser_identity::for_agent_open(&state, &mut meta, req.profile.as_deref()) {
+    if let Err(e) = crate::server::browser_identity::for_agent_open(&state, &mut meta, req.profile.as_deref(), grant.is_some()) {
         return err_response(StatusCode::BAD_REQUEST, e);
     }
     cmd.meta = Some(meta);
