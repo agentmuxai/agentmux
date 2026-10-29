@@ -187,6 +187,10 @@ struct DeliveryState {
     /// ask at once; the first composes while the rest wait here and then read
     /// its result, instead of each reading the memory and composing it again.
     compose_gates: HashMap<DeliveryKey, std::sync::Arc<tokio::sync::Mutex<()>>>,
+    /// Session starts that composed to nothing (no memory to deliver), by the
+    /// time they did: the parts that ask after the first answer from here,
+    /// instead of each reading the memory again to find it still empty.
+    composed_nothing: HashMap<DeliveryKey, i64>,
     /// A compaction's notice that finished before this block's stdout showed
     /// the boundary (the CLI runs its `SessionStart` hooks first): block →
     /// (delivery composed at, notice line). The stdout reader writes them
@@ -219,6 +223,7 @@ enum FallbackClaim {
 impl DeliveryState {
     fn prune(&mut self, now: i64) {
         self.deliveries.retain(|_, d| now - d.created_ms < DELIVERY_TTL_MS);
+        self.composed_nothing.retain(|_, at| now - *at < DELIVERY_TTL_MS);
         self.fallback_claims.retain(|_, at| now - *at < CLAIM_WINDOW_MS);
         self.fallbacks.retain(|_, f| now - f.created_ms < FALLBACK_TTL_MS);
     }
@@ -447,6 +452,9 @@ async fn session_start_part(state: AppState, caller: Option<axum::Extension<Call
             tracing::info!(block_id = %req.block_id, reason = reason.as_str(), part = req.part, "memory delivery: part stood down, the fallback claimed the event");
             return Json(PartResponse { text: None, part: req.part, of: 0 });
         }
+        if st.composed_nothing.contains_key(&key) {
+            return Json(PartResponse { text: None, part: req.part, of: 0 });
+        }
         st.deliveries.get(&key).cloned()
     };
     let delivery = match cached {
@@ -459,10 +467,13 @@ async fn session_start_part(state: AppState, caller: Option<axum::Extension<Call
             let _gate_entry = GateEntry(key.clone());
             // A part that held the gate before this one may have composed it, or
             // the fallback may have claimed the event while this one waited.
-            let (composed_meanwhile, claimed) = {
+            let (composed_meanwhile, claimed, nothing_meanwhile) = {
                 let st = state_lock();
-                (st.deliveries.get(&key).cloned(), st.fallback_claimed(&req.block_id, reason))
+                (st.deliveries.get(&key).cloned(), st.fallback_claimed(&req.block_id, reason), st.composed_nothing.contains_key(&key))
             };
+            if nothing_meanwhile {
+                return Json(PartResponse { text: None, part: req.part, of: 0 });
+            }
             if claimed {
                 tracing::info!(block_id = %req.block_id, reason = reason.as_str(), part = req.part, "memory delivery: part stood down, the fallback claimed the event");
                 return Json(PartResponse { text: None, part: req.part, of: 0 });
@@ -479,12 +490,17 @@ async fn session_start_part(state: AppState, caller: Option<axum::Extension<Call
                     compose_delivery(&state, &block_id, uid.as_deref(), reason, launch.as_ref(), now)
                 })
                     .await
-                    .unwrap_or_else(|e| {
-                        tracing::warn!(error = %e, "memory delivery: composing failed");
-                        None
-                    })
+            };
+            // A failed compose is not "nothing to deliver": the next part tries again.
+            let composed = match composed {
+                Ok(composed) => composed,
+                Err(e) => {
+                    tracing::warn!(error = %e, "memory delivery: composing failed");
+                    return Json(PartResponse { text: None, part: req.part, of: 0 });
+                }
             };
             let Some(composed) = composed else {
+                state_lock().composed_nothing.insert(key.clone(), now);
                 tracing::info!(block_id = %req.block_id, session_id = %req.session_id, reason = reason.as_str(), part = req.part, cwd_known = !req.cwd.is_empty(), "memory delivery: nothing to deliver for this session start");
                 return Json(PartResponse { text: None, part: req.part, of: 0 });
             };
