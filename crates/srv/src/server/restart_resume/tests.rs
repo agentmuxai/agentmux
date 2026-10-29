@@ -221,3 +221,78 @@ async fn an_agent_stopped_while_the_list_was_being_worked_is_not_started() {
 
     assert!(!still_wanted(&state, &queued), "the stop is seen right before the start");
 }
+
+
+/// A claimed task for `slug`/`uid`, held until the test ends.
+fn claim_a_task(state: &AppState, uid: &str) {
+    use crate::backend::storage::work_queue::{work_state, ClaimFilter, WorkItem};
+    let item = WorkItem {
+        id: format!("w-{uid}"),
+        title: "t".into(),
+        payload: "p".into(),
+        kind: String::new(),
+        target_agent: String::new(),
+        target_group: String::new(),
+        priority: 0,
+        state: work_state::OPEN.into(),
+        claimed_by: String::new(),
+        target_agent_uid: String::new(),
+        claimed_by_uid: String::new(),
+        claim_expires: None,
+        attempts: 0,
+        max_attempts: 3,
+        created_by: "tester".into(),
+        created_by_uid: String::new(),
+        created_at: 1000,
+        updated_at: 1000,
+        not_before: None,
+        result: String::new(),
+    };
+    state.work_store.work_queue_enqueue(&item).unwrap();
+    let slug = state.mstore.agent_def_get(uid).unwrap().unwrap().slug;
+    let filter = ClaimFilter { kind: None, agent_id: slug, agent_uid: uid.into(), groups: vec![] };
+    state.work_store.work_queue_claim(&filter, 2000, 600_000).unwrap().expect("claimed");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_agent_quiet_past_its_window_still_comes_back_if_it_was_running_at_exit_or_the_sweep_keeps_it() {
+    let state = test_state();
+    let (_ws, tabs) = seed_workspace(&state, 1).await;
+    let quiet = resumable(&state, &tabs[0], "ag-quiet").await;
+    let ran = resumable(&state, &tabs[0], "ag-ran").await;
+    let claims = resumable(&state, &tabs[0], "ag-claims").await;
+    // A window of about a millisecond: every turn written above is older than it a moment later.
+    for block in [&quiet, &ran, &claims] {
+        set_meta(&state, block, serde_json::json!({ "agent:idle_stop_minutes": 0.00002 }));
+    }
+    claim_a_task(&state, "ag-claims");
+    tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+
+    // Nothing says they ran: only the one that holds a claimed task (the sweep never stops it) is back.
+    let got: Vec<String> = candidates(&state).into_iter().map(|c| c.block_id).collect();
+    assert_eq!(got, vec![claims.clone()], "{got:?}");
+    // The exit left ag-ran running: back, whatever its last turn; the quiet one is still not.
+    let ran_at_exit: HashSet<String> = ["ag-ran".to_string()].into_iter().collect();
+    let mut got: Vec<String> = candidates_with(&state, &ran_at_exit).into_iter().map(|c| c.block_id).collect();
+    got.sort();
+    let mut want = vec![claims, ran];
+    want.sort();
+    assert_eq!(got, want, "{got:?}");
+    assert!(!got.contains(&quiet));
+}
+
+#[test]
+fn the_agents_running_at_exit_are_kept_for_one_start_only() {
+    let dir = tempfile::tempdir().unwrap();
+    assert!(take_running(dir.path()).is_empty(), "no file: none");
+    write_running(dir.path(), &["a".to_string(), "b".to_string()]);
+    let got = take_running(dir.path());
+    assert_eq!(got, ["a".to_string(), "b".to_string()].into_iter().collect::<HashSet<_>>());
+    assert!(take_running(dir.path()).is_empty(), "read once: gone");
+    // An exit with nothing running leaves nothing from an earlier one.
+    write_running(dir.path(), &["a".to_string()]);
+    write_running(dir.path(), &[]);
+    assert!(take_running(dir.path()).is_empty());
+    std::fs::write(dir.path().join(RUNNING_FILE), b"not json").unwrap();
+    assert!(take_running(dir.path()).is_empty(), "an unreadable list is none");
+}
