@@ -2,7 +2,7 @@
 
 **Status:** analysis — the research behind `docs/specs/SPEC_PROVIDER_CARD_TAGS_FREE_LOCAL_2026_10_29.md`; claims verified 2026-10-29 and going stale from then.
 
-Task #10963 (research). Written by Korp@narko, 2026-10-29. It ships with the first PR of the build that cites it.
+Task #10963 (research). Written 2026-10-29. It ships with the first PR of the build that cites it.
 
 ## How to read this
 
@@ -106,7 +106,7 @@ I did not evaluate newer entries on the library (`qwen3.8:27b`, `north-mini-code
 
 **The setting that bites agents:** Ollama's default context is 4K under 24 GB of VRAM (32K at 24-48 GB). Its docs say coding tools "should be set to at least 64000 tokens". `OLLAMA_CONTEXT_LENGTH=64000 ollama serve`, and check with `ollama ps`. Codex and Claude Code pages on Ollama both say 64K+. I did not check whether the 4K default also applies on a CPU-only machine; assume yes and set it explicitly.
 
-**Speed on a 64 GB machine: unverified.** My guess is the MoE models are usable on CPU and the dense 24B model is single-digit tokens per second, but I haven't measured either. Prompt processing of large agent prompts will probably be the pain on CPU. Whether narko has a GPU, I did not check.
+**Speed on a machine with 64 GB of RAM: unverified.** My guess is the MoE models are usable on CPU and the dense 24B model is single-digit tokens per second, but I haven't measured either. Prompt processing of large agent prompts will probably be the pain on CPU. Whether the test machine has a GPU, I did not check.
 
 ### Per provider: (a) what the CLI supports, (b) how well it works, (c) what AgentMux writes
 
