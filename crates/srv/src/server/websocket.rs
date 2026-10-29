@@ -97,6 +97,7 @@ async fn handle_ws_connection(mut socket: WebSocket, state: AppState) {
     let crate::backend::eventbus::WsReceivers {
         priority: mut priority_rx,
         background: mut background_rx,
+        drops,
     } = state.event_bus.register_ws(&conn_id, &tab_id);
     tracing::info!("[ws-perf] register_ws: {:.2}ms", ws_start.elapsed().as_secs_f64() * 1000.0);
 
@@ -246,6 +247,10 @@ async fn handle_ws_connection(mut socket: WebSocket, state: AppState) {
                 if forward_event(&mut socket, first).await {
                     break 'ws;
                 }
+                // Once the lane has drained, tell the window about events dropped from it.
+                if priority_rx.is_empty() && drops.has_unreported() && super::ws_resync::report_drops(&mut socket, &drops).await {
+                    break 'ws;
+                }
             }
 
             // Flush one fairly-ordered priority event per iteration. A no-op
@@ -263,27 +268,14 @@ async fn handle_ws_connection(mut socket: WebSocket, state: AppState) {
             // (sysinfo/blockstats) only; serviced when the priority lanes above
             // are momentarily idle, so it can never delay a keystroke echo.
             //
-            // Tradeoff of `biased;`: a SUSTAINED priority-lane flood (e.g.
-            // `! yes` pumping terminal output continuously) keeps the priority
-            // branches ready, so this lane is starved and events queue here
-            // until the flood pauses, then flush as a stale burst. As of B.2
-            // (SPEC_MEMORY_COMMIT_ATTRIBUTION_CORRECTION_2026_07_02) this is a
-            // bounded `mpsc::channel(BACKGROUND_LANE_CAPACITY)` with
-            // `try_send` drop-on-full semantics (see eventbus.rs), not an
-            // unbounded receiver — a starvation period long enough to fill
-            // all 256 slots drops each new event as it arrives (the queued
-            // events already in the channel are unaffected) rather than
-            // growing commit without limit. Acceptable for now because telemetry
-            // ingress is low-rate (sysinfo ~1/s) and a flood also saturates the
-            // socket writes — during which the priority lanes do drain, so this
-            // lane gets serviced — making true never-empty starvation the rare
-            // Phase 2: coalesce all immediately-available background events to the
-            // latest reading per (event-name:scope) key before forwarding. During
-            // sustained priority-lane activity, sysinfo/blockstats queue here; without
-            // coalescing they flush as a burst of stale frames that the browser
-            // processes back-to-back, delaying queued keypress events. Coalescing
-            // bounds the flush to O(distinct event×scope pairs) — at most 1 sysinfo +
-            // 1 blockstats per open block — regardless of how long the lane was starved.
+            // Tradeoff of `biased;`: a SUSTAINED priority-lane flood (`! yes` pumping terminal
+            // output) keeps the priority branches ready, so telemetry queues here until the flood
+            // pauses. The lane is bounded (`BACKGROUND_LANE_CAPACITY`, drop-on-full: see
+            // eventbus.rs), so a starvation long enough to fill it drops new readings instead of
+            // growing commit; fine for ~1/s telemetry. Phase 2: coalesce everything immediately
+            // available to the latest reading per (event-name:scope) key before forwarding, so
+            // the flush is at most 1 sysinfo + 1 blockstats per open block, not a burst of stale
+            // frames the browser processes back-to-back ahead of queued keypresses.
             // See SPEC_TERMINAL_INPUT_PRIORITY_OVER_SYSINFO_2026_06_16.md §4.2.
             Some(first_bg) = background_rx.recv() => {
                 let coalesced = coalesce_background(first_bg, &mut background_rx);
@@ -296,6 +288,9 @@ async fn handle_ws_connection(mut socket: WebSocket, state: AppState) {
 
             // Periodic ping
             _ = ping_interval.tick() => {
+                if drops.has_unreported() && super::ws_resync::report_drops(&mut socket, &drops).await {
+                    break;
+                }
                 let now = agentmux_common::time::now_ms();
                 let ping = json!({ "type": "ping", "stime": now });
                 let msg = serde_json::to_string(&ping).unwrap_or_default();
