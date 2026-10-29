@@ -1,6 +1,6 @@
 # SPEC: the Vault: one pane for the person's secrets, which agents use without seeing them
 
-**Status:** active — P1 (§4, §11) shipped in #5180; P2a (§5: the pane, the store, the `Vault` tool, agents kept out) P2b (Reveal and Copy, Windows), P2c (`.vault` export and import), P3 (§6.1 to §6.4, §6.6, as §6.7 says) and P4 (§6.5) are built; P5 is partly built (the CSV, JSON, .env, KeePass and 1Password `.1pux` importers, §8.8); P7 (§7) is built; P6, P8 and the rest of P5 remain. The operator took the recommended answers to §13 on 2026-10-19. On 2026-10-21 the operator moved the Vault into Warden as its Vault section (§5.6 amendment).
+**Status:** active — P1 (§4, §11) shipped in #5180; P2a (§5: the pane, the store, the `Vault` tool, agents kept out) P2b (Reveal and Copy, Windows), P2c (`.vault` export and import), P3 (§6.1 to §6.4, §6.6, as §6.7 says) and P4 (§6.5) are built; P5 is partly built (the CSV, JSON, .env, KeePass and 1Password `.1pux` importers, §8.8); P7 (§7) is built; P6 and the rest of P5 remain; P8 is replaced by SPEC_VAULT_GENERATE_CAPTURE_AND_BROWSER_SIGNINS_2026_10_28.md (2026-10-29). The operator took the recommended answers to §13 on 2026-10-19. On 2026-10-21 the operator moved the Vault into Warden as its Vault section (§5.6 amendment).
 **Date:** 2026-10-19
 **Author:** Agent2 #6 (agent2-6@narko), at the operator's request
 **Trigger (operator, 2026-10-19):** an agent filling a US state's corporate-registry certificate request form was refused on the address, city, ZIP and email fields, then could not tick a checkbox, so the person had to finish the form by hand. "Agentmux needs to be able to fill in personal information including ssn." … "we'll need to pivot into that work now, write a spec to file." On a first draft that put saved values in Settings: "sounds like we may need a new pane type, a vault, or settings wouldn't really make sense" … "api keys and anything secret can be kept there." … "we want rich features, like support for pw protected encrypted export file (.vault file), and imports from kdbx files and last pass, and any other popular services should be supported."
@@ -405,7 +405,7 @@ Fix (built in P1):
 | **P5** | Importers, first wave (§8.4): KeePass `.kdbx`, LastPass, 1Password, Bitwarden, the browsers' CSVs, `.env`, any CSV; plaintext-file handling (§8.6); fuzzing (§8.7); KeePass export (§8.3). Built so far: all of the first wave (§8.8) | Each imports its real-export fixture with the right kinds and no loss the preview didn't list |
 | **P6** | Importers, second wave: Proton Pass, Dashlane, Keeper, NordPass, RoboForm, Enpass, Zoho Vault, Sticky Password | The same, per source |
 | **P7** | §7: `Terminal` `run` with `secrets`, scrubbing, approval, grants. Built (§7.1) | A command reads `STRIPE_API_KEY` from the Vault; its echoed output shows `[vault:<id>]` |
-| **P8** | Only on a yes to §13 question 1 or 2 | — |
+| **P8** | Replaced on 2026-10-29 by `SPEC_VAULT_GENERATE_CAPTURE_AND_BROWSER_SIGNINS_2026_10_28.md`: the operator said yes to saving, generating and filling sign-ins (question 2), with filling only through its `signin` action and the approval window; question 1 (agent-typed secrets) stays no | — |
 
 ## 13. Decisions for the operator
 

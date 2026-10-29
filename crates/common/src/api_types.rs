@@ -64,6 +64,16 @@ pub struct ShellCreateRequest {
     /// Needs `auth`, and a local `connection`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub secrets: Option<HashMap<String, String>>,
+    /// One Vault entry whose value is written to the command's stdin, followed by a
+    /// newline, after which stdin is closed (`docker login --password-stdin`). Not with
+    /// `capture_stdin`. Needs `auth`, and a local `connection`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stdin_secret: Option<String>,
+    /// Vault entries written to files only the user can read, removed when the command
+    /// ends: `{ENV_NAME: entry id}`, with the file's path in `ENV_NAME`. Needs `auth`,
+    /// and a local `connection`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secret_files: Option<HashMap<String, String>>,
 }
 
 /// Response from `POST /api/v1/shell/create`
@@ -1258,6 +1268,8 @@ mod app_api_manifest_contract_tests {
             connection: Some("wsl://Ubuntu".to_string()),
             auth: Some(UiAutomationAuth { agent_id: "a".into(), ts_secs: 1, sig: "s".into() }),
             secrets: Some(Default::default()),
+            stdin_secret: None,
+            secret_files: None,
         };
         let value = serde_json::to_value(&instance).expect("must serialize");
         let struct_fields: HashSet<String> =

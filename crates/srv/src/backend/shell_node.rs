@@ -335,10 +335,16 @@ pub struct ShellNodeRunner {
     /// Takes the Vault values the command was given out of its output, before
     /// anything is published (spec section 7.2).
     pub scrubber: Option<Arc<crate::backend::vault::scrub::Scrubber>>,
+    /// A Vault value for its stdin (`stdin_secret`): written with a newline, then
+    /// stdin is closed. Never with `capture_stdin`.
+    pub stdin_once: Option<zeroize::Zeroizing<String>>,
+    /// The folder of its Vault secret files, removed when this runner ends, however
+    /// it ends.
+    pub secret_dir: Option<crate::backend::vault::files::SecretDir>,
 }
 
 impl ShellNodeRunner {
-    pub async fn run(self) {
+    pub async fn run(mut self) {
         let shell_id = self.shell_id.clone();
         let block_id = self.block_id.clone();
         let broker = self.broker.clone();
@@ -399,7 +405,7 @@ impl ShellNodeRunner {
         // programs that read stdin to EOF (e.g. `cat` with no args) don't block
         // forever. When piped, a relay task forwards ShellInput() writes; when all
         // senders drop the relay exits, ChildStdin drops, and the child sees EOF.
-        if self.capture_stdin {
+        if self.capture_stdin || self.stdin_once.is_some() {
             child_cmd.stdin(std::process::Stdio::piped());
         } else {
             child_cmd.stdin(std::process::Stdio::null());
@@ -434,6 +440,20 @@ impl ShellNodeRunner {
 
         let pid = child.id();
         tracing::info!(shell_id = %shell_id, pid = ?pid, capture_stdin = self.capture_stdin, "shell.spawn");
+
+        // A Vault value for stdin: written, then stdin is dropped, so the command sees
+        // the end of its input and nothing else can be typed there.
+        if let Some(value) = self.stdin_once.take() {
+            if !self.capture_stdin {
+                if let Some(mut writer) = child.stdin.take() {
+                    tokio::spawn(async move {
+                        let _ = writer.write_all(value.as_bytes()).await;
+                        let _ = writer.write_all(b"\n").await;
+                        let _ = writer.flush().await;
+                    });
+                }
+            }
+        }
 
         // Spawn stdin relay only when capture_stdin=true.
         let stdin_tx: Option<mpsc::UnboundedSender<String>> = if self.capture_stdin {
@@ -661,6 +681,8 @@ mod tests {
             registry,
             capture_stdin: false,
             scrubber: Some(Arc::new(Scrubber::new(&[("api-key-x".to_string(), VALUE.to_string())]))),
+            stdin_once: None,
+            secret_dir: None,
         };
         runner.run().await;
         let events = broker.read_event_history(crate::backend::mps::EVENT_SHELL_CHUNK, "shell:scrub-1", 20);

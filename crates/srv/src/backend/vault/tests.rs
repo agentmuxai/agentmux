@@ -173,3 +173,59 @@ fn a_reveal_of_a_missing_part_or_an_unknown_use_is_refused() {
     assert!(reveal(&s, &card, "cvc", "revealed").unwrap_err().contains("no cvc saved"));
     assert_eq!(activity(&s, 10).unwrap().iter().filter(|a| a.action == "revealed").count(), 0, "a refusal isn't a use");
 }
+
+fn gen(kind: &str, label: &str) -> GenerateRequest {
+    GenerateRequest { kind: kind.into(), label: label.into(), why: "deploy key for the staging site".into(), fields: BTreeMap::new(), rules: Default::default() }
+}
+
+#[test]
+fn generate_makes_an_entry_whose_value_nobody_was_given() {
+    let s = store();
+    let made = generate_entry(&s, gen("api-key", "Staging deploy key"), "Agent2-6").unwrap();
+    assert_eq!(made.kind, "api-key");
+    assert!(made.made.contains("20 characters"), "{}", made.made);
+    // The value is in the sealed row, with the generator's length.
+    let value = reveal(&s, &made.id, "value", "revealed").unwrap();
+    assert_eq!(value.chars().count(), generate::DEFAULT_LENGTH);
+    // What an agent can see names it, and nothing else.
+    let listed = list_for_agent(&s).unwrap();
+    assert_eq!(listed, vec![VaultAgentEntry { id: made.id.clone(), label: "Staging deploy key".into(), kind: "api-key".into(), section: VaultSection::ApiKeys }]);
+    // The record names the agent, and never the value.
+    let rows = activity(&s, 10).unwrap();
+    let line = rows.iter().find(|r| r.action == "generated").unwrap();
+    assert_eq!(line.actor, "Agent2-6");
+    assert_eq!(line.target, "deploy key for the staging site");
+    assert!(rows.iter().all(|r| !format!("{r:?}").contains(value.as_str())));
+}
+
+#[test]
+fn generate_fills_a_logins_password_and_keeps_its_site_and_username() {
+    let s = store();
+    let mut req = gen("login", "Example shop");
+    req.fields = [("site".to_string(), "https://shop.example.com".to_string()), ("username".to_string(), "alex@example.com".to_string())].into();
+    req.rules.passwordrules = Some("minlength: 24; required: lower; required: digit; allowed: upper".into());
+    let made = generate_entry(&s, req, "Agent2-6").unwrap();
+    let pw = reveal(&s, &made.id, "password", "revealed").unwrap();
+    assert_eq!(pw.chars().count(), 24);
+    let (entries, _) = list_for_pane(&s).unwrap();
+    assert_eq!(entries[0].fields.get("username").map(String::as_str), Some("alex@example.com"));
+}
+
+#[test]
+fn generate_refuses_kinds_that_are_the_persons_own() {
+    let s = store();
+    for kind in ["ssn", "card", "bank-account", "passport"] {
+        let e = generate_entry(&s, gen(kind, "x"), "Agent2-6").unwrap_err();
+        assert!(e.contains("request"), "{kind}: {e}");
+    }
+    assert_eq!(s.vault_count().unwrap(), 0);
+}
+
+#[test]
+fn generate_refuses_weak_rules_and_stores_nothing() {
+    let s = store();
+    let mut req = gen("login", "Weak site");
+    req.rules.passwordrules = Some("allowed: digit; maxlength: 6".into());
+    assert!(generate_entry(&s, req, "Agent2-6").is_err());
+    assert_eq!(s.vault_count().unwrap(), 0);
+}

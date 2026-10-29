@@ -54,6 +54,7 @@ beforeEach(() => {
         row({ actor: "you", action: "revealed", target: "value" }),
         row({ actor: "Agent2", action: "filled a web form", target: "https://irs.gov (SSN)", outcome: "denied" }),
         row({ actor: "Agent3", action: "requested an entry", target: "Stripe test key", outcome: "pending" }),
+        row({ actor: "Agent4", action: "generated", entry_label: "Webhook secret", target: "sign test webhooks" }),
     ];
 });
 afterEach(cleanup);
@@ -67,8 +68,10 @@ describe("Secrets in Warden's Audit section", () => {
         expect(table.textContent).toContain("Agent2");
         expect(table.textContent).toContain("denied");
         expect(table.textContent).not.toContain("revealed");
-        // A request for an entry isn't a use of one.
+        // A request for an entry isn't a use of one; an entry an agent had the Vault make is listed.
         expect(table.textContent).not.toContain("Agent3");
+        expect(table.textContent).toContain("Agent4");
+        expect(table.textContent).toContain("sign test webhooks");
     });
 
     it("loads nothing from the Vault until it is shown", async () => {

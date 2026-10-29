@@ -11,6 +11,8 @@
 //!   section. No value, tail, field or grant.
 //! - `POST /api/v1/vault/request`: an agent asks the person for a new entry
 //!   and waits for the answer: the new entry's id, or declined.
+//! - `POST /api/v1/vault/generate`: an agent creates an entry whose value the
+//!   Vault makes; it gets the id back, never the value.
 
 use std::time::Duration;
 
@@ -323,6 +325,40 @@ pub(crate) async fn handle_vault_list(State(state): State<AppState>) -> Response
     match tokio::task::spawn_blocking(move || vault::list_for_agent(&store)).await {
         Ok(Ok(entries)) => Json(json!({ "entries": entries })).into_response(),
         Ok(Err(e)) => error(StatusCode::INTERNAL_SERVER_ERROR, e),
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct GenerateBody {
+    #[serde(flatten)]
+    request: vault::GenerateRequest,
+    /// The asking agent's signed identity: the record names it, so it must be proven.
+    #[serde(default)]
+    auth: Option<agentmux_common::api_types::UiAutomationAuth>,
+}
+
+/// `POST /api/v1/vault/generate`: a new entry whose value the Vault makes
+/// (SPEC_VAULT_GENERATE_CAPTURE_AND_BROWSER_SIGNINS_2026_10_28.md §4.1). The
+/// person isn't asked: the value is no secret of theirs, nobody has seen it, and
+/// using it later asks as every use does. The answer names the entry, never the
+/// value.
+pub(crate) async fn handle_vault_generate(State(state): State<AppState>, Json(body): Json<GenerateBody>) -> Response {
+    let Some(auth) = body.auth.as_ref() else {
+        return error(StatusCode::FORBIDDEN, "generate needs the agent's signed identity: the Vault records who made each entry");
+    };
+    let agent: String = match super::ui_handlers::verified_block_id(&state, None, auth) {
+        Ok(_) => auth.agent_id.chars().take(64).collect(),
+        Err(e) => return error(StatusCode::FORBIDDEN, format!("generate needs the agent's signed identity: {e}")),
+    };
+    let store = state.identity_store.clone();
+    let request = body.request;
+    match tokio::task::spawn_blocking(move || vault::generate_entry(&store, request, &agent)).await {
+        Ok(Ok(made)) => {
+            publish(&state);
+            Json(json!({ "status": "created", "id": made.id, "label": made.label, "kind": made.kind, "made": made.made })).into_response()
+        }
+        Ok(Err(e)) => error(StatusCode::BAD_REQUEST, e),
         Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
     }
 }

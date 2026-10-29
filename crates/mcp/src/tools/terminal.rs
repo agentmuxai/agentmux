@@ -921,6 +921,12 @@ async fn await_prompt(cx: &ToolCtx<'_>, id: &str) -> Result<()> {
     }
 }
 
+/// Whether `run` hands the command Vault values: `secrets`, `stdin_secret` or `secret_files`.
+fn gives_secrets(arguments: &Value) -> bool {
+    let named = |k: &str| arguments.get(k).is_some_and(|s| s.as_object().is_some_and(|o| !o.is_empty()));
+    named("secrets") || named("secret_files") || arguments.get("stdin_secret").and_then(Value::as_str).is_some_and(|s| !s.trim().is_empty())
+}
+
 /// How long `run` with `secrets` waits for srv to know the job before saying it may not have started.
 const NEVER_STARTED: Duration = Duration::from_secs(15);
 
@@ -1001,15 +1007,20 @@ async fn run_with_secrets(arguments: &Value, command: &str, cx: &ToolCtx<'_>) ->
 async fn run_action(arguments: &Value, cx: &ToolCtx<'_>) -> Result<Value> {
     let command = str_arg(arguments, "command").ok_or_else(|| anyhow::anyhow!("run needs command"))?;
     let background = arguments.get("background").and_then(|v| v.as_bool()).unwrap_or(false);
-    if let Some(s) = arguments.get("secrets").filter(|v| !v.is_null()) {
-        if !s.as_object().is_some_and(|o| o.values().all(|v| v.is_string())) {
-            anyhow::bail!("secrets must be an object of environment variable names to Vault entry ids, e.g. {{\"STRIPE_API_KEY\": \"api-key-stripe\"}}");
+    for key in ["secrets", "secret_files"] {
+        if let Some(s) = arguments.get(key).filter(|v| !v.is_null()) {
+            if !s.as_object().is_some_and(|o| o.values().all(|v| v.is_string())) {
+                anyhow::bail!("{key} must be an object of environment variable names to Vault entry ids, e.g. {{\"STRIPE_API_KEY\": \"api-key-stripe\"}}");
+            }
         }
+    }
+    if arguments.get("stdin_secret").is_some_and(|v| !v.is_null() && !v.is_string()) {
+        anyhow::bail!("stdin_secret is one Vault entry id, e.g. \"api-key-registry\"");
     }
     // A command given Vault secrets never goes through the terminal the person watches (its
     // line would be typed there with the value in the environment's reach, and its output
     // read back from the screen): it runs as a job whose output srv cleans of the values.
-    if !background && arguments.get("secrets").is_some_and(|s| s.as_object().is_some_and(|o| !o.is_empty())) {
+    if !background && gives_secrets(arguments) {
         return run_with_secrets(arguments, command, cx).await;
     }
     if background {

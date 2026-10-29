@@ -171,6 +171,9 @@ async fn app_main() {
     // Job templates: this instance's approvals and pinned publishers, beside
     // the widgets' (SPEC_JOBS_AND_TEMPLATES_2026_10_24.md §5.4).
     backend::job_templates::start(&config.data_home);
+    // Where a command's Vault secret files go, emptied of any a crash left
+    // (SPEC_VAULT_GENERATE_CAPTURE_AND_BROWSER_SIGNINS_2026_10_28.md §4.3).
+    backend::vault::files::init(&config.data_home);
 
     // 5. Bind TCP listeners, bring up LAN discovery / LSP supervisor / process tracker.
     let net = boot_timing::time_async(

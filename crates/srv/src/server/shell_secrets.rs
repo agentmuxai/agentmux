@@ -1,15 +1,17 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! `Terminal` `run` with `secrets`: a command that gets Vault values in its
-//! environment without the agent ever holding them
-//! (docs/specs/SPEC_VAULT_PANE_AGENTS_USE_SECRETS_UNSEEN_2026_10_19.md §7).
+//! `Terminal` `run` with `secrets`, `stdin_secret` and `secret_files`: a command
+//! that gets Vault values without the agent ever holding them
+//! (docs/specs/SPEC_VAULT_PANE_AGENTS_USE_SECRETS_UNSEEN_2026_10_19.md §7,
+//! SPEC_VAULT_GENERATE_CAPTURE_AND_BROWSER_SIGNINS_2026_10_28.md §4.3).
 //!
-//! The agent names `{ENV_NAME: entry}`. srv checks who is asking, asks the person
-//! (every window shows the entry, the agent, the command and where it runs; "Always"
-//! is a grant per entry and agent), and only then reads the value, straight into
-//! that one process's environment. The returned [`Scrubber`] takes the values back
-//! out of the output before it is published.
+//! The agent names `{ENV_NAME: entry}` for the environment, one entry for stdin, and
+//! `{ENV_NAME: entry}` for files whose path goes in `ENV_NAME`. srv checks who is
+//! asking, asks the person (every window shows the entry, the agent, the command and
+//! where it runs; "Always" is a grant per entry and agent), and only then reads the
+//! value, straight into that one process. The returned [`Scrubber`] takes the values
+//! back out of the output before it is published.
 
 use std::time::Duration;
 
@@ -41,7 +43,67 @@ pub(crate) fn grant_key(agent: &str, part: &str) -> String {
 /// What the command is given and what to take out of its output.
 pub(super) struct Injected {
     pub env: Vec<(String, String)>,
+    /// Written to its stdin, then stdin is closed.
+    pub stdin: Option<zeroize::Zeroizing<String>>,
+    /// `(ENV_NAME, value)`: a file each, whose path goes in `ENV_NAME`.
+    pub files: Vec<(String, zeroize::Zeroizing<String>)>,
     pub scrubber: Scrubber,
+}
+
+/// What a command asks to be given, as the request names it.
+#[derive(Default, Clone, Copy)]
+pub(super) struct Wanted<'a> {
+    pub env: Option<&'a std::collections::HashMap<String, String>>,
+    pub stdin: Option<&'a str>,
+    pub files: Option<&'a std::collections::HashMap<String, String>>,
+}
+
+/// Where one value goes.
+#[derive(Debug, Clone, PartialEq)]
+enum Delivery {
+    Env(String),
+    Stdin,
+    File(String),
+}
+
+impl Delivery {
+    /// How the prompt names it, with the part: `STRIPE_KEY (value)`, `stdin (value)`.
+    fn shown(&self, part: &str) -> String {
+        match self {
+            Delivery::Env(n) => format!("{n} ({part})"),
+            Delivery::Stdin => format!("stdin ({part})"),
+            Delivery::File(n) => format!("a file at {n} ({part})"),
+        }
+    }
+}
+
+fn sorted(m: Option<&std::collections::HashMap<String, String>>) -> Vec<(String, String)> {
+    let mut v: Vec<(String, String)> = m.map(|m| m.iter().map(|(k, e)| (k.clone(), e.clone())).collect()).unwrap_or_default();
+    v.sort();
+    v
+}
+
+/// Every value the request names, checked: names usable, none twice, at most [`MOST`].
+fn deliveries(w: Wanted<'_>) -> Result<Vec<(Delivery, String)>, Refusal> {
+    let env = sorted(w.env);
+    let files = sorted(w.files);
+    for (name, _) in env.iter().chain(files.iter()) {
+        if !env_name_ok(name) {
+            return Err(refuse(StatusCode::BAD_REQUEST, format!("{name:?} isn't a usable environment variable name")));
+        }
+    }
+    if let Some((name, _)) = files.iter().find(|(f, _)| env.iter().any(|(n, _)| n == f)) {
+        return Err(refuse(StatusCode::BAD_REQUEST, format!("{name} is named in both secrets and secret_files")));
+    }
+    let mut out: Vec<(Delivery, String)> = env.into_iter().map(|(n, e)| (Delivery::Env(n), e)).collect();
+    if let Some(entry) = w.stdin.map(str::trim).filter(|s| !s.is_empty()) {
+        out.push((Delivery::Stdin, entry.to_string()));
+    }
+    out.extend(files.into_iter().map(|(n, e)| (Delivery::File(n), e)));
+    if out.len() > MOST {
+        return Err(refuse(StatusCode::BAD_REQUEST, format!("a command takes at most {MOST} Vault secrets")));
+    }
+    Ok(out)
 }
 
 type Refusal = (StatusCode, String);
@@ -69,12 +131,15 @@ pub(super) async fn inject(
     state: &AppState,
     agent_block_id: &str,
     auth: Option<&agentmux_common::api_types::UiAutomationAuth>,
-    wanted: Option<&std::collections::HashMap<String, String>>,
+    wanted: Wanted<'_>,
     remote: bool,
     cmd: &str,
     cwd: &str,
 ) -> Result<Option<Injected>, Refusal> {
-    let Some(wanted) = wanted.filter(|w| !w.is_empty()) else { return Ok(None) };
+    let wanted = deliveries(wanted)?;
+    if wanted.is_empty() {
+        return Ok(None);
+    }
     if remote {
         return Err(refuse(
             StatusCode::BAD_REQUEST,
@@ -87,31 +152,20 @@ pub(super) async fn inject(
             format!("a command given Vault secrets must fit in the approval prompt ({MAX_COMMAND} characters, folder {MAX_CWD}): put the steps in a script file and run that"),
         ));
     }
-    if wanted.len() > MOST {
-        return Err(refuse(StatusCode::BAD_REQUEST, format!("a command takes at most {MOST} Vault secrets")));
-    }
     // Who is asking, proved by the agent's own signature: the prompt names them, and
     // a grant is theirs alone.
     let agent = super::app_api::connections::verified_agent(state, agent_block_id, auth).map_err(|e| {
         refuse(StatusCode::FORBIDDEN, format!("a Vault secret needs the agent's signed identity: {}", e.replace("an SSH connection needs", "this needs")))
     })?;
     let agent: String = agent.chars().take(64).collect();
-    let mut names: Vec<(&String, &String)> = wanted.iter().collect();
-    names.sort();
-    for (name, _) in &names {
-        if !env_name_ok(name) {
-            return Err(refuse(StatusCode::BAD_REQUEST, format!("{name:?} isn't a usable environment variable name")));
-        }
-    }
-    let mut targets: Vec<(String, FillTarget)> = Vec::new();
-    for (name, entry) in &names {
+    let mut targets: Vec<(Delivery, FillTarget)> = Vec::new();
+    for (delivery, entry) in wanted {
         let store = state.identity_store.clone();
-        let entry = (*entry).clone();
         let target = tokio::task::spawn_blocking(move || vault::command_target(&store, &entry))
             .await
             .map_err(|e| refuse(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
             .map_err(|e| refuse(StatusCode::BAD_REQUEST, e))?;
-        targets.push(((*name).clone(), target));
+        targets.push((delivery, target));
     }
     let record = |t: &FillTarget, outcome: &str| {
         vault::record(&state.identity_store, &t.id, &t.label, &agent, "ran a command", &clip(cmd, 160), outcome);
@@ -127,12 +181,12 @@ pub(super) async fn inject(
             continue;
         }
         asked.push(&first.id);
-        let mut waiting_on: Vec<(&str, &FillTarget)> = Vec::new();
-        for (name, t) in targets.iter().filter(|(_, t)| t.id == first.id) {
+        let mut waiting_on: Vec<(&Delivery, &FillTarget)> = Vec::new();
+        for (delivery, t) in targets.iter().filter(|(_, t)| t.id == first.id) {
             let (store, id, key) = (state.identity_store.clone(), t.id.clone(), grant_key(&agent, t.part));
             let granted = tokio::task::spawn_blocking(move || store.vault_grant_check(&id, &key).unwrap_or(false)).await.unwrap_or(false);
             if !granted {
-                waiting_on.push((name.as_str(), t));
+                waiting_on.push((delivery, t));
             }
         }
         if waiting_on.is_empty() {
@@ -149,7 +203,7 @@ pub(super) async fn inject(
             entry_label: first.label.clone(),
             what: what.clone(),
             origin: String::new(),
-            field: waiting_on.iter().map(|(n, t)| format!("{n} ({})", t.part)).collect::<Vec<_>>().join(", "),
+            field: waiting_on.iter().map(|(d, t)| d.shown(t.part)).collect::<Vec<_>>().join(", "),
             offer_always: true,
             reason: format!("it is the first time {agent} runs a command with this entry"),
             needs_value: false,
@@ -189,8 +243,10 @@ pub(super) async fn inject(
 
     // Allowed: the values leave their sealed rows now, into this process only.
     let mut env = Vec::new();
+    let mut stdin = None;
+    let mut files = Vec::new();
     let mut known: Vec<(String, String)> = Vec::new();
-    for (name, target) in &targets {
+    for (delivery, target) in &targets {
         let (store, id, part, created) = (state.identity_store.clone(), target.id.clone(), target.part, target.created_at);
         let value = match tokio::task::spawn_blocking(move || vault::value_for_fill(&store, &id, created, part)).await {
             Ok(Ok(v)) => v,
@@ -208,14 +264,18 @@ pub(super) async fn inject(
             ));
         }
         known.push((target.id.clone(), value.to_string()));
-        env.push((name.clone(), value.to_string()));
+        match delivery {
+            Delivery::Env(name) => env.push((name.clone(), value.to_string())),
+            Delivery::Stdin => stdin = Some(value),
+            Delivery::File(name) => files.push((name.clone(), value)),
+        }
     }
     for (_, target) in &targets {
         record(target, "done");
         let (store, id) = (state.identity_store.clone(), target.id.clone());
         let _ = tokio::task::spawn_blocking(move || store.vault_touch(&id, agentmux_common::time::now_ms())).await;
     }
-    Ok(Some(Injected { env, scrubber: Scrubber::new(&known) }))
+    Ok(Some(Injected { env, stdin, files, scrubber: Scrubber::new(&known) }))
 }
 
 #[cfg(test)]
