@@ -6,11 +6,14 @@
 //! (or the time limit) finishes the file and returns its path, which goes straight into `files` of
 //! `Tasks` update/submit.
 //!
-//! A frame is what `screenshot` returns: the host's capture of the caller's own pane (or a browser pane
-//! it opened), clipped to that pane, with the secret fields and the Vault the host found just before and
-//! just after the capture blacked out here (`screenshot_redact`). So the target rules and the redaction
-//! are the screenshot's own, frame by frame. A frame the host could not check for secret fields is left
-//! out and counted, never kept. Frames are encoded as they arrive, so memory stays at about the size of
+//! A frame is what `screenshot` returns: the host's capture of the caller's own pane (or a browser pane it
+//! opened), cut to that pane, with the secret fields and the Vault the host found just before and just
+//! after the capture blacked out here (`screenshot_redact`). So the target rules and the redaction are the
+//! screenshot's own, frame by frame: the pane is checked again before every capture, and a pane that has
+//! gone to the user (a hand-off, an approval, a question, paused) ends the recording. A frame the host could
+//! not check for secret fields is left out and counted, never kept. The host captures the whole viewport
+//! and this crops it (a clipped capture in a visible page briefly changes its viewport and flickers the
+//! window, which a recording would do for its whole length); the rest of the viewport is dropped here. Frames are encoded as they arrive, so memory stays at about the size of
 //! the file, and the file is kept under the size one attached image may have.
 
 use std::collections::HashMap;
@@ -31,7 +34,7 @@ use serde_json::json;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
-use super::ui_handlers::{err_response, get_host_ipc, proxy_to_host_timeout, target_block_id, verified_block_id};
+use super::ui_handlers::{err_response, get_host_ipc, not_waiting_on_user, proxy_to_host_timeout, target_block_id, verified_block_id};
 use super::AppState;
 
 /// The longest recording, in seconds (the spec's limit).
@@ -61,7 +64,7 @@ pub(crate) struct Finished {
     /// Frames left out: the host could not check the page for secret fields, or a capture failed.
     pub skipped: u32,
     pub seconds: f32,
-    /// Why it ended: `stopped`, `time limit`, `size limit` or `capture failed`.
+    /// Why it ended: `stopped`, `time limit`, `size limit`, `capture failed` or `pane held`.
     pub ended: &'static str,
 }
 
@@ -161,16 +164,21 @@ impl GifBuilder {
 /// A host capture as a frame: decoded, scaled to [`FRAME_WIDTH`] if wider, and opaque (GIF has no partial alpha).
 pub(crate) fn frame_from(bytes: &[u8]) -> Result<RgbaImage, String> {
     let img = image::load_from_memory(bytes).map_err(|e| format!("read the capture: {e}"))?;
+    Ok(scale_frame(img.to_rgba8()))
+}
+
+/// `img` scaled to [`FRAME_WIDTH`] if wider, and opaque.
+pub(crate) fn scale_frame(img: RgbaImage) -> RgbaImage {
     let mut rgba = if img.width() > FRAME_WIDTH {
         let h = ((u64::from(img.height()) * u64::from(FRAME_WIDTH)) / u64::from(img.width())).max(1) as u32;
-        image::imageops::resize(&img.to_rgba8(), FRAME_WIDTH, h, FilterType::Triangle)
+        image::imageops::resize(&img, FRAME_WIDTH, h, FilterType::Triangle)
     } else {
-        img.to_rgba8()
+        img
     };
     for p in rgba.pixels_mut() {
         p.0[3] = 255;
     }
-    Ok(rgba)
+    rgba
 }
 
 /// `fps` as asked for, held to the limits; `seconds` likewise.
@@ -213,7 +221,7 @@ async fn capture_frame(state: &AppState, host: &super::HostIpc, block_id: &str) 
         state,
         host,
         "screenshot",
-        json!({ "block_id": block_id, "format": "jpeg", "quality": 60 }),
+        json!({ "block_id": block_id, "format": "jpeg", "quality": 60, "whole_viewport": true }),
         Some(FRAME_TIMEOUT),
     )
     .await?;
@@ -226,10 +234,31 @@ pub(crate) fn frame_of_response(resp: &serde_json::Value) -> Result<RgbaImage, S
     if resp.get("ok").and_then(|v| v.as_bool()) != Some(true) {
         return Err(resp.get("error").and_then(|v| v.as_str()).unwrap_or("unknown host error").to_string());
     }
-    let encoded = resp.pointer("/data/png_base64").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let bytes = base64::engine::general_purpose::STANDARD.decode(&encoded).map_err(|e| format!("decode the capture: {e}"))?;
-    let (bytes, _) = super::screenshot_redact::redact_host_screenshot(resp, bytes, encoded)?;
-    frame_from(&bytes)
+    let encoded = resp.pointer("/data/png_base64").and_then(|v| v.as_str()).unwrap_or("");
+    let bytes = base64::engine::general_purpose::STANDARD.decode(encoded).map_err(|e| format!("decode the capture: {e}"))?;
+    let mut img = image::load_from_memory(&bytes).map_err(|e| format!("read the capture: {e}"))?.to_rgba8();
+    // The pane's box in the whole viewport, in CSS pixels; the image is in device pixels.
+    if let Some(crop) = resp.pointer("/data/crop").and_then(|v| serde_json::from_value::<[f64; 4]>(v.clone()).ok()) {
+        let viewport = resp.pointer("/data/viewport_width").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        img = crop_to(&img, crop, viewport)?;
+    }
+    super::screenshot_redact::redact_image(resp, &mut img)?;
+    Ok(scale_frame(img))
+}
+
+/// `crop` (x, y, width, height in CSS pixels) of a whole-viewport `img` whose page is `viewport_width` CSS pixels wide.
+pub(crate) fn crop_to(img: &RgbaImage, crop: [f64; 4], viewport_width: f64) -> Result<RgbaImage, String> {
+    if viewport_width <= 0.0 {
+        return Err("the page's width is unknown, so the pane can't be cut out of the capture".to_string());
+    }
+    let scale = f64::from(img.width()) / viewport_width;
+    let at = |v: f64, limit: u32| -> u32 { (v * scale).round().clamp(0.0, f64::from(limit)) as u32 };
+    let (x0, y0) = (at(crop[0], img.width()), at(crop[1], img.height()));
+    let (x1, y1) = (at(crop[0] + crop[2], img.width()), at(crop[1] + crop[3], img.height()));
+    if x1 <= x0 || y1 <= y0 {
+        return Err("the pane is outside the capture".to_string());
+    }
+    Ok(image::imageops::crop_imm(img, x0, y0, x1 - x0, y1 - y0).to_image())
 }
 
 /// The capture loop: a frame every `1/fps` second until stopped, out of time, out of room, or failing.
@@ -250,6 +279,12 @@ async fn run(
     let (mut skipped, mut failed_in_a_row) = (0u32, 0u32);
     let mut last_error = String::new();
     let ended = loop {
+        // Checked before every capture, as `screenshot` checks it on every call: a hand-off, an approval, a
+        // question or a pause that began since the last frame is not filmed.
+        if let Err((_, why)) = not_waiting_on_user(&block_id) {
+            last_error = why;
+            break "pane held";
+        }
         let frame_started = Instant::now();
         match capture_frame(&state, &host, &block_id).await {
             Ok(frame) => {
@@ -384,11 +419,14 @@ pub(crate) async fn handle_ui_record(
             match rec.task.await {
                 Ok(Ok(f)) => {
                     tracing::info!(agent_id = %who, path = %f.path.display(), frames = f.frames, skipped = f.skipped, ended = f.ended, "[ui-automation] record stop");
-                    let note = if f.skipped > 0 {
+                    let mut note = if f.skipped > 0 {
                         format!(" {} frame(s) were left out because the page could not be checked for secret fields or a capture failed.", f.skipped)
                     } else {
                         String::new()
                     };
+                    if f.ended == "pane held" {
+                        note.push_str(" It ended early because the pane went to the user (a hand-off, an approval, a question or a pause), which is never recorded.");
+                    }
                     let msg = format!(
                         "Recording saved to {} ({} frames, {:.1} s, ended: {}).{note} Look at it before you attach it (Read shows an image; open it with Pane view \"media\" to see it move), then pass its path in files of Tasks update or submit.",
                         f.path.display(),

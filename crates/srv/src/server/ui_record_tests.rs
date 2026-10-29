@@ -138,3 +138,40 @@ fn a_host_refusal_is_not_a_frame() {
     let err = frame_of_response(&json!({ "ok": false, "error": "pane not found" })).unwrap_err();
     assert_eq!(err, "pane not found");
 }
+
+#[test]
+fn the_pane_is_cut_out_of_the_whole_viewport_in_device_pixels() {
+    // The page is 100 CSS pixels wide, shown at 2x: the image is 200 wide. The pane is at CSS (10, 10), 30 by 20.
+    let pane = crop_to(&solid(200, 100, [1, 2, 3]), [10.0, 10.0, 30.0, 20.0], 100.0).unwrap();
+    assert_eq!(pane.dimensions(), (60, 40));
+}
+
+#[test]
+fn a_pane_that_cannot_be_cut_out_is_refused_not_guessed() {
+    let img = solid(200, 100, [1, 2, 3]);
+    assert!(crop_to(&img, [10.0, 10.0, 30.0, 20.0], 0.0).is_err(), "the page's width is unknown");
+    assert!(crop_to(&img, [500.0, 10.0, 30.0, 20.0], 100.0).is_err(), "the pane is outside the capture");
+}
+
+#[test]
+fn a_secret_field_is_blacked_out_in_the_pane_cut_from_a_whole_viewport_and_the_rest_is_gone() {
+    let white = encoded(&solid(200, 100, [255, 255, 255]), ImageFormat::Png);
+    // The boxes are from the pane's own origin, as the host measures them for a clipped capture.
+    let resp = host_response(
+        &white,
+        json!({ "crop": [10.0, 10.0, 30.0, 20.0], "viewport_width": 100.0, "secret_boxes": [[5.0, 5.0, 10.0, 10.0]], "css_width": 30.0 }),
+    );
+    let frame = frame_of_response(&resp).unwrap();
+    assert_eq!(frame.dimensions(), (60, 40), "only the pane");
+    assert_eq!(frame.get_pixel(20, 20).0, [0, 0, 0, 255], "inside the field");
+    assert_eq!(frame.get_pixel(50, 35).0, [255, 255, 255, 255], "outside it");
+}
+
+#[test]
+fn a_whole_viewport_capture_the_host_could_not_scale_is_not_a_frame() {
+    let white = encoded(&solid(200, 100, [255, 255, 255]), ImageFormat::Png);
+    let resp = host_response(&white, json!({ "crop": [10.0, 10.0, 30.0, 20.0], "secrets_unchecked": true }));
+    assert!(frame_of_response(&resp).is_err());
+    let no_width = host_response(&white, json!({ "crop": [10.0, 10.0, 30.0, 20.0] }));
+    assert!(frame_of_response(&no_width).unwrap_err().contains("width is unknown"));
+}
