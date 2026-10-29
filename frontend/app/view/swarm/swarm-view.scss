@@ -1457,7 +1457,7 @@
 .swarm-match {
     color: inherit;
     background: color-mix(in srgb, var(--accent-color) 30%, transparent);
-    border-radius: 2px;
+    border-radius: var(--radius-sm);
 }
 
 .swarm-filter-empty {
@@ -1467,14 +1467,4 @@
     padding: var(--space-2);
     font-size: var(--text-sm);
     color: var(--secondary-text-color);
-}
-
-.swarm-filter-empty-clear {
-    @include mixins.button-reset;
-    color: var(--accent-color);
-    cursor: var(--cursor-interactive);
-
-    &:hover {
-        text-decoration: underline;
-    }
 }

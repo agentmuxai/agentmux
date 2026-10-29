@@ -3,7 +3,7 @@
 
 /** The Swarm's filter bar and the highlight of what matched (docs/specs/SPEC_SWARM_FILTER_BAR_2026_10_29.md §2). */
 
-import { FilterInput } from "@/app/element/ui";
+import { Button, FilterInput } from "@/app/element/ui";
 import { For, Show, type JSX } from "solid-js";
 import { splitMatches } from "./swarm-filter";
 import type { SwarmFilterState } from "./swarm-filter-state";
@@ -67,9 +67,9 @@ export function SwarmFilterEmpty(props: { filter: SwarmFilterState }): JSX.Eleme
     return (
         <div class="swarm-filter-empty" data-testid="swarm-filter-empty">
             <span>No agents match “{props.filter.text().trim()}”</span>
-            <button type="button" class="swarm-filter-empty-clear" onClick={() => props.filter.clear()}>
+            <Button class="swarm-filter-empty-clear" onClick={() => props.filter.clear()}>
                 Clear
-            </button>
+            </Button>
         </div>
     );
 }
