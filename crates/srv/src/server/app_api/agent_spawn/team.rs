@@ -18,7 +18,8 @@ fn tab_named(mstore: &Store, workspace: &Workspace, name: &str) -> Option<String
 
 /// The tab `leader`'s workers open in. `leaders_tab` (where the leader's pane is, or where it works from
 /// when parked) is the way out: if the workspace can't be found or the tab can't be made, the workers
-/// open there as they did before.
+/// open there as they did before. Both callers hold the leader's lock (`leader_lock`) from before the
+/// user is asked until the last worker is open, so one leader's find-or-make never overlaps itself.
 pub(super) async fn team_tab(state: &AppState, leader: &Leader, leaders_tab: &str) -> String {
     let Some(workspace) = state.mstore.get_all::<Workspace>().unwrap_or_default().into_iter().find(|w| w.tabids.iter().any(|t| t == leaders_tab)) else {
         return leaders_tab.to_string();
