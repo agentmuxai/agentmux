@@ -765,6 +765,7 @@ pub const COMMAND_SKILL_CATALOG_BIND: &str = "skill.catalog.bind";
 pub const COMMAND_SKILL_CATALOG_LIST_FOR_AGENT: &str = "skill.catalog.list_for_agent";
 pub const COMMAND_SKILL_CATALOG_UNBIND: &str = "skill.catalog.unbind";
 pub const COMMAND_SKILL_CATALOG_SET_REACH: &str = "skill.catalog.set_reach";
+pub const COMMAND_SKILL_CATALOG_SET_OPT_OUT: &str = "skill.catalog.set_opt_out";
 pub const COMMAND_SKILL_CATALOG_BIND_ALL: &str = "skill.catalog.bind_all";
 pub const COMMAND_SKILL_CATALOG_IMPORT_PREVIEW: &str = "skill.catalog.import_preview";
 pub const COMMAND_SKILL_CATALOG_IMPORT_COMMIT: &str = "skill.catalog.import_commit";
