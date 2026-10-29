@@ -1011,6 +1011,43 @@
     flex-wrap: wrap;
 }
 
+// The Supervisor's and Broadcast's own controls: one raised surface apart from the agent list,
+// which keeps the pane background. In the agents section the wrapper adds nothing (`display: contents`).
+// One custom property for the surface, so a shared compartment token can replace it in one line.
+.swarm-compartment {
+    --swarm-compartment-bg: var(--hover-bg-color);
+    display: contents;
+
+    &--on {
+        display: flex;
+        flex: 0 0 auto;
+        flex-direction: column;
+        gap: 1px;
+        margin: 6px 8px;
+        max-height: 55%;
+        overflow-y: auto;
+        background: var(--swarm-compartment-bg);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-md, 6px);
+
+        // Their own bars and dividers become the compartment's inner structure.
+        > .swarm-fleet-toolbar,
+        > .swarm-supervisor-settings,
+        > .swarm-broadcast-dock {
+            background: transparent;
+            margin: 0;
+            max-height: none;
+            border-top: 0;
+            border-bottom: 0;
+            overflow: visible;
+        }
+
+        > * + * {
+            border-top: 1px solid var(--border-color);
+        }
+    }
+}
+
 .swarm-fleet-toolbar-count {
     font-weight: 600;
     font-size: var(--text-sm);
@@ -1309,12 +1346,9 @@
     }
 }
 
-// The Broadcast section: the composer docked under the list, then the recent broadcasts.
+// The Broadcast section: the composer at the top of the compartment, then the recent broadcasts.
 .swarm-broadcast-dock {
     flex-shrink: 0;
-    // Under the list when it fills the pane, at the bottom of the pane when it doesn't.
-    margin-top: auto;
-    border-top: 1px solid var(--border-color);
     padding: 8px 10px;
     display: flex;
     flex-direction: column;

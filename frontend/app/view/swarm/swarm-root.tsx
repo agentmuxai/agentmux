@@ -18,37 +18,49 @@ import { SupervisorSettingsBar } from "./swarm-supervisor-settings";
 import { FleetToolbar, FleetResultPanel } from "./swarm-fleet-toolbar";
 import "./swarm-view.scss";
 
-/** What a section shows above the shared list: the fleet toolbar and its result, then either an
- *  empty-state note or the "Clear completed" button. */
-function SectionActions(props: { model: SwarmViewModel; agents: SwarmAgents; section: SwarmSection }): JSX.Element {
+/** The controls a section shows above the shared list: the Supervisor's settings, Broadcast's composer,
+ *  the fleet toolbar and its result. In the Supervisor and Broadcast they sit in one compartment
+ *  (`swarm-compartment`) of their own, apart from the list; the agents section shows them as before. */
+function SectionControls(props: { model: SwarmViewModel; agents: SwarmAgents; section: SwarmSection }): JSX.Element {
     const { model, agents } = props;
     return (
-        <>
+        <div class="swarm-compartment" classList={{ "swarm-compartment--on": props.section === "supervisor" || props.section === "broadcast" }}>
             <Show when={props.section === "supervisor"}>
                 <SupervisorSettingsBar blockId={model.blockId} />
+            </Show>
+            {/* The composer is the top of the Broadcast section, above the selection bar and the list. */}
+            <Show when={props.section === "broadcast"}>
+                <BroadcastDock model={model} agents={agents} />
             </Show>
             {/* Outside the tree's own Show: agents on other instances can be selected
                 when this instance has none, and the toolbar is what acts on them. It
                 shows itself only when there is something to select or act on. */}
             <FleetToolbar model={model} allBlockIds={agents.selectableKeys} section={props.section} />
             <FleetResultPanel model={model} quietWhenClean={props.section === "broadcast"} />
-            <Show
-                when={agents.tree().length > 0}
-                fallback={
-                    <div classList={{ "swarm-empty-root": true, "swarm-empty-root--compact": agents.remote().length > 0 }}>
-                        <span class="swarm-empty-icon">⬡</span>
-                        <div class="swarm-empty-title">No active agent panes</div>
-                        <div class="swarm-empty-desc">
-                            Start an agent session to see it here.
-                        </div>
+        </div>
+    );
+}
+
+/** What a section shows with the shared list: an empty-state note or the "Clear completed" button. */
+function SectionListNotes(props: { model: SwarmViewModel; agents: SwarmAgents }): JSX.Element {
+    const { model, agents } = props;
+    return (
+        <Show
+            when={agents.tree().length > 0}
+            fallback={
+                <div classList={{ "swarm-empty-root": true, "swarm-empty-root--compact": agents.remote().length > 0 }}>
+                    <span class="swarm-empty-icon">⬡</span>
+                    <div class="swarm-empty-title">No active agent panes</div>
+                    <div class="swarm-empty-desc">
+                        Start an agent session to see it here.
                     </div>
-                }
-            >
-                <Show when={agents.clearableCount() > 0}>
-                    <ClearCompletedButton model={model} count={agents.clearableCount()} />
-                </Show>
+                </div>
+            }
+        >
+            <Show when={agents.clearableCount() > 0}>
+                <ClearCompletedButton model={model} count={agents.clearableCount()} />
             </Show>
-        </>
+        </Show>
     );
 }
 
@@ -151,12 +163,9 @@ export function SwarmView(props: {
                         by a switch, which is what keeps a press on a row from being lost (#5208). */}
                     <div class="swarm-section-body">
                         <div class="swarm-agents-pane" classList={{ "is-hidden": section() === "kanban" }}>
-                            <SectionActions model={model} agents={agents} section={section()} />
+                            <SectionControls model={model} agents={agents} section={section()} />
+                            <SectionListNotes model={model} agents={agents} />
                             <SwarmAgentList model={model} ctx={ctx} agents={agents} density={density} />
-                            {/* After the list, so a switch never remounts it. */}
-                            <Show when={section() === "broadcast"}>
-                                <BroadcastDock model={model} agents={agents} />
-                            </Show>
                         </div>
                         <Show when={kanbanSeen()}>
                             <div class="swarm-kanban-slot" classList={{ "is-hidden": section() !== "kanban" }}>

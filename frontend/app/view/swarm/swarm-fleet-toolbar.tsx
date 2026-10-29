@@ -33,7 +33,7 @@ const NOTHING_SUPERVISABLE = "The Supervisor runs in each AgentMux for its own a
 
 export function FleetToolbar(props: {
     model: SwarmViewModel;
-    /** The Supervisor shows Stop and the mode menu; Broadcast has the selection only (its composer is docked). */
+    /** The Supervisor shows Stop and the mode menu; Broadcast has the selection only (its composer sits above). */
     section?: SwarmSection;
     /** Every currently-listed agent's blockId, for "Select all". Passed down
      *  rather than read via `model.buildTree()` here — SwarmView already
