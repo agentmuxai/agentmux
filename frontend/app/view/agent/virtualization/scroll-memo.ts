@@ -157,6 +157,9 @@ export function useScrollMemo(opts: {
     const capture = (): ScrollMemo | null =>
         captureScrollMemo(opts.scroller(), untrack(opts.following), opts.zoom ? untrack(opts.zoom) : 1);
     capturers.set(blockId, capture);
+    // Set once the pane has taken a place it was given (below). A pane that goes away before its history
+    // loaded has not: what it would record is only its default, and would wipe the place still waiting.
+    let restored = false;
     // The key is read while the pane is mounted: a deleted block's meta is gone by the time the pane's
     // cleanup runs, which would file the place under the block id and lose it for the reopened pane.
     let key = leftKey(blockId);
@@ -168,7 +171,7 @@ export function useScrollMemo(opts: {
         if (capturers.get(blockId) === capture) capturers.delete(blockId);
         // The pane is going away (unmounted behind another tab, or closed): keep where it was scrolled to.
         // The scroller is still attached while the owner is disposed; if it is not, there is nothing to read.
-        rememberLeft(key, capture());
+        if (restored) rememberLeft(key, capture());
     });
     // A reload reads only the tail, so a pane scrolled up into pages it loaded
     // later would come back at the bottom.
@@ -179,7 +182,6 @@ export function useScrollMemo(opts: {
         unregister();
         olderLoaded.delete(blockId);
     });
-    let restored = false;
     createEffect(() => {
         if (restored || !opts.historyReady()) return;
         restored = true;

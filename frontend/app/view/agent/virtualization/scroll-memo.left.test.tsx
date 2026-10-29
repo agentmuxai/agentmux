@@ -39,6 +39,12 @@ function pane(blockId: string, scroller: HTMLElement, following: boolean) {
     return { scrollToRow, ready: () => setReady(true), unmount: () => dispose() };
 }
 
+/** The pane's history loaded, then the pane went away. */
+function leave(p: ReturnType<typeof pane>): void {
+    p.ready();
+    p.unmount();
+}
+
 beforeEach(() => {
     agentOf.clear();
     sessionStorage.clear();
@@ -58,6 +64,7 @@ describe("scroll-memo: a pane that goes away scrolled up leaves its place", () =
         agentOf.set("blk-1", "agent-a");
         agentOf.set("blk-2", "agent-a");
         const first = pane("blk-1", scrollerWith([{ id: "r1", top: -80 }, { id: "r2", top: 20 }]), false);
+        first.ready();
         first.unmount();
         expect(hasScrolledUpMemo("blk-2"), "the reopened pane (and its history load) is told").toBe(true);
         const second = pane("blk-2", scrollerWith([{ id: "r1", top: 0 }]), true);
@@ -71,28 +78,44 @@ describe("scroll-memo: a pane that goes away scrolled up leaves its place", () =
         agentOf.set("blk-2", "agent-a");
         const first = pane("blk-1", scrollerWith([{ id: "r2", top: 20 }]), false);
         agentOf.delete("blk-1"); // a deleted block: its meta is gone before the pane is disposed
+        first.ready();
         first.unmount();
         expect(hasScrolledUpMemo("blk-2")).toBe(true);
     });
 
+    it("a pane that goes away before its history loaded leaves the place waiting for it alone", () => {
+        agentOf.set("blk-1", "agent-a");
+        agentOf.set("blk-2", "agent-a");
+        agentOf.set("blk-3", "agent-a");
+        leave(pane("blk-1", scrollerWith([{ id: "r2", top: 20 }]), false));
+        pane("blk-2", scrollerWith([{ id: "r1", top: 0 }]), true).unmount(); // never ready: nothing to record
+        const third = pane("blk-3", scrollerWith([{ id: "r1", top: 0 }]), true);
+        third.ready();
+        expect(third.scrollToRow).toHaveBeenCalledWith("r2", -20);
+    });
+
     it("a pane that was following leaves nothing, and clears an older place", () => {
         agentOf.set("blk-1", "agent-a");
-        pane("blk-1", scrollerWith([{ id: "r2", top: 20 }]), false).unmount();
-        pane("blk-1", scrollerWith([{ id: "r2", top: 20 }]), true).unmount();
+        const away = pane("blk-1", scrollerWith([{ id: "r2", top: 20 }]), false);
+        away.ready();
+        away.unmount();
+        const back = pane("blk-1", scrollerWith([{ id: "r2", top: 20 }]), true);
+        back.ready();
+        back.unmount();
         expect(hasScrolledUpMemo("blk-1")).toBe(false);
     });
 
     it("another agent's pane is not moved", () => {
         agentOf.set("blk-1", "agent-a");
         agentOf.set("blk-9", "agent-b");
-        pane("blk-1", scrollerWith([{ id: "r2", top: 20 }]), false).unmount();
+        leave(pane("blk-1", scrollerWith([{ id: "r2", top: 20 }]), false));
         const other = pane("blk-9", scrollerWith([{ id: "r2", top: 20 }]), true);
         other.ready();
         expect(other.scrollToRow).not.toHaveBeenCalled();
     });
 
     it("keeps the block's own place when the pane has no agent id", () => {
-        pane("blk-7", scrollerWith([{ id: "r3", top: 10 }]), false).unmount();
+        leave(pane("blk-7", scrollerWith([{ id: "r3", top: 10 }]), false));
         expect(hasScrolledUpMemo("blk-7")).toBe(true);
         expect(hasScrolledUpMemo("blk-8")).toBe(false);
     });
@@ -100,7 +123,7 @@ describe("scroll-memo: a pane that goes away scrolled up leaves its place", () =
     it("remembers the most recent agents only", () => {
         for (let i = 0; i < 105; i++) {
             agentOf.set(`b${i}`, `a${i}`);
-            pane(`b${i}`, scrollerWith([{ id: "r", top: 10 }]), false).unmount();
+            leave(pane(`b${i}`, scrollerWith([{ id: "r", top: 10 }]), false));
         }
         expect(hasScrolledUpMemo("b0"), "the oldest was dropped").toBe(false);
         expect(hasScrolledUpMemo("b104")).toBe(true);
