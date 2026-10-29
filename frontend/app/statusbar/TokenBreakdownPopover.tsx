@@ -13,12 +13,14 @@
  * SPEC_STATUSBAR_TOKEN_PANEL_BY_AGENT_2026_08_30.md.
  */
 
-import { createMemo, createSignal, For, Show, type JSX } from "solid-js";
+import { createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { AnchoredPopover, type PopoverAnchor } from "@/app/element/anchored-popover";
 import { ConfirmModal } from "@/element/modal";
 import { getCliCatalogEntry } from "@/app/view/agent/defaults/cli-catalog";
 import { formatCompactNumber } from "@/util/format-count";
 import { revealBlock } from "@/app/util/reveal-block";
+import { AMBIENT_OPEN_MS, ambientSummary, watchAmbient } from "@/app/store/ambient-health";
+import { AmbientPurposes } from "./AmbientPurposes";
 import {
     getAgentBreakdown,
     getAgentCacheHitRate,
@@ -76,6 +78,9 @@ interface TokenBreakdownPopoverProps {
 export const TokenBreakdownPopover = (props: TokenBreakdownPopoverProps): JSX.Element => {
     const [confirmingReset, setConfirmingReset] = createSignal(false);
     const [ambientExpanded, setAmbientExpanded] = createSignal(false);
+    // The counts come fast for as long as the popover is open, whether or not the part that shows
+    // them is (no internal tokens yet, or its row collapsed).
+    onMount(() => onCleanup(watchAmbient(AMBIENT_OPEN_MS)));
 
     // Trigger reactivity on the store so breakdown re-renders when
     // a new turn lands while the popover is open.
@@ -143,7 +148,8 @@ export const TokenBreakdownPopover = (props: TokenBreakdownPopoverProps): JSX.El
                     </span>
                 </div>
                 <Show
-                    when={agentRows().length > 0}
+                    // A failing purpose has no tokens, so it can be the only thing there is to explain the dot.
+                    when={agentRows().length > 0 || ambientSummary() != null}
                     fallback={
                         <div class="token-usage-breakdown-empty">
                             No turns completed yet this session.
@@ -229,10 +235,21 @@ export const TokenBreakdownPopover = (props: TokenBreakdownPopoverProps): JSX.El
                                                     </div>
                                                 )}
                                             </For>
+                                            <AmbientPurposes />
                                         </div>
                                     </Show>
                                 </div>
                             )}
+                        </Show>
+                        <Show when={!ambientRow() && ambientSummary()}>
+                            <div class="token-usage-breakdown-ambient">
+                                <div class="token-usage-breakdown-row">
+                                    <span class="token-usage-breakdown-row-name">AgentMux internal</span>
+                                </div>
+                                <div class="token-usage-breakdown-ambient-detail">
+                                    <AmbientPurposes />
+                                </div>
+                            </div>
                         </Show>
                         <div class="token-usage-breakdown-row token-usage-breakdown-total">
                             <span class="token-usage-breakdown-row-name">Total</span>

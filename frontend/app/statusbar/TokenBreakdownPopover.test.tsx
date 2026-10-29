@@ -15,6 +15,7 @@
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { autoUpdate } from "@floating-ui/dom";
+import { refreshAmbient } from "@/app/store/ambient-health";
 import { recordTurn, resetSession } from "@/store/token-usage";
 
 vi.mock("@floating-ui/dom", () => ({
@@ -29,6 +30,9 @@ vi.mock("@/app/util/menu-position", () => ({
         style: { position: "fixed", left: "0px", top: "0px" },
     })),
 }));
+const outcomesCmd = vi.hoisted(() => vi.fn());
+vi.mock("@/app/store/rpc-api", () => ({ RpcApi: { AmbientOutcomesCommand: outcomesCmd } }));
+vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 const focusBlockMock = vi.fn(async (_blockId: string, _opts?: unknown) => {});
 vi.mock("@/app/util/reveal-block", () => ({
     revealBlock: (blockId: string, opts?: unknown) => focusBlockMock(blockId, opts),
@@ -86,6 +90,41 @@ describe("TokenBreakdownPopover — by-agent regroup", () => {
 
         // Expanded: the ambient bucket's own service breakdown appears.
         expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    });
+
+    it("shows what AgentMux's own model calls did, per purpose, inside the internal row", async () => {
+        outcomesCmd.mockResolvedValue({ activity_summary: { accepted: 1, "rejected:shape": 2, cli_failed: 2 } });
+        recordTurn("ambient:activity_summary", { input: 40, output: 2 });
+        renderPopover();
+        fireEvent.click(screen.getByText(/AgentMux internal/).closest("button") as HTMLButtonElement);
+        expect(await screen.findByRole("button", { name: /Session titles/ })).toBeInTheDocument();
+        expect(screen.getByText("2 failed")).toBeInTheDocument();
+    });
+
+    it("lists the purposes even when no turn has completed and no internal tokens were recorded", async () => {
+        outcomesCmd.mockResolvedValue({ activity_summary: { accepted: 1, "rejected:shape": 2, cli_failed: 2 } });
+        renderPopover();
+        // The counts come from the indicator's ask, which is not mounted here.
+        await refreshAmbient();
+        expect(await screen.findByRole("button", { name: /Session titles/ })).toBeInTheDocument();
+        expect(screen.queryByText("No turns completed yet this session.")).not.toBeInTheDocument();
+    });
+
+    it("asks for the counts as soon as it opens and every few seconds after, with no purposes on screen", async () => {
+        vi.useFakeTimers();
+        try {
+            outcomesCmd.mockReset();
+            outcomesCmd.mockResolvedValue({});
+            const { unmount } = renderPopover();
+            expect(outcomesCmd).toHaveBeenCalledTimes(1);
+            await vi.advanceTimersByTimeAsync(5000);
+            expect(outcomesCmd).toHaveBeenCalledTimes(2);
+            unmount();
+            await vi.advanceTimersByTimeAsync(10_000);
+            expect(outcomesCmd).toHaveBeenCalledTimes(2);
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
     it("clicking a real agent row calls focusBlock with that agent's blockId", () => {
