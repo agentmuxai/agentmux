@@ -476,6 +476,9 @@ pub struct PaneOpenRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PaneOpenResponse {
     pub block_id: String,
+    /// Something the agent should know about the pane (a container agent's file is a snapshot).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
 }
 
 /// `POST /api/v1/pane/title` — set a pane's display title.

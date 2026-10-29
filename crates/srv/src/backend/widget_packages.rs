@@ -1263,7 +1263,7 @@ impl Budget {
 /// Opens `path` to read. With `within` (a canonical folder), the file must be one inside it: opened without
 /// following a link, and the file at that path inside `within` right after is the one opened, so a path
 /// whose folder was swapped for a link to somewhere else reads nothing from there.
-fn open_within(path: &Path, within: Option<&Path>) -> Result<std::fs::File, String> {
+pub(crate) fn open_within(path: &Path, within: Option<&Path>) -> Result<std::fs::File, String> {
     let mut options = std::fs::OpenOptions::new();
     options.read(true);
     #[cfg(unix)]

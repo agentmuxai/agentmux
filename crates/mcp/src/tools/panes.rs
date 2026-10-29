@@ -101,13 +101,14 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 .await
                 .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
 
+            let note = result.note.as_deref().map(|n| format!(" {n}")).unwrap_or_default();
             Ok(if media {
                 format!(
-                    "Opened {file} in the editor (block {}); OpenMedia is now an alias of OpenEditor",
+                    "Opened {file} in the editor (block {}); OpenMedia is now an alias of OpenEditor.{note}",
                     result.block_id
                 )
             } else {
-                format!("Opened {file} in editor pane (block {})", result.block_id)
+                format!("Opened {file} in editor pane (block {}).{note}", result.block_id)
             })
         }
         // A Files pane on a folder, optionally with entries selected.
