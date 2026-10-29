@@ -300,6 +300,20 @@ impl Tokens {
 /// function `agentmux-bashwrap` exports reads it.
 pub const BROKER_ENV: &str = "AGENTMUX_GITHUB_BROKER";
 use agentmux_common::github_broker_shim::{GH_FUNCTION_BODY, GH_FUNCTION_NAME, GIT_FUNCTION_BODY, GIT_FUNCTION_NAME};
+/// The machine's name for a commit trailer, set with the git setup (read by `agentmux-bashwrap`).
+const GIT_HOST_ENV: &str = "AGENTMUX_GIT_HOST";
+
+/// This machine's name as the fleet writes it (`narko`): lower case, without a domain.
+fn host_label() -> Option<String> {
+    let name = whoami::fallible::hostname().ok()?;
+    short_host(&name)
+}
+
+fn short_host(name: &str) -> Option<String> {
+    let short = name.trim().split('.').next().unwrap_or("").to_ascii_lowercase();
+    (!short.is_empty()).then_some(short)
+}
+
 const HELPER_KEY: &str = "credential.https://github.com.helper";
 const HELPER: &str = "!agentmux-bashwrap git-credential";
 const HTTP_PATH_KEY: &str = "credential.https://github.com.useHttpPath";
@@ -331,6 +345,10 @@ pub fn apply_agent_git_in(
         set_git_config_list(env, process, REWRITE_KEY, &["git@github.com:", "ssh://git@github.com/"]);
         env.insert("GIT_TERMINAL_PROMPT".to_string(), "0".to_string());
         env.insert(BROKER_ENV.to_string(), "1".to_string());
+        // The commit trailer names the agent as `agent@host`, and the host is this machine's name.
+        if let Some(host) = host_label() {
+            env.insert(GIT_HOST_ENV.to_string(), host);
+        }
         // `gh` goes through the broker too, in every bash the agent runs, whichever CLI started it.
         env.insert(GH_FUNCTION_NAME.to_string(), GH_FUNCTION_BODY.to_string());
         // `git` too: a push can't skip the hooks, and a commit is the bot's.
@@ -340,6 +358,7 @@ pub fn apply_agent_git_in(
             set_git_config_list(env, process, key, &[]);
         }
         env.remove(BROKER_ENV);
+        env.remove(GIT_HOST_ENV);
         env.remove(GH_FUNCTION_NAME);
         env.remove(GIT_FUNCTION_NAME);
         // Set with the rest, and only ever set by it: prompts come back with the connection gone.
@@ -356,6 +375,7 @@ pub fn without_agent_git(env: &HashMap<String, String>) -> HashMap<String, Strin
     }
     let mut out = [HELPER_KEY, HTTP_PATH_KEY, REWRITE_KEY, HOOKS_PATH_KEY].iter().fold(env.clone(), |e, key| without_git_config_key(&e, key));
     out.remove(BROKER_ENV);
+    out.remove(GIT_HOST_ENV);
     out.remove(GH_FUNCTION_NAME);
     out.remove(GIT_FUNCTION_NAME);
     out.remove("GIT_TERMINAL_PROMPT");
@@ -425,8 +445,10 @@ pub fn container_git_hooks() -> Option<std::path::PathBuf> {
 /// image runs from [`CONTAINER_HOOKS_DIR`].
 pub fn apply_container_git(env: &mut HashMap<String, String>) {
     apply_agent_git_in(env, |_| None, true, Some(std::path::Path::new(CONTAINER_HOOKS_DIR)));
-    // The workspace is a bind mount owned by the host's user: without this git stops at "dubious ownership".
-    crate::backend::publish_guard::set_git_config_list(env, |_| None, "safe.directory", &["/workspace"]);
+    // The workspace and the clones in it are bind mounts owned by the host's user: without this git
+    // stops at "dubious ownership" (`/workspace` alone doesn't cover `/workspace/<clone>`). Everything
+    // in the container is the agent's own, and the setting is read from here only, never from a repository.
+    crate::backend::publish_guard::set_git_config_list(env, |_| None, "safe.directory", &["*"]);
 }
 
 /// [`apply_agent_git_in`] for a spawn: every path that starts an agent process or runs a command for
@@ -722,6 +744,24 @@ mod tests {
         assert_eq!((tokens.cached(), tokens.locks()), (1, 1));
     }
 
+    #[test]
+    fn the_host_is_the_machines_short_lower_case_name() {
+        assert_eq!(short_host("NARKO").as_deref(), Some("narko"));
+        assert_eq!(short_host(" Area54.lan. ").as_deref(), Some("area54"));
+        assert_eq!(short_host("").as_deref(), None);
+        assert_eq!(short_host(".local").as_deref(), None);
+    }
+
+    #[test]
+    fn the_host_name_rides_with_the_setup_and_leaves_with_it() {
+        let mut e = env(&[]);
+        apply_agent_git_in(&mut e, |_| None, true, None);
+        assert_eq!(e.get(GIT_HOST_ENV).map(String::as_str), host_label().as_deref());
+        assert!(!without_agent_git(&e).contains_key(GIT_HOST_ENV));
+        apply_agent_git_in(&mut e, |_| None, false, None);
+        assert!(!e.contains_key(GIT_HOST_ENV));
+    }
+
     #[tokio::test]
     async fn a_container_gets_none_of_the_agent_git_setup() {
         let mut e = env(&[("GIT_CONFIG_COUNT", "1"), ("GIT_CONFIG_KEY_0", "user.name"), ("GIT_CONFIG_VALUE_0", "x"), ("OTHER", "kept")]);
@@ -744,7 +784,7 @@ mod tests {
         let config = entries(&e);
         assert!(config.contains(&("core.hooksPath".to_string(), CONTAINER_HOOKS_DIR.to_string())), "{config:?}");
         assert!(config.iter().any(|(k, v)| k == HELPER_KEY && v == HELPER));
-        assert!(config.contains(&("safe.directory".to_string(), "/workspace".to_string())), "{config:?}");
+        assert!(config.contains(&("safe.directory".to_string(), "*".to_string())), "{config:?}");
         // The directory is named like the host's, which the hook forwarding knows it by.
         assert!(CONTAINER_HOOKS_DIR.ends_with("/github-hooks"));
         assert_eq!(e["OTHER"], "kept");
