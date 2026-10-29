@@ -31,6 +31,12 @@ fn is_parked(block: &Block) -> bool {
     obj::meta_get_bool(&block.meta, crate::persist_subscriber::parked::PARKED_META_KEY, false)
 }
 
+/// Whether the block failed to open because the agent's conversation is open in another pane
+/// (`open_in_other_pane`): it is not the one that holds the conversation.
+fn lost_the_conversation(block: &Block) -> bool {
+    block.meta.get(blockcontroller::core::META_LAST_FAILURE).and_then(|f| f.get("code")).and_then(|c| c.as_str()) == Some("open_in_other_pane")
+}
+
 /// Whether the block runs its agent now: a controller that has not ended. A stopped one stays
 /// registered, so presence alone would not tell it from a running one.
 fn controller_is_live(block_id: &str) -> bool {
@@ -42,8 +48,9 @@ fn controller_is_live(block_id: &str) -> bool {
 ///
 /// Only a block that is in a tab or marked parked counts: an unmarked block in no tab is an
 /// orphan boot drops (`persist.rs`), which `AttachBlock` could not attach. An agent should have
-/// one block. Where old layouts left several, the one with a live controller wins, then one in a
-/// tab over a parked one, then the lowest id (so the answer is stable).
+/// one block. Where old layouts left several, one that was refused for a conversation open in
+/// another pane comes last (another block holds it), then the one with a live controller wins, then
+/// one in a tab over a parked one, then the lowest id (so the answer is stable).
 pub(crate) fn find_agent_block_by_uid(mstore: &Store, agent_uid: &str) -> Result<Option<AgentBlock>, String> {
     let agent_uid = agent_uid.trim();
     if agent_uid.is_empty() {
@@ -61,7 +68,7 @@ pub(crate) fn find_agent_block_by_uid(mstore: &Store, agent_uid: &str) -> Result
     let tabs: Vec<Tab> = mstore.get_all::<Tab>().map_err(|e| format!("find_agent_block_by_uid: list tabs: {e}"))?;
     let tab_of = |block: &Block| tabs.iter().find(|t| t.blockids.iter().any(|id| id == &block.oid)).map(|t| t.oid.clone());
     found.retain(|b| is_parked(b) || tab_of(b).is_some());
-    found.sort_by_key(|b| (!controller_is_live(&b.oid), tab_of(b).is_none(), b.oid.clone()));
+    found.sort_by_key(|b| (lost_the_conversation(b), !controller_is_live(&b.oid), tab_of(b).is_none(), b.oid.clone()));
     let Some(block) = found.into_iter().next() else {
         return Ok(None);
     };
@@ -193,6 +200,22 @@ mod tests {
         want.sort_by(|a, b| a.0.cmp(&b.0));
         assert_eq!(all.iter().map(|(b, t)| (b.oid.clone(), t.clone())).collect::<Vec<_>>(), want);
         assert!(all.iter().all(|(b, _)| b.oid != orphan));
+    }
+
+    /// Two blocks of one agent (an old layout): the one refused for a conversation open in another pane does
+    /// not hold it, so a start resumes the other, even when the refused one has a controller and the other's
+    /// has ended.
+    #[test]
+    fn a_block_refused_for_an_open_conversation_is_not_picked_over_the_holder() {
+        let store = Store::open_in_memory().unwrap();
+        let holder = insert_block(&store, "ann", false);
+        let refused = insert_block(&store, "ann", false);
+        let mut block = store.get::<Block>(&refused).unwrap().unwrap();
+        block.meta.insert(blockcontroller::core::META_LAST_FAILURE.to_string(), serde_json::json!({ "code": "open_in_other_pane", "holderBlockId": holder }));
+        store.update(&mut block).unwrap();
+        insert_tab(&store, &[&holder, &refused]);
+        let found = find_agent_block_by_uid(&store, "ann").unwrap().unwrap();
+        assert_eq!(found.block.oid, holder);
     }
 
     #[test]
