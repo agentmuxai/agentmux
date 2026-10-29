@@ -14,7 +14,7 @@ import {
     MOS,
     setActiveTab,
 } from "@/app/store/global";
-import { splitBlockDefFor } from "@/app/block/split-block-def";
+import { shortcutsSplitBlockDef } from "@/app/block/split-block-def";
 import { hostHas } from "@/app/host/host-caps";
 import { WorkspaceService } from "@/app/store/services";
 import { getLayoutModelForStaticTab, NavigateDirection } from "@/layout/index";
@@ -108,12 +108,11 @@ function getFocusedBlockIdForSplit(): string | null {
     return focusedNode?.data?.blockId ?? null;
 }
 
-/** What a palette split of `blockId` creates: the view's own `splitBlockDef`
- *  (an agent pane: a fresh picker), else a terminal.
- *  SPEC_AGENT_PANE_SPLIT_OPENS_PICKER_2026_09_30.md. */
+/** What a palette split of `blockId` creates: a Shortcuts pane (its tiles start where the pane
+ *  was). SPEC_SHORTCUTS_PANE_FOR_SPLITS_2026_10_28.md. */
 function getSplitBlockDef(blockId: string): BlockDef {
-    return splitBlockDefFor(MOS.getObjectValue<Block>(MOS.makeORef("block", blockId)), () => ({
-        meta: { view: "term", controller: "shell" },
+    return shortcutsSplitBlockDef(MOS.getObjectValue<Block>(MOS.makeORef("block", blockId)), () => ({
+        meta: { view: "shortcuts" },
     }));
 }
 

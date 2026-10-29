@@ -429,6 +429,24 @@ mod tests {
         assert_eq!(settings.widget_icon_only, Some(true));
     }
 
+    /// The Shortcuts pane's last-used list is a plain string list: it is stored by `setconfig`,
+    /// and a malformed one is ignored rather than failing the file.
+    #[test]
+    fn launcher_recent_is_a_string_list_and_a_bad_one_is_ignored() {
+        let config = ConfigState::new();
+        let mut keys = serde_json::Map::new();
+        keys.insert("launcher:recent".into(), serde_json::json!(["defwidget@terminal", "ext@acme.board/main"]));
+        config.update_settings(merge_settings_into_current(&config, keys));
+        assert_eq!(
+            config.get_settings().launcher_recent,
+            Some(vec!["defwidget@terminal".to_string(), "ext@acme.board/main".to_string()])
+        );
+        assert!(!config.get_settings().extra.contains_key("launcher:recent"));
+
+        let bad: wconfig::SettingsType = serde_json::from_str(r#"{ "launcher:recent": "defwidget@terminal" }"#).unwrap();
+        assert_eq!(bad.launcher_recent, None);
+    }
+
     // ── resolve_settings_dir isolation (SPEC_SETTINGS_ISOLATED_BY_CHANNEL_2026_08_19.md) ──
 
     /// codex P2 on PR #2664: a module-local `Mutex<()>` here would only

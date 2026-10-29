@@ -8,8 +8,7 @@
  */
 
 import { paneTabCapability } from "@/app/block/pane-tab-registry";
-import { FLOATING_ONTOP_META_KEY } from "./floating-ontop-meta";
-import { splitBlockDefFor } from "./split-block-def";
+import { shortcutsSplitBlockDef } from "./split-block-def";
 import { createBlockSplitHorizontally, createBlockSplitVertically, getApi } from "@/app/store/global";
 import { readText as clipboardReadText, writeText as clipboardWriteText } from "@/util/clipboard";
 import { shortcutFor } from "@/app/keybindings";
@@ -47,31 +46,12 @@ function paneAcceptsInput(blockData: Block): boolean {
 
 
 /**
- * The block a split of `blockData` creates. A view that declares
- * `splitBlockDef` gets exactly that (agent: a fresh picker,
- * SPEC_AGENT_PANE_SPLIT_OPENS_PICKER_2026_09_30.md). Any other view gets a
- * pane of the same type that inherits the source pane's meta (view,
- * controller, cwd, connection, etc.).
+ * The block a split of `blockData` creates: a Shortcuts pane, whatever the pane is. Its tiles
+ * start where the pane was (SPEC_SHORTCUTS_PANE_FOR_SPLITS_2026_10_28.md); the agent picker and
+ * the copy of the pane it replaces are the tiles' Agent and Terminal.
  */
 function splitBlockDef(blockData: Block): BlockDef {
-    return splitBlockDefFor(blockData, () => copiedSplitBlockDef(blockData));
-}
-
-/** A same-type pane inheriting `blockData`'s meta, for a view with no
- *  `splitBlockDef`. */
-function copiedSplitBlockDef(blockData: Block): BlockDef {
-    const sourceConn = blockData.meta?.connection;
-    const meta: Record<string, unknown> = { ...(blockData.meta ?? {}) };
-    // Only inherit connection for non-local connections (SSH/WSL).
-    // Local terminals have no connection field — setting it to "local"
-    // triggers the connection overlay and shows "Disconnected".
-    if (!sourceConn || sourceConn === "local") {
-        delete meta["connection"];
-    }
-    // The "Always on top" tack belongs to the source pane's floating window;
-    // the new split is docked (SPEC_FLOATING_PANE_ALWAYS_ON_TOP_2026_09_27 §6.3).
-    delete meta[FLOATING_ONTOP_META_KEY];
-    return { meta };
+    return shortcutsSplitBlockDef(blockData, () => ({ meta: { view: "shortcuts" } }));
 }
 
 /** Split the pane in the given direction. */

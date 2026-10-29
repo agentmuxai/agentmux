@@ -103,7 +103,7 @@ export const DEFAULT_KEYBINDINGS: KeyBindingRow[] = [
     { command: "pane:resize:right", label: "Move pane border right", helpGroup: "Resize pane", category: "Panes", mac: ["ctrl+alt+meta+ArrowRight"], other: ["alt+shift+ArrowRight"], when: "!textInputFocus", skipShell: true },
     { command: "pane:refocus", label: "Refocus pane", category: "Panes", mac: ["meta+i"], skipShell: true },
     { command: "agent:focusComposer", label: "Focus the message box", category: "Panes", mac: ["meta+l"], other: ["ctrl+l"], when: "viewType == agent" },
-    { command: "pane:replaceWithLauncher", label: "Replace pane with launcher", category: "Panes", mac: ["ctrl+shift+k"], other: ["ctrl+shift+k"], when: "!textInputFocus", skipShell: true },
+    { command: "pane:replaceWithLauncher", label: "Replace pane with Shortcuts", category: "Panes", mac: ["ctrl+shift+k"], other: ["ctrl+shift+k"], when: "!textInputFocus", skipShell: true },
     { command: "pane:changeConnection", label: "Change connection", category: "Panes", mac: ["meta+shift+g"], other: ["ctrl+shift+g"], skipShell: true },
     { command: "term:multiInput", label: "Type into all terminals", category: "Terminal", mac: ["meta+shift+m"], other: ["ctrl+shift+alt+m"], skipShell: true },
     { command: "pane:voice", label: "Voice input", category: "General", mac: ["ctrl+shift+v"], other: ["ctrl+shift+v"], when: "!terminalFocus" },

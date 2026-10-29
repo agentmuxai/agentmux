@@ -2,23 +2,23 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The split shortcuts (Cmd+D, Shift+Cmd+D, Ctrl+Shift+S then an arrow) split
- * an agent pane into a fresh picker, like the pane menu does; any other pane
- * still splits into the default new block. Cmd+N is not a split.
- * SPEC_AGENT_PANE_SPLIT_OPENS_PICKER_2026_09_30.md.
+ * The split shortcuts (Cmd+D, Shift+Cmd+D, Ctrl+Shift+S then an arrow) open a Shortcuts pane
+ * next to the focused pane, like the pane menu does. Cmd+N is not a split.
+ * SPEC_SHORTCUTS_PANE_FOR_SPLITS_2026_10_28.md.
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { g, blocks, focused } = vi.hoisted(() => ({
+const { g, blocks, focused, settingValue } = vi.hoisted(() => ({
     g: { createBlock: vi.fn(), createBlockSplitHorizontally: vi.fn(), createBlockSplitVertically: vi.fn() },
-    blocks: {} as Record<string, { meta: Record<string, unknown> }>,
+    blocks: {} as Record<string, { oid: string; meta: Record<string, unknown> }>,
     focused: { blockId: null as string | null },
+    settingValue: { current: undefined as string | undefined },
 }));
 
 vi.mock("@/app/store/global", () => ({
     ...g,
-    getSettingsKeyAtom: () => () => undefined,
+    getSettingsKeyAtom: () => () => settingValue.current,
     MOS: {
         makeORef: (_t: string, id: string) => id,
         getMuxObjectAtom: (id: string) => () => blocks[id],
@@ -40,35 +40,30 @@ registerPaneTab(stubPaneTab("termkb", { capabilities: { sharesCwd: true } }));
 
 beforeEach(() => {
     vi.clearAllMocks();
-    blocks.agent = { meta: { view: "agentkb", agentId: "lark", "agent:runtime": { model: "opus" } } };
-    blocks.term = { meta: { view: "termkb", "cmd:cwd": "C:/work" } };
+    blocks.agent = { oid: "agent", meta: { view: "agentkb", agentId: "lark", "agent:runtime": { model: "opus" } } };
+    blocks.term = { oid: "term", meta: { view: "termkb", "cmd:cwd": "C:/work" } };
 });
 
 describe("split shortcuts", () => {
-    it("an agent pane splits into its declared picker, in every direction", async () => {
-        focused.blockId = "agent";
-        await handleSplitVertical("after");
-        await handleSplitVertical("before");
-        await handleSplitHorizontal("after");
-        await handleSplitHorizontal("before");
-        expect(g.createBlockSplitVertically.mock.calls).toEqual([
-            [PICKER, "agent", "after"],
-            [PICKER, "agent", "before"],
-        ]);
-        expect(g.createBlockSplitHorizontally.mock.calls).toEqual([
-            [PICKER, "agent", "after"],
-            [PICKER, "agent", "before"],
-        ]);
-    });
+    const shortcuts = (from: string) => ({ meta: { view: "shortcuts", "shortcuts:from": from } });
 
-    it("any other pane still splits into the default new block (a terminal in its cwd)", async () => {
-        focused.blockId = "term";
-        await handleSplitVertical("after");
-        expect(g.createBlockSplitVertically).toHaveBeenCalledWith(
-            { meta: { view: "term", controller: "shell", "cmd:cwd": "C:/work" } },
-            "term",
-            "after"
-        );
+    it("every pane splits into a Shortcuts pane naming it, in every direction (an agent pane too)", async () => {
+        for (const id of ["agent", "term"]) {
+            vi.clearAllMocks();
+            focused.blockId = id;
+            await handleSplitVertical("after");
+            await handleSplitVertical("before");
+            await handleSplitHorizontal("after");
+            await handleSplitHorizontal("before");
+            expect(g.createBlockSplitVertically.mock.calls).toEqual([
+                [shortcuts(id), id, "after"],
+                [shortcuts(id), id, "before"],
+            ]);
+            expect(g.createBlockSplitHorizontally.mock.calls).toEqual([
+                [shortcuts(id), id, "after"],
+                [shortcuts(id), id, "before"],
+            ]);
+        }
     });
 
     it("nothing focused: no split", async () => {
@@ -83,5 +78,18 @@ describe("Cmd+N (a new block, not a split)", () => {
         focused.blockId = "agent";
         await handleCmdN();
         expect(g.createBlock).toHaveBeenCalledWith({ meta: { view: "term", controller: "shell" } });
+    });
+});
+
+describe("app:defaultnewblock", () => {
+    it("is not read by a split, and `launcher` and `shortcuts` both open the Shortcuts pane on Cmd+N", async () => {
+        for (const value of ["launcher", "shortcuts"]) {
+            vi.clearAllMocks();
+            settingValue.current = value;
+            focused.blockId = "agent";
+            await handleCmdN();
+            expect(g.createBlock).toHaveBeenCalledWith({ meta: { view: "shortcuts" } });
+        }
+        settingValue.current = undefined;
     });
 });
