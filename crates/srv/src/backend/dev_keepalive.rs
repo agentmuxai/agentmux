@@ -85,7 +85,8 @@ pub fn clean_command(command: &str) -> Result<String, String> {
     Ok(command.to_string())
 }
 
-/// The dev servers kept up, in a file next to AgentMux's other shared state so they outlive srv too.
+/// The dev servers kept up, in a file in this instance's data folder (which an upgrade keeps, and no other channel or
+/// checkout shares) so they outlive srv too.
 pub struct Store {
     path: Option<PathBuf>,
     specs: Mutex<Vec<Spec>>,
@@ -178,7 +179,7 @@ impl Store {
 /// The store every dev server is kept in.
 pub fn store() -> &'static Store {
     static STORE: OnceLock<Store> = OnceLock::new();
-    STORE.get_or_init(|| Store::open(agentmux_common::DataPaths::from_env().map(|p| p.shared_dir.join("dev-servers.json"))))
+    STORE.get_or_init(|| Store::open(agentmux_common::DataPaths::from_env().map(|p| p.data_dir.join("dev-servers.json"))))
 }
 
 /// Why a route to a container's dev server can't be made.
