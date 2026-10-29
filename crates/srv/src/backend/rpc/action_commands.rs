@@ -106,7 +106,7 @@ pub const READ_ONLY: &[&str] = &[
     "listdroneruns", "listdrones", "listeditordir", "listidentityaccounts", "listmemories", "listnamedagents",
     "listrecentsessions", "mcp.catalog.list", "mcp.catalog.list_for_agent", "mcp.get", "mcp.list",
     "mcp.observed.list", "memory.list", "memory.read", "memory:launchcost", "memorydelivery:compose", "muxbus.status",
-    "pins.list", "presence.status", "providers.models", "reactive.registrations", "readeditorfile", "remoteslist",
+    "pins.list", "presence.status", "providers.models", "reactive.registration_flags", "reactive.registrations", "readeditorfile", "remoteslist",
     "remotesshlocate", "resolve.prereqs", "resolvecli", "searchagenthistory", "session:activity_summary",
     "session:export", "session:next_prompt_suggestion", "session:resume_preflight", "shell.list", "shellstatus",
     "skill.catalog.list", "skill.catalog.list_for_agent", "skill.catalog.list_for_bundle", "skill.get", "skill.list",
