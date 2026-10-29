@@ -122,7 +122,7 @@ pub(crate) async fn handle_register_dev_server(
             return (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response();
         }
         if cm.agent_network_ip(&container_name).await.is_some() {
-            if let Err(e) = start(&cm, spec).await {
+            if let Err(e) = start(&cm, spec, false).await {
                 return (StatusCode::BAD_GATEWAY, Json(json!({ "error": e }))).into_response();
             }
             starting = !wait_listening(&cm, spec, std::time::Duration::from_secs(6)).await;

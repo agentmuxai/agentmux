@@ -223,18 +223,16 @@ fn started_recently(container: &str, project: &str, incarnation: &str, set: bool
     started.get(&key).is_some_and(|(at, id)| id == incarnation && at.elapsed() < STARTUP_WAIT)
 }
 
-/// Start `spec`'s command unless the server is listening already or was started within the startup wait.
-pub async fn start(cm: &ContainerManager, spec: &Spec) -> Result<(), String> {
+/// Start `spec`'s command unless the server is listening already or was started within the startup wait. With `only_if_kept`
+/// (a restore), nothing is started once the agent has dropped the project or replaced its registration, however long this waited.
+pub async fn start(cm: &ContainerManager, spec: &Spec, only_if_kept: bool) -> Result<(), String> {
     let lock = start_lock(&spec.container);
     let _one_at_a_time = lock.lock().await;
+    if only_if_kept && !store().is_current(spec) {
+        return Ok(());
+    }
     // The container's Docker id and when it last started: a stopped container that starts again keeps its id.
-    let incarnation = cm
-        .docker()
-        .inspect_container(&spec.container, None)
-        .await
-        .ok()
-        .map(|c| format!("{}@{}", c.id.unwrap_or_default(), c.state.and_then(|s| s.started_at).unwrap_or_default()))
-        .unwrap_or_default();
+    let incarnation = incarnation_of(cm, &spec.container).await;
     // And what was started: another port, command or folder is a different launch, not one still starting.
     let incarnation = format!("{incarnation}|{}|{}|{}", spec.port, spec.command, spec.dir);
     if cm.port_listening(&spec.container, spec.port).await || started_recently(&spec.container, &spec.project, &incarnation, false) {
@@ -263,8 +261,11 @@ pub async fn wait_listening(cm: &ContainerManager, spec: &Spec, wait: Duration) 
 }
 
 /// Make sure `spec`'s server is listening: start it if it isn't, and wait up to the startup wait.
-pub async fn bring_up(cm: &ContainerManager, spec: &Spec) -> Result<(), String> {
-    start(cm, spec).await?;
+pub async fn bring_up(cm: &ContainerManager, spec: &Spec, only_if_kept: bool) -> Result<(), String> {
+    start(cm, spec, only_if_kept).await?;
+    if only_if_kept && !store().is_current(spec) {
+        return Ok(());
+    }
     if wait_listening(cm, spec, STARTUP_WAIT).await {
         return Ok(());
     }
@@ -292,32 +293,42 @@ pub fn route_when_listening(cm: &ContainerManager, spec: Spec) {
     });
 }
 
+/// The incarnation of `container` (its Docker id and when it last started), as [`start`] tells containers apart.
+async fn incarnation_of(cm: &ContainerManager, container: &str) -> String {
+    cm.docker()
+        .inspect_container(container, None)
+        .await
+        .ok()
+        .map(|c| format!("{}@{}", c.id.unwrap_or_default(), c.state.and_then(|s| s.started_at).unwrap_or_default()))
+        .unwrap_or_default()
+}
+
 /// Start the dev servers kept up in `container` that aren't listening, and register their routes, without holding
-/// up the caller. Called when the container is ready for a turn.
+/// up the caller. Called when the container is ready for a turn. One restore runs per incarnation of the container: a
+/// turn while it is still going has nothing to add, but a container that was recreated meanwhile is restored afresh.
 pub fn restore_in_background(cm: &ContainerManager, container: &str) {
-    static RESTORING: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
-    let specs = store().for_container(container);
-    if specs.is_empty() {
-        return;
-    }
-    let busy = RESTORING.get_or_init(Default::default);
-    if !busy.lock().unwrap_or_else(|p| p.into_inner()).insert(container.to_string()) {
+    static RESTORING: OnceLock<Mutex<HashSet<(String, String)>>> = OnceLock::new();
+    if store().for_container(container).is_empty() {
         return;
     }
     store().touch(container);
-    /// Clears the container's entry however the task ends.
-    struct Done(String);
-    impl Drop for Done {
-        fn drop(&mut self) {
-            RESTORING.get_or_init(Default::default).lock().unwrap_or_else(|p| p.into_inner()).remove(&self.0);
-        }
-    }
     let (cm, container) = (cm.clone(), container.to_string());
     tokio::spawn(async move {
-        let _done = Done(container.clone());
-        for spec in &specs {
+        /// Clears the incarnation's entry however the task ends.
+        struct Done((String, String));
+        impl Drop for Done {
+            fn drop(&mut self) {
+                RESTORING.get_or_init(Default::default).lock().unwrap_or_else(|p| p.into_inner()).remove(&self.0);
+            }
+        }
+        let key = (container.clone(), incarnation_of(&cm, &container).await);
+        if !RESTORING.get_or_init(Default::default).lock().unwrap_or_else(|p| p.into_inner()).insert(key.clone()) {
+            return;
+        }
+        let _done = Done(key);
+        for spec in &store().for_container(&container) {
             let routed = async {
-                bring_up(&cm, spec).await?;
+                bring_up(&cm, spec, true).await?;
                 let target = route_target(&cm, &spec.container, spec.port).await.map_err(|e| format!("{e:?}"))?;
                 let registry = cm.dev_proxy_registry().ok_or("no dev proxy")?;
                 // Only if it is still what the agent wants kept: it may have registered the project again while this ran.
@@ -476,17 +487,17 @@ mod tests {
         };
         fresh(docker, image, name, network).await;
         assert!(!cm.port_listening(name, 7000).await);
-        bring_up(&cm, &spec).await.expect("started");
+        bring_up(&cm, &spec, false).await.expect("started");
         assert!(cm.port_listening(name, 7000).await);
-        bring_up(&cm, &spec).await.expect("already up: nothing is started twice");
+        bring_up(&cm, &spec, false).await.expect("already up: nothing is started twice");
         // The same project on another port straight away is another launch, not the first one still starting.
         let moved = Spec { port: 7001, command: spec.command.replace("7000", "7001"), ..spec.clone() };
-        bring_up(&cm, &moved).await.expect("the new port is started at once");
+        bring_up(&cm, &moved, false).await.expect("the new port is started at once");
         assert!(cm.port_listening(name, 7001).await);
         // The container is recreated: the server is gone, and comes back.
         fresh(docker, image, name, network).await;
         assert!(!cm.port_listening(name, 7000).await, "a recreated container starts empty");
-        bring_up(&cm, &spec).await.expect("started again");
+        bring_up(&cm, &spec, false).await.expect("started again");
         assert!(cm.port_listening(name, 7000).await);
         let _ = docker.remove_container(name, Some(RemoveContainerOptions { force: true, ..Default::default() })).await;
     }
