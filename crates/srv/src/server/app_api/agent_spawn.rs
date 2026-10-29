@@ -26,6 +26,7 @@ use agentmux_common::api_types::SpawnAgentRequest;
 use super::*;
 
 mod many;
+mod team;
 pub(crate) use many::handle_agent_spawn_many;
 
 /// The worker pane's leader, `{agent, id, block_id}`: the leader's name, its
@@ -171,6 +172,7 @@ async fn spawn_with(
         Some(n) => n.to_string(),
         None => next_worker_name(&state.mstore, &leader.def.name, &std::collections::HashSet::new()),
     };
+    let tab_id = team::team_tab(state, &leader, &tab_id).await;
     let (worker, opened) = launch(state, &leader, &name, &tab_id, &runtime, &account, None).await?;
     tracing::info!(
         leader = %leader.def.name,
@@ -750,7 +752,7 @@ fn consent_message(leader: &str, name: Option<&str>, model: Option<&str>, accoun
     let on = model.map(|m| format!(" on {}", one_line(m, 40))).unwrap_or_default();
     let note = account.note.as_deref().map(|n| format!(" {}", one_line(n, 200))).unwrap_or_default();
     format!(
-        "{} wants to start {who}{on}, from its own instructions, in a pane next to its own, with this task:\n\n{}\n\n\
+        "{} wants to start {who}{on}, from its own instructions, in its team tab, with this task:\n\n{}\n\n\
          It runs on the account {}.{note} It spends tokens until it is stopped. Start it?",
         one_line(leader, 60),
         one_line(brief, 400),
@@ -768,8 +770,8 @@ fn one_line(s: &str, max: usize) -> String {
     }
 }
 
-/// Remember the worker's runtime, then open it right of the leader's pane,
-/// marked as the leader's worker from the moment its block exists.
+/// Remember the worker's runtime, then open it in `tab_id` (right of the leader's pane when that pane
+/// is in the tab), marked as the leader's worker from the moment its block exists.
 async fn open_worker(
     state: &AppState,
     leader: &Leader,
@@ -788,13 +790,15 @@ async fn open_worker(
         COACHED_BY_META_KEY.to_string(),
         json!({ "agent": leader.def.name, "id": leader.def.id, "block_id": leader.block_id }),
     );
+    let beside = resolve_tab_id_for_block(&state.mstore, &leader.block_id).is_ok_and(|t| t == tab_id);
     super::agent_open::open_agent_inner(
         state,
         CommandAgentOpenData {
             agent_id: worker.id.clone(),
             tab_id: Some(tab_id.to_string()),
-            split_direction: Some("right".to_string()),
-            split_reference_block_id: Some(leader.block_id.clone()),
+            // Beside the leader's pane only when it is in the tab: a team tab has its own layout.
+            split_direction: beside.then(|| "right".to_string()),
+            split_reference_block_id: beside.then(|| leader.block_id.clone()),
             focus: Some(false),
         },
         None,

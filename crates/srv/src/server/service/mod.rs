@@ -67,6 +67,7 @@ pub(crate) use introspect::{
 pub(crate) use layout_helpers::setup_torn_off_block_layout;
 pub(crate) use object_helpers::{schedule_agent_zoom_mirror, update_object_meta};
 pub(crate) use reducer_helpers::{dispatch_to_reducer, publish_events};
+pub(crate) use tab_lifecycle::handle_create_tab;
 
 pub(super) async fn handle_service(
     State(state): State<AppState>,
