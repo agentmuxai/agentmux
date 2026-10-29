@@ -1,6 +1,6 @@
 # SPEC: LAN key continuity, with no person in the loop
 
-**Status:** active. Approved by the operator (2026-10-29, relayed by AgentY), ships in the PR that builds it (0.60.7). Author: Lazo@Area54.
+**Status:** active — approved by the operator (2026-10-29, relayed by AgentY); built in PR #5815 (0.60.7). Remains: the pin screen note and reason, retire notices, directory publishing (§6). Author: Lazo@Area54.
 **Builds on:** `SPEC_LAN_AGENT_KEY_REPLACEMENT_2026_10_27.md` (option A, the install certifies the key), `SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md` §2.2 (the name pin), `SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md` (the install key, the directory and the presence list).
 
 ## 1. The problem
