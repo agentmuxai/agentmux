@@ -154,18 +154,24 @@ pub(crate) fn live_agents(state: &AppState) -> Vec<Live> {
 /// Why this agent is not stopped even when idle: it holds a claimed Kanban task, has a message held
 /// for it, or holds the build slot. `None`: nothing keeps it.
 pub(crate) fn exempt(state: &AppState, live: &Live) -> Option<&'static str> {
+    exempt_agent(state, &live.agent_id, &live.uid)
+}
+
+/// [`exempt`] for the agent `uid`, whose slug (else its id) is `agent_id`: what a Kanban claim and
+/// the build slot name.
+pub(crate) fn exempt_agent(state: &AppState, agent_id: &str, uid: &str) -> Option<&'static str> {
     // A read that fails keeps the agent: stopping it on a guess could drop work.
-    match state.work_store.work_queue_claimed_by(&live.agent_id, &live.uid) {
+    match state.work_store.work_queue_claimed_by(agent_id, uid) {
         Ok(claimed) if claimed.is_empty() => {}
         Ok(_) => return Some("holds a claimed task"),
         Err(_) => return Some("its claimed tasks could not be read"),
     }
     match state.mstore.jekt_held_targets() {
-        Ok(held) if !held.iter().any(|t| *t == live.uid) => {}
+        Ok(held) if !held.iter().any(|t| t == uid) => {}
         Ok(_) => return Some("has a held message"),
         Err(_) => return Some("its held messages could not be read"),
     }
-    if build_slot_holder().is_some_and(|holder| holder.eq_ignore_ascii_case(&live.agent_id)) {
+    if build_slot_holder().is_some_and(|holder| holder.eq_ignore_ascii_case(agent_id)) {
         return Some("holds the build slot");
     }
     None
