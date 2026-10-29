@@ -139,6 +139,9 @@ async fn real_pty_flood() {
     #[cfg(unix)]
     cmd.arg(&src);
     let mut reader = pair.master.try_clone_reader().unwrap();
+    // ConPTY's host asks where the cursor is (ESC[6n) before the child writes; a terminal pane answers it, so the
+    // read loop below does too, or nothing ever flows.
+    let mut writer = pair.master.take_writer().unwrap();
     let (tx, rx) = tokio::sync::mpsc::channel(super::pty::PTY_CHANNEL_CAPACITY);
     let flusher = tokio::spawn(super::lifecycle::run_pty_output_flusher(rx, Some(broker.clone()), "pty-flood".to_string(), Some(fs.clone()), false));
 
@@ -156,6 +159,11 @@ async fn real_pty_flood() {
                 Ok(n) => {
                     bytes += n;
                     reads += 1;
+                    if buf[..n].windows(4).any(|w| w == b"[6n") {
+                        use std::io::Write;
+                        let _ = writer.write_all(b"[1;1R");
+                        let _ = writer.flush();
+                    }
                     let _ = tx.blocking_send(super::lifecycle::PtyReadChunk { data: buf[..n].to_vec(), osc_events: Vec::new(), ack: None });
                 }
             }
@@ -164,7 +172,11 @@ async fn real_pty_flood() {
     });
     // ConPTY's host outlives the child, so the reader never sees EOF: end it once the child is gone and
     // the output has stopped coming.
-    let waited = tokio::task::spawn_blocking(move || child.wait()).await.unwrap().unwrap();
+    let waited = tokio::time::timeout(std::time::Duration::from_secs(300), tokio::task::spawn_blocking(move || child.wait()))
+        .await
+        .expect("the child finished within 5 minutes (a stuck PTY otherwise holds the build slot)")
+        .unwrap()
+        .unwrap();
     assert!(waited.success());
     let mut last = 0usize;
     for _ in 0..200 {
