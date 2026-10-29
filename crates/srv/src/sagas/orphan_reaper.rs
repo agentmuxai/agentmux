@@ -181,6 +181,10 @@ pub(crate) fn is_agent_block(state: &AppState, block_id: &str) -> bool {
     let Some(block) = state.mstore.get::<Block>(block_id).ok().flatten() else {
         return false;
     };
+    // A history reader names its agent but is not its pane: Stop pane may close it.
+    if crate::backend::obj::is_history_reader(&block.meta) {
+        return false;
+    }
     let has_agent_id = !crate::backend::obj::meta_get_string(&block.meta, "agentId", "").is_empty();
     is_agent_view(&crate::backend::obj::meta_get_string(&block.meta, "view", ""), has_agent_id)
 }

@@ -754,11 +754,11 @@ pub(crate) async fn handle_ui_browser_open(
         Ok(m) => m,
         Err(e) => return err_response(StatusCode::BAD_REQUEST, e),
     };
-    meta.insert(crate::server::browser_owner::OWNER_META_KEY.to_string(), json!(req.auth.agent_id));
-    crate::server::browser_allowlist::mirror(&mut meta, allowed.as_deref());
-    if let Err(e) = crate::server::browser_identity::for_agent_open(&state, &mut meta, req.profile.as_deref(), grant.is_some()) {
-        return err_response(StatusCode::BAD_REQUEST, e);
-    }
+    let opened = (req.auth.agent_id.as_str(), allowed.as_deref(), req.profile.as_deref(), grant.is_some() || crate::server::browser_identity::in_container(&state, &own));
+    let browsing_as = match crate::server::browser_identity::for_agent_pane(&state, &mut meta, opened) {
+        Ok(b) => b,
+        Err(e) => return err_response(StatusCode::BAD_REQUEST, e),
+    };
     cmd.meta = Some(meta);
     let result = match crate::server::app_api::open_pane(&state, cmd).await {
         Ok(r) => r,
@@ -767,12 +767,12 @@ pub(crate) async fn handle_ui_browser_open(
     crate::server::browser_allowlist::limit_new_pane(&state, &result.block_id, allowed).await;
     crate::server::browser_owner::record(&result.block_id, &req.auth.agent_id);
     tracing::info!(
-        agent_id = %req.auth.agent_id, own_block = %own, pane = %result.block_id, url = %url,
+        agent_id = %req.auth.agent_id, own_block = %own, pane = %result.block_id, url = %url, browsing_as = %browsing_as, from_container = grant.is_some(),
         "[ui-automation] browser open (agent-owned)"
     );
     (
         StatusCode::OK,
-        Json(json!({ "ok": true, "data": { "pane": result.block_id } })),
+        Json(json!({ "ok": true, "data": { "pane": result.block_id, "browsing_as": browsing_as } })),
     )
         .into_response()
 }
