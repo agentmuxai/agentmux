@@ -210,6 +210,9 @@ pub(crate) fn list(state: &AppState, now_ms: u64) -> Vec<AgentRuntime> {
 
 /// The agent a block belongs to, by the id its meta carries.
 fn agent_of_block(block: &Block) -> Option<String> {
+    if crate::backend::obj::is_history_reader(&block.meta) {
+        return None; // the reader of its transcript, not its pane
+    }
     ["agentId", "agent:id"]
         .iter()
         .map(|k| crate::backend::obj::meta_get_string(&block.meta, k, ""))
@@ -364,6 +367,16 @@ mod tests {
             icon: String::new(),
             color: None,
         }
+    }
+
+    #[test]
+    fn the_history_reader_is_not_the_agents_pane() {
+        let mut meta = crate::backend::obj::MetaMapType::new();
+        meta.insert("agentId".to_string(), serde_json::json!("ann"));
+        let mut block = Block { meta, ..Default::default() };
+        assert_eq!(agent_of_block(&block).as_deref(), Some("ann"));
+        block.meta.insert(crate::backend::obj::HISTORY_READER_META_KEY.to_string(), serde_json::json!("ann"));
+        assert_eq!(agent_of_block(&block), None, "a reader carries the id but is not the pane");
     }
 
     #[test]
