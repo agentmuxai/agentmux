@@ -416,6 +416,7 @@ pub(super) async fn verify_lan_signature(state: &AppState, req: &mut InjectionRe
 }
 
 mod channel_v2;
+mod registration_flags;
 pub(crate) mod former_slug;
 mod lan_v2;
 pub(crate) mod lan_refusals;
@@ -2216,78 +2217,6 @@ pub(super) struct ReactiveRegistrationsParams {
     pub agent_id: String,
 }
 
-/// Every OTHER live instance/channel on this host claiming `agent_id`, freshest first.
-///
-/// Every agent (this instance's own included) writes itself into the same host-global shared
-/// registry, so this instance's own entry is filtered out or the "registered elsewhere too" badge
-/// would fire on every healthy agent. A crashed sibling's entry lingers until the next
-/// startup-only `cleanup_stale_shared` sweep, so the pid is checked live here (same-host by
-/// construction, per `pid_alive`).
-fn remote_claims(state: &AppState, agent_id: &str) -> Vec<RemoteRegistrationEntry> {
-    crate::registry::resolve_shared_reactive_dir()
-        .map(|shared_dir| {
-            agent_registry::lookup_all_shared(&shared_dir, agent_id)
-                .into_iter()
-                .filter(|e| !is_self_registration(&e.local_url, &state.local_web_url))
-                .filter(|e| agent_registry::pid_alive(e.pid))
-                .map(|e| RemoteRegistrationEntry { channel: e.channel, pid: e.pid, updated_at: e.updated_at })
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default()
-}
-
-/// The newest refusal by the recipient identity guard for `agent_id` in `audit` (newest first).
-fn recent_mismatch_for(audit: &[crate::backend::reactive::AuditLogEntry], agent_id: &str) -> Option<MismatchAuditSummary> {
-    let target_lower = agent_id.to_lowercase();
-    audit
-        .iter()
-        .find(|e| e.outcome.as_deref() == Some("identity-mismatch") && e.target_agent.to_lowercase() == target_lower)
-        .map(|e| MismatchAuditSummary {
-            timestamp: e.timestamp,
-            block_id: e.block_id.clone(),
-            error_message: e.error_message.clone(),
-        })
-}
-
-/// One registered agent that has a registration problem: another instance claims its id, or a
-/// message to it was recently refused by the identity guard.
-#[derive(serde::Serialize, serde::Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../../frontend/types/rpc/")]
-pub(super) struct RegistrationFlag {
-    agent_id: String,
-    block_id: String,
-    remote: Vec<RemoteRegistrationEntry>,
-    recent_mismatch: Option<MismatchAuditSummary>,
-}
-
-/// `reactive.registration_flags`: the agents with a registration problem, for the Swarm's row badge.
-/// A healthy agent is not listed, so one call every few seconds covers every row.
-#[derive(serde::Serialize, serde::Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../../frontend/types/rpc/")]
-pub(super) struct ReactiveRegistrationFlagsResult {
-    flags: Vec<RegistrationFlag>,
-}
-
-#[derive(serde::Serialize, serde::Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../../frontend/types/rpc/")]
-pub(super) struct ReactiveRegistrationFlagsParams {}
-
-fn registration_flags(state: &AppState) -> ReactiveRegistrationFlagsResult {
-    let audit = state.reactive_handler.get_audit_log(100);
-    let flags = state
-        .reactive_handler
-        .list_agents()
-        .into_iter()
-        .filter_map(|a| {
-            let remote = remote_claims(state, &a.agent_id);
-            let recent_mismatch = recent_mismatch_for(&audit, &a.agent_id);
-            (!remote.is_empty() || recent_mismatch.is_some())
-                .then(|| RegistrationFlag { agent_id: a.agent_id, block_id: a.block_id, remote, recent_mismatch })
-        })
-        .collect();
-    ReactiveRegistrationFlagsResult { flags }
-}
-
 /// Registers `reactive.registrations`, called by the Stash "Registration"
 /// tab (`AgentIdentityLinksPanel`'s sibling — see `frontend/app/store/
 /// rpc-api/reactive.ts`) to answer "is this agent's jekt identity healthy
@@ -2301,11 +2230,7 @@ pub fn register_reactive_ws_handlers(engine: &std::sync::Arc<crate::backend::rpc
     // params/result structs carry `#[derive(ts_rs::TS)]`, so the frontend
     // consumes generated bindings instead of four hand-written interfaces
     // that each said "mirrors agentmux-srv's ...".
-    let flags_state = state.clone();
-    engine.register_typed("reactive.registration_flags", move |_: ReactiveRegistrationFlagsParams, _ctx| {
-        let state = flags_state.clone();
-        async move { Ok(registration_flags(&state)) }
-    });
+    registration_flags::register(engine, state.clone());
     engine.register_typed(
         "reactive.registrations",
         move |params: ReactiveRegistrationsParams, _ctx| {
@@ -2314,9 +2239,13 @@ pub fn register_reactive_ws_handlers(engine: &std::sync::Arc<crate::backend::rpc
 
                 let local = state.reactive_handler.get_agent(&params.agent_id);
 
-                let remote = remote_claims(&state, &params.agent_id);
+                let remote = registration_flags::remote_claims(&state, &params.agent_id);
                 let audit = state.reactive_handler.get_audit_log(100);
-                let recent_mismatch = recent_mismatch_for(&audit, &params.agent_id);
+                let recent_mismatch = registration_flags::recent_mismatch_for(
+                    &audit,
+                    &params.agent_id,
+                    local.as_ref().map(|l| l.block_id.as_str()),
+                );
                 let result = ReactiveRegistrationsResult {
                     local,
                     remote,
