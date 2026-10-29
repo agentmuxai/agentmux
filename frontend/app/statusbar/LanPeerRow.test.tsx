@@ -1,6 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { createSignal } from "solid-js";
 import { cleanup, fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -92,5 +93,16 @@ describe("LanPeerList", () => {
         await waitFor(() => expect(pinsList).toHaveBeenCalled());
         expect(screen.queryByTestId("lan-peer-key-warning-icon")).toBeNull();
         expect(screen.getByText("charlie")).toBeTruthy();
+    });
+
+    it("keeps a row open when an event replaces the peer objects", () => {
+        const [peers, setPeers] = createSignal([inst({ instance_id: "a" }), inst({ instance_id: "b", hostname: "other" })]);
+        render(() => <LanPeerList peers={peers()} />);
+        fireEvent.click(screen.getByRole("button", { name: /other/ }));
+        expect(screen.getAllByText("203.0.113.30:4100")).toHaveLength(1);
+        // The same peers as new objects, as the next laninstances event delivers them.
+        setPeers([inst({ instance_id: "a" }), inst({ instance_id: "b", hostname: "other" })]);
+        expect(screen.getAllByText("203.0.113.30:4100")).toHaveLength(1);
+        expect(screen.getByRole("button", { name: /other/ }).getAttribute("aria-expanded")).toBe("true");
     });
 });

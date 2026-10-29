@@ -6,7 +6,7 @@
 // for a key that changed. Re-pinning stays in Settings > Devices > Pinned senders, beside its
 // explanation (docs/specs/SPEC_WARDEN_SPLIT_INTO_VAULT_HISTORY_AUDIT_2026_10_28.md §5).
 
-import { For, Show, createMemo, createSignal, onMount, type JSX } from "solid-js";
+import { For, Index, Show, createMemo, createSignal, onMount, type JSX } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
 import { Button } from "@/app/element/ui";
 import { openOrFocusPaneByView } from "@/app/store/block-component-registry";
@@ -25,8 +25,15 @@ const openPinnedSenders = () =>
 
 const openSwarm = () => void openOrFocusPaneByView("swarm");
 
-export function LanPeerRow(props: { peer: LanInstance; pins: readonly LanPinInfo[] }): JSX.Element {
-    const [open, setOpen] = createSignal(false);
+/** Which peer a row is, across the fresh objects each `laninstances` event brings. */
+const peerKey = (peer: LanInstance): string => peer.instance_id || `${peer.address}:${peer.port}`;
+
+export function LanPeerRow(props: {
+    peer: LanInstance;
+    pins: readonly LanPinInfo[];
+    open: boolean;
+    onToggle: () => void;
+}): JSX.Element {
     const tick = useTick(1000);
     const nowSecs = createMemo(() => (tick(), Math.floor(Date.now() / 1000)));
     const refusals = createMemo(() => peerKeyRefusals(props.peer, props.pins));
@@ -39,9 +46,9 @@ export function LanPeerRow(props: { peer: LanInstance; pins: readonly LanPinInfo
                 tone="quiet"
                 density="compact"
                 class="lan-peer-head"
-                icon={open() ? "chevron-down" : "chevron-right"}
-                aria-expanded={open()}
-                onClick={() => setOpen(!open())}
+                icon={props.open ? "chevron-down" : "chevron-right"}
+                aria-expanded={props.open}
+                onClick={props.onToggle}
             >
                 <span class="lan-peer-name">{name()}</span>
                 <Show when={props.peer.version}>
@@ -55,7 +62,7 @@ export function LanPeerRow(props: { peer: LanInstance; pins: readonly LanPinInfo
                     />
                 </Show>
             </Button>
-            <Show when={open()}>
+            <Show when={props.open}>
                 <div class="lan-peer-body">
                     <div class="status-bar-popover-row">
                         <span class="status-bar-popover-label">Address</span>
@@ -120,5 +127,25 @@ export function LanPeerList(props: { peers: readonly LanInstance[] }): JSX.Eleme
             }
         })();
     });
-    return <For each={props.peers}>{(peer) => <LanPeerRow peer={peer} pins={pins()} />}</For>;
+    // Kept here, by peer, because every event replaces the peer objects and a row's own state
+    // would close under the reader.
+    const [opened, setOpened] = createSignal<ReadonlySet<string>>(new Set());
+    const toggle = (key: string) =>
+        setOpened((prev) => {
+            const next = new Set(prev);
+            if (!next.delete(key)) next.add(key);
+            return next;
+        });
+    return (
+        <Index each={props.peers}>
+            {(peer) => (
+                <LanPeerRow
+                    peer={peer()}
+                    pins={pins()}
+                    open={opened().has(peerKey(peer()))}
+                    onToggle={() => toggle(peerKey(peer()))}
+                />
+            )}
+        </Index>
+    );
 }
