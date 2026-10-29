@@ -35,6 +35,7 @@ pub(crate) mod reactive;
 mod name_resolution;
 pub(crate) mod caller;
 pub(crate) mod agent_self_keys;
+pub(crate) mod container_pane_snapshot;
 mod container_workspace;
 mod container_tool_chunk;
 pub(crate) mod jekt_held;

@@ -235,6 +235,7 @@ mod tests {
             "/agentmux/cron",
             "/api/v1/agent/open",
             "/api/v1/attachments/upload",
+            "/api/v1/pane/open",
             "/api/v1/widgets/install",
         ] {
             assert!(container_route_allowed(ok), "{ok} should be allowed");
@@ -246,7 +247,6 @@ mod tests {
             "/agentmux/service",
             "/ws",
             "/api/v1/ui/browser/set_files",
-            "/api/v1/pane/open",
             "/api/v1/host/browser_bypass",
             "/api/v1/agent/desktop/authorize",
             "/api/v1/agent/globalmemory/write",
