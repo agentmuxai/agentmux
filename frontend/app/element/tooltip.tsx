@@ -26,7 +26,11 @@ interface TooltipProps {
     divClassName?: string;
     divStyle?: CSSProperties;
     divOnClick?: (e: MouseEvent) => void;
-    /** Show/hide delay in ms. Defaults to 300 (existing behavior). */
+    /**
+     * Show/hide delay in ms. Defaults to near-instant: it shows 40 ms after the pointer rests on
+     * the anchor (at once when another tooltip has just closed, so sweeping along a toolbar reads
+     * continuously), and lingers 100 ms after it leaves so a gap between two items does not flicker.
+     */
     delayMs?: number;
     /**
      * No delay and no fade: the panel appears the moment the pointer enters (as soon
@@ -38,13 +42,27 @@ interface TooltipProps {
     immediate?: boolean;
 }
 
+/** Hovers are near-instant (operator, 2026-10-29): a short rest before the first tooltip shows. */
+const SHOW_DELAY_MS = 40;
+/** How long a tooltip lingers after the pointer leaves, so crossing a gap between items does not flicker. */
+const HIDE_DELAY_MS = 100;
+/** After one tooltip closes, the next one within this time shows at once. */
+const WARM_MS = 400;
+
+let lastClosedAt = Number.NEGATIVE_INFINITY;
+/** The one default-mode tooltip that is open; opening another closes it at once. */
+let openTooltip: { close: () => void } | null = null;
+
 function TooltipInner(props: TooltipProps): JSX.Element {
     // Portal-mounted: drop its pane hole while its window tab is hidden (pane-overlay.ts).
     const hiddenTab = useHiddenTabMarker();
     const placement: Placement = props.placement ?? "top";
     const forceOpen = () => props.forceOpen ?? false;
     const immediate = () => props.immediate ?? false;
-    const delayMs = () => (immediate() ? 0 : (props.delayMs ?? 300));
+    // Warm: another tooltip is open or has just closed, so the pointer is moving along a row of them.
+    const warm = () => (openTooltip !== null && openTooltip !== self) || performance.now() - lastClosedAt < WARM_MS;
+    const showDelayMs = () => (immediate() ? 0 : (props.delayMs ?? (warm() ? 0 : SHOW_DELAY_MS)));
+    const hideDelayMs = () => (immediate() ? 0 : (props.delayMs ?? HIDE_DELAY_MS));
 
     const [isOpen, setIsOpen] = createSignal(forceOpen());
     const [isVisible, setIsVisible] = createSignal(false);
@@ -62,6 +80,21 @@ function TooltipInner(props: TooltipProps): JSX.Element {
     const clearTimeouts = () => {
         if (showTimeout !== null) { clearTimeout(showTimeout); showTimeout = null; }
         if (hideTimeout !== null) { clearTimeout(hideTimeout); hideTimeout = null; }
+    };
+
+    // Closes this tooltip now, without the lingering grace.
+    const self = {
+        close: () => {
+            clearTimeouts();
+            markClosed();
+            setIsOpen(false);
+            setIsVisible(false);
+            setIsPositioned(false);
+        },
+    };
+    const markClosed = () => {
+        lastClosedAt = performance.now();
+        if (openTooltip === self) openTooltip = null;
     };
 
     const updatePosition = async () => {
@@ -151,13 +184,17 @@ function TooltipInner(props: TooltipProps): JSX.Element {
             setIsOpen(false);
             setIsVisible(false);
             setIsPositioned(false);
+            markClosed();
         } else if (forceOpen()) {
             setIsOpen(true);
             setIsVisible(true);
         } else if (isHovering()) {
+            if (openTooltip && openTooltip !== self) openTooltip.close();
+            if (!immediate()) openTooltip = self;
             setIsOpen(true);
-            if (immediate()) setIsVisible(true);
-            else showTimeout = setTimeout(() => { setIsVisible(true); }, delayMs());
+            const delay = showDelayMs();
+            if (immediate() || delay === 0) setIsVisible(true);
+            else showTimeout = setTimeout(() => { setIsVisible(true); }, delay);
         } else {
             setIsVisible(false);
             if (immediate()) {
@@ -165,7 +202,7 @@ function TooltipInner(props: TooltipProps): JSX.Element {
                 setIsOpen(false);
                 setIsPositioned(false);
             } else {
-                hideTimeout = setTimeout(() => { setIsOpen(false); }, delayMs());
+                hideTimeout = setTimeout(() => { setIsOpen(false); setIsPositioned(false); markClosed(); }, hideDelayMs());
             }
         }
     });
@@ -173,6 +210,7 @@ function TooltipInner(props: TooltipProps): JSX.Element {
     onCleanup(() => {
         clearTimeouts();
         cleanupAutoUpdate?.();
+        if (openTooltip === self) openTooltip = null;
     });
 
     return (
@@ -191,7 +229,7 @@ function TooltipInner(props: TooltipProps): JSX.Element {
                 <Portal>
                     <div
                         ref={registerFloating}
-                        style={`${floatingStyle()};opacity:${isVisible() && (!immediate() || isPositioned()) ? 1 : 0};transition:${immediate() ? "none" : "opacity 200ms ease"}`}
+                        style={`${floatingStyle()};opacity:${isVisible() && isPositioned() ? 1 : 0};transition:${immediate() ? "none" : "opacity var(--duration-instant) var(--ease-out)"}`}
                         class={cn(
                             "bg-modalbg border border-border rounded-md px-2 py-1 text-xs text-foreground shadow-xl z-[var(--z-tooltip)]"
                         )}
