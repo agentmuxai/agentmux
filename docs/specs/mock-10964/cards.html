@@ -1,0 +1,136 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>MOCK (not built): provider card tags, #10964</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+<style>
+:root{
+  --main-bg:#222; --card-surface:#262626; --border:rgba(255,255,255,.16);
+  --text:#f0f0f0; --text-2:#c5c5c5; --muted:#9a9a9a;
+  --accent:rgb(65,159,224); --ok:rgb(78,154,6); --warn:rgb(224,185,86);
+  --mono: Consolas, "Cascadia Mono", monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--main-bg);color:var(--text);font:13px/1.35 var(--mono);padding:16px}
+h2{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:18px 0 8px}
+.note{color:var(--muted);font-size:11px;margin:0 0 8px}
+.cols{display:flex;gap:28px;align-items:flex-start}
+.col{flex:none}
+.col>h3{font-size:11px;color:var(--muted);margin:0 0 6px;font-weight:400}
+/* the picker's filter chips */
+.filters{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 10px}
+.fchip{font:inherit;font-size:11px;padding:2px 9px;border-radius:999px;background:transparent;color:var(--text-2);border:1px solid var(--border);cursor:default}
+.fchip .n{color:var(--muted);margin-left:4px}
+.fchip[aria-pressed=true]{background:color-mix(in srgb,var(--accent) 14%,transparent);border-color:var(--accent);color:var(--text)}
+/* the card */
+.card{position:relative;display:flex;gap:10px;padding:10px 12px;background:var(--card-surface);border:1px solid var(--border);margin-bottom:8px}
+.card.has-foot{padding-bottom:30px}
+.logo{flex:none;width:28px;height:28px;border-radius:6px;background:#3a3a3a;display:grid;place-items:center;font-size:13px;color:#ddd}
+.info{min-width:0}
+.title{font-weight:600}
+.cap{color:var(--text-2);font-size:12px}
+.foot{position:absolute;left:12px;right:0;bottom:6px;display:flex;align-items:center;gap:5px;min-height:20px}
+/* chip: a property (quiet, round, translucent wash) */
+.chip{display:inline-flex;align-items:center;gap:4px;font-size:11px;line-height:1;padding:3px 7px;border-radius:999px;color:var(--text);border:1px solid color-mix(in srgb,var(--tone) 70%,transparent);background:color-mix(in srgb,var(--tone) 14%,transparent);white-space:nowrap}
+.chip i{font-size:10px;color:var(--tone)}
+.chip.free{--tone:var(--accent)}
+.chip.neutral{--tone:#8a8a8a;color:var(--text-2)}
+.chip.warn{--tone:var(--warn)}
+.chip.more{--tone:#8a8a8a;color:var(--text-2)}
+/* ribbon: the card's action, square, on the corner, opaque */
+.ribbon{position:absolute;right:0;bottom:0;display:inline-flex;align-items:center;gap:5px;padding:3px 10px;font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text);border:1px solid var(--ok);border-right:0;border-bottom:0;background:color-mix(in srgb,var(--ok) 14%,var(--card-surface))}
+.ribbon i{font-size:10px;color:var(--ok)}
+.newbtn{position:absolute;right:8px;bottom:6px;font-size:11px;padding:1px 9px;border:1px solid var(--border);border-radius:999px;color:var(--text-2);background:transparent}
+/* narrow card (< 300 px): the action (ribbon or + New) gets its own line under the chips */
+.narrow .card.has-act{padding-bottom:56px}
+.narrow .card.has-act .foot{bottom:30px}
+/* tooltip */
+.tip{width:240px;background:#2d2d2d;border:1px solid var(--border);box-shadow:0 6px 18px rgba(0,0,0,.45);padding:8px 10px;font-size:12px}
+.tip b{color:var(--text)}
+.tip .d{color:var(--muted);font-size:11px;margin-top:6px}
+.tip ul{margin:4px 0 0;padding-left:16px}
+.panel{width:320px;border:1px solid var(--accent);background:#2a2a2a;padding:10px 12px}
+.panel h4{margin:0 0 6px;font-size:13px}
+.step{display:flex;gap:8px;margin:6px 0;color:var(--text-2);font-size:12px}
+.step .k{flex:none;width:18px;height:18px;border-radius:50%;border:1px solid var(--border);display:grid;place-items:center;font-size:10px;color:var(--text)}
+.btn{display:inline-block;padding:3px 10px;border:1px solid var(--accent);background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--text);font-size:12px}
+.input{display:block;width:100%;margin-top:4px;padding:4px 6px;background:#1c1c1c;border:1px solid var(--border);color:var(--muted);font:inherit;font-size:12px}
+</style>
+
+<h2>1. Filter chips (above the template cards, under the "New agent" intro)</h2>
+<div class="filters">
+  <span class="fchip" aria-pressed="false">Free<span class="n">7</span></span>
+  <span class="fchip" aria-pressed="true">Local<span class="n">14</span></span>
+  <span class="fchip" aria-pressed="false">Installed<span class="n">2</span></span>
+</div>
+<p class="note">Local is selected here. Selected = accent line and wash. Counts are live and follow the other chips.</p>
+
+<h2>2. Cards at three pane widths: 220 px (a narrow pane), 320 px (today's usual), 520 px</h2>
+<div class="cols">
+
+<div class="col narrow" style="width:220px"><h3>220 px, TagList max=2, action on its own line</h3>
+  <div class="card has-foot has-act"><div class="logo">O</div><div class="info"><div class="title">OpenCode</div><div class="cap">Open-source agent, 75+ providers</div></div>
+    <div class="foot"><span class="chip free"><i class="fa-solid fa-gift"></i>Free</span><span class="chip neutral"><i class="fa-solid fa-house"></i>Local</span></div>
+    <span class="ribbon"><i class="fa-solid fa-download"></i>Click to install</span></div>
+  <div class="card has-foot"><div class="logo">G</div><div class="info"><div class="title">Gemini CLI</div><div class="cap">Google's coding agent, with a Gemini API key</div></div>
+    <div class="foot"><span class="chip free"><i class="fa-solid fa-gift"></i>Free</span><span class="chip warn"><i class="fa-solid fa-circle-up"></i>Update</span></div></div>
+  <div class="card has-foot has-act"><div class="logo">K</div><div class="info"><div class="title">Kilo Code CLI</div><div class="cap">Open-source agent</div></div>
+    <div class="foot"><span class="chip free"><i class="fa-solid fa-gift"></i>Free</span><span class="chip neutral"><i class="fa-solid fa-house"></i>Local</span><span class="chip more">+1</span></div>
+    <span class="newbtn" style="bottom:6px">+ New</span></div>
+  <div class="card has-foot"><div class="logo">C</div><div class="info"><div class="title">Codex CLI</div><div class="cap">OpenAI's coding agent</div></div>
+    <div class="foot"><span class="chip neutral"><i class="fa-solid fa-house"></i>Local</span></div></div>
+  <div class="card"><div class="logo">C</div><div class="info"><div class="title">Claude Code</div><div class="cap">Anthropic's coding agent</div></div></div>
+</div>
+
+<div class="col" style="width:320px"><h3>320 px, max=3</h3>
+  <div class="card has-foot"><div class="logo">O</div><div class="info"><div class="title">OpenCode</div><div class="cap">Open-source agent, 75+ providers</div></div>
+    <div class="foot"><span class="chip free"><i class="fa-solid fa-gift"></i>Free</span><span class="chip neutral"><i class="fa-solid fa-house"></i>Local</span></div>
+    <span class="ribbon"><i class="fa-solid fa-download"></i>Click to install</span></div>
+  <div class="card has-foot"><div class="logo">G</div><div class="info"><div class="title">Gemini CLI</div><div class="cap">Google's coding agent, with a Gemini API key</div></div>
+    <div class="foot"><span class="chip free"><i class="fa-solid fa-gift"></i>Free</span><span class="chip warn"><i class="fa-solid fa-circle-up"></i>Update available</span></div></div>
+  <div class="card has-foot"><div class="logo">K</div><div class="info"><div class="title">Kilo Code CLI</div><div class="cap">Open-source agent</div></div>
+    <div class="foot"><span class="chip free"><i class="fa-solid fa-gift"></i>Free</span><span class="chip neutral"><i class="fa-solid fa-house"></i>Local</span><span class="chip warn"><i class="fa-solid fa-circle-up"></i>Update</span></div>
+    <span class="newbtn">+ New</span></div>
+  <div class="card has-foot"><div class="logo">C</div><div class="info"><div class="title">Codex CLI</div><div class="cap">OpenAI's coding agent</div></div>
+    <div class="foot"><span class="chip neutral"><i class="fa-solid fa-house"></i>Local</span></div></div>
+  <div class="card"><div class="logo">C</div><div class="info"><div class="title">Claude Code</div><div class="cap">Anthropic's coding agent</div></div></div>
+</div>
+
+<div class="col" style="width:520px"><h3>520 px, max=3</h3>
+  <div class="card has-foot"><div class="logo">O</div><div class="info"><div class="title">OpenCode</div><div class="cap">Open-source agent, 75+ providers</div></div>
+    <div class="foot"><span class="chip free"><i class="fa-solid fa-gift"></i>Free</span><span class="chip neutral"><i class="fa-solid fa-house"></i>Local</span></div>
+    <span class="ribbon"><i class="fa-solid fa-download"></i>Click to install</span></div>
+  <div class="card has-foot"><div class="logo">K</div><div class="info"><div class="title">Kilo Code CLI</div><div class="cap">Open-source agent</div></div>
+    <div class="foot"><span class="chip free"><i class="fa-solid fa-gift"></i>Free</span><span class="chip neutral"><i class="fa-solid fa-house"></i>Local</span><span class="chip warn"><i class="fa-solid fa-circle-up"></i>Update available</span></div>
+    <span class="newbtn">+ New</span></div>
+  <div class="card has-foot"><div class="logo">C</div><div class="info"><div class="title">Codex CLI</div><div class="cap">OpenAI's coding agent</div></div>
+    <div class="foot"><span class="chip neutral"><i class="fa-solid fa-house"></i>Local</span></div></div>
+</div>
+
+</div>
+<p class="note">Worst case, third card in each column: installed, a newer pinned CLI, a session in progress, Free and Local. The upgrade note is the first chip cut when the card is narrow ("+1"); the ribbon never counts toward max and sits in the same corner as "+ New" (they are exclusive today). A not-installed card shows the ribbon and no Update chip, as today.</p>
+
+<h2>3. The tooltips (the `detail` slot; no links, ~4 short lines, a muted "checked" date)</h2>
+<div class="cols">
+  <div class="tip"><b>Free</b>
+    <ul><li>Google account sign-in, no card.</li><li>Weekly quota; Google doesn't publish the number.</li><li>Gemini Flash-class models only.</li></ul>
+    <div class="d">Antigravity · checked 2026-10-29</div></div>
+  <div class="tip"><b>Free (with an API key)</b>
+    <ul><li>Free AI Studio key: 250 requests a day, Flash models.</li><li>Outside the EU, UK and Switzerland, Google may train on what you send.</li><li>Replaced the old personal-account tier, which now lives in Antigravity.</li></ul>
+    <div class="d">Gemini CLI · checked 2026-10-29</div></div>
+  <div class="tip"><b>Local</b>
+    <ul><li>Works with Ollama or LM Studio on this computer.</li><li>Uses the Responses API. No verified free cloud route.</li><li>Needs ~16 GB of memory and a 64K context.</li></ul>
+    <div class="d">Codex CLI · checked 2026-10-29</div></div>
+</div>
+
+<h2>4. The signup step, docked under the card (the card's own panel; the tooltip never holds a link)</h2>
+<div class="cols">
+  <div class="panel"><h4>Use Antigravity for free</h4>
+    <div class="step"><span class="k">1</span><span>Sign in with a Google account. No card.<br><span class="btn" style="margin-top:4px">Open sign-in</span></span></div>
+    <div class="step"><span class="k">2</span><span>Come back here. AgentMux sees the sign-in.</span></div>
+    <div class="step"><span class="k">3</span><span>Name your agent and start. <span style="color:var(--muted)">Weekly quota; /usage shows it.</span></span></div>
+    <div class="d" style="color:var(--muted);font-size:11px;margin-top:6px">checked 2026-10-29</div></div>
+  <div class="panel"><h4>Use Gemini CLI for free</h4>
+    <div class="step"><span class="k">1</span><span>Get a free key.<br><span class="btn" style="margin-top:4px">Open Google AI Studio</span></span></div>
+    <div class="step"><span class="k">2</span><span>Paste it here. It goes to your Vault, never the chat.<input class="input" value="" placeholder="AIza…  (hidden)"></span></div>
+    <div class="step"><span class="k">3</span><span>Start. <span style="color:var(--muted)">250 a day; free-tier data may train Google's models outside the EEA.</span></span></div></div>
+</div>
