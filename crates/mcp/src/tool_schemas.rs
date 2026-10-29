@@ -350,14 +350,15 @@ pub(crate) const VAULT_TOOL: &str = r#"{
 /// tool of its own a harness can gate (like Stop).
 pub(crate) const APP_TOOL: &str = r#"{
   "name": "App",
-  "description": "This AgentMux itself. Every call takes an action. version: the AgentMux you run in (version and how it was installed), whether a newer release is out, whether it is downloaded, and whether this install can upgrade itself. upgrade: ask for AgentMux to be upgraded to the latest release, with a one-line reason. An upgrade restarts AgentMux and every agent in it, so it never happens on your word alone: if the user's own message in this turn asked for it, pass their words verbatim as user_instruction and it starts (download, then a restart once every agent has finished its turn; the user still confirms in AgentMux's dialog); otherwise it goes to the super agent as a sensitive request (see Sensitive): if it approves, the person sees a banner with a 2-minute countdown and can veto it, and you get [AgentMux] notes as it goes. Your session resumes after the restart. Only the release AgentMux found itself can be installed: you can't name a file or a URL. network: whether AgentMux can reach the internet, MuxBus and each model API right now, from its own checks, and for how long a service has been down. It reports what AgentMux has checked, not a fresh test, so \"not checked yet\" and unlisted services are unknown.",
+  "description": "This AgentMux itself. Every call takes an action. version: the AgentMux you run in (version and how it was installed), whether a newer release is out, whether it is downloaded, and whether this install can upgrade itself. upgrade: ask for AgentMux to be upgraded to the latest release, with a one-line reason. An upgrade restarts AgentMux and every agent in it, so it never happens on your word alone: if the user's own message in this turn asked for it, pass their words verbatim as user_instruction and it starts (download, then a restart once every agent has finished its turn; the user still confirms in AgentMux's dialog); otherwise it goes to the super agent as a sensitive request (see Sensitive): if it approves, the person sees a banner with a 2-minute countdown and can veto it, and you get [AgentMux] notes as it goes. Your session resumes after the restart. Only the release AgentMux found itself can be installed: you can't name a file or a URL. network: whether AgentMux can reach the internet, MuxBus and each model API right now, from its own checks, and for how long a service has been down. It reports what AgentMux has checked, not a fresh test, so \"not checked yet\" and unlisted services are unknown. history_reclaim: give the shared pane-history store's free disk space back. reclaim \"request\" asks for it at the next start of AgentMux (the store is rewritten while it starts; it is recorded as you, and the person sees it pending in Warden > History > Storage and can cancel it there), \"cancel\" withdraws it, \"status\" (the default) says whether one is asked for and how the last went. Nothing runs now.",
   "inputSchema": {
     "type": "object",
     "properties": {
-      "action":           { "type": "string", "enum": ["version", "upgrade", "network"], "description": "What to do" },
+      "action":           { "type": "string", "enum": ["version", "upgrade", "network", "history_reclaim"], "description": "What to do" },
       "reason":           { "type": "string", "description": "upgrade: one line, why; the user sees it" },
       "user_instruction": { "type": "string", "description": "upgrade: the user's own words in this turn asking for the upgrade, verbatim; leave it out when the user didn't ask" },
-      "version":          { "type": "string", "description": "upgrade: the release you expect (from version); refused if it isn't the latest" }
+      "version":          { "type": "string", "description": "upgrade: the release you expect (from version); refused if it isn't the latest" },
+      "reclaim":          { "type": "string", "enum": ["request", "cancel", "status"], "description": "history_reclaim: request, cancel or read (default) the reclaim" }
     },
     "required": ["action"]
   }
@@ -402,6 +403,28 @@ pub(crate) const IDENTITY_TOOL: &str = r#"{
       "account":    { "type": "string", "description": "switch: the account to move to, by id or the label the pane shows" },
       "agent":      { "type": "string", "description": "switch: the agent to move; yourself when absent" },
       "when":       { "type": "string", "enum": ["after_turn", "now"], "description": "switch: after_turn (default) or now" }
+    },
+    "required": ["action"]
+  }
+}"#;
+
+/// Skills: the skill catalog, for an agent that manages it.
+pub(crate) const SKILLS_TOOL: &str = r#"{
+  "name": "Skills",
+  "description": "The skill catalog (what Memory > Skills shows a person). Every call takes an action. list: every catalog skill without its text: id, name, skill_type, trigger, description, bound_count and who gets it. get: one skill in full (skill_id). upsert: create a skill (name, and content, description, skill_type: agent-skill, the default, is a SKILL.md an agent loads when it fits; prompt is a slash command with a trigger) or edit one (skill_id; what you leave out stays). A new skill reaches the agents created after it. delete: remove a skill (skill_id). bind and unbind: give a skill to an agent or take it away (skill_id, and target, an agent's id from Agents list; yourself when absent). reach: who gets a skill without a bind: all_agents (every agent, the ones to come too) and new_agents (every agent created from now on). A change reaches an agent's files at its next launch. Changes are recorded as you; a skill is guidance every agent it reaches will follow, so write what you would be glad for them to follow. Only catalog skills; an agent's private skills are not here.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "action":      { "type": "string", "enum": ["list", "get", "upsert", "delete", "bind", "unbind", "reach"], "description": "What to do" },
+      "skill_id":    { "type": "string", "description": "get, delete, bind, unbind, reach: the skill's id, from list; upsert: the skill to edit (absent: a new one)" },
+      "name":        { "type": "string", "description": "upsert: the skill's name (required for a new one)" },
+      "description": { "type": "string", "description": "upsert: when an agent should use it (the line a model reads to decide)" },
+      "content":     { "type": "string", "description": "upsert: the skill's text" },
+      "skill_type":  { "type": "string", "enum": ["agent-skill", "prompt"], "description": "upsert: agent-skill (default) or prompt (a slash command)" },
+      "trigger":     { "type": "string", "description": "upsert, prompt skills: the slash command" },
+      "target":      { "type": "string", "description": "bind, unbind: the agent's id from Agents list; yourself when absent" },
+      "all_agents":  { "type": "boolean", "description": "reach: every agent gets it, the ones to come too" },
+      "new_agents":  { "type": "boolean", "description": "reach: every agent created from now on gets it" }
     },
     "required": ["action"]
   }
@@ -553,6 +576,7 @@ pub(crate) const ADVERTISED: &[&str] = &[
     WIDGET_TOOL,
     VAULT_TOOL,
     IDENTITY_TOOL,
+    SKILLS_TOOL,
     AGENTS_TOOL,
     MESSAGE_TOOL,
     APP_TOOL,

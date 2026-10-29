@@ -77,6 +77,15 @@ impl Store {
         Ok(())
     }
 
+    /// A new catalog skill reaches the agents created after it, unless it already has a reach: the
+    /// default is that new agents get the global skills, with a per-skill opt-out. Call on the catalog store.
+    pub fn skill_reach_default_for_new(&self, skill_id: &str, now_ms: i64) -> Result<(), StoreError> {
+        if !self.skill_reach_map()?.contains_key(skill_id) {
+            self.skill_set_reach(skill_id, false, true, now_ms)?;
+        }
+        Ok(())
+    }
+
     /// Drop a deleted skill's reach. Call on the catalog store.
     pub fn skill_reach_forget(&self, skill_id: &str) -> Result<(), StoreError> {
         let conn = self.conn.lock().unwrap();

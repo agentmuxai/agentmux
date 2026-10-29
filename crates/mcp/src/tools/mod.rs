@@ -36,6 +36,7 @@ mod schedule_tool;
 mod sensitive_tool;
 mod send_files;
 mod shell;
+mod skills_tool;
 mod stop_tool;
 mod tasks_tool;
 mod terminal;
@@ -250,6 +251,7 @@ pub(crate) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
         tasks_tool,
         memory_tool,
         identity_tool,
+        skills_tool,
         widget_tool,
         vault_tool,
         app_tool,
@@ -281,6 +283,7 @@ mod tests {
         ("presence_tool", include_str!("presence_tool.rs")),
         ("schedule_tool", include_str!("schedule_tool.rs")),
         ("sensitive_tool", include_str!("sensitive_tool.rs")),
+        ("skills_tool", include_str!("skills_tool.rs")),
         ("stop_tool", include_str!("stop_tool.rs")),
         ("tasks_tool", include_str!("tasks_tool.rs")),
         ("terminal", include_str!("terminal.rs")),
