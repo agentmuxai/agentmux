@@ -23,7 +23,7 @@
 
 .amx-error-banner-icon {
     grid-area: icon;
-    font-size: 16px;
+    font-size: var(--text-lg);
     line-height: 1;
     color: var(--error-text-color);
     margin-top: 1px;
