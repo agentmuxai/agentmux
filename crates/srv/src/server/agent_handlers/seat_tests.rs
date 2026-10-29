@@ -264,6 +264,29 @@ fn set(h: &Harness, id: &str, role: &str) {
     write_seats(&h.state.mstore, &planned, &SeatActor::Operator).unwrap();
 }
 
+/// A lead on another machine, set through MuxAPI, stays when the operator edits the seat's other fields
+/// (the window sends the stored lead back); a different remote lead is not taken from the window.
+#[tokio::test]
+async fn the_operator_can_edit_a_seat_that_has_a_remote_lead() {
+    let h = harness(None);
+    h.agent("a-1", "Posa");
+    {
+        let change = SeatChange { agent_id: "a-1".into(), seat: Some(SeatInput { role: "specialist".into(), qualifier: None, lead: Some("AgentY@narko".into()), area: None, lane: None }) };
+        let _seats = h.state.mstore.agent_seat_lock().unwrap();
+        let defs = h.state.mstore.agent_def_list().unwrap();
+        let planned = plan_seats(&h.state.mstore, &defs, std::slice::from_ref(&change), "", &["AgentY@narko".to_string()]).unwrap();
+        write_seats(&h.state.mstore, &planned, &SeatActor::Operator).unwrap();
+    }
+    let edit = |lead: &str| CommandAgentSetSeatData {
+        agent_id: "a-1".into(),
+        seat: Some(SeatInput { role: "specialist".into(), qualifier: Some("Area54".into()), lead: Some(lead.into()), area: Some("builds".into()), lane: None }),
+    };
+    let result = set_seat(&h.state.mstore, edit("AgentY@narko")).expect("the stored remote lead comes back unchanged");
+    assert_eq!(result.seat.unwrap().lead.as_deref(), Some("AgentY@narko"));
+    let err = set_seat(&h.state.mstore, edit("AgentX@narko")).unwrap_err();
+    assert!(err.contains("is not an agent on this machine"), "{err}");
+}
+
 #[tokio::test]
 async fn a_second_super_agent_takes_the_seat_and_the_first_goes_back() {
     let h = harness(None);

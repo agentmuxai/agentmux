@@ -250,7 +250,17 @@ pub(super) fn set_seat(mstore: &Store, cmd: CommandAgentSetSeatData) -> Result<A
     let _seats = mstore.agent_seat_lock().map_err(|e| format!("agent.setSeat: {e}"))?;
     let defs = mstore.agent_def_list().map_err(|e| format!("agent.setSeat: {e}"))?;
     let change = SeatChange { agent_id: cmd.agent_id, seat: cmd.seat };
-    let planned = plan_seats(mstore, &defs, std::slice::from_ref(&change), "agent.setSeat: ", &[])?;
+    // A lead on another machine, set through MuxAPI, stays when the operator edits the seat's other fields:
+    // the window sends the stored lead back. A new one is set with `Agents set_seat`, which checks the LAN.
+    let kept_remote: Vec<String> = defs
+        .iter()
+        .find(|d| d.id == change.agent_id.trim())
+        .and_then(|d| crate::backend::agent_seat::effective_seat(mstore, d))
+        .and_then(|s| s.lead)
+        .filter(|lead| crate::backend::agent_seat::is_remote_lead(lead))
+        .into_iter()
+        .collect();
+    let planned = plan_seats(mstore, &defs, std::slice::from_ref(&change), "agent.setSeat: ", &kept_remote)?;
     write_seats(mstore, &planned, &SeatActor::Operator)?;
     Ok(AgentSetSeatResult { seat: planned.into_iter().next().and_then(|p| p.seat) })
 }
