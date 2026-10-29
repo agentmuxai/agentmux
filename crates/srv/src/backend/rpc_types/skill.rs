@@ -56,6 +56,17 @@ pub struct CommandSkillCatalogSetReachData {
     pub new_agents: bool,
 }
 
+/// `skill.catalog.set_opt_out` — window-scoped. One agent opts out of a catalog skill that reaches
+/// it through "every agent" or "new agents" (or comes back in). It cancels the reach only: an
+/// explicit bind to the agent still gives it the skill.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandSkillCatalogSetOptOutData {
+    pub skill_id: String,
+    pub agent_id: String,
+    pub opted_out: bool,
+}
+
 /// `skill.catalog.bind_all` — window-scoped. Binds a catalog skill to every agent that exists now (a
 /// bind each, so the skill stays with the agent when "all agents" is switched off). Agents created
 /// later get it only through `skill.catalog.set_reach`.

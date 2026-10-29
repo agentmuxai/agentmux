@@ -38,6 +38,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_skill_catalog_bind_all(engine, state);
     register_skill_catalog_import_preview(engine, state);
     register_skill_catalog_import_commit(engine, state);
+    register_skill_catalog_set_opt_out(engine, state);
     register_skill_catalog_bind_to_bundle(engine, state);
     register_skill_catalog_unbind_from_bundle(engine, state);
     register_skill_catalog_list_for_bundle(engine, state);
@@ -837,6 +838,39 @@ fn register_skill_catalog_import_commit(engine: &Arc<WshRpcEngine>, state: &AppS
     );
 }
 
+// One agent opts out of (or back into) what a catalog skill reaches it through. The reach switches
+// are the skill's; this is the agent's exception to them.
+fn register_skill_catalog_set_opt_out(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let mstore = state.mstore.clone();
+    let identity_store = state.identity_store.clone();
+    let broker = state.broker.clone();
+    engine.register_typed(
+        COMMAND_SKILL_CATALOG_SET_OPT_OUT,
+        move |req: CommandSkillCatalogSetOptOutData, _ctx| {
+            let mstore = mstore.clone();
+            let identity_store = identity_store.clone();
+            let broker = broker.clone();
+            async move {
+                const E: &str = "skill.catalog.set_opt_out";
+                match identity_store.skill_get(&req.skill_id).map_err(|e| format!("{E}: {e}"))? {
+                    Some(s) if s.is_global => {}
+                    _ => return Err(format!("{E}: skill not found in the catalog")),
+                }
+                if mstore.agent_def_get(&req.agent_id).map_err(|e| format!("{E}: {e}"))?.is_none() {
+                    return Err(format!("{E}: agent not found"));
+                }
+                identity_store.skill_optout_put(&req.skill_id, &req.agent_id, req.opted_out).map_err(|e| format!("{E}: {e}"))?;
+                broker.publish_event::<crate::backend::mps_events::SkillsChanged>(&(), vec![], 0);
+                Ok(())
+            }
+        },
+    );
+}
+
 #[cfg(test)]
 #[path = "skill_import_rpc_tests.rs"]
 mod import_rpc_tests;
+
+#[cfg(test)]
+#[path = "skill_optout_rpc_tests.rs"]
+mod optout_rpc_tests;

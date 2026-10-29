@@ -17,6 +17,7 @@ import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { SkillCatalogModel } from "./skill-model";
 import { SkillImportModel } from "./skill-import-model";
 import { SkillImportPanel, SkillImportResult } from "./skill-import";
+import { SkillMatrix } from "./skill-matrix";
 import "./skill-import.scss";
 import "../agent/components/AgentPrimitiveModal.scss";
 import { Button, Switch } from "@/app/element/ui";
@@ -84,13 +85,16 @@ export const SkillManager = (): JSX.Element => {
     // Single-pane — see docs/specs/SPEC_ARMORY_RESPONSIVE_SINGLE_PANE_LAYOUT_2026_07_15.md.
     // The import panel, or an imported skill's "check for changes" (`updateOf` set).
     const [importing, setImporting] = createSignal<{ model: SkillImportModel; updateOf?: SkillCatalogItem } | null>(null);
-    const inDetail = () => model.selectedIdAtom() !== null || model.draftAtom() !== null || importing() !== null;
+    const [showMatrix, setShowMatrix] = createSignal(false);
+    const inDetail = () =>
+        model.selectedIdAtom() !== null || model.draftAtom() !== null || importing() !== null || showMatrix();
     const imported = (ids: string[]) => {
         setImporting(null);
         void model.refresh();
         if (ids[0]) model.setSelectedId(ids[0]);
     };
     const startImport = () => {
+        setShowMatrix(false);
         model.setSelectedId(null);
         model.setDraft(null);
         setImporting({ model: new SkillImportModel(imported) });
@@ -101,6 +105,7 @@ export const SkillManager = (): JSX.Element => {
         void check.check(skill.id);
     };
     const handleBack = () => {
+        setShowMatrix(false);
         setImporting(null);
         model.setError(null);
         model.setSelectedId(null);
@@ -123,6 +128,7 @@ export const SkillManager = (): JSX.Element => {
                             classList={{ "is-selected": model.selectedIdAtom() === skill.id }}
                             onClick={() => {
                                 setImporting(null);
+                                setShowMatrix(false);
                                 model.handleSelect(skill);
                             }}
                         >
@@ -142,6 +148,17 @@ export const SkillManager = (): JSX.Element => {
             </button>
             <Button class="agent-primitive-modal-new-btn" onClick={startImport}>
                 Import a skill…
+            </Button>
+            <Button
+                class="agent-primitive-modal-new-btn"
+                onClick={() => {
+                    model.setSelectedId(null);
+                    model.setDraft(null);
+                    setImporting(null);
+                    setShowMatrix(true);
+                }}
+            >
+                Agents and skills
             </Button>
         </div>
     );
@@ -174,7 +191,10 @@ export const SkillManager = (): JSX.Element => {
                     </Show>
                 )}
             </Show>
-            <Show when={!importing()}>
+            <Show when={showMatrix() && !importing()}>
+                <SkillMatrix catalog={model} />
+            </Show>
+            <Show when={!importing() && !showMatrix()}>
             <Show when={model.errorAtom()}>
                 <div class="agent-primitive-modal-error">{model.errorAtom()}</div>
             </Show>
