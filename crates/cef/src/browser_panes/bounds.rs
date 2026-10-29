@@ -497,11 +497,17 @@ impl BrowserPaneManager {
         base: Option<LayoutBase>,
         order: Option<RectsOrder>,
     ) {
-        let rects = drop_superseded(&mut NEWEST_BATCH.lock(), window_label, rects, order);
-        if rects.is_empty() {
-            return;
-        }
-        let (applied, post) = PENDING.lock().enqueue(window_label, rects, base);
+        // The order check and the merge into the pending rects are one step under PENDING: a
+        // batch that is checked first is merged first, so an older one can't overwrite a newer
+        // rect between the two. (Always PENDING, then NEWEST_BATCH.)
+        let (applied, post) = {
+            let mut pending = PENDING.lock();
+            let rects = drop_superseded(&mut NEWEST_BATCH.lock(), window_label, rects, order);
+            if rects.is_empty() {
+                return;
+            }
+            pending.enqueue(window_label, rects, base)
+        };
         if post {
             let mut task = ApplyPaneBoundsTask::new(state.clone(), window_label.to_string());
             if post_task(ThreadId::UI, Some(&mut task)) == 0 {
