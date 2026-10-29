@@ -754,7 +754,7 @@ pub(crate) async fn handle_ui_browser_open(
         Ok(m) => m,
         Err(e) => return err_response(StatusCode::BAD_REQUEST, e),
     };
-    let opened = (req.auth.agent_id.as_str(), allowed.as_deref(), req.profile.as_deref(), grant.is_some());
+    let opened = (req.auth.agent_id.as_str(), allowed.as_deref(), req.profile.as_deref(), grant.is_some() || crate::server::browser_identity::in_container(&state, &own));
     let browsing_as = match crate::server::browser_identity::for_agent_pane(&state, &mut meta, opened) {
         Ok(b) => b,
         Err(e) => return err_response(StatusCode::BAD_REQUEST, e),

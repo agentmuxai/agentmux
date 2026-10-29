@@ -216,6 +216,11 @@ pub(crate) fn for_agent_open(state: &AppState, meta: &mut MetaMapType, requested
     Ok(())
 }
 
+/// Whether pane `block_id` is a container agent's: whatever key it asks with, what it opens is not the user's own.
+pub(crate) fn in_container(state: &AppState, block_id: &str) -> bool {
+    state.mstore.get::<Block>(block_id).ok().flatten().is_some_and(|b| crate::server::agent_resources::container_of(&b).is_some())
+}
+
 /// A new pane for the agent `(id, allowed sites, profile asked for, from a container)`: owned by it, limited to
 /// its sites, and browsing as the identity it gets ([`for_agent_open`]). Returns whom it browses as, in words.
 pub(crate) fn for_agent_pane(

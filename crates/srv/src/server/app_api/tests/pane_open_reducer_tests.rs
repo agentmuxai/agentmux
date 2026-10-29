@@ -2741,4 +2741,13 @@ async fn a_container_agents_browser_open_gets_its_own_incognito_jar() {
     assert_eq!(s, axum::http::StatusCode::OK, "{body}");
     assert_eq!(identity_of(&body), None);
     assert_eq!(body["data"]["browsing_as"], "personal");
+
+    // And a pane that is a container agent's is one whichever key asks: the jar follows the agent, not the header.
+    let mut block = state.mstore.must_get::<crate::backend::obj::Block>(&own).unwrap();
+    block.meta.insert("agentMode".into(), serde_json::json!("container"));
+    block.meta.insert("agentId".into(), serde_json::json!(agent));
+    state.mstore.update(&mut block).unwrap();
+    let (s, body) = open("test-secret-key".to_string(), serde_json::json!({})).await;
+    assert_eq!(s, axum::http::StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["browsing_as"], "incognito");
 }
