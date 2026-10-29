@@ -2260,9 +2260,8 @@ pub(super) struct RegistrationFlag {
     recent_mismatch: Option<MismatchAuditSummary>,
 }
 
-/// `reactive.registration_flags`: the agents with a registration problem, for the Swarm's row badge
-/// (the Warden split spec, #5776). A healthy agent is not
-/// listed, so one call every few seconds covers every row.
+/// `reactive.registration_flags`: the agents with a registration problem, for the Swarm's row badge.
+/// A healthy agent is not listed, so one call every few seconds covers every row.
 #[derive(serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub(super) struct ReactiveRegistrationFlagsResult {
