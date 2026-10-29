@@ -643,14 +643,24 @@ async fn open_editor_creates_new_pane_when_none_exists_in_tab() {
     assert_ne!(res.block_id, caller.block_id);
 }
 
-/// Regression for reagent P2 on PR #2404: an explicit `collapse_tree`
-/// request (`tree_expanded: Some(false)`) has no live mechanism to apply
-/// to an already-mounted pane's tree state — bypass reuse for it
-/// entirely rather than silently ignoring the request.
+/// An agent that always passes `collapse_tree` (`tree_expanded: Some(false)`) still gets the
+/// Editor pane its tab has: the option shapes only a pane the call creates. It used to bypass reuse
+/// (reagent P2 on PR #2404), which made a new Editor pane on every open.
 #[tokio::test]
-async fn open_editor_bypasses_reuse_when_tree_expanded_requested() {
-    let state = test_state();
+async fn open_editor_reuses_the_pane_even_with_collapse_tree() {
+    let (state, tab_id, caller, existing_editor) = tab_with_caller_and_editor().await;
+    show_panes(&state, &tab_id, &[&caller.block_id, &existing_editor.block_id]).await;
 
+    let mut cmd = editor_open_cmd(None, "/tmp/collapsed.md", Some(caller.block_id.clone()), Some(true));
+    cmd.tree_expanded = Some(false);
+    let res = open_pane(&state, cmd).await.expect("open_pane collapse_tree request");
+    assert!(!res.created, "collapse_tree must not force a new Editor pane");
+    assert_eq!(res.block_id, existing_editor.block_id);
+}
+
+/// A tab, a caller pane in it (an agent's stand-in) and an Editor pane, none placed in the layout.
+async fn tab_with_caller_and_editor() -> (AppState, String, PaneOpenResult, PaneOpenResult) {
+    let state = test_state();
     let ws_evs = dispatch_apply(&state, Command::CreateWorkspace { name: "w".into() }).await;
     let ws_id = ws_evs
         .iter()
@@ -659,11 +669,7 @@ async fn open_editor_bypasses_reuse_when_tree_expanded_requested() {
             _ => None,
         })
         .unwrap();
-    let tab_evs = dispatch_apply(
-        &state,
-        Command::CreateTab { workspace_id: ws_id.clone(), name: "t".into() },
-    )
-    .await;
+    let tab_evs = dispatch_apply(&state, Command::CreateTab { workspace_id: ws_id, name: "t".into() }).await;
     let tab_id = tab_evs
         .iter()
         .find_map(|e| match e {
@@ -671,7 +677,6 @@ async fn open_editor_bypasses_reuse_when_tree_expanded_requested() {
             _ => None,
         })
         .unwrap();
-
     let caller = open_pane(&state, {
         let mut cmd = editor_open_cmd(Some(tab_id.clone()), "/tmp/unused.txt", None, None);
         cmd.view = "sysinfo".into();
@@ -680,21 +685,87 @@ async fn open_editor_bypasses_reuse_when_tree_expanded_requested() {
     })
     .await
     .expect("open_pane caller");
+    let editor = open_pane(&state, editor_open_cmd(Some(tab_id.clone()), "/tmp/existing.md", None, None))
+        .await
+        .expect("open_pane existing editor");
+    (state, tab_id, caller, editor)
+}
 
-    let existing_editor = open_pane(
+async fn set_tree(state: &AppState, tab_id: &str, root: agentmux_common::LayoutNode) {
+    dispatch_apply(
+        state,
+        Command::LayoutSetTree {
+            tab_id: tab_id.to_string(),
+            new_tree: Some(root),
+            correlation_id: String::new(),
+            slices: None,
+        },
+    )
+    .await;
+}
+
+fn leaf_of(id: &str, block: &str) -> agentmux_common::LayoutNode {
+    agentmux_common::LayoutNode {
+        id: id.into(),
+        data: Some(agentmux_common::LayoutNodeData { block_id: block.into(), ..Default::default() }),
+        ..Default::default()
+    }
+}
+
+/// An Editor the user can't see is still the Editor to reuse, not a reason for a second one: a
+/// minimized pane (the editor shows it again when it takes the file), a pane behind a magnified
+/// one, and a background tab of a pane stack, which srv brings to the front because a tab that is
+/// not showing never takes the file.
+#[tokio::test]
+async fn open_editor_reuses_an_editor_that_is_minimized_or_behind_another_tab() {
+    // Minimized.
+    let (state, tab_id, caller, editor) = tab_with_caller_and_editor().await;
+    let mut chip = leaf_of("e", &editor.block_id);
+    chip.minimized = true;
+    set_tree(
         &state,
-        editor_open_cmd(Some(tab_id.clone()), "/tmp/existing.md", None, None),
+        &tab_id,
+        agentmux_common::LayoutNode {
+            id: "root".into(),
+            children: vec![leaf_of("a", &caller.block_id), chip],
+            ..Default::default()
+        },
+    )
+    .await;
+    let res = open_pane(
+        &state,
+        editor_open_cmd(None, "/tmp/m.md", Some(caller.block_id.clone()), Some(true)),
     )
     .await
-    .expect("open_pane existing editor");
+    .expect("minimized editor");
+    assert!(!res.created, "a minimized Editor pane is reused");
+    assert_eq!(res.block_id, editor.block_id);
 
-    let mut cmd = editor_open_cmd(None, "/tmp/collapsed.md", Some(caller.block_id.clone()), Some(true));
-    cmd.tree_expanded = Some(false);
-    let res = open_pane(&state, cmd).await.expect("open_pane collapse_tree request");
-    assert_ne!(
-        res.block_id, existing_editor.block_id,
-        "an explicit tree_expanded request must bypass reuse and create its own pane"
-    );
+    // A background tab of a stack.
+    let (state, tab_id, caller, editor) = tab_with_caller_and_editor().await;
+    let mut stack = leaf_of("s", &caller.block_id);
+    {
+        let data = stack.data.as_mut().unwrap();
+        data.block_stack = vec![caller.block_id.clone(), editor.block_id.clone()];
+        data.active_block_id = caller.block_id.clone();
+    }
+    set_tree(&state, &tab_id, agentmux_common::LayoutNode { id: "root".into(), children: vec![stack], ..Default::default() })
+        .await;
+    let res = open_pane(
+        &state,
+        editor_open_cmd(None, "/tmp/s.md", Some(caller.block_id.clone()), Some(true)),
+    )
+    .await
+    .expect("stacked editor");
+    assert!(!res.created, "an Editor behind another tab of its pane is reused");
+    assert_eq!(res.block_id, editor.block_id);
+    let s = state.srv_state.lock().await;
+    let leaf = crate::backend::layout::find_leaf_containing_block(
+        s.tabs.get(&tab_id).unwrap().rootnode.as_ref().unwrap(),
+        &editor.block_id,
+    )
+    .unwrap();
+    assert_eq!(leaf.data.as_ref().unwrap().block_id, editor.block_id, "its tab is brought to the front");
 }
 
 /// An Editor pane already open in the caller's own tab → reused (file
@@ -1120,6 +1191,7 @@ async fn open_editor_floating_request_bypasses_reuse() {
     )
     .await
     .expect("open_pane existing editor");
+    show_panes(&state, &tab_id, &[&caller.block_id, &existing_editor.block_id]).await;
 
     let mut floating_cmd = editor_open_cmd(
         None,
