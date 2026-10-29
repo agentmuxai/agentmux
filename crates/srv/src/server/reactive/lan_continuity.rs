@@ -29,6 +29,8 @@ pub(crate) const CERT_MAX_AGE_SECS: i64 = 600;
 /// An unvouched key is not looked into again for this long, so a peer that
 /// keeps showing one cannot make this machine ask the directory every time.
 const RECHECK_AFTER_SECS: i64 = 60;
+/// At most this many unvouched keys are remembered at once; past it a key is simply looked into again.
+const MAX_UNVOUCHED: usize = 1024;
 
 /// What made the issuing install trusted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -167,7 +169,12 @@ pub(crate) async fn move_if_vouched(
             unvouched().remove(&marker);
         }
         Err(why) => {
-            unvouched().insert(marker, (now, why.clone()));
+            // Only the last minute matters, so a peer that shows a new key every time cannot make this grow.
+            let mut seen = unvouched();
+            seen.retain(|_, (at, _)| now - *at < RECHECK_AFTER_SECS);
+            if seen.len() < MAX_UNVOUCHED {
+                seen.insert(marker, (now, why.clone()));
+            }
         }
     }
     let (path, cert) = result?;

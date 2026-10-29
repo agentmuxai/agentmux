@@ -91,6 +91,21 @@ async fn an_impostor_key_with_no_certificate_is_refused_and_the_pin_stays() {
 }
 
 #[tokio::test]
+async fn the_memory_of_unvouched_keys_does_not_grow_past_its_cap() {
+    let state = test_state();
+    let (old, _) = generate_lan_keypair([1u8; 32]);
+    pin(&state, "maop-cap", &old);
+    for n in 0..(MAX_UNVOUCHED as u32 + 50) {
+        let mut seed = [0u8; 32];
+        seed[..4].copy_from_slice(&n.to_le_bytes());
+        seed[31] = 7;
+        let (fresh, _) = generate_lan_keypair(seed);
+        let _ = move_if_vouched(&state, "maop-cap", &fresh, None, "automatic", false).await;
+    }
+    assert!(unvouched().len() <= MAX_UNVOUCHED, "{}", unvouched().len());
+}
+
+#[tokio::test]
 async fn a_certificate_by_an_install_nobody_here_trusts_is_refused() {
     let state = test_state();
     let (_dir, theirs) = host("attacker");

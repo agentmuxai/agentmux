@@ -103,6 +103,13 @@ impl LanDiscoveryController {
         }
         shown
     }
+
+    /// The certificate the peer that answered [`Self::find_agent_lan_pubkey`]
+    /// for `agent_id` gave beside its name key, while that answer is cached.
+    pub fn cached_lan_cert(&self, agent_id: &str) -> Option<agentmux_common::jekt_sign::WanKeyRecord> {
+        let cache = self.pubkey_cache.read().ok()?;
+        cache.get(agent_id).filter(|e| e.expires > std::time::Instant::now())?.cert.clone()
+    }
 }
 
 #[cfg(test)]
@@ -140,13 +147,6 @@ impl LanDiscoveryController {
             agent_id.to_string(),
             LanPubkeyCacheEntry { public_key: None, uid_key: None, cert: None, expires: std::time::Instant::now() + left },
         );
-    }
-
-    /// The certificate the peer that answered [`Self::find_agent_lan_pubkey`]
-    /// for `agent_id` gave beside its name key, while that answer is cached.
-    pub fn cached_lan_cert(&self, agent_id: &str) -> Option<agentmux_common::jekt_sign::WanKeyRecord> {
-        let cache = self.pubkey_cache.read().ok()?;
-        cache.get(agent_id).filter(|e| e.expires > std::time::Instant::now())?.cert.clone()
     }
 
     /// [`Self::seed_lan_pubkey_for_test`], with the certificate the answer carried.
