@@ -18,6 +18,7 @@ import { Logger } from "@/util/logger";
 import { translateError } from "@/app/errors/translate";
 import { buildInstanceSlug } from "./defaults/instance-slug";
 import { archiveThenReturnToPicker, newSessionArchives } from "./start-new-session";
+import { CONTAINER_META_CLEARED_BY_A_HOST_LAUNCH, leavePaneAgent } from "./leave-pane-agent";
 import type { LaunchOverrides } from "./launch-overrides";
 import { buildConfigFiles, deriveSlug } from "./agent-config-builder";
 import { checkNodejsForProvider, ensureProviderAuthDir, agentmuxHome, resolveCliBin, resolveEffectiveLaunchProvider, resolveInitialRuntimeConfig, resolveLaunchRuntime, commitLaunch } from "./agent-launch-env";
@@ -172,25 +173,16 @@ export class AgentViewModel {
     }
 
     /**
-     * Clear the agent-identity meta keys so AgentViewWrapper falls back
-     * to the picker. Called from the pane-frame back button and from
-     * useAgentCommands.back (which delegates here).
+     * Take this pane's agent out of it, in place, so AgentViewWrapper falls back to the picker: stop its CLI, then
+     * clear what the pane kept of it (`leavePaneAgent`). Called from the pane-frame back button and from
+     * useAgentCommands.back (which delegates here), and by Start a new session.
      */
     backToPicker = async (): Promise<void> => {
         try {
-            await this.ctx.setMeta({
-                agentId: null,
-                agentProvider: null,
-                agentOutputFormat: null,
-                agentName: null,
-                agentIcon: null,
-                agentCliPath: null,
-                agentCliArgs: null,
-                agentBinDir: null,
-                controller: null,
-                // Identity M4b-3 (spec §6.5.8): a stamp left behind here
-                // would name the previous launch's row to the next one.
-                agentInstanceId: null,
+            await leavePaneAgent(this.blockId, {
+                stop: (blockId) => RpcApi.AgentStopCommand(TabRpcClient, { blockid: blockId, force: true }),
+                setMeta: (meta) => this.ctx.setMeta(meta),
+                warn: (message) => Logger.warn("agent", message),
             });
         } catch {
             // fail silently — user can manually switch via widget bar
@@ -785,7 +777,13 @@ export class AgentViewModel {
                 // back (#2872). `--fork-session` is deliberately NOT persisted
                 // here — it is a one-shot launch intent, not a durable arg.
                 [PROVIDER_FLAGS_META_KEY]: paneFlags,
-                ...(overrides?.containerImage || agent.container_image ? { "agent:container_image": overrides?.containerImage || agent.container_image } : {}),
+                // The image only when this agent has one. Otherwise the previous occupant's go (a host agent: all its
+                // container keys): the merge would leave them, and a host agent in a once-container pane would read as one.
+                ...(overrides?.containerImage || agent.container_image
+                    ? { "agent:container_image": overrides?.containerImage || agent.container_image }
+                    : agentMode === "container"
+                      ? { "agent:container_image": null }
+                      : CONTAINER_META_CLEARED_BY_A_HOST_LAUNCH),
                 // ACP harnesses (Copilot, OpenClaw, Pi) need srv's AcpController;
                 // a container agent keeps the per-turn path into its container
                 // (SPEC_ACP_CLIENT_CONFORMANCE_2026_10_07.md).
