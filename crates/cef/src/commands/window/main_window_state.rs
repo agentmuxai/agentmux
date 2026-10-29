@@ -79,6 +79,7 @@ pub fn fit(state: &MainWindowState, work_area_at: impl Fn(i32, i32) -> Option<Wo
 /// Whether `rect` (`left, top, right, bottom`) fills `work` (give or take a point
 /// or two): how a macOS window that was zoomed looks, before CEF reports it as
 /// maximized. NSWindow's zoom sets the frame to the display's visible frame.
+#[cfg(any(target_os = "macos", test))]
 pub fn fills_work_area(rect: &agentmux_common::ipc::Rect, work: WorkArea) -> bool {
     const SLACK: i32 = 2;
     let (wx, wy, ww, wh) = work;
