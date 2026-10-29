@@ -147,7 +147,7 @@
     max-width: 220px;
     margin-left: var(--space-2);
     font-size: var(--text-xs);
-    color: var(--secondary-text-color, rgb(from var(--main-text-color) r g b / 0.45));
+    color: var(--secondary-text-color);
     pointer-events: none;
 }
 
@@ -156,7 +156,7 @@
     flex-shrink: 0;
     margin-left: var(--space-2);
     font-size: var(--text-xs);
-    color: var(--secondary-text-color, rgb(from var(--main-text-color) r g b / 0.45));
+    color: var(--secondary-text-color);
     font-family: var(--font-mono, "Hack", monospace);
     letter-spacing: 0.02em;
     pointer-events: none;

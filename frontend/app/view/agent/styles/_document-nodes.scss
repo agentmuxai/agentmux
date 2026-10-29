@@ -73,18 +73,18 @@ $transcript-preview-max-height: calc(50vh / 3);
         color: var(--accent-color);
     }
     .sh-subcommand {
-        color: var(--term-cyan, var(--accent-color));
+        color: var(--term-cyan);
     }
     .sh-keyword,
     .sh-heredoc-marker {
-        color: var(--term-magenta, var(--accent-color));
+        color: var(--term-magenta);
     }
     .sh-flag {
-        color: var(--term-blue, var(--info-color));
+        color: var(--term-blue);
     }
     .sh-flag-value,
     .sh-string {
-        color: var(--term-green, var(--success-color));
+        color: var(--term-green);
     }
     // A heredoc body of unknown language is plain text, not one long
     // string; known languages are coloured below.
@@ -95,10 +95,10 @@ $transcript-preview-max-height: calc(50vh / 3);
     .sh-variable,
     .sh-env-assign,
     .sh-number {
-        color: var(--term-yellow, var(--warning-color, var(--accent-color)));
+        color: var(--term-yellow);
     }
     .sh-substitution {
-        color: var(--term-magenta, var(--accent-color));
+        color: var(--term-magenta);
     }
     .sh-operator,
     .sh-redirect,
@@ -109,7 +109,7 @@ $transcript-preview-max-height: calc(50vh / 3);
         color: var(--link-color);
     }
     .sh-comment {
-        color: var(--grey-text-color, var(--secondary-text-color));
+        color: var(--grey-text-color);
         font-style: italic;
     }
 }

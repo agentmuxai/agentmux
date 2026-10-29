@@ -34,7 +34,7 @@
 .ssh-approval-input {
     padding: var(--space-2);
     font-family: var(--font-mono);
-    background: var(--form-element-bg-color, var(--main-bg-color));
+    background: var(--form-element-bg-color);
     color: var(--main-text-color);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-sm);
