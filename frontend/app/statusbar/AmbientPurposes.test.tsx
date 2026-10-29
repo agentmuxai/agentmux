@@ -40,6 +40,13 @@ describe("AmbientPurposes", () => {
         expect(await screen.findByText("2 failed")).toBeTruthy();
     });
 
+    it("marks a purpose that only refuses, which lights the dot as much as a failing one", async () => {
+        outcomesCmd.mockResolvedValue({ activity_summary: { accepted: 1, "rejected:format": 3 } });
+        render(() => <AmbientPurposes />);
+        expect(await screen.findByText("3 refused")).toBeTruthy();
+        expect(screen.queryByText(/failed/)).toBeNull();
+    });
+
     it("says so when the counts could not be read, and keeps the last ones", async () => {
         outcomesCmd.mockResolvedValueOnce(healthy);
         render(() => <AmbientPurposes />);

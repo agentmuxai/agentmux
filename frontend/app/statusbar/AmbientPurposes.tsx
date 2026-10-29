@@ -25,8 +25,10 @@ function PurposeLine(props: { row: AmbientPurposeRow; open: boolean; onToggle: (
                 onClick={props.onToggle}
             >
                 <span class="ambient-purpose-name">{props.row.name}</span>
-                <Show when={props.row.counts.failed > 0}>
-                    <span class="ambient-purpose-failed">{props.row.counts.failed} failed</span>
+                <Show when={props.row.counts.failed > 0 || props.row.unhealthy}>
+                    <span class="ambient-purpose-failed">
+                        {props.row.counts.failed > 0 ? `${props.row.counts.failed} failed` : `${props.row.counts.refused} refused`}
+                    </span>
                 </Show>
                 <span class="ambient-purpose-total">{props.row.total}</span>
             </Button>
