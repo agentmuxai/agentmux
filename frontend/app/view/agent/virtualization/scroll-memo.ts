@@ -48,8 +48,7 @@ function leftKey(blockId: string): string {
     return typeof agent === "string" && agent !== "" ? `agent:${agent}` : `block:${blockId}`;
 }
 
-function rememberLeft(blockId: string, memo: ScrollMemo | null): void {
-    const key = leftKey(blockId);
+function rememberLeft(key: string, memo: ScrollMemo | null): void {
     left.delete(key); // a re-set key moves to the end: the oldest is the first
     if (!memo || "bottom" in memo) return;
     left.set(key, memo);
@@ -158,11 +157,18 @@ export function useScrollMemo(opts: {
     const capture = (): ScrollMemo | null =>
         captureScrollMemo(opts.scroller(), untrack(opts.following), opts.zoom ? untrack(opts.zoom) : 1);
     capturers.set(blockId, capture);
+    // The key is read while the pane is mounted: a deleted block's meta is gone by the time the pane's
+    // cleanup runs, which would file the place under the block id and lose it for the reopened pane.
+    let key = leftKey(blockId);
+    createEffect(() => {
+        const k = leftKey(blockId);
+        if (k.startsWith("agent:")) key = k;
+    });
     onCleanup(() => {
         if (capturers.get(blockId) === capture) capturers.delete(blockId);
         // The pane is going away (unmounted behind another tab, or closed): keep where it was scrolled to.
         // The scroller is still attached while the owner is disposed; if it is not, there is nothing to read.
-        rememberLeft(blockId, capture());
+        rememberLeft(key, capture());
     });
     // A reload reads only the tail, so a pane scrolled up into pages it loaded
     // later would come back at the bottom.

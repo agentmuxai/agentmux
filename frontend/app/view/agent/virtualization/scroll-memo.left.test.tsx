@@ -66,6 +66,15 @@ describe("scroll-memo: a pane that goes away scrolled up leaves its place", () =
         expect(hasScrolledUpMemo("blk-2"), "used once").toBe(false);
     });
 
+    it("files the place under the agent even when the block's meta is already gone at cleanup", () => {
+        agentOf.set("blk-1", "agent-a");
+        agentOf.set("blk-2", "agent-a");
+        const first = pane("blk-1", scrollerWith([{ id: "r2", top: 20 }]), false);
+        agentOf.delete("blk-1"); // a deleted block: its meta is gone before the pane is disposed
+        first.unmount();
+        expect(hasScrolledUpMemo("blk-2")).toBe(true);
+    });
+
     it("a pane that was following leaves nothing, and clears an older place", () => {
         agentOf.set("blk-1", "agent-a");
         pane("blk-1", scrollerWith([{ id: "r2", top: 20 }]), false).unmount();
