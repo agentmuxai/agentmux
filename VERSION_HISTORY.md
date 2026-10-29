@@ -1,5 +1,44 @@
 # AgentMux Version History
 
+## 0.60.6 — 2026-10-28
+
+- Agents can read a Google Calendar you connect: choose which agents may use it in the account's details, and see what they did
+- ci: the Linux build and the nightly release tag get their GitHub tokens from the actions broker (OIDC), not from an org-wide App private key
+- An agent whose turn an upgrade or restart cut off is told to carry on, and the cut-off turn reads as interrupted instead of a raw diagnostic error
+- The Hangar shows the icons your operating system shows for each file type and folder, the same as Windows Explorer, instead of AgentMux's own glyphs (Windows first; set files:icons to app to keep the old ones).
+- An agent's LAN signing key is now kept per machine instead of per channel, so moving an agent between channels or builds no longer changes the key other computers have pinned for it
+- A browser pane's page no longer draws in the wrong place while you drag panes or tabs: snapshots for the drag are taken only from pages that can answer, at most two at a time and given up on after two seconds, so they can't hold up the host commands that place the pages.
+- Agents of a person who connected GitHub push through a secret scan, commit as the AgentMux GitHub App's bot with the owner as co-author and an Agent trailer, can't skip the scan with git push --no-verify, and their pull requests carry the owner's GitHub id; changing CI workflow files needs a per-agent opt-in.
+- Agent picker: the filter bar's magnifier has room from the edge and the input
+- Agents: up to 24 agents run at once by default (was 12); agents:max_running still changes it
+- My Agents: the working pill is red, as in the Swarm
+- In My Agents, an agent that runs with no pane has a dashed border and a "no pane" tag, and clicking it asks Open it or Fork
+- A second click on a closing pane no longer reports a failure for a close that was working, and a window tab switch that replaces another no longer logs an error
+- Every countdown toast and banner now has a cancel and a do-it-now button (Keep running / Close now for an agent's close, each sensitive operation's own words); the OS toast's decisive buttons are proven by the launcher
+- fix(memory): the re-send after a compaction sends Personal Memory newest first, caps each file at 8 KB, names the files it could not fit, and nudges the agent to trim large or stale files
+- Stop agents over several agents is one window: one notification (Closing 5 agents: A, B, C and 2 more) with Keep running and Close now for all, a Keep running on each agent's own banner that keeps only that agent, and one audit entry
+- The built-in setup check no longer assumes our own GitHub tooling, existing agents get its new wording unless they edited it, and the open-PR overlap list falls back to plain gh
+- Skills: a skill can reach every agent, and new agents, from Memory > Skills (switches per skill; a new skill reaches the agents created after it by default)
+- A CI check rejects private tooling and repository names in the seed agents, operator-config entries and built-in skills every install ships
+- Agents with no GitHub identity of their own (no per-agent GitHub tool, no connected GitHub account) keep using the person's own gh login instead of finding gh logged out
+- A container agent's credentials are its own alone: ~/.claude is 700 in the image, and at container start the credentials file is handed to the turn user when root owns it and set to 600, with a log line saying what the host really presents
+- An agent opens with a 1 to 3 line update when the person opens its pane (My Agents, the Swarm's Open, the picker), not when a pane merely restores
+- The Stash toolbox button and its drawer are gone from agent panes: accounts, memory, MCP servers, skills, bundles, seat, registration and devices now live in Connectors, Memory, My Agents, Warden and Settings.
+- A container agent can register its dev server with RegisterDevServer: the container token is accepted on the route, bound to the agent's own container
+- Agents can manage the skill catalog with the new Skills tool (list, get, upsert, delete, bind, unbind, who gets a skill)
+- Agents spawn and open take several at once (workers, agents): one approval prompt for a spawn batch, all start or none, and a batch that does not fit under the agent limit is refused up front naming which would fit, without stopping any agent
+- A new container agent now sends its starter prompt by itself once you sign in, instead of waiting silently for a first message; the sign-in line is replaced by its answer, and a start that ends with nothing to do says it is ready for your message.
+- The dev proxy reaches a container agent's dev server on Docker Desktop (a relay container on the agents network with one loopback port), passes WebSocket upgrades through so hot reload works, and the container dev-server route is checked against a real daemon
+- Container agents get every srv route a native agent has (Presence, Vault, Browser and UI, Tasks, Schedule, Agents, Widget, RegisterDevServer and the rest) except the ones that run commands on the host, read host files outside their mounts or are the app's own plumbing, and a refused route says why and what to do instead; a container agent's browser defaults to its own Incognito jar, never the user's Personal profile
+- feat(skills): AgentMux ships a built-in disk-cleanup skill, seeded once for every agent (measure first, say what is safe to remove, ask before deleting anything); the seeding keeps a delete final and never overwrites an edit
+- The container agent image carries python3 and the GitHub CLI (gh)
+- Container agents get git and gh through AgentMux: a short-lived GitHub token from the host's gh-agent (or the connected account) for the repository they work on, the push scan and commit trailers mounted read-only, and no token written into the container.
+- Closing an agent's pane no longer asks to confirm or shows a shutdown log: the agent keeps running without a pane, with a note and an Open
+- Fix RegisterDevServer for container agents: the dev proxy finds the agent's container from its pane, so agents whose id differs from their slug register
+- feat(app): an agent can ask for the pane-history store's free space to be given back at the next start, withdraw it or read where it stands (App history_reclaim); it is recorded as the agent and the person sees it pending in Storage
+- Opening Warden, Memory or Connectors from the widget bar restores the pane when it is minimized and switches to it when it is a tab in a stack
+- The slug-migration crash tests run as one test per step and crash point instead of two long loops, so they run in parallel and stop hitting the test runner's kill time on Windows
+
 ## 0.60.5 — 2026-10-28
 
 - perf(srv): a line appended to a transcript is written in place into its tail row, so a line no longer rewrites the whole 64 KB tail part (the recovery tool knows the row's slack). srv writes about 89% fewer bytes in the memory lab. If a transcript is later appended to by an older AgentMux, its pane resyncs once

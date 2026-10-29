@@ -23,6 +23,7 @@ export const ADVANCED_SETTINGS = {
         description:
             "Shows DevTools in the menu, Inspect Element and View Page Source in right-click menus, and other developer tools. Off by default in the installed app; on by default in a task dev or debug build",
         section: "advanced",
+        group: "Developer",
         keywords: ["developer", "devtools", "inspect element", "view source", "task dev", "debug build", DEV_MODE_KEY],
     },
     disableWebgl: {
@@ -30,6 +31,7 @@ export const ADVANCED_SETTINGS = {
         label: "Disable WebGL rendering",
         description: "Fall back to canvas-based terminal rendering (restart required)",
         section: "advanced",
+        group: "Terminal (power user)",
         keywords: ["gpu rendering", "canvas fallback", "graphics glitch", "term:disablewebgl"],
     },
     autoAnswerTimeout: {
@@ -37,6 +39,7 @@ export const ADVANCED_SETTINGS = {
         label: "Auto-answer timeout",
         description: "Seconds an AskUserQuestion panel waits for you before auto-selecting the recommended option(s)",
         section: "advanced",
+        group: "Agent panes",
         keywords: ["auto select", "question timeout", "agent:askquestiontimeoutms"],
     },
     compactAt: {
@@ -45,6 +48,7 @@ export const ADVANCED_SETTINGS = {
         description:
             "Thousands of tokens at which Claude agents compact their context. Lower saves tokens; higher keeps more detail. 0 keeps Claude Code's own (about 967). Takes effect when each agent next starts",
         section: "advanced",
+        group: "Agent panes",
         keywords: ["compaction", "context", "tokens", "autoCompactWindow", "agent:compactat"],
     },
     subagentModel: {
@@ -53,6 +57,7 @@ export const ADVANCED_SETTINGS = {
         description:
             "The model Claude agents' general-purpose sub-agents run on: sonnet, haiku, opus, a model ID, or inherit to use the agent's own. A sub-agent that names its own model, or one the agent passes per call, still wins. Takes effect when each agent next starts",
         section: "advanced",
+        group: "Agent panes",
         keywords: ["sub-agent", "subagent", "model", "tokens", "agent:subagentmodel", "sonnet"],
     },
     exploreModel: {
@@ -61,6 +66,7 @@ export const ADVANCED_SETTINGS = {
         description:
             "The model Claude agents' Explore sub-agents run on: haiku, sonnet, opus, a model ID, or inherit to leave Claude Code's built-in. Takes effect when each agent next starts",
         section: "advanced",
+        group: "Agent panes",
         keywords: ["explore", "sub-agent", "subagent", "model", "tokens", "agent:exploremodel", "haiku"],
     },
     compactHints: {
@@ -69,6 +75,7 @@ export const ADVANCED_SETTINGS = {
         description:
             "When an agent's turn ends with a large context, tell it once that it can compact itself before its next task, so it doesn't compact by itself mid-task",
         section: "advanced",
+        group: "Agent panes",
         keywords: ["compaction", "context", "tokens", "hint", "agent:compacthints"],
     },
     overlapNotes: {
@@ -77,6 +84,7 @@ export const ADVANCED_SETTINGS = {
         description:
             "Tell an agent when it edits a file another agent on this computer is also changing, naming that agent so it can message them first",
         section: "advanced",
+        group: "Agent panes",
         keywords: ["same file", "conflict", "other agents", "Presence", "agent:overlapnotes"],
     },
     retryOnReconnect: {
@@ -85,6 +93,7 @@ export const ADVANCED_SETTINGS = {
         description:
             "When a turn failed because the model API couldn't be reached, retry it once by itself when the API answers again, unless a tool ran in it or you typed in that pane since",
         section: "advanced",
+        group: "Agent panes",
         keywords: ["offline", "network", "auto retry", "reconnect", "agent:retryonreconnect"],
     },
     kanbanReminders: {
@@ -92,6 +101,7 @@ export const ADVANCED_SETTINGS = {
         label: "Remind idle agents of their backlog",
         description: KANBAN_REMINDERS_DESCRIPTION,
         section: "advanced",
+        group: "Agent panes",
         keywords: ["kanban", "backlog", "reminder", "tasks waiting", "kanban:reminders"],
     },
     sampleInterval: {
@@ -99,6 +109,7 @@ export const ADVANCED_SETTINGS = {
         label: "Sample interval",
         description: "Seconds between sysinfo widget samples",
         section: "advanced",
+        group: "Sysinfo widget",
         keywords: ["sysinfo refresh rate", "polling interval", "telemetry:interval"],
     },
     historyLength: {
@@ -106,6 +117,7 @@ export const ADVANCED_SETTINGS = {
         label: "History length",
         description: "Number of sysinfo widget samples retained (30–1024)",
         section: "advanced",
+        group: "Sysinfo widget",
         keywords: ["sysinfo history", "graph length", "telemetry:numpoints"],
     },
     enableFileDrop: {
@@ -113,6 +125,7 @@ export const ADVANCED_SETTINGS = {
         label: "Enable file drop",
         description: "Drag files onto an agent pane to attach them",
         section: "advanced",
+        group: "Drag & drop",
         keywords: ["drag and drop", "file attach", "dnd:enabled"],
     },
     insertReferenceToken: {
@@ -120,6 +133,7 @@ export const ADVANCED_SETTINGS = {
         label: "Insert reference token",
         description: "Also insert a file-reference token into the composer on drop, in addition to attaching the file",
         section: "advanced",
+        group: "Drag & drop",
         keywords: ["file reference", "drop token", "dnd:agentinserttoken"],
     },
     maxConcurrentUploads: {
@@ -127,6 +141,7 @@ export const ADVANCED_SETTINGS = {
         label: "Max concurrent uploads",
         description: "Files uploaded at once on a multi-file drop. Leave blank for unlimited.",
         section: "advanced",
+        group: "Drag & drop",
         keywords: ["upload concurrency", "parallel uploads", "dnd:concurrency"],
     },
     globalEnvVars: {
@@ -134,6 +149,7 @@ export const ADVANCED_SETTINGS = {
         label: "Global environment variables",
         description: "Environment variables injected into every shell",
         section: "advanced",
+        group: "Environment",
         keywords: ["environment variables", "env vars", "shell env", "cmd:env"],
     },
 } satisfies Record<string, SettingsIndexEntry>;
