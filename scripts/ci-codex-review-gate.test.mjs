@@ -7,7 +7,7 @@
 
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { createGitHubClient } from "./lib/github-rest.mjs";
+import { createGitHubClient, GitHubError } from "./lib/github-rest.mjs";
 import {
     AGE_REFRESH_MS,
     ageText,
@@ -18,8 +18,10 @@ import {
     isDocsOnlyPath,
     latestCodexOutput,
     needsDiffSince,
+    prNoCode,
     reviewedCommit,
     SKIP_AUTHORS,
+    skipNeedsClassCheck,
     skipNote,
     STALE_REQUEST_MS,
     sweep,
@@ -563,10 +565,55 @@ describe("muxreview skip reasons", () => {
         expect(r.description).toMatch(/round cap/);
     });
 
-    it("a docs-only skip passes the head and says why", () => {
-        const r = evaluateCodexGate({ headSha: HEAD, comments: [note("docs-only")] });
+    it("a docs-only skip passes the head and says why, once the gate's own check of the files agrees", () => {
+        const r = evaluateCodexGate({ headSha: HEAD, comments: [note("docs-only")], noCodePr: true });
         expect(r.state).toBe("success");
         expect(r.description).toMatch(/Docs-only PR/);
+    });
+
+    it("a no-code skip passes the head and says why, once the gate's own check of the files agrees", () => {
+        const r = evaluateCodexGate({ headSha: HEAD, comments: [note("no-code")], noCodePr: true });
+        expect(r.state).toBe("success");
+        expect(r.description).toMatch(/No code in this PR/);
+    });
+
+    it.each([["no-code"], ["docs-only"]])("a %s skip is refused when the files say there is code, or were not checked", (reason) => {
+        for (const noCodePr of [false, null, undefined]) {
+            const r = evaluateCodexGate({ headSha: HEAD, comments: [note(reason)], noCodePr, noCodeWhy: "src/main.rs is code" });
+            expect(r.state, String(noCodePr)).toBe("pending");
+            expect(r.description).toMatch(/no code, but src\/main\.rs is code/);
+        }
+        expect(evaluateCodexGate({ headSha: HEAD, comments: [note(reason)] }).state).toBe("pending");
+    });
+
+    it("a no-code skip for another head, or from anyone but muxreview, passes nothing", () => {
+        expect(evaluateCodexGate({ headSha: HEAD, comments: [note("no-code", OLD)], noCodePr: true }).state).toBe("pending");
+        const forged = { ...note("no-code"), user: { login: "someone-else" } };
+        expect(evaluateCodexGate({ headSha: HEAD, comments: [forged], noCodePr: true }).state).toBe("pending");
+        expect(skipNeedsClassCheck({ headSha: HEAD, comments: [forged] })).toBe(false);
+    });
+
+    it("the files are read only for a skip that claims there is no code, on this head", () => {
+        expect(skipNeedsClassCheck({ headSha: HEAD, comments: [note("no-code")] })).toBe(true);
+        expect(skipNeedsClassCheck({ headSha: HEAD, comments: [note("docs-only")] })).toBe(true);
+        expect(skipNeedsClassCheck({ headSha: HEAD, comments: [note("no-code", OLD)] })).toBe(false);
+        expect(skipNeedsClassCheck({ headSha: HEAD, comments: [note("round-cap")] })).toBe(false);
+        expect(skipNeedsClassCheck({ headSha: HEAD, comments: [note("quota")] })).toBe(false);
+    });
+
+    it("a round-cap or quota skip does not depend on the files", () => {
+        expect(evaluateCodexGate({ headSha: HEAD, comments: [note("round-cap")], noCodePr: false }).state).toBe("success");
+        expect(evaluateCodexGate({ headSha: HEAD, comments: [note("quota")], noCodePr: false }).state).toBe("success");
+    });
+
+    it("Codex's findings on the head outrank a no-code skip", () => {
+        const findings = {
+            id: 9, user: { login: "chatgpt-codex-connector[bot]" }, state: "COMMENTED",
+            submitted_at: "2026-10-01T11:00:00Z", commit_id: HEAD,
+            body: `**Reviewed commit:** \`${HEAD.slice(0, 10)}\``,
+        };
+        const r = evaluateCodexGate({ headSha: HEAD, comments: [note("no-code")], reviews: [findings], noCodePr: true });
+        expect(r.state).toBe("failure");
     });
 
     it("a quota skip keeps its description", () => {
@@ -585,6 +632,59 @@ describe("muxreview skip reasons", () => {
         };
         const r = evaluateCodexGate({ headSha: HEAD, comments: [note("round-cap")], reviews: [findings] });
         expect(r.state).not.toBe("success");
+    });
+});
+
+describe("prNoCode", () => {
+    const pull = { number: 7, base: { sha: "b".repeat(40) }, head: { sha: HEAD } };
+    const MERGE_BASE = "a".repeat(40);
+    const manifest = (v) => JSON.stringify({ name: "agentmux", version: v, dependencies: { left: "1.0.0" } }, null, 4);
+
+    function fakeClient({ files, contents = {} }) {
+        const calls = [];
+        return {
+            calls,
+            paginate: async (path) => (calls.push(path), files),
+            json: async (path) => (calls.push(path), { merge_base_commit: { sha: MERGE_BASE } }),
+            request: async (path, init) => {
+                calls.push(path);
+                expect(init.headers.Accept).toBe("application/vnd.github.raw+json");
+                const m = /contents\/(.+)\?ref=(.+)$/.exec(path);
+                const key = `${decodeURIComponent(m[1])}@${m[2]}`;
+                if (!(key in contents)) throw new GitHubError("GET", path, 404, "");
+                return { text: async () => contents[key] };
+            },
+        };
+    }
+
+    it("a release PR reads each version file at the merge base and at the head", async () => {
+        const client = fakeClient({
+            files: [{ filename: "package.json", status: "modified" }, { filename: "VERSION_HISTORY.md", status: "modified" }],
+            contents: { [`package.json@${MERGE_BASE}`]: manifest("0.60.6"), [`package.json@${HEAD}`]: manifest("0.60.7") },
+        });
+        expect(await prNoCode(client, "o/r", pull)).toMatchObject({ ok: true });
+        expect(client.calls).toContain("/repos/o/r/pulls/7/files");
+        expect(client.calls).toContain(`/repos/o/r/contents/package.json?ref=${MERGE_BASE}`);
+    });
+
+    it("code in the PR is refused, and nothing is read for docs", async () => {
+        const client = fakeClient({ files: [{ filename: "docs/a.md", status: "modified" }, { filename: "src/a.rs", status: "modified" }] });
+        expect(await prNoCode(client, "o/r", pull)).toEqual({ ok: false, why: "src/a.rs is code" });
+        expect(client.calls.some((c) => c.includes("/contents/"))).toBe(false);
+    });
+
+    it("a version file that has a dependency change is refused", async () => {
+        const dep = JSON.stringify({ name: "agentmux", version: "0.60.7", dependencies: { left: "2.0.0" } }, null, 4);
+        const client = fakeClient({
+            files: [{ filename: "package.json", status: "modified" }],
+            contents: { [`package.json@${MERGE_BASE}`]: manifest("0.60.6"), [`package.json@${HEAD}`]: dep },
+        });
+        expect(await prNoCode(client, "o/r", pull)).toMatchObject({ ok: false });
+    });
+
+    it("a file missing at one of the commits is refused, not an error", async () => {
+        const client = fakeClient({ files: [{ filename: "package.json", status: "modified" }], contents: { [`package.json@${HEAD}`]: manifest("0.60.7") } });
+        expect(await prNoCode(client, "o/r", pull)).toMatchObject({ ok: false });
     });
 });
 
