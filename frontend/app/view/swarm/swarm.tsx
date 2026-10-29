@@ -17,6 +17,6 @@ export const swarmPaneTab = lazyPaneTab({
     // Applies `term:zoom` as CSS zoom; fills the pane edge to edge.
     capabilities: { paneZoom: {}, noPadding: true },
     sections: SWARM_SECTIONS,
-    members: ["liveTitle"],
+    members: ["liveTitle", "search"],
     load: () => import("./swarm-instance"),
 });

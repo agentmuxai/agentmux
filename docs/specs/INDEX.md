@@ -773,6 +773,7 @@ partial list.
 | [`SPEC_STREAMING_BASH_RUNNER_2026_05_11`](SPEC_STREAMING_BASH_RUNNER_2026_05_11.md) | Streaming bash runner — PreToolUse command rewrite |
 | [`SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20`](SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20.md) | SPEC — live subagent reconciliation + Retire action (best-practices plan) |
 | [`SPEC_SUPER_AGENT_2026_10_25`](SPEC_SUPER_AGENT_2026_10_25.md) | Spec: the super agent, one place for sensitive operations |
+| [`SPEC_SWARM_FILTER_BAR_2026_10_29`](SPEC_SWARM_FILTER_BAR_2026_10_29.md) | The Swarm filter bar: narrow the agent list by name and by what an agent is working on |
 | [`SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02`](SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02.md) | SPEC: The Swarm shows the agents of every other instance this one knows about |
 | [`SPEC_SWARM_REFINEMENTS_2026_10_17`](SPEC_SWARM_REFINEMENTS_2026_10_17.md) | Spec: Swarm refinements — the selection count, provider icons on remote agents, broadcast to remote agents |
 | [`SPEC_SWARM_SECTIONS_SUPERVISOR_SETTINGS_AND_KANBAN_2026_10_24`](SPEC_SWARM_SECTIONS_SUPERVISOR_SETTINGS_AND_KANBAN_2026_10_24.md) | Spec: the Swarm as three sections (Supervisor, Broadcast, Kanban); the Supervisor switched off until the operator turns it on, with its settings in the Supervisor section |

@@ -24,6 +24,7 @@ import { contextReadingFromMeta } from "@/app/store/agent-pane-state/context-rea
 import { resolveSwarmLine, type SwarmLine } from "@/app/store/swarm-line";
 import type { SupervisorMode } from "@/types/rpc/SupervisorMode";
 import { remoteSections, type SwarmOtherInstances } from "./swarm-remote";
+import { actionableKeys } from "./swarm-filter-state";
 import { createSignal, untrack, type Accessor, type Setter } from "solid-js";
 import { sameList, traced } from "@/app/util/select-trace";
 import { countdownCandidates, withRetiredEntry } from "./swarm-retire";
@@ -920,7 +921,6 @@ export class SwarmViewModel {
 
 
 
-
     private _subagents = createSignal<ActiveSubagent[]>([]);
     subagentsAtom: Accessor<ActiveSubagent[]> = this._subagents[0];
     private setSubagents: Setter<ActiveSubagent[]> = traced("subagents", this._subagents);
@@ -1654,7 +1654,7 @@ export class SwarmViewModel {
         reach: FleetAction,
         call: (targets: string[]) => Promise<FleetActionResult>
     ): Promise<FleetActionResult> {
-        const selected = Array.from(this.selectedBlockIdsAtom());
+        const selected = actionableKeys(this, this.selectedBlockIdsAtom());
         const known = this.fleetTargets();
         const { reachable: targets, unreachable } = partitionTargets(selected, reach, known);
         this.setFleetActionInFlight(true);
