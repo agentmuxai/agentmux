@@ -105,7 +105,8 @@ pub(crate) fn prepare(workspace: &Path, root: Option<&Path>, req: CommandPaneOpe
         return Err(format!("there are {MAX_SNAPSHOTS} snapshots open already: close some of those panes first"));
     }
     let dir = root.join(uuid::Uuid::new_v4().to_string());
-    let copy = crate::backend::workspace_copy::copy_file(&workspace_real, &real, &dir, limit).inspect_err(|_| {
+    // The copy is in a folder of its own, so a workspace file named like the marker can't take its place.
+    let copy = crate::backend::workspace_copy::copy_file(&workspace_real, &real, &dir.join("copy"), limit).inspect_err(|_| {
         let _ = std::fs::remove_dir_all(&dir);
     })?;
     let taken = chrono::Local::now().format("%H:%M").to_string();
@@ -208,6 +209,20 @@ mod tests {
     }
 
     #[test]
+    fn a_file_named_like_the_marker_cannot_take_its_place() {
+        let (_tmp, ws, root) = setup();
+        std::fs::write(ws.join(MARKER), "payload").unwrap();
+        let (open, snap) = prepare(&ws, Some(&root), open("editor", Some(MARKER))).unwrap();
+        let snap = snap.unwrap();
+        snap.opened("pane-x");
+        let copy = PathBuf::from(open.file.unwrap());
+        assert_eq!(std::fs::read_to_string(&copy).unwrap(), "payload");
+        assert_eq!(std::fs::read_to_string(copy.parent().unwrap().parent().unwrap().join(MARKER)).unwrap(), "pane-x");
+        remove_where(&root, |noted| noted == Some("pane-x"));
+        assert!(!copy.exists(), "closing its pane takes it");
+    }
+
+    #[test]
     fn only_the_checked_fields_survive_and_a_path_outside_is_refused() {
         let (tmp, ws, root) = setup();
         let mut req = open("media", Some("docs/notes.md"));
@@ -263,7 +278,7 @@ mod tests {
             if let Some(block) = note {
                 snap.opened(block);
             }
-            PathBuf::from(open.file.unwrap()).parent().unwrap().to_path_buf()
+            PathBuf::from(open.file.unwrap()).parent().unwrap().parent().unwrap().to_path_buf()
         };
         let (kept, closed, opening) = (take(Some("pane-a")), take(Some("pane-b")), take(None));
         remove_where(&root, |noted| noted == Some("pane-b"));

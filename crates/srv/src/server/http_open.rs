@@ -20,7 +20,12 @@ pub(super) async fn handle_pane_open(
     // A container agent opens a read-only snapshot of a file in its workspace, never a path a window would read.
     let mut snapshot = None;
     if let Some(axum::Extension(grant)) = grant {
-        match super::container_pane_snapshot::open_for(&state, &grant.block_id, req) {
+        // Reads and copies a file: off the async workers.
+        let taking = {
+            let (state, block) = (state.clone(), grant.block_id.clone());
+            tokio::task::spawn_blocking(move || super::container_pane_snapshot::open_for(&state, &block, req)).await
+        };
+        match taking.unwrap_or_else(|e| Err(format!("the snapshot couldn't be taken: {e}"))) {
             Ok((checked, taken)) => (req, snapshot) = (checked, taken),
             Err(e) => return (StatusCode::FORBIDDEN, Json(json!({ "error": e }))).into_response(),
         }
