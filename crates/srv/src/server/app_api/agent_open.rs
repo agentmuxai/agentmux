@@ -1080,12 +1080,10 @@ pub(super) fn write_agent_config_files(
     }
 
     // Expand ~ in work_dir
-    let expanded_dir = if work_dir.starts_with("~/") || work_dir == "~" {
-        if let Ok(home) = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")) {
-            format!("{}/{}", home, work_dir.trim_start_matches("~/"))
-        } else {
-            work_dir.to_string()
-        }
+    let expanded_dir = if let Some(under_override) = crate::backend::base::expand_under_home_override(work_dir) {
+        under_override.to_string_lossy().to_string()
+    } else if let (true, Ok(home)) = (work_dir.starts_with("~/") || work_dir == "~", std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE"))) {
+        format!("{}/{}", home, work_dir.trim_start_matches("~/"))
     } else {
         work_dir.to_string()
     };
