@@ -1248,7 +1248,7 @@ impl PersistentSubprocessController {
             &self.boot_id,
             &self.block_id,
             session_hint,
-            move |why| Self::stop_after_lease_loss(&inner, &block_id, &why),
+            move |why| Self::on_lease_lost(&inner, &block_id, &why),
         )?;
         Ok(Some(Arc::new(held)))
     }
@@ -1269,7 +1269,7 @@ impl PersistentSubprocessController {
 
     /// Kill the current CLI process after its lease was lost — the holder
     /// stops rather than racing the new one (spec §4.3).
-    fn stop_after_lease_loss(inner: &Arc<Mutex<PersistentInner>>, block_id: &str, why: &str) {
+    pub(super) fn stop_after_lease_loss(inner: &Arc<Mutex<PersistentInner>>, block_id: &str, why: &str) {
         let kill = inner.lock().unwrap().kill_tx.take();
         tracing::error!(block_id, why, "agent_admission.fenced: stopping this pane's CLI process");
         if let Some(tx) = kill {

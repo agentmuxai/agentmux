@@ -145,6 +145,39 @@ async fn a_pane_that_lost_its_lease_starts_no_turn_and_is_stopped() {
     assert!(ctrl.send_message(MSG.to_string(), config(Some(&f.uid))).is_err());
 }
 
+/// 2026-10-29: two starts of one block overlapped, so an older lease handle was superseded by the
+/// pane's own newer claim. When it found the lease gone it stopped the block's CURRENT process. Only
+/// the current handle's loss may do that.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_older_handle_superseded_by_the_panes_own_claim_does_not_stop_its_current_process() {
+    let f = Fixture::new();
+    let ctrl = f.controller("this-srv");
+    let older = ctrl.acquire_agent_lease(&config(Some(&f.uid)), None).unwrap().unwrap();
+    let current = ctrl.acquire_agent_lease(&config(Some(&f.uid)), None).unwrap().unwrap();
+    assert!(older.verify().is_err(), "the second claim superseded the first handle");
+    let (kill_tx, mut kill_rx) = tokio::sync::oneshot::channel::<KillRequest>();
+    {
+        let mut g = ctrl.inner.lock().unwrap();
+        g.agent_lease = Some(current);
+        g.kill_tx = Some(kill_tx);
+        g.current_pid = Some(4242);
+    }
+
+    PersistentSubprocessController::on_lease_lost(&ctrl.inner, &ctrl.block_id, "an older handle lost");
+    assert!(kill_rx.try_recv().is_err(), "the current process must keep running");
+    assert!(ctrl.inner.lock().unwrap().kill_tx.is_some());
+
+    // The current handle losing the agent (another instance took it) still stops the process.
+    std::fs::remove_file(f.lease_file()).unwrap();
+    let _new = crate::backend::agent_admission::acquire(
+        &f.store(), &f.uid, "Agent3", &Arc::from("other-srv"), "other-block", None, |_| {},
+    )
+    .unwrap();
+    PersistentSubprocessController::on_lease_lost(&ctrl.inner, &ctrl.block_id, "the agent was taken over");
+    assert!(matches!(kill_rx.try_recv(), Ok(KillRequest::Force)), "the process that lost the agent stops");
+    drop(older);
+}
+
 /// A spawn env with no agent UID (no `db_agents` row yet) runs as before
 /// Phase 1 — unguarded, logged — rather than being refused.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
