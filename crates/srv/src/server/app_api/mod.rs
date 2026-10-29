@@ -312,7 +312,8 @@ pub(super) fn find_agent_block(mstore: &Store, tab_id: &str, agent_id: &str) -> 
     for block_id in &tab.blockids {
         if let Ok(Some(block)) = mstore.get::<Block>(block_id) {
             let block_agent_id = obj::meta_get_string(&block.meta, "agentId", "");
-            if block_agent_id == agent_id {
+            // The agent's history reader carries its `agentId` but is not its pane.
+            if block_agent_id == agent_id && !obj::is_history_reader(&block.meta) {
                 return Ok(Some(block));
             }
         }
