@@ -9,9 +9,13 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const reveal = vi.fn(async (_blockId: string, _opts?: { tabId?: string }) => true);
+const reveal = vi.fn(async (_blockId: string, _opts?: { tabId?: string }) => (order.push("reveal"), true));
 let subscribed: { eventType: string; handler: (e: { data: unknown }) => void }[] = [];
 
+const order: string[] = [];
+vi.mock("@/app/store/global", () => ({
+    getApi: () => ({ getWindowLabel: async () => "main", focusWindow: async (l: string) => void order.push(`raise:${l}`) }),
+}));
 const revealed = vi.fn(async (_d: unknown) => ({ delivered: true }));
 vi.mock("@/app/store/rpc-api", () => ({ RpcApi: { BlockRevealedCommand: (_c: unknown, d: unknown) => revealed(d) } }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
@@ -40,6 +44,7 @@ import { EVENT_BLOCK_REVEAL, handleBlockReveal, installBlockRevealEvents, should
 beforeEach(() => {
     reveal.mockClear();
     revealed.mockClear();
+    order.length = 0;
     subscribed = [];
 });
 
@@ -64,6 +69,8 @@ describe("block:reveal handler", () => {
         expect(await handleBlockReveal(d, "w1")).toBe(true);
         expect(reveal).toHaveBeenCalledWith("b", { tabId: "t", source: "remote-window", localOnly: true, quiet: true });
         expect(revealed).toHaveBeenLastCalledWith({ request_id: "r1", ok: true, reason: undefined });
+        // Raised before the pane is shown: a hidden window draws no frames for the read-back.
+        expect(order.slice(0, 2)).toEqual(["raise:main", "reveal"]);
         reveal.mockResolvedValueOnce(false);
         expect(await handleBlockReveal(d, "w1")).toBe(false);
         expect(revealed).toHaveBeenLastCalledWith({ request_id: "r1", ok: false, reason: "layout-timeout" });
@@ -72,6 +79,7 @@ describe("block:reveal handler", () => {
     it("answers no one when nobody waits", async () => {
         await handleBlockReveal({ block_id: "b", tab_id: "t", window_id: "w1" }, "w1");
         expect(revealed).not.toHaveBeenCalled();
+        expect(order).toEqual(["reveal"]); // and an agent's pane open does not take the window to the front
     });
 
     it("another window's event does nothing here", async () => {
