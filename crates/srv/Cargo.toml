@@ -154,7 +154,7 @@ rcgen = { version = "0.13", default-features = false, features = ["crypto", "rin
 # ECDSA P-256 checks of a paired device's send signature (backend/viewer/signing),
 # from the ring already under rustls: no new crate.
 ring = { version = "0.17", default-features = false, features = ["alloc"] }
-hyper = { version = "1", features = ["http1", "server"] }
+hyper = { version = "1", features = ["http1", "server", "client"] }
 hyper-util = { version = "0.1", features = ["tokio", "service"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]

@@ -133,8 +133,12 @@ pub fn container_exec_env(block_id: &str, env_vars: &HashMap<String, String>) ->
     // The publish guard's hooks directory is a host path; the agent's other
     // GIT_CONFIG_* settings still apply inside the container.
     let env_vars = crate::backend::publish_guard::without_hooks_path(env_vars);
-    // The host's GitHub tokens are for host agents: the image has its own git and gh setup.
-    let env_vars = crate::identity::github_tokens::without_agent_git(&env_vars);
+    // A host agent's git setup is for the host; a container gets its own where tokens can be given
+    // (`github_tokens::container_git_hooks`), with the hooks where the image finds them.
+    let mut env_vars = crate::identity::github_tokens::without_agent_git(&env_vars);
+    if crate::identity::github_tokens::container_git_hooks().is_some() {
+        crate::identity::github_tokens::apply_container_git(&mut env_vars);
+    }
     let build_info = crate::backend::pane_env::build_info();
     let is_build_info = |k: &str| build_info.iter().any(|(b, _)| *b == k);
     let mut out: Vec<(String, String)> = env_vars
@@ -244,7 +248,7 @@ mod tests {
         for old in ["/agentmux/reactive/inject", "/agentmux/work/claim", "/agentmux/work/7f3a/ask", "/api/v1/self", "/api/v1/agent/tool-chunk", "/health"] {
             assert!(!route_needs_identity(old), "{old}");
         }
-        for new in ["/api/v1/agent/memory/session-start/part", "/api/v1/agent/memory/write", "/api/v1/agent/dev_server/register", "/api/v1/vault", "/api/v1/ui/browser/open", "/api/v1/ui/screenshot", "/agentmux/cron", "/api/v1/agent/open", "/agentmux/work/7f3a/hold"] {
+        for new in ["/api/v1/agent/memory/session-start/part", "/api/v1/agent/memory/write", "/api/v1/agent/dev_server/register", "/api/v1/github/token", "/api/v1/vault", "/api/v1/ui/browser/open", "/api/v1/ui/screenshot", "/agentmux/cron", "/api/v1/agent/open", "/agentmux/work/7f3a/hold"] {
             assert!(route_needs_identity(new), "{new}");
         }
     }

@@ -86,12 +86,20 @@ pub(crate) fn quit_self_result(status: u16, body: &Value) -> anyhow::Result<Stri
 /// (SPEC_AGENT_SELF_QUIT_2026_09_24.md §6.5) until it leaves `pending` — and
 /// `proceeding` too when `to_the_end` — and returns the last status seen. One
 /// long request instead would outlast the client's own timeout.
-pub(crate) async fn await_shutdown(
+pub(crate) async fn await_shutdown(client: &reqwest::Client, local_url: &str, auth_key: &str, request_id: &str, to_the_end: bool) -> Value {
+    await_shutdown_of(client, local_url, auth_key, request_id, to_the_end, None).await
+}
+
+/// [`await_shutdown`] for a caller whose own pane may be one of several in a request: it also stops
+/// waiting once the user has answered for `own` (kept it), which the request's shared status does
+/// not say until every other agent has been dealt with.
+pub(crate) async fn await_shutdown_of(
     client: &reqwest::Client,
     local_url: &str,
     auth_key: &str,
     request_id: &str,
     to_the_end: bool,
+    own: Option<&str>,
 ) -> Value {
     let url = format!("{}/api/v1/agent/shutdown/{request_id}", local_url.trim_end_matches('/'));
     // The window, the turn end a self-quit waits for (30 s) and the graceful
@@ -102,6 +110,9 @@ pub(crate) async fn await_shutdown(
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         if let Ok(r) = client.get(&url).header(AUTH_KEY_HEADER, auth_key).send().await {
             last = r.json().await.unwrap_or(last);
+        }
+        if own.is_some_and(|b| own_outcome(last.clone(), b)["status"] == "kept_by_user") {
+            break;
         }
         match last["status"].as_str().unwrap_or("") {
             "" | "pending" => {}
@@ -149,6 +160,19 @@ pub(crate) fn close_pane_outcome(block: &str, now: &Value) -> anyhow::Result<Str
         "failed" => anyhow::bail!("close failed: {}", now["error"].as_str().unwrap_or("no detail")),
         _ => anyhow::bail!("close of {block:?}: no answer from the user's override window"),
     }
+}
+
+/// One target's own answer from a settled request over several agents: srv lists what became of each
+/// agent (`outcomes`), while the request's own `status` is for all of them. A request for one agent
+/// has no list, and its answer is the target's own.
+pub(crate) fn own_outcome(now: Value, block: &str) -> Value {
+    let Some(o) = now["outcomes"].as_array().and_then(|all| all.iter().find(|o| o["block_id"].as_str() == Some(block))) else {
+        return now;
+    };
+    let mut own = now.clone();
+    own["status"] = o["outcome"].clone();
+    own["error"] = o.get("error").cloned().unwrap_or(Value::Null);
+    own
 }
 
 /// Folds each waited-on target into `Stop agents`' shape: closed (or already

@@ -709,7 +709,10 @@ pub(crate) async fn handle_ui_browser_open(
     grant: Option<axum::Extension<crate::backend::container_credential::ContainerGrant>>,
     Json(req): Json<UiBrowserOpenRequest>,
 ) -> impl IntoResponse {
-    let own = match verified_block_id(&state, caller.as_deref(), &req.auth) { Ok(b) => b, Err(e) => return err_response(StatusCode::UNAUTHORIZED, e) };
+    let own = match verified_block_id(&state, caller.as_deref(), &req.auth) {
+        Ok(b) => b,
+        Err(e) => return err_response(StatusCode::UNAUTHORIZED, e),
+    };
     let url = req.url.trim();
     if !(url.starts_with("https://") || url.starts_with("http://")) {
         return err_response(

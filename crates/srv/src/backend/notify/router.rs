@@ -848,10 +848,11 @@ impl Router {
         }));
     }
 
-    /// A sensitive operation counting down: the toast names what will happen and counts down. It has no button; clicking it opens AgentMux, whose window alone can veto.
+    /// A countdown that is no one pane's: a sensitive operation, or a close of several agents at once.
+    /// The toast names what will happen, counts down and offers its two buttons.
     /// `block_id` is the countdown's own group (there is no pane); `what` and `body` are app
     /// wording and cleaned names, never the requester's words. Not blocking: nothing is read.
-    pub fn emit_sensitive(&self, block_id: &str, what: &str, body: Option<String>, info: ShutdownInfo) {
+    pub fn emit_group(&self, block_id: &str, what: &str, body: Option<String>, info: ShutdownInfo) {
         self.step(Input::Emit(Request {
             kind: NotifyKind::ShutdownPending,
             block_id: block_id.to_string(),

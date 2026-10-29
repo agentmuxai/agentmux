@@ -19,6 +19,7 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use rusqlite::params;
 
 use super::error::StoreError;
+use super::host_lan_keys::{short, HostKey, HostKeyKind, HostLanKeys};
 use super::store::Store;
 
 use agentmux_common::time::now_secs;
@@ -44,86 +45,121 @@ pub struct AgentLanKeypair {
     pub private_key: String,
 }
 
-impl Store {
-    /// Load this agent's LAN keypair if one has already been minted,
-    /// without creating one.
-    pub fn agent_lan_key_load(&self, agent_id: &str) -> Result<Option<AgentLanKeypair>, StoreError> {
-        let key = agent_id.to_lowercase();
-        let conn = self.conn.lock().unwrap();
-        let mut stmt =
-            conn.prepare("SELECT public_key, private_key FROM db_agent_lan_keys WHERE agent_id = ?1")?;
-        match stmt.query_row(params![key], |row| {
-            Ok(AgentLanKeypair {
-                public_key: row.get(0)?,
-                private_key: row.get(1)?,
-            })
-        }) {
-            Ok(v) => Ok(Some(v)),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(e.into()),
+/// This channel's row for `key` (folded), and when it was minted.
+fn read_local(conn: &rusqlite::Connection, key: &str) -> Result<Option<(AgentLanKeypair, i64)>, StoreError> {
+    let mut stmt =
+        conn.prepare("SELECT public_key, private_key, created_at FROM db_agent_lan_keys WHERE agent_id = ?1")?;
+    match stmt.query_row(params![key], |row| {
+        Ok((AgentLanKeypair { public_key: row.get(0)?, private_key: row.get(1)? }, row.get(2)?))
+    }) {
+        Ok(v) => Ok(Some(v)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
+fn write_local(conn: &rusqlite::Connection, key: &str, pair: &AgentLanKeypair, created_at: i64) -> Result<(), StoreError> {
+    conn.execute(
+        "INSERT INTO db_agent_lan_keys (agent_id, public_key, private_key, created_at) VALUES (?1, ?2, ?3, ?4) ON CONFLICT (agent_id) DO UPDATE SET public_key = ?2, private_key = ?3, created_at = ?4",
+        params![key, pair.public_key, pair.private_key, created_at],
+    )?;
+    Ok(())
+}
+
+/// This channel's key for `key`, made to agree with the host's (`host_lan_keys.rs`): the host's key
+/// replaces the channel's own, and a channel key the host has no key for becomes the host's when
+/// `publish`. Without a host table, or when it cannot be reached, the channel's own key.
+pub(super) fn aligned_name_key(
+    conn: &rusqlite::Connection,
+    host: Option<&HostLanKeys>,
+    key: &str,
+    publish: bool,
+) -> Result<Option<AgentLanKeypair>, StoreError> {
+    let local = read_local(conn, key)?;
+    let Some(host) = host else { return Ok(local.map(|(pair, _)| pair)) };
+    let candidate = local.as_ref().filter(|_| publish).map(|(pair, at)| HostKey { pair: pair.clone(), created_at: *at });
+    match host.claim(HostKeyKind::Name, key, candidate.as_ref()) {
+        Ok(Some(h)) => {
+            if local.as_ref().map(|(pair, _)| pair) != Some(&h.pair) {
+                write_local(conn, key, &h.pair, h.created_at)?;
+                tracing::info!(agent = key, key = short(&h.pair.public_key), "LAN key: adopted the host's key for the agent");
+            }
+            Ok(Some(h.pair))
+        }
+        Ok(None) => Ok(local.map(|(pair, _)| pair)),
+        Err(e) => {
+            tracing::warn!(agent = key, error = %e, "LAN key: the host's key table is unreachable, using this channel's own");
+            Ok(local.map(|(pair, _)| pair))
         }
     }
+}
 
-    /// Load only this agent's PUBLIC key — the half safe to hand to a LAN
-    /// peer's pubkey-lookup query (see `LanDiscovery::find_agent_lan_pubkey`
-    /// and the `GET /agentmux/reactive/agent` handler it calls). Never loads
-    /// or touches the private half.
-    pub fn agent_lan_public_key_load(&self, agent_id: &str) -> Result<Option<String>, StoreError> {
+impl Store {
+    /// Load this agent's LAN keypair if one has already been minted,
+    /// without creating one. The host's key when it has one (see `host_lan_keys.rs`).
+    pub fn agent_lan_key_load(&self, agent_id: &str) -> Result<Option<AgentLanKeypair>, StoreError> {
         let key = agent_id.to_lowercase();
+        let host = self.host_lan_keys();
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare("SELECT public_key FROM db_agent_lan_keys WHERE agent_id = ?1")?;
-        match stmt.query_row(params![key], |row| row.get(0)) {
-            Ok(v) => Ok(Some(v)),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(e.into()),
-        }
+        aligned_name_key(&conn, host.as_deref(), &key, true)
+    }
+
+    /// This agent's PUBLIC key — the half safe to hand to a LAN
+    /// peer's pubkey-lookup query (see `LanDiscovery::find_agent_lan_pubkey`
+    /// and the `GET /agentmux/reactive/agent` handler it calls). Only the public
+    /// half is returned, but it goes through `agent_lan_key_load`: the keypair is
+    /// read and brought level with the host's key (adopted, or published when the
+    /// host has none), so a peer is never told a key the agent no longer signs with.
+    pub fn agent_lan_public_key_load(&self, agent_id: &str) -> Result<Option<String>, StoreError> {
+        Ok(self.agent_lan_key_load(agent_id)?.map(|pair| pair.public_key))
     }
 
     /// Replace this agent's LAN keypair with a fresh one, if it has one (none is minted for an agent
     /// that never had one). The old private key signs nothing that verifies from then on. `true` when a
-    /// keypair was replaced.
+    /// keypair was replaced. The host's key is replaced too, so every channel signs with the new one.
     pub fn agent_lan_key_rotate(&self, agent_id: &str) -> Result<bool, StoreError> {
         let (public_bytes, private_bytes) = agentmux_common::jekt_sign::generate_lan_keypair(random_seed_bytes());
+        let key = agent_id.to_lowercase();
+        let fresh = AgentLanKeypair { public_key: BASE64.encode(public_bytes), private_key: BASE64.encode(private_bytes) };
+        let now = now_secs();
         let conn = self.conn.lock().unwrap();
+        if read_local(&conn, &key)?.is_none() {
+            return Ok(false);
+        }
+        // The host's key first, and a failure fails the rotation: with the old key left there, the next
+        // load on any channel would adopt it over the new one and undo the rotation.
+        if let Some(host) = self.host_lan_keys() {
+            host.replace(HostKeyKind::Name, &key, &HostKey { pair: fresh.clone(), created_at: now })?;
+        }
         let changed = conn.execute(
             "UPDATE db_agent_lan_keys SET public_key = ?1, private_key = ?2, created_at = ?3 WHERE agent_id = ?4",
-            params![BASE64.encode(public_bytes), BASE64.encode(private_bytes), now_secs(), agent_id.to_lowercase()],
+            params![fresh.public_key, fresh.private_key, now, key],
         )?;
         Ok(changed > 0)
     }
 
-    /// Return this agent's LAN keypair, minting and persisting a fresh
-    /// random one on first use. Race-safe under concurrent first-use — same
-    /// `INSERT OR IGNORE` + re-read pattern as `agent_jekt_key_ensure`: two
-    /// concurrent callers for the same never-before-seen agent_id agree on
-    /// one keypair instead of each minting and using a different one.
+    /// Return this agent's LAN keypair: the host's if it has one, else this channel's own (which then
+    /// becomes the host's), else a fresh random one, minted and published on first use. Race-safe under
+    /// concurrent first-use: the `INSERT OR IGNORE` on the channel row and on the host row each leave
+    /// every caller with the one keypair that won.
     pub fn agent_lan_key_ensure(&self, agent_id: &str) -> Result<AgentLanKeypair, StoreError> {
         let key = agent_id.to_lowercase();
-        if let Some(existing) = self.agent_lan_key_load(&key)? {
+        let host = self.host_lan_keys();
+        let conn = self.conn.lock().unwrap();
+        if let Some(existing) = aligned_name_key(&conn, host.as_deref(), &key, true)? {
             return Ok(existing);
         }
-        let conn = self.conn.lock().unwrap();
         let seed = random_seed_bytes();
         let (public_bytes, private_bytes) = agentmux_common::jekt_sign::generate_lan_keypair(seed);
-        let public_key = BASE64.encode(public_bytes);
-        let private_key = BASE64.encode(private_bytes);
         conn.execute(
-            "INSERT OR IGNORE INTO db_agent_lan_keys (agent_id, public_key, private_key, created_at) \
-             VALUES (?1, ?2, ?3, ?4)",
-            params![key, public_key, private_key, now_secs()],
+            "INSERT OR IGNORE INTO db_agent_lan_keys (agent_id, public_key, private_key, created_at) VALUES (?1, ?2, ?3, ?4)",
+            params![key, BASE64.encode(public_bytes), BASE64.encode(private_bytes), now_secs()],
         )?;
         // Re-read regardless of whether our insert won the race — single
         // source of truth for "what keypair does this agent have," not an
-        // assumption that our own insert succeeded.
-        let mut stmt =
-            conn.prepare("SELECT public_key, private_key FROM db_agent_lan_keys WHERE agent_id = ?1")?;
-        stmt.query_row(params![key], |row| {
-            Ok(AgentLanKeypair {
-                public_key: row.get(0)?,
-                private_key: row.get(1)?,
-            })
-        })
-        .map_err(Into::into)
+        // assumption that our own insert succeeded. Publishing it to the host here is what makes a
+        // second channel, minting at the same moment, end up with this one.
+        aligned_name_key(&conn, host.as_deref(), &key, true)?.ok_or(StoreError::NotFound)
     }
 }
 

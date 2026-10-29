@@ -27,8 +27,6 @@ const HOST_PATHS: &str = "container agents can't read or open host paths outside
                           Put the file in /workspace, or ask a native agent.";
 /// Replacing the app.
 const UPGRADE: &str = "upgrading AgentMux replaces the app on the host, so container agents can't. Ask a native agent or your leader.";
-/// The host's own credentials.
-const HOST_CREDENTIALS: &str = "the host's GitHub tokens are for native agents; the container has its own git and gh setup.";
 /// Global Memory is composed into every native agent's context at launch.
 const GLOBAL_MEMORY: &str = "Global Memory is read by every native agent at launch, so a container agent can read it but not change it. \
                              Ask a native agent or your leader to write it.";
@@ -76,14 +74,13 @@ const REFUSED: &[(Match, &str)] = &[
     (Match::Exact("/agentmux/work/media"), HOST_PATHS),
     (Match::Exact("/api/v1/ui/browser/set_files"), HOST_PATHS),
     (Match::Exact("/api/v1/pane/open"), HOST_PATHS),
+    (Match::Exact("/api/v1/widgets/install"), HOST_PATHS),
     // What every native agent reads at launch
     (Match::Exact("/api/v1/agent/globalmemory/write"), GLOBAL_MEMORY),
     (Match::Exact("/api/v1/agent/globalmemory/remove"), GLOBAL_MEMORY),
     (Match::Exact("/api/v1/agent/globalmemory/revert"), GLOBAL_MEMORY),
     // Replacing the app
     (Match::Exact("/api/v1/agent/self/upgrade"), UPGRADE),
-    // The host's credentials
-    (Match::Exact("/api/v1/github/token"), HOST_CREDENTIALS),
     // Srv's own work for a container agent
     (Match::Exact("/agentmux/agents/self/keys"), "srv signs for a container agent, which holds no key to fetch."),
     (Match::Exact("/api/v1/agent/self/mcp-beat"), "health beats belong to persistent controllers; a container's turns are per-exec."),
@@ -142,8 +139,8 @@ mod tests {
             ("/api/messaging/discord/send", "for the AgentMux app itself"),
             ("/agentmux/service", "generic gateway"),
             ("/agentmux/stream-local-file", "outside their own workspace"),
+            ("/api/v1/widgets/install", "outside their own workspace"),
             ("/api/v1/agent/self/upgrade", "replaces the app"),
-            ("/api/v1/github/token", "native agents"),
             ("/api/v1/agent/globalmemory/write", "read it but not change it"),
         ];
         for (path, says) in cases {
@@ -173,7 +170,6 @@ mod tests {
             "/api/v1/ui/click",
             "/api/v1/ui/shortcuts/list",
             "/api/v1/agent/dev_server/register",
-            "/api/v1/widgets/install",
             "/agentmux/work",
             "/agentmux/cron",
             "/agentmux/reactive/inject",

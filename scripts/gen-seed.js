@@ -28,7 +28,10 @@ const SKILL = {
     skill_type: "prompt",
     description: "Re-run tool verification checks and report status table",
     content:
-        "Check your GitHub identity with `gh-agent auth status` where `gh-agent` is installed (plain `gh` reports \"not logged in\" for agents on purpose; never run `gh auth login`, and run `gh-agent doctor` if the check fails; if neither `gh-agent` nor `gh` is installed, as in some containers, report GitHub as N/A), your git identity (`git config user.name` and `git config user.email`), and that the AgentMux MCP server is connected (list peer agents). Report a status table with OK/FAIL for each check. Fix any failures automatically if possible.",
+        "Check your GitHub access with `gh repo view` from inside a GitHub repository where `gh` is installed (`gh auth status` can say you are not logged in even when AgentMux's own GitHub connection gives you access; if a `gh-agent` command is installed here, use `gh-agent auth status` instead, and run `gh-agent doctor` if it fails). If the check fails, report GitHub as not connected for this agent, and never run `gh auth login`: an agent's GitHub access is set up by AgentMux, not by logging in inside the agent. If neither `gh` nor `gh-agent` is installed, as in some containers, report GitHub as N/A. Check your git identity (`git config user.name` and `git config user.email`), and that the AgentMux MCP server is connected (list peer agents). Report a status table with OK/FAIL for each check. Fix any failures automatically if possible.",
+    // Earlier texts of this skill (SHA-256): an agent still holding one exactly gets the new text;
+    // one the user edited is left alone.
+    replaces_content_sha256: ["2735a3671393d524c305af35f0eaf60f8e8e409d1fbc4c1b65cf2aafd6768ec0"],
 };
 
 // Catalog-aligned seed. Keep in lockstep with
@@ -270,10 +273,10 @@ task changeset -- patch "fix(scope): short description"
 
 \`muxlog host\` / \`muxlog srv\` / \`muxlog fe\` — pipe to \`grep\` for filtering.
 
-### muxreview Bot
+### Automated review
 
-All PRs are auto-reviewed by muxreview (Claude Opus). Address P1 findings before
-merging. P2 findings should also be fixed if feasible.
+PRs are reviewed automatically. Address P1 findings before merging. P2 findings
+should also be fixed if feasible.
 
 ### Critical Rule
 
@@ -301,7 +304,10 @@ const SEED_MEMORIES = [
         id: "seed-agentmux-dev",
         // Earlier texts of this bundle (SHA-256): an install still holding one
         // exactly gets the new text; an edited bundle is left alone.
-        replaces_instructions_sha256: ["04af0430edeaa5c0acbdae583e239a880061221c9406be5a4eeff318c8a2f34e"],
+        replaces_instructions_sha256: [
+            "64d2618ce6f38cf5b12cc9f9c76c67ce5658e9e84ce11695e0ae5c57933927f6",
+            "04af0430edeaa5c0acbdae583e239a880061221c9406be5a4eeff318c8a2f34e",
+        ],
         name: "AgentMux Development",
         description: "Stack, build commands, version management, and workflow for the AgentMux codebase",
         is_global: false,

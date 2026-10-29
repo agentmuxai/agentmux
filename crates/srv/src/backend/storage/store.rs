@@ -81,6 +81,10 @@ pub struct Store {
     /// `AGENTMUX_AGENTS_DIR`. See
     /// `docs/specs/SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md` (P0.3).
     registry_agents_base: Mutex<Option<PathBuf>>,
+    /// The host's LAN signing keys (`host_lan_keys.rs`): the key an agent signs with on this machine
+    /// whatever channel runs it. `None` for in-memory test stores, and when the shared identity store
+    /// did not open, which leaves each channel on its own keys.
+    host_lan_keys: Mutex<Option<Arc<super::host_lan_keys::HostLanKeys>>>,
     /// Serializes `muxbus_save` end-to-end (keychain read, keychain write,
     /// SQL write, and any rollback) — reagent P1 on #2260: two concurrent
     /// `muxbus_save` calls (the `muxbus.login` RPC handler and the broker's
@@ -145,6 +149,7 @@ impl Store {
             token_index: Mutex::new(None),
             wan_identity: Mutex::new(None),
             registry_agents_base: Mutex::new(None),
+            host_lan_keys: Mutex::new(None),
             muxbus_save_lock: Mutex::new(()),
             global_memory_observer: Mutex::new(None),
             layout_writes: Default::default(),
@@ -228,6 +233,7 @@ impl Store {
             token_index: Mutex::new(None),
             wan_identity: Mutex::new(None),
             registry_agents_base: Mutex::new(None),
+            host_lan_keys: Mutex::new(None),
             muxbus_save_lock: Mutex::new(()),
             global_memory_observer: Mutex::new(None),
             layout_writes: Default::default(),
@@ -277,6 +283,7 @@ impl Store {
             token_index: Mutex::new(None),
             wan_identity: Mutex::new(None),
             registry_agents_base: Mutex::new(None),
+            host_lan_keys: Mutex::new(None),
             muxbus_save_lock: Mutex::new(()),
             global_memory_observer: Mutex::new(None),
             layout_writes: Default::default(),
@@ -307,6 +314,7 @@ impl Store {
             token_index: Mutex::new(None),
             wan_identity: Mutex::new(None),
             registry_agents_base: Mutex::new(None),
+            host_lan_keys: Mutex::new(None),
             muxbus_save_lock: Mutex::new(()),
             global_memory_observer: Mutex::new(None),
             layout_writes: Default::default(),
@@ -390,6 +398,7 @@ impl Store {
             token_index: Mutex::new(None),
             wan_identity: Mutex::new(None),
             registry_agents_base: Mutex::new(None),
+            host_lan_keys: Mutex::new(None),
             muxbus_save_lock: Mutex::new(()),
             global_memory_observer: Mutex::new(None),
             layout_writes: Default::default(),
@@ -424,6 +433,15 @@ impl Store {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .clone()
+    }
+
+    /// Attach the host's LAN key table: from then on this store's LAN keys follow it.
+    pub fn set_host_lan_keys(&self, keys: Arc<super::host_lan_keys::HostLanKeys>) {
+        *self.host_lan_keys.lock().unwrap_or_else(|e| e.into_inner()) = Some(keys);
+    }
+
+    pub(super) fn host_lan_keys(&self) -> Option<Arc<super::host_lan_keys::HostLanKeys>> {
+        self.host_lan_keys.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     /// Set the channel agents dir that instance `working_directory` values

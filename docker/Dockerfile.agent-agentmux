@@ -89,6 +89,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     libdbus-1-3 \
     libxcb1 \
+    python3 \
+    && rm -rf /var/lib/apt/lists/*
+
+# The GitHub CLI, from GitHub's own apt repository (the keyring is fetched over HTTPS and pinned by
+# apt's signed-by). It is free software; agents use it for issues and PRs from inside the sandbox.
+# The host's GitHub tokens are not passed in (container_exec_env), so `gh auth login` is the agent's own.
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list \
+    && apt-get update && apt-get install -y --no-install-recommends gh \
     && rm -rf /var/lib/apt/lists/*
 
 # node:24-slim ships a 'node' user at UID 1000. Rename it to 'agent' for clarity
@@ -107,8 +116,9 @@ ENV LANG=C.UTF-8
 
 # Pre-create ~/.claude with agent ownership before switching to the non-root user.
 # Docker initialises a fresh named volume as root:root; without this the agent
-# user cannot write its config/session state on first mount.
-RUN mkdir -p /home/agent/.claude && chown agent:agent /home/agent/.claude
+# user cannot write its config/session state on first mount. 700: it holds the
+# sign-in, and a fresh volume takes its mode from here.
+RUN mkdir -p /home/agent/.claude && chown agent:agent /home/agent/.claude && chmod 700 /home/agent/.claude
 
 # Where AgentMux installs the provider CLI on first start. A named volume mounted
 # here is initialised from this directory, so it is writable by `agent`.
