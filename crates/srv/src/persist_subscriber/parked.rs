@@ -11,6 +11,10 @@ use crate::backend::storage::store::Store;
 /// block into the reducer's state (`persist::bootstrap`) instead of dropping it as an orphan.
 pub(crate) const PARKED_META_KEY: &str = "agent:parked";
 
+/// Block meta on a parked block: the tab it was parked from, so a parked agent that spawns or opens
+/// panes puts them in its own tab, not the one the user happens to be looking at.
+pub(crate) const PARKED_FROM_TAB_META_KEY: &str = "agent:parkedFromTab";
+
 /// A parked block (`Command::ParkBlock`): out of the tab's `blockids`, its row and meta kept,
 /// its parent cleared and `agent:parked` set, which boot reads to load it (`persist::bootstrap`).
 pub(super) fn apply_block_parked(mstore: &Store, tab_id: &str, block_id: &str) -> Result<(), Box<dyn std::error::Error>> {
@@ -25,6 +29,9 @@ pub(super) fn apply_block_parked(mstore: &Store, tab_id: &str, block_id: &str) -
         if let Some(mut block) = tx.get::<Block>(block_id)? {
             block.parentoref = String::new();
             block.meta.insert(PARKED_META_KEY.to_string(), serde_json::json!(true));
+            if !tab_id.is_empty() {
+                block.meta.insert(PARKED_FROM_TAB_META_KEY.to_string(), serde_json::json!(tab_id));
+            }
             tx.update(&mut block)?;
         }
         Ok(())
@@ -46,6 +53,7 @@ pub(super) fn apply_block_attached(mstore: &Store, block_id: &str, dst_tab_id: &
         if let Some(mut block) = tx.get::<Block>(block_id)? {
             block.parentoref = format!("tab:{}", dst_tab_id);
             block.meta.remove(PARKED_META_KEY);
+            block.meta.remove(PARKED_FROM_TAB_META_KEY);
             tx.update(&mut block)?;
         }
         Ok(())
@@ -91,6 +99,7 @@ mod tests {
         assert!(s.get::<Tab>(&a.oid).unwrap().unwrap().blockids.is_empty());
         assert_eq!(block.parentoref, "");
         assert_eq!(block.meta.get(PARKED_META_KEY), Some(&serde_json::json!(true)));
+        assert_eq!(block.meta.get(PARKED_FROM_TAB_META_KEY), Some(&serde_json::json!(a.oid)), "it remembers its tab");
         assert_eq!(block.meta.get("agentId"), Some(&serde_json::json!("ann")), "its meta is kept");
 
         apply_block_attached(&s, "blk", &b.oid, 0).unwrap();
@@ -99,6 +108,7 @@ mod tests {
         assert_eq!(s.get::<Tab>(&b.oid).unwrap().unwrap().blockids, vec!["blk".to_string()], "once, however often delivered");
         assert_eq!(block.parentoref, format!("tab:{}", b.oid));
         assert!(!block.meta.contains_key(PARKED_META_KEY));
+        assert!(!block.meta.contains_key(PARKED_FROM_TAB_META_KEY), "a block in a tab has no tab to go back to");
     }
 
     /// A parked block was in no tab: its delete removes the row and touches no tab.

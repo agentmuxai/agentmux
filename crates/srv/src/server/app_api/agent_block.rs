@@ -101,16 +101,31 @@ pub(crate) fn blocks_in_tabs_or_parked(mstore: &Store) -> Result<Vec<(Block, Opt
     Ok(out)
 }
 
-/// [`resolve_tab_id_for_block`], and for a parked block, which no tab holds, the active tab: a
-/// headless agent that spawns or opens panes has no tab of its own to use.
+/// [`resolve_tab_id_for_block`], and for a parked block, which no tab holds, its agent's home tab
+/// ([`parked_agents_tab`]) and only then the active tab: a headless agent that spawns or opens panes
+/// has no tab of its own to use.
 pub(crate) fn resolve_tab_id_or_active(mstore: &Store, block_id: &str) -> Result<String, String> {
     match resolve_tab_id_for_block(mstore, block_id) {
         Ok(tab_id) => Ok(tab_id),
         Err(e) => match mstore.get::<Block>(block_id) {
-            Ok(Some(block)) if is_parked(&block) => resolve_tab_id(mstore, None),
+            Ok(Some(block)) if is_parked(&block) => match parked_agents_tab(mstore, &block) {
+                Some(tab_id) => Ok(tab_id),
+                None => resolve_tab_id(mstore, None),
+            },
             _ => Err(e),
         },
     }
+}
+
+/// The tab a parked agent works from, so its workers open beside it and not in whatever tab the user
+/// is looking at: the tab its pane was parked from, else a tab one of its open workers is in.
+fn parked_agents_tab(mstore: &Store, block: &Block) -> Option<String> {
+    let from = obj::meta_get_string(&block.meta, crate::persist_subscriber::parked::PARKED_FROM_TAB_META_KEY, "");
+    if !from.is_empty() && mstore.get::<Tab>(&from).ok().flatten().is_some() {
+        return Some(from);
+    }
+    let agent = obj::meta_get_string(&block.meta, "agentId", "");
+    super::agent_spawn::workers_of(mstore, &agent).iter().find_map(|w| resolve_tab_id_for_block(mstore, &w.block_id).ok())
 }
 
 #[cfg(test)]
@@ -263,6 +278,45 @@ mod tests {
         let found = find_agent_block_by_uid(&store, "ann").unwrap().unwrap();
         assert_eq!(found.block.oid, shown);
         assert_ne!(found.block.oid, parked);
+    }
+
+    #[test]
+    fn a_parked_agent_works_from_the_tab_it_was_parked_from_not_the_active_one() {
+        let store = Store::open_in_memory().unwrap();
+        let (team, active) = (insert_tab(&store, &[]), insert_tab(&store, &[]));
+        let mut ws = Workspace { oid: uuid::Uuid::new_v4().to_string(), tabids: vec![team.clone(), active.clone()], activetabid: active.clone(), ..Default::default() };
+        store.insert(&mut ws).unwrap();
+        let parked = insert_block(&store, "ann", true);
+        assert_eq!(resolve_tab_id_or_active(&store, &parked).unwrap(), active, "no home tab recorded: the active one");
+        let mut block = store.get::<Block>(&parked).unwrap().unwrap();
+        block.meta.insert(crate::persist_subscriber::parked::PARKED_FROM_TAB_META_KEY.to_string(), serde_json::json!(team));
+        store.update(&mut block).unwrap();
+        assert_eq!(resolve_tab_id_or_active(&store, &parked).unwrap(), team);
+        block.meta.insert(crate::persist_subscriber::parked::PARKED_FROM_TAB_META_KEY.to_string(), serde_json::json!("gone"));
+        store.update(&mut block).unwrap();
+        assert_eq!(resolve_tab_id_or_active(&store, &parked).unwrap(), active, "a tab that is gone is not a home");
+    }
+
+    #[test]
+    fn a_parked_agent_with_no_recorded_tab_works_from_the_tab_of_its_open_worker() {
+        let store = Store::open_in_memory().unwrap();
+        let (team, active) = (insert_tab(&store, &[]), insert_tab(&store, &[]));
+        let mut ws = Workspace { oid: uuid::Uuid::new_v4().to_string(), tabids: vec![team.clone(), active.clone()], activetabid: active, ..Default::default() };
+        store.insert(&mut ws).unwrap();
+        let parked = insert_block(&store, "lead", true);
+        let mut def: crate::backend::storage::AgentDefinition = serde_json::from_value(serde_json::json!({
+            "id": "wrk", "slug": "wrk", "name": "Wrk", "icon": "robot", "provider": "claude", "description": "", "created_at": 1,
+        }))
+        .unwrap();
+        store.agent_def_insert(&mut def).unwrap();
+        let mut worker = Block { oid: uuid::Uuid::new_v4().to_string(), ..Default::default() };
+        worker.meta.insert("agentId".to_string(), serde_json::json!("wrk"));
+        worker.meta.insert(crate::server::app_api::agent_spawn::COACHED_BY_META_KEY.to_string(), serde_json::json!({ "id": "lead" }));
+        store.insert(&mut worker).unwrap();
+        let mut tab = store.get::<Tab>(&team).unwrap().unwrap();
+        tab.blockids.push(worker.oid.clone());
+        store.update(&mut tab).unwrap();
+        assert_eq!(resolve_tab_id_or_active(&store, &parked).unwrap(), team);
     }
 
     #[test]
