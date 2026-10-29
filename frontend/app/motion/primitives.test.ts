@@ -245,6 +245,44 @@ describe("move", () => {
         expect(fake.calls[1].keyframes[0]).toEqual({ transform: "translateY(-150px)" });
     });
 
+    it("reads every rectangle before it starts any animation, so a long list forces one layout, not one per row", () => {
+        const rows = Array.from({ length: 5 }, (_, i) => row(`r${i}`, 0, i * 20));
+        const before = capture(rows, keyOf);
+        const log: string[] = [];
+        rows.forEach((r, i) => {
+            r.place(0, i * 20 + 40);
+            const read = r.getBoundingClientRect;
+            r.getBoundingClientRect = () => (log.push("read"), read.call(r));
+        });
+        const animate = Element.prototype.animate;
+        Element.prototype.animate = function (this: Element, ...args: Parameters<Element["animate"]>) {
+            log.push("write");
+            return animate.apply(this, args);
+        };
+        try {
+            move(before, rows, keyOf, { axis: "y" });
+            // Slides still running are cancelled before the measuring too.
+            move(before, rows, keyOf, { axis: "y" });
+        } finally {
+            Element.prototype.animate = animate;
+        }
+        expect(log.filter((e) => e === "write")).toHaveLength(10);
+        const firstWrite = log.indexOf("write");
+        expect(log.slice(0, firstWrite)).toEqual(Array(5).fill("read"));
+        expect(log.slice(firstWrite).filter((e) => e === "read")).toHaveLength(5);
+        expect(log.slice(firstWrite, firstWrite + 5)).toEqual(Array(5).fill("write"));
+    });
+
+    it("measures nothing when the policy asks for no motion", () => {
+        const a = row("a", 0, 0);
+        const before = capture([a], keyOf);
+        const read = vi.fn(a.getBoundingClientRect);
+        a.getBoundingClientRect = read;
+        reduce.categories.add("transition");
+        move(before, [a], keyOf);
+        expect(read).not.toHaveBeenCalled();
+    });
+
     it("replaces a slide still running on the element", () => {
         const a = row("a", 0, 10);
         const before = capture([a], keyOf);
