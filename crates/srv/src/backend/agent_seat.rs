@@ -233,7 +233,7 @@ pub fn stale_seat_meta(
     let mut by_agent: std::collections::HashMap<String, serde_json::Value> = std::collections::HashMap::new();
     let mut stale = Vec::new();
     for block in blocks {
-        if crate::backend::obj::meta_get_string(&block.meta, "view", "") != "agent" {
+        if crate::backend::obj::meta_get_string(&block.meta, "view", "") != "agent" || crate::backend::obj::is_history_reader(&block.meta) {
             continue;
         }
         let agent_id = crate::backend::obj::meta_get_string(&block.meta, "agentId", "");
