@@ -1,6 +1,6 @@
 # Spec: two buttons on every countdown, and agents stopped, opened and spawned as a batch
 
-**Status:** active: approved by the operator on 2026-10-28 ("yes, good for all 4"). S1 (part 1) is built in #5733; S2, S3 and S4 are not.
+**Status:** active: approved by the operator on 2026-10-28 ("yes, good for all 4"). S1 (part 1) is built in #5733, S2 (part 2) in #5735 and S3 (part 3) in #5749; S4 is not.
 **Date:** 2026-10-28
 **Author:** Manoz@Area54 (agent-pane lifecycle), for AgentY, from the operator's own asks of 2026-10-28.
 **Verified against:** `origin/main` @ `bd2aa677f`, by reading code. Not checked: the macOS toast (the launcher has no macOS notify module yet; it is #1267) and a run of any of this.
@@ -56,6 +56,7 @@ A `Stop agents` call is one request over all its local targets.
 - **`pending_shutdown`:** a new action `CloseTabs { block_ids, detail }` (the model `ClosePane { block_ids }` already has: `covers` returns every block). One request id, one deadline, one `PendingView` with a `blocks` list (block id and agent name) and, when it settles, an `outcomes` list per block (`shut_down`, `kept_by_user`, `superseded`, `failed`). `Stop agents` answers with the same request id on each target's entry, so a caller that polls per target still works.
 - **Toast and banner:** one OS toast, "Closing 5 agents: A, B, C and 2 more in 30 s", with **Keep running** (all) and **Close now** (all). Each target's own pane keeps its banner and its **Keep running** keeps **that** agent only (`keep_one`: the block leaves `covers`; the others and the clock are untouched; when none is left the request is `kept_by_user`). This is the "keep just one". The toast does not list a button per agent.
 - **Audit:** one `FleetBulkStop` entry with the target list (`audit_note` names them), and the per-block outcomes added when it settles. Today there is one row per target.
+- **Built as:** `pending_shutdown/batch.rs` (`request_batch`, `Action::CloseTabs`). The toast is the request's own group (`batch:<id>`), not one agent's block, so its Keep running (all) and Close now (all) name the request. Only the blocks no request covers yet go in the new one: a block that already has a window joins it as before, and with fewer than two free blocks `Stop agents` opens the ordinary request per block. A batch is never upgraded by a pane close (a pane that holds an agent is refused). The MCP `Stop agents` reads each target's answer from its own entry in `outcomes`.
 - **Not changed:** a target on another AgentMux on this machine is asked there (`ask_other_instances`) and has that instance's own window and toast. A batch is per instance. A block that already has an active request joins it as today.
 
 ## 5. Part 3: spawn and open many
@@ -63,13 +64,15 @@ A `Stop agents` call is one request over all its local targets.
 **Shapes.**
 - `Agents spawn` with `workers: [{ name?, model?, effort?, account?, brief }, ...]` (a single worker stays as it is). `Agents open` with `agents: [{ agent, tab_id?, focus? }, ...]` (a single `agent` stays). New srv routes `/api/v1/agent/spawn_many` and `/api/v1/agent/open_many`; the MCP process sends the briefs after srv has launched **all** the workers, so a failed batch has sent nothing and can be rolled back.
 - **One approval.** `consent` is asked once for a spawn batch: one question listing every worker (name, model, account, the first line of its brief), "Start them" or "Don't". The user's-own-turn shortcut (`self_quit::gate`) applies to the batch as it does to one. `Agents open` asks nothing today and asks nothing in a batch.
-- **All or nothing.** Everything that can be checked is checked before the first agent starts and before the prompt: briefs, names, accounts (`choose_account`), `MAX_LIVE_WORKERS` (3 per leader) against the number asked for, the cap, the start limit. If a launch still fails, the ones already launched are discarded (`discard_worker`, which exists for one) and the call returns the error. A `spawn` batch is serialised on the leader's lock, as one is.
+- **All or nothing.** Everything that can be checked is checked before the first agent starts and before the prompt: briefs, names, accounts (`choose_account`), `MAX_LIVE_WORKERS` (3 per leader) against the number asked for, the cap. If a launch still fails, the ones already launched are discarded (`discard_worker`, which exists for one) and the call returns the error. A `spawn` batch is serialised on the leader's lock, as one is.
 
 **The cap.** Agents already running or shown do not use capacity; only the ones that must start do.
 - A batch **never stops another agent to make room** (like restart resume). One start may stop an idle agent with no view; a batch of five doing that would be a surprising mass stop.
 - Under one hold of the admission lock it reads the room (`agents:max_running` minus running and reserved, and the commit limit) and **reserves** all of it, so a concurrent start cannot take it between the check and the starts. A refusal reserves nothing.
 - If the room is short, the whole call is refused: `capacity: 12 agents are running (the limit is 12); room for 2 of the 5 asked: A and B would fit, C, D and E would not. Stop some agents (3 are idle with no view), or ask for fewer.` Nothing starts.
-- The batch counts N starts against the sender's `start_rate` and is refused whole if N exceed what is left.
+- Neither batch charges the sender's `start_rate` up front: as for one agent, a start that a message triggers is charged when the message is delivered, so charging here too would count a started agent twice.
+
+**Built as:** `app_api/agent_spawn/many.rs` (`spawn_many`: validate everything, take the leader lock, count against `MAX_LIVE_WORKERS`, reserve room with `admit_batch`, one consent, launch each and roll back with `discard_worker`, `release_batch`) and `app_api/agent_open_many.rs` (`open_many`: at most 16, each agent by id, slug or name, a duplicate refused, only agents not already running count as starts, panes it created are closed again if a later one fails). `admit()` lets an agent that holds a reservation through. The MCP `spawn` with `workers` sends the briefs only after srv answers that every worker is open.
 
 **Touch.** `app_api/agent_spawn.rs` (`spawn_many`, one `consent`), `app_api/agent_open.rs` and `agent_attach.rs` (`open_many`, reusing the per-agent lock), `server/agent_lifecycle.rs` (`admit_batch`: room, reservation, the refusal text), `server/start_rate.rs` (take N), `crates/common/src/api_types.rs` (the request types), `crates/mcp/src/tools/agents_tool.rs` and `tool_schemas.rs` (the two list parameters, the briefs sent after the launch).
 

@@ -5,4 +5,12 @@
  * currently hold a `db_agent_skills_ref` to it — Memory → Skills'
  * "used by N agents" count (gap #2 of #1960).
  */
-export type SkillCatalogItem = { bound_count: number, id: string, name: string, trigger: string, skill_type: string, description: string, content: string, is_global: boolean, created_at: number, updated_at: number, };
+export type SkillCatalogItem = { bound_count: number, 
+/**
+ * Reaches every agent, not only the bound ones (`skill_reach::SkillReach`).
+ */
+all_agents: boolean, 
+/**
+ * Reaches every agent created from now on (`skill_reach::SkillReach`).
+ */
+new_agents: boolean, id: string, name: string, trigger: string, skill_type: string, description: string, content: string, is_global: boolean, created_at: number, updated_at: number, };

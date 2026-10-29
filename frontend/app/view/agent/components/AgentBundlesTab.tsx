@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * AgentBundlesTab — the "Bundles" tab inside AgentStashModal, also opened from
- * My Agents' row menu and the agent pane's right-click menu ("Bundles…"): the
+ * AgentBundlesTab — the "Bundles…" modal, opened from My Agents' row menu and
+ * the agent pane's right-click menu: the
  * agent's Bundles list, in order (SPEC_RENAME_KNOWLEDGE_TO_MEMORY_2026_10_06.md §3.6).
  * The agent's own bundle comes first and is fixed; the picks after it are
  * added, removed and reordered here, and saved on each change

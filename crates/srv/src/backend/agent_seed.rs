@@ -133,6 +133,11 @@ struct SeedSkill {
     description: String,
     #[serde(default)]
     content: String,
+    /// SHA-256 (hex) of the `content` this skill shipped with before. An agent whose skill
+    /// still holds exactly one of them never had it edited, so the seed replaces it with
+    /// `content`; a skill a user changed is left alone.
+    #[serde(default)]
+    replaces_content_sha256: Vec<String>,
 }
 
 fn default_skill_type() -> String {
@@ -309,6 +314,37 @@ fn seed_memories(mstore: &Arc<Store>, manifest: &SeedManifest) -> Result<usize, 
     Ok(created)
 }
 
+/// Refresh the seeded skills that agents still hold exactly as an earlier version shipped them
+/// (`replaces_content_sha256`): seeding creates an agent's skills once, so without this an agent
+/// that already exists keeps the old text for ever. Returns how many were replaced. A skill the
+/// user edited, renamed or deleted is never touched or recreated.
+fn refresh_seeded_skills(mstore: &Arc<Store>, manifest: &SeedManifest) -> Result<usize, StoreError> {
+    use sha2::{Digest, Sha256};
+    let mut refreshed = 0;
+    for agent_def in &manifest.agents {
+        let wanted: Vec<&SeedSkill> = agent_def.skills.iter().filter(|s| !s.replaces_content_sha256.is_empty()).collect();
+        if wanted.is_empty() {
+            continue;
+        }
+        for mut installed in mstore.agent_skill_list(&agent_def.id)? {
+            let Some(seed) = wanted.iter().find(|s| s.name == installed.name && s.trigger == installed.trigger) else {
+                continue;
+            };
+            if installed.content == seed.content {
+                continue;
+            }
+            let digest = hex::encode(Sha256::digest(installed.content.as_bytes()));
+            if seed.replaces_content_sha256.iter().any(|h| h.eq_ignore_ascii_case(&digest)) {
+                installed.content = seed.content.clone();
+                if mstore.agent_skill_update(&installed)? {
+                    refreshed += 1;
+                }
+            }
+        }
+    }
+    Ok(refreshed)
+}
+
 /// Is `current` exactly an earlier text of this seeded bundle, i.e. never edited?
 fn is_untouched_earlier_seed(current: &Bundle, mem_def: &SeedMemory) -> bool {
     use sha2::{Digest, Sha256};
@@ -360,6 +396,14 @@ pub fn auto_seed_on_startup(mstore: &Arc<Store>) {
             }
         }
         Err(e) => tracing::error!("agent seed: failed to count agents: {e}"),
+    }
+
+    // Skills are created with their agent, once; one an agent still holds as an earlier
+    // version shipped it is refreshed (`replaces_content_sha256`).
+    match refresh_seeded_skills(mstore, &manifest) {
+        Ok(0) => {}
+        Ok(n) => tracing::info!("agent seed: refreshed {n} seeded skills"),
+        Err(e) => tracing::error!("agent seed: failed to refresh seeded skills: {e}"),
     }
 
     // Seed bundles once — an existing ID is skipped, unless it still holds an
@@ -691,12 +735,103 @@ mod tests {
         assert_eq!(instructions_of(&mstore), "old text");
     }
 
+    // --- refreshing an untouched seeded skill ------------------------------
+
+    fn skill_manifest(new_text: &str, replaces: &[String]) -> SeedManifest {
+        serde_json::from_value(serde_json::json!({
+            "version": 1,
+            "agents": [{
+                "id": "tpl-a",
+                "name": "A",
+                "provider": "claude",
+                "skills": [{
+                    "name": "Startup Verification",
+                    "trigger": "startup",
+                    "content": new_text,
+                    "replaces_content_sha256": replaces,
+                }],
+            }],
+            "memories": [],
+        }))
+        .unwrap()
+    }
+
+    fn skill_text(mstore: &Arc<Store>) -> String {
+        mstore.agent_skill_list("tpl-a").unwrap().remove(0).content
+    }
+
+    fn agent_with_skill(old_text: &str) -> Arc<Store> {
+        let mstore = Arc::new(Store::open_in_memory().unwrap());
+        insert_tpl(&mstore, "tpl-a", "A", 0);
+        mstore
+            .agent_skill_insert(&AgentSkill {
+                id: "s1".to_string(),
+                agent_id: "tpl-a".to_string(),
+                name: "Startup Verification".to_string(),
+                trigger: "startup".to_string(),
+                skill_type: "prompt".to_string(),
+                description: String::new(),
+                content: old_text.to_string(),
+                created_at: 1,
+            })
+            .unwrap();
+        mstore
+    }
+
+    #[test]
+    fn an_untouched_earlier_skill_text_is_replaced() {
+        let mstore = agent_with_skill("old text");
+        let n = refresh_seeded_skills(&mstore, &skill_manifest("new text", &[sha_hex("old text")])).unwrap();
+        assert_eq!(n, 1);
+        assert_eq!(skill_text(&mstore), "new text");
+        // And once it is current there is nothing left to do.
+        assert_eq!(refresh_seeded_skills(&mstore, &skill_manifest("new text", &[sha_hex("old text")])).unwrap(), 0);
+    }
+
+    #[test]
+    fn an_edited_skill_is_left_alone() {
+        let mstore = agent_with_skill("old text, edited by the user");
+        assert_eq!(refresh_seeded_skills(&mstore, &skill_manifest("new text", &[sha_hex("old text")])).unwrap(), 0);
+        assert_eq!(skill_text(&mstore), "old text, edited by the user");
+    }
+
+    #[test]
+    fn without_earlier_hashes_an_existing_skill_is_never_touched() {
+        let mstore = agent_with_skill("old text");
+        assert_eq!(refresh_seeded_skills(&mstore, &skill_manifest("new text", &[])).unwrap(), 0);
+        assert_eq!(skill_text(&mstore), "old text");
+    }
+
+    #[test]
+    fn a_skill_the_user_deleted_is_not_recreated() {
+        let mstore = agent_with_skill("old text");
+        mstore.agent_skill_delete("s1").unwrap();
+        assert_eq!(refresh_seeded_skills(&mstore, &skill_manifest("new text", &[sha_hex("old text")])).unwrap(), 0);
+        assert!(mstore.agent_skill_list("tpl-a").unwrap().is_empty());
+    }
+
+    #[test]
+    fn the_shipped_manifest_lists_the_earlier_text_of_every_seeded_skill() {
+        let manifest: SeedManifest = serde_json::from_str(SEED_MANIFEST).unwrap();
+        for agent in &manifest.agents {
+            for skill in &agent.skills {
+                assert!(!skill.replaces_content_sha256.is_empty(), "{} / {}", agent.id, skill.name);
+                assert!(
+                    !skill.replaces_content_sha256.contains(&sha_hex(&skill.content)),
+                    "the current text must not be listed as an earlier one ({})",
+                    agent.id
+                );
+            }
+        }
+    }
+
     #[test]
     fn the_shipped_manifest_refreshes_the_old_reagent_text_of_the_dev_bundle() {
         let manifest: SeedManifest = serde_json::from_str(SEED_MANIFEST).unwrap();
         let dev = manifest.memories.iter().find(|m| m.id == "seed-agentmux-dev").unwrap();
         assert!(!dev.replaces_instructions_sha256.is_empty());
-        assert!(dev.instructions.contains("### muxreview Bot"));
+        assert!(dev.instructions.contains("### Automated review"));
+        assert!(!dev.instructions.contains("muxreview"), "a bot of ours is not named in text every user gets");
         assert!(!dev.replaces_instructions_sha256.contains(&sha_hex(&dev.instructions)),
             "the current text must not be listed as an earlier one");
     }

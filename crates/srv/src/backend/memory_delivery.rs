@@ -166,6 +166,18 @@ pub fn compose_items_with(
     running_summary: Option<&str>,
     global_in_startup_file: bool,
 ) -> Option<Composed> {
+    compose_items_tail(entries, reason, running_summary, global_in_startup_file, None)
+}
+
+/// [`compose_items_with`], with a closing note (`memory_fit`'s not-sent list and pruning nudge) after the
+/// memory and before the running summary.
+pub fn compose_items_tail(
+    entries: &[Entry],
+    reason: Reason,
+    running_summary: Option<&str>,
+    global_in_startup_file: bool,
+    tail: Option<&str>,
+) -> Option<Composed> {
     let global: Vec<usize> = (0..entries.len()).filter(|&i| entries[i].tier == Tier::Global).collect();
     let personal: Vec<usize> = (0..entries.len()).filter(|&i| entries[i].tier == Tier::Personal).collect();
     let summary = running_summary.filter(|s| !s.trim().is_empty() && reason == Reason::Compact);
@@ -189,7 +201,15 @@ pub fn compose_items_with(
         ));
     }
     let mut spans = Vec::new();
-    let wrote_section = push_sections(&mut b, entries, &global, &personal, &mut spans);
+    let mut wrote_section = push_sections(&mut b, entries, &global, &personal, &mut spans);
+    if let Some(tail) = tail.filter(|t| !t.trim().is_empty()) {
+        if wrote_section {
+            b.push("\n");
+        }
+        b.push(tail);
+        b.push("\n");
+        wrote_section = true;
+    }
     if let Some(summary) = summary {
         if wrote_section {
             b.push("\n");

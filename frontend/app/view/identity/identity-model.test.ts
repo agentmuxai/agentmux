@@ -109,7 +109,7 @@ describe("identity-model SecretRef field-name translation", () => {
 
     it("module exports expected public surface", () => {
         // Defensive: catches accidental removal/rename of the public API
-        // that callers (agent-view.tsx, AgentIdentityPanel.tsx,
+        // that callers (agent-view.tsx,
         // app-init.ts) import.
         expect(typeof identityModel.loadAccounts).toBe("function");
         expect(typeof identityModel.refreshAccountCache).toBe("function");

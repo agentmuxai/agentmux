@@ -118,6 +118,9 @@ pub(crate) mod tests;
 #[path = "tests/sender_claims_tests.rs"]
 mod sender_claims_tests;
 #[cfg(test)]
+#[path = "tests/http_skill_tests.rs"]
+mod http_skill_tests;
+#[cfg(test)]
 #[path = "tests/peer_veto_tests.rs"]
 mod peer_veto_tests;
 #[cfg(test)]
@@ -181,6 +184,7 @@ mod http_pty_shell;
 mod http_open;
 mod http_app_api;
 mod http_self;
+mod http_skill;
 mod http_naming;
 mod http_layout;
 mod auth;
@@ -194,6 +198,7 @@ use http_pty_shell::*;
 use http_open::*;
 use http_app_api::*;
 use http_self::*;
+use http_skill::*;
 use http_naming::*;
 use http_layout::*;
 pub(crate) use auth::*;

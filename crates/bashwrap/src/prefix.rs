@@ -37,7 +37,7 @@ const CALLS_DIR_OVERRIDE_ENV: &str = "AGENTMUX_BASHWRAP_CALLS_DIR";
 /// ran (denied, interrupted) leaves its record behind.
 const RECORD_MAX_AGE: Duration = Duration::from_secs(3600);
 /// The subcommands, which a lone argument must not be mistaken for.
-const SUBCOMMANDS: &[&str] = &["exec", "hook", "precompact", "sessionstart", "git-credential", "github-token", "help"];
+const SUBCOMMANDS: &[&str] = &["exec", "hook", "precompact", "sessionstart", "git-credential", "github-token", "github-owner-tag", "git-hook", "git-env", "help"];
 
 /// One Bash call, as the hook saw it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -327,6 +327,8 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // definition (not a fork), in a pane next to its own
         // (SPEC_AGENT_WORKERS_2026_10_15.md §3.1).
         .route("/api/v1/agent/spawn", post(app_api::agent_spawn::handle_agent_spawn))
+        .route("/api/v1/agent/spawn_many", post(app_api::agent_spawn::handle_agent_spawn_many))
+        .route("/api/v1/agent/open_many", post(app_api::agent_open_many::handle_agent_open_many))
         // Remove a container agent's container so its next message starts it from the current
         // agent image (`Agents update_container`); only between turns.
         .route("/api/v1/agent/container/update", post(app_api::container_update::handle_update_container))
@@ -494,6 +496,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/api/v1/agent/identity/accounts", get(handle_agent_identity_accounts))
         .route("/api/v1/agent/identity/validate", post(handle_agent_identity_validate))
         .route("/api/v1/agent/identity/switch", post(handle_agent_identity_switch))
+        .route("/api/v1/agent/skill", post(handle_agent_skill))
         // Agent UI automation (SPEC_AGENT_UI_AUTOMATION_CLICK_SCREENSHOT_2026_08_18.md)
         // — proxies to the paired CEF host's browser_api CDP routes. `block_id`
         // is stamped by agentmux-mcp from AGENTMUX_BLOCKID, same trust model as
@@ -590,6 +593,12 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/api/v1/github/token", post(app_api::github_token::handle_github_token))
         // An agent sets or clears seats, several at once; recorded under its name.
         .route("/api/v1/agent/seats", post(app_api::agent_seats::handle_agent_seats))
+        // An agent asks for the shared pane-history store's free space to be given back at the next
+        // start, withdraws that, or reads where it stands (`App history_reclaim`).
+        .route(
+            "/api/v1/agent/history/reclaim",
+            post(app_api::agent_history_reclaim::handle_history_reclaim).get(app_api::agent_history_reclaim::handle_history_reclaim_status),
+        )
         // The outcome of a shutdown waiting on the user's override (§6.5):
         // the MCP tools poll it after their 202.
         // axum 0.7: a path parameter is `:name`; `{name}` would be a literal.

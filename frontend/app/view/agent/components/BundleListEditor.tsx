@@ -3,7 +3,7 @@
 
 /**
  * BundleListEditor — pick an agent's bundles, in order: the new-agent form
- * and the Stash's Bundles tab
+ * and the Bundles… modal (AgentBundlesTab)
  * (SPEC_RENAME_KNOWLEDGE_TO_MEMORY_2026_10_06.md §3.6). Order matters: when
  * two bundles name the same skill, the first wins.
  *

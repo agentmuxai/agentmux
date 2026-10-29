@@ -6287,6 +6287,25 @@
     }
   },
   {
+    "command": "skill.catalog.bind_all",
+    "request": "agentmux_srv::backend::rpc_types::skill::CommandSkillCatalogBindAllData",
+    "requestName": "CommandSkillCatalogBindAllData",
+    "requestTs": {
+      "imports": [
+        "CommandSkillCatalogBindAllData"
+      ],
+      "name": "CommandSkillCatalogBindAllData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::skill::SkillBindAllResult",
+    "responseName": "SkillBindAllResult",
+    "responseTs": {
+      "imports": [
+        "SkillBindAllResult"
+      ],
+      "name": "SkillBindAllResult"
+    }
+  },
+  {
     "command": "skill.catalog.bind_to_bundle",
     "request": "agentmux_srv::backend::rpc_types::skill::SkillBundleBindingData",
     "requestName": "SkillBundleBindingData",
@@ -6379,6 +6398,25 @@
         "SkillBundleListItem"
       ],
       "name": "Array<SkillBundleListItem>"
+    }
+  },
+  {
+    "command": "skill.catalog.set_reach",
+    "request": "agentmux_srv::backend::rpc_types::skill::CommandSkillCatalogSetReachData",
+    "requestName": "CommandSkillCatalogSetReachData",
+    "requestTs": {
+      "imports": [
+        "CommandSkillCatalogSetReachData"
+      ],
+      "name": "CommandSkillCatalogSetReachData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::skill::SkillBindResult",
+    "responseName": "SkillBindResult",
+    "responseTs": {
+      "imports": [
+        "SkillBindResult"
+      ],
+      "name": "SkillBindResult"
     }
   },
   {

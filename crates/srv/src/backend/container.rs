@@ -14,7 +14,7 @@
 //!     ping is used (`container_runtime.rs`).
 //!   - Windows: named pipe `//./pipe/docker_engine`
 //!
-//! Independence boundary: this module has no dependency on a5af/claw.
+//! Independence boundary: this module has no dependency on any other project's container code.
 //! Docker best practices here were researched independently.
 
 pub(crate) mod drift;
@@ -89,6 +89,9 @@ pub struct ContainerMountSpec {
     pub workspace_host_dir: Option<String>,
     /// The agent's Personal Memory folder on the host, bind-mounted where Claude reads memory in the container.
     pub memory_host_dir: Option<String>,
+    /// AgentMux's git hooks (push scan, commit trailers) on the host, mounted read-only at
+    /// [`crate::identity::github_tokens::CONTAINER_HOOKS_DIR`] where container agents get git through AgentMux.
+    pub github_hooks_host_dir: Option<String>,
 }
 
 /// Normalize a host path for Docker's mount API: backslashes are not accepted in
@@ -163,8 +166,8 @@ pub fn rewrite_local_url_for_container(local_url: &str) -> String {
 /// instead — see [`ContainerMountSpec::claude_config_host_dir`].
 pub const CONTAINER_ENV_DENYLIST: &[&str] = &[
     "CLAUDE_CONFIG_DIR",
-    // Deliberately dropped even though `backend::gh_guard` sets it on every
-    // agent spawn: the guard dir is a host path that means nothing inside the
+    // Deliberately dropped even though `backend::gh_guard` sets it on the spawns
+    // it guards: the guard dir is a host path that means nothing inside the
     // image, and the image controls its own `gh` state.
     "GH_CONFIG_DIR",
     "PATH",
@@ -526,15 +529,15 @@ impl ContainerManager {
         };
 
         match existing {
-            Some(status) if status == "running" => {
-                // Already running — nothing to do.
-            }
-            Some(_) => {
-                // Exists but stopped — start it.
-                self.inner.docker
-                    .start_container(container_name, None::<StartContainerOptions<String>>)
-                    .await?;
-                tracing::info!(container = container_name, "restarted stopped container");
+            Some(status) => {
+                if status != "running" {
+                    // Exists but stopped — start it.
+                    self.inner.docker
+                        .start_container(container_name, None::<StartContainerOptions<String>>)
+                        .await?;
+                    tracing::info!(container = container_name, "restarted stopped container");
+                }
+                self.secure_credentials_once(container_name).await;
             }
             None => {
                 // Pull the image via Docker socket before create so the Engine API
@@ -545,7 +548,7 @@ impl ContainerManager {
                 // Create and start.
                 observe(StartEvent::Starting);
                 self.create_and_start(container_name, &image, volumes, env_vars, spec).await?;
-                self.own_memory_parents(container_name, spec).await;
+                self.prepare_home(container_name, spec).await;
                 tracing::info!(container = container_name, image = image, "created and started container");
             }
         }
@@ -1077,11 +1080,12 @@ impl ContainerManager {
     /// Every mount target this module owns. Anything NOT in here (the caller's
     /// `agent:container_volumes`) is the user's business and is never a reason
     /// to rebuild their container.
-    fn owned_mount_targets() -> [String; 3] {
+    fn owned_mount_targets() -> [String; 4] {
         [
             CONTAINER_CLAUDE_DIR.to_string(),
             format!("{CONTAINER_CLAUDE_DIR}/{CLAUDE_CREDENTIALS_FILE}"),
             CONTAINER_WORKSPACE_DIR.to_string(),
+            crate::identity::github_tokens::CONTAINER_HOOKS_DIR.to_string(),
         ]
     }
 
@@ -1669,7 +1673,8 @@ mod tests {
         assert!(owned.contains(&CONTAINER_CLAUDE_DIR.to_string()));
         assert!(owned.contains(&CONTAINER_WORKSPACE_DIR.to_string()));
         assert!(owned.contains(&format!("{CONTAINER_CLAUDE_DIR}/{CLAUDE_CREDENTIALS_FILE}")));
-        assert_eq!(owned.len(), 3, "a user volume target must never appear here");
+        assert!(owned.contains(&crate::identity::github_tokens::CONTAINER_HOOKS_DIR.to_string()));
+        assert_eq!(owned.len(), 4, "a user volume target must never appear here");
     }
 
     /// macOS keeps OAuth credentials in the Keychain and never writes this file
@@ -2092,7 +2097,7 @@ mod tests {
         registry.register("itest-proj", "itest-devproxy", addr).await;
         assert_eq!(
             registry.lookup("itest-proj-itest-devproxy").await,
-            Some(addr),
+            Some(addr.into()),
             "registration must be visible via lookup before cleanup"
         );
 

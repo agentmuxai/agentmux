@@ -16,6 +16,8 @@
  *   "Downloading the agent image… 42%", "Starting the container…", then
  *   "Container ready (12 s)" or "Couldn't start the container". Every frame of
  *   one start-up shares a `start_id`, so it is one row that updates in place.
+ * - `agentmux_agent_ready` — a container agent is up and nothing is on its way to it: "Ready: send a
+ *   message to start", so the pane never ends a start-up silent.
  * - `agentmux_container_image` — the container runs an older agent image than this AgentMux:
  *   "This container uses the 0.59.41 image" with an Update container button, then (one row, updated
  *   in place) "Container removed. The next message starts it from the 0.60.2 image".
@@ -36,6 +38,7 @@ const CLI_VERSION_CHANGED_SUBTYPE = "agentmux_cli_version_changed";
 const MCP_HEALTH_SUBTYPE = "agentmux_mcp_health";
 const CONTAINER_START_SUBTYPE = "agentmux_container_start";
 const CONTAINER_IMAGE_SUBTYPE = "agentmux_container_image";
+const AGENT_READY_SUBTYPE = "agentmux_agent_ready";
 
 const MCP_STATES = ["healing", "restarting", "ok", "gave_up"] as const;
 const CONTAINER_START_STATES = ["pulling", "starting", "ready", "failed"] as const;
@@ -125,6 +128,18 @@ export function parseCliNoticeFrame(rawEvent: unknown, now: number): CliNoticeNo
             timestamp,
         };
     }
+    if (e.subtype === AGENT_READY_SUBTYPE) {
+        const readyId = str(e.ready_id);
+        if (!readyId) return null;
+        return {
+            type: "cli_notice",
+            id: `agent-ready-${readyId}`,
+            kind: "agent_ready",
+            provider,
+            seconds: typeof e.seconds === "number" ? e.seconds : undefined,
+            timestamp,
+        };
+    }
     if (e.subtype === CONTAINER_IMAGE_SUBTYPE) {
         const imageState = e.state === "outdated" || e.state === "updated" ? e.state : null;
         const blockId = str(e.block_id);
@@ -192,6 +207,10 @@ export function cliNoticeText(node: CliNoticeNode): { label: string; detail: str
     if (node.kind === "mcp_health") return mcpHealthText(node);
     if (node.kind === "container_start") return containerStartText(node);
     if (node.kind === "container_image") return containerImageText(node);
+    if (node.kind === "agent_ready") {
+        const took = node.seconds != null ? ` (${Math.max(1, Math.round(node.seconds))} s)` : "";
+        return { label: `Ready${took}: send a message to start`, detail: `${name} is installed and the container is running`, tone: "info" };
+    }
     if (node.kind === "install") {
         switch (node.state) {
             case "installing":

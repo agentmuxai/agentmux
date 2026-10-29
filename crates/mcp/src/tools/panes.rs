@@ -500,7 +500,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                     // Yourself (§7): as QuitSelf, done once it's proceeding —
                     // the quit waits for this very turn to end.
                     None => {
-                        let now = await_shutdown(client, local_url, auth_key, request_id, false).await;
+                        let now = own_outcome(await_shutdown_of(client, local_url, auth_key, request_id, false, Some(block_id)).await, block_id);
                         match now["status"].as_str().unwrap_or("") {
                             "" | "pending" => anyhow::bail!("ClosePane: no answer on the pending shutdown {request_id}"),
                             state => quit_self_outcome(state, &now),
@@ -547,7 +547,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let request_id = body["request_id"].as_str().unwrap_or_default();
             // `proceeding` is final for QuitSelf: the shutdown waits for this
             // very turn to end, so waiting on here would hold it up.
-            let now = await_shutdown(client, local_url, auth_key, request_id, false).await;
+            let now = own_outcome(await_shutdown_of(client, local_url, auth_key, request_id, false, Some(block_id)).await, block_id);
             match now["status"].as_str().unwrap_or("") {
                 "" | "pending" => anyhow::bail!("QuitSelf: no answer on the pending shutdown {request_id}"),
                 state => quit_self_outcome(state, &now),

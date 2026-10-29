@@ -15,6 +15,7 @@
 export const AGENT_VIEW_SOURCES: readonly string[] = [
     "agent-view.tsx",
     "agent-block-content.tsx",
+    "system-notification.ts",
     "agent-pane-chrome-model.ts",
     "hooks/useShellLogBridge.ts",
     "hooks/useWorkingIndicator.ts",
@@ -22,7 +23,6 @@ export const AGENT_VIEW_SOURCES: readonly string[] = [
     "activity/promotion-clock.ts",
     "startup/sendStartupSequence.ts",
     "activity/useAttachedTaskAxis.ts",
-    "components/AgentStashDrawer.tsx",
     "components/AgentShellDrawer.tsx",
     "components/AgentBottomPanels.tsx",
     "failure/useAccountBinding.ts",

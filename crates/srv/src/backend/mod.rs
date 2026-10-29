@@ -127,6 +127,10 @@ pub mod global_memory_record;
 pub mod agent_bundle_sidecar;
 pub mod continuity_state;
 pub mod memory_delivery;
+/// Skills that ship with AgentMux, seeded into the catalog once.
+pub mod builtin_skills;
+/// What of Personal Memory fits in a delivery, and what the agent is told about the rest.
+pub mod memory_fit;
 pub mod shellexec;
 pub mod transcript;
 pub mod transcript_backfill;
@@ -186,6 +190,7 @@ pub(crate) mod packaged_tools;
 pub mod container;
 pub mod container_cli;
 pub mod container_credential;
+pub mod container_routes;
 pub mod container_image;
 pub mod container_listener;
 #[cfg(test)]
@@ -197,6 +202,7 @@ pub mod registry_probe;
 pub mod cron;
 pub mod jobs;
 pub mod dev_proxy;
+pub mod dev_relay;
 pub mod shell_node;
 pub mod work_facts;
 /// The Kanban's reminders and PR links (SPEC_WARDEN_KANBAN_2026_10_20.md).

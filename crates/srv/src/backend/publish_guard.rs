@@ -26,7 +26,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Once;
 
 const COUNT: &str = "GIT_CONFIG_COUNT";
-const HOOKS_PATH_KEY: &str = "core.hooksPath";
+pub(crate) const HOOKS_PATH_KEY: &str = "core.hooksPath";
 /// Larger counts already in the env are not trusted (and not looped over).
 const MAX_ENTRIES: usize = 256;
 /// The line `gh-agent` writes into every hook it generates.
@@ -189,9 +189,9 @@ pub fn apply_publish_guard(env: &mut HashMap<String, String>) {
         None => {
             static WARN: Once = Once::new();
             WARN.call_once(|| {
-                tracing::warn!(
-                    "publish guard: gh-agent's hooks are not written, so agents' pushes are not scanned; \
-                     install gh-agent 0.5 or later and run `gh-agent setup-git`, then restart agents"
+                tracing::debug!(
+                    "publish guard not active: no hooks directory from gh-agent was found, so agents' pushes are not scanned \
+                     (agents' GitHub access is set up by the AgentMux GitHub connection or by gh-agent)"
                 );
             });
         }

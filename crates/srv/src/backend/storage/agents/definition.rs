@@ -1010,7 +1010,7 @@ impl Store {
             let scope = Self::scope_for_row(&conn, id);
             // Identity M4a: also read before the DELETE.
             tombstone_key_names(&conn, id, &shared)?;
-            purge_name_keyed_keys(&conn, id, self.wan_identity().as_deref(), &shared)?;
+            purge_name_keyed_keys(&conn, id, self.wan_identity().as_deref(), self.host_lan_keys().as_deref(), &shared)?;
             let rows = conn.execute("DELETE FROM db_agents WHERE id=?1", params![id])?;
             // Unconditional, same convergence rule as the registry sweep
             // below (codex P2 on PR #3262): if a previous attempt committed

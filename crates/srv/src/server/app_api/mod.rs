@@ -31,6 +31,7 @@ pub(crate) mod agent_watch;
 mod agent_attach_tests;
 pub(crate) mod agent_block;
 pub(crate) mod agent_open;
+pub(crate) mod agent_open_many;
 /// Re-exported for `server/mod.rs`'s `POST /api/v1/agent/open` handler (the
 /// `OpenAgent` MCP tool's backing route) — the HTTP surface must share the
 /// RPC path's exact implementation, including its AGENT_OPEN_LOCKS TOCTOU
@@ -38,6 +39,7 @@ pub(crate) mod agent_open;
 pub(crate) use agent_open::open_agent_impl;
 /// The `Agents` `spawn` action's route (SPEC_AGENT_WORKERS_2026_10_15.md).
 pub(crate) mod agent_seats;
+pub(crate) mod agent_history_reclaim;
 pub(crate) mod agent_spawn;
 // pub(crate): `server/mod.rs`'s `/agentmux/agent/stop` handler (the
 // cross-channel bulk-stop forward target,

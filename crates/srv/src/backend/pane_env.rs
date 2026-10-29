@@ -348,6 +348,10 @@ mod spawn_site_coverage {
     /// `program` is the literal text between `new(` and the first `,` or `)`,
     /// which is stable across edits in a way line numbers are not.
     const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
+        ("src/identity/gh_agent_token.rs", "&exe", 1,
+         "sanitized: the host's `gh-agent token` for a container agent's repository, sanitize_external_command (it is told only the agent id)"),
+        ("src/backend/blockcontroller/subprocess/container_spawn.rs", "&argv[0]", 1,
+         "test: Unix only; runs the container turn launcher on the host to prove an exported function reaches the provider"),
         ("src/agents/runner.rs", "bin", 1,
          "sanitized: agent CLI subprocess, sanitize_process_command"),
         ("src/backend/attachments/extract.rs", "exe", 1,
@@ -398,6 +402,8 @@ mod spawn_site_coverage {
          "test: disposable `sleep 60` the launcher-watcher test waits on through a pidfd, to prove a signal doesn't end the wait"),
         ("src/backend/claude_layout.rs", "\"git\"", 1,
          "test: builds a throwaway repository with a linked worktree in a temp dir, to check the CLI's memory-folder rule"),
+        ("src/backend/container/mounts/credential_mode.rs", "\"sh\"", 1,
+         "test: Unix only; runs the container's credential-tightening script against a temp dir, to prove what it changes and what it leaves"),
         ("src/backend/container_cli.rs", "\"sh\"", 2,
          "test: Unix only; runs the container CLI install and check scripts against a stub npm in a temp dir, to prove they are idempotent and write no marker on failure"),
         ("src/backend/lsp/supervisor.rs", "&resolved", 1,

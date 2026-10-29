@@ -474,6 +474,12 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
                 match crate::boot_timing::time("open_identity_store", || Store::open_identity_store(&path)) {
                     Ok(s) => {
                         tracing::info!(path = %path.display(), "identity store: attached (always global)");
+                        // An agent's LAN signing key is the host's, not this channel's: a channel switch
+                        // must not change the key LAN peers have pinned.
+                        match backend::storage::host_lan_keys::HostLanKeys::open(&path) {
+                            Ok(keys) => mstore.set_host_lan_keys(Arc::new(keys)),
+                            Err(e) => tracing::warn!(error = %e, "LAN keys: the host key table did not open, this channel keeps its own keys"),
+                        }
                         Arc::new(s)
                     }
                     Err(e) => {
@@ -627,6 +633,9 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
 
     // No starter Skills are seeded: migrations::m0015_seed_starter_skills is
     // retired, and 0041 removed the ones it had left in existing catalogs.
+    // The skills AgentMux ships are a different thing: a few, each created once and then the
+    // user's (`backend::builtin_skills`).
+    backend::builtin_skills::seed_on_startup(&identity_store);
 
     // Gap-repair (backfilling a db_agent_definitions row missing its
     // db_agents mirror) is gone as of the definition flip: every

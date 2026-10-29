@@ -10,9 +10,9 @@
  *     command ("system"-tagged) activity-log lines write directly into its
  *     terminal rather than a separate panel), docked below the composer
  *     (SPEC_AGENT_SHELL_BELOW_COMPOSER_2026_08_08.md).
- *   - `anchor="top"`: the Stash drawer, docked under the pane header where
- *     its own toggle icon lives
- *     (SPEC_AGENT_STASH_PANE_MIGRATION_2026_09_22.md §3.1).
+ *   - `anchor="top"`: docked under the pane header (no current user; the
+ *     Stash drawer that used it was removed,
+ *     SPEC_DROP_THE_AGENT_STASH_2026_10_24.md).
  *
  * THE HANDLE ALWAYS SITS ON THE DRAWER'S FREE EDGE — the one opposite the
  * pinned one — so it tracks the cursor 1:1 as the drawer grows:
