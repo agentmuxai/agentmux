@@ -20,6 +20,7 @@
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { autoUpdate, computePosition } from "@floating-ui/dom";
+import { createSignal } from "solid-js";
 import { Tooltip } from "./tooltip";
 import * as pointerDragState from "@/app/util/pointer-drag-state";
 
@@ -179,6 +180,45 @@ describe("Tooltip default timing", () => {
         expect(screen.queryByText("first")).toBeNull();
         const second = screen.getByText("second").closest("[data-pane-overlay]") as HTMLElement;
         expect(second.getAttribute("style")).toContain("opacity: 1");
+    });
+
+    it("does not stay 'warm' for the others after an open tooltip is disabled", async () => {
+        vi.useFakeTimers();
+        const [disabled, setDisabled] = createSignal(false);
+        render(() => (
+            <>
+                <Tooltip content={<span>first</span>} disable={disabled()}>
+                    <span>anchor-first</span>
+                </Tooltip>
+                <Tooltip content={<span>second</span>}>
+                    <span>anchor-second</span>
+                </Tooltip>
+            </>
+        ));
+        fireEvent.mouseEnter(screen.getByText("anchor-first").parentElement!);
+        await vi.advanceTimersByTimeAsync(100);
+        setDisabled(true);
+        await vi.advanceTimersByTimeAsync(1000);
+        fireEvent.mouseLeave(screen.getByText("anchor-first").parentElement!);
+        fireEvent.mouseEnter(screen.getByText("anchor-second").parentElement!);
+        await vi.advanceTimersByTimeAsync(20);
+        expect(overlays()[0].getAttribute("style")).toContain("opacity: 0");
+    });
+
+    it("is invisible again until it has been placed when it reopens", async () => {
+        vi.useFakeTimers();
+        const [a] = two();
+        fireEvent.mouseEnter(a);
+        await vi.advanceTimersByTimeAsync(100);
+        expect(overlays()[0].getAttribute("style")).toContain("opacity: 1");
+        fireEvent.mouseLeave(a);
+        await vi.advanceTimersByTimeAsync(200);
+        expect(overlays()).toHaveLength(0);
+        // Reopen with the placement not yet computed.
+        vi.mocked(computePosition).mockImplementationOnce(() => new Promise(() => {}));
+        fireEvent.mouseEnter(a);
+        await vi.advanceTimersByTimeAsync(100);
+        expect(overlays()[0].getAttribute("style")).toContain("opacity: 0");
     });
 
     it("waits the short rest when no tooltip has been open lately", async () => {

@@ -184,6 +184,7 @@ function TooltipInner(props: TooltipProps): JSX.Element {
             setIsOpen(false);
             setIsVisible(false);
             setIsPositioned(false);
+            markClosed();
         } else if (forceOpen()) {
             setIsOpen(true);
             setIsVisible(true);
@@ -201,7 +202,7 @@ function TooltipInner(props: TooltipProps): JSX.Element {
                 setIsOpen(false);
                 setIsPositioned(false);
             } else {
-                hideTimeout = setTimeout(() => { setIsOpen(false); markClosed(); }, hideDelayMs());
+                hideTimeout = setTimeout(() => { setIsOpen(false); setIsPositioned(false); markClosed(); }, hideDelayMs());
             }
         }
     });
