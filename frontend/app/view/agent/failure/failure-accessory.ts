@@ -82,7 +82,7 @@ export interface FailureViewState {
      * bound in one click, excluding the account already linked here — see
      * `computeAccountBindCandidates` (bind-account-candidates.ts). Empty or
      * omitted → the auth row shows "Connectors → Accounts" as it did before Bind;
-     * non-empty → it shows "Bind: <name>" (one candidate) or "Bind account"
+     * non-empty → it shows "Use <name>" (one candidate) or "Use account…"
      * (2+, opens a picker) instead. See
      * docs/specs/SPEC_AGENT_LOGIN_FLOW_TIGHTENING_2026_09_04.md §3.1.
      */
@@ -195,7 +195,7 @@ export function failureToRow(f: AgentFailure, view: FailureViewState, on: Failur
             // "Login via terminal" stays unconditionally — it's the only
             // working recovery for providers whose in-app OAuth can't
             // complete in-app (SPEC_HOST_CLI_LOGIN_CAPTURE_2026_06_20.md
-            // §5.5). What "Bind account" replaces is "Connectors → Accounts",
+            // §5.5). What "Use account…" replaces is "Connectors → Accounts",
             // and only when it actually has something to offer instead —
             // decided 2026-09-04, see the spec's §3 for the full rationale.
             const accountsOrBind: PaneRowAction =
@@ -203,8 +203,8 @@ export function failureToRow(f: AgentFailure, view: FailureViewState, on: Failur
                     ? openAccounts
                     : {
                           icon: "plug",
-                          label: bindCandidates.length === 1 ? `Bind: ${bindCandidates[0].name}` : "Bind account",
-                          title: "Bind an already-signed-in account to this agent",
+                          label: bindCandidates.length === 1 ? `Use ${bindCandidates[0].name}` : "Use account…",
+                          title: "Use an account that is already signed in for this agent",
                           onClick: on.bindAccount,
                       };
             actions.push(

@@ -1066,7 +1066,7 @@ export const AgentPresentationView = ({
             log("auth", "Login via terminal — opening a console window for browser login");
             void status.loginViaTerminal({ retryAfterLogin: turnAttempted });
         },
-        // Labelled for the failure row's "Bind: <account>" (email, else name).
+        // Labelled for the failure row's "Use <account>" (email, else name).
         bindCandidates: () => account.bindCandidates().map((a) => ({ id: a.id, name: accountLabel(a) })),
         onBindAccount: account.onBindAccount,
     });
