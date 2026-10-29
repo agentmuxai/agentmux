@@ -81,14 +81,23 @@ fn status_of(db: &std::path::Path) -> Value {
 
 /// Request, cancel or read the reclaim of the store at `db`, as `by`.
 fn change(db: &std::path::Path, action: &str, by: &str, now_ms: u64) -> Result<Value, Refusal> {
+    // Whose request a cancel takes back: anyone may withdraw it (the person can in Storage, an agent here),
+    // but the answer and the log say whose it was.
+    let withdrawn = reclaim::status(db).0.map(|m| m.requested_by);
     let done = match action {
         "request" => reclaim::request(db, by, now_ms),
         "cancel" => reclaim::cancel(db),
         other => return Err(refuse(StatusCode::BAD_REQUEST, format!("INVALID_ARG: unknown action {other:?} (request or cancel)"))),
     };
     done.map_err(|e| refuse(StatusCode::INTERNAL_SERVER_ERROR, format!("history reclaim: {e}")))?;
-    tracing::info!(agent = by, action, "history reclaim: {}", if action == "request" { "asked for at the next start" } else { "withdrawn" });
-    Ok(status_of(db))
+    tracing::info!(agent = by, action, previously_requested_by = ?withdrawn, "history reclaim: {}", if action == "request" { "asked for at the next start" } else { "withdrawn" });
+    let mut out = status_of(db);
+    if action == "cancel" {
+        if let Some(was) = withdrawn {
+            out["withdrew_request_of"] = json!(was);
+        }
+    }
+    Ok(out)
 }
 
 fn respond(result: Result<Value, Refusal>) -> Response {

@@ -174,6 +174,10 @@ fn describe_reclaim(st: &Value, what: &str) -> String {
         }
     } else if what == "cancel" {
         out.push_str("No reclaim of the pane-history store is asked for now.");
+        let was = s(st, "withdrew_request_of");
+        if !was.is_empty() {
+            out.push_str(&format!(" It withdrew the request made by {was}."));
+        }
     } else {
         out.push_str("No reclaim of the pane-history store is asked for. App history_reclaim with reclaim \"request\" asks for one at the next start.");
     }
@@ -323,6 +327,8 @@ mod tests {
         let none = json!({ "pending": false, "last_done_ms": 0, "last_before_bytes": 0, "last_after_bytes": 0 });
         assert!(describe_reclaim(&none, "cancel").starts_with("No reclaim of the pane-history store is asked for now."));
         assert!(describe_reclaim(&none, "status").contains("reclaim \"request\" asks for one"));
+        let taken = json!({ "pending": false, "withdrew_request_of": "operator" });
+        assert!(describe_reclaim(&taken, "cancel").contains("withdrew the request made by operator"));
 
         let done = json!({ "pending": false, "last_done_ms": 5, "last_before_bytes": 3u64 << 30, "last_after_bytes": 1u64 << 30 });
         assert!(describe_reclaim(&done, "status").contains("from 3072.0 MB to 1024.0 MB"));

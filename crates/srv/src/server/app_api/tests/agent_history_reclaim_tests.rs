@@ -46,6 +46,17 @@ fn a_request_can_be_withdrawn_and_withdrawing_nothing_is_fine() {
 }
 
 #[test]
+fn a_cancel_says_whose_request_it_took_back() {
+    let (_dir, db) = db();
+    reclaim::request(&db, "operator", 500).unwrap();
+    let body = change(&db, "cancel", "loap-3", 2_000).ok().unwrap();
+    assert_eq!(body["pending"], false);
+    assert_eq!(body["withdrew_request_of"], "operator", "the person's request is taken back in the open");
+    // With nothing pending, nothing was taken back.
+    assert!(change(&db, "cancel", "loap-3", 3_000).ok().unwrap().get("withdrew_request_of").is_none());
+}
+
+#[test]
 fn an_unknown_action_is_refused() {
     let (_dir, db) = db();
     let err = change(&db, "now", "loap-3", 1_000).err().unwrap();
