@@ -404,6 +404,18 @@
         }
     }
 
+    // The tab's close was clicked and has not finished: dimmed and inert, a spinner where its ×
+    // was (SPEC_PANE_CLOSING_INDICATOR_AND_FASTER_CLOSE_2026_10_28.md §2).
+    &--closing {
+        opacity: 0.55;
+        pointer-events: none;
+        cursor: progress;
+
+        .pane-tab-close {
+            opacity: 1;
+        }
+    }
+
     // Same-pane drag-reorder (SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md
     // §3.2, Phase 3) — deliberately minimal (a dimmed source, a solid
     // insertion-line on the hovered side), matching this codebase's pattern

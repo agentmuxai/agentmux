@@ -317,6 +317,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // token, for an agent with a grant (Calendar, then Drive and Gmail).
         .route("/api/v1/google/self/services", get(super::google_handlers::handle_google_self_services))
         .route("/api/v1/google/calendar", post(super::google_handlers::handle_google_calendar))
+        .route("/api/v1/google/drive", post(super::google_handlers::handle_google_drive))
         // Open (launch) an agent into a pane from an agent tool call —
         // agentmux-mcp's OpenAgent tool POSTs `{agent_id, tab_id?, …}` here.
         // Shares the exact agent.open logic (incl. its AGENT_OPEN_LOCKS

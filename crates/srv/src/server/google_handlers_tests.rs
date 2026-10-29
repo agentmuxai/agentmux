@@ -109,3 +109,44 @@ async fn the_panel_lists_an_agent_whose_account_comes_from_its_template_parent()
     let child = agents.iter().find(|a| a["agentId"] == "child-1").expect("the child is listed");
     assert_eq!(child["levels"]["calendar"], "read");
 }
+
+#[test]
+fn an_agent_can_open_the_picker_once_a_minute_per_account() {
+    let t0 = std::time::Instant::now();
+    assert!(pick_throttle("throttle-a", t0).is_ok());
+    let e = pick_throttle("throttle-a", t0 + std::time::Duration::from_secs(10)).unwrap_err();
+    assert!(e.contains("a moment ago"), "{e}");
+    assert!(pick_throttle("throttle-b", t0 + std::time::Duration::from_secs(10)).is_ok(), "another account is its own");
+    assert!(pick_throttle("throttle-a", t0 + std::time::Duration::from_secs(61)).is_ok());
+}
+
+#[test]
+fn a_picker_that_did_not_open_does_not_use_up_the_slot() {
+    let t0 = std::time::Instant::now();
+    assert!(pick_throttle("throttle-c", t0).is_ok());
+    pick_release("throttle-c");
+    assert!(pick_throttle("throttle-c", t0 + std::time::Duration::from_secs(1)).is_ok(), "a retry right after a failed start is allowed");
+}
+
+#[tokio::test]
+async fn pick_files_needs_a_drive_grant_and_the_drive_route_needs_an_agent_token() {
+    let state = state_with_agent().await;
+    state.identity_store.agent_identity_link("def-1", "acc-1", "google").unwrap();
+    let body = || Json(serde_json::from_value::<DriveBody>(json!({ "action": "pick_files" })).unwrap());
+    let (status, out) = body_of(handle_google_drive(State(state.clone()), agent("def-1"), body()).await).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(out["error"].as_str().unwrap().contains("Drive is off for you"), "{out}");
+    let (status, _) = body_of(handle_google_drive(State(state.clone()), None, body()).await).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn a_grant_can_be_set_on_drive_and_the_panel_lists_both_services() {
+    let state = state_with_agent().await;
+    state.identity_store.agent_identity_link("def-1", "acc-1", "google").unwrap();
+    let (status, body) = host(&state, HOST_TOKEN, json!({ "op": "set", "account_id": "acc-1", "agent_id": "def-1", "service": "drive", "level": "read" })).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (_, body) = host(&state, HOST_TOKEN, json!({ "op": "account", "account_id": "acc-1" })).await;
+    assert_eq!(body["data"]["services"], json!(["calendar", "drive"]));
+    assert_eq!(body["data"]["agents"][0]["levels"]["drive"], "read");
+}

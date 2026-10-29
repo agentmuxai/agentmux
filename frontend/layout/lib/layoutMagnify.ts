@@ -11,12 +11,15 @@ import {
     LayoutTreeDeleteNodeAction,
     LayoutTreeInsertNodeAction,
     LayoutTreeMagnifyNodeToggleAction,
+    type BeforeDeleteHooks,
 } from "./types";
 import { effectiveStack, removeMemberFromStack } from "./stackMembers";
 import { setTransform } from "./utils";
 import type { LayoutModel } from "./layoutModel";
 import { clearLeafRevealGate } from "@/app/store/tab-reveal";
 import { sendViewIntent } from "./layoutIntents";
+import { beginClosing, endClosing } from "./layoutClosing";
+import { afterFrame, closeTraceRing, type CloseTrace } from "./closeTrace";
 
 /**
  * Toggle magnification of a given node.
@@ -120,17 +123,29 @@ export async function closeNode(model: LayoutModel, nodeId: string, opts?: { con
     if (!closing) closingNodes.set(model, (closing = new Set()));
     if (closing.has(nodeId)) return;
     closing.add(nodeId);
+    // The pane says it is closing from this frame on, before the close's first await
+    // (SPEC_PANE_CLOSING_INDICATOR_AND_FASTER_CLOSE_2026_10_28.md §2).
+    const leaf = findNode(model.treeState.rootNode, nodeId);
+    const tabs = leaf?.data ? effectiveStack(leaf.data).length : 1;
+    beginClosing(model, nodeId, tabs);
+    const trace = closeTraceRing.start(`pane ${nodeId.slice(0, 4)} ${tabs} tab${tabs === 1 ? "" : "s"}`);
     try {
-        await closeNodeOnce(model, nodeId, opts);
+        await closeNodeOnce(model, nodeId, opts, trace);
+    } catch (err) {
+        trace.end("failed");
+        throw err;
     } finally {
+        trace.end("kept");
         closing.delete(nodeId);
+        // Gone, or kept: either way the pane is not closing any more.
+        endClosing(model, nodeId);
     }
 }
 
 /** The nodes of each layout whose close is under way (`closeNode`). */
 const closingNodes = new WeakMap<LayoutModel, Set<string>>();
 
-async function closeNodeOnce(model: LayoutModel, nodeId: string, opts?: { confirmed?: boolean }) {
+async function closeNodeOnce(model: LayoutModel, nodeId: string, opts: { confirmed?: boolean } | undefined, trace: CloseTrace) {
     const nodeToDelete = findNode(model.treeState.rootNode, nodeId);
     if (!nodeToDelete) {
         // TODO: clean up the ephemeral node handling
@@ -155,7 +170,25 @@ async function closeNodeOnce(model: LayoutModel, nodeId: string, opts?: { confir
     let closingData = nodeToDelete.data;
     if (model.beforeNodeDelete && !opts?.confirmed) {
         const membersAsked = effectiveStack(nodeToDelete.data).join("\n");
-        if (!(await model.beforeNodeDelete(nodeToDelete.data))) return;
+        // A person's answer to a prompt: the prompt is the indicator, so the pane shows its normal
+        // look while it is open and goes back to closing on yes.
+        // The asks are done when the first prompt opens, so the wait on a person is its own phase.
+        let probed = false;
+        const hooks: BeforeDeleteHooks = {
+            async asking(answer) {
+                if (!probed) trace.mark("probes");
+                probed = true;
+                endClosing(model, nodeId);
+                const yes = await answer;
+                if (yes) beginClosing(model, nodeId, effectiveStack(nodeToDelete.data).length);
+                trace.mark("prompt");
+                return yes;
+            },
+        };
+        const proceed = await model.beforeNodeDelete(nodeToDelete.data, hooks);
+        if (!proceed) trace.mark("kept");
+        else if (!probed) trace.mark("probes");
+        if (!proceed) return;
         // The tree may have changed while the prompt was open (a backend
         // push, the orphan reaper, another close). Close only what the user
         // confirmed: the same pane, with the same members. Compared by node
@@ -180,12 +213,20 @@ async function closeNodeOnce(model: LayoutModel, nodeId: string, opts?: { confir
     };
 
     model.treeReducer(deleteAction);
+    trace.mark("reducer");
+    afterFrame(() => trace.mark("gone"));
     // Drop any leaf reveal-gate bookkeeping keyed on this now-gone node id
     // — otherwise tab-reveal.ts's per-node Maps grow unboundedly over a
     // long-running session (reagent's review of PR #2761).
     clearLeafRevealGate(nodeId);
 
-    await model.onNodeDelete?.(closingData);
+    try {
+        await model.onNodeDelete?.(closingData);
+        trace.mark("closePane");
+    } catch (err) {
+        trace.mark("failed");
+        throw err;
+    }
 }
 
 /**

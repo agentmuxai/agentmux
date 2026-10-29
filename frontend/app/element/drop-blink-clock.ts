@@ -24,8 +24,23 @@
  *
  * Panes are separate areas of the screen, so counting an exit on one pane against
  * a burst on another is the conservative reading.
+ *
+ * A header small enough to fall under WCAG 2.3.1's general flash threshold is outside
+ * the rule, and is outside this budget: it always gets the burst. The threshold is a
+ * flashing area of more than a quarter of a 10-degree field of view: a quarter of
+ * 341 by 256 px on the 1024 by 768 reference screen, 21,824 px² (W3C technique G176).
+ * The pane the pointer left changes in the same frame as the one it enters, so each
+ * gets half of that. Without this a pointer moving from pane to pane
+ * (the exit of the one it left counts against the burst of the one it enters) got the
+ * blink on the first pane and only the held negative, or the outline alone, on the
+ * next ones, so only some panes seemed to flash.
  * docs/specs/SPEC_PANE_TAB_MULTI_SELECT_MOVE_AND_COLLAPSED_EXPAND_2026_10_24.md §3.
  */
+
+/** A flashing area (CSS px²) at or under which a hover is outside the flash rule: half of the threshold,
+ *  which is a quarter of a 341 by 256 px field (21,824 px²), because the pane the pointer left changes in
+ *  the same frame as the one it enters. */
+export const EXEMPT_AREA_PX2 = (341 * 256) / 4 / 2;
 
 /** Blinks in a burst. Must equal `$drop-blink-count` in drop-feedback.scss (a test checks). */
 export const BLINK_COUNT = 2;
@@ -64,7 +79,9 @@ function usedAt(now: number): number {
 }
 
 /** A hover starts at `now`. Its treatment is the richest that fits the budget; call `end` when it ends. */
-export function beginHover(now: number = performance.now()): Hover {
+export function beginHover(now: number = performance.now(), areaPx2?: number): Hover {
+    // Too small an area to count as a flash: the burst, uncounted.
+    if (areaPx2 != null && areaPx2 > 0 && areaPx2 <= EXEMPT_AREA_PX2) return { kind: "blink", end: () => {} };
     const used = usedAt(now);
     const kind: HoverFlash =
         used + BLINK_COST <= CHANGES_PER_SECOND

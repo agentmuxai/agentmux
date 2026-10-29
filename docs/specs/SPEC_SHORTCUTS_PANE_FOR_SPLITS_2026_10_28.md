@@ -1,6 +1,6 @@
 # The Shortcuts pane: a split opens tiles for every pane type and widget, last used first
 
-**Status:** active. Approved by the operator 2026-10-29 (task #8191); built in task #8192 by Camper-2@narko. One part waits on #9110: a singleton tile (Memory, Connectors...) brings back the existing pane and closes the Shortcuts pane.
+**Status:** active. Approved by the operator 2026-10-29 (task #8191); built in task #8192 by Camper-2@narko. A singleton tile (Memory, Connectors...) brings back the existing pane and closes the Shortcuts pane; Shift-click or Shift+Enter opens a new one in place instead, and a singleton that is not open opens in place.
 **Author:** Camper@narko, at the operator's request (2026-10-28).
 **Scope:** [`frontend/app/view/shortcuts/shortcuts.tsx`](../../frontend/app/view/shortcuts/shortcuts.tsx) (the existing tile view, renamed from `launcher.tsx`), [`frontend/app/store/keymodel-blockcreate.ts`](../../frontend/app/store/keymodel-blockcreate.ts) and [`frontend/app/store/command-registry.ts`](../../frontend/app/store/command-registry.ts) (the split shortcuts and palette entries), [`frontend/app/block/pane-actions.ts`](../../frontend/app/block/pane-actions.ts) (the pane menu's Split), [`frontend/app/block/split-block-def.ts`](../../frontend/app/block/split-block-def.ts).
 

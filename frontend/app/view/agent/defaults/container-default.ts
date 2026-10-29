@@ -8,7 +8,10 @@
  * Container is the preferred runtime, but only when it can actually start: the
  * CLI supports it, Docker answers, and the image is not known to be refused or
  * missing. `unknown` (no answer from the registry) never counts against it, so a
- * proxy or an offline check does not take away a working default.
+ * proxy or an offline check does not take away a working default. What the person
+ * last chose themselves comes before the template's suggestion: an explicit Native
+ * wins over a container default, and an explicit Container is kept for a template
+ * that suggests Native, as long as it can run.
  *
  * Spec: docs/specs/SPEC_CONTAINER_AGENTS_WORK_FOR_EVERYONE_2026_10_07.md section 3.4.
  */
@@ -31,6 +34,8 @@ export interface PreselectInput {
     /** Does the Docker daemon answer? */
     dockerAvailable: boolean;
     image: ContainerImageState;
+    /** The runtime the person last chose explicitly in the new-agent form, if any. */
+    lastChoice?: "host" | "container" | null;
 }
 
 /**
@@ -38,7 +43,8 @@ export interface PreselectInput {
  * answered, so the choice is made once, with the answer in hand.
  */
 export function shouldPreselectContainer(input: PreselectInput): boolean {
-    if (input.templateType !== "container") return false;
+    if (input.lastChoice === "host") return false;
+    if (input.lastChoice !== "container" && input.templateType !== "container") return false;
     if (!input.containerSupported || !input.dockerAvailable) return false;
     if (input.image === undefined) return false;
     return !imageBlocksContainer(input.image);

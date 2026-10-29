@@ -7,10 +7,12 @@
 // through the host (`approvals.google`), never an RPC an agent could call.
 
 import { getApi } from "@/app/store/app-api";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 
 const PREFIX = "https://www.googleapis.com/auth/";
 
-export type GoogleService = "calendar";
+export type GoogleService = "calendar" | "drive";
 export type GrantLevel = "read" | "write";
 
 export interface ServiceInfo {
@@ -30,6 +32,12 @@ export const SERVICES: ServiceInfo[] = [
         readScopes: ["calendar.calendarlist.readonly", "calendar.events.readonly", "calendar.events.freebusy"].map(
             (s) => PREFIX + s
         ),
+    },
+    {
+        service: "drive",
+        label: "Drive",
+        line: "Agents you allow can read the files you pick for them in Google's file picker, and the ones AgentMux makes. Never the rest of your Drive.",
+        readScopes: [PREFIX + "drive.file"],
     },
 ];
 
@@ -93,4 +101,35 @@ export async function setGoogleGrant(
     const r = relay();
     if (!r) throw new Error("Open AgentMux's desktop app to choose which agents use this account.");
     await r("set", { account_id: accountId, agent_id: agentId, service, level });
+}
+
+
+/** How often the picker's session is asked whether the person has chosen, and for how long. */
+const PICK_POLL_MS = 1500;
+const PICK_WAIT_MS = 6 * 60 * 1000;
+
+/**
+ * Open Google's file picker for `accountId` in the system browser and wait for the person to
+ * choose. Resolves with the ids picked (none if they closed it without choosing); rejects with
+ * a sentence when it can't start or Google refuses. `cancelled()` is asked between polls.
+ */
+export async function pickDriveFiles(accountId: string, cancelled: () => boolean = () => false): Promise<string[]> {
+    const r = relay();
+    if (!r) throw new Error("Open AgentMux's desktop app to give agents files from Drive.");
+    const started = (await r("pick", { account_id: accountId })) as { session_id?: string } | null;
+    const sessionId = started?.session_id;
+    if (!sessionId) throw new Error("Google's file picker didn't open.");
+    const until = Date.now() + PICK_WAIT_MS;
+    while (Date.now() < until) {
+        if (cancelled()) {
+            void RpcApi.AccountOAuthCancelCommand(TabRpcClient, { sessionId });
+            return [];
+        }
+        const s = (await RpcApi.AccountOAuthPollCommand(TabRpcClient, { sessionId })) as { status: string; fileIds?: string[]; error?: string };
+        if (s.status === "picked") return s.fileIds ?? [];
+        if (s.status === "failed") throw new Error(s.error || "Google's file picker failed.");
+        await new Promise((resolve) => setTimeout(resolve, PICK_POLL_MS));
+    }
+    void RpcApi.AccountOAuthCancelCommand(TabRpcClient, { sessionId });
+    throw new Error("Nothing was picked in time. Try again.");
 }

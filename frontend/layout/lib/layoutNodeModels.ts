@@ -8,6 +8,7 @@ import type { Properties as CSSProperties } from "csstype";
 import { createMemo, createRoot, createSignal } from "solid-js";
 import { LayoutNode, LayoutNodeAdditionalProps, NodeModel } from "./types";
 import type { LayoutModel } from "./layoutModel";
+import { closingTabs } from "./layoutClosing";
 
 /**
  * Gets the node model for the given node.
@@ -142,6 +143,8 @@ export function getNodeModel(model: LayoutModel, node: LayoutNode): NodeModel {
                     const minimizedIds = model.minimizedNodeIds();
                     return minimizedIds.has(nodeid);
                 }),
+                closingTabs: createMemo(() => closingTabs(model, nodeid)),
+                isClosing: createMemo(() => closingTabs(model, nodeid) > 0),
                 canMinimize: createMemo(() => {
                     const minimizedIds = model.minimizedNodeIds();
                     // Restoring is always allowed; minimizing requires at
