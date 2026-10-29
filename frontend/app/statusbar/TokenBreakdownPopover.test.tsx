@@ -15,6 +15,7 @@
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { autoUpdate } from "@floating-ui/dom";
+import { refreshAmbient } from "@/app/store/ambient-health";
 import { recordTurn, resetSession } from "@/store/token-usage";
 
 vi.mock("@floating-ui/dom", () => ({
@@ -98,6 +99,15 @@ describe("TokenBreakdownPopover — by-agent regroup", () => {
         fireEvent.click(screen.getByText(/AgentMux internal/).closest("button") as HTMLButtonElement);
         expect(await screen.findByRole("button", { name: /Session titles/ })).toBeInTheDocument();
         expect(screen.getByText("2 failed")).toBeInTheDocument();
+    });
+
+    it("lists the purposes even when no turn has completed and no internal tokens were recorded", async () => {
+        outcomesCmd.mockResolvedValue({ activity_summary: { accepted: 1, "rejected:shape": 2, cli_failed: 2 } });
+        renderPopover();
+        // The counts come from the indicator's ask, which is not mounted here.
+        await refreshAmbient();
+        expect(await screen.findByRole("button", { name: /Session titles/ })).toBeInTheDocument();
+        expect(screen.queryByText("No turns completed yet this session.")).not.toBeInTheDocument();
     });
 
     it("clicking a real agent row calls focusBlock with that agent's blockId", () => {

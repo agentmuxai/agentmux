@@ -145,7 +145,8 @@ export const TokenBreakdownPopover = (props: TokenBreakdownPopoverProps): JSX.El
                     </span>
                 </div>
                 <Show
-                    when={agentRows().length > 0}
+                    // A failing purpose has no tokens, so it can be the only thing there is to explain the dot.
+                    when={agentRows().length > 0 || ambientSummary() != null}
                     fallback={
                         <div class="token-usage-breakdown-empty">
                             No turns completed yet this session.
