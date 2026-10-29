@@ -696,7 +696,8 @@ fn wardens_other_sections_are_written_as_the_panes_that_replaced_them() {
         (json!({ "view": "warden", "warden:section": "history" }), "history"),
         (json!({ "view": "warden", "warden:section": "audit" }), "audit"),
         (json!({ "view": "warden", "warden:section": "host" }), "swarm"),
-        (json!({ "view": "warden" }), "audit"),
+        (json!({ "view": "warden" }), "warden"),
+        (json!({ "view": "warden", "warden:section": "jobs" }), "warden"),
         (json!({ "view": "warden", "warden:section": "kanban" }), "kanban"),
         (json!({ "view": "warden", "warden:section": "lan" }), "audit"),
         (json!({ "view": "warden", "warden:section": "internet" }), "audit"),
@@ -704,7 +705,9 @@ fn wardens_other_sections_are_written_as_the_panes_that_replaced_them() {
     ] {
         let v = view_from_block(&store, &meta(m.clone()), &ctx(false), &mut Vec::new());
         assert_eq!(v.view_type, kind, "{m}");
-        assert!(v.config.is_empty(), "{m}: {:?}", v.config);
+        // What is left of Warden is Jobs, and a file says so.
+        let want = if kind == "warden" { json!({ "section": "jobs" }) } else { json!({}) };
+        assert_eq!(Value::Object(v.config.clone()), want, "{m}");
     }
 }
 

@@ -159,7 +159,7 @@ The canonical list is [`crates/srv/src/config/widgets.json`](crates/srv/src/conf
 | Widget | Icon | View | What it is |
 |--------|------|------|-------------|
 | **Drone** | diagram-project | `drone` | Visual DAG-of-blocks engine |
-| **Jobs** | calendar-check | `warden` | Everything that runs by itself: scheduled jobs, their runs and what they cost |
+| **Jobs** | calendar-check | `warden` | Everything that runs by itself: scheduled jobs, their runs and what they cost. Opened from the command palette ("Open Jobs"), not the widget bar, until it moves into Drone |
 | **Vault** | lock | `vault` | Your secrets, which agents use without seeing them |
 | **History** | clock-rotate-left | `history` | Every agent's recorded conversation, what you typed to it, and where it is kept |
 | **Audit** | list-check | `audit` | What agents did: every jekt, fleet and pane action, and what they did with your secrets |

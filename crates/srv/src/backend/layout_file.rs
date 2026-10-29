@@ -505,9 +505,10 @@ fn view_from_block(store: &Store, meta: &MetaMapType, ctx: &ExportContext, warni
         config.insert("section".into(), Value::String("remotes".to_string()));
     }
     // Warden was split: a block saved on a section that has a pane of its own now (the app moves it
-    // when the block loads) is written as that pane.
+    // when the block loads) is written as that pane. What is left of Warden is Jobs, which a live
+    // block does not name (the Jobs pane has no other section), so it is written as such.
     if view_type == "warden" {
-        if let Some(pane) = warden_section_pane(meta_str(meta, "warden:section")) {
+        if let Some(pane) = warden_section_pane(Some(meta_str(meta, "warden:section").unwrap_or("jobs"))) {
             view_type = pane.to_string();
         }
     }
@@ -601,7 +602,8 @@ fn view_from_block(store: &Store, meta: &MetaMapType, ctx: &ExportContext, warni
             }
         }
         "connectors" | "memory" | "warden" | "settings" | "vault" => {
-            if let Some(section) = meta_str(meta, &format!("{view_type}:section")) {
+            let own = meta_str(meta, &format!("{view_type}:section"));
+            if let Some(section) = own.or(if view_type == "warden" { Some("jobs") } else { None }) {
                 config.insert("section".into(), Value::String(section.to_string()));
             }
         }

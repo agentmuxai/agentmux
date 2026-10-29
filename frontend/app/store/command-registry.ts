@@ -223,7 +223,7 @@ export function registerDefaultCommands(): void {
         label: "Open Jobs",
         category: "Open",
         icon: "calendar-check",
-        execute: (opts) => openPane({ meta: { view: "warden" } }, opts?.forceNew),
+        execute: (opts) => openPane({ meta: { view: "warden", "warden:section": "jobs" } }, opts?.forceNew),
     });
     commandRegistry.register({
         id: "open:help",
