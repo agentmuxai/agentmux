@@ -57,7 +57,7 @@ Nothing in the agent pane opens a file in an editor today. Markdown links go to 
 **Where it opens.** In the editor the agent's tab is showing, if there is one; otherwise in a new editor pane:
 
 - **An editor shown in the agent's own window tab** (the active member of its pane stack, not minimized, and not hidden because another pane is magnified), on the same host: the file opens there as another document tab.
-- **Otherwise** (no editor in this tab, or only one that is minimized, behind another pane tab, or hidden by a magnified pane): a new editor pane split right of the agent pane, with its file tree collapsed.
+- **Otherwise** (no editor in this tab): a new editor pane split right of the agent pane, with its file tree collapsed. (Since #5762 an editor that is minimized, behind another pane tab or hidden by a magnified pane is reused too and shown, not skipped.)
 
 ```ts
 TabRpcClient.rpcCall("pane.open", {
@@ -70,7 +70,7 @@ TabRpcClient.rpcCall("pane.open", {
 ```
 
 - srv already had the reuse half: `reuse_editor_pane` (the agents' `OpenEditor` uses it) finds an editor in the caller's tab and queues the file into it (`editor:pending_open_files`), which the editor opens as a new document tab (`maybe_reuse_editor_pane`, `pane.rs`). What it lacked was "shown": `find_editor_block` took the first editor block in the tab. It now considers only the blocks the tab's layout shows (`shown_block_ids` in `app_api/mod.rs`: each leaf's active member, skipping effectively minimized nodes, and every leaf but the magnified one while one is magnified). That applies to `OpenEditor`'s reuse too: a file pushed into an editor the user can't see would look like nothing happened.
-- No `tree_expanded` in the request: srv skips reuse whenever one is given (a reused pane can't take a new tree state). A new pane still gets a collapsed tree: srv defaults `editor:tree_expanded` to false for a Markdown file (`build_pane_meta`), now for `.mdx` as well as `.md`.
+- No `tree_expanded` in the request: it only shapes a newly made pane, and a reused pane keeps its own tree (since #5762 a given `tree_expanded` no longer skips reuse). A new pane still gets a collapsed tree: srv defaults `editor:tree_expanded` to false for a Markdown file (`build_pane_meta`), now for `.mdx` as well as `.md`.
 - An editor that has just been created and not yet placed by the frontend isn't in the layout yet, so a second click within that moment opens a second pane. Accepted.
 - After opening, the button shows the editor it got (`showBlockWithoutFocus`, `reveal-block.ts`: un-magnify, restore, switch its stack to it, without moving focus). Without it, a new pane beside a magnified agent pane stayed hidden behind it, and repeated clicks stacked up hidden editors (Codex on #4680).
 

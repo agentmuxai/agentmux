@@ -796,9 +796,9 @@ async fn show_panes(state: &AppState, tab_id: &str, blocks: &[&String]) {
     .await;
 }
 
-/// An editor the user can't see isn't reused: a minimized one, one behind
-/// another pane tab in its stack, or any pane while another is magnified
-/// (SPEC_AGENT_PANE_TOOL_PEEK_ON_LINE_AND_MD_OPEN_IN_EDITOR_2026_10_11.md §2.2).
+/// A pane counts as shown when it is not minimized, is the front tab of its stack, and is not
+/// behind a magnified pane. Reuse prefers a shown editor; one that is not shown is the fallback
+/// (`find_editor_block`).
 #[test]
 fn only_shown_panes_count_as_shown() {
     use crate::server::app_api::shown_block_ids;
