@@ -15,6 +15,7 @@ import {
     declarations,
     handFocusRings,
     handRolledTags,
+    nativeTitleAttributes,
     parseCatFileBatch,
     pickBase,
     rawDurations,
@@ -416,5 +417,53 @@ describe("rule 13: hand-drawn tags", () => {
     it("compare fails a file whose count grows", () => {
         const { grew } = compare({ tags: { "a.scss": 3 } }, { tags: { "a.scss": 2 } });
         expect(grew).toEqual(["tags: a.scss has 3, base 2"]);
+    });
+});
+
+describe("rule 14: native title= labels", () => {
+    const lines = (src) => nativeTitleAttributes(src);
+
+    it("counts a title on a lowercase element, with its line", () => {
+        const src = 'const a = <button title="Close" onClick={f}>x</button>;\nconst b = (\n    <span\n        class="k"\n        title={label()}\n    />\n);';
+        expect(lines(src)).toEqual([1, 5]);
+    });
+
+    it("does not count a title prop on a component, or the word title elsewhere", () => {
+        const src = '<Modal title="Settings" /><Pill title="x" /><div class="title" data-title="x">{props.title}</div>';
+        expect(lines(src)).toEqual([]);
+    });
+
+    it("skips option, optgroup, iframe and an element marked data-native-title", () => {
+        const src = '<option title="a"/><optgroup title="b"/><iframe title="c"/><span data-native-title title="d"/>';
+        expect(lines(src)).toEqual([]);
+    });
+
+    it("is not thrown off by braces, arrows and strings inside other attributes", () => {
+        const src =
+            '<button onClick={() => { if (a > b) go({ x: "}" }); }} class={`a ${b ? "c" : "d"}`} title="Go">x</button>' +
+            "<div title='single' />";
+        expect(lines(src)).toEqual([1, 1]);
+    });
+
+    it("does not take a generic or a comparison for a tag", () => {
+        const src = 'const m = new Map<string, number>(); const [a] = createSignal<string>("x"); const t = a<b ? 1 : 2; foo(title="x")';
+        expect(lines(src)).toEqual([]);
+    });
+
+    it("ignores titles in comments", () => {
+        expect(lines('// <span title="x" />\n/* <div title="y"/> */')).toEqual([]);
+    });
+
+    it("is counted per file outside element/ui and tests, and compared like the others", () => {
+        const files = [
+            { path: "frontend/app/view/x/x.tsx", source: '<button title="a"/><span title="b"/>' },
+            { path: "frontend/app/element/ui/IconButton.tsx", source: '<button title="kit"/>' },
+            { path: "frontend/app/view/x/x.test.tsx", source: '<button title="test"/>' },
+        ];
+        const now = collect(files);
+        expect(now.nativeTitles).toEqual({ "frontend/app/view/x/x.tsx": 2 });
+        const before = collect([{ path: "frontend/app/view/x/x.tsx", source: '<button title="a"/>' }]);
+        expect(compare(now, before).grew).toEqual(["nativeTitles: frontend/app/view/x/x.tsx has 2, base 1"]);
+        expect(compare(before, now).shrank).toEqual(["nativeTitles: frontend/app/view/x/x.tsx has 1, base 2"]);
     });
 });
