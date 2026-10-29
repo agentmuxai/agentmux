@@ -30,7 +30,7 @@ import { addEventListener as addPaneListener } from "@/app/store/agent-pane-stat
 import type { AgentPaneEvent } from "@/app/store/agent-pane-state/types";
 import { focusManager } from "@/app/store/focusManager";
 import { getApi, getSettingsKeyAtom, workspace } from "@/app/store/global";
-import { revealBlockLocally } from "@/app/util/reveal-block";
+import { revealBlock } from "@/app/util/reveal-block";
 import { onMuxEvent } from "@/app/store/mps";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -123,7 +123,7 @@ export function shouldActivateHere(d: ActivatePayload | undefined, myWindowId: s
  * and puts the caret in it. Returns whether the block was found here.
  */
 export async function activateBlockLocally(blockId: string, tabId?: string): Promise<boolean> {
-    if (!(await revealBlockLocally(blockId, { tabId }))) {
+    if (!((await revealBlock(blockId, { tabId, source: "os-notify", localOnly: true })).ok)) {
         console.warn("[os-notify] activation: block not in this window's workspace", { blockId, tabId });
         return false;
     }

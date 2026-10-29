@@ -3,7 +3,7 @@
 
 /**
  * `block:reveal` receiving side — SPEC_REVEAL_BLOCK_ONE_PATH_2026_09_27.md §4.3.
- * Only the window srv named acts, and it acts through revealBlockLocally with
+ * Only the window srv named acts, and it acts through revealBlock (this window only) with
  * srv's tab as the hint.
  */
 
@@ -12,7 +12,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const reveal = vi.fn(async (_blockId: string, _opts?: { tabId?: string }) => true);
 let subscribed: { eventType: string; handler: (e: { data: unknown }) => void }[] = [];
 
-vi.mock("@/app/util/reveal-block", () => ({ revealBlockLocally: (b: string, o?: { tabId?: string }) => reveal(b, o) }));
+vi.mock("@/app/util/reveal-block", () => ({ revealBlock: async (b: string, o?: { tabId?: string }) => ({ ok: await reveal(b, o) }) }));
 vi.mock("@/app/store/window-identity", () => ({ windowId: () => "w1" }));
 vi.mock("@/app/store/mps", async () => {
     const { isNoPayloadMuxEvent } = await vi.importActual<typeof import("@/app/store/mps-events.generated")>("@/app/store/mps-events.generated");
@@ -50,7 +50,7 @@ describe("block:reveal handler", () => {
 
     it("reveals the block locally with srv's tab as the hint", async () => {
         expect(await handleBlockReveal({ block_id: "b", tab_id: "t", window_id: "w1" }, "w1")).toBe(true);
-        expect(reveal).toHaveBeenCalledWith("b", { tabId: "t" });
+        expect(reveal).toHaveBeenCalledWith("b", { tabId: "t", source: "remote-window", localOnly: true });
     });
 
     it("another window's event does nothing here", async () => {
@@ -66,7 +66,7 @@ describe("block:reveal handler", () => {
         subscribed[0].handler({ data: { block_id: "x", tab_id: "t", window_id: "w2" } });
         subscribed[0].handler({ data: { block_id: "b", tab_id: "t", window_id: "w1" } });
         await vi.waitFor(() => expect(reveal).toHaveBeenCalledTimes(1));
-        expect(reveal).toHaveBeenCalledWith("b", { tabId: "t" });
+        expect(reveal).toHaveBeenCalledWith("b", { tabId: "t", source: "remote-window", localOnly: true });
 
         off();
         expect(subscribed).toEqual([]);

@@ -64,6 +64,9 @@ function serviceRowsOf(row: AgentUsage): ServiceRow[] {
     return rows;
 }
 
+/** What names an agent's row from one breakdown to the next: its pane, else its name. */
+const rowKey = (r: AgentUsage): string => r.blockId ?? r.agentName;
+
 interface TokenBreakdownPopoverProps {
     /** The TokenUsageIndicator button. */
     anchor: PopoverAnchor;
@@ -81,6 +84,15 @@ export const TokenBreakdownPopover = (props: TokenBreakdownPopoverProps): JSX.El
         return getAgentBreakdown();
     });
     const realAgentRows = createMemo(() => agentRows().filter((r) => !r.isAmbient));
+    // The rows are listed by agent id and each reads its data from the latest breakdown: a turn that
+    // lands rebuilds the breakdown, and rows keyed by their data objects would be replaced under the
+    // pointer, losing the click (SPEC_PANE_SELECTION_STATE_MACHINE_AND_SWARM_CLICK_2026_10_18.md P1.4).
+    const realAgentIds = createMemo(
+        () => realAgentRows().map(rowKey),
+        [] as string[],
+        { equals: (a, b) => a.length === b.length && a.every((id, i) => id === b[i]) }
+    );
+    const rowById = createMemo(() => new Map(realAgentRows().map((r) => [rowKey(r), r])));
     const ambientRow = createMemo(() => agentRows().find((r) => r.isAmbient) ?? null);
     const total = createMemo(() => {
         void tokenUsageState.byService;
@@ -139,18 +151,20 @@ export const TokenBreakdownPopover = (props: TokenBreakdownPopoverProps): JSX.El
                     }
                 >
                     <div class="token-usage-breakdown-rows">
-                        <For each={realAgentRows()}>
-                            {(row) => {
-                                const agentCacheRate = createMemo(() => getAgentCacheHitRate(row));
+                        <For each={realAgentIds()}>
+                            {(id) => {
+                                // Keeps the last row if the agent drops out while this row is being removed.
+                                const row = createMemo<AgentUsage>((prev) => rowById().get(id) ?? prev);
+                                const agentCacheRate = createMemo(() => getAgentCacheHitRate(row()));
                                 return (
                                     <button
                                         type="button"
                                         class="token-usage-breakdown-row token-usage-breakdown-agent-row"
-                                        onClick={() => handleAgentClick(row)}
-                                        title={`Click to focus ${row.agentName}'s pane`}
+                                        onClick={() => handleAgentClick(row())}
+                                        title={`Click to focus ${row().agentName}'s pane`}
                                     >
                                         <span class="token-usage-breakdown-row-name">
-                                            {row.agentName}
+                                            {row().agentName}
                                             <Show when={agentCacheRate() != null}>
                                                 <span
                                                     class="token-usage-breakdown-row-cache"
@@ -161,17 +175,17 @@ export const TokenBreakdownPopover = (props: TokenBreakdownPopoverProps): JSX.El
                                             </Show>
                                         </span>
                                         <span class="token-usage-breakdown-row-meta">
-                                            {row.numTurns} {row.numTurns === 1 ? "turn" : "turns"}
-                                            <Show when={row.costUsd > 0}>
-                                                {" "}·{" "}${row.costUsd.toFixed(3)}
+                                            {row().numTurns} {row().numTurns === 1 ? "turn" : "turns"}
+                                            <Show when={row().costUsd > 0}>
+                                                {" "}·{" "}${row().costUsd.toFixed(3)}
                                             </Show>
                                         </span>
                                         <span class="token-usage-breakdown-row-counts">
                                             <span class="token-usage-indicator-arrow">↑</span>
-                                            {formatCompactNumber(row.input)}
+                                            {formatCompactNumber(row().input)}
                                             {" "}
                                             <span class="token-usage-indicator-arrow">↓</span>
-                                            {formatCompactNumber(row.output)}
+                                            {formatCompactNumber(row().output)}
                                         </span>
                                     </button>
                                 );

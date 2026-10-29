@@ -4,7 +4,7 @@
 
 // MuxAPI's focus path (docs/specs/PLAN_SHORTCUT_KINKS_2026_10_10.md, A1
 // and A2): a target anywhere in this window is revealed (its tab switched to,
-// its pane showing it) by revealBlockLocally, and PressKeys waits a few
+// its pane showing it) by revealBlock (this window only), and PressKeys waits a few
 // frames for the caret before refusing.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -22,7 +22,7 @@ vi.mock("@/app/store/global", () => ({
 vi.mock("@/layout/index", () => ({
     getLayoutModelForStaticTab: () => ({ focusedNode: () => null }),
 }));
-vi.mock("@/app/util/reveal-block", () => ({ revealBlockLocally: h.reveal }));
+vi.mock("@/app/util/reveal-block", () => ({ revealBlock: async (id: string) => ({ ok: await h.reveal(id) }) }));
 vi.mock("@/app/store/command-registry", () => ({ commandRegistry: { run: vi.fn(() => false) } }));
 
 import { caretInBlock, focusPaneForApi, installShortcutApi, OPERATOR_PROMPT_OPEN, operatorPromptOpen } from "./keymodel-dispatch";

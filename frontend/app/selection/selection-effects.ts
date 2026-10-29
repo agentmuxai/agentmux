@@ -83,6 +83,8 @@ export interface SelectionRequest {
     tabHint?: string;
     /** Default true. */
     focusCaret?: boolean;
+    /** Look in this window only (default false: another window is asked when this one has no such block). */
+    localOnly?: boolean;
 }
 
 export interface SelectionRunner {
@@ -257,6 +259,7 @@ export function createSelectionRunner(deps: SelectionDeps, trace: SelectionTrace
                 source: req.source ?? "unknown",
                 tabHint: req.tabHint,
                 focusCaret: req.focusCaret !== false,
+                localOnly: req.localOnly === true,
             };
             startedAt.set(intent.id, deps.now());
             const result = new Promise<SelectionResult>((resolve) => waiting.set(intent.id, resolve));

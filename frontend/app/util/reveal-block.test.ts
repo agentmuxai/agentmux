@@ -2,12 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * revealBlockLocally — the order of steps that brings a block on screen.
+ * revealBlock in this window — the order of steps that brings a block on screen.
  * SPEC_REVEAL_BLOCK_ONE_PATH_2026_09_27.md §4.1, §6.
  *
  * `setActiveBlockInStack` itself (switching a pane's tab) is covered by
  * layout/tests/layoutStack.test.ts; here it's recorded, so the test pins what
- * revealBlockLocally adds: that it is called, for the right pane, before the
+ * revealBlock adds: that it is called, for the right pane, before the
  * pane is focused and before the caret moves.
  */
 
@@ -86,19 +86,24 @@ vi.mock("@/app/store/services", () => ({
     },
 }));
 
-import { revealBlock, revealBlockLocally, showBlockInPane, showBlockWithoutFocus } from "./reveal-block";
+import { revealBlock, showBlockInPane, showBlockWithoutFocus } from "./reveal-block";
 
 /** A layout model whose one pane holds `members` as tabs. */
 function modelWithPane(nodeId: string, members: string[], magnified?: string, minimized = false) {
+    // Restoring a pane clears its flag, as the real toggle does (the machine reads it back).
+    const flags = { minimized };
     return {
         magnifiedNodeId: magnified,
         treeState: { focusedNodeId: nodeId },
         getNodeByBlockId: (b: string) =>
-            members.includes(b) ? { id: nodeId, ...(minimized ? { minimized: true } : {}) } : null,
+            members.includes(b) ? { id: nodeId, ...(flags.minimized ? { minimized: true } : {}) } : null,
         focusNode: (id: string) => calls.push(`focusNode:${id}`),
         magnifyNodeToggle: (id: string, setState = true, focused = true) =>
             calls.push(`unmagnify:${id}${setState ? "" : ":nocommit"}${focused ? ":focus" : ""}`),
-        minimizeNodeToggle: (id: string) => calls.push(`restore:${id}`),
+        minimizeNodeToggle: (id: string) => {
+            flags.minimized = false;
+            calls.push(`restore:${id}`);
+        },
     };
 }
 
@@ -116,9 +121,9 @@ beforeEach(() => {
 });
 afterEach(() => vi.useRealTimers());
 
-describe("revealBlockLocally", () => {
+describe("revealBlock in this window only", () => {
     it("a background tab in a multi-tab pane: switch the window tab, then the pane's tab, then focus, then caret", async () => {
-        expect(await revealBlockLocally("agentB")).toBe(true);
+        expect((await revealBlock("agentB", { localOnly: true })).ok).toBe(true);
         expect(calls).toEqual(["setActiveTab:t2", "stack:pane:agentB", "focusNode:pane", "caret:agentB"]);
     });
 
@@ -126,64 +131,75 @@ describe("revealBlockLocally", () => {
         vi.useFakeTimers();
         const late = modelWithPane("pane", ["agentA", "agentB"]);
         models.t2 = undefined; // not built until the tab renders
-        const p = revealBlockLocally("agentB");
+        const p = revealBlock("agentB", { localOnly: true });
         await vi.advanceTimersByTimeAsync(60);
         models.t2 = late;
-        await vi.advanceTimersByTimeAsync(60);
-        expect(await p).toBe(true);
+        await vi.advanceTimersByTimeAsync(200); // the next look, then the settle before the read-back
+        expect((await p).ok).toBe(true);
         expect(calls).toContain("stack:pane:agentB");
     });
 
     it("un-magnifies a different pane that would hide the target, before switching and focusing", async () => {
         models.t2 = modelWithPane("pane", ["agentA", "agentB"], "otherPane");
-        await revealBlockLocally("agentB");
+        await revealBlock("agentB", { localOnly: true });
         expect(calls.indexOf("unmagnify:otherPane")).toBeGreaterThan(-1);
         expect(calls.indexOf("unmagnify:otherPane")).toBeLessThan(calls.indexOf("stack:pane:agentB"));
     });
 
     it("leaves the target's own magnify alone", async () => {
         models.t2 = modelWithPane("pane", ["agentA", "agentB"], "pane");
-        await revealBlockLocally("agentB");
+        await revealBlock("agentB", { localOnly: true });
         expect(calls.some((c) => c.startsWith("unmagnify"))).toBe(false);
     });
 
     it("asks for the locate flash last, once the pane is switched to, focused and has its caret", async () => {
-        await revealBlockLocally("agentB");
+        await revealBlock("agentB", { localOnly: true });
         expect(located).toEqual([
             { blockId: "agentB", after: ["setActiveTab:t2", "stack:pane:agentB", "focusNode:pane", "caret:agentB"] },
         ]);
     });
 
     it("still asks for the flash when the caret is skipped", async () => {
-        await revealBlockLocally("agentB", { focusCaret: false });
+        await revealBlock("agentB", { focusCaret: false, localOnly: true });
         expect(located.map((l) => l.blockId)).toEqual(["agentB"]);
     });
 
     it("asks for no flash when the block isn't in this window", async () => {
-        await revealBlockLocally("elsewhere");
+        await revealBlock("elsewhere", { localOnly: true });
         expect(located).toEqual([]);
     });
 
     it("focusCaret: false skips the caret", async () => {
-        await revealBlockLocally("agentB", { focusCaret: false });
+        await revealBlock("agentB", { focusCaret: false, localOnly: true });
         expect(calls).not.toContain("caret:agentB");
     });
 
     it("a block not in this window returns false and touches nothing", async () => {
-        expect(await revealBlockLocally("elsewhere")).toBe(false);
+        expect((await revealBlock("elsewhere", { localOnly: true })).ok).toBe(false);
         expect(calls).toEqual([]);
+        expect(calls.some((c) => c.startsWith("block.reveal"))).toBe(false); // no other window is asked
+        expect(notices).toEqual([]); // the caller has the answer; nothing to tell the user
+    });
+
+    it("a this-window-only request that fails for another reason still says so", async () => {
+        models.t2 = undefined; // the tab's layout never arrives
+        vi.useFakeTimers();
+        const p = revealBlock("agentB", { localOnly: true });
+        await vi.advanceTimersByTimeAsync(2000);
+        expect((await p).ok).toBe(false);
+        expect(notices.map((n) => n.message)).toEqual(["its tab is still loading"]);
     });
 
     it("a tabId hint is tried first", async () => {
         tabs.t1 = { blockids: ["agentB"] }; // also claims agentB
         models.t1 = modelWithPane("n1", ["agentB"]);
-        await revealBlockLocally("agentB", { tabId: "t2" });
+        await revealBlock("agentB", { tabId: "t2", localOnly: true });
         expect(calls[0]).toBe("setActiveTab:t2");
     });
 
     it("restores a minimized pane before focusing it (focusNode alone leaves it collapsed)", async () => {
         models.t2 = modelWithPane("pane", ["agentA", "agentB"], undefined, true);
-        await revealBlockLocally("agentB");
+        await revealBlock("agentB", { localOnly: true });
         expect(calls).toEqual([
             "setActiveTab:t2",
             "restore:pane",

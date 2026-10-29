@@ -233,8 +233,8 @@ export async function openOrFocusPaneIdByView(
     }
     if (elsewhere) {
         if (focusMeta != null) await setBlockMeta(elsewhere, focusMeta);
-        const { revealBlockLocally } = await import("@/app/util/reveal-block");
-        if (await revealBlockLocally(elsewhere, { source: "widget" })) return elsewhere;
+        const { revealBlock } = await import("@/app/util/reveal-block");
+        if ((await revealBlock(elsewhere, { source: "widget", localOnly: true })).ok) return elsewhere;
     }
     return await createBlock(blockDef ?? { meta: { view: viewType } });
 }

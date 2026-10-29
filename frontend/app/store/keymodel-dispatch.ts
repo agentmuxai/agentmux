@@ -17,7 +17,7 @@ import { chordLeaderOf, commandForKey, DOC_TAB_HOSTS, resolveKey, type KeyContex
 import { commandRegistry } from "@/app/store/command-registry";
 import { atoms, getApi, getBlockComponentModel, setControlShiftDelayAtom } from "@/app/store/global";
 import { getLayoutModelForStaticTab } from "@/layout/index";
-import { revealBlockLocally } from "@/app/util/reveal-block";
+import { revealBlock } from "@/app/util/reveal-block";
 import { isEditableTarget } from "@/util/focusutil";
 import * as keyutil from "@/util/keyutil";
 import { CHORD_TIMEOUT } from "@/util/sharedconst";
@@ -289,12 +289,12 @@ const NO_KEY: MuxKeyboardEvent = { type: "keydown", key: "", code: "", repeat: f
  * Focuses a pane for MuxAPI, as a click would: layout focus and the
  * caret. `blockId` may be any pane in this window, in any tab, or one of a
  * pane's tabs: the window switches to that tab, the pane shows that tab, and
- * a minimized or hidden pane is brought back (revealBlockLocally; the kinks
+ * a minimized or hidden pane is brought back (revealBlock; the kinks
  * plan's D1, A2). It never reaches another window. False if no tab of this
  * window holds `blockId`.
  */
 export async function focusPaneForApi(blockId: string): Promise<boolean> {
-    return revealBlockLocally(blockId);
+    return (await revealBlock(blockId, { source: "api", localOnly: true })).ok;
 }
 
 /** Whether the caret is in `blockId`'s pane: in any element of that block, since a pane tab's content sits in its own block. */
