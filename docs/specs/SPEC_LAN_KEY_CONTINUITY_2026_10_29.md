@@ -19,6 +19,8 @@ A different key for a pinned name is **accepted automatically, and the pin moved
    - **a pinned instance:** this machine already pinned that instance for some agent (the WAN instance pin), or
    - **the account's directory:** the signed-in account's install list shows that instance as a live install of the account, and it is not revoked (the same standard WAN verification applies to a sender).
 
+**The pin keeps the certificate's time.** A moved pin is kept from the later of the receiver's time and the certificate's own issue time, so with the hosting install's clock ahead of ours (the freshness window allows it), an older certificate of the same install is older than the pin too and cannot move it back. **The move is conditional.** The check reads the pin, then may wait on the account's directory; the write happens only if the pin is still exactly the one that was checked (same key, same time, one transaction). If it changed meanwhile (a newer move, or the user's own change), nothing is written, unless it already holds this very key.
+
 The `(name, UID)` pins go with the old key: moving the name pin clears them, and the first message that verifies under the vouched name key pins the UID key again, beside the name pin as always. No separate UID certificate is needed, since a UID signature is only checked after the name signature verified.
 
 ## 3. What stops an impostor
@@ -42,6 +44,6 @@ Retire notices for keys the install retired (a refused key can be told apart fro
 
 ## 7. Tests
 
-An impostor key with no certificate is refused and the pin stays; a certificate by an untrusted instance is refused; a vouched rotation moves the name pin and the UID pin; the audit line is written with the path and the fingerprints; a stale certificate, a certificate older than the pin, a certificate for another agent or another key, and a certificate whose chain is broken are each refused; the agent route accepts a vouched key and refuses an unvouched one; a host that sends no certificate is unchanged.
+An impostor key with no certificate is refused and the pin stays; a certificate by an untrusted instance is refused; a vouched rotation moves the name pin and the UID pin; the audit line is written with the path and the fingerprints; a stale certificate, a certificate older than the pin (also with the host's clock ahead), a pin that changed while the install was being checked is not written over, a certificate for another agent or another key, and a certificate whose chain is broken are each refused; the agent route accepts a vouched key and refuses an unvouched one; a host that sends no certificate is unchanged.
 
 Agent: Lazo@Area54

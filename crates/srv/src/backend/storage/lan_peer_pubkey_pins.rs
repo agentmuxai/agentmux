@@ -114,6 +114,30 @@ impl Store {
         Ok(old)
     }
 
+    /// Move a LAN name's pin to `key_b64`, with `since` as the time it is
+    /// kept from, and drop the UID pins beside it, but only if the pin is still
+    /// `expect` (its key and its time), in one transaction. `false` means it
+    /// changed since it was read, and nothing was written: a check made against
+    /// an older pin must not undo a newer move or the operator's own change.
+    pub fn lan_peer_pubkey_pin_move(&self, agent_id: &str, expect: (&str, i64), key_b64: &str, since: i64) -> Result<bool, StoreError> {
+        let key = agent_id.to_lowercase();
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        let now: Option<(String, i64)> = tx
+            .query_row("SELECT public_key, first_seen_at FROM db_lan_peer_pubkey_pins WHERE agent_id = ?1", params![key], |r| Ok((r.get(0)?, r.get(1)?)))
+            .ok();
+        if now.as_ref().map(|(k, t)| (k.as_str(), *t)) != Some(expect) {
+            return Ok(false);
+        }
+        tx.execute("DELETE FROM db_lan_peer_uid_pins WHERE agent_id = ?1", params![key])?;
+        tx.execute(
+            "INSERT OR REPLACE INTO db_lan_peer_pubkey_pins (agent_id, public_key, first_seen_at) VALUES (?1, ?2, ?3)",
+            params![key, key_b64, since],
+        )?;
+        tx.commit()?;
+        Ok(true)
+    }
+
     /// Move a LAN name's pin to `key_b64` and drop the UID pins beside it,
     /// which were set against the old key. Only the operator's window calls
     /// this. Returns the key it replaced.

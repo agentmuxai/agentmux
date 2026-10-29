@@ -169,6 +169,47 @@ async fn a_copy_of_an_older_certificate_cannot_move_a_pin_back_to_a_retired_key(
 }
 
 #[tokio::test]
+async fn with_the_hosts_clock_ahead_an_older_certificate_still_cannot_move_the_pin_back() {
+    let state = test_state();
+    let (_sdir, sender) = host("starpower");
+    let (_rdir, receiver) = host("narko");
+    trust(&state, &receiver, &sender);
+    let (old, _) = generate_lan_keypair([1u8; 32]);
+    let (new, _) = generate_lan_keypair([2u8; 32]);
+    pin(&state, "maop-c", &old);
+    // The host's clock runs 100 s ahead: both certificates are inside the freshness window,
+    // and both are newer than the receiver's own time of pinning.
+    let old_cert = cert(&sender, "maop-c", &old, now() + 100);
+    let new_cert = cert(&sender, "maop-c", &new, now() + 101);
+    move_if_vouched(&state, "maop-c", &new, Some(&new_cert), "automatic", false).await.unwrap();
+    let (_, since) = state.mstore.lan_peer_pubkey_pin_since("maop-c").unwrap().unwrap();
+    assert_eq!(since, new_cert.issued_at, "the pin is kept from the time of the certificate that moved it");
+
+    let err = move_if_vouched(&state, "maop-c", &old, Some(&old_cert), "automatic", true).await.unwrap_err();
+    assert!(err.contains("older than the pin"), "{err}");
+    assert_eq!(pinned(&state, "maop-c"), BASE64.encode(new));
+}
+
+#[tokio::test]
+async fn a_pin_moves_only_if_it_is_still_the_one_that_was_checked() {
+    let state = test_state();
+    let (a, _) = generate_lan_keypair([1u8; 32]);
+    let (b, _) = generate_lan_keypair([2u8; 32]);
+    let (c, _) = generate_lan_keypair([3u8; 32]);
+    pin(&state, "maop-d", &a);
+    let (key, since) = state.mstore.lan_peer_pubkey_pin_since("maop-d").unwrap().unwrap();
+
+    // A newer move (or the user's own change) lands first ...
+    assert!(state.mstore.lan_peer_pubkey_pin_move("maop-d", (&key, since), &BASE64.encode(b), since + 50).unwrap());
+    // ... so a check made against the pin as it was must not write over it.
+    assert!(!state.mstore.lan_peer_pubkey_pin_move("maop-d", (&key, since), &BASE64.encode(c), since + 60).unwrap());
+    assert_eq!(pinned(&state, "maop-d"), BASE64.encode(b));
+    // An unpinned name is not moved either.
+    assert!(!state.mstore.lan_peer_pubkey_pin_move("nobody-d", (&key, since), &BASE64.encode(c), since).unwrap());
+    assert!(state.mstore.lan_peer_pubkey_pin_since("nobody-d").unwrap().is_none());
+}
+
+#[tokio::test]
 async fn an_install_certifies_the_key_it_hosts_and_a_receiver_accepts_the_certificate() {
     let state = test_state();
     let (_dir, wan) = host("starpower");

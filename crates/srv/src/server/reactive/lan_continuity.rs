@@ -177,17 +177,32 @@ pub(crate) async fn move_if_vouched(
             }
         }
     }
-    let (path, cert) = result?;
-    let old = state
+    let (path, cert, (old, old_since)) = result?;
+    // Kept from the later of now and the certificate's own time: with the host's clock ahead of
+    // ours, an older certificate of the same host (still inside the freshness window) is then
+    // older than this pin too, and cannot move it back.
+    let since = agentmux_common::time::now_secs().max(cert.issued_at);
+    let moved = state
         .mstore
-        .lan_peer_pubkey_pin_replace(agent, &observed_b64)
+        .lan_peer_pubkey_pin_move(agent, (&old, old_since), &observed_b64, since)
         .map_err(|e| format!("the pin could not be moved: {e}"))?;
+    if !moved {
+        // The pin changed while the install was being asked about (a newer move, or the user's own
+        // change): never write over it from an older check. If it already holds this key, done.
+        return match state.mstore.lan_peer_pubkey_pin_since(agent) {
+            Ok(Some((k, _))) if k == observed_b64 => {
+                super::lan_refusals::clear(agent);
+                Ok(path)
+            }
+            _ => Err("the pin changed while the key was being checked; it was not moved".to_string()),
+        };
+    }
     super::lan_refusals::clear(agent);
     let entry = json!({
         "action": "continuity",
         "kind": "lan",
         "agent": agent.to_lowercase(),
-        "from": old.as_deref().map(fingerprint),
+        "from": fingerprint(&old),
         "to": fingerprint(&observed_b64),
         "by": by,
         "vouched_by": { "instance": cert.instance_id, "host": cert.host_hint, "path": path.as_str(), "issued_at": cert.issued_at },
@@ -203,16 +218,17 @@ async fn vouch(
     observed_key: &[u8],
     cert: Option<&WanKeyRecord>,
     now: i64,
-) -> Result<(Path, WanKeyRecord), String> {
+) -> Result<(Path, WanKeyRecord, (String, i64)), String> {
     let cert = cert.ok_or("the peer sent no certificate for the key")?;
-    let (_, pin_since) = state
+    let pinned = state
         .mstore
         .lan_peer_pubkey_pin_since(agent)
         .map_err(|e| format!("the pin could not be read: {e}"))?
         .ok_or("the name is not pinned")?;
-    check_cert(cert, agent, observed_key, pin_since, now).map_err(str::to_string)?;
+    check_cert(cert, agent, observed_key, pinned.1, now).map_err(str::to_string)?;
     let path = instance_trust(state, &cert.instance_id).await?;
-    Ok((path, cert.clone()))
+    // The pin this check was made against: the move is conditional on it still being the pin.
+    Ok((path, cert.clone(), pinned))
 }
 
 /// A short fingerprint of a base64 key: enough to tell two keys apart on a
