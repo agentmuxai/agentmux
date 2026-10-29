@@ -244,7 +244,7 @@ export function AccountForm({ model }: { model: IdentityViewModel }): JSX.Elemen
                             type="text"
                             value={name()}
                             onInput={(e) => setName(e.currentTarget.value)}
-                            placeholder="GitHub agent1-workflow"
+                            placeholder="GitHub"
                             ref={(el) => focusOnOpen(el, { select: true })}
                         />
                     </FormField>
@@ -310,7 +310,7 @@ export function AccountForm({ model }: { model: IdentityViewModel }): JSX.Elemen
                             type="text"
                             value={displayName()}
                             onInput={(e) => setDisplayName(e.currentTarget.value)}
-                            placeholder="agent1-workflow (username / alias)"
+                            placeholder="your GitHub login"
                         />
                     </FormField>
 
@@ -468,7 +468,7 @@ export function AccountForm({ model }: { model: IdentityViewModel }): JSX.Elemen
                     {/* Provider-specific context */}
                     <Show when={provider() === "github"}>
                         <FormField label="GitHub username">
-                            <input class="identity-input" type="text" value={ghUsername()} onInput={(e) => setGhUsername(e.currentTarget.value)} placeholder="agent1-workflow" />
+                            <input class="identity-input" type="text" value={ghUsername()} onInput={(e) => setGhUsername(e.currentTarget.value)} placeholder="your GitHub login" />
                         </FormField>
                         <FormField label="Scopes (comma-separated)">
                             <input class="identity-input" type="text" value={ghScopes()} onInput={(e) => setGhScopes(e.currentTarget.value)} placeholder="repo, workflow, read:org" />
