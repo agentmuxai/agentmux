@@ -33,7 +33,7 @@ pub(crate) fn workspace_of(state: &AppState, block_id: &str) -> Option<PathBuf> 
 
 /// `raw` as a path on the host, inside `workspace`. `/workspace/...` is the container's name for it;
 /// a relative path is relative to it; a host path is accepted if it is inside it. Symlinks are resolved first.
-fn inside(workspace: &Path, raw: &str) -> Result<String, String> {
+pub(crate) fn inside(workspace: &Path, raw: &str) -> Result<String, String> {
     let raw = raw.trim();
     let joined = match raw.strip_prefix("/workspace") {
         Some("") => workspace.to_path_buf(),
