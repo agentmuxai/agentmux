@@ -438,6 +438,7 @@ import type { PresenceStatusResult } from "@/types/rpc/PresenceStatusResult";
 import type { ProbeResult } from "@/types/rpc/ProbeResult";
 import type { ProvidersModelsParams } from "@/types/rpc/ProvidersModelsParams";
 import type { ProvidersModelsResult } from "@/types/rpc/ProvidersModelsResult";
+import type { ReactiveRegistrationFlagsResult } from "@/types/rpc/ReactiveRegistrationFlagsResult";
 import type { ReactiveRegistrationsParams } from "@/types/rpc/ReactiveRegistrationsParams";
 import type { ReactiveRegistrationsResult } from "@/types/rpc/ReactiveRegistrationsResult";
 import type { RemoteRecord } from "@/types/rpc/RemoteRecord";
@@ -1434,6 +1435,10 @@ export const GeneratedApi = {
   // command "getmeta"
   GetMetaCommand(client: RpcClient, data: CommandGetMetaData, opts?: RpcOpts): Promise<MetaType> {
     return client.rpcCall("getmeta", data, opts);
+  },
+  // command "reactive.registration_flags"
+  GetReactiveRegistrationFlagsCommand(client: RpcClient, opts?: RpcOpts): Promise<ReactiveRegistrationFlagsResult> {
+    return client.rpcCall("reactive.registration_flags", {}, opts);
   },
   // command "reactive.registrations"
   GetReactiveRegistrationsCommand(

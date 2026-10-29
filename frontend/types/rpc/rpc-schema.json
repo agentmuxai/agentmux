@@ -5583,6 +5583,25 @@
     }
   },
   {
+    "command": "reactive.registration_flags",
+    "request": "agentmux_srv::server::reactive::ReactiveRegistrationFlagsParams",
+    "requestName": "ReactiveRegistrationFlagsParams",
+    "requestTs": {
+      "imports": [
+        "ReactiveRegistrationFlagsParams"
+      ],
+      "name": "ReactiveRegistrationFlagsParams"
+    },
+    "response": "agentmux_srv::server::reactive::ReactiveRegistrationFlagsResult",
+    "responseName": "ReactiveRegistrationFlagsResult",
+    "responseTs": {
+      "imports": [
+        "ReactiveRegistrationFlagsResult"
+      ],
+      "name": "ReactiveRegistrationFlagsResult"
+    }
+  },
+  {
     "command": "reactive.registrations",
     "request": "agentmux_srv::server::reactive::ReactiveRegistrationsParams",
     "requestName": "ReactiveRegistrationsParams",
