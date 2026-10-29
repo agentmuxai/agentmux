@@ -10,25 +10,33 @@ import { dropTargetForElements } from "@atlaskit/pragmatic-drag-and-drop/element
 import { createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 
 import { kanbanCardItemType } from "@/app/drag/drag-types";
-import { Button } from "@/app/element/ui";
+import { Button, IconButton } from "@/app/element/ui";
 import { formatAge } from "@/app/view/warden-shared/warden-shared";
 
 import { AgentChip, agentStateWords, KanbanCard, UntrackedCard } from "./kanban-card";
 import {
     backlogGroups,
     COLUMNS,
+    columnStats,
     columnTasks,
+    parseCollapsed,
     rankBetween,
     rankOf,
     reviewLoad,
+    takesDrops,
     type BacklogGroup,
     type ColumnId,
+    type ColumnStats,
 } from "./kanban-columns";
 import type { KanbanModel } from "./kanban-model";
 import type { KanbanAgent, KanbanTask } from "./kanban-types";
 
 /** A drop target for Kanban cards; `hover` shows it will take the card. */
-export function useCardDrop(el: () => HTMLElement | undefined, onDrop: (id: string) => void): () => boolean {
+export function useCardDrop(
+    el: () => HTMLElement | undefined,
+    onDrop: (id: string) => void,
+    enabled: () => boolean = () => true
+): () => boolean {
     const [hover, setHover] = createSignal(false);
     onMount(() => {
         const element = el();
@@ -36,7 +44,7 @@ export function useCardDrop(el: () => HTMLElement | undefined, onDrop: (id: stri
         onCleanup(
             dropTargetForElements({
                 element,
-                canDrop: ({ source }) => source.data.type === kanbanCardItemType,
+                canDrop: ({ source }) => source.data.type === kanbanCardItemType && enabled(),
                 onDragEnter: () => setHover(true),
                 onDragLeave: () => setHover(false),
                 onDrop: ({ source }) => {
@@ -107,6 +115,52 @@ function BacklogGroupView(props: {
     );
 }
 
+/** A collapsed column: a thin strip with the column's name written down it and its stats, one button
+ *  that opens the column again. A waiting column's strip still takes a dropped card. */
+function CollapsedColumn(props: {
+    id: ColumnId;
+    label: string;
+    stats: ColumnStats;
+    onExpand: () => void;
+    onDrop: (id: string) => void;
+}): JSX.Element {
+    let el: HTMLButtonElement | undefined;
+    const hover = useCardDrop(
+        () => el,
+        props.onDrop,
+        () => takesDrops(props.id)
+    );
+    const words = () => {
+        const s = props.stats;
+        const parts = [`${s.count} ${s.count === 1 ? "task" : "tasks"}`];
+        if (s.held > 0) parts.push(`${s.held} on hold`);
+        if (s.oldestMs > 0) parts.push(`oldest ${formatAge(s.oldestMs)}`);
+        return parts.join(", ");
+    };
+    return (
+        <Button
+            ref={el}
+            density="compact"
+            tone="quiet"
+            class={hover() ? "kanban-collapsed kanban-drop--hover" : "kanban-collapsed"}
+            aria-label={`${props.label}: ${words()}. Expand`}
+            aria-expanded={false}
+            title={`${props.label}: ${words()}. Click to expand`}
+            onClick={props.onExpand}
+        >
+            <i class="fa-solid fa-chevron-right kanban-collapsed__chevron" aria-hidden="true" />
+            <span class="kanban-collapsed__count">{props.stats.count}</span>
+            <span class="kanban-collapsed__name">{props.label}</span>
+            <Show when={props.stats.held > 0}>
+                <span class="kanban-collapsed__stat">{props.stats.held} held</span>
+            </Show>
+            <Show when={props.stats.oldestMs > 0}>
+                <span class="kanban-collapsed__stat">oldest {formatAge(props.stats.oldestMs)}</span>
+            </Show>
+        </Button>
+    );
+}
+
 export function KanbanBoard(props: {
     tasks: KanbanTask[];
     untracked: KanbanAgent[];
@@ -124,6 +178,10 @@ export function KanbanBoard(props: {
     colors?: Record<string, string>;
     /** The narrow layout (§8): one list, Merged and Released folded until opened. */
     narrow?: boolean;
+    /** The columns collapsed to a strip (wide layout only; the narrow list folds its own). */
+    collapsed?: readonly ColumnId[];
+    /** Collapse or expand a column; without it the board has no collapse control. */
+    onToggleCollapsed?: (id: ColumnId) => void;
 }): JSX.Element {
     const groups = (column: ColumnId) => backlogGroups(props.tasks, props.agents, column);
     // In the narrow list, Merged and Released start folded: one header line each.
@@ -136,6 +194,13 @@ export function KanbanBoard(props: {
             if (!next.delete(id)) next.add(id);
             return next;
         });
+    const collapsedSet = createMemo(() => new Set(props.narrow || !props.onToggleCollapsed ? [] : parseCollapsed(props.collapsed)));
+    const stripped = (id: ColumnId) => collapsedSet().has(id);
+    // Collapsed columns take a strip's width; the rest share what is left, as they did.
+    const gridColumns = () =>
+        collapsedSet().size === 0
+            ? undefined
+            : COLUMNS.map((c) => (stripped(c.id) ? "var(--kanban-strip-width)" : "minmax(160px, 1fr)")).join(" ");
     const review = createMemo(() => reviewLoad(props.tasks, props.now));
     const over = () => props.reviewLimit > 0 && props.reviewTotal > props.reviewLimit;
     const [showCancelled, setShowCancelled] = createSignal(false);
@@ -161,6 +226,20 @@ export function KanbanBoard(props: {
                 </Show>
                 {label}
             </span>
+            <Show when={!props.narrow && props.onToggleCollapsed}>
+                {(toggle) => (
+                    <IconButton
+                        icon="chevron-left"
+                        label={`Collapse ${label}`}
+                        class="kanban-column__collapse"
+                        aria-expanded={true}
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            toggle()(id);
+                        }}
+                    />
+                )}
+            </Show>
             <span
                 class="kanban-column__count"
                 classList={{ "kanban-column__count--over": id === "review" && over() }}
@@ -218,7 +297,7 @@ export function KanbanBoard(props: {
     );
 
     return (
-        <div class="kanban-board">
+        <div class="kanban-board" style={{ "grid-template-columns": gridColumns() }}>
             <For each={COLUMNS}>
                 {(col) => {
                     const tasks = () => columnTasks(props.tasks, col.id);
@@ -235,9 +314,36 @@ export function KanbanBoard(props: {
                                     !(col.id === "progress" && props.untracked.length > 0) &&
                                     col.id !== "backlog",
                                 "kanban-column--folded": folded(col.id),
+                                "kanban-column--collapsed": stripped(col.id),
                             }}
                             aria-label={col.label}
                         >
+                            <Show
+                                when={!stripped(col.id)}
+                                fallback={
+                                    <CollapsedColumn
+                                        id={col.id}
+                                        label={col.label}
+                                        stats={columnStats(
+                                            tasks(),
+                                            props.now,
+                                            col.id === "progress" ? props.untracked.length : 0
+                                        )}
+                                        onExpand={() => props.onToggleCollapsed?.(col.id)}
+                                        onDrop={(id) => {
+                                            // Dropped on a waiting column's strip: the task waits for anyone, at
+                                            // the end of the column.
+                                            const last = tasks()[tasks().length - 1];
+                                            void props.model.act({
+                                                action: "move",
+                                                id,
+                                                agent: "",
+                                                rank: rankBetween(last ? rankOf(last) : undefined, undefined),
+                                            });
+                                        }}
+                                    />
+                                }
+                            >
                             {columnHead(
                                 col.id,
                                 col.label,
@@ -275,6 +381,7 @@ export function KanbanBoard(props: {
                                         </Show>
                                     </Show>
                                 </div>
+                            </Show>
                             </Show>
                         </section>
                     );

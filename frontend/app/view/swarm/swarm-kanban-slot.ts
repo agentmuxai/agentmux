@@ -17,6 +17,9 @@ export interface SwarmKanbanSlotProps {
     /** Pane meta `kanban:lanes`: the lanes view on or off. */
     lanes: boolean;
     onLanes(on: boolean): void;
+    /** Pane meta `kanban:collapsed`: the columns folded to a strip, by id. */
+    collapsed: string[];
+    onCollapsed(ids: string[]): void;
     /** Select that agent's row in the Swarm; without it, `revealBlock` as the Kanban does today. */
     onOpenAgent?(blockId: string): void;
 }

@@ -75,12 +75,21 @@ $kanban-narrow: 760px;
 }
 
 .kanban-board {
+    // A collapsed column's width (board.tsx sets the track list when some are collapsed).
+    --kanban-strip-width: 40px;
+
     display: grid;
     grid-template-columns: repeat(8, minmax(160px, 1fr));
     gap: var(--space-2);
     flex: 1 1 auto;
     min-height: 0;
     overflow-x: auto;
+    // A column opening or closing slides its neighbours instead of jumping them.
+    transition: grid-template-columns var(--duration-quick) var(--ease-out);
+
+    @include mixins.when-motion-reduced(transition) {
+        transition: none;
+    }
 }
 
 // Narrow panes: one long list with one scrollbar, each column a section under its sticky header, Needs you
@@ -263,6 +272,57 @@ $kanban-narrow: 760px;
 
 .kanban-column__fold {
     align-self: flex-start;
+}
+
+// The header's collapse control sits beside the count and shrinks to its icon.
+.kanban-column__collapse {
+    margin-left: auto;
+}
+
+// A collapsed column: a strip that is one button. Its name and stats run down it, top to bottom.
+.kanban-column--collapsed {
+    min-width: 0;
+}
+
+.kanban-collapsed {
+    flex: 1 1 auto;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    gap: var(--space-2);
+    height: 100%;
+    min-height: 0;
+    padding: var(--space-2) 0;
+    border: 0;
+    border-radius: 0;
+    overflow: hidden;
+    width: 100%;
+}
+
+.kanban-collapsed__chevron {
+    font-size: var(--text-xs);
+    color: var(--secondary-text-color);
+}
+
+.kanban-collapsed__count {
+    font-weight: 600;
+    font-size: var(--text-sm);
+}
+
+.kanban-collapsed__name,
+.kanban-collapsed__stat {
+    writing-mode: vertical-rl;
+    white-space: nowrap;
+}
+
+.kanban-collapsed__name {
+    font-weight: 600;
+    font-size: var(--text-sm);
+}
+
+.kanban-collapsed__stat {
+    font-size: var(--text-xs);
+    color: var(--secondary-text-color);
 }
 
 .kanban-column__count {

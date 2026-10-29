@@ -23,6 +23,42 @@ export const COLUMNS: { id: ColumnId; label: string }[] = [
     { id: "released", label: "Released" },
 ];
 
+/** The ids in `value` that are columns, once each, in column order: what a pane's `kanban:collapsed` meta
+ *  holds, whatever was written there. */
+export function parseCollapsed(value: unknown): ColumnId[] {
+    if (!Array.isArray(value)) return [];
+    return COLUMNS.map((c) => c.id).filter((id) => value.includes(id));
+}
+
+/** `collapsed` with `id` collapsed if it was open, open if it was collapsed. */
+export function toggleCollapsed(collapsed: readonly ColumnId[], id: ColumnId): ColumnId[] {
+    return parseCollapsed(collapsed.includes(id) ? collapsed.filter((c) => c !== id) : [...collapsed, id]);
+}
+
+/** What a collapsed column's strip says about it. */
+export interface ColumnStats {
+    count: number;
+    /** Tasks put on hold. */
+    held: number;
+    /** How long the longest-unchanged task has sat there (ms); 0 for an empty column. */
+    oldestMs: number;
+}
+
+/** The stats of a column's `tasks`, plus `extra` cards that are no task (agents working without one). */
+export function columnStats(tasks: readonly KanbanTask[], now: number, extra = 0): ColumnStats {
+    const oldest = tasks.reduce((min, t) => Math.min(min, t.updated_at), now);
+    return {
+        count: tasks.length + extra,
+        held: tasks.filter((t) => t.state === "held").length,
+        oldestMs: tasks.length ? Math.max(0, now - oldest) : 0,
+    };
+}
+
+/** The columns that take a dropped card when collapsed, as they do open: the waiting ones. */
+export function takesDrops(id: ColumnId): boolean {
+    return id === "backlog" || id === "specd";
+}
+
 /** The Kanban section's width at or under which the board is one list (§8 of the stages spec); `kanban.scss`'s
  *  `$kanban-narrow` is the same number. */
 export const KANBAN_NARROW_PX = 760;
