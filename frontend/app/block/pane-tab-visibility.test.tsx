@@ -19,6 +19,7 @@ vi.mock("@/app/store/block-component-registry", () => ({
     },
 }));
 
+import { setBlockMinimized } from "@/app/block/pane-minimized";
 import { WindowTabDisplayedProvider } from "@/app/workspace/window-tab-visibility";
 import { usePaneTabVisibility, type PaneTabVisibility } from "./pane-tab-visibility";
 
@@ -52,6 +53,22 @@ describe("usePaneTabVisibility", () => {
         expect(s.visibility()).toBe("dormant");
         s.setDormant(false);
         expect(s.visibility()).toBe("active");
+    });
+
+    it("is dormant while its pane is minimized, even as the front member, and active again once restored", () => {
+        const s = setup("v-min");
+        setBlockMinimized("v-min", true);
+        expect(s.visibility()).toBe("dormant");
+        setBlockMinimized("v-min", false);
+        expect(s.visibility()).toBe("active");
+    });
+
+    it("stays windowHidden, not dormant, when its pane is minimized in a window tab that is not displayed", () => {
+        const s = setup("v-min2");
+        setBlockMinimized("v-min2", true);
+        s.setDisplayed(false);
+        expect(s.visibility()).toBe("windowHidden");
+        setBlockMinimized("v-min2", false);
     });
 
     it("is windowHidden while its window tab is not displayed, whatever the pane stack says", () => {

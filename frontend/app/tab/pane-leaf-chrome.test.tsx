@@ -18,6 +18,7 @@ import { createEffect, createSignal, onCleanup } from "solid-js";
 import type { JSX } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { NodeModel } from "@/layout/index";
+import { isBlockMinimized } from "@/app/block/pane-minimized";
 import { registerPaneTab } from "@/app/block/pane-tab-registry";
 import { stubPaneTab } from "@/app/block/pane-tab-test-utils";
 
@@ -158,8 +159,12 @@ async function loadPaneLeafChrome() {
 function makeFakeNodeModel(overrides?: {
     activeBlockId?: () => string;
     activeViewModel?: () => ViewModel | null;
+    isMinimized?: () => boolean;
+    isMagnified?: () => boolean;
 }): NodeModel {
     return {
+        ...(overrides?.isMinimized ? { isMinimized: overrides.isMinimized } : {}),
+        ...(overrides?.isMagnified ? { isMagnified: overrides.isMagnified } : {}),
         blockId: "b1",
         nodeId: "node-1",
         layoutModel: fakeLayoutModel,
@@ -245,6 +250,34 @@ describe("PaneLeafChrome — passthrough (not hoisted)", () => {
 
         expect(screen.getByTestId("block-b1")).toBeInTheDocument();
         expect(screen.queryByTestId("chrome-header")).toBeNull();
+    });
+});
+
+describe("PaneLeafChrome — a minimized pane is hidden", () => {
+    it("marks its block minimized while the pane is a chip, and clears it on restore", async () => {
+        setBlockView("b1", "settings");
+        const [minimized, setMinimized] = createSignal(true);
+        const nodeModel = makeFakeNodeModel({ isMinimized: minimized });
+        const PaneLeafChrome = await loadPaneLeafChrome();
+
+        render(() => <PaneLeafChrome nodeModel={nodeModel} />);
+        expect(isBlockMinimized("b1")()).toBe(true);
+        setMinimized(false);
+        expect(isBlockMinimized("b1")()).toBe(false);
+    });
+
+    it("keeps a maximized pane visible although its minimized flag stays set", async () => {
+        setBlockView("b1", "settings");
+        const [magnified, setMagnified] = createSignal(false);
+        const nodeModel = makeFakeNodeModel({ isMinimized: () => true, isMagnified: magnified });
+        const PaneLeafChrome = await loadPaneLeafChrome();
+
+        render(() => <PaneLeafChrome nodeModel={nodeModel} />);
+        expect(isBlockMinimized("b1")()).toBe(true);
+        setMagnified(true);
+        expect(isBlockMinimized("b1")()).toBe(false);
+        setMagnified(false);
+        expect(isBlockMinimized("b1")()).toBe(true);
     });
 });
 
