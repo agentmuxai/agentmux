@@ -33,6 +33,33 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 result.path
             ))
         }
+        "UIRecord" => {
+            require_agent_env(local_url, auth_key, block_id)?;
+            let auth = sign_ui_automation_auth()?;
+            let op = arguments.get("op").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            if op != "start" && op != "stop" {
+                anyhow::bail!("record needs op: \"start\" to begin a recording, \"stop\" to end it and get the file");
+            }
+            let number = |key: &str| arguments.get(key).and_then(|v| v.as_u64()).map(|v| v.min(u64::from(u32::MAX)) as u32);
+            let url = format!("{}/api/v1/ui/record", local_url.trim_end_matches('/'));
+            let resp = client
+                .post(&url)
+                .header(AUTH_KEY_HEADER, auth_key)
+                .json(&UiRecordRequest { auth, op, pane: pane_arg(arguments), fps: number("fps"), seconds: number("seconds") })
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                anyhow::bail!("record failed: HTTP {status} — {text}");
+            }
+            let result: UiRecordResponse = resp
+                .json()
+                .await
+                .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
+            Ok(result.message)
+        }
         "CaptureWindow" => {
             // `index` stays an Option all the way into capture_window_impl —
             // NOT defaulted to 0 here. Defaulting it here is exactly what

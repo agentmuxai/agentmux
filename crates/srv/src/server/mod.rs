@@ -103,6 +103,7 @@ pub(crate) mod host_http;
 pub(crate) mod operator_proof;
 pub(crate) mod screenshot_redact;
 pub(crate) mod ui_handlers;
+pub(crate) mod ui_record;
 pub(crate) mod ui_shortcuts;
 pub(crate) mod widget_access_handlers;
 pub(crate) mod widget_agent_handlers;

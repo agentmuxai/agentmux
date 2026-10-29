@@ -502,6 +502,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // is stamped by agentmux-mcp from AGENTMUX_BLOCKID, same trust model as
         // the agent/memory/preset/identity routes just above.
         .route("/api/v1/ui/screenshot", post(ui_handlers::handle_ui_screenshot))
+        .route("/api/v1/ui/record", post(ui_record::handle_ui_record))
         .route("/api/v1/ui/click", post(ui_handlers::handle_ui_click))
         .route("/api/v1/ui/query", post(ui_handlers::handle_ui_query))
         // Shortcuts (PLAN_SHORTCUTS_VERIFIED_AND_APP_API_2026_10_10.md §4) —

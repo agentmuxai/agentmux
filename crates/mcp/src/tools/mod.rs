@@ -147,6 +147,7 @@ const REPLACED: &[(&str, &str)] = &[
     ("PressKeys", "UI with action \"keys\""),
     ("DiscoverWindows", "UI with action \"windows\""),
     ("CaptureWindow", "UI with action \"window\""),
+    ("UIRecord", "UI with action \"record\""),
     ("MemoryList", "Memory with action \"list\""),
     ("MemoryRead", "Memory with action \"read\""),
     ("MemoryWrite", "Memory with action \"write\""),
