@@ -30,8 +30,16 @@ describe("preparingNow: a container agent's start-up in the background", () => {
         expect(preparingNow([start("ready"), install("failed")], NOW)).toBeNull();
     });
 
-    it("is not shown once a message or a reply is in the conversation: the agent is already up", () => {
-        expect(preparingNow([start("starting"), user], NOW)).toBeNull();
+    it("is not shown once the agent has answered: it is already up", () => {
+        const reply = { type: "agent_message", id: "a1", content: "hello", timestamp: NOW } as unknown as DocumentNode;
+        expect(preparingNow([start("starting"), user, reply], NOW)).toBeNull();
+    });
+
+    it("stays while the user's first message waits for the container: sending is not being ready", () => {
+        expect(preparingNow([start("pulling", { percent: 10 }), user], NOW)?.phase).toBe("Downloading the agent image… 10%");
+        expect(preparingNow([start("ready"), install("installing"), user], NOW)?.phase).toBe("Installing Claude Code 2.1.285…");
+        // once the start ends, a message after it changes nothing
+        expect(preparingNow([start("ready"), user], NOW)).toBeNull();
     });
 
     it("ignores other notices after the start-up row", () => {

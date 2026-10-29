@@ -3,8 +3,8 @@
 
 /**
  * "Preparing…" with the phase, above the composer, while a container agent's container is started
- * in the background (`preparing.ts`). Not a working turn: no spinner of the Working row, no timer,
- * and it does not queue what the user types.
+ * in the background (`preparing.ts`). Not a working turn: it shares the Working row's spinner but
+ * has no timer or turn phase, and it does not queue what the user types.
  */
 import { Show, createEffect, createMemo, createSignal, onCleanup, type Accessor, type JSX } from "solid-js";
 import { AsciiSpinner } from "@/app/element/AsciiSpinner";

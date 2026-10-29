@@ -33,13 +33,14 @@ function inProgress(n: CliNoticeNode): boolean {
 
 /**
  * What the pre-start is doing, or null. Reads from the newest row back: the first start-up row
- * decides (in progress: preparing; ready, installed, failed: not), and a message or a reply after it
- * means the agent is already up.
+ * decides (in progress: preparing; ready, installed, failed: not), and output of the agent after it
+ * means the agent is already up. The user's own message does not: they can send their first one
+ * while the image is still downloading, and the start-up row stays above it.
  */
 export function preparingNow(nodes: readonly DocumentNode[], now: number): Preparing | null {
     for (let i = nodes.length - 1; i >= 0; i--) {
         const n = nodes[i];
-        if (n.type === "user_message" || n.type === "agent_message" || n.type === "markdown" || n.type === "tool") return null;
+        if (n.type === "agent_message" || n.type === "markdown" || n.type === "tool") return null;
         if (n.type !== "cli_notice") continue;
         if (n.kind !== "container_start" && n.kind !== "install") continue;
         if (!inProgress(n)) return null;
