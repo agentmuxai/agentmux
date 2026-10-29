@@ -68,9 +68,11 @@ pub(crate) fn confine(req: &mut CommandPaneOpenData, workspace: &Path) -> Result
     req.url = None;
     req.connection = None;
     for path in [&mut req.file, &mut req.cwd] {
-        if let Some(p) = path.as_deref().filter(|p| !p.trim().is_empty()) {
-            *path = Some(inside(workspace, p)?);
-        }
+        // A blank path is none, as the pane builder reads it: left in place it would hide "no path named" below.
+        *path = match path.as_deref().filter(|p| !p.trim().is_empty()) {
+            Some(p) => Some(inside(workspace, p)?),
+            None => None,
+        };
     }
     // The files view shows a folder; with none named it shows the workspace, not the user's home.
     if req.view == "files" && req.file.is_none() && req.cwd.is_none() {
@@ -162,6 +164,17 @@ mod tests {
         let mut ssh = open("editor", Some("src/main.rs"));
         ssh.connection = Some("user@host".into());
         assert!(confine(&mut ssh, &ws).unwrap_err().contains("another machine"));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn blank_paths_are_no_path_so_the_files_view_still_shows_the_workspace() {
+        let (root, ws) = workspace();
+        let host_ws = crate::server::browser_uploads::canonical(&ws).unwrap().to_string_lossy().into_owned();
+        let mut req = open("files", Some(""));
+        req.cwd = Some("  ".into());
+        confine(&mut req, &ws).unwrap();
+        assert_eq!((req.file.as_deref(), req.cwd.as_deref()), (Some(host_ws.as_str()), None), "not the user's home");
         let _ = std::fs::remove_dir_all(root);
     }
 
