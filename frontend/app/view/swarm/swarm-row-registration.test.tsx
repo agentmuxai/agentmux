@@ -88,7 +88,7 @@ describe("readRegistrationFlags", () => {
     it("returns what srv flags", async () => {
         mocks.readFlags.mockResolvedValue({ flags: [claimed] });
         expect(await readRegistrationFlags()).toEqual([claimed]);
-        expect(mocks.readFlags).toHaveBeenCalledWith(client, {});
+        expect(mocks.readFlags).toHaveBeenCalledWith(client);
     });
 
     it("is empty when srv does not know the command, or answers nothing", async () => {

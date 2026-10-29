@@ -16,31 +16,23 @@
  */
 
 import { ConfirmModal } from "@/app/element/confirm-modal";
-import { RpcApi, type ReactiveMismatchSummary, type ReactiveRemoteRegistration } from "@/app/store/rpc-api";
+import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import type { RegistrationFlag } from "@/types/rpc/RegistrationFlag";
 import { createContext, createEffect, createMemo, createSignal, onCleanup, Show, useContext, type Accessor, type JSX } from "solid-js";
 
-/** One agent srv flags: a claim by another instance, a refused jekt, or both. */
-export interface RegistrationFlag {
-    agent_id: string;
-    block_id: string;
-    remote: ReactiveRemoteRegistration[];
-    recent_mismatch: ReactiveMismatchSummary | null;
-}
+export type { RegistrationFlag };
 
 export const REGISTRATION_POLL_MS = 15_000;
 
-type ReadFlags = (client: typeof TabRpcClient, data: Record<string, never>) => Promise<{ flags?: RegistrationFlag[] } | null>;
-
 /**
- * The flags srv holds now (`reactive.registration_flags`). Empty on any failure, including a srv
- * that does not know the command: the stub is looked up by name, so this window shows no badges
- * until the stub is in its build and srv serves it, and nothing breaks before then.
+ * The flags srv holds now (`reactive.registration_flags`): one agent per entry, with a claim by
+ * another instance, a refused jekt, or both. Empty on any failure, including a srv that does not
+ * know the command yet, so a window older than its srv shows no badges and nothing breaks.
  */
 export async function readRegistrationFlags(): Promise<RegistrationFlag[]> {
     try {
-        const read = (RpcApi as unknown as { GetReactiveRegistrationFlagsCommand?: ReadFlags }).GetReactiveRegistrationFlagsCommand;
-        const result = await read?.(TabRpcClient, {});
+        const result = await RpcApi.GetReactiveRegistrationFlagsCommand(TabRpcClient);
         return Array.isArray(result?.flags) ? result!.flags! : [];
     } catch {
         return [];
