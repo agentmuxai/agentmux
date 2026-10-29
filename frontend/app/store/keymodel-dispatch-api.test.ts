@@ -12,6 +12,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const h = vi.hoisted(() => ({
     inWindow: new Set<string>(),
     reveal: vi.fn<(blockId: string) => Promise<boolean>>(),
+    /** Why a reveal that returned false failed. */
+    reason: "not-found",
 }));
 vi.mock("@/app/store/global", () => ({
     atoms: { modalOpen: () => false },
@@ -22,7 +24,9 @@ vi.mock("@/app/store/global", () => ({
 vi.mock("@/layout/index", () => ({
     getLayoutModelForStaticTab: () => ({ focusedNode: () => null }),
 }));
-vi.mock("@/app/util/reveal-block", () => ({ revealBlock: async (id: string) => ({ ok: await h.reveal(id) }) }));
+vi.mock("@/app/util/reveal-block", () => ({
+    revealBlock: async (id: string) => ((await h.reveal(id)) ? { ok: true } : { ok: false, reason: h.reason }),
+}));
 vi.mock("@/app/store/command-registry", () => ({ commandRegistry: { run: vi.fn(() => false) } }));
 
 import { caretInBlock, focusPaneForApi, installShortcutApi, OPERATOR_PROMPT_OPEN, operatorPromptOpen } from "./keymodel-dispatch";
@@ -40,6 +44,7 @@ function pane(blockId: string): HTMLInputElement {
 beforeEach(() => {
     h.inWindow.clear();
     h.reveal.mockReset();
+    h.reason = "not-found";
     h.reveal.mockImplementation(async (id) => h.inWindow.has(id));
 });
 afterEach(() => {
@@ -83,6 +88,19 @@ describe("plan()", () => {
         const plan = await api().plan("ctrl+shift+code:Digit1", "late");
         expect(plan.reason).toBeUndefined();
         expect(plan.events).toHaveLength(1);
+    });
+
+    it("says why a pane could not be focused: not in this window, or not brought to the front", async () => {
+        installShortcutApi();
+        expect((await api().plan("ctrl+shift+code:Digit1", "elsewhere")).reason).toBe("pane elsewhere is not in this window");
+        h.reason = "superseded";
+        expect((await api().plan("ctrl+shift+code:Digit1", "elsewhere")).reason).toBe(
+            "pane elsewhere was not focused: another pane was chosen meanwhile"
+        );
+        h.reason = "layout-timeout";
+        expect((await api().plan("ctrl+shift+code:Digit1", "elsewhere")).reason).toBe(
+            "pane elsewhere did not come to the front (layout-timeout)"
+        );
     });
 
     it("refuses when the caret never arrives", async () => {

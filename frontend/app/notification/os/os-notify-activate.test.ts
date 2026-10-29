@@ -12,7 +12,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const reveal = vi.fn();
 const focusWindow = vi.fn();
 
-vi.mock("@/app/util/reveal-block", () => ({ revealBlock: async (...a: unknown[]) => ({ ok: await reveal(...a) }) }));
+vi.mock("@/app/util/reveal-block", () => ({ revealBlock: async (...a: unknown[]) => ((await reveal(...a)) ? { ok: true } : { ok: false, reason: "not-found" }) }));
 vi.mock("@/app/store/agent-pane-state-store", () => ({ addEventListener: () => () => {} }));
 vi.mock("@/app/store/focusManager", () => ({ focusManager: { blockFocusAtom: () => null } }));
 vi.mock("@/app/store/window-identity", () => ({ windowId: () => "w1" }));

@@ -19,7 +19,7 @@ const layout = vi.hoisted(() => ({
 }));
 const createBlock = vi.hoisted(() => vi.fn(async () => "new-block"));
 const showBlockInPane = vi.hoisted(() => vi.fn());
-const revealBlock = vi.hoisted(() => vi.fn(async (_id: string, _opts?: unknown) => ({ ok: true }) as { ok: boolean }));
+const revealBlock = vi.hoisted(() => vi.fn(async (_id: string, _opts?: unknown) => ({ ok: true }) as { ok: boolean; reason?: string }));
 
 vi.mock("@/layout/index", () => ({ getLayoutModelForStaticTab: () => layout.model }));
 vi.mock("./block-layout-actions", () => ({ createBlock }));
@@ -89,12 +89,23 @@ describe("openOrFocusPaneIdByView", () => {
 
     it("opens a new pane when the pane in another tab cannot be shown, or there is none", async () => {
         register("warden-1", "warden");
-        revealBlock.mockResolvedValue({ ok: false });
+        revealBlock.mockResolvedValue({ ok: false, reason: "not-found" });
         expect(await openOrFocusPaneIdByView("warden")).toBe("new-block");
         unregisterBlockComponentModel("warden-1");
         createBlock.mockClear();
         expect(await openOrFocusPaneIdByView("warden")).toBe("new-block");
         expect(createBlock).toHaveBeenCalledTimes(1);
         expect(showBlockInPane).not.toHaveBeenCalled();
+    });
+
+    it("keeps the pane in another tab when it was only slow or a newer click took over, instead of opening a copy", async () => {
+        register("warden-1", "warden");
+        for (const reason of ["superseded", "layout-timeout", "mismatch"]) {
+            revealBlock.mockResolvedValue({ ok: false, reason });
+            expect(await openOrFocusPaneIdByView("warden")).toBe("warden-1");
+        }
+        expect(createBlock).not.toHaveBeenCalled();
+        revealBlock.mockResolvedValue({ ok: false, reason: "gone" });
+        expect(await openOrFocusPaneIdByView("warden")).toBe("new-block");
     });
 });

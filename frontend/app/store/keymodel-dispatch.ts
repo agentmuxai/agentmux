@@ -17,6 +17,7 @@ import { chordLeaderOf, commandForKey, DOC_TAB_HOSTS, resolveKey, type KeyContex
 import { commandRegistry } from "@/app/store/command-registry";
 import { atoms, getApi, getBlockComponentModel, setControlShiftDelayAtom } from "@/app/store/global";
 import { getLayoutModelForStaticTab } from "@/layout/index";
+import { isFailure, type SelectionResult } from "@/app/selection/selection-machine";
 import { revealBlock } from "@/app/util/reveal-block";
 import { isEditableTarget } from "@/util/focusutil";
 import * as keyutil from "@/util/keyutil";
@@ -290,11 +291,24 @@ const NO_KEY: MuxKeyboardEvent = { type: "keydown", key: "", code: "", repeat: f
  * caret. `blockId` may be any pane in this window, in any tab, or one of a
  * pane's tabs: the window switches to that tab, the pane shows that tab, and
  * a minimized or hidden pane is brought back (revealBlock; the kinks
- * plan's D1, A2). It never reaches another window. False if no tab of this
- * window holds `blockId`.
+ * plan's D1, A2). It never reaches another window. False when it could not be
+ * shown: no tab of this window holds `blockId`, or it did not come to the
+ * front (`focusPaneResult` says which).
  */
 export async function focusPaneForApi(blockId: string): Promise<boolean> {
-    return (await revealBlock(blockId, { source: "api", localOnly: true })).ok;
+    return (await focusPaneResult(blockId)).ok;
+}
+
+/** `focusPaneForApi`, with why it failed. */
+export function focusPaneResult(blockId: string): Promise<SelectionResult> {
+    return revealBlock(blockId, { source: "api", localOnly: true });
+}
+
+/** What a PressKeys caller is told when `target` could not be focused. */
+function focusRefusal(target: string, result: SelectionResult & { ok: false }): string {
+    if (result.reason === "not-found" || result.reason === "gone") return `pane ${target} is not in this window`;
+    if (result.reason === "superseded") return `pane ${target} was not focused: another pane was chosen meanwhile`;
+    return `pane ${target} did not come to the front (${result.reason}${result.detail ? `: ${result.detail}` : ""})`;
 }
 
 /** Whether the caret is in `blockId`'s pane: in any element of that block, since a pane tab's content sits in its own block. */
@@ -344,7 +358,10 @@ export function installShortcutApi() {
         // sends the events and reads `last()`.
         plan: async (keys: string, target?: string): Promise<KeyPressPlan | { reason: string }> => {
             if (operatorPromptOpen()) return { reason: OPERATOR_PROMPT_OPEN };
-            if (target && !(await focusPaneForApi(target))) return { reason: `pane ${target} is not in this window` };
+            if (target) {
+                const focused = await focusPaneResult(target);
+                if (isFailure(focused)) return { reason: focusRefusal(target, focused) };
+            }
             // A key goes where the caret is: refuse rather than press it into another pane.
             if (target && !(await caretArrives(target))) return { reason: `pane ${target} didn't take keyboard focus` };
             const plan = planKeyPress(keys, keyPlatform());

@@ -12,6 +12,7 @@ import { getLayoutModelForStaticTab } from "@/layout/index";
 import { cleanupBlockAtomCache } from "./block-atom-cache";
 import { createBlock } from "./block-layout-actions";
 import { setBlockMeta } from "./block-meta";
+import { isFailure } from "@/app/selection/selection-machine";
 import { giveBlockFocus } from "./focusManager";
 
 const blockComponentModelMap = new Map<string, BlockComponentModel>();
@@ -234,7 +235,10 @@ export async function openOrFocusPaneIdByView(
     if (elsewhere) {
         if (focusMeta != null) await setBlockMeta(elsewhere, focusMeta);
         const { revealBlock } = await import("@/app/util/reveal-block");
-        if ((await revealBlock(elsewhere, { source: "widget", localOnly: true })).ok) return elsewhere;
+        const shown = await revealBlock(elsewhere, { source: "widget", localOnly: true });
+        // Only a pane that is not there (never found, or closed meanwhile) is opened afresh: a newer click
+        // taking over, or a tab that was slow, leaves the pane where it is and a second one would be a copy.
+        if (!isFailure(shown) || (shown.reason !== "not-found" && shown.reason !== "gone")) return elsewhere;
     }
     return await createBlock(blockDef ?? { meta: { view: viewType } });
 }
