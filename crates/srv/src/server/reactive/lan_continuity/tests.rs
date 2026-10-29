@@ -230,6 +230,15 @@ async fn an_install_known_here_to_be_revoked_vouches_for_nothing_even_while_it_i
     assert!(audited_for("maop-rv").is_empty());
 }
 
+#[test]
+fn a_revocation_learned_from_the_directory_is_kept_even_for_an_install_with_no_record_yet() {
+    let (_dir, wan) = host("narko");
+    assert!(wan.known_instance_get("inst-never-seen").unwrap().is_none());
+    remember_revoked(&wan, "inst-never-seen", now());
+    let known = wan.known_instance_get("inst-never-seen").unwrap().expect("a record was made");
+    assert!(known.revoked_at.is_some(), "the revocation stands for the next request, with the directory out of reach");
+}
+
 #[tokio::test]
 async fn an_install_certifies_the_key_it_hosts_and_a_receiver_accepts_the_certificate() {
     let state = test_state();

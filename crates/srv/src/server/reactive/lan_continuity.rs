@@ -135,7 +135,7 @@ async fn instance_trust(state: &AppState, instance_id: &str) -> Result<Path, Str
         if let Some(dir) = &dir {
             if instance_is_revoked(dir, instance_id).await == Some(true) {
                 if let Some(wan) = &wan {
-                    let _ = wan.known_instance_record_revocation_check(instance_id, true, agentmux_common::time::now_secs());
+                    remember_revoked(wan, instance_id, agentmux_common::time::now_secs());
                 }
                 return Err("the install is revoked".to_string());
             }
@@ -150,6 +150,14 @@ async fn instance_trust(state: &AppState, instance_id: &str) -> Result<Path, Str
         Some(false) => Err("the install is not pinned here and the account's directory does not list it as a live install".to_string()),
         None => Err("the install is not pinned here and the account's directory could not be read".to_string()),
     }
+}
+
+/// Keep a revocation learned from the directory, so it still stands when the directory cannot be
+/// asked. The install may have no known-install row yet (a pin the user adopted never went through
+/// WAN verification), and recording a check updates a row only, so make the row first.
+fn remember_revoked(wan: &crate::backend::storage::wan_identity::WanIdentityStore, instance_id: &str, now: i64) {
+    let _ = wan.known_instance_observe(instance_id, "?", now);
+    let _ = wan.known_instance_record_revocation_check(instance_id, true, now);
 }
 
 static UNVOUCHED: LazyLock<Mutex<HashMap<(String, String), (i64, String)>>> = LazyLock::new(Default::default);
