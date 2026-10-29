@@ -1192,6 +1192,9 @@ pub struct RegisterDevServerResponse {
     /// The full routable URL, e.g. `"http://pulse-korp.localhost:8090"` —
     /// what to actually browse to.
     pub url: String,
+    /// The server was started for you and is not listening yet: the URL works once it does.
+    #[serde(default)]
+    pub starting: bool,
 }
 
 #[cfg(test)]

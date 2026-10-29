@@ -577,7 +577,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let resp = client
                 .post(&url)
                 .header(AUTH_KEY_HEADER, auth_key)
-                .json(&RegisterDevServerRequest { auth, project, port, command, dir })
+                .json(&RegisterDevServerRequest { auth, project: project.clone(), port, command, dir })
                 .send()
                 .await
                 .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
@@ -590,7 +590,12 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 .json()
                 .await
                 .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
-            Ok(format!("Registered. Browse to: {}", body.url))
+            let starting = if body.starting {
+                format!(" The server is still starting, so the URL works once it is listening; its output is in /tmp/amx-dev-{project}.log in your container.")
+            } else {
+                String::new()
+            };
+            Ok(format!("Registered. Browse to: {}{starting}", body.url))
         }
         _ => Err(not_in_family()),
     }

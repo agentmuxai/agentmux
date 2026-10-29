@@ -28,6 +28,12 @@ const MAX_PER_CONTAINER: usize = 8;
 const MAX_COMMAND_BYTES: usize = 4096;
 /// How long a freshly started server gets to begin listening.
 const STARTUP_WAIT: Duration = Duration::from_secs(90);
+/// A server nobody has run a turn beside for this long is no longer kept up.
+const FORGET_AFTER_SECS: u64 = 30 * 24 * 3600;
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs())
+}
 
 /// One dev server to keep up.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -41,6 +47,9 @@ pub struct Spec {
     pub command: String,
     /// Where the command runs, as a path in the container.
     pub dir: String,
+    /// When the container last ran a turn with this kept up (unix seconds): one nobody has used for a month is let go.
+    #[serde(default)]
+    pub seen: u64,
 }
 
 impl Spec {
@@ -87,11 +96,13 @@ pub struct Store {
 impl Store {
     /// The store in `path` (as left by an earlier run); in memory only when there is none.
     pub fn open(path: Option<PathBuf>) -> Self {
-        let specs = path
+        let mut specs: Vec<Spec> = path
             .as_ref()
             .and_then(|p| std::fs::read_to_string(p).ok())
             .and_then(|text| serde_json::from_str(&text).ok())
             .unwrap_or_default();
+        let now = now_secs();
+        specs.retain(|s| s.seen == 0 || now.saturating_sub(s.seen) < FORGET_AFTER_SECS);
         Self { path, specs: Mutex::new(specs) }
     }
 
@@ -111,16 +122,35 @@ impl Store {
         }
     }
 
-    /// Keep `spec` up, replacing the one for the same project in the same container.
-    pub fn keep(&self, spec: Spec) -> Result<(), String> {
-        let mut specs = self.lock();
-        specs.retain(|s| !(s.container == spec.container && s.project == spec.project));
-        if specs.iter().filter(|s| s.container == spec.container).count() >= MAX_PER_CONTAINER {
+    /// Whether `spec` can be kept: the container has room for it, or it replaces its project's.
+    pub fn can_keep(&self, spec: &Spec) -> Result<(), String> {
+        let specs = self.lock();
+        let others = specs.iter().filter(|s| s.container == spec.container && s.project != spec.project).count();
+        if others >= MAX_PER_CONTAINER {
             return Err(format!("at most {MAX_PER_CONTAINER} dev servers can be kept up per container"));
         }
+        Ok(())
+    }
+
+    /// Keep `spec` up, replacing the one for the same project in the same container.
+    pub fn keep(&self, mut spec: Spec) -> Result<(), String> {
+        self.can_keep(&spec)?;
+        spec.seen = now_secs();
+        let mut specs = self.lock();
+        specs.retain(|s| !(s.container == spec.container && s.project == spec.project));
         specs.push(spec);
         self.save(&specs);
         Ok(())
+    }
+
+    /// `container` ran a turn: what is kept up in it is in use.
+    fn touch(&self, container: &str) {
+        let mut specs = self.lock();
+        let now = now_secs();
+        for s in specs.iter_mut().filter(|s| s.container == container) {
+            s.seen = now;
+        }
+        self.save(&specs);
     }
 
     /// Stop keeping `project` up in `container` (it was registered again without a command).
@@ -167,23 +197,81 @@ pub async fn route_target(cm: &ContainerManager, container: &str, port: u16) -> 
     format!("{ip}:{port}").parse::<std::net::SocketAddr>().map(Target::Direct).map_err(|e| RouteError::Address(format!("{ip}:{port}: {e}")))
 }
 
-/// Make sure `spec`'s server is listening: if it isn't, start its command and wait for it to begin.
-pub async fn bring_up(cm: &ContainerManager, spec: &Spec) -> Result<(), String> {
-    if cm.port_listening(&spec.container, spec.port).await {
+/// One start at a time per container, and a server started a moment ago is waited for, not started again.
+fn start_lock(container: &str) -> std::sync::Arc<tokio::sync::Mutex<()>> {
+    static LOCKS: OnceLock<Mutex<std::collections::HashMap<String, std::sync::Arc<tokio::sync::Mutex<()>>>>> = OnceLock::new();
+    LOCKS.get_or_init(Default::default).lock().unwrap_or_else(|p| p.into_inner()).entry(container.to_string()).or_default().clone()
+}
+
+/// When each `(container, project)` was last started, and in which incarnation of the container (its Docker id): a
+/// recreated container has none of what ran in the old one. Tells a server that is slow to listen from one not running.
+fn started_recently(container: &str, project: &str, incarnation: &str, set: bool) -> bool {
+    static STARTED: OnceLock<Mutex<std::collections::HashMap<(String, String), (Instant, String)>>> = OnceLock::new();
+    let mut started = STARTED.get_or_init(Default::default).lock().unwrap_or_else(|p| p.into_inner());
+    let key = (container.to_string(), project.to_string());
+    if set {
+        started.insert(key, (Instant::now(), incarnation.to_string()));
+        return true;
+    }
+    started.get(&key).is_some_and(|(at, id)| id == incarnation && at.elapsed() < STARTUP_WAIT)
+}
+
+/// Start `spec`'s command unless the server is listening already or was started within the startup wait.
+pub async fn start(cm: &ContainerManager, spec: &Spec) -> Result<(), String> {
+    let lock = start_lock(&spec.container);
+    let _one_at_a_time = lock.lock().await;
+    let incarnation = cm.docker().inspect_container(&spec.container, None).await.ok().and_then(|c| c.id).unwrap_or_default();
+    if cm.port_listening(&spec.container, spec.port).await || started_recently(&spec.container, &spec.project, &incarnation, false) {
         return Ok(());
     }
     let env = crate::backend::container_credential::watcher_polling_env(cfg!(any(windows, target_os = "macos")), &[]);
     cm.start_dev_server(&spec.container, &spec.command, &spec.dir, &env, &spec.log())
         .await
         .map_err(|e| format!("couldn't start {:?}: {e}", spec.command))?;
-    let deadline = Instant::now() + STARTUP_WAIT;
-    while Instant::now() < deadline {
-        tokio::time::sleep(Duration::from_millis(500)).await;
+    started_recently(&spec.container, &spec.project, &incarnation, true);
+    Ok(())
+}
+
+/// Whether `spec`'s server is listening within `wait`.
+pub async fn wait_listening(cm: &ContainerManager, spec: &Spec, wait: Duration) -> bool {
+    let deadline = Instant::now() + wait;
+    loop {
         if cm.port_listening(&spec.container, spec.port).await {
-            return Ok(());
+            return true;
         }
+        if Instant::now() >= deadline {
+            return false;
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+}
+
+/// Make sure `spec`'s server is listening: start it if it isn't, and wait up to the startup wait.
+pub async fn bring_up(cm: &ContainerManager, spec: &Spec) -> Result<(), String> {
+    start(cm, spec).await?;
+    if wait_listening(cm, spec, STARTUP_WAIT).await {
+        return Ok(());
     }
     Err(format!("{:?} didn't start listening on port {} within {}s; its output is in {} in the container", spec.command, spec.port, STARTUP_WAIT.as_secs(), spec.log()))
+}
+
+/// Register `spec`'s route once its server listens, in the background; for a server too slow to wait for in a request.
+pub fn route_when_listening(cm: &ContainerManager, spec: Spec) {
+    let cm = cm.clone();
+    tokio::spawn(async move {
+        if !wait_listening(&cm, &spec, STARTUP_WAIT).await {
+            tracing::warn!(container = %spec.container, project = %spec.project, "[dev-keepalive] the dev server never listened; its output is in {}", spec.log());
+            return;
+        }
+        match route_target(&cm, &spec.container, spec.port).await {
+            Ok(target) => {
+                if let Some(registry) = cm.dev_proxy_registry() {
+                    registry.register_from(&spec.project, &spec.agent_id, Some(&spec.container), target).await;
+                }
+            }
+            Err(e) => tracing::warn!(container = %spec.container, error = ?e, "[dev-keepalive] no route to the dev server"),
+        }
+    });
 }
 
 /// Start the dev servers kept up in `container` that aren't listening, and register their routes, without holding
@@ -198,8 +286,17 @@ pub fn restore_in_background(cm: &ContainerManager, container: &str) {
     if !busy.lock().unwrap_or_else(|p| p.into_inner()).insert(container.to_string()) {
         return;
     }
+    store().touch(container);
+    /// Clears the container's entry however the task ends.
+    struct Done(String);
+    impl Drop for Done {
+        fn drop(&mut self) {
+            RESTORING.get_or_init(Default::default).lock().unwrap_or_else(|p| p.into_inner()).remove(&self.0);
+        }
+    }
     let (cm, container) = (cm.clone(), container.to_string());
     tokio::spawn(async move {
+        let _done = Done(container.clone());
         for spec in &specs {
             let routed = async {
                 bring_up(&cm, spec).await?;
@@ -214,7 +311,6 @@ pub fn restore_in_background(cm: &ContainerManager, container: &str) {
                 Err(e) => tracing::warn!(container = %spec.container, project = %spec.project, error = %e, "[dev-keepalive] couldn't bring the dev server up"),
             }
         }
-        busy.lock().unwrap_or_else(|p| p.into_inner()).remove(&container);
     });
 }
 
@@ -230,7 +326,13 @@ mod tests {
             port: 4600,
             command: "npm run dev".into(),
             dir: "/workspace/landing".into(),
+            seen: 0,
         }
+    }
+
+    /// What a store holds for `container`, without the time each was last used.
+    fn kept(store: &Store, container: &str) -> Vec<Spec> {
+        store.for_container(container).into_iter().map(|s| Spec { seen: 0, ..s }).collect()
     }
 
     #[test]
@@ -260,11 +362,13 @@ mod tests {
         let mut again = spec("c1", "landing");
         again.command = "npm start".into();
         store.keep(again.clone()).unwrap();
-        assert_eq!(store.for_container("c1"), vec![again], "the same project is replaced, not added");
+        assert_eq!(kept(&store, "c1"), vec![again], "the same project is replaced, not added");
         assert!(store.for_container("c2").is_empty());
         for i in 1..MAX_PER_CONTAINER {
             store.keep(spec("c1", &format!("p{i}"))).unwrap();
         }
+        assert!(store.can_keep(&spec("c1", "one-too-many")).is_err(), "the cap is known before anything is started");
+        assert!(store.can_keep(&spec("c1", "landing")).is_ok(), "replacing a project needs no room");
         assert!(store.keep(spec("c1", "one-too-many")).is_err());
         store.keep(spec("c2", "other")).unwrap();
         store.drop_project("c1", "landing");
@@ -279,11 +383,21 @@ mod tests {
         let store = Store::open(Some(path.clone()));
         store.keep(spec("c1", "landing")).unwrap();
         let reopened = Store::open(Some(path.clone()));
-        assert_eq!(reopened.for_container("c1"), vec![spec("c1", "landing")]);
+        assert_eq!(kept(&reopened, "c1"), vec![spec("c1", "landing")]);
         reopened.drop_project("c1", "landing");
         assert!(Store::open(Some(path)).for_container("c1").is_empty());
         std::fs::write(dir.path().join("bad.json"), "not json").unwrap();
         assert!(Store::open(Some(dir.path().join("bad.json"))).for_container("c1").is_empty(), "a damaged file is no servers, not a crash");
+    }
+
+    #[test]
+    fn a_server_nobody_has_run_a_turn_beside_for_a_month_is_let_go() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("dev-servers.json");
+        let (old, fresh) = (Spec { seen: now_secs() - FORGET_AFTER_SECS - 10, ..spec("c1", "old") }, Spec { seen: now_secs(), ..spec("c1", "fresh") });
+        std::fs::write(&path, serde_json::to_vec(&[old, fresh]).unwrap()).unwrap();
+        let store = Store::open(Some(path));
+        assert_eq!(store.for_container("c1").iter().map(|s| s.project.as_str()).collect::<Vec<_>>(), ["fresh"]);
     }
 
     /// Against a real daemon: a server is started for a container, and started again in a recreated one.
@@ -323,6 +437,7 @@ mod tests {
             port: 7000,
             command: "node -e \"require('http').createServer((q,r)=>r.end('hi')).listen(7000,'0.0.0.0')\"".into(),
             dir: "/tmp".into(),
+            seen: 0,
         };
         fresh(docker, image, name, network).await;
         assert!(!cm.port_listening(name, 7000).await);
