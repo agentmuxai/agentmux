@@ -23,6 +23,7 @@ import { buildConfigFiles, deriveSlug } from "./agent-config-builder";
 import { checkNodejsForProvider, ensureProviderAuthDir, agentmuxHome, resolveCliBin, resolveEffectiveLaunchProvider, resolveInitialRuntimeConfig, resolveLaunchRuntime, commitLaunch } from "./agent-launch-env";
 import { realAccountIdOrEmpty } from "./identity-carry-over";
 import { shouldWriteThroughAccountLink } from "./identity-link-writethrough";
+import { canonicalProviderId, lastLinkedAccountId } from "./providers/provider-id-aliases";
 import { refreshAccountCache } from "@/app/view/identity/identity-model";
 import { dimAgentColor, isValidAgentColor, pickAgentColor } from "./agent-color";
 import { parseSeedZoom } from "./agent-zoom-seed";
@@ -877,10 +878,12 @@ export class AgentViewModel {
                     (await refreshAccountCache()).map((a) => a.id),
                 );
                 const continuing = !!overrides?.continueOfInstanceId && !overrides?.forkSession;
-                const existing = !continuing
+                const links = !continuing
                     ? null
                     : await RpcApi.ListAgentIdentitiesCommand(TabRpcClient, { agent_id: agent.id }).catch(() => null);
-                if (shouldWriteThroughAccountLink({ accountId, continuing, existing })) {
+                // The link for THIS provider (a legacy-alias row counts), not any link the agent has.
+                const linked = links == null ? null : lastLinkedAccountId(links, canonicalProviderId(effectiveProvider)) ?? "";
+                if (shouldWriteThroughAccountLink({ accountId, continuing, linked })) {
                     await RpcApi.LinkAgentIdentityCommand(TabRpcClient, {
                         agent_id: agent.id,
                         account_id: accountId,
