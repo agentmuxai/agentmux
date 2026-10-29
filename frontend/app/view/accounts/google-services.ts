@@ -22,6 +22,9 @@ export interface ServiceInfo {
     line: string;
     /** The scopes "Turn on" asks for (srv's `Service::scopes` at read). */
     readScopes: string[];
+    /** What a "read and write" level adds, with its own consent: the scopes it asks for when the
+     *  person allows writing. A service without this has no write level to offer. */
+    write?: { label: string; line: string; scopes: string[] };
     /** Offered only on a client the person brought (their own, or their organization's internal one):
      *  Google's restricted scopes are reviewed per app, and AgentMux's own client has not been. */
     needsOwnClient?: boolean;
@@ -45,8 +48,13 @@ export const SERVICES: ServiceInfo[] = [
     {
         service: "gmail",
         label: "Gmail",
-        line: "Agents you allow can search and read your mail. They can't send, delete or change anything.",
+        line: "Agents you allow can search and read your mail.",
         readScopes: [PREFIX + "gmail.readonly"],
+        write: {
+            label: "Drafts, labels and sending",
+            line: "Agents you allow to write can write drafts, put labels on threads and take them off. To send a mail, or move a thread to the trash, an agent has to ask you: a window shows you the mail as it will go, and nothing happens until you approve it.",
+            scopes: [PREFIX + "gmail.compose", PREFIX + "gmail.modify"],
+        },
         needsOwnClient: true,
     },
 ];
@@ -57,17 +65,32 @@ export function ownClientNeeded(info: ServiceInfo, clientMode: string | undefine
     return `${info.label} needs your own Google client, or your organization's internal one: Google reviews apps that read mail, and AgentMux's own client hasn't been through that yet. Connect a Google account with your own client to use it.`;
 }
 
+/** Whether the account's token covers `scopes`: all, some or none of them. */
+export function scopesState(scopes: readonly string[], granted: readonly string[]): "on" | "partly" | "off" {
+    const have = scopes.filter((s) => granted.includes(s)).length;
+    if (have === scopes.length) return "on";
+    return have === 0 ? "off" : "partly";
+}
+
 /** Whether the account's token covers a service: all, some or none of its scopes. */
 export function serviceState(info: ServiceInfo, granted: readonly string[]): "on" | "partly" | "off" {
-    const have = info.readScopes.filter((s) => granted.includes(s)).length;
-    if (have === info.readScopes.length) return "on";
-    return have === 0 ? "off" : "partly";
+    return scopesState(info.readScopes, granted);
 }
 
 export interface PanelAgent {
     agentId: string;
     name: string;
     levels: Partial<Record<GoogleService, GrantLevel>>;
+}
+
+/** The levels the person can give an agent on a service: Off, Read, and for a service with a write
+ *  level, Read and write. */
+export function levelOptions(info: ServiceInfo): { value: GrantLevel | "off"; label: string }[] {
+    const base: { value: GrantLevel | "off"; label: string }[] = [
+        { value: "off", label: "Off" },
+        { value: "read", label: "Read" },
+    ];
+    return info.write ? [...base, { value: "write", label: "Read and write" }] : base;
 }
 
 export interface GoogleCall {

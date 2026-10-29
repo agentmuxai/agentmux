@@ -27,6 +27,8 @@ use super::AppState;
 use crate::backend::google::calendar::CalendarArgs;
 use crate::backend::google::calls::{calendar_read, drive_read, gmail_read, log_call, CallDeps};
 use crate::backend::google::drive::DriveArgs;
+use crate::backend::google::gmail_flow::{gmail_write, Answer, Approver};
+use crate::backend::google::gmail_write::WRITE_ACTIONS;
 use crate::backend::google::gmail::GmailArgs;
 use crate::backend::google::{access, LiveGoogleHttp, Service};
 use crate::backend::storage::store::AgentDefinition;
@@ -176,9 +178,38 @@ pub(crate) async fn handle_google_gmail(
         id_store: &state.id_store,
         identity_store: &state.identity_store,
     };
-    match gmail_read(&deps, &def, body.action.trim(), &body.args, body.account.as_deref(), chrono::Utc::now()).await {
+    let action = body.action.trim();
+    let result = if WRITE_ACTIONS.contains(&action) {
+        gmail_write(&deps, &HostApprover { state: &state }, &def, action, &body.args, body.account.as_deref(), chrono::Utc::now()).await
+    } else {
+        gmail_read(&deps, &def, action, &body.args, body.account.as_deref(), chrono::Utc::now()).await
+    };
+    match result {
         Ok(v) => Json(v).into_response(),
         Err(e) => error(StatusCode::UNPROCESSABLE_ENTITY, e),
+    }
+}
+
+/// The person's yes or no, asked in the host's approval window over the agent's own pane: a window
+/// no agent can click (`connections::ask_user`). With no window connected, or no pane for the agent,
+/// there is no one to ask and nothing is done.
+struct HostApprover<'a> {
+    state: &'a AppState,
+}
+
+impl Approver for HostApprover<'_> {
+    async fn ask(&self, def: &AgentDefinition, title: String, message: String, yes: &str, no: &str) -> Result<Answer, String> {
+        let block = super::app_api::agent_block::find_agent_block_by_uid(&self.state.mstore, &def.id)?
+            .ok_or("you have no pane open to ask the person in, so this can't be approved")?
+            .block
+            .oid;
+        let question = json!({ "kind": "consent", "title": title, "message": message, "checkbox": "", "ok_label": yes, "cancel_label": no });
+        let answer = super::app_api::connections::ask_user(self.state, &block, question).await?;
+        Ok(match (answer.answered, answer.approve) {
+            (true, true) => Answer::Yes,
+            (true, false) => Answer::No,
+            _ => Answer::Unanswered,
+        })
     }
 }
 
