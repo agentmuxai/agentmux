@@ -8,11 +8,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/app/store/auth-headers", () => ({ authHeaders: () => ({}) }));
 vi.mock("@/util/endpoints", () => ({ getWebServerEndpoint: () => "http://srv" }));
 
-import { actionCommand, fetchWardenAudit, type AuditEntry } from "./warden-audit-shared";
+import { actionCommand, fetchAudit, type AuditEntry } from "./audit-shared";
 
 afterEach(() => vi.unstubAllGlobals());
 
-describe("fetchWardenAudit", () => {
+describe("fetchAudit", () => {
     it("keeps register and unregister entries beside deliveries", async () => {
         const rows = [
             { event_kind: "delivery", target_agent: "a" },
@@ -22,14 +22,14 @@ describe("fetchWardenAudit", () => {
         ];
         const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => rows });
         vi.stubGlobal("fetch", fetchMock);
-        const entries = await fetchWardenAudit();
+        const entries = await fetchAudit();
         expect(entries.map((e) => e.target_agent)).toEqual(["a", "b", "c", "d"]);
         expect(fetchMock.mock.calls[0][0]).toBe("http://srv/agentmux/reactive/audit?limit=50");
     });
 
     it("throws on a failed request", async () => {
         vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 500 }));
-        await expect(fetchWardenAudit()).rejects.toThrow("500");
+        await expect(fetchAudit()).rejects.toThrow("500");
     });
 });
 

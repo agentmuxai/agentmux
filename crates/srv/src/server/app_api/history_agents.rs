@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Warden's History section: `history.agents` lists every agent whose history
+//! The History pane: `history.agents` lists every agent whose history
 //! the global transcript store holds (`backend::history_registry`), and
 //! `history.agent_sessions` one agent's sessions from its record. The Agent
 //! History view's `history.locate` finds the line to load up to for a time or

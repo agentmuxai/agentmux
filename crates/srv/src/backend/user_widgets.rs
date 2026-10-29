@@ -258,11 +258,11 @@ mod tests {
 
     #[test]
     fn a_section_entry_is_added_once_and_never_to_a_file_that_doesnt_parse() {
-        let base = "section@warden-lan";
-        let entry = serde_json::json!({ "label": "LAN", "section": "lan", "blockdef": { "meta": { "view": "warden" } } });
+        let base = "section@warden-jobs";
+        let entry = serde_json::json!({ "label": "Jobs", "section": "jobs", "blockdef": { "meta": { "view": "warden" } } });
         let (key, text) = section_entry_in("", base, entry.clone()).unwrap();
         let parsed: HashMap<String, WidgetConfigType> = serde_json::from_str(&text.unwrap()).unwrap();
-        assert_eq!((key.as_str(), parsed[base].section.as_str()), (base, "lan"));
+        assert_eq!((key.as_str(), parsed[base].section.as_str()), (base, "jobs"));
         // Kept beside what the user already has, and not added twice.
         let (_, both) = section_entry_in(r#"{"mine@x":{"label":"Mine"}}"#, base, entry.clone()).unwrap();
         let both = both.unwrap();
@@ -273,15 +273,15 @@ mod tests {
 
     #[test]
     fn a_section_entry_key_the_user_reused_for_something_else_is_never_handed_back() {
-        let base = "section@warden-lan";
-        let entry = serde_json::json!({ "label": "LAN", "section": "lan", "blockdef": { "meta": { "view": "warden" } } });
-        let taken = r#"{"section@warden-lan":{"label":"Mine","blockdef":{"meta":{"view":"term"}}}}"#;
+        let base = "section@warden-jobs";
+        let entry = serde_json::json!({ "label": "Jobs", "section": "jobs", "blockdef": { "meta": { "view": "warden" } } });
+        let taken = r#"{"section@warden-jobs":{"label":"Mine","blockdef":{"meta":{"view":"term"}}}}"#;
         let (key, text) = section_entry_in(taken, base, entry.clone()).unwrap();
-        assert_eq!(key, "section@warden-lan-2");
+        assert_eq!(key, "section@warden-jobs-2");
         let text = text.unwrap();
         assert!(text.contains("\"Mine\""));
         // Pinning it again finds the one just added.
-        assert_eq!(section_entry_in(&text, base, entry).unwrap(), ("section@warden-lan-2".to_string(), None));
+        assert_eq!(section_entry_in(&text, base, entry).unwrap(), ("section@warden-jobs-2".to_string(), None));
     }
 
     #[test]

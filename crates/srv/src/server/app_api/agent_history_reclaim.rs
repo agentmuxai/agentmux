@@ -3,7 +3,7 @@
 
 //! `App history_reclaim` (`GET`/`POST /api/v1/agent/history/reclaim`): a host or container agent asks for the
 //! shared pane-history store's free space to be given back at the next start, withdraws that request, or reads
-//! where it stands. The window does the same with `history.reclaim` (Warden > History > Storage); nothing in
+//! where it stands. The window does the same with `history.reclaim` (History > Storage); nothing in
 //! the request touches the host's files from the agent's side: srv writes the one marker beside its own store.
 //!
 //! The request is recorded as the calling agent (the marker's `requested_by` is its slug, and the HTTP layer
@@ -42,7 +42,7 @@ fn caller_slug(state: &AppState, caller: Option<&Caller>) -> Result<String, Refu
     let Some(uid) = caller.and_then(Caller::uid) else {
         return Err(refuse(
             StatusCode::UNAUTHORIZED,
-            "no agent token: App history_reclaim acts as the calling agent; the operator uses Warden > History > Storage",
+            "no agent token: App history_reclaim acts as the calling agent; the operator uses History > Storage",
         ));
     };
     let def = state

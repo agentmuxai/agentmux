@@ -1,20 +1,18 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Warden — Audit section. The jekt-injection audit feed lifted out of the
-// original monolithic warden.tsx's Host section into its own section
-// (it was never Host-specific — every jekt, from any
-// tier, lands here), plus fleet and pane actions (with their `reason`).
+// The Audit pane's feed: every jekt, from any tier, plus fleet and pane actions (with their
+// `reason`), and below it what agents did with the person's secrets (vault-secrets.tsx).
 
 import { createMemo, createSignal, For, Show, type JSX } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
 
 import { ageMs, formatAge, pollWhileVisible, WARDEN_REFRESH_MS } from "@/app/view/warden-shared/warden-shared";
-import { WardenSecrets } from "@/app/view/vault/vault-warden";
-import { actionCommand, fetchWardenAudit, WARDEN_AUDIT_LIMIT, type AuditEntry } from "./warden-audit-shared";
+import { VaultSecrets } from "@/app/view/vault/vault-secrets";
+import { actionCommand, fetchAudit, AUDIT_LIMIT, type AuditEntry } from "./audit-shared";
 
 import "@/app/view/warden-shared/warden-manager-chrome.scss";
-import "./warden-audit-manager.scss";
+import "./audit-manager.scss";
 
 /** What each non-delivery event reads as after the agent's name. */
 const REGISTRATION_VERBS: Record<string, string> = {
@@ -33,7 +31,7 @@ function registrationNote(entry: AuditEntry): string {
     return parts.join(", ");
 }
 
-export const WardenAuditManager = (props: { visible?: boolean }): JSX.Element => {
+export const AuditManager = (props: { visible?: boolean }): JSX.Element => {
     const [audit, setAudit] = createSignal<AuditEntry[]>([]);
     const [error, setError] = createSignal<string | null>(null);
     const [loading, setLoading] = createSignal(true);
@@ -42,7 +40,7 @@ export const WardenAuditManager = (props: { visible?: boolean }): JSX.Element =>
 
     const refresh = async () => {
         try {
-            const auditLog = await fetchWardenAudit();
+            const auditLog = await fetchAudit();
             setAudit(auditLog);
             setError(null);
         } catch (e) {
@@ -52,7 +50,7 @@ export const WardenAuditManager = (props: { visible?: boolean }): JSX.Element =>
         }
     };
 
-    // Polls only while the section is shown (warden-view.tsx passes `visible`).
+    // Polls only while the section is shown (the pane passes `visible`).
     pollWhileVisible(() => void refresh(), () => props.visible ?? true);
 
     return (
@@ -126,12 +124,12 @@ export const WardenAuditManager = (props: { visible?: boolean }): JSX.Element =>
                     </For>
                 </ul>
             </Show>
-            <WardenSecrets visible={props.visible} />
+            <VaultSecrets visible={props.visible} />
             <div class="warden-manager-footnote">
-                Refreshes every {WARDEN_REFRESH_MS / 1000}s · last {WARDEN_AUDIT_LIMIT} entries.
+                Refreshes every {WARDEN_REFRESH_MS / 1000}s · last {AUDIT_LIMIT} entries.
             </div>
         </div>
     );
 };
 
-WardenAuditManager.displayName = "WardenAuditManager";
+AuditManager.displayName = "AuditManager";

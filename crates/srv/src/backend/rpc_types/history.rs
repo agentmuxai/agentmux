@@ -131,7 +131,7 @@ pub struct HistoryUsage {
     pub compression: Option<HistoryCompression>,
 }
 
-/// `history.agents`'s request: Warden's History section lists every agent
+/// `history.agents`'s request: the History pane lists every agent
 /// with history (`backend::history_registry`).
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]

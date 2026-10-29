@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Warden — History section, Typed: what the user typed to an agent, newest
+// The History pane, Typed: what the user typed to an agent, newest
 // first, from the history srv keeps with the agent (the composer's ArrowUp and
 // Ctrl+R read the same; docs/specs/SPEC_AGENT_INPUT_HISTORY_2026_10_18.md).
 // Forgetting an entry, or an agent's whole history, is asked twice.
@@ -14,17 +14,17 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { clearInputHistory, forgetInputHistoryEntry, restoreInputHistory } from "@/app/view/agent/agent-input-history";
 import type { InputHistoryItem } from "@/types/rpc/InputHistoryItem";
 import type { InputHistoryTrashItem } from "@/types/rpc/InputHistoryTrashItem";
-import { formatWhen, typedAgents, typedTags, type TypedAgent } from "./warden-history-shared";
+import { formatWhen, typedAgents, typedTags, type TypedAgent } from "./history-shared";
 
 import "@/app/view/warden-shared/warden-manager-chrome.scss";
-import "./warden-history.scss";
+import "./history.scss";
 
 /** Entries read at a time (srv's default page). */
 const PAGE = 200;
 /** How long a search waits after the last keystroke. */
 const SEARCH_DELAY_MS = 250;
 
-export const WardenHistoryTyped = (props: { visible: boolean }): JSX.Element => {
+export const HistoryTyped = (props: { visible: boolean }): JSX.Element => {
     const [agents, setAgents] = createSignal<TypedAgent[] | null>(null);
     const [agentId, setAgentId] = createSignal("");
     const [query, setQuery] = createSignal("");
@@ -310,4 +310,4 @@ export const WardenHistoryTyped = (props: { visible: boolean }): JSX.Element => 
     );
 };
 
-WardenHistoryTyped.displayName = "WardenHistoryTyped";
+HistoryTyped.displayName = "HistoryTyped";

@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { HistoryAgent } from "@/types/rpc/HistoryAgent";
-import { agentRows, historyTotals, typedAgents, typedTags } from "./warden-history-shared";
+import { agentRows, historyTotals, typedAgents, typedTags } from "./history-shared";
 
 function agent(id: string, extra: Partial<HistoryAgent> = {}): HistoryAgent {
     return {

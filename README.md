@@ -64,8 +64,8 @@ Cross-platform (Windows, macOS, Linux). Rust backend (Tokio + Axum). CEF host (b
 - **Browser pane** — Native `CefBrowserView` embedded as a child window of the AgentMux frame — full Chromium fidelity (links, popups, DRM) without iframe limitations.
 - **MuxAPI** (formerly the App API) — Local WebSocket RPC with an intent-based layer (`agent.open`, `agent.send`, `pane.open`) and about 250 lower-level commands (panes, files, memory, skills, bundles, fleet, and more). Agents reach it through the built-in `agentmux` MCP server; external tools can call it directly. See [MuxAPI](#muxapi).
 - **Build your own widgets** — A widget is a folder with a `widget.json` and web files. It runs sandboxed, and installing it asks you to approve each permission it wants; an agent can build one and install it the same way. Manage them in Settings → Widgets. See [Build a widget](https://docs.agentmux.ai/build-a-widget/) and [`sdk/widget-sdk/`](sdk/widget-sdk).
-- **Warden: Kanban and the Vault** — Warden is where you oversee agents. Its **Kanban** section shows what every agent is working on, what waits for them, and what needs you; agents keep their cards current through the `Tasks` tool. Its **Vault** section holds your secrets (ID numbers, cards and bank accounts, API keys, logins, notes), which agents use by name without ever seeing a value. See [Warden](https://docs.agentmux.ai/warden/).
-- **Pin any section** — Panes with sections (Warden, Connectors, Memory, Settings) can be opened on one from the widget bar, the way the Kanban button opens Warden on Kanban. Right-click the pane's header and choose **Pin “LAN” to bar**, or add an entry with `"section"` to your `widgets.json`. See [Sections](#sections).
+- **Kanban, Vault, History and Audit** — Four panes for overseeing agents. The **Kanban** shows what every agent is working on, what waits for them, and what needs you; agents keep their cards current through the `Tasks` tool. The **Vault** holds your secrets (ID numbers, cards and bank accounts, API keys, logins, notes), which agents use by name without ever seeing a value. **History** is every agent's recorded conversation, what you typed, and where it is kept. The **Audit** shows what agents did: every jekt, fleet and pane action, and what they did with your secrets. Jobs (what runs by itself) are in the **Jobs** pane. See [Warden](https://docs.agentmux.ai/warden/).
+- **Pin any section** — Panes with sections (Connectors, Memory, Settings, the Vault) can be opened on one from the widget bar. Right-click the pane's header and choose **Pin “Remotes” to bar**, or add an entry with `"section"` to your `widgets.json`. See [Sections](#sections).
 - **Across machines** — Find other AgentMux instances on your network (opt-in), message agents across machines over MuxBus, run terminals on SSH and WSL hosts (Connectors → Remotes), and watch a live agent feed from a paired phone. See [LAN discovery](https://docs.agentmux.ai/lan-discovery/) and [Warden](https://docs.agentmux.ai/warden/).
 - **Work queue and schedules** — Agents can enqueue, claim and finish shared tasks, and run prompts on a schedule with cron, which catches up on runs missed while the app was closed.
 - **Bundle import and export** — Move an agent's setup between machines as a single file ([ABF](https://docs.agentmux.ai/abf/)).
@@ -143,7 +143,7 @@ The canonical list is [`crates/srv/src/config/widgets.json`](crates/srv/src/conf
 |--------|------|------|-------------|
 | **Agent** | wand-magic-sparkles | `agent` | An AI agent with streaming output and tool execution |
 | **Swarm** | people-group | `swarm` | Every agent, its subagents and background work, across machines |
-| **Kanban** | table-columns | `warden` | Warden opened on its Kanban section: what every agent is working on, and what needs you |
+| **Kanban** | table-columns | `kanban` | What every agent is working on, what waits for them, and what needs you |
 | **Memory** | brain | `memory` | Global and Personal Memory, Skills and Bundles |
 | **Hangar** | folder-open | `files` | File browser |
 | **Connectors** | plug | `connectors` | Accounts, MCP servers, and SSH/WSL remotes |
@@ -159,8 +159,10 @@ The canonical list is [`crates/srv/src/config/widgets.json`](crates/srv/src/conf
 | Widget | Icon | View | What it is |
 |--------|------|------|-------------|
 | **Drone** | diagram-project | `drone` | Visual DAG-of-blocks engine |
-| **Warden** | shield-halved | `warden` | Oversight of agents: Kanban, the Vault, AgentMux instances across Host / LAN / Internet, an audit trail, History, and how AgentMux's own model calls are doing (Ambient) |
-| **Vault** | lock | `warden` | Warden opened on its Vault section: your secrets, which agents use without seeing them |
+| **Jobs** | calendar-check | `warden` | Everything that runs by itself: scheduled jobs, their runs and what they cost. Opened from the command palette ("Open Jobs"), not the widget bar, until it moves into Drone |
+| **Vault** | lock | `vault` | Your secrets, which agents use without seeing them |
+| **History** | clock-rotate-left | `history` | Every agent's recorded conversation, what you typed to it, and where it is kept |
+| **Audit** | list-check | `audit` | What agents did: every jekt, fleet and pane action, and what they did with your secrets |
 | **Media** | photo-film | `media` | Images and video, updated live as the file changes on disk |
 | **Toolchain** | wrench | `toolchain` | Node, npm, Git, Docker, provider CLIs and installed widgets |
 | **Tower** | tower-observation | `tower` | CPU and memory per pane and per process (a read-only task manager) |
@@ -170,20 +172,20 @@ Right-click a widget to pin or unpin it. As the title bar narrows, the widget ba
 
 ### Sections
 
-Some panes are a row of sections: **Warden** (Kanban, Vault, Host, LAN, Internet, Audit, History, Ambient), **Connectors** (Accounts, MCP servers, Remotes), **Memory** (Global, Personal, Skills, Bundles) and **Settings**. A widget-bar entry can open one of them on a given section: Kanban and Vault are Warden entries of this kind. To add your own, right-click the pane's header and choose **Pin “LAN” to bar** (on Warden's Vault section you can pin the Vault's own section too), or add an entry to your `widgets.json`, next to `settings.json`:
+Some panes are a row of sections: **Connectors** (Accounts, MCP servers, Remotes), **Memory** (Global, Personal, Skills, Bundles), **Settings** and the **Vault** (Personal, Cards and banks, API keys, Logins, Notes, Kept, Activity). A widget-bar entry can open one of them on a given section. To add your own, right-click the pane's header and choose **Pin “Remotes” to bar**, or add an entry to your `widgets.json`, next to `settings.json`:
 
 ```json
 {
-  "section@warden-lan": {
-    "label": "LAN",
-    "icon": "network-wired",
-    "section": "lan",
-    "blockdef": { "meta": { "view": "warden" } }
+  "section@connectors-remotes": {
+    "label": "Remotes",
+    "icon": "server",
+    "section": "remotes",
+    "blockdef": { "meta": { "view": "connectors" } }
   }
 }
 ```
 
-`"section": "vault/cards"` opens a section's own section (Warden's Vault, on Cards and banks). Settings ▸ Widgets flags a section the pane doesn't have. Each pane declares its sections on its manifest ([`frontend/app/block/pane-sections.ts`](frontend/app/block/pane-sections.ts)); a widget opens one with `am.panes.open("warden", { "warden:section": "kanban" })`.
+`"section": "cards"` on `"view": "vault"` opens the Vault on Cards and banks. A link that names Warden's old Vault, History or Audit section still opens that pane. Settings ▸ Widgets flags a section the pane doesn't have. Each pane declares its sections on its manifest ([`frontend/app/block/pane-sections.ts`](frontend/app/block/pane-sections.ts)); a widget opens one with `am.panes.open("vault", { "vault:section": "cards" })`.
 
 ### Panes and tabs
 
@@ -212,7 +214,7 @@ full rollout plan: [`docs/specs/SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_1
 
 | Surface | How to reach it |
 |---|---|
-| **Agent setup** | Right-click an Agent pane for **Seat…**, **Bundles…** (in order, the bundles the agent starts with) and **Personal memory**; **My Agents** has the same, plus **Environment…**. The accounts an agent signs in with are in **Connectors → Accounts**, its MCP servers in **Connectors → MCP servers**, its skills in **Memory → Skills**, its registration for messages between machines in **Warden → Host**, and the agents hidden from paired devices in **Settings → Paired devices**. |
+| **Agent setup** | Right-click an Agent pane for **Seat…**, **Bundles…** (in order, the bundles the agent starts with) and **Personal memory**; **My Agents** has the same, plus **Environment…**. The accounts an agent signs in with are in **Connectors → Accounts**, its MCP servers in **Connectors → MCP servers**, its skills in **Memory → Skills**, its registration for messages between machines in the **Swarm** (the row's badge), and the agents hidden from paired devices in **Settings → Paired devices**. |
 | **The ≡ menu** | In the top tab bar: New Tab, New Window, Theme, Opacity, Layouts, Settings, Command Palette, Connectors, Memory, Toolchain, DevTools, Online Docs, Exit. Settings has ten sections (Appearance, Window & Panes, Browser, Terminal, Sounds, Notifications & Tray, Recording, Paired devices, Widgets, Advanced); a footer button opens the raw `settings.json` in your default editor. |
 | **Command Palette** | **Ctrl+Shift+P** (also **Ctrl+P** outside a terminal; **⌘P** on macOS), or the ≡ menu. Every keyboard shortcut is listed in Help and in [docs/keybindings.md](docs/keybindings.md). |
 | **DevTools** | ≡ menu → DevTools. Toggles Chromium DevTools. |

@@ -7,7 +7,7 @@
 import { authHeaders } from "@/app/store/auth-headers";
 import { getWebServerEndpoint } from "@/util/endpoints";
 
-export const WARDEN_AUDIT_LIMIT = 50;
+export const AUDIT_LIMIT = 50;
 
 export interface AuditEntry {
     timestamp: number;
@@ -45,13 +45,13 @@ export interface AuditEntry {
 export const actionCommand = (entry: AuditEntry): string | undefined =>
     entry.event_kind === "action" ? entry.outcome : undefined;
 
-export async function fetchWardenAudit(): Promise<AuditEntry[]> {
+export async function fetchAudit(): Promise<AuditEntry[]> {
     const resp = await fetch(
-        getWebServerEndpoint() + `/agentmux/reactive/audit?limit=${WARDEN_AUDIT_LIMIT}`,
+        getWebServerEndpoint() + `/agentmux/reactive/audit?limit=${AUDIT_LIMIT}`,
         { headers: authHeaders() },
     );
     if (!resp.ok) {
-        throw new Error(`warden: GET /agentmux/reactive/audit → ${resp.status}`);
+        throw new Error(`audit: GET /agentmux/reactive/audit → ${resp.status}`);
     }
     const data = await resp.json();
     return Array.isArray(data) ? (data as AuditEntry[]) : [];

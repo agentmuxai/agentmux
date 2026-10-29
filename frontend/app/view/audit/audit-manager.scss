@@ -1,8 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Migrated from the original monolithic warden stylesheet's audit-feed rules, now
-// scoped to its own manager component.
+// The Audit pane's feed. `.audit-container` (audit-instance.tsx) carries the container the
+// width queries below answer.
 
 @use "../../mixins.scss";
 
@@ -74,7 +74,7 @@
 // ── Responsive container queries ─────────────────────────────────────────────
 
 // sm: drop bytes + error/reason columns from audit grid (3-col layout)
-@container warden (max-width: 767px) {
+@container audit (max-width: 767px) {
     .warden-audit-row {
         grid-template-columns: 60px 1fr 50px;
     }
@@ -87,7 +87,7 @@
 }
 
 // xs: audit rows become stacked two-line cards
-@container warden (max-width: 479px) {
+@container audit (max-width: 479px) {
     .warden-audit-row {
         display: flex;
         flex-direction: column;
@@ -110,6 +110,20 @@
 }
 
 // The Vault's oversight half (what agents did with secrets, and where each may use one).
-.warden-secrets {
+.vault-secrets {
     margin-top: var(--space-4);
+}
+
+// Does not scroll itself (the feed's body does): a container that scrolls would resize with its own scrollbar.
+.audit-container {
+    width: 100%;
+    height: 100%;
+    container-type: inline-size;
+    container-name: audit;
+}
+
+.audit-pane {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
 }

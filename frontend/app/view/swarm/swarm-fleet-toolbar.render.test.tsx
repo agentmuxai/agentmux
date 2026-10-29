@@ -78,7 +78,7 @@ describe("FleetToolbar — select all", () => {
 });
 
 describe("FleetToolbar — no Groups or Stats", () => {
-    // The Stats panel moved to Warden's Ambient section (warden-ambient-manager.tsx).
+    // The Stats panel moved to the token popover's AgentMux internal row.
     it("has neither a Groups nor a Stats button", () => {
         const { queryByText } = render(() => <FleetToolbar model={modelStub(["a"])} allBlockIds={() => ["a"]} />);
         expect(queryByText(/Groups/)).toBeNull();

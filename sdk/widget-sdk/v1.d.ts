@@ -35,12 +35,12 @@ export declare class AgentMuxError extends Error {
 export type Visibility = "active" | "dormant" | "windowHidden";
 
 /** The sections of AgentMux's own sectioned panes, by view. A pane opens on one when its meta
- *  holds `<view>:section` (see `panes.open`); any other id opens its default section. `vault` is
- *  not a view: it lists the sections of Warden's Vault section, set with `vault:section` beside
- *  `"warden:section": "vault"`. */
+ *  holds `<view>:section` (see `panes.open`); any other id opens its default section. Warden's
+ *  Vault, History and Audit sections are panes of their own now (`vault`, `history`, `audit`);
+ *  an old call naming one of them (`"warden:section": "vault"`) opens that pane. */
 export interface PaneSections {
     swarm: "supervisor" | "broadcast";
-    warden: "jobs" | "vault" | "host" | "lan" | "internet" | "audit" | "history" | "ambient";
+    warden: "jobs";
     vault: "personal" | "cards" | "api-keys" | "logins" | "notes" | "kept" | "activity";
     connectors: "accounts" | "mcp" | "remotes";
     memory: "global" | "personal" | "skills" | "bundles";
@@ -182,10 +182,10 @@ export interface AgentMux {
     panes: {
         /** Opens one of AgentMux's sectioned panes on a section (needs `panes`):
          *  `am.panes.open("swarm", { "swarm:section": "broadcast" })`, or the Vault's Cards with
-         *  `am.panes.open("warden", { "warden:section": "vault", "vault:section": "cards" })`. */
-        open<V extends Exclude<keyof PaneSections, "vault">>(
+         *  `am.panes.open("vault", { "vault:section": "cards" })`. */
+        open<V extends keyof PaneSections>(
             view: V,
-            meta?: { [K in `${V}:section`]?: PaneSections[V] } & (V extends "warden" ? { "vault:section"?: PaneSections["vault"] } : {}),
+            meta?: { [K in `${V}:section`]?: PaneSections[V] },
             split?: "right" | "down" | "tab"
         ): Promise<{ pane: string }>;
         /** The package's own views need no permission; any other view needs `panes`.

@@ -202,9 +202,28 @@ export function registerDefaultCommands(): void {
         label: "Open Vault",
         category: "Open",
         icon: "lock",
-        // Warden's Vault section: switch the Warden already in this tab there.
-        execute: () =>
-            openOrFocusPaneByView("warden", { meta: { view: "warden", "warden:section": "vault" } }, { "warden:section": "vault" }),
+        execute: (opts) => openPane({ meta: { view: "vault" } }, opts?.forceNew),
+    });
+    commandRegistry.register({
+        id: "open:history",
+        label: "Open History",
+        category: "Open",
+        icon: "clock-rotate-left",
+        execute: (opts) => openPane({ meta: { view: "history" } }, opts?.forceNew),
+    });
+    commandRegistry.register({
+        id: "open:audit",
+        label: "Open Audit",
+        category: "Open",
+        icon: "list-check",
+        execute: (opts) => openPane({ meta: { view: "audit" } }, opts?.forceNew),
+    });
+    commandRegistry.register({
+        id: "open:jobs",
+        label: "Open Jobs",
+        category: "Open",
+        icon: "calendar-check",
+        execute: (opts) => openPane({ meta: { view: "warden", "warden:section": "jobs" } }, opts?.forceNew),
     });
     commandRegistry.register({
         id: "open:help",

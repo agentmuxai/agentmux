@@ -37,6 +37,9 @@ describe("the palette's open entries", () => {
         ["open:help", "help"],
         ["open:swarm", "swarm"],
         ["open:kanban", "kanban"],
+        ["open:vault", "vault"],
+        ["open:history", "history"],
+        ["open:audit", "audit"],
     ])("%s brings back the open %s pane", async (id, view) => {
         await commandRegistry.get(id)!.execute();
         expect(h.openOrFocusPaneByView).toHaveBeenCalledWith(view, { meta: { view } });
