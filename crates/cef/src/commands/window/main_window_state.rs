@@ -83,6 +83,7 @@ pub fn fit(state: &MainWindowState, work_area_at: impl Fn(i32, i32) -> Option<Wo
 /// Where the saved rect goes when the position can't be chosen (native Wayland): the
 /// saved size, shrunk to fit `work`, centred in it. `(x, y, width, height)`; the
 /// compositor ignores the position, it is only a well-formed one.
+#[cfg(any(target_os = "linux", test))]
 pub fn fit_size_only(state: &MainWindowState, work: WorkArea) -> Option<(i32, i32, i32, i32)> {
     let (wx, wy, ww, wh) = work;
     if ww <= 0 || wh <= 0 {
