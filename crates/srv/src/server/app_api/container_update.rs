@@ -105,14 +105,19 @@ fn is_older(running: &str, current: &str) -> bool {
     }
 }
 
+/// The container's update gate taken exclusively, or None while a turn (or another update) holds it.
+fn take_update_gate(container_name: &str) -> Option<tokio::sync::OwnedRwLockWriteGuard<()>> {
+    crate::backend::container::drift::update_gate(container_name).try_write_owned().ok()
+}
+
 /// Moves an idle agent's container to this AgentMux's agent image: when it runs an older one, the agent follows
-/// the default image (no pin, no image of its own), the current image can be had, and no turn is using the
-/// container. The container is removed (workspace, memory and the CLI volume stay; tools installed inside it are
+/// the default image (no pin, no image of its own), the current image is already on this machine, and no turn is
+/// using the container. The container is removed (workspace, memory and the CLI volume stay; tools installed inside it are
 /// installed again) and the pane is told; the start that follows creates it from the current image. Returns whether
 /// it did. Anything else leaves the "outdated" row and its button as they are.
 ///
 /// Run where nothing is mid-turn (the pre-start): a turn holds the update gate shared for its whole length, so
-/// there this finds the gate taken and does nothing.
+/// called from inside a turn this finds the gate taken and does nothing.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn update_if_idle(
     cm: &ContainerManager,
@@ -127,14 +132,16 @@ pub(crate) async fn update_if_idle(
     if image_blocks_update(configured_image).is_some() {
         return false;
     }
+    // Taken first: a turn holds the gate shared, and then nothing below is worth asking the daemon.
+    let Some(_updating) = take_update_gate(container_name) else { return false };
     let Some(running) = cm.base_image_version(container_name).await else { return false };
     // Only forward: after a downgrade the container is on a NEWER image, which a banner reports but an update would
-    // replace with an older one.
-    if !is_older(&running, CURRENT) || !current_image_available_cached(cm).await {
+    // replace with an older one. And only to an image already on this machine: the container is removed before the
+    // start pulls anything, so a download that then failed (offline, a slow registry) would leave an agent that
+    // used to run with nothing to run. When the image is not here yet, the banner and its button stay.
+    if !is_older(&running, CURRENT) || !cm.has_image_locally(&versioned_agent_image()).await {
         return false;
     }
-    let gate = crate::backend::container::drift::update_gate(container_name);
-    let Ok(_updating) = gate.try_write_owned() else { return false };
     if let Err(e) = cm.update_container(container_name).await {
         tracing::warn!(container = container_name, error = %e.user_message(), "could not move an idle container to the current agent image");
         return false;
@@ -240,6 +247,20 @@ mod tests {
         assert!(err.contains("pinned to ghcr.io/agentmuxai/agent-base@sha256:abc"), "{err}");
 
         assert!(update_for_block(&state, "no-such-block").await.unwrap_err().contains("no such pane"));
+    }
+
+    #[test]
+    fn a_turn_holding_the_gate_stops_the_update_and_an_idle_agent_does_not() {
+        let name = "agentmux-test-gate-for-update-if-idle";
+        let turn = crate::backend::container::drift::update_gate(name).try_read_owned().expect("a turn takes the gate shared");
+        assert!(take_update_gate(name).is_none(), "an update must not start under a turn");
+        drop(turn);
+        let updating = take_update_gate(name).expect("no turn: the update takes the gate");
+        assert!(
+            crate::backend::container::drift::update_gate(name).try_read_owned().is_err(),
+            "a turn must not start inside an update"
+        );
+        drop(updating);
     }
 
     #[test]
