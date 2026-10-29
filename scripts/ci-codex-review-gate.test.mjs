@@ -21,6 +21,7 @@ import {
     prNoCode,
     reviewedCommit,
     SKIP_AUTHORS,
+    codexVerdictOnHead,
     skipClaim,
     skipNote,
     checkSkipClaim,
@@ -686,6 +687,21 @@ describe("prNoCode", () => {
     it("a file missing at one of the commits is refused, not an error", async () => {
         const client = fakeClient({ files: [{ filename: "package.json", status: "modified" }], contents: { [`package.json@${HEAD}`]: manifest("0.60.7") } });
         expect(await prNoCode(client, "o/r", pull)).toMatchObject({ ok: false });
+    });
+});
+
+describe("codexVerdictOnHead", () => {
+    it("is true for Codex's OK, findings or attributed quota notice on the head, false otherwise", () => {
+        expect(codexVerdictOnHead({ headSha: HEAD, comments: [okComment(HEAD)] })).toBe(true);
+        expect(codexVerdictOnHead({ headSha: HEAD, reviews: [findingsReview(HEAD)] })).toBe(true);
+        expect(codexVerdictOnHead({ headSha: HEAD, comments: [okComment(OLD)] })).toBe(false);
+        expect(codexVerdictOnHead({ headSha: HEAD, reviews: [findingsReview(OLD)] })).toBe(false);
+        expect(codexVerdictOnHead({ headSha: HEAD })).toBe(false);
+    });
+
+    it("is false for a muxreview skip note alone, which is what the claim check is for", () => {
+        const skip = { user: { login: "muxreview[bot]" }, created_at: "2026-10-01T12:00:00Z", body: `<!-- reagent:codex-skipped reason=no-code head=${HEAD} -->` };
+        expect(codexVerdictOnHead({ headSha: HEAD, comments: [skip] })).toBe(false);
     });
 });
 

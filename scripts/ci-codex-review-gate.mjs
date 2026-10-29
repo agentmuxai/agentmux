@@ -274,6 +274,16 @@ function codexOutputs({ comments = [], reviews = [], reviewComments = [] }) {
         .sort(byAt);
 }
 
+/**
+ * Whether Codex itself has given a verdict (or a usage notice) that names this head. Such an
+ * answer decides the head before any muxreview skip note is looked at, so the note's claim need
+ * not be checked: a failed read of the PR's files must not stand in the way of that verdict.
+ */
+export function codexVerdictOnHead({ headSha, comments = [], reviews = [], reviewComments = [] }) {
+    const head = headSha.toLowerCase();
+    return codexOutputs({ comments, reviews, reviewComments }).some((o) => namesCommit(head, o.sha));
+}
+
 /** Codex's most recent verdict on any commit of the PR, or null. */
 export function latestCodexOutput({ comments = [], reviews = [], reviewComments = [] }) {
     return codexOutputs({ comments, reviews, reviewComments }).at(-1) ?? null;
@@ -622,8 +632,9 @@ async function main() {
         DEPENDENCY_BOTS.has(String(pull.user?.login ?? "").toLowerCase()) &&
         pull.commits <= 250 &&
         isDependencyBotPr(pull.user.login, await client.paginate(`/repos/${repo}/pulls/${pr}/commits`));
-    // Read the PR's files only when muxreview's note claims something about them.
-    const claim = skipClaim({ headSha, comments });
+    // Read the PR's files only when muxreview's note claims something about them and Codex has not
+    // answered for the head itself (that answer decides it, whatever the note says).
+    const claim = codexVerdictOnHead({ headSha, comments, reviews, reviewComments }) ? null : skipClaim({ headSha, comments });
     const noCode = claim ? await checkSkipClaim(client, repo, pull, claim) : null;
     const result = evaluateCodexGate({
         headSha,
