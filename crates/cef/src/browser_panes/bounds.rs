@@ -260,6 +260,20 @@ const SETTLE: Duration = Duration::from_millis(250);
 #[cfg(any(target_os = "windows", test))]
 const ROUNDING_PX: i32 = 2;
 
+/// The most the client area can exceed the page's viewport by with the page
+/// caught up (rounding at a fractional scale). A page further off than this
+/// is behind the window, however long ago the window last changed.
+#[cfg(any(target_os = "windows", test))]
+const MAX_OFFSET_PX: i32 = 8;
+
+/// The client area minus the viewport, if a rect laid out against `viewport`
+/// shows the page caught up with a `client` that has been still (`settled`).
+#[cfg(any(target_os = "windows", test))]
+fn learned_offset(settled: bool, viewport: (i32, i32), client: (i32, i32)) -> Option<(i32, i32)> {
+    let offset = (client.0 - viewport.0, client.1 - viewport.1);
+    (settled && offset.0.abs() <= MAX_OFFSET_PX && offset.1.abs() <= MAX_OFFSET_PX).then_some(offset)
+}
+
 /// Where the page's `rect` goes while the window's client area is `client`.
 /// `offset` is what the client area exceeds the page's viewport by when the
 /// two agree (`WindowSize`).
@@ -676,14 +690,16 @@ fn apply_windows(state: &Arc<AppState>, window_label: &str, live: &[(&PaneBounds
 }
 
 /// The offset between `window_label`'s client area and its page's viewport. It
-/// is learned whenever the window hasn't changed size for `SETTLE`, which is
-/// when the page's viewport is the window's.
+/// is learned from a rect laid out for a size near the client area's, once the
+/// window hasn't changed size for `SETTLE`. A busy page's late rect for an
+/// older size is far from the client area and teaches nothing.
 #[cfg(target_os = "windows")]
 fn window_offset(window_label: &str, base: &LayoutBase, client: (i32, i32)) -> (i32, i32) {
     let mut sizes = WINDOW_SIZES.lock();
     let size = sizes.entry(window_label.to_string()).or_default();
-    if size.changed.is_none_or(|t| t.elapsed() > SETTLE) {
-        size.offset = (client.0 - base.viewport.0, client.1 - base.viewport.1);
+    let settled = size.changed.is_none_or(|t| t.elapsed() > SETTLE);
+    if let Some(offset) = learned_offset(settled, base.viewport, client) {
+        size.offset = offset;
     }
     size.offset
 }
@@ -907,6 +923,16 @@ mod tests {
         let args = serde_json::json!({ "epoch": 1_793_000_000_000u64, "seq": 4 });
         assert_eq!(RectsOrder::parse(&args), order(1_793_000_000_000, 4));
         assert_eq!(RectsOrder::parse(&serde_json::json!({ "seq": 4 })), None);
+    }
+
+    #[test]
+    fn a_late_rect_for_an_older_size_teaches_no_offset() {
+        // Still for a while, and the page is caught up apart from rounding: learned.
+        assert_eq!(learned_offset(true, (1000, 800), (1002, 799)), Some((2, -1)));
+        // The page is slow: its rect is for a size 200 px behind the window.
+        assert_eq!(learned_offset(true, (800, 800), (1000, 800)), None);
+        // Mid-drag, whatever the rect says.
+        assert_eq!(learned_offset(false, (1000, 800), (1001, 800)), None);
     }
 
     #[test]
