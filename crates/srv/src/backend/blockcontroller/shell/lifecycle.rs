@@ -37,9 +37,9 @@ use crate::backend::mps;
 /// One PTY read's worth of already-OSC-cleaned output, on its way from the
 /// blocking read loop to the coalescing flusher (`start()`, below). See
 /// docs/reports/REPORT_RENDERER_CPU_UNBATCHED_PTY_OUTPUT_2026_09_11.md.
-struct PtyReadChunk {
-    data: Vec<u8>,
-    osc_events: Vec<crate::backend::osc_extractor::OscEvent>,
+pub(super) struct PtyReadChunk {
+    pub(super) data: Vec<u8>,
+    pub(super) osc_events: Vec<crate::backend::osc_extractor::OscEvent>,
     /// Flush barrier. When set, the flusher signals it AFTER committing the
     /// batch this chunk lands in — so a sender that enqueues a barrier and
     /// awaits it knows everything queued before it has reached the FileStore
@@ -53,7 +53,7 @@ struct PtyReadChunk {
     /// itself had been idle for most of that second. A barrier asks the
     /// question actually being asked — "is prior output committed yet?" —
     /// and is answered as soon as the batch it lands in commits.
-    ack: Option<tokio::sync::oneshot::Sender<()>>,
+    pub(super) ack: Option<tokio::sync::oneshot::Sender<()>>,
 }
 
 /// Do the actual per-batch work the read loop used to do per-read: write
@@ -108,7 +108,7 @@ pub(super) fn flush_pty_batch(
 /// A standalone fn rather than inlined into its `tokio::spawn` call site so
 /// it can be driven directly in a test with a synthetic channel and no real
 /// PTY — see `pty_output_flusher_tests` below.
-async fn run_pty_output_flusher(
+pub(super) async fn run_pty_output_flusher(
     mut rx: mpsc::Receiver<PtyReadChunk>,
     broker: Option<Arc<mps::Broker>>,
     block_id: String,

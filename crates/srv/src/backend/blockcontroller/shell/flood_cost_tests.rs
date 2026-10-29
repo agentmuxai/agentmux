@@ -80,3 +80,110 @@ fn a_flood_written_in_batches_reads_back_whole() {
     }
     assert_eq!(fs.read_file("whole-block", "term").unwrap().unwrap(), sent);
 }
+
+/// Counts the events a batch publishes, and serializes each as the websocket client does.
+struct CountingClient(Arc<std::sync::atomic::AtomicUsize>);
+
+impl mps::WpsClient for CountingClient {
+    fn send_event(&self, _route_id: &str, event: mps::MuxEvent) {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let _ = serde_json::to_vec(&event);
+    }
+}
+
+/// CPU time this process has used so far, in ms.
+fn cpu_ms() -> u64 {
+    let pid = sysinfo::Pid::from_u32(std::process::id());
+    let mut sys = sysinfo::System::new();
+    sys.refresh_processes_specifics(sysinfo::ProcessesToUpdate::Some(&[pid]), true, sysinfo::ProcessRefreshKind::nothing().with_cpu());
+    sys.process(pid).map(|p| p.accumulated_cpu_time()).unwrap_or(0)
+}
+
+/// A real flood: a child process writes `FLOOD_MB` megabytes (default 64) to a real PTY (ConPTY on Windows),
+/// read by the same loop and flusher the shell controller runs, into a real filestore. Prints the wall time,
+/// the CPU this process spent, the size of the reads and of the batches, and whether the log holds what was
+/// read (it can't past the term cap). A measurement, not a check:
+/// `cargo test -p agentmux-srv real_pty_flood -- --ignored --nocapture`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "a measurement, not a check"]
+async fn real_pty_flood() {
+    use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+    use std::io::Read;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let mb: usize = std::env::var("FLOOD_MB").ok().and_then(|v| v.parse().ok()).unwrap_or(64);
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("flood.txt");
+    {
+        use std::io::Write;
+        let line = b"y the quick brown fox jumps over the lazy dog 0123456789\r\n";
+        let block: Vec<u8> = line.iter().copied().cycle().take(1 << 20).collect();
+        let mut f = std::io::BufWriter::new(std::fs::File::create(&src).unwrap());
+        for _ in 0..mb {
+            f.write_all(&block).unwrap();
+        }
+    }
+    let fs = Arc::new(FileStore::open(&dir.path().join("pty.db")).unwrap());
+    let events = Arc::new(AtomicUsize::new(0));
+    let broker = Arc::new(mps::Broker::new());
+    broker.set_client(Box::new(CountingClient(events.clone())));
+    broker.subscribe("flood-route", mps::SubscriptionRequest { event: mps::EVENT_BLOCK_FILE.to_string(), scopes: vec![], allscopes: true });
+
+    let pair = native_pty_system().openpty(PtySize { rows: 50, cols: 200, pixel_width: 0, pixel_height: 0 }).unwrap();
+    #[cfg(windows)]
+    let mut cmd = CommandBuilder::new("cmd");
+    #[cfg(windows)]
+    cmd.args(["/C", "type", &src.to_string_lossy()]);
+    #[cfg(unix)]
+    let mut cmd = CommandBuilder::new("cat");
+    #[cfg(unix)]
+    cmd.arg(&src);
+    let mut reader = pair.master.try_clone_reader().unwrap();
+    let (tx, rx) = tokio::sync::mpsc::channel(super::pty::PTY_CHANNEL_CAPACITY);
+    let flusher = tokio::spawn(super::lifecycle::run_pty_output_flusher(rx, Some(broker.clone()), "pty-flood".to_string(), Some(fs.clone()), false));
+
+    let cpu0 = cpu_ms();
+    let t0 = Instant::now();
+    let mut child = pair.slave.spawn_command(cmd).unwrap();
+    drop(pair.slave);
+    // The read loop of `start()`: 4 KB reads, one chunk each.
+    let read = tokio::task::spawn_blocking(move || {
+        let mut buf = [0u8; super::pty::PTY_READ_BUF_SIZE];
+        let (mut bytes, mut reads) = (0usize, 0usize);
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => {
+                    bytes += n;
+                    reads += 1;
+                    let _ = tx.blocking_send(super::lifecycle::PtyReadChunk { data: buf[..n].to_vec(), osc_events: Vec::new(), ack: None });
+                }
+            }
+        }
+        (bytes, reads)
+    });
+    // ConPTY's host outlives the child, so the reader never sees EOF: end it once the child is gone and
+    // the output has stopped coming.
+    let waited = tokio::task::spawn_blocking(move || child.wait()).await.unwrap().unwrap();
+    assert!(waited.success());
+    let mut last = 0usize;
+    for _ in 0..200 {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let n = events.load(Ordering::Relaxed);
+        if n == last && n > 0 {
+            break;
+        }
+        last = n;
+    }
+    drop(pair.master);
+    let (bytes, reads) = tokio::time::timeout(std::time::Duration::from_secs(30), read).await.expect("the reader ended").unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(30), flusher).await.expect("the flusher ended").unwrap();
+    let wall = t0.elapsed().as_secs_f64();
+    let cpu = (cpu_ms() - cpu0) as f64 / 1000.0;
+    let batches = events.load(Ordering::Relaxed);
+    let logged = fs.read_file("pty-flood", "term").unwrap().map(|b| b.len()).unwrap_or(0);
+    println!("real PTY flood: {mb} MB file; read {bytes} bytes in {reads} reads (avg {} B), {batches} batches (avg {} B)", bytes / reads.max(1), bytes / batches.max(1));
+    println!("wall {wall:.1} s, this process's CPU {cpu:.1} s ({:.2} s per wall second, {:.0} ms per MB read), {:.2} MB/s", cpu / wall, cpu * 1000.0 / (bytes as f64 / 1e6), bytes as f64 / 1e6 / wall);
+    println!("log holds {logged} bytes of {bytes} read (the term cap keeps the newest 50 MB)");
+    assert!(bytes > mb << 20, "ConPTY/PTY output is at least the file");
+}
