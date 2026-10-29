@@ -303,9 +303,9 @@ fn register_skill_catalog_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .map_err(|e| format!("skill.catalog.upsert: {e}"))?;
                 // A new catalog skill reaches the agents created after it, unless switched off
                 // (the operator's default: new agents get the global skills, with a per-skill opt-out).
-                if is_new && !identity_store.skill_reach_map().unwrap_or_default().contains_key(&id) {
+                if is_new {
                     identity_store
-                        .skill_set_reach(&id, false, true, now)
+                        .skill_reach_default_for_new(&id, now)
                         .map_err(|e| format!("skill.catalog.upsert: {e}"))?;
                 }
                 broker.publish_event::<crate::backend::mps_events::SkillsChanged>(&(), vec![], 0);
