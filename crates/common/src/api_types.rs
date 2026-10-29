@@ -1268,8 +1268,8 @@ mod app_api_manifest_contract_tests {
             connection: Some("wsl://Ubuntu".to_string()),
             auth: Some(UiAutomationAuth { agent_id: "a".into(), ts_secs: 1, sig: "s".into() }),
             secrets: Some(Default::default()),
-            stdin_secret: None,
-            secret_files: None,
+            stdin_secret: Some("api-key-x".to_string()),
+            secret_files: Some(Default::default()),
         };
         let value = serde_json::to_value(&instance).expect("must serialize");
         let struct_fields: HashSet<String> =
