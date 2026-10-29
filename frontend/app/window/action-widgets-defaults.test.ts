@@ -20,6 +20,7 @@ vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 
 import defaults from "../../../crates/srv/src/config/widgets.json";
 import { registerPaneTab } from "@/app/block/pane-tab-registry";
+import { BUILTIN_SINGLETON_VIEWS } from "@/app/store/widget-singleton";
 import { getMoreWidgets, getPinnedKeys, openWidget } from "./action-widgets-config";
 
 const wmap = defaults as unknown as Record<string, WidgetConfigType>;
@@ -84,6 +85,13 @@ describe("the singleton flag in the default widget config", () => {
         );
     });
 
+    it("the built-in policy list is the views those flags open", () => {
+        const flaggedViews = Object.values(wmap)
+            .filter(flagged)
+            .map((w) => (w.blockdef?.meta as Record<string, unknown>)["view"] as string);
+        expect([...BUILTIN_SINGLETON_VIEWS].sort()).toEqual([...new Set(flaggedViews)].sort());
+    });
+
     it("leaves the work panes opening a new pane each time", () => {
         for (const key of ["agent", "terminal", "browser", "editor", "files", "sysinfo", "discord", "slack"]) {
             expect(wmap[`defwidget@${key}`]?.singleton, key).toBeUndefined();
@@ -122,6 +130,19 @@ describe("openWidget", () => {
         const entry = { label: "Mine", blockdef: { meta: { view: "memory" } } } as unknown as WidgetConfigType;
         await openWidget(entry);
         expect(store.openOrFocusPaneByView).toHaveBeenCalledTimes(1);
+    });
+
+    it("a user's replacement of a built-in entry that leaves the flag out still brings back the pane", async () => {
+        const mine = { label: "Mem", blockdef: { meta: { view: "memory" } } } as unknown as WidgetConfigType;
+        // widgets.json replaces the whole entry, so the config no longer holds the flagged default.
+        store.atoms.fullConfigAtom = () => ({ widgets: { "defwidget@memory": mine } });
+        try {
+            await openWidget(mine);
+            expect(store.openOrFocusPaneByView).toHaveBeenCalledTimes(1);
+            expect(store.createBlock).not.toHaveBeenCalled();
+        } finally {
+            store.atoms.fullConfigAtom = () => ({ widgets: wmap });
+        }
     });
 
     it("an installed widget's pane follows the singleton its manifest declares", async () => {

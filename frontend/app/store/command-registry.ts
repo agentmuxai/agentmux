@@ -53,7 +53,8 @@ export interface CommandEntry {
      *  and each time `run` is asked (dev mode, for the developer commands). */
     when?: () => boolean;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    execute: () => void | Promise<any>;
+    /** `forceNew`: the person held Shift (opens a new pane even for a singleton). */
+    execute: (opts?: { forceNew?: boolean }) => void | Promise<any>;
 }
 
 /** Can `entry` run on this host? */
@@ -174,7 +175,7 @@ export function registerDefaultCommands(): void {
         label: "Open Tower (Task Manager)",
         category: "Open",
         icon: "tower-observation",
-        execute: () => openPane({ meta: { view: "tower" } }),
+        execute: (opts) => openPane({ meta: { view: "tower" } }, opts?.forceNew),
     });
     commandRegistry.register({
         id: "new:tower",
@@ -188,7 +189,7 @@ export function registerDefaultCommands(): void {
         label: "Open Kanban",
         category: "Open",
         icon: "table-columns",
-        execute: () => openPane({ meta: { view: "kanban" } }),
+        execute: (opts) => openPane({ meta: { view: "kanban" } }, opts?.forceNew),
     });
     commandRegistry.register({
         id: "new:kanban",
@@ -211,7 +212,7 @@ export function registerDefaultCommands(): void {
         label: "Open Help",
         category: "Open",
         icon: "circle-question",
-        execute: () => openPane({ meta: { view: "help" } }),
+        execute: (opts) => openPane({ meta: { view: "help" } }, opts?.forceNew),
     });
     commandRegistry.register({
         id: "new:help",
@@ -226,7 +227,7 @@ export function registerDefaultCommands(): void {
         category: "Open",
         icon: "people-group",
         iconColor: "#f59e0b",
-        execute: () => openPane({ meta: { view: "swarm" } }),
+        execute: (opts) => openPane({ meta: { view: "swarm" } }, opts?.forceNew),
     });
     commandRegistry.register({
         id: "new:swarm",
