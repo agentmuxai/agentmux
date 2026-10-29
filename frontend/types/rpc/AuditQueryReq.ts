@@ -23,4 +23,8 @@ cursor?: string,
 /**
  * At most this many (default 50, at most 200).
  */
-limit?: number, };
+limit?: number, 
+/**
+ * Also answer `totals` over every entry the filter matches, not only this page.
+ */
+totals?: boolean, };

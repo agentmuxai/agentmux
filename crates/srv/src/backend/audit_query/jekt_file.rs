@@ -91,6 +91,27 @@ pub(super) fn entries(path: &Path, end: Option<u64>) -> impl Iterator<Item = (u6
     })
 }
 
+/// Calls `each` with every entry from byte `from` on, oldest first, and returns where the last complete line
+/// ends: a line the writer hasn't finished isn't read, and is the next scan's first.
+pub(super) fn scan(path: &Path, from: u64, mut each: impl FnMut(AuditLogEntry)) -> std::io::Result<u64> {
+    use std::io::BufRead;
+    let mut file = File::open(path)?;
+    file.seek(SeekFrom::Start(from))?;
+    let mut reader = std::io::BufReader::new(file);
+    let (mut at, mut line) = (from, Vec::new());
+    loop {
+        line.clear();
+        let n = reader.read_until(b'\n', &mut line)?;
+        if n == 0 || line.last() != Some(&b'\n') {
+            return Ok(at);
+        }
+        at += n as u64;
+        if let Ok(entry) = serde_json::from_slice::<AuditLogEntry>(&line) {
+            each(entry);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -147,6 +168,22 @@ mod tests {
         let got: Vec<_> = lines.by_ref().take(10).collect();
         assert!(got.iter().any(|l| l.is_err()), "the error is reported once");
         assert!(got.len() < 10 && lines.next().is_none(), "and then there is nothing more");
+    }
+
+    #[test]
+    fn a_scan_stops_before_a_line_the_writer_has_not_finished() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.jsonl");
+        let line = |ts: u64| format!("{}\n", serde_json::json!({"timestamp": ts, "target_agent": "x", "block_id": "", "message_hash": "", "message_length": 0, "success": true, "request_id": ""}));
+        std::fs::write(&path, format!("{}{}{{\"timestamp\":3", line(1), line(2))).unwrap();
+        let mut seen = Vec::new();
+        let end = scan(&path, 0, |e| seen.push(e.timestamp)).unwrap();
+        assert_eq!((seen.clone(), end), (vec![1, 2], (line(1).len() + line(2).len()) as u64));
+        // Finished, it is read from where the scan stopped.
+        std::fs::write(&path, format!("{}{}{}", line(1), line(2), line(3))).unwrap();
+        seen.clear();
+        scan(&path, end, |e| seen.push(e.timestamp)).unwrap();
+        assert_eq!(seen, [3]);
     }
 
     #[test]
