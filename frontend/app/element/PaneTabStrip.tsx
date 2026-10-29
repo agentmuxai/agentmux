@@ -42,6 +42,7 @@ import { cancelFlashPattern, flashElement, onActivityFlash } from "@/app/notific
 import { LOCATE_PILL_FLASH, onPaneLocate, onPaneLocatePlay } from "@/app/util/pane-locate";
 import { shouldReduceMotion } from "@/app/motion/motion";
 import { DURATION_BASE_MS, EASE_OUT } from "@/app/motion/tokens";
+import { usePulseWhen } from "@/app/motion/solid";
 import { isModKey, isWindows } from "@/util/platformutil";
 import { Tooltip } from "./tooltip";
 import { classifyPillClick, markPillDragEnded, msSinceLastPillDrag } from "./pane-tab-gesture";
@@ -780,6 +781,13 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
     const id = () => props.getId(props.tab);
     const attention = () => props.getAttention?.(props.tab) ?? false;
     let pillRef: HTMLDivElement | undefined;
+    // The pill that just landed plays the landing bounce (`.pane-tab--landing` marks it while it
+    // does, for the strip's reveal to wait out). On the pill, not its `.pane-tab-tip` wrapper: the
+    // wrapper owns the flex sizing, so a transform here never moves its neighbours.
+    usePulseWhen(
+        () => pillRef,
+        () => !!landedTab()?.ids.has(id()) && landedTab()?.paneKey === landingKey()
+    );
     // The pane a landing bounce is for: the block, for document tabs.
     const landingKey = () => props.docDrag?.blockId ?? props.paneKey;
     const isDragging = () =>

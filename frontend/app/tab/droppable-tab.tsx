@@ -9,6 +9,7 @@ import { createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import type { JSX } from "solid-js";
 import clsx from "clsx";
 import { Tab } from "./tab";
+import { usePulseWhen } from "@/app/motion/solid";
 import { tabItemType, tileItemType } from "@/app/drag/drag-types";
 import { windowTabDragData } from "@/app/drag/foreign-drop";
 import { hideDragImageOnNativeWayland } from "@/app/drag/wayland-drag-image";
@@ -82,6 +83,8 @@ export function DroppableTab(props: DroppableTabProps): JSX.Element {
     });
 
     const isBouncing = () => bouncingTabId() === props.tabId;
+    // The dropped tab plays the landing bounce (`.tab-bouncing` marks the wrapper meanwhile).
+    usePulseWhen(() => tabWrapRef?.querySelector(".tab"), isBouncing);
     const isTileDropHover = () => hoveredDropTabId() === props.tabId;
 
     onMount(() => {
