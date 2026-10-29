@@ -47,7 +47,7 @@ pub(crate) fn agent_workspace(block_id: &str) -> Option<PathBuf> {
 
 /// `canonicalize` without Windows' `\\?\` verbatim prefix, which the browser
 /// doesn't expect in a file path.
-fn canonical(p: &Path) -> std::io::Result<PathBuf> {
+pub(crate) fn canonical(p: &Path) -> std::io::Result<PathBuf> {
     let c = std::fs::canonicalize(p)?;
     let s = c.to_string_lossy();
     Ok(match s.strip_prefix(r"\\?\") {

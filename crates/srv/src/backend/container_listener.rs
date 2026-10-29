@@ -14,9 +14,9 @@
 //!    network namespace, where the bind fails) is not used and the old route stays.
 //! 2. **Only container tokens.** The router is the full router behind [`layer`], which admits a
 //!    request only with a live container token (`amxc_…`): the instance key, the LAN key and no
-//!    key at all are refused, and so is every route that is not on
-//!    [`container_route_allowed`](crate::backend::container_credential::container_route_allowed),
-//!    which leaves out the operator RPCs and `/ws`.
+//!    key at all are refused, and so is every route on the denylist
+//!    ([`container_routes`](crate::backend::container_routes)): the operator RPCs, `/ws` and what runs
+//!    or writes on the host.
 //! 3. **Only from the agents subnet.** The peer address must be inside the network's subnet.
 //!
 //! The container's `AGENTMUX_LOCAL_URL` becomes `http://<gateway>:<port>`
@@ -356,9 +356,9 @@ mod tests {
         answer.lines().next().unwrap_or("").split_whitespace().nth(1).unwrap_or("none").to_string()
     }
 
-    /// Paths that look like an allowed route, or climb out of one, never reach an operator route:
-    /// the allowlist matches the raw path exactly as the router does, so every one is refused
-    /// before the app sees it.
+    /// Paths that look like an allowed route, or climb out of one, never reach a refused route:
+    /// the denylist matches the raw path exactly as the router does, so a trick that names a
+    /// refused route is refused and one that names no route gets the router's 404.
     #[tokio::test]
     async fn path_tricks_do_not_reach_an_operator_route() {
         let state = crate::server::tests::test_state();
