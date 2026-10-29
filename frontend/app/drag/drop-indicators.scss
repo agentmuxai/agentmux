@@ -63,8 +63,8 @@
 }
 
 // Keyframes for drag/drop feedback, emitted once here rather than once per
-// `@use` of drop-feedback.scss (whose mixins use them). `tab-bounce` is also
-// used by the activity row and shell nodes.
+// `@use` of drop-feedback.scss (whose mixins use them). The landing bounce is
+// the motion primitive `pulse(el, "bounce")`, not a keyframe.
 @keyframes tab-drop-pulse {
     from {
         outline-color: var(--drop-target-border);
@@ -74,13 +74,7 @@
     }
 }
 
-// Spring bounce on tab landing — slight overshoot then settle
-@keyframes tab-bounce {
-    0%   { transform: scaleX(0.88); }
-    55%  { transform: scaleX(1.04); }
-    80%  { transform: scaleX(0.98); }
-    100% { transform: scaleX(1.0);  }
-}
+
 
 // One strobe cycle: the element's negative for the first half (200ms), normal
 // for the second (200ms) — 2 iterations = 2 distinct invert flashes over

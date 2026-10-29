@@ -6,8 +6,8 @@
 // unmounts mid-motion never leaves a copy on screen or an original hidden
 // (docs/specs/SPEC_MOTION_PRIMITIVES_2026_10_29.md §3.5).
 
-import { onCleanup } from "solid-js";
-import type { MotionHandle } from "./primitives";
+import { createEffect, on, onCleanup } from "solid-js";
+import type { MotionHandle, PulseKind } from "./primitives";
 import * as motion from "./primitives";
 
 /** Call inside a component or an owner (createRoot, an effect). */
@@ -34,4 +34,22 @@ export function useMotion() {
         glide: (...args: Parameters<typeof motion.glide>) => track(motion.glide(...args)),
         capture: motion.capture,
     };
+}
+
+/**
+ * Pulse `el()` each time `when()` turns true (and once at mount if it starts true), cancelled if
+ * the owner is cleaned up first. For a flag that a store sets when something has just landed.
+ */
+export function usePulseWhen(
+    el: () => Element | null | undefined,
+    when: () => boolean,
+    kind: PulseKind = "bounce"
+): void {
+    const motion = useMotion();
+    createEffect(
+        on(when, (now) => {
+            const target = now ? el() : null;
+            if (target) motion.pulse(target, kind);
+        })
+    );
 }

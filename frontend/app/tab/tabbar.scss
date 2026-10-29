@@ -162,10 +162,6 @@
                 opacity var(--duration-fast) var(--ease-standard);
         }
 
-        // Landing bounce on the dropped tab
-        &.tab-bouncing .tab {
-            @include drop.landing-bounce;
-        }
     }
 
     .tab-bar-fill {
