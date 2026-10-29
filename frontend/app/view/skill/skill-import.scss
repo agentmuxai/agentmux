@@ -1,0 +1,72 @@
+// Memory → Skills: the "Import a skill" panel and "check for changes".
+.skill-import-list,
+.skill-import-warnings {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
+.skill-import-warnings {
+    font-size: var(--text-xs);
+    color: var(--secondary-text-color);
+}
+
+.skill-import-item {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    padding: var(--space-2);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+}
+
+.skill-import-item-head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1-5);
+}
+
+.skill-import-item-name {
+    font-weight: 600;
+    color: var(--main-text-color);
+}
+
+.skill-import-item-status,
+.skill-import-item-path,
+.skill-import-diff-label {
+    font-size: var(--text-xs);
+    color: var(--secondary-text-color);
+}
+
+.skill-import-item-desc {
+    font-size: var(--text-xs);
+    color: var(--main-text-color);
+}
+
+.skill-import-text {
+    margin: 0;
+    padding: var(--space-1-5) var(--space-2);
+    max-height: 240px;
+    overflow: auto;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+    color: var(--main-text-color);
+}
+
+// The same added / removed lines as the Memory history diff.
+.skill-import-text .native-memory-diff-line {
+    &.is-added {
+        color: var(--success-text-color);
+        background: var(--success-bg-subtle);
+    }
+
+    &.is-removed {
+        color: var(--error-text-color);
+        background: var(--error-bg-subtle);
+    }
+}

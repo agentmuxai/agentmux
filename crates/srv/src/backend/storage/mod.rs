@@ -47,6 +47,7 @@ pub mod muxbus;
 pub mod registry_mirror;
 pub mod builtin_seeds;
 pub mod skill_reach;
+pub mod skill_source;
 pub mod skills;
 pub mod snapshot;
 pub mod store;

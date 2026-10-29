@@ -1302,6 +1302,14 @@
             "method": "SkillCatalogBindAllCommand"
         },
         {
+            "command": "skill.catalog.import_preview",
+            "method": "SkillCatalogImportPreviewCommand"
+        },
+        {
+            "command": "skill.catalog.import_commit",
+            "method": "SkillCatalogImportCommitCommand"
+        },
+        {
             "command": "skill.catalog.unbind",
             "method": "SkillCatalogUnbindCommand"
         },

@@ -9,12 +9,15 @@
  * without a bind (every agent, new agents).
  */
 
-import { createResource, onCleanup, For, Show, type JSX } from "solid-js";
+import { createResource, createSignal, onCleanup, For, Show, type JSX } from "solid-js";
 import type { SkillCatalogItem } from "@/types/rpc/SkillCatalogItem";
 import { Markdown } from "@/app/element/markdown";
 import { PrimitiveListDetail } from "@/app/element/primitive-list-detail";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { SkillCatalogModel } from "./skill-model";
+import { SkillImportModel } from "./skill-import-model";
+import { SkillImportPanel, SkillImportResult } from "./skill-import";
+import "./skill-import.scss";
 import "../agent/components/AgentPrimitiveModal.scss";
 import { Button, Switch } from "@/app/element/ui";
 import { focusOnOpen } from "@/util/focusutil";
@@ -79,8 +82,26 @@ export const SkillManager = (): JSX.Element => {
     onCleanup(() => model.dispose());
 
     // Single-pane — see docs/specs/SPEC_ARMORY_RESPONSIVE_SINGLE_PANE_LAYOUT_2026_07_15.md.
-    const inDetail = () => model.selectedIdAtom() !== null || model.draftAtom() !== null;
+    // The import panel, or an imported skill's "check for changes" (`updateOf` set).
+    const [importing, setImporting] = createSignal<{ model: SkillImportModel; updateOf?: SkillCatalogItem } | null>(null);
+    const inDetail = () => model.selectedIdAtom() !== null || model.draftAtom() !== null || importing() !== null;
+    const imported = (ids: string[]) => {
+        setImporting(null);
+        void model.refresh();
+        if (ids[0]) model.setSelectedId(ids[0]);
+    };
+    const startImport = () => {
+        model.setSelectedId(null);
+        model.setDraft(null);
+        setImporting({ model: new SkillImportModel(imported) });
+    };
+    const startCheck = (skill: SkillCatalogItem) => {
+        const check = new SkillImportModel(imported);
+        setImporting({ model: check, updateOf: skill });
+        void check.check(skill.id);
+    };
     const handleBack = () => {
+        setImporting(null);
         model.setError(null);
         model.setSelectedId(null);
         model.setDraft(null);
@@ -100,7 +121,10 @@ export const SkillManager = (): JSX.Element => {
                         <button
                             class="agent-primitive-modal-list-item"
                             classList={{ "is-selected": model.selectedIdAtom() === skill.id }}
-                            onClick={() => model.handleSelect(skill)}
+                            onClick={() => {
+                                setImporting(null);
+                                model.handleSelect(skill);
+                            }}
                         >
                             <span class="agent-primitive-modal-list-item-name">{skill.name}</span>
                             <span class="agent-primitive-modal-list-item-badge">
@@ -116,11 +140,41 @@ export const SkillManager = (): JSX.Element => {
             <button class="agent-primitive-modal-new-btn" onClick={() => model.startNew()}>
                 + New skill
             </button>
+            <button class="agent-primitive-modal-new-btn" onClick={startImport}>
+                Import a skill…
+            </button>
         </div>
     );
 
     const detailView = (
         <div class="agent-primitive-modal-detail">
+            <Show when={importing()}>
+                {(imp) => (
+                    <Show
+                        when={imp().updateOf}
+                        fallback={<SkillImportPanel model={imp().model} onCancel={() => setImporting(null)} />}
+                    >
+                        {(skill) => (
+                            <div class="agent-primitive-modal-form skill-import">
+                                <h3 class="agent-primitive-modal-name">{skill().name}: check for changes</h3>
+                                <Show when={imp().model.errorAtom()}>
+                                    <div class="agent-primitive-modal-error">{imp().model.errorAtom()}</div>
+                                </Show>
+                                <Show when={imp().model.busyAtom() && !imp().model.previewAtom()}>
+                                    <p class="agent-primitive-modal-global-note">Reading the source…</p>
+                                </Show>
+                                <SkillImportResult model={imp().model} verb="Update" />
+                                <div class="agent-primitive-modal-actions">
+                                    <Button class="agent-primitive-modal-btn" onClick={() => setImporting(null)}>
+                                        Close
+                                    </Button>
+                                </div>
+                            </div>
+                        )}
+                    </Show>
+                )}
+            </Show>
+            <Show when={!importing()}>
             <Show when={model.errorAtom()}>
                 <div class="agent-primitive-modal-error">{model.errorAtom()}</div>
             </Show>
@@ -138,6 +192,23 @@ export const SkillManager = (): JSX.Element => {
                                         </p>
                                         <SkillReach model={model} skill={skill()} />
                                         <SkillBoundAgents model={model} skill={skill()} />
+                                        <Show when={skill().source}>
+                                            {(src) => (
+                                                <>
+                                                    <span class="agent-primitive-modal-field-label">Imported from</span>
+                                                    <pre class="agent-primitive-modal-field-value">
+                                                        {src().location}
+                                                        {src().git_ref ? ` (${src().git_ref})` : ""}
+                                                        {src().item_key ? `\n${src().item_key}` : ""}
+                                                    </pre>
+                                                    <div class="agent-primitive-modal-actions">
+                                                        <Button class="agent-primitive-modal-btn" onClick={() => startCheck(skill())}>
+                                                            Check for changes
+                                                        </Button>
+                                                    </div>
+                                                </>
+                                            )}
+                                        </Show>
                                         <Show when={skill().description}>
                                             <span class="agent-primitive-modal-field-label">Description</span>
                                             <pre class="agent-primitive-modal-field-value">{skill().description}</pre>
@@ -273,6 +344,7 @@ export const SkillManager = (): JSX.Element => {
                                 </div>
                             </form>
                         )}
+            </Show>
             </Show>
         </div>
     );
