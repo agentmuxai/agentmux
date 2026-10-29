@@ -165,6 +165,7 @@ fn resync_block_parent(mstore: &Store, rec: &BlockRecord) -> ResyncResult {
             block.meta.insert(super::parked::PARKED_META_KEY.to_string(), serde_json::json!(true));
         } else {
             block.meta.remove(super::parked::PARKED_META_KEY);
+            block.meta.remove(super::parked::PARKED_FROM_TAB_META_KEY);
         }
         mstore.update(&mut block)?;
     }
