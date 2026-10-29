@@ -13,7 +13,8 @@
 //! | `vault`                      | `vault` (`vault:section`, `vault:request` kept) |
 //! | `history`                    | `history`                                       |
 //! | `audit`                      | `audit`                                         |
-//! | `host`, none, or unknown     | `swarm`                                         |
+//! | `host`                       | `swarm`                                         |
+//! | none, or unknown             | `audit` (read-only: a redirect nobody asked for never asks for the Vault key) |
 //! | `kanban`                     | `kanban`                                        |
 //! | `lan`, `internet`, `ambient` | `audit` (these sections have no pane)           |
 //! | `jobs`                       | unchanged                                       |
@@ -107,9 +108,9 @@ fn target_view(section: Option<&str>) -> Option<&'static str> {
         "jobs" => None,
         "vault" => Some("vault"),
         "history" => Some("history"),
-        "audit" | "lan" | "internet" | "ambient" => Some("audit"),
+        "host" => Some("swarm"),
         "kanban" => Some("kanban"),
-        _ => Some("swarm"),
+        _ => Some("audit"),
     }
 }
 
@@ -297,23 +298,22 @@ mod tests {
     }
 
     #[test]
-    fn host_no_section_and_an_unknown_section_become_the_swarm() {
+    fn host_becomes_the_swarm() {
         assert_eq!(
             moved(json!({ "view": "warden", "warden:section": "host" })),
             json!({ "view": "swarm" })
         );
-        assert_eq!(
-            moved(json!({ "view": "warden" })),
-            json!({ "view": "swarm" })
-        );
-        assert_eq!(
-            moved(json!({ "view": "warden", "warden:section": "" })),
-            json!({ "view": "swarm" })
-        );
-        assert_eq!(
-            moved(json!({ "view": "warden", "warden:section": "nope" })),
-            json!({ "view": "swarm" })
-        );
+    }
+
+    #[test]
+    fn no_section_or_an_unknown_one_opens_the_audit() {
+        for meta in [
+            json!({ "view": "warden" }),
+            json!({ "view": "warden", "warden:section": "" }),
+            json!({ "view": "warden", "warden:section": "nope" }),
+        ] {
+            assert_eq!(moved(meta), json!({ "view": "audit" }));
+        }
     }
 
     #[test]

@@ -700,9 +700,9 @@ fn warden_section_pane(section: Option<&str>) -> Option<&'static str> {
         "jobs" => None,
         "vault" => Some("vault"),
         "history" => Some("history"),
-        "audit" | "lan" | "internet" | "ambient" => Some("audit"),
+        "host" => Some("swarm"),
         "kanban" => Some("kanban"),
-        _ => Some("swarm"),
+        _ => Some("audit"),
     }
 }
 
