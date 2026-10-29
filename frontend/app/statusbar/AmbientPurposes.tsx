@@ -6,9 +6,9 @@
 // table the Ambient section had is a line per purpose.
 // docs/specs/SPEC_WARDEN_SPLIT_INTO_VAULT_HISTORY_AUDIT_2026_10_28.md §6.
 
-import { createSignal, For, Index, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { createSignal, For, Index, Show, type JSX } from "solid-js";
 import { Button } from "@/app/element/ui";
-import { AMBIENT_OPEN_MS, ambientAskFailed, ambientSummary, watchAmbient } from "@/app/store/ambient-health";
+import { ambientAskFailed, ambientSummary } from "@/app/store/ambient-health";
 import type { AmbientPurposeRow } from "@/app/store/ambient-outcomes";
 
 const BUCKETS = ["accepted", "kept", "refused", "skipped", "failed"] as const;
@@ -52,9 +52,9 @@ function PurposeLine(props: { row: AmbientPurposeRow; open: boolean; onToggle: (
     );
 }
 
-/** The purposes, asking every few seconds while it is on screen. */
+/** The purposes. The popover asks for the counts (`TokenBreakdownPopover`), so they keep arriving
+ *  whether or not this part is on screen. */
 export function AmbientPurposes(): JSX.Element {
-    onMount(() => onCleanup(watchAmbient(AMBIENT_OPEN_MS)));
     // Which purposes are open, kept here: every ask replaces the row objects, and a row's own state
     // would close under the reader.
     const [opened, setOpened] = createSignal<ReadonlySet<string>>(new Set());

@@ -26,6 +26,7 @@ describe("AmbientPurposes", () => {
     it("lists a line per purpose and opens one to its counts", async () => {
         outcomesCmd.mockResolvedValue(healthy);
         render(() => <AmbientPurposes />);
+        await refreshAmbient();
         const head = await screen.findByRole("button", { name: /Session titles/ });
         expect(screen.queryByText("Accepted")).toBeNull();
         fireEvent.click(head);
@@ -37,12 +38,14 @@ describe("AmbientPurposes", () => {
     it("marks the failing count on the line without opening it", async () => {
         outcomesCmd.mockResolvedValue(failing);
         render(() => <AmbientPurposes />);
+        await refreshAmbient();
         expect(await screen.findByText("2 failed")).toBeTruthy();
     });
 
     it("marks a purpose that only refuses, which lights the dot as much as a failing one", async () => {
         outcomesCmd.mockResolvedValue({ activity_summary: { accepted: 1, "rejected:format": 3 } });
         render(() => <AmbientPurposes />);
+        await refreshAmbient();
         expect(await screen.findByText("3 refused")).toBeTruthy();
         expect(screen.queryByText(/failed/)).toBeNull();
     });
@@ -50,6 +53,7 @@ describe("AmbientPurposes", () => {
     it("says so when the counts could not be read, and keeps the last ones", async () => {
         outcomesCmd.mockResolvedValueOnce(healthy);
         render(() => <AmbientPurposes />);
+        await refreshAmbient();
         await screen.findByRole("button", { name: /Session titles/ });
         outcomesCmd.mockImplementation(async () => {
             throw new Error("down");
@@ -62,6 +66,7 @@ describe("AmbientPurposes", () => {
     it("keeps a purpose open when the next ask brings new row objects", async () => {
         outcomesCmd.mockResolvedValue(healthy);
         render(() => <AmbientPurposes />);
+        await refreshAmbient();
         fireEvent.click(await screen.findByRole("button", { name: /Session titles/ }));
         expect(screen.getByText("Accepted")).toBeTruthy();
         outcomesCmd.mockResolvedValue({ activity_summary: { accepted: 11, kept: 30 } });

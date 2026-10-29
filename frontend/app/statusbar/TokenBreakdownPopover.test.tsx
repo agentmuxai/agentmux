@@ -110,6 +110,23 @@ describe("TokenBreakdownPopover — by-agent regroup", () => {
         expect(screen.queryByText("No turns completed yet this session.")).not.toBeInTheDocument();
     });
 
+    it("asks for the counts as soon as it opens and every few seconds after, with no purposes on screen", async () => {
+        vi.useFakeTimers();
+        try {
+            outcomesCmd.mockReset();
+            outcomesCmd.mockResolvedValue({});
+            const { unmount } = renderPopover();
+            expect(outcomesCmd).toHaveBeenCalledTimes(1);
+            await vi.advanceTimersByTimeAsync(5000);
+            expect(outcomesCmd).toHaveBeenCalledTimes(2);
+            unmount();
+            await vi.advanceTimersByTimeAsync(10_000);
+            expect(outcomesCmd).toHaveBeenCalledTimes(2);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
     it("clicking a real agent row calls focusBlock with that agent's blockId", () => {
         recordTurn("claude", { input: 1000, output: 50 }, { blockId: "block-1", agentName: "Manoz" });
         renderPopover();

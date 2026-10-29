@@ -13,13 +13,13 @@
  * SPEC_STATUSBAR_TOKEN_PANEL_BY_AGENT_2026_08_30.md.
  */
 
-import { createMemo, createSignal, For, Show, type JSX } from "solid-js";
+import { createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { AnchoredPopover, type PopoverAnchor } from "@/app/element/anchored-popover";
 import { ConfirmModal } from "@/element/modal";
 import { getCliCatalogEntry } from "@/app/view/agent/defaults/cli-catalog";
 import { formatCompactNumber } from "@/util/format-count";
 import { revealBlock } from "@/app/util/reveal-block";
-import { ambientSummary } from "@/app/store/ambient-health";
+import { AMBIENT_OPEN_MS, ambientSummary, watchAmbient } from "@/app/store/ambient-health";
 import { AmbientPurposes } from "./AmbientPurposes";
 import {
     getAgentBreakdown,
@@ -78,6 +78,9 @@ interface TokenBreakdownPopoverProps {
 export const TokenBreakdownPopover = (props: TokenBreakdownPopoverProps): JSX.Element => {
     const [confirmingReset, setConfirmingReset] = createSignal(false);
     const [ambientExpanded, setAmbientExpanded] = createSignal(false);
+    // The counts come fast for as long as the popover is open, whether or not the part that shows
+    // them is (no internal tokens yet, or its row collapsed).
+    onMount(() => onCleanup(watchAmbient(AMBIENT_OPEN_MS)));
 
     // Trigger reactivity on the store so breakdown re-renders when
     // a new turn lands while the popover is open.
