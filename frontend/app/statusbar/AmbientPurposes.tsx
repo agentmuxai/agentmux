@@ -6,24 +6,23 @@
 // table the Ambient section had is a line per purpose.
 // docs/specs/SPEC_WARDEN_SPLIT_INTO_VAULT_HISTORY_AUDIT_2026_10_28.md §6.
 
-import { createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { createSignal, For, Index, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { Button } from "@/app/element/ui";
 import { AMBIENT_OPEN_MS, ambientAskFailed, ambientSummary, watchAmbient } from "@/app/store/ambient-health";
 import type { AmbientPurposeRow } from "@/app/store/ambient-outcomes";
 
 const BUCKETS = ["accepted", "kept", "refused", "skipped", "failed"] as const;
 
-function PurposeLine(props: { row: AmbientPurposeRow }): JSX.Element {
-    const [open, setOpen] = createSignal(false);
+function PurposeLine(props: { row: AmbientPurposeRow; open: boolean; onToggle: () => void }): JSX.Element {
     return (
         <div class="ambient-purpose" data-state={props.row.unhealthy ? "failing" : undefined} title={props.row.detail}>
             <Button
                 tone="quiet"
                 density="compact"
                 class="ambient-purpose-head"
-                icon={open() ? "chevron-down" : "chevron-right"}
-                aria-expanded={open()}
-                onClick={() => setOpen(!open())}
+                icon={props.open ? "chevron-down" : "chevron-right"}
+                aria-expanded={props.open}
+                onClick={props.onToggle}
             >
                 <span class="ambient-purpose-name">{props.row.name}</span>
                 <Show when={props.row.counts.failed > 0}>
@@ -31,7 +30,7 @@ function PurposeLine(props: { row: AmbientPurposeRow }): JSX.Element {
                 </Show>
                 <span class="ambient-purpose-total">{props.row.total}</span>
             </Button>
-            <Show when={open()}>
+            <Show when={props.open}>
                 <div class="ambient-purpose-counts">
                     <div class="ambient-purpose-count">
                         <span>Requests</span>
@@ -54,6 +53,15 @@ function PurposeLine(props: { row: AmbientPurposeRow }): JSX.Element {
 /** The purposes, asking every few seconds while it is on screen. */
 export function AmbientPurposes(): JSX.Element {
     onMount(() => onCleanup(watchAmbient(AMBIENT_OPEN_MS)));
+    // Which purposes are open, kept here: every ask replaces the row objects, and a row's own state
+    // would close under the reader.
+    const [opened, setOpened] = createSignal<ReadonlySet<string>>(new Set());
+    const toggle = (purpose: string) =>
+        setOpened((prev) => {
+            const next = new Set(prev);
+            if (!next.delete(purpose)) next.add(purpose);
+            return next;
+        });
     return (
         <div class="ambient-purposes" data-testid="ambient-purposes">
             <Show when={ambientAskFailed()}>
@@ -63,7 +71,17 @@ export function AmbientPurposes(): JSX.Element {
                 when={ambientSummary()}
                 fallback={<div class="ambient-purposes-note">No calls have ended since AgentMux's server started.</div>}
             >
-                {(s) => <For each={s().rows}>{(row) => <PurposeLine row={row} />}</For>}
+                {(s) => (
+                    <Index each={s().rows}>
+                        {(row) => (
+                            <PurposeLine
+                                row={row()}
+                                open={opened().has(row().purpose)}
+                                onToggle={() => toggle(row().purpose)}
+                            />
+                        )}
+                    </Index>
+                )}
             </Show>
             <div class="ambient-purposes-note">
                 Requests include those that never reached the model. A purpose is failing when its refusals and

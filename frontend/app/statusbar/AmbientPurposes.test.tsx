@@ -51,6 +51,17 @@ describe("AmbientPurposes", () => {
         expect(await screen.findByText(/Could not read the counts/)).toBeTruthy();
         expect(screen.getByRole("button", { name: /Session titles/ })).toBeTruthy();
     });
+
+    it("keeps a purpose open when the next ask brings new row objects", async () => {
+        outcomesCmd.mockResolvedValue(healthy);
+        render(() => <AmbientPurposes />);
+        fireEvent.click(await screen.findByRole("button", { name: /Session titles/ }));
+        expect(screen.getByText("Accepted")).toBeTruthy();
+        outcomesCmd.mockResolvedValue({ activity_summary: { accepted: 11, kept: 30 } });
+        await refreshAmbient();
+        await waitFor(() => expect(screen.getByText("Accepted").nextElementSibling?.textContent).toBe("11"));
+        expect(screen.getByRole("button", { name: /Session titles/ }).getAttribute("aria-expanded")).toBe("true");
+    });
 });
 
 describe("watchAmbient", () => {
