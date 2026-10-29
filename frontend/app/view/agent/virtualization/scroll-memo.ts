@@ -17,6 +17,7 @@
  */
 
 import { createEffect, onCleanup, untrack, type Accessor } from "solid-js";
+import { getBlockMetaKeyAtom } from "@/app/store/block-atom-cache";
 import { registerRecycleBlocker } from "@/app/store/recycle-blockers";
 import { readSession, writeSession } from "../reload-persistence";
 
@@ -25,6 +26,47 @@ const KEY = "agentmux:scroll:";
 export type ScrollMemo = { bottom: true } | { nodeId: string; offsetPx: number };
 
 const capturers = new Map<string, () => ScrollMemo | null>();
+
+/**
+ * Where a pane was scrolled up when it went away without the page going (a stack remount, a closed
+ * pane): the next pane of the same agent puts it back. Kept by agent, because a reopened pane is a new
+ * block; in memory only, so it never outlives the page (a reload has the session memo above).
+ * A pane that was following leaves nothing: the default is the bottom.
+ */
+const left = new Map<string, ScrollMemo>();
+/** The most agents remembered at once: the oldest goes first. */
+const LEFT_MAX = 100;
+
+/** What a pane's memo is kept under: its agent, else the block (a pane with no agent id in its meta). */
+function leftKey(blockId: string): string {
+    let agent: unknown;
+    try {
+        agent = getBlockMetaKeyAtom(blockId, "agentId")();
+    } catch {
+        // no store (a test); the block id will do
+    }
+    return typeof agent === "string" && agent !== "" ? `agent:${agent}` : `block:${blockId}`;
+}
+
+function rememberLeft(key: string, memo: ScrollMemo | null): void {
+    left.delete(key); // a re-set key moves to the end: the oldest is the first
+    if (!memo || "bottom" in memo) return;
+    left.set(key, memo);
+    if (left.size > LEFT_MAX) left.delete(left.keys().next().value as string);
+}
+
+/** The position the last pane of this pane's agent left, once; then forgotten. */
+function takeLeft(blockId: string): ScrollMemo | undefined {
+    const key = leftKey(blockId);
+    const memo = left.get(key);
+    left.delete(key);
+    return memo;
+}
+
+/** For tests: forget every remembered position. */
+export function resetLeftScrollMemosForTests(): void {
+    left.clear();
+}
 
 /** Panes that loaded history older than their restore read, this page. */
 const olderLoaded = new Set<string>();
@@ -51,6 +93,7 @@ if (typeof window !== "undefined") window.addEventListener("pagehide", saveScrol
  * consume the memo (`takeScrollMemo` does, once the history has loaded).
  */
 export function hasScrolledUpMemo(blockId: string): boolean {
+    if (left.has(leftKey(blockId))) return true;
     const memo = readSession<ScrollMemo>(KEY + blockId);
     return !!memo && typeof memo === "object" && !("bottom" in memo) && typeof memo.nodeId === "string";
 }
@@ -114,8 +157,21 @@ export function useScrollMemo(opts: {
     const capture = (): ScrollMemo | null =>
         captureScrollMemo(opts.scroller(), untrack(opts.following), opts.zoom ? untrack(opts.zoom) : 1);
     capturers.set(blockId, capture);
+    // Set once the pane has taken a place it was given (below). A pane that goes away before its history
+    // loaded has not: what it would record is only its default, and would wipe the place still waiting.
+    let restored = false;
+    // The key is read while the pane is mounted: a deleted block's meta is gone by the time the pane's
+    // cleanup runs, which would file the place under the block id and lose it for the reopened pane.
+    let key = leftKey(blockId);
+    createEffect(() => {
+        const k = leftKey(blockId);
+        if (k.startsWith("agent:")) key = k;
+    });
     onCleanup(() => {
         if (capturers.get(blockId) === capture) capturers.delete(blockId);
+        // The pane is going away (unmounted behind another tab, or closed): keep where it was scrolled to.
+        // The scroller is still attached while the owner is disposed; if it is not, there is nothing to read.
+        if (restored) rememberLeft(key, capture());
     });
     // A reload reads only the tail, so a pane scrolled up into pages it loaded
     // later would come back at the bottom.
@@ -126,11 +182,12 @@ export function useScrollMemo(opts: {
         unregister();
         olderLoaded.delete(blockId);
     });
-    let restored = false;
     createEffect(() => {
         if (restored || !opts.historyReady()) return;
         restored = true;
-        const memo = takeScrollMemo(blockId);
+        const fromLeft = takeLeft(blockId);
+        const fromSession = takeScrollMemo(blockId); // taken either way: it is used once
+        const memo = fromLeft ?? fromSession;
         if (!memo || "bottom" in memo) return; // the default: following, at the bottom
         // After the restored rows' first layout, so the row has a position; then
         // on each frame for a while: the rows above it are measured over the next
