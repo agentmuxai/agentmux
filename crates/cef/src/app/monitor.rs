@@ -132,26 +132,47 @@ struct CocoaScreen {
 #[cfg(any(target_os = "macos", test))]
 fn work_area_at(screens: &[CocoaScreen], px: i32, py: i32) -> Option<(i32, i32, i32, i32)> {
     let primary = screens.first()?;
-    // CEF Views puts the origin at the top-left of the primary display with y
-    // down; Cocoa puts it at the bottom-left with y up. The primary display's
-    // top edge is the flip axis for every display.
-    let flip = primary.frame.y + primary.frame.h;
-    let top_of = |r: &CocoaRect| flip - (r.y + r.h);
+    let screen = display_at(screens, px, py).unwrap_or(primary);
+    Some(work_area_of(primary, screen))
+}
+
+/// Like [`work_area_at`], but `None` for a point on no display, where that one
+/// falls back to the primary. A window saved on a display that has been
+/// unplugged since must not be put "on" the primary by a point that is nowhere.
+#[cfg(any(target_os = "macos", test))]
+fn work_area_on_a_display(screens: &[CocoaScreen], px: i32, py: i32) -> Option<(i32, i32, i32, i32)> {
+    let primary = screens.first()?;
+    display_at(screens, px, py).map(|screen| work_area_of(primary, screen))
+}
+
+/// The display whose frame contains `(px, py)` in CEF Views coordinates.
+#[cfg(any(target_os = "macos", test))]
+fn display_at(screens: &[CocoaScreen], px: i32, py: i32) -> Option<&CocoaScreen> {
+    let primary = screens.first()?;
     let (x, y) = (px as f64, py as f64);
-    let screen = screens
-        .iter()
-        .find(|s| {
-            let top = top_of(&s.frame);
-            x >= s.frame.x && x < s.frame.x + s.frame.w && y >= top && y < top + s.frame.h
-        })
-        .unwrap_or(primary);
+    screens.iter().find(|s| {
+        let top = top_of(primary, &s.frame);
+        x >= s.frame.x && x < s.frame.x + s.frame.w && y >= top && y < top + s.frame.h
+    })
+}
+
+/// CEF Views puts the origin at the top-left of the primary display with y
+/// down; Cocoa puts it at the bottom-left with y up. The primary display's
+/// top edge is the flip axis for every display.
+#[cfg(any(target_os = "macos", test))]
+fn top_of(primary: &CocoaScreen, r: &CocoaRect) -> f64 {
+    (primary.frame.y + primary.frame.h) - (r.y + r.h)
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn work_area_of(primary: &CocoaScreen, screen: &CocoaScreen) -> (i32, i32, i32, i32) {
     let v = &screen.visible;
-    Some((
+    (
         v.x.round() as i32,
-        top_of(v).round() as i32,
+        top_of(primary, v).round() as i32,
         v.w.round() as i32,
         v.h.round() as i32,
-    ))
+    )
 }
 
 /// Every attached display, primary first. Must run on the main (UI) thread.
@@ -255,6 +276,13 @@ pub fn get_monitor_work_area(px: i32, py: i32) -> Option<(i32, i32, i32, i32)> {
     work_area_at(&appkit_screens(), px, py)
 }
 
+/// Work area of the display containing `(px, py)`, in points like
+/// [`get_monitor_work_area`], but `None` when no display has that point.
+#[cfg(target_os = "macos")]
+pub fn display_work_area_at(px: i32, py: i32) -> Option<(i32, i32, i32, i32)> {
+    work_area_on_a_display(&appkit_screens(), px, py)
+}
+
 #[cfg(target_os = "linux")]
 pub fn get_monitor_work_area(_px: i32, _py: i32) -> Option<(i32, i32, i32, i32)> {
     // X11: XDisplayWidth/XDisplayHeight on the default screen.
@@ -312,6 +340,17 @@ mod tests {
             visible: rect(80.0, 0.0, 1360.0, 876.0),
         };
         assert_eq!(work_area_at(&[s], 500, 500), Some((80, 24, 1360, 876)));
+    }
+
+    #[test]
+    fn a_point_on_no_display_is_none_for_the_strict_lookup_and_primary_for_the_other() {
+        let screens = [primary(), right_of_primary()];
+        // Far right of both displays: where an unplugged third display was.
+        assert_eq!(work_area_on_a_display(&screens, 5000, 100), None);
+        assert_eq!(work_area_at(&screens, 5000, 100), Some((0, 24, 1440, 806)));
+        // On a display, both agree.
+        assert_eq!(work_area_on_a_display(&screens, 2000, 100), work_area_at(&screens, 2000, 100));
+        assert_eq!(work_area_on_a_display(&[], 0, 0), None);
     }
 
     #[test]

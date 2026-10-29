@@ -467,10 +467,22 @@ pub(super) async fn maybe_reuse_editor_pane(
 
     // Only an editor on the file's own connection: one on a host reads and
     // saves there, so a local file pushed into it would be read there.
-    let existing = match super::find_editor_block(mstore, &tab_id, connection)? {
-        Some(block) => block,
+    let (existing, needs_activation) = match super::find_editor_block(mstore, &tab_id, connection)? {
+        Some(found) => (found.block, found.needs_activation),
         None => return Ok(None),
     };
+    // A background tab of a pane stack isn't mounted, so it would never take the file: bring it to
+    // the front first, the way a click on its tab does.
+    if needs_activation {
+        if let Err(e) = super::activate_tab(
+            state,
+            crate::backend::rpc_types::CommandPaneTabData { block_id: existing.oid.clone(), action_id: None },
+        )
+        .await
+        {
+            tracing::warn!(block_id = %existing.oid, "pane.open: reuse: couldn't bring the editor tab to the front: {e}");
+        }
+    }
 
     // Durable delivery path: append to any already-pending queue (read then
     // write — a small race window under truly concurrent reuse calls is
@@ -1138,21 +1150,13 @@ pub async fn open_pane(state: &AppState, mut cmd: CommandPaneOpenData) -> Result
     // `openToTheSide`). Also excludes `floating` requests — those always get
     // their own new window (codex P1 on PR #2404: this branch previously ran
     // before the floating check below and silently swallowed floating
-    // requests into a reused docked pane). Also excludes an explicit
-    // `tree_expanded` request (`OpenEditor`'s `collapse_tree` option) —
-    // reagent P2 on PR #2404: a reused pane keeps ITS OWN existing tree
-    // state, with no live mechanism to apply a new one (same class of
-    // construction-time-only limitation as focus, see
-    // `maybe_reuse_editor_pane`'s doc comment) — bypassing reuse for this
-    // specific request and falling through to the create path (which
-    // already honors `tree_expanded` correctly) is far simpler than
-    // building live meta-application, and was the reviewer's own suggested
-    // alternative.
-    if cmd.view == "editor"
-        && cmd.reuse_editor_pane == Some(true)
-        && cmd.floating != Some(true)
-        && cmd.tree_expanded.is_none()
-    {
+    // requests into a reused docked pane).
+    //
+    // An explicit `tree_expanded` (`OpenEditor`'s `collapse_tree`) does NOT
+    // bypass reuse: a reused pane keeps its own tree state (it has no live way
+    // to take a new one), and the option only shapes a pane this call creates.
+    // Bypassing reuse made a new pane on every open of an agent that always passes it.
+    if cmd.view == "editor" && cmd.reuse_editor_pane == Some(true) && cmd.floating != Some(true) {
         if let (Some(caller_block_id), Some(file)) =
             (cmd.split_reference_block_id.as_deref(), cmd.file.as_deref())
         {

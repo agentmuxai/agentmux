@@ -176,6 +176,7 @@ use agentmux_common::api_types::{
 mod state;
 mod routes;
 mod http_health;
+mod old_versions_handlers;
 mod http_fleet;
 mod http_viewer;
 mod http_viewer_input;

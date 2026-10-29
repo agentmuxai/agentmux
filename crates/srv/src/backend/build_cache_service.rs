@@ -136,7 +136,7 @@ fn try_lock_file(path: &Path) -> Option<std::fs::File> {
 }
 
 /// [`may_clean`] for this process.
-fn this_srv_may_clean() -> bool {
+pub(crate) fn this_srv_may_clean() -> bool {
     let channel = agentmux_common::DataPaths::from_env().map(|p| p.channel);
     may_clean(&Start {
         own_home: std::env::var_os("AGENTMUX_HOME_OVERRIDE").is_some_and(|v| !v.is_empty()),

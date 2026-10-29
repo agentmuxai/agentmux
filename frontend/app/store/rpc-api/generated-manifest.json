@@ -626,6 +626,11 @@
             "returns": "MetaType"
         },
         {
+            "command": "reactive.registration_flags",
+            "method": "GetReactiveRegistrationFlagsCommand",
+            "send": "{}"
+        },
+        {
             "command": "reactive.registrations",
             "method": "GetReactiveRegistrationsCommand"
         },

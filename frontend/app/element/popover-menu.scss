@@ -22,7 +22,7 @@
 
 .popover-menu-section-header {
     cursor: default;
-    color: var(--secondary-text-color, rgb(from var(--main-text-color) r g b / 0.65));
+    color: var(--secondary-text-color);
     font-size: var(--text-xs);
     @include mixins.label-caps;
 

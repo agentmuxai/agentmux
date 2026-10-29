@@ -58,7 +58,7 @@
         @include mixins.abs-fill;
         pointer-events: none;
         border: var(--pane-ring-width) solid var(--pane-ring-color, var(--border-color));
-        border-radius: var(--block-border-radius);
+        border-radius: var(--radius-md);
         z-index: var(--z-pane-mask);
         will-change: transform;
     }
@@ -173,7 +173,7 @@
     @include mixins.abs-fill;
     // Matches the ring's own radius so the masked frame inside doesn't poke
     // square corners past the pane's rounded ones.
-    border-radius: var(--block-border-radius);
+    border-radius: var(--radius-md);
     // `clip`, not `hidden`: not a scroll container, so the rotating pattern's
     // overflow can never scroll the band off its edges
     // (RETRO_AGENT_PANE_BUSY_RING_LEFT_EDGE_FAINT_2026_09_25.md, candidate 3).

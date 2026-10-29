@@ -27,7 +27,7 @@ pub(super) const ALWAYS: &[&str] = &[
     "POST /agentmux/agent/broadcast", "POST /agentmux/agent/release", "POST /agentmux/agent/stop",
     "POST /agentmux/agent/stop-pending", "POST /agentmux/cron", "POST /agentmux/cron/:id/run",
     "POST /agentmux/cron/runs/:run_id/report", "POST /agentmux/jobs", "POST /agentmux/jobs/:id/run",
-    "POST /agentmux/jobs/runs/:run_id/report", "POST /agentmux/jobs/stop-run",
+    "POST /agentmux/jobs/runs/:run_id/report", "POST /agentmux/jobs/stop-run", "POST /agentmux/old-versions",
     "POST /agentmux/reactive/ensure-signing-key", "POST /agentmux/reactive/poller/config",
     "POST /agentmux/reactive/register", "POST /agentmux/reactive/unregister", "POST /agentmux/work",
     "POST /agentmux/work/:id/accept", "POST /agentmux/work/:id/ask", "POST /agentmux/work/:id/complete",

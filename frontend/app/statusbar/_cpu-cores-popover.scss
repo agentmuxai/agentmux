@@ -54,7 +54,7 @@
         display: inline-block;
         width: 44px;
         height: 7px;
-        border-radius: 2px;
+        border-radius: var(--radius-sm);
         // idle → warning → error, matching loadColor().
         background: linear-gradient(
             to right,
@@ -97,12 +97,12 @@
         .cpu-core-bar {
             @include popoverFrame.readout-bar;
             background: var(--tint-4);
-            border-radius: 2px;
+            border-radius: var(--radius-sm);
         }
 
         .cpu-core-bar-fill {
             @include popoverFrame.readout-bar-fill;
-            border-radius: 2px;
+            border-radius: var(--radius-sm);
             transition:
                 width var(--duration-moderate) var(--ease-standard),
                 background-color var(--duration-moderate) var(--ease-standard);
@@ -132,7 +132,7 @@
             gap: 2px 4px;
             padding: 3px 5px;
             background: var(--button-secondary-bg-color);
-            border-radius: 3px;
+            border-radius: var(--radius-sm);
 
             .cpu-core-label { grid-area: label; }
             .cpu-core-pct { grid-area: pct; min-width: 0; }
@@ -151,7 +151,7 @@
     .cpu-core-square {
         width: var(--sq);
         height: var(--sq);
-        border-radius: 2px;
+        border-radius: var(--radius-sm);
         cursor: default;
         transition:
             background-color var(--duration-moderate) var(--ease-standard),

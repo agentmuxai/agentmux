@@ -260,6 +260,24 @@ mod tests {
         assert!(!obj::is_history_reader(&MetaMapType::new()));
     }
 
+    /// `find_agent_block` (the open path's "this tab already has the agent's pane") skips a reader of
+    /// the agent too, and still finds the live pane beside it.
+    #[test]
+    fn the_tab_lookup_does_not_take_a_history_reader_for_the_agents_pane() {
+        let store = Store::open_in_memory().unwrap();
+        let mut meta = MetaMapType::new();
+        meta.insert("view".to_string(), serde_json::json!("agent"));
+        meta.insert("agentId".to_string(), serde_json::json!("ann"));
+        meta.insert(obj::HISTORY_READER_META_KEY.to_string(), serde_json::json!("ann"));
+        let mut reader = Block { oid: uuid::Uuid::new_v4().to_string(), meta, ..Default::default() };
+        store.insert(&mut reader).unwrap();
+        let tab = insert_tab(&store, &[&reader.oid]);
+        assert!(super::super::find_agent_block(&store, &tab, "ann").unwrap().is_none(), "a reader alone is no pane");
+        let pane = insert_block(&store, "ann", false);
+        let tab = insert_tab(&store, &[&reader.oid, &pane]);
+        assert_eq!(super::super::find_agent_block(&store, &tab, "ann").unwrap().unwrap().oid, pane);
+    }
+
     #[test]
     fn an_unmarked_block_in_no_tab_is_not_the_agents_block() {
         let store = Store::open_in_memory().unwrap();

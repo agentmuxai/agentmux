@@ -90,7 +90,8 @@ pub fn list(windows: &[Window], workspaces: &[Workspace], tabs: &[Tab], blocks: 
                 running: None,
                 parent_block_id: None,
             };
-            for b in tab.blockids.iter().filter_map(|id| block(id)) {
+            // An agent's history reader is not its pane: a paired device lists only live panes.
+            for b in tab.blockids.iter().filter_map(|id| block(id)).filter(|b| !obj::is_history_reader(&b.meta)) {
                 let (label, agent) = (facts.label)(b);
                 let view = obj::meta_get_string(&b.meta, "view", "");
                 if agent || view == "agent" {

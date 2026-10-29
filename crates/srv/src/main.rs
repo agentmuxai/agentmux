@@ -423,6 +423,8 @@ async fn app_main() {
     // Agents' cargo caches are cleared as tasks finish, and the disk is watched
     // (SPEC_BUILD_CACHE_CLEANUP_2026_10_26.md).
     backend::build_cache_service::install(Arc::clone(&state.mstore), Arc::clone(&state.config_watcher));
+    // The version folders and unpacked portables an upgrade leaves behind are listed daily, and cleared on a host that turns it on.
+    backend::old_versions_service::install(Arc::clone(&state.config_watcher));
     // A leader hears from its workers (SPEC_AGENT_WORKERS_2026_10_15.md §3.3).
     backend::worker_notes::install(
         Arc::clone(&state.broker),
