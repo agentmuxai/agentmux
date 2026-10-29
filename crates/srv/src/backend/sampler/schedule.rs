@@ -211,10 +211,16 @@ impl Scheduler {
 
     /// When to call [`Self::due`] next; `None` when nothing is leased.
     pub fn next_wakeup(&self, now: Ms) -> Option<Ms> {
+        self.planned_wakeup(now).map(|t| t.max(now))
+    }
+
+    /// When the next run was planned for, even if that is already past: how late the loop got round to it
+    /// is `now` less this.
+    pub fn planned_wakeup(&self, now: Ms) -> Option<Ms> {
         self.specs
             .iter()
             .filter(|s| self.live(s.id, now).next().is_some())
-            .map(|s| self.state[&s.id].next_due.unwrap_or(now).max(now))
+            .map(|s| self.state[&s.id].next_due.unwrap_or(now))
             .min()
     }
 
@@ -472,6 +478,15 @@ mod tests {
         assert_eq!(tick(&mut s, 4500, 10), [Machine]);
         assert_eq!(s.status(4500)[0].skipped, 3);
         assert_eq!(s.next_wakeup(4500), Some(5500), "one interval on, not four runs in a burst");
+    }
+
+    #[test]
+    fn the_planned_wakeup_stays_in_the_past_when_the_loop_is_behind() {
+        let mut s = sched();
+        s.lease("bar", Machine, 1000, None, 0);
+        tick(&mut s, 0, 10);
+        assert_eq!(s.planned_wakeup(5000), Some(1000), "planned for 1000, however late it is now");
+        assert_eq!(s.next_wakeup(5000), Some(5000), "the sleep target is never in the past");
     }
 
     #[test]

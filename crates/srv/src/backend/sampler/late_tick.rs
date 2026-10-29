@@ -26,8 +26,9 @@ pub struct LateTickLog {
 }
 
 impl LateTickLog {
-    /// A tick planned for `due_ms` that ran at `now_ms` (the same clock): `Some` when it is late enough to
-    /// log and the last line was long enough ago.
+    /// A tick the scheduler planned for `due_ms` (even if that was already past when the loop got there)
+    /// that ran at `now_ms` (the same clock): `Some` when it is late enough to log and the last line was
+    /// long enough ago.
     pub fn check(&mut self, due_ms: u64, now_ms: u64) -> Option<LateTick> {
         let late_ms = now_ms.saturating_sub(due_ms);
         if late_ms < LATE_TICK_WARN_MS {

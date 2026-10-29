@@ -1193,12 +1193,13 @@ pub async fn run_sysinfo_loop(
             watched = has_viewers;
             tracing::debug!(watched, "sysinfo: pane stats {}", if watched { "have a viewer" } else { "have no viewer" });
         }
+        let planned = sched.planned_wakeup(now_ms).unwrap_or(now_ms + interval_ms);
         let wake = sched.next_wakeup(now_ms).unwrap_or(now_ms + interval_ms);
         if wake > now_ms {
             tokio::time::sleep_until(tokio::time::Instant::from_std(epoch + Duration::from_millis(wake))).await;
         }
         let woke_ms = since_epoch(Instant::now());
-        if let Some(late) = late_ticks.check(wake, woke_ms) {
+        if let Some(late) = late_ticks.check(planned, woke_ms) {
             tracing::warn!(late_ms = late.late_ms, also_late = late.also, "sysinfo: a tick ran late; a chart breaks after 3 s without a sample");
         }
         let due = sched.due(woke_ms);
