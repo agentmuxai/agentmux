@@ -186,7 +186,8 @@ export function refocusNode(blockId: string) {
 /**
  * Open or focus a pane by view type.
  * If a block with the given viewType already exists in the current tab's layout,
- * focus it, first merging `focusMeta` into its meta (a section to show, say).
+ * show and focus it (restoring a minimized pane and switching to its tab in a stack),
+ * first merging `focusMeta` into its meta (a section to show, say).
  * Otherwise create a new block using blockDef (defaults to `{ meta: { view: viewType } }`).
  */
 export async function openOrFocusPaneByView(
@@ -210,8 +211,12 @@ export async function openOrFocusPaneIdByView(
             if (blockId) {
                 const node = layoutModel.getNodeByBlockId(blockId);
                 if (node?.id != null) {
-                    // Block is in the active tab — focus it.
+                    // Block is in the active tab — show it, then focus it. focusNode alone leaves a
+                    // minimized pane collapsed and a background tab of a pane's stack hidden.
                     if (focusMeta != null) await setBlockMeta(blockId, focusMeta);
+                    // Loaded here, not at the top: reveal-block reaches back into global.ts, which re-exports this file.
+                    const { showBlockInPane } = await import("@/app/util/reveal-block");
+                    showBlockInPane(layoutModel, node, blockId);
                     layoutModel.focusNode(node.id);
                     giveBlockFocus(blockId);
                     return blockId;
