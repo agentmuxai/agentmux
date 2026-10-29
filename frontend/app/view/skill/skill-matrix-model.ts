@@ -15,26 +15,29 @@ import type { AgentDefinition } from "@/app/store/rpc-api";
 import type { SkillCatalogItem } from "@/types/rpc/SkillCatalogItem";
 
 /** How one agent stands with one skill. */
-export type CellState = "bound" | "reach-all" | "reach-new" | "opted-out" | "none";
+export type CellState = "bound" | "bundle" | "reach-all" | "reach-new" | "opted-out" | "none";
 
 export interface CellFacts {
     bound: boolean;
+    viaBundle: boolean;
     reached: boolean;
     optedOut: boolean;
 }
 
 export const CELL_TEXT: Record<CellState, string> = {
     bound: "Bound",
+    bundle: "Via bundle",
     "reach-all": "Every agent",
     "reach-new": "New agents",
     "opted-out": "Opted out",
     none: "",
 };
 
-/** What the cell shows. An explicit bind wins over a reach. */
+/** What the cell shows. A bind or a bundle wins over a reach: neither is cancelled by an opt-out. */
 export function cellState(skill: SkillCatalogItem, facts: CellFacts | undefined): CellState {
     if (!facts) return "none";
     if (facts.bound) return "bound";
+    if (facts.viaBundle) return "bundle";
     if (facts.optedOut) return "opted-out";
     if (facts.reached) return skill.all_agents ? "reach-all" : "reach-new";
     return "none";
@@ -45,6 +48,8 @@ export function cellAction(state: CellState): string {
     switch (state) {
         case "bound":
             return "Unbind";
+        case "bundle":
+            return "Change it in the bundle";
         case "reach-all":
         case "reach-new":
             return "Opt out";
@@ -77,7 +82,7 @@ export class SkillMatrixModel {
                 try {
                     const list = await RpcApi.SkillCatalogListForAgentCommand(TabRpcClient, { agent_id: agent.id });
                     const facts = new Map<string, CellFacts>();
-                    for (const s of list) facts.set(s.id, { bound: s.bound_to_agent, reached: s.reached, optedOut: s.opted_out });
+                    for (const s of list) facts.set(s.id, { bound: s.bound_to_agent, viaBundle: s.via_bundle, reached: s.reached, optedOut: s.opted_out });
                     return [agent.id, facts] as const;
                 } catch {
                     return null;
@@ -91,6 +96,7 @@ export class SkillMatrixModel {
 
     /** Do what the cell's action says, then ask again. */
     async toggle(agent: AgentDefinition, skill: SkillCatalogItem, state: CellState, agents: AgentDefinition[]): Promise<void> {
+        if (state === "bundle") return;
         this._error[1](null);
         try {
             const ids = { agent_id: agent.id, skill_id: skill.id };

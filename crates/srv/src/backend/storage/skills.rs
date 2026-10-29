@@ -298,12 +298,13 @@ pub struct SkillListItem {
     #[serde(flatten)]
     pub skill: Skill,
     pub bound_to_agent: bool,
-    /// This agent gets the skill without a bind, through its reach (`skill_reach::SkillReach`). Only the
-    /// catalog-tier list for an agent (`skill_list_global_for_agent`) says so; false elsewhere.
+    /// Gets the skill through its reach (`skill_reach`), not a bind; only `skill_list_global_for_agent` says so.
     #[serde(default)]
     pub reached: bool,
-    /// This agent opted out of the skill's reach (`skill_optout`), so `reached` is false.
+    /// Opted out of the skill's reach (`skill_optout`), so `reached` is false.
     pub opted_out: bool,
+    /// One of the agent's bundles holds the skill, so it gets it whatever its reach or opt-out says.
+    pub via_bundle: bool,
 }
 
 /// `skill_list_global`'s response shape: the skill plus how many agents
@@ -345,7 +346,7 @@ impl Store {
         Ok(self
             .managed_list::<Skill>(catalog, Owner::Agent, agent_id)?
             .into_iter()
-            .map(|(skill, bound_to_agent)| SkillListItem { skill, bound_to_agent, reached: false, opted_out: false })
+            .map(|(skill, bound_to_agent)| SkillListItem { skill, bound_to_agent, reached: false, opted_out: false, via_bundle: false })
             .collect())
     }
 
@@ -438,8 +439,7 @@ impl Store {
             .collect())
     }
 
-    /// Catalog-tier sibling of `skill_list` (above) — same `bound_to_agent`
-    /// shape, but deliberately GLOBAL ROWS ONLY, unlike `skill_list`'s UNION
+    /// Catalog-tier sibling of `skill_list` (above) — same `bound_to_agent` shape, but deliberately GLOBAL ROWS ONLY, unlike `skill_list`'s UNION
     /// with `agent_id`'s own private skills. Backs `skill.catalog.list_for_agent`,
     /// which — like every other `skill.catalog.*` command — has no
     /// `check_s1`, so `agent_id` here is caller-supplied and unverified.
@@ -451,7 +451,7 @@ impl Store {
     /// Skills) — so exposing them alongside a caller-chosen agent's bind
     /// status is safe. reagentx P0 on PR #2329.
     pub fn skill_list_global_for_agent(&self, catalog: &Store, agent_id: &str) -> Result<Vec<SkillListItem>, StoreError> {
-        let (reach, optout) = (catalog.skill_reach_map()?, catalog.skill_optout_set_all()?);
+        let (reach, optout, via) = (catalog.skill_reach_map()?, catalog.skill_optout_set_all()?, self.skill_ids_via_bundles(catalog, agent_id));
         let agent_created_at = self.agent_def_get(agent_id).ok().flatten().map_or(0, |d| d.created_at);
         Ok(self
             .managed_list_global_for_agent::<Skill>(catalog, agent_id)?
@@ -459,7 +459,7 @@ impl Store {
             .map(|(skill, bound_to_agent)| {
                 let reaches = reach.get(&skill.id).is_some_and(|r| r.reaches(agent_created_at));
                 let opted_out = reaches && optout.contains(&(skill.id.clone(), agent_id.to_string()));
-                SkillListItem { skill, bound_to_agent, reached: reaches && !opted_out, opted_out }
+                SkillListItem { via_bundle: via.contains(&skill.id), skill, bound_to_agent, reached: reaches && !opted_out, opted_out }
             })
             .collect())
     }

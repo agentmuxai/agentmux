@@ -10,6 +10,7 @@ use rusqlite::params;
 use std::collections::HashSet;
 
 use super::error::StoreError;
+use super::skills::Skill;
 use super::store::Store;
 
 const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS db_skill_optout (
@@ -38,6 +39,14 @@ impl Store {
             conn.execute("DELETE FROM db_skill_optout WHERE skill_id = ?1 AND agent_id = ?2", params![skill_id, agent_id])?;
         }
         Ok(())
+    }
+
+    /// Ids of the skills the agent's bundles hold. A bundle's skill is not the agent's reach, so an
+    /// opt-out does not cancel it. Call on the store that holds the agent.
+    pub fn skill_ids_via_bundles(&self, catalog: &Store, agent_id: &str) -> HashSet<String> {
+        let mut held: Vec<Skill> = Vec::new();
+        self.managed_union_bundle_refs(catalog, agent_id, &mut held);
+        held.into_iter().map(|s| s.id).collect()
     }
 
     /// Drop a deleted skill's opt-outs. Call on the catalog store.
@@ -114,6 +123,40 @@ mod optout_tests {
         c.skill_optout_put("s1", "a1", false).unwrap();
         c.skill_optout_put("s1", "a1", false).unwrap(); // idempotent
         assert!(c.skill_optout_set_all().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_skill_in_the_agents_bundle_is_given_whatever_the_opt_out_says_and_the_list_says_so() {
+        let (m, c) = stores();
+        c.skill_upsert_unique_global(&global_skill("s1")).unwrap();
+        agent(&m, "a1");
+        m.bundle_upsert(&crate::backend::storage::bundles::Bundle {
+            id: "b1".to_string(),
+            name: "Bundle b1".to_string(),
+            description: String::new(),
+            is_blank: false,
+            is_global: false,
+            provider: "claude".to_string(),
+            model: "anthropic".to_string(),
+            instructions: String::new(),
+            instructions_by_provider: "{}".to_string(),
+            context_files: "[]".to_string(),
+            mcp_servers: "[]".to_string(),
+            skills: "[]".to_string(),
+            sort_order: 0,
+            created_at: 1,
+            updated_at: 1,
+            is_system: false,
+        })
+        .unwrap();
+        m.conn().lock().unwrap().execute("UPDATE db_agents SET default_memory_id = 'b1' WHERE id = 'a1'", []).unwrap();
+        m.bundle_skill_bind(&c, &m, "b1", "s1").unwrap();
+        c.skill_set_reach("s1", true, false, 5).unwrap();
+        c.skill_optout_put("s1", "a1", true).unwrap();
+
+        assert_eq!(names(&m, &c, "a1"), ["Skill s1"], "the bundle still gives it");
+        let item = m.skill_list_global_for_agent(&c, "a1").unwrap().into_iter().find(|i| i.skill.id == "s1").unwrap();
+        assert!(item.via_bundle && !item.bound_to_agent);
     }
 
     #[test]

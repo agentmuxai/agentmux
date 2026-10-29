@@ -42,7 +42,12 @@ function skill(id: string, over: Record<string, unknown> = {}) {
     };
 }
 
-const facts = (bound: boolean, reached: boolean, opted_out = false) => ({ bound_to_agent: bound, reached, opted_out });
+const facts = (bound: boolean, reached: boolean, opted_out = false, via_bundle = false) => ({
+    bound_to_agent: bound,
+    reached,
+    opted_out,
+    via_bundle,
+});
 
 beforeEach(() => {
     Object.values(rpc).forEach((f) => f.mockReset().mockResolvedValue(undefined));
@@ -69,10 +74,13 @@ describe("cell state", () => {
     it("a bind wins over a reach, an opt-out over nothing, and the action follows", () => {
         const all = skill("s", { all_agents: true }) as never;
         const fresh = skill("s") as never;
-        expect(cellState(all, { bound: true, reached: true, optedOut: false })).toBe("bound");
-        expect(cellState(all, { bound: false, reached: true, optedOut: false })).toBe("reach-all");
-        expect(cellState(fresh, { bound: false, reached: true, optedOut: false })).toBe("reach-new");
-        expect(cellState(all, { bound: false, reached: false, optedOut: true })).toBe("opted-out");
+        const f = { bound: false, viaBundle: false, reached: false, optedOut: false };
+        expect(cellState(all, { ...f, bound: true, reached: true })).toBe("bound");
+        expect(cellState(all, { ...f, reached: true })).toBe("reach-all");
+        expect(cellState(fresh, { ...f, reached: true })).toBe("reach-new");
+        expect(cellState(all, { ...f, optedOut: true })).toBe("opted-out");
+        // A bundle's skill is given whatever the opt-out says, so the cell says so and does nothing.
+        expect(cellState(all, { ...f, viaBundle: true, optedOut: true })).toBe("bundle");
         expect(cellState(all, undefined)).toBe("none");
         expect(["bound", "reach-all", "opted-out", "none"].map((s) => cellAction(s as never))).toEqual([
             "Unbind",
@@ -114,6 +122,20 @@ describe("Agents and skills grid", () => {
         await waitFor(() =>
             expect(rpc.SkillCatalogSetOptOutCommand).toHaveBeenCalledWith({}, { agent_id: "a2", skill_id: "deploy", opted_out: false }),
         );
+    });
+
+    it("shows a skill the agent's bundle holds as such, even when the agent opted out, and leaves it alone", async () => {
+        rpc.SkillCatalogListCommand.mockResolvedValue([skill("kit", { all_agents: true })]);
+        rpc.SkillCatalogListForAgentCommand.mockImplementation(() =>
+            Promise.resolve([{ ...skill("kit"), ...facts(false, false, true, true) }]),
+        );
+        await open();
+        await waitFor(() => expect(cell("Korp", "kit").textContent).toBe("Via bundle"));
+        const button = cell("Korp", "kit") as HTMLButtonElement;
+        expect(button.disabled).toBe(true);
+        fireEvent.click(button);
+        expect(rpc.SkillCatalogSetOptOutCommand).not.toHaveBeenCalled();
+        expect(rpc.SkillCatalogBindCommand).not.toHaveBeenCalled();
     });
 
     it("says why a change failed and keeps the grid", async () => {
