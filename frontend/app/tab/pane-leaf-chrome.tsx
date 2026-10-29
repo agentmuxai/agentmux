@@ -4,6 +4,7 @@
 import { Block, resolveEffectiveViewType } from "@/app/block/block";
 import { getPaneTab, isKeepAliveView } from "@/app/block/pane-tab-registry";
 import { renderPaneChromeShell } from "@/app/element/PaneChrome";
+import { setBlockMinimized } from "@/app/block/pane-minimized";
 import { setKeepAliveBlockDormant } from "@/app/store/block-component-registry";
 import { agentMountForgotten, agentMountSettled, expectAgentMount } from "@/app/tab/agent-mount-watch";
 import { PaneStackMemberActiveProvider, usePaneStackMemberActive } from "@/app/tab/pane-stack-member";
@@ -350,6 +351,18 @@ export function PaneLeafChrome(props: { nodeModel: NodeModel }): JSX.Element {
     });
     onCleanup(() => {
         for (const id of stackBlockIds()) agentMountForgotten(id);
+    });
+
+    // A minimized pane is not on screen, whichever of its tabs is in front: every member is
+    // dormant in the visibility signal, so a row of minimized agents stops doing the work of
+    // visible ones. Restoring the pane makes the front member active again.
+    createEffect(() => {
+        // A maximized pane shows its content in the overlay, so it is on screen even while its flag stays minimized.
+        const minimized = (nodeModel.isMinimized?.() ?? false) && !(nodeModel.isMagnified?.() ?? false);
+        for (const id of stackBlockIds()) setBlockMinimized(id, minimized);
+    });
+    onCleanup(() => {
+        for (const id of stackBlockIds()) setBlockMinimized(id, false);
     });
 
     // The NodeModel chrome itself renders with — plain passthrough when not
