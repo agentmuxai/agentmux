@@ -309,7 +309,7 @@ async fn five_hundred_reads_do_not_push_the_sends_out_of_the_count() {
         w2.store.google_call_log("acc-1", &line("other", "send_draft", "ok", now - 5000 - i)).unwrap();
         w2.store.google_call_log("acc-1", &line("def-1", "send_draft", "error: no", now - 5000 - i)).unwrap();
     }
-    assert_eq!(w2.store.google_calls_count("acc-1", "def-1", "gmail", &["send_draft"], now - 86_400_000, true).unwrap(), 0);
+    assert_eq!(w2.store.google_calls_count("acc-1", "def-1", "gmail", &["send_draft"], now - 86_400_000, CallsCounted::Ok).unwrap(), 0);
 }
 
 #[tokio::test]
@@ -377,4 +377,34 @@ async fn a_draft_replying_in_a_thread_gets_the_threads_headers() {
     let e = run(&w, &none, &Person::says(Answer::No), "create_draft", json!({ "thread_id": "t1", "to": ["a@example.com"] })).await.unwrap_err();
     assert!(e.contains("no Message-ID"), "{e}");
     assert_eq!(none.seen().len(), 1);
+}
+
+#[tokio::test]
+async fn only_calls_that_put_a_question_to_the_person_count_toward_the_hourly_limit() {
+    let w = world(WRITE_SCOPES, Some(GrantLevel::Write));
+    let now = chrono::Utc::now().timestamp_millis();
+    let line = |outcome: &str, i: i64| crate::backend::storage::google_grants::GoogleCall {
+        at: now - 1000 - i,
+        agent_id: "def-1".into(),
+        agent_name: "Naki".into(),
+        service: "gmail".into(),
+        action: "send_draft".into(),
+        ids: String::new(),
+        outcome: outcome.into(),
+    };
+    // Twenty calls that never showed a window: refused for the limit, a bad id, no recipient, a failed read.
+    for i in 0..20 {
+        let why = ["error: you have asked the person 10 times in the last hour", "error: \"x\" isn't a Gmail id", "error: the draft has no recipient", "error: Google answered HTTP 500"][i % 4];
+        w.store.google_call_log("acc-1", &line(why, i as i64)).unwrap();
+    }
+    let count = |w: &World| w.store.google_calls_count("acc-1", "def-1", "gmail", &["send_draft", "trash_thread"], now - 3_600_000, CallsCounted::Asked).unwrap();
+    assert_eq!(count(&w), 0);
+    // A yes, a no and no answer did.
+    for (i, o) in ["ok", "error: the person said no, so sending was not done", "error: the person didn't answer, so sending was not done"].into_iter().enumerate() {
+        w.store.google_call_log("acc-1", &line(o, 100 + i as i64)).unwrap();
+    }
+    assert_eq!(count(&w), 3);
+    // So an agent that keeps retrying a typo is never locked out, and one that is asked ten times is.
+    let e = run(&w, &StubGoogle::new(vec![]), &Person::says(Answer::Yes), "send_draft", json!({ "draft_id": "../x" })).await.unwrap_err();
+    assert!(e.contains("isn't a Gmail id"), "{e}");
 }

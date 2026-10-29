@@ -15,7 +15,7 @@ use std::future::Future;
 use chrono::{DateTime, Utc};
 use serde_json::{json, Value};
 
-use crate::backend::storage::google_grants::GrantLevel;
+use crate::backend::storage::google_grants::{CallsCounted, GrantLevel};
 use crate::backend::storage::store::AgentDefinition;
 use crate::identity::oauth_tokens::{access_token_for, HttpReply, OAuthHttp, TokenSecrets};
 
@@ -187,11 +187,11 @@ impl Drop for Asking {
 /// account only.
 fn reserve(deps: &CallDeps<'_, impl GoogleHttp, impl OAuthHttp, impl TokenSecrets>, access: &Access, def: &AgentDefinition, now: DateTime<Utc>, send: bool) -> Result<Asking, String> {
     let ms = now.timestamp_millis();
-    let count = |actions: &[&str], since: i64, ok: bool| {
-        deps.identity_store.google_calls_count(&access.account.id, &def.id, "gmail", actions, since, ok).map_err(|e| format!("store: {e}"))
+    let count = |actions: &[&str], since: i64, which: CallsCounted| {
+        deps.identity_store.google_calls_count(&access.account.id, &def.id, "gmail", actions, since, which).map_err(|e| format!("store: {e}"))
     };
-    let asked = count(&["send_draft", "trash_thread"], ms - 3_600_000, false)?;
-    let sent = if send { count(&["send_draft"], ms - 86_400_000, true)? } else { 0 };
+    let asked = count(&["send_draft", "trash_thread"], ms - 3_600_000, CallsCounted::Asked)?;
+    let sent = if send { count(&["send_draft"], ms - 86_400_000, CallsCounted::Ok)? } else { 0 };
     // Per store as well as account and agent: one store in srv, one per test.
     let key = (std::sync::Arc::as_ptr(deps.identity_store) as usize, access.account.id.clone(), def.id.clone());
     let mut pending = in_flight();
