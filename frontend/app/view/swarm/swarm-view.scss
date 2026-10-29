@@ -1028,7 +1028,7 @@
         overflow-y: auto;
         background: var(--swarm-compartment-bg);
         border: 1px solid var(--border-color);
-        border-radius: var(--radius-md, 6px);
+        border-radius: var(--radius-md);
 
         // Their own bars and dividers become the compartment's inner structure.
         > .swarm-fleet-toolbar,
