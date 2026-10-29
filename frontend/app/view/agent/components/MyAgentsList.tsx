@@ -486,7 +486,7 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
         const fs = getForkState(row.definition_id);
         if (fs.kind !== "naming" || !fs.label.trim()) return;
         const label = fs.label.trim();
-        setForkState(row.definition_id, { kind: "naming", label, loading: true, error: null });
+        setForkState(row.definition_id, { kind: "naming", label, loading: true, error: null, edited: fs.edited });
         try {
             await props.onFork?.(row, label);
             setForkState(row.definition_id, { kind: "idle" });
@@ -496,6 +496,8 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                 label,
                 loading: false,
                 error: err instanceof Error ? err.message : String(err),
+                // A failed start keeps the panel (and its error) up whatever the name was.
+                edited: true,
             });
         }
     };

@@ -69,12 +69,13 @@ const mountAlreadyOpen = async () => {
 };
 
 /** The agent runs with no pane: clicking it shows the no-pane prompt. */
-const mountNoPane = async () => {
+const mountNoPane = async (extra: { onFork?: () => Promise<void> } = {}) => {
     load([makeRow()]);
     render(() => (
         <MyAgentsList
             onReattach={() => {}}
             onAttach={() => {}}
+            onFork={extra.onFork}
             runtimeOf={() => ({
                 agent_id: "def-1",
                 state: "working",
@@ -171,5 +172,17 @@ describe("the naming step", () => {
         await userEvent.click(document.body);
         expect(screen.queryByTestId("agent-fork-prompt")).not.toBeNull();
         expect((screen.getByTestId("agent-fork-name-input") as HTMLInputElement).value).toContain("v2");
+    });
+
+    it("stays after a failed start, with its error, when a click lands outside", async () => {
+        await mountNoPane({ onFork: async () => Promise.reject(new Error("boom")) });
+        await userEvent.click(screen.getByTestId("agent-fork-fork"));
+        const input = (await screen.findByTestId("agent-fork-name-input")) as HTMLInputElement;
+        await waitFor(() => expect(input.value).not.toBe(""));
+        await userEvent.click(screen.getByTestId("agent-fork-start"));
+        await screen.findByText("boom");
+        await userEvent.click(document.body);
+        expect(screen.queryByTestId("agent-fork-prompt")).not.toBeNull();
+        expect(screen.queryByText("boom")).not.toBeNull();
     });
 });
