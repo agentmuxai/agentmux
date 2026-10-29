@@ -12,7 +12,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const reveal = vi.fn();
 const focusWindow = vi.fn();
 
-vi.mock("@/app/util/reveal-block", () => ({ revealBlockLocally: (...a: unknown[]) => reveal(...a) }));
+vi.mock("@/app/util/reveal-block", () => ({ revealBlock: async (...a: unknown[]) => ((await reveal(...a)) ? { ok: true } : { ok: false, reason: "not-found" }) }));
 vi.mock("@/app/store/agent-pane-state-store", () => ({ addEventListener: () => () => {} }));
 vi.mock("@/app/store/focusManager", () => ({ focusManager: { blockFocusAtom: () => null } }));
 vi.mock("@/app/store/window-identity", () => ({ windowId: () => "w1" }));
@@ -34,10 +34,10 @@ beforeEach(() => {
 });
 
 describe("activateBlockLocally", () => {
-    it("reveals the block through revealBlockLocally, passing srv's tab, then raises this window", async () => {
+    it("reveals the block through revealBlock in this window, passing srv's tab, then raises this window", async () => {
         reveal.mockResolvedValue(true);
         expect(await activateBlockLocally("b1", "tab-7")).toBe(true);
-        expect(reveal).toHaveBeenCalledWith("b1", { tabId: "tab-7" });
+        expect(reveal).toHaveBeenCalledWith("b1", { tabId: "tab-7", source: "os-notify", localOnly: true });
         expect(focusWindow).toHaveBeenCalledWith("main");
     });
 

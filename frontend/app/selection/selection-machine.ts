@@ -20,6 +20,8 @@ export interface Intent {
     tabHint?: string;
     /** Put the caret in the block (its composer or terminal). */
     focusCaret: boolean;
+    /** Look in this window only: a block that is not here is not found, and no other window is asked. */
+    localOnly: boolean;
 }
 
 /** Why a pane could not be shown, in the words of the notice (selection-trace and notice text map them). */
@@ -170,6 +172,7 @@ export function transition(state: SelectionState, event: SelectionEvent): Transi
             if (state.kind !== "resolving") return same(state);
             if (event.where === "none") return fail(state, intent, "not-found");
             if (event.where === "other") {
+                if (intent.localOnly) return fail(state, intent, "not-found");
                 return enter(state, intent, { kind: "handoff" }, [{ type: "handoff", intentId: intent.id, blockId }]);
             }
             return event.active

@@ -14,7 +14,7 @@ import {
     type SelectionStateKind,
 } from "./selection-machine";
 
-const intent = (id: number, blockId = "blk"): Intent => ({ id, blockId, source: "swarm", focusCaret: true });
+const intent = (id: number, blockId = "blk"): Intent => ({ id, blockId, source: "swarm", focusCaret: true, localOnly: false });
 
 /** Feed events in order; the state after, and every effect they produced. */
 function run(events: SelectionEvent[], from: SelectionState = IDLE) {

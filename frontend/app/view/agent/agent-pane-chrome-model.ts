@@ -5,7 +5,7 @@
 
 import { getOpenBlockIdsForDefinition } from "@/app/store/agent-pane-state-store";
 import { MOS } from "@/app/store/global";
-import { revealBlockLocally } from "@/app/util/reveal-block";
+import { revealBlock } from "@/app/util/reveal-block";
 import { setActiveBlockInStack, type NodeModel } from "@/layout/index";
 import { findNode } from "@/layout/lib/layoutNode";
 import { createMemo } from "solid-js";
@@ -117,7 +117,7 @@ export function buildAgentPaneChromeModel(anchorBlockId: string, nodeModel: Node
     // Activating a tab has two cases, both "switch," neither "create": (1)
     // the target block already lives in THIS pane's own block-stack — swap
     // the active member in place; (2) a fork open as its own separate
-    // top-level pane of this window tab — reveal it via revealBlockLocally,
+    // top-level pane of this window tab — reveal it via revealBlock,
     // same as the picker's "Switch to existing" flow already does.
     const handleTabSwitch = (targetBlockId: string) => {
         if (targetBlockId === activeBlockId()) return;
@@ -139,7 +139,7 @@ export function buildAgentPaneChromeModel(anchorBlockId: string, nodeModel: Node
         } else {
             // Another pane — switch it to the fork if it's a background tab
             // there (refocusNode only focused the pane).
-            void revealBlockLocally(targetBlockId);
+            void revealBlock(targetBlockId, { source: "pane-tab", localOnly: true });
         }
     };
     // × on a tab (also middle-click, via PaneTabStrip's onMouseDown).

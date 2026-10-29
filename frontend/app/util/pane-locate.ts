@@ -6,7 +6,7 @@
  * popover, the agent picker, or another window asking), its pane flashes once
  * in its own colour so the user can see which pane was just selected.
  *
- * `revealBlockLocally` asks (`emitPaneLocate`). The pane that owns the block
+ * `revealBlock` asks (`emitPaneLocate`). The pane that owns the block
  * waits until it is actually on screen (`whenPaneReady`), then shows the
  * overlay (`showLocateFlash`) and tells its tab pills to light up
  * (`emitPaneLocatePlay`). A reveal can switch the window tab or raise another

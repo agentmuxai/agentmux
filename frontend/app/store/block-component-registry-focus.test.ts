@@ -19,7 +19,7 @@ const layout = vi.hoisted(() => ({
 }));
 const createBlock = vi.hoisted(() => vi.fn(async () => "new-block"));
 const showBlockInPane = vi.hoisted(() => vi.fn());
-const revealBlockLocally = vi.hoisted(() => vi.fn(async (_id: string, _opts?: unknown) => true));
+const revealBlock = vi.hoisted(() => vi.fn(async (_id: string, _opts?: unknown) => ({ ok: true }) as { ok: boolean; reason?: string }));
 
 vi.mock("@/layout/index", () => ({ getLayoutModelForStaticTab: () => layout.model }));
 vi.mock("./block-layout-actions", () => ({ createBlock }));
@@ -28,9 +28,9 @@ vi.mock("./block-meta", () => ({ setBlockMeta: vi.fn(async () => {}) }));
 vi.mock("./focusManager", () => ({ giveBlockFocus: (id: string) => void calls.push(`give:${id}`) }));
 vi.mock("./block-atom-cache", () => ({ cleanupBlockAtomCache: vi.fn() }));
 vi.mock("@/app/util/reveal-block", () => ({
-    revealBlockLocally: async (id: string, opts?: unknown) => {
+    revealBlock: async (id: string, opts?: unknown) => {
         calls.push(`reveal:${id}`);
-        return revealBlockLocally(id, opts);
+        return revealBlock(id, opts);
     },
     showBlockInPane: (...args: unknown[]) => {
         calls.push(`show:${(args[1] as { id: string }).id}:${args[2]}`);
@@ -47,8 +47,8 @@ describe("openOrFocusPaneIdByView", () => {
     beforeEach(() => {
         calls.length = 0;
         showBlockInPane.mockClear();
-        revealBlockLocally.mockClear();
-        revealBlockLocally.mockResolvedValue(true);
+        revealBlock.mockClear();
+        revealBlock.mockResolvedValue({ ok: true });
         createBlock.mockClear();
     });
     afterEach(() => {
@@ -83,18 +83,29 @@ describe("openOrFocusPaneIdByView", () => {
         register("warden-2", "warden");
         layout.nodes.set("warden-2", { id: "node-2" });
         expect(await openOrFocusPaneIdByView("warden")).toBe("warden-2");
-        expect(revealBlockLocally).not.toHaveBeenCalled();
+        expect(revealBlock).not.toHaveBeenCalled();
         unregisterBlockComponentModel("warden-2");
     });
 
     it("opens a new pane when the pane in another tab cannot be shown, or there is none", async () => {
         register("warden-1", "warden");
-        revealBlockLocally.mockResolvedValue(false);
+        revealBlock.mockResolvedValue({ ok: false, reason: "not-found" });
         expect(await openOrFocusPaneIdByView("warden")).toBe("new-block");
         unregisterBlockComponentModel("warden-1");
         createBlock.mockClear();
         expect(await openOrFocusPaneIdByView("warden")).toBe("new-block");
         expect(createBlock).toHaveBeenCalledTimes(1);
         expect(showBlockInPane).not.toHaveBeenCalled();
+    });
+
+    it("keeps the pane in another tab when it was only slow or a newer click took over, instead of opening a copy", async () => {
+        register("warden-1", "warden");
+        for (const reason of ["superseded", "layout-timeout", "mismatch"]) {
+            revealBlock.mockResolvedValue({ ok: false, reason });
+            expect(await openOrFocusPaneIdByView("warden")).toBe("warden-1");
+        }
+        expect(createBlock).not.toHaveBeenCalled();
+        revealBlock.mockResolvedValue({ ok: false, reason: "gone" });
+        expect(await openOrFocusPaneIdByView("warden")).toBe("new-block");
     });
 });
