@@ -114,20 +114,6 @@
 
 .native-memory-history-revert-btn {
     flex-shrink: 0;
-    padding: var(--space-1) var(--space-2);
-    border: 1px solid var(--border-color);
-    background: transparent;
-    color: var(--main-text-color);
-    font-size: var(--text-xs);
-    cursor: default;
-
-    &:hover:not(:disabled) {
-        background: var(--hover-bg-color);
-    }
-
-    &:disabled {
-        opacity: 0.5;
-    }
 }
 
 .native-memory-history-revert-confirm {

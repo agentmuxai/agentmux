@@ -260,6 +260,8 @@ describe("collect", () => {
 
     it("counts each <button", () => {
         expect(countButtons("<button>\n<button\n  type='x'>\n<buttons>")).toBe(2);
+        // A comment that mentions the element isn't one.
+        expect(countButtons("// not a native <button>\n/** nor a <button> here */\n<button>")).toBe(1);
     });
 });
 

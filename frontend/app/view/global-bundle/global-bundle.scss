@@ -159,18 +159,7 @@ code.global-bundle-file-label {
 }
 
 .global-memory-import-button {
-    padding: var(--space-1) var(--space-2);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-sm);
-    background: var(--main-bg-color);
-    color: var(--main-text-color);
-    font-size: var(--text-sm);
     white-space: nowrap;
-    cursor: default;
-
-    &:disabled {
-        opacity: 0.5;
-    }
 }
 
 .global-memory-import-message {

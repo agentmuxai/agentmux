@@ -88,7 +88,7 @@ const isTest = (p) => /\.test\.(tsx?|mjs)$/.test(p);
 // ── Rule 1: hand-rolled buttons ─────────────────────────────────────────────
 
 export function countButtons(source) {
-    return (source.match(/<button\b/g) ?? []).length;
+    return (stripScriptComments(source).match(/<button\b/g) ?? []).length;
 }
 
 // ── SCSS walking (rules 2 and 3) ────────────────────────────────────────────

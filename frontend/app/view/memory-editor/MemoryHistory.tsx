@@ -140,13 +140,14 @@ export function MemoryHistory<V extends MemoryVersionMeta>(props: MemoryHistoryP
                                             <Show
                                                 when={confirmingRevert() === v.id}
                                                 fallback={
-                                                    <button
+                                                    <Button
                                                         class="native-memory-history-revert-btn"
+                                                        density="compact"
                                                         disabled={model.revertingAtom() || props.revertDisabled}
                                                         onClick={() => setConfirmingRevert(v.id)}
                                                     >
                                                         Revert to this
-                                                    </button>
+                                                    </Button>
                                                 }
                                             >
                                                 <div class="native-memory-history-revert-confirm">

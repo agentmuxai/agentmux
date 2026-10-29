@@ -61,6 +61,7 @@ import { NativeMemoryCreate } from "./NativeMemoryCreate";
 import { MEMORY_AGENT_KEY } from "@/app/view/section-pane/panes";
 import "./native-memory-manager.scss";
 import { matchesEveryWord } from "@/app/util/fuzzysearch";
+import { Button } from "@/app/element/ui";
 
 const MEMORY_SORT_STORAGE_KEY = "nativeMemory:sortBy";
 
@@ -675,9 +676,9 @@ export function NativeMemoryManager(props: { pane?: NativeMemoryPane }): JSX.Ele
                             agent grid, so the file grid is a real stop on the path
                             and not a screen you can only leave by starting over. */}
                         <div class="native-memory-manager-header">
-                            <button
-                                type="button"
+                            <Button
                                 class="native-memory-manager-back"
+                                density="compact"
                                 onClick={() => {
                                     if (!selectedFilename()) {
                                         setSelectedAgent(null);
@@ -688,7 +689,7 @@ export function NativeMemoryManager(props: { pane?: NativeMemoryPane }): JSX.Ele
                                 }}
                             >
                                 {selectedFilename() ? "← All files" : "← All agents"}
-                            </button>
+                            </Button>
                             <span class="native-memory-manager-crumbs">
                                 <span class="native-memory-manager-agent-name">{agentLabel(agent())}</span>
                                 <Show when={unverified()}>
