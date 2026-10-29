@@ -58,7 +58,7 @@ pub(crate) const BROWSER_TOOL: &str = r#"{
       "pane":            { "type": "string", "description": "A pane id from open, or a popup's id from a snapshot. Default: your own pane, if it is a browser pane" },
       "url":             { "type": "string", "description": "open: an http:// or https:// URL; navigate: the URL to go to" },
       "allowed_origins": { "type": "array", "items": { "type": "string" }, "description": "open: keep the pane on these sites. Each is example.com (https://example.com), *.example.com (it and its subdomains, https) or a full origin like http://localhost:3000; url must be on the list. Include every site a sign-in on the way needs" },
-      "profile":         { "type": "string", "description": "open: whose sign-ins the pane browses with. Omit for the user's own (Personal); \"incognito\" for a fresh jar gone when the pane closes; or a profile the user has let agents use (Settings > Browser)" },
+      "profile":         { "type": "string", "description": "open: whose sign-ins the pane browses with. Omit for your default: the user's own (Personal) for an agent on the user's machine, a fresh Incognito jar for a container agent; \"incognito\" for a fresh jar gone when the pane closes; or a profile the user has let agents use (Settings > Browser). The answer says which one the pane got" },
       "split":           { "type": "string", "enum": ["right", "left", "up", "down"], "description": "open: where to place the pane relative to yours (default right)" },
       "title":           { "type": "string", "description": "open: the pane's title" },
       "ref":             { "type": "string", "description": "click, fill, select, check, set_files: an element's ref from the latest snapshot or a find, e.g. \"e12\" or \"n1e2\"" },
