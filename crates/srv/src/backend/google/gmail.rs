@@ -253,12 +253,22 @@ fn has_unloaded_text(payload: &Value) -> bool {
     is_external_text(payload) || payload.get("parts").and_then(Value::as_array).is_some_and(|ps| ps.iter().any(has_unloaded_text))
 }
 
-/// Gmail's text parts are base64url; decode one, lossily.
-fn decode(data: &str) -> String {
-    base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .decode(data.trim_end_matches('='))
-        .map(|b| String::from_utf8_lossy(&b).into_owned())
-        .unwrap_or_default()
+/// The charset a part's `Content-Type` header declares (`text/plain; charset="ISO-8859-1"`), if any.
+fn charset_of(part: &Value) -> Option<String> {
+    let ct = header(part, "Content-Type").to_ascii_lowercase();
+    let after = ct.split("charset=").nth(1)?;
+    let name = after.split(';').next()?.trim().trim_matches('"').trim_matches('\'');
+    (!name.is_empty()).then(|| name.to_string())
+}
+
+/// Gmail's text parts are base64url; decode one in the charset its part declares (UTF-8 when none is
+/// declared or the name is unknown), replacing what doesn't decode.
+fn decode(data: &str, charset: Option<&str>) -> String {
+    let Ok(bytes) = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(data.trim_end_matches('=')) else {
+        return String::new();
+    };
+    let enc = charset.and_then(|c| encoding_rs::Encoding::for_label(c.as_bytes())).unwrap_or(encoding_rs::UTF_8);
+    enc.decode(&bytes).0.into_owned()
 }
 
 /// HTML as plain text: tags dropped, the common entities decoded, `script` and `style` removed.
@@ -296,7 +306,7 @@ fn body_text(payload: &Value) -> String {
         if s(part, "/mimeType") == mime {
             let data = s(part, "/body/data");
             if !data.is_empty() {
-                out.push(decode(data));
+                out.push(decode(data, charset_of(part).as_deref()));
             }
         }
         if let Some(parts) = part.get("parts").and_then(Value::as_array) {

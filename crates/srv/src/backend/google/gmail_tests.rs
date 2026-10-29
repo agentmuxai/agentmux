@@ -167,3 +167,18 @@ fn a_stored_part_is_asked_for_by_message_and_attachment_id_and_a_path_is_refused
     assert_eq!(r.url, "https://gmail.googleapis.com/gmail/v1/users/me/messages/m1/attachments/ATT_text-1");
     assert!(part_plan("m1", "../x").is_err() && part_plan("m1", "").is_err() && part_plan("../m", "a").is_err());
 }
+
+#[test]
+fn text_is_read_in_the_charset_its_part_declares() {
+    let latin1 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode([b'C', b'a', b'f', 0xE9]);
+    let sjis = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode([0x93, 0xFA, 0x96, 0x7B]);
+    let part = |ct: &str, data: &str| json!({ "id": "m", "payload": { "mimeType": "text/plain", "headers": [{ "name": "Content-Type", "value": ct }], "body": { "data": data } } });
+    let body = |m: serde_json::Value| shape("get_thread", &json!({ "id": "t", "messages": [m] }))["messages"][0]["body"].as_str().unwrap().to_string();
+    assert_eq!(body(part("text/plain; charset=\"ISO-8859-1\"", &latin1)), "Café");
+    assert_eq!(body(part("text/plain; charset=Shift_JIS; format=flowed", &sjis)), "日本");
+    // No charset, or one nobody knows: UTF-8, with what doesn't decode replaced.
+    let utf8 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode("Café");
+    assert_eq!(body(part("text/plain", &utf8)), "Café");
+    assert_eq!(body(part("text/plain; charset=x-made-up", &utf8)), "Café");
+    assert_eq!(body(json!({ "id": "m", "payload": { "mimeType": "text/plain", "body": { "data": utf8 } } })), "Café");
+}
