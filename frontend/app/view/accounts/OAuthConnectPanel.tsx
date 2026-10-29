@@ -27,6 +27,9 @@ import { oauthInfo } from "./oauth-catalog";
 import { isBlockedError, setOAuthNote } from "./oauth-account-state";
 import { createOAuthClientState, OAuthClientSection } from "./OAuthClientSection";
 import { Button } from "@/app/element/ui";
+import { muxbusDelivery } from "@/store/muxbus-delivery";
+import { githubNeedsCloudSignIn, isNeedsCloudSignInError } from "./github-cloud-gate";
+import { GithubCloudSignIn } from "./GithubCloudSignIn";
 import "./oauth-connect.scss";
 
 const POLL_INTERVAL_MS = 2000;
@@ -207,6 +210,13 @@ export function OAuthConnectPanel(props: OAuthConnectPanelProps): JSX.Element {
     };
 
     const label = PROVIDER_LABELS[props.provider] ?? props.provider;
+    // GitHub through AgentMux's own App needs the Cloud sign-in: say so, with the sign-in, in place of Connect.
+    const needsCloud = () =>
+        githubNeedsCloudSignIn(
+            props.provider,
+            client.state.loaded() && !client.state.showFields() && client.state.info()?.saved !== true,
+            muxbusDelivery(),
+        );
 
     return (
         <div class="oauth-connect">
@@ -216,22 +226,38 @@ export function OAuthConnectPanel(props: OAuthConnectPanelProps): JSX.Element {
 
             {/* Idle: the client + Connect */}
             <Show when={status() == null}>
-                <OAuthClientSection client={client} />
-                <div class="identity-key-actions">
-                    <Button
-                        tone="accent"
-                        class="identity-btn identity-btn-primary"
-                        disabled={busy() || !client.state.loaded()}
-                        onClick={() => void connect()}
-                    >
-                        {busy() ? "Starting…" : props.accountId ? "Reconnect" : `Connect ${label}`}
-                    </Button>
-                    <Show when={props.onCancel}>
-                        <Button class="identity-btn identity-btn-secondary" onClick={() => props.onCancel?.()}>
-                            Cancel
+                <Show
+                    when={!needsCloud()}
+                    fallback={
+                        <>
+                            <GithubCloudSignIn />
+                            <Show when={props.onCancel}>
+                                <div class="identity-key-actions">
+                                    <Button class="identity-btn identity-btn-secondary" onClick={() => props.onCancel?.()}>
+                                        Cancel
+                                    </Button>
+                                </div>
+                            </Show>
+                        </>
+                    }
+                >
+                    <OAuthClientSection client={client} />
+                    <div class="identity-key-actions">
+                        <Button
+                            tone="accent"
+                            class="identity-btn identity-btn-primary"
+                            disabled={busy() || !client.state.loaded()}
+                            onClick={() => void connect()}
+                        >
+                            {busy() ? "Starting…" : props.accountId ? "Reconnect" : `Connect ${label}`}
                         </Button>
-                    </Show>
-                </div>
+                        <Show when={props.onCancel}>
+                            <Button class="identity-btn identity-btn-secondary" onClick={() => props.onCancel?.()}>
+                                Cancel
+                            </Button>
+                        </Show>
+                    </div>
+                </Show>
             </Show>
 
             {/* Running: device code or browser prompt */}
@@ -347,6 +373,8 @@ function ConfirmUser(props: {
 
 /** A flow's error; an organization's block gets its own heading (spec §7). */
 function FlowError(props: { error: string }): JSX.Element {
+    // srv asking for the AgentMux Cloud sign-in is a question with an answer, not an error.
+    if (isNeedsCloudSignInError(props.error)) return <GithubCloudSignIn />;
     return (
         <div class="identity-form-error" role="alert">
             <Show when={isBlockedError(props.error)}>
