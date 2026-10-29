@@ -57,6 +57,41 @@ fn parse(stdout: &[u8]) -> Result<HostToken, String> {
     Ok(HostToken { token: Zeroizing::new(out.token), expires_at: out.expires_at.unwrap_or(0), bot_slug })
 }
 
+/// The numeric id in GitHub's answer for a user (`GET /users/<login>`).
+fn parse_user_id(body: &[u8]) -> Option<u64> {
+    #[derive(Deserialize)]
+    struct User {
+        id: u64,
+    }
+    serde_json::from_slice::<User>(body).ok().map(|u| u.id)
+}
+
+/// The user id of the bot `<slug>[bot]`, which `gh-agent` doesn't say: a commit's author email is
+/// `<id>+<slug>[bot]@users.noreply.github.com`. A public lookup, asked once per bot and kept; `None`
+/// when GitHub can't be reached, and then the commit keeps its own author.
+pub async fn bot_user_id(slug: &str) -> Option<u64> {
+    static KNOWN: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, u64>>> = std::sync::OnceLock::new();
+    let known = KNOWN.get_or_init(Default::default);
+    if let Some(id) = known.lock().unwrap_or_else(|e| e.into_inner()).get(slug) {
+        return Some(*id);
+    }
+    if !is_name(slug) {
+        return None;
+    }
+    let client = reqwest::Client::builder().timeout(Duration::from_secs(5)).user_agent("agentmux-srv").build().ok()?;
+    let resp = client
+        .get(format!("https://api.github.com/users/{slug}%5Bbot%5D"))
+        .header("Accept", "application/vnd.github+json")
+        .send()
+        .await
+        .ok()?
+        .error_for_status()
+        .ok()?;
+    let id = parse_user_id(&resp.bytes().await.ok()?)?;
+    known.lock().unwrap_or_else(|e| e.into_inner()).insert(slug.to_string(), id);
+    Some(id)
+}
+
 /// A token for `owner/repo`, minted for the agent `slug`.
 pub async fn token_for(slug: &str, owner: &str, repo: &str) -> Result<HostToken, String> {
     if !is_name(owner) || !is_name(repo) {
@@ -96,6 +131,13 @@ mod tests {
         for bad in ["", "-x", ".hidden", "a b", "a/b", "a;b", "--repo", "a\nb", &"x".repeat(101)] {
             assert!(!is_name(bad), "{bad:?}");
         }
+    }
+
+    #[test]
+    fn the_bots_user_id_is_read_from_githubs_answer() {
+        assert_eq!(parse_user_id(br#"{"login":"muxagent[bot]","id":331051269,"type":"Bot"}"#), Some(331051269));
+        assert_eq!(parse_user_id(br#"{"message":"Not Found"}"#), None);
+        assert_eq!(parse_user_id(b"x"), None);
     }
 
     #[test]

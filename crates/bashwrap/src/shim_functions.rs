@@ -137,6 +137,11 @@ esac"#,
         // `gh pr create` runs with the arguments the owner-tag helper gave; `gh pr list` with its own.
         assert_eq!(run("gh pr create --body x", "1", "", "").0, "gh args=pr create --body x --tagged");
         assert_eq!(run("gh pr list", "1", "", "").0, "gh args=pr list");
+        // `gh auth status` says how gh is signed in, not "not logged in"; without the switch it is plain gh.
+        let (said, code) = run("gh auth status", "1", "", "");
+        assert!(said.starts_with("github.com") && said.contains("per repository") && !said.contains("gh args="), "{said}");
+        assert_eq!(code, Some(0));
+        assert_eq!(run("gh auth status", "", "", "").0, "gh args=auth status");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
