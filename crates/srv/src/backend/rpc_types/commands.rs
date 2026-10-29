@@ -601,6 +601,8 @@ pub const COMMAND_HISTORY_AGENTS: &str = "history.agents";
 pub const COMMAND_HISTORY_AGENT_SESSIONS: &str = "history.agent_sessions";
 // The line the Agent History view loads up to for a time or a session's end.
 pub const COMMAND_HISTORY_LOCATE: &str = "history.locate";
+// The Audit view's merged list of jekts, actions, registrations and agent starts and ends (backend::audit_query). The window's, not an agent API.
+pub const COMMAND_AUDIT_QUERY: &str = "audit.query";
 /// The shells installed here, and which one a new local terminal starts with (`backend::shells`).
 pub const COMMAND_SHELL_LIST: &str = "shell.list";
 
@@ -764,6 +766,8 @@ pub const COMMAND_SKILL_CATALOG_LIST_FOR_AGENT: &str = "skill.catalog.list_for_a
 pub const COMMAND_SKILL_CATALOG_UNBIND: &str = "skill.catalog.unbind";
 pub const COMMAND_SKILL_CATALOG_SET_REACH: &str = "skill.catalog.set_reach";
 pub const COMMAND_SKILL_CATALOG_BIND_ALL: &str = "skill.catalog.bind_all";
+pub const COMMAND_SKILL_CATALOG_IMPORT_PREVIEW: &str = "skill.catalog.import_preview";
+pub const COMMAND_SKILL_CATALOG_IMPORT_COMMIT: &str = "skill.catalog.import_commit";
 
 // Bundle-scoped siblings of the three above (composable model v2,
 // docs/specs/SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md, GH issue #2024 item

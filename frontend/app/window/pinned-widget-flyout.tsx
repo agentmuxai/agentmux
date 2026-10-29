@@ -27,7 +27,7 @@ import {
 import { makeIconClass } from "@/util/util";
 import { autoUpdate, type Placement } from "@floating-ui/dom";
 import { createSignal, For, onCleanup, type JSX } from "solid-js";
-import { getChildWidgets, handleWidgetSelect, widgetIconStyle } from "./action-widgets-config";
+import { getChildWidgets, openWidget, widgetIconStyle } from "./action-widgets-config";
 
 const PinnedWidgetFlyout = (props: {
     widget: WidgetConfigType;
@@ -102,8 +102,8 @@ const PinnedWidgetFlyout = (props: {
         props.setSubmenuEl?.(null);
     });
 
-    const handleItemClick = (widget: WidgetConfigType) => {
-        handleWidgetSelect(widget);
+    const handleItemClick = (widget: WidgetConfigType, e?: MouseEvent) => {
+        openWidget(widget, { forceNew: e?.shiftKey });
         props.onClose();
     };
 
@@ -128,7 +128,7 @@ const PinnedWidgetFlyout = (props: {
                 {({ key, widget }) => (
                     <div
                         class="action-widget-more-item"
-                        onClick={() => handleItemClick(widget)}
+                        onClick={(e) => handleItemClick(widget, e)}
                         onContextMenu={(e) => handleItemContextMenu(e, key)}
                     >
                         <span class="action-widget-more-item-icon widget-icon" style={widgetIconStyle(widget)}>

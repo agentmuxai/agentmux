@@ -4,7 +4,9 @@
 //! Vault: the person's secrets, named but never read
 //! (docs/specs/SPEC_VAULT_PANE_AGENTS_USE_SECRETS_UNSEEN_2026_10_19.md §5.4).
 //! `list` reads entries' names; `request` asks the person for a new entry
-//! and waits for the answer. No route an agent can call returns a value.
+//! and waits for the answer; `generate` creates an entry whose value the
+//! Vault makes (docs/specs/SPEC_VAULT_GENERATE_CAPTURE_AND_BROWSER_SIGNINS_2026_10_28.md §4.1).
+//! No route an agent can call returns a value.
 
 use super::*;
 
@@ -52,7 +54,20 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                     let result: Value = serde_json::from_str(&text).unwrap_or_default();
                     Ok(serde_json::to_string_pretty(&result).unwrap_or_default())
                 }
-                other => anyhow::bail!("Vault: unknown action {other:?}; use list or request"),
+                "generate" => {
+                    let s = |k: &str| arguments.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+                    let body = json!({
+                        "kind": s("kind"),
+                        "label": s("label"),
+                        "why": s("why"),
+                        "fields": arguments.get("fields").cloned().unwrap_or_else(|| json!({})),
+                        "rules": arguments.get("rules").cloned().unwrap_or_else(|| json!({})),
+                        "auth": crate::identity::sign_ui_automation_auth().map_err(|e| anyhow::anyhow!("Vault generate needs this agent's signed identity: {e}"))?,
+                    });
+                    let result = crate::srv_http::srv_post_json(cx.client, &format!("{base}/api/v1/vault/generate"), cx.auth_key, &body, "Vault generate").await?;
+                    Ok(serde_json::to_string_pretty(&result).unwrap_or_default())
+                }
+                other => anyhow::bail!("Vault: unknown action {other:?}; use list, request or generate"),
             }
         }
         _ => Err(not_in_family()),
@@ -67,7 +82,7 @@ mod tests {
     fn the_schema_lists_every_action_and_every_kind_srv_knows() {
         let schema: Value = serde_json::from_str(crate::tool_schemas::VAULT_TOOL).unwrap();
         let actions = &schema["inputSchema"]["properties"]["action"]["enum"];
-        assert_eq!(actions, &json!(["list", "request"]));
+        assert_eq!(actions, &json!(["list", "request", "generate"]));
         // srv's catalog (backend/vault/kinds.rs) is the source; this list
         // must name the same kinds.
         let srv = include_str!("../../../srv/src/backend/vault/kinds.rs");

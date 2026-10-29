@@ -237,6 +237,17 @@ pub struct SettingsType {
     )]
     pub widget_hidden: Option<Vec<String>>,
 
+    /// The widget keys (`defwidget@terminal`, `ext@acme.board/main`) the person opened last, newest
+    /// first, at most 12: the Shortcuts pane lists these tiles first. Written by the window
+    /// when the person opens a pane. SPEC_SHORTCUTS_PANE_FOR_SPLITS_2026_10_28.md.
+    #[serde(
+        rename = "launcher:recent",
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_string_list"
+    )]
+    pub launcher_recent: Option<Vec<String>>,
+
     // -- Status bar settings --
     /// Whether the status bar shows MuxBus Cloud: the dot after the host name and
     /// the sign-in block in the host popover. Absent means shown; only an explicit
@@ -679,6 +690,13 @@ pub struct WidgetConfigType {
 
     #[serde(default, skip_serializing_if = "is_false")]
     pub magnified: bool,
+
+    /// A pane a person manages, of which one is the point (Memory, Connectors, Settings...): a click
+    /// on this entry brings back the one already open (restores it, switches to its tab, focuses it)
+    /// instead of opening another. Off, an entry opens a new pane each time. Absent, it follows the
+    /// view it opens; a user's `false` is kept, so it can switch a built-in entry off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub singleton: Option<bool>,
 
     /// Ordered short-names (no "defwidget@" prefix, same convention as
     /// `widget:pinned`) of this widget's children. A non-empty `children`

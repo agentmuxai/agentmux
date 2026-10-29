@@ -81,10 +81,13 @@ async fn a_held_message_starts_the_stopped_agent_only_for_a_host_sender_with_the
     set_always_available(&state, false);
     let held = hold_for(&state, "ag-off", crate::server::ReactiveAuthVia::FullAuthKey).await.expect("held");
     assert_eq!(held["held"], true, "{held}");
+    assert!(held.get("starting").is_none(), "setting off: nothing is starting, so the sender is not told it is: {held}");
     set_always_available(&state, true);
     assert!(hold_for(&state, "ag-lan", crate::server::ReactiveAuthVia::LanKey).await.is_none(), "a LAN caller is never held, so never starts one");
     let held = hold_for(&state, "ag-on", crate::server::ReactiveAuthVia::FullAuthKey).await.expect("held");
     assert_eq!(held["held"], true, "{held}");
+    assert_eq!(held["starting"], true, "the sender is told the agent is being started: {held}");
+    assert!(held["error"].as_str().unwrap().contains("starting it"), "{held}");
 
     for _ in 0..100 {
         if desired_of(&state, &on).await.as_deref() == Some("running") {

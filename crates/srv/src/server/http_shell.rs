@@ -51,13 +51,20 @@ pub(super) async fn handle_shell_create(
     };
     let remote = !matches!(target, AgentTarget::Local);
 
+    // stdin is closed once a Vault value is written to it, so nothing can type there after.
+    if req.capture_stdin == Some(true) && req.stdin_secret.as_deref().is_some_and(|s| !s.trim().is_empty()) {
+        let e = "stdin_secret and capture_stdin can't be used together: stdin is closed once the value is written";
+        return (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response();
+    }
     // Vault secrets for this command: the person is asked first, and the values go
-    // into this one process's environment (further down) and out of its output.
+    // into this one process (its environment, stdin or private files, further down)
+    // and out of its output.
+    let wanted = super::shell_secrets::Wanted { env: req.secrets.as_ref(), stdin: req.stdin_secret.as_deref(), files: req.secret_files.as_ref() };
     let injected = match super::shell_secrets::inject(
         &state,
         &req.agent_block_id,
         req.auth.as_ref(),
-        req.secrets.as_ref(),
+        wanted,
         remote,
         &req.cmd,
         req.cwd.as_deref().unwrap_or(""),
@@ -130,10 +137,32 @@ pub(super) async fn handle_shell_create(
         effective_env.extend(req_env);
     }
     // After the caller's env, so the agent can't name a value of its own over one.
-    let scrubber = injected.map(|i| {
-        effective_env.extend(i.env);
-        Arc::new(i.scrubber)
-    });
+    let mut stdin_once = None;
+    let mut secret_dir = None;
+    let scrubber = match injected {
+        Some(i) => {
+            effective_env.extend(i.env);
+            if !i.files.is_empty() {
+                // A folder of its own, removed when the runner ends (or at the next start).
+                let dir = match crate::backend::vault::files::SecretDir::create() {
+                    Ok(d) => d,
+                    Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e }))).into_response(),
+                };
+                for (name, value) in &i.files {
+                    match dir.write(name, value) {
+                        Ok(path) => {
+                            effective_env.insert(name.clone(), path.to_string_lossy().into_owned());
+                        }
+                        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e }))).into_response(),
+                    }
+                }
+                secret_dir = Some(dir);
+            }
+            stdin_once = i.stdin;
+            Some(Arc::new(i.scrubber))
+        }
+        None => None,
+    };
     reserve_agent_env(&state.mstore, &req.agent_block_id, &mut effective_env);
     // WSL passes on only what WSLENV names: the caller's own variables and the
     // gh guard, never the rest of the agent's env.
@@ -214,6 +243,8 @@ pub(super) async fn handle_shell_create(
         registry: Arc::clone(&state.shell_sessions),
         capture_stdin: req.capture_stdin.unwrap_or(false),
         scrubber,
+        stdin_once,
+        secret_dir,
     };
     tokio::spawn(runner.run());
 

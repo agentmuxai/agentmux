@@ -35,13 +35,12 @@ use tokio::sync::RwLock;
 pub const DEV_PROXY_PORT: u16 = 8090;
 
 /// One registered dev server: where to actually send the request, and
-/// which agent owns the registration (needed so `unregister_agent` can
-/// remove exactly this agent's entries — see its doc comment for why a
-/// plain string-suffix match on the routing key isn't safe).
+/// the container it came from.
 #[derive(Debug, Clone)]
 struct Route {
     target: Target,
-    agent_id: String,
+    /// The container it was registered from, when known: what stopping or removing a container clears.
+    container: Option<String>,
 }
 
 /// How to reach a registered dev server.
@@ -62,7 +61,7 @@ impl From<SocketAddr> for Target {
 /// `"<project>-<agent_id>"` → the container's internal `ip:port` its dev
 /// server is actually listening on. Cleared per-agent when that agent's
 /// container stops (`ContainerManager::stop`/`remove` in `container.rs`
-/// call `unregister_agent` — see that module's `cleanup_dev_proxy_routes`).
+/// call `unregister_container` — see that module's `cleanup_dev_proxy_routes`).
 ///
 /// Cheap to clone (one `Arc` inside) — held directly by `AppState` and
 /// passed to the proxy's own axum router as state.
@@ -86,31 +85,23 @@ impl DevProxyRegistry {
     }
 
     pub async fn register(&self, project: &str, agent_id: &str, target: impl Into<Target>) {
+        self.register_from(project, agent_id, None, target).await
+    }
+
+    /// [`register`](Self::register) for a dev server in `container`, so that container stopping or being removed
+    /// clears the route ([`unregister_container`](Self::unregister_container)).
+    pub async fn register_from(&self, project: &str, agent_id: &str, container: Option<&str>, target: impl Into<Target>) {
         let key = Self::routing_key(project, agent_id);
         self.routes.write().await.insert(
             key,
-            Route {
-                target: target.into(),
-                agent_id: agent_id.to_lowercase(),
-            },
+            Route { target: target.into(), container: container.map(str::to_string) },
         );
     }
 
-    /// Removes every registration belonging to `agent_id`, regardless of
-    /// project name — called when that agent's container stops so a dead
-    /// container never keeps serving (stale) proxy traffic.
-    ///
-    /// Matches on the stored `agent_id` field, NOT a `key.ends_with(...)`
-    /// string check — agent ids can themselves contain hyphens (e.g. a
-    /// named identity like `korp-asaf`), so a suffix match on the combined
-    /// `"<project>-<agent_id>"` key could wrongly match a different
-    /// agent's registration whose id happens to end in the same substring.
-    pub async fn unregister_agent(&self, agent_id: &str) {
-        let agent_id = agent_id.to_lowercase();
-        self.routes
-            .write()
-            .await
-            .retain(|_, route| route.agent_id != agent_id);
+    /// Removes every registration made from `container`. A container is named from its definition's uuid and
+    /// a route from the agent's id, which are not the same string, so this is how a stopped container's routes go.
+    pub async fn unregister_container(&self, container: &str) {
+        self.routes.write().await.retain(|_, route| route.container.as_deref() != Some(container));
     }
 
     pub async fn lookup(&self, key: &str) -> Option<Target> {
@@ -313,55 +304,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unregister_agent_removes_only_that_agents_routes() {
-        let registry = DevProxyRegistry::new();
-        registry.register("pulse", "korp", addr(4000)).await;
-        registry.register("stratum", "korp", addr(4001)).await;
-        registry.register("app", "narko", addr(4002)).await;
-        assert_eq!(registry.len().await, 3);
-
-        registry.unregister_agent("korp").await;
-
-        assert_eq!(registry.len().await, 1);
-        assert_eq!(
-            registry
-                .lookup(&DevProxyRegistry::routing_key("pulse", "korp"))
-                .await,
-            None
-        );
-        assert_eq!(
-            registry
-                .lookup(&DevProxyRegistry::routing_key("app", "narko"))
-                .await,
-            Some(Target::Direct(addr(4002)))
-        );
-    }
-
-    /// The exact scenario the doc comment on `unregister_agent` warns
-    /// about: an agent id that itself contains a hyphen and is a suffix of
-    /// a DIFFERENT agent's id must not be swept up by a naive
-    /// `key.ends_with("-<agent_id>")` check.
-    #[tokio::test]
-    async fn unregister_agent_is_exact_not_a_suffix_match() {
-        let registry = DevProxyRegistry::new();
-        registry.register("proj", "x-lib", addr(4000)).await; // key: "proj-x-lib"
-        registry.register("proj", "lib", addr(4001)).await; // key: "proj-lib"
-
-        registry.unregister_agent("lib").await;
-
-        assert_eq!(
-            registry
-                .lookup(&DevProxyRegistry::routing_key("proj", "x-lib"))
-                .await,
-            Some(Target::Direct(addr(4000))),
-            "a different agent (\"x-lib\") whose id merely ends with \"lib\" must survive"
-        );
-        assert_eq!(
-            registry
-                .lookup(&DevProxyRegistry::routing_key("proj", "lib"))
-                .await,
-            None
-        );
+    async fn unregister_container_removes_what_was_registered_from_it_whatever_the_agent_is_called() {
+        let reg = DevProxyRegistry::new();
+        let addr: SocketAddr = "127.0.0.1:5173".parse().unwrap();
+        // The route is under the agent's id; the container is named from the definition's uuid.
+        reg.register_from("app", "kcont", Some("agentmux-a5e772db"), addr).await;
+        reg.register_from("api", "kcont", Some("agentmux-a5e772db"), addr).await;
+        reg.register_from("app", "other", Some("agentmux-ffff"), addr).await;
+        reg.register("loose", "kcont", addr).await;
+        reg.unregister_container("agentmux-a5e772db").await;
+        assert!(reg.lookup("app-kcont").await.is_none() && reg.lookup("api-kcont").await.is_none());
+        assert!(reg.lookup("app-other").await.is_some(), "another container's route stays");
+        assert!(reg.lookup("loose-kcont").await.is_some(), "a route with no container isn't a container's to lose");
     }
 
     #[tokio::test]

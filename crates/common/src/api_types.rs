@@ -64,6 +64,16 @@ pub struct ShellCreateRequest {
     /// Needs `auth`, and a local `connection`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub secrets: Option<HashMap<String, String>>,
+    /// One Vault entry whose value is written to the command's stdin, followed by a
+    /// newline, after which stdin is closed (`docker login --password-stdin`). Not with
+    /// `capture_stdin`. Needs `auth`, and a local `connection`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stdin_secret: Option<String>,
+    /// Vault entries written to files only the user can read, removed when the command
+    /// ends: `{ENV_NAME: entry id}`, with the file's path in `ENV_NAME`. Needs `auth`,
+    /// and a local `connection`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secret_files: Option<HashMap<String, String>>,
 }
 
 /// Response from `POST /api/v1/shell/create`
@@ -476,6 +486,9 @@ pub struct PaneOpenRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PaneOpenResponse {
     pub block_id: String,
+    /// Something the agent should know about the pane (a container agent's file is a snapshot).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
 }
 
 /// `POST /api/v1/pane/title` — set a pane's display title.
@@ -603,6 +616,38 @@ pub struct UiScreenshotRequest {
 pub struct UiScreenshotResponse {
     pub path: String,
     pub png_base64: String,
+}
+
+/// `POST /api/v1/ui/record`: `op` is `start` (a recording of the caller's own pane, or of `pane`) or `stop`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiRecordRequest {
+    #[serde(flatten)]
+    pub auth: UiAutomationAuth,
+    pub op: String,
+    /// As for `UiScreenshotRequest`: a browser pane this agent opened; absent = the caller's own pane.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane: Option<String>,
+    /// start: frames a second (1 to 10, default 5).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fps: Option<u32>,
+    /// start: the most seconds to record (1 to 30, default 30).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seconds: Option<u32>,
+}
+
+/// Response for `POST /api/v1/ui/record`. `status` is `recording` or `saved`; `path` is the finished file.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiRecordResponse {
+    pub status: String,
+    pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(default)]
+    pub frames: u32,
+    #[serde(default)]
+    pub skipped: u32,
+    #[serde(default)]
+    pub seconds: f32,
 }
 
 /// `POST /api/v1/ui/click`
@@ -1176,6 +1221,14 @@ pub struct RegisterDevServerRequest {
     /// Port the dev server is listening on INSIDE the caller's own
     /// container (container-internal — never a host-published port).
     pub port: u16,
+    /// The shell command that starts the server (e.g. `npm run dev`). With it AgentMux starts the
+    /// server when it isn't listening yet and starts it again, and re-registers it, whenever the
+    /// container is recreated; without it the registration lasts only as long as the container.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    /// The folder the command runs in: `/workspace/...` or relative to `/workspace` (default `/workspace`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dir: Option<String>,
 }
 
 /// Response for `POST /api/v1/agent/dev_server/register`.
@@ -1184,6 +1237,9 @@ pub struct RegisterDevServerResponse {
     /// The full routable URL, e.g. `"http://pulse-korp.localhost:8090"` —
     /// what to actually browse to.
     pub url: String,
+    /// The server was started for you and is not listening yet: the URL works once it does.
+    #[serde(default)]
+    pub starting: bool,
 }
 
 #[cfg(test)]
@@ -1247,6 +1303,8 @@ mod app_api_manifest_contract_tests {
             connection: Some("wsl://Ubuntu".to_string()),
             auth: Some(UiAutomationAuth { agent_id: "a".into(), ts_secs: 1, sig: "s".into() }),
             secrets: Some(Default::default()),
+            stdin_secret: Some("api-key-x".to_string()),
+            secret_files: Some(Default::default()),
         };
         let value = serde_json::to_value(&instance).expect("must serialize");
         let struct_fields: HashSet<String> =

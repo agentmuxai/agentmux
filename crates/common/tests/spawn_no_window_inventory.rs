@@ -302,6 +302,8 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
      "not-windows: macOS/Linux/unix-only code path"),
     ("crates/srv/src/backend/tool_store.rs", "cmd", 1,
      "no-window: calls no_window()/creation_flags in this file"),
+    ("crates/srv/src/backend/skill_import.rs", "\"git\"", 1,
+     "no-window: calls no_window()/creation_flags in this file"),
     ("crates/srv/src/backend/attachments/extract.rs", "exe", 1,
      "no-window: calls no_window()/creation_flags in this file"),
     ("crates/srv/src/backend/attachments/extract.rs", "harness", 1,

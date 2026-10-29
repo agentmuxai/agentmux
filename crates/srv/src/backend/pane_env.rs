@@ -354,6 +354,8 @@ mod spawn_site_coverage {
          "test: Unix only; runs the container turn launcher on the host to prove an exported function reaches the provider"),
         ("src/agents/runner.rs", "bin", 1,
          "sanitized: agent CLI subprocess, sanitize_process_command"),
+        ("src/backend/skill_import.rs", "\"git\"", 1,
+         "sanitized: a shallow clone of a skill repository to import, sanitize_external_command (third-party network program, needs no instance identity)"),
         ("src/backend/attachments/extract.rs", "exe", 1,
          "sanitized: our own binary re-run as `__extract` to parse one attachment in isolation; it needs no instance identity, so sanitize_external_std_command"),
         ("src/backend/file_icons/pool.rs", "exe", 1,

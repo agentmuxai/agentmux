@@ -278,6 +278,8 @@ pub async fn app_exit(state: &AppState) -> usize {
     // Before the close interrupts them: the next start tells these agents to
     // carry on (`upgrade_notice`).
     record_turns_in_flight(state, &ids).await;
+    // And which parked agents are running, for the restart resume to bring back whatever their last turn.
+    crate::server::restart_resume::record_running_at_exit(state, &ids).await;
     let all_closed = async {
         run_many(state, &ids, Policy::app_exit()).await;
         // And every close already in flight: its controller has left the

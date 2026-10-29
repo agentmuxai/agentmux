@@ -9,6 +9,8 @@ import type { PaneTabHostContext, PaneTabInstance } from "@/app/block/pane-tab-r
 import { SwarmViewModel } from "./swarm-model";
 import { createSwarmSection, swarmTitleOf } from "./swarm-section";
 import { SwarmView } from "./swarm-root";
+import type { SwarmFilterFocus } from "./swarm-filter-bar";
+import { createSignalAtom } from "@/util/util";
 
 export function create(ctx: PaneTabHostContext): PaneTabInstance {
     const model = new SwarmViewModel(ctx.blockId);
@@ -20,8 +22,25 @@ export function create(ctx: PaneTabHostContext): PaneTabInstance {
         const moved = meta ? movedMeta(meta) : meta;
         if (meta && moved !== meta) void ctx.setMeta({ view: moved?.view, "swarm:section": null });
     });
+    // Find in pane (Ctrl/Cmd+F) is the filter: opening the find "bar" puts the focus in its box,
+    // and the bar is always there, so it closes again at once (swarm-filter-bar.tsx).
+    let filterBox: SwarmFilterFocus | undefined;
+    const find = createSignalAtom(false);
+    createEffect(() => {
+        if (find()) {
+            filterBox?.focus();
+            find._set(false);
+        }
+    });
+    const searchAtoms: SearchAtoms = {
+        searchValue: createSignalAtom(""),
+        resultsIndex: createSignalAtom(0),
+        resultsCount: createSignalAtom(0),
+        isOpen: find,
+    };
     return {
-        component: () => <SwarmView model={model} ctx={ctx} />,
+        component: () => <SwarmView model={model} ctx={ctx} filterFocusRef={(focus) => (filterBox = focus)} />,
+        search: () => searchAtoms,
         // The selected section names the pane: "Swarm · Broadcast".
         liveTitle: () => ({ text: swarmTitleOf(section()) }),
         dispose: () => model.dispose(),

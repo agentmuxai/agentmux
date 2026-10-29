@@ -1131,6 +1131,22 @@ fn resolve_claude_config_dir_prefers_the_identity_bound_dir_over_stale_cmd_env()
     assert_eq!(resolved, bound);
 }
 
+// A pane's `cmd:env` snapshot left by a build that kept its accounts under its own channel is no
+// dir for this channel's agent: with nothing bound it resolves to nothing (the watch stays put),
+// not to that dir and not to the legacy guess; the bound dir still wins over it.
+#[test]
+fn resolve_claude_config_dir_never_follows_a_snapshot_in_another_channels_identities() {
+    let mut meta = crate::backend::obj::MetaMapType::new();
+    meta.insert(
+        "cmd:env".to_string(),
+        serde_json::json!({ "CLAUDE_CONFIG_DIR": "/h/.agentmux/channels/some-other-channel/identities/acct-9/claude" }),
+    );
+    let foreign = |dir: &Path| crate::identity::foreign_dir::is_other_channel_identity_dir(dir, "this-channel");
+    assert_eq!(resolve_claude_config_dir_with(&meta, "some-agent", None, foreign), None);
+    let shared = PathBuf::from("/h/.agentmux/shared/identities/acct-1/claude");
+    assert_eq!(resolve_claude_config_dir_with(&meta, "some-agent", Some(shared.clone()), foreign), Some(shared));
+}
+
 #[tokio::test]
 async fn watch_agent_falls_back_to_nearest_existing_ancestor_when_config_dir_is_missing() {
     // Regression test for the observed bug: watch_agent() is called from

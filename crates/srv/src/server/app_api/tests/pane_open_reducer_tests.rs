@@ -2747,3 +2747,79 @@ async fn a_navigation_stopped_during_a_handoff_is_asked_about_over_it() {
     let (s, body) = post_json(&app, "/api/v1/ui/browser/focus_info", merged(&auth, serde_json::json!({ "pane": pane }))).await;
     assert_ne!(s, StatusCode::CONFLICT, "{body}");
 }
+
+/// What a container agent's `OpenBrowser` really does: the request the MCP tool sends, with the container's
+/// token in the key header, opens a pane in a jar of its own (never the user's Personal profile) and says so.
+#[tokio::test]
+async fn a_container_agents_browser_open_gets_its_own_incognito_jar() {
+    use tower::ServiceExt;
+    let state = test_state();
+    let ws_id = dispatch_apply(&state, Command::CreateWorkspace { name: "w".into() })
+        .await
+        .iter()
+        .find_map(|e| match e {
+            Event::WorkspaceCreated { workspace_id, .. } => Some(workspace_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let tab_id = dispatch_apply(&state, Command::CreateTab { workspace_id: ws_id, name: "t".into() })
+        .await
+        .iter()
+        .find_map(|e| match e {
+            Event::TabCreated { tab_id, .. } => Some(tab_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let own = stand_in_pane(&state, &tab_id).await;
+    let (agent, auth) = signed_agent_on(&state, &own);
+    *state.host_ipc.lock().await = Some(crate::server::state::HostIpc { port: 1, token: "host-ipc-token".into() });
+    let app = crate::server::build_router(state.clone());
+    let token = crate::backend::container_credential::token_for_block(&own, Some(&agent));
+
+    let open = |key: String, extra: serde_json::Value| {
+        let app = app.clone();
+        let body = merged(&auth, merged(&serde_json::json!({ "url": "https://example.com/" }), extra));
+        async move {
+            let req = axum::http::Request::builder()
+                .uri("/api/v1/ui/browser/open")
+                .method("POST")
+                .header("X-AuthKey", key)
+                .header("Content-Type", "application/json")
+                .body(axum::body::Body::from(body.to_string()))
+                .unwrap();
+            let resp = app.oneshot(req).await.unwrap();
+            let status = resp.status();
+            let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+            (status, serde_json::from_slice::<serde_json::Value>(&bytes).unwrap_or_default())
+        }
+    };
+    let identity_of = |body: &serde_json::Value| {
+        let pane = body["data"]["pane"].as_str().unwrap().to_string();
+        state.mstore.must_get::<crate::backend::obj::Block>(&pane).unwrap().meta.get("browser:identity").cloned()
+    };
+
+    // As KCont sent it: a site limit and a title, and no profile.
+    let (s, body) = open(token.clone(), serde_json::json!({ "allowed_origins": ["https://example.com"], "title": "dev" })).await;
+    assert_eq!(s, axum::http::StatusCode::OK, "{body}");
+    let jar = identity_of(&body).expect("the pane has a jar of its own, not Personal");
+    assert!(jar.as_str().is_some_and(|j| j.starts_with("incognito:")), "{jar}");
+    assert_eq!(body["data"]["browsing_as"], "incognito");
+
+    let (s, body) = open(token.clone(), serde_json::json!({ "profile": "personal" })).await;
+    assert_eq!(s, axum::http::StatusCode::BAD_REQUEST, "{body}");
+
+    // The same request with the instance key (an agent on the user's machine) browses as the user.
+    let (s, body) = open("test-secret-key".to_string(), serde_json::json!({})).await;
+    assert_eq!(s, axum::http::StatusCode::OK, "{body}");
+    assert_eq!(identity_of(&body), None);
+    assert_eq!(body["data"]["browsing_as"], "personal");
+
+    // And a pane that is a container agent's is one whichever key asks: the jar follows the agent, not the header.
+    let mut block = state.mstore.must_get::<crate::backend::obj::Block>(&own).unwrap();
+    block.meta.insert("agentMode".into(), serde_json::json!("container"));
+    block.meta.insert("agentId".into(), serde_json::json!(agent));
+    state.mstore.update(&mut block).unwrap();
+    let (s, body) = open("test-secret-key".to_string(), serde_json::json!({})).await;
+    assert_eq!(s, axum::http::StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["browsing_as"], "incognito");
+}

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it, vi } from "vitest";
-import { createPaneRectBatcher, hostSendRects, type PaneRectUpdate } from "./pane-rect-batcher";
+import { createPaneRectBatcher, hostSendRects, type BatcherClock, type PaneRectUpdate } from "./pane-rect-batcher";
 
 const r = (x: number) => ({ x, y: 0, width: 100, height: 50 });
 
@@ -44,26 +44,89 @@ describe("createPaneRectBatcher", () => {
         expect(sent).toEqual([[{ blockId: "a", ...r(9) }]]);
     });
 
-    it("never has two batches in flight, and sends what's newest the moment one returns", async () => {
-        const { send, sent, settle } = controlledSend();
+    /** A clock the test moves; `after` callbacks run when it passes their time. */
+    function fakeClock() {
+        let t = 1000;
+        const timers: { at: number; cb: () => void }[] = [];
+        const clock: BatcherClock = { now: () => t, after: (ms, cb) => void timers.push({ at: t + ms, cb }) };
+        const advance = (ms: number) => {
+            t += ms;
+            for (const due of timers.filter((x) => x.at <= t)) {
+                timers.splice(timers.indexOf(due), 1);
+                due.cb();
+            }
+        };
+        return { clock, advance, timers };
+    }
+
+    it("holds a second batch for the first one's frame, then sends it without the first's reply", () => {
+        const { send, sent } = controlledSend();
+        const { clock, advance } = fakeClock();
         const flushes: (() => void)[] = [];
-        const b = createPaneRectBatcher(send, (cb) => flushes.push(cb));
+        const b = createPaneRectBatcher(send, (cb) => flushes.push(cb), clock);
         b.set("a", r(1));
         flushes.shift()!();
         expect(sent).toHaveLength(1);
 
-        // While the first batch is out: three frames of rects, nothing sent.
+        // The first batch is out and unanswered: three frames of rects collect.
         b.set("a", r(2));
         b.set("b", r(3));
         b.set("a", r(4));
-        expect(flushes).toHaveLength(0);
+        flushes.shift()!();
         expect(sent).toHaveLength(1);
 
-        await settle();
+        // A frame later the newest goes, though the page hasn't seen the reply.
+        advance(16);
         expect(sent[1]).toEqual([{ blockId: "a", ...r(4) }, { blockId: "b", ...r(3) }]);
+    });
 
-        await settle();
+    it("sends a batch that has aged a frame straight away, and holds a fresher one for its frame", () => {
+        const { send, sent } = controlledSend();
+        const { clock, advance } = fakeClock();
+        const flushes: (() => void)[] = [];
+        const b = createPaneRectBatcher(send, (cb) => flushes.push(cb), clock);
+        b.set("a", r(1));
+        flushes.shift()!();
+        advance(20);
+        b.set("a", r(2));
+        flushes.shift()!();
         expect(sent).toHaveLength(2);
+        // A third arrives while the second is still fresh: it waits out the frame.
+        b.set("a", r(3));
+        flushes.shift()!();
+        expect(sent).toHaveLength(2);
+        advance(16);
+        expect(sent).toHaveLength(3);
+        expect(sent[2]).toEqual([{ blockId: "a", ...r(3) }]);
+    });
+
+    it("never has more than three batches out at once", async () => {
+        const { send, sent, settle } = controlledSend();
+        const { clock, advance } = fakeClock();
+        const flushes: (() => void)[] = [];
+        const b = createPaneRectBatcher(send, (cb) => flushes.push(cb), clock);
+        for (let i = 1; i <= 5; i++) {
+            b.set("a", r(i));
+            while (flushes.length) flushes.shift()!();
+            advance(20);
+        }
+        expect(sent).toHaveLength(3);
+        await settle();
+        expect(sent).toHaveLength(4);
+        expect(sent[3]).toEqual([{ blockId: "a", ...r(5) }]);
+    });
+
+    it("sends from the caller's own task with flushNow, without waiting for the scheduled one", () => {
+        const { send, sent } = controlledSend();
+        const flushes: (() => void)[] = [];
+        const b = createPaneRectBatcher(send, (cb) => flushes.push(cb));
+        b.set("a", r(1));
+        b.set("b", r(2));
+        b.flushNow();
+        expect(sent).toEqual([[{ blockId: "a", ...r(1) }, { blockId: "b", ...r(2) }]]);
+        // The task queued by set() finds nothing left.
+        flushes.shift()!();
+        expect(sent).toHaveLength(1);
     });
 
     it("drops a forgotten pane's unsent rect", () => {
@@ -104,8 +167,19 @@ describe("hostSendRects", () => {
         const setRects = vi.fn(() => Promise.resolve());
         const { api: a, resize } = api(setRects);
         await hostSendRects(a, "main")([{ blockId: "a", ...r(1) }]);
-        expect(setRects).toHaveBeenCalledWith("main", [{ blockId: "a", ...r(1) }]);
+        expect(setRects).toHaveBeenCalledWith("main", [{ blockId: "a", ...r(1) }], { epoch: expect.any(Number), seq: 1 });
         expect(resize).not.toHaveBeenCalled();
+    });
+
+    it("numbers its batches, so the host can tell a late one", async () => {
+        const setRects = vi.fn(() => Promise.resolve());
+        const { api: a } = api(setRects);
+        const send = hostSendRects(a, "main");
+        await send([{ blockId: "a", ...r(1) }]);
+        await send([{ blockId: "a", ...r(2) }]);
+        const orders = setRects.mock.calls.map((c) => (c as unknown as [string, unknown, { epoch: number; seq: number }])[2]);
+        expect(orders.map((o) => o.seq)).toEqual([1, 2]);
+        expect(orders[0].epoch).toBe(orders[1].epoch);
     });
 
     it("falls back to one resize per pane, from then on, when the host doesn't know the command", async () => {

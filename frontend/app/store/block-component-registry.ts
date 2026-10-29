@@ -6,11 +6,13 @@
 // Re-exported from global.ts for backward-compat (97 files import from that
 // module).
 
+import { recordBlockOpened } from "./shortcuts-recent";
 import { createSignal, type Accessor } from "solid-js";
 import { getLayoutModelForStaticTab } from "@/layout/index";
 import { cleanupBlockAtomCache } from "./block-atom-cache";
 import { createBlock } from "./block-layout-actions";
 import { setBlockMeta } from "./block-meta";
+import { isFailure } from "@/app/selection/selection-machine";
 import { giveBlockFocus } from "./focusManager";
 
 const blockComponentModelMap = new Map<string, BlockComponentModel>();
@@ -188,7 +190,8 @@ export function refocusNode(blockId: string) {
  * If a block with the given viewType already exists in the current tab's layout,
  * show and focus it (restoring a minimized pane and switching to its tab in a stack),
  * first merging `focusMeta` into its meta (a section to show, say).
- * Otherwise create a new block using blockDef (defaults to `{ meta: { view: viewType } }`).
+ * One in another tab of this window is gone to (the tab switches, then it is shown and focused),
+ * not duplicated. Otherwise create a new block using blockDef (defaults to `{ meta: { view: viewType } }`).
  */
 export async function openOrFocusPaneByView(
     viewType: string,
@@ -205,6 +208,10 @@ export async function openOrFocusPaneIdByView(
     focusMeta?: MetaType
 ): Promise<string | undefined> {
     const layoutModel = getLayoutModelForStaticTab();
+    // In another tab of this window: the most recently registered one.
+    let elsewhere: string | undefined;
+    // Showing the pane that is already open is a use of it too (the Shortcuts pane's last-used order).
+    recordBlockOpened(blockDef ?? { meta: { view: viewType } });
     for (const bcm of blockComponentModelMap.values()) {
         if (bcm.viewModel?.viewType === viewType) {
             const blockId = (bcm.viewModel as any).blockId as string | undefined;
@@ -221,9 +228,17 @@ export async function openOrFocusPaneIdByView(
                     giveBlockFocus(blockId);
                     return blockId;
                 }
-                // Block exists on another tab; fall through and open a fresh one here.
+                elsewhere = blockId;
             }
         }
+    }
+    if (elsewhere) {
+        if (focusMeta != null) await setBlockMeta(elsewhere, focusMeta);
+        const { revealBlock } = await import("@/app/util/reveal-block");
+        const shown = await revealBlock(elsewhere, { source: "widget", localOnly: true });
+        // Only a pane that is not there (never found, or closed meanwhile) is opened afresh: a newer click
+        // taking over, or a tab that was slow, leaves the pane where it is and a second one would be a copy.
+        if (!isFailure(shown) || (shown.reason !== "not-found" && shown.reason !== "gone")) return elsewhere;
     }
     return await createBlock(blockDef ?? { meta: { view: viewType } });
 }

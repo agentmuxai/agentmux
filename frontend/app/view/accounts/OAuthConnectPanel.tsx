@@ -27,6 +27,9 @@ import { oauthInfo } from "./oauth-catalog";
 import { isBlockedError, setOAuthNote } from "./oauth-account-state";
 import { createOAuthClientState, OAuthClientSection } from "./OAuthClientSection";
 import { Button } from "@/app/element/ui";
+import { muxbusDelivery, muxbusOffersSignIn } from "@/store/muxbus-delivery";
+import { githubNeedsCloudSignIn, isNeedsCloudSignInError } from "./github-cloud-gate";
+import { GithubCloudSignIn } from "./GithubCloudSignIn";
 import "./oauth-connect.scss";
 
 const POLL_INTERVAL_MS = 2000;
@@ -178,15 +181,21 @@ export function OAuthConnectPanel(props: OAuthConnectPanelProps): JSX.Element {
         }
     };
 
-    // A Reconnect starts by itself once it knows it has a client to use.
+    // GitHub through AgentMux's own App needs the Cloud sign-in: say so, with the sign-in, in place of Connect.
+    const needsCloud = () =>
+        githubNeedsCloudSignIn(
+            props.provider,
+            client.state.loaded() && !client.state.showFields() && client.state.info()?.saved !== true,
+            muxbusDelivery(),
+        );
+
+    // A Reconnect starts by itself once it knows it has a client to use, and, for GitHub, a Cloud sign-in.
     let autoStarted = false;
-    createEffect(
-        on(client.state.loaded, (loaded) => {
-            if (!props.autoStart || autoStarted || !loaded || client.state.showFields()) return;
-            autoStarted = true;
-            void connect();
-        }),
-    );
+    createEffect(() => {
+        if (!props.autoStart || autoStarted || !client.state.loaded() || client.state.showFields() || needsCloud()) return;
+        autoStarted = true;
+        void connect();
+    });
 
     // The person agreed to replace the GitHub user this account is connected as.
     const replaceUser = () => {
@@ -206,32 +215,59 @@ export function OAuthConnectPanel(props: OAuthConnectPanelProps): JSX.Element {
         opened = false;
     };
 
+    // The person signed in from the prompt: the answer that sent them there no longer holds.
+    createEffect(
+        on(muxbusDelivery, (delivery) => {
+            if (delivery == null || muxbusOffersSignIn(delivery)) return;
+            if (isNeedsCloudSignInError(localError())) setLocalError(null);
+            const s = status();
+            if (s?.status === "failed" && isNeedsCloudSignInError(s.error)) setStatus(null);
+        }),
+    );
+
     const label = PROVIDER_LABELS[props.provider] ?? props.provider;
 
     return (
         <div class="oauth-connect">
-            <Show when={localError()}>
-                {(err) => <FlowError error={err()} />}
+            {/* srv's sign-in answer is the prompt below when the gate shows it already: not twice. */}
+            <Show when={localError() && !(needsCloud() && isNeedsCloudSignInError(localError()))}>
+                <FlowError error={localError()!} />
             </Show>
 
             {/* Idle: the client + Connect */}
             <Show when={status() == null}>
-                <OAuthClientSection client={client} />
-                <div class="identity-key-actions">
-                    <Button
-                        tone="accent"
-                        class="identity-btn identity-btn-primary"
-                        disabled={busy() || !client.state.loaded()}
-                        onClick={() => void connect()}
-                    >
-                        {busy() ? "Starting…" : props.accountId ? "Reconnect" : `Connect ${label}`}
-                    </Button>
-                    <Show when={props.onCancel}>
-                        <Button class="identity-btn identity-btn-secondary" onClick={() => props.onCancel?.()}>
-                            Cancel
+                <Show
+                    when={!needsCloud()}
+                    fallback={
+                        <>
+                            <GithubCloudSignIn />
+                            <Show when={props.onCancel}>
+                                <div class="identity-key-actions">
+                                    <Button class="identity-btn identity-btn-secondary" onClick={() => props.onCancel?.()}>
+                                        Cancel
+                                    </Button>
+                                </div>
+                            </Show>
+                        </>
+                    }
+                >
+                    <OAuthClientSection client={client} />
+                    <div class="identity-key-actions">
+                        <Button
+                            tone="accent"
+                            class="identity-btn identity-btn-primary"
+                            disabled={busy() || !client.state.loaded()}
+                            onClick={() => void connect()}
+                        >
+                            {busy() ? "Starting…" : props.accountId ? "Reconnect" : `Connect ${label}`}
                         </Button>
-                    </Show>
-                </div>
+                        <Show when={props.onCancel}>
+                            <Button class="identity-btn identity-btn-secondary" onClick={() => props.onCancel?.()}>
+                                Cancel
+                            </Button>
+                        </Show>
+                    </div>
+                </Show>
             </Show>
 
             {/* Running: device code or browser prompt */}
@@ -347,6 +383,8 @@ function ConfirmUser(props: {
 
 /** A flow's error; an organization's block gets its own heading (spec §7). */
 function FlowError(props: { error: string }): JSX.Element {
+    // srv asking for the AgentMux Cloud sign-in is a question with an answer, not an error.
+    if (isNeedsCloudSignInError(props.error)) return <GithubCloudSignIn />;
     return (
         <div class="identity-form-error" role="alert">
             <Show when={isBlockedError(props.error)}>

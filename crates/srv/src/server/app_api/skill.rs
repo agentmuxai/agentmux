@@ -18,6 +18,8 @@
 //! ref-owning receiver).
 
 use super::*;
+use crate::backend::storage::skill_source::SkillSource;
+use crate::backend::storage::skills::SkillCatalogItem;
 
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_skill_list(engine, state);
@@ -34,6 +36,8 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_skill_catalog_unbind(engine, state);
     register_skill_catalog_set_reach(engine, state);
     register_skill_catalog_bind_all(engine, state);
+    register_skill_catalog_import_preview(engine, state);
+    register_skill_catalog_import_commit(engine, state);
     register_skill_catalog_bind_to_bundle(engine, state);
     register_skill_catalog_unbind_from_bundle(engine, state);
     register_skill_catalog_list_for_bundle(engine, state);
@@ -676,3 +680,163 @@ fn register_skill_catalog_delete(engine: &Arc<WshRpcEngine>, state: &AppState) {
         },
     );
 }
+
+
+/// What a source holds: a folder, a git repository (https) or one SKILL.md at an https URL.
+async fn read_skill_source(src: &SkillSource) -> Result<crate::backend::skill_import::Scan, String> {
+    use crate::backend::skill_import as imp;
+    match src.kind.as_str() {
+        "folder" => imp::scan_dir(&crate::backend::base::expand_home_dir_safe(src.location.trim())),
+        "git" => imp::fetch_git(&src.location, &src.git_ref).await,
+        "url" => imp::fetch_url(&src.location).await,
+        other => Err(format!("unknown source kind '{other}' (use folder, git or url)")),
+    }
+}
+
+// Read a source and compare each skill in it with the catalog. Writes nothing: the person reads
+// the whole text (and the diff for a skill that already exists) before `import_commit`.
+fn register_skill_catalog_import_preview(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let mstore = state.mstore.clone();
+    let identity_store = state.identity_store.clone();
+    engine.register_typed(
+        COMMAND_SKILL_CATALOG_IMPORT_PREVIEW,
+        move |req: CommandSkillCatalogImportPreviewData, _ctx| {
+            let mstore = mstore.clone();
+            let identity_store = identity_store.clone();
+            async move {
+                const E: &str = "skill.catalog.import_preview";
+                // An update names a skill; its recorded source says where to read.
+                let (source, only_key) = match (&req.source, req.skill_id.is_empty()) {
+                    (_, false) => {
+                        let src = identity_store
+                            .skill_source_get(&req.skill_id)
+                            .map_err(|e| format!("{E}: {e}"))?
+                            .ok_or_else(|| format!("{E}: this skill was not imported from a source, so there is nothing to check"))?;
+                        let key = src.item_key.clone();
+                        (src, Some(key))
+                    }
+                    (Some(src), true) => (src.clone(), None),
+                    (None, true) => return Err(format!("{E}: give a source or a skill_id")),
+                };
+                let scan = read_skill_source(&source).await.map_err(|e| format!("{E}: {e}"))?;
+                let catalog = mstore.skill_list_global(&identity_store).map_err(|e| format!("{E}: {e}"))?;
+                let mut warnings = scan.warnings;
+                let mut items = Vec::new();
+                for c in scan.candidates {
+                    if only_key.as_deref().is_some_and(|k| k != c.key) {
+                        continue;
+                    }
+                    let existing = if !req.skill_id.is_empty() {
+                        catalog.iter().find(|i| i.skill.id == req.skill_id)
+                    } else {
+                        let from_here = |i: &&SkillCatalogItem| {
+                            i.source.as_ref().is_some_and(|s| s.kind == source.kind && s.location == source.location && s.item_key == c.key)
+                        };
+                        catalog.iter().find(from_here).or_else(|| catalog.iter().find(|i| i.skill.name == c.name))
+                    };
+                    let (status, e) = match existing {
+                        None => ("new", None),
+                        Some(e) if e.skill.description == c.description && e.skill.content == c.content && e.skill.name == c.name => ("same", Some(e)),
+                        Some(e) => ("changed", Some(e)),
+                    };
+                    items.push(SkillImportItem {
+                        key: c.key,
+                        name: c.name,
+                        description: c.description,
+                        content: c.content,
+                        status: status.to_string(),
+                        existing_id: e.map(|e| e.skill.id.clone()).unwrap_or_default(),
+                        existing_description: e.map(|e| e.skill.description.clone()).unwrap_or_default(),
+                        existing_content: e.map(|e| e.skill.content.clone()).unwrap_or_default(),
+                    });
+                }
+                if items.is_empty() && warnings.is_empty() {
+                    warnings.push(if only_key.is_some() { "the skill is no longer in its source" } else { "no SKILL.md found in that source" }.to_string());
+                }
+                Ok(SkillImportPreview { source, items, warnings })
+            }
+        },
+    );
+}
+
+// Write the skills the person approved. A new one is global, unbound and outside "new agents get
+// it": an imported skill tells every agent it reaches what to do, so reaching them is a separate,
+// deliberate step. An existing one keeps its binds and reach.
+fn register_skill_catalog_import_commit(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let identity_store = state.identity_store.clone();
+    let broker = state.broker.clone();
+    engine.register_typed(
+        COMMAND_SKILL_CATALOG_IMPORT_COMMIT,
+        move |req: CommandSkillCatalogImportCommitData, _ctx| {
+            let identity_store = identity_store.clone();
+            let broker = broker.clone();
+            async move {
+                const E: &str = "skill.catalog.import_commit";
+                let now = now_ms();
+                // Check the whole batch before writing any of it, so a bad item cannot leave the
+                // ones before it written.
+                let mut seen = std::collections::HashSet::new();
+                let mut existing_rows = Vec::with_capacity(req.items.len());
+                for item in &req.items {
+                    let name = item.name.trim();
+                    if name.is_empty() || name.chars().count() > 200 {
+                        return Err(format!("{E}: '{}' needs a name of 1 to 200 characters", item.key));
+                    }
+                    if item.description.chars().count() > 4000 || item.content.len() > 256 * 1024 {
+                        return Err(format!("{E}: '{name}' has a description over 4000 characters or text over 256 KB"));
+                    }
+                    if !seen.insert(name.to_string()) {
+                        return Err(format!("{E}: two of the skills are called '{name}'; import them one at a time"));
+                    }
+                    existing_rows.push(if item.existing_id.is_empty() {
+                        None
+                    } else {
+                        match identity_store.skill_get(&item.existing_id).map_err(|e| format!("{E}: {e}"))? {
+                            Some(s) if s.is_global => Some(s),
+                            _ => return Err(format!("{E}: the skill to update ('{name}') is not in the catalog")),
+                        }
+                    });
+                }
+                let mut saved = Vec::new();
+                let mut failure = None;
+                for (item, existing) in req.items.into_iter().zip(existing_rows) {
+                    let skill = crate::backend::storage::Skill {
+                        id: existing.as_ref().map_or_else(|| uuid::Uuid::new_v4().to_string(), |s| s.id.clone()),
+                        name: item.name.trim().to_string(),
+                        trigger: existing.as_ref().map_or_else(|| item.name.trim().to_string(), |s| s.trigger.clone()),
+                        skill_type: existing.as_ref().map_or_else(|| "agent-skill".to_string(), |s| s.skill_type.clone()),
+                        description: item.description,
+                        content: item.content,
+                        is_global: true,
+                        created_at: existing.as_ref().map_or(now, |s| s.created_at),
+                        updated_at: now,
+                    };
+                    let source = SkillSource { item_key: item.key, ..req.source.clone() };
+                    let written = identity_store
+                        .skill_upsert_unique_global(&skill)
+                        .and_then(|_| if existing.is_none() { identity_store.skill_set_reach(&skill.id, false, false, now) } else { Ok(()) })
+                        .and_then(|_| identity_store.skill_source_set(&skill.id, &source, now));
+                    match written {
+                        Ok(()) => saved.push(skill.id),
+                        Err(e) => {
+                            failure = Some(format!("{E}: '{}': {e}", skill.name));
+                            break;
+                        }
+                    }
+                }
+                // Tell the windows about what was written even when a later item failed.
+                if !saved.is_empty() {
+                    broker.publish_event::<crate::backend::mps_events::SkillsChanged>(&(), vec![], 0);
+                }
+                if let Some(f) = failure {
+                    return Err(if saved.is_empty() { f } else { format!("{f} ({} earlier skill(s) were saved)", saved.len()) });
+                }
+                Ok(SkillImportCommitResult { saved })
+            }
+        },
+    );
+}
+
+#[cfg(test)]
+#[path = "skill_import_rpc_tests.rs"]
+mod import_rpc_tests;

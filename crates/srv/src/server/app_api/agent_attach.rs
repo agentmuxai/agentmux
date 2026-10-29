@@ -108,7 +108,7 @@ fn ensure_controller(
 /// window, its tab is made active and its pane focused here.
 async fn focus_shown(state: &AppState, tab_id: &str, block_id: &str) {
     let router = crate::server::notify_handlers::router_for(state);
-    if matches!(crate::server::notify_handlers::reveal_block(state, &router, block_id.to_string()).await, Ok(r) if r.found) {
+    if matches!(crate::server::notify_handlers::reveal_block(state, &router, block_id.to_string(), false).await, Ok(r) if r.found) {
         return;
     }
     let (workspace_id, node_id) = {

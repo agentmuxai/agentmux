@@ -16,7 +16,7 @@ import { createPeerRegistry, createSubmenuHover, type SubmenuHoverController } f
 import { makeIconClass } from "@/util/util";
 import { autoUpdate } from "@floating-ui/dom";
 import { createSignal, For, onCleanup, Show, type JSX } from "solid-js";
-import { handleWidgetSelect, widgetIconStyle } from "./action-widgets-config";
+import { openWidget, widgetIconStyle } from "./action-widgets-config";
 import { PinnedWidgetFlyout } from "./pinned-widget-flyout";
 
 const MoreDropdown = ({
@@ -112,8 +112,8 @@ const MoreDropdown = ({
         setSubmenuEl?.(null);
     });
 
-    const handleItemClick = (widget: WidgetConfigType) => {
-        handleWidgetSelect(widget);
+    const handleItemClick = (widget: WidgetConfigType, e?: MouseEvent) => {
+        openWidget(widget, { forceNew: e?.shiftKey });
         onClose();
     };
 
@@ -177,7 +177,7 @@ const MoreDropdown = ({
                             <div
                                 class="action-widget-more-item"
                                 onMouseEnter={() => parentPeers.closeOthers(key)}
-                                onClick={() => handleItemClick(widget)}
+                                onClick={(e) => handleItemClick(widget, e)}
                                 onContextMenu={(e) => handleItemContextMenu(e, key)}
                             >
                                 <span class="action-widget-more-item-icon widget-icon" style={widgetIconStyle(widget)}>

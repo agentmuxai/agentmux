@@ -246,6 +246,10 @@
             "method": "BlockRevealCommand"
         },
         {
+            "command": "block.revealed",
+            "method": "BlockRevealedCommand"
+        },
+        {
             "command": "bundle.import.commit",
             "method": "BundleImportCommitCommand"
         },
@@ -624,6 +628,11 @@
             "method": "GetMetaCommand",
             "dataType": "CommandGetMetaData",
             "returns": "MetaType"
+        },
+        {
+            "command": "reactive.registration_flags",
+            "method": "GetReactiveRegistrationFlagsCommand",
+            "send": "{}"
         },
         {
             "command": "reactive.registrations",
@@ -1302,6 +1311,14 @@
             "method": "SkillCatalogBindAllCommand"
         },
         {
+            "command": "skill.catalog.import_preview",
+            "method": "SkillCatalogImportPreviewCommand"
+        },
+        {
+            "command": "skill.catalog.import_commit",
+            "method": "SkillCatalogImportCommitCommand"
+        },
+        {
             "command": "skill.catalog.unbind",
             "method": "SkillCatalogUnbindCommand"
         },
@@ -1405,6 +1422,10 @@
         {
             "command": "history.agent_sessions",
             "method": "HistoryAgentSessionsCommand"
+        },
+        {
+            "command": "audit.query",
+            "method": "AuditQueryCommand"
         },
         {
             "command": "history.locate",

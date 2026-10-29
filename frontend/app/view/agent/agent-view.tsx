@@ -68,6 +68,7 @@ import { askSideQuestion } from "./btw";
 import type { AgentViewModel } from "./agent-model";
 import "./agent-view.scss";
 import { AgentBottomPanels } from "./components/AgentBottomPanels";
+import { AgentPreparingRow } from "./components/AgentPreparingRow";
 import { AgentComposerStrip } from "./components/AgentComposerStrip";
 import { AgentShellDrawer } from "./components/AgentShellDrawer";
 import { AgentDocumentView } from "./components/AgentDocumentView";
@@ -1361,6 +1362,9 @@ export const AgentPresentationView = ({
                 onStop={commands.stopAgent}
                 offline={offline}
             />
+
+            {/* A container agent's container starting in the background (preparing.ts). */}
+            <AgentPreparingRow nodes={displayDocument} enabled={() => block()?.meta?.["agentMode"] === "container"} />
 
             {/* Composer status strip — single 28-32px row with live
                 activity ticker and Log button that toggles the log panel.

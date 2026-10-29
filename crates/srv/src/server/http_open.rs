@@ -14,8 +14,22 @@ use super::*;
 /// so the frontend renders the pane. Body is `CommandPaneOpenData`.
 pub(super) async fn handle_pane_open(
     State(state): State<AppState>,
+    grant: Option<axum::Extension<crate::backend::container_credential::ContainerGrant>>,
     Json(mut req): Json<crate::backend::rpc_types::CommandPaneOpenData>,
 ) -> impl IntoResponse {
+    // A container agent opens a read-only snapshot of a file in its workspace, never a path a window would read.
+    let mut snapshot = None;
+    if let Some(axum::Extension(grant)) = grant {
+        // Reads and copies a file: off the async workers.
+        let taking = {
+            let (state, block) = (state.clone(), grant.block_id.clone());
+            tokio::task::spawn_blocking(move || super::container_pane_snapshot::open_for(&state, &block, req)).await
+        };
+        match taking.unwrap_or_else(|e| Err(format!("the snapshot couldn't be taken: {e}"))) {
+            Ok((checked, taken)) => (req, snapshot) = (checked, taken),
+            Err(e) => return (StatusCode::FORBIDDEN, Json(json!({ "error": e }))).into_response(),
+        }
+    }
     if let Some(meta) = req.meta.as_mut() {
         crate::server::browser_owner::strip_srv_only_keys(meta);
         // Agents call this route: a named profile only if the user lets them.
@@ -57,9 +71,17 @@ pub(super) async fn handle_pane_open(
                 crate::backend::remote::helper_consent::note_agent_pane(&result.block_id, agent);
             }
             drop(opening);
-            (StatusCode::OK, Json(json!(result))).into_response()
+            let mut body = json!(result);
+            if let Some(snap) = &snapshot {
+                snap.opened(&result.block_id);
+                body["note"] = json!(snap.note());
+            }
+            (StatusCode::OK, Json(body)).into_response()
         }
         Err(e) => {
+            if let Some(snap) = &snapshot {
+                snap.discard();
+            }
             // Argument/validation errors from build_pane_meta are the caller's
             // fault (400); everything else is a server-side failure (500).
             let status = if e.starts_with("MISSING_ARG") || e.starts_with("INVALID_VIEW") || e.starts_with("INVALID_ARG") {

@@ -268,6 +268,24 @@ impl OAuthStatus {
 struct OAuthSession {
     status: OAuthStatus,
     started_at: Instant,
+    /// Set once the flow has what it needs and is about to write the account
+    /// (`begin_commit`). A cancel after that is too late: the account is being
+    /// written, and reporting "cancelled" would be a lie.
+    committing: bool,
+    /// Tells the flow's task to stop (cancel, timeout). Per flow, so one
+    /// flow's cancel never reaches another.
+    stop: tokio::sync::watch::Sender<bool>,
+}
+
+/// The flow task's end of its session's stop signal.
+pub struct StopSignal(tokio::sync::watch::Receiver<bool>);
+
+impl StopSignal {
+    /// Resolves once the session was cancelled or timed out, or was dropped
+    /// from the manager (a flow nobody can poll any more).
+    async fn stopped(&mut self) {
+        let _ = self.0.wait_for(|stop| *stop).await;
+    }
 }
 
 #[derive(Default)]
@@ -280,19 +298,49 @@ pub struct OAuthSessionManager {
 const SESSION_RETENTION: Duration = Duration::from_secs(900);
 
 impl OAuthSessionManager {
-    fn new_session(&self, status: OAuthStatus) -> String {
+    fn new_session(&self, status: OAuthStatus) -> (String, StopSignal) {
         let id = format!("oauth-{}", uuid::Uuid::new_v4());
+        let (stop, rx) = tokio::sync::watch::channel(false);
         let mut guard = self.sessions.lock().unwrap();
         // Prune stale entries so the global map can't grow unbounded over the
         // process lifetime (terminal + timed-out sessions are GC'd here).
         guard.retain(|_, s| s.started_at.elapsed() < SESSION_RETENTION);
-        guard.insert(id.clone(), OAuthSession { status, started_at: Instant::now() });
-        id
+        guard.insert(id.clone(), OAuthSession { status, started_at: Instant::now(), committing: false, stop });
+        (id, StopSignal(rx))
     }
 
-    fn set_status(&self, id: &str, status: OAuthStatus) {
-        if let Some(s) = self.sessions.lock().unwrap().get_mut(id) {
-            s.status = status;
+    /// Record the flow's progress. A terminal status is final: a flow that
+    /// finishes after its session was cancelled or timed out cannot turn it
+    /// back into `Success`. Returns whether the status was applied.
+    fn set_status(&self, id: &str, status: OAuthStatus) -> bool {
+        let mut guard = self.sessions.lock().unwrap();
+        match guard.get_mut(id) {
+            Some(s) if !s.status.is_terminal() => {
+                s.status = status;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// The flow has its callback (or token) and is about to write the account.
+    /// Returns false when the session already ended (cancelled, timed out):
+    /// the flow must write nothing. When true, a later cancel is refused.
+    fn begin_commit(&self, id: &str) -> bool {
+        let mut guard = self.sessions.lock().unwrap();
+        let Some(s) = guard.get_mut(id) else { return false };
+        Self::sweep_timeout(s);
+        if s.status.is_terminal() {
+            return false;
+        }
+        s.committing = true;
+        true
+    }
+
+    fn sweep_timeout(s: &mut OAuthSession) {
+        if !s.status.is_terminal() && !s.committing && s.started_at.elapsed() > SESSION_TIMEOUT {
+            s.status = OAuthStatus::Failed { error: "authorization timed out".into() };
+            let _ = s.stop.send(true);
         }
     }
 
@@ -300,21 +348,27 @@ impl OAuthSessionManager {
     pub fn poll(&self, id: &str) -> Option<OAuthStatus> {
         let mut guard = self.sessions.lock().unwrap();
         let s = guard.get_mut(id)?;
-        if !s.status.is_terminal() && s.started_at.elapsed() > SESSION_TIMEOUT {
-            s.status = OAuthStatus::Failed { error: "authorization timed out".into() };
-        }
+        Self::sweep_timeout(s);
         Some(s.status.clone())
     }
 
+    /// Cancel a flow, finally: its status becomes `Failed("cancelled")`, its
+    /// task is told to stop, and nothing it does afterwards changes the status
+    /// or writes an account. Returns true when the session is now cancelled (or
+    /// had already ended), false when it is unknown or already committing
+    /// (too late to cancel).
     pub fn cancel(&self, id: &str) -> bool {
         let mut guard = self.sessions.lock().unwrap();
-        if let Some(s) = guard.get_mut(id) {
-            if !s.status.is_terminal() {
-                s.status = OAuthStatus::Failed { error: "cancelled".into() };
-            }
+        let Some(s) = guard.get_mut(id) else { return false };
+        if s.status.is_terminal() {
             return true;
         }
-        false
+        if s.committing {
+            return false;
+        }
+        s.status = OAuthStatus::Failed { error: "cancelled".into() };
+        let _ = s.stop.send(true);
+        true
     }
 }
 
@@ -681,12 +735,27 @@ pub fn start(
         mstore,
         identity_store,
     };
+    if needs_cloud_sign_in(ctx.cfg.provider, opts.cloud_signed_in, &ctx.client) {
+        return Err(NEEDS_CLOUD_SIGN_IN.to_string());
+    }
     let brokered = runs_through_broker(ctx.cfg.provider, opts.cloud_signed_in, &ctx.client);
     match ctx.cfg.flow {
         OAuthFlow::AuthCodePkce => start_code_flow(ctx, None),
         OAuthFlow::Device if brokered => start_code_flow(ctx, Some(BrokerLeg { replace: opts.replace_user })),
         OAuthFlow::Device => start_device_flow(ctx),
     }
+}
+
+/// What a GitHub connect answers when the person isn't signed in to AgentMux Cloud: a code the UI
+/// turns into "Sign in to AgentMux Cloud to connect GitHub" and a sign-in button, never a bare error
+/// (`frontend/app/view/accounts/github-cloud-gate.ts` has the same string). GitHub through AgentMux's
+/// own App is a Cloud feature (the Connect with GitHub design).
+pub const NEEDS_CLOUD_SIGN_IN: &str = "needs-cloud-sign-in";
+
+/// Whether a GitHub connect with AgentMux's own App has to stop because the person isn't signed
+/// in to AgentMux Cloud. A client the person brought is their own App and costs us nothing.
+fn needs_cloud_sign_in(provider: &str, cloud_signed_in: bool, client: &ResolvedClient) -> bool {
+    provider == github_connect::PROVIDER && !cloud_signed_in && client.mode == ClientMode::Builtin
 }
 
 /// Whether a GitHub connect goes through AgentMux Cloud's broker: the person is signed in to
@@ -709,6 +778,9 @@ async fn broker_exchange(ctx: &FlowCtx, code: &str, verifier: &str, redirect_uri
     use crate::muxbus::github_broker::{self, BrokerError};
     let who = match github_broker::caller(&ctx.mstore).await {
         Ok(who) => who,
+        // A sign-in that lapsed since the connect began is the same question as none. The other
+        // reasons ("not running yet", "the key can't be read") are not fixed by signing in.
+        Err(e) if e.needs_sign_in() => return OAuthStatus::Failed { error: NEEDS_CLOUD_SIGN_IN.to_string() },
         Err(e) => return OAuthStatus::Failed { error: e.to_string() },
     };
     match github_broker::exchange_code(http(), &who, code, verifier, redirect_uri, replace).await {
@@ -730,7 +802,7 @@ fn start_code_flow(ctx: FlowCtx, broker: Option<BrokerLeg>) -> Result<(String, O
     let pkce = pkce_pair();
     let state = random_state();
 
-    let session_id = manager().new_session(OAuthStatus::Pending);
+    let (session_id, mut stop) = manager().new_session(OAuthStatus::Pending);
     let sid = session_id.clone();
 
     tokio::spawn(async move {
@@ -753,7 +825,11 @@ fn start_code_flow(ctx: FlowCtx, broker: Option<BrokerLeg>) -> Result<(String, O
 
         // Await the single inbound callback (the session timeout sweep bounds
         // total wait; this accept has its own guard too).
-        let accept = tokio::time::timeout(SESSION_TIMEOUT, listener.accept()).await;
+        // A cancel (or the timeout sweep) ends the wait and drops the listener.
+        let accept = tokio::select! {
+            _ = stop.stopped() => return,
+            accept = tokio::time::timeout(SESSION_TIMEOUT, listener.accept()) => accept,
+        };
         let mut stream = match accept {
             Ok(Ok((s, _))) => s,
             _ => {
@@ -786,6 +862,11 @@ fn start_code_flow(ctx: FlowCtx, broker: Option<BrokerLeg>) -> Result<(String, O
             }
         };
 
+        // From here the flow writes the account: a cancel that already
+        // happened wins and nothing is written; a later one is refused.
+        if !manager().begin_commit(&sid) {
+            return;
+        }
         // Through the broker, which holds the App's client secret.
         if let Some(leg) = broker {
             let status = broker_exchange(&ctx, &code, &pkce.verifier, &redirect_uri, leg.replace).await;
@@ -816,7 +897,7 @@ fn start_code_flow(ctx: FlowCtx, broker: Option<BrokerLeg>) -> Result<(String, O
 fn start_device_flow(ctx: FlowCtx) -> Result<(String, OAuthStatus), String> {
     let device_url = ctx.cfg.device_url.ok_or("provider has no device endpoint")?.to_string();
     let scopes = ctx.requested.join(" ");
-    let session_id = manager().new_session(OAuthStatus::Pending);
+    let (session_id, mut stop) = manager().new_session(OAuthStatus::Pending);
     let sid = session_id.clone();
     let client_id = ctx.client.client_id.clone();
 
@@ -847,7 +928,11 @@ fn start_device_flow(ctx: FlowCtx) -> Result<(String, OAuthStatus), String> {
 
         // 2. Poll the token endpoint (RFC 8628 §3.4–3.5).
         loop {
-            tokio::time::sleep(Duration::from_secs(interval)).await;
+            // A cancel (or the timeout sweep) ends the wait at once.
+            tokio::select! {
+                _ = stop.stopped() => return,
+                _ = tokio::time::sleep(Duration::from_secs(interval)) => {}
+            }
             // Stop if the session was cancelled / timed out by the manager.
             match manager().poll(&sid) {
                 Some(s) if s.is_terminal() => return,
@@ -868,6 +953,11 @@ fn start_device_flow(ctx: FlowCtx) -> Result<(String, OAuthStatus), String> {
             };
             let j: serde_json::Value = r.json().await.unwrap_or_else(|_| serde_json::json!({}));
             if j.get("access_token").is_some() {
+                // The token is in hand; a cancel that already happened wins and
+                // nothing is written, a later one is refused.
+                if !manager().begin_commit(&sid) {
+                    return;
+                }
                 manager().set_status(&sid, complete(&ctx, &j).await);
                 return;
             }

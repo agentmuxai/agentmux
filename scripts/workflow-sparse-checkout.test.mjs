@@ -93,7 +93,6 @@ describe("sparse checkouts cover what their scripts import", () => {
                 "codex-review-gate-sweep.yml sweep",
                 "ci-pr.yml changes",
                 "ci-pr.yml ci-required",
-                "srv-image.yml changes",
             ]),
         );
     });

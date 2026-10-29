@@ -171,6 +171,9 @@ async fn app_main() {
     // Job templates: this instance's approvals and pinned publishers, beside
     // the widgets' (SPEC_JOBS_AND_TEMPLATES_2026_10_24.md §5.4).
     backend::job_templates::start(&config.data_home);
+    // Where a command's Vault secret files go, emptied of any a crash left
+    // (SPEC_VAULT_GENERATE_CAPTURE_AND_BROWSER_SIGNINS_2026_10_28.md §4.3).
+    backend::vault::files::init(&config.data_home);
 
     // 5. Bind TCP listeners, bring up LAN discovery / LSP supervisor / process tracker.
     let net = boot_timing::time_async(
@@ -423,6 +426,8 @@ async fn app_main() {
     // Agents' cargo caches are cleared as tasks finish, and the disk is watched
     // (SPEC_BUILD_CACHE_CLEANUP_2026_10_26.md).
     backend::build_cache_service::install(Arc::clone(&state.mstore), Arc::clone(&state.config_watcher));
+    // The version folders and unpacked portables an upgrade leaves behind are listed daily, and cleared on a host that turns it on.
+    backend::old_versions_service::install(Arc::clone(&state.config_watcher));
     // A leader hears from its workers (SPEC_AGENT_WORKERS_2026_10_15.md §3.3).
     backend::worker_notes::install(
         Arc::clone(&state.broker),

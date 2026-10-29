@@ -14,7 +14,7 @@
     border: 1px solid var(--border-color);
     background: transparent;
     color: var(--secondary-text-color);
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     font-size: var(--text-sm);
     padding: 3px 8px;
     cursor: pointer;
@@ -44,7 +44,7 @@
     width: 20px;
     height: 20px;
     @include mixins.flex-center(inline-flex);
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     cursor: pointer;
 
     &:hover {
@@ -79,7 +79,7 @@
     color: var(--main-text-color);
     background: var(--highlight-bg-color);
     border: 1px solid var(--error-color);
-    border-radius: 3px;
+    border-radius: var(--radius-sm);
 }
 
 .copy-error-button-fallback-hint {

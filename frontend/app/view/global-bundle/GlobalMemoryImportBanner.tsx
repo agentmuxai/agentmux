@@ -16,6 +16,7 @@
 import { createSignal, For, onMount, Show, type JSX } from "solid-js";
 import { RpcApi, type GlobalMemoryImportSources } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { Button } from "@/app/element/ui";
 
 /** How a scope is named to the human. */
 export function scopeLabel(scope: string): string {
@@ -69,14 +70,13 @@ export const GlobalMemoryImportBanner = (props: { onImported?: () => void }): JS
                                     {src.missing.map((e) => e.name).join(", ")}
                                 </span>
                             </span>
-                            <button
-                                type="button"
+                            <Button
                                 class="global-memory-import-button"
                                 disabled={busy() !== null}
                                 onClick={() => void bring(src.index)}
                             >
                                 {busy() === src.index ? "Bringing…" : "Bring them here"}
-                            </button>
+                            </Button>
                         </div>
                     )}
                 </For>

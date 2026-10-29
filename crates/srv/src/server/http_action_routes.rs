@@ -27,7 +27,7 @@ pub(super) const ALWAYS: &[&str] = &[
     "POST /agentmux/agent/broadcast", "POST /agentmux/agent/release", "POST /agentmux/agent/stop",
     "POST /agentmux/agent/stop-pending", "POST /agentmux/cron", "POST /agentmux/cron/:id/run",
     "POST /agentmux/cron/runs/:run_id/report", "POST /agentmux/jobs", "POST /agentmux/jobs/:id/run",
-    "POST /agentmux/jobs/runs/:run_id/report", "POST /agentmux/jobs/stop-run",
+    "POST /agentmux/jobs/runs/:run_id/report", "POST /agentmux/jobs/stop-run", "POST /agentmux/old-versions",
     "POST /agentmux/reactive/ensure-signing-key", "POST /agentmux/reactive/poller/config",
     "POST /agentmux/reactive/register", "POST /agentmux/reactive/unregister", "POST /agentmux/work",
     "POST /agentmux/work/:id/accept", "POST /agentmux/work/:id/ask", "POST /agentmux/work/:id/complete",
@@ -58,7 +58,7 @@ pub(super) const ALWAYS: &[&str] = &[
     "POST /api/v1/ui/browser/navigate", "POST /api/v1/ui/browser/open", "POST /api/v1/ui/browser/reload",
     "POST /api/v1/ui/browser/request_bypass", "POST /api/v1/ui/browser/set_files",
     "POST /api/v1/ui/browser/vault_fill", "POST /api/v1/ui/click", "POST /api/v1/ui/shortcuts/press",
-    "POST /api/v1/ui/shortcuts/run", "POST /api/v1/vault/request", "POST /api/v1/widgets/install",
+    "POST /api/v1/ui/shortcuts/run", "POST /api/v1/vault/generate", "POST /api/v1/vault/request", "POST /api/v1/widgets/install",
     "POST /api/v1/window/focus", "POST /api/v1/window/name", "POST /api/v1/work-claims",
     "POST /api/v1/work-claims/release", "POST /api/v1/workspace/name",
     "POST /api/v1/agent/detach", "POST /api/v1/agent/start", "POST /api/v1/agent/stop",
@@ -91,7 +91,7 @@ pub(super) const NEVER: &[&str] = &[
     "POST /api/v1/ptyshell/read", "POST /api/v1/ptyshell/status", "POST /api/v1/shell/output",
     "POST /api/v1/shell/status", "POST /api/v1/ui/browser/actions", "POST /api/v1/ui/browser/dialogs",
     "POST /api/v1/ui/browser/find", "POST /api/v1/ui/browser/focus_info", "POST /api/v1/ui/browser/snapshot",
-    "POST /api/v1/ui/browser/wait_for", "POST /api/v1/ui/query", "POST /api/v1/ui/screenshot",
+    "POST /api/v1/ui/browser/wait_for", "POST /api/v1/ui/query", "POST /api/v1/ui/record", "POST /api/v1/ui/screenshot",
     "POST /api/v1/ui/shortcuts/list", "POST /webhook/whatsapp",
 ];
 

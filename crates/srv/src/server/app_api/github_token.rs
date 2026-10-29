@@ -30,6 +30,9 @@ pub(crate) struct GithubTokenRequest {
     repo: String,
 }
 
+/// What an agent is told when the person isn't signed in to AgentMux Cloud (the Connect with GitHub design).
+const NEEDS_SIGN_IN_FOR_AGENT: &str = "GitHub needs the person to sign in to AgentMux Cloud (Connectors → Accounts)";
+
 /// The status a refusal is answered with: the request's fault (4xx) or a bad moment (503).
 fn status_for(e: &TokenError) -> StatusCode {
     match e {
@@ -109,6 +112,15 @@ pub(crate) async fn handle_github_token(
         .into_response(),
         Err(e) => {
             tracing::info!(target: "identity", agent = %want.agent, owner = %want.owner, repo = %want.repo, error = %e, "identity.github: no agent token");
+            // A lapsed or missing Cloud sign-in is the person's to fix, in words an agent can show.
+            // The reason rides along: "not running yet" or "key can't be read" are not fixed by signing in.
+            if let TokenError::Broker(BrokerError::NotSignedIn(why)) = &e {
+                let said = format!("{NEEDS_SIGN_IN_FOR_AGENT} ({why})");
+                return refuse(status_for(&e), match host_error {
+                    Some(host) => format!("{host}; {said}"),
+                    None => said,
+                });
+            }
             // A container agent was tried against gh-agent first: say both, in words it can show.
             match host_error {
                 Some(host) => refuse(status_for(&e), format!("{host}; {e}")),

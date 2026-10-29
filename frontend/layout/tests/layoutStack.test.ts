@@ -324,7 +324,7 @@ describe("layoutStack", () => {
             expect(model.treeState.rootNode!.data).toEqual(before);
         });
 
-        // revealBlockLocally (app/util/reveal-block.ts) calls this unconditionally
+        // revealBlock (app/util/reveal-block.ts) calls this unconditionally
         // on every reveal, relying on it to write nothing when there is nothing to
         // switch. SPEC_REVEAL_BLOCK_ONE_PATH_2026_09_27.md §6.
         it("sends pane.activateTab only on a real switch — never for the already-active tab or a single-block pane, and pushes no tree", async () => {

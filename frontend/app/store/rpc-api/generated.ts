@@ -53,9 +53,13 @@ import type { AskSideQuestionResult } from "@/types/rpc/AskSideQuestionResult";
 import type { AttachmentsCopyToWorkdirResult } from "@/types/rpc/AttachmentsCopyToWorkdirResult";
 import type { AttachmentsInfoResult } from "@/types/rpc/AttachmentsInfoResult";
 import type { AttachmentsIngestResult } from "@/types/rpc/AttachmentsIngestResult";
+import type { AuditQueryReq } from "@/types/rpc/AuditQueryReq";
+import type { AuditQueryResult } from "@/types/rpc/AuditQueryResult";
 import type { BackgroundTaskView } from "@/types/rpc/BackgroundTaskView";
 import type { BlockRevealParams } from "@/types/rpc/BlockRevealParams";
 import type { BlockRevealResult } from "@/types/rpc/BlockRevealResult";
+import type { BlockRevealedParams } from "@/types/rpc/BlockRevealedParams";
+import type { BlockRevealedResult } from "@/types/rpc/BlockRevealedResult";
 import type { BlockStatsDetail } from "@/types/rpc/BlockStatsDetail";
 import type { BlockStatsDetailReq } from "@/types/rpc/BlockStatsDetailReq";
 import type { BlockfileLineCountResult } from "@/types/rpc/BlockfileLineCountResult";
@@ -225,6 +229,8 @@ import type { CommandShellExecData } from "@/types/rpc/CommandShellExecData";
 import type { CommandShellStatusData } from "@/types/rpc/CommandShellStatusData";
 import type { CommandShellStopData } from "@/types/rpc/CommandShellStopData";
 import type { CommandSkillCatalogBindAllData } from "@/types/rpc/CommandSkillCatalogBindAllData";
+import type { CommandSkillCatalogImportCommitData } from "@/types/rpc/CommandSkillCatalogImportCommitData";
+import type { CommandSkillCatalogImportPreviewData } from "@/types/rpc/CommandSkillCatalogImportPreviewData";
 import type { CommandSkillCatalogSetReachData } from "@/types/rpc/CommandSkillCatalogSetReachData";
 import type { CommandSkillCatalogUpsertData } from "@/types/rpc/CommandSkillCatalogUpsertData";
 import type { CommandSkillCatalogUpsertForBundleData } from "@/types/rpc/CommandSkillCatalogUpsertForBundleData";
@@ -438,6 +444,7 @@ import type { PresenceStatusResult } from "@/types/rpc/PresenceStatusResult";
 import type { ProbeResult } from "@/types/rpc/ProbeResult";
 import type { ProvidersModelsParams } from "@/types/rpc/ProvidersModelsParams";
 import type { ProvidersModelsResult } from "@/types/rpc/ProvidersModelsResult";
+import type { ReactiveRegistrationFlagsResult } from "@/types/rpc/ReactiveRegistrationFlagsResult";
 import type { ReactiveRegistrationsParams } from "@/types/rpc/ReactiveRegistrationsParams";
 import type { ReactiveRegistrationsResult } from "@/types/rpc/ReactiveRegistrationsResult";
 import type { RemoteRecord } from "@/types/rpc/RemoteRecord";
@@ -477,6 +484,8 @@ import type { SkillCatalogItem } from "@/types/rpc/SkillCatalogItem";
 import type { SkillCatalogItemData } from "@/types/rpc/SkillCatalogItemData";
 import type { SkillCatalogListData } from "@/types/rpc/SkillCatalogListData";
 import type { SkillDeleteResult } from "@/types/rpc/SkillDeleteResult";
+import type { SkillImportCommitResult } from "@/types/rpc/SkillImportCommitResult";
+import type { SkillImportPreview } from "@/types/rpc/SkillImportPreview";
 import type { SkillListItem } from "@/types/rpc/SkillListItem";
 import type { SkillUnbindResult } from "@/types/rpc/SkillUnbindResult";
 import type { StartPageSetReq } from "@/types/rpc/StartPageSetReq";
@@ -922,6 +931,10 @@ export const GeneratedApi = {
   // command "block.reveal"
   BlockRevealCommand(client: RpcClient, data: BlockRevealParams, opts?: RpcOpts): Promise<BlockRevealResult> {
     return client.rpcCall("block.reveal", data, opts);
+  },
+  // command "block.revealed"
+  BlockRevealedCommand(client: RpcClient, data: BlockRevealedParams, opts?: RpcOpts): Promise<BlockRevealedResult> {
+    return client.rpcCall("block.revealed", data, opts);
   },
   // command "bundle.import.commit"
   BundleImportCommitCommand(
@@ -1434,6 +1447,10 @@ export const GeneratedApi = {
   // command "getmeta"
   GetMetaCommand(client: RpcClient, data: CommandGetMetaData, opts?: RpcOpts): Promise<MetaType> {
     return client.rpcCall("getmeta", data, opts);
+  },
+  // command "reactive.registration_flags"
+  GetReactiveRegistrationFlagsCommand(client: RpcClient, opts?: RpcOpts): Promise<ReactiveRegistrationFlagsResult> {
+    return client.rpcCall("reactive.registration_flags", {}, opts);
   },
   // command "reactive.registrations"
   GetReactiveRegistrationsCommand(
@@ -2333,6 +2350,22 @@ export const GeneratedApi = {
   ): Promise<SkillBindAllResult> {
     return client.rpcCall("skill.catalog.bind_all", data, opts);
   },
+  // command "skill.catalog.import_preview"
+  SkillCatalogImportPreviewCommand(
+    client: RpcClient,
+    data: CommandSkillCatalogImportPreviewData,
+    opts?: RpcOpts
+  ): Promise<SkillImportPreview> {
+    return client.rpcCall("skill.catalog.import_preview", data, opts);
+  },
+  // command "skill.catalog.import_commit"
+  SkillCatalogImportCommitCommand(
+    client: RpcClient,
+    data: CommandSkillCatalogImportCommitData,
+    opts?: RpcOpts
+  ): Promise<SkillImportCommitResult> {
+    return client.rpcCall("skill.catalog.import_commit", data, opts);
+  },
   // command "skill.catalog.unbind"
   SkillCatalogUnbindCommand(
     client: RpcClient,
@@ -2461,6 +2494,10 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<HistoryAgentSessions> {
     return client.rpcCall("history.agent_sessions", data, opts);
+  },
+  // command "audit.query"
+  AuditQueryCommand(client: RpcClient, data: AuditQueryReq, opts?: RpcOpts): Promise<AuditQueryResult> {
+    return client.rpcCall("audit.query", data, opts);
   },
   // command "history.locate"
   HistoryLocateCommand(client: RpcClient, data: HistoryLocateReq, opts?: RpcOpts): Promise<HistoryLocation> {

@@ -172,6 +172,12 @@ fn send_message_outcome_names_the_state_and_the_id() {
     assert!(t.starts_with("HELD for Camper (not_running)"), "{t}");
     assert!(t.contains("24 hours") && t.ends_with(" id=1-2-3"), "{t}");
 
+    // Held while srv starts the stopped agent: the sender is told it is on its way, not to wait for someone.
+    let t = ok(json!({ "success": false, "held": true, "starting": true, "request_id": "1-2-3", "error": "agent Camper is not running" }));
+    assert!(t.starts_with("HELD for Camper (not_running, starting)"), "{t}");
+    assert!(t.contains("starting it now") && t.contains("within a few seconds") && t.contains("Do not resend"), "{t}");
+    assert!(t.ends_with(" id=1-2-3"), "{t}");
+
     // Held because the receiver is not signed in (Phase 0 item 4).
     let t = ok(json!({ "success": false, "held": true, "held_reason": "needs_login", "request_id": "1-2-3",
         "error": "agent Camper is not signed in — held" }));

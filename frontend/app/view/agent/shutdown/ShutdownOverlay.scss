@@ -17,7 +17,7 @@
     max-width: min(560px, 92%);
     padding: 12px 16px;
     border: 1px solid var(--border-color);
-    border-radius: 6px;
+    border-radius: var(--radius-md);
     background: var(--main-bg-color);
     font-family: var(--font-mono);
     font-size: var(--text-sm);

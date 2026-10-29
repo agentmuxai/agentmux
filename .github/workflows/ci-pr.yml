@@ -371,7 +371,14 @@ jobs:
       # (missing fields); #1823 was a Windows `cfg` break in agentmux-cef
       # itself, which nightly (ci-nightly-build.yml) now owns catching.
       # The `rust-macos` job checks the same crate list; keep them identical.
+      # Not on the Ubuntu leg of a PR: its nextest step below compiles every
+      # test target of these same crates (lib, bin, integration, examples) with
+      # the same features and cfgs, a superset of what a check does, and fails
+      # the job on the same errors, so a check first only added about 2.5 min to
+      # the required path. Windows keeps it (it runs no tests), and so does the
+      # merge queue's run (`queue`), which skips nextest and relies on this.
       - name: cargo check --tests (CEF-free crates)
+        if: matrix.os == 'windows-latest' || needs.changes.outputs.queue == 'true'
         run: cargo check --tests -p agentmux-common -p agentmux-srv -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats
 
       # Catches stale-assertion breaks (e.g. #1876's pre-JEKT expectations)
@@ -402,7 +409,11 @@ jobs:
         uses: taiki-e/install-action@nextest
       - name: cargo nextest (CEF-free crates)
         if: matrix.os != 'windows-latest' && needs.changes.outputs.queue != 'true'
-        run: cargo nextest run --profile ci -p agentmux-common -p agentmux-srv -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats
+        # The build's warnings go to a file for the ts-rs check below, which used
+        # to read them off a separate `cargo check`; pipefail keeps a failing
+        # build or test failing the step.
+        shell: bash
+        run: cargo nextest run --profile ci -p agentmux-common -p agentmux-srv -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats 2>&1 | tee "$RUNNER_TEMP/nextest-build.log"
       # nextest does not run doctests. Only these three have a library target.
       - name: cargo test --doc (CEF-free crates)
         if: matrix.os != 'windows-latest' && needs.changes.outputs.queue != 'true'
@@ -446,12 +457,12 @@ jobs:
       # ts-rs ignores a serde attribute item it can't parse, so the generated
       # TypeScript can silently disagree with the wire (a lost rename caused the
       # "My Agents empty" incident). This fails on any such warning outside the
-      # script's allow-list. It repeats the `cargo check --tests` above exactly,
-      # so cargo only replays that build's warnings; nothing recompiles.
-      # See scripts/check-tsrs-serde-warnings.mjs and #4802.
+      # script's allow-list. It reads the warnings the nextest build above just
+      # printed (the derive warns on every compile of these crates), so nothing
+      # compiles twice. See scripts/check-tsrs-serde-warnings.mjs and #4802.
       - name: ts-rs parses every serde attribute
         if: matrix.os == 'ubuntu-latest' && needs.changes.outputs.queue != 'true'
-        run: node scripts/check-tsrs-serde-warnings.mjs -- check --tests -p agentmux-common -p agentmux-srv -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats
+        run: node scripts/check-tsrs-serde-warnings.mjs --log "$RUNNER_TEMP/nextest-build.log"
 
   # macOS compile check, non-blocking for now (PLAN_MACOS_COMPILE_GATE_2026_10_09.md
   # phase 1): `cargo check --tests` on the same CEF-free crates as the `rust`

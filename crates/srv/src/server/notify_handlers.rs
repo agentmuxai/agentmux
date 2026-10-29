@@ -154,7 +154,37 @@ pub struct NotifyOk {
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct BlockRevealParams {
     pub block_id: String,
+    /// Wait for the window to say whether it showed the block (`block.revealed`), up to
+    /// `REVEAL_ACK_WAIT`; the answer is in `revealed`. Without it the call returns once the
+    /// window has been told.
+    #[serde(default)]
+    #[ts(optional)]
+    pub await_ack: Option<bool>,
 }
+
+/// `block.revealed`: the window named by `block:reveal` says how it went.
+#[derive(serde::Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct BlockRevealedParams {
+    /// The `request_id` the `block:reveal` carried.
+    pub request_id: String,
+    pub ok: bool,
+    /// Why not, when `ok` is false (the renderer's own word for it).
+    #[serde(default)]
+    #[ts(optional)]
+    pub reason: Option<String>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct BlockRevealedResult {
+    /// A caller was still waiting for this answer.
+    pub delivered: bool,
+}
+
+/// How long `block.reveal` with `await_ack` waits for the window. Less than the renderer's own
+/// deadline for a hand-over, so the caller hears a named failure rather than its own timeout.
+const REVEAL_ACK_WAIT: std::time::Duration = std::time::Duration::from_millis(2000);
 
 #[derive(serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
@@ -166,6 +196,15 @@ pub struct BlockRevealResult {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub window_id: Option<String>,
+    /// With `await_ack`: whether that window showed the block. Absent when it did not answer
+    /// in time, or the caller did not wait.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub revealed: Option<bool>,
+    /// With `revealed: false`: why, in the window's words.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub reason: Option<String>,
 }
 
 pub(crate) fn router_for(state: &AppState) -> Arc<router::Router> {
@@ -181,6 +220,7 @@ pub(crate) async fn reveal_block(
     state: &AppState,
     r: &Arc<router::Router>,
     block_id: String,
+    await_ack: bool,
 ) -> Result<BlockRevealResult, String> {
     if block_id.is_empty() {
         return Err("block.reveal: block_id required".to_string());
@@ -190,11 +230,26 @@ pub(crate) async fn reveal_block(
         .await
         .map_err(|e| format!("block.reveal: {e}"))?;
     let Some(target) = target else {
-        return Ok(BlockRevealResult { found: false, window_id: None });
+        return Ok(BlockRevealResult { found: false, window_id: None, revealed: None, reason: None });
     };
     activate_in_stored_layout(state, &target.tab_id, &target.block_id).await;
+    let mut target = target;
+    // Registered before the window is told, so an answer cannot beat the waiter.
+    let waiting = await_ack.then(|| {
+        let id = uuid::Uuid::new_v4().to_string();
+        let rx = r.expect_reveal_ack(&id);
+        target.request_id = Some(id.clone());
+        (id, rx)
+    });
     r.publish_block_reveal(&target);
-    Ok(BlockRevealResult { found: true, window_id: Some(target.window_id) })
+    let (mut revealed, mut reason) = (None, None);
+    if let Some((id, rx)) = waiting {
+        match tokio::time::timeout(REVEAL_ACK_WAIT, rx).await {
+            Ok(Ok(ack)) => (revealed, reason) = (Some(ack.ok), ack.reason),
+            _ => r.forget_reveal_ack(&id),
+        }
+    }
+    Ok(BlockRevealResult { found: true, window_id: Some(target.window_id), revealed, reason })
 }
 
 /// `LayoutStackActivate` through the reducer, then mstore — the same
@@ -387,12 +442,20 @@ pub fn register_notify_handlers(engine: &Arc<WshRpcEngine>, state: &AppState, co
         }
     });
 
-    let rr = r;
+    let rr = r.clone();
     let st = state.clone();
     engine.register_typed("block.reveal", move |p: BlockRevealParams, _ctx| {
         let r = rr.clone();
         let st = st.clone();
-        async move { reveal_block(&st, &r, p.block_id).await }
+        async move { reveal_block(&st, &r, p.block_id, p.await_ack == Some(true)).await }
+    });
+    let rr = r;
+    engine.register_typed("block.revealed", move |p: BlockRevealedParams, _ctx| {
+        let r = rr.clone();
+        async move {
+            let ack = router::RevealAck { ok: p.ok, reason: p.reason.filter(|s| !s.is_empty()) };
+            Ok(BlockRevealedResult { delivered: r.reveal_acked(&p.request_id, ack) })
+        }
     });
 }
 
@@ -503,7 +566,7 @@ mod block_reveal_tests {
     #[tokio::test]
     async fn reveals_a_background_pane_tab_in_the_window_showing_it() {
         let f = fixture(true).await;
-        let res = super::reveal_block(&f.state, &f.router, f.b.clone()).await.unwrap();
+        let res = super::reveal_block(&f.state, &f.router, f.b.clone(), false).await.unwrap();
         assert!(res.found);
         assert_eq!(res.window_id.as_deref(), Some(f.window_id.as_str()));
 
@@ -519,13 +582,64 @@ mod block_reveal_tests {
         let reveals = f.reveals.lock().unwrap().clone();
         assert_eq!(reveals.len(), 1, "{reveals:?}");
         let ev: BlockRevealEvent = serde_json::from_value(reveals[0].clone()).unwrap();
-        assert_eq!(ev, BlockRevealEvent { block_id: f.b.clone(), tab_id: f.tab_id.clone(), window_id: f.window_id.clone() });
+        assert_eq!(ev, BlockRevealEvent { block_id: f.b.clone(), tab_id: f.tab_id.clone(), window_id: f.window_id.clone(), request_id: None });
+    }
+
+    /// The request id the window was told to answer, once it has been told.
+    async fn told_request_id(f: &Fixture) -> String {
+        loop {
+            if let Some(v) = f.reveals.lock().unwrap().first().cloned() {
+                let ev: BlockRevealEvent = serde_json::from_value(v).unwrap();
+                return ev.request_id.expect("the event names the request the caller waits on");
+            }
+            tokio::task::yield_now().await;
+        }
+    }
+
+    #[tokio::test]
+    async fn a_caller_that_waits_hears_the_window_say_it_showed_the_block() {
+        let f = fixture(true).await;
+        let (res, delivered) = tokio::join!(
+            super::reveal_block(&f.state, &f.router, f.b.clone(), true),
+            async {
+                let id = told_request_id(&f).await;
+                f.router.reveal_acked(&id, router::RevealAck { ok: true, reason: None })
+            }
+        );
+        let res = res.unwrap();
+        assert!(delivered);
+        assert!(res.found);
+        assert_eq!((res.revealed, res.reason), (Some(true), None));
+    }
+
+    #[tokio::test]
+    async fn a_window_that_could_not_show_the_block_says_why() {
+        let f = fixture(true).await;
+        let (res, _) = tokio::join!(
+            super::reveal_block(&f.state, &f.router, f.b.clone(), true),
+            async {
+                let id = told_request_id(&f).await;
+                f.router.reveal_acked(&id, router::RevealAck { ok: false, reason: Some("layout-timeout".into()) })
+            }
+        );
+        let res = res.unwrap();
+        assert_eq!((res.revealed, res.reason.as_deref()), (Some(false), Some("layout-timeout")));
+    }
+
+    #[tokio::test]
+    async fn a_caller_that_does_not_wait_sends_no_request_id_and_an_answer_to_nobody_is_dropped() {
+        let f = fixture(true).await;
+        let res = super::reveal_block(&f.state, &f.router, f.b.clone(), false).await.unwrap();
+        assert_eq!(res.revealed, None);
+        let ev: BlockRevealEvent = serde_json::from_value(f.reveals.lock().unwrap()[0].clone()).unwrap();
+        assert_eq!(ev.request_id, None);
+        assert!(!f.router.reveal_acked("nobody-asked", router::RevealAck { ok: true, reason: None }));
     }
 
     #[tokio::test]
     async fn unknown_block_is_not_found_and_publishes_nothing() {
         let f = fixture(true).await;
-        let res = super::reveal_block(&f.state, &f.router, "no-such-block".into()).await.unwrap();
+        let res = super::reveal_block(&f.state, &f.router, "no-such-block".into(), false).await.unwrap();
         assert!(!res.found);
         assert_eq!(res.window_id, None);
         assert!(f.reveals.lock().unwrap().is_empty());
@@ -534,7 +648,7 @@ mod block_reveal_tests {
     #[tokio::test]
     async fn workspace_open_in_no_window_is_not_found_and_changes_nothing() {
         let f = fixture(false).await;
-        let res = super::reveal_block(&f.state, &f.router, f.b.clone()).await.unwrap();
+        let res = super::reveal_block(&f.state, &f.router, f.b.clone(), false).await.unwrap();
         assert!(!res.found);
         assert!(f.reveals.lock().unwrap().is_empty());
         let tree = f.state.srv_state.lock().await.tabs[&f.tab_id].rootnode.clone().unwrap();
@@ -544,7 +658,7 @@ mod block_reveal_tests {
     #[tokio::test]
     async fn empty_block_id_is_an_error() {
         let f = fixture(true).await;
-        assert!(super::reveal_block(&f.state, &f.router, String::new()).await.is_err());
+        assert!(super::reveal_block(&f.state, &f.router, String::new(), false).await.is_err());
     }
 }
 

@@ -32,12 +32,15 @@ pub mod widget_catalog;
 pub mod widget_packages;
 #[cfg(unix)]
 mod widget_beneath;
+pub mod workspace_copy;
 pub mod widget_signature;
 pub mod widget_requests;
 pub mod job_templates;
 pub mod vault;
 pub mod build_cache;
 pub mod build_cache_service;
+pub mod old_versions;
+pub mod old_versions_service;
 pub mod bundle_export;
 pub mod bundle_import;
 pub mod bundle_import_skill_text;
@@ -120,6 +123,7 @@ pub mod context_reading;
 pub mod continuity;
 pub mod continuity_relocate;
 pub mod continuity_segments;
+pub mod audit_query;
 pub mod memory_record;
 pub mod memory_dir_claims;
 pub mod memory_reconcile;
@@ -132,6 +136,8 @@ pub mod continuity_state;
 pub mod memory_delivery;
 /// Skills that ship with AgentMux, seeded into the catalog once.
 pub mod builtin_skills;
+/// Reading a skill from a folder, a git repository or a URL, for import.
+pub mod skill_import;
 /// What of Personal Memory fits in a delivery, and what the agent is told about the rest.
 pub mod memory_fit;
 pub mod shellexec;
@@ -205,6 +211,7 @@ pub mod registry_probe;
 pub mod cron;
 pub mod jobs;
 pub mod dev_proxy;
+pub mod dev_keepalive;
 pub mod dev_relay;
 pub mod shell_node;
 pub mod work_facts;

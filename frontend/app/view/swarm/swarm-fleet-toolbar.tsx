@@ -4,6 +4,7 @@
 // Fleet control toolbar + confirm modal + results panel for the Swarm pane.
 // See docs/specs/SPEC_MULTI_AGENT_FLEET_CONTROL_2026_08_20.md.
 
+import { actionableKeys, filterActive } from "./swarm-filter-state";
 import { createMemo, createSignal, For, Show, type JSX } from "solid-js";
 import { ConfirmModal } from "@/app/element/confirm-modal";
 import { ContextMenuModel } from "@/app/store/contextmenu";
@@ -43,11 +44,21 @@ export function FleetToolbar(props: {
 }): JSX.Element {
     // `section` changes while this stays mounted, so it is read through `props`, never destructured.
     const { model, allBlockIds } = props;
-    const selected = () => model.selectedBlockIdsAtom();
-    const count = () => selected().size;
+    // What an action reaches is the selected agents the filter shows; a selected agent it hides
+    // stays selected, is counted, and is not included (swarm-filter-state.ts).
+    const selected = () => new Set(actionableKeys(model, model.selectedBlockIdsAtom()));
+    const count = () => model.selectedBlockIdsAtom().size;
+    const hiddenCount = () => count() - selected().size;
+    const filtering = () => filterActive(model);
     const allSelected = () => {
         const ids = allBlockIds();
-        return ids.length > 0 && ids.every((id) => selected().has(id));
+        const all = model.selectedBlockIdsAtom();
+        return ids.length > 0 && ids.every((id) => all.has(id));
+    };
+    // With a filter on, Select all and Select none are about the shown agents; the hidden ones keep their ticks.
+    const toggleAll = () => {
+        if (!filtering()) return allSelected() ? model.clearSelection() : model.selectAll(allBlockIds());
+        model.setManySelected(allBlockIds(), !allSelected());
     };
     // Agents on other instances in the selection, and how many of the selected
     // an action can reach. Cheap: only the other instances' list is read, not
@@ -96,10 +107,11 @@ export function FleetToolbar(props: {
                 <Show when={allBlockIds().length > 0}>
                     <Button
                         class="swarm-fleet-btn"
-                        onClick={() => (allSelected() ? model.clearSelection() : model.selectAll(allBlockIds()))}
+                        onClick={toggleAll}
                     >
                         <i class={allSelected() ? "fa-solid fa-square-check" : "fa-regular fa-square"} />{" "}
                         {allSelected() ? "Select none" : "Select all"}
+                        <Show when={filtering()}> {allBlockIds().length} shown</Show>
                     </Button>
                 </Show>
 
@@ -111,6 +123,7 @@ export function FleetToolbar(props: {
                 <Show when={count() > 0}>
                     <span class="swarm-fleet-toolbar-count">
                         {count()} selected
+                        <Show when={hiddenCount() > 0}> · {hiddenCount()} hidden by the filter, not included</Show>
                         <Show when={otherMachineN() > 0}> · {otherMachineN()} on other machines</Show>
                     </span>
 
@@ -217,7 +230,7 @@ export function FleetToolbar(props: {
 export function StopTargetRows(props: { model: SwarmViewModel }): JSX.Element {
     const rows = createMemo(() => {
         const known = props.model.fleetTargets();
-        return Array.from(props.model.selectedBlockIdsAtom()).map((key) => {
+        return actionableKeys(props.model, props.model.selectedBlockIdsAtom()).map((key) => {
             const t = known.get(key);
             return {
                 key,

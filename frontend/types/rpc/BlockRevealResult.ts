@@ -9,4 +9,13 @@ found: boolean,
 /**
  * That window (a connected frontend's `Window` oid) — the caller raises it.
  */
-window_id?: string, };
+window_id?: string, 
+/**
+ * With `await_ack`: whether that window showed the block. Absent when it did not answer
+ * in time, or the caller did not wait.
+ */
+revealed?: boolean, 
+/**
+ * With `revealed: false`: why, in the window's words.
+ */
+reason?: string, };

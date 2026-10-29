@@ -245,7 +245,7 @@ container agents: <why, and what to do instead>`.
 | `/agentmux/service`, `/ws`, `/agentmux/wps/publish` | no | generic gateways to everything else |
 | `/agentmux/stream-local-file`, `/agentmux/file`, `/agentmux/file-icon` | no | read host files for the app's windows; a container agent reads its own files in `/workspace` directly |
 | `/api/v1/ui/browser/set_files` | no, for now | uploads from a path; needs the container's `/workspace` mapped to the host folder first |
-| `/api/v1/pane/open` | no, for now | a pane shows a host file in the user's windows, which read the path they are given; a container agent reads its own files in `/workspace` directly, or asks a native agent to open one |
+| `/api/v1/pane/open` | yes, as a snapshot | editor and media panes show a read-only copy of a file from `/workspace` (srv reads it out without following a link and keeps the copy in its own folder; the title says it is a snapshot and the time; it goes when the pane closes), and sysinfo, help and tower open as they are; a terminal, another machine, a browser and a folder are refused with what to do instead. Live, editable panes need the windows' file reads held to the workspace per pane, which is not built |
 | `/api/v1/agent/globalmemory/{write,remove,revert}` | no | Global Memory is composed into every native agent's context at launch; a container reads it, a native agent writes it |
 | `/api/v1/agent/self/upgrade` | no | replaces the app on the host |
 | `/agentmux/agents/self/keys`, `/api/v1/agent/self/mcp-beat`, `/agentmux/reactive/register` | no | srv does this for a container agent itself |

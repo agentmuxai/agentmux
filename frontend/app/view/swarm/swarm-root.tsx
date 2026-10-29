@@ -9,8 +9,10 @@ import { AccountAvailabilityStrip } from "@/app/view/account-availability/accoun
 import { selectTrace } from "@/app/util/select-trace";
 import { readZoom } from "@/app/store/zoom-factor";
 import { SwarmAgentList, useSwarmAgents, type SwarmAgents } from "./swarm-agent-list";
+import type { SwarmFilterFocus } from "./swarm-filter-bar";
 import { ClearCompletedButton } from "./swarm-view";
 import { SwarmSectionBar } from "./swarm-section-bar";
+import { RegistrationFlagsProvider } from "./swarm-row-registration";
 import { createSwarmSection, swarmDensityOf, type SwarmSection } from "./swarm-section";
 import { BroadcastDock } from "./swarm-broadcast";
 import { SupervisorSettingsBar } from "./swarm-supervisor-settings";
@@ -34,7 +36,7 @@ function SectionControls(props: { model: SwarmViewModel; agents: SwarmAgents; se
             {/* Outside the tree's own Show: agents on other instances can be selected
                 when this instance has none, and the toolbar is what acts on them. It
                 shows itself only when there is something to select or act on. */}
-            <FleetToolbar model={model} allBlockIds={agents.selectableKeys} section={props.section} />
+            <FleetToolbar model={model} allBlockIds={agents.shownSelectableKeys} section={props.section} />
             <FleetResultPanel model={model} quietWhenClean={props.section === "broadcast"} />
         </div>
     );
@@ -66,6 +68,8 @@ function SectionListNotes(props: { model: SwarmViewModel; agents: SwarmAgents })
 export function SwarmView(props: {
     model: SwarmViewModel;
     ctx: PaneTabHostContext;
+    /** Gets the filter box's focus handle, for the pane's Find (Ctrl/Cmd+F). */
+    filterFocusRef?: (focus: SwarmFilterFocus) => void;
 }): JSX.Element {
     const model = props.model;
     const ctx = props.ctx;
@@ -122,19 +126,21 @@ export function SwarmView(props: {
                 when={!model.loadingAtom()}
                 fallback={<div class="swarm-loading">Loading…</div>}
             >
-                <AccountAvailabilityStrip />
-                <SwarmSectionBar section={section} onChange={(id) => void ctx.setMeta({ "swarm:section": id })}>
-                    {/* The body is the same elements in every section: the area above the list
-                        follows the section, the list itself is rendered once and never remounted
-                        by a switch, which is what keeps a press on a row from being lost (#5208). */}
-                    <div class="swarm-section-body">
-                        <div class="swarm-agents-pane">
-                            <SectionControls model={model} agents={agents} section={section()} />
-                            <SectionListNotes model={model} agents={agents} />
-                            <SwarmAgentList model={model} ctx={ctx} agents={agents} density={density} />
+                <RegistrationFlagsProvider visible={() => ctx.visibility() === "active"}>
+                    <AccountAvailabilityStrip />
+                    <SwarmSectionBar section={section} onChange={(id) => void ctx.setMeta({ "swarm:section": id })}>
+                        {/* The body is the same elements in every section: the area above the list
+                            follows the section, the list itself is rendered once and never remounted
+                            by a switch, which is what keeps a press on a row from being lost (#5208). */}
+                        <div class="swarm-section-body">
+                            <div class="swarm-agents-pane">
+                                <SectionControls model={model} agents={agents} section={section()} />
+                                <SectionListNotes model={model} agents={agents} />
+                                <SwarmAgentList model={model} ctx={ctx} agents={agents} density={density} filterFocusRef={props.filterFocusRef} />
+                            </div>
                         </div>
-                    </div>
-                </SwarmSectionBar>
+                    </SwarmSectionBar>
+                </RegistrationFlagsProvider>
             </Show>
         </div>
     );

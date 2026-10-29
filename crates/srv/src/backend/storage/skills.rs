@@ -318,6 +318,8 @@ pub struct SkillCatalogItem {
     pub all_agents: bool,
     /// Reaches every agent created from now on (`skill_reach::SkillReach`).
     pub new_agents: bool,
+    /// Where it was imported from (`skill_source`); `None` for one written by hand.
+    pub source: Option<super::skill_source::SkillSource>,
 }
 
 /// `bundle_skill_list`'s response shape — mirrors `SkillListItem`, but
@@ -421,13 +423,14 @@ impl Store {
     /// SPEC_V1_MCP_SKILLS_PRIMITIVES_2026_06_30.md §8 ("used by N agents"),
     /// tracked as gap #2 of #1960.
     pub fn skill_list_global(&self, catalog: &Store) -> Result<Vec<SkillCatalogItem>, StoreError> {
-        let reach = catalog.skill_reach_map()?;
+        let (reach, sources) = (catalog.skill_reach_map()?, catalog.skill_source_map()?);
         Ok(self
             .managed_list_global::<Skill>(catalog)?
             .into_iter()
             .map(|(skill, bound_count)| {
                 let r = reach.get(&skill.id).copied().unwrap_or_default();
-                SkillCatalogItem { skill, bound_count, all_agents: r.all_agents, new_agents: r.new_agents_since > 0 }
+                let source = sources.get(&skill.id).cloned();
+                SkillCatalogItem { skill, bound_count, all_agents: r.all_agents, new_agents: r.new_agents_since > 0, source }
             })
             .collect())
     }
@@ -468,6 +471,7 @@ impl Store {
         let deleted = self.managed_delete::<Skill>(catalog, id)?;
         // Its reach goes with it.
         catalog.skill_reach_forget(id)?;
+        catalog.skill_source_forget(id)?;
         Ok(deleted)
     }
 

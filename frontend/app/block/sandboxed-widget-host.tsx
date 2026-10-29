@@ -48,6 +48,7 @@ export function makeSandboxedPaneManifest(pkg: WidgetPackageInfo, pane: WidgetPa
         view: pane.view,
         label: pane.label,
         icon: pane.icon,
+        singleton: pane.singleton,
         defaultHue: pkg.default_hue ?? undefined,
         capabilities: { noPadding: true },
         create: (ctx) => createSandboxedInstance(pkg, pane, ctx),

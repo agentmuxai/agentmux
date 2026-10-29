@@ -20,6 +20,7 @@ use serde_json::json;
 
 use agentmux_common::api_types::{RegisterDevServerRequest, RegisterDevServerResponse};
 
+use crate::backend::dev_keepalive::{self, clean_command, clean_dir, route_target, route_when_listening, start, wait_listening, RouteError, Spec};
 use crate::backend::dev_proxy::DEV_PROXY_PORT;
 
 use super::AppState;
@@ -99,51 +100,70 @@ pub(crate) async fn handle_register_dev_server(
         )
             .into_response();
     };
-    let Some(ip) = cm.agent_network_ip(&container_name).await else {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(json!({
-                "error": format!(
-                    "no running container found for agent {agent_id:?} on the dev-proxy \
-                     network — RegisterDevServer only works from inside a container-type \
-                     agent's own container"
-                )
-            })),
-        )
-            .into_response();
-    };
-
-    // Where the proxy reaches it. On Linux the container's own address; where the daemon runs in a VM
-    // (Docker Desktop) that address is not routable from here, so the dev relay joins the two.
-    let target: crate::backend::dev_proxy::Target = if crate::backend::dev_relay::needed(&cm).await {
-        let image = cm
-            .docker()
-            .inspect_container(&container_name, None)
-            .await
-            .ok()
-            .and_then(|c| c.config?.image)
-            .unwrap_or_default();
-        match crate::backend::dev_relay::ensure(&cm, &image).await {
-            Ok(via) => crate::backend::dev_proxy::Target::Relay { via, container: container_name, port: req.port },
-            Err(e) => {
-                return (StatusCode::BAD_GATEWAY, Json(json!({ "error": format!("the dev proxy's relay is not available: {e}") }))).into_response();
+    // With a command, AgentMux starts the server if nothing is listening yet and keeps it up (`dev_keepalive`).
+    let keep = match req.command.as_deref() {
+        None => None,
+        Some(command) => {
+            let spec = clean_command(command).and_then(|command| {
+                let dir = clean_dir(req.dir.as_deref())?;
+                Ok(Spec { agent_id: agent_id.clone(), container: container_name.clone(), project: project.clone(), port: req.port, command, dir, seen: 0 })
+            });
+            match spec {
+                Ok(s) => Some(s),
+                Err(e) => return (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response(),
             }
         }
+    };
+    // Room for it first, so a refusal leaves nothing started or registered. A server that listens within a request's
+    // patience is registered now; a slower one is registered when it does listen.
+    let mut starting = false;
+    if let Some(spec) = &keep {
+        if let Err(e) = dev_keepalive::store().can_keep(spec) {
+            return (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response();
+        }
+        if cm.agent_network_ip(&container_name).await.is_some() {
+            if let Err(e) = start(&cm, spec, false).await {
+                return (StatusCode::BAD_GATEWAY, Json(json!({ "error": e }))).into_response();
+            }
+            starting = !wait_listening(&cm, spec, std::time::Duration::from_secs(6)).await;
+        }
+    }
+    if let (true, Some(spec)) = (starting, &keep) {
+        // Kept before the task that routes it can look, so it can tell the project is still wanted.
+        if let Err(e) = remember(&keep, &container_name, &project) {
+            return (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response();
+        }
+        route_when_listening(&cm, spec.clone());
     } else {
-        match format!("{ip}:{}", req.port).parse::<std::net::SocketAddr>() {
-            Ok(a) => a.into(),
-            Err(e) => {
+        // Where the proxy reaches it. On Linux the container's own address; where the daemon runs in a VM
+        // (Docker Desktop) that address is not routable from here, so the dev relay joins the two.
+        let target = match route_target(&cm, &container_name, req.port).await {
+            Ok(t) => t,
+            Err(RouteError::NoContainer) => {
                 return (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({ "error": format!("invalid address {ip}:{}: {e}", req.port) })),
+                    StatusCode::NOT_FOUND,
+                    Json(json!({
+                        "error": format!(
+                            "no running container found for agent {agent_id:?} on the dev-proxy \
+                             network — RegisterDevServer only works from inside a container-type \
+                             agent's own container"
+                        )
+                    })),
                 )
                     .into_response();
             }
+            Err(RouteError::Relay(e)) => {
+                return (StatusCode::BAD_GATEWAY, Json(json!({ "error": format!("the dev proxy's relay is not available: {e}") }))).into_response();
+            }
+            Err(RouteError::Address(e)) => {
+                return (StatusCode::BAD_REQUEST, Json(json!({ "error": format!("invalid address {e}") }))).into_response();
+            }
+        };
+        state.dev_proxy.register_from(&project, &agent_id, Some(&container_name), target).await;
+        if let Err(e) = remember(&keep, &container_name, &project) {
+            return (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response();
         }
-    };
-
-    state.dev_proxy.register(&project, &agent_id, target).await;
-
+    }
     // Lowercased to match the actual routing key (`DevProxyRegistry::routing_key`
     // lowercases both halves) — this is what a browser should actually be
     // pointed at, not necessarily `agent_id`'s on-disk casing.
@@ -151,7 +171,19 @@ pub(crate) async fn handle_register_dev_server(
         "http://{project}-{}.localhost:{DEV_PROXY_PORT}",
         agent_id.to_lowercase()
     );
-    (StatusCode::OK, Json(RegisterDevServerResponse { url })).into_response()
+    (StatusCode::OK, Json(RegisterDevServerResponse { url, starting })).into_response()
+}
+
+/// What is kept up for `project` in `container` after this registration: the spec if there is a command; registered
+/// again without one, nothing.
+fn remember(keep: &Option<Spec>, container: &str, project: &str) -> Result<(), String> {
+    match keep {
+        Some(spec) => dev_keepalive::store().keep(spec.clone()),
+        None => {
+            dev_keepalive::store().drop_project(container, project);
+            Ok(())
+        }
+    }
 }
 
 /// The container the verified pane `block_id` runs in.

@@ -256,6 +256,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/schema/*path", get(files::handle_schema))
         .route("/api/lan-instances", get(handle_lan_instances))
         .route("/agentmux/discovery", get(handle_discovery))
+        .route("/agentmux/old-versions", get(super::old_versions_handlers::handle_get).post(super::old_versions_handlers::handle_post))
         .route("/agentmux/reactive/availability", get(super::availability_view::handle_availability))
         .route("/agentmux/diag/sagas", get(handle_diag_sagas))
         // Streaming-bash wrapper publish endpoint
@@ -303,9 +304,11 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // for the user's answer, which only the host can carry.
         .route("/api/v1/widgets", get(super::widget_agent_handlers::handle_widgets_list))
         .route("/api/v1/widgets/install", post(super::widget_agent_handlers::handle_widgets_install))
-        // The Vault for agents: entries' names, and asking the person for a
-        // new one. Never a value; writes come only from the host, below.
+        // The Vault for agents: entries' names, asking the person for a new
+        // one, and an entry whose value the Vault makes. Never a value back;
+        // the person's writes come only from the host, below.
         .route("/api/v1/vault", get(super::vault_handlers::handle_vault_list))
+        .route("/api/v1/vault/generate", post(super::vault_handlers::handle_vault_generate))
         .route("/api/v1/vault/request", post(super::vault_handlers::handle_vault_request))
         .route("/api/v1/vault/on_screen", get(super::vault_handlers::handle_vault_on_screen))
         // An agent's `Browser` `fill` with `vault`: the person says where it may go.
@@ -502,6 +505,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // is stamped by agentmux-mcp from AGENTMUX_BLOCKID, same trust model as
         // the agent/memory/preset/identity routes just above.
         .route("/api/v1/ui/screenshot", post(ui_handlers::handle_ui_screenshot))
+        .route("/api/v1/ui/record", post(ui_record::handle_ui_record))
         .route("/api/v1/ui/click", post(ui_handlers::handle_ui_click))
         .route("/api/v1/ui/query", post(ui_handlers::handle_ui_query))
         // Shortcuts (PLAN_SHORTCUTS_VERIFIED_AND_APP_API_2026_10_10.md §4) —

@@ -51,7 +51,7 @@ The same list is in the app: press F1, or open the Help pane. A terminal keeps e
 | Resize pane | ⌃⌥⌘↑/↓/←/→ | Alt+Shift+↑/↓/←/→ |
 | Refocus pane | ⌘I | — |
 | Focus the message box | ⌘L | Ctrl+L |
-| Replace pane with launcher | ⌃⇧K | Ctrl+Shift+K |
+| Replace pane with Shortcuts | ⌃⇧K | Ctrl+Shift+K |
 | Change connection | ⇧⌘G | Ctrl+Shift+G |
 
 ## Find & zoom

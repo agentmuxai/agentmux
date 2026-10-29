@@ -37,6 +37,10 @@ pub(crate) mod window_settings;
 pub(crate) use gpu::{detect_gpu_tier, GpuTier};
 pub(crate) use monitor::get_monitor_centered_70pct;
 pub use monitor::get_monitor_work_area;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+pub(crate) use monitor::display_work_area_at;
+#[cfg(target_os = "linux")]
+pub(crate) use monitor::primary_work_area;
 #[cfg(target_os = "windows")]
 pub use monitor::{dpi_scale_at, get_monitor_work_area_physical};
 #[cfg(target_os = "linux")]
@@ -267,16 +271,46 @@ wrap_window_delegate! {
         // macOS: browser panes move with the window as it is resized, not a
         // frame or two later when the page has laid out (bounds.rs `LayoutBase`).
         #[cfg(target_os = "macos")]
-        fn on_window_bounds_changed(&self, _window: Option<&mut Window>, _new_bounds: Option<&Rect>) {
+        fn on_window_bounds_changed(&self, window: Option<&mut Window>, new_bounds: Option<&Rect>) {
             if let Some((state, label)) = &self.window_registration {
                 crate::browser_panes::bounds::follow_window_resize(state, label);
+                // The main window's own record, for the next start (`main_window_state`).
+                // A full-screen window fills the display: that isn't a place to reopen at.
+                if label == "main" {
+                    if let (Some(window), Some(b)) = (window, new_bounds) {
+                        if window.is_fullscreen() == 0 {
+                            let rect = agentmux_common::ipc::Rect {
+                                left: b.x,
+                                top: b.y,
+                                right: b.x + b.width,
+                                bottom: b.y + b.height,
+                            };
+                            // `is_maximized()` lags the frame here, in both directions, while
+                            // NSWindow's zoom settles: a frame filling the display's work area is
+                            // what a zoomed window is.
+                            let maximized = crate::commands::window::main_window_state::fills_its_display(&rect);
+                            crate::commands::window::main_window_state::note_position(maximized, rect);
+                        }
+                    }
+                }
             }
         }
 
         #[cfg(target_os = "linux")]
-        fn on_window_bounds_changed(&self, window: Option<&mut Window>, _new_bounds: Option<&Rect>) {
+        fn on_window_bounds_changed(&self, window: Option<&mut Window>, new_bounds: Option<&Rect>) {
             if let (Some((state, label)), Some(window)) = (&self.window_registration, window) {
                 crate::browser_panes::bounds::window_resized(state, label, window);
+                // The main window's own record, for the next start (`main_window_state`). A
+                // full-screen window fills the display: that isn't a place to reopen at.
+                if label == "main" && window.is_fullscreen() == 0 {
+                    if let Some(b) = new_bounds {
+                        let rect = agentmux_common::ipc::Rect { left: b.x, top: b.y, right: b.x + b.width, bottom: b.y + b.height };
+                        // The window manager's maximize can land after the frame does, so a frame
+                        // that fills its display's work area counts too (as on macOS).
+                        let maximized = window.is_maximized() != 0 || crate::commands::window::main_window_state::fills_its_display(&rect);
+                        crate::commands::window::main_window_state::note_position(maximized, rect);
+                    }
+                }
             }
         }
 

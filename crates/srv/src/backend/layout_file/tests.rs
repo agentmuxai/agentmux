@@ -541,6 +541,19 @@ fn unknown_types_open_as_empty_panes_with_a_sanitized_name() {
     assert!(plan.notes.iter().any(|n| n.contains("isn't known")));
 }
 
+/// The Shortcuts pane (once the launcher) is a plain view under either name: a saved layout that
+/// holds one imports it without an "unknown pane type" note.
+#[test]
+fn the_shortcuts_pane_opens_under_both_of_its_names() {
+    let home = tempfile::tempdir().unwrap();
+    for view in ["shortcuts", "launcher"] {
+        let plan = plan_from_doc(&Store::open_in_memory().unwrap(), &one_pane(json!({ "type": view })), &opts(home.path(), false));
+        assert_eq!(block_meta(&plan, 0, 0)["view"], view);
+        assert!(plan.notes.is_empty(), "{view}: {:?}", plan.notes);
+        assert!(plan.tabs[0].summary.iter().all(|s| !s.contains("unknown")), "{view}");
+    }
+}
+
 #[test]
 fn editor_like_views_open_as_the_editor() {
     let home = tempfile::tempdir().unwrap();

@@ -1375,6 +1375,25 @@
     }
   },
   {
+    "command": "audit.query",
+    "request": "agentmux_srv::backend::rpc_types::audit::AuditQueryReq",
+    "requestName": "AuditQueryReq",
+    "requestTs": {
+      "imports": [
+        "AuditQueryReq"
+      ],
+      "name": "AuditQueryReq"
+    },
+    "response": "agentmux_srv::backend::rpc_types::audit::AuditQueryResult",
+    "responseName": "AuditQueryResult",
+    "responseTs": {
+      "imports": [
+        "AuditQueryResult"
+      ],
+      "name": "AuditQueryResult"
+    }
+  },
+  {
     "command": "auth.cancel",
     "request": "agentmux_srv::server::identity_handlers::CancelProviderAuthReq",
     "requestName": "CancelProviderAuthReq",
@@ -1501,6 +1520,25 @@
         "BlockRevealResult"
       ],
       "name": "BlockRevealResult"
+    }
+  },
+  {
+    "command": "block.revealed",
+    "request": "agentmux_srv::server::notify_handlers::BlockRevealedParams",
+    "requestName": "BlockRevealedParams",
+    "requestTs": {
+      "imports": [
+        "BlockRevealedParams"
+      ],
+      "name": "BlockRevealedParams"
+    },
+    "response": "agentmux_srv::server::notify_handlers::BlockRevealedResult",
+    "responseName": "BlockRevealedResult",
+    "responseTs": {
+      "imports": [
+        "BlockRevealedResult"
+      ],
+      "name": "BlockRevealedResult"
     }
   },
   {
@@ -5583,6 +5621,25 @@
     }
   },
   {
+    "command": "reactive.registration_flags",
+    "request": "agentmux_srv::server::reactive::registration_flags::ReactiveRegistrationFlagsParams",
+    "requestName": "ReactiveRegistrationFlagsParams",
+    "requestTs": {
+      "imports": [
+        "ReactiveRegistrationFlagsParams"
+      ],
+      "name": "ReactiveRegistrationFlagsParams"
+    },
+    "response": "agentmux_srv::server::reactive::registration_flags::ReactiveRegistrationFlagsResult",
+    "responseName": "ReactiveRegistrationFlagsResult",
+    "responseTs": {
+      "imports": [
+        "ReactiveRegistrationFlagsResult"
+      ],
+      "name": "ReactiveRegistrationFlagsResult"
+    }
+  },
+  {
     "command": "reactive.registrations",
     "request": "agentmux_srv::server::reactive::ReactiveRegistrationsParams",
     "requestName": "ReactiveRegistrationsParams",
@@ -6341,6 +6398,44 @@
         "SkillDeleteResult"
       ],
       "name": "SkillDeleteResult"
+    }
+  },
+  {
+    "command": "skill.catalog.import_commit",
+    "request": "agentmux_srv::backend::rpc_types::skill::CommandSkillCatalogImportCommitData",
+    "requestName": "CommandSkillCatalogImportCommitData",
+    "requestTs": {
+      "imports": [
+        "CommandSkillCatalogImportCommitData"
+      ],
+      "name": "CommandSkillCatalogImportCommitData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::skill::SkillImportCommitResult",
+    "responseName": "SkillImportCommitResult",
+    "responseTs": {
+      "imports": [
+        "SkillImportCommitResult"
+      ],
+      "name": "SkillImportCommitResult"
+    }
+  },
+  {
+    "command": "skill.catalog.import_preview",
+    "request": "agentmux_srv::backend::rpc_types::skill::CommandSkillCatalogImportPreviewData",
+    "requestName": "CommandSkillCatalogImportPreviewData",
+    "requestTs": {
+      "imports": [
+        "CommandSkillCatalogImportPreviewData"
+      ],
+      "name": "CommandSkillCatalogImportPreviewData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::skill::SkillImportPreview",
+    "responseName": "SkillImportPreview",
+    "responseTs": {
+      "imports": [
+        "SkillImportPreview"
+      ],
+      "name": "SkillImportPreview"
     }
   },
   {

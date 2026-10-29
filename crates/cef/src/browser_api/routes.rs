@@ -347,6 +347,9 @@ pub async fn screenshot(
     // no clip is needed (and __amq_rect_of would find nothing to clip to —
     // there's no [data-blockid] concept inside third-party page content).
     let mut clip_width = None;
+    // The pane's clip, for the secret scans; it is on the capture only when the capture is clipped.
+    let mut clip = serde_json::Value::Null;
+    let mut crop = None;
     if scope_to_block {
         let helper = include_str!("scripts/query.js");
         if let Err(e) = cdp
@@ -377,7 +380,12 @@ pub async fn screenshot(
                 let y = r.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
                 let width = r.get("width").and_then(|v| v.as_f64()).unwrap_or(0.0);
                 let height = r.get("height").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                params["clip"] = json!({ "x": x, "y": y, "width": width, "height": height, "scale": 1.0 });
+                clip = json!({ "x": x, "y": y, "width": width, "height": height, "scale": 1.0 });
+                if req.whole_viewport == Some(true) {
+                    crop = Some([x, y, width, height]);
+                } else {
+                    params["clip"] = clip.clone();
+                }
                 clip_width = Some(width);
             }
             None => {
@@ -402,7 +410,7 @@ pub async fn screenshot(
     let mut cap = serde_json::Value::Null;
     for _attempt in 0..2 {
         if let Some(width) = clip_width {
-            let before = hidden_boxes(&mut cdp, &params["clip"]).await;
+            let before = hidden_boxes(&mut cdp, &clip).await;
             cap = match cdp.call("Page.captureScreenshot", params.clone()).await {
                 Ok(v) => v,
                 Err(e) => {
@@ -410,7 +418,7 @@ pub async fn screenshot(
                     return ok_body(ApiResponse::err(format!("CDP Page.captureScreenshot: {e}")));
                 }
             };
-            let after = hidden_boxes(&mut cdp, &params["clip"]).await;
+            let after = hidden_boxes(&mut cdp, &clip).await;
             secrets = Some(match (before, after) {
                 (Some(mut b), Some(a)) => {
                     b.extend(a);
@@ -438,6 +446,15 @@ pub async fn screenshot(
         }
     }
 
+    // A whole-viewport capture is scaled to the page by its width.
+    let viewport_width = if crop.is_some() {
+        cdp.call("Runtime.evaluate", json!({ "expression": "window.innerWidth", "returnByValue": true }))
+            .await
+            .ok()
+            .and_then(|v| v.get("result").and_then(|r| r.get("value")).and_then(|w| w.as_f64()))
+    } else {
+        None
+    };
     let _ = cdp.close().await;
 
     let data = match cap.get("data").and_then(|d| d.as_str()) {
@@ -453,7 +470,9 @@ pub async fn screenshot(
         Some(s) => (s.boxes, s.css_width, !s.complete),
         None => (Vec::new(), None, false),
     };
-    ok_body(ApiResponse::ok(ScreenshotData { png_base64: data, secret_boxes, css_width, secrets_unchecked }))
+    // Without the viewport's width a whole-viewport image can't be cropped: it is unusable, and srv refuses it.
+    let secrets_unchecked = secrets_unchecked || (crop.is_some() && viewport_width.is_none());
+    ok_body(ApiResponse::ok(ScreenshotData { png_base64: data, secret_boxes, css_width, secrets_unchecked, crop, viewport_width }))
 }
 
 /// The boxes of what agents may never capture (`[data-agent-hidden]`, the

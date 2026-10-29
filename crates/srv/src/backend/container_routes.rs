@@ -28,9 +28,6 @@ const HOST_FILES: &str = "this reads files on the host for the app's windows. A 
 /// A host path that has to be mapped to the container's mounts first.
 const HOST_PATHS: &str = "container agents can't send files from host paths yet; this one is not available to them. \
                           Ask a native agent, or hand the file over with the Browser tool's handoff.";
-/// A pane that shows a host file in the user's windows.
-const PANE_OPEN: &str = "a pane shows host files in the user's windows, and container agents can't open one yet. Read the file in your own shell, \
-                         or ask a native agent to open it.";
 /// Replacing the app.
 const UPGRADE: &str = "upgrading AgentMux replaces the app on the host, so container agents can't. Ask a native agent or your leader.";
 /// Global Memory is composed into every native agent's context at launch.
@@ -78,8 +75,6 @@ const REFUSED: &[(Match, &str)] = &[
     (Match::Exact("/agentmux/file-icon"), HOST_FILES),
     // Uploading from a path in the agent's workspace needs the container's folder mapped first
     (Match::Exact("/api/v1/ui/browser/set_files"), HOST_PATHS),
-    // The windows read the path they are given, so a pane can't yet be held to the agent's workspace
-    (Match::Exact("/api/v1/pane/open"), PANE_OPEN),
     // What every native agent reads at launch
     (Match::Exact("/api/v1/agent/globalmemory/write"), GLOBAL_MEMORY),
     (Match::Exact("/api/v1/agent/globalmemory/remove"), GLOBAL_MEMORY),
@@ -144,7 +139,6 @@ mod tests {
             ("/api/messaging/discord/send", "for the AgentMux app itself"),
             ("/agentmux/service", "generic gateway"),
             ("/agentmux/stream-local-file", "reads files on the host"),
-            ("/api/v1/pane/open", "ask a native agent to open it"),
             ("/api/v1/agent/self/upgrade", "replaces the app"),
             ("/api/v1/agent/globalmemory/write", "read it but not change it"),
         ];
@@ -162,6 +156,7 @@ mod tests {
             "/api/v1/work-facts/who",
             "/api/v1/coord/posts",
             "/api/v1/vault",
+            "/api/v1/vault/generate",
             "/api/v1/vault/request",
             "/api/v1/ui/browser/open",
             "/api/v1/ui/browser/snapshot",
@@ -171,6 +166,7 @@ mod tests {
             "/api/v1/ui/browser/eval",
             "/api/v1/ui/browser/vault_fill",
             "/api/v1/ui/screenshot",
+            "/api/v1/ui/record",
             "/api/v1/ui/query",
             "/api/v1/ui/click",
             "/api/v1/ui/shortcuts/list",

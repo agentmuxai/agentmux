@@ -347,6 +347,14 @@ pub(crate) fn send_message_outcome(to: &str, result: &Value) -> Result<String> {
                  Do not resend it.{id}"
             ));
         }
+        if result.get("starting").and_then(|v| v.as_bool()) == Some(true) {
+            return Ok(format!(
+                "HELD for {to} (not_running, starting) — not delivered yet. {to} was stopped; \
+                 AgentMux is starting it now and delivers this message as soon as it is up, \
+                 normally within a few seconds (kept for up to 24 hours if the start fails). Do \
+                 not resend it.{id}"
+            ));
+        }
         return Ok(format!(
             "HELD for {to} (not_running) — not delivered yet. {to} is not running; this \
              AgentMux instance (channel) keeps the message and delivers it when {to} starts \

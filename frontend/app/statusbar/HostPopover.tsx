@@ -16,8 +16,9 @@ import {
 import { devModeOn } from "@/app/store/dev-mode";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { Accessor, createEffect, createSignal, For, onCleanup, Show, untrack, type JSX } from "solid-js";
+import { Accessor, createEffect, createSignal, onCleanup, Show, untrack, type JSX } from "solid-js";
 import { firewallMessage, resolveLanIndicator } from "./lan-indicator";
+import { LanPeerList } from "./LanPeerRow";
 import { AnchoredPopover, type PopoverAnchor } from "@/app/element/anchored-popover";
 import { useMuxBusStatus, type MuxBusController } from "@/app/view/accounts/AgentMuxConnectPanel";
 import { isMuxBusSessionOk, muxbusNeedsSignInAgain } from "@/app/view/accounts/muxbus-session";
@@ -150,7 +151,7 @@ const HostPopoverPanel = (props: HostPopoverPanelProps): JSX.Element => {
                         style={{
                             "padding-left": "12px",
                             "font-size": "0.85em",
-                            color: "var(--warning-text-color, #d97706)",
+                            color: "var(--warning-text-color)",
                         }}
                     >
                         <span>⚠ {openDirError()}</span>
@@ -181,7 +182,7 @@ const HostPopoverPanel = (props: HostPopoverPanelProps): JSX.Element => {
                         style={{
                             "padding-left": "12px",
                             "font-size": "0.85em",
-                            color: "var(--warning-text-color, #d97706)",
+                            color: "var(--warning-text-color)",
                         }}
                     >
                         <span>⚠ {props.lanDiscoveryError()}</span>
@@ -195,7 +196,7 @@ const HostPopoverPanel = (props: HostPopoverPanelProps): JSX.Element => {
                             style={{
                                 "padding-left": "12px",
                                 "font-size": "0.85em",
-                                color: "var(--warning-text-color, #d97706)",
+                                color: "var(--warning-text-color)",
                             }}
                         >
                             <span>⚠ {message()}</span>
@@ -209,7 +210,7 @@ const HostPopoverPanel = (props: HostPopoverPanelProps): JSX.Element => {
                         style={{
                             "padding-left": "12px",
                             "font-size": "0.85em",
-                            color: "var(--warning-text-color, #d97706)",
+                            color: "var(--warning-text-color)",
                         }}
                     >
                         <span>
@@ -224,20 +225,7 @@ const HostPopoverPanel = (props: HostPopoverPanelProps): JSX.Element => {
                         <span style={{ color: "var(--accent-color)" }}>◆</span>
                         <span>{props.lanCount()} peer{props.lanCount() !== 1 ? "s" : ""}</span>
                     </div>
-                    <For each={props.lanInstances()}>
-                        {(inst: LanInstance) => (
-                            <div class="status-bar-popover-row" style={{ "padding-left": "20px" }}>
-                                <span style={{ opacity: "0.7" }}>
-                                    {inst.hostname || inst.instance_id || "resolving…"}
-                                </span>
-                                <Show when={inst.version}>
-                                    <span class="status-bar-popover-mono" style={{ opacity: "0.5" }}>
-                                        v{inst.version}
-                                    </span>
-                                </Show>
-                            </div>
-                        )}
-                    </For>
+                    <LanPeerList peers={props.lanInstances()} />
                 </Show>
                 <Show when={props.lanDiscoveryEnabled() && props.lanCount() === 0 && !props.lanDiscoveryError()}>
                     <div
@@ -332,7 +320,7 @@ const HostPopoverPanel = (props: HostPopoverPanelProps): JSX.Element => {
                         </div>
                     </Show>
                     <Show when={muxbus.error()}>
-                        <div class="status-bar-popover-row" style={{ "font-size": "0.85em", color: "var(--warning-text-color, #d97706)" }}>
+                        <div class="status-bar-popover-row" style={{ "font-size": "0.85em", color: "var(--warning-text-color)" }}>
                             <span>⚠ {muxbus.error()}</span>
                         </div>
                     </Show>
