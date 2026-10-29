@@ -83,6 +83,15 @@ export function countExpandedLeaves(root: LayoutNode | undefined): number {
     return count;
 }
 
+/** Merges a pane into its minimized neighbour instead of minimizing it (layoutMinimizeMergeApply.ts);
+ *  false when there is none. Registered by layout/index.ts: it needs the stack mutators, which this
+ *  module (imported by the pure layout code) must not import. */
+type MinimizeMerger = (model: LayoutModel, nodeId: string) => boolean;
+let minimizeMerger: MinimizeMerger | undefined;
+export function setMinimizeMerger(merger: MinimizeMerger | undefined): void {
+    minimizeMerger = merger;
+}
+
 /**
  * Toggle minimize for a leaf node: the `minimize` / `restore` layout intent
  * (layoutTree.ts `minimizeNode`, computed again by srv). No sizes are read or
@@ -119,6 +128,8 @@ export function minimizeNodeToggle(model: LayoutModel, nodeId: string) {
     // ends the maximize in the same commit, which IS "remember the minimize
     // position" (maximize is a layer over the tree), with focus left where
     // minimizing a tiled pane leaves it.
+    // Next to a minimized pane of its split, the person's minimize merges the tabs into it instead.
+    if (minimizeMerger?.(model, nodeId)) return;
     commitToggle(model, LayoutTreeActionType.Minimize, nodeId);
 }
 
@@ -137,6 +148,7 @@ export function collapseMaximizedNode(model: LayoutModel, nodeId: string) {
     // A pane that is already minimized is not counted as expanded, so it needs one other.
     const otherExpanded = countExpandedLeaves(model.treeState.rootNode) - (isNodeLocked(node) ? 0 : 1);
     if (otherExpanded < 1) return;
+    if (!node.minimized && minimizeMerger?.(model, nodeId)) return;
     commitToggle(model, LayoutTreeActionType.Minimize, nodeId);
 }
 
