@@ -8,12 +8,13 @@
  */
 
 import { LANDING_BOUNCE_MS, markLanded } from "@/app/element/pane-tab-landing";
-import { DURATION_MODERATE_MS, EASE_EMPHASIZED } from "@/app/motion/tokens";
-import { shouldReduceMotion } from "@/app/motion/motion";
 import { revealInStrip, STRIP_EDGE_FADE_PX } from "@/app/element/strip-reveal";
-import { findNode, findNodeByBlockId } from "./layoutNode";
+import { shouldReduceMotion } from "@/app/motion/motion";
+import { mergeInto } from "@/app/motion/primitives";
+import { DURATION_MODERATE_MS } from "@/app/motion/tokens";
 import { findMinimizeMergeTarget } from "./layoutMinimizeMerge";
 import type { LayoutModel } from "./layoutModel";
+import { findNode, findNodeByBlockId } from "./layoutNode";
 import { effectiveStack, moveBlocksInStack } from "./layoutStack";
 
 /**
@@ -41,8 +42,7 @@ export function mergeIntoMinimizedNeighbour(model: LayoutModel, nodeId: string):
         // The pills travel first (as copies, see travelPills), then land with the bounce.
         const travelMs = from?.size ? DURATION_MODERATE_MS : 0;
         if (landedIn && !reduceMotion) {
-            if (travelMs) travelPills(targetBlockId, moved, from!);
-            if (travelMs) setTimeout(() => markLanded(moved, landedIn.id), travelMs);
+            if (travelMs) travelPills(targetBlockId, moved, from!, () => markLanded(moved, landedIn.id));
             else markLanded(moved, landedIn.id);
         }
         revealArrivals(targetBlockId, moved[moved.length - 1], reduceMotion, travelMs);
@@ -69,45 +69,43 @@ function paneElement(blockId: string): HTMLElement | null {
 
 /**
  * Once the target's strip has drawn the arrived pills, a copy of each travels from where it was in
- * the merged pane's header to its place in the strip, so the tabs move into the neighbour instead
- * of appearing in it. Copies in a fixed layer, not the pills themselves: the strip clips its
- * contents, so a pill moved back to the other pane's header would be invisible until it entered
- * the strip. The real pills stay hidden meanwhile and land with the bounce (pane-tab-landing).
+ * the merged pane's header to its place in the strip (motion primitive `mergeInto`), so the tabs
+ * move into the neighbour instead of appearing in it. The copies live in a fixed layer, not in the
+ * pills themselves: the strip clips its contents, so a pill moved back to the other pane's header
+ * would be invisible until it entered the strip. The real pills stay hidden meanwhile; `land` marks
+ * them for the bounce (pane-tab-landing) once the first arrives, and again if none could be found.
  */
-function travelPills(targetBlockId: string, movedIds: readonly string[], from: Map<string, DOMRect>): void {
-    requestAnimationFrame(() => {
-        const pane = paneElement(targetBlockId);
-        if (!pane) return;
-        for (const el of pane.querySelectorAll<HTMLElement>("[data-tab-id]")) {
-            const id = el.dataset.tabId;
-            const before = id && movedIds.includes(id) ? from.get(id) : undefined;
-            if (!before) continue;
-            const after = el.getBoundingClientRect();
-            const copy = el.cloneNode(true) as HTMLElement;
-            copy.classList.remove("pane-tab--landing", "pane-tab--active");
-            Object.assign(copy.style, {
-                position: "fixed",
-                left: `${before.left}px`,
-                top: `${before.top}px`,
-                width: `${after.width}px`,
-                height: `${after.height}px`,
-                margin: "0",
-                pointerEvents: "none",
-                zIndex: "10000",
-            });
-            document.body.append(copy);
-            el.style.visibility = "hidden";
-            const done = () => {
-                copy.remove();
-                el.style.visibility = "";
-            };
-            const travel = copy.animate(
-                [{ transform: "translate(0, 0)" }, { transform: `translate(${after.left - before.left}px, ${after.top - before.top}px)` }],
-                { duration: DURATION_MODERATE_MS, easing: EASE_EMPHASIZED }
-            );
-            travel.onfinish = done;
-            travel.oncancel = done;
+function travelPills(
+    targetBlockId: string,
+    movedIds: readonly string[],
+    from: Map<string, DOMRect>,
+    land: () => void
+): void {
+    const ids = movedIds.filter((id) => from.has(id));
+    let landed = false;
+    const markOnce = () => {
+        if (landed) return;
+        landed = true;
+        land();
+    };
+    const handle = mergeInto(
+        ids.map((id) => from.get(id)!),
+        () => {
+            const pills = new Map<string, HTMLElement>();
+            for (const el of paneElement(targetBlockId)?.querySelectorAll<HTMLElement>("[data-tab-id]") ?? []) {
+                if (el.dataset.tabId) pills.set(el.dataset.tabId, el);
+            }
+            return ids.map((id) => pills.get(id));
+        },
+        {
+            land: markOnce,
+            // The copy is a picture of the pill, not an active or just-landed one.
+            onCopy: (copy) => copy.classList.remove("pane-tab--landing", "pane-tab--active"),
         }
+    );
+    // A pane that is gone, or pills that were not drawn: nothing flew, but the bounce still belongs to the move.
+    void handle.finished.then(() => {
+        if (!handle.cancelled) markOnce();
     });
 }
 
@@ -119,19 +117,22 @@ function travelPills(targetBlockId: string, movedIds: readonly string[], from: M
  */
 function revealArrivals(targetBlockId: string, lastArrivedId: string, reduceMotion: boolean, travelMs: number): void {
     if (typeof document === "undefined") return;
-    setTimeout(() => {
-        const pane = paneElement(targetBlockId);
-        if (!pane) return;
-        for (const pill of pane.querySelectorAll<HTMLElement>("[data-tab-id]")) {
-            if (pill.dataset.tabId !== lastArrivedId) continue;
-            const strip = pill.closest<HTMLElement>(".pane-tab-strip");
-            if (strip) {
-                revealInStrip(strip, pill, true, {
-                    edgeClearance: STRIP_EDGE_FADE_PX,
-                    behavior: reduceMotion ? "instant" : "smooth",
-                });
+    setTimeout(
+        () => {
+            const pane = paneElement(targetBlockId);
+            if (!pane) return;
+            for (const pill of pane.querySelectorAll<HTMLElement>("[data-tab-id]")) {
+                if (pill.dataset.tabId !== lastArrivedId) continue;
+                const strip = pill.closest<HTMLElement>(".pane-tab-strip");
+                if (strip) {
+                    revealInStrip(strip, pill, true, {
+                        edgeClearance: STRIP_EDGE_FADE_PX,
+                        behavior: reduceMotion ? "instant" : "smooth",
+                    });
+                }
+                return;
             }
-            return;
-        }
-    }, travelMs + LANDING_BOUNCE_MS + 100);
+        },
+        travelMs + LANDING_BOUNCE_MS + 100
+    );
 }
