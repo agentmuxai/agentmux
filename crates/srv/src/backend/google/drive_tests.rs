@@ -114,3 +114,14 @@ fn the_log_names_the_file_never_the_search_words() {
     assert_eq!(logged_ids("read_file_content", &args(Some(" f1 "), None)), "f1");
     assert_eq!(logged_ids("search_files", &args(None, Some("secret plan"))), "");
 }
+
+#[test]
+fn shared_drive_files_are_listed_and_read_not_left_out() {
+    let list = plan("search_files", &args(None, Some("plan"))).unwrap();
+    assert_eq!(q(&list, "supportsAllDrives"), Some("true"));
+    assert_eq!(q(&list, "includeItemsFromAllDrives"), Some("true"));
+    let meta = plan("get_file_metadata", &args(Some("f1"), None)).unwrap();
+    assert_eq!(q(&meta, "supportsAllDrives"), Some("true"));
+    let media = content_plan(&json!({ "id": "m1", "mimeType": "text/plain", "name": "n.txt" })).unwrap();
+    assert_eq!(q(&media, "supportsAllDrives"), Some("true"));
+}

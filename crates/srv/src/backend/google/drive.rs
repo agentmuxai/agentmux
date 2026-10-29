@@ -25,6 +25,16 @@ pub const READ_ACTIONS: [&str; 3] = ["search_files", "get_file_metadata", "read_
 
 const DEFAULT_RESULTS: u32 = 25;
 const MAX_RESULTS: u32 = 100;
+/// A file in a shared drive is left out of a list, and refused by a get or a download, unless the
+/// request says it understands shared drives (Workspace accounts; harmless on a personal one).
+fn shared_drives(list: bool) -> Vec<(&'static str, String)> {
+    let mut q = vec![("supportsAllDrives", "true".to_string())];
+    if list {
+        q.push(("includeItemsFromAllDrives", "true".to_string()));
+    }
+    q
+}
+
 /// The fields of a file Google is asked for.
 const FILE_FIELDS: &str = "id,name,mimeType,modifiedTime,size,webViewLink,owners(emailAddress)";
 
@@ -104,6 +114,7 @@ pub fn plan(action: &str, args: &DriveArgs) -> Result<GoogleRequest, String> {
                 ("pageSize", args.max_results.unwrap_or(DEFAULT_RESULTS).clamp(1, MAX_RESULTS).to_string()),
                 ("fields", format!("nextPageToken,files({FILE_FIELDS})")),
             ];
+            query.extend(shared_drives(true));
             if text.is_empty() {
                 query.push(("orderBy", "modifiedTime desc".to_string()));
             }
@@ -113,7 +124,9 @@ pub fn plan(action: &str, args: &DriveArgs) -> Result<GoogleRequest, String> {
             Ok(get(format!("{API}/files"), query))
         }
         "get_file_metadata" | "read_file_content" => {
-            Ok(get(file_url(&file_id(args)?, None)?, vec![("fields", FILE_FIELDS.to_string())]))
+            let mut query = vec![("fields", FILE_FIELDS.to_string())];
+            query.extend(shared_drives(false));
+            Ok(get(file_url(&file_id(args)?, None)?, query))
         }
         other => Err(format!("Drive has no action \"{other}\"; one of {}, pick_files", READ_ACTIONS.join(", "))),
     }
@@ -132,7 +145,9 @@ pub fn content_plan(meta: &Value) -> Result<GoogleRequest, String> {
     let mut req = if let Some(to) = export {
         get(file_url(id, Some("export"))?, vec![("mimeType", to.to_string())])
     } else if is_text(mime) {
-        get(file_url(id, None)?, vec![("alt", "media".to_string())])
+        let mut query = vec![("alt", "media".to_string())];
+        query.extend(shared_drives(false));
+        get(file_url(id, None)?, query)
     } else {
         return Err(format!(
             "{} is a {} file, which can't be read as text here. Only Google Docs, Sheets and Slides (exported) and plain-text files can",
