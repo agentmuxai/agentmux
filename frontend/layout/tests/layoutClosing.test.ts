@@ -205,6 +205,16 @@ describe("closing state", () => {
         expect(model.treeState.rootNode).toBeDefined();
     });
 
+    it("a close whose asks throw leaves a failed entry in the trace", async () => {
+        const model = createLayoutModel();
+        const nodeId = insertRootBlock(model, "b1");
+        model.beforeNodeDelete = vi.fn(async () => {
+            throw new Error("probe failed");
+        });
+        await expect(closeNode(model, nodeId)).rejects.toThrow();
+        expect((globalThis as { __closeTrace?: () => string[] }).__closeTrace!().some((l) => l.includes("failed+"))).toBe(true);
+    });
+
     it("a close that throws puts the pane back to normal", async () => {
         const model = createLayoutModel();
         const nodeId = insertRootBlock(model, "b1");
@@ -349,5 +359,18 @@ describe("close trace", () => {
         t.mark("kept");
         expect(ring.lines()).toHaveLength(1);
         expect(ring.lines()[0]).toContain("kept+0ms");
+    });
+
+    it("end() records kept or failed for a close that never removed the pane, and nothing once it did", () => {
+        const ring = createCloseTraceRing(() => 0, () => {});
+        const a = ring.start("pane a");
+        a.mark("probes");
+        a.end("failed");
+        a.end("kept"); // already ended: no second line
+        const b = ring.start("pane b");
+        b.mark("reducer");
+        b.end("kept"); // removed the pane: closePane and gone still to come
+        expect(ring.lines()).toHaveLength(1);
+        expect(ring.lines()[0]).toContain("pane a probes+0ms failed+0ms");
     });
 });

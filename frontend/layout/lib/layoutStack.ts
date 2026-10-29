@@ -239,7 +239,11 @@ export async function closeBlockInStack(
     const trace = closeTraceRing.start(`tab ${blockId.slice(0, 4)} of ${stack.length}`);
     try {
         await closeTabOfStack(model, nodeId, node.data, blockId, opts, trace);
+    } catch (err) {
+        trace.end("failed");
+        throw err;
     } finally {
+        trace.end("kept");
         endClosingBlock(model, blockId);
     }
 }

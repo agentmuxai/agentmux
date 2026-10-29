@@ -19,6 +19,9 @@ export type ClosePhase = "probes" | "prompt" | "reducer" | "gone" | "closePane" 
 export interface CloseTrace {
     /** The phase that just ended. */
     mark(phase: ClosePhase): void;
+    /** The close is over without the pane having left (a throw, an early return, a no): records `kept`
+     *  or `failed` unless the close got as far as removing it. Safe to call on every path. */
+    end(phase: "kept" | "failed"): void;
 }
 
 export interface CloseTraceRing {
@@ -53,7 +56,11 @@ export function createCloseTraceRing(
                 }
                 return worst;
             };
+            const has = (p: ClosePhase) => marks.some((m) => m.phase === p);
             return {
+                end(phase) {
+                    if (!finished && !has("reducer")) this.mark(phase);
+                },
                 mark(phase) {
                     if (finished) return;
                     marks.push({ phase, at: Math.round(now() - t0) });
@@ -64,7 +71,6 @@ export function createCloseTraceRing(
                         log(`[close] ${label} took ${gone.at}ms to leave; slowest phase: ${worst?.phase} (${worst?.ms}ms)`);
                     }
                     // Done once srv answered and the pane left, in either order, or the close was kept or failed.
-                    const has = (p: ClosePhase) => marks.some((m) => m.phase === p);
                     if (has("kept") || has("failed") || (has("closePane") && has("gone"))) {
                         finished = true;
                         push(`[close] ${label} ${marks.map((m) => `${m.phase}+${m.at}ms`).join(" ")}`);

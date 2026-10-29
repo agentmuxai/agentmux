@@ -131,7 +131,11 @@ export async function closeNode(model: LayoutModel, nodeId: string, opts?: { con
     const trace = closeTraceRing.start(`pane ${nodeId.slice(0, 4)} ${tabs} tab${tabs === 1 ? "" : "s"}`);
     try {
         await closeNodeOnce(model, nodeId, opts, trace);
+    } catch (err) {
+        trace.end("failed");
+        throw err;
     } finally {
+        trace.end("kept");
         closing.delete(nodeId);
         // Gone, or kept: either way the pane is not closing any more.
         endClosing(model, nodeId);
