@@ -116,3 +116,33 @@ fn a_block_that_is_not_an_agents_or_has_no_folder_is_left_alone() {
     assert_eq!(refresh_for_block(&meta_for("a1", &dir.path().join("gone")), &s, &s), 0);
     assert!(!dir.path().join(".claude").exists());
 }
+
+#[test]
+fn the_launched_name_fills_the_skill_templates_and_a_home_relative_folder_is_expanded() {
+    let s = store();
+    agent(&s, "a1", "host");
+    let mut sk = skill("s1", "who-am-i");
+    sk.content = "I am {{AGENT}}".to_string();
+    s.skill_upsert_unique_global(&sk).unwrap();
+    s.skill_bind(&s, "a1", "s1").unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let mut meta = meta_for("a1", dir.path());
+    meta.insert("agentName".to_string(), json!("Instance Two"));
+
+    refresh_for_block(&meta, &s, &s);
+    let text = std::fs::read_to_string(skill_md(dir.path(), "who-am-i")).unwrap();
+    assert!(text.contains("I am Instance Two"), "{text}");
+
+    // `~` is the user's home, as `agent.open` leaves a default folder.
+    let home = crate::backend::base::expand_home_dir_safe("~");
+    let rel = format!("~/.agentmux-skill-refresh-test-{}", std::process::id());
+    let under_home = crate::backend::base::expand_home_dir_safe(&rel);
+    if home.is_dir() && std::fs::create_dir_all(&under_home).is_ok() {
+        let mut meta = meta_for("a1", &under_home);
+        meta.insert("cmd:cwd".to_string(), json!(rel));
+        refresh_for_block(&meta, &s, &s);
+        let wrote = skill_md(&under_home, "who-am-i").exists();
+        let _ = std::fs::remove_dir_all(&under_home);
+        assert!(wrote, "a folder written as {rel} is refreshed");
+    }
+}

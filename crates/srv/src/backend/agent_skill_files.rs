@@ -34,11 +34,14 @@ fn agent_uid_of(meta: &MetaMapType) -> String {
 /// Returns how many skill files it wrote.
 pub fn refresh_for_block(meta: &MetaMapType, mstore: &Store, identity_store: &Store) -> usize {
     let uid = agent_uid_of(meta);
-    let work_dir = meta_get_string(meta, "cmd:cwd", "");
-    if uid.is_empty() || work_dir.is_empty() {
+    let raw_dir = meta_get_string(meta, "cmd:cwd", "");
+    if uid.is_empty() || raw_dir.is_empty() {
         return 0;
     }
-    let base_path = Path::new(&work_dir);
+    // `agent.open` stores a default folder as `~/.agentmux/agents/<slug>`, unexpanded.
+    let expanded = crate::backend::base::expand_home_dir_safe(&raw_dir);
+    let work_dir = expanded.to_string_lossy().into_owned();
+    let base_path = expanded.as_path();
     if !base_path.is_dir() {
         return 0;
     }
@@ -48,7 +51,10 @@ pub fn refresh_for_block(meta: &MetaMapType, mstore: &Store, identity_store: &St
     let slug = if agent.slug.is_empty() { agent.id.clone() } else { agent.slug.clone() };
     let skills = mstore.effective_skills(identity_store, &agent.id);
     // The same files `agent.open` would write for these skills; only the skill-derived ones are kept.
-    let all = build_config_files(&HashMap::new(), &skills, &agent.name, &agent.id, &slug, &work_dir, &agent.provider);
+    // The name the pane was launched under fills `{{AGENT}}` in a skill, as it did when the files were first written.
+    let launched_name = meta_get_string(meta, "agentName", "");
+    let name = if launched_name.is_empty() { agent.name.as_str() } else { launched_name.as_str() };
+    let all = build_config_files(&HashMap::new(), &skills, name, &agent.id, &slug, &work_dir, &agent.provider);
     let wanted = managed_skill_file_paths(all.iter().map(|f| f.filename.as_str()));
     let files: Vec<_> = all.iter().filter(|f| wanted.contains(&f.filename)).collect();
 
