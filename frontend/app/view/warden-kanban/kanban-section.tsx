@@ -102,11 +102,23 @@ export const KanbanSection = (props: Pick<SwarmKanbanSlotProps, "visible"> & Par
     // Columns collapsed to a strip: the pane's (it survives a restart), or this section's own when it
     // mounts alone.
     const [ownCollapsed, setOwnCollapsed] = createSignal<ColumnId[]>([]);
-    const collapsed = () => parseCollapsed(props.collapsed ?? ownCollapsed());
+    // A choice shows at once and holds until the pane's meta says the same (or a few seconds pass),
+    // so two clicks in a row, or a slow write, don't undo each other.
+    const [pending, setPending] = createSignal<ColumnId[] | null>(null);
+    const collapsed = () => pending() ?? parseCollapsed(props.collapsed ?? ownCollapsed());
+    createEffect(() => {
+        const mine = pending();
+        if (mine && parseCollapsed(props.collapsed).join() === mine.join()) setPending(null);
+    });
+    let pendingTimer: number | undefined;
+    onCleanup(() => window.clearTimeout(pendingTimer));
     const toggleColumn = (id: ColumnId) => {
         const next = toggleCollapsed(collapsed(), id);
-        if (props.onCollapsed) props.onCollapsed(next);
-        else setOwnCollapsed(next);
+        if (!props.onCollapsed) return setOwnCollapsed(next);
+        setPending(next);
+        window.clearTimeout(pendingTimer);
+        pendingTimer = window.setTimeout(() => setPending(null), 3000);
+        props.onCollapsed(next);
     };
     const [folded, setFolded] = createSignal<ReadonlySet<string>>(new Set());
     const fold = (repo: string) =>
