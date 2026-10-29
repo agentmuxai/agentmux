@@ -1260,6 +1260,15 @@ impl Budget {
     }
 }
 
+/// `p` without Windows' `\\?\` verbatim prefix, so a canonical path compares with a folder given without it.
+fn plain(p: &Path) -> &Path {
+    let s = p.to_str().unwrap_or_default();
+    match s.strip_prefix(r"\\?\") {
+        Some(rest) if !rest.starts_with("UNC\\") => Path::new(rest),
+        _ => p,
+    }
+}
+
 /// Opens `path` to read. With `within` (a canonical folder), the file must be one inside it: opened without
 /// following a link, and the file at that path inside `within` right after is the one opened, so a path
 /// whose folder was swapped for a link to somewhere else reads nothing from there.
@@ -1274,7 +1283,7 @@ pub(crate) fn open_within(path: &Path, within: Option<&Path>) -> Result<std::fs:
     if let Some(root) = within {
         let outside = || format!("{} is outside the workspace", path.display());
         let real = path.canonicalize().map_err(|_| outside())?;
-        if !real.starts_with(root) {
+        if !plain(&real).starts_with(plain(root)) {
             return Err(outside());
         }
         // The same file, on every platform (a Windows link is followed by the open, so the identity check is what catches it).
@@ -1318,7 +1327,7 @@ fn copy_tree_beneath(dir: &std::os::fd::OwnedFd, to: &Path, budget: &mut Budget)
 
 fn copy_tree(from: &Path, to: &Path, budget: &mut Budget, within: Option<&Path>) -> Result<(), String> {
     if let Some(root) = within {
-        if !from.canonicalize().is_ok_and(|real| real.starts_with(root)) {
+        if !from.canonicalize().is_ok_and(|real| plain(&real).starts_with(plain(root))) {
             return Err(format!("{} is outside the workspace", from.display()));
         }
     }

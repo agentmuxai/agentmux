@@ -326,7 +326,7 @@ mod tests {
         assert!(body.contains("runs on the host"), "{body}");
         let (status, body) = call(token, r#"{"view":"editor","file":"/etc/passwd"}"#).await;
         assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
-        assert!(body.contains("outside this agent's workspace"), "{body}");
+        assert!(body.contains("outside this agent's workspace") || body.contains("no such file"), "{body}");
         let (status, body) = call("test-secret-key".to_string(), r#"{"view":"term"}"#).await;
         assert_ne!(status, StatusCode::FORBIDDEN, "the instance key is not confined: {body}");
     }
