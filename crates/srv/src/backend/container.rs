@@ -1069,9 +1069,7 @@ impl ContainerManager {
     /// way an interrupted `stop`/`remove` wouldn't be.
     async fn cleanup_dev_proxy_routes(&self, container_name: &str) {
         if let Some(registry) = self.inner.dev_proxy.get() {
-            if let Some(agent_id) = agent_id_from_container_name(container_name) {
-                registry.unregister_agent(agent_id).await;
-            }
+            registry.unregister_container(container_name).await;
         }
     }
 
@@ -1439,13 +1437,6 @@ pub fn container_name_for_slug(slug: &str) -> String {
     format!("agentmux-{slug}")
 }
 
-/// Reverses [`container_name_for_slug`] — `"agentmux-foo"` → `Some("foo")`.
-/// Used by `cleanup_dev_proxy_routes` to key off the container name alone
-/// (`stop`/`remove` only get a container_name, not the agent's own id).
-fn agent_id_from_container_name(container_name: &str) -> Option<&str> {
-    container_name.strip_prefix("agentmux-").filter(|s| !s.is_empty())
-}
-
 /// Parse a Docker volume spec into `(source, target, read_only)`.
 ///
 /// Format: `source:target` or `source:target:options`.
@@ -1493,14 +1484,6 @@ mod tests {
     fn test_container_name_for_slug() {
         assert_eq!(container_name_for_slug("my-agent"), "agentmux-my-agent");
         assert_eq!(container_name_for_slug("agent1"), "agentmux-agent1");
-    }
-
-    #[test]
-    fn agent_id_from_container_name_reverses_container_name_for_slug() {
-        assert_eq!(agent_id_from_container_name("agentmux-my-agent"), Some("my-agent"));
-        assert_eq!(agent_id_from_container_name("agentmux-agent1"), Some("agent1"));
-        assert_eq!(agent_id_from_container_name("agentmux-"), None, "empty slug is not a real agent id");
-        assert_eq!(agent_id_from_container_name("not-agentmux-prefixed"), None);
     }
 
     // ── AGENTMUX_LOCAL_URL rewrite for container reachability ───────────────
@@ -2094,7 +2077,7 @@ mod tests {
         // Simulate a real registration (what `handle_register_dev_server`
         // does) so we can prove `remove` actually clears it below.
         let addr: std::net::SocketAddr = format!("{ip}:3000").parse().expect("valid addr");
-        registry.register("itest-proj", "itest-devproxy", addr).await;
+        registry.register_from("itest-proj", "itest-devproxy", Some(name), addr).await;
         assert_eq!(
             registry.lookup("itest-proj-itest-devproxy").await,
             Some(addr.into()),
