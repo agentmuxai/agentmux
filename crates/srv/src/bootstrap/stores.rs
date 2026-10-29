@@ -474,6 +474,12 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
                 match crate::boot_timing::time("open_identity_store", || Store::open_identity_store(&path)) {
                     Ok(s) => {
                         tracing::info!(path = %path.display(), "identity store: attached (always global)");
+                        // An agent's LAN signing key is the host's, not this channel's: a channel switch
+                        // must not change the key LAN peers have pinned.
+                        match backend::storage::host_lan_keys::HostLanKeys::open(&path) {
+                            Ok(keys) => mstore.set_host_lan_keys(Arc::new(keys)),
+                            Err(e) => tracing::warn!(error = %e, "LAN keys: the host key table did not open, this channel keeps its own keys"),
+                        }
                         Arc::new(s)
                     }
                     Err(e) => {

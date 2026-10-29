@@ -8,7 +8,7 @@
 //!   so a delete is final; a release that adds a new skill to [`BUILTINS`] seeds only that one.
 //! - **Never overwritten.** After the first write nothing here touches the row, so the user's edits stay. A
 //!   later release that improves the text does not replace it.
-//! - **Every agent.** The skill is global and reaches every agent (`db_skill_reach`, `all_agents`), so it is
+//! - **Every agent.** The skill is global and reaches every agent and every agent to come (`db_skill_reach`), so it is
 //!   in each agent's skills without a bind, and the user can switch that off in Memory > Skills.
 //! - **Quiet on conflict.** If the user already has a global skill with the same name, the built-in one is
 //!   skipped and recorded as seeded, not retried at every start.
@@ -109,7 +109,7 @@ fn seed_one(store: &Store, b: &Builtin, now_ms: i64) -> Result<bool, StoreError>
         }
         Err(e) => return Err(e),
     }
-    store.skill_set_reach(b.id, true, false, now_ms)?;
+    store.skill_set_reach(b.id, true, true, now_ms)?;
     Ok(true)
 }
 

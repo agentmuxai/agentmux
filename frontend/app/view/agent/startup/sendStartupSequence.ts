@@ -6,6 +6,8 @@
 import type { AgentDefinition } from "@/app/store/rpc-api";
 import type { AgentAccounts } from "@/app/view/identity/identity-model";
 import { buildStartupPayload, resolveAccounts } from "./buildStartupPayload";
+import { takeOpenedByPerson } from "@/app/store/agent-open-note";
+import { OPENING_SUMMARY_PROMPT } from "./opening-summary";
 
 /**
  * Everything the startup sequence reads or does, injected so it runs without a
@@ -24,6 +26,8 @@ export interface StartupSequenceDeps {
     listIdentities: () => Promise<Array<{ provider: string; account_id: string }>>;
     loadAccounts: () => Parameters<typeof resolveAccounts>[1];
     send: (payload: string) => Promise<void>;
+    /** True while a turn runs (a pane attaching to a headless run): the opening update is not for a working agent. */
+    isBusy?: () => boolean;
     log: (tag: string, text: string, level?: "info" | "error" | "warn") => void;
 }
 
@@ -33,8 +37,15 @@ export interface StartupSequenceDeps {
  * turn. See docs/specs/SPEC_AGENT_STARTUP_SEQUENCE_2026_04_16.md.
  */
 export async function sendStartupSequence(d: StartupSequenceDeps): Promise<void> {
-    // Skip if this is a resumed session
-    if (d.sessionId()) return;
+    // The note an explicit open left for this agent is used up by the first pane that asks.
+    const openedByPerson = takeOpenedByPerson(d.agent()?.id);
+    // A resumed session has no startup payload; one the person just opened gets the opening update,
+    // unless it is mid-task: the prompt would be held into the running turn, so it is skipped.
+    if (d.sessionId()) {
+        if (openedByPerson && d.isBusy?.()) d.log("agent", "opening update skipped: the agent is working");
+        else if (openedByPerson) await d.send(OPENING_SUMMARY_PROMPT).catch((err) => d.log("warn", `opening update failed: ${err}`, "warn"));
+        return;
+    }
 
     try {
         const agent = d.agent();

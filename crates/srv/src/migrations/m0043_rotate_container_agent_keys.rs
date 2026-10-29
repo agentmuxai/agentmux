@@ -22,6 +22,8 @@
 
 use std::sync::Arc;
 
+use crate::backend::storage::agent_lan_keys::AgentLanKeypair;
+use crate::backend::storage::host_lan_keys::{HostKey, HostKeyKind, HostLanKeys};
 use crate::backend::storage::store::Store;
 use crate::backend::storage::wan_identity::{self, WanIdentityStore};
 
@@ -58,7 +60,17 @@ impl Migration for M0043RotateContainerAgentKeys {
             Some(_) => Wan::NoneYet,
             None => Wan::Unavailable,
         };
-        let rotated = rotate_container_keys(&store, &wan).map_err(MigrationError)?;
+        // The host's LAN keys (shared by every channel): one that is still the exposed key goes with it.
+        // A host database that exists but does not open fails the migration, which stays pending and runs
+        // again: going on without it would rotate this channel's keys and leave the exposed ones there.
+        let host = match crate::registry::resolve_identity_store_path().filter(|p| p.exists()) {
+            Some(path) => Some(
+                HostLanKeys::open(&path)
+                    .map_err(|e| MigrationError(format!("rotate_container_agent_keys: the host's LAN key table did not open: {e}")))?,
+            ),
+            None => None,
+        };
+        let rotated = rotate_container_keys(&store, &wan, host.as_ref()).map_err(MigrationError)?;
         if rotated > 0 {
             tracing::info!(rotated, "rotate_container_agent_keys: replaced container agents' signing keys");
         }
@@ -121,10 +133,44 @@ fn container_agents(store: &Store) -> Result<Vec<(String, String)>, String> {
     Ok(slugs)
 }
 
+/// A new LAN keypair, as the stores mint them.
+fn fresh_lan_pair() -> AgentLanKeypair {
+    use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+    let mut seed = [0u8; 32];
+    seed[..16].copy_from_slice(uuid::Uuid::new_v4().as_bytes());
+    seed[16..].copy_from_slice(uuid::Uuid::new_v4().as_bytes());
+    let (public, private) = agentmux_common::jekt_sign::generate_lan_keypair(seed);
+    AgentLanKeypair { public_key: BASE64.encode(public), private_key: BASE64.encode(private) }
+}
+
 /// Replace the keys of each container agent; how many agents had any.
-fn rotate_container_keys(store: &Store, wan: &Wan) -> Result<usize, String> {
+///
+/// `host` is the host's LAN key table. A key there that is still the exposed one is replaced by a new
+/// one, so the next lookup cannot adopt it back; a key another channel put there is not the exposed one
+/// and stays, so no other channel's key changes.
+fn rotate_container_keys(store: &Store, wan: &Wan, host: Option<&HostLanKeys>) -> Result<usize, String> {
     let mut rotated = 0;
     for (id, slug) in container_agents(store)? {
+        let old_name = store.agent_lan_key_load(&slug).map_err(|e| format!("rotate_container_agent_keys: LAN key of {slug}: {e}"))?;
+        let old_uid = store.agent_uid_lan_public_key_load(&id).map_err(|e| format!("rotate_container_agent_keys: UID LAN key of {slug}: {e}"))?;
+        // The host's keys first, with new keys made here: a failure leaves this channel untouched, so a
+        // retry still finds the exposed keys to match. (Replacing them afterwards lost them on a retry.)
+        // The channel's own rotation below makes keys of its own; once the host table is attached the
+        // channel follows the host's. An empty host slot is never left for a channel that still holds the
+        // exposed key to fill.
+        if let Some(host) = host {
+            let now = agentmux_common::time::now_secs();
+            if let Some(old) = &old_name {
+                let new = HostKey { pair: fresh_lan_pair(), created_at: now };
+                host.supersede(HostKeyKind::Name, &slug.to_lowercase(), &old.public_key, Some(&new))
+                    .map_err(|e| format!("rotate_container_agent_keys: host LAN key of {slug}: {e}"))?;
+            }
+            if let Some(old) = &old_uid {
+                let new = HostKey { pair: fresh_lan_pair(), created_at: now };
+                host.supersede(HostKeyKind::Uid, &id, old, Some(&new))
+                    .map_err(|e| format!("rotate_container_agent_keys: host UID LAN key of {slug}: {e}"))?;
+            }
+        }
         let uid_copies = store
             .agent_uid_keys_delete(&id)
             .map_err(|e| format!("rotate_container_agent_keys: UID keys of {slug}: {e}"))?;
@@ -178,7 +224,7 @@ mod tests {
         let (boxed_jekt, host_jekt) = (store.agent_jekt_key_ensure(&boxed).unwrap(), store.agent_jekt_key_ensure(&host).unwrap());
         let (boxed_lan, host_lan) = (store.agent_lan_key_ensure(&boxed).unwrap(), store.agent_lan_key_ensure(&host).unwrap());
 
-        assert_eq!(rotate_container_keys(&store, &Wan::Unavailable).unwrap(), 1);
+        assert_eq!(rotate_container_keys(&store, &Wan::Unavailable, None).unwrap(), 1);
 
         assert_ne!(store.agent_jekt_key_load(&boxed).unwrap().unwrap(), boxed_jekt);
         assert_ne!(store.agent_lan_key_load(&boxed).unwrap().unwrap().private_key, boxed_lan.private_key);
@@ -196,7 +242,7 @@ mod tests {
         let boxed_before = store.agent_uid_keys_ensure(&boxed_id).unwrap().unwrap().0;
         let host_before = store.agent_uid_keys_ensure(&host_id).unwrap().unwrap().0;
 
-        assert_eq!(rotate_container_keys(&store, &Wan::Unavailable).unwrap(), 1);
+        assert_eq!(rotate_container_keys(&store, &Wan::Unavailable, None).unwrap(), 1);
 
         let boxed_after = store.agent_uid_keys_ensure(&boxed_id).unwrap().unwrap().0;
         assert_ne!(boxed_after.lan.private_key, boxed_before.lan.private_key, "the exposed UID key no longer verifies");
@@ -216,7 +262,7 @@ mod tests {
         block.meta = serde_json::json!({ "agentMode": "container", "agentId": id }).as_object().unwrap().clone().into_iter().collect();
         store.insert(&mut block).unwrap();
 
-        assert_eq!(rotate_container_keys(&store, &Wan::Unavailable).unwrap(), 1);
+        assert_eq!(rotate_container_keys(&store, &Wan::Unavailable, None).unwrap(), 1);
         assert_eq!(store.agent_jekt_key_load(&other).unwrap().unwrap(), before, "an agent no pane ran as a container is left alone");
     }
 
@@ -234,7 +280,7 @@ mod tests {
         let host_before = store.channel_wan_key(&wan, &host).unwrap();
 
         let reopened = Wan::Store(WanIdentityStore::open(&wan_path).unwrap());
-        assert_eq!(rotate_container_keys(&store, &reopened).unwrap(), 1);
+        assert_eq!(rotate_container_keys(&store, &reopened, None).unwrap(), 1);
 
         let fresh = store.channel_wan_key(&wan, &boxed).unwrap();
         assert_ne!(fresh.private_key, exposed.private_key, "a new key, not the exposed one imported again");
@@ -247,7 +293,7 @@ mod tests {
         let store = Store::open_in_memory().unwrap();
         let boxed = agent(&store, "Boxed", "container");
         store.agent_wan_key_ensure(&boxed).unwrap();
-        assert_eq!(rotate_container_keys(&store, &Wan::NoneYet).unwrap(), 1);
+        assert_eq!(rotate_container_keys(&store, &Wan::NoneYet, None).unwrap(), 1);
         assert!(store.agent_wan_key_load(&boxed).unwrap().is_none());
     }
 
@@ -255,8 +301,72 @@ mod tests {
     fn a_container_agent_with_no_keys_gets_none_minted() {
         let store = Store::open_in_memory().unwrap();
         let boxed = agent(&store, "Boxed", "container");
-        assert_eq!(rotate_container_keys(&store, &Wan::Unavailable).unwrap(), 0);
+        assert_eq!(rotate_container_keys(&store, &Wan::Unavailable, None).unwrap(), 0);
         assert!(store.agent_jekt_key_load(&boxed).unwrap().is_none());
         assert!(store.agent_lan_key_load(&boxed).unwrap().is_none());
+    }
+
+    fn host_table() -> (tempfile::TempDir, HostLanKeys) {
+        let dir = tempfile::tempdir().unwrap();
+        let host = HostLanKeys::open(&dir.path().join("identity-store.db")).unwrap();
+        (dir, host)
+    }
+
+    fn host_key(host: &HostLanKeys, kind: HostKeyKind, subject: &str) -> Option<HostKey> {
+        host.claim(kind, subject, None).unwrap()
+    }
+
+    #[test]
+    fn an_exposed_key_the_host_holds_is_replaced_there_too() {
+        let store = Store::open_in_memory().unwrap();
+        let (_dir, host) = host_table();
+        let boxed = agent(&store, "Boxed", "container");
+        let id = store.agent_def_list().unwrap().into_iter().find(|d| d.slug == boxed).unwrap().id;
+        let exposed = store.agent_lan_key_ensure(&boxed).unwrap();
+        let uid_key = store.agent_uid_keys_ensure(&id).unwrap().unwrap().0.lan;
+        let exposed_uid_public = uid_key.public_key.clone();
+        let now = agentmux_common::time::now_secs();
+        host.replace(HostKeyKind::Name, &boxed, &HostKey { pair: exposed.clone(), created_at: now }).unwrap();
+        let uid_pair = AgentLanKeypair { public_key: uid_key.public_key, private_key: uid_key.private_key };
+        host.replace(HostKeyKind::Uid, &id, &HostKey { pair: uid_pair, created_at: now }).unwrap();
+
+        assert_eq!(rotate_container_keys(&store, &Wan::Unavailable, Some(&host)).unwrap(), 1);
+
+        let fresh = store.agent_lan_key_load(&boxed).unwrap().unwrap();
+        assert_ne!(fresh, exposed);
+        let on_host = host_key(&host, HostKeyKind::Name, &boxed).expect("the slot is filled");
+        assert_ne!(on_host.pair, exposed, "the exposed key is off the host");
+        let uid_on_host = host_key(&host, HostKeyKind::Uid, &id).expect("the slot is filled, not left empty for a stale channel to reclaim");
+        assert_ne!(uid_on_host.pair.public_key, exposed_uid_public, "and not the exposed UID key either");
+    }
+
+    #[test]
+    fn a_host_that_cannot_be_updated_fails_the_migration_before_anything_is_rotated() {
+        let store = Store::open_in_memory().unwrap();
+        let (dir, host) = host_table();
+        let boxed = agent(&store, "Boxed", "container");
+        let exposed = store.agent_lan_key_ensure(&boxed).unwrap();
+        let now = agentmux_common::time::now_secs();
+        host.replace(HostKeyKind::Name, &boxed, &HostKey { pair: exposed.clone(), created_at: now }).unwrap();
+        host.disconnect();
+        drop(dir);
+
+        assert!(rotate_container_keys(&store, &Wan::Unavailable, Some(&host)).is_err());
+        assert_eq!(store.agent_lan_key_load(&boxed).unwrap().unwrap(), exposed, "nothing was rotated, so a retry still finds the exposed key");
+    }
+
+    #[test]
+    fn a_key_another_channel_put_on_the_host_is_not_the_exposed_one_and_stays() {
+        let store = Store::open_in_memory().unwrap();
+        let (_dir, host) = host_table();
+        let boxed = agent(&store, "Boxed", "container");
+        store.agent_lan_key_ensure(&boxed).unwrap();
+        let other = Store::open_in_memory().unwrap().agent_lan_key_ensure(&boxed).unwrap();
+        let now = agentmux_common::time::now_secs();
+        host.replace(HostKeyKind::Name, &boxed, &HostKey { pair: other.clone(), created_at: now }).unwrap();
+
+        rotate_container_keys(&store, &Wan::Unavailable, Some(&host)).unwrap();
+
+        assert_eq!(host_key(&host, HostKeyKind::Name, &boxed).unwrap().pair, other, "no other channel's key changes");
     }
 }

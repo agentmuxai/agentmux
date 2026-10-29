@@ -202,7 +202,7 @@ pub(crate) fn forget(store: &Store, ws_id: &str) -> Option<Value> {
 
 /// Whether a quit is closing the windows: its record is the session record,
 /// saved within the last two minutes.
-fn quit_under_way(store: &Store) -> bool {
+pub(crate) fn quit_under_way(store: &Store) -> bool {
     super::session_restore::load_last_session_snapshot(store)
         .is_some_and(|r| super::session_windows::is_recent_quit_record(&r, now_ms()))
 }

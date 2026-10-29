@@ -25,6 +25,7 @@ fn a_fresh_catalog_gets_the_skill_for_every_agent() {
     assert_eq!((skill.name.as_str(), skill.skill_type.as_str(), skill.content.as_str()), ("demo", "agent-skill", "Original text."));
     let reach = s.skill_reach_map().unwrap();
     assert!(reach[one().id].all_agents, "every agent, no bind needed");
+    assert!(reach[one().id].new_agents_since > 0, "and the agents created later");
 }
 
 #[test]

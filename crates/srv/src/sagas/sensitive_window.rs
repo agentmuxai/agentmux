@@ -412,7 +412,7 @@ fn raise_toast(state: &AppState, view: &SensitiveView) {
         request_id: view.request_id.clone(),
         labels: Some((view.cancel_label.clone(), view.now_label.clone())),
     };
-    router.emit_sensitive(&toast_group(&view.request_id), &title, Some(body), info);
+    router.emit_group(&toast_group(&view.request_id), &title, Some(body), info);
     // A withdrawal or veto that settled the countdown while this was being raised asked the router
     // to retract the toast before it existed: look again now it does, and retract it.
     if status(&view.request_id).is_none_or(|v| v.status != "pending") {
