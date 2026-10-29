@@ -47,6 +47,25 @@ describe("shouldPreselectContainer", () => {
     });
 });
 
+describe("shouldPreselectContainer with a remembered choice", () => {
+    it("lets an explicit Native win over a container template", () => {
+        expect(shouldPreselectContainer({ ...ok, lastChoice: "host" })).toBe(false);
+    });
+
+    it("keeps an explicit Container for a template that suggests Native, while it can run", () => {
+        expect(shouldPreselectContainer({ ...ok, templateType: "host", lastChoice: "container" })).toBe(true);
+        expect(shouldPreselectContainer({ ...ok, templateType: "host", lastChoice: "container", dockerAvailable: false })).toBe(false);
+        expect(shouldPreselectContainer({ ...ok, templateType: "host", lastChoice: "container", image: "denied" })).toBe(false);
+        expect(shouldPreselectContainer({ ...ok, templateType: "host", lastChoice: "container", image: undefined })).toBe(false);
+        expect(shouldPreselectContainer({ ...ok, templateType: "host", lastChoice: "container", containerSupported: false })).toBe(false);
+    });
+
+    it("follows the template when nothing was chosen", () => {
+        expect(shouldPreselectContainer({ ...ok, lastChoice: null })).toBe(true);
+        expect(shouldPreselectContainer({ ...ok, templateType: "host", lastChoice: null })).toBe(false);
+    });
+});
+
 describe("imageBlocksContainer", () => {
     it("blocks only on a definite refusal", () => {
         expect(imageBlocksContainer("denied")).toBe(true);
