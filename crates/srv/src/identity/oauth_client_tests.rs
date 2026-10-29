@@ -370,3 +370,89 @@ fn only_agentmuxs_own_github_app_runs_through_the_broker() {
     assert!(!runs_through_broker("github", false, &client(ClientMode::Builtin)));
     assert!(!runs_through_broker("google", true, &client(ClientMode::Builtin)));
 }
+
+// ── Sessions: cancel is final, and per flow ─────────────────────────────────
+
+fn success() -> OAuthStatus {
+    OAuthStatus::Success {
+        account_id: "acc-1".into(),
+        granted_scopes: Vec::new(),
+        missing_scopes: Vec::new(),
+        email: None,
+    }
+}
+
+fn is_cancelled(s: Option<OAuthStatus>) -> bool {
+    matches!(s, Some(OAuthStatus::Failed { error }) if error == "cancelled")
+}
+
+#[test]
+fn a_cancelled_flow_cannot_later_report_success() {
+    let m = OAuthSessionManager::default();
+    let (id, _stop) = m.new_session(OAuthStatus::Pending);
+    assert!(m.cancel(&id));
+    // The flow's task finishes after the cancel and tries to record its result.
+    assert!(!m.set_status(&id, success()), "a terminal status is final");
+    assert!(is_cancelled(m.poll(&id)), "the poll still says cancelled");
+}
+
+#[test]
+fn a_flow_that_was_cancelled_may_not_begin_to_write_the_account() {
+    let m = OAuthSessionManager::default();
+    let (id, _stop) = m.new_session(OAuthStatus::Pending);
+    assert!(m.cancel(&id));
+    assert!(!m.begin_commit(&id), "the cancel came first: the flow writes nothing");
+}
+
+#[test]
+fn a_cancel_after_the_flow_began_to_write_is_refused() {
+    let m = OAuthSessionManager::default();
+    let (id, _stop) = m.new_session(OAuthStatus::Pending);
+    assert!(m.begin_commit(&id));
+    assert!(!m.cancel(&id), "too late to cancel");
+    assert!(m.set_status(&id, success()));
+    assert!(matches!(m.poll(&id), Some(OAuthStatus::Success { .. })));
+}
+
+#[test]
+fn cancel_of_an_unknown_or_finished_session() {
+    let m = OAuthSessionManager::default();
+    assert!(!m.cancel("oauth-nope"), "unknown");
+    let (id, _stop) = m.new_session(OAuthStatus::Pending);
+    assert!(m.set_status(&id, OAuthStatus::Failed { error: "access denied".into() }));
+    assert!(m.cancel(&id), "already over: nothing to cancel");
+    assert!(
+        matches!(m.poll(&id), Some(OAuthStatus::Failed { error }) if error == "access denied"),
+        "a cancel does not rewrite a finished flow's result"
+    );
+}
+
+#[tokio::test]
+async fn a_cancel_stops_that_flow_only() {
+    let m = OAuthSessionManager::default();
+    let (a, mut stop_a) = m.new_session(OAuthStatus::Pending);
+    let (b, mut stop_b) = m.new_session(OAuthStatus::Pending);
+    assert!(m.cancel(&a));
+    tokio::time::timeout(Duration::from_secs(1), stop_a.stopped()).await.expect("the cancelled flow is told to stop");
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), stop_b.stopped()).await.is_err(),
+        "the other flow keeps running"
+    );
+    assert!(matches!(m.poll(&b), Some(OAuthStatus::Pending)));
+    assert!(m.begin_commit(&b));
+}
+
+#[tokio::test]
+async fn the_timeout_sweep_is_final_and_stops_the_flow() {
+    let m = OAuthSessionManager::default();
+    let (id, mut stop) = m.new_session(OAuthStatus::Pending);
+    {
+        let mut guard = m.sessions.lock().unwrap();
+        let s = guard.get_mut(&id).unwrap();
+        s.started_at = Instant::now().checked_sub(SESSION_TIMEOUT + Duration::from_secs(1)).expect("uptime");
+    }
+    assert!(matches!(m.poll(&id), Some(OAuthStatus::Failed { error }) if error.contains("timed out")));
+    tokio::time::timeout(Duration::from_secs(1), stop.stopped()).await.expect("a timed-out flow is told to stop");
+    assert!(!m.set_status(&id, success()), "a flow that wakes up late cannot report success");
+    assert!(!m.begin_commit(&id));
+}
