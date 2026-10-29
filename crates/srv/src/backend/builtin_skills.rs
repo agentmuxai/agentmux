@@ -88,7 +88,13 @@ pub(crate) fn seed(store: &Store, list: &[Builtin], now_ms: i64) -> usize {
 /// global skill of the same name does (both count as seeded). A store failure is an `Err`, to retry.
 fn seed_one(store: &Store, b: &Builtin, now_ms: i64) -> Result<bool, StoreError> {
     if store.skill_get(b.id)?.is_some() {
-        return Ok(false);
+        // A start that wrote the skill but failed before its reach left a skill that reaches nobody, and
+        // the seed unrecorded: finish that. A reach row that exists, even one switched off, is the user's.
+        if store.skill_reach_map()?.contains_key(b.id) {
+            return Ok(false);
+        }
+        store.skill_set_reach(b.id, true, true, now_ms)?;
+        return Ok(true);
     }
     let skill = Skill {
         id: b.id.to_string(),

@@ -29,6 +29,39 @@ fn a_fresh_catalog_gets_the_skill_for_every_agent() {
 }
 
 #[test]
+fn a_start_cut_off_between_the_skill_and_its_reach_finishes_the_reach_next_time() {
+    let (s, _d) = store();
+    let b = one();
+    let skill = Skill {
+        id: b.id.into(),
+        name: b.name.into(),
+        trigger: b.trigger.into(),
+        skill_type: "agent-skill".into(),
+        description: b.description.into(),
+        content: b.content.into(),
+        is_global: true,
+        created_at: 1,
+        updated_at: 1,
+    };
+    s.skill_upsert_unique_global(&skill).unwrap();
+    assert!(s.skill_reach_map().unwrap().get(b.id).is_none(), "the cut-off state: a skill that reaches nobody");
+    assert_eq!(seed(&s, &[one()], 2_000), 1);
+    assert!(s.skill_reach_map().unwrap()[b.id].all_agents);
+    assert_eq!(seed(&s, &[one()], 3_000), 0, "and then it is done");
+}
+
+#[test]
+fn a_reach_the_user_switched_off_is_not_switched_back_on() {
+    let (s, _d) = store();
+    seed(&s, &[one()], 1_000);
+    s.skill_set_reach(one().id, false, false, 1_500).unwrap();
+    // Even if the seed record were missing, a reach row that exists (here switched off) is left as it is.
+    assert!(!seed_one(&s, &one(), 2_000).unwrap());
+    let reach = s.skill_reach_map().unwrap()[one().id];
+    assert!((reach.all_agents, reach.new_agents_since) == (false, 0), "{reach:?}");
+}
+
+#[test]
 fn it_is_seeded_once_and_a_second_start_adds_nothing() {
     let (s, _d) = store();
     assert_eq!(seed(&s, &[one()], 1_000), 1);
@@ -114,7 +147,7 @@ fn the_disk_cleanup_skill_says_to_ask_first_and_what_never_to_touch() {
     let b = BUILTINS.iter().find(|b| b.name == "disk-cleanup").expect("shipped");
     let c = b.content.to_lowercase();
     assert!(c.contains("ask before deleting anything"));
-    for protected in ["shared/", "memory", "transcript", "agents/<name>/"] {
+    for protected in ["shared/", "memory", "transcript", "agents/<name>/", "identity-store.db", "`config/`"] {
         assert!(c.contains(protected), "{protected}");
     }
     assert!(c.contains("measure"));
