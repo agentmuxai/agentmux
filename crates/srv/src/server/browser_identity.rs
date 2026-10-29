@@ -174,9 +174,27 @@ pub(crate) fn identity_for_agent(requested: &str, profiles: &[BrowserProfile]) -
     Ok(Some(format!("profile:{}", p.id)))
 }
 
+/// What a container agent's `profile` asks for, once its defaults are applied. A container agent exists
+/// to be isolated from the user's own sign-ins, so with nothing asked it gets an Incognito jar of its
+/// own, never Personal; it browses as a named profile only when the user lets agents use that profile
+/// (the check `identity_for_agent` makes for every agent).
+fn requested_by_container(requested: Option<&str>) -> Result<Option<&str>, String> {
+    match requested.map(str::trim) {
+        None | Some("") => Ok(Some("incognito")),
+        Some(r) if r.eq_ignore_ascii_case("personal") => Err(
+            "a container agent doesn't browse as the user's Personal profile: it has Incognito by default, or a profile the user \
+             lets agents use (Settings → Browser → \"Agents may use it\")"
+                .to_string(),
+        ),
+        Some(r) => Ok(Some(r)),
+    }
+}
+
 /// `OpenBrowser`'s `profile`: give the agent's new tab the identity it asked
-/// for, checked like any new tab (the platform, the Incognito cap).
-pub(crate) fn for_agent_open(state: &AppState, meta: &mut MetaMapType, requested: Option<&str>) -> Result<(), String> {
+/// for, checked like any new tab (the platform, the Incognito cap). A container agent's default is
+/// Incognito ([`requested_by_container`]).
+pub(crate) fn for_agent_open(state: &AppState, meta: &mut MetaMapType, requested: Option<&str>, from_container: bool) -> Result<(), String> {
+    let requested = if from_container { requested_by_container(requested)? } else { requested };
     let Some(requested) = requested else { return Ok(()) };
     let profiles = crate::server::app_api::browser_profiles_list()?;
     if let Some(identity) = identity_for_agent(requested, &profiles)? {
@@ -204,6 +222,24 @@ mod tests {
 
     fn profile(id: &str, name: &str, agents_allowed: bool) -> BrowserProfile {
         BrowserProfile { id: id.into(), name: name.into(), color: "#3b82f6".into(), created_at: 0, agents_allowed }
+    }
+
+    #[test]
+    fn a_container_agent_browses_in_its_own_jar_unless_a_shared_profile_is_asked_for() {
+        // Nothing asked: Incognito, not the user's Personal profile.
+        assert_eq!(requested_by_container(None), Ok(Some("incognito")));
+        assert_eq!(requested_by_container(Some("  ")), Ok(Some("incognito")));
+        // Personal asked for by name is refused, with the way out.
+        let refused = requested_by_container(Some("Personal")).unwrap_err();
+        assert!(refused.contains("Incognito") && refused.contains("Agents may use it"), "{refused}");
+        // A named profile still goes through the usual check, which lets in only shared ones.
+        assert_eq!(requested_by_container(Some("Work")), Ok(Some("Work")));
+        let ps = [profile("p-work", "Work", true), profile("p-bank", "Bank", false)];
+        assert_eq!(identity_for_agent("Work", &ps), Ok(Some("profile:p-work".into())));
+        assert!(identity_for_agent("Bank", &ps).is_err());
+        // The default really is a fresh jar.
+        let jar = identity_for_agent("incognito", &ps).unwrap().unwrap();
+        assert!(is_incognito(&jar));
     }
 
     #[test]

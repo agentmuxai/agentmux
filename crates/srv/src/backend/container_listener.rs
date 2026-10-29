@@ -32,7 +32,7 @@ use axum::response::IntoResponse;
 use axum::{Json, Router};
 use serde_json::json;
 
-use crate::backend::container_credential::{container_route_allowed, grant_for};
+use crate::backend::container_credential::grant_for;
 
 /// An IPv4 network.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,20 +61,20 @@ impl Subnet {
 }
 
 /// Why a request on the container listener is refused, or `Ok`. The pure part of [`layer`].
-pub fn check(peer: IpAddr, subnet: Option<&Subnet>, token: Option<&str>, path: &str) -> Result<(), (StatusCode, &'static str)> {
+pub fn check(peer: IpAddr, subnet: Option<&Subnet>, token: Option<&str>, path: &str) -> Result<(), (StatusCode, String)> {
     let Some(subnet) = subnet else {
-        return Err((StatusCode::SERVICE_UNAVAILABLE, "the container listener is not set up"));
+        return Err((StatusCode::SERVICE_UNAVAILABLE, "the container listener is not set up".to_string()));
     };
     if !subnet.contains(peer) {
-        return Err((StatusCode::FORBIDDEN, "not from the agents network"));
+        return Err((StatusCode::FORBIDDEN, "not from the agents network".to_string()));
     }
     // Only a live container token: the instance key and the LAN key are not tokens, and an
     // unknown string has no grant.
     if token.map_or(true, |t| grant_for(t).is_none()) {
-        return Err((StatusCode::UNAUTHORIZED, "unauthorized"));
+        return Err((StatusCode::UNAUTHORIZED, "unauthorized".to_string()));
     }
-    if !container_route_allowed(path) {
-        return Err((StatusCode::FORBIDDEN, "this route is not available to container agents"));
+    if let Some(why) = crate::backend::container_routes::refusal_message(path) {
+        return Err((StatusCode::FORBIDDEN, why));
     }
     Ok(())
 }
@@ -89,12 +89,12 @@ pub fn layer(router: Router, subnet: impl Fn() -> Option<Subnet> + Clone + Send 
             let token = req.headers().get(agentmux_common::AUTH_KEY_HEADER).and_then(|v| v.to_str().ok());
             let verdict = match peer {
                 Some(peer) => check(peer, subnet().as_ref(), token, req.uri().path()),
-                None => Err((StatusCode::FORBIDDEN, "unknown peer")),
+                None => Err((StatusCode::FORBIDDEN, "unknown peer".to_string())),
             };
             match verdict {
                 Ok(()) => next.run(req).await,
                 Err((status, why)) => {
-                    tracing::warn!(path = %req.uri().path(), peer = ?peer, why, "container listener refused a request");
+                    tracing::warn!(path = %req.uri().path(), peer = ?peer, %why, "container listener refused a request");
                     (status, Json(json!({ "error": why }))).into_response()
                 }
             }
@@ -331,8 +331,8 @@ mod tests {
         // The instance key is not a container token, from the right network too.
         assert_eq!(call(&router, &d("172_30_0_7"), Some(&instance_key), "/agentmux/discovery").await, StatusCode::UNAUTHORIZED);
         assert_eq!(call(&router, &d("172_30_0_7"), Some(&instance_key), "/agentmux/service").await, StatusCode::UNAUTHORIZED);
-        // A container token reaches only the agent routes.
-        for operator in ["/agentmux/service", "/ws", "/agentmux/file", "/agentmux/shell", "/agentmux/stream-local-file", "/api/v1/agent/open"] {
+        // A container token reaches every route but the host's: commands, host files, the app's plumbing.
+        for operator in ["/agentmux/service", "/ws", "/agentmux/file", "/api/v1/shell/create", "/api/v1/ptyshell/input", "/agentmux/stream-local-file", "/api/v1/host/vault", "/api/v1/agent/desktop/authorize"] {
             let got = call(&router, &d("172_30_0_7"), Some(&token), operator).await;
             assert_eq!(got, StatusCode::FORBIDDEN, "{operator}");
         }
@@ -402,8 +402,10 @@ mod tests {
             "/ws/.",
         ];
         for target in tricks {
+            // With a denylist a trick that names no route is a 404 from the router; what must never happen is
+            // an answer from a route the container is refused.
             let got = raw_status(addr, target, &token).await;
-            assert!(got == "403" || got == "400", "{target} answered {got}");
+            assert!(got == "403" || got == "400" || got == "404", "{target} answered {got}");
         }
         // The guard is not simply refusing everything.
         let got = raw_status(addr, "/agentmux/discovery", &token).await;
