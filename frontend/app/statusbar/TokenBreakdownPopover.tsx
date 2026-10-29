@@ -19,6 +19,8 @@ import { ConfirmModal } from "@/element/modal";
 import { getCliCatalogEntry } from "@/app/view/agent/defaults/cli-catalog";
 import { formatCompactNumber } from "@/util/format-count";
 import { revealBlock } from "@/app/util/reveal-block";
+import { ambientSummary } from "@/app/store/ambient-health";
+import { AmbientPurposes } from "./AmbientPurposes";
 import {
     getAgentBreakdown,
     getAgentCacheHitRate,
@@ -229,10 +231,21 @@ export const TokenBreakdownPopover = (props: TokenBreakdownPopoverProps): JSX.El
                                                     </div>
                                                 )}
                                             </For>
+                                            <AmbientPurposes />
                                         </div>
                                     </Show>
                                 </div>
                             )}
+                        </Show>
+                        <Show when={!ambientRow() && ambientSummary()}>
+                            <div class="token-usage-breakdown-ambient">
+                                <div class="token-usage-breakdown-row">
+                                    <span class="token-usage-breakdown-row-name">AgentMux internal</span>
+                                </div>
+                                <div class="token-usage-breakdown-ambient-detail">
+                                    <AmbientPurposes />
+                                </div>
+                            </div>
                         </Show>
                         <div class="token-usage-breakdown-row token-usage-breakdown-total">
                             <span class="token-usage-breakdown-row-name">Total</span>

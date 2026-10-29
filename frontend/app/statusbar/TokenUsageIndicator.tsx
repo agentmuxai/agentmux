@@ -8,7 +8,8 @@
  * SPEC_STATUSBAR_TOKEN_USAGE_2026_04_24.md §4.1.
  */
 
-import { createMemo, createSignal, Show, type JSX } from "solid-js";
+import { createMemo, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { AMBIENT_BACKGROUND_MS, ambientFailingCount, watchAmbient } from "@/app/store/ambient-health";
 import { getTotal, tokenUsageState } from "@/store/token-usage";
 import { formatCompactNumber } from "@/util/format-count";
 import { TokenBreakdownPopover } from "./TokenBreakdownPopover";
@@ -23,6 +24,11 @@ export const TokenUsageIndicator = (): JSX.Element => {
 
     const [open, setOpen] = createSignal(false);
     let indicatorRef: HTMLButtonElement | undefined;
+
+    // AgentMux's own model calls: the count only drives the dot, so a slow background ask is enough
+    // while the popover (which asks faster) is closed.
+    onMount(() => onCleanup(watchAmbient(AMBIENT_BACKGROUND_MS)));
+    const failing = () => ambientFailingCount();
 
     const handleToggle = () => setOpen(!open());
 
@@ -42,7 +48,7 @@ export const TokenUsageIndicator = (): JSX.Element => {
                 classList={{ "token-usage-indicator--idle": isZero() }}
                 onClick={handleToggle}
                 onKeyDown={handleKeyDown}
-                aria-label="Token usage, click for breakdown"
+                aria-label={failing() > 0 ? "Token usage, AgentMux internal calls failing, click for breakdown" : "Token usage, click for breakdown"}
                 data-tip="Total tokens this session"
             >
                 <span class="token-usage-indicator-counts">
@@ -52,6 +58,13 @@ export const TokenUsageIndicator = (): JSX.Element => {
                     <span class="token-usage-indicator-arrow">↓</span>
                     {formatCompactNumber(total().output)}
                 </span>
+                <Show when={failing() > 0}>
+                    <span
+                        class="token-usage-indicator-dot"
+                        data-testid="ambient-failing-dot"
+                        title={`AgentMux's own model calls: ${failing()} purpose${failing() === 1 ? "" : "s"} failing`}
+                    />
+                </Show>
             </button>
             <Show when={open()}>
                 <TokenBreakdownPopover anchor={indicatorRef} onClose={() => setOpen(false)} />
