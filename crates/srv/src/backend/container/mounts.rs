@@ -2,6 +2,7 @@
 //! credentials, and the agent's Personal Memory folder.
 
 mod credential_mode;
+mod dev_exec;
 
 use bollard::exec::{CreateExecOptions, StartExecOptions, StartExecResults};
 use bollard::models::{Mount, MountTypeEnum};

@@ -362,6 +362,8 @@ impl ContainerStartup {
             row_open.disarm();
             return Err(self.fail(&e, report_failure));
         }
+        // Dev servers the agent asked to have kept up come back with the container.
+        crate::backend::dev_keepalive::restore_in_background(&self.cm, &self.container_name);
         if shown.load(Ordering::Relaxed) {
             start_row(ContainerStartState::Ready, None, &image, None);
         } else {

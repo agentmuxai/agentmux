@@ -75,7 +75,7 @@
     }
 
     .swarm-empty-icon {
-        font-size: 28px;
+        font-size: var(--text-3xl);
         opacity: 0.3;
     }
     .swarm-empty-title {
@@ -134,7 +134,7 @@
     border: 1px solid var(--border-color);
     background: transparent;
     color: var(--secondary-text-color);
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     font-size: var(--text-xs);
     padding: 3px 8px;
     cursor: default;
@@ -163,7 +163,7 @@
 
 .swarm-agent-card {
     cursor: pointer;
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     user-select: none;
 
     // --swarm-agent-active-border / --swarm-agent-hover-border are set inline
@@ -230,7 +230,7 @@
         font-size: var(--text-2xs);
         line-height: 1;
         padding: 2px 5px;
-        border-radius: 7px;
+        border-radius: var(--radius-full);
         background: var(--highlight-bg-color);
         color: var(--secondary-text-color);
     }
@@ -465,7 +465,7 @@
     padding: 0 6px 0 30px;
     gap: 6px;
     cursor: default;
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     user-select: none;
 
     &:hover {
@@ -512,7 +512,7 @@
     @include mixins.label-caps;
     letter-spacing: 0.02em;
     padding: 1px 6px;
-    border-radius: 3px;
+    border-radius: var(--radius-sm);
     flex-shrink: 0;
 
     &--active {
@@ -534,7 +534,7 @@
     flex-direction: column;
     margin: 0 6px 4px 30px;
     border: 1px solid var(--border-color);
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     background: var(--panel-bg-color, var(--main-bg-color));
     max-height: 320px;
     overflow-y: auto;
@@ -585,7 +585,7 @@
     padding: 0 6px 0 30px;
     gap: 5px;
     cursor: default;
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     user-select: none;
 
     &:hover {
@@ -678,7 +678,7 @@
     background: transparent;
     color: var(--secondary-text-color);
     font-size: var(--text-2xs);
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     cursor: pointer;
     opacity: 0;
     transition:
@@ -753,7 +753,7 @@
     @include mixins.label-caps;
     letter-spacing: 0.02em;
     padding: 1px 6px;
-    border-radius: 3px;
+    border-radius: var(--radius-sm);
 
     &--active {
         color: var(--info-color);
@@ -1066,7 +1066,7 @@
     max-height: 160px;
     overflow-y: auto;
     background: var(--hover-bg-color);
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     padding: 6px 8px;
     margin-bottom: 8px;
     font-size: var(--text-xs);
@@ -1094,7 +1094,7 @@
 .swarm-fleet-tag {
     padding: 0 5px;
     border: 1px solid var(--border-color);
-    border-radius: 8px;
+    border-radius: var(--radius-full);
     font-size: var(--text-2xs);
 }
 
@@ -1131,7 +1131,7 @@
         width: 60px;
         background: var(--main-bg-color);
         border: 1px solid var(--border-color);
-        border-radius: 4px;
+        border-radius: var(--radius-sm);
         color: var(--main-text-color);
         padding: 3px 6px;
     }
@@ -1239,7 +1239,7 @@
 .swarm-remote-platform {
     flex-shrink: 0;
     padding: 0 6px;
-    border-radius: 8px;
+    border-radius: var(--radius-full);
     border: 1px solid var(--border-color);
     font-size: var(--text-2xs);
     color: var(--secondary-text-color);

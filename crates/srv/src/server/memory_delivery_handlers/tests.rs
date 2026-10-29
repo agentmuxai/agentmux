@@ -123,6 +123,17 @@ fn the_parts_of_one_delivery_share_a_compose_gate_and_a_finished_one_leaves_none
 }
 
 #[test]
+fn a_session_start_that_composed_to_nothing_is_remembered_for_its_parts_and_then_forgotten() {
+    let mut st = DeliveryState::default();
+    let key = startup_key("b");
+    st.composed_nothing.insert(key.clone(), NOW);
+    st.prune(NOW + DELIVERY_TTL_MS - 1);
+    assert!(st.composed_nothing.contains_key(&key), "the later parts of the same start answer from it");
+    st.prune(NOW + DELIVERY_TTL_MS);
+    assert!(!st.composed_nothing.contains_key(&key), "and it does not outlive a delivery's own TTL");
+}
+
+#[test]
 fn a_gate_entry_takes_its_gate_with_it_when_dropped() {
     let key = startup_key("gate-entry-test");
     state_lock().compose_gates.entry(key.clone()).or_default();

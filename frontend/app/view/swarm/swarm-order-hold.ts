@@ -9,8 +9,9 @@
  */
 
 import { createComputed, onCleanup, onMount, type Accessor } from "solid-js";
+import type { Snapshot } from "@/app/motion/primitives";
 import { SwarmOrderController, type SwarmOrderItem } from "./swarm-order";
-import { captureRowTops, playRowMoves } from "./swarm-order-motion";
+import { captureRows, playRowMoves } from "./swarm-order-motion";
 
 export interface SwarmOrder {
     /** The keys of the rows, in the order to show them. */
@@ -39,12 +40,12 @@ export function useSwarmOrder(opts: {
     list: () => HTMLElement | undefined;
     zoom: Accessor<number>;
 }): SwarmOrder {
-    let tops = new Map<string, number>();
+    let before: Snapshot = new Map();
     const control = new SwarmOrderController(undefined, undefined, {
         beforeMove: () => {
-            tops = captureRowTops(opts.list());
+            before = captureRows(opts.list());
         },
-        afterMove: () => playRowMoves(opts.list(), tops, opts.zoom()),
+        afterMove: () => playRowMoves(opts.list(), before, opts.zoom()),
         stillHeld: (hold) => {
             const list = opts.list();
             if (!list) return false;

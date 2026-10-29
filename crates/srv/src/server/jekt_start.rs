@@ -100,10 +100,11 @@ fn sender_key(req: &InjectionRequest) -> String {
 }
 
 /// A message was held for the stopped agent `target_uid`: start it in the background. The row stays
-/// held and the replay delivers it once the agent registers, so a failed start loses nothing.
-pub(super) fn start_for_held(state: &AppState, req: &InjectionRequest, target_uid: &str) {
+/// held and the replay delivers it once the agent registers, so a failed start loses nothing. True when
+/// a start was launched, which the sender is told (`starting`) so it does not send the message again.
+pub(super) fn start_for_held(state: &AppState, req: &InjectionRequest, target_uid: &str) -> bool {
     if !enabled(state) || !may_start(req) {
-        return;
+        return false;
     }
     let (state, uid) = (state.clone(), target_uid.to_string());
     let sender = sender_key(req);
@@ -113,6 +114,7 @@ pub(super) fn start_for_held(state: &AppState, req: &InjectionRequest, target_ui
             Err(e) => tracing::warn!(target_uid = %uid, "message for a stopped agent: could not start it, the message stays held: {e}"),
         }
     });
+    true
 }
 
 /// Deliver a Job or cron fire. With the setting on, a target that is an agent of this instance and runs

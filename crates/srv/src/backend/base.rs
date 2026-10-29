@@ -303,12 +303,34 @@ pub fn is_dev_mode() -> bool {
         .unwrap_or(false)
 }
 
+/// A `~/.agentmux[/…]` path re-rooted under `AGENTMUX_HOME_OVERRIDE`, when
+/// that is set; `None` for any other path or when it is not set.
+///
+/// An isolated srv (a test or dev instance started with the override) keeps
+/// its data under that root, but its `$HOME` is still the real one, so a
+/// stored `~/.agentmux/agents/<slug>` workspace expanded against `$HOME` and
+/// was created under the real `~/.agentmux/agents/`. Every `~` expander that
+/// can see such a path goes through this first.
+pub(crate) fn expand_under_home_override(path: &str) -> Option<PathBuf> {
+    let root = PathBuf::from(env::var_os("AGENTMUX_HOME_OVERRIDE").filter(|v| !v.is_empty())?);
+    let rest = path.strip_prefix("~/").or_else(|| path.strip_prefix("~\\"))?;
+    let below = if rest == ".agentmux" {
+        ""
+    } else {
+        rest.strip_prefix(".agentmux/").or_else(|| rest.strip_prefix(".agentmux\\"))?
+    };
+    Some(root.join(below.trim_start_matches(['/', '\\'])))
+}
+
 /// Expand `~` at the start of a path to the home directory.
 /// Rejects `~user/` and paths containing `..` components (path traversal).
 pub fn expand_home_dir(path: &str) -> Result<PathBuf, String> {
     // Reject paths with .. components regardless of ~ prefix
     if path.split(['/', '\\']).any(|c| c == "..") {
         return Err(format!("cannot expand path: '..' traversal in {}", path));
+    }
+    if let Some(under_override) = expand_under_home_override(path) {
+        return Ok(under_override);
     }
 
     if let Some(rest) = path.strip_prefix('~') {
@@ -589,6 +611,40 @@ mod tests {
         // When env var is not set, should be ~/.agentmux
         let dir = get_mux_data_dir();
         assert!(dir.to_string_lossy().contains(".agentmux") || dir.to_string_lossy().contains("AGENTMUX"));
+    }
+
+    /// An isolated srv's `~/.agentmux/...` paths (agent workspaces) follow
+    /// `AGENTMUX_HOME_OVERRIDE`, not the real `$HOME`; anything else under `~`
+    /// still expands to the real home.
+    #[test]
+    fn tilde_agentmux_paths_follow_the_home_override() {
+        let _guard = crate::test_support::ISOLATED_AUTH_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let fake = tempfile::tempdir().unwrap();
+        let prior = env::var_os("AGENTMUX_HOME_OVERRIDE");
+        let real_home = get_home_dir();
+
+        env::set_var("AGENTMUX_HOME_OVERRIDE", fake.path());
+        let workspace = expand_home_dir_safe("~/.agentmux/agents/aria");
+        let via_core = PathBuf::from(crate::backend::blockcontroller::core::expand_home_dir("~/.agentmux/agents/aria"));
+        let root = expand_home_dir_safe("~/.agentmux");
+        let elsewhere = expand_home_dir_safe("~/projects/x");
+        let lookalike = expand_home_dir_safe("~/.agentmux-other/x");
+
+        env::remove_var("AGENTMUX_HOME_OVERRIDE");
+        let real = expand_home_dir_safe("~/.agentmux/agents/aria");
+        if let Some(p) = prior {
+            env::set_var("AGENTMUX_HOME_OVERRIDE", p);
+        }
+
+        assert_eq!(workspace, fake.path().join("agents").join("aria"));
+        assert_eq!(via_core, workspace);
+        assert_eq!(root, fake.path());
+        assert!(!workspace.starts_with(real_home.join(".agentmux")), "must not land under the real home");
+        assert_eq!(elsewhere, real_home.join("projects/x"));
+        assert_eq!(lookalike, real_home.join(".agentmux-other/x"));
+        assert_eq!(real, real_home.join(".agentmux/agents/aria"), "unchanged without the override");
     }
 
     #[test]
