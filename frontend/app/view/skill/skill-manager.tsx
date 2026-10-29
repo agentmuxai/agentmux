@@ -4,9 +4,9 @@
 /**
  * SkillManager — the Memory → Skills section body. Context-free
  * list/create/edit/delete over the global Skill catalog (skill.catalog.*
- * MuxAPI via SkillCatalogModel). Every row here is global — per-agent
- * private skills live in the Agent-setup modal (AgentSkillsModal), not
- * here.
+ * MuxAPI via SkillCatalogModel). Every row here is global; an agent's own
+ * private skills are not shown here. A skill's details also say who gets it
+ * without a bind (every agent, new agents).
  */
 
 import { createResource, onCleanup, For, Show, type JSX } from "solid-js";
