@@ -173,8 +173,43 @@ fn walk(root: &Path, dir: &Path, dir_name: &str, depth: usize, scan: &mut Scan) 
     }
 }
 
-fn https_url(raw: &str) -> Result<url::Url, String> {
-    let parsed = url::Url::parse(raw.trim()).map_err(|e| format!("not a valid URL: {e}"))?;
+/// Whether a connection to this address is refused: loopback, private, link-local, shared
+/// (carrier-grade NAT), multicast, broadcast, unspecified and documentation ranges, with an
+/// IPv4-mapped IPv6 address judged as the IPv4 address it carries.
+fn blocked_ip(ip: std::net::IpAddr) -> bool {
+    use std::net::IpAddr;
+    match ip {
+        IpAddr::V4(v4) => {
+            let o = v4.octets();
+            v4.is_loopback()
+                || v4.is_private()
+                || v4.is_link_local()
+                || v4.is_unspecified()
+                || v4.is_broadcast()
+                || v4.is_multicast()
+                || v4.is_documentation()
+                || o[0] == 0
+                || (o[0] == 100 && (o[1] & 0xc0) == 64) // 100.64.0.0/10
+                || o[0] >= 240
+        }
+        IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
+            Some(v4) => blocked_ip(IpAddr::V4(v4)),
+            None => {
+                let s = v6.segments();
+                v6.is_loopback()
+                    || v6.is_unspecified()
+                    || v6.is_multicast()
+                    || (s[0] & 0xfe00) == 0xfc00 // unique local
+                    || (s[0] & 0xffc0) == 0xfe80 // link-local
+                    || (s[0] == 0x64 && s[1] == 0xff9b) // NAT64 can reach an IPv4 host
+            }
+        },
+    }
+}
+
+/// A host name or address a skill may be fetched from: https, no credentials, and not a local
+/// name or a refused address. Applied to the first URL and again on every redirect.
+fn check_url(parsed: &url::Url) -> Result<(), String> {
     if parsed.scheme() != "https" {
         return Err("only https:// sources are accepted".to_string());
     }
@@ -182,19 +217,39 @@ fn https_url(raw: &str) -> Result<url::Url, String> {
         return Err("a URL with a user name or password is not accepted".to_string());
     }
     match parsed.host() {
-        None => return Err("the URL has no host".to_string()),
-        Some(url::Host::Domain(d)) if d.eq_ignore_ascii_case("localhost") || d.ends_with(".localhost") => {
-            return Err("a local address is not accepted".to_string())
+        None => Err("the URL has no host".to_string()),
+        Some(url::Host::Domain(d)) if d.eq_ignore_ascii_case("localhost") || d.to_ascii_lowercase().ends_with(".localhost") => {
+            Err("a local address is not accepted".to_string())
         }
-        Some(url::Host::Ipv4(ip)) if ip.is_loopback() || ip.is_private() || ip.is_link_local() || ip.is_unspecified() => {
-            return Err("a local address is not accepted".to_string())
-        }
-        Some(url::Host::Ipv6(ip)) if ip.is_loopback() || ip.is_unspecified() || (ip.segments()[0] & 0xfe00) == 0xfc00 || (ip.segments()[0] & 0xffc0) == 0xfe80 => {
-            return Err("a local address is not accepted".to_string())
-        }
-        _ => {}
+        Some(url::Host::Ipv4(ip)) if blocked_ip(ip.into()) => Err("a local address is not accepted".to_string()),
+        Some(url::Host::Ipv6(ip)) if blocked_ip(ip.into()) => Err("a local address is not accepted".to_string()),
+        _ => Ok(()),
     }
+}
+
+fn https_url(raw: &str) -> Result<url::Url, String> {
+    let parsed = url::Url::parse(raw.trim()).map_err(|e| format!("not a valid URL: {e}"))?;
+    check_url(&parsed)?;
     Ok(parsed)
+}
+
+/// Resolves host names for the fetch and drops every refused address, so a public name that
+/// points at a private address (or is switched to one between a check and the connection) cannot
+/// be reached, on the first request or on a redirect.
+struct PublicOnlyResolver;
+
+impl reqwest::dns::Resolve for PublicOnlyResolver {
+    fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        Box::pin(async move {
+            let found: Vec<std::net::SocketAddr> = tokio::net::lookup_host((name.as_str(), 443)).await?.collect();
+            let allowed: Vec<std::net::SocketAddr> = found.into_iter().filter(|a| !blocked_ip(a.ip())).collect();
+            if allowed.is_empty() {
+                let e: Box<dyn std::error::Error + Send + Sync> = "that name only points at local addresses".into();
+                return Err(e);
+            }
+            Ok(Box::new(allowed.into_iter()) as reqwest::dns::Addrs)
+        })
+    }
 }
 
 /// One `SKILL.md` fetched from an HTTPS URL.
@@ -202,21 +257,35 @@ pub async fn fetch_url(raw: &str) -> Result<Scan, String> {
     let parsed = https_url(raw)?;
     let client = reqwest::Client::builder()
         .timeout(URL_TIMEOUT)
-        .redirect(reqwest::redirect::Policy::limited(3))
+        .dns_resolver(std::sync::Arc::new(PublicOnlyResolver))
+        .redirect(reqwest::redirect::Policy::custom(|attempt| {
+            if attempt.previous().len() >= 3 {
+                attempt.error("too many redirects")
+            } else if let Err(why) = check_url(attempt.url()) {
+                attempt.error(format!("redirected somewhere not accepted: {why}"))
+            } else {
+                attempt.follow()
+            }
+        }))
         .build()
         .map_err(|e| e.to_string())?;
-    let resp = client.get(parsed.clone()).send().await.map_err(|e| format!("fetch failed: {e}"))?;
+    let mut resp = client.get(parsed.clone()).send().await.map_err(|e| format!("fetch failed: {e}"))?;
     if !resp.status().is_success() {
         return Err(format!("fetch failed: HTTP {}", resp.status()));
     }
+    let too_big = || format!("the file is larger than {} KB", MAX_FILE_BYTES / 1024);
     if resp.content_length().map(|n| n > MAX_FILE_BYTES).unwrap_or(false) {
-        return Err(format!("the file is larger than {} KB", MAX_FILE_BYTES / 1024));
+        return Err(too_big());
     }
-    let bytes = resp.bytes().await.map_err(|e| format!("fetch failed: {e}"))?;
-    if bytes.len() as u64 > MAX_FILE_BYTES {
-        return Err(format!("the file is larger than {} KB", MAX_FILE_BYTES / 1024));
+    // Read in pieces and stop at the cap: a server that sends no length cannot fill memory.
+    let mut bytes: Vec<u8> = Vec::new();
+    while let Some(chunk) = resp.chunk().await.map_err(|e| format!("fetch failed: {e}"))? {
+        if (bytes.len() + chunk.len()) as u64 > MAX_FILE_BYTES {
+            return Err(too_big());
+        }
+        bytes.extend_from_slice(&chunk);
     }
-    let text = String::from_utf8(bytes.to_vec()).map_err(|_| "the file is not UTF-8 text".to_string())?;
+    let text = String::from_utf8(bytes).map_err(|_| "the file is not UTF-8 text".to_string())?;
     let segments: Vec<&str> = parsed.path_segments().map(|s| s.filter(|p| !p.is_empty()).collect()).unwrap_or_default();
     let last = segments.last().copied().unwrap_or("skill");
     let stem = last.strip_suffix(".md").unwrap_or(last);
@@ -232,9 +301,31 @@ fn valid_git_ref(r: &str) -> bool {
         && r.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '/' | '-'))
 }
 
+/// Bytes of a clone that stop it: a skill repository is text, so this is generous.
+const MAX_CLONE_BYTES: u64 = 200 * 1024 * 1024;
+
+/// Total size of the files under `dir` (symlinks not followed).
+fn dir_bytes(dir: &Path) -> u64 {
+    let mut total = 0;
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&d) else { continue };
+        for e in entries.flatten() {
+            match e.file_type() {
+                Ok(t) if t.is_dir() => stack.push(e.path()),
+                Ok(t) if t.is_file() => total += e.metadata().map(|m| m.len()).unwrap_or(0),
+                _ => {}
+            }
+        }
+    }
+    total
+}
+
 /// Shallow-clone an HTTPS git repository into a scratch folder, scan it, delete the folder. The
-/// clone runs with every protocol but https switched off and never asks for a password.
+/// clone runs with every protocol but https switched off, never asks for a password, and is
+/// stopped when it runs past the time or size limit.
 pub async fn fetch_git(raw: &str, git_ref: &str) -> Result<Scan, String> {
+    use tokio::io::AsyncReadExt;
     let parsed = https_url(raw)?;
     let git_ref = git_ref.trim();
     if !git_ref.is_empty() && !valid_git_ref(git_ref) {
@@ -252,14 +343,41 @@ pub async fn fetch_git(raw: &str, git_ref: &str) -> Result<Scan, String> {
         cmd.args(["--branch", git_ref]);
     }
     cmd.arg("--").arg(parsed.as_str()).arg(&dir);
-    let result = match tokio::time::timeout(GIT_TIMEOUT, cmd.output()).await {
-        Err(_) => Err(format!("git clone did not finish in {} s", GIT_TIMEOUT.as_secs())),
-        Ok(Err(e)) => Err(format!("could not run git: {e}")),
-        Ok(Ok(out)) if !out.status.success() => {
-            Err(format!("git clone failed: {}", String::from_utf8_lossy(&out.stderr).trim().lines().last().unwrap_or("")))
+    cmd.stdout(std::process::Stdio::null()).stderr(std::process::Stdio::piped());
+    let result = async {
+        let mut child = cmd.spawn().map_err(|e| format!("could not run git: {e}"))?;
+        let mut stderr = child.stderr.take().expect("stderr is piped");
+        let said = tokio::spawn(async move {
+            let mut s = String::new();
+            let _ = stderr.read_to_string(&mut s).await;
+            s
+        });
+        let started = std::time::Instant::now();
+        let status = loop {
+            tokio::select! {
+                status = child.wait() => break status.map_err(|e| format!("could not run git: {e}"))?,
+                _ = tokio::time::sleep(Duration::from_millis(500)) => {
+                    let why = if started.elapsed() > GIT_TIMEOUT {
+                        Some(format!("git clone did not finish in {} s", GIT_TIMEOUT.as_secs()))
+                    } else if dir_bytes(&dir) > MAX_CLONE_BYTES {
+                        Some(format!("the repository is larger than {} MB", MAX_CLONE_BYTES / 1024 / 1024))
+                    } else {
+                        None
+                    };
+                    if let Some(why) = why {
+                        let _ = child.kill().await;
+                        return Err(why);
+                    }
+                }
+            }
+        };
+        if !status.success() {
+            let said = said.await.unwrap_or_default();
+            return Err(format!("git clone failed: {}", said.trim().lines().last().unwrap_or("")));
         }
-        Ok(Ok(_)) => scan_dir(&dir),
-    };
+        scan_dir(&dir)
+    }
+    .await;
     let _ = std::fs::remove_dir_all(&dir);
     result
 }

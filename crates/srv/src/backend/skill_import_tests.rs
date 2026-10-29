@@ -64,6 +64,7 @@ fn a_single_markdown_file_is_a_skill_and_an_oversize_one_is_skipped_with_a_reaso
 #[test]
 fn only_public_https_sources_and_plain_ref_names_are_accepted() {
     assert!(https_url("https://example.com/a/SKILL.md").is_ok());
+    assert!(https_url("https://8.8.8.8/x").is_ok() && https_url("https://[2606:4700::1111]/x").is_ok());
     for bad in [
         "http://example.com/x",
         "file:///etc/passwd",
@@ -74,6 +75,16 @@ fn only_public_https_sources_and_plain_ref_names_are_accepted() {
         "https://10.0.0.5/x",
         "https://169.254.169.254/x",
         "https://[::1]/x",
+        "https://[::ffff:127.0.0.1]/x",
+        "https://[::ffff:10.0.0.1]/x",
+        "https://100.64.0.1/x",
+        "https://0.0.0.0/x",
+        "https://255.255.255.255/x",
+        "https://224.0.0.1/x",
+        "https://[fe80::1]/x",
+        "https://[fd00::1]/x",
+        "https://[64:ff9b::7f00:1]/x",
+        "https://foo.localhost/x",
         "not a url",
     ] {
         assert!(https_url(bad).is_err(), "{bad} must be refused");

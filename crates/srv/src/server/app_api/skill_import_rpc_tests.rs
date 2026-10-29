@@ -94,3 +94,19 @@ async fn bad_sources_and_hand_written_skills_are_refused_with_a_reason() {
     assert!(e.contains("not imported"), "{e}");
     assert!(call(&state, COMMAND_SKILL_CATALOG_IMPORT_PREVIEW, json!({})).await.is_err());
 }
+
+#[tokio::test]
+async fn a_bad_item_in_a_batch_writes_nothing() {
+    let state = crate::server::tests::test_state();
+    let source = json!({"kind": "folder", "location": "x", "git_ref": "", "item_key": ""});
+    let item = |key: &str, name: &str| json!({"key": key, "name": name, "description": "d", "content": "c", "existing_id": ""});
+    for items in [
+        vec![item("a", "batch-t-one"), item("b", "batch-t-one")], // two with one name
+        vec![item("a", "batch-t-two"), item("b", &"n".repeat(201))], // a name over the limit
+    ] {
+        let e = call(&state, COMMAND_SKILL_CATALOG_IMPORT_COMMIT, json!({"source": source, "items": items})).await.unwrap_err();
+        assert!(e.contains("skill.catalog.import_commit"), "{e}");
+        let listed = call(&state, COMMAND_SKILL_CATALOG_LIST, json!({})).await.unwrap().to_string();
+        assert!(!listed.contains("batch-t-"), "the earlier item must not have been written: {listed}");
+    }
+}

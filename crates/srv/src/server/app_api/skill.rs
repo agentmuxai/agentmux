@@ -773,19 +773,33 @@ fn register_skill_catalog_import_commit(engine: &Arc<WshRpcEngine>, state: &AppS
             async move {
                 const E: &str = "skill.catalog.import_commit";
                 let now = now_ms();
-                let mut saved = Vec::new();
-                for item in req.items {
-                    if item.name.trim().is_empty() || item.content.len() > 256 * 1024 {
-                        return Err(format!("{E}: '{}' needs a name and at most 256 KB of text", item.key));
+                // Check the whole batch before writing any of it, so a bad item cannot leave the
+                // ones before it written.
+                let mut seen = std::collections::HashSet::new();
+                let mut existing_rows = Vec::with_capacity(req.items.len());
+                for item in &req.items {
+                    let name = item.name.trim();
+                    if name.is_empty() || name.chars().count() > 200 {
+                        return Err(format!("{E}: '{}' needs a name of 1 to 200 characters", item.key));
                     }
-                    let existing = if item.existing_id.is_empty() {
+                    if item.description.chars().count() > 4000 || item.content.len() > 256 * 1024 {
+                        return Err(format!("{E}: '{name}' has a description over 4000 characters or text over 256 KB"));
+                    }
+                    if !seen.insert(name.to_string()) {
+                        return Err(format!("{E}: two of the skills are called '{name}'; import them one at a time"));
+                    }
+                    existing_rows.push(if item.existing_id.is_empty() {
                         None
                     } else {
                         match identity_store.skill_get(&item.existing_id).map_err(|e| format!("{E}: {e}"))? {
                             Some(s) if s.is_global => Some(s),
-                            _ => return Err(format!("{E}: the skill to update is not in the catalog")),
+                            _ => return Err(format!("{E}: the skill to update ('{name}') is not in the catalog")),
                         }
-                    };
+                    });
+                }
+                let mut saved = Vec::new();
+                let mut failure = None;
+                for (item, existing) in req.items.into_iter().zip(existing_rows) {
                     let skill = crate::backend::storage::Skill {
                         id: existing.as_ref().map_or_else(|| uuid::Uuid::new_v4().to_string(), |s| s.id.clone()),
                         name: item.name.trim().to_string(),
@@ -797,15 +811,26 @@ fn register_skill_catalog_import_commit(engine: &Arc<WshRpcEngine>, state: &AppS
                         created_at: existing.as_ref().map_or(now, |s| s.created_at),
                         updated_at: now,
                     };
-                    identity_store.skill_upsert_unique_global(&skill).map_err(|e| format!("{E}: {e}"))?;
-                    if existing.is_none() {
-                        identity_store.skill_set_reach(&skill.id, false, false, now).map_err(|e| format!("{E}: {e}"))?;
-                    }
                     let source = SkillSource { item_key: item.key, ..req.source.clone() };
-                    identity_store.skill_source_set(&skill.id, &source, now).map_err(|e| format!("{E}: {e}"))?;
-                    saved.push(skill.id);
+                    let written = identity_store
+                        .skill_upsert_unique_global(&skill)
+                        .and_then(|_| if existing.is_none() { identity_store.skill_set_reach(&skill.id, false, false, now) } else { Ok(()) })
+                        .and_then(|_| identity_store.skill_source_set(&skill.id, &source, now));
+                    match written {
+                        Ok(()) => saved.push(skill.id),
+                        Err(e) => {
+                            failure = Some(format!("{E}: '{}': {e}", skill.name));
+                            break;
+                        }
+                    }
                 }
-                broker.publish_event::<crate::backend::mps_events::SkillsChanged>(&(), vec![], 0);
+                // Tell the windows about what was written even when a later item failed.
+                if !saved.is_empty() {
+                    broker.publish_event::<crate::backend::mps_events::SkillsChanged>(&(), vec![], 0);
+                }
+                if let Some(f) = failure {
+                    return Err(if saved.is_empty() { f } else { format!("{f} ({} earlier skill(s) were saved)", saved.len()) });
+                }
                 Ok(SkillImportCommitResult { saved })
             }
         },

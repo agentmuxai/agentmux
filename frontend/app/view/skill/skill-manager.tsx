@@ -140,9 +140,9 @@ export const SkillManager = (): JSX.Element => {
             <button class="agent-primitive-modal-new-btn" onClick={() => model.startNew()}>
                 + New skill
             </button>
-            <button class="agent-primitive-modal-new-btn" onClick={startImport}>
+            <Button class="agent-primitive-modal-new-btn" onClick={startImport}>
                 Import a skill…
-            </button>
+            </Button>
         </div>
     );
 
