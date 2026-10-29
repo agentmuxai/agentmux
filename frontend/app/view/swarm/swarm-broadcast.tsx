@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// The Swarm's Broadcast section: the composer docked under the shared agent list, and the last ten
+// The Swarm's Broadcast section: the composer at the top, above the shared agent list, and the last ten
 // broadcasts sent from this Swarm. The draft and the recent list live outside the section, so
 // switching away and back loses neither. docs/specs/SPEC_SWARM_SECTIONS_SUPERVISOR_SETTINGS_AND_KANBAN_2026_10_24.md §3.3.
 
