@@ -147,7 +147,7 @@ impl HeldAgentLease {
                 Ok(())
             }
             Err(LeaseError::HeldByOther { holder, .. }) => {
-                Err(self.lost.set_first(lost_message(&self.agent, holder.as_ref())))
+                Err(self.lost.set_first(lost_message(&self.agent, holder.as_ref(), self.lease.owner_boot_id())))
             }
             Err(LeaseError::Io(e)) => {
                 tracing::warn!(agent = %self.agent, error = %e, "agent lease: verify failed (io) — not treating as lost");
@@ -172,8 +172,18 @@ impl Drop for HeldAgentLease {
     }
 }
 
-fn lost_message(agent: &str, holder: Option<&LeaseHolder>) -> String {
+/// The block of this same process that holds the lease, when the holder is not another instance: the
+/// lease reports a held agent the same way whoever holds it, and a second pane of this AgentMux that
+/// claims an agent its first pane runs is "another pane", not "another AgentMux instance".
+fn own_process_holder<'a>(holder: Option<&'a LeaseHolder>, own_boot: &str) -> Option<&'a str> {
+    holder.filter(|h| h.owner_boot_id == own_boot && !h.block_id.is_empty()).map(|h| h.block_id.as_str())
+}
+
+fn lost_message(agent: &str, holder: Option<&LeaseHolder>, own_boot: &str) -> String {
     let agent = if agent.is_empty() { "This agent" } else { agent };
+    if let Some(block) = own_process_holder(holder, own_boot) {
+        return crate::backend::blockcontroller::persistent::held_elsewhere_error(block, false);
+    }
     match holder {
         Some(_) => format!(
             "{agent} was taken over by another AgentMux instance on this host — {}",
@@ -213,16 +223,21 @@ pub fn acquire(
     let lease = match result {
         Ok(lease) => lease,
         Err(LeaseError::HeldByOther { holder, owner_boot_id, age_ms, .. }) => {
+            let own_block = own_process_holder(holder.as_ref(), boot_id).map(str::to_string);
             tracing::warn!(
                 agent,
                 uid,
                 block_id,
                 owner_boot_id = %owner_boot_id,
+                same_process = own_block.is_some(),
                 holder_block = holder.as_ref().map(|h| h.block_id.as_str()).unwrap_or(""),
                 holder_channel = holder.as_ref().map(|h| h.channel.as_str()).unwrap_or(""),
                 age_ms,
                 "agent_admission.denied: agent is live in another instance"
             );
+            if let Some(block) = own_block {
+                return Err(crate::backend::blockcontroller::persistent::held_elsewhere_error(&block, false));
+            }
             return Err(denied_message(agent, holder.as_ref()));
         }
         Err(LeaseError::Io(e)) => {
@@ -324,12 +339,13 @@ fn spawn_renewal(
             match renewed {
                 Ok(Ok(())) => last_ok_ms.store(agentmux_common::time::now_ms(), Ordering::SeqCst),
                 Ok(Err(LeaseError::HeldByOther { holder, owner_boot_id, .. })) => {
-                    let why = lost.set_first(lost_message(&agent, holder.as_ref()));
+                    let why = lost.set_first(lost_message(&agent, holder.as_ref(), lease.owner_boot_id()));
                     tracing::error!(
                         agent = %agent,
                         instance_id = %lease.instance_id(),
                         owner_boot_id = %owner_boot_id,
-                        "agent_admission.fenced: lease lost to another instance — stopping this one"
+                        same_process = owner_boot_id == lease.owner_boot_id(),
+                        "agent_admission.fenced: lease lost to another claim — stopping this one"
                     );
                     on_lost(why);
                     break;
@@ -814,7 +830,7 @@ impl RecordFence {
                 true
             }
             Err(LeaseError::HeldByOther { holder, .. }) => {
-                self.lost.set_first(lost_message(&self.agent, holder.as_ref()));
+                self.lost.set_first(lost_message(&self.agent, holder.as_ref(), self.lease.owner_boot_id()));
                 tracing::error!(
                     agent = %self.agent,
                     instance_id = %self.lease.instance_id(),
@@ -1260,12 +1276,31 @@ mod tests {
         for m in [
             denied_message("Agent3", Some(&holder)),
             denied_message("", None),
-            lost_message("Agent3", Some(&holder)),
-            lost_message("Agent3", None),
+            lost_message("Agent3", Some(&holder), "other-boot"),
+            lost_message("Agent3", None, "other-boot"),
         ] {
             assert!(is_admission_refusal(&m), "not recognised: {m}");
         }
         assert!(!is_admission_refusal("failed to spawn persistent process: not found"));
+    }
+
+    /// 2026-10-29: a second claim by the same process was reported as "another AgentMux instance
+    /// ... pid <own pid>". The holder being this process, the text names the other pane instead, in the
+    /// wording the pane refusal already has (so the failure card offers the same Move here).
+    #[test]
+    fn a_holder_in_this_process_is_another_pane_and_not_another_instance() {
+        let holder = LeaseHolder {
+            owner_boot_id: "this-boot".into(), block_id: "96a441d2".into(), pid: 1, channel: "c".into(), version: "v".into(),
+            hostname: String::new(), epoch: 1, acquired_at_ms: 0, renewed_at_ms: 0,
+        };
+        let lost = lost_message("Agent3", Some(&holder), "this-boot");
+        assert!(lost.contains("is already open in another pane (block 96a441d2)"), "{lost}");
+        assert!(!lost.contains("another AgentMux instance"), "{lost}");
+        assert!(crate::backend::blockcontroller::persistent::is_held_elsewhere_error(&lost), "{lost}");
+        let elsewhere = lost_message("Agent3", Some(&holder), "other-boot");
+        assert!(elsewhere.contains("taken over by another AgentMux instance"), "{elsewhere}");
+        let no_block = LeaseHolder { block_id: String::new(), ..holder };
+        assert!(lost_message("Agent3", Some(&no_block), "this-boot").contains("another AgentMux instance"));
     }
 
     /// ReAgent P1 on #3742: a local lease-file I/O error is not "running in
