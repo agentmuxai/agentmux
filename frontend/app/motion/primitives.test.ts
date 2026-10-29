@@ -271,6 +271,18 @@ describe("travel", () => {
         expect(handle.cancelled).toBe(true);
     });
 
+    it("keeps one flight per element: a second travel replaces the first and the element ends shown", () => {
+        const el = at(200, 300);
+        const first = travel(el, rectOf(20, 30));
+        const second = travel(el, rectOf(40, 50));
+        expect(first.cancelled).toBe(true);
+        expect(el.style.visibility).toBe("hidden");
+        fake.calls[1].finish();
+        expect(el.style.visibility).toBe("");
+        expect(second.cancelled).toBe(false);
+        expect(document.body.querySelectorAll("div")).toHaveLength(1);
+    });
+
     it("lets the caller adjust the copy", () => {
         const el = at(0, 0);
         el.className = "pill pill--landing";
@@ -362,6 +374,27 @@ describe("mergeInto", () => {
         expect(els.map((e) => e.style.visibility)).toEqual(["", ""]);
         expect(land).not.toHaveBeenCalled();
         expect(handle.cancelled).toBe(true);
+    });
+
+    it("is not finished until the landing pulses end, and cancel() stops a pulse that has started", async () => {
+        const el = at(200, 10);
+        const handle = mergeInto([rectOf(0, 0)], [el]);
+        let done = false;
+        void handle.finished.then(() => (done = true));
+        fake.calls[0].finish();
+        await flush();
+        const beat = fake.calls[1];
+        expect(beat.el).toBe(el);
+        expect(done).toBe(false);
+        handle.cancel();
+        expect(beat.ended).toBe(true);
+        await handle.finished;
+
+        const second = mergeInto([rectOf(0, 0)], [at(200, 10)]);
+        fake.calls[2].finish();
+        await flush();
+        fake.calls[3].finish();
+        await second.finished;
     });
 
     it("cancel() before the frame never resolves the destination", async () => {

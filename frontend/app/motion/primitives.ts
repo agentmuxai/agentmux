@@ -259,6 +259,8 @@ export interface TravelOptions {
     onCopy?: (copy: HTMLElement) => void;
 }
 
+const flying = new WeakMap<Element, MotionHandle>();
+
 /**
  * `el` is already at its new place; a copy of it flies there from `from` (a rectangle read before
  * the change), in a fixed layer on <body> so no clipping ancestor hides it. The real element is
@@ -267,6 +269,8 @@ export interface TravelOptions {
 export function travel(el: HTMLElement, from: DOMRect, opts: TravelOptions = {}): MotionHandle {
     const category = opts.category ?? MOTION.travel.category;
     if (!motionAllowed(category) || typeof document === "undefined") return finishedHandle();
+    // One flight per element: a second would clone the hidden element and restore it hidden.
+    flying.get(el)?.cancel();
     const to = el.getBoundingClientRect();
     const copy = el.cloneNode(true) as HTMLElement;
     opts.onCopy?.(copy);
@@ -283,7 +287,7 @@ export function travel(el: HTMLElement, from: DOMRect, opts: TravelOptions = {})
     const hiddenBefore = el.style.visibility;
     document.body.append(copy);
     el.style.visibility = "hidden";
-    return play(
+    const handle = play(
         copy,
         [
             { transform: "translate(0, 0)" },
@@ -299,6 +303,11 @@ export function travel(el: HTMLElement, from: DOMRect, opts: TravelOptions = {})
             },
         }
     );
+    flying.set(el, handle);
+    void handle.finished.then(() => {
+        if (flying.get(el) === handle) flying.delete(el);
+    });
+    return handle;
 }
 
 export interface MergeOptions {
@@ -326,6 +335,7 @@ export function mergeInto(
     const stagger = opts.stagger ?? 0;
     const pulseKind = opts.pulse ?? (opts.land ? false : "bounce");
     const flights: MotionHandle[] = [];
+    const pulses: MotionHandle[] = [];
     let cancelled = false;
     let frame: number | undefined;
     let settle!: () => void;
@@ -337,7 +347,7 @@ export function mergeInto(
         } catch (err) {
             warn("land failed", err);
         }
-        if (pulseKind) pulse(el, pulseKind);
+        if (pulseKind) pulses.push(pulse(el, pulseKind));
     };
 
     const run = () => {
@@ -356,7 +366,10 @@ export function mergeInto(
                 })
             );
         });
-        void Promise.all(arrivals).then(settle);
+        // Done when every piece has landed and its pulse has ended.
+        void Promise.all(arrivals)
+            .then(() => Promise.all(pulses.map((p) => p.finished)))
+            .then(settle);
     };
 
     if (typeof dest === "function") {
@@ -378,6 +391,7 @@ export function mergeInto(
                 frame = undefined;
             }
             flights.forEach((f) => f.cancel());
+            pulses.forEach((p) => p.cancel());
             settle();
         },
         finished,
