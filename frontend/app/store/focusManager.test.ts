@@ -223,6 +223,19 @@ describe("focusManager", () => {
             expect(giveFocus).toHaveBeenCalledTimes(1);
         });
 
+        // The shown tab is not the committed one yet: `getLayoutModelForStaticTab`
+        // still answers for the tab just left, so a retry that asked it would stop
+        // on its first frame and leave the caret parked.
+        it("keeps retrying against the shown tab's selection when its pane isn't focusable yet", () => {
+            shownTabModels["tab-2"] = { focusedNode: () => ({ id: "n2", data: { blockId: "block-2" } }), focusNode: vi.fn() };
+            bcmForBlockId = { "block-2": { viewModel: { giveFocus } } };
+            giveFocus.mockReturnValueOnce(false).mockReturnValue(true);
+            focusManager.focusShownTab("tab-2");
+            expect(giveFocus).toHaveBeenCalledTimes(1);
+            runFrames(1);
+            expect(giveFocus).toHaveBeenCalledTimes(2);
+        });
+
         it("does nothing for a tab with no layout model yet", () => {
             focusManager.focusShownTab("tab-unknown");
             expect(giveFocus).not.toHaveBeenCalled();
