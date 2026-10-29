@@ -246,6 +246,10 @@
             "method": "BlockRevealCommand"
         },
         {
+            "command": "block.revealed",
+            "method": "BlockRevealedCommand"
+        },
+        {
             "command": "bundle.import.commit",
             "method": "BundleImportCommitCommand"
         },

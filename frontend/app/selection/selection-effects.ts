@@ -14,6 +14,7 @@ import {
     liveIntent,
     transition,
     type Intent,
+    type RemoteOutcome,
     type SelectionEffect,
     type SelectionEvent,
     type SelectionResult,
@@ -42,8 +43,8 @@ export interface SelectionDeps {
     settle(): Promise<void>;
     /** Read the state back and compare it with the intent. */
     verify(tabId: string, blockId: string, caret: boolean): VerifyOutcome;
-    /** Ask another window to show it; whether one was found. */
-    handoff(blockId: string): Promise<boolean>;
+    /** Ask another window to show it, and say how that went. */
+    handoff(blockId: string): Promise<{ outcome: RemoteOutcome; reason?: string }>;
     /** The locate flash. */
     flash(blockId: string): void;
     /** The quiet notice for a pane that could not be shown. */
@@ -85,6 +86,8 @@ export interface SelectionRequest {
     focusCaret?: boolean;
     /** Look in this window only (default false: another window is asked when this one has no such block). */
     localOnly?: boolean;
+    /** No failure notice (the window that handed the request over tells the user). */
+    quiet?: boolean;
 }
 
 export interface SelectionRunner {
@@ -225,7 +228,7 @@ export function createSelectionRunner(deps: SelectionDeps, trace: SelectionTrace
                 return;
             case "handoff":
                 deps.handoff(effect.blockId).then(
-                    (found) => dispatch({ type: "remoteDone", intentId: effect.intentId, found }),
+                    (done) => dispatch({ type: "remoteDone", intentId: effect.intentId, ...done }),
                     (e) => dispatch({ type: "effectFailed", intentId: effect.intentId, detail: String(e) })
                 );
                 return;
@@ -260,6 +263,7 @@ export function createSelectionRunner(deps: SelectionDeps, trace: SelectionTrace
                 tabHint: req.tabHint,
                 focusCaret: req.focusCaret !== false,
                 localOnly: req.localOnly === true,
+                quiet: req.quiet === true,
             };
             startedAt.set(intent.id, deps.now());
             const result = new Promise<SelectionResult>((resolve) => waiting.set(intent.id, resolve));

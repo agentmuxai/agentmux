@@ -68,6 +68,17 @@ pub struct BlockRevealEvent {
     pub tab_id: String,
     /// The open window showing the block's workspace; only it acts.
     pub window_id: String,
+    /// Set when the caller waits for the window's answer (`block.revealed`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub request_id: Option<String>,
+}
+
+/// A window's answer to `block:reveal`: whether it showed the block, and if not, why.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RevealAck {
+    pub ok: bool,
+    pub reason: Option<String>,
 }
 
 /// srv-internal sources, fed from places that must not block (the broker's
@@ -304,6 +315,8 @@ pub struct Router {
     turn_active: Mutex<std::collections::HashMap<String, bool>>,
     /// (block_id, turn_id, ended_at_ms) of turn ends already notified.
     notified_turns: Mutex<std::collections::HashSet<(String, u64, u64)>>,
+    /// `block:reveal` requests whose caller waits for the window's answer, by request id.
+    reveal_waiters: Mutex<std::collections::HashMap<String, tokio::sync::oneshot::Sender<RevealAck>>>,
 }
 
 type Registry = Mutex<std::collections::HashMap<usize, Arc<Router>>>;
@@ -347,6 +360,7 @@ pub fn init(
                 last_tray: Mutex::new(None),
                 turn_active: Mutex::new(Default::default()),
                 notified_turns: Mutex::new(Default::default()),
+                reveal_waiters: Mutex::new(Default::default()),
             });
             spawn_ticker(Arc::downgrade(&r));
             spawn_internal(Arc::downgrade(&r), rx);
@@ -1028,7 +1042,25 @@ impl Router {
             let p = self.policy.lock().unwrap_or_else(|e| e.into_inner());
             pick_open_window(&p, &t.window_ids)
         }?;
-        Some(BlockRevealEvent { block_id: t.block_id, tab_id: t.tab_id, window_id })
+        Some(BlockRevealEvent { block_id: t.block_id, tab_id: t.tab_id, window_id, request_id: None })
+    }
+
+    /// Wait for the answer to the `block:reveal` that carries `request_id`: register before publishing.
+    pub fn expect_reveal_ack(&self, request_id: &str) -> tokio::sync::oneshot::Receiver<RevealAck> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.reveal_waiters.lock().unwrap_or_else(|e| e.into_inner()).insert(request_id.to_string(), tx);
+        rx
+    }
+
+    /// Stop waiting for `request_id` (its answer did not come in time).
+    pub fn forget_reveal_ack(&self, request_id: &str) {
+        self.reveal_waiters.lock().unwrap_or_else(|e| e.into_inner()).remove(request_id);
+    }
+
+    /// A window's answer (`block.revealed`). Whether a caller was still waiting for it.
+    pub fn reveal_acked(&self, request_id: &str, ack: RevealAck) -> bool {
+        let tx = self.reveal_waiters.lock().unwrap_or_else(|e| e.into_inner()).remove(request_id);
+        tx.is_some_and(|tx| tx.send(ack).is_ok())
     }
 
     /// Tell `target.window_id`'s renderer to reveal the block.

@@ -1504,6 +1504,25 @@
     }
   },
   {
+    "command": "block.revealed",
+    "request": "agentmux_srv::server::notify_handlers::BlockRevealedParams",
+    "requestName": "BlockRevealedParams",
+    "requestTs": {
+      "imports": [
+        "BlockRevealedParams"
+      ],
+      "name": "BlockRevealedParams"
+    },
+    "response": "agentmux_srv::server::notify_handlers::BlockRevealedResult",
+    "responseName": "BlockRevealedResult",
+    "responseTs": {
+      "imports": [
+        "BlockRevealedResult"
+      ],
+      "name": "BlockRevealedResult"
+    }
+  },
+  {
     "command": "blockfile:line_count",
     "request": "agentmux_srv::backend::rpc_types::block::CommandBlockfileLineCountData",
     "requestName": "CommandBlockfileLineCountData",

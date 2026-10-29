@@ -18,7 +18,7 @@ let ws: { oid: string; pinnedtabids: string[]; tabids: string[] } | null;
 let tabs: Record<string, { blockids: string[] }>;
 let models: Record<string, any>;
 /** Slow-path doubles: srv's block.reveal, the host window API, legacy fallback. */
-let blockReveal: (d: { block_id: string }) => Promise<{ found: boolean; window_id?: string }>;
+let blockReveal: (d: { block_id: string; await_ack?: boolean }) => Promise<{ found: boolean; window_id?: string; revealed?: boolean; reason?: string }>;
 let otherWorkspaces: any[];
 /** The window tab the window shows, and the notices the selection machine pushed. */
 const win = vi.hoisted(() => ({ activeTab: "t1", commitDelayMs: 0 }));
@@ -68,7 +68,7 @@ vi.mock("@/layout/index", () => ({
 vi.mock("@/layout/lib/layoutModelHooks", () => ({ getLayoutModelForTabById: (id: string) => models[id] }));
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
-        BlockRevealCommand: async (_c: unknown, d: { block_id: string }) => {
+        BlockRevealCommand: async (_c: unknown, d: { block_id: string; await_ack?: boolean }) => {
             calls.push(`block.reveal:${d.block_id}`);
             return blockReveal(d);
         },
@@ -265,9 +265,19 @@ describe("showBlockWithoutFocus — an agent's file-open into an existing pane",
 
 describe("revealBlock — a block in another window (spec §4.3)", () => {
     it("asks srv to reveal it there, then raises the window srv named", async () => {
-        blockReveal = async () => ({ found: true, window_id: "win-other" });
-        await revealBlock("remote");
+        blockReveal = async () => ({ found: true, window_id: "win-other", revealed: true });
+        expect(await revealBlock("remote")).toEqual({ ok: true });
         expect(calls).toEqual(["block.reveal:remote", "focusWindow:second"]);
+    });
+
+    it("waits for the other window's answer: it showed the pane, could not, or did not say", async () => {
+        let asked: boolean | undefined;
+        blockReveal = async (d) => ((asked = d.await_ack), { found: true, window_id: "win-other", revealed: false, reason: "layout-timeout" });
+        expect(await revealBlock("remote")).toMatchObject({ ok: false, reason: "remote-failed", detail: "layout-timeout" });
+        expect(asked).toBe(true);
+        expect(notices.map((n) => n.message)).toEqual(["the other window could not show it"]);
+        blockReveal = async () => ({ found: true, window_id: "win-other" });
+        expect(await revealBlock("remote")).toMatchObject({ ok: false, reason: "remote-timeout" });
     });
 
     it("a block in this window never reaches srv", async () => {
