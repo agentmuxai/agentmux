@@ -94,6 +94,15 @@ fn words_are_from_the_list_and_joined_by_hyphens() {
 }
 
 #[test]
+fn words_that_a_fields_maxlength_would_cut_are_refused() {
+    let short = rules(&RulesRequest { words: Some(6), maxlength: Some(16), ..Default::default() }).unwrap_err();
+    assert!(short.contains("maxlength of 16"), "{short}");
+    assert!(rules(&RulesRequest { words: Some(6), maxlength: Some(128), ..Default::default() }).is_ok());
+    let with_rules = RulesRequest { words: Some(6), passwordrules: Some("maxlength: 16".into()), ..Default::default() };
+    assert!(rules(&with_rules).is_err(), "a site's rules don't apply to words, so the two aren't combined");
+}
+
+#[test]
 fn every_character_is_about_equally_likely() {
     // Chi-square over 100,000 characters from a 29-character alphabet: with no bias the
     // statistic stays well under 80 (28 degrees of freedom; p < 1e-6 above it).

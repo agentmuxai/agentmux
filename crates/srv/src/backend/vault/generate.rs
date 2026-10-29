@@ -126,6 +126,16 @@ pub fn rules(req: &RulesRequest) -> Result<Rules, String> {
         if !(DEFAULT_WORDS..=MAX_WORDS).contains(&n) {
             return Err(format!("words is {DEFAULT_WORDS} to {MAX_WORDS}"));
         }
+        if req.passwordrules.as_deref().is_some_and(|t| !t.trim().is_empty()) {
+            return Err("words can't follow a site's passwordrules: leave out words for a character value".into());
+        }
+        // A field that can't hold the longest value it might get would cut it on use.
+        let longest = n * super::wordlist::WORDS.iter().map(|w| w.len()).max().unwrap_or(0) + n - 1;
+        if let Some(m) = req.maxlength.filter(|m| *m > 0 && *m < longest) {
+            return Err(format!(
+                "{n} words can run to {longest} characters, more than the field's maxlength of {m}: leave out words for a character value"
+            ));
+        }
         return Ok(Rules { style: Style::Words(n), length: 0, required: Vec::new(), allowed: String::new(), max_consecutive: None });
     }
     let mut r = Rules::default();
