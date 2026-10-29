@@ -2239,13 +2239,7 @@ pub fn register_reactive_ws_handlers(engine: &std::sync::Arc<crate::backend::rpc
 
                 let local = state.reactive_handler.get_agent(&params.agent_id);
 
-                let remote = registration_flags::remote_claims(&state, &params.agent_id);
-                let audit = state.reactive_handler.get_audit_log(100);
-                let recent_mismatch = registration_flags::recent_mismatch_for(
-                    &audit,
-                    &params.agent_id,
-                    local.as_ref().map(|l| l.block_id.as_str()),
-                );
+                let (remote, recent_mismatch) = registration_flags::problems_of(&state, &local, &params.agent_id);
                 let result = ReactiveRegistrationsResult {
                     local,
                     remote,

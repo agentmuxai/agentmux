@@ -11,7 +11,7 @@ use crate::backend::reactive::registry as agent_registry;
 /// would fire on every healthy agent. A crashed sibling's entry lingers until the next
 /// startup-only `cleanup_stale_shared` sweep, so the pid is checked live here (same-host by
 /// construction, per `pid_alive`).
-pub(super) fn remote_claims(state: &AppState, agent_id: &str) -> Vec<RemoteRegistrationEntry> {
+fn remote_claims(state: &AppState, agent_id: &str) -> Vec<RemoteRegistrationEntry> {
     crate::registry::resolve_shared_reactive_dir()
         .map(|shared_dir| {
             agent_registry::lookup_all_shared(&shared_dir, agent_id)
@@ -105,4 +105,19 @@ pub(super) fn register(
             async move { Ok(flags(&state)) }
         },
     );
+}
+
+/// The other instances claiming `agent_id` and its newest identity refusal, for the registration
+/// tab of one agent. `local` is the registration this instance holds for it, if any.
+pub(super) fn problems_of(
+    state: &AppState,
+    local: &Option<crate::backend::reactive::AgentRegistration>,
+    agent_id: &str,
+) -> (Vec<RemoteRegistrationEntry>, Option<MismatchAuditSummary>) {
+    let audit = state.reactive_handler.get_audit_log(100);
+    let block_id = local.as_ref().map(|l| l.block_id.as_str());
+    (
+        remote_claims(state, agent_id),
+        recent_mismatch_for(&audit, agent_id, block_id),
+    )
 }
