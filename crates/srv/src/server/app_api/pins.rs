@@ -5,20 +5,26 @@
 //! machine has pinned to the names of agents that speak to it from elsewhere
 //! (the LAN name pin, and the WAN install pin), and the way to move one.
 //!
-//! A pin decides who may speak as an agent, so only the operator's own window,
-//! proven by the host, may list or change them: a connection registered as an
-//! agent may do neither. Every change is logged to `logs/pin-changes.log`.
+//! A pin decides who may speak as an agent, so changing one needs proof. The
+//! operator's own window, proven by the host, may change any of them. An agent's
+//! connection may list the pins (fingerprints only) and `adopt` a refused LAN key,
+//! but only when srv itself finds the key vouched for by the install that hosts the
+//! agent (`lan_continuity`, SPEC_LAN_KEY_CONTINUITY_2026_10_29.md): the caller's
+//! word counts for nothing. `forget` stays with the window: forgetting a pin makes
+//! the next key shown for the name first-seen, which is exactly how an impostor
+//! would get in, and it has no proof to ask for. Every change is logged to
+//! `logs/pin-changes.log`, with who made it.
 //! `forget` drops a pin so the next key or install shown for the name is
 //! pinned; `adopt` pins the key or install that was last refused for it.
 
 use serde_json::json;
-use sha2::{Digest, Sha256};
 
 use super::*;
 use crate::backend::rpc_types::{
     CommandPinsChangeData, CommandPinsListData, LanPinInfo, PinnedSendersResult, RefusedInstanceInfo, RefusedKeyInfo, WanPinInfo,
     COMMAND_PINS_ADOPT, COMMAND_PINS_FORGET, COMMAND_PINS_LIST,
 };
+use crate::server::reactive::lan_continuity::{self, fingerprint};
 use crate::server::reactive::lan_refusals;
 
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -26,7 +32,10 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     engine.register_typed(COMMAND_PINS_LIST, move |_req: CommandPinsListData, ctx| {
         let state = st.clone();
         async move {
-            operator(&ctx)?;
+            // Fingerprints only, never a key: an agent may read them.
+            if ctx.agent_id.is_empty() {
+                operator(&ctx)?;
+            }
             list(&state)
         }
     });
@@ -45,11 +54,35 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     engine.register_typed(COMMAND_PINS_ADOPT, move |req: CommandPinsChangeData, ctx| {
         let state = st.clone();
         async move {
-            operator(&ctx)?;
-            change(&state, &req, Change::Adopt)?;
+            if ctx.agent_id.is_empty() {
+                operator(&ctx)?;
+                change(&state, &req, Change::Adopt)?;
+            } else {
+                agent_adopt(&state, &ctx, &req).await?;
+            }
             list(&state)
         }
     });
+}
+
+/// An agent's `adopt` of a refused LAN key: done only if the install that hosts the
+/// agent vouches for it and this machine trusts that install, found by srv now.
+async fn agent_adopt(state: &AppState, ctx: &RpcContext, req: &CommandPinsChangeData) -> Result<(), String> {
+    if req.kind != "lan" {
+        return Err("pins: an agent adopts a LAN key only; an install pin needs the user's window".to_string());
+    }
+    let agent = req.agent_id.trim().to_lowercase();
+    if agent.is_empty() {
+        return Err("pins: no agent named".to_string());
+    }
+    let refused = lan_refusals::get(&agent).ok_or_else(|| format!("pins: no other key has been shown for {agent} since AgentMux started"))?;
+    confirm_shown(req.expect.as_deref(), &fingerprint(&refused.key_b64), &agent)?;
+    use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+    let key = BASE64.decode(&refused.key_b64).map_err(|_| "pins: the refused key is not a key".to_string())?;
+    lan_continuity::move_if_vouched(state, &agent, &key, refused.cert.as_ref(), &ctx.agent_id, true)
+        .await
+        .map(|_| ())
+        .map_err(|why| format!("pins: not vouched for, so not accepted: {why}"))
 }
 
 fn operator(ctx: &RpcContext) -> Result<(), String> {
@@ -69,12 +102,6 @@ impl Change {
             Change::Adopt => "adopt",
         }
     }
-}
-
-/// A short fingerprint of a base64 key: enough to tell two keys apart on a
-/// screen, never the key.
-fn fingerprint(key_b64: &str) -> String {
-    hex::encode(&Sha256::digest(key_b64.as_bytes())[..5])
 }
 
 fn list(state: &AppState) -> Result<PinnedSendersResult, String> {
@@ -126,7 +153,7 @@ fn change(state: &AppState, req: &CommandPinsChangeData, how: Change) -> Result<
         "wan" => change_wan(&agent, req.channel.as_deref().ok_or("pins: a WAN pin needs its channel")?, how, req.expect.as_deref())?,
         other => return Err(format!("pins: unknown kind {other:?} (lan or wan)")),
     };
-    audit(&json!({ "action": how.as_str(), "kind": req.kind, "agent": agent, "channel": req.channel, "from": done.0, "to": done.1 }));
+    lan_continuity::audit(&json!({ "action": how.as_str(), "kind": req.kind, "agent": agent, "channel": req.channel, "from": done.0, "to": done.1, "by": "operator" }));
     Ok(())
 }
 
@@ -188,22 +215,6 @@ fn change_wan(agent: &str, channel: &str, how: Change, expect: Option<&str>) -> 
     }
 }
 
-/// One line to `logs/pin-changes.log`, best effort. Fingerprints and labels
-/// only: never a key.
-fn audit(entry: &serde_json::Value) {
-    let line = json!({ "at": agentmux_common::time::now_secs(), "change": entry });
-    tracing::warn!(change = %entry, "pin changed by the operator");
-    let Ok(root) = agentmux_common::data_paths::agentmux_root() else { return };
-    let dir = root.join("logs");
-    if std::fs::create_dir_all(&dir).is_err() {
-        return;
-    }
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("pin-changes.log")) {
-        use std::io::Write;
-        let _ = f.write_all(format!("{line}\n").as_bytes());
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -221,16 +232,64 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn only_the_proven_operator_window_lists_or_changes_pins() {
+    async fn only_the_proven_operator_window_changes_pins_and_an_agent_only_adopts_with_proof() {
         let state = crate::server::tests::test_state();
         let forget = json!({ "kind": "lan", "agent_id": "maop" });
         for (command, data) in [(COMMAND_PINS_LIST, json!({})), (COMMAND_PINS_FORGET, forget.clone()), (COMMAND_PINS_ADOPT, forget.clone())] {
             let (unproven, _) = call(&state, None, command, data.clone()).await;
             assert!(unproven.starts_with("FORBIDDEN") && unproven.contains("isn't the AgentMux window"), "{command}: {unproven}");
-            let agent = RpcContext { agent_id: "AgentX".into(), ..Default::default() };
-            let (as_agent, _) = call(&state, Some(agent), command, data).await;
-            assert!(as_agent.starts_with("FORBIDDEN"), "{command}: {as_agent}");
         }
+        let agent = || Some(RpcContext { agent_id: "AgentX".into(), ..Default::default() });
+        // Forgetting a pin has no proof to ask for, so it stays with the window.
+        let (err, _) = call(&state, agent(), COMMAND_PINS_FORGET, forget.clone()).await;
+        assert!(err.starts_with("FORBIDDEN"), "{err}");
+        // Listing is fingerprints only; adopting needs the vouch, and says what was missing.
+        let (err, _) = call(&state, agent(), COMMAND_PINS_LIST, json!({})).await;
+        assert_eq!(err, "");
+        let (err, _) = call(&state, agent(), COMMAND_PINS_ADOPT, forget.clone()).await;
+        assert!(!err.starts_with("FORBIDDEN") && err.contains("no other key has been shown"), "{err}");
+        let (err, _) = call(&state, agent(), COMMAND_PINS_ADOPT, json!({ "kind": "wan", "agent_id": "maop", "channel": "stable" })).await;
+        assert!(err.contains("LAN key only"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn an_agent_adopts_a_refused_lan_key_only_when_the_install_that_hosts_it_vouches() {
+        use agentmux_common::jekt_sign::{generate_lan_keypair, WanKeyRecord};
+        use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+        let state = crate::server::tests::test_state();
+        let tmp = |name: &str| {
+            let dir = tempfile::tempdir().unwrap();
+            let wan = std::sync::Arc::new(crate::backend::storage::wan_identity::WanIdentityStore::open(&dir.path().join(name)).unwrap());
+            (dir, wan)
+        };
+        let (_sdir, sender) = tmp("sender.db");
+        let (_rdir, receiver) = tmp("receiver.db");
+        let host = sender.instance_ensure("starpower").unwrap();
+        receiver.instance_ensure("narko").unwrap();
+        receiver.agent_instance_pin_get_or_set("clare", "stable", &host.instance_id, &host.host_hint, agentmux_common::time::now_secs()).unwrap();
+        state.mstore.set_wan_identity(receiver);
+
+        let (old, _) = generate_lan_keypair([1u8; 32]);
+        let (new, _) = generate_lan_keypair([2u8; 32]);
+        let (new_b64, old_b64) = (BASE64.encode(new), BASE64.encode(old));
+        state.mstore.lan_peer_pubkey_pin_get_or_set("pinagent", &old_b64).unwrap();
+        let agent = || Some(RpcContext { agent_id: "AgentX".into(), ..Default::default() });
+        let adopt = json!({ "kind": "lan", "agent_id": "pinagent", "expect": fingerprint(&new_b64) });
+
+        // Refused with no certificate: not accepted, and the pin stays.
+        lan_refusals::pin_mismatch_with("pinagent", &new_b64, None, Some("no certificate".into()));
+        let (err, _) = call(&state, agent(), COMMAND_PINS_ADOPT, adopt.clone()).await;
+        assert!(err.contains("not vouched for") && err.contains("no certificate"), "{err}");
+        assert_eq!(state.mstore.lan_peer_pubkey_pin_load("pinagent").unwrap().as_deref(), Some(old_b64.as_str()));
+
+        // Refused with the hosting install's certificate: accepted, and the audit line names the agent that asked.
+        let vouch = WanKeyRecord::certify(&host.private_key, "pinagent", "lan", &new, &host.host_hint, agentmux_common::time::now_secs() + 5).unwrap();
+        lan_refusals::pin_mismatch_with("pinagent", &new_b64, Some(vouch), None);
+        let (err, _) = call(&state, agent(), COMMAND_PINS_ADOPT, adopt).await;
+        assert_eq!(err, "");
+        assert_eq!(state.mstore.lan_peer_pubkey_pin_load("pinagent").unwrap().as_deref(), Some(new_b64.as_str()));
+        let audited = lan_continuity::AUDITED.lock().unwrap().iter().any(|e| e["agent"] == "pinagent" && e["by"] == "AgentX" && e["vouched_by"]["path"] == "pinned-instance");
+        assert!(audited, "who accepted what, and why");
     }
 
     #[tokio::test]

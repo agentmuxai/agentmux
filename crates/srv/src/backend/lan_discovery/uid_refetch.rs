@@ -87,7 +87,7 @@ impl LanDiscoveryController {
         // does not confirm this name key with a UID key must leave the cache as
         // it was, or a miss would stand in for the key that just verified.
         let before = self.pubkey_cache.read().ok().and_then(|cache| {
-            cache.get(agent_id).map(|e| LanPubkeyCacheEntry { public_key: e.public_key.clone(), uid_key: e.uid_key.clone(), expires: e.expires })
+            cache.get(agent_id).map(|e| LanPubkeyCacheEntry { public_key: e.public_key.clone(), uid_key: e.uid_key.clone(), cert: e.cert.clone(), expires: e.expires })
         });
         let shown = match self.pubkey_from_peers(peers, agent_id, http).await {
             LanPubkeyLookup::Found(key) if key == name_key => self.cached_lan_uid_key(agent_id),
@@ -102,6 +102,13 @@ impl LanDiscoveryController {
             }
         }
         shown
+    }
+
+    /// The certificate the peer that answered [`Self::find_agent_lan_pubkey`]
+    /// for `agent_id` gave beside its name key, while that answer is cached.
+    pub fn cached_lan_cert(&self, agent_id: &str) -> Option<agentmux_common::jekt_sign::WanKeyRecord> {
+        let cache = self.pubkey_cache.read().ok()?;
+        cache.get(agent_id).filter(|e| e.expires > std::time::Instant::now())?.cert.clone()
     }
 }
 
@@ -138,7 +145,21 @@ impl LanDiscoveryController {
         let left = life.saturating_sub(std::time::Duration::from_secs(age_secs));
         self.pubkey_cache.write().unwrap().insert(
             agent_id.to_string(),
-            LanPubkeyCacheEntry { public_key: None, uid_key: None, expires: std::time::Instant::now() + left },
+            LanPubkeyCacheEntry { public_key: None, uid_key: None, cert: None, expires: std::time::Instant::now() + left },
+        );
+    }
+
+    /// [`Self::seed_lan_pubkey_for_test`], with the certificate the answer carried.
+    #[cfg(test)]
+    pub fn seed_lan_pubkey_with_cert_for_test(&self, agent_id: &str, public_key: Vec<u8>, cert: Option<agentmux_common::jekt_sign::WanKeyRecord>) {
+        self.pubkey_cache.write().unwrap().insert(
+            agent_id.to_string(),
+            LanPubkeyCacheEntry {
+                public_key: Some(public_key),
+                uid_key: None,
+                cert,
+                expires: std::time::Instant::now() + std::time::Duration::from_secs(LAN_AGENT_CACHE_TTL_SECS),
+            },
         );
     }
 }

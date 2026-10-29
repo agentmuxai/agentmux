@@ -616,6 +616,20 @@ impl WanIdentityStore {
         )?)
     }
 
+    /// What is known about `instance_id`, without recording it as seen.
+    pub fn known_instance_get(&self, instance_id: &str) -> Result<Option<KnownInstance>, StoreError> {
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        match conn.query_row(
+            "SELECT approved_at, revoked_at, revocation_checked_at FROM wan_known_instances WHERE instance_id = ?1",
+            params![instance_id],
+            |r| Ok(KnownInstance { approved_at: r.get(0)?, revoked_at: r.get(1)?, revocation_checked_at: r.get(2)? }),
+        ) {
+            Ok(k) => Ok(Some(k)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
     /// Record a revocation-status check. `revoked` is sticky: a later check
     /// that says "not revoked" never clears it.
     pub fn known_instance_record_revocation_check(
