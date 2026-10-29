@@ -88,6 +88,9 @@ describe("a collapsed Kanban column", () => {
         const { container } = board({ collapsed: ["review"], onToggle });
         const strip = screen.getByRole("button", { name: "Review: 2 tasks, oldest 2h. Expand" });
         expect(strip.getAttribute("aria-expanded")).toBe("false");
+        // Its own class: ".kanban-strip" is the agent row above the board and keeps its layout.
+        expect(strip.classList.contains("kanban-collapsed")).toBe(true);
+        expect(strip.classList.contains("kanban-strip")).toBe(false);
         expect(strip.textContent).toContain("Review");
         expect(strip.textContent).toContain("oldest 2h");
         expect(container.querySelector(".kanban-column--review")?.classList.contains("kanban-column--collapsed")).toBe(true);

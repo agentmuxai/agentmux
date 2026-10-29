@@ -284,7 +284,7 @@ $kanban-narrow: 760px;
     min-width: 0;
 }
 
-.kanban-strip {
+.kanban-collapsed {
     flex: 1 1 auto;
     flex-direction: column;
     align-items: center;
@@ -299,28 +299,28 @@ $kanban-narrow: 760px;
     width: 100%;
 }
 
-.kanban-strip__chevron {
+.kanban-collapsed__chevron {
     font-size: var(--text-xs);
     color: var(--secondary-text-color);
 }
 
-.kanban-strip__count {
+.kanban-collapsed__count {
     font-weight: 600;
     font-size: var(--text-sm);
 }
 
-.kanban-strip__name,
-.kanban-strip__stat {
+.kanban-collapsed__name,
+.kanban-collapsed__stat {
     writing-mode: vertical-rl;
     white-space: nowrap;
 }
 
-.kanban-strip__name {
+.kanban-collapsed__name {
     font-weight: 600;
     font-size: var(--text-sm);
 }
 
-.kanban-strip__stat {
+.kanban-collapsed__stat {
     font-size: var(--text-xs);
     color: var(--secondary-text-color);
 }

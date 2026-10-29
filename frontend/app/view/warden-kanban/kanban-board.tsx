@@ -142,20 +142,20 @@ function CollapsedColumn(props: {
             ref={el}
             density="compact"
             tone="quiet"
-            class={hover() ? "kanban-strip kanban-drop--hover" : "kanban-strip"}
+            class={hover() ? "kanban-collapsed kanban-drop--hover" : "kanban-collapsed"}
             aria-label={`${props.label}: ${words()}. Expand`}
             aria-expanded={false}
             title={`${props.label}: ${words()}. Click to expand`}
             onClick={props.onExpand}
         >
-            <i class="fa-solid fa-chevron-right kanban-strip__chevron" aria-hidden="true" />
-            <span class="kanban-strip__count">{props.stats.count}</span>
-            <span class="kanban-strip__name">{props.label}</span>
+            <i class="fa-solid fa-chevron-right kanban-collapsed__chevron" aria-hidden="true" />
+            <span class="kanban-collapsed__count">{props.stats.count}</span>
+            <span class="kanban-collapsed__name">{props.label}</span>
             <Show when={props.stats.held > 0}>
-                <span class="kanban-strip__stat">{props.stats.held} held</span>
+                <span class="kanban-collapsed__stat">{props.stats.held} held</span>
             </Show>
             <Show when={props.stats.oldestMs > 0}>
-                <span class="kanban-strip__stat">oldest {formatAge(props.stats.oldestMs)}</span>
+                <span class="kanban-collapsed__stat">oldest {formatAge(props.stats.oldestMs)}</span>
             </Show>
         </Button>
     );
