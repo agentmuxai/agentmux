@@ -87,7 +87,7 @@ pub const READ_ONLY: &[&str] = &[
     "agent.project_instructions", "agent.status", "agent.tracked-blocks", "agent:memory:adoption_list",
     "agent:memory:claims", "agent:memory:diff", "agent:memory:history", "agent:memory:list", "agent:memory:read_file",
     "agent:session:list_archives", "agent:session:read", "agentapiretry", "agentdeflisthiddentemplates", "agentruntime.list",
-    "ambient.outcomes", "app.update-check", "app.update-status", "attachments.info", "auth.poll",
+    "ambient.outcomes", "audit.query", "app.update-check", "app.update-status", "attachments.info", "auth.poll",
     "blockfile:line_count", "blockfile:read_range", "blockfile:read_state", "blockstats.detail", "bookmarks.list",
     "browser_profiles.list", "bundle.export", "bundle.export_for_agent", "bundle.export_for_agent_with_history",
     "bundle.get", "bundle.import.preview", "bundle.list", "bundle.self.get", "bundle.validate", "checkcliauth",

@@ -1375,6 +1375,25 @@
     }
   },
   {
+    "command": "audit.query",
+    "request": "agentmux_srv::backend::rpc_types::audit::AuditQueryReq",
+    "requestName": "AuditQueryReq",
+    "requestTs": {
+      "imports": [
+        "AuditQueryReq"
+      ],
+      "name": "AuditQueryReq"
+    },
+    "response": "agentmux_srv::backend::rpc_types::audit::AuditQueryResult",
+    "responseName": "AuditQueryResult",
+    "responseTs": {
+      "imports": [
+        "AuditQueryResult"
+      ],
+      "name": "AuditQueryResult"
+    }
+  },
+  {
     "command": "auth.cancel",
     "request": "agentmux_srv::server::identity_handlers::CancelProviderAuthReq",
     "requestName": "CancelProviderAuthReq",

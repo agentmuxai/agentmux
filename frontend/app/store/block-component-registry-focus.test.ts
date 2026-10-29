@@ -27,7 +27,10 @@ vi.mock("./shortcuts-recent", () => ({ recordBlockOpened: vi.fn() }));
 vi.mock("./block-meta", () => ({ setBlockMeta: vi.fn(async () => {}) }));
 vi.mock("./focusManager", () => ({ giveBlockFocus: (id: string) => void calls.push(`give:${id}`) }));
 vi.mock("./block-atom-cache", () => ({ cleanupBlockAtomCache: vi.fn() }));
+/** Panes open in the window but not mounted (an inactive tab of a pane's stack), by view. */
+const unmounted = vi.hoisted(() => new Map<string, string>());
 vi.mock("@/app/util/reveal-block", () => ({
+    findOpenBlockByView: async (view: string) => unmounted.get(view) ?? null,
     revealBlock: async (id: string, opts?: unknown) => {
         calls.push(`reveal:${id}`);
         return revealBlock(id, opts);
@@ -53,6 +56,7 @@ describe("openOrFocusPaneIdByView", () => {
     });
     afterEach(() => {
         layout.nodes.clear();
+        unmounted.clear();
         for (const id of ["warden-1", "mem-1"]) unregisterBlockComponentModel(id);
     });
 
@@ -107,5 +111,18 @@ describe("openOrFocusPaneIdByView", () => {
         expect(createBlock).not.toHaveBeenCalled();
         revealBlock.mockResolvedValue({ ok: false, reason: "gone" });
         expect(await openOrFocusPaneIdByView("warden")).toBe("new-block");
+    });
+
+    it("brings an inactive tab of a pane's stack to the front instead of opening a copy of it", async () => {
+        unmounted.set("memory", "mem-stacked"); // open, but unmounted: not in the component registry
+        expect(await openOrFocusPaneIdByView("memory")).toBe("mem-stacked");
+        expect(calls).toEqual(["reveal:mem-stacked"]);
+        expect(revealBlock).toHaveBeenCalledWith("mem-stacked", { source: "widget", localOnly: true });
+        expect(createBlock).not.toHaveBeenCalled();
+    });
+
+    it("opens a new pane only when the window has none, mounted or not", async () => {
+        expect(await openOrFocusPaneIdByView("memory")).toBe("new-block");
+        expect(createBlock).toHaveBeenCalledTimes(1);
     });
 });
