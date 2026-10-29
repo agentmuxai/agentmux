@@ -8,6 +8,7 @@ import {
     BLINK_PHASE_MS,
     beginHover,
     CHANGES_PER_SECOND,
+    EXEMPT_AREA_PX2,
     FLASH_WINDOW_MS,
     resetFlashBudget,
     STEADY_COST,
@@ -102,5 +103,39 @@ describe("the window's flash budget", () => {
             expect(inWindow).toBeLessThanOrEqual(CHANGES_PER_SECOND);
         }
         expect(log.length).toBeGreaterThan(50);
+    });
+
+    describe("a header under the flash threshold", () => {
+        const header = 1000 * 32; // a pane header's area in CSS px²
+
+        it("is small enough to be outside the rule: a quarter of a 10-degree field is far larger", () => {
+            expect(header).toBeLessThan(EXEMPT_AREA_PX2);
+        });
+
+        it("always gets the burst, pane after pane, however fast the pointer moves between them", () => {
+            const kinds: string[] = [];
+            let prev: ReturnType<typeof beginHover> | null = null;
+            for (let t = 0; t < 600; t += 100) {
+                prev?.end(t); // leaving the last pane in the frame the next is entered
+                prev = beginHover(t, header);
+                kinds.push(prev.kind);
+            }
+            expect(kinds).toEqual(Array(6).fill("blink"));
+        });
+
+        it("costs the budget nothing, so a header too large to be exempt still gets its burst", () => {
+            const a = beginHover(0, header);
+            a.end(10);
+            expect(beginHover(20, EXEMPT_AREA_PX2 * 4).kind).toBe("blink");
+        });
+
+        it("a header over the threshold, or one not measured, is counted as before", () => {
+            expect(beginHover(0, EXEMPT_AREA_PX2 * 4).kind).toBe("blink");
+            expect(beginHover(10, EXEMPT_AREA_PX2 * 4).kind).toBe("plain");
+            resetFlashBudget();
+            expect(beginHover(0).kind).toBe("blink");
+            expect(beginHover(10, 0).kind).toBe("plain");
+            expect(beginHover(20, undefined).kind).toBe("plain");
+        });
     });
 });

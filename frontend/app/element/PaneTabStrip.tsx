@@ -408,9 +408,15 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
     // `foreignHover`, so the class toggles are applied in the same frame.
     const [flash, setFlash] = createSignal<HoverFlash>("blink");
     let hover: Hover | null = null;
+    // The element that flashes, to size the hover against the flash rule (drop-blink-clock.ts).
+    let flashEl: HTMLElement | undefined;
+    const flashArea = (): number | undefined => {
+        const r = flashEl?.getBoundingClientRect();
+        return r ? r.width * r.height : undefined;
+    };
     const beginForeignHover = () => {
         hover?.end();
-        hover = beginHover();
+        hover = beginHover(performance.now(), flashArea());
         batch(() => {
             setFlash(hover!.kind);
             setForeignHover(true);
@@ -438,6 +444,7 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
         const el = foreignDropRootFor(strip);
         // The flash goes on the header either way (`foreignDropHighlightFor`).
         const highlightEl = foreignDropHighlightFor(strip);
+        flashEl = highlightEl;
         if (highlightEl !== strip) {
             setHighlightStrip(false);
             // `highlightEl` is blockframe.tsx's element, outside this
