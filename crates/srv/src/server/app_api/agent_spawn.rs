@@ -752,7 +752,7 @@ fn consent_message(leader: &str, name: Option<&str>, model: Option<&str>, accoun
     let on = model.map(|m| format!(" on {}", one_line(m, 40))).unwrap_or_default();
     let note = account.note.as_deref().map(|n| format!(" {}", one_line(n, 200))).unwrap_or_default();
     format!(
-        "{} wants to start {who}{on}, from its own instructions, in a pane next to its own, with this task:\n\n{}\n\n\
+        "{} wants to start {who}{on}, from its own instructions, in its team tab, with this task:\n\n{}\n\n\
          It runs on the account {}.{note} It spends tokens until it is stopped. Start it?",
         one_line(leader, 60),
         one_line(brief, 400),
@@ -770,8 +770,8 @@ fn one_line(s: &str, max: usize) -> String {
     }
 }
 
-/// Remember the worker's runtime, then open it right of the leader's pane,
-/// marked as the leader's worker from the moment its block exists.
+/// Remember the worker's runtime, then open it in `tab_id` (right of the leader's pane when that pane
+/// is in the tab), marked as the leader's worker from the moment its block exists.
 async fn open_worker(
     state: &AppState,
     leader: &Leader,

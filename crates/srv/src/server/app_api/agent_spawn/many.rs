@@ -82,7 +82,7 @@ pub(super) fn consent_message_many(leader: &str, planned: &[Planned]) -> String 
         })
         .collect();
     format!(
-        "{} wants to start {} new agents, from its own instructions, in panes next to its own:\n\n{}\n\n\
+        "{} wants to start {} new agents, from its own instructions, in its team tab:\n\n{}\n\n\
          They spend tokens until they are stopped. Start them?",
         one_line(leader, 60),
         planned.len(),

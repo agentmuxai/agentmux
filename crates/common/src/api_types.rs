@@ -1076,7 +1076,7 @@ pub struct DesktopReleaseRequest {
 /// `POST /api/v1/agent/spawn` — backs the `Agents` tool's `spawn`
 /// (docs/specs/SPEC_AGENT_WORKERS_2026_10_15.md §3.1): the calling agent, the
 /// leader, opens a worker: a new agent built from its own definition (not a
-/// fork: no history), in a pane next to its own.
+/// fork: no history), in its team tab.
 /// `POST /api/v1/agent/workers` — backs the `Agents` tool's `workers`
 /// (docs/specs/SPEC_AGENT_WORKERS_2026_10_15.md §3.4): the calling agent's own
 /// workers, by its signed identity.
