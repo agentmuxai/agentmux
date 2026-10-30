@@ -77,7 +77,7 @@ export const HistoryUsagePopover = (props: HistoryUsagePopoverProps): JSX.Elemen
                             </For>
                         </div>
                         <Show when={(usage().reclaimable_bytes ?? 0) > 0}>
-                            <div class="history-usage-row" data-store="reclaimable" title="Free space inside the pane history file. It is reused as history grows, and a reclaim gives it back to the disk.">
+                            <div class="history-usage-row" data-store="reclaimable">
                                 <span class="history-usage-label">Reclaimable (not in the total)</span>
                                 <span class="history-usage-bytes">{formatBytes(usage().reclaimable_bytes)}</span>
                             </div>
