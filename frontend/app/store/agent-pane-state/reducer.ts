@@ -1453,7 +1453,7 @@ export function update(
                     },
                     // A failure ends the turn like TurnEnd/TurnReset/RequestStop/StreamUnsubscribe,
                     // so the compaction in flight is moot too (else a mid-compaction error leaves
-                    // "Compacting…" stuck; reagent P1 on PR #2378).
+                    // "Compacting…" stuck, #2378).
                     compacting: turnWasEnded ? null : state.compacting,
                     pendingCompactionPing: turnWasEnded ? null : state.pendingCompactionPing,
                 },
