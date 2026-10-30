@@ -372,7 +372,7 @@ It taints the element and returns the entry's id. The value goes from the render
 
 **Recorded:** "captured from <origin>", with the agent and the entry, as for every write.
 
-**As built (A1, first PR):** masking, `capture` of an element, the screenshot blackout and the `eval` refusal. In the tree a snapshot reads, `kbd` and `samp` have no role of their own, so there the rule covers `code`, `pre`, read-only fields and Copy rows; the screenshot scan, which sees tag names, covers all four. `eval` is refused while the page holds a Vault-filled field or a shown-once value, not for a password field alone. Downloads into the Vault come in a second PR: CEF's download handler always writes to disk, so a file kept only in memory needs its own path.
+**As built (A1, first PR):** masking, `capture` of an element, the screenshot blackout and the `eval` refusal. In the tree a snapshot reads, `kbd` and `samp` have no role of their own, so there the rule covers `code`, `pre`, read-only fields and Copy rows; the screenshot scan, which sees tag names, covers all four. `eval` is refused while the page holds a Vault-filled field or a shown-once value, not for a password field alone. A query can't read a hidden value a piece at a time: `find` and a scope by name match the masked name, and `wait` for text leaves those values out. Downloads into the Vault come in a second PR: CEF's download handler always writes to disk, so a file kept only in memory needs its own path.
 
 **Who reviews:** Korp, as for the other browser phases. Tests:
 - the shape rule against real GitHub, Azure and AWS console pages, with GUIDs, SHAs and URLs left visible;

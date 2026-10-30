@@ -96,6 +96,18 @@ fn find_masks_it_too() {
 }
 
 #[test]
+fn a_query_cant_read_it_a_piece_at_a_time() {
+    // Matching the hidden value would let `find` (or a scope by name) count
+    // matches for a growing prefix until it has the whole secret.
+    let piece = &SECRET[..8];
+    let q = ElementQuery { role: Some("text".into()), name: piece.into(), ..Default::default() };
+    assert_eq!(find(&console(), &HashMap::new(), &q, "").total, 0);
+    assert!(super::super::snapshot::find_candidates(&console(), &q).is_empty());
+    let exact = ElementQuery { name: SECRET.into(), exact: true, ..Default::default() };
+    assert_eq!(super::super::snapshot::first_match(&console(), &exact), None);
+}
+
+#[test]
 fn a_copy_buttons_container_is_its_nearest_ancestor_with_more_than_the_button() {
     // The button sits in a wrapper of its own; the row above it holds the secret.
     let nodes = vec![

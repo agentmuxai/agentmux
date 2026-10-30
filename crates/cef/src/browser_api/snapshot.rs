@@ -679,13 +679,20 @@ fn shown_nodes(nodes: &[Value]) -> Vec<Shown<'_>> {
     out
 }
 
+/// The name a query is matched against: the one a line shows, with a secret the
+/// page shows once masked. Matching the raw name would let a query read it a
+/// piece at a time (`find name=<prefix>`, counting the matches).
+fn shown_name(node: &Value, in_zone: bool) -> String {
+    super::shown_once::mask_where(str_of(node, "name").trim(), in_zone).into_owned()
+}
+
 /// The nodes that may match `q` before their markup is read: what the find
 /// route looks up `DomFacts` for (a field's value, whether a button is a file
 /// input). In document order.
 pub fn find_candidates<'a>(nodes: &'a [Value], q: &ElementQuery) -> Vec<&'a Value> {
     shown_nodes(nodes)
         .into_iter()
-        .filter(|(n, _, _)| q.matches(str_of(n, "role"), str_of(n, "name").trim(), None, false))
+        .filter(|(n, _, in_zone)| q.matches(str_of(n, "role"), &shown_name(n, *in_zone), None, false))
         .map(|(n, _, _)| n)
         .collect()
 }
@@ -721,7 +728,7 @@ pub fn find(nodes: &[Value], facts: &HashMap<i64, DomFacts>, q: &ElementQuery, r
             found.frames += 1;
         }
         let backend = node.get("backendDOMNodeId").and_then(|v| v.as_i64());
-        if !q.matches(role, name, backend.and_then(|b| facts.get(&b)), true) {
+        if !q.matches(role, &shown_name(node, in_zone), backend.and_then(|b| facts.get(&b)), true) {
             continue;
         }
         found.total += 1;
