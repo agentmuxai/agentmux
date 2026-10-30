@@ -46,6 +46,7 @@ import { closeNode, removeLeafEmptiedByMove } from "./layoutMagnify";
 import { sendStackCommand } from "./layoutPersistence";
 import { beginClosingBlock, endClosingBlock, isBlockClosing } from "./layoutClosing";
 import { afterFrame, closeTraceRing, type CloseTrace } from "./closeTrace";
+import { getDocPaneMerger } from "./docPaneMerger";
 import { FlexDirection, LayoutTreeActionType, type BeforeDeleteHooks, type LayoutTreeAction } from "./types";
 import {
     activateMemberInStack,
@@ -311,6 +312,57 @@ async function closeTabOfStack(
     }
 }
 
+export { setDocPaneMerger } from "./docPaneMerger";
+
+/** What a person's move takes besides where it goes. */
+export interface PersonMoveOpts {
+    /** Keep two document panes as two pane tabs (Alt held on the drop). */
+    keepSeparate?: boolean;
+}
+
+/** Close, as a move, the pane tabs whose documents are in another pane now: nothing in them to ask about. */
+async function closeEmptiedDocumentPanes(model: LayoutModel, blockIds: readonly string[]): Promise<void> {
+    for (const id of blockIds) {
+        const node = model.treeState.rootNode && findNodeByBlockId(model.treeState.rootNode, id);
+        if (node?.data) await closeBlockInStack(model, node.id, id, { confirmed: true });
+    }
+}
+
+/** After a person's move of `moved` into the pane holding `targetBlockId`: merge document panes. */
+function mergeDocumentPanesAfterMove(
+    model: LayoutModel,
+    targetBlockId: string,
+    moved: readonly string[],
+    opts?: PersonMoveOpts
+): void {
+    const merger = getDocPaneMerger();
+    if (!merger || opts?.keepSeparate || moved.length === 0) return;
+    const node = model.treeState.rootNode && findNodeByBlockId(model.treeState.rootNode, targetBlockId);
+    if (!node?.data) return;
+    void merger
+        .merge(targetBlockId, effectiveStack(node.data), moved)
+        .then((done) => closeEmptiedDocumentPanes(model, done))
+        .catch((err) => console.error("document pane merge failed", err));
+}
+
+/** The members of `nodeId`'s stack the pane-tab menu's "Merge document tabs" would merge (empty: none). */
+export function mergeableDocumentPanes(model: LayoutModel, nodeId: string): string[] {
+    const node = findNode(model.treeState.rootNode, nodeId);
+    const merger = getDocPaneMerger();
+    return node?.data && merger ? merger.mergeable(effectiveStack(node.data)) : [];
+}
+
+/** Merge the document panes of `nodeId`'s stack by hand (the pane-tab menu), for the stacks no move reached. */
+export async function mergeDocumentPanesInStack(model: LayoutModel, nodeId: string): Promise<void> {
+    const group = mergeableDocumentPanes(model, nodeId);
+    const node = findNode(model.treeState.rootNode, nodeId);
+    const merger = getDocPaneMerger();
+    if (!merger || group.length < 2 || !node?.data) return;
+    const [into, ...others] = group;
+    const done = await merger.merge(into, effectiveStack(node.data), others);
+    await closeEmptiedDocumentPanes(model, done);
+}
+
 /**
  * Reorder `blockId` within its own pane's stack (when `targetBlockId` is a
  * member of that same pane), OR move it into `targetBlockId`'s pane (when
@@ -336,7 +388,8 @@ export function moveBlockInStack(
     blockId: string,
     targetBlockId: string,
     position: "before" | "after" | "end",
-    activate = false
+    activate = false,
+    opts?: PersonMoveOpts
 ): boolean {
     const root = model.treeState.rootNode;
     // BOTH sides are resolved from their block ids, exactly as the backend's
@@ -394,6 +447,8 @@ export function moveBlockInStack(
             {}
         )
     );
+    // Only a move into another pane brings a second document pane in.
+    if (crossPane) mergeDocumentPanesAfterMove(model, targetBlockId, [blockId], opts);
     return true;
 }
 
@@ -413,7 +468,8 @@ export function moveBlocksInStack(
     model: LayoutModel,
     blockIds: readonly string[],
     targetBlockId: string,
-    activateBlockId?: string
+    activateBlockId?: string,
+    opts?: PersonMoveOpts
 ): string[] | false {
     const root = model.treeState.rootNode;
     const targetNode = root && findNodeByBlockId(root, targetBlockId);
@@ -478,6 +534,7 @@ export function moveBlocksInStack(
             ),
         moving.length
     );
+    mergeDocumentPanesAfterMove(model, targetBlockId, moving, opts);
     return moving;
 }
 
