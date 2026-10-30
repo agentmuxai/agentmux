@@ -57,14 +57,12 @@ interface Geo {
 
 /**
  * Scroller geometry: writes clamp, and a write that moves fires `scroll` like a
- * browser. `scrollHeight` is the content's plus the one-way bottom spacer's.
+ * browser. `scrollHeight` is the content's.
  */
 function makeScrollable(el: HTMLElement, geo: Geo) {
     let { scrollTop, clientHeight } = geo;
     let content = geo.scrollHeight;
-    const spacer = (): number =>
-        parseFloat(el.querySelector<HTMLElement>(".agent-document-bottom-spacer")?.style.height ?? "") || 0;
-    const sh = (): number => content + spacer();
+    const sh = (): number => content;
     const clamp = (v: number): number => Math.max(0, Math.min(v, Math.max(0, sh() - clientHeight)));
     const write = (v: number): void => {
         const next = clamp(v);

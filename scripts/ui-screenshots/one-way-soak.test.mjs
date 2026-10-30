@@ -10,10 +10,13 @@ const stats = (over) => ({
     framesFollowing: 90,
     down: 0,
     overshoot: 0,
+    tight: 0,
+    maxTight: 0,
     maxDy: 0,
     blankFrames: 0,
     maxGap: 0,
     byCause: {},
+    tightByCause: {},
     recent: [],
     ...over,
 });
@@ -62,5 +65,19 @@ describe("one-way-soak summarize", () => {
         expect(r.violations).toBe(6);
         expect(r.text).toMatch(/causes: transform×4 {2}hold:release-ease×2/);
         expect(r.text).toMatch(/FAIL: 6/);
+    });
+
+    it("counts blank room under the newest content as a failure", () => {
+        const r = summarize([stats({ blankFrames: 3, maxGap: 80 })]);
+        expect(r.violations).toBe(3);
+        expect(r.text).toMatch(/FAIL: 3/);
+    });
+
+    it("reports tight shifts and their causes without failing", () => {
+        const r = summarize([stats({ tight: 4, maxTight: 120, tightByCause: { "content-shrink:120": 3, "viewport-grow:30": 1 } })]);
+        expect(r.violations).toBe(0);
+        expect(r.text).toMatch(/PASS/);
+        expect(r.text).toMatch(/tight=4/);
+        expect(r.text).toMatch(/tight shifts .*content-shrink:120×3/);
     });
 });

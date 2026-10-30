@@ -44,6 +44,28 @@ describe("checkFrame — V1 (one direction)", () => {
         expect(v.causes).toContain("scroll-up:30");
     });
 
+    it("rows moving down because the content below shrank are a tight shift, not a violation", () => {
+        // A 120 px preview collapsed at the bottom: the browser clamped scrollTop, rows above slid down.
+        const prev = frame(pinned, { scrollHeight: 1600, scrollTop: 1000 });
+        const cur = frame([row("a", 120, 200), row("b", 320, 200), row("c", 520, 80)], { scrollHeight: 1480, scrollTop: 880 });
+        const v = checkFrame(prev, cur).violation!;
+        expect(v.kind).toBe("tight");
+        expect(v.causes[0]).toBe("content-shrink:120");
+    });
+
+    it("rows moving down because the scroller got taller are a tight shift too", () => {
+        const prev = frame(pinned);
+        const cur = frame(pinned.map((r) => ({ ...r, top: r.top + 60, bottom: r.bottom + 60 })), { clientHeight: 660, scrollTop: 940 });
+        const v = checkFrame(prev, cur).violation!;
+        expect(v.kind).toBe("tight");
+        expect(v.causes).toContain("viewport-grow:60");
+    });
+
+    it("a move down with no allowed cause is still a violation", () => {
+        const down = pinned.map((r) => ({ ...r, top: r.top + 30, bottom: r.bottom + 30 }));
+        expect(checkFrame(frame(pinned), frame(down, { scrollTop: 970 })).violation!.kind).toBe("down");
+    });
+
     it("sub-pixel settling is not a violation", () => {
         const nudge = pinned.map((r) => ({ ...r, top: r.top + 0.4, bottom: r.bottom + 0.4 }));
         expect(checkFrame(frame(pinned), frame(nudge)).violation).toBeNull();
