@@ -93,13 +93,9 @@ pub fn compute(
         }
     }
 
-    let mut pane = file_size(&roots.transcripts_db);
-    for ext in ["-wal", "-shm"] {
-        let mut name = roots.transcripts_db.as_os_str().to_owned();
-        name.push(ext);
-        let (b, f) = file_size(Path::new(&name));
-        pane = (pane.0 + b, pane.1 + f);
-    }
+    // The data the shared store holds, not the file around it: its free pages
+    // are space it will reuse (or a reclaim gives back), shown as `reclaimable_bytes`.
+    let (pane, reclaimable_bytes) = pane_history(roots, transcripts);
 
     // channels/<channel>/versions/<version>/data/db/filestore.db
     let mut channels = (0u64, 0u64);
@@ -116,11 +112,14 @@ pub fn compute(
     let stores = vec![
         store("provider-files", "Session files (the CLI's own)", cli),
         store("pane-history", "Pane history (shared)", pane),
-        store("channel-copies", "Pane history copies (per version)", channels),
+        store("channel-copies", "Old copies, per version (not in the total)", channels),
         store("archives", "Archived sessions", dir_size(&roots.archives)),
         store("audit", "Jekt audit trail", file_size(&roots.audit)),
     ];
-    let total_bytes = stores.iter().map(|s| s.bytes).sum();
+    // Each version keeps its own copy of the pane store (the recovery source after
+    // an upgrade). They are listed, but they are not the history itself, so they
+    // stay out of the total.
+    let total_bytes = stores.iter().filter(|s| s.key != "channel-copies").map(|s| s.bytes).sum();
 
     HistoryUsage {
         total_bytes,
@@ -128,7 +127,34 @@ pub fn compute(
         agents: largest_agents(transcripts, name_of),
         computed_at_ms: now_ms,
         compression: transcripts.map(|t| compression(t, roots.transcripts_db.parent())),
+        reclaimable_bytes,
     }
+}
+
+/// The shared store's stored bytes and its free space. With the store open that
+/// is its pages in use (compressed frames, parts not yet framed, indexes; the
+/// WAL's pages are in the page count) and its free pages. Without it, the
+/// files' lengths, as before, and nothing reclaimable.
+fn pane_history(roots: &Roots, transcripts: Option<&FileStore>) -> ((u64, u64), u64) {
+    let stats = transcripts.and_then(|t| match t.page_stats() {
+        Ok(s) => Some(s),
+        Err(e) => {
+            tracing::warn!(error = %e, "history.usage: couldn't read the transcript store's page counts");
+            None
+        }
+    });
+    if let Some((page_size, page_count, free_pages, _)) = stats {
+        let (size, count, free) = (page_size.max(0) as u64, page_count.max(0) as u64, free_pages.max(0) as u64);
+        return ((count.saturating_sub(free) * size, 1), free.min(count) * size);
+    }
+    let mut pane = file_size(&roots.transcripts_db);
+    for ext in ["-wal", "-shm"] {
+        let mut name = roots.transcripts_db.as_os_str().to_owned();
+        name.push(ext);
+        let (b, f) = file_size(Path::new(&name));
+        pane = (pane.0 + b, pane.1 + f);
+    }
+    (pane, 0)
 }
 
 /// The shared store's compression as it is now, for a cached answer.

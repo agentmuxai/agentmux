@@ -28,7 +28,6 @@ literal-ms frontend/app/element/PaneLoadingCover.scss 1
 literal-ms frontend/app/element/modal-layer.scss 1
 literal-ms frontend/app/element/modal.scss 2
 literal-ms frontend/app/element/ui/card.scss 1
-literal-ms frontend/app/view/accounts/accounts-gallery.scss 1
 literal-ms frontend/app/view/agent/agent-view.scss 1
 literal-ms frontend/app/view/agent/styles/_attachments.scss 2
 literal-ms frontend/app/view/agent/styles/_composer-strip.scss 1

@@ -408,6 +408,15 @@ pub(super) async fn claim_and_deliver(
         // Remembered, so a bare "got it" back to this sender is refused (`backend::ack_policy`); the relay
         // doesn't carry `reply` yet, so a WAN message never arrives marked `REPLY=none`.
         crate::server::jekt_ack::remember_arrival(mstore, &req);
+        // Verified, and its agent can't work now: kept here until it can. Injected now it would be lost in
+        // a failed turn, or given back to the relay to come again.
+        if crate::server::jekt_hold::hold_wan_for_unavailable(mstore, handler, &req) {
+            delivered_count += 1;
+            if let Some(wan) = &wan_store {
+                crate::muxbus::wan_verify::record_delivered(wan, &wan_verdict, &wan_row, now_unix_secs());
+            }
+            continue;
+        }
         let charged = req.files_delivery.is_some().then(|| req.clone());
         let delivery = handler.inject_message(req);
         if let Some(charged) = &charged {

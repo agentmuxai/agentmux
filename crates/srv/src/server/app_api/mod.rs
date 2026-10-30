@@ -51,6 +51,7 @@ pub(crate) mod agent_context;
 pub(crate) mod agent_env;
 pub(crate) mod agent_io;
 mod agent_define;
+pub(crate) mod container_limits;
 pub(crate) mod container_update;
 /// Re-exported so the human-facing creation/edit RPC handlers
 /// (`server::agent_handlers::template`/`core`) can reuse the same
@@ -495,7 +496,7 @@ pub(super) fn same_pane_connection(a: &str, b: &str) -> bool {
 /// on what they capture — some clone the whole state into the closure, others
 /// clone `mstore` alone — and a borrowed `&AppState` cannot escape into a
 /// `'static` future.
-pub(super) fn check_s1(
+pub(crate) fn check_s1(
     store: &crate::backend::storage::store::Store,
     ctx: &RpcContext,
     req_agent_id: &str,
@@ -631,3 +632,7 @@ mod self_owner_tests;
 #[cfg(test)]
 #[path = "tests/agent_io_open_wire_tests.rs"]
 mod agent_io_open_wire_tests;
+
+#[cfg(test)]
+#[path = "tests/block_transcript_write_tests.rs"]
+mod block_transcript_write_tests;

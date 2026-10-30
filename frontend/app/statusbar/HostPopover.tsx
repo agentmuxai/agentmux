@@ -26,7 +26,7 @@ import { MuxBusSignOutButton } from "@/app/view/accounts/muxbus-sign-out";
 import { isLinux, isMacOS } from "@/util/platformutil";
 import { PairDevicePanel } from "./PairDevicePanel";
 
-import { Switch } from "@/app/element/ui";
+import { Button, Switch } from "@/app/element/ui";
 import type { LanInstance } from "@/types/rpc/LanInstance";
 
 /** Whether the host's reported name is srv's machine (names compare case-insensitively). */
@@ -135,15 +135,15 @@ const HostPopoverPanel = (props: HostPopoverPanelProps): JSX.Element => {
                         manager. The host resolves the directory from a closed
                         target, never from this path string.
                         Spec: SPEC_STATUSBAR_HOST_POPOVER_INSTANCE_AND_OPEN_DATA_DIR_2026_09_25.md §4 */}
-                    <button
-                        type="button"
+                    <Button
+                        variant="link"
                         class="status-bar-popover-mono status-bar-popover-link"
                         style={{ "font-size": "0.85em" }}
                         data-tip={fileManagerLabel()}
                         onClick={() => void openDataDir()}
                     >
                         {props.hostInfo()!.dataDir}
-                    </button>
+                    </Button>
                 </div>
                 <Show when={openDirError()}>
                     <div
@@ -263,13 +263,12 @@ const HostPopoverPanel = (props: HostPopoverPanelProps): JSX.Element => {
                                             {muxbus.status()?.email}
                                         </span>
                                     </Show>
-                                    <button
-                                        type="button"
+                                    <Button
+                                        tone="danger"
+                                        density="compact"
                                         class="muxbus-login-chip muxbus-login-chip-signin"
                                         style={{
                                             "margin-left": signInAgain() ? "6px" : "auto",
-                                            height: "auto",
-                                            padding: "1px 8px",
                                         }}
                                         title={muxbus.loading() ? "Cancel sign-in" : undefined}
                                         onClick={() => void (muxbus.loading() ? muxbus.cancel() : muxbus.connect())}
@@ -281,7 +280,7 @@ const HostPopoverPanel = (props: HostPopoverPanelProps): JSX.Element => {
                                               : muxbus.status()?.connected
                                                 ? "Expired — re-login"
                                                 : "Sign in"}
-                                    </button>
+                                    </Button>
                                 </>
                             }
                         >

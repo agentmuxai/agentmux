@@ -302,7 +302,6 @@
     .status-bar-popover-link {
         display: block;
         min-width: 0;
-        @include mixins.button-reset;
         color: inherit;
         text-align: right;
         white-space: normal;
@@ -310,7 +309,6 @@
         text-wrap: balance;
         text-decoration: underline;
         text-underline-offset: 2px;
-        cursor: pointer;
 
         &:hover,
         &:focus-visible {
@@ -407,39 +405,12 @@
 
 // ── MuxBus Cloud login chip ─────────────────────────────────────────────────
 
-.muxbus-login-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 0 6px;
-    height: 100%;
+.ui-button.muxbus-login-chip {
+    min-height: 0;
+    padding: 1px 8px;
     font-size: var(--text-xs);
-    font-family: inherit;
-    color: inherit;
-    background: transparent;
-    border: none;
-    border-radius: 0;
-    cursor: default;
-    white-space: nowrap;
+    font-weight: 400;
     line-height: 1;
-
-    &:disabled {
-        opacity: 0.4;
-        cursor: default;
-    }
-
-    // "Sign in" / expired states — red, matching the status bar's muxbus dot
-    // so the cause of that dot is unmistakable once the panel is open.
-    &.muxbus-login-chip-signin {
-        color: var(--error-text-color);
-        background: var(--error-bg);
-        border-radius: var(--radius-sm);
-        cursor: pointer;
-
-        &:hover:not(:disabled) {
-            background: var(--error-bg-heavy);
-        }
-    }
 }
 
 .muxbus-popover-disconnect-btn {

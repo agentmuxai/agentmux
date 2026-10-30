@@ -15,6 +15,7 @@
 
 import { createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { AnchoredPopover, type PopoverAnchor } from "@/app/element/anchored-popover";
+import { Button } from "@/app/element/ui";
 import { ConfirmModal } from "@/element/modal";
 import { getCliCatalogEntry } from "@/app/view/agent/defaults/cli-catalog";
 import { formatCompactNumber } from "@/util/format-count";
@@ -163,8 +164,8 @@ export const TokenBreakdownPopover = (props: TokenBreakdownPopoverProps): JSX.El
                                 const row = createMemo<AgentUsage>((prev) => rowById().get(id) ?? prev);
                                 const agentCacheRate = createMemo(() => getAgentCacheHitRate(row()));
                                 return (
-                                    <button
-                                        type="button"
+                                    <Button
+                                        tone="quiet"
                                         class="token-usage-breakdown-row token-usage-breakdown-agent-row"
                                         onClick={() => handleAgentClick(row())}
                                         title={`Click to focus ${row().agentName}'s pane`}
@@ -193,15 +194,15 @@ export const TokenBreakdownPopover = (props: TokenBreakdownPopoverProps): JSX.El
                                             <span class="token-usage-indicator-arrow">↓</span>
                                             {formatCompactNumber(row().output)}
                                         </span>
-                                    </button>
+                                    </Button>
                                 );
                             }}
                         </For>
                         <Show when={ambientRow()}>
                             {(row) => (
                                 <div class="token-usage-breakdown-ambient">
-                                    <button
-                                        type="button"
+                                    <Button
+                                        tone="quiet"
                                         class="token-usage-breakdown-row token-usage-breakdown-ambient-toggle"
                                         onClick={() => setAmbientExpanded(!ambientExpanded())}
                                         aria-expanded={ambientExpanded()}
@@ -216,7 +217,7 @@ export const TokenBreakdownPopover = (props: TokenBreakdownPopoverProps): JSX.El
                                             <span class="token-usage-indicator-arrow">↓</span>
                                             {formatCompactNumber(row().output)}
                                         </span>
-                                    </button>
+                                    </Button>
                                     <Show when={ambientExpanded()}>
                                         <div class="token-usage-breakdown-ambient-detail">
                                             <For each={serviceRowsOf(row())}>
@@ -272,14 +273,14 @@ export const TokenBreakdownPopover = (props: TokenBreakdownPopoverProps): JSX.El
                     </div>
                 </Show>
                 <div class="token-usage-breakdown-footer">
-                    <button
-                        type="button"
-                        class="token-usage-breakdown-reset"
+                    <Button
+                        tone="danger"
+                        density="compact"
                         onClick={handleResetClick}
                         disabled={agentRows().length === 0}
                     >
                         Reset counter
-                    </button>
+                    </Button>
                 </div>
             </AnchoredPopover>
             <ConfirmModal

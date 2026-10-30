@@ -29,16 +29,22 @@ use axum::Router;
 use crate::state::AppState;
 
 pub mod act;
+pub mod capture;
 pub mod cdp;
+pub mod combobox;
 pub mod dates;
+pub mod frame_scope;
 pub mod frames;
 pub mod hibernation;
+pub mod key_typing;
 pub mod page_state;
 pub mod ref_tables;
 pub mod resolver;
 pub mod routes;
 pub mod secret;
+pub mod select_lists;
 pub mod shortcuts;
+pub mod shown_once;
 pub mod snapshot;
 pub mod types;
 pub mod vault_fill;
@@ -65,6 +71,8 @@ pub fn register_routes(router: Router<Arc<AppState>>) -> Router<Arc<AppState>> {
         .route("/agentmux/browser/wait_for", post(wait::wait_for_route))
         .route("/agentmux/browser/field_info", post(vault_fill::field_info_route))
         .route("/agentmux/browser/vault_fill", post(vault_fill::vault_fill_route))
+        .route("/agentmux/browser/capture_value", post(capture::capture_value_route))
+        .route("/agentmux/browser/capture_mark", post(capture::capture_mark_route))
         .route("/agentmux/browser/screenshot", post(routes::screenshot))
         .route("/agentmux/browser/click_element", post(routes::click_element))
         .route("/agentmux/browser/focus_element", post(routes::focus_element))

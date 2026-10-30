@@ -820,9 +820,9 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                                     <Show when={i() > 0}>
                                         <i class="fa fa-chevron-right files-crumb-sep" aria-hidden="true" />
                                     </Show>
-                                    <button type="button" class="files-crumb" onClick={() => void model.navigate(crumb.path)}>
+                                    <Button tone="quiet" density="compact" class="files-crumb" onClick={() => void model.navigate(crumb.path)}>
                                         {crumb.label}
-                                    </button>
+                                    </Button>
                                 </>
                             )}
                         </For>
@@ -868,20 +868,20 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                         <div class="files-places-heading">Places</div>
                         <For each={model.places().filter((p) => p.kind !== "drive" && p.kind !== "wsl")}>
                             {(p) => (
-                                <button type="button" class="files-place" title={p.path} onClick={() => void model.openOn("", p.path)}>
+                                <Button variant="row" density="compact" class="files-place" title={p.path} onClick={() => void model.openOn("", p.path)}>
                                     <i class={`fa fa-${p.kind === "home" ? "house" : "folder"}`} />
                                     <span>{p.label}</span>
-                                </button>
+                                </Button>
                             )}
                         </For>
                         <Show when={model.places().some((p) => p.kind === "drive")}>
                             <div class="files-places-heading">Drives</div>
                             <For each={model.places().filter((p) => p.kind === "drive")}>
                                 {(p) => (
-                                    <button type="button" class="files-place" title={p.path} onClick={() => void model.openOn("", p.path)}>
+                                    <Button variant="row" density="compact" class="files-place" title={p.path} onClick={() => void model.openOn("", p.path)}>
                                         <i class="fa fa-hard-drive" />
                                         <span>{p.label}</span>
-                                    </button>
+                                    </Button>
                                 )}
                             </For>
                         </Show>
@@ -889,42 +889,40 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                             <div class="files-places-heading">WSL</div>
                             <For each={model.places().filter((p) => p.kind === "wsl")}>
                                 {(p) => (
-                                    <button type="button" class="files-place" title={p.path} onClick={() => void model.openOn("", p.path)}>
+                                    <Button variant="row" density="compact" class="files-place" title={p.path} onClick={() => void model.openOn("", p.path)}>
                                         <i class="fa-brands fa-linux" />
                                         <span>{p.label}</span>
-                                    </button>
+                                    </Button>
                                 )}
                             </For>
                         </Show>
                         <Show when={model.remotes().length > 0}>
                             <div class="files-places-heading files-places-heading-with-action">
                                 <span>Remote</span>
-                                <button
-                                    type="button"
+                                <IconButton
+                                    icon="gear"
+                                    label="Manage remotes…"
+                                    density="compact"
                                     class="files-places-heading-action"
-                                    title="Manage remotes…"
-                                    aria-label="Manage remotes"
                                     onClick={() =>
                                         void openRemotesInPane(model.blockId, model.connection() || undefined).catch(
                                             (e) => console.log("could not open Remotes", e)
                                         )
                                     }
-                                >
-                                    <i class="fa fa-gear" />
-                                </button>
+                                />
                             </div>
                             <For each={model.remotes()}>
                                 {(host) => (
-                                    <button
-                                        type="button"
-                                        class="files-place"
-                                        classList={{ "files-place-active": model.connection() === host.name }}
+                                    <Button
+                                        variant="row"
+                                        density="compact"
+                                        class={model.connection() === host.name ? "files-place files-place-active" : "files-place"}
                                         title={`Your home folder on ${host.name}, over SSH`}
                                         onClick={() => void model.openOn(host.name, "~")}
                                     >
                                         <i class="fa fa-server" style={host.color ? { color: host.color } : undefined} />
                                         <span>{host.label}</span>
-                                    </button>
+                                    </Button>
                                 )}
                             </For>
                         </Show>
@@ -932,10 +930,10 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                             <div class="files-places-heading">Agents</div>
                             <For each={model.agents()}>
                                 {(a) => (
-                                    <button type="button" class="files-place" title={a.path} onClick={() => void model.openOn("", a.path)}>
+                                    <Button variant="row" density="compact" class="files-place" title={a.path} onClick={() => void model.openOn("", a.path)}>
                                         <i class="fa fa-robot" />
                                         <span style={a.color ? { color: readableAgentColor(a.color) } : undefined}>{a.name}</span>
-                                    </button>
+                                    </Button>
                                 )}
                             </For>
                         </Show>
@@ -979,8 +977,8 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                     <div class="files-row files-header" role="row" aria-rowindex={1}>
                         <For each={COLUMNS}>
                             {(col) => (
-                                <button
-                                    type="button"
+                                <Button
+                                    tone="quiet"
                                     role="columnheader"
                                     class={`files-cell ${col.class}`}
                                     aria-sort={model.sortKey() === col.key ? (model.sortDir() === "asc" ? "ascending" : "descending") : "none"}
@@ -990,7 +988,7 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                                     <Show when={model.sortKey() === col.key}>
                                         <i class={`fa fa-caret-${model.sortDir() === "asc" ? "up" : "down"} files-sort-mark`} aria-hidden="true" />
                                     </Show>
-                                </button>
+                                </Button>
                             )}
                         </For>
                     </div>

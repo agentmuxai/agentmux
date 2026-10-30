@@ -399,6 +399,76 @@ pub fn wrap_jekt_message(
     )
 }
 
+/// How far a jekt's sender is trusted: the marker's `TRUST=` label, and the
+/// `trust` of the record's origin (`message_origin`), from one function so the
+/// two cannot differ. `wan_pinned` is a WAN sender whose instance srv verified.
+pub fn jekt_trust(
+    delivery_tier: &str,
+    sig_verified: Option<bool>,
+    lan_verified: Option<bool>,
+    channel_verified: Option<bool>,
+    wan_pinned: bool,
+) -> crate::backend::message_origin::OriginTrust {
+    use crate::backend::message_origin::OriginTrust;
+    if delivery_tier == "lan" && lan_verified == Some(true) {
+        OriginTrust::LanVerified
+    } else if delivery_tier == "channel" && channel_verified == Some(true) {
+        OriginTrust::ChannelVerified
+    } else if wan_pinned {
+        OriginTrust::WanVerified
+    } else if delivery_tier != "host" && delivery_tier != "channel" {
+        OriginTrust::NetworkClaimed
+    } else {
+        match sig_verified {
+            Some(true) => OriginTrust::HostVerified,
+            Some(false) => OriginTrust::Unverified,
+            None => OriginTrust::SelfDeclared,
+        }
+    }
+}
+
+/// Where a jekt came from, as the record of it stores it (`message_origin`),
+/// from the same typed values the marker is composed from. Nothing is read
+/// from the body.
+pub fn jekt_origin(
+    req: &super::types::InjectionRequest,
+    effective_tier: &str,
+    delivery_tier: &str,
+    msg_id: &str,
+    now_ms: i64,
+) -> crate::backend::message_origin::MessageOrigin {
+    use crate::backend::message_origin::{MessageOrigin, OriginDelivery, OriginSig, OriginTier};
+    let mut origin = match req.source_agent.as_deref() {
+        Some(from) if validate_agent_id(from) => MessageOrigin::from_sender(from),
+        _ => MessageOrigin::of(crate::backend::blockcontroller::health::TriggerKind::Agent),
+    };
+    let wan_pinned = delivery_tier == "wan" && req.wan_instance.is_some() && req.wan_verified == Some(true);
+    origin.trust = Some(jekt_trust(delivery_tier, req.sig_verified, req.lan_verified, req.channel_verified, wan_pinned));
+    origin.tier = match effective_tier {
+        "info" => Some(OriginTier::Info),
+        "coord" => Some(OriginTier::Coord),
+        "sensitive" => Some(OriginTier::Sensitive),
+        _ => None,
+    };
+    origin.delivery = match delivery_tier {
+        "host" => Some(OriginDelivery::Host),
+        "channel" => Some(OriginDelivery::Channel),
+        "lan" => Some(OriginDelivery::Lan),
+        "wan" => Some(OriginDelivery::Wan),
+        _ => None,
+    };
+    origin.sig = match req.reagent_verified {
+        Some(true) => Some(OriginSig::Verified),
+        Some(false) => Some(OriginSig::Invalid),
+        None => None,
+    };
+    origin.msg_id = Some(msg_id.to_string());
+    origin.sent_ms = req.held_sent_at_ms.filter(|ms| *ms > 0);
+    origin.delivered_ms = Some(now_ms);
+    origin.held_for_s = origin.sent_ms.map(|sent| (now_ms.saturating_sub(sent) / 1000).max(0) as u64);
+    origin
+}
+
 /// [`wrap_jekt_message`] for a jekt that was sent with files
 /// (SPEC_JEKT_FILE_TRANSFER_2026_10_05.md §6.2): the marker gains
 /// `FILES=<n delivered>`, and srv's own text for them (the
@@ -448,21 +518,7 @@ pub fn wrap_jekt_message_with_files(
     let delivery_tier = delivery_tier.as_str();
     let msg = neutralize_file_lists(&neutralize_markers(msg));
     let wan_instance = wan_instance.filter(|_| delivery_tier == "wan");
-    let trust = if delivery_tier == "lan" && lan_verified == Some(true) {
-        "lan-verified"
-    } else if delivery_tier == "channel" && channel_verified == Some(true) {
-        "channel-verified"
-    } else if wan_instance.is_some() {
-        "wan-verified"
-    } else if delivery_tier != "host" && delivery_tier != "channel" {
-        "network-claimed"
-    } else {
-        match sig_verified {
-            Some(true) => "host-verified",
-            Some(false) => "unverified",
-            None => "self-declared",
-        }
-    };
+    let trust = jekt_trust(delivery_tier, sig_verified, lan_verified, channel_verified, wan_instance.is_some()).label();
 
     let sig_field = match reagent_verified {
         Some(true) => " SIG=verified",
@@ -743,6 +799,21 @@ pub fn quote_in_jekt(text: &str) -> String {
     neutralize_file_lists(&neutralize_markers(text))
 }
 
+/// The marker every note of srv's own starts with. The agent pane shows a turn that starts with it
+/// as an AgentMux note; a turn without it would take the style of a person's message.
+pub const SYSTEM_NOTE_MARKER: &str = "[AgentMux]";
+
+/// `text` as a system note: unchanged when it already starts with the marker, else with it in front.
+/// Every way srv puts a note of its own into an agent's turn goes through this, so a caller that
+/// forgets the marker still cannot make automated text look like a person's.
+pub fn with_system_note_marker(text: &str) -> std::borrow::Cow<'_, str> {
+    if text.starts_with(SYSTEM_NOTE_MARKER) {
+        std::borrow::Cow::Borrowed(text)
+    } else {
+        std::borrow::Cow::Owned(format!("{SYSTEM_NOTE_MARKER} {text}"))
+    }
+}
+
 /// Text that goes inside one of srv's own `[AgentMux]` system notes but was
 /// not written by srv: another agent's claim note or topic, a file path, a
 /// branch or agent name. Sanitized like a delivered body, flattened to one
@@ -795,5 +866,32 @@ pub fn validate_muxbus_url(url_str: &str) -> Result<(), String> {
         }
     } else {
         Err("invalid URL: missing scheme".to_string())
+    }
+}
+
+#[cfg(test)]
+mod system_note_marker_tests {
+    use super::*;
+
+    /// Every way srv puts a note of its own into an agent's turn is marked, whatever its caller wrote.
+    #[test]
+    fn a_note_always_starts_with_the_marker() {
+        let table = [
+            ("Task #5 can start", "[AgentMux] Task #5 can start"),
+            ("[AgentMux] already marked", "[AgentMux] already marked"),
+            // The pane only knows a note by its exact start, so leading spaces do not count.
+            ("  [AgentMux] spaced", "[AgentMux]   [AgentMux] spaced"),
+            ("", "[AgentMux] "),
+            ("mentions [AgentMux] later", "[AgentMux] mentions [AgentMux] later"),
+        ];
+        for (input, expected) in table {
+            assert_eq!(with_system_note_marker(input), expected, "input: {input:?}");
+        }
+    }
+
+    #[test]
+    fn marking_twice_changes_nothing() {
+        let once = with_system_note_marker("Probe").into_owned();
+        assert_eq!(with_system_note_marker(&once), once);
     }
 }

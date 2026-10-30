@@ -415,6 +415,7 @@ async fn app_main() {
     // Claude config dirs get the auto-compact window `agent:compactat` asks for.
     backend::providers::install_config(Arc::clone(&state.config_watcher));
     backend::context_reading::install_config(Arc::clone(&state.config_watcher));
+    backend::container::limits::install_config(Arc::clone(&state.config_watcher));
     // The Claude CLI's own cross-session messaging is off unless `agent:climessaging` is true.
     backend::cli_messaging::install_config(Arc::clone(&state.config_watcher));
     // The Supervisor's switch and limits are read live from the settings.

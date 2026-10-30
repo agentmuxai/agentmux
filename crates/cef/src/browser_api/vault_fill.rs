@@ -108,13 +108,13 @@ fn takes_text(f: &DomFacts) -> bool {
 }
 
 /// Where a reference is and what it is, from the pane's latest snapshot.
-struct Located {
-    facts: DomFacts,
-    origin: String,
-    page: String,
+pub(super) struct Located {
+    pub facts: DomFacts,
+    pub origin: String,
+    pub page: String,
 }
 
-async fn locate(
+pub(super) async fn locate(
     state: &Arc<AppState>,
     block_id: &str,
     ref_: &str,

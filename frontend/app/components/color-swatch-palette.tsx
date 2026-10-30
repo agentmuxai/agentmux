@@ -4,6 +4,7 @@
 import clsx from "clsx";
 import { For, Show } from "solid-js";
 import type { JSX } from "solid-js";
+import { Button } from "@/element/ui";
 import "./color-swatch-palette.scss";
 
 interface SwatchColor {
@@ -45,7 +46,9 @@ export function ColorSwatchPalette(props: ColorSwatchPaletteProps): JSX.Element 
             </div>
             <Show when={showClear()}>
                 <div class="color-swatch-clear">
-                    <button onClick={() => props.onSelect(null)}>✕ Clear color</button>
+                    <Button density="compact" icon="xmark" class="color-swatch-clear-btn" onClick={() => props.onSelect(null)}>
+                        Clear color
+                    </Button>
                 </div>
             </Show>
         </>

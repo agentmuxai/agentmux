@@ -27,7 +27,7 @@
  */
 
 import { createMemo, createSignal, Show, type JSX } from "solid-js";
-import { IconButton } from "@/app/element/ui";
+import { Button, IconButton } from "@/app/element/ui";
 import { translateError } from "./translate";
 import "./ErrorBanner.scss";
 
@@ -54,13 +54,9 @@ export const ErrorBanner = (props: ErrorBannerProps): JSX.Element => {
                     <div class="amx-error-banner-retry">{t().retry}</div>
                 </Show>
                 <Show when={t().rawMessage && t().rawMessage !== t().message}>
-                    <button
-                        type="button"
-                        class="amx-error-banner-details-toggle"
-                        onClick={() => setDetailsOpen((o) => !o)}
-                    >
+                    <Button variant="link" class="amx-error-banner-details-toggle" onClick={() => setDetailsOpen((o) => !o)}>
                         {detailsOpen() ? "Hide details" : "Show details"}
-                    </button>
+                    </Button>
                     <Show when={detailsOpen()}>
                         <pre class="amx-error-banner-raw">{t().rawMessage}</pre>
                     </Show>

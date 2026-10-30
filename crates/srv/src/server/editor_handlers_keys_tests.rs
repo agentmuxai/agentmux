@@ -35,13 +35,37 @@ async fn only_the_window_is_handed_an_agents_signing_keys() {
     let env = &window["mcpServers"]["agentmux"]["env"];
     assert!(env["AGENTMUX_JEKT_KEY"].as_str().is_some_and(|k| !k.is_empty()), "the window's launch carries the keys: {window}");
 
-    // Any other connection, or one registered as an agent: the file is written, without them.
-    for ctx in [RpcContext::default(), RpcContext { agent_id: "attacker".into(), ..Default::default() }] {
-        let written = write_mcp_json(ctx, "victim").await;
-        let env = &written["mcpServers"]["agentmux"]["env"];
-        assert_eq!(env["AGENTMUX_AGENT_ID"], "victim", "the rest of the file is as sent");
-        for key in ["AGENTMUX_JEKT_KEY", "AGENTMUX_LAN_KEY", "AGENTMUX_WAN_KEY"] {
-            assert!(env.get(key).is_none(), "{key} was handed to a caller that isn't the window: {written}");
-        }
+    // Any other connection: the file is written, without them.
+    let written = write_mcp_json(RpcContext::default(), "victim").await;
+    let env = &written["mcpServers"]["agentmux"]["env"];
+    assert_eq!(env["AGENTMUX_AGENT_ID"], "victim", "the rest of the file is as sent");
+    for key in ["AGENTMUX_JEKT_KEY", "AGENTMUX_LAN_KEY", "AGENTMUX_WAN_KEY"] {
+        assert!(env.get(key).is_none(), "{key} was handed to a caller that isn't the window: {written}");
+    }
+}
+
+/// A connection registered as an agent writes nothing outside its own workspace, so it can neither
+/// plant files in another agent's folder nor sign a `.mcp.json` as another agent.
+#[tokio::test]
+async fn an_agent_cannot_write_config_for_another_agent_or_into_another_folder() {
+    let state = crate::server::tests::test_state();
+    let (engine, mut rx) = WshRpcEngine::new();
+    super::register_editor_handlers(&engine, &state);
+    engine.set_rpc_context(RpcContext { agent_id: "attacker".into(), ..Default::default() });
+    let dir = tempfile::tempdir().unwrap();
+    for agent_id in [Some("victim"), None] {
+        engine.handle_message(RpcMessage {
+            command: "writeagentconfig".to_string(),
+            reqid: "req-2".to_string(),
+            data: Some(serde_json::json!({
+                "working_dir": dir.path().to_string_lossy(),
+                "agent_id": agent_id,
+                "files": [{ "path": "CLAUDE.md", "content": "planted" }],
+            })),
+            ..Default::default()
+        });
+        let resp = tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv()).await.unwrap().unwrap();
+        assert!(resp.error.starts_with("FORBIDDEN"), "{agent_id:?}: {}", resp.error);
+        assert!(!dir.path().join("CLAUDE.md").exists(), "nothing was written");
     }
 }

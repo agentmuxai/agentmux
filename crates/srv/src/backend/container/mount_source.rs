@@ -122,6 +122,8 @@ mod tests {
             workspace_host_dir: Some(r"C:\Users\me\.agentmux/agents/a-1".to_string()),
             memory_host_dir: None,
             github_hooks_host_dir: None,
+            keychain_config_dir: None,
+            limits: Default::default(),
         };
         let reported = |source: &str| match source.split_once(":/") {
             Some((drive, rest)) if drive.len() == 1 => format!("/run/desktop/mnt/host/{}/{rest}", drive.to_lowercase()),

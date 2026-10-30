@@ -46,6 +46,7 @@ pub mod oauth_client;
 pub mod oauth_tokens;
 pub mod resolver;
 pub mod secret_store;
+pub mod stable_account;
 pub mod token_warmup;
 
 // Legacy convenience re-export — newer call sites use

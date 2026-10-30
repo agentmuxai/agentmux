@@ -50,6 +50,7 @@ import { openPaneTabWidgetPicker } from "./pane-tab-picker";
 import { PaneHeaderTabStrip } from "./PaneHeaderTabStrip";
 import { installPaneInteractionReveal, revealPaneStrips } from "./pane-strip-registry";
 import { createPaneTabMemory, describePaneTab, PaneTabIconView, prunePaneTabMemory, type PaneTabInfo } from "./pane-tab-model";
+import { persistTabInfo } from "./pane-tab-persist";
 import { PaneTabRenameInput } from "./PaneTabRenameInput";
 import { usePaneTabProgress } from "@/app/store/pane-tab-progress";
 import type { PaneTabColors } from "./PaneTabStrip";
@@ -258,6 +259,11 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
         }
         prunePaneTabMemory(tabMemory, infos.keys());
         return infos;
+    });
+    // A tab's last real name and favicon go to its meta, so no tab changes when it is first clicked.
+    createEffect(() => {
+        const inStack = new Set(stackIds());
+        for (const info of tabInfos().values()) if (inStack.has(info.blockId)) persistTabInfo(info);
     });
 
     // Each pill's own pane color (SPEC_AGENT_COLOR_2026_08_08.md's identity

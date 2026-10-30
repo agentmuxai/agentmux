@@ -313,6 +313,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/api/v1/vault/on_screen", get(super::vault_handlers::handle_vault_on_screen))
         // An agent's `Browser` `fill` with `vault`: the person says where it may go.
         .route("/api/v1/ui/browser/vault_fill", post(super::browser_vault_fill::handle_vault_fill))
+        .route("/api/v1/ui/browser/capture", post(super::browser_capture::handle_browser_capture))
         // Google connectors for agents: srv makes the call with the account's
         // token, for an agent with a grant (Calendar, then Drive and Gmail).
         .route("/api/v1/google/self/services", get(super::google_handlers::handle_google_self_services))
@@ -337,6 +338,8 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // Remove a container agent's container so its next message starts it from the current
         // agent image (`Agents update_container`); only between turns.
         .route("/api/v1/agent/container/update", post(app_api::container_update::handle_update_container))
+        // A container agent's CPU and memory limits (`Agents set_container_limits`).
+        .route("/api/v1/agent/container/limits", post(app_api::container_limits::handle_container_limits))
         // A leader's own workers and how each is doing (§3.4).
         .route("/api/v1/agent/workers", post(app_api::agent_spawn::handle_agent_workers))
         // Start, stop or detach an agent (`Agents start`, `stop`, `detach`); a stop of another agent waits for the person's override window.
@@ -444,6 +447,8 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // (SPEC_AGENT_OVERLAP_AWARENESS_2026_10_10.md §3.1, §3.2). Read-only.
         .route("/api/v1/work-facts", get(work_facts_handlers::handle_work_facts))
         .route("/api/v1/work-facts/who", get(work_facts_handlers::handle_who_is_working_on))
+        // What messages cost per agent per day (SPEC_CHEAPER_FLEET_MESSAGING_2026_10_30.md section 7). Read-only.
+        .route("/api/v1/message-stats", get(message_stats_handler::handle_message_stats))
         // ClaimWork / ReleaseWork (same spec, §3.4): informational claims,
         // never a lock.
         // PostToChannel / ReadChannel: a repository's coordination channel

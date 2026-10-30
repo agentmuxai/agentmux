@@ -394,3 +394,20 @@ async fn stopping_is_attributed_to_the_agent_that_asks() {
     let (status, v) = post(&state, Some(&token), "/api/v1/fleet/bulk-stop", bulk).await;
     assert_eq!(status, StatusCode::OK, "{v}");
 }
+
+/// The route that serves an agent its signing keys takes no name from the request: with no token it
+/// serves nothing, and with a token only the keys of the agent that token names.
+#[tokio::test]
+async fn the_self_keys_route_serves_only_the_keys_of_the_agent_its_token_names() {
+    let _counters = M4_ACTOR_COUNTERS.lock().await;
+    let (state, token) = state_with_alpha();
+    let (status, _) = get(&state, None, "/agentmux/agents/self/keys").await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (status, _) = get(&state, Some("not-a-token-this-srv-minted"), "/agentmux/agents/self/keys").await;
+    assert_ne!(status, StatusCode::OK, "an unknown token is not served keys");
+    // A name in the query string changes nothing: the token decides.
+    let (status, v) = get(&state, Some(&token), "/agentmux/agents/self/keys?slug=sc-beta&agent_id=uid-sc-beta").await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["slug"], "sc-alpha", "{v}");
+    assert_eq!(v["uid"], "uid-sc-alpha", "{v}");
+}

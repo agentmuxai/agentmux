@@ -51,6 +51,7 @@ fn entry(ev: &Event) -> AuditLogEntry {
             from_mode: ev.from_mode.clone(),
             preview: preview(&ev.text),
         }),
+        turn: None,
     }
 }
 

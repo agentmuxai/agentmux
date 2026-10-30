@@ -25,6 +25,13 @@ import { browserStartPageAtom } from "@/store/config-signals";
 import { refocusNode } from "@/app/store/global";
 import { createEffect, createMemo, createRoot, createSignal, onCleanup, type Accessor } from "solid-js";
 import { originCovered, pageOrigin } from "./bypass";
+import {
+    applyDownloadUpdate,
+    DONE_ROW_MS,
+    dismissDownload,
+    type DownloadRow,
+    type DownloadUpdate,
+} from "./downloads";
 import { errorPageFailedUrl } from "./error-page-url";
 import { findTabHolding } from "@/app/util/reveal-block";
 import { getLayoutModelForStaticTab, getLayoutModelForTabById } from "@/layout/lib/layoutModelHooks";
@@ -193,6 +200,14 @@ export class BrowserViewModel {
 
     /** Unsubscribe from `browser-pane-notice`. */
     private _noticeUnsub: (() => void) | null = null;
+
+    /** The pane's downloads, from the host's `pane-download-update` events
+     *  (SPEC_BROWSER_PANE_DOWNLOADS_2026_10_14.md §5). */
+    private _downloads = createSignal<DownloadRow[]>([]);
+    downloadsAtom: Accessor<DownloadRow[]> = this._downloads[0];
+    private _downloadUnsub: (() => void) | null = null;
+    /** A finished row folds away after `DONE_ROW_MS`; these are its timers. */
+    private _downloadTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
     /** The host's own notice that a navigation stopped, for when srv couldn't
      *  be told: shown when srv has no banner up, and taken down here. */
@@ -723,6 +738,25 @@ export class BrowserViewModel {
             else this._noticeUnsub = unsub;
         });
 
+        // A download this pane's page started: the host says how it goes, and the
+        // strip under the address bar shows it. Every pane in the window hears
+        // every pane's event; only the pane it is for keeps it.
+        void getApi().listen<DownloadUpdate>("pane-download-update", (payload) => {
+            if (this.closed || payload.block_id !== this.blockId) return;
+            this._downloads[1]((rows) => applyDownloadUpdate(rows, payload));
+            if (payload.state === "done" && payload.download_id != null) {
+                const key = String(payload.download_id);
+                clearTimeout(this._downloadTimers.get(key));
+                this._downloadTimers.set(
+                    key,
+                    setTimeout(() => this.dismissDownload(key), DONE_ROW_MS),
+                );
+            }
+        }).then((unsub) => {
+            if (this.closed) unsub();
+            else this._downloadUnsub = unsub;
+        });
+
         // Load URL from block meta on init. An empty/missing `url` falls
         // back to the user's configured start page
         // (`browserStartPageAtom`, "Set as Start Page" in the bookmarks
@@ -1097,6 +1131,30 @@ export class BrowserViewModel {
         return this.ctx.setMeta({ [LOADMS_META_KEY]: Math.round(loadMs) });
     }
 
+    /** Stop a running download (the strip's Cancel). The host holds the download; it
+     *  says "cancelled" back, which is what the strip then shows. */
+    cancelDownload(downloadId: number): void {
+        getApi().browserPanes.cancelDownload(this.blockId, downloadId).catch(() => {});
+    }
+
+    /** Show a finished download in its folder (the strip's Show in folder). `path` is the
+     *  host's own, from the "done" event. */
+    revealDownload(path: string): void {
+        getApi()
+            .revealInFileExplorer(path)
+            .catch(() => {
+                this._downloads[1]((rows) =>
+                    rows.map((r) => (r.path === path ? { ...r, reason: "Couldn't open the folder." } : r)),
+                );
+            });
+    }
+
+    dismissDownload(key: string): void {
+        clearTimeout(this._downloadTimers.get(key));
+        this._downloadTimers.delete(key);
+        this._downloads[1]((rows) => dismissDownload(rows, key));
+    }
+
     /** The person asked to keep this pane awake. */
     keepAwake(): Promise<void> {
         return this.ctx.setMeta({ [KEEPAWAKE_META_KEY]: true });
@@ -1130,6 +1188,12 @@ export class BrowserViewModel {
             this._noticeUnsub();
             this._noticeUnsub = null;
         }
+        if (this._downloadUnsub) {
+            this._downloadUnsub();
+            this._downloadUnsub = null;
+        }
+        this._downloadTimers.forEach((t) => clearTimeout(t));
+        this._downloadTimers.clear();
         if (this._memoRootDispose) {
             this._memoRootDispose();
             this._memoRootDispose = null;

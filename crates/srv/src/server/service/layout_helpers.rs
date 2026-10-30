@@ -140,9 +140,8 @@ pub(crate) async fn queue_target_stack_push(
 /// reused verbatim, not re-derived, so the frontend applies the identical
 /// operation rather than inferring it from resulting tree state. `activate`
 /// rides on `LayoutActionData.focused` — the same field `queue_target_stack_push`
-/// above already overloads for this purpose (that call hardcodes `true`,
-/// since `CreateBlockInStack` always activates; this one carries the
-/// caller's actual `activate` value since a reorder may or may not).
+/// above already overloads for this purpose (both carry the caller's
+/// `activate` value: a new tab and a reorder may or may not be shown).
 /// SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §4.1, Phase 3.
 pub(crate) async fn queue_target_stack_move(
     state: &super::super::AppState,

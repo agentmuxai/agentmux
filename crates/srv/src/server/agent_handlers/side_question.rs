@@ -372,7 +372,7 @@ async fn spawn_throwaway_turn(
         prompt,
         None,
         TurnRegistration::Skip,
-        crate::backend::blockcontroller::health::TurnOrigin::System,
+        crate::backend::message_origin::MessageOrigin::system(),
         Vec::new(),
     )
     .await

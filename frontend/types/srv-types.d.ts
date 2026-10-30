@@ -616,7 +616,7 @@ declare global {
         ts: number;
         agent: string;
         /** navigate, back, forward, reload, click, fill, select, check, key,
-         *  upload, eval, handoff, auto-approve-on, auto-approve-off, pause, resume. */
+         *  upload, capture, eval, handoff, auto-approve-on, auto-approve-off, pause, resume. */
         kind: string;
         url?: string;
         /** The element's label or ref, or a field's ref for a fill. */
@@ -722,6 +722,9 @@ declare global {
         "frame:hue"?: number | null;
         "frame:title"?: string;
         "frame:icon"?: string;
+        /** A pane tab's last real name and favicon from its view, so the tab reads the same before it is clicked (pane-tab-persist.ts). */
+        "pane:label"?: string;
+        "pane:favicon"?: string;
         "frame:text"?: string;
         // Tab accent color (frontend/app/tab/tab.tsx, tabbar.tsx). Was missing
         // here despite being a real, actively-set meta key — #859.
@@ -1228,6 +1231,8 @@ declare global {
         "agent:followcontroller"?: boolean;
         "agent:livefeed"?: boolean;
         "agent:livefeedturns"?: number;
+        "agent:container_memory"?: string | number;
+        "agent:container_cpus"?: string | number;
         "markdown:streamtailinplace"?: boolean;
     };
 

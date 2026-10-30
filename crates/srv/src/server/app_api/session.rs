@@ -190,11 +190,12 @@ fn register_session_archive_handler(engine: &Arc<WshRpcEngine>, state: &AppState
 
     engine.register_typed(
         COMMAND_SESSION_ARCHIVE,
-        move |cmd: CommandSessionArchiveData, _ctx| {
+        move |cmd: CommandSessionArchiveData, ctx| {
             let mstore = mstore.clone();
             let filestore = filestore.clone();
             let broker = broker.clone();
             async move {
+                crate::server::actor::require_own_block_transcript(&ctx, &mstore, &cmd.block_id, "a pane's transcript")?;
 
                 tracing::info!(block_id = %cmd.block_id, "session:archive");
 
@@ -240,11 +241,14 @@ fn register_session_restore_handler(engine: &Arc<WshRpcEngine>, state: &AppState
 
     engine.register_typed(
         COMMAND_SESSION_RESTORE,
-        move |cmd: CommandSessionRestoreData, _ctx| {
+        move |cmd: CommandSessionRestoreData, ctx| {
             let mstore = mstore.clone();
             let filestore = filestore.clone();
             let broker = broker.clone();
             async move {
+                // Restore replaces the transcript with the file `session:archive_path` names, which any
+                // writer of block meta can point anywhere, so it is as much a write as an append.
+                crate::server::actor::require_own_block_transcript(&ctx, &mstore, &cmd.block_id, "a pane's transcript")?;
 
                 tracing::info!(block_id = %cmd.block_id, "session:restore");
 

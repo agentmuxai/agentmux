@@ -669,6 +669,11 @@ pub struct AuditLogEntry {
     /// other through the CLI's own messaging (`backend::cli_native`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cli_native: Option<CliNativeAudit>,
+    /// For a delivery to a running agent: whether it started a turn (`started`) or joined one in
+    /// flight (`joined`), so the Audit can count the turns messages cause
+    /// (`SPEC_CHEAPER_FLEET_MESSAGING_2026_10_30.md` §7). Absent for every other entry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn: Option<String>,
 }
 
 /// What a `cli_native` audit line adds to the ordinary entry. The entry's
@@ -791,7 +796,14 @@ pub type InputSender = Arc<dyn Fn(&str, &[u8]) -> Result<(), String> + Send + Sy
 /// with the text, for a persistent Claude agent; every other controller
 /// ignores it. Empty for every delivery but a jekt's files from a verified
 /// sender (SPEC_JEKT_FILE_TRANSFER_2026_10_05.md §6.4).
-pub type MessageSender = Arc<dyn Fn(&str, &str, &[serde_json::Value]) -> Result<SenderDelivery, String> + Send + Sync>;
+///
+/// The fourth is where the message came from (`message_origin`), which the
+/// record of it carries: every sender says, none can leave it out.
+pub type MessageSender = Arc<
+    dyn Fn(&str, &str, &[serde_json::Value], &crate::backend::message_origin::MessageOrigin) -> Result<SenderDelivery, String>
+        + Send
+        + Sync,
+>;
 
 /// See [`MessageSender`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

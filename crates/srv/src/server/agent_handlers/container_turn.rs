@@ -66,7 +66,8 @@ impl ContainerStartup {
         filestore: Arc<crate::backend::storage::filestore::FileStore>,
         mstore: Arc<crate::backend::storage::store::Store>,
     ) -> Self {
-        let spec = ContainerSpec::of(block_meta, env_vars, working_dir);
+        let mut spec = ContainerSpec::of(block_meta, env_vars, working_dir);
+        spec.mount_spec.limits = crate::backend::container::limits::ContainerLimits::of_agent(&mstore, &crate::backend::obj::meta_get_string(block_meta, "agentId", ""));
         Self {
             cm,
             block_id: block_id.to_string(),
@@ -338,6 +339,17 @@ impl ContainerStartup {
         if let Some(dir) = self.mount_spec.workspace_host_dir.clone() {
             let _ = tokio::task::spawn_blocking(move || crate::backend::mcp_json_identity::strip_workspace_signing_keys(&dir)).await;
         }
+        // On macOS a Keychain-backed account has no credentials file to mount: its login is staged for the container.
+        let mut mount_spec = self.mount_spec.clone();
+        if mount_spec.claude_config_host_dir.is_none() {
+            if let Some(config_dir) = mount_spec.keychain_config_dir.clone() {
+                match self.cm.stage_keychain_login(&self.container_name, &config_dir).await {
+                    Ok(dir) => mount_spec.claude_config_host_dir = Some(dir),
+                    // Stop before anything is pulled: a container with no login can only sit there signed out.
+                    Err(reason) => return Err(self.fail(&ContainerError::NoLogin(reason), report_failure)),
+                }
+            }
+        }
         let image = resolve_container_image(&self.image);
         let began = Instant::now();
         let start_id = uuid::Uuid::new_v4().to_string();
@@ -367,7 +379,7 @@ impl ContainerStartup {
         };
         if let Err(e) = self
             .cm
-            .ensure_running_observed(&self.container_name, &image, &self.volumes, &[], &self.mount_spec, &observe)
+            .ensure_running_observed(&self.container_name, &image, &self.volumes, &[], &mount_spec, &observe)
             .await
         {
             if shown.load(Ordering::Relaxed) {

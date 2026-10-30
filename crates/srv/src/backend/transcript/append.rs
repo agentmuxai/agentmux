@@ -14,6 +14,7 @@ use std::sync::Arc;
 
 use base64::Engine as _;
 
+use crate::backend::message_origin::RecordOrigin;
 use crate::backend::mps;
 use crate::backend::storage::filestore::{AppendPos, FileStore};
 
@@ -65,8 +66,9 @@ pub fn persist_user_line(
     data: &[u8],
     filestore: Option<&Arc<FileStore>>,
     global_output_zone: Option<&str>,
+    record: Option<&RecordOrigin>,
 ) {
-    persist_user_line_as(broker, block_id, data, filestore, global_output_zone, true);
+    persist_user_line_as(broker, block_id, data, filestore, global_output_zone, true, record);
 }
 
 /// [`persist_user_line`] for a message no pane typed (a jekt, a broadcast, a
@@ -78,8 +80,9 @@ pub fn persist_injected_user_line(
     data: &[u8],
     filestore: Option<&Arc<FileStore>>,
     global_output_zone: Option<&str>,
+    record: Option<&RecordOrigin>,
 ) {
-    persist_user_line_as(broker, block_id, data, filestore, global_output_zone, false);
+    persist_user_line_as(broker, block_id, data, filestore, global_output_zone, false, record);
 }
 
 fn persist_user_line_as(
@@ -89,15 +92,23 @@ fn persist_user_line_as(
     filestore: Option<&Arc<FileStore>>,
     global_output_zone: Option<&str>,
     shown_by_pane: bool,
+    record: Option<&RecordOrigin>,
 ) {
     let global = global_output_zone.and_then(|zone| {
         crate::backend::agent_session::global_transcript_store().map(|gfs| (gfs, zone))
     });
-    let stamped = crate::backend::viewer::origin::stamp(block_id, data);
-    let (data, echo) = match &stamped {
-        Some(line) => (line.as_slice(), None),
-        None if shown_by_pane => (data, Some("stdin")),
-        None => (data, None),
+    // A message a paired device sent says so (`viewer::origin`); every one
+    // says where it came from and which notes went with it.
+    let from_device = crate::backend::viewer::origin::stamp(block_id, data);
+    let echo = if from_device.is_none() && shown_by_pane { Some("stdin") } else { None };
+    let data = from_device.as_deref().unwrap_or(data);
+    let stamped;
+    let data = match record {
+        Some(record) => {
+            stamped = crate::backend::message_origin::stamp_bytes(data, record);
+            stamped.as_slice()
+        }
+        None => data,
     };
     append_transcript(broker, block_id, data, filestore, global, global_output_zone.is_some(), echo);
 }

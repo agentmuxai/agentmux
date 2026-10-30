@@ -630,7 +630,7 @@ fn deliver(block_id: &str, text: &str) -> Result<(), String> {
     use crate::backend::reactive::SenderDelivery;
     use crate::bootstrap::AgentRoute;
     let input = TurnInput { origin: TurnOrigin::Automated, text: text.to_string(), joins_turn: None };
-    match crate::bootstrap::route_agent_message_from(block_id, text, Some(input), &[]) {
+    match crate::bootstrap::route_agent_message_from(block_id, text, Some(input), crate::backend::message_origin::MessageOrigin::supervisor(), &[]) {
         Ok(AgentRoute::Sent(SenderDelivery::Delivered | SenderDelivery::Deferred)) => Ok(()),
         Ok(AgentRoute::Sent(SenderDelivery::Pty)) => Err("the pane is not an agent session".to_string()),
         Ok(AgentRoute::StartTurn { .. }) => Err("the agent isn't running".to_string()),

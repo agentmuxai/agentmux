@@ -77,6 +77,25 @@ pub fn group_for(data_dir: &std::path::Path) -> String {
     }
     format!("am-{:012x}", h & 0xffff_ffff_ffff)
 }
+/// Why Windows isn't drawing a toast's banner right now, from
+/// `SHQueryUserNotificationState` (`QUNS_*`), or `None` when it will. In these
+/// states the toast goes straight to the Action Center, which looks like "no
+/// toast" to anyone watching the screen.
+pub fn no_banner_reason(state: i32) -> Option<&'static str> {
+    match state {
+        1 => Some("the screen saver is on, the PC is locked or another user is signed in"),
+        2 => Some("a full-screen app is in front"),
+        3 => Some("a Direct3D full-screen app is running"),
+        4 => Some("presentation mode is on"),
+        6 => Some("Do Not Disturb is on"),
+        _ => None,
+    }
+}
+
+fn user_notification_state() -> Option<i32> {
+    unsafe { windows::Win32::UI::Shell::SHQueryUserNotificationState() }.ok().map(|s| s.0)
+}
+
 const ICON_PNG: &[u8] = include_bytes!("../../../../assets/favicon-150x150.png");
 /// Upper bound on waiting for the WinRT thread at startup (see `spawn`).
 const READY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
@@ -176,6 +195,12 @@ fn thread_main(
         match cmd {
             Cmd::Show(n) => match show(&notifier, &n, &actions, &group) {
                 Ok(toast) => {
+                    if let Some(why) = user_notification_state().and_then(no_banner_reason) {
+                        crate::logging::log(&format!(
+                            "notify: toast {} went to the Action Center without a banner: {why}",
+                            n.kind
+                        ));
+                    }
                     gone.remove(&n.tag);
                     seq.insert(n.tag.clone(), 1);
                     live.insert(n.tag.clone(), toast);
@@ -491,6 +516,17 @@ mod tests {
         assert_eq!(xml.matches(r#"<text placement="attribution">"#).count(), 1, "{xml}");
         assert!(xml.contains("&lt;/text&gt;&lt;text placement="), "{xml}");
         assert_eq!(doc.GetElementsByTagName(&HSTRING::from("action")).unwrap().Length().unwrap(), 0);
+    }
+
+    #[test]
+    fn a_banner_is_missing_only_in_the_states_windows_suppresses_it() {
+        for suppressed in [1, 2, 3, 4, 6] {
+            assert!(no_banner_reason(suppressed).is_some(), "{suppressed}");
+        }
+        // Accepts notifications, a Store app in front, and anything unknown.
+        for shown in [5, 7, 0, 99] {
+            assert_eq!(no_banner_reason(shown), None, "{shown}");
+        }
     }
 
     /// Live smoke test — shows a REAL toast on this machine for a few seconds,

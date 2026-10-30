@@ -68,6 +68,10 @@ pub struct RemoteAgent {
     /// this machine's other channels, which don't report one. Display only.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub seat: Option<crate::backend::rpc_types::SeatSummary>,
+    /// Its account's stable id as a LAN peer reported it (`agent_accounts`); absent
+    /// when none was, and for this machine's other channels. Display only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub account: Option<String>,
 }
 
 /// What one channel of this machine said about its agents, by lower-cased name.
@@ -175,6 +179,7 @@ pub fn other_channels(
                     line: report.and_then(|r| r.lines.get(&key)).cloned(),
                     provider: report.and_then(|r| r.providers.get(&key)).cloned(),
                     seat: None,
+                    account: None,
                 }
             });
     }
@@ -260,6 +265,7 @@ pub fn lan_hosts(
                 line: p.agent_lines.get(&name.to_lowercase()).cloned(),
                 provider: p.agent_providers.get(&name.to_lowercase()).cloned(),
                 seat: p.agent_seats.get(&name.to_lowercase()).cloned(),
+                account: p.agent_accounts.get(&name.to_lowercase()).cloned(),
             })
             .collect();
         agents.sort_by_key(|a| a.name.to_lowercase());
@@ -673,6 +679,7 @@ mod tests {
             agent_status: Default::default(),
             agent_lines: Default::default(),
             agent_providers: Default::default(),
+            agent_accounts: Default::default(),
             agent_seats: Default::default(),
             first_seen: 0,
             last_seen: NOW / 1000 - age_secs,
@@ -1117,7 +1124,7 @@ mod tests {
     fn lan_hosts_are_left_as_they_are() {
         let entries = [with_uid("Camper", "dev", "uid-camper")];
         let defined: DefinedProviders = [("uid-camper".to_string(), "claude".to_string())].into();
-        let agent = RemoteAgent { name: "Camper".into(), block_id: String::new(), status: None, line: None, provider: None, seat: None };
+        let agent = RemoteAgent { name: "Camper".into(), block_id: String::new(), status: None, line: None, provider: None, seat: None, account: None };
         let channel = RemoteChannel { channel: "dev".into(), seen_at_ms: NOW, stale: false, os: String::new(), agents: vec![agent], route: None };
         let mut snap = SwarmOtherInstancesResult {
             hostname: "narko".into(),

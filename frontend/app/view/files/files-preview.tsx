@@ -185,9 +185,9 @@ export function FilesPreview(props: {
                             <Show when={p().truncated}>
                                 <div class="files-preview-more">
                                     Showing the first {formatBytes(PREVIEW_TEXT_BYTES)}.{" "}
-                                    <button type="button" class="files-link" onClick={() => props.onOpen(p().entry)}>
+                                    <Button variant="link" tone="accent" onClick={() => props.onOpen(p().entry)}>
                                         Open the whole file
-                                    </button>
+                                    </Button>
                                 </div>
                             </Show>
                         </div>

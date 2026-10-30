@@ -34,6 +34,7 @@ import {
 } from "./types";
 import { buildMemoryReinjectionNodeFromReplay, isCatchUpMessage } from "./memory-reinjection";
 import { splitAttachedImages } from "./attachments/attached-images";
+import { parseCliTurn } from "./cli-wrappers";
 import { splitSystemNotes } from "./system-notes";
 import { toolDetailOf, toolIcon } from "./tool-meta/tool-descriptors";
 import { parseSupervisorHeader } from "@/app/store/supervisor";
@@ -535,6 +536,8 @@ export class ClaudeCodeStreamParser {
                     return null;
                 }
                 const group = this.userMessageToNodes(event as UserMessageEvent);
+                // A turn of CLI wrappers with no text has nothing to show.
+                if (group.length === 0) return null;
                 const node = group[0];
                 const echoOfCard = this.fallbackCardShown && node.type === "memory_reinjection";
                 this.fallbackCardShown = false;
@@ -881,6 +884,23 @@ export class ClaudeCodeStreamParser {
         // one this same event.type check just confirmed isn't itself
         // another reinjection.
         this.hidingUntilNextUserMessage = false;
+
+        // A turn the CLI wrote itself (a task notification, a system reminder, a hook's output) is
+        // automated: a note, never the human's style (cli-wrappers.ts, INTERIM text parsing).
+        const cli = parseCliTurn(event.message);
+        if (cli) {
+            if (cli.text === "") return [];
+            return [
+                {
+                    type: "system_note",
+                    id: this.nextIdOf("note"),
+                    text: cli.text,
+                    source: "cli",
+                    raw: event.message,
+                    timestamp: event.timestamp || (this.isReplay ? undefined : Date.now()),
+                },
+            ];
+        }
 
         // srv's own notes ride after the message (or arrive alone): they get
         // their own nodes, so neither the note nor the jekt it follows can take

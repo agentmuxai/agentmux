@@ -296,6 +296,29 @@ pub(crate) fn require_own_transcript(ctx: &RpcContext, store: &Store, target: &s
     }
 }
 
+/// [`require_own_transcript`] for a call that names a pane's block instead of an agent: the
+/// archive or restore of that block's transcript. An agent's connection may act only on the block
+/// its own agent is running on (a block with no running agent is the window's alone); any other
+/// connection must be the AgentMux window, proven by the host.
+pub(crate) fn require_own_block_transcript(ctx: &RpcContext, store: &Store, block_id: &str, what: &str) -> Result<(), String> {
+    if ctx.agent_id.is_empty() {
+        return ctx.operator_only(&format!("{what} is written by its own agent or by the AgentMux window"));
+    }
+    // Who runs on a pane comes from the launch record (`last_block_id`), never from the block's `agentId`
+    // meta, which any connection can write: `instance_get_by_block_id` only lets that meta choose between
+    // rows already recorded for this block.
+    let owner = store
+        .instance_get_by_block_id(block_id)
+        .ok()
+        .flatten()
+        .and_then(|inst| store.agent_def_get(&inst.id).ok().flatten())
+        .map(|def| def.slug);
+    match owner {
+        Some(slug) if slug.eq_ignore_ascii_case(&ctx.agent_id) => Ok(()),
+        _ => Err(format!("FORBIDDEN: {what} is written by its own agent or by the AgentMux window, not by another agent")),
+    }
+}
+
 /// For a route that records who acted: the agent the request's token names, as
 /// `(slug, uid)`. `claimed` is the name the request gives for itself, and an
 /// empty one leaves the token to decide alone. Refused without a token, and

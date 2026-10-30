@@ -10,6 +10,8 @@ export type AgentAccountSwitchReq = {
  */
 agent_id: string | null, 
 /**
- * The account: its id, or the label the pane shows (`email ·2`).
+ * The account: its stable or local id, the label the pane shows (`email ·2`), an email
+ * that names exactly one account with quota, or `any with quota` (another account of the
+ * agent's provider that can run now).
  */
 account: string, when: AccountSwitchWhen, };

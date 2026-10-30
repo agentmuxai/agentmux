@@ -1,6 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Button, IconButton } from "@/app/element/ui";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import clsx from "clsx";
 import { createEffect, createSignal, onCleanup, Show, type JSX } from "solid-js";
@@ -133,8 +134,8 @@ export function CopyErrorButton(props: CopyErrorButtonProps): JSX.Element {
             <Show
                 when={variant() === "icon"}
                 fallback={
-                    <button
-                        type="button"
+                    <Button
+                        density="compact"
                         class={clsx("copy-error-button-action", {
                             "is-copied": state() === "copied",
                             "is-failed": state() === "failed",
@@ -142,24 +143,21 @@ export function CopyErrorButton(props: CopyErrorButtonProps): JSX.Element {
                         onClick={handleClick}
                     >
                         {buttonLabel()}
-                    </button>
+                    </Button>
                 }
             >
-                <button
-                    type="button"
+                <IconButton
+                    icon={state() === "copied" ? "check" : state() === "failed" ? "triangle-exclamation" : "copy"}
+                    label={buttonLabel()}
+                    tooltip={false}
+                    density="compact"
                     class={clsx("copy-error-button-icon", {
                         "is-copied": state() === "copied",
                         "is-failed": state() === "failed",
                     })}
                     onClick={handleClick}
                     title={buttonLabel()}
-                    aria-label={buttonLabel()}
-                >
-                    <i
-                        class={`fa-solid fa-${state() === "copied" ? "check" : state() === "failed" ? "triangle-exclamation" : "copy"}`}
-                        aria-hidden="true"
-                    />
-                </button>
+                />
             </Show>
             <Show when={fallbackText() !== null}>
                 <span class="copy-error-button-fallback">

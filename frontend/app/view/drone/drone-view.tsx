@@ -121,7 +121,8 @@ const NodeTypeBar = (p: { model: DroneViewModel }): JSX.Element => {
 const NodeChip = (p: { model: DroneViewModel; kind: BlockKind }): JSX.Element => {
     const meta = blockMeta(p.kind);
     return (
-        <button
+        <Button
+            tone="quiet"
             class="drone-chip"
             style={{ "--block-color": meta.color }}
             draggable={true}
@@ -140,7 +141,7 @@ const NodeChip = (p: { model: DroneViewModel; kind: BlockKind }): JSX.Element =>
         >
             <span class="drone-chip-emoji">{meta.emoji}</span>
             <span class="drone-chip-label">{meta.label}</span>
-        </button>
+        </Button>
     );
 };
 
@@ -573,23 +574,15 @@ const Canvas = (p: { model: DroneViewModel }): JSX.Element => {
                 </div>
             </Show>
             <div class="drone-controls" style={{ zoom: m.zoom() }}>
-                <button
-                    class="drone-ctrl"
-                    title="Zoom in"
-                    onClick={() => zoomByCenter(1.2)}
-                >
+                <Button class="ui-icon-button drone-ctrl" density="compact" title="Zoom in" onClick={() => zoomByCenter(1.2)}>
                     +
-                </button>
-                <button
-                    class="drone-ctrl"
-                    title="Zoom out"
-                    onClick={() => zoomByCenter(1 / 1.2)}
-                >
+                </Button>
+                <Button class="ui-icon-button drone-ctrl" density="compact" title="Zoom out" onClick={() => zoomByCenter(1 / 1.2)}>
                     −
-                </button>
-                <button class="drone-ctrl" title="Fit view" onClick={fitView}>
+                </Button>
+                <Button class="ui-icon-button drone-ctrl" density="compact" title="Fit view" onClick={fitView}>
                     ⤢
-                </button>
+                </Button>
             </div>
         </div>
     );

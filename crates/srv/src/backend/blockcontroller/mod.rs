@@ -44,6 +44,7 @@ use std::sync::{Arc, RwLock};
 use serde::{Deserialize, Serialize};
 
 use super::eventbus::EventBus;
+use super::message_origin::{MessageOrigin, RecordOrigin};
 use super::obj::{Block, MetaMapType, TermSize};
 use super::storage::filestore::FileStore;
 use super::storage::store::Store;
@@ -778,18 +779,23 @@ pub enum AgentDelivery {
 /// This is the controller-aware delivery primitive muxbus Tier-1 needs: PTY
 /// keystrokes silently fail to reach a persistent stream-json agent (it rejects raw
 /// input). Spec: docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md §6 (Phase 3).
+#[cfg(test)]
 pub fn deliver_agent_message(block_id: &str, message: &str) -> Result<AgentDelivery, String> {
-    deliver_agent_message_from(block_id, message, None, &[])
+    deliver_agent_message_from(block_id, message, None, MessageOrigin::system(), &[])
 }
 
 /// [`deliver_agent_message`], saying who the input is from (turn provenance,
 /// SPEC_AGENT_SELF_QUIT §6.3). Only the persistent controller records it
 /// (see `send_user_message_outcome_from`); ACP and App Server turns carry no
 /// provenance on any path today, the user's own typed turn included.
+///
+/// `from` says where the message came from, for the record of it
+/// (`message_origin`): a producer that doesn't say doesn't compile.
 pub fn deliver_agent_message_from(
     block_id: &str,
     message: &str,
     origin: Option<health::TurnInput>,
+    from: MessageOrigin,
     inline: &[serde_json::Value],
 ) -> Result<AgentDelivery, String> {
     let ctrl =
@@ -802,7 +808,8 @@ pub fn deliver_agent_message_from(
         .as_any()
         .downcast_ref::<persistent::PersistentSubprocessController>()
     {
-        let outcome = persistent_ctrl.send_user_message_with_images_from(message, origin, inline.to_vec())?;
+        let record = RecordOrigin { origin: from, notes: held.note_texts() };
+        let outcome = persistent_ctrl.send_user_message_with_images_from(message, origin, inline.to_vec(), record)?;
         held.delivered();
         return Ok(match outcome {
             SendOutcome::Sent => AgentDelivery::Structured,
@@ -835,6 +842,8 @@ pub fn deliver_agent_message_from(
 /// controllers can only queue a message as a turn of its own, so theirs is
 /// always held. Returns whether it joined a turn.
 pub fn system_note_into_turn_or_hold(block_id: &str, key: &str, text: &str) -> bool {
+    let text = crate::backend::reactive::sanitize::with_system_note_marker(text);
+    let text = text.as_ref();
     if let Some(ctrl) = get_controller(block_id) {
         if let Some(p) = ctrl.as_any().downcast_ref::<persistent::PersistentSubprocessController>() {
             return p.note_into_turn_or_hold(key, text);
