@@ -14,7 +14,7 @@
 //    folder (e.g. D:/demo/acme-web or /opt/demo/acme-web). It's required, and
 //    a path that contains the user name or the home folder is refused.
 // 2. Writes a user widgets.json into every channel config folder under --home
-//    that starts Hangar (files:path), Terminal (cmd:cwd) and Editor (file) in
+//    that starts Files (files:path), Terminal (cmd:cwd) and Editor (file) in
 //    the demo project, and shows Sysinfo's CPU, memory and network graphs
 //    rather than CPU alone. User entries replace built-in ones, so the rest of
 //    each entry is copied from the built-in config.

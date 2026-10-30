@@ -3,7 +3,7 @@
 
 /**
  * Copy and move for the Files pane: the shared clipboard (Cut/Copy/Paste work
- * across Hangar panes), and the jobs srv runs (`fs.op.*`), followed through
+ * across Files panes), and the jobs srv runs (`fs.op.*`), followed through
  * their `files:op` events: progress, a conflict waiting for an answer, the
  * end. docs/specs/SPEC_FILE_BROWSER_PANE_2026_10_01.md §7.1, §7.2.
  */
@@ -26,7 +26,7 @@ export interface FilesClipboard {
     connection?: string;
 }
 
-/** One clipboard for every Hangar pane in this window, like a file manager's. */
+/** One clipboard for every Files pane in this window, like a file manager's. */
 const [clipboard, setClipboardSignal] = createSignal<FilesClipboard | null>(null);
 export { clipboard };
 

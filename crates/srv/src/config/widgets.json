@@ -59,7 +59,7 @@
         "display:order": 5,
         "display:pinned": true,
         "icon": "folder-open",
-        "label": "Hangar",
+        "label": "Files",
         "description": "Browse files",
         "blockdef": {
             "meta": {

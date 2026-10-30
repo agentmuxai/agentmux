@@ -23,7 +23,7 @@ The move to Free was #4665 (2026-10-11). Renames in `widgets.json`: `sparkles` â
 | Agent | `agent` | wand-magic-sparkles | widget bar |
 | Swarm | `swarm` | people-group | widget bar |
 | Memory | `memory` | brain | widget bar |
-| Hangar | `files` | folder-open | widget bar |
+| Files | `files` | folder-open | widget bar |
 | Connectors | `connectors` | plug | widget bar |
 | Terminal | `term` | terminal | widget bar |
 | Editor | `editor` | file-code | widget bar |
@@ -67,7 +67,7 @@ The bar narrows in three steps ([`frontend/app/window/use-widget-bar-responsive.
 
 ## 5. Features the README doesn't mention
 
-Hangar, Tower, Media, Toolchain and Messengers widgets; the widget SDK and user widgets ([`sdk/widget-sdk/`](../../sdk/widget-sdk)); LAN discovery and MuxBus cloud; paired devices (mobile viewer); the work queue and cron; the agentmux MCP server ([`crates/mcp`](../../crates/mcp)); container agents and headless srv; SSH and WSL remotes; bundle import/export; voice input and recording; the command palette.
+Files, Tower, Media, Toolchain and Messengers widgets; the widget SDK and user widgets ([`sdk/widget-sdk/`](../../sdk/widget-sdk)); LAN discovery and MuxBus cloud; paired devices (mobile viewer); the work queue and cron; the agentmux MCP server ([`crates/mcp`](../../crates/mcp)); container agents and headless srv; SSH and WSL remotes; bundle import/export; voice input and recording; the command palette.
 
 ## 6. Claims that need an owner decision
 

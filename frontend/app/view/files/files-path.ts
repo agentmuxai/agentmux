@@ -8,7 +8,7 @@
  * docs/specs/SPEC_FILE_BROWSER_PANE_2026_10_01.md §5.1, §7.4, §9.
  */
 
-/** The block meta key holding the folder a Hangar pane shows. */
+/** The block meta key holding the folder a Files pane shows. */
 export const META_PATH = "files:path";
 
 /** One clickable breadcrumb segment: its label and the folder it opens. */

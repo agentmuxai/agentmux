@@ -12,7 +12,7 @@
 - the pane registry (`block/block-registry.ts`, `block/pane-tab-registry.ts`);
 - the connection picker (`modals/conntypeahead.tsx`);
 - the block frame;
-- Hangar (`view/files/`);
+- Files (`view/files/`);
 - [`crates/srv/src/backend/remote/`](../../crates/srv/src/backend/remote);
 - [`crates/srv/src/server/app_api/connections.rs`](../../crates/srv/src/server/app_api/connections.rs).
 
@@ -38,7 +38,7 @@ Name chosen by the owner on 2026-10-05; "Outposts", "Uplink" and "Tower" were al
 - A terminal pane's header has a connection chip (`ConnectionButton`) that opens a typeahead picker (`ChangeConnectionBlockModal`, `conntypeahead.tsx`). It lists local, WSL distros (`WslListCommand`) and SSH names (`ConnListCommand`), and accepts a typed `user@host`.
 - `ConnStatusOverlay` shows a dropped connection, with Reconnect and Disconnect.
 
-**Hangar.**
+**Files.**
 - The sidebar has Places, Drives, WSL, **Remote** (`model.remotes()`) and Agents sections.
 - The breadcrumb shows the host when the folder is on one.
 - "Open terminal here" opens a terminal on the same connection.
@@ -96,7 +96,7 @@ Researched on 2026-10-05: VS Code Remote-SSH and Remote Explorer, JetBrains Gate
 
 ### 4.1 The pane
 
-Remotes is an ordinary widget: a pane tab type like Hangar, Armory or Swarm, under the Pane Tab contract (`SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md`). Nothing about it is special to the host.
+Remotes is an ordinary widget: a pane tab type like Files, Armory or Swarm, under the Pane Tab contract (`SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md`). Nothing about it is special to the host.
 
 - **Manifest:** `remotesPaneTab: PaneTabManifest` in `view/remotes/remotes.tsx`, listed in `block-registry.ts` beside `swarmPaneTab`:
   - `view: "remotes"`;
@@ -107,7 +107,7 @@ Remotes is an ordinary widget: a pane tab type like Hangar, Armory or Swarm, und
 - **Opened from:**
   - the launcher, the new-tab menu and the command palette ("Open Remotes"), like any widget;
   - the connection picker's footer, "Manage remotes…";
-  - the Remote heading in Hangar's sidebar;
+  - the Remote heading in the Files pane's sidebar;
   - a pane's connection chip menu, "Remote settings…".
 
   The last three are links from inside another pane. They open a Remotes tab in that same pane, beside it, with the host's row expanded where one is named. If that pane already has a Remotes tab, they switch to it instead of adding another.
@@ -135,7 +135,7 @@ A remote appears in exactly one section: Pinned wins, then Hidden, then the othe
 
 **Row actions** (buttons, and the right-click menu):
 - **New terminal** opens a terminal pane on the remote.
-- **Browse files** opens Hangar on the remote's home folder.
+- **Browse files** opens the Files pane on the remote's home folder.
 - **Sessions…** expands the row to its durable sessions (the "Sessions on <host>" list), with Reattach and End.
 - **Connect** / **Disconnect**.
 - **Pin** / **Unpin**, **Hide** / **Unhide**.
@@ -230,7 +230,7 @@ The header picker stays the one way to choose where a pane runs. It becomes the 
 
 It is used everywhere a pane can be remote:
 - terminal;
-- Hangar, from its toolbar as well as the sidebar, whose Remote section shows the pinned and SSH-host remotes with their colours;
+- Files, from its toolbar as well as the sidebar, whose Remote section shows the pinned and SSH-host remotes with their colours;
 - the editor, through a new "Open from remote…".
 
 ### 4.8 Which remote a pane is on
@@ -279,7 +279,7 @@ The detail panel lists the agents allowed on this host (`ssh-agent-access.json`)
 | Phase | Ships | Depends on |
 |---|---|---|
 | **R1** | The pane: `RemotesList` and `remoteschange`, sections, status, helper and session counts, New terminal and Browse files, pin, hide, nickname, colour; `remote-recent.json`; the platform record | — |
-| **R2** | The picker as §4.7; frame chip and colour stripe (§4.8); Hangar's sidebar from `RemotesList` | R1 |
+| **R2** | The picker as §4.7; frame chip and colour stripe (§4.8); the Files pane's sidebar from `RemotesList` | R1 |
 | **R3** | The install question (§4.9), the global default, Remove helper | R1 |
 | **R4** | Add remote (ssh config write, backup, refuse duplicates), Test connection, Edit in ssh config | R1 |
 | **R5** | Agents allowed: list and Revoke | R1 |
@@ -317,7 +317,7 @@ R3 should ship before the next release. The helper installs without asking until
 - **Syncing remotes across machines.** `~/.ssh/config` is per machine; Recent and settings stay local.
 - **Containers and Kubernetes** as remote kinds.
 - **Windows as a remote host** (remote-terminals P6).
-- **Hangar following the terminal's folder** (MobaXterm-style). A good next step once remote shells report their cwd (remote-terminals P5).
+- **Files following the terminal's folder** (MobaXterm-style). A good next step once remote shells report their cwd (remote-terminals P5).
 
 ## 8. Decisions for the owner
 

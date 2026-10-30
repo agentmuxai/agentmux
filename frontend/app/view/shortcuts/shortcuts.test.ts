@@ -58,7 +58,7 @@ const w = (label: string, order: number, view = label.toLowerCase(), extra: Part
 const widgets = (): Record<string, WidgetConfigType> => ({
     "defwidget@agent": w("Agent", 1),
     "defwidget@terminal": w("Terminal", 2, "term"),
-    "defwidget@files": w("Hangar", 3, "files"),
+    "defwidget@files": w("Files", 3, "files"),
     "defwidget@browser": w("Browser", 4),
     "defwidget@drone": w("Drone", 5),
     "ext@acme.board/main": w("Board", 6, "ext:acme.board/main"),
@@ -86,17 +86,17 @@ describe("Shortcuts pane: the manifest", () => {
 describe("Shortcuts pane: tile order", () => {
     it("lists every pane type and installed widget in the configured order when nothing was used", () => {
         config();
-        expect(labels(new ShortcutsViewModel("b1"))).toEqual(["Agent", "Terminal", "Hangar", "Browser", "Drone", "Board"]);
+        expect(labels(new ShortcutsViewModel("b1"))).toEqual(["Agent", "Terminal", "Files", "Browser", "Drone", "Board"]);
     });
 
     it("puts the last used first, then the rest in their configured place", () => {
         config({ "launcher:recent": ["ext@acme.board/main", "defwidget@files"] });
-        expect(labels(new ShortcutsViewModel("b1"))).toEqual(["Board", "Hangar", "Agent", "Terminal", "Browser", "Drone"]);
+        expect(labels(new ShortcutsViewModel("b1"))).toEqual(["Board", "Files", "Agent", "Terminal", "Browser", "Drone"]);
     });
 
     it("leaves out a hidden entry even when it was used last, and ignores a key that no longer exists", () => {
         config({ "widget:hidden": ["defwidget@drone"], "launcher:recent": ["defwidget@drone", "defwidget@gone", "defwidget@browser"] });
-        expect(labels(new ShortcutsViewModel("b1"))).toEqual(["Browser", "Agent", "Terminal", "Hangar", "Board"]);
+        expect(labels(new ShortcutsViewModel("b1"))).toEqual(["Browser", "Agent", "Terminal", "Files", "Board"]);
     });
 
     it("filters by label as before", () => {
@@ -139,13 +139,13 @@ describe("Shortcuts pane: choosing a tile", () => {
         expect(h.replaceBlock).toHaveBeenCalledWith("sc", { meta: { "cmd:cwd": "C:/work", connection: "wsl://Ubuntu", view: "term" } }, true);
     });
 
-    it("a Hangar tile starts in that directory; an Agent tile opens the picker as the widget defines it", async () => {
+    it("a Files tile starts in that directory; an Agent tile opens the picker as the widget defines it", async () => {
         config();
         h.blocks.src = { meta: { view: "term", "cmd:cwd": "C:/work" } };
         h.blocks.sc = { meta: { view: "shortcuts", "shortcuts:from": "src" } };
         const m = new ShortcutsViewModel("sc");
 
-        await m.handleWidgetSelect(tile(m, "Hangar"));
+        await m.handleWidgetSelect(tile(m, "Files"));
         await m.handleWidgetSelect(tile(m, "Agent"));
 
         expect(h.replaceBlock.mock.calls[0]).toEqual(["sc", { meta: { "files:path": "C:/work", view: "files" } }, true]);

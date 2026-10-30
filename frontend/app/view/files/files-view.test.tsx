@@ -270,7 +270,7 @@ describe("the Files pane: listing", () => {
     });
 });
 
-// SPEC_HANGAR_ZOOM_2026_10_08.md: the shared per-pane zoom (`term:zoom`).
+// SPEC_FILES_ZOOM_2026_10_08.md: the shared per-pane zoom (`term:zoom`).
 describe("the Files pane: zoom", () => {
     it("scales with the pane's term:zoom, and is 1 when unset", async () => {
         const v = mount();
@@ -424,9 +424,9 @@ describe("the Files pane: navigation", () => {
         expect(loap).not.toBe("rgb(95, 200, 121)");
     });
 
-    it("opens only Hangar's menu on blank space, not the pane frame's as well", async () => {
+    it("opens only the Files pane's menu on blank space, not the pane frame's as well", async () => {
         // The pane frame listens above the view; a right-click that reaches it
-        // opens the generic pane menu on top of Hangar's own.
+        // opens the generic pane menu on top of the Files pane's own.
         const reachedFrame = vi.fn();
         const v = mount({}, reachedFrame);
         await waitFor(() => expect(v.names()).toHaveLength(4));
@@ -551,7 +551,7 @@ describe("the Files pane on an SSH host (remote terminals spec §6.3)", () => {
                 {}
             )
         );
-        // A drop onto a host pane is a copy, even from a local Hangar pane
+        // A drop onto a host pane is a copy, even from a local Files pane
         // whose root (`/`) looks like the host's: never a move that deletes
         // the original here.
         expect(v.model.dropKind(["/tmp/notes.md"], true)).toBe("copy");
@@ -1037,17 +1037,17 @@ describe("the Files pane: dragging files (§8.2)", () => {
         expect(JSON.parse(data.get(PATHS_MIME)!)).toEqual([`${HOME}\\a2.md`, `${HOME}\\a10.md`, `${HOME}\\b.txt`]);
     });
 
-    it("a row dropped on another Hangar pane on the same drive is moved there", async () => {
+    it("a row dropped on another Files pane on the same drive is moved there", async () => {
         const v = mount();
         await waitFor(() => expect(v.names()).toHaveLength(4));
-        // The pane is the drop target; the drag came from another Hangar pane.
+        // The pane is the drop target; the drag came from another Files pane.
         const pane = document.createElement("div");
         pane.setAttribute("data-role", "pane");
         pane.setAttribute("data-blockid", "b1");
         pane.getClientRects = () => [{}] as unknown as DOMRectList;
         document.body.appendChild(pane);
         const dt = { setData: () => {}, effectAllowed: "", types: [PATHS_MIME], items: [], files: [], dropEffect: "" };
-        beginPathDrag(dt as unknown as DataTransfer, ["C:\\other\\x.txt"], "another-hangar");
+        beginPathDrag(dt as unknown as DataTransfer, ["C:\\other\\x.txt"], "another-files");
         const drop = new Event("drop", { bubbles: true, cancelable: true });
         Object.defineProperty(drop, "dataTransfer", { value: dt });
         pane.dispatchEvent(drop);
@@ -1451,10 +1451,10 @@ describe("the Files pane: macOS access prompts (§9.1)", () => {
 
 describe("the Files pane: registration", () => {
     it("registers as a keep-alive pane tab titled by its folder", () => {
-        expect(filesPaneTab).toMatchObject({ view: "files", label: "Hangar", icon: "folder-open" });
+        expect(filesPaneTab).toMatchObject({ view: "files", label: "Files", icon: "folder-open" });
         expect(filesPaneTab.capabilities?.lifecycle).toBe("keepAlive");
         expect(filesTitle({ "files:path": "C:\\Users\\a\\src" } as MetaType)).toBe("src");
-        expect(filesTitle(undefined)).toBe("Hangar");
+        expect(filesTitle(undefined)).toBe("Files");
         void getPaneTab;
     });
 

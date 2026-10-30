@@ -1,18 +1,18 @@
-# Zoom in the Hangar, through the shared pane zoom
+# Zoom in the Files pane, through the shared pane zoom
 
 **Status:** active — built in #4485.
 **Date:** 2026-10-08.
-**Requested by:** repo owner (asafebgi): "lets introduce zoom into the hangar .. write a separate spec to file"; "that too
+**Requested by:** repo owner (asafebgi): "lets introduce zoom into the files .. write a separate spec to file"; "that too
 should be DRY .. from my understanding zoom is already well DRYly defined currently in the codebase".
 **Author:** AgentO.
 **Related:** `zoom-architecture.md`, `per-pane-zoom-hover.md`, `SPEC_CTRL_SHIFT_SCROLL_ZOOM_ALL_PANES_2026_09_07.md`,
-`SPEC_FILE_BROWSER_PANE_2026_10_01.md` (the Hangar; says nothing about zoom).
+`SPEC_FILE_BROWSER_PANE_2026_10_01.md` (the Files pane; says nothing about zoom).
 
 ---
 
 ## 1. Goal
 
-The Hangar (the Files pane, view `files`) zooms like the other panes: Ctrl/Cmd `+` / `-` / `0`, Ctrl+scroll over the
+The Files pane (view `files`) zooms like the other panes: Ctrl/Cmd `+` / `-` / `0`, Ctrl+scroll over the
 pane, Ctrl+Shift+scroll and "Reset zoom on all panes". The level is kept per pane and survives a restart.
 
 ## 2. The shared zoom, as it is
@@ -32,13 +32,13 @@ handlers of its own (its old local handlers fought the global ones and were remo
 
 ## 3. Design
 
-1. **Join:** `filesPaneTab.capabilities` gains `paneZoom: { baseFontSize: 12 }` (`files.tsx`). 12 px is the Hangar's
+1. **Join:** `filesPaneTab.capabilities` gains `paneZoom: { baseFontSize: 12 }` (`files.tsx`). 12 px is the Files pane's
    font size (`files.scss`), so the step logic that skips zoom steps which don't change the rendered font size measures
    the right thing. That alone routes the keys, Ctrl+scroll, the all-panes gesture and "Reset zoom on all panes" to it.
 2. **Apply:** `FilesView`'s root `.files-view` gets `style={{ zoom: readZoom(ctx.meta()) }}`. CSS `zoom`, not font
    size: the toolbar, Places, the list rows, the thumbnail tiles and their icons all scale together, and the pane has
    no canvas or terminal that needs a 1:1 pixel ratio.
-3. **No handlers of its own.** Nothing in the Hangar listens for Ctrl+scroll or Ctrl `+`/`-`; the global ones do it
+3. **No handlers of its own.** Nothing in the Files pane listens for Ctrl+scroll or Ctrl `+`/`-`; the global ones do it
    all, with the shared steps and the indicator.
 
 ### Behaviour under zoom (checked, not changed)

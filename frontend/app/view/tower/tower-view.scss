@@ -6,7 +6,7 @@
 
 @use "../../mixins.scss";
 
-// The theme's own surface, as the Hangar paints it: without it the pane
+// The theme's own surface, as the Files pane paints it: without it the pane
 // showed its frame's darker layer, near-black in the dark themes, with the
 // sticky header a lighter band over it
 // (SPEC_TOWER_THEME_SURFACE_AND_COLOR_2026_10_17.md §1.1, §5.1).
@@ -318,7 +318,7 @@ th[aria-sort="descending"] .tower-sort {
 }
 
 // ── The Agents view: a rail of agents beside the selected one's processes,
-// laid out like Hangar's places and list. ──
+// laid out like the Files pane's places and list. ──
 
 .tower-view {
     container-type: inline-size;

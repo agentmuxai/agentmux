@@ -728,7 +728,7 @@
           "type": "string",
           "enum": ["system", "app"],
           "default": "system",
-          "description": "Which icons the Hangar (Files pane) shows for files and folders: \"system\" is the picture the operating system shows for each type (the same as Windows Explorer), made by srv; \"app\" is AgentMux's own monochrome glyphs. Where the system has no source yet, or an icon can't be made, the glyph shows. See docs/specs/SPEC_HANGAR_SYSTEM_FILE_ICONS_2026_10_27.md."
+          "description": "Which icons the Files pane shows for files and folders: \"system\" is the picture the operating system shows for each type (the same as Windows Explorer), made by srv; \"app\" is AgentMux's own monochrome glyphs. Where the system has no source yet, or an icon can't be made, the glyph shows. See docs/specs/SPEC_FILES_SYSTEM_FILE_ICONS_2026_10_27.md."
         },
         "supervisor:enabled": {
           "type": "boolean",

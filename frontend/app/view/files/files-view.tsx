@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The Files pane ("Hangar"): a toolbar with history and a breadcrumb, Places
+ * The Files pane: a toolbar with history and a breadcrumb, Places
  * on the left, a sortable details list, and a status line.
  * docs/specs/SPEC_FILE_BROWSER_PANE_2026_10_01.md §5.
  *
@@ -88,7 +88,7 @@ function kindOf(e: FsEntry): string {
     return e.is_symlink ? `${base} link` : base;
 }
 
-/** The agent pane the user last worked in, for Alt+K: Hangar has the focus
+/** The agent pane the user last worked in, for Alt+K: Files has the focus
  *  when the key is pressed, so it is remembered as focus moves. */
 let lastAgentBlock: string | null = null;
 let focusTracking = false;
@@ -161,7 +161,7 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
     let crumbsEl: HTMLElement | undefined;
 
     // Files dropped on the pane go into the folder it shows: an OS drop or
-    // another pane's row is copied; a row from another Hangar pane on the
+    // another pane's row is copied; a row from another Files pane on the
     // same drive is moved (§8.2).
     onMount(() => {
         const dispose = registerFileDropTarget(model.blockId, {
@@ -383,7 +383,7 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
             });
     };
 
-    /** A folder in a new Hangar tab of this pane (Ctrl+Enter, middle-click,
+    /** A folder in a new Files tab of this pane (Ctrl+Enter, middle-click,
      *  the menu); Ctrl+T opens the folder shown. */
     const openInNewTab = (dir: string): void => {
         void openFolderInNewTab(model.blockId, dir, model.connection() || undefined).catch((err) =>
@@ -465,7 +465,7 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                 void model.undo();
                 return true;
             case "files:copy":
-                // Both: the files for a paste in Hangar, the paths for anywhere else.
+                // Both: the files for a paste in the Files pane, the paths for anywhere else.
                 model.copyToClipboard("copy", model.selectedEntries());
                 copyPaths(model.selectedEntries(), true);
                 return true;
