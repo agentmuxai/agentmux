@@ -358,7 +358,7 @@ pub(super) fn hold_applies(
 /// A verified WAN message to an agent here that can't work: kept for 24 h, as a local one is, and
 /// delivered when it can (the cross-machine operations spec, §4.5). `true` when it is kept, so the
 /// caller neither injects it into a turn that would fail nor hands it back to the relay. A message
-/// with files is left to the old path: their charge and fetch are the caller's.
+/// with files, or a note that its files were dropped, is left to the old path: the held row keeps neither.
 pub(crate) fn hold_wan_for_unavailable(
     mstore: &crate::backend::storage::store::Store,
     handler: &crate::backend::reactive::handler::ReactiveHandler,
@@ -373,6 +373,7 @@ pub(crate) fn hold_wan_for_unavailable(
         || !verified_peer(req)
         || req.source_agent.as_deref() == Some("cron")
         || req.files.is_some()
+        || req.files_delivery.is_some()
     {
         return false;
     }
