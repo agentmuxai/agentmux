@@ -26,6 +26,7 @@
 
 import type { PendingMessage } from "../../view/agent/state";
 import type { ContextReading, ContextSource, ContextWindowMap, ReportedContextWindows } from "./context-reading";
+import type { FailureSource } from "./failure-precedence";
 import type { TurnLedger } from "./turn-ledger";
 import type { ToolActivity } from "@/app/store/agent-pane-state/tool-labels";
 import type { PlanState } from "@/app/store/agent-pane-state/plan";
@@ -222,7 +223,15 @@ export interface PaneFailure {
      * See docs/specs/PLAN_LOGIN_CTA_SURFACE_CONSOLIDATION_2026_09_02.md §4.
      */
     turnAttempted?: boolean;
+    /**
+     * Who raised it (failure-precedence.ts): a failure of a lower-ranked source never replaces
+     * this one. Absent means the backend's event, as for a record that predates sources.
+     */
+    source?: FailureSource;
 }
+
+/** Why the failure row went (for the event, and so each clear says what it is). */
+export type FailureClearReason = "dismissed" | "retried" | "episode-ended" | "recovered" | "retracted" | "offline";
 
 /**
  * True when the pane's failure is an auth failure: the agent isn't signed in
@@ -947,9 +956,23 @@ export type AgentPaneCommand =
            * `false` only by the pane's own synthetic pre-launch auth failure.
            */
           turnAttempted?: boolean;
+          /**
+           * Who raises it. Omitted means the backend's event (`live`). Dropped, with no other
+           * effect, when the failure showing outranks it (failure-precedence.ts).
+           */
+          source?: FailureSource;
+          /**
+           * For a `seed` only: when the pane mounted. A seed is dropped when a turn is running or
+           * has finished since, so a stored failure that arrives late never ends or overwrites it.
+           */
+          since?: number;
       }
-    /** User dismissed the failure row (Dismiss / ×). Episode over. */
-    | { type: "FailureCleared" }
+    /**
+     * The failure row goes: dismissed, its episode over, proven resolved, or retracted. `onlyCode`
+     * clears it only when it is that class, decided here in the reducer so no caller reads the
+     * failure and then clears a different one that landed in between.
+     */
+    | { type: "FailureCleared"; reason?: FailureClearReason; onlyCode?: AgentFailure["code"] }
 
     // ── Composer details / Log panel ─────────────────────────────
     /** Toggle the log panel open/closed. */
@@ -1214,7 +1237,7 @@ export type AgentPaneEvent =
      */
     | { type: "failure-observed"; code: AgentFailure["code"]; turnWasEnded: boolean }
     /** `state.failure` was cleared (explicit dismiss, or implicitly by TurnStart). */
-    | { type: "failure-cleared" }
+    | { type: "failure-cleared"; reason?: FailureClearReason }
     | { type: "stop-requested"; at: number }
     | { type: "stop-failed" }
     /**

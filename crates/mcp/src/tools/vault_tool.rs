@@ -68,7 +68,36 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                     let result = crate::srv_http::srv_post_json(cx.client, &format!("{base}/api/v1/vault/generate"), cx.auth_key, &body, "Vault generate").await?;
                     Ok(serde_json::to_string_pretty(&result).unwrap_or_default())
                 }
-                other => anyhow::bail!("Vault: unknown action {other:?}; use list, request or generate"),
+                "rotate" => {
+                    let s = |k: &str| arguments.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+                    let body = json!({
+                        "id": s("id"),
+                        "set": s("set"),
+                        "verify": arguments.get("verify").and_then(Value::as_str),
+                        "cwd": arguments.get("cwd").and_then(Value::as_str),
+                        "rules": arguments.get("rules").cloned().unwrap_or_else(|| json!({})),
+                        "auth": crate::identity::sign_ui_automation_auth().map_err(|e| anyhow::anyhow!("Vault rotate needs this agent's signed identity: {e}"))?,
+                    });
+                    // The person's approval, then set and verify, each up to 10 minutes.
+                    let url = format!("{base}/api/v1/vault/rotate");
+                    let resp = cx
+                        .client
+                        .post(&url)
+                        .header(AUTH_KEY_HEADER, cx.auth_key)
+                        .timeout(std::time::Duration::from_secs(32 * 60))
+                        .json(&body)
+                        .send()
+                        .await
+                        .map_err(|e| anyhow::anyhow!(crate::srv_http::describe_transport_error("Vault rotate", &url, &e)))?;
+                    let status = resp.status();
+                    let text = resp.text().await.unwrap_or_default();
+                    if !status.is_success() {
+                        anyhow::bail!(crate::srv_http::describe_http_error("Vault rotate", status, &text));
+                    }
+                    let result: Value = serde_json::from_str(&text).unwrap_or_default();
+                    Ok(serde_json::to_string_pretty(&result).unwrap_or_default())
+                }
+                other => anyhow::bail!("Vault: unknown action {other:?}; use list, request, generate or rotate"),
             }
         }
         _ => Err(not_in_family()),
@@ -83,7 +112,7 @@ mod tests {
     fn the_schema_lists_every_action_and_every_kind_srv_knows() {
         let schema: Value = serde_json::from_str(crate::tool_schemas::VAULT_TOOL).unwrap();
         let actions = &schema["inputSchema"]["properties"]["action"]["enum"];
-        assert_eq!(actions, &json!(["list", "request", "generate"]));
+        assert_eq!(actions, &json!(["list", "request", "generate", "rotate"]));
         // srv's catalog (backend/vault/kinds.rs) is the source; this list
         // must name the same kinds.
         let srv = include_str!("../../../srv/src/backend/vault/kinds.rs");

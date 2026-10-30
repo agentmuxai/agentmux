@@ -786,6 +786,12 @@ jobs:
       - name: Motion gates
         run: node scripts/check-motion-gates.mjs
 
+      # The pane's failure row is raised and cleared only through failure-writer.ts, which names
+      # the source or the reason so the reducer can apply the written precedence
+      # (frontend/app/store/agent-pane-state/failure-precedence.ts).
+      - name: Failure writers
+        run: node scripts/check-failure-writers.mjs
+
       # Ratchet for the line-style component set: hand-rolled buttons, solid
       # fills on controls, off-token corner radii and undefined CSS variables
       # may not go up compared with the base branch, which this job's

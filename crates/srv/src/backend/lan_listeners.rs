@@ -585,7 +585,8 @@ impl LanListenerSupervisor {
                 tracing::warn!("could not adopt LAN listener into the tokio runtime");
                 return;
             };
-            let served = axum::serve(listener, router)
+            // With the peer's address as `ConnectInfo`: a remote operation names the machine it came from.
+            let served = axum::serve(listener, router.into_make_service_with_connect_info::<std::net::SocketAddr>())
                 .with_graceful_shutdown(async move { token.cancelled().await })
                 .await;
             if let Err(e) = served {

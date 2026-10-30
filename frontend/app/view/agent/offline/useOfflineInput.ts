@@ -28,6 +28,7 @@ import { registerRecycleBlocker } from "@/app/store/recycle-blockers";
 import { clockTime } from "@/store/muxbus-delivery";
 import { Logger } from "@/util/logger";
 import type { AttachmentRef } from "@/types/rpc/AttachmentRef";
+import { clearFailure, raiseFailure } from "../failure/failure-writer";
 import { useApiRetryState } from "../hooks/useApiRetryState";
 import type { ProviderDefinition } from "../providers";
 import {
@@ -199,8 +200,8 @@ export function useOfflineInput(opts: {
         autoRetryOn: () => getSettingsKeyAtom(RETRY_ON_RECONNECT_SETTING)() !== false,
         deliver,
         restoreFailure: (f) =>
-            opts.paneModel.dispatchPane({ type: "FailureObserved", failure: f.data, at: f.at, turnAttempted: f.turnAttempted }, "system"),
-        clearFailure: () => opts.paneModel.dispatchPane({ type: "FailureCleared" }, "system"),
+            raiseFailure(opts.paneModel, { source: "offline", failure: f.data, at: f.at, turnAttempted: f.turnAttempted, system: true }),
+        clearFailure: () => clearFailure(opts.paneModel, { reason: "offline", system: true }),
         storage: blockRetryMarkStorage(opts.blockId, opts.agentId),
         lock,
         clockTime,

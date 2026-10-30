@@ -131,7 +131,7 @@ validate_dir "$HOME/cef-build/darwin/$ARCH" || true
 # to bash, so an unmatched glob iterates over the literal pattern; the
 # `[ -d "$cand" ]` guard handles that without needing nullglob.
 for profile in release debug; do
-    for cand in "$REPO_ROOT/target/$profile/build/cef-dll-sys-"*"/out/cef_macos_$ARCH"; do
+    for cand in "${CARGO_TARGET_DIR:-$REPO_ROOT/target}/$profile/build/cef-dll-sys-"*"/out/cef_macos_$ARCH"; do
         [ -d "$cand" ] || continue
         validate_dir "$cand" cargo-cache || true
     done
