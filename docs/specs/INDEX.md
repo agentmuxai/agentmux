@@ -657,6 +657,7 @@ partial list.
 | [`SPEC_BROWSER_PANE_POPUPS_ADOPTED_2026_10_08`](SPEC_BROWSER_PANE_POPUPS_ADOPTED_2026_10_08.md) | SPEC: Popups from a browser pane stay in AgentMux, and an agent can drive them |
 | [`SPEC_BROWSER_PANE_PROFILES_MENU_2026_10_09`](SPEC_BROWSER_PANE_PROFILES_MENU_2026_10_09.md) | SPEC: Home and Profile buttons in the browser pane's toolbar, with Incognito and named profiles |
 | [`SPEC_BROWSER_PANE_THIN_BAR_AND_MENUS_IN_PANE_2026_10_18`](SPEC_BROWSER_PANE_THIN_BAR_AND_MENUS_IN_PANE_2026_10_18.md) | SPEC: The browser pane's thin bar puts Bookmarks on the right with a line between its rows, and its menus stay inside the pane |
+| [`SPEC_BROWSER_WEB_TERMINAL_TYPING_2026_10_23`](SPEC_BROWSER_WEB_TERMINAL_TYPING_2026_10_23.md) | SPEC: On a site the person has granted, an agent runs freely in a web terminal, and Enter, Space and uploads work |
 | [`SPEC_BUILD_CACHE_CLEANUP_2026_10_26`](SPEC_BUILD_CACHE_CLEANUP_2026_10_26.md) | Spec: Build-cache cleanup and a low-disk warning |
 | [`SPEC_BUILD_SLOT_ENFORCEMENT_2026_10_20`](SPEC_BUILD_SLOT_ENFORCEMENT_2026_10_20.md) | Spec: The build slot — one heavy build or test at a time on a machine, enforced for agents' cargo |
 | [`SPEC_BUNDLE_CONTENTS_MEMORY_NOT_MCP_2026_10_07`](SPEC_BUNDLE_CONTENTS_MEMORY_NOT_MCP_2026_10_07.md) | SPEC: A bundle holds instructions, context, skills, Global Memory and Personal Memory — not MCP servers |

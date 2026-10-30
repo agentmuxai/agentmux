@@ -14,6 +14,7 @@ use serde_json::json;
 
 use crate::server::browser_actions::{note, How, Kind, Note};
 use crate::server::browser_bypass as bypass;
+use crate::server::browser_powers::{self, Power};
 use crate::server::ui_handlers::{
     banner_for, err_response, from_host, get_host_ipc, owning_agent, proxy_to_host_timeout, proxy_value, target_block_id,
 };
@@ -28,7 +29,7 @@ fn bypass_pane(target: &str) -> String {
 
 /// The address `target` (a pane or popup window) shows, as the host reports
 /// it from the page itself: never block meta, which a client can write.
-async fn page_url(state: &AppState, target: &str) -> Result<String, String> {
+pub(crate) async fn page_url(state: &AppState, target: &str) -> Result<String, String> {
     let host = get_host_ipc(state).await?;
     let script = json!({ "block_id": target, "script": "location.href", "await_promise": false });
     let v = proxy_to_host_timeout(state, &host, "eval", script, None).await?;
@@ -104,17 +105,24 @@ pub(crate) async fn handle_ui_browser_request_bypass(
         Err((code, e)) => return err_response(code, e),
     };
     let pane = bypass_pane(&block_id);
+    let powers = match browser_powers::parse(req.powers.as_deref()) {
+        Ok(p) => p,
+        Err(e) => return err_response(StatusCode::BAD_REQUEST, e),
+    };
     let granted = |g: &bypass::Grant| {
         (
             StatusCode::OK,
             Json(json!({ "ok": true, "data": {
-                "answer": "granted", "origins": g.origins, "minutes": g.minutes,
+                "answer": "granted", "origins": g.origins, "minutes": g.minutes, "powers": browser_powers::names(&g.powers),
                 "minutes_left": g.minutes_left(), "expires_at": g.expires_at_ms,
             } })),
         )
             .into_response()
     };
-    if let Some(g) = bypass::active_for(&pane, &agent) {
+    // A grant already there answers a request for what it carries. One that
+    // lacks a power the agent now asks for is not widened by asking: the
+    // person is shown the banner for the larger set.
+    if let Some(g) = bypass::active_for(&pane, &agent).filter(|g| powers.iter().all(|p| g.allows(*p))) {
         return granted(&g);
     }
     let (banner_at, in_window) = banner_for(&block_id);
@@ -163,7 +171,10 @@ pub(crate) async fn handle_ui_browser_request_bypass(
         &banner_at,
         &agent,
         crate::server::browser_attention::Kind::Bypass,
-        json!({ "reason": reason, "origins": origins, "minutes": minutes, "window": in_window }),
+        json!({
+            "reason": reason, "origins": origins, "minutes": minutes, "window": in_window,
+            "powers": browser_powers::names(&powers),
+        }),
         std::time::Duration::from_secs(10 * 60),
     )
     .await
@@ -178,7 +189,7 @@ pub(crate) async fn handle_ui_browser_request_bypass(
         Answer::Yes if crate::server::browser_owner::owner_of(&pane) != owner_before => {
             return err_response(StatusCode::FORBIDDEN, "the user took over this pane, so auto-approve wasn't turned on".to_string());
         }
-        Answer::Yes => return granted(&bypass::grant(&state, &pane, &agent, origins, minutes, How::Approved)),
+        Answer::Yes => return granted(&bypass::grant(&state, &pane, &agent, origins, powers, minutes, How::Approved)),
         Answer::Cancelled => {
             bypass::note_declined(&pane);
             tracing::info!(agent_id = %agent, pane = %pane, "[browser-bypass] the user said No");
@@ -262,7 +273,8 @@ pub(crate) async fn handle_host_browser_bypass(
         );
     }
     let minutes = bypass::clamp_minutes(body.get("minutes").and_then(|v| v.as_u64()));
-    let g = bypass::grant(&state, &pane, &owner, origins, minutes, How::ByUser);
+    // The header's button turns on what Auto-approve always was: committing clicks.
+    let g = bypass::grant(&state, &pane, &owner, origins, vec![Power::Clicks], minutes, How::ByUser);
     (
         StatusCode::OK,
         Json(json!({ "ok": true, "data": { "origins": g.origins, "minutes": g.minutes, "expires_at": g.expires_at_ms } })),
