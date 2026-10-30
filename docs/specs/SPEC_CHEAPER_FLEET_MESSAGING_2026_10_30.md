@@ -1,6 +1,6 @@
 # Spec: cheaper fleet messaging: a bulletin that never wakes, quota mode as a setting, no-ack messages, and a count
 
-**Status:** approved, 2026-10-30. The four parts were approved by the operator ("approved, lets do it", relayed by AgentY). Built in Kanban #11016, one PR per part.
+**Status:** active, 2026-10-30. Approved the same day. The four parts were approved by the operator ("approved, lets do it", relayed by AgentY). Built in Kanban #11016, one PR per part.
 **Date:** 2026-10-30
 **Author:** Agent2@narko
 **Verified against:** `agentmux` `main` @ `be2d8f8fe` (2026-10-30), by reading code, and against the jekt audit file and Claude session transcripts of 2026-10-29.

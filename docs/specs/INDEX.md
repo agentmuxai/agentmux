@@ -659,6 +659,7 @@ partial list.
 | [`SPEC_BUNDLE_CONTENTS_MEMORY_NOT_MCP_2026_10_07`](SPEC_BUNDLE_CONTENTS_MEMORY_NOT_MCP_2026_10_07.md) | SPEC: A bundle holds instructions, context, skills, Global Memory and Personal Memory — not MCP servers |
 | [`SPEC_CANONICAL_AGENT_ID_MIGRATION_2026_09_21`](SPEC_CANONICAL_AGENT_ID_MIGRATION_2026_09_21.md) | SPEC: retire the agent slug as a lookup key — `db_agents.id` becomes canonical |
 | [`SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07`](SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md) | CEF milestone upgrade: 148 (7778) → 152 (7977), all three platforms |
+| [`SPEC_CHEAPER_FLEET_MESSAGING_2026_10_30`](SPEC_CHEAPER_FLEET_MESSAGING_2026_10_30.md) | Spec: cheaper fleet messaging: a bulletin that never wakes, quota mode as a setting, no-ack messages, and a count |
 | [`SPEC_CLAUDE_CLI_PIN_CONTRACT_TESTS_2026_07_14`](SPEC_CLAUDE_CLI_PIN_CONTRACT_TESTS_2026_07_14.md) | SPEC — CLI pin consolidation + contract tests against the pinned Claude CLI |
 | [`SPEC_CLI_NATIVE_AGENT_MESSAGE_VISIBILITY_2026_10_26`](SPEC_CLI_NATIVE_AGENT_MESSAGE_VISIBILITY_2026_10_26.md) | SPEC: See what agents say to each other through the CLI's own messaging: one record, one container, live in the pane |
 | [`SPEC_CLOUD_SETTINGS_DISCOVERY_2026_09_27`](SPEC_CLOUD_SETTINGS_DISCOVERY_2026_09_27.md) | SPEC: AgentMux Cloud settings discovery, and recovering from a dead cloud sign-in |
@@ -1482,12 +1483,6 @@ section above, do not bulk-restamp them.
 | [`SPEC_BROWSER_PANE_LIFECYCLE`](SPEC_BROWSER_PANE_LIFECYCLE.md) | SPEC: Browser Pane Lifecycle & State Machine |
 | [`cef-drag-window-management`](cef-drag-window-management.md) | Spec: CEF Drag, Drop, and Window Management |
 | [`cef-transparency-architecture`](cef-transparency-architecture.md) | Spec: CEF Transparency Architecture |
-
-**`approved`**
-
-| Spec | Title |
-|---|---|
-| [`SPEC_CHEAPER_FLEET_MESSAGING_2026_10_30`](SPEC_CHEAPER_FLEET_MESSAGING_2026_10_30.md) | Spec: cheaper fleet messaging: a bulletin that never wakes, quota mode as a setting, no-ack messages, and a count |
 
 **`assessment`**
 
