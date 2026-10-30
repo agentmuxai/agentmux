@@ -21,6 +21,10 @@ pub struct FleetActionResult {
     /// early" distinctly from "ran to completion, some failed."
     #[serde(default)]
     pub aborted_early: bool,
+    /// Blocks whose stop waits for the person's override window (an agent stopping another
+    /// agent): not stopped yet, and not failed.
+    #[serde(default)]
+    pub pending: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
