@@ -44,6 +44,68 @@ describe("checkFrame — V1 (one direction)", () => {
         expect(v.causes).toContain("scroll-up:30");
     });
 
+    it("rows moving down because the content below shrank are a tight shift, not a violation", () => {
+        // A 120 px preview collapsed at the bottom: the browser clamped scrollTop, rows above slid down.
+        const prev = frame(pinned, { scrollHeight: 1600, scrollTop: 1000 });
+        const cur = frame([row("a", 120, 200), row("b", 320, 200), row("c", 520, 80)], { scrollHeight: 1480, scrollTop: 880 });
+        const v = checkFrame(prev, cur).violation!;
+        expect(v.kind).toBe("tight");
+        expect(v.causes[0]).toBe("content-shrink:120");
+    });
+
+    it("rows moving down because the scroller got taller are a tight shift too", () => {
+        const prev = frame(pinned);
+        const cur = frame(pinned.map((r) => ({ ...r, top: r.top + 60, bottom: r.bottom + 60 })), { clientHeight: 660, scrollTop: 940 });
+        const v = checkFrame(prev, cur).violation!;
+        expect(v.kind).toBe("tight");
+        expect(v.causes).toContain("viewport-grow:60");
+    });
+
+    it("a move down larger than the shrink that explains it is still a violation", () => {
+        // A 1 px shrink cannot account for rows sliding 100 px.
+        const down = pinned.map((r) => ({ ...r, top: r.top + 100, bottom: r.bottom + 100 }));
+        const small = checkFrame(frame(pinned), frame(down, { scrollHeight: 1599, scrollTop: 900 })).violation!;
+        expect(small.kind).toBe("down");
+        // 120 px of shrink explains 120 px, not 200.
+        const far = pinned.map((r) => ({ ...r, top: r.top + 200, bottom: r.bottom + 200 }));
+        const big = checkFrame(frame(pinned), frame(far, { scrollHeight: 1480, scrollTop: 800 })).violation!;
+        expect(big.kind).toBe("down");
+        expect(big.causes[0]).toBe("content-shrink:120");
+    });
+
+    it("a shrink and a taller scroller together account for the sum of both", () => {
+        const down = pinned.map((r) => ({ ...r, top: r.top + 150, bottom: r.bottom + 150 }));
+        const v = checkFrame(frame(pinned), frame(down, { scrollHeight: 1540, clientHeight: 690, scrollTop: 850 })).violation!;
+        expect(v.kind).toBe("tight");
+    });
+
+    it("growth above the visible rows does not hide a shrink below them", () => {
+        // Eight 200 px rows, the last three visible (the first is rendered above the viewport). The
+        // first grows 50 px and the last shrinks 100 px: the net change is -50, but the visible rows
+        // legitimately slide down by 100.
+        const prev = frame([row("e", -1000, 200), row("f", 0, 200), row("g", 200, 200), row("h", 400, 200)]);
+        const cur = frame([row("e", -950, 250), row("f", 100, 200), row("g", 300, 200), row("h", 500, 100)], {
+            scrollHeight: 1550,
+            scrollTop: 950,
+        });
+        const v = checkFrame(prev, cur).violation!;
+        expect(v.kind).toBe("tight");
+        expect(v.dy).toBe(100);
+    });
+
+    it("a row drawn somewhere else with no size change is not explained as a shrink", () => {
+        // Only row b moves down 30 px; every height, the scroll position and the viewport are unchanged.
+        const cur = [row("a", 0, 200), row("b", 230, 200), row("c", 400, 200)];
+        const v = checkFrame(frame(pinned), frame(cur)).violation!;
+        expect(v.kind).toBe("down");
+        expect(v.causes).toContain("transform");
+    });
+
+    it("a move down with no allowed cause is still a violation", () => {
+        const down = pinned.map((r) => ({ ...r, top: r.top + 30, bottom: r.bottom + 30 }));
+        expect(checkFrame(frame(pinned), frame(down, { scrollTop: 970 })).violation!.kind).toBe("down");
+    });
+
     it("sub-pixel settling is not a violation", () => {
         const nudge = pinned.map((r) => ({ ...r, top: r.top + 0.4, bottom: r.bottom + 0.4 }));
         expect(checkFrame(frame(pinned), frame(nudge)).violation).toBeNull();
