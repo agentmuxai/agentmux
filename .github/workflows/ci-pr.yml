@@ -235,14 +235,9 @@ jobs:
     # keep file and line, and the biggest part of codegen and link time for 18
     # large test binaries goes (docs/specs/SPEC_CI_MERGE_QUEUE_AND_FAST_GATES_2026_10_19.md
     # §5 Phase 4; ~4.5 of the ~6.5 nextest minutes were compiling).
-    #
-    # The Ubuntu leg has no debug info at all: its 16 GB were exhausted while rustc built the
-    # agentmux-srv test crate (it peaked at 14 GB with line tables), which shut the runner down
-    # (exit 143) on about 1 run in 9. A panic still prints its file and line; only a backtrace loses
-    # the lines of its frames.
     env:
-      CARGO_PROFILE_DEV_DEBUG: ${{ matrix.os == 'ubuntu-latest' && '0' || 'line-tables-only' }}
-      CARGO_PROFILE_TEST_DEBUG: ${{ matrix.os == 'ubuntu-latest' && '0' || 'line-tables-only' }}
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+      CARGO_PROFILE_TEST_DEBUG: line-tables-only
     # Both legs block, per SPEC_CI_CHECK_PLACEMENT_PROTOCOL_2026_09_21.md R2.
     # Ubuntu used to be `continue-on-error` — it spent ~6 min on every PR and
     # could not fail one, while Windows (14-15 min, the slowest leg) was the
@@ -292,6 +287,20 @@ jobs:
       - name: Use the mold linker (Linux)
         if: matrix.os == 'ubuntu-latest'
         uses: rui314/setup-mold@v1
+
+      # The Linux runner has 16 GB and 4 GB of swap, and rustc alone peaks at ~14 GB building the
+      # agentmux-srv test crate (see the nextest step), so a spike past RAM used to fill the swap, stall
+      # the machine and get the runner shut down (exit 143). Twelve more GB of swap on the 80+ GB of
+      # free disk turns that spike into a short slowdown. This is the margin; the real fix is a
+      # smaller srv test crate or a larger runner.
+      - name: More swap (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo fallocate -l 12G /extra.swap
+          sudo chmod 600 /extra.swap
+          sudo mkswap /extra.swap
+          sudo swapon /extra.swap
+          free -m
 
       # Kept byte-for-byte in sync with the identical step in
       # ci-nightly-build.yml — the nightly has had this since it was added;
@@ -426,7 +435,8 @@ jobs:
           # test binary), each rustc growing to ~8 GB until the machine swapped and the runner went.
           # The unit test binary is built first, on its own, so the two never overlap; the run below
           # then builds the binary and the small integration tests. Same package list in both, so the
-          # features cargo resolves, and so what the second reuses, are the same.
+          # features cargo resolves, and so what the second reuses, are the same. Even alone, rustc
+          # reaches ~14 GB on the test crate (with or without debug info), hence the extra swap above.
           (while true; do
             echo "[resources] $(free -m | awk 'NR==2{printf "mem_used=%dMB mem_avail=%dMB ", $3, $7} NR==3{printf "swap_used=%dMB", $3}') disk_root_avail=$(df -m --output=avail / | tail -1 | tr -d ' ')MB top=$(ps -eo rss=,comm= --sort=-rss | head -1 | awk '{printf "%s:%dMB", $2, $1/1024}')"
             sleep 5

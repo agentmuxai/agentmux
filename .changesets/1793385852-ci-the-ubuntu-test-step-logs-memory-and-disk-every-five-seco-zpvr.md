@@ -1,5 +1,4 @@
 ---
 type: patch
 ---
-
-CI: the ubuntu test step logs memory and disk every five seconds, to find why the runner is sometimes shut down mid-build
+CI: the ubuntu test leg no longer gets shut down mid-build: it builds the srv unit test binary before the srv binary so two 8 GB compiles never overlap, has 12 GB more swap, and logs memory and disk every five seconds
