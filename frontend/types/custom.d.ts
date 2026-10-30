@@ -300,6 +300,8 @@ declare global {
         reload(blockId: string): Promise<void>;
         /** Stop the page's load (the toolbar's Reload turns into Stop while it loads). */
         stop(blockId: string): Promise<void>;
+        /** Stop a running download of the pane (the strip's Cancel); an id the host no longer holds does nothing. */
+        cancelDownload(blockId: string, downloadId: number): Promise<void>;
         focus(blockId: string): Promise<void>;
         cut(blockId: string): Promise<void>;
         copy(blockId: string): Promise<void>;
