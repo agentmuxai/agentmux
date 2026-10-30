@@ -186,6 +186,21 @@ describe("PaneTabStrip — cross-pane drop target (§3.4)", () => {
         expect(config.canDrop(drag("pane-other", "TILE_ITEM"))).toBe(false);
     });
 
+    it("Alt held on the drop asks to keep two document panes as separate pane tabs", () => {
+        vi.useFakeTimers();
+        try {
+            const { config, onReceiveForeignTab } = renderInHeader();
+            config.onDrop({
+                source: { data: { type: paneTabItemType, sourceNodeId: "pane-other", blockId: "blk-7" } },
+                location: { current: { input: { altKey: true } } },
+            });
+            vi.runOnlyPendingTimers();
+            expect(onReceiveForeignTab).toHaveBeenCalledWith("blk-7", { keepSeparate: true });
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
     it("reports the dragged blockId on drop — one task later, not inside the drop dispatch", () => {
         vi.useFakeTimers();
         try {
