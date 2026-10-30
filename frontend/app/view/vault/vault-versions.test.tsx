@@ -32,7 +32,7 @@ const key: VaultEntryInfo = {
     last_used_at: 0,
 };
 
-const earlier: VaultVersionInfo = { seq: 7, replaced_at: Date.now() - 60_000, replaced_by: "you", how: "replaced", tail: "a1B3" };
+const earlier: VaultVersionInfo = { seq: 7, replaced_at: Date.now() - 60_000, replaced_by: "you", how: "replaced", tail: "a1B3", state: "previous" };
 
 describe("Earlier values", () => {
     beforeEach(() => {
@@ -69,6 +69,24 @@ describe("Earlier values", () => {
         render(() => <VaultVersionsDialog entry={key} onClose={() => {}} />);
         fireEvent.click(await screen.findByRole("button", { name: /Restore/ }));
         expect((await screen.findByRole("alert")).textContent).toContain("past its 7 days");
+    });
+
+    it("marks a rotation's new value, and offers no restore while its rotation runs", async () => {
+        loadVersions.mockResolvedValue([
+            { ...earlier, seq: 9, how: "rotated", replaced_by: "Agent2-6", state: "pending" },
+            { ...earlier, seq: 10, how: "rotated", replaced_by: "Agent2-6", state: "rotation failed at step 3" },
+        ]);
+        render(() => <VaultVersionsDialog entry={key} onClose={() => {}} />);
+        const pending = await waitFor(() => {
+            const el = document.querySelector('[data-seq="9"]');
+            if (!el) throw new Error("not yet");
+            return el;
+        });
+        expect(pending.textContent).toContain("still running");
+        expect(pending.querySelector("button")).toBeNull();
+        const failed = document.querySelector('[data-seq="10"]')!;
+        expect(failed.textContent).toContain("may hold it");
+        expect(failed.querySelector("button")).not.toBeNull();
     });
 
     it("says when none is kept", async () => {
