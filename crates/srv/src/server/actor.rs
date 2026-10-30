@@ -304,7 +304,16 @@ pub(crate) fn require_own_block_transcript(ctx: &RpcContext, store: &Store, bloc
     if ctx.agent_id.is_empty() {
         return ctx.operator_only(&format!("{what} is written by its own agent or by the AgentMux window"));
     }
-    match super::agent_handlers::identity_env::block_agent_slug(store, block_id) {
+    // Who runs on a pane comes from the launch record (`last_block_id`), never from the block's `agentId`
+    // meta, which any connection can write: `instance_get_by_block_id` only lets that meta choose between
+    // rows already recorded for this block.
+    let owner = store
+        .instance_get_by_block_id(block_id)
+        .ok()
+        .flatten()
+        .and_then(|inst| store.agent_def_get(&inst.id).ok().flatten())
+        .map(|def| def.slug);
+    match owner {
         Some(slug) if slug.eq_ignore_ascii_case(&ctx.agent_id) => Ok(()),
         _ => Err(format!("FORBIDDEN: {what} is written by its own agent or by the AgentMux window, not by another agent")),
     }

@@ -11,6 +11,9 @@ use crate::backend::rpc_types::{RpcContext, RpcMessage, COMMAND_SESSION_ARCHIVE,
 use crate::backend::storage::agents::test_agent_def;
 use crate::server::tests::test_state;
 
+/// The pane (block ids must be UUIDs for the meta writes below).
+const PANE: &str = "7b1c0f4e-52a3-4d9e-8f10-3c2d9a6e4b11";
+
 /// A state with agents `own-a` and `own-b`, and a pane running `own-a`.
 fn state_with_a_pane() -> (AppState, String) {
     let state = test_state();
@@ -20,7 +23,7 @@ fn state_with_a_pane() -> (AppState, String) {
         state.mstore.agent_def_insert(&mut def).unwrap();
     }
     let mut block = crate::backend::obj::Block {
-        oid: "own-block".to_string(),
+        oid: PANE.to_string(),
         parentoref: String::new(),
         version: 0,
         runtimeopts: None,
@@ -34,7 +37,28 @@ fn state_with_a_pane() -> (AppState, String) {
         subblockids: None,
     };
     state.mstore.insert(&mut block).unwrap();
-    (state, "own-block".to_string())
+    // The launch record: srv writes it when the agent starts on the pane.
+    state
+        .mstore
+        .instance_create(&crate::backend::storage::agents::AgentInstance {
+            id: "inst-own-a".to_string(),
+            definition_id: "uid-own-a".to_string(),
+            parent_instance_id: String::new(),
+            block_id: PANE.to_string(),
+            session_id: String::new(),
+            status: "running".to_string(),
+            github_context: String::new(),
+            started_at: 1000,
+            ended_at: 0,
+            created_at: 1000,
+            identity_id: String::new(),
+            memory_id: String::new(),
+            instance_name: String::new(),
+            working_directory: String::new(),
+            display_hidden: false,
+        })
+        .unwrap();
+    (state, PANE.to_string())
 }
 
 async fn call(state: &AppState, ctx: RpcContext, command: &str, block_id: &str) -> Result<serde_json::Value, String> {
@@ -85,4 +109,20 @@ async fn the_panes_own_agent_and_the_window_are_not_refused() {
         let e = call(&state, ctx, COMMAND_SESSION_RESTORE, &block).await.unwrap_err();
         assert!(!e.starts_with("FORBIDDEN"), "{e}");
     }
+}
+
+/// Block meta is writable by any connection, so a pane's `agentId` is not proof of who runs on it:
+/// another agent that rewrites it to its own id is still refused.
+#[tokio::test]
+async fn rewriting_a_panes_agent_id_meta_does_not_make_an_agent_its_owner() {
+    let (state, block) = state_with_a_pane();
+    let mut meta = crate::backend::obj::MetaMapType::new();
+    meta.insert("agentId".to_string(), serde_json::json!("uid-own-b"));
+    crate::server::service::update_object_meta(&state.mstore, &format!("block:{block}"), &meta).unwrap();
+    for command in [COMMAND_SESSION_ARCHIVE, COMMAND_SESSION_RESTORE] {
+        let e = call(&state, as_agent("own-b"), command, &block).await.unwrap_err();
+        assert!(e.starts_with("FORBIDDEN"), "{command}: {e}");
+    }
+    let e = call(&state, as_agent("own-a"), COMMAND_SESSION_RESTORE, &block).await.unwrap_err();
+    assert!(!e.starts_with("FORBIDDEN"), "the agent that was launched there is still its owner: {e}");
 }
