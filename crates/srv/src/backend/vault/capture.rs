@@ -394,12 +394,13 @@ impl Capture {
                 Target::Existing { id, created_at, label, part } => {
                     let gone = || format!("{label} was deleted while the command ran");
                     let row = store.vault_get(id).map_err(|e| e.to_string())?.filter(|r| r.created_at == *created_at).ok_or_else(gone)?;
-                    let kind = kinds::kind(&row.kind).ok_or_else(|| format!("{label} has an unknown kind"))?;
                     let mut parts = seal::open(&key, &row.id, &row.sealed)?;
                     if let Some(mut old) = parts.0.insert(part.to_string(), f.value.to_string()) {
                         zeroize::Zeroize::zeroize(&mut old);
                     }
-                    let kept = (*part == kind.parts[0]).then(|| versions::of(&row, &self.agent, CAPTURED));
+                    // The whole entry as it was, whichever part this replaces: the person was
+                    // told the old value is kept for 7 days.
+                    let kept = Some(versions::of(&row, &self.agent, CAPTURED));
                     let was = row.sealed.clone();
                     let changed = VaultRow { sealed: seal::seal(&key, &row.id, &parts)?, updated_at: now, ..row };
                     writes.push(CaptureWrite::Replace { row: changed, was, kept });

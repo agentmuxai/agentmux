@@ -277,3 +277,24 @@ fn a_captured_value_containing_a_given_one_is_cleaned_out_whole() {
     let clean = clean_held(&out, &given.merged(&captured), &[]).unwrap();
     assert_eq!(clean[0].1, "old [vault:api-key-old] new [vault:api-key-new]");
 }
+
+#[test]
+fn a_capture_into_any_part_keeps_the_old_entry_for_seven_days() {
+    let s = store();
+    let card = create(
+        &s,
+        NewEntry {
+            kind: "card".into(),
+            label: "Company card".into(),
+            fields: Default::default(),
+            tags: vec![],
+            parts: Parts([("number".to_string(), "4111111111111111".to_string()), ("cvc".to_string(), "123".to_string())].into()),
+        },
+    )
+    .unwrap();
+    let rule = CaptureRule { into: CaptureInto { id: Some(card.clone()), part: Some("cvc".into()), ..Default::default() }, from: CaptureFrom::Stdout("all".into()) };
+    let cap = plan(&s, &[rule], "Agent2-6", "issue-cvc").unwrap();
+    let Outcome::Stored { .. } = cap.finish(&s, "cvc-98765432", "cvc-98765432", false, 0) else { panic!("stored") };
+    assert_eq!(value(&s, &card, "cvc"), "cvc-98765432");
+    assert_eq!(versions::list(&s, &card).unwrap().len(), 1, "the person was told the old value is kept");
+}
