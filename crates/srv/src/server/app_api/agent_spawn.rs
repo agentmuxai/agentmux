@@ -27,7 +27,7 @@ use agentmux_common::api_types::SpawnAgentRequest;
 use super::*;
 
 mod many;
-mod team;
+pub(super) mod team;
 pub(crate) use many::handle_agent_spawn_many;
 
 /// The worker pane's leader, `{agent, id, block_id}`: the leader's name, its

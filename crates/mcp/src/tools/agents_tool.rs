@@ -89,12 +89,14 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
     }
 }
 
-/// `start`, `stop`, `set_seat`, `env_get` or `env_set` on another machine (`host`): srv signs the request
+/// `start`, `open`, `stop`, `set_seat`, `env_get` or `env_set` on another machine (`host`): srv signs the request
 /// as this agent and the other machine's srv carries it out (`agents.<action>`, spec §4.3). Any other
 /// action refuses a `host`, so a call never quietly runs here when it was meant for there.
 async fn remote_agents(cx: &ToolCtx<'_>, action: &str, args: &Value, host: &str) -> Result<String> {
     let params = match action {
         "start" | "stop" | "env_get" => json!({ "agent": str_arg(args, "agent") }),
+        // The public `agent` is `agent_id` by now (`ACTS` renames it for `OpenAgent`).
+        "open" => json!({ "agent": str_arg(args, "agent_id") }),
         "env_set" => json!({
             "agent": str_arg(args, "agent"),
             "lines": args.get("lines"),
@@ -102,7 +104,7 @@ async fn remote_agents(cx: &ToolCtx<'_>, action: &str, args: &Value, host: &str)
             "unset": args.get("unset"),
         }),
         "set_seat" => json!({ "seats": args.get("seats") }),
-        other => anyhow::bail!("Agents {other}: host applies to start, stop, set_seat, env_get and env_set; the other actions run on this machine"),
+        other => anyhow::bail!("Agents {other}: host applies to start, open, stop, set_seat, env_get and env_set; the other actions run on this machine"),
     };
     let op = format!("agents.{action}");
     let reason = str_arg(args, "reason").unwrap_or_else(|| format!("Agents {action}"));
@@ -605,7 +607,7 @@ mod tests {
         let cx = ToolCtx { local_url: "", auth_key: "", block_id: "", client: &client, loops: &loops, loop_counter: &counter };
         for action in ["list", "spawn", "detach", "watch"] {
             let e = call("Agents", &json!({ "action": action, "host": "narko" }), &cx).await.unwrap_err().to_string();
-            assert!(e.contains("host applies to start, stop, set_seat, env_get and env_set"), "{action}: {e}");
+            assert!(e.contains("host applies to start, open, stop, set_seat, env_get and env_set"), "{action}: {e}");
         }
     }
 

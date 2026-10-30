@@ -45,7 +45,7 @@ fn stored_env(state: &AppState, def: &AgentDefinition) -> Option<String> {
 
 #[test]
 fn every_agent_control_operation_needs_a_certificate_backed_caller() {
-    for op in ["agents.start", "agents.stop", "agents.set_seat", "agents.env_get", "agents.env_set"] {
+    for op in ["agents.start", "agents.open", "agents.stop", "agents.set_seat", "agents.env_get", "agents.env_set"] {
         assert!(lookup(op).unwrap_or_else(|| panic!("{op} is registered")).changes_state, "{op}");
     }
 }
@@ -74,6 +74,7 @@ async fn a_call_must_name_an_agent_here() {
         env_set(&state, &caller(), json!({ "set": { "TZ": "1" } })).await,
         env_get(&state, &caller(), json!({})).await,
         start(&state, &caller(), json!({})).await,
+        open(&state, &caller(), json!({})).await,
         stop(&state, &caller(), json!({ "agent": "  " })).await,
     ] {
         assert_eq!(run.unwrap_err().code, "invalid_arg");
@@ -81,6 +82,7 @@ async fn a_call_must_name_an_agent_here() {
     for run in [
         env_set(&state, &caller(), json!({ "agent": "nobody-here", "set": { "TZ": "1" } })).await,
         start(&state, &caller(), json!({ "agent": "nobody-here" })).await,
+        open(&state, &caller(), json!({ "agent": "nobody-here" })).await,
         stop(&state, &caller(), json!({ "agent": "nobody-here" })).await,
     ] {
         assert_eq!(run.unwrap_err().code, "not_found");
