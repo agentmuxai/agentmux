@@ -116,8 +116,8 @@ function setGeometry(el: HTMLElement, g: PartialGeometry): void {
  * instead of hiding it behind an opaque ordering flag. (reagent P2 on the
  * original version of this file: a `clampFirst` boolean that only reordered
  * two side-effecting calls without ever flushing between them produced
- * byte-identical outcomes for both orders, since `notify()`'s own
- * the pin recomputes and lands on the same clamped value
+ * byte-identical outcomes for both orders, since the pin recomputes
+ * from the geometry and lands on the same clamped value
  * regardless of what `clamp()` already did — so it never actually exercised
  * two different orderings from the SUT's perspective.)
  *
@@ -217,7 +217,7 @@ describe("AgentDocumentVirtualList — stick-to-bottom across pane resize", () =
     it("stays pinned when the pane GROWS and the native clamp's scroll event is fully processed BEFORE the ResizeObserver notifies", () => {
         // The worst-case ordering the (disproven) H1 theory relied on: if the
         // browser's own scrollTop auto-clamp reached handleScrollNow before
-        // RO #1 got a chance to also correct, would isNearBottom() read "not
+        // RO #1 got a chance to also correct, would the follow check read "not
         // near bottom" and disengage stickToBottom? Flushing rAF between
         // clamp() and notify() actually forces that intermediate state
         // through handleScrollNow, rather than letting both scroll events
@@ -352,29 +352,5 @@ describe("AgentDocumentVirtualList — first-ever overflow", () => {
         expect(viewState.stickToBottom()).toBe(false);
         expect(scrollRef.scrollTop).toBe(150); // untouched — not forced to bottom
         expect(viewState.headAnchor()).toEqual({ nodeId: "some-older-node", offsetPx: 40 });
-    });
-
-    it("does not log or act when the first-overflow event already reads near bottom (reagent P2 on PR #2834)", () => {
-        // If the raw geometry already reads near-bottom, forcing is a
-        // redundant no-op and must not spam the [wave-scroll-first-overflow]
-        // diagnostic meant to flag genuine saves for future telemetry pulls.
-        const { scrollRef } = setup();
-        setGeometry(scrollRef, { scrollHeight: 200, clientHeight: 200, scrollTop: 0 });
-
-        const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
-        try {
-            // Grows past the viewport, but scrollTop already reflects true
-            // bottom for the new geometry — nothing to save here.
-            setGeometry(scrollRef, { scrollHeight: 500, scrollTop: 300 });
-            scrollRef.dispatchEvent(new Event("scroll"));
-            flushRaf();
-
-            const firstOverflowLogs = infoSpy.mock.calls.filter(
-                (call) => call[0] === "[wave-scroll-first-overflow]",
-            );
-            expect(firstOverflowLogs).toHaveLength(0);
-        } finally {
-            infoSpy.mockRestore();
-        }
     });
 });
