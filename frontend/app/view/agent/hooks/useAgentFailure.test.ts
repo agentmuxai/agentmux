@@ -887,8 +887,10 @@ describe("useAgentFailure follows the live state (SPEC_AGENT_PANE_FAILURE_ROW_FO
             blockId: BLOCK_ID, model, failure, liveAccount: account,
             onRetry() {}, onLoginAgain() {}, onLoginViaTerminal() {}, onOpenAccounts() {}, onNewSession() {},
         });
-        return { ui, setAccount };
+        return { ui, setAccount, model };
     };
+    const observed = (model: { dispatchPane: { mock: { calls: unknown[][] } } }) =>
+        model.dispatchPane.mock.calls.filter((c) => (c[0] as { type: string }).type === "FailureObserved");
     const labels = (ui: UseAgentFailureResult) => (ui.row()?.actions ?? []).map((a) => a.label ?? a.glyph);
 
     it("raises nothing at mount for a sign-in failure srv says is over", async () => {
@@ -922,6 +924,35 @@ describe("useAgentFailure follows the live state (SPEC_AGENT_PANE_FAILURE_ROW_FO
             expect(ui.row()).toBeNull();
             vi.advanceTimersByTime(SEED_WAIT_MS);
             expect(ui.row()).not.toBeNull();
+            dispose();
+        });
+    });
+
+    it("a live failure that arrives while the stored one waits is not overwritten by it", async () => {
+        hub.persistedFailure = authFailure();
+        await createRoot(async (dispose) => {
+            const { ui, model } = mkLive("unknown");
+            await Promise.resolve();
+            fire("agentfailure", transient());
+            expect(observed(model)).toHaveLength(1);
+            vi.advanceTimersByTime(SEED_WAIT_MS);
+            expect(observed(model)).toHaveLength(1);
+            expect((observed(model)[0][0] as { failure: AgentFailure }).failure.code).toBe("rate_limited");
+            expect(ui.row()).not.toBeNull();
+            dispose();
+        });
+    });
+
+    it("a turn that starts while the stored failure waits means it is never raised", async () => {
+        hub.persistedFailure = authFailure();
+        await createRoot(async (dispose) => {
+            const { ui, setAccount, model } = mkLive("unknown");
+            await Promise.resolve();
+            fireEvent(BLOCK_ID, { type: "turn-started", at: Date.now() } as AgentPaneEvent);
+            vi.advanceTimersByTime(SEED_WAIT_MS);
+            setAccount("signed_out");
+            expect(observed(model)).toHaveLength(0);
+            expect(ui.row()).toBeNull();
             dispose();
         });
     });

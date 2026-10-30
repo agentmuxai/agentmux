@@ -316,17 +316,24 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
         // one never flashes; a transient one has had no ladder in this pane, so it comes back as a
         // lapsed note, not as a live retry.
         let seedTimer: ReturnType<typeof setTimeout> | undefined;
+        // Set once the persisted failure has been judged, or overtaken by a live failure or a new turn.
+        let seeded = false;
+        const settleSeed = () => {
+            seeded = true;
+            clearTimeout(seedTimer);
+        };
         if (pf) {
             const at = recordedAt(pf, Date.now());
             failureFromMeta = true;
             const seed = () => {
+                // A live failure or a turn that began while it waited is newer than the stored one.
+                if (opts.failure()) return;
                 if (verdictOf({ data: pf, at }) === "healed") return;
                 opts.model.dispatchPane({ type: "FailureObserved", failure: pf, at });
             };
             if (isTransient(pf.code)) setLadderEnded(true);
             if (isAccountCause(pf.code) && opts.liveAccount && opts.liveAccount() === "unknown") {
                 // Until srv says, or for SEED_WAIT_MS, whichever comes first.
-                let seeded = false;
                 const once = () => {
                     if (seeded) return;
                     seeded = true;
@@ -342,6 +349,7 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
         }
 
         const unsubFailure = onMuxEvent(WpsEvent.AgentFailure, (f) => {
+                settleSeed();
                 cancelCountdown();
                 // A new failure never inherits an armed Take over: its row must
                 // start at the first click again (ReAgent P1 on #3742).
@@ -374,6 +382,7 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
         // never misfire on a failure.
         const unsubTurnEnded = addPaneEventListener((blockId, event) => {
             if (blockId !== opts.blockId) return;
+            if (event.type === "turn-started") settleSeed();
             if (event.type === "turn-ended" && event.outcome === "completed") {
                 autoRetries = 0;
                 setCompletedTurnAt(Date.now());
