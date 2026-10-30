@@ -5,7 +5,9 @@
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
-use super::sanitize::{format_injected_message, is_sensitive_message, sanitize_message, validate_agent_id, wrap_jekt_message_with_files};
+use super::sanitize::{
+    format_injected_message, is_sensitive_message, sanitize_message, validate_agent_id, with_system_note_marker, wrap_jekt_message_with_files,
+};
 use super::types::*;
 use super::{audit_hash, now_unix_millis, AUDIT_LOG_MAX, RATE_LIMIT_MAX};
 
@@ -1461,6 +1463,8 @@ impl Handler {
     /// Routed like a jekt: the controller's structured channel, else
     /// keystrokes. Audited as `system_note` from `agentmux`.
     pub fn deliver_system_note(&mut self, target_agent: &str, text: &str) -> Result<(), String> {
+        let text = with_system_note_marker(text);
+        let text = text.as_ref();
         let block_id = self.note_target(target_agent)?;
         let result = self.send_to_block(&block_id, text);
         let request_id = uuid::Uuid::new_v4().to_string();

@@ -835,6 +835,8 @@ pub fn deliver_agent_message_from(
 /// controllers can only queue a message as a turn of its own, so theirs is
 /// always held. Returns whether it joined a turn.
 pub fn system_note_into_turn_or_hold(block_id: &str, key: &str, text: &str) -> bool {
+    let text = crate::backend::reactive::sanitize::with_system_note_marker(text);
+    let text = text.as_ref();
     if let Some(ctrl) = get_controller(block_id) {
         if let Some(p) = ctrl.as_any().downcast_ref::<persistent::PersistentSubprocessController>() {
             return p.note_into_turn_or_hold(key, text);
