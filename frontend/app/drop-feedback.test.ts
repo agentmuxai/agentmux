@@ -143,7 +143,9 @@ describe("the pane header's edge glow", () => {
     });
 
     it("with its budget short, or under reduced motion, the strips are lit without the blink", () => {
-        expect(rule(strip, ".pane-header--foreign-hover.pane-header--no-blink::before")).not.toContain("tab-drop-edge-blink");
+        const steady = rule(strip, ".pane-header--foreign-hover.pane-header--no-blink::before");
+        expect(steady).not.toContain("am-blink");
+        expect(steady).toContain("am-pulse");
         for (const side of ["before", "after"]) {
             const reduced = rule(strip, `:root[data-motion-reduce~=feedback] .pane-header--foreign-hover::${side}`);
             expect(reduced).toContain("animation: none");
