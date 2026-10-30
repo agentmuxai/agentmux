@@ -2,17 +2,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * One-way flow for a following transcript — R2–R4 of
- * docs/specs/SPEC_AGENT_PANE_ONE_WAY_FLOW_2026_10_07.md.
+ * One-way flow for a following transcript — R2 and R4 of
+ * docs/specs/SPEC_AGENT_PANE_ONE_WAY_FLOW_2026_10_07.md, and the tight rule of
+ * docs/specs/SPEC_AGENT_PANE_BOTTOM_TIGHT_INVARIANT_2026_10_29.md.
  *
- * - R2, compensate: in one ResizeObserver callback, with layout clean, find how
- *   far each row that was visible at the last observation moved on screen, and
- *   scroll forward at once by the largest downward move. Every visible row then
- *   sits at or above where it was, whatever moved it.
- * - R3, a bottom spacer: a compensating scroll needs room below it when the
- *   content got shorter or the viewport taller. A trailing element provides
- *   exactly that much; new content fills it, and it only shrinks while it is
- *   below the viewport.
+ * - R2, compensate growth: in one ResizeObserver callback, with layout clean,
+ *   find how far each row that was visible at the last observation moved on
+ *   screen, and scroll forward at once by the largest downward move, never past
+ *   the true bottom. Growth makes its own room, so every visible row then sits
+ *   at or above where it was.
+ * - T, tight: while following there is never room below the latest content.
+ *   When the content below the reader got shorter, or the scroller taller, the
+ *   rows above slide down by exactly that much (the browser's own clamp) and the
+ *   bottom stays on the bottom edge. The old R3 bottom spacer, which kept the
+ *   rows still by leaving that much blank, is gone. A change of the scroller's
+ *   height or width (a pane resize, zoom) lands at the bottom at once.
  * - R4, one observer and one writer: this module owns the only observer and the
  *   only scrollTop writes on the one-way path; user input suspends both.
  *
@@ -29,9 +33,8 @@ export const RECHECK_MS = 300;
  * After the user commits (a send, or a queued message starting its turn), the
  * layout keeps changing for a moment: the composer shrinks back to one line,
  * the queued-message panel comes and goes. Those are the user's own changes
- * (spec §1), so for this long they land at the true bottom instead of being
- * held in place with spacer room, which left a gap between the user's message
- * and the composer for the agent to fill slowly.
+ * (spec §1), so for this long they land at the true bottom at once instead of
+ * being compensated row by row.
  */
 const COMMIT_SETTLE_MS = 600;
 
@@ -58,26 +61,6 @@ export function largestDownwardMove<K>(before: ReadonlyMap<K, number>, after: Re
     return worst > MOVE_EPSILON_PX ? worst : 0;
 }
 
-export interface SpacerInput {
-    /** The spacer's current height, px. */
-    spacer: number;
-    /** The scrollTop that must stay reachable. */
-    wanted: number;
-    clientHeight: number;
-    /** scrollHeight now, including the current spacer. */
-    scrollHeight: number;
-}
-
-/**
- * The spacer height that keeps `wanted` reachable with nothing to spare:
- * grows when the content got shorter or the viewport taller, is used up first
- * when content grows, never negative. Rounded up so a fractional `wanted`
- * against an integer scrollHeight never clamps by a fraction of a pixel.
- */
-export function spacerFor({ spacer, wanted, clientHeight, scrollHeight }: SpacerInput): number {
-    return Math.max(0, spacer + Math.ceil(wanted + clientHeight - scrollHeight - 0.001));
-}
-
 export interface OneWayHost {
     /** The pane follows (stick-to-bottom). */
     following(): boolean;
@@ -100,8 +83,6 @@ export interface OneWayHost {
 
 export class OneWayFlow {
     private scroller: HTMLElement | null = null;
-    private spacerEl: HTMLElement | null = null;
-    private spacerPx = 0;
     private readonly ro: ResizeObserver | null;
     private readonly rows = new Set<Element>();
     /**
@@ -115,7 +96,9 @@ export class OneWayFlow {
      */
     private baseline: Map<string, number> | null = null;
     private lastWidth = -1;
-    /** Until when layout changes settle at the bottom without spacer room (see COMMIT_SETTLE_MS, SHOW_SETTLE_MS). */
+    /** The scroller's clientHeight at the last observation: a change is a resize, which lands at the bottom at once. */
+    private lastHeight = -1;
+    /** Until when layout changes land at the bottom at once (see COMMIT_SETTLE_MS, SHOW_SETTLE_MS). */
     private settleUntil = Number.NEGATIVE_INFINITY;
     /** scrollHeight / clientHeight at the last observation, for the geometry of frame-step writes. */
     private lastGeo = { scrollHeight: 0, clientHeight: 0 };
@@ -141,17 +124,11 @@ export class OneWayFlow {
         });
     }
 
-    /** The scroller, the spacer, and the containers whose size is "how tall the content is". */
-    attach(scroller: HTMLElement, spacer: HTMLElement, containers: (Element | undefined)[]): void {
+    /** The scroller, and the containers whose size is "how tall the content is". */
+    attach(scroller: HTMLElement, containers: (Element | undefined)[]): void {
         this.scroller = scroller;
-        this.spacerEl = spacer;
         this.ro?.observe(scroller);
         for (const c of containers) if (c) this.ro?.observe(c, { box: "border-box" });
-    }
-
-    /** The bottom spacer's current height (px). */
-    get spacerHeight(): number {
-        return this.spacerPx;
     }
 
     observeRow(el: Element): void {
@@ -178,10 +155,10 @@ export class OneWayFlow {
     /**
      * Typing, send, a queued turn, the jump button: straight to the bottom.
      * With `commit` (a send, a queued message starting its turn; not each
-     * keystroke) it is a commit point (spec §1): any spacer room is given up,
-     * and layout changes for COMMIT_SETTLE_MS after it settle at the bottom
-     * too. Typing doesn't open the window, or the one-way rule would be off
-     * for as long as the user types.
+     * keystroke) it is a commit point (spec §1): layout changes for
+     * COMMIT_SETTLE_MS after it settle at the bottom too. Typing doesn't open
+     * the window, or the one-way rule would be off for as long as the user
+     * types.
      */
     jumpToBottom(commit = false): void {
         const el = this.scroller;
@@ -199,25 +176,20 @@ export class OneWayFlow {
     }
 
     /**
-     * A commit point without a jump (a queued message accepted mid-turn): give
-     * up spacer room and let layout changes for COMMIT_SETTLE_MS settle at the
-     * bottom. Callers only use it while the pane follows.
+     * A commit point without a jump (a queued message accepted mid-turn): let
+     * layout changes for COMMIT_SETTLE_MS settle at the bottom. Callers only use
+     * it while the pane follows.
      */
     commit(): void {
         this.settleUntil = performance.now() + COMMIT_SETTLE_MS;
-        if (this.spacerPx > 0) {
-            this.host.note?.(`spacer:release-${this.spacerPx}`);
-            this.setSpacer(0);
-        }
     }
 
     /**
      * The pane was shown again after its tab was hidden: land at the bottom now,
      * and let layout changes for SHOW_SETTLE_MS land there too instead of being
      * eased to, so the pane appears at its latest content with no catch-up
-     * motion. Output after that eases in as usual. Spacer room is given up:
-     * nothing was painted since the pane was hidden, so that moves nothing
-     * anyone saw. Callers only use it while the pane follows.
+     * motion. Output after that eases in as usual. Callers only use it while
+     * the pane follows.
      * SPEC_AGENT_PANE_NO_CATCH_UP_MOTION_2026_10_15.md §3.2.
      */
     settleOnShow(): void {
@@ -234,7 +206,6 @@ export class OneWayFlow {
         };
         arm();
         if (typeof requestAnimationFrame !== "undefined") requestAnimationFrame(arm);
-        if (this.spacerPx > 0) this.setSpacer(0);
         const ch = el.clientHeight; // perf:allow-layout-read — once, when the pane is shown
         const sh = el.scrollHeight; // perf:allow-layout-read — once, when the pane is shown
         const target = Math.max(0, sh - ch);
@@ -245,28 +216,23 @@ export class OneWayFlow {
         this.baseline = this.readAllTops(el);
     }
 
-    /** `/clear` or a fresh session in the pane: no room is owed to anything. */
+    /** `/clear` or a fresh session in the pane: nothing to compare against. */
     reset(): void {
-        this.setSpacer(0);
         this.baseline = null;
         this.follower.stop();
     }
 
     /**
      * A scroll batch the user caused (the scroll handler, inside the user-input
-     * window, live geometry). Re-baselines the visible rows, lets go of spacer
-     * room that is now below the viewport, and returns true when the user moved
-     * the transcript up while following: that releases follow at once, however
-     * small the move.
+     * window, live geometry). Re-baselines the visible rows and returns true
+     * when the user moved the transcript up while following: that releases
+     * follow at once, however small the move.
      */
     userScrolled(geo: { scrollTop: number; scrollHeight: number; clientHeight: number }): boolean {
         const el = this.scroller;
         if (!el) return false;
         this.follower.stop();
         const movedUp = geo.scrollTop < this.follower.position - 1;
-        if (this.spacerPx > 0) {
-            this.setSpacer(spacerFor({ spacer: this.spacerPx, wanted: geo.scrollTop, clientHeight: geo.clientHeight, scrollHeight: geo.scrollHeight }));
-        }
         this.baseline = this.readAllTops(el);
         return movedUp && this.host.following();
     }
@@ -306,30 +272,27 @@ export class OneWayFlow {
             return;
         }
         let live = el.scrollTop; // perf:allow-layout-read — ResizeObserver callback (layout clean)
-        let sh = el.scrollHeight; // perf:allow-layout-read — ResizeObserver callback (layout clean)
+        const sh = el.scrollHeight; // perf:allow-layout-read — ResizeObserver callback (layout clean)
+        // A pane resize or a zoom is the user's own change (spec §1): it lands at the true
+        // bottom at once. A first observation has nothing to compare against.
+        let resized = false;
         if (cw !== this.lastWidth) {
-            // Width or zoom changed (user-initiated): everything reflowed, nothing
-            // to compare against, and no room is owed. Start over at the bottom.
-            const first = this.lastWidth < 0;
+            // Width or zoom changed: everything reflowed, nothing to compare against.
+            resized = this.lastWidth >= 0;
             this.lastWidth = cw;
             this.baseline = null;
-            if (!first && this.spacerPx > 0) {
-                this.setSpacer(0);
-                sh = el.scrollHeight; // perf:allow-layout-read — once, after a width change
-            }
         }
-        if (this.active() && performance.now() < this.settleUntil) {
-            // Just after the user committed, or the pane was shown again
-            // (settleOnShow): layout changes land at the true bottom with no
-            // room held.
-            if (this.spacerPx > 0) {
-                sh -= this.spacerPx;
-                this.setSpacer(0);
-            }
+        if (ch !== this.lastHeight) {
+            resized = resized || this.lastHeight >= 0;
+            this.lastHeight = ch;
+        }
+        if (this.active() && (resized || performance.now() < this.settleUntil)) {
+            // A resize, just after the user committed, or the pane was shown again
+            // (settleOnShow): layout changes land at the true bottom.
             const bottom = Math.max(0, sh - ch);
             if (Math.abs(bottom - live) > MOVE_EPSILON_PX) {
                 el.scrollTop = bottom;
-                live = el.scrollTop; // perf:allow-layout-read — after the spacer write: one layout, inside the RO callback
+                live = el.scrollTop; // perf:allow-layout-read — after the write: one layout, inside the RO callback
                 this.host.wrote({ scrollTop: live, scrollHeight: sh, clientHeight: ch });
             }
             this.lastGeo = { scrollHeight: sh, clientHeight: ch };
@@ -342,19 +305,18 @@ export class OneWayFlow {
                 // set that can show a downward move.
                 const d = largestDownwardMove(this.baseline, this.readOnScreen(el, ch));
                 if (d > 0) {
-                    wanted = live + d;
-                    this.host.note?.(`comp:${Math.round(d)}`);
+                    // Growth made room for the scroll back, so it can reach `d`. A
+                    // shrink (or a taller scroller) did not: the rows stay where the
+                    // browser's clamp put them, tight against the bottom (spec T).
+                    const room = Math.max(0, sh - ch - live);
+                    if (d > room + MOVE_EPSILON_PX) this.host.note?.(`tight:${Math.round(d - room)}`);
+                    wanted = live + Math.min(d, room);
+                    if (wanted > live) this.host.note?.(`comp:${Math.round(wanted - live)}`);
                 }
-            }
-            const spacer = spacerFor({ spacer: this.spacerPx, wanted, clientHeight: ch, scrollHeight: sh });
-            if (spacer !== this.spacerPx) {
-                if (spacer > this.spacerPx) this.host.note?.(`spacer:+${spacer - this.spacerPx}`);
-                sh += spacer - this.spacerPx;
-                this.setSpacer(spacer);
             }
             if (wanted > live + MOVE_EPSILON_PX) {
                 el.scrollTop = wanted;
-                live = el.scrollTop; // perf:allow-layout-read — after the spacer write: one layout, inside the RO callback
+                live = el.scrollTop; // perf:allow-layout-read — after the write: one layout, inside the RO callback
                 this.host.wrote({ scrollTop: live, scrollHeight: sh, clientHeight: ch });
             }
             // The geometry any write from here reports.
@@ -367,14 +329,6 @@ export class OneWayFlow {
             // Look again once they let go, or content that arrived meanwhile
             // would sit below the bottom until some unrelated resize.
             if (this.host.following()) this.recheckSoon();
-            // Detached: keep only the room the reader's position needs.
-            if (this.spacerPx > 0) {
-                const spacer = spacerFor({ spacer: this.spacerPx, wanted: live, clientHeight: ch, scrollHeight: sh });
-                if (spacer !== this.spacerPx) {
-                    sh += spacer - this.spacerPx;
-                    this.setSpacer(spacer);
-                }
-            }
         }
         this.lastGeo = { scrollHeight: sh, clientHeight: ch };
         this.baseline = this.readAllTops(el);
@@ -405,11 +359,6 @@ export class OneWayFlow {
         // Our own move: shift the record, so it is never mistaken for content moving.
         if (this.baseline) for (const [k, v] of this.baseline) this.baseline.set(k, v - delta);
         this.host.wrote({ scrollTop: top, ...this.lastGeo });
-    }
-
-    private setSpacer(px: number): void {
-        this.spacerPx = px;
-        if (this.spacerEl) this.spacerEl.style.height = px > 0 ? `${px}px` : "";
     }
 
     /** Zoom of the scroller's coordinate space: rects are scaled by an ancestor CSS `zoom`, clientWidth is not. */

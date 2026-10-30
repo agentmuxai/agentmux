@@ -73,9 +73,11 @@ export function parseArgs(argv) {
 export function summarize(stats) {
     const out = [];
     const causes = {};
+    const tightCauses = {};
     let violations = 0;
     for (const s of stats) {
-        const v = s.down + s.overshoot;
+        // Blank room under the newest content while following is a failure too (spec T); a tight shift is not.
+        const v = s.down + s.overshoot + s.blankFrames;
         violations += v;
         out.push(
             [
@@ -84,14 +86,19 @@ export function summarize(stats) {
                 `down=${s.down}`,
                 `overshoot=${s.overshoot}`,
                 `maxDy=${s.maxDy.toFixed(1)}px`,
+                `tight=${s.tight ?? 0}`,
+                `maxTight=${(s.maxTight ?? 0).toFixed(1)}px`,
                 `blankFrames=${s.blankFrames}`,
                 `maxGap=${s.maxGap.toFixed(1)}px`,
             ].join("  "),
         );
         for (const [c, n] of Object.entries(s.byCause)) causes[c] = (causes[c] ?? 0) + n;
+        for (const [c, n] of Object.entries(s.tightByCause ?? {})) tightCauses[c] = (tightCauses[c] ?? 0) + n;
     }
     const ranked = Object.entries(causes).sort((a, b) => b[1] - a[1]);
     if (ranked.length) out.push("causes: " + ranked.map(([c, n]) => `${c}×${n}`).join("  "));
+    const tightRanked = Object.entries(tightCauses).sort((a, b) => b[1] - a[1]);
+    if (tightRanked.length) out.push("tight shifts (allowed; what shrinks on screen): " + tightRanked.map(([c, n]) => `${c}×${n}`).join("  "));
     out.push(violations === 0 ? "PASS: no one-way violations" : `FAIL: ${violations} one-way violation(s)`);
     return { text: out.join("\n"), violations };
 }
