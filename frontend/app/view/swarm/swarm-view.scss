@@ -129,23 +129,6 @@
     padding: 4px 8px 0;
 }
 
-.swarm-clear-completed-btn {
-    appearance: none;
-    border: 1px solid var(--border-color);
-    background: transparent;
-    color: var(--secondary-text-color);
-    border-radius: var(--radius-sm);
-    font-size: var(--text-xs);
-    padding: 3px 8px;
-    cursor: default;
-
-    &:hover {
-        color: var(--main-text-color);
-        border-color: var(--secondary-text-color);
-        background: var(--highlight-bg-color);
-    }
-}
-
 // ── Agent group (root + its children) ───────────────────────────────────
 
 .swarm-agent-group {
@@ -670,33 +653,18 @@
 
 .swarm-shell-stop {
     flex-shrink: 0;
-    @include mixins.flex-center(inline-flex);
-    width: 20px;
-    height: 20px;
-    appearance: none;
-    border: none;
-    background: transparent;
-    color: var(--secondary-text-color);
-    font-size: var(--text-2xs);
-    border-radius: var(--radius-sm);
-    cursor: pointer;
     opacity: 0;
-    transition:
-        opacity var(--duration-decorative-base) var(--ease-standard),
-        color var(--duration-decorative-base) var(--ease-standard),
-        background var(--duration-decorative-base) var(--ease-standard);
+    transition: opacity var(--duration-decorative-base) var(--ease-standard);
 }
 
 .swarm-shell-row:hover .swarm-shell-stop {
     opacity: 0.75;
 }
 
-.swarm-shell-stop:hover {
+.swarm-shell-stop:hover,
+.swarm-shell-stop:focus-visible {
     opacity: 1;
-    // --error-color is unconditionally defined in theme.scss, so it needs
-    // no hex fallback.
     color: var(--error-text-color);
-    background: var(--hover-bg-color);
 }
 
 // ── Cron row (SPEC_SWARM_LONG_RUNNING_PROCESS_ROWS_2026_07_20 Phase 2) —
