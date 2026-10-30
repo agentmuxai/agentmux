@@ -581,7 +581,10 @@ pub(super) async fn click_element(
     frame: Option<&FrameRef>,
     object_id: &str,
 ) -> Result<(), String> {
-    let p = call_on(cdp, object_id, CLICK_POINT, vec![]).await?;
+    let p = match call_on(cdp, object_id, CLICK_POINT, vec![]).await {
+        Ok(p) => p,
+        Err(e) => return Err(explain_unclickable(cdp, object_id, e).await),
+    };
     let mut x = p.get("x").and_then(|v| v.as_f64()).ok_or("no click point")?;
     let mut y = p.get("y").and_then(|v| v.as_f64()).ok_or("no click point")?;
     if let Some(f) = frame {
@@ -593,6 +596,24 @@ pub(super) async fn click_element(
         y += oy;
     }
     click_at(root, x, y).await
+}
+
+/// An element that can't be clicked, as the agent should read it: "not
+/// visible" reads like a layout problem, but an element the page removed since
+/// the snapshot (a popup that closed itself) is the likelier cause
+/// (docs/specs/PLAN_BROWSER_PANE_FORM_FILLING_FIXES_2026_10_17.md §3.4).
+async fn explain_unclickable(cdp: &mut CdpSession, object_id: &str, error: String) -> String {
+    let attached = call_on(cdp, object_id, "function () { return { v: this.isConnected }; }", vec![])
+        .await
+        .ok()
+        .and_then(|v| v.get("v").and_then(|b| b.as_bool()));
+    // Only a probe that answered "detached" says so; a probe that failed too
+    // (a closed session, a timeout) leaves the original error to be read.
+    if attached == Some(false) {
+        "the page changed since the snapshot (the element is gone); take a new snapshot".to_string()
+    } else {
+        error
+    }
 }
 
 /// The secret-field guard for typing into whatever has focus (spec §5.1),
