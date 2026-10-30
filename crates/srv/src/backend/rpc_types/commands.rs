@@ -649,6 +649,9 @@ pub const COMMAND_AGENT_ACCOUNT_SWITCH: &str = "agent.account.switch";
 /// A sign-in the window ran for an account completed: its agents' "signed
 /// out" ends (#2237). The operator's window only.
 pub const COMMAND_IDENTITY_ACCOUNT_SIGNED_IN: &str = "identity.account.signed_in";
+/// Mark an account "never fail over to this" (or take the mark off): an agent that hit its
+/// limit is never moved onto it by itself (`server::account_episodes::failover`).
+pub const COMMAND_IDENTITY_ACCOUNT_SET_FAILOVER: &str = "identity.account.set_failover";
 // Bundle MuxAPI commands (Preset → Bundle, spec Phase 2). The `preset.*`
 // constants below are retained as wire aliases for one release.
 pub const COMMAND_BUNDLE_LIST: &str = "bundle.list";
