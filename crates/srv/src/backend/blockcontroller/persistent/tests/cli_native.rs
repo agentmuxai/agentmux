@@ -74,7 +74,7 @@ async fn a_replayed_turn_stays_out_of_the_transcript_and_a_peer_message_is_audit
         message_id: None,
     };
     let line = r#"{"type":"user","message":{"role":"user","content":[{"type":"text","text":"go"}]}}"#;
-    c.send_message_with_images_from(line.to_string(), Vec::new(), config, None).unwrap();
+    c.send_message_with_images_from(line.to_string(), Vec::new(), config, None, RecordOrigin::new(MessageOrigin::user())).unwrap();
 
     let audited = |id: &str| {
         crate::backend::reactive::get_global_handler()

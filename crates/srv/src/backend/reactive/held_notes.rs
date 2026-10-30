@@ -245,6 +245,11 @@ pub struct Attached {
 }
 
 impl Attached {
+    /// The texts of the notes taken for the message, oldest first.
+    pub fn note_texts(&self) -> Vec<String> {
+        self.notes.iter().map(|(_, text)| text.clone()).collect()
+    }
+
     /// The message carrying the notes went to the agent.
     pub fn delivered(mut self) {
         self.notes.clear();
@@ -509,7 +514,7 @@ mod tests {
         let sent = Arc::new(Mutex::new(0usize));
         let handler = ReactiveHandler::new();
         let (s1, s2) = (sent.clone(), sent.clone());
-        handler.set_message_sender(Arc::new(move |_: &str, _: &str, _: &[serde_json::Value]| {
+        handler.set_message_sender(Arc::new(move |_: &str, _: &str, _: &[serde_json::Value], _origin: &crate::backend::message_origin::MessageOrigin| {
             *s1.lock().unwrap() += 1;
             Ok(SenderDelivery::Delivered)
         }));

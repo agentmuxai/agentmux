@@ -43,6 +43,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use super::health::TurnActivityTracker;
+use crate::backend::message_origin::RecordOrigin;
 use super::{BlockControllerRuntimeStatus, BlockInputUnion, Controller, STATUS_INIT};
 use crate::backend::eventbus::EventBus;
 use crate::backend::storage::filestore::FileStore;
@@ -127,6 +128,10 @@ pub struct SubprocessSpawnConfig {
     /// leasing for this spawn (e.g. the container-mode branch in this
     /// PR — see `host_spawn::spawn_turn`'s own doc comment).
     pub instance_id: String,
+    /// Where `message` came from and the notes that went with it, for the
+    /// record of it ([`UserRecordSink`]). `None` stores it with no origin: a
+    /// reader then takes it as untyped, never as the human.
+    pub record: Option<crate::backend::message_origin::RecordOrigin>,
 }
 
 /// Inner state protected by mutex.
@@ -350,9 +355,10 @@ impl SubprocessController {
     /// turn carries the pane's `message_id`). A message from anywhere else (a
     /// jekt, a broadcast, a schedule, the app API) is not on screen, so its
     /// record is published for the pane to show.
-    pub(super) fn user_record_sink(&self, shown_by_pane: bool) -> UserRecordSink {
+    pub(super) fn user_record_sink(&self, shown_by_pane: bool, record: Option<RecordOrigin>) -> UserRecordSink {
         UserRecordSink {
             shown_by_pane,
+            record,
             broker: self.broker.clone(),
             block_id: self.block_id.clone(),
             filestore: self.filestore.clone(),
@@ -512,6 +518,8 @@ pub(crate) fn injected_user_record(message: &str) -> serde_json::Value {
 /// [`persists_user_record`]).
 pub(super) struct UserRecordSink {
     shown_by_pane: bool,
+    /// Where the message came from; `None` stores it with no origin (untyped).
+    record: Option<RecordOrigin>,
     broker: Option<Arc<mps::Broker>>,
     block_id: String,
     filestore: Option<Arc<FileStore>>,
@@ -544,6 +552,7 @@ impl UserRecordSink {
             line.as_bytes(),
             self.filestore.as_ref(),
             global_zone.as_deref(),
+            self.record.as_ref(),
         );
     }
 }
