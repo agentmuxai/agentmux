@@ -29,19 +29,25 @@ use serde_json::{json, Value};
 use crate::server::browser_actions::{note, How, Kind};
 use crate::server::browser_bypass as bypass;
 use crate::server::browser_powers::Power;
-use crate::server::ui_handlers::{
-    banner_for, err_response, get_host_ipc, proxy_to_host_timeout, proxy_value, target_block_id,
-};
+use crate::server::ui_handlers::{banner_for, err_response, proxy_value, target_block_id};
 use crate::server::AppState;
 
 /// Most characters one call types, so a script fits and a runaway can't.
 pub(crate) const MAX_CHARS: usize = 20_000;
 /// Keys per call to the host. A brake is checked between calls.
 const CHUNK: usize = 32;
-/// Output counts as settled once it hasn't changed for this long.
-const QUIET: Duration = Duration::from_millis(700);
+/// How long xterm.js's screen-reader rows can trail the screen: it redraws
+/// them at most once a second, so a line's output (a password prompt) may not
+/// be in the rows for up to this long after the line ran.
+const ROWS_LAG: Duration = Duration::from_millis(1100);
+/// Output counts as settled once it hasn't changed for this long (a little
+/// over [`ROWS_LAG`], so the rows have caught up with what it printed).
+const QUIET: Duration = Duration::from_millis(1200);
 /// How often the rows are read while waiting.
 const POLL: Duration = Duration::from_millis(250);
+/// The longest to wait for the rows to catch up with a line before reading
+/// them for a prompt and sending the next one.
+const LINE_SETTLE: Duration = Duration::from_millis(2600);
 /// The longest an agent may ask to wait for output.
 const MAX_WAIT_SECS: u64 = 60;
 /// How long to wait for output when the agent didn't say.
@@ -325,6 +331,40 @@ pub(crate) fn typed_for_log(text: &str) -> String {
     )
 }
 
+/// What the Log keeps for a call: the text (shortened), else the keys. Empty
+/// when the text looks like a credential, on every path including a call that
+/// is refused for another reason: the Log is the person's record, and a key
+/// or a token has no place in it.
+pub(crate) fn detail_for_log(typed: &str, keys_label: &str) -> String {
+    if credential_line(typed) {
+        return String::new();
+    }
+    if typed.is_empty() {
+        keys_label.to_string()
+    } else {
+        typed_for_log(typed)
+    }
+}
+
+/// The keys in the order they go out, in pieces. A piece ends after an Enter
+/// (the end of a line, so the screen can be read before the next line goes in:
+/// a command may have opened a password prompt) or at `max` keys, whichever
+/// comes first.
+pub(crate) fn pieces(steps: &[KeyStep], max: usize) -> Vec<&[KeyStep]> {
+    let mut out = Vec::new();
+    let mut start = 0;
+    for (i, k) in steps.iter().enumerate() {
+        if k.key == "Enter" || i + 1 - start == max {
+            out.push(&steps[start..=i]);
+            start = i + 1;
+        }
+    }
+    if start < steps.len() {
+        out.push(&steps[start..]);
+    }
+    out
+}
+
 /// The terminal's rows as the agent gets them: trailing blank rows dropped,
 /// the bottom [`MAX_ROWS`] kept.
 pub(crate) fn tidy_rows(rows: &[String]) -> Vec<String> {
@@ -355,6 +395,75 @@ async fn look(state: &AppState, block_id: &str) -> Result<Value, (StatusCode, St
     .await
 }
 
+/// Why the terminal can't be typed into right now.
+enum Refusal {
+    /// The page, or the terminal's frame, is off the granted sites, or there is no terminal.
+    Plain(StatusCode, String),
+    /// The terminal is asking for something only the person types.
+    Secret(String),
+}
+
+/// Looks at the page, at the frame that holds the terminal, and at the last
+/// line the terminal shows, and says whether the grant lets the agent type
+/// there now. Run before the first key and again before every later line: a
+/// page can navigate, and a command can open a prompt, between two keys.
+async fn check_target(
+    state: &AppState,
+    block_id: &str,
+    grant: &bypass::Grant,
+) -> Result<Value, Refusal> {
+    let page = crate::server::browser_bypass_routes::page_url(state, block_id)
+        .await
+        .map_err(|e| Refusal::Plain(StatusCode::BAD_GATEWAY, e))?;
+    if !grant.covers(&page) {
+        return Err(Refusal::Plain(
+            StatusCode::FORBIDDEN,
+            "this page is off the sites the person granted, so the terminal is paused: go back to the granted site"
+                .to_string(),
+        ));
+    }
+    let seen = look(state, block_id)
+        .await
+        .map_err(|(code, e)| Refusal::Plain(code, e))?;
+    if seen.get("count").and_then(|c| c.as_u64()).unwrap_or(0) == 0 {
+        return Err(Refusal::Plain(
+            StatusCode::BAD_REQUEST,
+            "no web terminal found on this page (only xterm.js terminals are supported)"
+                .to_string(),
+        ));
+    }
+    let origin = seen.get("origin").and_then(|o| o.as_str()).unwrap_or("");
+    if !grant.covers(origin) {
+        return Err(Refusal::Plain(
+            StatusCode::FORBIDDEN,
+            "the terminal is in a frame from a site the person didn't grant; hand the pane to them for it".to_string(),
+        ));
+    }
+    if let Some(prompt) = rows_of(&seen).as_deref().and_then(secret_prompt) {
+        return Err(Refusal::Secret(format!(
+            "the terminal is asking for something only the person should type ({prompt:?}): hand off the pane and let them type it, then carry on"
+        )));
+    }
+    Ok(seen)
+}
+
+/// Before the next line goes in, let what the last one did reach the rows: wait
+/// out [`ROWS_LAG`], then read until two reads in a row agree, for at most
+/// [`LINE_SETTLE`], so a prompt a command opened is showing when it is checked.
+async fn let_screen_catch_up(state: &AppState, block_id: &str) {
+    let start = Instant::now();
+    tokio::time::sleep(ROWS_LAG).await;
+    let mut last: Option<Vec<String>> = None;
+    loop {
+        let now = look(state, block_id).await.ok().and_then(|v| rows_of(&v));
+        if (now.is_some() && now == last) || start.elapsed() >= LINE_SETTLE {
+            break;
+        }
+        last = now;
+        tokio::time::sleep(POLL).await;
+    }
+}
+
 /// `POST /api/v1/ui/browser/terminal` — backs `Browser`'s `terminal` action.
 pub(crate) async fn handle_ui_browser_terminal(
     State(state): State<AppState>,
@@ -371,11 +480,8 @@ pub(crate) async fn handle_ui_browser_terminal(
     let typed = req.text.clone().unwrap_or_default();
     let log = |detail: String| note(&pane, &agent, Kind::Terminal).detail(&detail);
     let keys_label = req.keys.as_ref().map(|k| k.join(" ")).unwrap_or_default();
-    let what = if typed.is_empty() {
-        keys_label.clone()
-    } else {
-        typed_for_log(&typed)
-    };
+    // Computed before anything can refuse the call: see `detail_for_log`.
+    let what = detail_for_log(&typed, &keys_label);
 
     // What to send. Checked before anything is typed.
     if typed.is_empty() && req.keys.as_ref().is_none_or(|k| k.is_empty()) {
@@ -430,50 +536,28 @@ pub(crate) async fn handle_ui_browser_terminal(
                 .to_string(),
         );
     };
-    let page = match crate::server::browser_bypass_routes::page_url(&state, &block_id).await {
-        Ok(u) => u,
-        Err(e) => return err_response(StatusCode::BAD_GATEWAY, e),
-    };
-    if !grant.covers(&page) {
-        return log(what).fail(
-            &state,
-            StatusCode::FORBIDDEN,
-            "this page is off the sites the person granted, so the terminal is paused: go back to the granted site".to_string(),
-        );
-    }
-    let seen = match look(&state, &block_id).await {
+    let seen = match check_target(&state, &block_id, &grant).await {
         Ok(v) => v,
-        Err((code, e)) => return log(what).fail(&state, code, e),
+        Err(Refusal::Plain(code, e)) => return log(what).fail(&state, code, e),
+        // The text may be what the prompt is for: it is not logged.
+        Err(Refusal::Secret(e)) => {
+            return log(String::new()).fail(&state, StatusCode::FORBIDDEN, e)
+        }
     };
-    if seen.get("count").and_then(|c| c.as_u64()).unwrap_or(0) == 0 {
-        return log(what).fail(
-            &state,
-            StatusCode::BAD_REQUEST,
-            "no web terminal found on this page (only xterm.js terminals are supported)"
-                .to_string(),
-        );
-    }
-    let origin = seen.get("origin").and_then(|o| o.as_str()).unwrap_or("");
-    if !grant.covers(origin) {
-        return log(what).fail(
-            &state,
-            StatusCode::FORBIDDEN,
-            "the terminal is in a frame from a site the person didn't grant; hand the pane to them for it".to_string(),
-        );
-    }
-    if let Some(prompt) = rows_of(&seen).as_deref().and_then(secret_prompt) {
-        return log(String::new()).fail(
-            &state,
-            StatusCode::FORBIDDEN,
-            format!("the terminal is asking for something only the person should type ({prompt:?}): hand off the pane and let them type it, then carry on"),
-        );
-    }
+    let origin = seen
+        .get("origin")
+        .and_then(|o| o.as_str())
+        .unwrap_or("")
+        .to_string();
 
-    // Type, a chunk at a time, with the brakes checked between chunks.
+    // Type a line at a time (or a chunk of a long one), with the brakes, the
+    // grant, the page and the prompt checked between pieces.
     let total = steps.len();
     let mut sent = 0usize;
     let mut stopped: Option<String> = None;
-    for chunk in steps.chunks(CHUNK) {
+    let mut secret_stop = false;
+    let parts = pieces(&steps, CHUNK);
+    for (n, chunk) in parts.iter().enumerate() {
         if crate::server::browser_actions::not_paused(&block_id).is_err() {
             stopped = Some(
                 "the user paused this pane, so the rest was not typed; your calls on it wait until they resume it"
@@ -485,10 +569,32 @@ pub(crate) async fn handle_ui_browser_terminal(
             stopped = Some("the person ended the grant".to_string());
             break;
         }
+        if n > 0 {
+            if parts[n - 1].last().is_some_and(|k| k.key == "Enter") {
+                let_screen_catch_up(&state, &block_id).await;
+            }
+            match check_target(&state, &block_id, &grant).await {
+                Ok(_) => {}
+                Err(Refusal::Plain(_, why)) => {
+                    stopped = Some(format!("{why}; the rest was not typed"));
+                    break;
+                }
+                Err(Refusal::Secret(why)) => {
+                    stopped = Some(format!("{why}; the rest was not typed"));
+                    secret_stop = true;
+                    break;
+                }
+            }
+        }
         match proxy_value(
             &state,
             "terminal_keys",
-            json!({ "block_id": block_id, "keys": chunk }),
+            json!({
+                "block_id": block_id,
+                "keys": chunk,
+                // The host checks these against the terminal it picks, at the moment it types.
+                "allowed_origins": grant.origins,
+            }),
             Duration::from_secs(20),
         )
         .await
@@ -515,6 +621,10 @@ pub(crate) async fn handle_ui_browser_terminal(
 
     let how = How::AutoApproved;
     let detail = match &stopped {
+        // The rest of the text may be what the prompt was for: it is not logged.
+        Some(_) if secret_stop => {
+            format!("(stopped after {sent} of {total} keys: the terminal asked for something only the person types)")
+        }
         Some(_) => format!("{what} (stopped after {sent} of {total} keys)"),
         None => what,
     };
@@ -755,5 +865,64 @@ mod tests {
         let t = tidy_rows(&many);
         assert_eq!(t.len(), MAX_ROWS);
         assert_eq!(t.last().unwrap(), "row 199");
+    }
+
+    fn names(parts: &[&[KeyStep]]) -> Vec<String> {
+        parts
+            .iter()
+            .map(|p| p.iter().map(|k| k.key.clone()).collect::<Vec<_>>().join(""))
+            .collect()
+    }
+
+    #[test]
+    fn a_script_goes_in_a_line_at_a_time_so_the_screen_can_be_read_between() {
+        // "sudo ls" Enter "hunter2" Enter: the second line must not go in before the screen has been read.
+        let steps = steps_for_text("ab\ncd\nef").unwrap();
+        let parts = pieces(&steps, 32);
+        assert_eq!(names(&parts), vec!["abEnter", "cdEnter", "ef"]);
+        assert!(parts[0].last().is_some_and(|k| k.key == "Enter"));
+        assert!(parts[2].last().is_some_and(|k| k.key != "Enter"));
+    }
+
+    #[test]
+    fn a_long_line_is_cut_at_the_chunk_size_and_a_blank_line_is_its_own_piece() {
+        let steps = steps_for_text("abcde\n\nx").unwrap();
+        assert_eq!(
+            names(&pieces(&steps, 3)),
+            vec!["abc", "deEnter", "Enter", "x"]
+        );
+        assert_eq!(pieces(&[], 3).len(), 0);
+        // Every key is in exactly one piece, in order.
+        let joined: Vec<String> = pieces(&steps, 3)
+            .concat()
+            .iter()
+            .map(|k| k.key.clone())
+            .collect();
+        let all: Vec<String> = steps.iter().map(|k| k.key.clone()).collect();
+        assert_eq!(joined, all);
+    }
+
+    #[test]
+    fn named_keys_that_press_enter_end_a_piece_too() {
+        let mut steps = steps_for_text("ls").unwrap();
+        steps.push(step_for_key("Enter").unwrap());
+        steps.push(step_for_key("ArrowUp").unwrap());
+        assert_eq!(names(&pieces(&steps, 32)), vec!["lsEnter", "ArrowUp"]);
+    }
+
+    #[test]
+    fn credential_text_is_never_what_the_log_keeps_whatever_refused_the_call() {
+        let key = format!(
+            "export K={}{}",
+            "ghp_", "abcdefghijklmnopqrstuvwxyz0123456789ab"
+        );
+        assert!(credential_line(&key));
+        assert_eq!(detail_for_log(&key, ""), "");
+        // Over the size limit as well: the early refusals log what this returns.
+        let long = format!("{key}\n{}", "x".repeat(MAX_CHARS));
+        assert_eq!(detail_for_log(&long, ""), "");
+        // Ordinary text and a keys-only call are kept.
+        assert_eq!(detail_for_log("echo hi", ""), "echo hi");
+        assert_eq!(detail_for_log("", "Ctrl+C"), "Ctrl+C");
     }
 }

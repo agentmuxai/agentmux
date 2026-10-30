@@ -64,6 +64,10 @@ const TERMINAL_JS: &str = r#"(focus) => {
     count: found.length,
     kind: 'xterm',
     origin: pick.win.location.origin,
+    // The two addresses a grant is checked against, read in the same
+    // evaluation that picks the terminal (see `off_granted_sites`).
+    page: location.href,
+    frame: pick.win.location.href,
     focused: pick.doc.activeElement === pick.ta,
     screen_reader: !!tree,
     rows,
@@ -92,6 +96,11 @@ pub struct KeyStep {
 pub struct TerminalKeysReq {
     pub block_id: String,
     pub keys: Vec<KeyStep>,
+    /// The sites the person's grant is bound to (`allowed_origins` normal
+    /// form). Checked here, against the terminal this call picks, and not
+    /// only by srv before it: a page that navigates or redirects between
+    /// srv's look and these keys must not get them.
+    pub allowed_origins: Vec<String>,
 }
 
 fn ok(data: Value) -> (StatusCode, Json<ApiResponse<Value>>) {
@@ -168,7 +177,7 @@ pub async fn terminal_keys(
         Ok(c) => c,
         Err(e) => return fail(e),
     };
-    let sent = send_keys(&mut cdp, &req.keys).await;
+    let sent = send_keys(&mut cdp, &req.keys, &req.allowed_origins).await;
     let _ = cdp.close().await;
     match sent {
         Ok(n) => ok(json!({ "sent": n })),
@@ -176,10 +185,36 @@ pub async fn terminal_keys(
     }
 }
 
-async fn send_keys(cdp: &mut CdpSession, keys: &[KeyStep]) -> Result<usize, String> {
+/// Why `seen` (what [`TERMINAL_JS`] reported) is off the granted sites, if it
+/// is: the page itself, or the frame that holds the terminal, is not on one of
+/// `allowed`. Missing addresses count as off: never type on a guess.
+fn off_granted_sites(seen: &Value, allowed: &[String]) -> Option<String> {
+    use agentmux_common::allowed_origins::{allows, target_origin};
+    for (field, what) in [("page", "the page"), ("frame", "the terminal's frame")] {
+        let on = seen
+            .get(field)
+            .and_then(|v| v.as_str())
+            .is_some_and(|url| target_origin(url).is_some() && allows(allowed, url));
+        if !on {
+            return Some(format!(
+                "{what} is off the sites the person granted, so nothing was typed: go back to the granted site"
+            ));
+        }
+    }
+    None
+}
+
+async fn send_keys(
+    cdp: &mut CdpSession,
+    keys: &[KeyStep],
+    allowed: &[String],
+) -> Result<usize, String> {
     let seen = look(cdp, true).await?;
     if seen.get("count").and_then(|c| c.as_u64()).unwrap_or(0) == 0 {
         return Err("no web terminal on this page".to_string());
+    }
+    if let Some(why) = off_granted_sites(&seen, allowed) {
+        return Err(why);
     }
     if seen.get("focused").and_then(|f| f.as_bool()) != Some(true) {
         return Err("the terminal didn't take focus (is the pane showing?)".to_string());
@@ -213,4 +248,65 @@ async fn send_keys(cdp: &mut CdpSession, keys: &[KeyStep]) -> Result<usize, Stri
         tokio::time::sleep(KEY_PACE).await;
     }
     Ok(keys.len())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn seen(page: &str, frame: &str) -> Value {
+        json!({ "count": 1, "page": page, "frame": frame })
+    }
+    fn allowed(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn a_page_and_frame_on_the_granted_site_may_be_typed_into() {
+        let s = seen(
+            "https://shell.example.com/",
+            "https://shell.example.com/term",
+        );
+        assert_eq!(
+            off_granted_sites(&s, &allowed(&["https://shell.example.com"])),
+            None
+        );
+    }
+
+    #[test]
+    fn a_page_that_left_the_granted_site_is_refused() {
+        let s = seen("https://evil.example.net/", "https://evil.example.net/");
+        let why = off_granted_sites(&s, &allowed(&["https://shell.example.com"])).unwrap();
+        assert!(
+            why.contains("the page") && why.contains("nothing was typed"),
+            "{why}"
+        );
+    }
+
+    #[test]
+    fn a_terminal_frame_from_another_site_is_refused_even_on_a_granted_page() {
+        let s = seen(
+            "https://shell.example.com/",
+            "https://other.example.org/term",
+        );
+        let why = off_granted_sites(&s, &allowed(&["https://shell.example.com"])).unwrap();
+        assert!(why.contains("terminal's frame"), "{why}");
+    }
+
+    #[test]
+    fn a_missing_or_non_web_address_is_off_never_a_guess() {
+        let ok = allowed(&["https://shell.example.com"]);
+        assert!(off_granted_sites(&json!({ "count": 1 }), &ok).is_some());
+        assert!(off_granted_sites(&seen("about:blank", "about:blank"), &ok).is_some());
+        assert!(
+            off_granted_sites(&seen("https://shell.example.com/", "data:text/html,x"), &ok)
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn no_granted_sites_means_nowhere() {
+        let s = seen("https://shell.example.com/", "https://shell.example.com/");
+        assert!(off_granted_sites(&s, &[]).is_some());
+    }
 }
