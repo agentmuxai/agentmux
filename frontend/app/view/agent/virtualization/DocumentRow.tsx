@@ -180,10 +180,9 @@ function DocumentRowBody(props: DocumentRowProps): JSX.Element {
                 "agent-node-search-match": isSearchMatch(),
             }}
             data-node-id={props.node().id}
-            // Read by AgentDocumentVirtualList's shrink-attribution sampler
-            // (shrink-trace.ts) so it can name the KIND of node that shrank
-            // straight from the DOM, without a reactive read from inside a
-            // microtask/ResizeObserver callback.
+            // The kind of node, for the stylesheet (the user message has its own
+            // enter motion) and for code that must read it from the DOM, without
+            // a reactive read inside a ResizeObserver callback.
             data-node-type={props.node().type}
             tabindex="0"
             onKeyDown={handleRowKey}
