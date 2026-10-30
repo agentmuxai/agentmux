@@ -220,36 +220,16 @@ pub(super) async fn plan_capture(
     Ok(Some(capture::Job { capture: plan, store: state.identity_store.clone(), changed: Box::new(move || super::vault_handlers::publish(&changed_state)) }))
 }
 
+/// A rotation's command, approved by the person with the rotation (`Vault`
+/// `rotate`): exactly these secrets (`NEW_SECRET` naming the entry's pending
+/// value, `OLD_SECRET` its current one). Only srv's rotation makes one, and hands
+/// it to [`inject`] directly; nothing an agent sends can.
+pub(super) struct Preapproved {
+    pub env: std::collections::HashMap<String, String>,
+}
+
 /// Resolves, asks for and reads the entries a command was given. `None` when it
 /// was given none.
-/// Commands a rotation (`Vault` `rotate`) runs, by agent and command line, which
-/// the person approved with the rotation: the next `inject` for one asks nothing
-/// more and may hand it the rotation's pending value (`id@pending`). Each is used
-/// once. Only srv's own rotation adds one; nothing an agent sends can.
-static PREAPPROVED: std::sync::LazyLock<std::sync::Mutex<Vec<(String, String)>>> = std::sync::LazyLock::new(Default::default);
-
-/// Marks `cmd`, run next for `agent`, as approved with its rotation.
-pub(super) fn preapprove(agent: &str, cmd: &str) {
-    PREAPPROVED.lock().unwrap_or_else(|e| e.into_inner()).push((agent.to_string(), cmd.to_string()));
-}
-
-/// Drops a mark a rotation's command never used (it couldn't start).
-pub(super) fn forget_preapproved(agent: &str, cmd: &str) {
-    take_preapproved(agent, cmd);
-}
-
-/// Whether `cmd` for `agent` was approved with a rotation, using the mark up.
-fn take_preapproved(agent: &str, cmd: &str) -> bool {
-    let mut marks = PREAPPROVED.lock().unwrap_or_else(|e| e.into_inner());
-    match marks.iter().position(|(a, c)| a == agent && c == cmd) {
-        Some(i) => {
-            marks.remove(i);
-            true
-        }
-        None => false,
-    }
-}
-
 pub(super) async fn inject(
     state: &AppState,
     agent_block_id: &str,
@@ -258,7 +238,12 @@ pub(super) async fn inject(
     remote: bool,
     cmd: &str,
     cwd: &str,
+    preapproved: Option<&Preapproved>,
 ) -> Result<Option<Injected>, Refusal> {
+    // A rotation's approval covers exactly the secrets it approved, nothing more.
+    let preapproved = preapproved.is_some_and(|p| {
+        wanted.stdin.is_none_or(|s| s.trim().is_empty()) && wanted.files.is_none_or(|f| f.is_empty()) && wanted.env == Some(&p.env)
+    });
     let wanted = deliveries(wanted)?;
     if wanted.is_empty() {
         return Ok(None);
@@ -285,8 +270,7 @@ pub(super) async fn inject(
             .map_err(|e| refuse(StatusCode::BAD_REQUEST, e))?;
         targets.push((delivery, target));
     }
-    // A rotation's own command was approved with it; nothing else gets its pending value.
-    let preapproved = take_preapproved(&agent, cmd);
+    // Only a rotation's own command, approved with it, gets its pending value.
     if !preapproved && targets.iter().any(|(_, t)| t.version == Some("pending")) {
         return Err(refuse(StatusCode::BAD_REQUEST, "@pending is a rotation's new value: only that rotation's own commands get it"));
     }

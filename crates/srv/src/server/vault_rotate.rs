@@ -249,17 +249,15 @@ async fn run(
         "cwd": cwd,
         "title": format!("rotate: {}", clip(cmd)),
         "auth": auth,
-        "secrets": secrets,
+        "secrets": &secrets,
     }))
     .map_err(|e| e.to_string())?;
-    super::shell_secrets::preapprove(agent, cmd);
-    let resp = super::http_shell::handle_shell_create(State(state.clone()), Json(req)).await.into_response();
+    let approved = super::shell_secrets::Preapproved { env: secrets };
+    let resp = super::http_shell::create_shell(state.clone(), req, Some(&approved)).await;
     let status = resp.status();
     let body = axum::body::to_bytes(resp.into_body(), 1 << 20).await.map_err(|e| e.to_string())?;
     let v: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
     if !status.is_success() {
-        // Not run: the mark it didn't use goes with it.
-        super::shell_secrets::forget_preapproved(agent, cmd);
         return Err(v.get("error").and_then(Value::as_str).unwrap_or("the command couldn't start").to_string());
     }
     let shell_id = v.get("shell_id").and_then(Value::as_str).ok_or("the command couldn't start")?.to_string();
