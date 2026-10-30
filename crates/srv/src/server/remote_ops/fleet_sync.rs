@@ -188,9 +188,9 @@ where
                 ("memory.global.remove", serde_json::to_value(removal).map_err(|e| e.to_string())?)
             }
         };
-        // The transport signs at most MAX_PARAMS_BYTES of params. A bigger entry waits for the
-        // per-op limit; it is skipped here, and logged, so the others still go.
-        if params.to_string().len() + SIGNING_SLACK > agentmux_common::remote_op::MAX_PARAMS_BYTES {
+        // The transport signs at most the operation's params limit. A bigger entry is skipped here,
+        // and logged, so the others still go.
+        if params.to_string().len() + SIGNING_SLACK > super::max_params_of(op) {
             tracing::warn!(peer = %peer.host, op, bytes = params.to_string().len(), "fleet memory: an entry is too big to send; skipped");
             continue;
         }

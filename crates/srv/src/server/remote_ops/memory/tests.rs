@@ -13,6 +13,7 @@ fn caller() -> RemoteCaller {
         slug: "loap".into(),
         machine: "charlie".into(),
         instance_id: "inst-1".into(),
+        install_trusted: true,
         verification: Verification::Lan,
         reason: "sync".into(),
     }

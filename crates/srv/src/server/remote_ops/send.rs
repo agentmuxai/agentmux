@@ -115,7 +115,7 @@ async fn call_as(state: &AppState, slug: &str, uid: &str, host: &str, op: &str, 
         reason: agentmux_common::remote_op::clip_reason(reason),
     };
     let nonce = envelope.nonce.clone();
-    let Some(signed) = envelope.sign(&key) else {
+    let Some(signed) = envelope.sign_with(&key, super::max_params_of(op)) else {
         return RemoteOpResult::failed("the request could not be signed (too long, or a malformed field)");
     };
     let result = post(state, &peer, &signed).await;

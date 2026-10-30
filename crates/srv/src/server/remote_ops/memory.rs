@@ -15,6 +15,10 @@ use super::{AppState, RemoteCaller, RemoteRefusal, RemoteResult};
 use crate::backend::fleet_memory::{self, Actor, FleetEntry, FleetError, FleetRemoval, Outcome};
 use crate::backend::storage::store::Store;
 
+/// The most params bytes `memory.global.put` takes: the 1 MiB an entry's text may be, plus its
+/// JSON escaping and the other fields.
+pub(super) const MAX_PUT_PARAMS: usize = 1_200_000;
+
 fn parse<T: DeserializeOwned>(op: &str, params: Value) -> Result<T, RemoteRefusal> {
     serde_json::from_value(params).map_err(|e| RemoteRefusal::new("bad_params", format!("{op}: {e}")))
 }

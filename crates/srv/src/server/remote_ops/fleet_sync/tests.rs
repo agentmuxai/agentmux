@@ -166,14 +166,17 @@ async fn a_machine_that_went_away_and_came_back_is_synced_again_at_once() {
 #[tokio::test]
 async fn an_entry_too_big_to_sign_is_skipped_and_the_others_still_go() {
     let (mine, theirs) = (machine(), machine());
-    write(&mine, "big", &"x".repeat(20_000), 3_000);
+    // Under the 1 MiB an entry may be, but every newline is two bytes in the params: over the cap.
+    write(&mine, "big", &"
+".repeat(700_000), 3_000);
+    write(&mine, "medium", &"x".repeat(200_000), 2_000);
     write(&mine, "small", "fits", 1_000);
     let fake = Fake::new(theirs.clone());
     let call = fake.call();
     let mut seen = HashMap::new();
 
     sync_peers(mine.clone(), &[peer("charlie")], &mut seen, &call, Instant::now()).await;
-    assert_eq!(ids(&theirs), [("small".to_string(), false)]);
+    assert_eq!(ids(&theirs), [("medium".to_string(), false), ("small".to_string(), false)], "a 200 KB entry goes now");
     assert!(seen.get("id-charlie").unwrap().retry_at.is_none(), "not a failure of the peer");
 }
 
