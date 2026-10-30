@@ -39,7 +39,7 @@ vi.mock("@/app/store/rpc-api", () => {
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 
 import { registerPane, unregisterPane, type AgentPaneModel } from "@/app/store/agent-pane-registration";
-import { AgentWorkingRow } from "./components/AgentFooter";
+import { AgentWorkingRow } from "./components/working-row";
 import { useAgentStream } from "./useAgentStream";
 
 const BLOCK = "stream-replay";

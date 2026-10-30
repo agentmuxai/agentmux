@@ -12,20 +12,23 @@ import { revealInStrip, STRIP_EDGE_FADE_PX } from "@/app/element/strip-reveal";
 import { shouldReduceMotion } from "@/app/motion/motion";
 import { mergeInto } from "@/app/motion/primitives";
 import { DURATION_MODERATE_MS } from "@/app/motion/tokens";
-import { findMinimizeMergeTarget } from "./layoutMinimizeMerge";
+import { findExpandedMergeTarget, findMinimizeMergeTarget } from "./layoutMinimizeMerge";
 import type { LayoutModel } from "./layoutModel";
 import { findNode, findNodeByBlockId } from "./layoutNode";
 import { effectiveStack, moveBlocksInStack } from "./layoutStack";
 
 /**
- * Merge the pane `nodeId` into its minimized neighbour instead of minimizing it: all its tabs are
- * appended to the end of the target's strip, in their strip order, and the emptied pane is removed
- * as a move (its space goes to the expanded panes, as for a minimize). Returns false, touching
- * nothing, when there is no target or the move could not be applied, so the caller minimizes as before.
+ * Merge the pane `nodeId` into its neighbour instead of minimizing it: a minimized one, else the
+ * nearest expanded one. All its tabs are appended to the end of the target's strip, in their strip
+ * order, inactive (the target's own tab keeps showing), and the emptied pane is removed as a move
+ * (its space goes to the other panes, as for a minimize). Returns false, touching nothing, when
+ * there is no target or the move could not be applied, so the caller minimizes as before.
  */
-export function mergeIntoMinimizedNeighbour(model: LayoutModel, nodeId: string): boolean {
+export function mergeIntoNeighbour(model: LayoutModel, nodeId: string): boolean {
     const root = model.treeState.rootNode;
-    const target = findMinimizeMergeTarget(root, nodeId);
+    // A minimized pane to join first (tabs that were hidden together stay together), else the expanded
+    // neighbour: its tabs go in as background tabs and the pane's own tile goes.
+    const target = findMinimizeMergeTarget(root, nodeId) ?? findExpandedMergeTarget(root, nodeId);
     const node = root && findNode(root, nodeId);
     if (!target?.data || !node?.data) return false;
     const targetBlockId = target.data.blockId;

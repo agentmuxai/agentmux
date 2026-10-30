@@ -38,6 +38,7 @@ export const MENU_ICON = {
     hide: "eye-slash",
     show: "eye",
     // Panes
+    minimize: "regular@window-minimize",
     magnify: "regular@window-maximize",
     unmagnify: "regular@window-restore",
     splitDown: "table-rows",

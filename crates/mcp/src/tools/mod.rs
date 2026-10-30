@@ -31,6 +31,7 @@ mod pane_tool;
 mod panes;
 mod presence_tool;
 mod presets;
+pub(crate) mod remote_op;
 mod pty_shell;
 mod schedule_tool;
 mod sensitive_tool;
@@ -228,6 +229,8 @@ const REPLACED: &[(&str, &str)] = &[
     ("FleetBroadcast", "Message with action \"broadcast\""),
     ("PostToChannel", "Message with action \"post\""),
     ("ReadChannel", "Message with action \"read\""),
+    ("PostBulletin", "Message with action \"bulletin\""),
+    ("ReadBulletin", "Message with action \"read_bulletin\""),
 ];
 
 /// Try each family in turn; the first that owns `name` answers.

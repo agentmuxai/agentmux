@@ -35,6 +35,7 @@ import type { AttachmentRef } from "@/types/rpc/AttachmentRef";
 import { forgetRefusedSend, isOpenInOtherPaneError, rememberRefusedSend } from "../failure/refused-send";
 import type { LogFn } from "./useAgentControllerStatus";
 import { setBlockMeta } from "@/app/store/block-meta";
+import { clearFailure, raiseFailure } from "../failure/failure-writer";
 
 /**
  * How long a pending message can sit unacknowledged before the reducer
@@ -487,9 +488,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                 // Clear only an "auth" failure: FailureCleared clears any
                 // code, and an unrelated one (rate_limited, ...) is still
                 // real. See failure/useAuthHealth.ts's declareAuthHealthy.
-                if (isAuthFailure(paneSnapshot(opts.blockId)?.failure)) {
-                    opts.model.dispatchPane({ type: "FailureCleared" });
-                }
+                clearFailure(opts.model, { reason: "recovered", onlyCode: "auth" });
                 // Success proves the "auth" slot resolved, so held items'
                 // older snapshots of it are stale; keeping them would reject
                 // good messages and resurrect the "Not logged in" banner.
@@ -527,11 +526,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         setAuthUrl: opts.setAuthUrl,
         notifyControllerHealthy: opts.notifyControllerHealthy,
         // Auth failures only — see flushPendingControllerRefresh above.
-        clearAuthFailure: () => {
-            if (isAuthFailure(paneSnapshot(opts.blockId)?.failure)) {
-                opts.model.dispatchPane({ type: "FailureCleared" });
-            }
-        },
+        clearAuthFailure: () => clearFailure(opts.model, { reason: "recovered", onlyCode: "auth" }),
         forceControllerRefresh: opts.forceControllerRefresh,
         deferControllerRefreshUntilIdle,
         // false is frozen and true/undefined read live: see
@@ -599,19 +594,17 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
             // a busy pane has none to roll back.
             if (wasAlreadyWorking) return;
             if (authFailureToPreserve && !clearedByCommand) {
-                opts.model.dispatchPane(
-                    {
-                        type: "FailureObserved",
-                        failure: authFailureToPreserve.data,
-                        at: Date.now(),
-                        // Keep the original flag: the reducer defaults it to
-                        // true, turning a pre-launch row into "Login Again"
-                        // that resends an old message on an agent that never
-                        // ran a turn. See PaneFailure.turnAttempted.
-                        turnAttempted: authFailureToPreserve.turnAttempted,
-                    },
-                    "system",
-                );
+                raiseFailure(opts.model, {
+                    source: "command",
+                    failure: authFailureToPreserve.data,
+                    at: Date.now(),
+                    // Keep the original flag: the reducer defaults it to
+                    // true, turning a pre-launch row into "Login Again"
+                    // that resends an old message on an agent that never
+                    // ran a turn. See PaneFailure.turnAttempted.
+                    turnAttempted: authFailureToPreserve.turnAttempted,
+                    system: true,
+                });
             }
         };
 
@@ -879,15 +872,13 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                 // (turnAttempted=false). After TurnStartFailed, so
                 // turnPhase is already Idle; otherwise the reducer reads
                 // Submitting as a turn ending and flashes Done.
-                opts.model.dispatchPane(
-                    {
-                        type: "FailureObserved",
-                        failure: authFailureToPreserve.data,
-                        at: Date.now(),
-                        turnAttempted: authFailureToPreserve.turnAttempted, // see PaneFailure.turnAttempted
-                    },
-                    "system",
-                );
+                raiseFailure(opts.model, {
+                    source: "command",
+                    failure: authFailureToPreserve.data,
+                    at: Date.now(),
+                    turnAttempted: authFailureToPreserve.turnAttempted, // see PaneFailure.turnAttempted
+                    system: true,
+                });
             }
             return false;
         };
@@ -1035,15 +1026,13 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                     // item's snapshot caused the rejection and no live failure
                     // covers it (as in restoreAuthFailureIfUnresolved).
                     if (item.authFailureToPreserve && !liveAuthFailure) {
-                        opts.model.dispatchPane(
-                        {
-                            type: "FailureObserved",
+                        raiseFailure(opts.model, {
+                            source: "command",
                             failure: item.authFailureToPreserve.data,
                             at: Date.now(),
                             turnAttempted: item.authFailureToPreserve.turnAttempted, // see PaneFailure.turnAttempted
-                        },
-                        "system",
-                    );
+                            system: true,
+                        });
                     }
                     attachmentsByMessage.delete(item.id);
                     opts.model.dispatchPane({ type: "PendingMessageRejected", id: item.id });
@@ -1092,15 +1081,13 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
             opts.model.dispatchPane({ type: "TurnStartFailed" }, "system");
         }
         if (item.authFailureToPreserve && paneSnapshot(opts.blockId)?.failure?.data.code !== "auth") {
-            opts.model.dispatchPane(
-                        {
-                            type: "FailureObserved",
-                            failure: item.authFailureToPreserve.data,
-                            at: Date.now(),
-                            turnAttempted: item.authFailureToPreserve.turnAttempted, // see PaneFailure.turnAttempted
-                        },
-                        "system",
-                    );
+            raiseFailure(opts.model, {
+                source: "command",
+                failure: item.authFailureToPreserve.data,
+                at: Date.now(),
+                turnAttempted: item.authFailureToPreserve.turnAttempted, // see PaneFailure.turnAttempted
+                system: true,
+            });
         }
         opts.model.dispatchPane({ type: "PendingMessageRejected", id: item.id });
         const attachments = attachmentsByMessage.get(item.id);

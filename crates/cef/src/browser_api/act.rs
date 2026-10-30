@@ -764,7 +764,8 @@ pub async fn snapshot_route(
                     let _ = cdp.close().await;
                     return fail(format!("the page changed since {r} was handed out; take a snapshot without scope first"));
                 }
-                let out = super::frame_scope::scoped_snapshot(&mut cdp, &state.browser_api.ref_tables, &req.block_id, epoch, &now, r, backend, frame).await;
+                let allowed = state.site_limits.list(&req.block_id);
+                let out = super::frame_scope::scoped_snapshot(&mut cdp, &state.browser_api.ref_tables, &req.block_id, epoch, &now, r, backend, frame, allowed.as_deref()).await;
                 let _ = cdp.close().await;
                 return match out {
                     Ok(data) => (StatusCode::OK, Json(ApiResponse::ok(data))),
@@ -845,7 +846,7 @@ pub async fn snapshot_route(
     let mut describes_left = MAX_DESCRIBES.saturating_sub(facts.len());
     let (frame_trees, frame_refs) = match scope {
         Some(_) => (Vec::new(), HashMap::new()),
-        None => frames::read_frames(&mut cdp, &mut describes_left).await,
+        None => frames::read_frames(&mut cdp, &mut describes_left, state.site_limits.list(&req.block_id).as_deref()).await,
     };
     let rendered = snapshot::render_with_frames(&nodes, &facts, scope, &prefix, &frame_trees);
     // A scoped snapshot adds its references to the full snapshot's table, so
@@ -972,6 +973,13 @@ pub async fn act_route(
         return fail("the page closed while this was starting; take a new snapshot");
     }
     let frame = table.frames.get(&req.ref_).cloned();
+    if let Some(f) = &frame {
+        let allowed = state.site_limits.list(&req.block_id);
+        if let Err(e) = frames::refuse_if_blocked(&mut cdp, allowed.as_deref(), f, &req.ref_).await {
+            let _ = cdp.close().await;
+            return fail(e);
+        }
+    }
     let result = act(&mut cdp, &table, backend, frame.as_ref(), &req).await;
     let _ = cdp.close().await;
     match result {

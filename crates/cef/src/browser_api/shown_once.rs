@@ -146,6 +146,13 @@ pub fn masks(name: &str, value: Option<&str>, in_zone: bool, readonly: bool) -> 
     (in_zone && shown_once::has_shown_once(name)) || ((in_zone || readonly) && value.is_some_and(shown_once::has_shown_once))
 }
 
+/// The name a query (`find`, a scope by name) is matched against: the one a line
+/// shows, with a secret the page shows once masked. Matching the raw name would
+/// let a query read it a piece at a time (`find name=<prefix>`, counting matches).
+pub fn shown_name(node: &Value, in_zone: bool) -> String {
+    mask_where(name(node), in_zone).into_owned()
+}
+
 /// `text` with a one-time secret masked, where one is shown.
 pub fn mask_where(text: &str, shown: bool) -> std::borrow::Cow<'_, str> {
     if shown {
