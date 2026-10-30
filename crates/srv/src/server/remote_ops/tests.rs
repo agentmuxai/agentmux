@@ -316,6 +316,8 @@ fn the_machine_is_named_by_the_address_it_called_from() {
     assert_eq!(super::receive::machine_in(&[peer("charlie", "main"), narko], from), "Narko");
     assert_eq!(super::receive::machine_in(&[peer("charlie", "main")], from), "unknown machine");
     assert_eq!(super::receive::machine_in(&[], None), "unknown machine");
+}
+
 /// A request with `params`, signed by `private`.
 fn request_with(slug: &str, nonce: &str, op: &str, params: serde_json::Value, audience: &str, private: &[u8; 32]) -> SignedRemoteOp {
     RemoteOp {
