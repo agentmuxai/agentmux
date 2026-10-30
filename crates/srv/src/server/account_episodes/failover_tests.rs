@@ -165,6 +165,23 @@ async fn the_agents_lead_gets_one_line_too() {
     cleanup(&[&block, &lead_pane]);
 }
 
+/// Two accounts both out of quota don't pass an agent back and forth: the one it left over its
+/// limit is not picked again until that limit lifts, though no pane has re-tested it.
+#[tokio::test]
+async fn an_account_just_left_over_its_limit_is_not_gone_back_to() {
+    let state = test_state();
+    let block = limited_agent(&state, vec![mail("b", "valid", "b@x.com")]).await;
+    failover::run(&state, &scan(&state, now()));
+    assert_eq!(linked_account(&state, "ag"), ["b"]);
+
+    // It hits its limit on b too; a, which it left, has not been re-tested by any pane.
+    let tab = new_tab(&state).await;
+    let on_b = pane(&state, &tab, "ag", "Ag", "b", Some(failure("usage_limit", Some(in_an_hour()), None)), false).await;
+    failover::run(&state, &scan(&state, now()));
+    assert_eq!(linked_account(&state, "ag"), ["b"], "a is still out of quota");
+    cleanup(&[&block, &on_b]);
+}
+
 /// A re-sign-in that rebuilds the account's context keeps the operator's mark.
 #[tokio::test]
 async fn a_rewritten_account_keeps_its_mark() {

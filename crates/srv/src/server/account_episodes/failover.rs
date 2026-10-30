@@ -70,15 +70,33 @@ pub(super) fn set_failover(state: &AppState, req: &IdentityAccountSetFailoverReq
     Ok(IdentityAccountSetFailoverResult { account_id: req.account_id.clone(), allow: req.allow })
 }
 
+/// Accounts an agent was moved off after a limit, and when that limit lifts (unix ms): the
+/// move clears the stored failure, so without this the next failover could send the agent
+/// straight back to an account no pane has re-tested yet.
+static LEFT: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, u64>>> = std::sync::LazyLock::new(Default::default);
+/// How long to avoid an account left over a limit with no known reset.
+const UNKNOWN_RESET_MS: u64 = 60 * 60_000;
+
+fn remember_left(pane: &BlockedPane, now_ms: u64) {
+    let until = pane.resets_at_ms.unwrap_or(now_ms + UNKNOWN_RESET_MS);
+    LEFT.lock().unwrap_or_else(|e| e.into_inner()).insert(pane.account_id.clone(), until);
+}
+
+fn recently_left(account_id: &str, now_ms: u64) -> bool {
+    let mut left = LEFT.lock().unwrap_or_else(|e| e.into_inner());
+    left.retain(|_, until| *until > now_ms);
+    left.contains_key(account_id)
+}
+
 fn enabled(state: &AppState) -> bool {
     state.config_watcher.extra_bool(SETTING).unwrap_or(true)
 }
 
 /// The account `pane`'s agent moves to: one of its provider's other accounts that is signed in,
-/// has quota and isn't marked, else why not.
-fn target<'a>(state: &AppState, accounts: &'a [IdentityAccount], pane: &BlockedPane) -> Result<&'a IdentityAccount, String> {
+/// has quota, isn't marked and wasn't just left over its own limit, else why not.
+fn target<'a>(state: &AppState, accounts: &'a [IdentityAccount], pane: &BlockedPane, now_ms: u64) -> Result<&'a IdentityAccount, String> {
     let usable: Vec<IdentityAccount> =
-        accounts.iter().filter(|a| canonical(&a.provider) == pane.provider && signed_in(&a.status) && !is_never(a)).cloned().collect();
+        accounts.iter().filter(|a| canonical(&a.provider) == pane.provider && signed_in(&a.status) && !is_never(a) && !recently_left(&a.id, now_ms)).cloned().collect();
     let chosen = pick(state, &usable, "any with quota", std::slice::from_ref(&pane.account_id), &pane.provider)?;
     accounts.iter().find(|a| a.id == chosen.id).ok_or_else(|| "the account is gone".to_string())
 }
@@ -102,7 +120,8 @@ pub(super) fn run(state: &AppState, panes: &[BlockedPane]) {
         if open_panes(state, def_id).iter().any(|b| b.meta.get(META_PENDING_ACCOUNT).is_some_and(|v| v.is_string())) {
             continue;
         }
-        let to = match target(state, &accounts, pane) {
+        let now_ms = agentmux_common::time::now_ms_u64();
+        let to = match target(state, &accounts, pane, now_ms) {
             Ok(to) => to,
             Err(why) => {
                 tracing::debug!(agent = %pane.agent_name, "account failover: no account to move to: {why}");
@@ -110,8 +129,9 @@ pub(super) fn run(state: &AppState, panes: &[BlockedPane]) {
             }
         };
         let same_provider: Vec<IdentityAccount> = accounts.iter().filter(|a| canonical(&a.provider) == pane.provider).cloned().collect();
-        if let Err(e) = super::switch::switch_to(state, ACTOR, def_id, to, &pane.provider, &same_provider, AccountSwitchWhen::AfterTurn) {
-            tracing::warn!(agent = %pane.agent_name, error = %e, "account failover: the move failed");
+        match super::switch::switch_to(state, ACTOR, def_id, to, &pane.provider, &same_provider, AccountSwitchWhen::AfterTurn) {
+            Ok(_) => remember_left(pane, now_ms),
+            Err(e) => tracing::warn!(agent = %pane.agent_name, error = %e, "account failover: the move failed"),
         }
     }
 }

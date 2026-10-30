@@ -1079,6 +1079,9 @@ describe("AgentComposerStrip — sign-in chip switches account", () => {
         const props = { ...baseProps, authStatus: "unknown" as const, authEmail: "alice@example.com", canSwitchAccount: true, onSwitchAccount };
         const { container } = render(() => <AgentComposerStrip {...props} signInCheckedLater={true} />);
         expect(link(container)).toHaveTextContent("alice@example.com");
+        // Nothing has confirmed the login, so it is neither green nor "Signed in as".
+        expect(chip(container).className).not.toContain("--ok");
+        expect(chip(container).getAttribute("title")).toBe("Account alice@example.com. Click to switch account.");
         await userEvent.click(link(container)!);
         expect(onSwitchAccount).toHaveBeenCalledTimes(1);
         // A host agent's unchecked sign-in still shows no chip, so the strip doesn't flash a colour.

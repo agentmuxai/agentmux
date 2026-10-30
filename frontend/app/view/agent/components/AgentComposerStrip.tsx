@@ -845,18 +845,20 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                 // flipping it with every turn would reorder the strip.
                 interactive: true,
                 render: () => {
-                    const authed = () => props.authStatus === "authenticated" || accountKnown();
+                    const authed = () => props.authStatus === "authenticated";
                     const hasOthers = () => !!props.canSwitchAccount && !!props.onSwitchAccount;
                     // srv holds a switch asked for in a turn until it ends (agent.account.switch).
                     const busy = () => !!props.loading || props.compacting != null;
                     const canSwitch = () => hasOthers();
                     const label = () => {
-                        const base = !authed() ? "Not logged in" : props.authEmail ? shortenEmail(props.authEmail) : "Logged in";
+                        const base = accountKnown() ? shortenEmail(props.authEmail!) : !authed() ? "Not logged in" : props.authEmail ? shortenEmail(props.authEmail) : "Logged in";
                         return props.pendingAccountLabel ? `${base} → ${shortenEmail(props.pendingAccountLabel)}` : base;
                     };
                     const title = () => {
-                        if (!authed()) return hasOthers() ? "Not signed in — click to log in or switch account" : "Not signed in — click Log in to continue";
-                        const base = props.authEmail
+                        if (!authed() && !accountKnown()) return hasOthers() ? "Not signed in — click to log in or switch account" : "Not signed in — click Log in to continue";
+                        const base = accountKnown()
+                            ? `Account ${props.authEmail}`
+                            : props.authEmail
                             ? `Signed in as ${props.authEmail}`
                             : "Signed in to this agent's provider";
                         if (props.pendingAccountLabel) return `${base}. Switching to ${props.pendingAccountLabel} when this turn ends.`;
