@@ -157,3 +157,43 @@ export function filterCounts(
     }
     return counts;
 }
+
+// ── The free sign-up guide ──────────────────────────────────────────────
+
+export interface FreeGuide {
+    lead: string;
+    limits: string;
+    /** At most two, as the Free tag's tooltip shows them. */
+    catches: string[];
+    signupUrl: string;
+    steps: string[];
+    checked: CheckedNote;
+    /** Set while the Free claims are stale: the guide still shows, but says so. */
+    stale: boolean;
+    /** A card whose free route moved: "For a personal Google account, use Antigravity." */
+    successor?: string;
+}
+
+/**
+ * What the new-agent panel shows a person who is new to a provider that has a
+ * free sign-in route: the one link, then what to do after it. `null` for a
+ * provider with no free route, an expired one, or one whose route is a pasted
+ * key (a key needs somewhere to land that is not built yet), so the panel
+ * shows nothing rather than a guide that cannot finish.
+ */
+export function freeGuideFor(provider: string, now: Date): FreeGuide | null {
+    const access = getProviderAccess(provider);
+    const tag = freeTagFor(access, now);
+    const free = access?.free;
+    if (!tag || !free || free.route !== "signin") return null;
+    return {
+        lead: free.lead,
+        limits: free.limits.text,
+        catches: free.catches.slice(0, 2).map((c) => c.text),
+        signupUrl: free.signupUrl,
+        steps: free.steps,
+        checked: tag.checked,
+        stale: tag.checked.state === "stale",
+        successor: access?.successor?.text.text,
+    };
+}
