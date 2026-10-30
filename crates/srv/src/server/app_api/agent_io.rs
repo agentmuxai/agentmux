@@ -250,13 +250,15 @@ pub(crate) async fn refuse_other_agents_processes(state: &AppState, caller: &str
 
 /// `fleet.bulk-stop` from the agent `caller`: its own block and its workers stop at once, every
 /// other agent's opens the override window (`pending` in the answer) and stops when it runs out.
+/// A `staged` rollout can't be applied to those windows (they all open at once), so it is refused
+/// when any target is another agent's.
 pub(crate) async fn agent_bulk_stop(
     state: &AppState,
     caller: &str,
     targets: Vec<String>,
     signal: Option<&str>,
     staged: Option<StagePlanInput>,
-) -> FleetActionResult {
+) -> Result<FleetActionResult, String> {
     let (mut waits, mut at_once, mut by) = (Vec::new(), Vec::new(), None);
     for block_id in targets {
         match window_caller_for(state, caller, &block_id).await {
@@ -266,6 +268,9 @@ pub(crate) async fn agent_bulk_stop(
             }
             None => at_once.push(block_id),
         }
+    }
+    if staged.is_some() && !waits.is_empty() {
+        return Err("staged rollouts don't apply to other agents' blocks from an agent; stop them without `staged`".to_string());
     }
     let mut result = if at_once.is_empty() {
         FleetActionResult::default()
@@ -279,7 +284,7 @@ pub(crate) async fn agent_bulk_stop(
         result.aborted_early |= now.aborted_early;
         result.pending.extend(pending.into_iter().map(|v| v.block_id));
     }
-    result
+    Ok(result)
 }
 
 fn register_agent_kill_process(engine: &Arc<WshRpcEngine>, state: &AppState) {

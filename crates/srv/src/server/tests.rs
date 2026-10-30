@@ -3323,12 +3323,15 @@ mod fleet_tests {
         write_raw_shared_entry(&shared_dir, "peer-agent-y", &peer_url, &block_id, "peer-secret-key");
         let state = test_state();
 
-        let result = crate::server::app_api::agent_io::agent_bulk_stop(&state, "Korp", vec![block_id.clone()], None, None).await;
+        let result = crate::server::app_api::agent_io::agent_bulk_stop(&state, "Korp", vec![block_id.clone()], None, None).await.unwrap();
         std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
 
         assert!(result.succeeded.is_empty() && result.failed.is_empty(), "nothing is stopped at once");
-        assert_eq!(result.pending, vec![block_id]);
+        assert_eq!(result.pending, vec![block_id.clone()]);
         assert_eq!(hits.lock().unwrap().clone(), vec!["stop-pending:Korp".to_string()], "asked there, never the plain stop");
+        let staged = Some(crate::backend::rpc_types::StagePlanInput { batch_size: 1, max_fail_percentage: 0 });
+        let refused = crate::server::app_api::agent_io::agent_bulk_stop(&state, "Korp", vec![block_id.clone()], None, staged).await;
+        assert!(refused.unwrap_err().contains("staged"), "a staged rollout is not applied to the windows");
     }
 
     #[tokio::test]

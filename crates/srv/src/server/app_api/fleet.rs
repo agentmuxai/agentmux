@@ -472,7 +472,7 @@ fn register_fleet_bulk_stop(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // A connection registered as an agent waits for the person's override window on every
                 // target that is another agent's; the window's own connection stops at once.
                 if !ctx.agent_id.trim().is_empty() {
-                    return Ok(super::agent_io::agent_bulk_stop(&state, &ctx.agent_id, cmd.targets, cmd.signal.as_deref(), cmd.staged).await);
+                    return super::agent_io::agent_bulk_stop(&state, &ctx.agent_id, cmd.targets, cmd.signal.as_deref(), cmd.staged).await;
                 }
                 let result = fleet_bulk_stop_impl(&state, cmd.targets, cmd.signal.as_deref(), cmd.staged).await;
                 Ok(result)
