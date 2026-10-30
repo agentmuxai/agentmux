@@ -19,6 +19,7 @@ const DURATIONS: Record<string, number> = {
     base: tokens.DURATION_BASE_MS,
     moderate: tokens.DURATION_MODERATE_MS,
     slow: tokens.DURATION_SLOW_MS,
+    pulse: tokens.DURATION_PULSE_MS,
 };
 
 const EASINGS: Record<string, string> = {
