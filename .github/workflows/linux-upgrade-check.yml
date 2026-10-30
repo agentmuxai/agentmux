@@ -11,9 +11,10 @@ name: Linux package upgrade check
 # A pull request that changes the harness or this file runs it too, on the latest published release against the one
 # before it, so neither can rot unseen.
 #
-# It reports and never blocks: the release is already published when it runs. A failure opens (or comments on) an
-# issue and leaves an error annotation; the job itself ends green so a flaky registry never marks the Release red.
-# (On a pull request nothing is filed; the run's own log is the report.)
+# It reports and never blocks: the release is already published when it runs. A failure leaves an error annotation
+# and the failed cases in the run's job summary; the job itself ends green so a flaky registry never marks the Release
+# red. It files no issue: a called workflow can't hold a permission its caller doesn't grant, and the tag's own
+# release.yml (which cannot change after the tag) grants no `issues`. Restore the issue once a tag carries it.
 
 on:
   pull_request:
@@ -54,7 +55,6 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
-      issues: write
     env:
       GH_TOKEN: ${{ github.token }}
       TO: ${{ inputs.to-version }}
@@ -132,18 +132,15 @@ jobs:
         env:
           FROM_VERSION: ${{ steps.pick.outputs.from }}
           TO_VERSION: ${{ steps.pick.outputs.to }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -uo pipefail
-          title="Linux package upgrade check failed: $FROM_VERSION to $TO_VERSION"
           failed=$(grep -E '^(  FAIL|  SETUP|== )|SETUP FAILED|can.t download|didn.t start|failed; see' "$RUNNER_TEMP/upgrade-check.log" | cut -c1-300 | head -n 30)
           [ -n "$failed" ] || failed=$(tail -n 30 "$RUNNER_TEMP/upgrade-check.log" | cut -c1-300)
-          body=$(printf 'The .deb/.rpm upgrade check from %s to %s failed after the release published.\n\nRun: %s\n\n```\n%s\n```\n\nRun it again by hand: `FROM_VERSION=%s TO_VERSION=%s scripts/linux-upgrade-harness/run.sh` (see its README).\n' \
-            "$FROM_VERSION" "$TO_VERSION" "$RUN_URL" "$failed" "$FROM_VERSION" "$TO_VERSION")
-          existing=$(gh issue list --state open --search "\"$title\" in:title" --json number --jq '.[0].number // empty')
-          if [ -n "$existing" ]; then
-            gh issue comment "$existing" --body "$body"
-          else
-            gh issue create --title "$title" --body "$body"
-          fi
-          echo "::error::The Linux package upgrade check from $FROM_VERSION to $TO_VERSION failed; see the issue and the summary."
+          {
+            echo "### The .deb/.rpm upgrade check from $FROM_VERSION to $TO_VERSION failed after the release published"
+            echo '```'
+            echo "$failed"
+            echo '```'
+            echo "Run it again by hand: \`FROM_VERSION=$FROM_VERSION TO_VERSION=$TO_VERSION scripts/linux-upgrade-harness/run.sh\` (see its README)."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::error::The Linux package upgrade check from $FROM_VERSION to $TO_VERSION failed; see the job summary."
