@@ -25,8 +25,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::cdp::CdpSession;
+use super::combobox;
 use super::dates;
 use super::frames::{self, FrameRef};
+use super::key_typing;
 use super::snapshot::{self, DomFacts};
 use super::types::ApiResponse;
 use crate::state::AppState;
@@ -573,13 +575,16 @@ async fn click_at(cdp: &mut CdpSession, x: f64, y: f64) -> Result<(), String> {
 /// page's own session, which the mouse events go through: the browser routes
 /// them to whichever frame is under the point. A point measured inside a frame
 /// is moved to where that frame is on the page first.
-async fn click_element(
+pub(super) async fn click_element(
     cdp: &mut CdpSession,
     root: &mut CdpSession,
     frame: Option<&FrameRef>,
     object_id: &str,
 ) -> Result<(), String> {
-    let p = call_on(cdp, object_id, CLICK_POINT, vec![]).await?;
+    let p = match call_on(cdp, object_id, CLICK_POINT, vec![]).await {
+        Ok(p) => p,
+        Err(e) => return Err(explain_unclickable(cdp, object_id, e).await),
+    };
     let mut x = p.get("x").and_then(|v| v.as_f64()).ok_or("no click point")?;
     let mut y = p.get("y").and_then(|v| v.as_f64()).ok_or("no click point")?;
     if let Some(f) = frame {
@@ -593,6 +598,24 @@ async fn click_element(
     click_at(root, x, y).await
 }
 
+/// An element that can't be clicked, as the agent should read it: "not
+/// visible" reads like a layout problem, but an element the page removed since
+/// the snapshot (a popup that closed itself) is the likelier cause
+/// (docs/specs/PLAN_BROWSER_PANE_FORM_FILLING_FIXES_2026_10_17.md §3.4).
+async fn explain_unclickable(cdp: &mut CdpSession, object_id: &str, error: String) -> String {
+    let attached = call_on(cdp, object_id, "function () { return { v: this.isConnected }; }", vec![])
+        .await
+        .ok()
+        .and_then(|v| v.get("v").and_then(|b| b.as_bool()));
+    // Only a probe that answered "detached" says so; a probe that failed too
+    // (a closed session, a timeout) leaves the original error to be read.
+    if attached == Some(false) {
+        "the page changed since the snapshot (the element is gone); take a new snapshot".to_string()
+    } else {
+        error
+    }
+}
+
 /// The secret-field guard for typing into whatever has focus (spec §5.1),
 /// used by `dispatch_key`. `Err` names the refusal.
 pub async fn refuse_typing_into_secret_field(cdp: &mut CdpSession) -> Result<(), String> {
@@ -601,7 +624,7 @@ pub async fn refuse_typing_into_secret_field(cdp: &mut CdpSession) -> Result<(),
 
 /// The same guard for whatever has focus in `frame_id` (`cdp` reaches that
 /// frame), or in the main frame.
-async fn refuse_typing_in_frame(cdp: &mut CdpSession, frame_id: Option<&str>) -> Result<(), String> {
+pub(super) async fn refuse_typing_in_frame(cdp: &mut CdpSession, frame_id: Option<&str>) -> Result<(), String> {
     let ctx = isolated_context(cdp, frame_id).await?;
     let v = call(
         cdp,
@@ -624,7 +647,7 @@ async fn refuse_typing_in_frame(cdp: &mut CdpSession, frame_id: Option<&str>) ->
 
 /// The refusal for a secret field, naming what made it one, so a false alarm
 /// is easy to see and report.
-fn secret_refusal(why: &str) -> String {
+pub(super) fn secret_refusal(why: &str) -> String {
     format!(
         "this is a password, one-time-code, card or Social Security / taxpayer ID field ({why}): AgentMux never lets an agent type into one. \
          Ask the user to fill it in the pane themselves, then take a new snapshot."
@@ -645,7 +668,7 @@ pub(super) fn fail<T>(msg: impl Into<String>) -> (StatusCode, Json<ApiResponse<T
 /// or a file input apart from an ordinary one: value-bearing fields first
 /// (a field without facts has its value hidden, `snapshot::render`), then
 /// buttons (a file input's role).
-const MAX_DESCRIBES: usize = 600;
+pub(super) const MAX_DESCRIBES: usize = 600;
 
 /// `POST /agentmux/browser/snapshot`.
 pub async fn snapshot_route(
@@ -668,13 +691,19 @@ pub async fn snapshot_route(
     let scope = match &req.scope {
         Some(r) => {
             let table = state.browser_api.ref_tables.get(&req.block_id).unwrap_or_default();
-            if table.frames.contains_key(r) {
-                let _ = cdp.close().await;
-                return fail(format!(
-                    "{r} is inside an iframe, and scoping to a part of a frame isn't supported yet: take a snapshot without scope"
-                ));
-            }
             let now = page_url(&mut cdp).await;
+            if let (Some(frame), Some(backend)) = (table.frames.get(r), table.refs.get(r).copied()) {
+                if table.url != now {
+                    let _ = cdp.close().await;
+                    return fail(format!("the page changed since {r} was handed out; take a snapshot without scope first"));
+                }
+                let out = super::frame_scope::scoped_snapshot(&mut cdp, &state.browser_api.ref_tables, &req.block_id, epoch, &now, r, backend, frame).await;
+                let _ = cdp.close().await;
+                return match out {
+                    Ok(data) => (StatusCode::OK, Json(ApiResponse::ok(data))),
+                    Err(e) => fail(e),
+                };
+            }
             match table.refs.get(r).copied() {
                 Some(b) if table.url == now => Some(b),
                 Some(_) => {
@@ -999,7 +1028,28 @@ async fn act(
                 call(cdp, "Input.insertText", json!({ "text": text })).await?;
             }
             let mut after = call_on(cdp, &obj, READ_BACK, vec![]).await?;
-            let got = after.get("value").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let mut got = after.get("value").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let mut method = "insertText";
+            // Step 3 of the ladder: a mask reads keydown, not the inserted
+            // text, so clear the field and type the text key by key.
+            // (Not for text with a line break: that would press Enter.)
+            if !text.is_empty() && got != text && after.get("contentEditable").is_none() && key_typing::is_typable(&text) {
+                call_on(cdp, &obj, PREPARE_FILL, vec![]).await?;
+                if let Some(why) = describe(cdp, backend).await.as_ref().and_then(snapshot::secret_reason) {
+                    return Err(secret_refusal(why));
+                }
+                refuse_typing_in_frame(cdp, frame_id).await?;
+                key_typing::clear_selection(cdp).await?;
+                let emptied = call_on(cdp, &obj, READ_BACK, vec![]).await?;
+                if emptied.get("value").and_then(|v| v.as_str()).is_some_and(|v| !v.is_empty()) {
+                    call_on(cdp, &obj, SET_VALUE, vec![json!("")]).await?;
+                    call_on(cdp, &obj, PREPARE_FILL, vec![]).await?;
+                }
+                key_typing::type_keys(cdp, &text).await?;
+                method = "keys";
+                after = call_on(cdp, &obj, READ_BACK, vec![]).await?;
+                got = after.get("value").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            }
             // Set the value directly only for a widget that took nothing from
             // the inserted text (the value is empty or what it was). A value
             // the page changed (cut to a limit, reformatted by a mask) is the
@@ -1009,8 +1059,12 @@ async fn act(
             if forced {
                 call_on(cdp, &obj, SET_VALUE, vec![json!(text)]).await?;
                 after = call_on(cdp, &obj, READ_BACK, vec![]).await?;
+                method = "set";
             }
             let mut after = warn_if_changed(after, &text);
+            if let Some(o) = after.as_object_mut() {
+                o.insert("filledBy".to_string(), json!(method));
+            }
             if forced {
                 // Never silent: a field that rejected the text on purpose was overridden.
                 if let Some(o) = after.as_object_mut() {
@@ -1023,6 +1077,9 @@ async fn act(
         }
         "select" => {
             let option = req.option.clone().ok_or("select needs `option`")?;
+            if facts.local_name != "select" && combobox::is_combobox(cdp, &obj).await {
+                return combobox::select(cdp, root, frame, frame_id, &obj, &facts, &option).await;
+            }
             call_on(cdp, &obj, SELECT_OPTION, vec![json!(option)]).await?;
             call_on(cdp, &obj, READ_BACK, vec![]).await
         }

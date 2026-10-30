@@ -138,6 +138,7 @@ impl LanDiscoveryController {
             agent_status: Default::default(),
             agent_lines: Default::default(),
             agent_providers: Default::default(),
+            agent_accounts: Default::default(),
             agent_seats: Default::default(),
             first_seen: 0,
             last_seen: agentmux_common::time::now_secs_u64(),

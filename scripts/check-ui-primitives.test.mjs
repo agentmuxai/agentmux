@@ -7,6 +7,7 @@
 import { describe, expect, it } from "vitest";
 import {
     badRadii,
+    buttonViolations,
     collect,
     colourLiterals,
     compare,
@@ -265,6 +266,28 @@ describe("collect", () => {
         expect(countButtons("<button>\n<button\n  type='x'>\n<buttons>")).toBe(2);
         // A comment that mentions the element isn't one.
         expect(countButtons("// not a native <button>\n/** nor a <button> here */\n<button>")).toBe(1);
+    });
+});
+
+describe("rule 1: the hard zero outside the agent pane", () => {
+    const allow = { "frontend/app/a.tsx": { max: 1, reason: "r" } };
+
+    it("passes with nothing, and lets the agent pane keep its buttons", () => {
+        expect(buttonViolations({}, {})).toEqual([]);
+        expect(buttonViolations({ "frontend/app/view/agent/x.tsx": 9 }, {})).toEqual([]);
+    });
+
+    it("refuses a button anywhere else", () => {
+        expect(buttonViolations({ "frontend/app/b.tsx": 1 }, {})).toEqual(["buttons: frontend/app/b.tsx has 1, allowed 0"]);
+    });
+
+    it("allows an allowlisted file up to its count only", () => {
+        expect(buttonViolations({ "frontend/app/a.tsx": 1 }, allow)).toEqual([]);
+        expect(buttonViolations({ "frontend/app/a.tsx": 2 }, allow)).toEqual(["buttons: frontend/app/a.tsx has 2, allowed 1"]);
+    });
+
+    it("asks for an allowlist entry to go once its file has no buttons", () => {
+        expect(buttonViolations({}, allow)).toEqual(["buttons: frontend/app/a.tsx has none; remove it from BUTTON_ALLOWLIST"]);
     });
 });
 

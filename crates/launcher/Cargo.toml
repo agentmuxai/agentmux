@@ -107,6 +107,8 @@ windows = { version = "0.61", features = [
     # NotificationData's value map (a shutdown toast's live countdown).
     "Foundation_Collections",
     "Win32_System_WinRT",
+    # SHQueryUserNotificationState: whether Windows will draw a toast banner now.
+    "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ] }
 

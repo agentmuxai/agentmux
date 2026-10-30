@@ -16,6 +16,8 @@ use std::collections::{HashMap, HashSet};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
+use super::select_lists;
+
 pub use super::secret::{is_secret, secret_reason};
 
 /// Snapshot text is capped so one page can't flood an agent's context.
@@ -345,7 +347,7 @@ pub fn render_with_frames(
     if let Some(root) = root {
         // A scope inside a zone is still in it: its secret stays masked.
         let in_zone = super::shown_once::under_zone(root, &by_id, &zones);
-        walk(root, &by_id, facts, &zones, in_zone, ref_prefix, 0, "", false, 0, frames, &mut out);
+        walk(root, &by_id, facts, &zones, in_zone, ref_prefix, 0, "", false, 0, frames, scope_backend_id, &mut out);
     }
     if out.truncated {
         out.text.push_str("- … snapshot truncated at 40 KB: use find (a role and name), or pass `scope` (a reference, or a role and quoted name) to read one part of the page\n");
@@ -365,6 +367,7 @@ fn walk(
     hide_text: bool,
     frame: usize,
     frames: &[FrameTree],
+    scope_root: Option<i64>,
     out: &mut Snapshot,
 ) {
     if out.truncated {
@@ -378,6 +381,8 @@ fn walk(
 
     let mut child_depth = depth;
     let mut name_for_children = parent_name;
+    // A closed dropdown with many options shows their count, not the options.
+    let collapsed = select_lists::collapsed_option_count(node, role, truthy(prop(node, "expanded")), scope_root.is_some() && scope_root == backend, by_id);
     if !transparent {
         // The reference goes into the table only once its line is known to
         // fit: a line cut by the cap would hand out a reference the agent
@@ -385,6 +390,10 @@ fn walk(
         let r = (takes_ref(role, backend, facts) || (backend.is_some() && masks_shown_once(node, role, name, in_zone)))
             .then(|| next_ref(out, ref_prefix, frame));
         let line = line_for(node, role, name, backend, facts, r.as_deref(), frame, frames, in_zone);
+        let line = match collapsed {
+            Some(n) => format!("{line} [{n} options]"),
+            None => line,
+        };
         let indent = "  ".repeat(depth);
         if out.text.len() + indent.len() + line.len() + 1 > MAX_SNAPSHOT_BYTES {
             out.truncated = true;
@@ -408,10 +417,13 @@ fn walk(
     if DATE_ROLES.contains(&role) && !transparent {
         return;
     }
+    if !transparent && collapsed.is_some() {
+        return;
+    }
     if let Some(children) = node.get("childIds").and_then(|v| v.as_array()) {
         for c in children {
             if let Some(child) = c.as_str().and_then(|id| by_id.get(id)) {
-                walk(child, by_id, facts, zones, in_zone, ref_prefix, child_depth, name_for_children, hide_text || TEXT_SHOWN_ELSEWHERE.contains(&role), frame, frames, out);
+                walk(child, by_id, facts, zones, in_zone, ref_prefix, child_depth, name_for_children, hide_text || TEXT_SHOWN_ELSEWHERE.contains(&role), frame, frames, scope_root, out);
             }
         }
     }
@@ -441,7 +453,7 @@ fn render_frame(f: &FrameTree, frames: &[FrameTree], depth: usize, out: &mut Sna
     let root = f.nodes.iter().find(|n| n.get("parentId").is_none()).or_else(|| f.nodes.first());
     let zones = super::shown_once::copy_zones(&f.nodes);
     if let Some(root) = root {
-        walk(root, &by_id, &f.facts, &zones, false, "", depth, "", false, f.ordinal, frames, out);
+        walk(root, &by_id, &f.facts, &zones, false, "", depth, "", false, f.ordinal, frames, None, out);
     }
 }
 
@@ -791,6 +803,24 @@ mod tests {
     /// Facts for every backend id given, as plain text inputs.
     fn plain(ids: &[i64]) -> HashMap<i64, DomFacts> {
         ids.iter().map(|b| (*b, DomFacts { local_name: "input".into(), attrs: HashMap::new(), label: String::new() })).collect()
+    }
+
+    #[test]
+    fn a_long_closed_dropdown_shows_its_option_count_not_the_options() {
+        let kids: Vec<String> = (0..20).map(|i| format!("o{i}")).collect();
+        let kid_refs: Vec<&str> = kids.iter().map(String::as_str).collect();
+        let mut nodes = vec![
+            n("1", None, "RootWebArea", "", Some(1), &["2"]),
+            n("2", Some("1"), "combobox", "State", Some(20), &["3"]),
+            n("3", Some("2"), "MenuListPopup", "", Some(30), &kid_refs),
+        ];
+        nodes.extend(kids.iter().enumerate().map(|(i, id)| n(id, Some("3"), "option", &format!("State {i}"), Some(100 + i as i64), &[])));
+        let s = render(&nodes, &plain(&[20]), None, "");
+        assert!(s.text.contains("[20 options]"), "{}", s.text);
+        assert!(!s.text.contains("State 7"), "{}", s.text);
+        // Scoped to the dropdown, its options are listed.
+        let scoped = render(&nodes, &plain(&[20]), Some(20), "e2.");
+        assert!(scoped.text.contains("State 7"), "{}", scoped.text);
     }
 
     #[test]

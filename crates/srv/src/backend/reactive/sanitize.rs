@@ -799,6 +799,21 @@ pub fn quote_in_jekt(text: &str) -> String {
     neutralize_file_lists(&neutralize_markers(text))
 }
 
+/// The marker every note of srv's own starts with. The agent pane shows a turn that starts with it
+/// as an AgentMux note; a turn without it would take the style of a person's message.
+pub const SYSTEM_NOTE_MARKER: &str = "[AgentMux]";
+
+/// `text` as a system note: unchanged when it already starts with the marker, else with it in front.
+/// Every way srv puts a note of its own into an agent's turn goes through this, so a caller that
+/// forgets the marker still cannot make automated text look like a person's.
+pub fn with_system_note_marker(text: &str) -> std::borrow::Cow<'_, str> {
+    if text.starts_with(SYSTEM_NOTE_MARKER) {
+        std::borrow::Cow::Borrowed(text)
+    } else {
+        std::borrow::Cow::Owned(format!("{SYSTEM_NOTE_MARKER} {text}"))
+    }
+}
+
 /// Text that goes inside one of srv's own `[AgentMux]` system notes but was
 /// not written by srv: another agent's claim note or topic, a file path, a
 /// branch or agent name. Sanitized like a delivered body, flattened to one
@@ -851,5 +866,32 @@ pub fn validate_muxbus_url(url_str: &str) -> Result<(), String> {
         }
     } else {
         Err("invalid URL: missing scheme".to_string())
+    }
+}
+
+#[cfg(test)]
+mod system_note_marker_tests {
+    use super::*;
+
+    /// Every way srv puts a note of its own into an agent's turn is marked, whatever its caller wrote.
+    #[test]
+    fn a_note_always_starts_with_the_marker() {
+        let table = [
+            ("Task #5 can start", "[AgentMux] Task #5 can start"),
+            ("[AgentMux] already marked", "[AgentMux] already marked"),
+            // The pane only knows a note by its exact start, so leading spaces do not count.
+            ("  [AgentMux] spaced", "[AgentMux]   [AgentMux] spaced"),
+            ("", "[AgentMux] "),
+            ("mentions [AgentMux] later", "[AgentMux] mentions [AgentMux] later"),
+        ];
+        for (input, expected) in table {
+            assert_eq!(with_system_note_marker(input), expected, "input: {input:?}");
+        }
+    }
+
+    #[test]
+    fn marking_twice_changes_nothing() {
+        let once = with_system_note_marker("Probe").into_owned();
+        assert_eq!(with_system_note_marker(&once), once);
     }
 }

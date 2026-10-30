@@ -287,7 +287,7 @@ pub fn unlocked_text(spec: &BoardTask, build: &BoardTask) -> String {
     use crate::backend::reactive::sanitize::quote_in_system_note as q;
     let doc = if spec.card.doc.is_empty() { String::new() } else { format!(" ({})", q(&spec.card.doc)) };
     format!(
-        "Task #{} \"{}\" can start: the {} it waits on, #{} \"{}\"{doc}, is done. \
+        "[AgentMux] Task #{} \"{}\" can start: the {} it waits on, #{} \"{}\"{doc}, is done. \
          Take it with Tasks claim (id {}) when you've finished your current task.",
         build.card.num,
         q(&build.item.title),
@@ -499,6 +499,13 @@ mod tests {
             .unwrap();
         assert_eq!(ids(due(&s, "Loap-3", "", 15_000, 30_000)), ["b"]);
         assert!(due(&s, "Naki", "", 0, 30_000).is_empty(), "not Naki's");
+    }
+
+    #[test]
+    fn the_unlock_notice_is_marked_as_srv_s_own() {
+        let spec = task(1, "Spec: x", "spec", "Loap-3", 0);
+        let build = task(2, "Build: x", "build", "Loap-3", 0);
+        assert!(unlocked_text(&spec, &build).starts_with("[AgentMux] Task #2 "), "{}", unlocked_text(&spec, &build));
     }
 
     #[test]
