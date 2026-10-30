@@ -11,6 +11,10 @@ name: Container Agent Image
 # in the GitHub UI. The last step fails, naming that step, until it is done.
 #
 # docs/specs/SPEC_CONTAINER_AGENTS_WORK_FOR_EVERYONE_2026_10_07.md
+#
+# A second job builds the developer variant (docker/Dockerfile.agent-developer) FROM the digest the first
+# job pushed, as <version>-developer in the same package: a tag in an existing public package needs no new
+# visibility step. docs/specs/SPEC_CONTAINER_AGENT_DEVELOPER_IMAGE_2026_10_29.md section 3.
 
 # When it runs: as a job of release-core.yml, after the release gate, for each release;
 # and by hand from main. It used to run on any pushed `v*` tag with the tag's own copy of
@@ -33,6 +37,9 @@ on:
       digest:
         description: 'The digest of the multi-arch index just pushed (sha256:<64 hex>). release-core.yml puts it in the signed manifest.'
         value: ${{ jobs.build-and-push.outputs.digest }}
+      developer_digest:
+        description: 'The digest of the developer image index just pushed (empty when that job did not run or failed). release-core.yml puts it in the signed manifest next to the base image.'
+        value: ${{ jobs.developer-manifest.outputs.digest }}
   workflow_dispatch:
     inputs:
       tag_latest:
@@ -176,6 +183,186 @@ jobs:
       # Anonymous, like the daemon's own pull: no login in this step. Fails with
       # the exact UI step when the package is still private. Checks the first tag
       # this run pushed.
+      - name: Anonymous pull must work (the package must be public)
+        env:
+          PUSHED_TAGS: ${{ steps.tags.outputs.list }}
+        run: |
+          docker logout "$REGISTRY" >/dev/null 2>&1 || true
+          image="$(printf '%s\n' "$PUSHED_TAGS" | head -n 1)"
+          bash scripts/check-anonymous-pull.sh "$image" \
+            "https://github.com/orgs/agentmuxai/packages/container/package/agent-base"
+
+  # The developer variant: the base image plus a C toolchain, Rust, go-task, cargo-nextest, a headless
+  # display and the CEF libraries. Built on the base image's own digest, so it cannot sit on a different
+  # base than the one this release signs. Each architecture builds on a native runner (a Rust toolchain
+  # layer under QEMU is slow) and is pushed by digest; developer-manifest then joins the two into one
+  # tagged multi-arch image. Both jobs are optional: a failure leaves the release without a developer image
+  # (the manifest names none) and never blocks the release or the base image.
+  developer-image:
+    name: Developer image (${{ matrix.arch }})
+    needs: [gate, build-and-push]
+    if: ${{ always() && needs.build-and-push.result == 'success' }}
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The repository's pinned toolchain when it has one (rust-toolchain.toml), else the Dockerfile's own default.
+      - name: Rust version
+        id: rust
+        run: |
+          v=""
+          if [ -f rust-toolchain.toml ]; then
+            v="$(sed -n 's/^channel *= *"\([0-9][0-9.]*\)".*/\1/p' rust-toolchain.toml | head -n 1)"
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/Dockerfile.agent-developer
+          platforms: ${{ matrix.platform }}
+          build-args: |
+            BASE=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build-and-push.outputs.digest }}
+            ${{ steps.rust.outputs.version != '' && format('RUST_VERSION={0}', steps.rust.outputs.version) || '' }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ needs.gate.outputs.version || format('dispatch-{0}', github.sha) }}
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
+
+      - name: Keep the digest for the manifest job
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          if ! printf '%s' "$DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$'; then
+            echo "::error::the push did not report an image digest ('$DIGEST')"
+            exit 1
+          fi
+          mkdir -p /tmp/digests
+          touch "/tmp/digests/${DIGEST#sha256:}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: developer-digest-${{ matrix.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  developer-manifest:
+    name: Developer image (multi-arch tags)
+    needs: [gate, developer-image]
+    if: ${{ always() && needs.gate.result != 'cancelled' && needs.developer-image.result != 'skipped' }}
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.index.outputs.digest }}
+
+    steps:
+      - name: Checkout (for the anonymous-pull script)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: scripts/check-anonymous-pull.sh
+          sparse-checkout-cone-mode: false
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: developer-digest-*
+          path: /tmp/digests
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image tags
+        id: tags
+        env:
+          VERSION: ${{ needs.gate.outputs.version }}
+          SHA: ${{ github.sha }}
+          TAG_LATEST: ${{ inputs.tag_latest }}
+        run: |
+          {
+            echo "list<<EOF"
+            if [ -n "$VERSION" ]; then
+              echo "${REGISTRY}/${IMAGE_NAME}:${VERSION}-developer"
+              echo "${REGISTRY}/${IMAGE_NAME}:${VERSION%.*}-developer"
+              echo "${REGISTRY}/${IMAGE_NAME}:developer"
+            else
+              echo "${REGISTRY}/${IMAGE_NAME}:dispatch-${SHA::7}-developer"
+              if [ "$TAG_LATEST" = "true" ]; then echo "${REGISTRY}/${IMAGE_NAME}:developer"; fi
+            fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      # Both architectures or nothing: one tag that is only half an image would break the other half's users.
+      - name: Join the two architectures under the tags
+        working-directory: /tmp/digests
+        env:
+          TAGS: ${{ steps.tags.outputs.list }}
+        run: |
+          if [ "$(ls | wc -l)" -ne 2 ]; then
+            echo "::error::expected a digest for amd64 and for arm64, found: $(ls | tr '\n' ' ')"
+            exit 1
+          fi
+          tag_args=()
+          while IFS= read -r t; do [ -n "$t" ] && tag_args+=(-t "$t"); done <<< "$TAGS"
+          docker buildx imagetools create "${tag_args[@]}" $(printf "${REGISTRY}/${IMAGE_NAME}@sha256:%s " *)
+
+      # The digest of the index just tagged: the one reference that selects the platform, and what the signed manifest names.
+      - name: The pushed index digest
+        id: index
+        env:
+          TAGS: ${{ steps.tags.outputs.list }}
+        run: |
+          first="$(printf '%s\n' "$TAGS" | head -n 1)"
+          digest="$(docker buildx imagetools inspect "$first" --format '{{json .Manifest}}' | jq -r .digest)"
+          if ! printf '%s' "$digest" | grep -Eq '^sha256:[0-9a-f]{64}$'; then
+            echo "::error::no index digest for $first ('$digest')"
+            exit 1
+          fi
+          echo "pushed $REGISTRY/$IMAGE_NAME@$digest"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
       - name: Anonymous pull must work (the package must be public)
         env:
           PUSHED_TAGS: ${{ steps.tags.outputs.list }}
