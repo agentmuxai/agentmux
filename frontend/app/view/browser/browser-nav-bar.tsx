@@ -9,7 +9,9 @@ import { paneCommandFor } from "@/app/keybindings";
 import { ContextMenuModel, showTextInputContextMenu } from "@/app/store/contextmenu";
 import { browserStartPageAtom, settingsAtom } from "@/store/config-signals";
 import { FlyoutMenu } from "@/app/element/flyoutmenu";
-import { IconButton } from "@/app/element/ui";
+import { Button } from "@/app/element/ui";
+import { ToolbarBookmarkIcon, ToolbarHomeIcon } from "./browser-toolbar-icons";
+import { reloadButtonState } from "./browser-reload-button";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { findBookmark, toggleBookmark } from "./browser-bookmarks-logic";
@@ -514,14 +516,21 @@ export function BrowserNavBar(props: {
                         >{"→"}</button>
                         <button
                             class="browser-nav-btn"
-                            onClick={() => getApi().browserPanes.reload(model.blockId).catch(() => {})}
-                            title="Reload"
-                        >{"↻"}</button>
-                        <IconButton
-                            class="browser-nav-btn"
-                            icon="house"
-                            label={`Home: ${home()}`}
-                            tooltipPlacement="bottom"
+                            data-testid="browser-reload-stop"
+                            onClick={() => {
+                                const panes = getApi().browserPanes;
+                                const press = reloadButtonState(model.loadingAtom()).action === "stop" ? panes.stop : panes.reload;
+                                press(model.blockId).catch(() => {});
+                            }}
+                            title={reloadButtonState(model.loadingAtom()).label}
+                            aria-label={reloadButtonState(model.loadingAtom()).label}
+                        >{reloadButtonState(model.loadingAtom()).glyph}</button>
+                        <Button
+                            tone="quiet"
+                            class="ui-icon-button browser-nav-btn"
+                            data-testid="browser-home"
+                            title={`Home: ${home()}`}
+                            aria-label={`Home: ${home()}`}
                             onClick={goHome}
                             onContextMenu={(e) => {
                                 e.preventDefault();
@@ -537,7 +546,9 @@ export function BrowserNavBar(props: {
                                     e
                                 );
                             }}
-                        />
+                        >
+                            <ToolbarHomeIcon />
+                        </Button>
                     </div>
                     <div class="browser-nav-group browser-nav-group--bookmarks">
                         <FlyoutMenu
@@ -582,10 +593,8 @@ export function BrowserNavBar(props: {
                                           : "Bookmarks"
                                 }
                             >
-                                <i
-                                    class="fa fa-solid fa-bookmark"
-                                    classList={{ "browser-bookmark-btn-error": !!bookmarksError() || !!startPageError() }}
-                                    aria-hidden="true"
+                                <ToolbarBookmarkIcon
+                                    class={clsx((!!bookmarksError() || !!startPageError()) && "browser-bookmark-btn-error")}
                                 />
                             </button>
                         </FlyoutMenu>
