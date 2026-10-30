@@ -39,14 +39,14 @@
 import { ObjectService } from "@/app/store/services";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { findNode, findNodeByBlockId } from "./layoutNode";
+import { findNode, findNodeByBlockId, findParent, newLayoutNode } from "./layoutNode";
 import type { LayoutModel } from "./layoutModel";
 import { focusNode } from "./layoutFocus";
 import { closeNode, removeLeafEmptiedByMove } from "./layoutMagnify";
 import { sendStackCommand } from "./layoutPersistence";
 import { beginClosingBlock, endClosingBlock, isBlockClosing } from "./layoutClosing";
 import { afterFrame, closeTraceRing, type CloseTrace } from "./closeTrace";
-import type { BeforeDeleteHooks } from "./types";
+import { FlexDirection, LayoutTreeActionType, type BeforeDeleteHooks, type LayoutTreeAction } from "./types";
 import {
     activateMemberInStack,
     effectiveStack,
@@ -479,4 +479,48 @@ export function moveBlocksInStack(
         moving.length
     );
     return moving;
+}
+
+/**
+ * Take `blockId` out of its pane's stack into a new pane of its own, split off the hovered pane
+ * (`opts.targetNodeId`, default the member's own pane) on `opts.side` (default right in a Row,
+ * below in a Column), half and half. The member leaves the stack with the same `pane.removeTab`
+ * a close sends, then a split intent places the block in a new leaf, both through the layout
+ * outbox so srv applies them in that order. Returns false, touching nothing, when the member is
+ * its pane's only tab (there is nothing to split out of) or is in no pane.
+ * SPEC_PANE_TAB_DRAG_BODY_PLACEMENT_AND_EDGE_GLOW_2026_10_29.md §3.3.
+ */
+export function splitOutStackMember(
+    model: LayoutModel,
+    blockId: string,
+    opts?: { targetNodeId?: string; side?: "left" | "right" | "up" | "down" }
+): boolean {
+    const root = model.treeState.rootNode;
+    const source = root && findNodeByBlockId(root, blockId);
+    if (!root || !source?.data || effectiveStack(source.data).length <= 1) return false;
+    const targetNodeId = opts?.targetNodeId ?? source.id;
+    if (!findNode(root, targetNodeId)) return false;
+    const parent = findParent(root, targetNodeId);
+    const side = opts?.side ?? (parent?.flexDirection === FlexDirection.Column ? "down" : "right");
+    const horizontal = side === "left" || side === "right";
+    const position = side === "left" || side === "up" ? "before" : "after";
+
+    removeMemberFromStack(source.data, blockId);
+    model.updateTree(false);
+    model.setter(model.localTreeStateAtom, { ...model.treeState });
+    void sendStackCommand(model, "pane.removeTab", (action_id) =>
+        RpcApi.PaneRemoveTabCommand(TabRpcClient, { block_id: blockId, action_id }, {})
+    );
+
+    // The target is re-resolved by id after the edit: nothing above changes the tree's shape, but
+    // the split reads the live tree.
+    model.treeReducer({
+        type: horizontal ? LayoutTreeActionType.SplitHorizontal : LayoutTreeActionType.SplitVertical,
+        targetNodeId,
+        newNode: newLayoutNode(undefined, undefined, undefined, { blockId } as TabLayoutData),
+        position,
+        sizeFraction: 0.5,
+        focused: true,
+    } as LayoutTreeAction);
+    return true;
 }

@@ -39,6 +39,7 @@ import { readSeatMeta, seatTooltipLine } from "@/app/view/agent/seat-format";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { isBlockClosing } from "@/layout/lib/layoutClosing";
 import { closeBlockInStack, moveBlockInStack, moveBlocksInStack, setActiveBlockInStack, type NodeModel } from "@/layout/index";
+import { placePill, type PillZone } from "@/layout/lib/paneBodyDrop";
 import { paneStackIds } from "@/layout/lib/layoutNodeModels";
 import { allBlockIds } from "@/layout/lib/stackOrder";
 import { useWindowTabDisplayed } from "@/app/workspace/window-tab-visibility";
@@ -495,6 +496,19 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
         clearPaneTabSelection();
         return moved;
     };
+    // A single pill dropped on this pane's body, outside its middle, becomes a pane of its own on that
+    // side; the new pane's key is where the pill bounces. SPEC_PANE_TAB_DRAG_BODY_PLACEMENT_AND_EDGE_GLOW_2026_10_29.md.
+    const bodyDrop = {
+        model: layoutModel,
+        // No body zones while a pane is maximized: the layout keeps every pane's tiled rectangle, which is
+        // not where the displayed pane is, so the pointer could not be placed against it.
+        hasBody: () => !(nodeModel.isMinimized?.() ?? false) && !layoutModel.treeState.magnifiedNodeId,
+        place: (blockId: string, zone: Extract<PillZone, { kind: "place" }>): string | false => {
+            const landedIn = placePill(layoutModel, blockId, nodeModel.nodeId, zone);
+            if (landedIn !== false && paneTabSelection().has(blockId)) clearPaneTabSelection();
+            return landedIn;
+        },
+    };
     const acceptsForeignTabs = (blockIds: readonly string[]) => {
         const here = new Set(stackIds());
         return blockIds.some((id) => !here.has(id));
@@ -555,6 +569,7 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
             onReceiveForeignTab={handleReceiveForeignTab}
             onReceiveForeignTabs={handleReceiveForeignTabs}
             acceptsForeignTabs={acceptsForeignTabs}
+            bodyDrop={bodyDrop}
             selection={paneTabSelectionApi}
             onTabDoubleClick={(id) => tabInfos().get(id)?.rename && setRenamingId(id)}
             renderLabel={(id) =>
