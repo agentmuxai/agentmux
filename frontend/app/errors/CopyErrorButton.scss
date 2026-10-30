@@ -9,13 +9,17 @@
 
 // The two buttons are the kit's; these rules only colour the copied and failed
 // states.
+// The :hover forms outrank the kit's own hover look (`.ui-button:hover:not(...)`), so the
+// result stays visible while the pointer is still on the button.
 .copy-error-button-action {
-    &.is-copied {
+    &.is-copied,
+    &.is-copied:hover:not(:disabled) {
         color: var(--success-text-color);
         border-color: var(--success-color);
     }
 
-    &.is-failed {
+    &.is-failed,
+    &.is-failed:hover:not(:disabled) {
         color: var(--error-text-color);
         border-color: var(--error-color);
     }
