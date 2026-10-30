@@ -1,6 +1,7 @@
 //! The mounts of a container agent's home: the per-agent volume, the bound account's
 //! credentials, and the agent's Personal Memory folder.
 
+mod caches;
 mod credential_mode;
 mod dev_exec;
 
