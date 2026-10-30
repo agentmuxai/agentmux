@@ -249,10 +249,21 @@ pub fn draft_fetch_plan(args: &GmailArgs) -> Result<GoogleRequest, String> {
     Ok(get(url_of(&["drafts", &id])?, vec![("format", "full".to_string())]))
 }
 
-/// The request that sends the draft `id`.
-pub fn send_plan(id: &str) -> Result<GoogleRequest, String> {
+/// The request for the draft's message as raw MIME: the snapshot that is sent.
+pub fn draft_raw_plan(args: &GmailArgs) -> Result<GoogleRequest, String> {
+    let id = id_arg("draft_id", args.draft_id.as_deref())?;
+    Ok(get(url_of(&["drafts", &id])?, vec![("format", "raw".to_string())]))
+}
+
+/// The request that sends the draft `id` with exactly the message `raw` (base64url MIME) that was
+/// checked, so a save made after the check cannot put other text, recipients or files in its place.
+pub fn send_plan(id: &str, raw: &str, thread_id: Option<&str>) -> Result<GoogleRequest, String> {
     let id = id_arg("draft_id", Some(id))?;
-    Ok(post(url_of(&["drafts", "send"])?, json!({ "id": id })))
+    let mut message = json!({ "raw": raw });
+    if let Some(t) = thread_id.filter(|t| !t.is_empty()) {
+        message["threadId"] = json!(t);
+    }
+    Ok(post(url_of(&["drafts", "send"])?, json!({ "id": id, "message": message })))
 }
 
 /// The request that moves a thread to the trash (it stays there for 30 days).

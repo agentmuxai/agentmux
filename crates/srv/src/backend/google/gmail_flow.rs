@@ -245,11 +245,15 @@ async fn send_draft<G: GoogleHttp, O: OAuthHttp, S: TokenSecrets, A: Approver>(
     // so whatever ends the call from here is logged as an answered question (it counts toward the
     // hourly limit, as a no does).
     let after_yes = async {
+        // The raw message is read between two identical reads of the draft, so it is the message the
+        // person saw (a save makes a new version id), and it is what is sent, not the draft's id.
+        let raw = send(deps, access, &write::draft_raw_plan(args)?).await?.body;
+        let snapshot = raw.pointer("/message/raw").and_then(Value::as_str).filter(|r| !r.is_empty()).ok_or("Gmail did not return the draft's message, so it was not sent")?;
         let again = read_draft(deps, access, &fetch).await?;
         if again.digest() != view.digest() {
             return Err("the draft changed after the person approved it, so it was not sent. Call send_draft again to ask about the new text".to_string());
         }
-        let reply = send(deps, access, &write::send_plan(&view.id)?).await?;
+        let reply = send(deps, access, &write::send_plan(&view.id, snapshot, raw.pointer("/message/threadId").and_then(Value::as_str))?).await?;
         Ok(json!({
             "sent": true,
             "message_id": reply.body.get("id").and_then(Value::as_str).unwrap_or(""),

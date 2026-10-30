@@ -88,10 +88,11 @@ fn labels_are_changed_by_id_and_the_trash_label_is_not_one_to_add() {
 
 #[test]
 fn send_and_trash_are_post_requests_by_id() {
-    let send = send_plan("r-9").unwrap();
+    let send = send_plan("r-9", "UkFX", Some("t1")).unwrap();
     assert_eq!((send.method, send.url.as_str()), (reqwest::Method::POST, "https://gmail.googleapis.com/gmail/v1/users/me/drafts/send"));
-    assert_eq!(send.body.unwrap(), json!({ "id": "r-9" }));
-    assert!(send_plan("../x").is_err());
+    assert_eq!(send.body.unwrap(), json!({ "id": "r-9", "message": { "raw": "UkFX", "threadId": "t1" } }));
+    assert_eq!(send_plan("r-9", "UkFX", None).unwrap().body.unwrap(), json!({ "id": "r-9", "message": { "raw": "UkFX" } }));
+    assert!(send_plan("../x", "UkFX", None).is_err());
     let trash = trash_plan(&args(json!({ "thread_id": "t7" }))).unwrap();
     assert_eq!(trash.url, "https://gmail.googleapis.com/gmail/v1/users/me/threads/t7/trash");
 }

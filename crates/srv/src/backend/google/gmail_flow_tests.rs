@@ -100,6 +100,11 @@ fn stored_draft(to: &str, body: &str) -> Value {
     json!({ "id": "r-1", "message": { "payload": { "mimeType": "text/plain", "headers": [{ "name": "To", "value": to }, { "name": "Subject", "value": "Hello" }], "body": { "data": data } } } })
 }
 
+/// Google's answer to the draft read with format raw.
+fn raw_draft() -> Value {
+    json!({ "id": "r-1", "message": { "id": "m1", "threadId": "t9", "raw": "UkFX" } })
+}
+
 fn log(w: &World) -> Vec<crate::backend::storage::google_grants::GoogleCall> {
     w.store.google_calls("acc-1", 100).unwrap()
 }
@@ -145,6 +150,7 @@ async fn an_approved_send_shows_the_draft_asks_once_checks_it_again_and_sends() 
     let w = world(WRITE_SCOPES, Some(GrantLevel::Write));
     let google = StubGoogle::new(vec![
         (200, stored_draft("bob@example.com", "See you at noon")),
+        (200, raw_draft()),
         (200, stored_draft("bob@example.com", "See you at noon")),
         (200, json!({ "id": "m9", "threadId": "t9" })),
     ]);
@@ -156,9 +162,11 @@ async fn an_approved_send_shows_the_draft_asks_once_checks_it_again_and_sends() 
     assert!(asked[0].1.contains("To: bob@example.com") && asked[0].1.contains("See you at noon"), "{}", asked[0].1);
     assert_eq!((asked[0].2.as_str(), asked[0].3.as_str()), ("Send", "Don't send"));
     let seen = google.seen();
-    assert_eq!(seen.len(), 3);
-    assert!(seen[0].0.url.ends_with("/drafts/r-1") && seen[1].0.url.ends_with("/drafts/r-1"));
-    assert_eq!((seen[2].0.method.as_str(), seen[2].0.url.as_str()), ("POST", "https://gmail.googleapis.com/gmail/v1/users/me/drafts/send"));
+    assert_eq!(seen.len(), 4);
+    assert!(seen[0].0.url.ends_with("/drafts/r-1") && seen[1].0.url.ends_with("/drafts/r-1") && seen[2].0.url.ends_with("/drafts/r-1"));
+    assert!(seen[1].0.query.contains(&("format", "raw".to_string())), "the snapshot is read raw");
+    assert_eq!((seen[3].0.method.as_str(), seen[3].0.url.as_str()), ("POST", "https://gmail.googleapis.com/gmail/v1/users/me/drafts/send"));
+    assert_eq!(seen[3].0.body, Some(json!({ "id": "r-1", "message": { "raw": "UkFX", "threadId": "t9" } })), "the checked message is sent, not just the draft's id");
     assert_eq!(log(&w)[0].ids, "r-1");
 }
 
@@ -190,11 +198,21 @@ async fn a_draft_changed_after_the_yes_is_not_sent() {
     let w = world(WRITE_SCOPES, Some(GrantLevel::Write));
     let google = StubGoogle::new(vec![
         (200, stored_draft("bob@example.com", "Lunch at noon?")),
+        (200, raw_draft()),
         (200, stored_draft("mallory@example.com", "Lunch at noon?")),
     ]);
     let person = Person::says(Answer::Yes);
     let e = run(&w, &google, &person, "send_draft", json!({ "draft_id": "r-1" })).await.unwrap_err();
     assert!(e.contains("changed after the person approved"), "{e}");
+    assert_eq!(google.seen().len(), 3, "no send request was made");
+}
+
+#[tokio::test]
+async fn a_draft_whose_message_cannot_be_read_raw_is_not_sent() {
+    let w = world(WRITE_SCOPES, Some(GrantLevel::Write));
+    let google = StubGoogle::new(vec![(200, stored_draft("bob@example.com", "x")), (200, json!({ "id": "r-1", "message": { "id": "m1" } }))]);
+    let e = run(&w, &google, &Person::says(Answer::Yes), "send_draft", json!({ "draft_id": "r-1" })).await.unwrap_err();
+    assert!(e.contains("did not return the draft's message"), "{e}");
     assert_eq!(google.seen().len(), 2, "no send request was made");
 }
 
@@ -338,6 +356,7 @@ async fn a_drafts_stored_text_is_loaded_before_the_person_is_asked() {
     let google = StubGoogle::new(vec![
         (200, stored.clone()),
         (200, json!({ "data": data, "size": 28 })),
+        (200, raw_draft()),
         (200, stored),
         (200, json!({ "data": data, "size": 28 })),
         (200, json!({ "id": "m9", "threadId": "t9" })),
@@ -413,11 +432,11 @@ async fn only_calls_that_put_a_question_to_the_person_count_toward_the_hourly_li
 async fn a_failure_after_the_yes_counts_as_a_question_asked() {
     let w = world(WRITE_SCOPES, Some(GrantLevel::Write));
     // The draft changes after the yes: a window was shown, so the line counts toward the hourly limit.
-    let google = StubGoogle::new(vec![(200, stored_draft("bob@example.com", "one")), (200, stored_draft("bob@example.com", "two"))]);
+    let google = StubGoogle::new(vec![(200, stored_draft("bob@example.com", "one")), (200, raw_draft()), (200, stored_draft("bob@example.com", "two"))]);
     let e = run(&w, &google, &Person::says(Answer::Yes), "send_draft", json!({ "draft_id": "r-1" })).await.unwrap_err();
     assert!(e.starts_with("the person said yes, but the draft changed"), "{e}");
     // So does a Google error on the send itself, and on the trash.
-    let google = StubGoogle::new(vec![(200, stored_draft("bob@example.com", "x")), (200, stored_draft("bob@example.com", "x")), (500, json!({}))]);
+    let google = StubGoogle::new(vec![(200, stored_draft("bob@example.com", "x")), (200, raw_draft()), (200, stored_draft("bob@example.com", "x")), (500, json!({}))]);
     let e = run(&w, &google, &Person::says(Answer::Yes), "send_draft", json!({ "draft_id": "r-1" })).await.unwrap_err();
     assert!(e.starts_with("the person said yes, but "), "{e}");
     let google = StubGoogle::new(vec![(200, json!({ "messages": [] })), (500, json!({}))]);
