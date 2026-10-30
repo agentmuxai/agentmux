@@ -16,7 +16,13 @@ import { effectiveStack, splitOutStackMember } from "./layoutStack";
 import { computeMoveNode } from "./layoutTree";
 import type { LayoutModel } from "./layoutModel";
 import { placementDirection, showPlacement, sideOfDirection, type PlacementSide } from "./placementPreview";
-import { DropDirection, LayoutTreeActionType, type LayoutNode, type LayoutTreeComputeMoveNodeAction } from "./types";
+import {
+    DropDirection,
+    FlexDirection,
+    LayoutTreeActionType,
+    type LayoutNode,
+    type LayoutTreeComputeMoveNodeAction,
+} from "./types";
 
 export type PillZone =
     /** Nothing here takes the pill (a pane's own header, or its own middle). */
@@ -71,6 +77,16 @@ export function pillZone(input: PillZoneInput): PillZone {
     return { kind: "place", direction, side };
 }
 
+/**
+ * A lone pane at the root has no layout axis, but it keeps the one its tree had before the others
+ * closed. The ghost for a split beside it is drawn along that axis, so point it the way the split goes.
+ */
+function alignLoneRoot(model: LayoutModel, nodeId: string, side: PlacementSide | undefined): void {
+    const root = model.treeState.rootNode;
+    if (!side || root?.id !== nodeId || root.children?.length) return;
+    root.flexDirection = side === "left" || side === "right" ? FlexDirection.Row : FlexDirection.Column;
+}
+
 /** The same direction held again is not a new ghost: the caller keeps the last one it showed. */
 export function showPillGhost(model: LayoutModel, input: PillZoneInput, zone: Extract<PillZone, { kind: "place" }>): void {
     const stand = pillStandIn(input.blockId);
@@ -78,6 +94,7 @@ export function showPillGhost(model: LayoutModel, input: PillZoneInput, zone: Ex
     const rect = getNodeRectById(model, input.nodeId);
     if (!container || !rect) return;
     const box = container.getBoundingClientRect();
+    alignLoneRoot(model, input.nodeId, zone.side);
     showPlacement(
         model,
         {

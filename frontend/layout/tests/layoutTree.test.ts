@@ -649,3 +649,21 @@ describe("deleteNode restores the nearest pane when only minimized ones are left
         expect(find(root, "m").minimized).toBe(true);
     });
 });
+
+test("computeMoveNode - a split beside a lone root pane that keeps the other axis yields no move instead of throwing", () => {
+    const only = newLayoutNode(FlexDirection.Column, undefined, undefined, { blockId: "only" });
+    const treeState = newLayoutTreeState(only);
+    const stand = newLayoutNode(undefined, undefined, undefined, { blockId: "pill" });
+
+    for (const direction of [DropDirection.Left, DropDirection.Right]) {
+        expect(() =>
+            computeMoveNode(treeState, {
+                type: LayoutTreeActionType.ComputeMove,
+                nodeId: only.id,
+                nodeToMoveId: stand.id,
+                direction,
+                nodeToMove: stand,
+            })
+        ).not.toThrow();
+    }
+});

@@ -11,7 +11,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { LayoutModel } from "@/layout/lib/layoutModel";
 import { clearPillGhost, pillStandIn, pillZone, showPillGhost, type PillZoneInput } from "@/layout/lib/paneBodyDrop";
-import { LayoutTreeActionType } from "@/layout/lib/types";
+import { DropDirection, FlexDirection, LayoutTreeActionType } from "@/layout/lib/types";
 
 const RECT = { left: 100, top: 50, width: 500, height: 400 };
 const HEADER = { left: 100, top: 50, right: 600, bottom: 83 };
@@ -119,5 +119,21 @@ describe("the placement ghost", () => {
         const { model, treeReducer } = fakeModel();
         clearPillGhost(model);
         expect(treeReducer).toHaveBeenCalledWith({ type: LayoutTreeActionType.ClearPendingAction });
+    });
+});
+
+describe("showPillGhost over a lone pane", () => {
+    it("points a root that still has the other axis the way the split goes, so the ghost is drawn along it", () => {
+        const { model, treeReducer } = fakeModel();
+        const root = model.treeState.rootNode as { flexDirection?: FlexDirection };
+        root.flexDirection = FlexDirection.Column;
+        const pointer = at(RECT.left + 10, RECT.top + 200);
+
+        showPillGhost(model, input(model, pointer, { ownPane: true }), { kind: "place", direction: DropDirection.Left, side: "left" });
+        expect(root.flexDirection).toBe(FlexDirection.Row);
+        expect(treeReducer).toHaveBeenCalledTimes(1);
+
+        showPillGhost(model, input(model, pointer, { ownPane: true }), { kind: "place", direction: DropDirection.Bottom, side: "down" });
+        expect(root.flexDirection).toBe(FlexDirection.Column);
     });
 });
