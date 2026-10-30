@@ -73,9 +73,9 @@ export interface AgentViewState {
      * The view layer's `syncOverflowState()` is the ONLY thing allowed to
      * call `markOverflowing`/`markNotOverflowing`, and it runs
      * unconditionally from every geometry-observation point (every scroll
-     * event, both ResizeObservers, the itemized content-signal effect) —
+     * event, both ResizeObservers, OneWayFlow's observer) —
      * deliberately NOT gated on `stickToBottom()` already being true, the
-     * way the actual re-pin action (`scrollToTrueBottom()`) is. A pane
+     * way OneWayFlow's pin is. A pane
      * scrolled away reading history can still collapse or regrow while
      * disengaged, and this flag has to track that regardless of whether
      * anything chooses to act on it. See

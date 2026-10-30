@@ -220,8 +220,6 @@ export const AgentDocumentView = (props: AgentDocumentViewProps): JSX.Element =>
             blockId={props.blockId}
             layoutView={props.layoutView}
             tailPolicy={props.tailPolicy ?? resolveTailPolicy(untrack(() => getSettingsKeyAtom("agent:turnscopedtail")()))}
-            // One-way flow while following, on unless explicitly false; read once
-            // at mount like the tail policy. SPEC_AGENT_PANE_ONE_WAY_FLOW_2026_10_07.md.
             // The follow state machine: unset means on in dev builds only, until
             // its live soak passes. SPEC_AGENT_PANE_SCROLL_FOLLOW_STATE_MACHINE_2026_09_24.md §8.
             followController={followControllerOn()}

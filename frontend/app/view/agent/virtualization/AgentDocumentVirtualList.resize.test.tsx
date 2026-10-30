@@ -117,7 +117,7 @@ function setGeometry(el: HTMLElement, g: PartialGeometry): void {
  * original version of this file: a `clampFirst` boolean that only reordered
  * two side-effecting calls without ever flushing between them produced
  * byte-identical outcomes for both orders, since `notify()`'s own
- * `scrollToTrueBottom()` recomputes and lands on the same clamped value
+ * the pin recomputes and lands on the same clamped value
  * regardless of what `clamp()` already did — so it never actually exercised
  * two different orderings from the SUT's perspective.)
  *
@@ -334,7 +334,7 @@ describe("AgentDocumentVirtualList — first-ever overflow", () => {
         // since a non-overflowing pane's scrollTop is always 0 and so always
         // satisfies isNearTop. If content then overflows for the first time
         // while that capture is in effect (e.g. the pagination restore's own
-        // direct scrollTo(), which never routes through scrollToTrueBottom),
+        // direct scrollTo(), which never pins),
         // the fix must not force stickToBottom back to true and blow away
         // the just-restored reading position.
         const { viewState, scrollRef } = setup();
@@ -377,6 +377,4 @@ describe("AgentDocumentVirtualList — first-ever overflow", () => {
             infoSpy.mockRestore();
         }
     });
-
-
 });

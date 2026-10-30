@@ -259,7 +259,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // whole-pane scrollHeight->0px collapse, mid-history-read — and a
     // stickToBottom()-gated call site would otherwise never observe it,
     // leaving isOverflowing() stale until the user manually re-engages
-    // (reagent P1 on PR #2834).
+    // (#2834).
     function syncOverflowState(geo?: ScrollGeometry): void {
         if (!scrollRef) return;
         const overflowing = geo ? geo.scrollHeight > geo.clientHeight : scrollRef.scrollHeight > scrollRef.clientHeight; // perf:allow-layout-read — only without geometry: RO callbacks (layout clean) and the no-RO fallback
