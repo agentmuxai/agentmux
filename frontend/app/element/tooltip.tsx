@@ -140,8 +140,10 @@ function TooltipInner(props: TooltipProps): JSX.Element {
     // stuck open indefinitely whenever mouseleave fired mid-drag but the
     // button was released elsewhere, since no further mouseenter/
     // mouseleave would ever fire for an anchor the cursor had already left.
+    // Hover is tracked even while `forceOpen` holds the tooltip open, so the pointer state is true when
+    // the hold ends (a chip pinned by focus that the pointer has since left must close on blur).
     const handleMouseEnter = () => {
-        if (forceOpen() || isPrimaryButtonDown()) return;
+        if (isPrimaryButtonDown()) return;
         setIsHovering(true);
     };
 
@@ -158,7 +160,6 @@ function TooltipInner(props: TooltipProps): JSX.Element {
     );
 
     const handleMouseLeave = () => {
-        if (forceOpen()) return;
         setIsHovering(false);
     };
 

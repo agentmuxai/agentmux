@@ -115,6 +115,21 @@ describe("Tag", () => {
             expect(document.querySelector(".ui-tag-detail")).not.toBeNull();
         });
 
+        it("hover, focus, leave, then blur closes the detail (a pinned tooltip does not keep a stale hover)", async () => {
+            render(() => <Tag detail="More">Free</Tag>);
+            const tag = screen.getByText("Free").closest(".ui-tag") as HTMLElement;
+            const anchor = tag.closest(".ui-tag-anchor") as HTMLElement;
+            fireEvent.mouseEnter(anchor);
+            fireEvent.focus(tag);
+            await tick();
+            fireEvent.mouseLeave(anchor);
+            await tick();
+            expect(document.querySelector(".ui-tag-detail")).not.toBeNull();
+            fireEvent.blur(tag);
+            await afterHide();
+            expect(document.querySelector(".ui-tag-detail")).toBeNull();
+        });
+
         it("a tap pins the detail open and Escape closes it", async () => {
             render(() => <Tag detail="More">Free</Tag>);
             const tag = screen.getByText("Free").closest(".ui-tag") as HTMLElement;
