@@ -14,7 +14,7 @@
 import { createMemo, createSignal, onCleanup, Show, type JSX } from "solid-js";
 
 import { ConfirmModal } from "@/app/element/confirm-modal";
-import { Button, Card, CardGrid, FilterInput } from "@/app/element/ui";
+import { Button, Card, CardGrid, EmptyState, FilterInput, Notice, SectionHeader } from "@/app/element/ui";
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import { MENU_ICON } from "@/app/util/menu-icons";
 import { matchesEveryWord } from "@/app/util/fuzzysearch";
@@ -267,9 +267,7 @@ export const McpManager = (): JSX.Element => {
 
     return (
         <div class="ui-card-section ui-density-compact mcp-cards">
-            <div class="ui-card-section-header">
-                <span class="ui-card-section-title">MCP servers</span>
-                <span class="ui-card-section-count">{count()}</span>
+            <SectionHeader title="MCP servers" count={count()}>
                 <FilterInput
                     class="ui-card-section-filter"
                     value={filter()}
@@ -277,12 +275,10 @@ export const McpManager = (): JSX.Element => {
                     placeholder="Filter servers"
                 />
                 {addButton}
-            </div>
+            </SectionHeader>
 
             <Show when={model.errorAtom()}>
-                <div class="mcp-cards-error" role="alert">
-                    {model.errorAtom()}
-                </div>
+                <Notice tone="danger">{model.errorAtom()}</Notice>
             </Show>
 
             <CardGrid
@@ -315,16 +311,19 @@ export const McpManager = (): JSX.Element => {
             <Show
                 when={hasAny()}
                 fallback={
-                    <div class="ui-card-empty mcp-cards-empty">
-                        <span>No MCP servers yet. Add one to give your agents its tools.</span>
-                        <Button tone="accent" icon="plus" onClick={startNew}>
-                            Add server
-                        </Button>
-                    </div>
+                    <EmptyState
+                        actions={
+                            <Button tone="accent" icon="plus" onClick={startNew}>
+                                Add server
+                            </Button>
+                        }
+                    >
+                        No MCP servers yet. Add one to give your agents its tools.
+                    </EmptyState>
                 }
             >
                 <Show when={serverKeys().length > 0}>
-                    <h4 class="ui-card-group-heading">Your servers</h4>
+                    <SectionHeader variant="group" level={4} title="Your servers" />
                     <CardGrid
                         class="mcp-servers-grid"
                         ariaLabel="Your servers"
@@ -337,7 +336,7 @@ export const McpManager = (): JSX.Element => {
                     />
                 </Show>
                 <Show when={otherKeys().length > 0}>
-                    <h4 class="ui-card-group-heading">Also in use</h4>
+                    <SectionHeader variant="group" level={4} title="Also in use" />
                     <CardGrid
                         class="mcp-observed-grid"
                         ariaLabel="Also in use"
@@ -352,7 +351,7 @@ export const McpManager = (): JSX.Element => {
                     />
                 </Show>
                 <Show when={filter() && serverKeys().length === 0 && otherKeys().length === 0}>
-                    <div class="ui-card-empty">No servers match “{filter()}”.</div>
+                    <EmptyState>No servers match “{filter()}”.</EmptyState>
                 </Show>
             </Show>
 

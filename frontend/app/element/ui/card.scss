@@ -308,12 +308,6 @@
     color: var(--secondary-text-color);
 }
 
-.ui-card-empty {
-    padding: var(--space-2) 0;
-    font-size: var(--text-2xs);
-    color: var(--secondary-text-color);
-}
-
 @keyframes ui-card-detail-reveal {
     from {
         opacity: 0;
