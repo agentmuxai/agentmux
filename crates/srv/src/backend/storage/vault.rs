@@ -60,6 +60,22 @@ pub(super) const VAULT_SCHEMA: &str = "
         saved_at    INTEGER NOT NULL,
         PRIMARY KEY (identity_id, origin, realm, is_proxy)
     );
+    -- An entry's earlier values, sealed as the entry is (its id is the seal's
+    -- associated data, so a blob moves between the two tables unchanged), kept 7
+    -- days after they were replaced (`backend::vault::versions`). `entry_created_at`
+    -- ties each to one incarnation of a reused id; `state` is `previous`, or
+    -- `pending` for a rotation's value not yet in use.
+    CREATE TABLE IF NOT EXISTS db_vault_versions (
+        seq              INTEGER PRIMARY KEY AUTOINCREMENT,
+        entry_id         TEXT NOT NULL,
+        entry_created_at INTEGER NOT NULL,
+        sealed           BLOB NOT NULL,
+        replaced_at      INTEGER NOT NULL,
+        replaced_by      TEXT NOT NULL DEFAULT '',
+        how              TEXT NOT NULL DEFAULT '',
+        state            TEXT NOT NULL DEFAULT 'previous'
+    );
+    CREATE INDEX IF NOT EXISTS idx_vault_versions_entry ON db_vault_versions (entry_id, seq);
     -- Which AgentMux instances show a Vault pane now, until when: agents'
     -- whole-window captures of AgentMux are refused while any does.
     CREATE TABLE IF NOT EXISTS db_vault_on_screen (
@@ -133,11 +149,12 @@ impl Store {
         Ok(n > 0)
     }
 
-    /// Deletes an entry and the grants it had.
+    /// Deletes an entry and the grants and earlier values it had.
     pub fn vault_delete(&self, id: &str) -> Result<bool, StoreError> {
         let conn = self.conn.lock().unwrap();
         let tx = conn.unchecked_transaction()?;
         tx.execute("DELETE FROM db_vault_grants WHERE entry_id = ?1", params![id])?;
+        tx.execute("DELETE FROM db_vault_versions WHERE entry_id = ?1", params![id])?;
         let n = tx.execute("DELETE FROM db_vault_entries WHERE id = ?1", params![id])?;
         tx.commit()?;
         Ok(n > 0)
