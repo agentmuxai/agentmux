@@ -82,7 +82,7 @@ pub(super) fn target_of(state: &AppState, named: &str) -> Result<AgentRuntime, R
 /// that do not say (idle, and limited or signed out, which show over an ended process) the explicit
 /// stop settles it: a subprocess agent that was stopped reads `idle` because its process exits between
 /// turns, and a stop is not undone until a start or a message sets it running again.
-fn is_running(row: &AgentRuntime) -> bool {
+pub(super) fn is_running(row: &AgentRuntime) -> bool {
     match row.state {
         AgentRuntimeState::Stopped | AgentRuntimeState::Error => false,
         AgentRuntimeState::Starting | AgentRuntimeState::Working | AgentRuntimeState::WaitingOnUser => true,

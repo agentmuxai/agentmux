@@ -154,6 +154,7 @@ pub(crate) fn lookup(op: &str) -> Option<Op> {
         "identity.accounts" => Op::read_personal(|state, caller, params| Box::pin(identity_ops::accounts(state, caller, params))),
         "identity.switch" => Op::write(|state, caller, params| Box::pin(identity_ops::switch(state, caller, params))),
         "agents.start" => Op::write(|state, caller, params| Box::pin(agent_ops::start(state, caller, params))),
+        "agents.open" => Op::write(|state, caller, params| Box::pin(agent_ops::open(state, caller, params))),
         "agents.stop" => Op::write(|state, caller, params| Box::pin(agent_ops::stop(state, caller, params))),
         "agents.set_seat" => Op::write(|state, caller, params| Box::pin(agent_ops::set_seat(state, caller, params))),
         // A write too: an environment holds the operator's own lines, and a read can go on a first-seen pin.

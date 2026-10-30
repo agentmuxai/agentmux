@@ -1,8 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! `agents.start`, `agents.stop`, `agents.set_seat`, `agents.env_get` and `agents.env_set`: an agent
-//! controls another machine's agents as it controls its own (spec §4.3, P3). Each runs the code of
+//! `agents.start`, `agents.open`, `agents.stop`, `agents.set_seat`, `agents.env_get` and `agents.env_set`: an
+//! agent controls another machine's agents as it controls its own (spec §4.3, P3). Each runs the code of
 //! the local `Agents` action with the remote agent (`slug@machine`) as the actor, so every rule a local
 //! caller meets is met here too: a stop of another agent waits for the person's keep-running window, a
 //! start counts against the sender's start limit, an environment refuses the names an agent may not set.
@@ -12,7 +12,7 @@ use axum::http::StatusCode;
 use serde_json::{json, Value};
 
 use super::{AppState, RemoteCaller, RemoteRefusal, RemoteResult};
-use crate::server::app_api::{agent_env, agent_lifecycle, agent_seats};
+use crate::server::app_api::{agent_env, agent_lifecycle, agent_open_remote, agent_seats};
 
 /// A refusal of the local code, as the requester reads it.
 fn refused((status, message): (StatusCode, String)) -> RemoteRefusal {
@@ -40,6 +40,12 @@ fn agent_of(params: &Value) -> Result<&str, RemoteRefusal> {
 pub(super) async fn start(state: &AppState, caller: &RemoteCaller, params: Value) -> RemoteResult {
     let agent = agent_of(&params)?;
     agent_lifecycle::run_remote(state, &caller.actor(), "start", agent).await.map_err(refused)
+}
+
+/// Opens the agent in the caller's own tab, without focus (`agent_open_remote`).
+pub(super) async fn open(state: &AppState, caller: &RemoteCaller, params: Value) -> RemoteResult {
+    let agent = agent_of(&params)?;
+    agent_open_remote::run_remote(state, &caller.actor(), agent).await.map_err(refused)
 }
 
 pub(super) async fn stop(state: &AppState, caller: &RemoteCaller, params: Value) -> RemoteResult {
