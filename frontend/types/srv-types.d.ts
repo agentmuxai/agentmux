@@ -1137,6 +1137,7 @@ declare global {
         "conn:askbeforewshinstall"?: boolean;
         "conn:wshenabled"?: boolean;
         "network:lan_discovery"?: boolean;
+        "network:remote_ops"?: boolean;
         "cloud:publishpresence"?: boolean;
         "swarm:sharesummaries"?: boolean;
         "voice:enabled"?: boolean;

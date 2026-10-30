@@ -83,6 +83,7 @@ actor_sites! {
     PresetGet => "preset_get",
     IdentityValidate => "identity_validate",
     IdentitySwitch => "identity_switch",
+    RemoteOp => "remote_op",
     SkillManage => "skill_manage",
     HistorySearch => "history_search",
     WorkEnqueue => "work_enqueue",

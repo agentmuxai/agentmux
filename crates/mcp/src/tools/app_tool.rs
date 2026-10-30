@@ -14,13 +14,63 @@ use super::*;
 pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     match name {
         "App" => match str_arg(arguments, "action").as_deref() {
-            Some("version") => version(cx).await,
+            Some("version") => match remote_op::host_arg(arguments) {
+                Some(host) => remote_version(arguments, cx, &host).await,
+                None => version(cx).await,
+            },
+            Some("health") => match remote_op::host_arg(arguments) {
+                Some(host) => remote_health(arguments, cx, &host).await,
+                None => local_health(cx).await,
+            },
             Some("upgrade") => upgrade(arguments, cx).await,
             Some("network") => network(cx).await,
             Some("history_reclaim") => history_reclaim(arguments, cx).await,
-            other => anyhow::bail!("App: unknown action {other:?}; use \"version\", \"upgrade\", \"network\" or \"history_reclaim\""),
+            other => anyhow::bail!("App: unknown action {other:?}; use \"version\", \"health\", \"upgrade\", \"network\" or \"history_reclaim\""),
         },
         _ => Err(not_in_family()),
+    }
+}
+
+/// `version` with a `host`: the AgentMux on that machine, from its own answer.
+async fn remote_version(arguments: &Value, cx: &ToolCtx<'_>, host: &str) -> Result<String> {
+    let answer = ask(arguments, cx, host, "app.version").await?;
+    let r = &answer["result"];
+    Ok(format!(
+        "{host} runs AgentMux {} (build {}, channel {}, {}). {}",
+        s(r, "version"),
+        s(r, "build"),
+        s(r, "channel"),
+        s(r, "os"),
+        describe_status(&r["update"])
+    ))
+}
+
+/// `health` with a `host`: what a steward checks after an upgrade, on that machine.
+async fn remote_health(arguments: &Value, cx: &ToolCtx<'_>, host: &str) -> Result<String> {
+    let answer = ask(arguments, cx, host, "app.health").await?;
+    Ok(remote_op::pretty(host, &answer))
+}
+
+/// `health` on this machine, from the same report a remote call gets.
+async fn local_health(cx: &ToolCtx<'_>) -> Result<String> {
+    let url = format!("{}/api/v1/app/health", cx.local_url.trim_end_matches('/'));
+    let resp = cx.client.get(&url).header(AUTH_KEY_HEADER, cx.auth_key).send().await.map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+    let status = resp.status();
+    let body: Value = resp.json().await.unwrap_or(Value::Null);
+    if !status.is_success() {
+        anyhow::bail!("App health: srv answered {status}: {body}");
+    }
+    Ok(format!("This machine:
+{}", serde_json::to_string_pretty(&body).unwrap_or_else(|_| body.to_string())))
+}
+
+/// Run a read-only operation on `host`; an error carries the machine's refusal in words.
+async fn ask(arguments: &Value, cx: &ToolCtx<'_>, host: &str, op: &str) -> Result<Value> {
+    let reason = str_arg(arguments, "reason").unwrap_or_else(|| format!("App {}", op.trim_start_matches("app.")));
+    let answer = remote_op::remote_op_call(cx, host, op, json!({}), &reason).await?;
+    match remote_op::explain_not_done(host, op, &answer) {
+        Some(problem) => anyhow::bail!("{problem}"),
+        None => Ok(answer),
     }
 }
 

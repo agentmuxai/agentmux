@@ -31,6 +31,7 @@ mod pane_tool;
 mod panes;
 mod presence_tool;
 mod presets;
+pub(crate) mod remote_op;
 mod pty_shell;
 mod schedule_tool;
 mod sensitive_tool;

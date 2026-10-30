@@ -107,6 +107,9 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
     // comment for why this can't just be nested inside `authed_routes`.
     let lan_forward_routes = Router::new()
         .route("/agentmux/reactive/inject", post(reactive::handle_reactive_inject))
+        // A typed request from an agent on another machine, which this srv carries out itself
+        // (SPEC_AGENTS_OPERATE_OTHER_MACHINES_2026_10_30.md). The signature authorizes it, never the key.
+        .route("/agentmux/remote/op", post(super::remote_ops::receive::handle_remote_op))
         // A jekt with its files after it, from another instance or a LAN peer
         // (SPEC_JEKT_FILE_TRANSFER_2026_10_05.md §4). Streamed, never buffered.
         .route("/agentmux/reactive/inject-files", post(super::jekt_files::handle_reactive_inject_files))
@@ -576,7 +579,10 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // The App tool: what AgentMux runs and whether a newer release is out,
         // and asking to upgrade (SPEC_UPGRADE_FOR_USERS_AND_AGENTS §5.1).
         .route("/api/v1/app/update-status", get(app_api::app_update::handle_update_status))
+        // An agent asks this srv to run an operation on another machine (the `host` argument).
+        .route("/api/v1/agent/remote/op", post(super::remote_ops::send::handle_agent_remote_op))
         .route("/api/v1/app/connectivity", get(app_api::connectivity::handle_status))
+        .route("/api/v1/app/health", get(super::remote_ops::app_ops::handle_health))
         .route("/api/v1/agent/self/upgrade", post(app_api::app_update::handle_request_upgrade))
         // The Desktop tool: the gate in front of looking at and controlling a
         // native app (SPEC_DESKTOP_DRIVING_2026_10_20.md §6).
