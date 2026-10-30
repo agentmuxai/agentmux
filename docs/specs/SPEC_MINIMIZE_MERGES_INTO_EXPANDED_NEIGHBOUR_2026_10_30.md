@@ -1,6 +1,6 @@
 # Minimizing a pane next to an expanded pane puts its tabs in that pane
 
-**Status:** active. Approved by the operator 2026-10-30 with all seven recommendations (relayed by AgentY, "approve all recommended"). Amends [SPEC_MINIMIZE_MERGES_INTO_ADJACENT_MINIMIZED_PANE_2026_10_28.md](SPEC_MINIMIZE_MERGES_INTO_ADJACENT_MINIMIZED_PANE_2026_10_28.md) (§2.1, §2.5, §6).
+**Status:** active — built in PR #5884. Approved by the operator 2026-10-30 with all seven recommendations (relayed by AgentY, "approve all recommended"). Amends [SPEC_MINIMIZE_MERGES_INTO_ADJACENT_MINIMIZED_PANE_2026_10_28.md](SPEC_MINIMIZE_MERGES_INTO_ADJACENT_MINIMIZED_PANE_2026_10_28.md) (§2.1, §2.5, §6).
 **Author:** Camper@narko, from the operator's report (2026-10-30).
 **Scope:** `layoutMinimize.ts` (`minimizeNodeToggle`), `layoutMinimizeMerge.ts` (target choice), `layoutMinimizeMergeApply.ts`, the pane-tab context menu.
 
