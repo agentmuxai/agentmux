@@ -351,51 +351,14 @@ pub(super) async fn verify_lan_signature(state: &AppState, req: &mut InjectionRe
     let Some(claimed) = req.source_agent.clone().filter(|s| !s.is_empty()) else {
         return;
     };
-    let observed_key = match state.lan_discovery.find_agent_lan_pubkey_asking_again(&claimed, &state.http_client).await {
-        crate::backend::lan_discovery::LanPubkeyLookup::Found(key) => key,
-        // Genuinely unknown sender — nothing to check against, not a red
-        // flag on its own (same treatment self-declared senders get
-        // elsewhere).
-        crate::backend::lan_discovery::LanPubkeyLookup::NotFound => return,
-        crate::backend::lan_discovery::LanPubkeyLookup::Renamed(current) => {
-            tracing::warn!(agent_id = %claimed, current = %current, "LAN jekt signed as a name its agent was renamed from, which never signs: counted as failed");
-            req.lan_verified = Some(false);
-            return;
-        }
-        // reagentx P0 follow-up: the lookup was SKIPPED (rate-limited), not
-        // genuinely absent — a lan_sig WAS presented (checked above), so
-        // "we didn't check" must not collapse into the same benign outcome
-        // as "nothing to check." Treat conservatively as a failure, same as
-        // an active forgery attempt — the alternative lets an attacker
-        // exhaust the rate limiter to slip a forged identity claim through
-        // unverified instead of forced-sensitive.
-        crate::backend::lan_discovery::LanPubkeyLookup::RateLimited => {
-            tracing::warn!(
-                agent_id = %claimed,
-                "LAN pubkey lookup was rate-limited while verifying a signed jekt — \
-                 treating as unverified/failed rather than silently passing it through"
-            );
+    let observed_key = match lan_signer::resolve(state, &claimed).await {
+        lan_signer::SignerKey::Pinned(key) => key,
+        lan_signer::SignerKey::Unknown => return,
+        lan_signer::SignerKey::Refused => {
             req.lan_verified = Some(false);
             return;
         }
     };
-
-    // Trust-on-first-use pin (mDNS discovery is unauthenticated; see
-    // lan_peer_pubkey_pins.rs and SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md
-    // §2.2): the first key seen for a sender is pinned, and a LATER,
-    // DIFFERENT key is an active red flag, never a silent update.
-    use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
-    let observed_key_b64 = BASE64.encode(&observed_key);
-    let Ok(pinned_key_b64) = state.mstore.lan_peer_pubkey_pin_get_or_set(&claimed, &observed_key_b64) else {
-        tracing::warn!(agent_id = %claimed, "LAN pubkey pin store unreadable: signature counted as failed");
-        req.lan_verified = Some(false); // fail closed
-        return;
-    };
-    // A different key moves the pin only if the hosting install vouches for it (lan_continuity).
-    if pinned_key_b64 != observed_key_b64 && !lan_continuity::on_mismatch(state, &claimed, &observed_key).await {
-        req.lan_verified = Some(false);
-        return;
-    }
 
     let msgid = req.request_id.clone().unwrap_or_default();
     let ts = req.ts_secs.unwrap_or(0);
@@ -416,6 +379,7 @@ pub(super) async fn verify_lan_signature(state: &AppState, req: &mut InjectionRe
 }
 
 mod channel_v2;
+pub(crate) mod lan_signer;
 mod registration_flags;
 pub(crate) mod former_slug;
 mod lan_v2;

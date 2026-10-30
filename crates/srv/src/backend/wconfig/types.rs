@@ -366,6 +366,12 @@ pub struct SettingsType {
     #[serde(rename = "network:lan_discovery", default, skip_serializing_if = "is_false")]
     pub network_lan_discovery: bool,
 
+    /// Whether this machine carries out typed requests from agents on other proven machines.
+    /// Absent means on; only an explicit `false` refuses every one
+    /// (SPEC_AGENTS_OPERATE_OTHER_MACHINES_2026_10_30.md §4.2).
+    #[serde(rename = "network:remote_ops", default, skip_serializing_if = "Option::is_none")]
+    pub network_remote_ops: Option<bool>,
+
     // -- Voice settings --
     //
     // `voice:enabled` globally controls whether the per-pane microphone

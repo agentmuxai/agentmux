@@ -19,6 +19,7 @@ pub mod install_presence;
 pub mod ipc;
 pub mod jekt_files;
 pub mod jekt_sign;
+pub mod remote_op;
 pub mod wan_key_revocation;
 pub mod layout_intent;
 pub mod layout_types;
