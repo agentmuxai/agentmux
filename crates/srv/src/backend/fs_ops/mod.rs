@@ -1,8 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! The filesystem layer behind the generic `fs.*` RPCs and the Files pane
-//! ("Hangar"): paginated listing, known places, name validation, the
+//! The filesystem layer behind the generic `fs.*` RPCs and the Files pane:
+//! paginated listing, known places, name validation, the
 //! mutation safety policy, and the mutations themselves.
 //!
 //! Everything here is blocking and is called from `spawn_blocking` (or the

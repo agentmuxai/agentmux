@@ -5,7 +5,7 @@
 **Type:** Report (an audit, and a plan)
 **Status:** proposed
 **Requested by:** the operator: *"lets introduce zoom to any newly recently added panes that lack it, we have a unified zoom system, i notice tower is still does have zoom, write a report to file"*
-**Builds on:** `docs/specs/SPEC_SYSINFO_TEXT_ZOOM_DENSITY_AND_ONE_ZOOM_PATH_2026_10_18.md` (the one zoom path, #5128), `docs/specs/zoom-architecture.md`, `docs/specs/SPEC_CTRL_SHIFT_SCROLL_ZOOM_ALL_PANES_2026_09_07.md`, `docs/specs/SPEC_HANGAR_ZOOM_2026_10_08.md`.
+**Builds on:** `docs/specs/SPEC_SYSINFO_TEXT_ZOOM_DENSITY_AND_ONE_ZOOM_PATH_2026_10_18.md` (the one zoom path, #5128), `docs/specs/zoom-architecture.md`, `docs/specs/SPEC_CTRL_SHIFT_SCROLL_ZOOM_ALL_PANES_2026_09_07.md`, `docs/specs/SPEC_FILES_ZOOM_2026_10_08.md`.
 
 ## 1. Summary
 
@@ -19,7 +19,7 @@ Code read on main at `cc46a8c21`. The built-in panes are registered in `frontend
 
 | Pane (view) | Shared zoom | Added | Notes |
 |---|---|---|---|
-| Terminal (`term`), Agent (`agent`), Editor (`editor`), Hangar (`files`), Sysinfo (`sysinfo`), Help (`help`), Swarm (`swarm`), Warden (`warden`, also Kanban and Vault), Connectors (`connectors`), Memory (`memory`) | **yes** | | |
+| Terminal (`term`), Agent (`agent`), Editor (`editor`), Files (`files`), Sysinfo (`sysinfo`), Help (`help`), Swarm (`swarm`), Warden (`warden`, also Kanban and Vault), Connectors (`connectors`), Memory (`memory`) | **yes** | | |
 | **Tower** (`tower`) | **no** | 2026-10-08 | `capabilities: { noPadding: true }` only (`view/tower/tower.tsx`) |
 | **Installed widgets** (`ext:<id>/<pane>`) | **no** | 2026-10-10 | `capabilities: { noPadding: true }` (`block/sandboxed-widget-host.tsx`) |
 | **Toolchain** (`toolchain`) | **no** | 2026-06-25 | no capabilities |
@@ -31,7 +31,7 @@ Code read on main at `cc46a8c21`. The built-in panes are registered in `frontend
 
 What "no" means for the user today: in those panes, Ctrl/Cmd `+` `-` `0` and Ctrl+scroll do nothing, the all-panes gesture and "Reset zoom on all panes" skip them, and only chrome zoom (title bar, status bar, pane headers) changes them.
 
-**A test gap that let this slip:** `frontend/app/block/block-registry.test.ts` asserts the full list of `paneZoom` holders, but only over its own `VIEWS` list. That list doesn't include `tower` or `files`, so a new pane that forgets zoom can't fail the test. Hangar does zoom, and is checked on another line.
+**A test gap that let this slip:** `frontend/app/block/block-registry.test.ts` asserts the full list of `paneZoom` holders, but only over its own `VIEWS` list. That list doesn't include `tower` or `files`, so a new pane that forgets zoom can't fail the test. Files does zoom, and is checked on another line.
 
 ## 3. Per pane: what it takes
 

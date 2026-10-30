@@ -107,7 +107,7 @@ export function floaterEdgeDirection(x: number, y: number, width: number, height
 /** Controls that win over the band: only the pane header's buttons (Close, Maximize), which sit within a
  *  few px of the window's edge, so a wider band would take a part of their click target. A press or hover on
  *  one is a click on the control, never a resize; the band still covers the gap around it. A button in the
- *  pane's content is not one: a sidebar or toolbar button can reach the window's edge (a floating Hangar's
+ *  pane's content is not one: a sidebar or toolbar button can reach the window's edge (a floating Files pane's
  *  Places list starts at x 0), and the band wins there. */
 export const FLOATER_BAND_CONTROL_SELECTOR =
     '[data-role="block-header"] button, [data-role="block-header"] [role="button"]';

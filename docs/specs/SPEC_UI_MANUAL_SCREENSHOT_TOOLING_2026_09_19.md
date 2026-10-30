@@ -309,10 +309,10 @@ each crop; `SHOTS_DEBUG=keep` skips cleanup so the state can be inspected.
 The capture instance is a separate build started with
 `AGENTMUX_HOME_OVERRIDE=<empty folder>` and `AGENTMUX_CDP_PORT`, which moves
 everything AgentMux keeps under `~/.agentmux` (agents, memory, accounts). It
-doesn't cover what widgets read from the rest of the file system: Hangar opened
+doesn't cover what widgets read from the rest of the file system: Files opened
 on the home folder and the terminal prompt showed it. `demo-env.mjs --home <dir>
 --demo <dir>` writes a small made-up project and a user `widgets.json` that
-starts Hangar, Terminal and Editor in it. The demo path shows in those
+starts Files, Terminal and Editor in it. The demo path shows in those
 screenshots, so `--demo` is required and a path that contains the user name or
 lies under the home folder is refused.
 

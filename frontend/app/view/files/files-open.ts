@@ -84,10 +84,10 @@ export async function openTerminalHere(dir: string, besideBlockId: string, conne
     );
 }
 
-// ── Pane tabs (several Hangar tabs in one pane) ────────────────────────────
+// ── Pane tabs (several Files tabs in one pane) ────────────────────────────
 //
-// Hangar uses the app's pane tabs rather than tabs of its own: each tab is a
-// whole Hangar block with its own folder, history and selection, and gets
+// Files uses the app's pane tabs rather than tabs of its own: each tab is a
+// whole Files block with its own folder, history and selection, and gets
 // reordering, dragging between panes, tear-off and layout persistence from
 // the pane-tab system (SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md).
 
@@ -98,7 +98,7 @@ function paneOf(blockId: string): { model: LayoutModel; nodeId: string } | null 
     return model && node ? { model, nodeId: node.id } : null;
 }
 
-/** A new Hangar tab on `dir`, beside `fromBlockId` in its pane; on
+/** A new Files tab on `dir`, beside `fromBlockId` in its pane; on
  *  `connection` (an SSH host) when given. */
 export async function openFolderInNewTab(fromBlockId: string, dir: string, connection?: string): Promise<void> {
     const pane = paneOf(fromBlockId);

@@ -1,17 +1,17 @@
-# Hangar: the system's own file icons, and real thumbnails for images and video
+# Files: the system's own file icons, and real thumbnails for images and video
 
-**Status:** active. Approved by the operator on 2026-10-27 ("hangar spec approved with best recommendations"), so every §13 decision goes as recommended. Phase 1 (Windows type and folder icons) is built in the PR that commits this file (#5827); P2 to P5 are not built.
+**Status:** active. Approved by the operator on 2026-10-27 ("files spec approved with best recommendations"), so every §13 decision goes as recommended. Phase 1 (Windows type and folder icons) is built in the PR that commits this file (#5827); P2 to P5 are not built.
 **Date:** 2026-10-27.
-**Requested by:** the operator, through AgentY. Their words: "can we get a spec on supporting system icons in the hangar (so we see the same icons for the files as in windows explorer."; and "can we also get image and video previews as the actual file thumbnail for media file in the hangar? simlar to modern windows".
+**Requested by:** the operator, through AgentY. Their words: "can we get a spec on supporting system icons in the files (so we see the same icons for the files as in windows explorer."; and "can we also get image and video previews as the actual file thumbnail for media file in the files? simlar to modern windows".
 **Author:** Agent1@narko.
-**Related:** `SPEC_FILE_BROWSER_PANE_2026_10_01.md` (the Hangar; §5.2 views, §12.5 grid), `SPEC_HANGAR_ZOOM_2026_10_08.md`.
+**Related:** `SPEC_FILE_BROWSER_PANE_2026_10_01.md` (the Files pane; §5.2 views, §12.5 grid), `SPEC_FILES_ZOOM_2026_10_08.md`.
 **Checked against:** `origin/main` at 685c739a4 (v0.60.x).
 
 ---
 
 ## 1. Summary
 
-Today every Hangar row is a Font Awesome glyph picked by a regex on the file name (`iconOf`, `files-view.tsx`), and only the grid view shows a thumbnail, and only for images: the page downloads each image (up to 25 MB), decodes it in JavaScript and scales it to 192 px (`files-thumbs.ts`). Videos, PDFs and everything else get a glyph.
+Today every Files row is a Font Awesome glyph picked by a regex on the file name (`iconOf`, `files-view.tsx`), and only the grid view shows a thumbnail, and only for images: the page downloads each image (up to 25 MB), decodes it in JavaScript and scales it to 192 px (`files-thumbs.ts`). Videos, PDFs and everything else get a glyph.
 
 The proposal, in one paragraph: **srv serves small PNGs of the icons and thumbnails the operating system itself would show, through two new routes. The Windows shell supplies them (the same calls Explorer uses, so the same icons, the same associations and Explorer's own thumbnail cache), run in a killable helper process so a third-party shell extension can't take srv down. Only pixels cross to the page. Our own decoder (the `image` crate srv already has) is the fallback and the cross-platform path.** Font Awesome icons stay as the placeholder while an icon loads, as the fallback when none can be made, and as a setting (`files:icons = system | app`). Windows ships first; macOS and Linux follow with different sources behind the same routes.
 
@@ -32,11 +32,11 @@ A PowerShell/C# script (`icon-proto/proto.ps1` in my workspace; contact sheet `i
 
 Not verified: the shortcut arrow on `.lnk` (Explorer draws it as an overlay; the prototype's `.lnk` output did not show it clearly), OneDrive status overlays, High-DPI scaling above 100 %, any macOS or Linux behaviour (§8, §9 say what a Mac or Linux seat must check).
 
-## 3. What the Hangar looks like today (so the change fits it)
+## 3. What the Files pane looks like today (so the change fits it)
 
 - Details rows are 24 px high (`ROW_HEIGHT`) with a 14 px FA glyph. Grid tiles are 112×132 with a 96×80 art box (`TILE_W`, `TILE_H`, `.files-tile-art`). Both are windowed: only visible rows exist in the DOM (`visibleNames`).
 - Grid thumbnails: images only, `THUMB_PX` 192, 300 kept (`MAX_CACHED`), 4 decoded at once (`MAX_ACTIVE`), the file fetched whole through `/agentmux/stream-local-file` (auth header, so an `<img src>` can't be used directly; hence blobs and object URLs). Videos and larger images get a glyph.
-- A Hangar can browse an SSH host (`connection` in block meta); those entries come from the remote helper and their files are not on this machine. WSL appears as `\\wsl$` paths on Windows. There is no archive browsing.
+- A Files pane can browse an SSH host (`connection` in block meta); those entries come from the remote helper and their files are not on this machine. WSL appears as `\\wsl$` paths on Windows. There is no archive browsing.
 - `FsEntry` carries name, `is_dir`, `is_symlink`, size, mtime, hidden, readonly, link target, an error; no icon fields.
 
 ## 4. Design
@@ -81,7 +81,7 @@ Whether a type has its own icon is decided once per extension in the helper from
 
 ### 4.5 Sizes and layout (no jumping)
 
-The `<img>` sits in the same box the glyph has today (16×16 in a row, the 96×80 art box in the grid) with `object-fit: contain`, `decoding="async"`. The glyph shows until the picture arrives, then it is swapped in the same box, so nothing reflows. `px` requested = CSS size × `devicePixelRatio` × the pane's zoom (`SPEC_HANGAR_ZOOM`), snapped up to the list in §4.1, so a 125 % display or a zoomed pane asks for 20 or 24 px, not a blurry 16.
+The `<img>` sits in the same box the glyph has today (16×16 in a row, the 96×80 art box in the grid) with `object-fit: contain`, `decoding="async"`. The glyph shows until the picture arrives, then it is swapped in the same box, so nothing reflows. `px` requested = CSS size × `devicePixelRatio` × the pane's zoom (`SPEC_FILES_ZOOM`), snapped up to the list in §4.1, so a 125 % display or a zoomed pane asks for 20 or 24 px, not a blurry 16.
 
 ### 4.6 Bigger grid sizes, so thumbnails are worth having
 
@@ -95,14 +95,14 @@ Video poster frames are not something srv can make: there is no video decoder in
 
 ## 5. Theme fit
 
-System icons are full-colour bitmaps drawn for light and dark backgrounds alike; Windows ships its own icons in both themes and they read on the Hangar's dark surfaces (the prototype sheet was drawn on `#202024`). Two rules: (1) no tinting, no CSS filters, the picture is shown as made; (2) `files:icons = app` keeps today's FA glyphs and their theme colours for anyone who prefers a monochrome list. The thumbnail frame is a 1 px border in `--border-color` so a white page thumbnail doesn't bleed into a light theme.
+System icons are full-colour bitmaps drawn for light and dark backgrounds alike; Windows ships its own icons in both themes and they read on the Files pane's dark surfaces (the prototype sheet was drawn on `#202024`). Two rules: (1) no tinting, no CSS filters, the picture is shown as made; (2) `files:icons = app` keeps today's FA glyphs and their theme colours for anyone who prefers a monochrome list. The thumbnail frame is a 1 px border in `--border-color` so a white page thumbnail doesn't bleed into a light theme.
 
 ## 6. Security and privacy
 
 - **Only pixels cross.** The routes return PNG (or an SVG from the icon theme on Linux, served only as an `<img>`, which cannot run script). No file contents, no path echoed back, no error text beyond a status code. Decoding and shell calls happen in the helper or in srv, never in the page.
 - **Nothing the page couldn't already do.** `stream-local-file` already serves any readable local file to a page holding the instance key; the thumbnail route reads strictly less (a few KB of derived pixels) under the same authentication. It adds no new principal and no new reach.
 - **No path widening:** `file-icon` takes no path at all; `file-thumb` takes an absolute path that must exist, be a regular file or folder, be local (not UNC, not network), have no NUL, be canonicalised before use, and the `px`, `ext` and `kind` are enumerated. The helper never opens a file for writing and never follows a placeholder's data.
-- **Agent-opened Hangars are the same code with the same limits:** an agent can navigate and select (`OpenFiles`) but cannot ask for anything the page itself can't; the routes have no agent-callable RPC.
+- **Agent-opened Files panes are the same code with the same limits:** an agent can navigate and select (`OpenFiles`) but cannot ask for anything the page itself can't; the routes have no agent-callable RPC.
 - **Disk cache = a copy of the user's pictures at small size.** It sits under the user's own AgentMux data directory (user-only permissions on every OS), is capped and expires, can be cleared, is not synced, not backed up by AgentMux and never contains remote files (§7). Windows' own `thumbcache` already holds the same thumbnails for Explorer, so reusing it adds nothing new. A privacy-minded user sets `files:thumbnails = off` and gets icons only.
 - **Third-party code isolation** is the reason for the helper (§4.2); a handler that hangs costs one 3 s timeout and one respawn.
 - **Rate and size limits:** at most 6 in flight per page, 2 helper workers, queue of 64 then `503`; response bodies capped at 256×256 RGBA.
@@ -118,7 +118,7 @@ System icons are full-colour bitmaps drawn for light and dark backgrounds alike;
 
 - **A folder of thousands of files costs one request per distinct type**, not per file. Rows already exist only when visible; each visible row asks for its type's icon (shared, usually cached) and, for the few "own icon" files, one `file-thumb`.
 - **A folder of thousands of photos:** only the visible tiles ask (plus the existing 2-row overscan); each request is a queue entry that is **aborted when the tile scrolls away** (the `Job.interest` count `files-thumbs.ts` already has); 6 in flight; srv answers from memory or disk cache in under a millisecond, and cold ones cost the 4 to 18 ms measured (a cold video 240 ms). Fast scrolling therefore costs only the tiles you stop on.
-- **First open of a folder:** the placeholder glyph is already on screen, the first rows' icons arrive in tens of milliseconds, the first call in a session may add about 200 ms (§2); the Hangar's budgets in `SPEC_FILE_BROWSER_PANE` §10 (first rows < 100 ms, no frame > 16 ms) are about rows, not icons, and stay as they are because icons never block a row.
+- **First open of a folder:** the placeholder glyph is already on screen, the first rows' icons arrive in tens of milliseconds, the first call in a session may add about 200 ms (§2); the Files pane's budgets in `SPEC_FILE_BROWSER_PANE` §10 (first rows < 100 ms, no frame > 16 ms) are about rows, not icons, and stay as they are because icons never block a row.
 - **srv stays unblocked:** all shell work is out of process; decodes are `spawn_blocking`; the route is `async`.
 
 ## 9. Other platforms (same routes, different source)
@@ -145,12 +145,12 @@ P1 alone answers "the same icons as Explorer" for everyday files; P2 is what mak
 - **srv route:** missing/oversized/odd parameters give 400; unauthenticated gives 401; a path that is a directory, missing, UNC or contains NUL gives 400/404 without a body that names it; a second identical request is served from cache (counted); a helper that hangs yields 504 within the deadline and the next request works on a fresh worker (fake helper in the test).
 - **Helper (Windows-only, `#[cfg(windows)]`):** by-name `.txt`, `.rs`, unknown extension and folder return non-empty PNGs of the requested size with non-zero alpha; a nonexistent file name works; a placeholder-attribute file refuses THUMBNAILONLY.
 - **Page (vitest):** the glyph shows until the picture loads and the box size is identical before and after (no layout shift); a tile scrolled away aborts its request; failure is remembered and not retried; `files:icons = app` renders glyphs only; the grid size setting changes tile geometry and the requested `px`; the own-icon set is fetched once.
-- **Live (my own isolated `task dev`, never the installed AgentMux):** one folder opened in Explorer and in a Hangar, side by side, screenshots in the PR (System32-like: many `.exe`/`.dll`; Pictures; a 3,000-file folder); scroll a 5,000-photo folder and watch the trace for frames over 16 ms; associations change (install or remap a type) and the next request shows the new icon; an SSH folder shows local type icons. The dev instance gets an isolated `AGENTMUX_HOME_OVERRIDE`.
+- **Live (my own isolated `task dev`, never the installed AgentMux):** one folder opened in Explorer and in a Files pane, side by side, screenshots in the PR (System32-like: many `.exe`/`.dll`; Pictures; a 3,000-file folder); scroll a 5,000-photo folder and watch the trace for frames over 16 ms; associations change (install or remap a type) and the next request shows the new icon; an SSH folder shows local type icons. The dev instance gets an isolated `AGENTMUX_HOME_OVERRIDE`.
 
 ## 12. Edge cases
 
 - **No shell icon available** (a locked-down profile, helper cannot start): the glyph stays; one `warn` per session, no retry storm.
-- **Two Hangars, one folder:** one request per key (the routes and the page cache are shared).
+- **Two Files panes, one folder:** one request per key (the routes and the page cache are shared).
 - **Dark/light theme switch:** nothing to redo; icons are theme-independent. Switching `files:icons` swaps the render, no restart.
 - **A file replaced with the same `mtime` and `len`:** keeps its old thumbnail (the same trade-off Explorer makes).
 - **Very large images** (above the decoder limits): type icon, not a failure row.

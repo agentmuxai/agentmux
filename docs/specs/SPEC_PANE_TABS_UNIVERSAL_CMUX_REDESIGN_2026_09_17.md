@@ -43,7 +43,7 @@ and normal RPC plumbing; the difficulty of this redesign lives almost entirely i
 frontend (chrome hoisting, tab-strip UI, focus model, interaction design).
 
 > [!IMPORTANT]
-> **Superseded in part (2026-10-02) by `SPEC_DOCUMENT_TABS_2026_10_02.md`.** The repo owner set a third tab layer under pane tabs: **document tabs**, the files inside one pane (Editor files, Media files), on one shared system; folders (Hangar) stay pane tabs here. That reverses §7 resolution 3 below (Editor files do **not** become pane tabs), adds the missing layer to §2.2, and withdraws §4.9's `Ctrl:Shift:T` (it reopens a closed document tab instead). Everything else here stands.
+> **Superseded in part (2026-10-02) by `SPEC_DOCUMENT_TABS_2026_10_02.md`.** The repo owner set a third tab layer under pane tabs: **document tabs**, the files inside one pane (Editor files, Media files), on one shared system; folders (Files) stay pane tabs here. That reverses §7 resolution 3 below (Editor files do **not** become pane tabs), adds the missing layer to §2.2, and withdraws §4.9's `Ctrl:Shift:T` (it reopens a closed document tab instead). Everything else here stands.
 
 ---
 

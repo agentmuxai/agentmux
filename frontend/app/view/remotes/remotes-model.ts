@@ -146,7 +146,7 @@ export class RemotesViewModel {
         );
     }
 
-    /** Hangar on the remote's home folder, beside this pane. */
+    /** Files on the remote's home folder, beside this pane. */
     async browseFiles(name: string): Promise<void> {
         await RpcApi.PaneOpenCommand(
             TabRpcClient,

@@ -273,7 +273,7 @@ Deleted: the `:global(...)` rules and the other dead rules in §3.4, the per-pre
 
 Not changed, on purpose:
 - **Markdown** (Agent reports, `.md` Reads and Writes, WebSearch summaries) still renders through the Markdown component; its code fences still use highlight.js. Markdown is prose with its own layout.
-- **HighlightedCode** stays for Hangar's file preview and the PowerShell command view, now on the shared Shiki loader and theme.
+- **HighlightedCode** stays for the Files pane's file preview and the PowerShell command view, now on the shared Shiki loader and theme.
 - **The hover peek, message bodies, WebFetch and record tables** keep their own text handling; they aren't tool-preview boxes.
 - **The Shiki theme** is still `github-dark-high-contrast` whatever the app theme (§3.1); that's a separate change.
 

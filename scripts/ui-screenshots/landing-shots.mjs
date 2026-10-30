@@ -154,7 +154,7 @@ async function openPane(session, args) {
 }
 
 /** The workspace an agent lives in: the default layout (agent picker, a live CPU graph, Swarm)
- *  with the Hangar file browser and a terminal on the demo project beside it. */
+ *  with the Files pane file browser and a terminal on the demo project beside it. */
 function landingWorkspace() {
     const tab = { tabId: null };
     let terminal = null;
@@ -163,7 +163,7 @@ function landingWorkspace() {
     return {
         id: "landing-workspace",
         title: "The workspace",
-        description: "A whole window: the agent picker, a live CPU graph and Swarm (the default layout), with the Hangar file browser on the demo project and a PowerShell terminal in it, side by side. For the landing site's workspace sections (Home, Features).",
+        description: "A whole window: the agent picker, a live CPU graph and Swarm (the default layout), with the Files pane file browser on the demo project and a PowerShell terminal in it, side by side. For the landing site's workspace sections (Home, Features).",
         retries: 1,
         settleMs: 1200,
         containsWorkspaceData: "review",
@@ -174,7 +174,7 @@ function landingWorkspace() {
             await session.pressKey("Escape");
             tab.tabId = null;
             await openNewTab(session, tab);
-            // The new tab has the default layout; the Hangar and the terminal open as columns beside it.
+            // The new tab has the default layout; the Files pane and the terminal open as columns beside it.
             files = await openPane(session, { view: "files", cwd: DEMO });
             terminal = await openPane(session, { view: "term", cwd: DEMO });
             let stashed = false;
@@ -201,9 +201,9 @@ function landingWorkspace() {
         verify: async (session) => {
             if (await session.evaluate(MENU_OPEN)) return "a menu is still open";
             const visible = (await session.evaluate(VISIBLE_BLOCK_IDS)).split(",").filter(Boolean);
-            if (!visible.includes(files)) return "the Hangar isn't visible";
+            if (!visible.includes(files)) return "the Files pane isn't visible";
             if (!visible.includes(terminal)) return "the terminal isn't visible";
-            if (visible.length < 5) return `only ${visible.length} panes are visible; the default layout's three plus the Hangar and the terminal are expected`;
+            if (visible.length < 5) return `only ${visible.length} panes are visible; the default layout's three plus the Files pane and the terminal are expected`;
             const text = await session.evaluate(terminalText(terminal));
             if (text == null) return "can't read the terminal's buffer, so its content can't be checked";
             if (!text.includes(COMMAND.expect)) return `the terminal doesn't show its expected output (${COMMAND.expect})`;
