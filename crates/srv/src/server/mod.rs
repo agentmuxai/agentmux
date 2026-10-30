@@ -85,6 +85,7 @@ mod transcript_tail;
 mod coord_channel_handlers;
 mod work_claims_handlers;
 mod work_facts_handlers;
+mod message_stats_handler;
 pub(crate) mod memory_launch_cost;
 pub(crate) mod native_memory_diff;
 pub(crate) mod native_memory_handlers;

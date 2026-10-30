@@ -1274,11 +1274,7 @@ impl Handler {
         // also lands the message mid-turn (steering) instead of waiting for idle.
         // PTY-based shell/term agents report back so we fall through to keystrokes.
         if let Some(ref deliver) = self.message_sender {
-            // Read just before the write, which flips the turn on: a message into a running turn costs
-            // no new context read, one to an idle agent starts a turn.
-            let joins_turn = crate::backend::blockcontroller::get_controller(&block_id)
-                .and_then(|c| c.turn_tracker())
-                .is_some_and(|t| t.is_active_turn());
+            let joins_turn = super::turn_audit::turn_in_flight(&block_id);
             match deliver(&block_id, &final_msg, req.files_delivery.as_ref().map_or(&[][..], |d| &d.inline)) {
                 Ok(outcome @ (SenderDelivery::Delivered | SenderDelivery::Deferred)) => {
                     let deferred = outcome == SenderDelivery::Deferred;
@@ -1564,12 +1560,6 @@ impl Handler {
         };
 
         super::audit_store::push(&mut self.audit_log, AUDIT_LOG_MAX, entry);
-    }
-
-    /// A reply that said nothing was refused before delivery (`backend::ack_policy`): an entry with
-    /// outcome `ack_refused`, so the Audit counts the turns it saved.
-    pub(super) fn log_ack_refused(&mut self, source_agent: &str, target_agent: &str, request_id: &str, why: &str) {
-        self.log_audit(Some(source_agent), target_agent, "", "", false, Some(why), request_id, Some("ack_refused"), None);
     }
 
     /// Record a registration/eviction event in the audit log — the
@@ -2061,13 +2051,6 @@ impl ReactiveHandler {
             None,
             reason,
         );
-    }
-}
-
-impl ReactiveHandler {
-    /// See [`Handler::log_ack_refused`].
-    pub fn log_ack_refused(&self, source_agent: &str, target_agent: &str, request_id: &str, why: &str) {
-        self.inner.lock().unwrap().log_ack_refused(source_agent, target_agent, request_id, why);
     }
 }
 
