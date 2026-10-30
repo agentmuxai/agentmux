@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Which Global Memory entries follow the fleet
-//! (docs/specs/SPEC_AGENTS_OPERATE_OTHER_MACHINES_2026_10_30.md §4.6).
+//! (task #12439, "agents operate other machines", section 4.6).
 //!
 //! An entry's scope is `fleet` (pushed to every proven machine, last write
 //! wins) or `machine` (this machine only). Rows live in `db_bundle_scope`,

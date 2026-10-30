@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! One Global Memory for the fleet
-//! (docs/specs/SPEC_AGENTS_OPERATE_OTHER_MACHINES_2026_10_30.md §4.6).
+//! (task #12439, "agents operate other machines", section 4.6).
 //!
 //! A Global Memory entry with scope `fleet` (see `storage::bundle_scope`) is
 //! pushed to every proven machine with the remote ops `memory.global.put` and

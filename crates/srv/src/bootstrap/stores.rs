@@ -504,7 +504,7 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     // Install the process-global handle so the block-controller stdout-reader
     // hot path can mirror agent `output` into the global zone without threading
     // the store through `resync_controller` and every controller constructor.
-    // Which Global Memory entries follow the fleet (SPEC_AGENTS_OPERATE_OTHER_MACHINES §4.6): the
+    // Which Global Memory entries follow the fleet (task #12439, section 4.6): the
     // entries that exist now stay on this machine, so create the table before anything new is written.
     if let Err(e) = id_store.bundle_scope_ensure() {
         tracing::warn!(error = %e, "Global Memory scope table: could not create it");
