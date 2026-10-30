@@ -6,7 +6,7 @@
 // docs/specs/SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md §7
 //
 // THE RULES. Controls come from frontend/app/element/ui/ and follow its line
-// style. Eight counts may not go up compared with the base branch (the
+// style. The counts below may not go up compared with the base branch (the
 // merge-base with origin/main, or $GITHUB_BASE_REF):
 //
 //   1. buttons      hand-rolled `<button` elements in .tsx outside element/ui/,
@@ -54,6 +54,15 @@
 //                   (or the line after a `// colour: fixed` comment) doesn't either:
 //                   a brand mark, a user-pickable palette, a fallback for a page
 //                   that has no stylesheet. A chrome colour is a `var(--…)` token.
+//
+// One for the tag and badge family (docs/specs/SPEC_UI_PANEL_PRIMITIVE_2026_10_29.md §9.5), per
+// file, in SCSS/CSS outside element/ui/:
+//
+//  13. tags         a rule whose class name ends in badge, chip, tag, pill or ribbon and that
+//                   gives itself a box (a padding, a font-size, and a border-radius or a
+//                   background): a tag drawn by hand, where `Tag` belongs. A rule marked
+//                   `// tag: fixed` (on its selector line, above it or inside it) doesn't count:
+//                   a control that is not a tag but is named like one, a third party's markup.
 //
 // A count above the base's fails: use the element/ui/ components instead. A
 // count below it is reported and passes. There is no checked-in baseline:
@@ -405,6 +414,34 @@ export function handFocusRings(scss) {
     return [...new Set(rules.map((d) => d.selector))];
 }
 
+const TAG_CLASS = /\.[\w-]*(?:badge|chip|tag|pill|ribbon)$/i;
+
+/**
+ * Rules (by resolved selector) that draw a tag by hand: the class ends in badge, chip, tag, pill
+ * or ribbon, and the rule declares a padding, a font-size and a border-radius or a background.
+ * A declaration anywhere in the file for the same selector counts toward it. A `// tag: fixed`
+ * comment from three lines above a rule's first declaration to its last excuses it.
+ */
+export function handRolledTags(scss) {
+    const byRule = new Map();
+    for (const d of declarations(scss)) {
+        if (!d.selector.split(",").some((sel) => TAG_CLASS.test(sel.trim()))) continue;
+        const rule = byRule.get(d.selector) ?? { props: new Set(), first: d.line, last: d.line };
+        rule.props.add(d.property.replace(/-(top|right|bottom|left|inline|block)(-(start|end))?$/, "").replace(/^background-.*/, "background"));
+        rule.first = Math.min(rule.first, d.line);
+        rule.last = Math.max(rule.last, d.line);
+        byRule.set(d.selector, rule);
+    }
+    const marks = [];
+    scss.split("\n").forEach((text, i) => {
+        if (/tag:\s*fixed/.test(text)) marks.push(i + 1);
+    });
+    return [...byRule]
+        .filter(([, r]) => r.props.has("padding") && r.props.has("font-size") && (r.props.has("border-radius") || r.props.has("background")))
+        .filter(([, r]) => !marks.some((m) => m >= r.first - 3 && m <= r.last))
+        .map(([selector]) => selector);
+}
+
 /** Custom properties set on `:root` itself (alone or in a list), outside any at-rule: defined in every element. */
 export function rootTokens(scss) {
     const onRoot = (selector) => selector.split(",").some((s) => s.trim() === ":root");
@@ -436,6 +473,7 @@ export function collect(files) {
     const focusRings = {};
     const colours = {};
     const tsColours = {};
+    const tags = {};
     const styles = [];
 
     for (const { path, source } of files) {
@@ -463,6 +501,7 @@ export function collect(files) {
             countInto(focusRings, path, handFocusRings(source).length);
             // The theme files are where colours are defined.
             if (!THEME_FILE.test(path)) countInto(colours, path, colourLiterals(source).length);
+            if (!path.startsWith(UI_DIR)) countInto(tags, path, handRolledTags(source).length);
         }
     }
 
@@ -487,6 +526,7 @@ export function collect(files) {
         focusRings: sortObject(focusRings),
         colours: sortObject(colours),
         tsColours: sortObject(tsColours),
+        tags: sortObject(tags),
     };
 }
 
@@ -500,7 +540,7 @@ function sortObject(obj) {
 
 // ── Compare ─────────────────────────────────────────────────────────────────
 
-const PER_FILE = ["buttons", "radius", "durations", "fontSizes", "fallbacks", "zIndex", "focusRings", "colours", "tsColours"];
+const PER_FILE = ["buttons", "radius", "durations", "fontSizes", "fallbacks", "zIndex", "focusRings", "colours", "tsColours", "tags"];
 
 /** How `current` differs from `baseline` (the base branch), as human-readable lines. */
 export function compare(current, baseline) {
@@ -615,7 +655,8 @@ if (isMain(import.meta.url)) {
         console.log("only custom properties that are defined, --duration-*, --text-* and --z-* tokens");
         console.log("instead of raw values, no fallback on a token :root always sets, and");
         console.log("`@include mixins.focus-ring` for a focus ring, and theme tokens (--error-color,");
-        console.log("--success-bg, --tint-2, …) instead of a colour literal.");
+        console.log("--success-bg, --tint-2, …) instead of a colour literal, and Tag / TagList /");
+        console.log("FilterChip instead of a hand-drawn badge, chip, pill or ribbon.");
         process.exit(1);
     }
     const total = (o) => Object.values(o).reduce((a, b) => a + b, 0);
@@ -625,7 +666,8 @@ if (isMain(import.meta.url)) {
             `${current.undefinedVars.length} undefined variables, ${total(current.durations)} raw durations, ` +
             `${total(current.fontSizes)} raw px font sizes, ${total(current.fallbacks)} fallbacks on always-defined ` +
             `tokens, ${total(current.zIndex)} raw z-indexes, ${total(current.focusRings)} hand-written focus rings, ` +
-            `${total(current.colours)} colour literals in styles, ${total(current.tsColours)} in scripts.`
+            `${total(current.colours)} colour literals in styles, ${total(current.tsColours)} in scripts, ` +
+            `${total(current.tags)} hand-drawn tags.`
     );
     if (shrank.length > 0) {
         console.log(`Down from the base branch (${shrank.length}):`);
