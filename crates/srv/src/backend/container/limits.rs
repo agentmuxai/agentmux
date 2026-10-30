@@ -276,6 +276,13 @@ impl ContainerManager {
         Wanted::resolve(agent, ContainerLimits::from_settings(), self.daemon_capacity().await, recommended_min_mb)
     }
 
+    /// The limits `container_name` has or would be given: as [`Self::limits_apply`] sets them, with its image's
+    /// recommended minimum. Without such a container, no label is known.
+    pub async fn wanted_limits_for_container(&self, container_name: &str, agent: ContainerLimits) -> Wanted {
+        let recommended = self.inner.docker.inspect_container(container_name, None).await.ok().and_then(|d| recommended_min_mb(&d));
+        self.wanted_limits(agent, recommended).await
+    }
+
     /// The limits for a container about to be made from `image`, whose labels may name a recommended minimum.
     pub(super) async fn wanted_limits_for_new(&self, image: &str, agent: ContainerLimits) -> Wanted {
         let labels = self.inner.docker.inspect_image(image).await.ok().and_then(|i| i.config).and_then(|c| c.labels);

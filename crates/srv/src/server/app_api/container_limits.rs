@@ -65,7 +65,8 @@ pub(crate) async fn view(state: &AppState, uid: &str, applied: Option<bool>) -> 
         applied,
     };
     if let Some(cm) = state.container_manager.get().await {
-        let wanted = cm.wanted_limits(ContainerLimits::from_strings(&memory_mb, &cpus), None).await;
+        let name = crate::backend::container::container_name_for_slug(uid);
+        let wanted = cm.wanted_limits_for_container(&name, ContainerLimits::from_strings(&memory_mb, &cpus)).await;
         if let Target::Set(bytes) = wanted.memory {
             out.effective_memory_mb = Some(mb_of(bytes));
         }
