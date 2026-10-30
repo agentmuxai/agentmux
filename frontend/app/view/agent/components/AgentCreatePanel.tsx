@@ -89,15 +89,22 @@ export const AgentCreatePanel = (props: AgentCreatePanelProps): JSX.Element => {
     const userInstalled = () => !!provider() && !provider()!.npmPackage;
 
     // The free sign-up guide is for someone new to this provider: not shown once an
-    // account for it exists (the list is fetched here as the form fetches it).
+    // account for it exists (the list is fetched here as the form fetches it). It
+    // waits for the list, and stays away when the list can't be read, so a person
+    // with an account never sees it flash in, and a failed fetch doesn't guess.
     const [accounts] = createResource(async () => {
         try {
             return await refreshAccountCache();
         } catch {
-            return [];
+            return null;
         }
     });
-    const hasAccount = () => (accounts() ?? []).some((acct) => acct.provider === (providerId() ?? props.template.provider));
+    const showFreeGuide = () => {
+        const list = accounts();
+        if (!list) return false;
+        const provider = providerId() ?? props.template.provider;
+        return !list.some((acct) => acct.provider === provider);
+    };
 
     // ── Tools ────────────────────────────────────────────────────────
     const [missing, setMissing] = createSignal<MissingPrereq[] | null>(null);
@@ -397,7 +404,7 @@ export const AgentCreatePanel = (props: AgentCreatePanelProps): JSX.Element => {
                 <Match when={step() === "create"}>
                     {/* A provider with a free sign-in route, for someone with no
                         account for it yet: the link to sign up, then the steps. */}
-                    <Show when={!hasAccount()}>
+                    <Show when={showFreeGuide()}>
                         <FreeStartGuide provider={providerId() ?? props.template.provider} name={name()} />
                     </Show>
                     <AgentCreateForm

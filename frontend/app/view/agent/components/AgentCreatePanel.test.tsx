@@ -109,10 +109,21 @@ vi.mock("../agent-launch-env", () => ({
 }));
 
 // The accounts the panel looks for (the free sign-up guide shows only without one).
-const { accountsForTest } = vi.hoisted(() => ({ accountsForTest: { list: [] as { provider: string }[] } }));
+const { accountsForTest } = vi.hoisted(() => ({
+    accountsForTest: {
+        list: [] as { provider: string }[],
+        /** While set, the account list hasn't arrived yet; calling it delivers the list. */
+        gate: null as null | Promise<void>,
+        fail: false,
+    },
+}));
 vi.mock("@/app/view/identity/identity-model", async (importOriginal) => ({
     ...(await importOriginal<typeof import("@/app/view/identity/identity-model")>()),
-    refreshAccountCache: vi.fn(async () => accountsForTest.list),
+    refreshAccountCache: vi.fn(async () => {
+        if (accountsForTest.gate) await accountsForTest.gate;
+        if (accountsForTest.fail) throw new Error("accounts unavailable");
+        return accountsForTest.list;
+    }),
 }));
 
 // The Create step's own behaviour is AgentCreateForm.test.tsx's.
@@ -577,6 +588,8 @@ describe("AgentCreatePanel — Install step, a CLI AgentMux doesn't install", ()
 describe("the free sign-up guide in the Create step", () => {
     beforeEach(() => {
         accountsForTest.list = [];
+        accountsForTest.gate = null;
+        accountsForTest.fail = false;
     });
 
     const agyTemplate = () => baseTemplate({ provider: "antigravity", name: "Antigravity" });
@@ -591,6 +604,37 @@ describe("the free sign-up guide in the Create step", () => {
 
     it("is hidden once an account for the provider exists", async () => {
         accountsForTest.list = [{ provider: "antigravity" }];
+        renderPanel({ template: agyTemplate() });
+        await waitFor(() => expect(screen.getByTestId("agent-create-form")).toBeTruthy());
+        await new Promise((r) => setTimeout(r, 0));
+        expect(screen.queryByTestId("agent-free-guide")).toBeNull();
+    });
+
+    it("does not flash in for someone who has an account while the account list is still loading", async () => {
+        let release!: () => void;
+        accountsForTest.gate = new Promise<void>((r) => (release = r));
+        accountsForTest.list = [{ provider: "antigravity" }];
+        renderPanel({ template: agyTemplate() });
+        await waitFor(() => expect(screen.getByTestId("agent-create-form")).toBeTruthy());
+        await new Promise((r) => setTimeout(r, 0));
+        expect(screen.queryByTestId("agent-free-guide")).toBeNull();
+        release();
+        await new Promise((r) => setTimeout(r, 0));
+        expect(screen.queryByTestId("agent-free-guide")).toBeNull();
+    });
+
+    it("waits for the list, then shows for someone with no account", async () => {
+        let release!: () => void;
+        accountsForTest.gate = new Promise<void>((r) => (release = r));
+        renderPanel({ template: agyTemplate() });
+        await waitFor(() => expect(screen.getByTestId("agent-create-form")).toBeTruthy());
+        expect(screen.queryByTestId("agent-free-guide")).toBeNull();
+        release();
+        await waitFor(() => expect(screen.getByTestId("agent-free-guide")).toBeTruthy());
+    });
+
+    it("stays away when the account list can't be read", async () => {
+        accountsForTest.fail = true;
         renderPanel({ template: agyTemplate() });
         await waitFor(() => expect(screen.getByTestId("agent-create-form")).toBeTruthy());
         await new Promise((r) => setTimeout(r, 0));
