@@ -209,6 +209,15 @@ fn certificate(slug: &str, public: &[u8; 32], issued_at: i64) -> (tempfile::Temp
     (dir, cert)
 }
 
+/// This machine trusts the install `instance_id`: pinned here for some agent already.
+fn trust_install(state: &AppState, instance_id: &str) {
+    let dir = Box::leak(Box::new(tempfile::tempdir().unwrap()));
+    let wan = std::sync::Arc::new(WanIdentityStore::open(&dir.path().join("wan.db")).unwrap());
+    wan.instance_ensure("receiver").unwrap();
+    state.mstore.set_wan_identity(wan.clone());
+    wan.agent_instance_pin_get_or_set("pinned-elsewhere", "stable", instance_id, "host", NOW).unwrap();
+}
+
 #[tokio::test]
 async fn an_operation_that_changes_state_needs_a_certificate_backed_caller() {
     let (public, private) = keys(20);
@@ -222,6 +231,7 @@ async fn an_operation_that_changes_state_needs_a_certificate_backed_caller() {
     let (_dir, cert) = certificate("rop-s", &public, NOW);
     let instance = cert.instance_id.clone();
     state.lan_discovery.seed_lan_cert_for_test("rop-s", cert);
+    trust_install(&state, &instance);
     let ok = run(&state, PEER, request("rop-s", "n-s2", "test.change", &audience, NOW, &private)).await;
     assert_eq!(ok.status, OpStatus::Done, "{ok:?}");
     assert!(ok.result["changed_by"].as_str().unwrap().starts_with("rop-s@"), "{ok:?}");
@@ -266,6 +276,7 @@ async fn a_claimed_install_must_be_the_one_the_certificate_names() {
     };
     let refused = run(&state, PEER, lying.clone().sign(&private).unwrap()).await;
     assert_eq!(refused.refused_reason.as_deref(), Some("install_mismatch"));
+    trust_install(&state, &real);
     lying.requester.instance_id = real;
     lying.nonce = "n-i2".into();
     assert_eq!(run(&state, PEER, lying.sign(&private).unwrap()).await.status, OpStatus::Done);
@@ -305,4 +316,22 @@ fn the_machine_is_named_by_the_address_it_called_from() {
     assert_eq!(super::receive::machine_in(&[peer("charlie", "main"), narko], from), "Narko");
     assert_eq!(super::receive::machine_in(&[peer("charlie", "main")], from), "unknown machine");
     assert_eq!(super::receive::machine_in(&[], None), "unknown machine");
+}
+
+#[tokio::test]
+async fn a_certificate_from_an_install_this_machine_does_not_trust_backs_nothing() {
+    let (public, private) = keys(25);
+    let (state, audience) = state_with_peer("rop-u", &public);
+    // A LAN host that won the first-use pin issues a certificate for its own key from its own install.
+    let (_dir, cert) = certificate("rop-u", &public, NOW);
+    let install = cert.instance_id.clone();
+    state.lan_discovery.seed_lan_cert_for_test("rop-u", cert);
+    let refused = run(&state, PEER, request("rop-u", "n-u1", "test.change", &audience, NOW, &private)).await;
+    assert_eq!(refused.refused_reason.as_deref(), Some("install_not_trusted"), "{refused:?}");
+    // It can still read, on the pin alone.
+    assert_eq!(run(&state, PEER, request("rop-u", "n-u2", "app.version", &audience, NOW, &private)).await.status, OpStatus::Done);
+    // Once this machine trusts that install, the same request goes through.
+    trust_install(&state, &install);
+    let ok = run(&state, PEER, request("rop-u", "n-u1", "test.change", &audience, NOW, &private)).await;
+    assert_eq!(ok.status, OpStatus::Done, "{ok:?}");
 }

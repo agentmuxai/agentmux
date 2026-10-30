@@ -14,7 +14,8 @@
 //! 5. its signature verifies under the key this machine pins for that agent
 //!    (`reactive::lan_signer`, the same judgement a LAN jekt gets), and the install
 //!    the agent's certificate names, when one is on hand, is the install it claims;
-//! 6. the operation exists, and a state-changing one has a certificate-backed caller;
+//! 6. the operation exists, and a state-changing one has a caller whose key is vouched for by a
+//!    fresh certificate from an install this machine trusts;
 //! 7. the nonce is new, or the first answer is repeated;
 //! 8. the operation runs under a [`RemoteCaller`].
 //!
@@ -224,11 +225,12 @@ pub(super) async fn receive(
         Some(cert) => cert.instance_id,
         None => String::new(),
     };
-    let caller = RemoteCaller {
+    let mut caller = RemoteCaller {
         agent_uid: op.requester.agent_uid.clone(),
         slug: op.requester.slug.clone(),
         machine: machine_name(state, from),
         instance_id,
+        install_trusted: false,
         verification: Verification::Lan,
         reason: op.reason.clone(),
     };
@@ -236,8 +238,17 @@ pub(super) async fn receive(
     let Some(operation) = lookup(&op.op) else {
         return refuse("unknown_op", proof);
     };
-    if operation.changes_state && caller.instance_id.is_empty() {
-        return refuse("needs_certificate", proof);
+    if operation.changes_state {
+        if caller.instance_id.is_empty() {
+            return refuse("needs_certificate", proof);
+        }
+        // A certificate any install can issue for itself proves nothing about who hosts the agent:
+        // the install must be one this machine already trusts, as for moving a pinned key.
+        if let Err(why) = crate::server::reactive::lan_continuity::instance_trust(state, &caller.instance_id).await {
+            tracing::info!(agent = %caller.slug, install = %caller.instance_id, %why, "remote operation refused: the install that vouches for the agent is not trusted here");
+            return refuse("install_not_trusted", proof);
+        }
+        caller.install_trusted = true;
     }
     let nonce_key = (op.requester.slug.to_ascii_lowercase(), op.nonce.clone());
     match reserve(&nonce_key, now) {

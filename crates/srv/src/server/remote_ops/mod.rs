@@ -46,6 +46,9 @@ impl Verification {
 /// `agent_uid` and `reason` are signed too, but nothing ties the uid to the key, so a handler
 /// uses them to describe the caller and never to authorize it. `instance_id` is the install
 /// whose certificate vouches for the agent's key; it is empty when no valid certificate is held.
+/// `install_trusted` says this machine also trusts that install (pinned here, or live in the
+/// account's directory, and not revoked): it is looked into only for an operation that changes
+/// state, so it is `false` for a read, and always `true` inside a write's handler.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RemoteCaller {
     pub agent_uid: String,
@@ -54,6 +57,7 @@ pub(crate) struct RemoteCaller {
     pub machine: String,
     /// The requesting install's id, from the agent's certificate; empty when none was shown.
     pub instance_id: String,
+    pub install_trusted: bool,
     pub verification: Verification,
     /// The requester's own words, to show as theirs. Never acted on, never given to an agent.
     pub reason: String,
@@ -94,7 +98,8 @@ pub(crate) type OpFn = for<'a> fn(&'a AppState, &'a RemoteCaller, Value) -> BoxF
 pub(crate) struct Op {
     pub run: OpFn,
     /// A state-changing operation needs a caller backed by a certificate from the install that
-    /// hosts the agent (`needs_certificate` otherwise). A read can go on the first-seen pin alone:
+    /// hosts the agent, an install this machine trusts (`needs_certificate`, `install_not_trusted`
+    /// otherwise). A read can go on the first-seen pin alone:
     /// that pin comes from unauthenticated discovery, which is enough to read a version and too
     /// thin to stop an agent or move an account.
     pub changes_state: bool,
