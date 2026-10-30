@@ -107,3 +107,27 @@ fn an_entry_made_again_under_a_reused_id_has_no_earlier_values() {
     assert!(list(&s, &id).unwrap().is_empty());
     assert!(restore(&s, &id, first).is_err());
 }
+
+#[test]
+fn a_restore_from_a_stale_read_never_overwrites_a_value_written_since() {
+    let s = store();
+    let id = create(&s, key("sk_live_first_value")).unwrap();
+    set(&s, &id, Some("sk_live_second_value"), "");
+    let seq = list(&s, &id).unwrap()[0].seq;
+    // What restore read, before a capture or an edit wrote a third value.
+    let stale = s.vault_get(&id).unwrap().unwrap();
+    set(&s, &id, Some("sk_live_third_value"), "");
+    let previous = VaultVersionRow {
+        seq: 0,
+        entry_id: id.clone(),
+        entry_created_at: stale.created_at,
+        sealed: stale.sealed,
+        replaced_at: 1,
+        replaced_by: "you".into(),
+        how: "restored".into(),
+        state: PREVIOUS.into(),
+    };
+    assert!(!s.vault_version_swap(&id, seq, &previous, 2).unwrap(), "the entry changed since it was read");
+    assert_eq!(current(&s, &id), "sk_live_third_value");
+    assert_eq!(list(&s, &id).unwrap().len(), 2, "both earlier values are still kept, and nothing stale was added");
+}

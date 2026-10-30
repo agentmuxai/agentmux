@@ -77,7 +77,7 @@ pub struct ShellCreateRequest {
     /// Values the command prints that go straight into the Vault: srv holds the
     /// output until the command ends, stores each match, and publishes the output
     /// with the values taken out (`[vault:<id>]`). If a rule matches nothing, the
-    /// output is withheld whole. Needs `auth`; not with an SSH `connection`.
+    /// output is withheld whole. Needs `auth`; works over any `connection`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub capture: Option<Vec<CaptureRule>>,
 }
