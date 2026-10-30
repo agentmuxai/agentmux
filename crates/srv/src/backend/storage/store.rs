@@ -195,6 +195,7 @@ impl Store {
         run_identity_store_schema(&conn)?;
         conn.execute_batch(super::work_claims::SCHEMA)?;
         conn.execute_batch(super::coord_posts::SCHEMA)?;
+        conn.execute_batch(super::bulletins::SCHEMA)?;
         conn.execute_batch(super::work_board::SCHEMA)?;
         super::job_runs::apply_schema(&conn)?;
         conn.execute_batch(super::work_deps::SCHEMA)?;
@@ -267,6 +268,7 @@ impl Store {
         run_identity_store_schema(&conn)?;
         conn.execute_batch(super::work_claims::SCHEMA)?;
         conn.execute_batch(super::coord_posts::SCHEMA)?;
+        conn.execute_batch(super::bulletins::SCHEMA)?;
         conn.execute_batch(super::work_board::SCHEMA)?;
         conn.execute_batch(super::work_deps::SCHEMA)?;
         conn.execute_batch(super::work_prs::SCHEMA)?;

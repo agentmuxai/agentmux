@@ -23,7 +23,7 @@ import {
     splitOutStackMember,
 } from "./lib/layoutStack";
 import { setMinimizeMerger } from "./lib/layoutMinimize";
-import { mergeIntoMinimizedNeighbour } from "./lib/layoutMinimizeMergeApply";
+import { mergeIntoNeighbour } from "./lib/layoutMinimizeMergeApply";
 import { installWindowEdgeResizeListener } from "./lib/windowEdgeResize";
 import type {
     ContentRenderer,
@@ -36,7 +36,7 @@ import type {
 } from "./lib/types";
 import { LayoutTreeActionType, NavigateDirection } from "./lib/types";
 
-setMinimizeMerger(mergeIntoMinimizedNeighbour);
+setMinimizeMerger(mergeIntoNeighbour);
 
 export {
     addWidgetAsPaneTab,

@@ -27,6 +27,7 @@ pub mod agents;
 pub mod agents_consolidate;
 pub mod background_tasks;
 pub mod content;
+pub mod bulletins;
 pub mod coord_posts;
 pub mod user_workspaces;
 pub mod container_limits;

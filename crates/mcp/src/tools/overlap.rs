@@ -92,6 +92,31 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let answer = srv_post_json(client, &url, auth_key, &body, name).await?;
             Ok(serde_json::to_string_pretty(&answer).unwrap_or_else(|_| answer.to_string()))
         }
+        "PostBulletin" | "ReadBulletin" => {
+            if local_url.is_empty() || auth_key.is_empty() {
+                anyhow::bail!(
+                    "AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. \
+                     Is this agent pane opened via AgentMux?"
+                );
+            }
+            let agent = std::env::var("AGENTMUX_AGENT_ID").unwrap_or_default();
+            let url = format!("{}/api/v1/bulletin", local_url.trim_end_matches('/'));
+            let answer = if name == "PostBulletin" {
+                let mut body = serde_json::Map::new();
+                for key in ["message", "key", "targets", "expires_minutes"] {
+                    if let Some(v) = arguments.get(key).filter(|v| !v.is_null()) {
+                        body.insert(key.into(), v.clone());
+                    }
+                }
+                body.insert("agent".into(), json!(agent.trim()));
+                body.insert("block".into(), json!(block_id.trim()));
+                srv_post_json(client, &url, auth_key, &Value::Object(body), name).await?
+            } else {
+                let query = vec![("agent", agent.trim().to_string()), ("block", block_id.trim().to_string())];
+                srv_get_json(client, &url, auth_key, &query, name).await?
+            };
+            Ok(serde_json::to_string_pretty(&answer).unwrap_or_else(|_| answer.to_string()))
+        }
         "PostToChannel" | "ReadChannel" => {
             if local_url.is_empty() || auth_key.is_empty() {
                 anyhow::bail!(
