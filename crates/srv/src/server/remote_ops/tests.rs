@@ -457,42 +457,37 @@ fn request_with(slug: &str, nonce: &str, op: &str, params: serde_json::Value, au
 }
 
 #[tokio::test]
-async fn an_operation_that_declares_a_larger_limit_takes_a_megabyte_and_the_others_still_do_not() {
-    let (public, private) = keys(20);
-    let (state, audience) = state_with_peer("rop-big", &public);
-    let megabyte = json!({ "text": "y".repeat(1_000_000) });
-
-    let big = request_with("rop-big", "n-big", "test.big", megabyte.clone(), &audience, &private, 1_200_000);
-    let result = run(&state, PEER, big).await;
-    assert_eq!(result.status, OpStatus::Done, "{result:?}");
-    assert!(result.result["bytes"].as_u64().unwrap() > 1_000_000);
-
-    // The same params to an operation with the default limit are refused before anything else:
-    // the signature is made with the large limit here, as a sender that ignored the op's own would.
-    let small = request_with("rop-big", "n-small", "app.version", megabyte.clone(), &audience, &private, 1_200_000);
-    assert_eq!(run(&state, PEER, small).await.refused_reason.as_deref(), Some("too_long"));
-
-    // And the large limit is a limit: past it, the same operation refuses too.
-    let too_big = json!({ "text": "y".repeat(1_300_000) });
-    assert!(RemoteOp {
-        v: REMOTE_OP_VERSION,
-        op: "test.big".into(),
-        params: too_big,
-        requester: Requester { agent_uid: "uid-x".into(), slug: "rop-big".into(), instance_id: String::new() },
-        audience: audience.clone(),
-        ts: NOW,
-        nonce: "n-too".into(),
-        reason: String::new(),
-    }
-    .sign_with(&private, super::max_params_of("test.big"))
-    .is_none());
+async fn app_logs_tail_may_hold_personal_data_so_it_needs_an_approved_install_and_refuses_a_log_it_does_not_have() {
+    use agentmux_common::remote_op::MAX_PARAMS_BYTES;
+    let (public, private) = keys(40);
+    let (state, audience) = state_with_peer("rop-log", &public);
+    let ask = |nonce: &str| request_with("rop-log", nonce, "app.logs.tail", json!({ "which": "cef" }), &audience, &private, MAX_PARAMS_BYTES);
+    // A log line can hold an email or a path: the first-seen pin alone is not enough to read it.
+    let refused = run(&state, PEER, ask("n-log1")).await;
+    assert_eq!(refused.refused_reason.as_deref(), Some("needs_certificate"), "{refused:?}");
+    let (_dir, cert) = certificate("rop-log", &public, NOW);
+    let instance = cert.instance_id.clone();
+    state.lan_discovery.seed_lan_cert_for_test("rop-log", cert);
+    trust_install(&state, &instance);
+    let bad = run(&state, PEER, ask("n-log2")).await;
+    assert_eq!(bad.status, OpStatus::Failed, "{bad:?}");
+    assert!(bad.refused_reason.is_none(), "not a transport refusal: {bad:?}");
+    assert!(bad.result["error"].as_str().unwrap_or_default().contains("srv"), "{bad:?}");
 }
 
-#[test]
-fn only_the_global_memory_put_declares_more_than_the_default() {
-    let default = agentmux_common::remote_op::MAX_PARAMS_BYTES;
-    assert_eq!(super::max_params_of("memory.global.put"), super::memory::MAX_PUT_PARAMS);
-    for op in ["app.version", "app.health", "memory.global.list", "memory.global.remove", "no.such.op"] {
-        assert_eq!(super::max_params_of(op), default, "{op}");
-    }
+#[tokio::test]
+async fn app_history_reclaim_changes_state_so_it_needs_a_certificate_backed_caller() {
+    use agentmux_common::remote_op::MAX_PARAMS_BYTES;
+    let (public, private) = keys(41);
+    let (state, audience) = state_with_peer("rop-rc", &public);
+    let ask = |nonce: &str, action: &str| request_with("rop-rc", nonce, "app.history_reclaim", json!({ "action": action }), &audience, &private, MAX_PARAMS_BYTES);
+    let refused = run(&state, PEER, ask("n-rc1", "request")).await;
+    assert_eq!(refused.refused_reason.as_deref(), Some("needs_certificate"), "{refused:?}");
+    let (_dir, cert) = certificate("rop-rc", &public, NOW);
+    let instance = cert.instance_id.clone();
+    state.lan_discovery.seed_lan_cert_for_test("rop-rc", cert);
+    trust_install(&state, &instance);
+    let bad = run(&state, PEER, ask("n-rc2", "wipe")).await;
+    assert_eq!(bad.status, OpStatus::Failed, "{bad:?}");
+    assert!(bad.result["error"].as_str().unwrap_or_default().contains("request"), "{bad:?}");
 }
