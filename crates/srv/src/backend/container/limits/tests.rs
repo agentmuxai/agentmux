@@ -129,6 +129,8 @@ fn a_cpu_limit_above_what_docker_has_is_cut_to_it_and_memory_has_a_floor() {
     assert_eq!(wanted, Wanted { memory: Target::Set(6 * 1024 * 1024), cpus: Target::Set(8_000_000_000) }, "6 MB is the least Docker takes");
     let unknown = Wanted::resolve(big, ContainerLimits::default(), None, None);
     assert_eq!(unknown.cpus, Target::Set(64_000_000_000), "uncut when the daemon can't be asked");
+    let tiny = ContainerLimits { memory: Limit::Auto, cpus: Limit::Fixed(4) };
+    assert_eq!(Wanted::resolve(tiny, ContainerLimits::default(), daemon(16, 8), None).cpus, Target::Set(10_000_000), "0.01 CPU is the least Docker takes");
 }
 
 #[test]

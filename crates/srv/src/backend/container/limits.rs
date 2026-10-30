@@ -28,6 +28,8 @@ pub const RECOMMENDED_MIN_MEMORY_LABEL: &str = "ai.agentmux.recommended-min-memo
 const MIB: u64 = 1024 * 1024;
 /// The least memory Docker accepts for a container (6 MB).
 const MIN_MEMORY_BYTES: u64 = 6 * MIB;
+/// The least CPU Docker accepts for a container (0.01 CPU), in billionths of a CPU.
+const MIN_NANO_CPUS: u64 = 10_000_000;
 const GIB: u64 = 1024 * MIB;
 /// A runaway fork loop is the third way a build freezes a machine; not a setting.
 const PIDS_LIMIT: i64 = 8192;
@@ -183,9 +185,9 @@ impl Wanted {
         };
         let cpus = match pick(agent.cpus, app.cpus) {
             Limit::Unlimited => capacity.map_or(Target::Leave, |c| Target::Set(i64::from(c.ncpu) * 1_000_000_000)),
-            // Docker refuses more CPUs than it has, and then the container cannot be made.
+            // Docker refuses more CPUs than it has, or fewer than 0.01, and then the container cannot be made.
             Limit::Fixed(millis) => {
-                let nano = millis.saturating_mul(1_000_000).min(i64::MAX as u64) as i64;
+                let nano = millis.saturating_mul(1_000_000).clamp(MIN_NANO_CPUS, i64::MAX as u64) as i64;
                 Target::Set(capacity.map_or(nano, |c| nano.min(i64::from(c.ncpu) * 1_000_000_000)))
             }
             Limit::Auto => match capacity {
