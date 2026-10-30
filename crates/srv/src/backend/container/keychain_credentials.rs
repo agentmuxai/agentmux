@@ -155,15 +155,10 @@ fn stage(dir: &Path, file: &Path, config_dir: &str, raw: &str) -> Result<(), Str
         .map_err(|e| format!("couldn't write the staging note: {e}"))
 }
 
-/// Brings the staged login of `container_name` in step with the Keychain entry of `config_dir`, and returns the
-/// staging folder to mount (its `.credentials.json` is the login).
-///
-/// `container_account` is the account id the container's own `.claude.json` names, or `None` when it can't be
-/// told (the container isn't running, or the file isn't there): a refresh made in the container is then not
-/// written back, only the Keychain's newer login reaches the container.
-///
-/// `Err` when there is no login to give the container (no Keychain entry, or one that isn't a login), with the
-/// reason in plain words; nothing is left staged in that case.
+/// [`sync_account`] for the account the agent is bound to now, after dealing with the accounts it was bound to
+/// before: what an earlier account's login refreshed goes back to its own entry, and its staged login is deleted
+/// unless a refresh is still pending (then it stays, unmounted). Each account is synced on its own, so this does
+/// not recurse.
 pub(crate) fn prepare(
     keychain: &dyn Keychain,
     root: &Path,
@@ -172,15 +167,11 @@ pub(crate) fn prepare(
     container_account: Option<&str>,
     moved: &mut dyn FnMut(Moved),
 ) -> Result<PathBuf, String> {
-    let dir = staging_dir(root, container_name, config_dir);
-    let file = dir.join(CLAUDE_CREDENTIALS_FILE);
-    // The agent was bound to another account since: what that account's login refreshed goes back to its own
-    // entry, and its staged login is deleted unless a refresh is still pending (then it stays, unmounted).
     for earlier in staged_config_dirs(root, container_name)
         .into_iter()
         .filter(|earlier| earlier != config_dir)
     {
-        let _ = prepare(
+        let _ = sync_account(
             keychain,
             root,
             container_name,
@@ -194,6 +185,35 @@ pub(crate) fn prepare(
             remove_staging(root, container_name, &earlier);
         }
     }
+    sync_account(
+        keychain,
+        root,
+        container_name,
+        config_dir,
+        container_account,
+        moved,
+    )
+}
+
+/// Brings the staged login of `container_name` in step with the Keychain entry of `config_dir`, and returns the
+/// staging folder to mount (its `.credentials.json` is the login).
+///
+/// `container_account` is the account id the container's own `.claude.json` names, or `None` when it can't be
+/// told (the container isn't running, or the file isn't there): a refresh made in the container is then not
+/// written back, only the Keychain's newer login reaches the container.
+///
+/// `Err` when there is no login to give the container (no Keychain entry, or one that isn't a login), with the
+/// reason in plain words; nothing is left staged in that case.
+fn sync_account(
+    keychain: &dyn Keychain,
+    root: &Path,
+    container_name: &str,
+    config_dir: &str,
+    container_account: Option<&str>,
+    moved: &mut dyn FnMut(Moved),
+) -> Result<PathBuf, String> {
+    let dir = staging_dir(root, container_name, config_dir);
+    let file = dir.join(CLAUDE_CREDENTIALS_FILE);
     let service = service_name(config_dir);
     let (host_uuid, label) = host_account(config_dir);
     let label = if label.is_empty() {
@@ -263,9 +283,16 @@ pub(crate) fn prepare(
                 } else if container_account != Some(host_uuid.as_str()) {
                     Err("the container isn't signed in as the bound account (or can't say), so its login stays there".to_string())
                 } else {
-                    keychain.write(&service, &staged).map_err(|e| {
-                        format!("couldn't write the refreshed login to the Keychain: {e}")
-                    })
+                    with_login_of(&kc, &staged)
+                        .ok_or_else(|| {
+                            "the Keychain entry or the staged login can't be read as JSON"
+                                .to_string()
+                        })
+                        .and_then(|merged| {
+                            keychain.write(&service, &merged).map_err(|e| {
+                                format!("couldn't write the refreshed login to the Keychain: {e}")
+                            })
+                        })
                 };
                 moved(Moved {
                     direction: Direction::ContainerToKeychain,
@@ -276,6 +303,18 @@ pub(crate) fn prepare(
             Ok(dir)
         }
     }
+}
+
+/// The Keychain's JSON with only its `claudeAiOauth` replaced by the staged file's: whatever else the host keeps
+/// in that entry stays as it is.
+fn with_login_of(keychain_json: &str, staged_json: &str) -> Option<String> {
+    let mut entry: serde_json::Value = serde_json::from_str(keychain_json).ok()?;
+    let staged: serde_json::Value = serde_json::from_str(staged_json).ok()?;
+    entry.as_object_mut()?.insert(
+        "claudeAiOauth".to_string(),
+        staged.get("claudeAiOauth")?.clone(),
+    );
+    serde_json::to_string(&entry).ok()
 }
 
 /// The config dirs that have a staged login for `container_name` (one per account it was bound to).
@@ -437,7 +476,7 @@ impl ContainerManager {
     ) -> Option<String> {
         #[cfg(target_os = "macos")]
         {
-            self.sync_keychain_login(container_name, config_dir)
+            self.sync_keychain_login(container_name, config_dir, true)
                 .await
                 .map(|dir| dir.to_string_lossy().into_owned())
         }
@@ -466,7 +505,9 @@ impl ContainerManager {
         #[cfg(target_os = "macos")]
         if let Ok(root) = agentmux_common::data_paths::agentmux_root() {
             for config_dir in staged_config_dirs(&root, container_name) {
-                let _ = self.sync_keychain_login(container_name, &config_dir).await;
+                let _ = self
+                    .sync_keychain_login(container_name, &config_dir, false)
+                    .await;
             }
         }
         #[cfg(not(target_os = "macos"))]
@@ -522,13 +563,23 @@ impl ContainerManager {
     }
 
     #[cfg(target_os = "macos")]
-    async fn sync_keychain_login(&self, container_name: &str, config_dir: &str) -> Option<PathBuf> {
+    async fn sync_keychain_login(
+        &self,
+        container_name: &str,
+        config_dir: &str,
+        rebind_cleanup: bool,
+    ) -> Option<PathBuf> {
         let root = agentmux_common::data_paths::agentmux_root().ok()?;
         let account = self.container_account(container_name).await;
         let (name, dir) = (container_name.to_string(), config_dir.to_string());
         let (result, rows) = tokio::task::spawn_blocking(move || {
             let mut rows = Vec::new();
-            let result = prepare(
+            let sync = if rebind_cleanup {
+                prepare
+            } else {
+                sync_account
+            };
+            let result = sync(
                 &SecurityCli,
                 &root,
                 &name,
@@ -624,6 +675,11 @@ mod tests {
     }
 
     const ACCOUNT: &str = "acct-1111";
+
+    /// The same JSON whatever order its keys were written in.
+    fn json(text: &str) -> serde_json::Value {
+        serde_json::from_str(text).unwrap()
+    }
 
     fn login(expires: i64, tag: &str) -> String {
         format!(
@@ -744,7 +800,10 @@ mod tests {
         let dir = run(&kc, &tmp, &config, None).0.unwrap();
         std::fs::write(dir.join(".credentials.json"), login(300, "container")).unwrap();
         let (_, moved) = run(&kc, &tmp, &config, Some(ACCOUNT));
-        assert_eq!(kc.entries.borrow()[&service], login(300, "container"));
+        assert_eq!(
+            json(&kc.entries.borrow()[&service]),
+            json(&login(300, "container"))
+        );
         assert_eq!(
             moved,
             vec![Moved {
@@ -953,8 +1012,8 @@ mod tests {
                 &mut |m| moved.push(m),
             )?;
             assert_eq!(
-                SecurityCli.read(&service)?.map(|z| z.to_string()),
-                Some(login(300, "container"))
+                SecurityCli.read(&service)?.map(|z| json(&z)),
+                Some(json(&login(300, "container")))
             );
             assert!(security(&[
                 "add-generic-password",
@@ -1120,7 +1179,10 @@ mod tests {
             result.is_err(),
             "B has no login and A's is not offered in its place"
         );
-        assert_eq!(kc.entries.borrow()[&service_a], login(300, "a-refreshed"));
+        assert_eq!(
+            json(&kc.entries.borrow()[&service_a]),
+            json(&login(300, "a-refreshed"))
+        );
         assert!(
             !dir_a.exists(),
             "A's refresh is in the Keychain, so its staged login is deleted"
@@ -1161,6 +1223,63 @@ mod tests {
             std::fs::read_to_string(dir_a.join(".credentials.json")).unwrap(),
             login(300, "a-refreshed"),
             "kept, not deleted"
+        );
+    }
+
+    #[test]
+    fn syncing_again_while_two_accounts_are_staged_terminates_and_keeps_the_pending_one() {
+        let (tmp, config_a) = setup();
+        let config_b = tmp.path().join("account-b").to_string_lossy().into_owned();
+        std::fs::create_dir_all(&config_b).unwrap();
+        let kc = Fake::with(&service_name(&config_a), Some(login(100, "a")));
+        kc.entries
+            .borrow_mut()
+            .insert(service_name(&config_b), login(50, "b"));
+        let dir_a = run(&kc, &tmp, &config_a, None).0.unwrap();
+        std::fs::write(dir_a.join(".credentials.json"), login(300, "a-refreshed")).unwrap();
+        let dir_b = run(&kc, &tmp, &config_b, None).0.unwrap();
+        let root = tmp.path().join("root");
+        assert_eq!(
+            staged_config_dirs(&root, "agentmux-c1").len(),
+            2,
+            "A stays staged, B is mounted"
+        );
+        // Every turn start, and the sync before a removal, run again over both.
+        for _ in 0..3 {
+            assert_eq!(run(&kc, &tmp, &config_b, None).0.unwrap(), dir_b);
+            let mut moved = Vec::new();
+            for dir in staged_config_dirs(&root, "agentmux-c1") {
+                let _ = sync_account(&kc, &root, "agentmux-c1", &dir, None, &mut |m| {
+                    moved.push(m)
+                });
+            }
+        }
+        assert_eq!(staged_config_dirs(&root, "agentmux-c1").len(), 2);
+        assert_eq!(
+            std::fs::read_to_string(dir_a.join(".credentials.json")).unwrap(),
+            login(300, "a-refreshed")
+        );
+    }
+
+    #[test]
+    fn a_write_back_replaces_only_the_login_and_keeps_the_rest_of_the_entry() {
+        let (tmp, config) = setup();
+        let service = service_name(&config);
+        let with_extra = r#"{"claudeAiOauth":{"accessToken":"a","refreshToken":"r","expiresAt":100},"mcpOAuth":{"server":{"token":"keep"}}}"#;
+        let kc = Fake::with(&service, Some(with_extra.to_string()));
+        let dir = run(&kc, &tmp, &config, None).0.unwrap();
+        std::fs::write(dir.join(".credentials.json"), login(300, "container")).unwrap();
+        let _ = run(&kc, &tmp, &config, Some(ACCOUNT));
+        let written: serde_json::Value =
+            serde_json::from_str(&kc.entries.borrow()[&service]).unwrap();
+        assert_eq!(written["claudeAiOauth"]["accessToken"], "a-container");
+        assert_eq!(written["claudeAiOauth"]["expiresAt"], 300);
+        assert_eq!(written["mcpOAuth"]["server"]["token"], "keep");
+        assert_eq!(with_login_of("not json", &login(1, "x")), None);
+        assert_eq!(
+            with_login_of(with_extra, "{}"),
+            None,
+            "a staged file with no login is never written"
         );
     }
 }
