@@ -51,19 +51,6 @@
 
 .instance-panel-copy {
     flex: 0 0 auto;
-    background: transparent;
-    border: 1px solid transparent;
-    color: var(--secondary-text-color);
-    cursor: default;
-    padding: 2px 4px;
-    border-radius: 0;
-    font-size: var(--text-sm);
-    line-height: 1;
-
-    &:hover {
-        border-color: var(--border-color);
-        color: var(--main-text-color);
-    }
 }
 
 .instance-panel-divider {

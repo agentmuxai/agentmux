@@ -69,63 +69,6 @@
     background: var(--block-bg-color);
 }
 
-// Pure-CSS instant tooltip — same pattern as the status bar's `data-tip`,
-// scoped here so it doesn't leak. No JS, no entry animation; tooltip is
-// visible the same frame mouseenter fires.
-.file-tree-toolbar [data-tip] {
-    position: relative;
-
-    &:hover::after,
-    &:focus-visible::after {
-        content: attr(data-tip);
-        position: absolute;
-        top: calc(100% + 4px);
-        left: 50%;
-        transform: translateX(-50%);
-        padding: var(--space-1) var(--space-1-5);
-        background: var(--modal-bg-color);
-        color: var(--main-text-color);
-        border: 1px solid var(--border-color);
-        border-radius: var(--radius-sm);
-        font-size: var(--text-xs);
-        white-space: nowrap;
-        pointer-events: none;
-        z-index: 1000;
-    }
-}
-
-.file-tree-toolbar-btn {
-    width: 24px;
-    height: 24px;
-    @include mixins.flex-center(inline-flex);
-    padding: 0;
-    border: 1px solid transparent;
-    border-radius: var(--radius-sm);
-    background: transparent;
-    color: var(--secondary-text-color);
-    cursor: default;
-    font-size: var(--text-xs);
-    transition:
-        background var(--duration-decorative-instant) var(--ease-standard),
-        color var(--duration-decorative-instant) var(--ease-standard),
-        border-color var(--duration-decorative-instant) var(--ease-standard);
-
-    &:hover {
-        background: var(--tint-2);
-        color: var(--main-text-color);
-    }
-
-    &:active {
-        background: var(--tint-4);
-    }
-
-    &--active {
-        background: var(--tint-3);
-        color: var(--accent-color);
-        border-color: var(--border-color);
-    }
-}
-
 // Room on every side for the focused row's ring, which the scroll box would clip.
 .file-tree-body {
     flex: 1;
@@ -620,7 +563,6 @@
     @include mixins.truncate;
 }
 
-.editor-lsp-banner-copy,
 .editor-lsp-banner-docs {
     padding: 2px var(--space-2);
     background: transparent;
@@ -684,19 +626,9 @@
 }
 
 // Shows the file tree again, leading the document bar while it is hidden.
-.editor-tree-toggle {
+.editor-tree-toggle.ui-icon-button {
     flex: 0 0 auto;
-    @include mixins.flex-center(inline-flex);
     width: 30px;
-    @include mixins.button-reset;
-    // The same icon size as the tree toolbar's buttons (.file-tree-toolbar-btn).
-    font-size: var(--text-xs);
-    border-right: 1px solid var(--border-color);
-    color: var(--secondary-text-color);
-    cursor: pointer;
-
-    &:hover {
-        background: var(--hover-bg-color);
-        color: var(--main-text-color);
-    }
+    border-radius: 0;
+    border-right-color: var(--border-color);
 }

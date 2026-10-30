@@ -8,9 +8,18 @@ import { densityClass, toneClass, UiIcon, type UiDensity, type UiTone } from "./
 
 import "./ui.scss";
 
+/**
+ * `row`: a full-width list row (a place, a menu entry, a list item); pressed
+ * marks the selected one. `link`: inline text that acts, such as "Show
+ * details". Both default to the `quiet` tone and keep the kit's hover, focus
+ * and disabled states.
+ */
+export type ButtonVariant = "row" | "link";
+
 export interface ButtonProps extends Omit<JSX.ButtonHTMLAttributes<HTMLButtonElement>, "class" | "classList"> {
-    /** Default `neutral`. Use `accent` for the one main action in a group. */
+    /** Default `neutral` (`quiet` for a `row` or `link`). Use `accent` for the one main action in a group. */
     tone?: UiTone;
+    variant?: ButtonVariant;
     density?: UiDensity;
     /** Font Awesome icon name, shown before the label. */
     icon?: string;
@@ -26,12 +35,18 @@ export interface ButtonProps extends Omit<JSX.ButtonHTMLAttributes<HTMLButtonEle
  * colour, hover and pressed as a stronger line and a faint tint.
  */
 export function Button(props: ButtonProps): JSX.Element {
-    const [local, rest] = splitProps(props, ["tone", "density", "icon", "busy", "pressed", "class", "children", "disabled", "type"]);
+    const [local, rest] = splitProps(props, ["tone", "variant", "density", "icon", "busy", "pressed", "class", "children", "disabled", "type"]);
     return (
         <button
             {...rest}
             type={local.type ?? "button"}
-            class={clsx("ui-button", toneClass(local.tone), densityClass(local.density), local.class)}
+            class={clsx(
+                "ui-button",
+                toneClass(local.tone ?? (local.variant ? "quiet" : undefined)),
+                local.variant && `ui-button--${local.variant}`,
+                densityClass(local.density),
+                local.class
+            )}
             disabled={local.disabled || local.busy}
             aria-busy={local.busy ? "true" : undefined}
             aria-pressed={local.pressed === undefined ? undefined : local.pressed ? "true" : "false"}

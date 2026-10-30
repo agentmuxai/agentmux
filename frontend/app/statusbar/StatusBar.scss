@@ -302,7 +302,6 @@
     .status-bar-popover-link {
         display: block;
         min-width: 0;
-        @include mixins.button-reset;
         color: inherit;
         text-align: right;
         white-space: normal;
@@ -310,7 +309,6 @@
         text-wrap: balance;
         text-decoration: underline;
         text-underline-offset: 2px;
-        cursor: pointer;
 
         &:hover,
         &:focus-visible {
