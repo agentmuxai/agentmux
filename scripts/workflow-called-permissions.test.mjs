@@ -7,17 +7,67 @@
 // granted contents, id-token and packages. This walks every `uses: …/.github/workflows/x.yml@ref` call and
 // fails when a job of the called file (or the file's own top-level grant, for a job with none) is above what
 // the caller grants. A caller with no `permissions` of its own is skipped: its grant is the repository default.
+//
+// The workflows are read by indentation (the keys this needs are all plain), as workflow-sparse-checkout.test.mjs
+// does, so the test needs no YAML package.
 
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { parse } from "yaml";
 
 const WORKFLOWS = join(dirname(fileURLToPath(import.meta.url)), "..", ".github/workflows");
 const LEVEL = { none: 0, read: 1, write: 2 };
 
-const load = (file) => parse(readFileSync(join(WORKFLOWS, file), "utf8"));
+/** The text after `key:` on a line, without a trailing comment or quotes. */
+const value = (rest) => rest.replace(/\s+#.*$/, "").trim().replace(/^["']|["']$/g, "");
+
+/**
+ * { permissions, jobs: { name: { permissions, uses } } } of a workflow file. `permissions` is a string
+ * (`read-all`, `write-all`), a { scope: level } map, or undefined when the level has none.
+ */
+function load(file) {
+    const lines = readFileSync(join(WORKFLOWS, file), "utf8").replace(/\r\n/g, "\n").split("\n");
+    const doc = { permissions: undefined, jobs: {} };
+    let section = null; // "permissions" | "jobs" at the top level
+    let job = null; // the job being read
+    let perms = null; // the permissions block being read: its key's indent and its map
+    const permissionsOf = (v) => {
+        if (v === "{}") return {};
+        if (v) return v;
+        return perms.map;
+    };
+    for (const line of lines) {
+        if (/^\s*(#.*)?$/.test(line)) continue;
+        const indent = line.search(/\S/);
+        const m = /^\s*([A-Za-z0-9_-]+):(.*)$/.exec(line);
+        if (perms && indent > perms.indent && m) {
+            perms.map[m[1]] = value(m[2]);
+            continue;
+        }
+        perms = null;
+        if (!m) continue;
+        const key = m[1];
+        const v = value(m[2]);
+        if (indent === 0) {
+            section = key === "permissions" || key === "jobs" ? key : null;
+            job = null;
+            if (key === "permissions") {
+                if (!v) perms = { indent, map: {} };
+                doc.permissions = permissionsOf(v);
+            }
+        } else if (section === "jobs" && indent === 2) {
+            job = doc.jobs[key] = {};
+        } else if (section === "jobs" && job && indent === 4) {
+            if (key === "uses") job.uses = v;
+            if (key === "permissions") {
+                if (!v) perms = { indent, map: {} };
+                job.permissions = permissionsOf(v);
+            }
+        }
+    }
+    return doc;
+}
 
 /** `read-all` / `write-all` strings and maps alike, as { scope: level }; null when nothing is declared. */
 function grant(perms) {
