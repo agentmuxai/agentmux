@@ -157,33 +157,34 @@ async fn a_line_that_would_be_skipped_at_launch_is_refused() {
 }
 
 #[tokio::test]
-async fn a_container_agent_is_refused() {
+async fn a_container_agent_edits_environments_as_a_host_agent_does() {
     let state = test_state();
     let (container, host) = (agent(&state, "container", false), agent(&state, "host", false));
-    for body in [json!({ "action": "get" }), json!({ "action": "set", "set": { "TZ": "1" } })] {
-        let (status, out) = call(&state, Some(&container), body).await;
-        assert_eq!(status, StatusCode::FORBIDDEN, "{out}");
-        assert!(out["error"].as_str().unwrap().starts_with("CONTAINER_AGENT"), "{out}");
-    }
-    let (status, _) = call(&state, Some(&container), json!({ "action": "set", "agent": host.id, "set": { "TZ": "1" } })).await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
-    assert_eq!(stored(&state, &host), None);
+    let (status, out) = call(&state, Some(&container), json!({ "action": "set", "set": { "TZ": "1" } })).await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert_eq!(stored(&state, &container).as_deref(), Some("TZ=1\n"));
+    let (status, out) = call(&state, Some(&container), json!({ "action": "get" })).await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let (status, _) = call(&state, Some(&container), json!({ "action": "set", "agent": host.id, "set": { "LANG": "2" } })).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(stored(&state, &host).as_deref(), Some("LANG=2\n"));
+    // The rules a host caller has: a name an agent may not set is refused, and nothing is written.
+    let (status, _) = call(&state, Some(&container), json!({ "action": "set", "set": { "PATH": "/x" } })).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(stored(&state, &container).as_deref(), Some("TZ=1\n"));
 }
 
 #[tokio::test]
-async fn a_container_agents_environment_is_refused_as_a_target() {
+async fn a_container_agents_environment_is_edited_as_a_target_like_a_hosts() {
     let state = test_state();
     let (container, host) = (agent(&state, "container", false), agent(&state, "host", false));
-    for body in [
-        json!({ "action": "get", "agent": container.id }),
-        json!({ "action": "set", "agent": container.id, "set": { "TZ": "1" } }),
-        json!({ "action": "set", "agent": container.slug, "lines": "TZ=1\n" }),
-    ] {
-        let (status, out) = call(&state, Some(&host), body).await;
-        assert_eq!(status, StatusCode::FORBIDDEN, "{out}");
-        assert!(out["error"].as_str().unwrap().starts_with("CONTAINER_AGENT"), "{out}");
-    }
-    assert_eq!(stored(&state, &container), None);
+    let (status, out) = call(&state, Some(&host), json!({ "action": "set", "agent": container.id, "set": { "TZ": "1" } })).await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert_eq!(stored(&state, &container).as_deref(), Some("TZ=1\n"));
+    let (status, out) = call(&state, Some(&host), json!({ "action": "set", "agent": container.slug, "lines": "LANG=2\n" })).await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let (status, out) = call(&state, Some(&host), json!({ "action": "get", "agent": container.id })).await;
+    assert_eq!(status, StatusCode::OK, "{out}");
 }
 
 #[tokio::test]
