@@ -1,0 +1,24 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// The skill list's rows are element/ui Buttons dressed as the list-detail
+// rows (_primitive-list-detail-content.scss); the kit supplies hover and focus.
+.ui-button.agent-primitive-modal-list-item {
+    --ui-fg: var(--main-text-color);
+    --ui-fg-hover: var(--main-text-color);
+    --ui-bg-hover: var(--hover-bg-color);
+    justify-content: flex-start;
+    min-height: 0;
+    padding: var(--space-1-5) var(--space-2);
+    border: none;
+    border-bottom: 1px solid var(--border-color);
+    border-radius: 0;
+    font-size: var(--text-sm);
+    font-weight: 400;
+    text-align: left;
+
+    &.is-selected,
+    &.is-selected:hover:not(:disabled) {
+        background: var(--accent-bg);
+    }
+}
