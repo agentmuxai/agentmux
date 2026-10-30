@@ -30,6 +30,7 @@ import { UserMessageBlock } from "../components/UserMessageBlock";
 import { useNodePeek } from "../hooks/useNodePeek";
 import { historyLinkLabel } from "../live-feed";
 import { cliNoticeText } from "../cli-notice";
+import { ContainerLimitButton } from "../components/ContainerLimitButton";
 import { ContainerUpdateButton } from "../components/ContainerUpdateButton";
 import type { ContextDeliveryNode, DocumentNode, DocumentState, HistoryLinkNode, ShellNode, UserMessageNode } from "../types";
 import { markRowMount } from "./perf-probe";
@@ -751,6 +752,9 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                             </Show>
                             <Show when={node().kind === "container_image" && node().imageState === "outdated" && node().blockId}>
                                 <ContainerUpdateButton blockId={node().blockId!} />
+                            </Show>
+                            <Show when={node().kind === "container_limit" && node().limitState === "oom" && node().agentId}>
+                                <ContainerLimitButton agentId={node().agentId!} agentName={node().agentName || "this agent"} />
                             </Show>
                         </div>
                     );

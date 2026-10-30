@@ -384,6 +384,12 @@ pub const COMMAND_CONTAINER_RUNTIME_AVAILABLE: &str = "containerruntimeavailable
 /// Remove a container agent's container so its next message starts it from the current agent
 /// image (the pane row's "Update container"). Only between turns.
 pub const COMMAND_UPDATE_CONTAINER: &str = "updatecontainer";
+/// A container agent's CPU and memory limits, and what Docker has (`CommandGetContainerLimitsData` ->
+/// `AgentContainerLimitsResult`).
+pub const COMMAND_GET_CONTAINER_LIMITS: &str = "getcontainerlimits";
+/// Set them (`CommandSetContainerLimitsData` -> `AgentContainerLimitsResult`); the running container takes them at
+/// once. The operator's client only: an agent uses `Agents set_container_limits`.
+pub const COMMAND_SET_CONTAINER_LIMITS: &str = "setcontainerlimits";
 
 /// Whether a container image can be had on this machine: already in the
 /// Docker daemon, or readable from its registry without credentials. Lets the

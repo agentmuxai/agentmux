@@ -1228,6 +1228,8 @@ declare global {
         "agent:followcontroller"?: boolean;
         "agent:livefeed"?: boolean;
         "agent:livefeedturns"?: number;
+        "agent:container_memory"?: string | number;
+        "agent:container_cpus"?: string | number;
         "markdown:streamtailinplace"?: boolean;
     };
 

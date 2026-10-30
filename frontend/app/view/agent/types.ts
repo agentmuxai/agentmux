@@ -704,7 +704,7 @@ export interface SessionOutcomeNode {
 export interface CliNoticeNode {
     type: "cli_notice";
     id: string;
-    kind: "install" | "version_changed" | "compaction_failed" | "mcp_health" | "container_start" | "container_image" | "agent_ready";
+    kind: "install" | "version_changed" | "compaction_failed" | "mcp_health" | "container_start" | "container_image" | "container_limit" | "agent_ready";
     /** Provider id, e.g. `"claude"`. */
     provider: string;
     /** `install`: the version being installed. */
@@ -733,6 +733,15 @@ export interface CliNoticeNode {
     running?: string;
     current?: string;
     blockId?: string;
+    /** `container_limit`: a container's limit changed by someone (`changed`), a process in it was stopped for going
+     *  over its memory limit (`oom`), or Docker refused a new limit (`failed`). `memoryMb` and `cpus` are the limits
+     *  in force, `by` who changed them, `agentId` and `agentName` whose container it is. */
+    limitState?: "changed" | "oom" | "failed";
+    memoryMb?: number;
+    cpus?: number;
+    by?: string;
+    agentId?: string;
+    agentName?: string;
     /** `mcp_health`: where the repair of the agent's AgentMux MCP server is. */
     mcpState?: "healing" | "restarting" | "ok" | "gave_up";
     /** `mcp_health`, while `healing`: which reconnect. */

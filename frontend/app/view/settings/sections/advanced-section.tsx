@@ -14,6 +14,27 @@ import {
 import type { SettingsIndexEntry } from "../settings-model";
 import { KeyValueEditor, NumberControl, SectionHeader, set, SettingRow, ToggleControl } from "../settings-controls";
 
+/** A limit setting: "auto" (shown as it is, stored as unset), 0 for no limit, or a positive number. */
+function LimitInput(props: { settingKey: "agent:container_memory" | "agent:container_cpus"; value: unknown }): JSX.Element {
+    return (
+        <TextInput
+            class="setting-number setting-number--wide"
+            placeholder="auto"
+            value={props.value == null ? "auto" : String(props.value)}
+            onBlur={(e) => {
+                const raw = e.currentTarget.value.trim().toLowerCase();
+                if (raw === "" || raw === "auto") {
+                    set(props.settingKey, null);
+                    return;
+                }
+                const n = Number(raw);
+                if (Number.isFinite(n) && n >= 0) set(props.settingKey, n);
+                else e.currentTarget.value = props.value == null ? "auto" : String(props.value);
+            }}
+        />
+    );
+}
+
 // ── Search index — see appearance-section.tsx's header comment for the pattern. ──
 
 export const ADVANCED_SETTINGS = {
@@ -50,6 +71,24 @@ export const ADVANCED_SETTINGS = {
         section: "advanced",
         group: "Agent panes",
         keywords: ["compaction", "context", "tokens", "autoCompactWindow", "agent:compactat"],
+    },
+    containerMemory: {
+        id: "advanced.container_memory",
+        label: "Container agents' memory",
+        description:
+            "Megabytes of memory each container agent may use, unless the agent has its own limit. auto is half of what Docker has (at least 2 GB). 0 is no limit. Reaches running containers without restarting them",
+        section: "advanced",
+        group: "Agent panes",
+        keywords: ["container", "docker", "memory", "ram", "limit", "out of memory", "agent:container_memory"],
+    },
+    containerCpus: {
+        id: "advanced.container_cpus",
+        label: "Container agents' CPUs",
+        description:
+            "CPUs each container agent may use, unless the agent has its own limit. auto is all but a quarter of what Docker has (at least one). 0 is no limit. Reaches running containers without restarting them",
+        section: "advanced",
+        group: "Agent panes",
+        keywords: ["container", "docker", "cpu", "cores", "limit", "agent:container_cpus"],
     },
     subagentModel: {
         id: "advanced.subagent_model",
@@ -199,6 +238,18 @@ export function AdvancedSection(): JSX.Element {
                         onChange={(v) => set("agent:compactat", Math.max(0, Math.round(v)) * 1000)}
                     />
                 }
+            />
+            <SettingRow
+                id={ADVANCED_SETTINGS.containerMemory.id}
+                label={ADVANCED_SETTINGS.containerMemory.label}
+                description={ADVANCED_SETTINGS.containerMemory.description}
+                control={<LimitInput settingKey="agent:container_memory" value={s()["agent:container_memory"]} />}
+            />
+            <SettingRow
+                id={ADVANCED_SETTINGS.containerCpus.id}
+                label={ADVANCED_SETTINGS.containerCpus.label}
+                description={ADVANCED_SETTINGS.containerCpus.description}
+                control={<LimitInput settingKey="agent:container_cpus" value={s()["agent:container_cpus"]} />}
             />
             <SettingRow
                 id={ADVANCED_SETTINGS.subagentModel.id}
