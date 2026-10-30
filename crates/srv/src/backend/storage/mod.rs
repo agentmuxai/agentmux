@@ -29,6 +29,7 @@ pub mod background_tasks;
 pub mod content;
 pub mod coord_posts;
 pub mod user_workspaces;
+pub mod container_limits;
 pub mod conversation_trust_grants;
 pub mod cron;
 pub mod def_registry_mirror;
