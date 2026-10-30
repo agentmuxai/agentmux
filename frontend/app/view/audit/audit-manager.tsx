@@ -49,6 +49,8 @@ export const AuditManager = (props: { paneBlockId: string; visible?: boolean; ag
 
     // The newest request wins: a slow answer for an earlier filter is dropped.
     let seq = 0;
+    // The filter changed while the pane was hidden: the list shown is for the old one until it is shown again.
+    let stale = false;
 
     const loadFirst = async (quiet = false) => {
         const mine = ++seq;
@@ -100,7 +102,11 @@ export const AuditManager = (props: { paneBlockId: string; visible?: boolean; ag
         on(
             filter,
             () => {
+                // Whatever is loading, and the cursor of the old list, belongs to the old filter.
+                seq++;
+                setCursor(undefined);
                 if (props.visible ?? true) void loadFirst();
+                else stale = true;
             },
             { defer: true }
         )
@@ -110,7 +116,10 @@ export const AuditManager = (props: { paneBlockId: string; visible?: boolean; ag
     // you have scrolled back, the list stays where it is until the filter changes.
     pollWhileVisible(
         () => {
-            if (untrack(entries).length <= AUDIT_PAGE) void loadFirst(true);
+            if (stale || untrack(entries).length <= AUDIT_PAGE) {
+                stale = false;
+                void loadFirst(true);
+            }
         },
         () => props.visible ?? true
     );

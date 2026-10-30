@@ -11,6 +11,7 @@ import { revealBlock } from "@/app/util/reveal-block";
 import { openOrFocusHistoryTab } from "@/app/view/agent/open-history-tab";
 import { makeHistoryAt } from "@/app/view/agent/history/history-start-at";
 import { ageMs, formatAge } from "@/app/view/warden-shared/warden-shared";
+import { resolveHistoryTarget } from "./audit-history-target";
 import type { AuditEntry } from "@/types/rpc/AuditEntry";
 import { costLabel, entryLinks, isFailure, KIND_CHIPS, type AuditLinkItem } from "./audit-shared";
 
@@ -19,14 +20,18 @@ const kindLabel = (kind: string): string => KIND_CHIPS.find((c) => c.kind === ki
 export const AuditRow = (props: { entry: AuditEntry; now: number; paneBlockId: string }): JSX.Element => {
     const failed = () => isFailure(props.entry);
 
-    const open = (item: AuditLinkItem) => {
+    const open = async (item: AuditLinkItem) => {
         if (item.kind === "pane") return void revealBlock(item.blockId, { source: "audit" });
         const { link } = item;
-        void openOrFocusHistoryTab({
+        // The reader parses the transcript by the agent's provider, and a time-only link is in whichever
+        // conversation that time falls in: neither is on the link.
+        const target = await resolveHistoryTarget(link);
+        await openOrFocusHistoryTab({
             currentBlockId: props.paneBlockId,
-            agentId: link.definition_id ?? link.agent_id,
-            agentName: link.agent_id,
-            at: makeHistoryAt({ at_ms: link.at_ms, at_byte: link.at_byte, zone: link.zone }),
+            agentId: target.agentId,
+            agentName: target.agentName,
+            provider: target.provider,
+            at: makeHistoryAt({ at_ms: link.at_ms, at_byte: link.at_byte, zone: target.zone }),
         });
     };
 
@@ -48,7 +53,7 @@ export const AuditRow = (props: { entry: AuditEntry; now: number; paneBlockId: s
             <span class="audit-row-links">
                 <For each={entryLinks(props.entry)}>
                     {(item) => (
-                        <Button tone="quiet" density="compact" onClick={() => open(item)}>
+                        <Button tone="quiet" density="compact" onClick={() => void open(item)}>
                             {item.label}
                         </Button>
                     )}

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { cleanup, fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
+import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { AuditEntry } from "@/types/rpc/AuditEntry";
@@ -9,7 +10,14 @@ import type { AuditQueryReq } from "@/types/rpc/AuditQueryReq";
 import type { AuditQueryResult } from "@/types/rpc/AuditQueryResult";
 
 const query = vi.fn<(req: AuditQueryReq) => Promise<AuditQueryResult>>();
-vi.mock("@/app/store/rpc-api", () => ({ RpcApi: { AuditQueryCommand: (_c: unknown, req: AuditQueryReq) => query(req) } }));
+const archives = vi.fn();
+vi.mock("@/app/store/rpc-api", () => ({
+    RpcApi: {
+        AuditQueryCommand: (_c: unknown, req: AuditQueryReq) => query(req),
+        HistoryAgentsCommand: () => Promise.resolve({ agents: [{ definition_id: "uid-korp", provider: "codex" }] }),
+        AgentSessionListArchivesCommand: () => archives(),
+    },
+}));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 vi.mock("@/app/view/vault/vault-secrets", () => ({ VaultSecrets: () => null }));
 
@@ -19,6 +27,8 @@ const openOrFocusHistoryTab = vi.fn();
 vi.mock("@/app/view/agent/open-history-tab", () => ({ openOrFocusHistoryTab: (...a: unknown[]) => openOrFocusHistoryTab(...a) }));
 
 import { AuditManager } from "./audit-manager";
+
+const flush = () => new Promise((r) => setTimeout(r, 0));
 
 afterEach(() => {
     cleanup();
@@ -90,13 +100,41 @@ describe("AuditManager", () => {
         render(() => <AuditManager paneBlockId="pane-1" />);
         await waitFor(() => expect(screen.getByRole("button", { name: "Sender's history" })).toBeInTheDocument());
 
+        // The agent's provider comes from the history list, and the time falls before this archive.
+        archives.mockResolvedValue([{ archive_zoneid: "agent:uid-korp:archive:5000", archived_at_ms: 5000 }]);
         fireEvent.click(screen.getByRole("button", { name: "Sender's history" }));
+        await waitFor(() => expect(openOrFocusHistoryTab).toHaveBeenCalled());
         expect(openOrFocusHistoryTab).toHaveBeenCalledWith(
-            expect.objectContaining({ currentBlockId: "pane-1", agentId: "uid-korp", at: expect.objectContaining({ at_ms: 1234 }) })
+            expect.objectContaining({
+                currentBlockId: "pane-1",
+                agentId: "uid-korp",
+                provider: "codex",
+                at: expect.objectContaining({ at_ms: 1234, zone: "agent:uid-korp:archive:5000" }),
+            })
         );
 
         fireEvent.click(screen.getByRole("button", { name: "Receiver's pane" }));
         expect(revealBlock).toHaveBeenCalledWith("blk-loap", { source: "audit" });
+    });
+
+    it("reloads a filter changed while the pane was hidden once it is shown, instead of paging the old list", async () => {
+        const [visible, setVisible] = createSignal(true);
+        const [agent, setAgent] = createSignal<string | undefined>(undefined);
+        query.mockResolvedValue(page([entry({ summary: "old agent's" })], { next_cursor: "old" }));
+        render(() => <AuditManager paneBlockId="pane-1" visible={visible()} agent={agent()} />);
+        await waitFor(() => expect(screen.getByText("old agent's")).toBeInTheDocument());
+
+        setVisible(false);
+        await flush();
+        query.mockResolvedValue(page([entry({ summary: "new agent's" })]));
+        setAgent("loap");
+        await flush();
+        expect(screen.queryByRole("button", { name: /Show older/ })).toBeNull();
+
+        setVisible(true);
+        await waitFor(() => expect(screen.getByText("new agent's")).toBeInTheDocument());
+        expect(query.mock.calls.at(-1)![0]).toMatchObject({ agent_id: "loap" });
+        expect(query.mock.calls.at(-1)![0].cursor).toBeUndefined();
     });
 
     it("shows an error from the query", async () => {
