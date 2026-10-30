@@ -19,6 +19,7 @@ use crate::backend::storage::identities::{IdentityAccount, SecretRef};
 use crate::server::app_api::agent_spawn::account_label_in;
 use crate::server::AppState;
 
+use super::accounts::pick;
 use super::moves::{busy, can_receive, relink, restart, signed_in};
 use super::{agent_name, canonical, tab_blocks};
 
@@ -47,7 +48,9 @@ pub struct AgentAccountSwitchReq {
     /// The agent (slug or definition id). An agent connection may leave it out for itself.
     #[serde(default)]
     pub agent_id: Option<String>,
-    /// The account: its id, or the label the pane shows (`email ·2`).
+    /// The account: its stable or local id, the label the pane shows (`email ·2`), an email
+    /// that names exactly one account with quota, or `any with quota` (another account of the
+    /// agent's provider that can run now).
     pub account: String,
     #[serde(default)]
     pub when: AccountSwitchWhen,
@@ -163,6 +166,55 @@ fn apply(state: &AppState, actor: &str, def_id: &str, to: &IdentityAccount, prov
     result
 }
 
+/// One agent's outcome in an `all limited` switch.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct AccountSwitchAllEntry {
+    pub agent_id: String,
+    pub agent_name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub result: Option<AgentAccountSwitchResult>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub error: Option<String>,
+}
+
+/// `Identity` `switch` with the agent `all limited`: every agent with a pane out of quota.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct AccountSwitchAllResult {
+    pub agents: Vec<AccountSwitchAllEntry>,
+}
+
+/// Whether `agent` is the target `all limited`, in the words an agent may type.
+pub fn is_all_limited(agent: &str) -> bool {
+    agent.trim().to_lowercase().replace(['_', '-'], " ") == "all limited"
+}
+
+/// Move every agent that has a pane out of quota (a usage limit that hasn't reset) to `req.account`
+/// (`any with quota` is chosen per agent, so each lands on an account that can run). One agent that
+/// can't move doesn't stop the others. `req.agent_id` is ignored. BLOCKING.
+pub(super) fn switch_all_limited(state: &AppState, caller: &str, req: &AgentAccountSwitchReq) -> Result<AccountSwitchAllResult, String> {
+    let now = agentmux_common::time::now_ms_u64();
+    let mut limited: Vec<(String, String)> = Vec::new();
+    for pane in super::scan(state, now).into_iter().filter(|p| p.state == crate::backend::agent_state::AgentState::Limited) {
+        if !pane.agent_id.is_empty() && !limited.iter().any(|(id, _)| *id == pane.agent_id) {
+            limited.push((pane.agent_id, pane.agent_name));
+        }
+    }
+    let mut agents = Vec::new();
+    for (agent_id, agent_name) in limited {
+        let one = AgentAccountSwitchReq { agent_id: Some(agent_id.clone()), account: req.account.clone(), when: req.when };
+        let (result, error) = match switch(state, caller, &one) {
+            Ok(r) => (Some(r), None),
+            Err(e) => (None, Some(e)),
+        };
+        agents.push(AccountSwitchAllEntry { agent_id, agent_name, result, error });
+    }
+    Ok(AccountSwitchAllResult { agents })
+}
+
 /// `agent.account.switch`. `caller` is the connection's agent slug, empty for the window.
 /// BLOCKING (store reads, link writes, restarts).
 pub(super) fn switch(state: &AppState, caller: &str, req: &AgentAccountSwitchReq) -> Result<AgentAccountSwitchResult, String> {
@@ -187,11 +239,16 @@ pub(super) fn switch(state: &AppState, caller: &str, req: &AgentAccountSwitchReq
         .into_iter()
         .filter(|a| canonical(&a.provider) == provider)
         .collect();
-    let wanted = req.account.trim();
-    let Some(to) = accounts.iter().find(|a| crate::identity::account_numbering::names(a, wanted, &accounts)) else {
-        let known: Vec<String> = accounts.iter().map(|a| account_label_in(a, &accounts)).collect();
-        return Err(format!("UNKNOWN_ACCOUNT: no {provider} account {wanted:?}; the user's are: {}", known.join(", ")));
-    };
+    // `any with quota` doesn't pick the account the agent is on already.
+    let on: Vec<String> = state
+        .identity_store
+        .agent_identity_list_for_agent(&def_id)
+        .map_err(|e| format!("agent.account.switch: {e}"))?
+        .into_iter()
+        .filter(|l| canonical(&l.provider) == provider)
+        .map(|l| l.account_id)
+        .collect();
+    let to = pick(state, &accounts, req.account.trim(), &on, &provider)?;
     if !signed_in(&to.status) {
         return Err(format!("ACCOUNT_CANT_RUN: {} is not signed in; sign in to it first", account_label_in(to, &accounts)));
     }

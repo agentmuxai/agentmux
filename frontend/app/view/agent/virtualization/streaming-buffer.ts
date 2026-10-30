@@ -11,6 +11,7 @@
  * §"Hybrid virtualization".
  */
 
+import { isCliTurn } from "../cli-wrappers";
 import type { DocumentNode } from "../types";
 
 /**
@@ -282,7 +283,7 @@ export function turnScopedFrontier(
     const floor = Math.min(Math.max(0, from), nodes.length - 1);
     let start = floor;
     for (let i = nodes.length - 1; i >= floor; i--) {
-        if (nodes[i].type === "user_message") {
+        if (nodes[i].type === "user_message" || isCliTurn(nodes[i])) {
             start = i;
             break;
         }

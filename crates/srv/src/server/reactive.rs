@@ -1320,7 +1320,8 @@ pub(super) async fn handle_reactive_agent_names(
 ) -> Json<serde_json::Value> {
     let settings = state.config_watcher.get_full_config();
     let agents = state.reactive_handler.list_agents();
-    Json(crate::backend::lan_discovery::agent_names_body(&state.mstore, &settings.settings, &agents))
+    let account_of_block = crate::identity::stable_account::stable_id_of_block(&state.mstore, &state.id_store, &state.identity_store);
+    Json(crate::backend::lan_discovery::agent_names_body(&state.mstore, &settings.settings, &agents, account_of_block))
 }
 
 #[derive(serde::Deserialize)]

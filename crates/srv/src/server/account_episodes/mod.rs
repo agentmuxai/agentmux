@@ -28,6 +28,7 @@
 //! ([`failed_panes`], [`after_rebind`]), and a sign-in that proves an
 //! account works clears its panes' "signed out" ([`after_sign_in`]).
 
+mod accounts;
 mod machine;
 mod moves;
 mod switch;
@@ -90,8 +91,9 @@ pub struct AccountMoveCandidate {
 }
 
 /// One account's episode, as `identity.account.availability` lists it for the
-/// operator's windows. The label never goes in a toast, an event or to
-/// another host.
+/// operator's windows and for agents. The label never goes in a toast or an
+/// event; it reaches another machine only through the proven `identity.accounts`
+/// remote operation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct AccountAvailability {
@@ -142,7 +144,8 @@ impl From<AccountAvailability> for AccountAvailabilityEvent {
     }
 }
 
-/// `identity.account.availability`: the open episodes.
+/// `identity.account.availability`: the open episodes. Open to agents (spec §4.4): it names
+/// accounts and their limits, never a credential.
 #[derive(Debug, Clone, Serialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct IdentityAccountAvailabilityResult {
@@ -166,7 +169,8 @@ pub struct IdentityAccountSignedInResult {
 }
 
 use moves::IdentityAccountMoveAgentsReq;
-pub(crate) use switch::{AccountSwitchWhen, AgentAccountSwitchReq, AgentAccountSwitchResult};
+pub(crate) use accounts::IdentityAccountsResult;
+pub(crate) use switch::{is_all_limited, AccountSwitchAllResult, AccountSwitchWhen, AgentAccountSwitchReq, AgentAccountSwitchResult};
 
 struct Runtime {
     state: AppState,
@@ -208,6 +212,16 @@ pub fn install(state: AppState) {
 /// route). `caller` is the agent's slug. Runs off the async workers.
 pub(crate) async fn switch_account(state: AppState, caller: String, req: AgentAccountSwitchReq) -> Result<AgentAccountSwitchResult, String> {
     tokio::task::spawn_blocking(move || switch::switch(&state, &caller, &req)).await.map_err(|e| e.to_string())?
+}
+
+/// `Identity` `switch` with the agent `all limited`. `caller` is the agent's slug. Runs off the async workers.
+pub(crate) async fn switch_all_limited(state: AppState, caller: String, req: AgentAccountSwitchReq) -> Result<AccountSwitchAllResult, String> {
+    tokio::task::spawn_blocking(move || switch::switch_all_limited(&state, &caller, &req)).await.map_err(|e| e.to_string())?
+}
+
+/// `identity.accounts`: every signed-in account here with its stable id and quota. Runs off the async workers.
+pub(crate) async fn identity_accounts(state: AppState) -> Result<IdentityAccountsResult, String> {
+    tokio::task::spawn_blocking(move || accounts::accounts(&state, agentmux_common::time::now_ms_u64())).await.map_err(|e| e.to_string())?
 }
 
 /// Rebuild the episodes soon (a failure, a turn end, a rebind).
@@ -595,10 +609,12 @@ pub(crate) fn clear_signed_out(mstore: &Arc<Store>, identity: &Store, event_bus:
     cleared
 }
 
-/// These RPCs are the operator's, except `agent.account.switch`: an agent connection
-/// (`bus:register`) is refused for the others, since the answer names accounts, the move
-/// relinks and restarts other agents, and a sign-in clears other agents' state. A switch is
-/// open to agents (the caller is `ctx.agent_id`) and is audited under their name.
+/// These RPCs are the operator's, except `agent.account.switch` and
+/// `identity.account.availability`: an agent connection (`bus:register`) is refused for the
+/// others, since the move relinks and restarts other agents and a sign-in clears other agents'
+/// state. A switch is open to agents (the caller is `ctx.agent_id`) and is audited under their
+/// name. The availability names accounts and their limits, never a credential, and an agent has
+/// to see it to choose where to move (spec §4.4).
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let s = state.clone();
     engine.register_typed(COMMAND_IDENTITY_ACCOUNT_SIGNED_IN, move |req: IdentityAccountSignedInReq, ctx| {
@@ -618,7 +634,10 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     engine.register_typed(COMMAND_IDENTITY_ACCOUNT_AVAILABILITY, move |_req: Option<NoArgsReq>, ctx| {
         let s = s.clone();
         async move {
-            ctx.operator_only("only the operator sees which accounts their agents can't run on")?;
+            // A registered agent may read it; any other connection must be the proven window.
+            if ctx.agent_id.is_empty() {
+                ctx.operator_only("only the AgentMux window or an agent sees which accounts can't run")?;
+            }
             tokio::task::spawn_blocking(move || availability(&s)).await.map_err(|e| e.to_string())
         }
     });

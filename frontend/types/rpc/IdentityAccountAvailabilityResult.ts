@@ -2,6 +2,7 @@
 import type { AccountAvailability } from "./AccountAvailability";
 
 /**
- * `identity.account.availability`: the open episodes.
+ * `identity.account.availability`: the open episodes. Open to agents (spec §4.4): it names
+ * accounts and their limits, never a credential.
  */
 export type IdentityAccountAvailabilityResult = { episodes: Array<AccountAvailability>, };

@@ -1025,6 +1025,10 @@ mod tests {
     #[test]
     fn scope_is_a_reference_or_a_role_and_name() {
         assert_eq!(scope_arg(None).unwrap(), (None, None));
+        // An empty scope is no scope (plan §3.7), not an unknown reference.
+        for empty in ["", "  "] {
+            assert_eq!(scope_arg(Some(&json!(empty))).unwrap(), (None, None), "{empty:?}");
+        }
         for r in ["e12", "e4.e1", "f1e3", "n2e1", "e4.n3e2"] {
             assert_eq!(scope_arg(Some(&json!(r))).unwrap(), (Some(r.to_string()), None), "{r}");
         }
