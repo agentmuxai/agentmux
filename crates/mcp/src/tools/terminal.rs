@@ -998,7 +998,11 @@ async fn run_with_secrets(arguments: &Value, command: &str, cx: &ToolCtx<'_>) ->
             }
             if let Some(why) = r.withheld {
                 done["withheld"] = json!(why);
-                done["note"] = json!("The capture failed, so the output is withheld: nothing it printed went into the Vault. The person can open the output in the Vault.");
+                done["note"] = json!(if r.captured.is_empty() {
+                    "The capture failed, so the output is withheld: nothing it printed went into the Vault. The person can open the output in the Vault."
+                } else {
+                    "The values went into the Vault (captured), but the output is withheld: it couldn't be cleaned of them."
+                });
             }
             return Ok(done);
         }
@@ -1032,6 +1036,13 @@ async fn run_action(arguments: &Value, cx: &ToolCtx<'_>) -> Result<Value> {
     }
     if arguments.get("stdin_secret").is_some_and(|v| !v.is_null() && !v.is_string()) {
         anyhow::bail!("stdin_secret is one Vault entry id, e.g. \"api-key-registry\"");
+    }
+    // Checked before choosing how to run: a malformed capture must never fall
+    // through to the terminal the person watches, where the value would show.
+    if let Some(c) = arguments.get("capture").filter(|v| !v.is_null()) {
+        if !c.as_array().is_some_and(|a| !a.is_empty() && a.iter().all(Value::is_object)) {
+            anyhow::bail!("capture is a list of rules, e.g. [{{\"as\": {{\"kind\": \"api-key\", \"label\": \"GitHub token\"}}, \"from\": {{\"stdout\": \"all\"}}}}]; the command did not run");
+        }
     }
     // A command given Vault secrets never goes through the terminal the person watches (its
     // line would be typed there with the value in the environment's reach, and its output

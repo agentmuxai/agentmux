@@ -18,7 +18,7 @@ use base64::Engine as _;
 pub const MIN_LEN: usize = 4;
 
 /// The shortest line of a multi-line value that is scrubbed on its own.
-const MIN_LINE: usize = 6;
+pub const MIN_LINE: usize = 6;
 
 pub struct Scrubber {
     /// (what to find, what to put there), longest first so a form that contains
@@ -97,6 +97,20 @@ impl Scrubber {
         }
         needles.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
         Self { needles }
+    }
+
+    /// One scrubber with both sets of values, longest first. Applying two in turn
+    /// isn't the same: the first can break up the second's longer value (a new key
+    /// that contains a key the command was given) and leave the rest of it.
+    pub fn merged(&self, other: &Scrubber) -> Scrubber {
+        let mut needles = self.needles.clone();
+        for n in &other.needles {
+            if !needles.iter().any(|(f, _)| *f == n.0) {
+                needles.push(n.clone());
+            }
+        }
+        needles.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
+        Scrubber { needles }
     }
 
     pub fn scrub<'a>(&self, text: &'a str) -> std::borrow::Cow<'a, str> {

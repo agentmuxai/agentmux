@@ -19,7 +19,7 @@ use agentmux_common::time::now_ms;
 use serde_json::value::RawValue;
 use zeroize::Zeroizing;
 
-use super::scrub::Scrubber;
+use super::scrub::{Scrubber, MIN_LINE};
 use super::{insert, kinds, new_id_besides, record, seal, validate, versions, NewEntry, Parts};
 use crate::backend::storage::store::Store;
 use crate::backend::storage::vault::VaultRow;
@@ -87,9 +87,10 @@ pub struct Job {
 
 /// What a capture came to, once the command ended.
 pub enum Outcome {
-    /// Every rule matched: the entries, in rule order, and the values to take
-    /// out of the output.
-    Stored { ids: Vec<String>, scrubber: Scrubber },
+    /// Every rule matched: the entries, in rule order, the values to take out of
+    /// the output, and the lines of a multi-line value too short for the scrubber
+    /// to find on their own (see [`clean_held`]).
+    Stored { ids: Vec<String>, scrubber: Scrubber, short: Vec<Zeroizing<String>> },
     /// The output is withheld: why, and the note the person can open it in.
     Withheld { why: String, kept_as: Option<String> },
 }
@@ -100,6 +101,30 @@ fn clip(s: &str, n: usize) -> String {
         out.push('…');
     }
     out
+}
+
+/// One line of held output: its stream, its text and when it was printed.
+pub type HeldLine = (&'static str, String, u64);
+
+/// The held output cleaned of every value, as the lines to publish. It is cleaned
+/// as one text, so a multi-line value is found across the lines it was printed
+/// on; lines it took up become one. If a line of such a value that is too short
+/// for the scrubber to find alone is still there (printed apart from the rest),
+/// the output can't be published: the reason is returned.
+pub fn clean_held(held: &[HeldLine], scrubber: &Scrubber, short: &[Zeroizing<String>]) -> Result<Vec<HeldLine>, String> {
+    let joined = Zeroizing::new(held.iter().map(|l| l.1.as_str()).collect::<Vec<_>>().join("\n"));
+    let clean = scrubber.scrub(&joined);
+    let lines: Vec<&str> = clean.split('\n').collect();
+    if lines.iter().any(|l| short.iter().any(|f| l.trim() == f.as_str())) {
+        return Err(format!("a line of a captured value is shorter than {MIN_LINE} characters and was printed apart from the rest, so it can't be cleaned out"));
+    }
+    if lines.len() == held.len() {
+        return Ok(held.iter().zip(lines).map(|(h, l)| (h.0, l.to_string(), h.2)).collect());
+    }
+    // A value over several lines became one mark: which stream each line came from
+    // no longer lines up, and all of it is published as standard output.
+    let ts = held.last().map(|h| h.2).unwrap_or(0);
+    Ok(lines.into_iter().map(|l| ("stdout", l.to_string(), ts)).collect())
 }
 
 /// `$.a.b[0]['c d']` as steps. `$` alone is the whole document.
@@ -319,13 +344,17 @@ impl Capture {
         match self.store(store, &found) {
             Ok(ids) => {
                 let mut known: Vec<(String, String)> = Vec::new();
+                let mut short = Vec::new();
                 for (id, f) in ids.iter().zip(found.iter()) {
                     known.push((id.clone(), f.value.to_string()));
                     if let Some(p) = &f.printed {
                         known.push((id.clone(), p.to_string()));
                     }
+                    if f.value.contains('\n') {
+                        short.extend(f.value.lines().map(str::trim).filter(|l| !l.is_empty() && l.len() < MIN_LINE).map(|l| Zeroizing::new(l.to_string())));
+                    }
                 }
-                Outcome::Stored { scrubber: Scrubber::new(&known), ids }
+                Outcome::Stored { scrubber: Scrubber::new(&known), ids, short }
             }
             Err(why) => self.withhold(store, format!("the value couldn't be stored: {why}"), output),
         }

@@ -617,10 +617,23 @@ impl ShellNodeRunner {
             .unwrap_or_else(|e| Outcome::Withheld { why: format!("the capture stopped: {e}"), kept_as: None });
         (job.changed)();
         match outcome {
-            Outcome::Stored { ids, scrubber } => {
-                for (kind, content, ts) in held {
-                    let clean = scrubber.scrub(&given(&content)).into_owned();
-                    emit(status, &self.broker, &self.block_id, &self.shell_id, kind, &clean, ts);
+            Outcome::Stored { ids, scrubber, short } => {
+                // The values it was given and the ones it printed, in one scrubber.
+                let all = match &self.scrubber {
+                    Some(given) => given.merged(&scrubber),
+                    None => scrubber,
+                };
+                match crate::backend::vault::capture::clean_held(&held, &all, &short) {
+                    Ok(lines) => {
+                        for (kind, clean, ts) in lines {
+                            emit(status, &self.broker, &self.block_id, &self.shell_id, kind, &clean, ts);
+                        }
+                    }
+                    Err(why) => {
+                        let line = format!("The values went into the Vault, but the output ({lines} lines) is withheld: {why}.");
+                        emit(status, &self.broker, &self.block_id, &self.shell_id, "system", &line, now_ms());
+                        status.lock().withheld = Some(why);
+                    }
                 }
                 status.lock().captured = ids;
             }

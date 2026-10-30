@@ -94,7 +94,7 @@ fn matches_become_new_entries_and_the_output_is_cleaned_of_them() {
     ];
     let cap = plan(&s, &rules, "Agent2-6", "aws iam create-access-key --user-name deploy").unwrap();
     assert_eq!(cap.replaces().count(), 0, "a new entry asks nobody");
-    let Outcome::Stored { ids, scrubber } = cap.finish(&s, AWS, AWS, false, 0) else { panic!("stored") };
+    let Outcome::Stored { ids, scrubber, .. } = cap.finish(&s, AWS, AWS, false, 0) else { panic!("stored") };
     assert_eq!(ids, ["api-key-aws-deploy-secret", "api-key-aws-deploy-key-id"]);
     assert_eq!(value(&s, &ids[0], "value"), "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY");
     let clean = scrubber.scrub(AWS);
@@ -177,7 +177,7 @@ fn a_json_value_with_escapes_is_cleaned_out_as_the_output_printed_it() {
         CaptureRule { into: CaptureInto { kind: Some("note".into()), label: Some("Key".into()), ..Default::default() }, from: CaptureFrom::Json("$.key".into()) },
     ];
     let cap = plan(&s, &rules, "Agent2-6", "make-creds --json").unwrap();
-    let Outcome::Stored { ids, scrubber } = cap.finish(&s, out, out, false, 0) else { panic!("stored") };
+    let Outcome::Stored { ids, scrubber, .. } = cap.finish(&s, out, out, false, 0) else { panic!("stored") };
     assert_eq!(value(&s, &ids[0], "value"), "pa\"ss\\wo/rd-1234", "the value is stored decoded");
     assert_eq!(value(&s, &ids[1], "text"), "-----BEGIN KEY-----\nMIIEabcdefgh\n-----END KEY-----");
     let clean = scrubber.scrub(out);
@@ -248,4 +248,32 @@ fn two_labels_that_make_the_same_id_get_ids_of_their_own() {
     let Outcome::Stored { ids, .. } = cap.finish(&s, out, out, false, 0) else { panic!("stored") };
     assert_eq!(ids, ["api-key-aws-key", "api-key-aws-key-2"]);
     assert_eq!(value(&s, &ids[1], "value"), "second_value_0002");
+}
+
+fn held(lines: &[(&'static str, &str)]) -> Vec<HeldLine> {
+    lines.iter().enumerate().map(|(n, (k, l))| (*k, l.to_string(), n as u64)).collect()
+}
+
+#[test]
+fn a_value_over_several_lines_is_cleaned_out_whatever_its_lines_length() {
+    let s = store();
+    let cap = plan(&s, &[CaptureRule { into: CaptureInto { kind: Some("note".into()), label: Some("Codes".into()), ..Default::default() }, from: CaptureFrom::Stdout("all".into()) }], "Agent2-6", "codes").unwrap();
+    let out = held(&[("stdout", "abcd"), ("stdout", "1234")]);
+    let Outcome::Stored { ids, scrubber, short } = cap.finish(&s, "abcd\n1234", "abcd\n1234", false, 0) else { panic!("stored") };
+    let clean = clean_held(&out, &scrubber, &short).unwrap();
+    assert_eq!(clean, vec![("stdout", format!("[vault:{}]", ids[0]), 1)]);
+
+    // Its lines printed apart (a line of stderr between them): a short one can't be found alone.
+    let apart = held(&[("stdout", "abcd"), ("stderr", "warning: slow"), ("stdout", "1234")]);
+    let why = clean_held(&apart, &scrubber, &short).unwrap_err();
+    assert!(why.contains("shorter than 6"), "{why}");
+}
+
+#[test]
+fn a_captured_value_containing_a_given_one_is_cleaned_out_whole() {
+    let given = crate::backend::vault::scrub::Scrubber::new(&[("api-key-old".to_string(), "abcdefgh".to_string())]);
+    let captured = crate::backend::vault::scrub::Scrubber::new(&[("api-key-new".to_string(), "abcdefgh12345678".to_string())]);
+    let out = held(&[("stdout", "old abcdefgh new abcdefgh12345678")]);
+    let clean = clean_held(&out, &given.merged(&captured), &[]).unwrap();
+    assert_eq!(clean[0].1, "old [vault:api-key-old] new [vault:api-key-new]");
 }
