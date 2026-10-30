@@ -885,16 +885,16 @@ export class LayoutModel {
         magnifyNodeToggleImpl(this, nodeId, setState, focused);
     }
 
-    collapseMaximizedNode(nodeId: string) {
-        collapseMaximizedNodeImpl(this, nodeId);
+    collapseMaximizedNode(nodeId: string, opts?: { chip?: boolean }) {
+        collapseMaximizedNodeImpl(this, nodeId, opts);
     }
 
     restoreMaximizedNode(nodeId: string) {
         restoreMaximizedNodeImpl(this, nodeId);
     }
 
-    minimizeNodeToggle(nodeId: string) {
-        minimizeNodeToggleImpl(this, nodeId);
+    minimizeNodeToggle(nodeId: string, opts?: { chip?: boolean }) {
+        minimizeNodeToggleImpl(this, nodeId, opts);
     }
 
     rebuildMinimizedSet() {
