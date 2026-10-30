@@ -81,6 +81,19 @@ fn expires_at(raw: &str) -> Option<i64> {
     oauth.get("expiresAt")?.as_i64()
 }
 
+/// The furthest ahead a login's `expiresAt` may be and still be taken as a real refresh. Claude's access tokens
+/// last hours, so a week is generous; a container can write its own `.credentials.json`, and without a limit a
+/// far-future `expiresAt` would outrank every later refresh the host makes.
+const MAX_EXPIRY_AHEAD_MS: i64 = 7 * 24 * 60 * 60 * 1000;
+
+/// Whether `expires_at` (milliseconds since the epoch) is no further ahead than a real login's.
+fn plausible_expiry(expires_at: i64) -> bool {
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX));
+    expires_at <= now_ms.saturating_add(MAX_EXPIRY_AHEAD_MS)
+}
+
 /// The account a Claude config dir (host or container) is signed in as: its id and its email.
 fn account_in(claude_json: &str) -> (String, String) {
     let value: serde_json::Value = serde_json::from_str(claude_json).unwrap_or_default();
@@ -282,6 +295,8 @@ fn sync_account(
                     Err("the host account's id isn't known, so the container's login can't be tied to it".to_string())
                 } else if container_account != Some(host_uuid.as_str()) {
                     Err("the container isn't signed in as the bound account (or can't say), so its login stays there".to_string())
+                } else if !plausible_expiry(staged_expiry) {
+                    Err("the container's login expires further ahead than a real one does, so it isn't written to the Keychain".to_string())
                 } else {
                     with_login_of(&kc, &staged)
                         .ok_or_else(|| {
@@ -345,7 +360,9 @@ pub(crate) fn refresh_pending(
     .ok()
     .map(Zeroizing::new)
     .and_then(|raw| expires_at(&raw));
-    let Some(staged) = staged else { return false };
+    let Some(staged) = staged.filter(|&expiry| plausible_expiry(expiry)) else {
+        return false;
+    };
     match keychain.read(&service_name(config_dir)) {
         Err(_) => true,
         Ok(None) => false,
@@ -865,6 +882,36 @@ mod tests {
             login(500, "kc")
         );
         assert!(!kc.touched.borrow().iter().any(|t| t.starts_with("write")));
+    }
+
+    #[test]
+    fn a_login_that_expires_implausibly_far_ahead_is_not_written_back_and_not_kept_as_pending() {
+        let (tmp, config) = setup();
+        let service = service_name(&config);
+        let kc = Fake::with(&service, Some(login(100, "old")));
+        let dir = run(&kc, &tmp, &config, None).0.unwrap();
+        std::fs::write(dir.join(".credentials.json"), login(i64::MAX, "forged")).unwrap();
+        let (_, moved) = run(&kc, &tmp, &config, Some(ACCOUNT));
+        assert_eq!(kc.entries.borrow()[&service], login(100, "old"));
+        assert!(!kc.touched.borrow().iter().any(|t| t.starts_with("write")));
+        assert!(
+            matches!(
+                moved.as_slice(),
+                [Moved {
+                    direction: Direction::ContainerToKeychain,
+                    outcome: Err(_),
+                    ..
+                }]
+            ),
+            "{moved:?}"
+        );
+        // It must not hold the staging back from deletion either.
+        assert!(!refresh_pending(
+            &kc,
+            &tmp.path().join("root"),
+            "agentmux-c1",
+            &config
+        ));
     }
 
     #[test]
