@@ -407,9 +407,7 @@ pub(super) async fn claim_and_deliver(
         }
         // Remembered, so a bare "got it" back to this sender is refused (`backend::ack_policy`); the relay
         // doesn't carry `reply` yet, so a WAN message never arrives marked `REPLY=none`.
-        if let Some(source) = req.source_agent.as_deref().filter(|s| !s.is_empty()) {
-            crate::backend::ack_policy::record(source, &req.target_agent, req.request_id.as_deref(), false);
-        }
+        crate::server::jekt_ack::remember_arrival(mstore, &req);
         let charged = req.files_delivery.is_some().then(|| req.clone());
         let delivery = handler.inject_message(req);
         if let Some(charged) = &charged {
