@@ -64,6 +64,14 @@
 //                   `// tag: fixed` (on its selector line, above it or inside it) doesn't count:
 //                   a control that is not a tag but is named like one, a third party's markup.
 //
+//  14. nativeTitles `title=` on a lowercase JSX element (a button, span, div ...) in .tsx
+//                   outside element/ui/, per file. The browser's own tooltip waits
+//                   0.5 to 1 s; a hover label is `<Tooltip>` or an IconButton's tooltip.
+//                   title-tooltip.ts shows a leftover `title` through the shared tooltip,
+//                   so existing ones still work, but a new one is a regression in intent.
+//                   `option`, `optgroup`, `iframe` and an element marked
+//                   `data-native-title` don't count.
+//
 // A count above the base's fails: use the element/ui/ components instead. A
 // count below it is reported and passes. There is no checked-in baseline:
 // one used to live in scripts/ui-primitives-baseline.json, and since every
@@ -381,6 +389,53 @@ export function colourLiterals(scss) {
 // are built from something else), in a script's code.
 const TS_COLOUR = /(?<![\w&/#-])#(?:[0-9a-f]{8}|[0-9a-f]{6}|[0-9a-f]{3})\b(?![\w-])|\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch)\((?=\s*[\d.])[^)$]*\)/gi;
 
+const NATIVE_TITLE_OK = new Set(["option", "optgroup", "iframe"]);
+
+/** Skip a quoted string or template literal starting at `i` (the opening quote); returns the index after it. */
+function skipString(code, i) {
+    const quote = code[i];
+    for (let j = i + 1; j < code.length; j++) {
+        if (code[j] === "\\") j++;
+        else if (code[j] === quote) return j + 1;
+    }
+    return code.length;
+}
+
+/**
+ * `title=` attributes on lowercase JSX elements in a .tsx file: the line of each. A small scanner,
+ * not a parser: it finds a tag opening (`<div`, not a generic `Array<string>`), walks its attributes
+ * with `{}` nesting and strings, and notes a top-level `title` followed by `=`. Elements named in
+ * NATIVE_TITLE_OK and those carrying `data-native-title` are left out.
+ */
+export function nativeTitleAttributes(source) {
+    const code = stripScriptComments(source);
+    const out = [];
+    for (let i = 0; i < code.length; i++) {
+        if (code[i] !== "<" || !/[a-z]/.test(code[i + 1] ?? "") || /[\w)\]]/.test(code[i - 1] ?? " ")) continue;
+        const name = /^[a-z][\w.-]*/.exec(code.slice(i + 1))[0];
+        let j = i + 1 + name.length;
+        let depth = 0;
+        const found = [];
+        let native = false;
+        for (; j < code.length; j++) {
+            const c = code[j];
+            if (c === '"' || c === "'" || c === "`") j = skipString(code, j) - 1;
+            else if (c === "{") depth++;
+            else if (c === "}") depth--;
+            else if (c === ">" && depth === 0) break;
+            else if (depth === 0 && /\s/.test(code[j - 1] ?? "") && /[a-zA-Z]/.test(c)) {
+                const attr = /^[\w:-]+/.exec(code.slice(j))[0];
+                if (attr === "title" && /^\s*=/.test(code.slice(j + attr.length))) found.push(j);
+                if (attr === "data-native-title") native = true;
+                j += attr.length - 1;
+            }
+        }
+        if (!native && !NATIVE_TITLE_OK.has(name)) for (const at of found) out.push(code.slice(0, at).split("\n").length);
+        i = j;
+    }
+    return out;
+}
+
 /**
  * Colour literals in a script's code, other than pure black and white, comments, and lines the
  * script marks `colour: fixed` (on the line, or on a comment line just above it).
@@ -474,6 +529,7 @@ export function collect(files) {
     const colours = {};
     const tsColours = {};
     const tags = {};
+    const nativeTitles = {};
     const styles = [];
 
     for (const { path, source } of files) {
@@ -489,6 +545,7 @@ export function collect(files) {
         if (path.endsWith(".tsx") && !path.startsWith(UI_DIR)) {
             const n = countButtons(source);
             if (n > 0) buttons[path] = n;
+            countInto(nativeTitles, path, nativeTitleAttributes(source).length);
         }
         if (isStyle) {
             for (const selector of solidFills(source)) fills.add(`${path} :: ${selector}`);
@@ -527,6 +584,7 @@ export function collect(files) {
         colours: sortObject(colours),
         tsColours: sortObject(tsColours),
         tags: sortObject(tags),
+        nativeTitles: sortObject(nativeTitles),
     };
 }
 
@@ -540,7 +598,7 @@ function sortObject(obj) {
 
 // ── Compare ─────────────────────────────────────────────────────────────────
 
-const PER_FILE = ["buttons", "radius", "durations", "fontSizes", "fallbacks", "zIndex", "focusRings", "colours", "tsColours", "tags"];
+const PER_FILE = ["buttons", "radius", "durations", "fontSizes", "fallbacks", "zIndex", "focusRings", "colours", "tsColours", "tags", "nativeTitles"];
 
 /** How `current` differs from `baseline` (the base branch), as human-readable lines. */
 export function compare(current, baseline) {
@@ -656,7 +714,8 @@ if (isMain(import.meta.url)) {
         console.log("instead of raw values, no fallback on a token :root always sets, and");
         console.log("`@include mixins.focus-ring` for a focus ring, and theme tokens (--error-color,");
         console.log("--success-bg, --tint-2, …) instead of a colour literal, and Tag / TagList /");
-        console.log("FilterChip instead of a hand-drawn badge, chip, pill or ribbon.");
+        console.log("FilterChip instead of a hand-drawn badge, chip, pill or ribbon, and <Tooltip> (or an");
+        console.log("IconButton tooltip) instead of a native title= hover label.");
         process.exit(1);
     }
     const total = (o) => Object.values(o).reduce((a, b) => a + b, 0);
@@ -667,7 +726,8 @@ if (isMain(import.meta.url)) {
             `${total(current.fontSizes)} raw px font sizes, ${total(current.fallbacks)} fallbacks on always-defined ` +
             `tokens, ${total(current.zIndex)} raw z-indexes, ${total(current.focusRings)} hand-written focus rings, ` +
             `${total(current.colours)} colour literals in styles, ${total(current.tsColours)} in scripts, ` +
-            `${total(current.tags)} hand-drawn tags.`
+            `${total(current.tags)} hand-drawn tags, ` +
+            `${total(current.nativeTitles)} native title= labels.`
     );
     if (shrank.length > 0) {
         console.log(`Down from the base branch (${shrank.length}):`);
