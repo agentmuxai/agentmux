@@ -3237,6 +3237,25 @@
     }
   },
   {
+    "command": "getcontainerlimits",
+    "request": "agentmux_srv::backend::rpc_types::agent::CommandGetContainerLimitsData",
+    "requestName": "CommandGetContainerLimitsData",
+    "requestTs": {
+      "imports": [
+        "CommandGetContainerLimitsData"
+      ],
+      "name": "CommandGetContainerLimitsData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::agent::AgentContainerLimitsResult",
+    "responseName": "AgentContainerLimitsResult",
+    "responseTs": {
+      "imports": [
+        "AgentContainerLimitsResult"
+      ],
+      "name": "AgentContainerLimitsResult"
+    }
+  },
+  {
     "command": "getdrone",
     "request": "agentmux_srv::server::drone_handlers::GetDroneReq",
     "requestName": "GetDroneReq",
@@ -6210,6 +6229,25 @@
     "responseTs": {
       "imports": [],
       "name": "null"
+    }
+  },
+  {
+    "command": "setcontainerlimits",
+    "request": "agentmux_srv::backend::rpc_types::agent::CommandSetContainerLimitsData",
+    "requestName": "CommandSetContainerLimitsData",
+    "requestTs": {
+      "imports": [
+        "CommandSetContainerLimitsData"
+      ],
+      "name": "CommandSetContainerLimitsData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::agent::AgentContainerLimitsResult",
+    "responseName": "AgentContainerLimitsResult",
+    "responseTs": {
+      "imports": [
+        "AgentContainerLimitsResult"
+      ],
+      "name": "AgentContainerLimitsResult"
     }
   },
   {
