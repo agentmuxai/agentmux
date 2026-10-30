@@ -39,6 +39,7 @@ vi.mock("@/app/store/rpc-api", () => ({
         InstallCheckCommand: vi.fn(),
         ToolchainResolveInstallCommandCommand: vi.fn(),
         ToolchainInstallSystemToolCommand: vi.fn(),
+        ListIdentityAccountsCommand: vi.fn(),
     },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
@@ -109,22 +110,12 @@ vi.mock("../agent-launch-env", () => ({
 }));
 
 // The accounts the panel looks for (the free sign-up guide shows only without one).
-const { accountsForTest } = vi.hoisted(() => ({
-    accountsForTest: {
-        list: [] as { provider: string }[],
-        /** While set, the account list hasn't arrived yet; calling it delivers the list. */
-        gate: null as null | Promise<void>,
-        fail: false,
-    },
-}));
-vi.mock("@/app/view/identity/identity-model", async (importOriginal) => ({
-    ...(await importOriginal<typeof import("@/app/view/identity/identity-model")>()),
-    refreshAccountCache: vi.fn(async () => {
-        if (accountsForTest.gate) await accountsForTest.gate;
-        if (accountsForTest.fail) throw new Error("accounts unavailable");
-        return accountsForTest.list;
-    }),
-}));
+const accountsForTest = {
+    list: [] as { provider: string }[],
+    /** While set, the account list hasn't arrived yet. */
+    gate: null as null | Promise<void>,
+    fail: false,
+};
 
 // The Create step's own behaviour is AgentCreateForm.test.tsx's.
 vi.mock("./AgentCreateForm", () => ({
@@ -590,6 +581,11 @@ describe("the free sign-up guide in the Create step", () => {
         accountsForTest.list = [];
         accountsForTest.gate = null;
         accountsForTest.fail = false;
+        vi.mocked(RpcApi.ListIdentityAccountsCommand).mockImplementation((async () => {
+            if (accountsForTest.gate) await accountsForTest.gate;
+            if (accountsForTest.fail) throw new Error("accounts unavailable");
+            return accountsForTest.list;
+        }) as any);
     });
 
     const agyTemplate = () => baseTemplate({ provider: "antigravity", name: "Antigravity" });

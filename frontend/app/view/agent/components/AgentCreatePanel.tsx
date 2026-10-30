@@ -31,7 +31,7 @@ import { agentInstallSession, onAgentInstallDone, watchAgentInstall } from "../i
 import { getProvider } from "../providers";
 import { AgentCreateForm, type CreateDraft, type CreatedAgent } from "./AgentCreateForm";
 import { FreeStartGuide } from "./FreeStartGuide";
-import { refreshAccountCache } from "@/app/view/identity/identity-model";
+
 import type { AgentDefinition } from "@/app/store/rpc-api";
 import "./AgentCreatePanel.scss";
 
@@ -89,12 +89,13 @@ export const AgentCreatePanel = (props: AgentCreatePanelProps): JSX.Element => {
     const userInstalled = () => !!provider() && !provider()!.npmPackage;
 
     // The free sign-up guide is for someone new to this provider: not shown once an
-    // account for it exists (the list is fetched here as the form fetches it). It
-    // waits for the list, and stays away when the list can't be read, so a person
-    // with an account never sees it flash in, and a failed fetch doesn't guess.
+    // account for it exists. It waits for the list, and stays away when the list
+    // can't be read, so a person with an account never sees it flash in, and a failed
+    // fetch doesn't guess. Asked of the RPC directly: `refreshAccountCache` swallows a
+    // failure and returns its (possibly empty) cache, which would read as "no account".
     const [accounts] = createResource(async () => {
         try {
-            return await refreshAccountCache();
+            return await RpcApi.ListIdentityAccountsCommand(TabRpcClient, {});
         } catch {
             return null;
         }
