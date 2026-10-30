@@ -30,6 +30,7 @@ use crate::state::AppState;
 
 pub mod act;
 pub mod capture;
+pub mod capture_download;
 pub mod cdp;
 pub mod dates;
 pub mod frames;
@@ -69,6 +70,7 @@ pub fn register_routes(router: Router<Arc<AppState>>) -> Router<Arc<AppState>> {
         .route("/agentmux/browser/vault_fill", post(vault_fill::vault_fill_route))
         .route("/agentmux/browser/capture_value", post(capture::capture_value_route))
         .route("/agentmux/browser/capture_mark", post(capture::capture_mark_route))
+        .route("/agentmux/browser/capture_download", post(capture_download::capture_download_route))
         .route("/agentmux/browser/screenshot", post(routes::screenshot))
         .route("/agentmux/browser/click_element", post(routes::click_element))
         .route("/agentmux/browser/focus_element", post(routes::focus_element))

@@ -877,6 +877,9 @@ async fn browser_capture(cx: &ToolCtx<'_>, auth: agentmux_common::api_types::UiA
             body[k] = v.clone();
         }
     }
+    if let Some(s) = arguments.get("timeout_seconds").and_then(Value::as_f64) {
+        body["timeout_ms"] = json!((s.clamp(1.0, 120.0) * 1000.0) as u64);
+    }
     let url = format!("{}/api/v1/ui/browser/capture", cx.local_url.trim_end_matches('/'));
     // Replacing an existing entry's value waits for the person.
     let resp = cx
@@ -901,10 +904,12 @@ async fn browser_capture(cx: &ToolCtx<'_>, auth: agentmux_common::api_types::UiA
 /// The agent's answer to a capture: the entry, never the value.
 fn capture_text(body: &Value) -> String {
     let s = |k: &str| body.get(k).and_then(Value::as_str).unwrap_or("");
-    let page = if body.get("marked").and_then(Value::as_bool).unwrap_or(false) {
-        "While it is on the page, screenshots black it out and eval is refused on this tab."
+    let page = if let Some(file) = body.get("file").and_then(Value::as_str) {
+        format!("The file ({file}) was never written to disk: give it to a command with Terminal run's secret_files.")
+    } else if body.get("marked").and_then(Value::as_bool).unwrap_or(false) {
+        "While it is on the page, screenshots black it out and eval is refused on this tab.".to_string()
     } else {
-        "The page changed before the element could be marked, so only a value with a secret's shape stays hidden on it: don't read the element again, and navigate away when you're done."
+        "The page changed before the element could be marked, so only a value with a secret's shape stays hidden on it: don't read the element again, and navigate away when you're done.".to_string()
     };
     format!(
         "Browser capture: saved in the Vault as {} ({}), captured from {}. You never see the value: use the entry by id (Terminal run with secrets, Browser fill with vault). {page}",
@@ -981,6 +986,8 @@ mod tests {
         assert!(capture_text(&body(true)).contains("eval is refused"));
         let unmarked = capture_text(&body(false));
         assert!(unmarked.contains("api-key-x") && !unmarked.contains("eval is refused"), "{unmarked}");
+        let file = capture_text(&serde_json::json!({ "id": "note-key", "label": "Key", "captured_from": "https://github.com", "file": "app.pem" }));
+        assert!(file.contains("app.pem") && file.contains("never written to disk"), "{file}");
     }
 
     #[test]

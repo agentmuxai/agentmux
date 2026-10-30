@@ -573,7 +573,7 @@ async fn click_at(cdp: &mut CdpSession, x: f64, y: f64) -> Result<(), String> {
 /// page's own session, which the mouse events go through: the browser routes
 /// them to whichever frame is under the point. A point measured inside a frame
 /// is moved to where that frame is on the page first.
-async fn click_element(
+pub(super) async fn click_element(
     cdp: &mut CdpSession,
     root: &mut CdpSession,
     frame: Option<&FrameRef>,
