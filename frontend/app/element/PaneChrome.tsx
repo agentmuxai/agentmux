@@ -38,15 +38,8 @@ import { readSwarmSummary } from "@/app/store/activitySummary";
 import { readSeatMeta, seatTooltipLine } from "@/app/view/agent/seat-format";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { isBlockClosing } from "@/layout/lib/layoutClosing";
-import {
-    closeBlockInStack,
-    moveBlockInStack,
-    moveBlocksInStack,
-    setActiveBlockInStack,
-    splitOutStackMember,
-    type NodeModel,
-} from "@/layout/index";
-import { findNodeByBlockId } from "@/layout/lib/layoutNode";
+import { closeBlockInStack, moveBlockInStack, moveBlocksInStack, setActiveBlockInStack, type NodeModel } from "@/layout/index";
+import { placePill, type PillZone } from "@/layout/lib/paneBodyDrop";
 import { paneStackIds } from "@/layout/lib/layoutNodeModels";
 import { allBlockIds } from "@/layout/lib/stackOrder";
 import { useWindowTabDisplayed } from "@/app/workspace/window-tab-visibility";
@@ -508,11 +501,10 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
     const bodyDrop = {
         model: layoutModel,
         hasBody: () => !(nodeModel.isMinimized?.() ?? false),
-        place: (blockId: string, side: "left" | "right" | "up" | "down"): string | false => {
-            if (!splitOutStackMember(layoutModel, blockId, { targetNodeId: nodeModel.nodeId, side })) return false;
-            if (paneTabSelection().has(blockId)) clearPaneTabSelection();
-            const root = layoutModel.treeState.rootNode;
-            return (root && findNodeByBlockId(root, blockId)?.id) || false;
+        place: (blockId: string, zone: Extract<PillZone, { kind: "place" }>): string | false => {
+            const landedIn = placePill(layoutModel, blockId, nodeModel.nodeId, zone);
+            if (landedIn !== false && paneTabSelection().has(blockId)) clearPaneTabSelection();
+            return landedIn;
         },
     };
     const acceptsForeignTabs = (blockIds: readonly string[]) => {

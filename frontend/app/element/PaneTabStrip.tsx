@@ -57,7 +57,6 @@ import { useWindowTabDisplayed } from "@/app/workspace/window-tab-visibility";
 import { beginHover, edgeFlashArea, type Hover, type HoverFlash } from "./drop-blink-clock";
 import type { LayoutModel } from "@/layout/lib/layoutModel";
 import { clearPillGhost, pillZone, showPillGhost, type PillZone } from "@/layout/lib/paneBodyDrop";
-import type { PlacementSide } from "@/layout/lib/placementPreview";
 import type { DropDirection } from "@/layout/lib/types";
 import type { PaneTabSelectionApi } from "./pane-tab-selection";
 import { createStripReveal, registerStripWithPane } from "./strip-reveal-controller";
@@ -356,7 +355,7 @@ export interface PaneTabStripProps<T> {
         model: LayoutModel;
         /** False for a header-only pane (minimized, collapsed): no body zone. */
         hasBody: () => boolean;
-        place: (blockId: string, side: PlacementSide) => string | false;
+        place: (blockId: string, zone: Extract<PillZone, { kind: "place" }>) => string | false;
     };
     /** Ctrl/Cmd+click multi-select for a Pane's own header strip. Omitted by document
      *  tabs and the agent History strip, which have no selection. */
@@ -571,10 +570,9 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
                     if (dropZone.kind === "none") return;
                     if (dropZone.kind === "place") {
                         setCurrentDragPayload(null);
-                        const side = dropZone.side;
                         // Next task, like a join: the move unmounts the dragged pill (see below).
                         setTimeout(() => {
-                            const landedIn = body.place(blockId, side);
+                            const landedIn = body.place(blockId, dropZone);
                             if (landedIn !== false) markLanded(blockId, landedIn);
                         }, 0);
                         return;

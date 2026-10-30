@@ -27,6 +27,8 @@ import {
     setActiveBlockInStack,
     splitOutStackMember,
 } from "@/layout/lib/layoutStack";
+import { placePill } from "@/layout/lib/paneBodyDrop";
+import { DropDirection } from "@/layout/lib/types";
 import type { NodeModel } from "@/layout/lib/types";
 import { LayoutNodeAdditionalProps, LayoutTreeActionType, LayoutTreeInsertNodeAction } from "@/layout/lib/types";
 import type { SignalAtom } from "@/util/util";
@@ -1907,5 +1909,66 @@ describe("splitOutStackMember", () => {
         splitOutStackMember(model, "b2", { targetNodeId: root.children![1].id, side: "down" });
         const col = model.treeState.rootNode!.children![1];
         expect(col.children!.map((c) => c.data?.blockId)).toEqual(["b3", "b2"]);
+    });
+});
+
+describe("placePill", () => {
+    beforeEach(() => {
+        layoutStateSignals.clear();
+        vi.useFakeTimers();
+        rpcCall.mockReset();
+        rpcCall.mockResolvedValue(undefined);
+    });
+    afterEach(() => vi.useRealTimers());
+
+    function addPane(model: LayoutModel, blockId: string): string {
+        model.treeReducer({
+            type: LayoutTreeActionType.InsertNode,
+            node: newLayoutNode(undefined, undefined, undefined, { blockId }),
+            magnified: false,
+            focused: false,
+        } as LayoutTreeInsertNodeAction);
+        return getNodeByBlockId(model, blockId)!.id;
+    }
+
+    const order = (model: LayoutModel) => {
+        const out: string[] = [];
+        const walk = (n: any) => (n.children?.length ? n.children.forEach(walk) : out.push(n.data.blockId));
+        walk(model.treeState.rootNode);
+        return out;
+    };
+
+    it("a tab with others behind it leaves for a new pane beside the target and returns that pane's key", () => {
+        const model = createLayoutModel();
+        const p1 = insertRootBlock(model, "a1");
+        pushBlockOntoStack(model, p1, "a2");
+        const p2 = addPane(model, "c1");
+        model.updateTree();
+
+        const landed = placePill(model, "a2", p2, { kind: "place", direction: DropDirection.Right, side: "right" });
+
+        expect(landed).toBe(getNodeByBlockId(model, "a2")!.id);
+        expect(landed).not.toBe(p1);
+        expect(order(model)).toEqual(["a1", "c1", "a2"]);
+    });
+
+    it("a pane's only tab moves the whole pane next to the target, as dragging it by its header does", () => {
+        const model = createLayoutModel();
+        const p1 = insertRootBlock(model, "a1");
+        const p2 = addPane(model, "b1");
+        addPane(model, "c1");
+        model.updateTree();
+
+        const landed = placePill(model, "a1", p2, { kind: "place", direction: DropDirection.Right, side: "right" });
+
+        expect(landed).toBe(p1);
+        expect(order(model)).toEqual(["b1", "a1", "c1"]);
+    });
+
+    it("refuses a block that is in no pane", () => {
+        const model = createLayoutModel();
+        const p1 = insertRootBlock(model, "a1");
+
+        expect(placePill(model, "nope", p1, { kind: "place", direction: DropDirection.Right, side: "right" })).toBe(false);
     });
 });

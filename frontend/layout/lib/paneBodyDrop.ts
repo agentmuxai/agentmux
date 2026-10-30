@@ -10,10 +10,13 @@
  * docs/specs/SPEC_PANE_TAB_DRAG_BODY_PLACEMENT_AND_EDGE_GLOW_2026_10_29.md §3.1, §3.2.
  */
 
+import { findNodeByBlockId } from "./layoutNode";
 import { getNodeRectById } from "./layoutNodeModels";
+import { effectiveStack, splitOutStackMember } from "./layoutStack";
+import { computeMoveNode } from "./layoutTree";
 import type { LayoutModel } from "./layoutModel";
 import { placementDirection, showPlacement, sideOfDirection, type PlacementSide } from "./placementPreview";
-import { DropDirection, LayoutTreeActionType, type LayoutNode } from "./types";
+import { DropDirection, LayoutTreeActionType, type LayoutNode, type LayoutTreeComputeMoveNodeAction } from "./types";
 
 export type PillZone =
     /** Nothing here takes the pill (a pane's own header, or its own middle). */
@@ -86,6 +89,32 @@ export function showPillGhost(model: LayoutModel, input: PillZoneInput, zone: Ex
         },
         zone.direction
     );
+}
+
+/**
+ * Drop the pill on a `place` zone. A tab with others behind it leaves its stack for a new pane
+ * (`splitOutStackMember`); a pane's only tab has nothing to leave, so the pane itself moves next
+ * to the hovered one, as when it is dragged by its header. Returns the key of the pane the tab
+ * is in afterwards, or false when nothing could be done.
+ */
+export function placePill(model: LayoutModel, blockId: string, targetNodeId: string, zone: Extract<PillZone, { kind: "place" }>): string | false {
+    const root = model.treeState.rootNode;
+    const source = root && findNodeByBlockId(root, blockId);
+    if (!root || !source?.data || source.id === targetNodeId && effectiveStack(source.data).length <= 1) return false;
+    if (effectiveStack(source.data).length > 1) {
+        if (!splitOutStackMember(model, blockId, { targetNodeId, side: zone.side })) return false;
+    } else {
+        const move = computeMoveNode(model.treeState, {
+            type: LayoutTreeActionType.ComputeMove,
+            nodeId: targetNodeId,
+            nodeToMoveId: source.id,
+            direction: zone.direction,
+        } as LayoutTreeComputeMoveNodeAction);
+        if (!move) return false;
+        model.treeReducer(move);
+    }
+    const after = model.treeState.rootNode;
+    return (after && findNodeByBlockId(after, blockId)?.id) || false;
 }
 
 /** Take the ghost down. */

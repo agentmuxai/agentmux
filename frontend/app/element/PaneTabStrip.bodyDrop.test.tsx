@@ -64,7 +64,7 @@ const TABS: T[] = [
 
 function renderPane(opts: { tabs?: T[]; hasBody?: boolean } = {}) {
     const onReceiveForeignTab = vi.fn(() => true);
-    const place = vi.fn((_blockId: string, _side: string): string | false => "new-pane");
+    const place = vi.fn((_blockId: string, _zone: unknown): string | false => "new-pane");
     const showOverlay = { _set: vi.fn() };
     const model = { showOverlay } as any;
     const result = render(() => (
@@ -167,7 +167,7 @@ describe("PaneTabStrip bodyDrop", () => {
         expect(place).not.toHaveBeenCalled();
         vi.runAllTimers();
 
-        expect(place).toHaveBeenCalledWith("dragged", "left");
+        expect(place).toHaveBeenCalledWith("dragged", { kind: "place", direction: 2, side: "left" });
         expect(onReceiveForeignTab).not.toHaveBeenCalled();
     });
 
