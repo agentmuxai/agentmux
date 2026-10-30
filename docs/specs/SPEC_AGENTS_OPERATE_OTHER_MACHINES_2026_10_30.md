@@ -1,6 +1,6 @@
 # SPEC: Agents operate other machines: typed remote operations between AgentMux instances, accounts first
 
-**Status:** approved by the operator, 2026-10-30 ("yes, spec looks good"), with every recommendation in section 9 (D1-D8). Nothing is built yet.
+**Status:** proposed — approved by the operator, 2026-10-30 ("yes, spec looks good"), with every recommendation in section 9 (D1-D8). Building: P1 accounts (the stable account id, `identity.accounts`, `identity.switch`) and the P1 transport; P2-P6 are not started.
 **Date:** 2026-10-30
 **Author:** AgentY, at the operator's request: "lets also write a spec that allows agents to set the accounts on other machines, remember agents need superpowers, so fill in other operational gaps you find."
 **Tasks:** spec #12438, build #12439 (split into the phase tasks in section 8 once approved).

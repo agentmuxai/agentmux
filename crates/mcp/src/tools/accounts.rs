@@ -16,7 +16,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let resp = client
                 .get(&url)
                 .header(AUTH_KEY_HEADER, auth_key)
-                .query(&[("agent_id", agent_id.as_str())])
+                .query(&[("agent_id", agent_id.as_str()), ("scope", arguments.get("scope").and_then(|v| v.as_str()).unwrap_or(""))])
                 .send()
                 .await
                 .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;

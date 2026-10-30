@@ -403,8 +403,8 @@ async fn call_with(
     }
 }
 
-/// Both RPCs are the operator's: an agent connection can neither read which
-/// accounts are blocked (their labels can be emails) nor move other agents.
+/// Moving agents is the operator's: an agent connection can't, and a connection the host
+/// never proved can't read the episodes either (an agent may).
 #[tokio::test]
 async fn only_the_operators_client_may_list_episodes_or_move_agents() {
     let state = test_state();
@@ -417,8 +417,9 @@ async fn only_the_operators_client_may_list_episodes_or_move_agents() {
     let idle = pane(&state, &tab, "idle", "Idle", "old", Some(failure("usage_limit", None, None)), false).await;
     let move_req = json!({ "from": "old", "to": "spare", "block_ids": [idle] });
 
-    let e = call(&state, Some("loap-3"), COMMAND_IDENTITY_ACCOUNT_AVAILABILITY, json!({})).await.unwrap_err();
-    assert!(e.starts_with("FORBIDDEN"), "{e}");
+    // An agent may see which accounts are out of quota (to choose where to move), never move others.
+    let seen = call(&state, Some("loap-3"), COMMAND_IDENTITY_ACCOUNT_AVAILABILITY, json!({})).await.unwrap();
+    assert!(seen["episodes"].is_array());
     let e = call(&state, Some("loap-3"), COMMAND_IDENTITY_ACCOUNT_MOVE_AGENTS, move_req.clone()).await.unwrap_err();
     assert!(e.starts_with("FORBIDDEN"), "{e}");
     assert_eq!(state.identity_store.agent_identity_list_for_agent("idle").unwrap()[0].account_id, "old", "nothing moved");
@@ -863,7 +864,7 @@ async fn a_switch_names_the_account_by_id_or_numbered_label_and_refuses_what_can
     state.identity_store.agent_identity_link("ag", "one", "claude").unwrap();
 
     let e = switch::switch(&state, "", &switch_req("ag", "me@example.com", AfterTurn)).unwrap_err();
-    assert!(e.starts_with("UNKNOWN_ACCOUNT") && e.contains("me@example.com \u{b7}2"), "{e}");
+    assert!(e.starts_with("AMBIGUOUS_ACCOUNT") && e.contains("me@example.com \u{b7}2"), "two with quota share the email: {e}");
     let e = switch::switch(&state, "", &switch_req("ag", "out", AfterTurn)).unwrap_err();
     assert!(e.starts_with("ACCOUNT_CANT_RUN"), "{e}");
     let e = switch::switch(&state, "", &switch_req("ag", "gh", AfterTurn)).unwrap_err();
@@ -875,4 +876,135 @@ async fn a_switch_names_the_account_by_id_or_numbered_label_and_refuses_what_can
     assert_eq!((r.account_id.as_str(), r.status), ("two", switch::AccountSwitchStatus::Switched));
     assert_eq!(r.account_label, "me@example.com \u{b7}2");
     assert_eq!(linked_account(&state, "ag"), ["two"]);
+}
+
+
+fn mail(id: &str, status: &str, email: &str) -> IdentityAccount {
+    let mut a = account(id, "claude", status);
+    a.context = json!({ "email": email });
+    a
+}
+
+fn in_an_hour() -> u64 {
+    agentmux_common::time::now_ms_u64() + 3_600_000
+}
+
+/// `identity.accounts` lists every account of an agent provider with its stable id, whether it can
+/// run and when a limit lifts, and who uses it; another provider's login isn't an AI account.
+#[tokio::test]
+async fn identity_accounts_lists_stable_id_quota_and_who_uses_each() {
+    let state = test_state();
+    for a in [mail("a", "valid", "a@x.com"), mail("b", "valid", "b@x.com"), mail("c", "expired", "c@x.com"), account("gh", "github", "valid")] {
+        state.id_store.identity_upsert(&a).unwrap();
+    }
+    agent_def(&state, "ag1");
+    agent_def(&state, "ag2");
+    state.identity_store.agent_identity_link("ag1", "a", "claude").unwrap();
+    state.identity_store.agent_identity_link("ag2", "b", "claude").unwrap();
+    let tab = new_tab(&state).await;
+    let reset = in_an_hour();
+    let limited = pane(&state, &tab, "ag2", "Ag2", "b", Some(failure("usage_limit", Some(reset), Some("five_hour"))), false).await;
+
+    let r = accounts::accounts(&state, agentmux_common::time::now_ms_u64()).unwrap();
+    let ids: Vec<&str> = r.accounts.iter().map(|a| a.account_id.as_str()).collect();
+    assert_eq!(ids, ["a", "b", "c"], "the github login is not an agent account");
+    let by = |id: &str| r.accounts.iter().find(|a| a.account_id == id).unwrap();
+    assert!(by("a").stable_id.as_deref().is_some_and(|s| s.starts_with("claude:")));
+    assert_ne!(by("a").stable_id, by("b").stable_id);
+    assert_eq!((by("a").quota.state.as_str(), by("a").email.as_str(), by("a").sign_in.as_str()), ("ok", "a@x.com", "valid"));
+    assert_eq!(by("a").agents.iter().map(|g| g.agent_id.as_str()).collect::<Vec<_>>(), ["ag1"]);
+    assert_eq!((by("b").quota.state.as_str(), by("b").quota.resets_at_ms, by("b").quota.limit_window.as_deref()), ("limited", Some(reset), Some("five_hour")));
+    assert_eq!(by("c").quota.state, "signed_out");
+    let text = serde_json::to_string(&r).unwrap();
+    assert!(!text.contains("/tmp/") && !text.contains("secret"), "no config dir or secret reference: {text}");
+    cleanup(&[&limited]);
+}
+
+/// `any with quota` skips the account the agent is on and the ones out of quota or signed out,
+/// and refuses with the list when nothing is left.
+#[tokio::test]
+async fn a_switch_to_any_with_quota_picks_an_account_that_can_run_or_refuses_with_the_list() {
+    use switch::AccountSwitchWhen::AfterTurn;
+    let state = test_state();
+    for a in [mail("a", "valid", "a@x.com"), mail("b", "valid", "b@x.com"), mail("c", "valid", "c@x.com"), mail("d", "expired", "d@x.com")] {
+        state.id_store.identity_upsert(&a).unwrap();
+    }
+    agent_def(&state, "ag");
+    agent_def(&state, "other");
+    state.identity_store.agent_identity_link("ag", "a", "claude").unwrap();
+    let tab = new_tab(&state).await;
+    let limited = pane(&state, &tab, "other", "Other", "b", Some(failure("usage_limit", Some(in_an_hour()), None)), false).await;
+
+    let r = switch::switch(&state, "", &switch_req("ag", "any with quota", AfterTurn)).unwrap();
+    assert_eq!((r.account_id.as_str(), r.status), ("c", switch::AccountSwitchStatus::Switched));
+    assert_eq!(linked_account(&state, "ag"), ["c"]);
+
+    // Now a is the only one left that is not ag's own, and it is limited too.
+    let second = pane(&state, &tab, "ag", "Ag", "a", Some(failure("usage_limit", Some(in_an_hour()), None)), false).await;
+    let e = switch::switch(&state, "", &switch_req("ag", "any_with_quota", AfterTurn)).unwrap_err();
+    assert!(e.starts_with("NO_ACCOUNT_WITH_QUOTA") && e.contains("a@x.com") && e.contains("d@x.com"), "{e}");
+    cleanup(&[&limited, &second]);
+}
+
+/// A stable id names an account on any machine; an email names the one of its sign-ins that has
+/// quota, and is refused when none or several do.
+#[tokio::test]
+async fn a_switch_names_the_account_by_stable_id_or_by_an_email_with_exactly_one_account_with_quota() {
+    use switch::AccountSwitchWhen::AfterTurn;
+    let state = test_state();
+    for a in [mail("x1", "valid", "m@x.com"), mail("x2", "valid", "m@x.com"), mail("solo", "valid", "solo@x.com"), mail("start", "valid", "start@x.com")] {
+        state.id_store.identity_upsert(&a).unwrap();
+    }
+    agent_def(&state, "ag");
+    agent_def(&state, "other");
+    state.identity_store.agent_identity_link("ag", "start", "claude").unwrap();
+    let tab = new_tab(&state).await;
+
+    let all = accounts::accounts(&state, agentmux_common::time::now_ms_u64()).unwrap().accounts;
+    let solo = all.iter().find(|a| a.account_id == "solo").unwrap().stable_id.clone().unwrap();
+    let r = switch::switch(&state, "", &switch_req("ag", &solo, AfterTurn)).unwrap();
+    assert_eq!(r.account_id, "solo", "by stable id");
+
+    let e = switch::switch(&state, "", &switch_req("ag", "m@x.com", AfterTurn)).unwrap_err();
+    assert!(e.starts_with("AMBIGUOUS_ACCOUNT"), "two sign-ins of m@x.com have quota: {e}");
+
+    let limited = pane(&state, &tab, "other", "Other", "x1", Some(failure("usage_limit", Some(in_an_hour()), None)), false).await;
+    let r = switch::switch(&state, "", &switch_req("ag", "M@X.com", AfterTurn)).unwrap();
+    assert_eq!(r.account_id, "x2", "the email names the one with quota");
+
+    let limited_too = pane(&state, &tab, "other", "Other", "x2", Some(failure("usage_limit", Some(in_an_hour()), None)), false).await;
+    let e = switch::switch(&state, "", &switch_req("ag", "m@x.com", AfterTurn)).unwrap_err();
+    assert!(e.starts_with("NO_ACCOUNT_WITH_QUOTA"), "{e}");
+    cleanup(&[&limited, &limited_too]);
+}
+
+/// `all limited` moves each agent that has a pane out of quota, to an account that can run, and
+/// leaves an agent with quota where it is.
+#[tokio::test]
+async fn switching_all_limited_agents_moves_each_to_an_account_with_quota() {
+    use switch::AccountSwitchWhen::AfterTurn;
+    let state = test_state();
+    for a in [mail("old", "valid", "old@x.com"), mail("new", "valid", "new@x.com")] {
+        state.id_store.identity_upsert(&a).unwrap();
+    }
+    for id in ["l1", "l2", "fine"] {
+        agent_def(&state, id);
+        state.identity_store.agent_identity_link(id, "old", "claude").unwrap();
+    }
+    let tab = new_tab(&state).await;
+    let lim = || Some(failure("usage_limit", Some(in_an_hour()), None));
+    let p1 = pane(&state, &tab, "l1", "L1", "old", lim(), false).await;
+    let p2 = pane(&state, &tab, "l2", "L2", "old", lim(), false).await;
+    let ok = pane(&state, &tab, "fine", "Fine", "old", None, false).await;
+
+    let req = switch::AgentAccountSwitchReq { agent_id: None, account: "any with quota".into(), when: AfterTurn };
+    let r = switch::switch_all_limited(&state, "lead", &req).unwrap();
+    let mut moved: Vec<&str> = r.agents.iter().filter(|e| e.result.is_some()).map(|e| e.agent_id.as_str()).collect();
+    moved.sort_unstable();
+    assert_eq!(moved, ["l1", "l2"], "{r:?}");
+    assert_eq!(linked_account(&state, "l1"), ["new"]);
+    assert_eq!(linked_account(&state, "l2"), ["new"]);
+    assert_eq!(linked_account(&state, "fine"), ["old"], "an agent with quota stays");
+    assert!(switch::is_all_limited("All_Limited") && switch::is_all_limited("all limited") && !switch::is_all_limited("l1"));
+    cleanup(&[&p1, &p2, &ok]);
 }
