@@ -6,12 +6,11 @@
 # HELPER is set. It runs as root directly, against the HTTPS mirror (/www is the mirror's tree).
 set -u
 
-FROM_VERSION="${FROM_VERSION:-0.60.3}"
-TO_VERSION="${TO_VERSION:-0.60.4}"
+FROM_VERSION="${FROM_VERSION:-0.60.6}"
+TO_VERSION="${TO_VERSION:-0.60.7}"
 HELPER="${HELPER:-/opt/agentmux/bin/agentmux-install-update}"
 MIRROR="${MIRROR:-https://mirror.amx-harness.test}"
 PKGS=/pkgs
-U=$((RANDOM + 100))   # keeps this run's fake releases apart from any other run on the same mirror
 UPDATES=/updates
 
 if command -v dpkg-query >/dev/null 2>&1; then KIND=deb; else KIND=rpm; fi
@@ -23,34 +22,11 @@ installed() {
     if [ "$KIND" = deb ]; then dpkg-query -W -f='${Version}' agentmux 2>/dev/null
     else rpm -q --queryformat '%{VERSION}' agentmux 2>/dev/null; fi
 }
-install_by_hand() { # file: what a person would type, allowing a downgrade
-    if [ "$KIND" = deb ]; then DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-downgrades --no-install-recommends "$1" >/dev/null 2>&1
-    elif command -v dnf >/dev/null 2>&1; then dnf -y install --allowerasing "$1" >/dev/null 2>&1 || dnf -y downgrade "$1" >/dev/null 2>&1
-    else zypper --non-interactive install --oldpackage --allow-unsigned-rpm "$1" >/dev/null 2>&1; fi
-}
 
 # A process that has quit, for the launcher pid: the helper waits for it, so it must be gone.
 gone_pid() { sh -c 'exit 0' & local p=$!; wait "$p"; echo "$p"; }
 
-# The mirror's release for <version>, listing <files> the way GitHub lists a release.
-fake_release() { # version file...
-    local v=$1 f first=1; shift
-    mkdir -p "/www/api" "/www/blob/v$v"
-    {
-        printf '{\n  "tag_name": "v%s",\n  "assets": [\n' "$v"
-        for f in "$@"; do
-            [ "$first" = 1 ] || printf '    ,\n'
-            first=0
-            cp "$f" "/www/blob/v$v/$(basename "$f")"
-            printf '    {\n      "id": 1,\n      "name": "%s",\n      "size": %s,\n      "digest": "sha256:%s"\n    }\n' \
-                "$(basename "$f")" "$(stat -c %s "$f")" "$(sha256sum <"$f" | awk '{print $1}')"
-        done
-        printf '  ]\n}\n'
-    } >"/www/api/v$v"
-}
-RELEASES=()
-scratch_release() { RELEASES+=("$1"); fake_release "$@"; }
-cleanup() { for v in "${RELEASES[@]:-}"; do [ -n "$v" ] && rm -rf "/www/api/v$v" "/www/blob/v$v"; done; [ -s /tmp/amx-stub.pid ] && kill "$(cat /tmp/amx-stub.pid)" 2>/dev/null; }
+cleanup() { [ -s /tmp/amx-stub.pid ] && kill "$(cat /tmp/amx-stub.pid)" 2>/dev/null; }
 trap cleanup EXIT
 
 # Run the helper as root, the way pkexec would start it. Sets rc, and out/err files.
@@ -116,7 +92,7 @@ case_real_github_upgrade_and_go_back() {
     pass "real github.com: $FROM_VERSION -> $TO_VERSION (GitHub's own checksum), then back to $FROM_VERSION (downloaded from the release)"
 }
 
-# #5717: the 0.60.5 helper and launcher in a real 0.60.4 install do the upgrade (the real signed
+# #5717: the target package's helper and launcher put over the installed pair do the upgrade (the real signed
 # manifest, with GitHub's API unreachable so a fall back would fail), then go back the same way.
 case_real_upgrade_through_the_new_helper() {
     stage

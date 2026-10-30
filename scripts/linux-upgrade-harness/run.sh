@@ -8,13 +8,13 @@
 #   ./run.sh clean                remove what this harness created, by recorded id (cache kept; --all drops it too)
 #
 # Distros: ubuntu24 ubuntu26 fedora42 debian13 tumbleweed
-# Env: FROM_VERSION (3-part, default 0.60.3), TO_VERSION (0.60.4), HELPER (a helper to test instead of the one
+# Env: FROM_VERSION (3-part, default 0.60.6), TO_VERSION (0.60.7), HELPER (a helper to test instead of the one
 #      the package installed: a path on this host, mounted in), KEEP=1 (keep snapshot images between runs).
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$HERE"
-FROM_VERSION="${FROM_VERSION:-0.60.3}"
-TO_VERSION="${TO_VERSION:-0.60.4}"
+FROM_VERSION="${FROM_VERSION:-0.60.6}"
+TO_VERSION="${TO_VERSION:-0.60.7}"
 STATE="$HERE/state"; CACHE="${CACHE:-$HERE/cache}"; WWW="$HERE/www"; CERTS="$STATE/certs"
 # HARNESS_ID: a second user of a copy of this directory sets its own, so the network, mirror and images differ.
 IMG="amx-harness${HARNESS_ID:+-$HARNESS_ID}"

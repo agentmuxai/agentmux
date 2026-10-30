@@ -51,8 +51,9 @@
 //!   instance:<id> pending_migrations:<n>` — ready ([`Estart`]).
 //! - `AGENTMUXSRV-EVENT:<json>` — a startup event for the launcher to log
 //!   ([`parse_event_line`]).
-//! - `AGENTMUXSRV-UPGRADE version:<v> launcher:<path>` (a portable) or
-//!   `… installer:<path>` (a `setup.exe` install) — any time after ESTART: the
+//! - `AGENTMUXSRV-UPGRADE version:<v> [approved:<how>:<id>] launcher:<path>` (a portable) or
+//!   `… installer:<path>` (a `setup.exe` install; the digest is `sha256:<hex>` before it). The optional
+//!   `approved:` token says who approved the restart; the launcher skips it. Any time after ESTART: the
 //!   user chose "Upgrade & restart" and `<path>` is the launcher, or the
 //!   installer, of a release srv downloaded and verified. The launcher checks it again, asks
 //!   the user itself, and restarts into it (`crates/launcher/src/upgrade_restart.rs`).

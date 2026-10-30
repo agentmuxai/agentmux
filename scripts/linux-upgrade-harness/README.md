@@ -2,7 +2,7 @@
 
 Runs the `.deb`/`.rpm` upgrade path (`scripts/agentmux-install-update.sh`, the launcher's waiter in
 `crates/launcher/src/upgrade_package.rs`) against real published packages, in containers, on Ubuntu 24.04,
-Ubuntu 26.04 and Fedora 42 (Debian 13 and openSUSE Tumbleweed also work). See
+Ubuntu 26.04 and Fedora 42. The harness also has Debian 13 and openSUSE Tumbleweed images (`debian13`, `tumbleweed`), which are untested. See
 `docs/specs/SPEC_LINUX_PACKAGE_UPGRADE_AND_REPOSITORY_2026_10_24.md` §3.6.
 
 ```
