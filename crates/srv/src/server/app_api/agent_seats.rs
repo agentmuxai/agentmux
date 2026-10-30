@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! `Agents set_seat` (`POST /api/v1/agent/seats`): a host agent sets or clears
+//! `Agents set_seat` (`POST /api/v1/agent/seats`): an agent, host or container, sets or clears
 //! the seats of agents on this machine, several in one call (a whole roster).
 //! A seat is an agent's role, who it reports to and what it owns
 //! (`backend::agent_seat`); the operator's window sets one with `agent.setSeat`
@@ -74,9 +74,6 @@ fn actor_of(state: &AppState, caller: Option<&Caller>) -> Result<Actor, Refusal>
         .agent_def_get(uid)
         .map_err(|e| refuse(StatusCode::INTERNAL_SERVER_ERROR, format!("agent seats: {e}")))?
         .ok_or_else(|| refuse(StatusCode::UNAUTHORIZED, "the agent token names no agent on this machine"))?;
-    if def.agent_type == "container" {
-        return Err(refuse(StatusCode::FORBIDDEN, "CONTAINER_AGENT: a container agent can't set seats"));
-    }
     Ok(Actor { uid: uid.to_string(), slug: def.slug, name: def.name })
 }
 

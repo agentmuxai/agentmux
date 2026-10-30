@@ -19,7 +19,7 @@ import { Button } from "@/app/element/ui";
 import { BrowserNavBar } from "./browser-nav-bar";
 import { DownloadStrip } from "./download-strip";
 import { ActionLogStrip, DrivenByStrip } from "./driven-by-strip";
-import { minutesLabel, siteLabel } from "./bypass";
+import { hasTerminalPower, minutesLabel, siteLabel } from "./bypass";
 import { attentionLook, dialogMessage } from "./attention-kinds";
 import { usePaneTabVisibility } from "@/app/block/pane-tab-visibility";
 import { useWindowTabId } from "@/app/workspace/window-tab-visibility";
@@ -717,6 +717,13 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
                                 <b>{minutesLabel(a().minutes ?? 60)}</b>: its clicks that submit, delete or send go
                                 through without asking you, and so does the page's own "Are you sure?" that follows one. It still can't type passwords or codes or run scripts, and
                                 payments still ask. Stop it any time from the red strip.
+                            </div>
+                        </Show>
+                        <Show when={a().kind === "bypass" && hasTerminalPower(a().powers)}>
+                            <div class="browser-attention-target">
+                                It also asks to <b>run commands in the terminal</b> on {(a().origins ?? []).map(siteLabel).join(", ")}:
+                                it types real keys and presses Enter with no question per line. You can read every line in the
+                                pane's Log, and Stop or Pause end it at once. Passwords and codes stay yours to type.
                             </div>
                         </Show>
                         <Show when={a().window}>
