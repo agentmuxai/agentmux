@@ -230,6 +230,8 @@ pub mod always_available;
 pub mod sensitive_ops;
 /// The requests for those operations and what became of them.
 pub mod sensitive_requests;
+/// Replies that say nothing are not sent (SPEC_CHEAPER_FLEET_MESSAGING_2026_10_30.md).
+pub mod ack_policy;
 /// Holding a routine message for an agent whose session has gone cold (SPEC_JEKT_HOLD_FOR_COLD_SESSIONS_2026_10_25.md).
 pub mod cold_hold;
 /// Google connectors: Calendar, Drive and Gmail for agents, called by srv.

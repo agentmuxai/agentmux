@@ -14,6 +14,22 @@ fn urgent_priority(arguments: &Value) -> Option<String> {
     arguments.get("urgent").and_then(|v| v.as_bool()).unwrap_or(false).then(|| "urgent".to_string())
 }
 
+/// `reply: "none"` on a send: the message asks for no reply (the marker says `REPLY=none`, and
+/// srv refuses an answer to it). Any other value is an ordinary message.
+fn reply_arg(arguments: &Value) -> Option<String> {
+    (arguments.get("reply").and_then(|v| v.as_str()) == Some("none")).then(|| "none".to_string())
+}
+
+/// `in_reply_to` on a send: the MSGID of the message this one answers.
+fn in_reply_to_arg(arguments: &Value) -> Option<String> {
+    arguments
+        .get("in_reply_to")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|id| !id.is_empty() && id.len() <= 128)
+        .map(str::to_string)
+}
+
 pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     let ToolCtx { local_url, auth_key, client, .. } = *cx;
     match name {
@@ -56,6 +72,8 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let sent_names: Vec<String> = files.iter().flatten().map(|f| f.name.clone()).collect();
             let mut req = signed_jekt_with_files(source_agent, to, message, files);
             req.priority = urgent_priority(arguments);
+            req.reply = reply_arg(arguments);
+            req.in_reply_to = in_reply_to_arg(arguments);
 
             let resp = client
                 .post(&url)
@@ -283,6 +301,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                     let target_agent = block_to_agent.get(&target).cloned().unwrap_or_else(|| target.clone());
                     let mut req = signed_jekt_with_files(source_agent.clone(), &target_agent, message, files.clone());
                     req.priority = priority.clone();
+                    req.reply = reply_arg(arguments);
                     let outcome = async {
                         let resp = client
                             .post(&url)
@@ -572,6 +591,18 @@ mod broadcast_files_tests {
 
 #[cfg(test)]
 mod urgent_tests {
+    #[test]
+    fn reply_none_and_in_reply_to_are_read_from_the_arguments() {
+        use super::{in_reply_to_arg, reply_arg};
+        use serde_json::json;
+        assert_eq!(reply_arg(&json!({ "reply": "none" })), Some("none".to_string()));
+        assert_eq!(reply_arg(&json!({ "reply": "ok" })), None);
+        assert_eq!(reply_arg(&json!({})), None);
+        assert_eq!(in_reply_to_arg(&json!({ "in_reply_to": " m-1 " })), Some("m-1".to_string()));
+        assert_eq!(in_reply_to_arg(&json!({ "in_reply_to": "" })), None);
+        assert_eq!(in_reply_to_arg(&json!({ "in_reply_to": "x".repeat(200) })), None);
+    }
+
     use super::*;
     use serde_json::json;
 

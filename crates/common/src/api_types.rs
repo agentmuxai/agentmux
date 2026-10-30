@@ -424,6 +424,14 @@ pub struct InjectRequest {
     /// any signature: it only skips a wait.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub priority: Option<String>,
+    /// `none` when the sender asks for no reply (`Message` `reply: "none"`): the receiver's
+    /// marker says `REPLY=none`, and srv refuses a reply to it. Not part of any signature.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reply: Option<String>,
+    /// The MSGID of the message this one answers (`Message` `in_reply_to`), so srv can refuse
+    /// an answer to a message that asked for none. Not part of any signature.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub in_reply_to: Option<String>,
 }
 
 // ── Pane ──────────────────────────────────────────────────────────────────────
