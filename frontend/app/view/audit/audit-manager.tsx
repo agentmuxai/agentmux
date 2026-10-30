@@ -51,9 +51,13 @@ export const AuditManager = (props: { paneBlockId: string; visible?: boolean; ag
     let seq = 0;
     // The filter changed while the pane was hidden: the list shown is for the old one until it is shown again.
     let stale = false;
+    // A first-page request in flight: a periodic refresh waits for it, so a slow answer isn't superseded every
+    // five seconds and never shown. A filter change still supersedes it.
+    let refreshing = false;
 
     const loadFirst = async (quiet = false) => {
         const mine = ++seq;
+        refreshing = true;
         if (!quiet) setLoading(true);
         try {
             const res = await fetchAuditPage(buildRequest(untrack(filter), Date.now(), undefined, true));
@@ -66,7 +70,10 @@ export const AuditManager = (props: { paneBlockId: string; visible?: boolean; ag
         } catch (e) {
             if (mine === seq) setError(String(e));
         } finally {
-            if (mine === seq) setLoading(false);
+            if (mine === seq) {
+                setLoading(false);
+                refreshing = false;
+            }
         }
     };
 
@@ -75,6 +82,7 @@ export const AuditManager = (props: { paneBlockId: string; visible?: boolean; ag
         if (!next || loadingMore()) return;
         // Taking a number of its own drops a first-page refresh still in flight, which would overwrite what this adds.
         const mine = ++seq;
+        refreshing = false;
         setLoadingMore(true);
         try {
             const res = await fetchAuditPage(buildRequest(untrack(filter), Date.now(), next));
@@ -105,6 +113,7 @@ export const AuditManager = (props: { paneBlockId: string; visible?: boolean; ag
             () => {
                 // Whatever is loading, and the cursor of the old list, belongs to the old filter.
                 seq++;
+                refreshing = false;
                 setCursor(undefined);
                 if (props.visible ?? true) void loadFirst();
                 else stale = true;
@@ -117,7 +126,7 @@ export const AuditManager = (props: { paneBlockId: string; visible?: boolean; ag
     // you have scrolled back, the list stays where it is until the filter changes.
     pollWhileVisible(
         () => {
-            if (untrack(loadingMore)) return;
+            if (untrack(loadingMore) || refreshing) return;
             if (stale || untrack(entries).length <= AUDIT_PAGE) {
                 stale = false;
                 void loadFirst(true);

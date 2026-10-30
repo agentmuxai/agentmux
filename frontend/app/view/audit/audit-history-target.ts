@@ -14,6 +14,16 @@ export interface HistoryTarget {
     provider?: string;
     /** An archive's zone id; absent for the current conversation. */
     zone?: string;
+    /** False when the conversation holding the time can't be told: the reader opens at its end, not somewhere wrong. */
+    positioned: boolean;
+}
+
+/** The most archives one listing gives (newest first); an agent with more has older ones the listing leaves out. */
+export const ARCHIVE_LIST_CAP = 100;
+
+/** Whether the listing reaches back to `atMs`: a list cut at its cap may have left out the archive holding it. */
+export function archiveKnown(archives: { archived_at_ms: number }[], atMs: number): boolean {
+    return archives.length < ARCHIVE_LIST_CAP || atMs >= Math.min(...archives.map((a) => a.archived_at_ms));
 }
 
 /**
@@ -26,15 +36,16 @@ export function archiveAt(archives: { archive_zoneid: string; archived_at_ms: nu
 
 export async function resolveHistoryTarget(link: AuditHistoryLink): Promise<HistoryTarget> {
     const agentId = link.definition_id ?? link.agent_id;
-    const target: HistoryTarget = { agentId, agentName: link.agent_id, ...(link.zone ? { zone: link.zone } : {}) };
+    const target: HistoryTarget = { agentId, agentName: link.agent_id, positioned: true, ...(link.zone ? { zone: link.zone } : {}) };
     if (!link.definition_id) return target;
     const [agents, archives] = await Promise.all([
         RpcApi.HistoryAgentsCommand(TabRpcClient, {}).catch(() => null),
-        link.zone ? Promise.resolve(null) : RpcApi.AgentSessionListArchivesCommand(TabRpcClient, { definition_id: agentId, limit: 100 }).catch(() => null),
+        link.zone ? Promise.resolve(null) : RpcApi.AgentSessionListArchivesCommand(TabRpcClient, { definition_id: agentId, limit: ARCHIVE_LIST_CAP }).catch(() => null),
     ]);
     const known = agents?.agents.find((a) => a.definition_id === agentId);
     if (known?.provider) target.provider = known.provider;
-    const zone = archives ? archiveAt(archives, link.at_ms) : undefined;
+    if (archives && !archiveKnown(archives, link.at_ms)) target.positioned = false;
+    const zone = archives && target.positioned ? archiveAt(archives, link.at_ms) : undefined;
     if (zone) target.zone = zone;
     return target;
 }

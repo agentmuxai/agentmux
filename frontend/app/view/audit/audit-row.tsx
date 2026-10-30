@@ -31,7 +31,7 @@ export const AuditRow = (props: { entry: AuditEntry; now: number; paneBlockId: s
             agentId: target.agentId,
             agentName: target.agentName,
             provider: target.provider,
-            at: makeHistoryAt({ at_ms: link.at_ms, at_byte: link.at_byte, zone: target.zone }),
+            ...(target.positioned ? { at: makeHistoryAt({ at_ms: link.at_ms, at_byte: link.at_byte, zone: target.zone }) } : {}),
         });
     };
 
