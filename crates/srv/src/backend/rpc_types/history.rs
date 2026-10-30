@@ -129,6 +129,11 @@ pub struct HistoryUsage {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub compression: Option<HistoryCompression>,
+    /// Free space inside the shared pane-history store's file. Not in `total_bytes`
+    /// or in any store's `bytes`: the store reuses it, and a reclaim gives it back.
+    #[serde(default)]
+    #[ts(type = "number")]
+    pub reclaimable_bytes: u64,
 }
 
 /// `history.agents`'s request: the History pane lists every agent
