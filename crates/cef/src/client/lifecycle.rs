@@ -824,8 +824,8 @@ impl AgentMuxHandler {
         let is_external = crate::commands::platform::is_external_http_url(&url);
 
         // **Browser pane → a new window.** The page chose what it gets by what
-        // it asked for: popup features → a bare native popup window; a tab or
-        // a window → a browser pane beside it. Whether it's honored at all is
+        // it asked for: popup features → a bare native popup window; a tab → a
+        // pane tab of the opener, a window → a pane beside it. Whether it's honored at all is
         // `agentmux_common::popup_rules` (a click; its own site, a sign-in
         // provider, or an agent-owned pane; a cap). Anything not honored does
         // what it always did: a popup goes to the system browser, a link loads
@@ -922,7 +922,7 @@ impl AgentMuxHandler {
                     }
                     Route::Pane => {
                         if let Some(opener) = opener {
-                            self.offer_popup_as_pane(opener, opener_url, url, user_gesture);
+                            self.offer_popup_as_pane(opener, opener_url, url, user_gesture, asked);
                         }
                         return true;
                     }
@@ -994,12 +994,11 @@ impl AgentMuxHandler {
         origins
     }
 
-    /// Ask srv to open a popup from the browser pane `opener` as a pane beside
-    /// it; open it in the system browser if srv says no or can't be reached.
-    /// srv makes the call because only it knows whether an agent owns the
-    /// opener. The request runs on its own thread: `on_before_popup` holds
-    /// this handler's lock on the UI thread and must return at once.
-    fn offer_popup_as_pane(&self, opener: String, opener_url: String, url: String, user_gesture: bool) {
+    /// Ask srv to open a popup from the browser pane `opener` as a pane tab (a
+    /// new window: beside it); open it in the system browser if srv says no or
+    /// can't be reached. srv decides (it knows who owns the opener). Runs on its
+    /// own thread: `on_before_popup` holds the handler's lock on the UI thread.
+    fn offer_popup_as_pane(&self, opener: String, opener_url: String, url: String, user_gesture: bool, asked: super::popup_route::Asked) {
         let web_endpoint = self.state.backend_endpoints.lock().web_endpoint.clone();
         let auth_key = self.state.auth_key.lock().clone();
         let ipc_token = self.state.ipc_token.clone();
@@ -1008,6 +1007,7 @@ impl AgentMuxHandler {
             "opener_url": opener_url,
             "url": url,
             "user_gesture": user_gesture,
+            "asked": if asked == super::popup_route::Asked::Window { "window" } else { "tab" },
         });
         let fallback_url = url.clone();
         let spawned = std::thread::Builder::new().name("browser-popup".into()).spawn(move || {

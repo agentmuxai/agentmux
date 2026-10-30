@@ -1218,7 +1218,7 @@ pub(crate) fn owning_agent(block: &crate::backend::obj::Block, block_id: &str) -
 /// `POST /api/v1/host/browser_popup` — a browser pane's page opened a popup
 /// (docs/specs/SPEC_BROWSER_PANE_POPUPS_ADOPTED_2026_10_08.md). Only the host
 /// calls it, from `on_before_popup`. Answers `{admitted: true, pane}` when
-/// srv opened the popup as a pane beside its opener, or `{admitted: false,
+/// srv opened the popup as a pane tab (a window: beside its opener), or `{admitted: false,
 /// reason}`, and the host opens it in the system browser as it always did.
 pub(crate) async fn handle_host_browser_popup(
     State(state): State<AppState>,
@@ -1230,7 +1230,7 @@ pub(crate) async fn handle_host_browser_popup(
         return err_response(StatusCode::FORBIDDEN, "only the AgentMux host can report a popup".to_string());
     }
     let s = |k: &str| body.get(k).and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
-    let (opener, url, opener_url) = (s("opener"), s("url"), s("opener_url"));
+    let (opener, url, opener_url, as_window) = (s("opener"), s("url"), s("opener_url"), s("asked") == "window");
     let user_gesture = body.get("user_gesture").and_then(|v| v.as_bool()).unwrap_or(false);
     let refused = |reason: &str| {
         (StatusCode::OK, Json(json!({ "ok": true, "data": { "admitted": false, "reason": reason } }))).into_response()
@@ -1273,16 +1273,16 @@ pub(crate) async fn handle_host_browser_popup(
         cwd: None,
         title: None,
         tab_id: None,
-        split_direction: Some("right".to_string()),
-        split_reference_block_id: Some(opener.clone()),
+        split_direction: as_window.then(|| "right".to_string()),
+        split_reference_block_id: as_window.then(|| opener.clone()),
         // The person clicked: show them the popup. An agent's popup opens
-        // beside its pane without taking the person's focus, like OpenBrowser.
+        // without taking the person's focus, like OpenBrowser.
         focus: Some(owner.is_none()),
         tree_expanded: None,
         floating: None,
         meta: None,
         skip_placement: None,
-        stack_onto_block_id: None,
+        stack_onto_block_id: (!as_window).then(|| opener.clone()),
         connection: None,
         auth: None,
         ..Default::default()
