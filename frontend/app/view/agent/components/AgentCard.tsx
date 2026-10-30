@@ -136,7 +136,7 @@ export const AgentCard = (props: AgentCardProps): JSX.Element => {
     const hasAction = () => props.installed === false || (!!props.hasCurrentSession && !props.launching);
 
     // A narrow card shows two chips, the rest folding into "+N", and its corner action
-    // moves to its own line under them (the container query in _picker.scss).
+    // moves to its own line under them (`agent-card--narrow` in _picker.scss).
     const [narrow, setNarrow] = createSignal(false);
     let cardEl: HTMLDivElement | undefined;
     onMount(() => {
@@ -225,6 +225,7 @@ export const AgentCard = (props: AgentCardProps): JSX.Element => {
                 "agent-card--open": !!props.expanded,
                 "agent-card--has-tags": chipCount() > 0,
                 "agent-card--has-action": hasAction(),
+                "agent-card--narrow": narrow(),
             }}
             onClick={handleCardClick}
             onContextMenu={handleContextMenu}

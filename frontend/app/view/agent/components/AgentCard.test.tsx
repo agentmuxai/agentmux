@@ -359,6 +359,32 @@ describe("AgentCard tags", () => {
         expect(container.querySelector(".agent-card--has-action")).not.toBeNull();
     });
 
+    it("marks a card narrower than 300px, which folds the chips to two and gives its action its own line", () => {
+        let fire: ((width: number) => void) | undefined;
+        vi.stubGlobal(
+            "ResizeObserver",
+            class {
+                constructor(cb: (entries: { contentRect: { width: number } }[]) => void) {
+                    fire = (width) => cb([{ contentRect: { width } }]);
+                }
+                observe() {}
+                disconnect() {}
+            }
+        );
+        try {
+            const { container } = renderTags("opencode", { hasCurrentSession: true, drift: "behind-pin" });
+            expect(container.querySelector(".agent-card--narrow")).toBeNull();
+            expect(chipLabels(container).length).toBe(3);
+            fire!(250);
+            expect(container.querySelector(".agent-card--narrow")).not.toBeNull();
+            expect(chipLabels(container).length).toBeLessThanOrEqual(3);
+            fire!(400);
+            expect(container.querySelector(".agent-card--narrow")).toBeNull();
+        } finally {
+            vi.unstubAllGlobals();
+        }
+    });
+
     it("keeps the removed hand-rolled ribbon and badge classes gone", () => {
         const { container } = renderTags("opencode", { installed: false });
         expect(container.querySelector(".agent-card-install-ribbon")).toBeNull();

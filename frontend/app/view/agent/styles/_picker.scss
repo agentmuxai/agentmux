@@ -345,14 +345,15 @@
             margin-top: auto;
         }
 
-        // A narrow card: the corner action gets a line of its own under the chips, so a
-        // chip is never hidden under the ribbon.
-        @container (max-width: 300px) {
-            &.agent-card--has-action .agent-card-tags {
+        // A narrow card (AgentCard's ResizeObserver sets the class; a container query can't
+        // match the card, which is itself the container): the corner action gets a line of
+        // its own under the chips, so a chip is never hidden under the ribbon.
+        &.agent-card--narrow.agent-card--has-action {
+            .agent-card-tags {
                 margin-bottom: var(--space-4);
             }
 
-            &.agent-card--has-action.agent-card--has-tags {
+            &.agent-card--has-tags {
                 padding-bottom: calc(var(--space-4) + var(--space-3) + var(--space-4));
             }
         }
