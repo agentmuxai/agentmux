@@ -375,21 +375,25 @@
     }
 
     // Over the size cap: a card that opens the file in a Media pane.
-    .am-media-card,
-    .am-media-chip {
-        display: inline-flex;
-        align-items: center;
+    .ui-button.am-media-card,
+    .ui-button.am-media-chip {
+        --ui-fg: inherit;
+        --ui-fg-hover: inherit;
+        --ui-bg: color-mix(in srgb, var(--secondary-text-color) 8%, transparent);
+        --ui-bg-hover: color-mix(in srgb, var(--secondary-text-color) 16%, transparent);
+        --ui-line: color-mix(in srgb, var(--secondary-text-color) 35%, transparent);
+        --ui-line-hover: color-mix(in srgb, var(--secondary-text-color) 35%, transparent);
         gap: 0.5em;
+        min-height: 0;
         padding: 0.25em 0.7em;
-        border: 1px solid color-mix(in srgb, var(--secondary-text-color) 35%, transparent);
         border-radius: var(--radius-md);
-        background: color-mix(in srgb, var(--secondary-text-color) 8%, transparent);
-        color: inherit;
         font: inherit;
-        cursor: pointer;
+        font-weight: 400;
+        line-height: inherit;
+        white-space: normal;
 
-        &:hover {
-            background: color-mix(in srgb, var(--secondary-text-color) 16%, transparent);
+        i {
+            font-size: inherit;
         }
     }
 
@@ -398,9 +402,10 @@
     }
 
     // A remote image waiting for a click (§4.3).
-    .am-media-chip {
+    .ui-button.am-media-chip {
+        --ui-fg: var(--secondary-text-color);
+        --ui-fg-hover: var(--secondary-text-color);
         font-size: 0.9em;
-        color: var(--secondary-text-color);
     }
 
     // Video and audio (§5). A video keeps one 16:9 stage from placeholder to

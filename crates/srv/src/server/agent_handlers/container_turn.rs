@@ -66,7 +66,8 @@ impl ContainerStartup {
         filestore: Arc<crate::backend::storage::filestore::FileStore>,
         mstore: Arc<crate::backend::storage::store::Store>,
     ) -> Self {
-        let spec = ContainerSpec::of(block_meta, env_vars, working_dir);
+        let mut spec = ContainerSpec::of(block_meta, env_vars, working_dir);
+        spec.mount_spec.limits = crate::backend::container::limits::ContainerLimits::of_agent(&mstore, &crate::backend::obj::meta_get_string(block_meta, "agentId", ""));
         Self {
             cm,
             block_id: block_id.to_string(),

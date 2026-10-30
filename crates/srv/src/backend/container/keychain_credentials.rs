@@ -12,7 +12,7 @@
 //! The guards:
 //! - only the bound account's own entry is read or written, by the service name computed from its config dir;
 //!   nothing is searched or listed;
-//! - the staging folder is `<AgentMux root>/container-credentials/<container>` (`0700`, the file `0600`), never
+//! - the staging folder is `<AgentMux root>/container-credentials/<container>/<account>` (`0700`, the file `0600`), never
 //!   in the account's dir or the agent's workspace, and it is deleted with the container;
 //! - a refresh is written back only when the container's `.claude.json` names the same account as the host's
 //!   and the staged `expiresAt` is newer than the Keychain's;
@@ -100,9 +100,13 @@ fn host_account(config_dir: &str) -> (String, String) {
     account_in(&text)
 }
 
-/// The staging folder of `container_name` under the AgentMux `root`.
-pub(crate) fn staging_dir(root: &Path, container_name: &str) -> PathBuf {
-    root.join(STAGING_ROOT).join(container_name)
+/// The staging folder of the login of `config_dir` for `container_name`, under the AgentMux `root`. It is named by
+/// the account, so an agent bound to another account mounts another path: the container is then recreated (the
+/// mount source changed) and can't keep a bind to the previous account's file.
+pub(crate) fn staging_dir(root: &Path, container_name: &str, config_dir: &str) -> PathBuf {
+    use sha2::{Digest, Sha256};
+    let account = hex::encode(&Sha256::digest(config_dir.as_bytes())[..6]);
+    root.join(STAGING_ROOT).join(container_name).join(account)
 }
 
 #[cfg(unix)]
@@ -117,10 +121,11 @@ fn private(_: &Path, _: u32) -> std::io::Result<()> {
 
 fn create_private_dir(dir: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)?;
-    if let Some(parent) = dir.parent() {
-        private(parent, 0o700)?;
+    // The account's folder and the two above it (the container's, and the shared root of all of them).
+    for folder in dir.ancestors().take(3) {
+        private(folder, 0o700)?;
     }
-    private(dir, 0o700)
+    Ok(())
 }
 
 /// Writes `value` to `file`: in place when it exists, so a container that has it bind-mounted keeps seeing the
@@ -167,12 +172,13 @@ pub(crate) fn prepare(
     container_account: Option<&str>,
     moved: &mut dyn FnMut(Moved),
 ) -> Result<PathBuf, String> {
-    let dir = staging_dir(root, container_name);
+    let dir = staging_dir(root, container_name, config_dir);
     let file = dir.join(CLAUDE_CREDENTIALS_FILE);
-    // The agent was bound to another account since the login here was staged: what that account's login
-    // refreshed goes back to its own entry, then this account's login starts from its own entry.
-    if let Some(earlier) =
-        staged_config_dir(root, container_name).filter(|earlier| earlier != config_dir)
+    // The agent was bound to another account since: what that account's login refreshed goes back to its own
+    // entry, and its staged login is deleted unless a refresh is still pending (then it stays, unmounted).
+    for earlier in staged_config_dirs(root, container_name)
+        .into_iter()
+        .filter(|earlier| earlier != config_dir)
     {
         let _ = prepare(
             keychain,
@@ -182,7 +188,11 @@ pub(crate) fn prepare(
             container_account,
             &mut *moved,
         );
-        let _ = std::fs::remove_dir_all(&dir);
+        if refresh_pending(keychain, root, container_name, &earlier) {
+            tracing::warn!(container = container_name, "container agent: keeping the staged login of an account the agent is no longer bound to, it holds a refresh the Keychain doesn't have yet");
+        } else {
+            remove_staging(root, container_name, &earlier);
+        }
     }
     let service = service_name(config_dir);
     let (host_uuid, label) = host_account(config_dir);
@@ -268,41 +278,51 @@ pub(crate) fn prepare(
     }
 }
 
-/// The config dir an existing staging folder was made for, to sync it when its container goes.
-pub(crate) fn staged_config_dir(root: &Path, container_name: &str) -> Option<String> {
-    let text = std::fs::read_to_string(staging_dir(root, container_name).join(META_FILE)).ok()?;
-    serde_json::from_str::<Meta>(&text)
-        .ok()
-        .map(|m| m.config_dir)
+/// The config dirs that have a staged login for `container_name` (one per account it was bound to).
+pub(crate) fn staged_config_dirs(root: &Path, container_name: &str) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(root.join(STAGING_ROOT).join(container_name)) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter_map(|entry| std::fs::read_to_string(entry.path().join(META_FILE)).ok())
+        .filter_map(|text| serde_json::from_str::<Meta>(&text).ok())
+        .map(|meta| meta.config_dir)
+        .collect()
 }
 
-/// Whether the staged login holds a refresh that is not in the Keychain yet: it expires later than the Keychain's,
-/// or the Keychain can't be read to tell. Deleting the staged login then would lose a rotated token.
-pub(crate) fn refresh_pending(keychain: &dyn Keychain, root: &Path, container_name: &str) -> bool {
-    let Some(config_dir) = staged_config_dir(root, container_name) else {
-        return false;
-    };
-    let staged =
-        std::fs::read_to_string(staging_dir(root, container_name).join(CLAUDE_CREDENTIALS_FILE))
-            .ok()
-            .map(Zeroizing::new)
-            .and_then(|raw| expires_at(&raw));
+/// Whether the staged login of `config_dir` holds a refresh that is not in the Keychain yet: it expires later
+/// than the Keychain's, or the Keychain can't be read to tell. Deleting the staged login then would lose a
+/// rotated token.
+pub(crate) fn refresh_pending(
+    keychain: &dyn Keychain,
+    root: &Path,
+    container_name: &str,
+    config_dir: &str,
+) -> bool {
+    let staged = std::fs::read_to_string(
+        staging_dir(root, container_name, config_dir).join(CLAUDE_CREDENTIALS_FILE),
+    )
+    .ok()
+    .map(Zeroizing::new)
+    .and_then(|raw| expires_at(&raw));
     let Some(staged) = staged else { return false };
-    match keychain.read(&service_name(&config_dir)) {
+    match keychain.read(&service_name(config_dir)) {
         Err(_) => true,
         Ok(None) => false,
         Ok(Some(raw)) => expires_at(&raw).is_none_or(|kc| staged > kc),
     }
 }
 
-/// Deletes the staging folder of a removed container.
-pub(crate) fn remove_staging(root: &Path, container_name: &str) {
-    let dir = staging_dir(root, container_name);
+/// Deletes the staged login of `config_dir` for `container_name` (and the container's folder when it is empty).
+pub(crate) fn remove_staging(root: &Path, container_name: &str, config_dir: &str) {
+    let dir = staging_dir(root, container_name, config_dir);
     if dir.exists() {
         if let Err(e) = std::fs::remove_dir_all(&dir) {
             tracing::warn!(container = container_name, error = %e, "container agent: couldn't delete the staged login");
         }
     }
+    let _ = std::fs::remove_dir(root.join(STAGING_ROOT).join(container_name));
 }
 
 /// The account id in the `.claude.json` that a Docker archive download holds (a tar with that one file).
@@ -444,36 +464,38 @@ impl ContainerManager {
     /// still there to ask which account it is signed in as. Best effort; it never fails the removal.
     pub(crate) async fn write_back_keychain_login(&self, container_name: &str) {
         #[cfg(target_os = "macos")]
-        if let Some(config_dir) = agentmux_common::data_paths::agentmux_root()
-            .ok()
-            .and_then(|root| staged_config_dir(&root, container_name))
-        {
-            let _ = self.sync_keychain_login(container_name, &config_dir).await;
+        if let Ok(root) = agentmux_common::data_paths::agentmux_root() {
+            for config_dir in staged_config_dirs(&root, container_name) {
+                let _ = self.sync_keychain_login(container_name, &config_dir).await;
+            }
         }
         #[cfg(not(target_os = "macos"))]
         let _ = container_name;
     }
 
-    /// After a container is removed: deletes its staged login, unless it holds a refresh that did not reach the
-    /// Keychain (it stays until a later sync can write it back).
+    /// After a container is removed: deletes its staged logins, except one that holds a refresh that did not reach
+    /// the Keychain (it stays until a later sync can write it back).
     pub(crate) async fn drop_staged_keychain_login(&self, container_name: &str) {
         let Ok(root) = agentmux_common::data_paths::agentmux_root() else {
             return;
         };
-        #[cfg(target_os = "macos")]
-        {
-            let (root_for_check, name) = (root.clone(), container_name.to_string());
-            let pending = tokio::task::spawn_blocking(move || {
-                refresh_pending(&SecurityCli, &root_for_check, &name)
-            })
-            .await
-            .unwrap_or(true);
-            if pending {
-                tracing::warn!(container = container_name, "container agent: keeping the staged login, it holds a refresh the Keychain doesn't have yet");
-                return;
+        for config_dir in staged_config_dirs(&root, container_name) {
+            #[cfg(target_os = "macos")]
+            {
+                let (root_for_check, name, dir) =
+                    (root.clone(), container_name.to_string(), config_dir.clone());
+                let pending = tokio::task::spawn_blocking(move || {
+                    refresh_pending(&SecurityCli, &root_for_check, &name, &dir)
+                })
+                .await
+                .unwrap_or(true);
+                if pending {
+                    tracing::warn!(container = container_name, "container agent: keeping the staged login, it holds a refresh the Keychain doesn't have yet");
+                    continue;
+                }
             }
+            remove_staging(&root, container_name, &config_dir);
         }
-        remove_staging(&root, container_name);
     }
 
     /// The account id the container's own `.claude.json` names, or `None` when there is no container or file. Read
@@ -688,7 +710,7 @@ mod tests {
         let (result, moved) = run(&kc, &tmp, &config, None);
         assert!(result.unwrap_err().contains("no login in the Keychain"));
         assert!(moved.is_empty());
-        assert!(!staging_dir(&tmp.path().join("root"), "agentmux-c1").exists());
+        assert!(!staging_dir(&tmp.path().join("root"), "agentmux-c1", &config).exists());
         let kc = Fake::with(&service_name(&config), Some("not a login".into()));
         assert!(run(&kc, &tmp, &config, None).0.is_err());
     }
@@ -824,13 +846,17 @@ mod tests {
         let root = tmp.path().join("root");
         run(&kc, &tmp, &config, None).0.unwrap();
         assert_eq!(
-            staged_config_dir(&root, "agentmux-c1").as_deref(),
-            Some(config.as_str())
+            staged_config_dirs(&root, "agentmux-c1"),
+            vec![config.clone()]
         );
-        remove_staging(&root, "agentmux-c1");
-        assert!(!staging_dir(&root, "agentmux-c1").exists());
-        assert_eq!(staged_config_dir(&root, "agentmux-c1"), None);
-        remove_staging(&root, "agentmux-c1"); // already gone: fine
+        remove_staging(&root, "agentmux-c1", &config);
+        assert!(!staging_dir(&root, "agentmux-c1", &config).exists());
+        assert!(staged_config_dirs(&root, "agentmux-c1").is_empty());
+        assert!(
+            !root.join(STAGING_ROOT).join("agentmux-c1").exists(),
+            "the container's folder goes with its last login"
+        );
+        remove_staging(&root, "agentmux-c1", &config); // already gone: fine
     }
 
     /// Against the real login keychain, with an entry of its own that this test creates and deletes (never a
@@ -1038,22 +1064,22 @@ mod tests {
         let service = service_name(&config);
         let kc = Fake::with(&service, Some(login(100, "old")));
         assert!(
-            !refresh_pending(&kc, &root, "agentmux-c1"),
+            !refresh_pending(&kc, &root, "agentmux-c1", &config),
             "nothing staged"
         );
         let dir = run(&kc, &tmp, &config, None).0.unwrap();
         assert!(
-            !refresh_pending(&kc, &root, "agentmux-c1"),
+            !refresh_pending(&kc, &root, "agentmux-c1", &config),
             "staged equals the Keychain's"
         );
         std::fs::write(dir.join(".credentials.json"), login(300, "container")).unwrap();
         assert!(
-            refresh_pending(&kc, &root, "agentmux-c1"),
+            refresh_pending(&kc, &root, "agentmux-c1", &config),
             "the container refreshed and nothing was written back"
         );
         kc.unreadable.set(true);
         assert!(
-            refresh_pending(&kc, &root, "agentmux-c1"),
+            refresh_pending(&kc, &root, "agentmux-c1", &config),
             "can't tell: keep it"
         );
         kc.unreadable.set(false);
@@ -1061,7 +1087,7 @@ mod tests {
             .borrow_mut()
             .insert(service, login(300, "container"));
         assert!(
-            !refresh_pending(&kc, &root, "agentmux-c1"),
+            !refresh_pending(&kc, &root, "agentmux-c1", &config),
             "written back: safe to delete"
         );
     }
@@ -1077,40 +1103,64 @@ mod tests {
         )
         .unwrap();
         let config_b = config_b.to_string_lossy().into_owned();
+        let root = tmp.path().join("root");
         let (service_a, service_b) = (service_name(&config_a), service_name(&config_b));
         let kc = Fake::with(&service_a, Some(login(100, "a")));
-        let dir = run(&kc, &tmp, &config_a, None).0.unwrap();
-        std::fs::write(dir.join(".credentials.json"), login(300, "a-refreshed")).unwrap();
+        let dir_a = run(&kc, &tmp, &config_a, None).0.unwrap();
+        std::fs::write(dir_a.join(".credentials.json"), login(300, "a-refreshed")).unwrap();
+        assert_ne!(
+            staging_dir(&root, "agentmux-c1", &config_a),
+            staging_dir(&root, "agentmux-c1", &config_b),
+            "another account mounts another path, so the container is recreated"
+        );
 
-        // B has no login yet: nothing of A's is mounted for it, and A's refresh is not lost.
+        // B has no login yet: nothing of A's is offered for it, and A's refresh went back to A's entry.
         let (result, _) = run(&kc, &tmp, &config_b, Some(ACCOUNT));
         assert!(
             result.is_err(),
             "B has no login and A's is not offered in its place"
         );
-        assert_eq!(
-            kc.entries.borrow()[&service_a],
-            login(300, "a-refreshed"),
-            "A's refresh went back to A's entry"
+        assert_eq!(kc.entries.borrow()[&service_a], login(300, "a-refreshed"));
+        assert!(
+            !dir_a.exists(),
+            "A's refresh is in the Keychain, so its staged login is deleted"
         );
 
-        // B gets a login: the staged file is B's.
-        kc.entries
-            .borrow_mut()
-            .insert(service_b.clone(), login(50, "b"));
-        let dir = run(&kc, &tmp, &config_b, None).0.unwrap();
+        // B gets a login: the staged file is B's, at B's own path.
+        kc.entries.borrow_mut().insert(service_b, login(50, "b"));
+        let dir_b = run(&kc, &tmp, &config_b, None).0.unwrap();
+        assert_ne!(dir_b, dir_a);
         assert_eq!(
-            std::fs::read_to_string(dir.join(".credentials.json")).unwrap(),
+            std::fs::read_to_string(dir_b.join(".credentials.json")).unwrap(),
             login(50, "b")
         );
-        assert_eq!(
-            staged_config_dir(&tmp.path().join("root"), "agentmux-c1").as_deref(),
-            Some(config_b.as_str())
-        );
+        assert_eq!(staged_config_dirs(&root, "agentmux-c1"), vec![config_b]);
+    }
+
+    #[test]
+    fn an_old_accounts_pending_refresh_is_kept_when_the_agent_is_rebound() {
+        let (tmp, config_a) = setup();
+        let config_b = tmp.path().join("account-b").to_string_lossy().into_owned();
+        std::fs::create_dir_all(&config_b).unwrap();
+        let service_a = service_name(&config_a);
+        let kc = Fake::with(&service_a, Some(login(100, "a")));
+        kc.entries
+            .borrow_mut()
+            .insert(service_name(&config_b), login(50, "b"));
+        let dir_a = run(&kc, &tmp, &config_a, None).0.unwrap();
+        std::fs::write(dir_a.join(".credentials.json"), login(300, "a-refreshed")).unwrap();
+        // The container's account can't be told, so A's refresh can't be written back yet.
+        let dir_b = run(&kc, &tmp, &config_b, None).0.unwrap();
+        assert_ne!(dir_a, dir_b);
         assert_eq!(
             kc.entries.borrow()[&service_a],
+            login(100, "a"),
+            "not written back"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir_a.join(".credentials.json")).unwrap(),
             login(300, "a-refreshed"),
-            "A's entry is not touched again"
+            "kept, not deleted"
         );
     }
 }

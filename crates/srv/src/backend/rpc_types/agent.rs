@@ -1100,3 +1100,57 @@ pub struct ReseedAgentsResult {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandListHiddenTemplatesData {}
+
+/// Request for `getcontainerlimits`: the CPU and memory limits of the container agent whose uid is `agent_id`.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandGetContainerLimitsData {
+    pub agent_id: String,
+}
+
+/// Request for `setcontainerlimits`: sets what is given and leaves the other as it is. A value is `""` or `"auto"`
+/// (the app-wide setting, then a default from what Docker has), `"0"` (no limit), or a number: MB of memory, CPUs.
+/// `docs/specs/SPEC_CONTAINER_AGENT_RESOURCE_LIMITS_2026_10_29.md` §3.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandSetContainerLimitsData {
+    pub agent_id: String,
+    #[serde(default)]
+    #[ts(optional)]
+    pub memory_mb: Option<String>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub cpus: Option<String>,
+}
+
+/// A container agent's limits: what is set, what is in force and what Docker has.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct AgentContainerLimitsResult {
+    /// Memory as set for this agent: `""` auto, `"0"` no limit, else MB.
+    pub memory_mb: String,
+    /// CPUs as set for this agent: `""` auto, `"0"` no limit, else CPUs.
+    pub cpus: String,
+    /// Memory in force now, in MB (the agent's setting, else the app-wide setting, else the default); absent when it
+    /// is unlimited or Docker can't be asked.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub effective_memory_mb: Option<u64>,
+    /// CPUs in force now; absent when unlimited or Docker can't be asked.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub effective_cpus: Option<f64>,
+    /// All the memory Docker has (on Docker Desktop, the VM's), in MB.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub daemon_memory_mb: Option<u64>,
+    /// All the CPUs Docker has.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub daemon_cpus: Option<u32>,
+    /// After a change: whether the running container has the new limits (`false`: Docker refused them); absent when
+    /// there is no container yet (it takes them when it is made) or nothing changed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub applied: Option<bool>,
+}

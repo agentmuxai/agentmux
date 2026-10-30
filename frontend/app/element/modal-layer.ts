@@ -20,6 +20,7 @@ export type ModalLayerRequest =
     | BrowserAuthRequest
     | AgentSeatRequest
     | AgentEnvRequest
+    | AgentContainerLimitsRequest
     | AgentBundlesRequest
     | BundleImportSelectRequest
     | BundleImportPreviewRequest
@@ -75,6 +76,16 @@ export interface AgentSeatRequest {
  */
 export interface AgentEnvRequest {
     kind: "agent-env";
+    agentId: string;
+    agentName: string;
+}
+
+/**
+ * A container agent's CPU and memory limits, opened by "Container limits…" in its pane menu and by "Raise the limit"
+ * on an out-of-memory row (AgentContainerLimitsPanel).
+ */
+export interface AgentContainerLimitsRequest {
+    kind: "agent-container-limits";
     agentId: string;
     agentName: string;
 }

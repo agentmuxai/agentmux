@@ -9,6 +9,7 @@
 import type { JSX } from "solid-js";
 import { BrowserAuthModalPanel } from "@/app/view/browser/components/BrowserAuthModal";
 import { AgentBundlesTab } from "@/app/view/agent/components/AgentBundlesTab";
+import { AgentContainerLimitsPanel } from "@/app/view/agent/components/AgentContainerLimitsPanel";
 import { AgentEnvPanel } from "@/app/view/agent/components/AgentEnvPanel";
 import { AgentSeatPanel } from "@/app/view/agent/components/AgentSeatPanel";
 import { BundleImportSelectModalPanel } from "@/app/view/bundle/components/BundleImportSelectModal";
@@ -27,6 +28,8 @@ export function requestLabel(req: ModalLayerRequest): string {
             return `Seat — ${req.agentName}`;
         case "agent-env":
             return `Environment — ${req.agentName}`;
+        case "agent-container-limits":
+            return `Container limits — ${req.agentName}`;
         case "agent-bundles":
             return `Bundles — ${req.agentName}`;
         case "bundle-import-select":
@@ -67,6 +70,11 @@ export function renderRequest(
             return {
                 label: requestLabel(req),
                 panel: <AgentSeatPanel agentId={req.agentId} agentName={req.agentName} onClose={api.close} />,
+            };
+        case "agent-container-limits":
+            return {
+                label: requestLabel(req),
+                panel: <AgentContainerLimitsPanel agentId={req.agentId} agentName={req.agentName} onClose={api.close} />,
             };
         case "agent-env":
             return {
