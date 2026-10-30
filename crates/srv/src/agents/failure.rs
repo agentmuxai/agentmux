@@ -368,9 +368,13 @@ pub fn classify(
             &tail,
         );
     }
-    if hay.contains("model_context_window_exceeded")
-        || hay.contains("prompt is too long")
-        || (hay.contains("context") && (hay.contains("exceed") || hay.contains("window") || hay.contains("too long")))
+    // "Prompt is too long · automatic compaction failed: You've hit your weekly limit": the CLI
+    // couldn't compact because the account is out of quota, so the limit is the cause, and
+    // a move to an account with quota (failover) is what fixes it. It falls through to the limit below.
+    if !names_plan_limit(&hay)
+        && (hay.contains("model_context_window_exceeded")
+            || hay.contains("prompt is too long")
+            || (hay.contains("context") && (hay.contains("exceed") || hay.contains("window") || hay.contains("too long"))))
     {
         return build(
             FailureClass::ContextExceeded,
@@ -481,6 +485,17 @@ pub fn classify(
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Whether `hay` (lower-cased) says the plan itself is out: the phrases a usage limit uses, without
+/// the broad words (`quota`, `billing`, `insufficient`) the limit branch also takes.
+fn names_plan_limit(hay: &str) -> bool {
+    hay.contains("usage limit")
+        || hay.contains("weekly limit")
+        || hay.contains("hit your limit")
+        || hay.contains("hit your session limit")
+        || hay.contains("spend limit")
+        || hay.contains("out of credits")
+}
+
 fn build(
     code: FailureClass,
     title: &str,
@@ -739,6 +754,20 @@ mod tests {
             let f = classify(Some(1), None, stderr, None);
             assert_eq!(f.code, FailureClass::UsageLimit, "{stderr}");
             assert!(!f.retryable, "{stderr}");
+        }
+    }
+
+    /// A context failure whose compaction died on the plan's limit is the limit: failover moves the
+    /// agent, and the next turn compacts on an account with quota (seen on a container agent, 0.60.7).
+    #[test]
+    fn a_compaction_that_failed_on_the_weekly_limit_is_a_usage_limit() {
+        let stderr = "Prompt is too long · automatic compaction failed: You've hit your weekly limit · resets Nov 3";
+        let f = classify(Some(1), None, stderr, None);
+        assert_eq!(f.code, FailureClass::UsageLimit, "{f:?}");
+        assert!(!f.retryable);
+        // The same phrases with no limit in them are still the context window.
+        for plain in ["Prompt is too long", "model_context_window_exceeded", "automatic compaction failed: prompt is too long"] {
+            assert_eq!(classify(Some(1), None, plain, None).code, FailureClass::ContextExceeded, "{plain}");
         }
     }
 
