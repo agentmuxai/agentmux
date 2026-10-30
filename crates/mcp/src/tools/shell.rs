@@ -66,6 +66,10 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                     Some(v) => Some(serde_json::from_value(v.clone()).map_err(|_| anyhow::anyhow!("secret_files must be an object of environment variable names to Vault entry ids, e.g. {{\"GOOGLE_APPLICATION_CREDENTIALS\": \"api-key-gcp\"}}"))?),
                     None => None,
                 },
+                capture: match arguments.get("capture").filter(|v| !v.is_null()) {
+                    Some(v) => Some(serde_json::from_value(v.clone()).map_err(|e| anyhow::anyhow!("capture is a list of {{\"as\": {{\"kind\", \"label\"}} or {{\"id\"}}, \"from\": {{\"stdout\": \"all\"}} or {{\"json\": \"$.path\"}} or {{\"regex\": \"...(group)...\"}} or {{\"line\": n}}}}: {e}"))?),
+                    None => None,
+                },
             };
 
             let resp = client

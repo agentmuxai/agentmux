@@ -22,6 +22,7 @@ const entry = (fields: Record<string, string>): VaultEntryInfo => ({
     parts_set: ["value"],
     grants: [],
     tail: "ab12",
+    versions: 0,
     created_at: 0,
     updated_at: 0,
     last_used_at: 0,

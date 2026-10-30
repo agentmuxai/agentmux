@@ -54,6 +54,10 @@ pub struct ShellStatusInfo {
     pub tail: Option<Arc<Mutex<VecDeque<String>>>>,
     /// A line of `tail` was cut to the per-line limit: the output is not whole.
     pub tail_clipped: bool,
+    /// The entries a `capture` stored, once the job ended.
+    pub captured: Vec<String>,
+    /// Why a `capture` failed, and so why the output was withheld.
+    pub withheld: Option<String>,
 }
 
 /// Snapshot of one currently-running shell for the Swarm pane's per-agent
@@ -341,6 +345,9 @@ pub struct ShellNodeRunner {
     /// The folder of its Vault secret files, removed when this runner ends, however
     /// it ends.
     pub secret_dir: Option<crate::backend::vault::files::SecretDir>,
+    /// Values its output goes into the Vault as (`capture`): the output is held
+    /// until it ends, and published only once they are taken out of it.
+    pub capture: Option<crate::backend::vault::capture::Job>,
 }
 
 impl ShellNodeRunner {
@@ -480,8 +487,8 @@ impl ShellNodeRunner {
             cmd: self.cmd.clone(),
             title: self.title.clone(),
             started_at: now_ms(),
-            tail: self.scrubber.as_ref().map(|_| Arc::new(Mutex::new(VecDeque::new()))),
-            tail_clipped: false,
+            tail: (self.scrubber.is_some() || self.capture.is_some()).then(|| Arc::new(Mutex::new(VecDeque::new()))),
+            ..Default::default()
         }));
         let (cancel_tx, cancel_rx) = oneshot::channel::<()>();
         let evicted = self.registry.register_full(
@@ -536,29 +543,28 @@ impl ShellNodeRunner {
         drop(tx);
 
         let mut line_count: u64 = 0;
+        // With `capture`, nothing is published until the command has ended and the
+        // values are in the Vault: until then srv can't know which line holds one.
+        let mut held: Vec<Line> = Vec::new();
+        let mut held_bytes = 0usize;
+        let mut held_cut = false;
         while let Some((kind, content, ts)) = rx.recv().await {
             line_count += 1;
             status_arc.lock().line_count = line_count;
-            match &self.scrubber {
-                Some(s) => {
-                    let clean = s.scrub(&content);
-                    {
-                        let mut status = status_arc.lock();
-                        if clean.chars().count() > TAIL_LINE_CHARS {
-                            status.tail_clipped = true;
-                        }
-                        if let Some(tail) = &status.tail {
-                            let mut t = tail.lock();
-                            if t.len() >= TAIL_LINES {
-                                t.pop_front();
-                            }
-                            t.push_back(clean.chars().take(TAIL_LINE_CHARS).collect());
-                        }
-                    }
-                    publish_chunk(&broker, &block_id, &shell_id, kind, &clean, ts)
+            if self.capture.is_some() {
+                if held_bytes + content.len() + 1 > crate::backend::vault::capture::MAX_HELD {
+                    held_cut = true;
+                } else {
+                    held_bytes += content.len() + 1;
+                    held.push((kind, content, ts));
                 }
-                None => publish_chunk(&broker, &block_id, &shell_id, kind, &content, ts),
+                continue;
             }
+            let clean = match &self.scrubber {
+                Some(s) => s.scrub(&content),
+                None => std::borrow::Cow::Borrowed(content.as_str()),
+            };
+            emit(&status_arc, &broker, &block_id, &shell_id, kind, &clean, ts);
         }
 
         let _ = tokio::join!(t_stdout, t_stderr);
@@ -571,6 +577,10 @@ impl ShellNodeRunner {
             Ok(status) => status.code().unwrap_or(-1),
             Err(_) => -1,
         };
+
+        if let Some(job) = self.capture.take() {
+            self.publish_captured(job, held, held_cut, exit_code, &status_arc).await;
+        }
 
         let was_stopped = kill_task.await.unwrap_or(false);
         tracing::info!(shell_id = %shell_id, exit_code, was_stopped, line_count, "shell.exit");
@@ -585,6 +595,77 @@ impl ShellNodeRunner {
 
         publish_exit(&broker, &block_id, &shell_id, exit_code, was_stopped, now_ms());
     }
+}
+
+impl ShellNodeRunner {
+    /// Runs the capture on the held output, then publishes it cleaned of the
+    /// values, or, if the capture failed, one line saying it is withheld and why.
+    async fn publish_captured(&self, job: crate::backend::vault::capture::Job, held: Vec<(&'static str, String, u64)>, cut: bool, exit_code: i32, status: &Arc<Mutex<ShellStatusInfo>>) {
+        use crate::backend::vault::capture::Outcome;
+        let given = |line: &str| -> String {
+            match &self.scrubber {
+                Some(s) => s.scrub(line).into_owned(),
+                None => line.to_string(),
+            }
+        };
+        let stdout = zeroize::Zeroizing::new(held.iter().filter(|l| l.0 == "stdout").map(|l| l.1.as_str()).collect::<Vec<_>>().join("\n"));
+        let output = zeroize::Zeroizing::new(held.iter().map(|l| given(&l.1)).collect::<Vec<_>>().join("\n"));
+        let lines = held.len();
+        let (store, capture) = (job.store.clone(), job.capture.clone());
+        let outcome = tokio::task::spawn_blocking(move || capture.finish(&store, &stdout, &output, cut, exit_code))
+            .await
+            .unwrap_or_else(|e| Outcome::Withheld { why: format!("the capture stopped: {e}"), kept_as: None });
+        (job.changed)();
+        match outcome {
+            Outcome::Stored { ids, scrubber, short } => {
+                // The values it was given and the ones it printed, in one scrubber.
+                let all = match &self.scrubber {
+                    Some(given) => given.merged(&scrubber),
+                    None => scrubber,
+                };
+                match crate::backend::vault::capture::clean_held(&held, &all, &short) {
+                    Ok(lines) => {
+                        for (kind, clean, ts) in lines {
+                            emit(status, &self.broker, &self.block_id, &self.shell_id, kind, &clean, ts);
+                        }
+                    }
+                    Err(why) => {
+                        let line = format!("The values went into the Vault, but the output ({lines} lines) is withheld: {why}.");
+                        emit(status, &self.broker, &self.block_id, &self.shell_id, "system", &line, now_ms());
+                        status.lock().withheld = Some(why);
+                    }
+                }
+                status.lock().captured = ids;
+            }
+            Outcome::Withheld { why, kept_as } => {
+                let kept = match &kept_as {
+                    Some(id) => format!(" The person can open it in the Vault as [vault:{id}]."),
+                    None => String::new(),
+                };
+                let line = format!("The output ({lines} lines) is withheld: the capture failed: {why}.{kept}");
+                emit(status, &self.broker, &self.block_id, &self.shell_id, "system", &line, now_ms());
+                status.lock().withheld = Some(why);
+            }
+        }
+    }
+}
+
+/// Publishes one cleaned line, and keeps it in the job's tail when it has one.
+fn emit(status: &Arc<Mutex<ShellStatusInfo>>, broker: &Broker, block_id: &str, shell_id: &str, kind: &str, clean: &str, ts: u64) {
+    {
+        let mut s = status.lock();
+        if s.tail.is_some() && clean.chars().count() > TAIL_LINE_CHARS {
+            s.tail_clipped = true;
+        }
+        if let Some(tail) = &s.tail {
+            let mut t = tail.lock();
+            if t.len() >= TAIL_LINES {
+                t.pop_front();
+            }
+            t.push_back(clean.chars().take(TAIL_LINE_CHARS).collect());
+        }
+    }
+    publish_chunk(broker, block_id, shell_id, kind, clean, ts);
 }
 
 // Every shell_chunk / exit event is published under a SINGLE scope:
@@ -683,6 +764,7 @@ mod tests {
             scrubber: Some(Arc::new(Scrubber::new(&[("api-key-x".to_string(), VALUE.to_string())]))),
             stdin_once: None,
             secret_dir: None,
+            capture: None,
         };
         runner.run().await;
         let events = broker.read_event_history(crate::backend::mps::EVENT_SHELL_CHUNK, "shell:scrub-1", 20);
@@ -690,6 +772,60 @@ mod tests {
 ");
         assert!(text.contains("token=[vault:api-key-x]") && text.contains("fine"), "{text}");
         assert!(!text.contains(VALUE), "{text}");
+    }
+
+    // A real process too: `cargo test -p agentmux-srv --bin agentmux-srv a_runner_with_a_capture -- --ignored`.
+    #[tokio::test]
+    #[ignore]
+    async fn a_runner_with_a_capture_publishes_only_once_the_value_is_in_the_vault() {
+        use agentmux_common::api_types::{CaptureFrom, CaptureInto, CaptureRule};
+        use crate::backend::vault::{capture, seal};
+        const VALUE: &str = "ghp_abcdefgh12345678";
+        seal::use_test_key();
+        let store = Arc::new(crate::backend::storage::store::Store::open_in_memory().unwrap());
+        store.apply_identity_schema_for_tests().unwrap();
+        let run = |id: &str, pattern: &str| {
+            let rule = CaptureRule { into: CaptureInto { kind: Some("api-key".into()), label: Some(format!("Token {id}")), ..Default::default() }, from: CaptureFrom::Regex(pattern.into()) };
+            let cmd = format!("echo token={VALUE} && echo fine");
+            let plan = capture::plan(&store, &[rule], "Agent2-6", &cmd).unwrap();
+            ShellNodeRunner {
+                shell_id: id.into(),
+                block_id: "block-1".into(),
+                cmd,
+                title: "t".into(),
+                cwd: None,
+                launch: None,
+                askpass_secret: None,
+                extra_env: HashMap::new(),
+                broker: Arc::new(Broker::new()),
+                registry: ShellSessionRegistry::new(),
+                capture_stdin: false,
+                scrubber: None,
+                stdin_once: None,
+                secret_dir: None,
+                capture: Some(capture::Job { capture: plan, store: Arc::clone(&store), changed: Box::new(|| {}) }),
+            }
+        };
+        let published = |broker: &Broker, id: &str| {
+            let events = broker.read_event_history(crate::backend::mps::EVENT_SHELL_CHUNK, &format!("shell:{id}"), 20);
+            events.iter().map(|e| e.data.clone().unwrap_or_default().to_string()).collect::<Vec<_>>().join("\n")
+        };
+
+        let r = run("cap-1", r"token=(\S+)");
+        let (broker, registry) = (Arc::clone(&r.broker), Arc::clone(&r.registry));
+        r.run().await;
+        let text = published(&broker, "cap-1");
+        assert!(text.contains("token=[vault:api-key-token-cap-1]") && text.contains("fine"), "{text}");
+        assert!(!text.contains(VALUE), "{text}");
+        assert_eq!(registry.get_status("cap-1").captured, ["api-key-token-cap-1"]);
+
+        let r = run("cap-2", r"key=(\S+)");
+        let (broker, registry) = (Arc::clone(&r.broker), Arc::clone(&r.registry));
+        r.run().await;
+        let text = published(&broker, "cap-2");
+        assert!(text.contains("withheld: the capture failed: the regex matched nothing"), "{text}");
+        assert!(!text.contains(VALUE) && !text.contains("fine"), "{text}");
+        assert_eq!(registry.get_status("cap-2").withheld.as_deref(), Some("the regex matched nothing"));
     }
 
     use super::*;
