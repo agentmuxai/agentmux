@@ -6,7 +6,7 @@
 // (docs/specs/SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md).
 // scripts/check-ui-primitives.mjs counts what still doesn't.
 
-export { Button, IconButton, type ButtonProps, type IconButtonProps } from "./Button";
+export { Button, IconButton, type ButtonProps, type ButtonVariant, type IconButtonProps } from "./Button";
 export { Card, type CardProps } from "./Card";
 export { CardGrid, columnsFor, rowEnd, type CardGridProps } from "./CardGrid";
 export { Field, useField, type FieldProps } from "./Field";
