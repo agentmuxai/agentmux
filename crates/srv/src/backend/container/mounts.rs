@@ -40,8 +40,12 @@ pub(crate) fn personal_memory_host_dir(claude_config_dir: Option<&str>, working_
 impl ContainerMountSpec {
     /// What an agent started with `env_vars` in `working_dir` gets mounted: its bound
     /// account's credentials, its workspace, and, for an agent with a Claude config dir,
-    /// its Personal Memory.
+    /// its Personal Memory. A `~/...` working dir (what `agent.open` records for an agent with
+    /// none of its own) is expanded here, against the AgentMux home an isolated instance
+    /// overrides: Docker takes only an absolute bind source.
     pub(crate) fn for_agent(env_vars: &std::collections::HashMap<String, String>, working_dir: &str) -> Self {
+        let working_dir = crate::backend::base::expand_home_dir_safe(working_dir).to_string_lossy().into_owned();
+        let working_dir = working_dir.as_str();
         let config_dir = env_vars.get("CLAUDE_CONFIG_DIR").map(String::as_str).filter(|d| !d.is_empty());
         Self {
             claude_config_host_dir: config_dir.and_then(super::credentials_dir_if_file_backed),
@@ -259,6 +263,23 @@ mod tests {
         assert_eq!(std::path::Path::new(&got), expected);
         assert_eq!(personal_memory_host_dir(Some(&config.to_string_lossy()), ""), None);
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_tilde_working_dir_is_mounted_as_the_absolute_folder_it_names() {
+        let _guard = crate::test_support::ISOLATED_AUTH_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let fake = tempfile::tempdir().unwrap();
+        let prior = std::env::var_os("AGENTMUX_HOME_OVERRIDE");
+        std::env::set_var("AGENTMUX_HOME_OVERRIDE", fake.path());
+        let isolated = ContainerMountSpec::for_agent(&HashMap::new(), "~/.agentmux/agents/aria");
+        std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
+        let normal = ContainerMountSpec::for_agent(&HashMap::new(), "~/.agentmux/agents/aria");
+        if let Some(p) = prior {
+            std::env::set_var("AGENTMUX_HOME_OVERRIDE", p);
+        }
+        assert_eq!(isolated.workspace_host_dir.as_deref().map(std::path::Path::new), Some(fake.path().join("agents").join("aria").as_path()));
+        let normal = normal.workspace_host_dir.unwrap();
+        assert!(std::path::Path::new(&normal).is_absolute() && !normal.contains('~'), "{normal}");
     }
 
     #[test]
