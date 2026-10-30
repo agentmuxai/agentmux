@@ -1218,7 +1218,7 @@ pub(crate) fn owning_agent(block: &crate::backend::obj::Block, block_id: &str) -
 /// `POST /api/v1/host/browser_popup` — a browser pane's page opened a popup
 /// (docs/specs/SPEC_BROWSER_PANE_POPUPS_ADOPTED_2026_10_08.md). Only the host
 /// calls it, from `on_before_popup`. Answers `{admitted: true, pane}` when
-/// srv opened the popup as a pane beside its opener, or `{admitted: false,
+/// srv opened the popup as a pane tab (a window: beside its opener), or `{admitted: false,
 /// reason}`, and the host opens it in the system browser as it always did.
 pub(crate) async fn handle_host_browser_popup(
     State(state): State<AppState>,
