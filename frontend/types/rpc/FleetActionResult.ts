@@ -13,4 +13,9 @@ export type FleetActionResult = { succeeded: Array<string>, failed: Array<FleetA
  * remaining batches were skipped — lets the frontend show "aborted
  * early" distinctly from "ran to completion, some failed."
  */
-aborted_early: boolean, };
+aborted_early: boolean, 
+/**
+ * Blocks whose stop waits for the person's override window (an agent stopping another
+ * agent): not stopped yet, and not failed.
+ */
+pending: Array<string>, };
