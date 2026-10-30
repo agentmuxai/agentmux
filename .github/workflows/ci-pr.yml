@@ -235,9 +235,14 @@ jobs:
     # keep file and line, and the biggest part of codegen and link time for 18
     # large test binaries goes (docs/specs/SPEC_CI_MERGE_QUEUE_AND_FAST_GATES_2026_10_19.md
     # §5 Phase 4; ~4.5 of the ~6.5 nextest minutes were compiling).
+    #
+    # The Ubuntu leg has no debug info at all: its 16 GB were exhausted while rustc built the
+    # agentmux-srv test crate (it peaked at 14 GB with line tables), which shut the runner down
+    # (exit 143) on about 1 run in 9. A panic still prints its file and line; only a backtrace loses
+    # the lines of its frames.
     env:
-      CARGO_PROFILE_DEV_DEBUG: line-tables-only
-      CARGO_PROFILE_TEST_DEBUG: line-tables-only
+      CARGO_PROFILE_DEV_DEBUG: ${{ matrix.os == 'ubuntu-latest' && '0' || 'line-tables-only' }}
+      CARGO_PROFILE_TEST_DEBUG: ${{ matrix.os == 'ubuntu-latest' && '0' || 'line-tables-only' }}
     # Both legs block, per SPEC_CI_CHECK_PLACEMENT_PROTOCOL_2026_09_21.md R2.
     # Ubuntu used to be `continue-on-error` — it spent ~6 min on every PR and
     # could not fail one, while Windows (14-15 min, the slowest leg) was the
