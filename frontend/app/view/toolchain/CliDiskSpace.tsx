@@ -14,7 +14,7 @@ import { createSignal, For, Show, type JSX } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import type { ToolchainPruneResult } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { Button } from "@/app/element/ui";
+import { Button, SectionHeader } from "@/app/element/ui";
 
 /** `1.2 GB`, `340 MB`, `12 KB`. */
 export function formatBytes(n: number): string {
@@ -71,7 +71,7 @@ export const CliDiskSpace = (): JSX.Element => {
 
     return (
         <section class="toolchain-section" data-testid="cli-disk-space">
-            <h4 class="ui-card-group-heading">Old CLI versions</h4>
+            <SectionHeader variant="group" level={4} title="Old CLI versions" />
             <Show when={state().kind === "idle" || state().kind === "error"}>
                 <div class="toolchain-env-line">
                     Agent CLIs are kept after an upgrade. This lists the ones nothing has used for 30 days and nothing is

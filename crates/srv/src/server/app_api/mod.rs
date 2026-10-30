@@ -495,7 +495,7 @@ pub(super) fn same_pane_connection(a: &str, b: &str) -> bool {
 /// on what they capture — some clone the whole state into the closure, others
 /// clone `mstore` alone — and a borrowed `&AppState` cannot escape into a
 /// `'static` future.
-pub(super) fn check_s1(
+pub(crate) fn check_s1(
     store: &crate::backend::storage::store::Store,
     ctx: &RpcContext,
     req_agent_id: &str,
