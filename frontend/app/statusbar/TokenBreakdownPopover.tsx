@@ -164,8 +164,8 @@ export const TokenBreakdownPopover = (props: TokenBreakdownPopoverProps): JSX.El
                                 const row = createMemo<AgentUsage>((prev) => rowById().get(id) ?? prev);
                                 const agentCacheRate = createMemo(() => getAgentCacheHitRate(row()));
                                 return (
-                                    <button
-                                        type="button"
+                                    <Button
+                                        tone="quiet"
                                         class="token-usage-breakdown-row token-usage-breakdown-agent-row"
                                         onClick={() => handleAgentClick(row())}
                                         title={`Click to focus ${row().agentName}'s pane`}
@@ -194,15 +194,15 @@ export const TokenBreakdownPopover = (props: TokenBreakdownPopoverProps): JSX.El
                                             <span class="token-usage-indicator-arrow">↓</span>
                                             {formatCompactNumber(row().output)}
                                         </span>
-                                    </button>
+                                    </Button>
                                 );
                             }}
                         </For>
                         <Show when={ambientRow()}>
                             {(row) => (
                                 <div class="token-usage-breakdown-ambient">
-                                    <button
-                                        type="button"
+                                    <Button
+                                        tone="quiet"
                                         class="token-usage-breakdown-row token-usage-breakdown-ambient-toggle"
                                         onClick={() => setAmbientExpanded(!ambientExpanded())}
                                         aria-expanded={ambientExpanded()}
@@ -217,7 +217,7 @@ export const TokenBreakdownPopover = (props: TokenBreakdownPopoverProps): JSX.El
                                             <span class="token-usage-indicator-arrow">↓</span>
                                             {formatCompactNumber(row().output)}
                                         </span>
-                                    </button>
+                                    </Button>
                                     <Show when={ambientExpanded()}>
                                         <div class="token-usage-breakdown-ambient-detail">
                                             <For each={serviceRowsOf(row())}>

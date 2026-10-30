@@ -10,7 +10,7 @@
  */
 
 import { createSignal, For, Show, type JSX } from "solid-js";
-import { Card, CardGrid, IconButton } from "@/app/element/ui";
+import { Button, Card, CardGrid, IconButton } from "@/app/element/ui";
 import { ProviderLogo } from "@/element/ProviderLogo";
 import type { AccountKind, AccountProvider, IdentityViewModel } from "@/app/view/identity/identity-model";
 import { SERVICE_CATALOG, modeLabel, type AuthMode, type ServiceTile } from "./accounts-catalog";
@@ -115,14 +115,14 @@ export function AccountsGallery(props: {
                                     {(mode) => {
                                         const m = modeLabel(mode);
                                         return (
-                                            <button
-                                                type="button"
+                                            <Button
+                                                tone="neutral"
                                                 class="accounts-chooser-mode"
                                                 onClick={() => pick(tile(), mode)}
                                             >
                                                 <span class="accounts-chooser-mode-title">{m.title}</span>
                                                 <span class="accounts-chooser-mode-sub">{m.sub}</span>
-                                            </button>
+                                            </Button>
                                         );
                                     }}
                                 </For>
