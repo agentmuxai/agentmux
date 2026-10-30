@@ -13,7 +13,7 @@
 import { createSignal, For, onMount, Show, type JSX } from "solid-js";
 
 import { Button } from "@/element/button";
-import { Button, IconButton } from "@/app/element/ui";
+import { Button as UiButton, IconButton } from "@/app/element/ui";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { BundleImportSelectionState, BundleImportSkillSelectionState } from "@/app/element/modal-layer";
@@ -135,13 +135,13 @@ export const BundleImportPreviewModalPanel = (
                     <Show when={preview.name_collision}>
                         <div class="bundle-import-hint">
                             A bundle named this already exists.{" "}
-                            <Button
+                            <UiButton
                                 variant="link"
                                 tone="accent"
                                 onClick={() => setBundleName(suggestedAltName())}
                             >
                                 Use "{suggestedAltName()}" instead
-                            </Button>
+                            </UiButton>
                         </div>
                     </Show>
                 </label>
@@ -157,13 +157,13 @@ export const BundleImportPreviewModalPanel = (
                     </label>
                     <Show when={includeInstructions() && preview.instructions_preview}>
                         <div class="bundle-import-instructions-preview">
-                            <Button
+                            <UiButton
                                 variant="link"
                                 tone="accent"
                                 onClick={() => setInstructionsExpanded((v) => !v)}
                             >
                                 {instructionsExpanded() ? "Hide" : "Show"} preview
-                            </Button>
+                            </UiButton>
                             <Show when={instructionsExpanded()}>
                                 <pre class="bundle-import-instructions-text">{preview.instructions_preview}</pre>
                                 <Show when={preview.instructions_truncated}>
