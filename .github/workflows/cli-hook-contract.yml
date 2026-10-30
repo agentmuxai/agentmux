@@ -44,7 +44,7 @@ jobs:
             - uses: actions/setup-node@v4
               with:
                   node-version: "24"
-            - uses: dtolnay/rust-toolchain@stable
+            - uses: dtolnay/rust-toolchain@1.99.1
             - uses: Swatinem/rust-cache@v2
               with:
                   shared-key: cli-hook-contract
