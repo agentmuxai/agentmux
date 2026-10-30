@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import clsx from "clsx";
-import { createContext, createSignal, createUniqueId, For, type JSX, Show, splitProps, useContext } from "solid-js";
+import { createContext, createMemo, createSignal, createUniqueId, For, type JSX, Show, splitProps, useContext } from "solid-js";
 
 import { Tooltip } from "@/app/element/tooltip";
 import { TAG_GROUPS, type TagGroup, type TagTone } from "./tag-tokens";
@@ -95,9 +95,11 @@ function DetailedChip(props: { class: string; detail: JSX.Element; children: JSX
     // leaves or the chip is touched again.
     const [dismissed, setDismissed] = createSignal(false);
     const descId = `ui-tag-detail-${createUniqueId()}`;
+    // The one rendering that sits in the page as the hidden description.
+    const description = createMemo(() => props.detail);
     return (
         <Tooltip
-            content={<div class="ui-tag-detail">{copyOf(props.detail)}</div>}
+            content={<div class="ui-tag-detail">{copyOf(props.detail, description())}</div>}
             placement="top"
             forceOpen={pinned()}
             disable={dismissed()}
@@ -133,19 +135,24 @@ function DetailedChip(props: { class: string; detail: JSX.Element; children: JSX
             </span>
             {/* Outside the chip, so the detail is read once (as its description), not also as its name. */}
             <span id={descId} class="ui-tag-sr">
-                {props.detail}
+                {description()}
             </span>
         </Tooltip>
     );
 }
 
 /**
- * A second copy of `detail` for the tooltip. The page keeps the original as the hidden description, and a
- * DOM node given to two places is moved, not copied, so opening the tooltip would empty the description.
+ * The tooltip's own rendering of `detail`. JSX written in the `detail` prop is built afresh on every
+ * read, so the tooltip gets its own live copy and keeps updating. Only a node stored in a variable
+ * and passed in is the same node as the hidden description, and a DOM node given to two places is
+ * moved, not copied (opening the tooltip would empty the description), so that one is cloned: a
+ * snapshot, so keep live content inline in the prop or pass it as a function.
  */
-function copyOf(detail: JSX.Element): JSX.Element {
-    if (typeof Node !== "undefined" && detail instanceof Node) return detail.cloneNode(true) as unknown as JSX.Element;
-    if (Array.isArray(detail)) return detail.map(copyOf);
+function copyOf(detail: JSX.Element, described: JSX.Element): JSX.Element {
+    if (Array.isArray(detail)) return detail.map((d, i) => copyOf(d, Array.isArray(described) ? described[i] : null));
+    if (typeof Node !== "undefined" && detail instanceof Node && detail === described) {
+        return detail.cloneNode(true) as unknown as JSX.Element;
+    }
     return detail;
 }
 

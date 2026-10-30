@@ -157,6 +157,20 @@ describe("Tag", () => {
             expect(hidden.textContent).toBe("Checked 3 days ago");
         });
 
+        it("a detail written in the prop keeps updating in the tooltip and in the description", async () => {
+            const [status, setStatus] = createSignal("fresh");
+            render(() => <Tag detail={<b>{status()}</b>}>Free</Tag>);
+            const tag = screen.getByText("Free").closest(".ui-tag") as HTMLElement;
+            const hidden = document.getElementById(tag.getAttribute("aria-describedby")!)!;
+            fireEvent.focus(tag);
+            await tick();
+            expect(document.querySelector(".ui-tag-detail")?.textContent).toBe("fresh");
+            setStatus("stale");
+            await tick();
+            expect(document.querySelector(".ui-tag-detail")?.textContent).toBe("stale");
+            expect(hidden.textContent).toBe("stale");
+        });
+
         it("a tap pins the detail open and Escape closes it", async () => {
             render(() => <Tag detail="More">Free</Tag>);
             const tag = screen.getByText("Free").closest(".ui-tag") as HTMLElement;
