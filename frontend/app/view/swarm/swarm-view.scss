@@ -653,6 +653,8 @@
 
 .swarm-shell-stop {
     flex-shrink: 0;
+    // The kit's hover colour; Stop reads red when the pointer is on it.
+    --ui-fg-hover: var(--error-text-color);
     opacity: 0;
     transition: opacity var(--duration-decorative-base) var(--ease-standard);
 }
@@ -664,6 +666,9 @@
 .swarm-shell-stop:hover,
 .swarm-shell-stop:focus-visible {
     opacity: 1;
+}
+
+.swarm-shell-stop:focus-visible {
     color: var(--error-text-color);
 }
 
