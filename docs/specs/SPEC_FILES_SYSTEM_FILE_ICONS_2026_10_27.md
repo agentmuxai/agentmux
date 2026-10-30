@@ -102,7 +102,7 @@ System icons are full-colour bitmaps drawn for light and dark backgrounds alike;
 - **Only pixels cross.** The routes return PNG (or an SVG from the icon theme on Linux, served only as an `<img>`, which cannot run script). No file contents, no path echoed back, no error text beyond a status code. Decoding and shell calls happen in the helper or in srv, never in the page.
 - **Nothing the page couldn't already do.** `stream-local-file` already serves any readable local file to a page holding the instance key; the thumbnail route reads strictly less (a few KB of derived pixels) under the same authentication. It adds no new principal and no new reach.
 - **No path widening:** `file-icon` takes no path at all; `file-thumb` takes an absolute path that must exist, be a regular file or folder, be local (not UNC, not network), have no NUL, be canonicalised before use, and the `px`, `ext` and `kind` are enumerated. The helper never opens a file for writing and never follows a placeholder's data.
-- **Agent-opened Filess are the same code with the same limits:** an agent can navigate and select (`OpenFiles`) but cannot ask for anything the page itself can't; the routes have no agent-callable RPC.
+- **Agent-opened Files panes are the same code with the same limits:** an agent can navigate and select (`OpenFiles`) but cannot ask for anything the page itself can't; the routes have no agent-callable RPC.
 - **Disk cache = a copy of the user's pictures at small size.** It sits under the user's own AgentMux data directory (user-only permissions on every OS), is capped and expires, can be cleared, is not synced, not backed up by AgentMux and never contains remote files (§7). Windows' own `thumbcache` already holds the same thumbnails for Explorer, so reusing it adds nothing new. A privacy-minded user sets `files:thumbnails = off` and gets icons only.
 - **Third-party code isolation** is the reason for the helper (§4.2); a handler that hangs costs one 3 s timeout and one respawn.
 - **Rate and size limits:** at most 6 in flight per page, 2 helper workers, queue of 64 then `503`; response bodies capped at 256×256 RGBA.
@@ -150,7 +150,7 @@ P1 alone answers "the same icons as Explorer" for everyday files; P2 is what mak
 ## 12. Edge cases
 
 - **No shell icon available** (a locked-down profile, helper cannot start): the glyph stays; one `warn` per session, no retry storm.
-- **Two Filess, one folder:** one request per key (the routes and the page cache are shared).
+- **Two Files panes, one folder:** one request per key (the routes and the page cache are shared).
 - **Dark/light theme switch:** nothing to redo; icons are theme-independent. Switching `files:icons` swaps the render, no restart.
 - **A file replaced with the same `mtime` and `len`:** keeps its old thumbnail (the same trade-off Explorer makes).
 - **Very large images** (above the decoder limits): type icon, not a failure row.
