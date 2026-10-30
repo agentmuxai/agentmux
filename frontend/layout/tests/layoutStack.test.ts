@@ -1618,7 +1618,7 @@ describe("minimizing next to a minimized pane (merge)", () => {
     it("a minimize with no minimized neighbour minimizes as before", () => {
         const model = fourPanes();
 
-        model.minimizeNodeToggle(idOf(model, "b1"));
+        model.minimizeNodeToggle(idOf(model, "b1"), { chip: true });
 
         expect(getNodeByBlockId(model, "b1")!.minimized).toBe(true);
         expect(leaves(model)).toHaveLength(4);
@@ -1627,7 +1627,7 @@ describe("minimizing next to a minimized pane (merge)", () => {
 
     it("moves every tab of the pane to the end of the minimized neighbour's strip and leaves no chip of its own", async () => {
         const model = fourPanes();
-        model.minimizeNodeToggle(idOf(model, "a1"));
+        model.minimizeNodeToggle(idOf(model, "a1"), { chip: true });
 
         model.minimizeNodeToggle(idOf(model, "b1"));
         await settle();
@@ -1646,7 +1646,7 @@ describe("minimizing next to a minimized pane (merge)", () => {
 
     it("scrolls the target's strip to the arrived pills when it overflows, after the landing bounce", () => {
         const model = fourPanes();
-        model.minimizeNodeToggle(idOf(model, "a1"));
+        model.minimizeNodeToggle(idOf(model, "a1"), { chip: true });
         const pane = document.createElement("div");
         pane.dataset.role = "pane";
         pane.dataset.blockid = "a2";
@@ -1677,7 +1677,7 @@ describe("minimizing next to a minimized pane (merge)", () => {
 
     it("travels copies of the pills from the merged pane's header, hides the real ones meanwhile, then bounces them", () => {
         const model = fourPanes();
-        model.minimizeNodeToggle(idOf(model, "a1"));
+        model.minimizeNodeToggle(idOf(model, "a1"), { chip: true });
         const makePane = (blockId: string, ids: string[], left: number) => {
             const pane = document.createElement("div");
             pane.dataset.role = "pane";
@@ -1736,7 +1736,7 @@ describe("minimizing next to a minimized pane (merge)", () => {
 
     it("keeps the target's visible tab", () => {
         const model = fourPanes();
-        model.minimizeNodeToggle(idOf(model, "a1"));
+        model.minimizeNodeToggle(idOf(model, "a1"), { chip: true });
         const before = getNodeByBlockId(model, "a1")!.data!.activeBlockId;
 
         model.minimizeNodeToggle(idOf(model, "b1"));
@@ -1746,8 +1746,8 @@ describe("minimizing next to a minimized pane (merge)", () => {
 
     it("merges into the minimized neighbour that is adjacent, not one past an expanded pane", () => {
         const model = fourPanes();
-        model.minimizeNodeToggle(idOf(model, "a1"));
-        model.minimizeNodeToggle(idOf(model, "d1"));
+        model.minimizeNodeToggle(idOf(model, "a1"), { chip: true });
+        model.minimizeNodeToggle(idOf(model, "d1"), { chip: true });
 
         model.minimizeNodeToggle(idOf(model, "c1"));
 
@@ -1758,9 +1758,9 @@ describe("minimizing next to a minimized pane (merge)", () => {
 
     it("does not merge when the only minimized pane is past an expanded one", () => {
         const model = fourPanes();
-        model.minimizeNodeToggle(idOf(model, "a1"));
+        model.minimizeNodeToggle(idOf(model, "a1"), { chip: true });
 
-        model.minimizeNodeToggle(idOf(model, "c1")); // b1 is expanded between a1 and c1
+        model.minimizeNodeToggle(idOf(model, "c1"), { chip: true }); // b1 is expanded between a1 and c1
 
         expect(getNodeByBlockId(model, "c1")!.minimized).toBe(true);
         expect(leaves(model)).toHaveLength(4);
@@ -1769,7 +1769,8 @@ describe("minimizing next to a minimized pane (merge)", () => {
 
     it("still refuses to minimize the last expanded pane", () => {
         const model = fourPanes();
-        for (const id of ["a1", "b1", "c1"]) model.minimizeNodeToggle(idOf(model, id));
+        model.minimizeNodeToggle(idOf(model, "a1"), { chip: true });
+        for (const id of ["b1", "c1"]) model.minimizeNodeToggle(idOf(model, id));
 
         model.minimizeNodeToggle(idOf(model, "d1"));
 
@@ -1779,8 +1780,8 @@ describe("minimizing next to a minimized pane (merge)", () => {
 
     it("restores a minimized pane instead of merging it", () => {
         const model = fourPanes();
-        model.minimizeNodeToggle(idOf(model, "a1"));
-        model.minimizeNodeToggle(idOf(model, "c1"));
+        model.minimizeNodeToggle(idOf(model, "a1"), { chip: true });
+        model.minimizeNodeToggle(idOf(model, "c1"), { chip: true });
 
         model.minimizeNodeToggle(idOf(model, "a1"));
 
@@ -1790,7 +1791,7 @@ describe("minimizing next to a minimized pane (merge)", () => {
 
     it("never merges for the layout intent itself (what an agent's minimize and a layout load apply)", () => {
         const model = fourPanes();
-        model.minimizeNodeToggle(idOf(model, "a1"));
+        model.minimizeNodeToggle(idOf(model, "a1"), { chip: true });
 
         model.treeReducer({ type: LayoutTreeActionType.Minimize, nodeId: idOf(model, "b1") } as any);
 
@@ -1800,7 +1801,7 @@ describe("minimizing next to a minimized pane (merge)", () => {
 
     it("a maximized pane minimized from the header ends the maximize and merges", () => {
         const model = fourPanes();
-        model.minimizeNodeToggle(idOf(model, "a1"));
+        model.minimizeNodeToggle(idOf(model, "a1"), { chip: true });
         const b = idOf(model, "b1");
         model.magnifyNodeToggle(b);
         expect(model.treeState.magnifiedNodeId).toBe(b);
@@ -1810,6 +1811,57 @@ describe("minimizing next to a minimized pane (merge)", () => {
         expect(model.treeState.magnifiedNodeId).toBeUndefined();
         expect(effectiveStack(getNodeByBlockId(model, "a1")!.data!)).toEqual(["a1", "a2", "b1", "b2"]);
         expect(leaves(model)).toHaveLength(3);
+    });
+
+    it("with no minimized neighbour, merges into the nearest expanded pane after it as background tabs", () => {
+        const model = fourPanes();
+
+        model.minimizeNodeToggle(idOf(model, "b1"));
+
+        const target = getNodeByBlockId(model, "c1")!;
+        expect(effectiveStack(target.data!)).toEqual(["c1", "b1", "b2"]);
+        expect(target.data!.activeBlockId).toBe("c1"); // the target keeps showing
+        expect(target.minimized).toBeUndefined();
+        expect(getNodeByBlockId(model, "b1")).toBe(target);
+        expect(leaves(model)).toHaveLength(3);
+    });
+
+    it("the last pane of a split merges into the expanded pane before it", () => {
+        const model = fourPanes();
+
+        model.minimizeNodeToggle(idOf(model, "d1"));
+
+        expect(effectiveStack(getNodeByBlockId(model, "c1")!.data!)).toEqual(["c1", "d1"]);
+        expect(leaves(model)).toHaveLength(3);
+    });
+
+    it("the first pane of a split merges into the expanded pane after it", () => {
+        const model = fourPanes();
+
+        model.minimizeNodeToggle(idOf(model, "a1"));
+
+        expect(effectiveStack(getNodeByBlockId(model, "b1")!.data!)).toEqual(["b1", "b2", "a1", "a2"]);
+        expect(leaves(model)).toHaveLength(3);
+    });
+
+    it("skips a minimized pane to merge into the nearest expanded one", () => {
+        const model = fourPanes();
+        model.minimizeNodeToggle(idOf(model, "c1"), { chip: true });
+
+        model.minimizeNodeToggle(idOf(model, "d1")); // c1 is a chip and adjacent: joins it
+
+        expect(effectiveStack(getNodeByBlockId(model, "c1")!.data!)).toEqual(["c1", "d1"]);
+        expect(getNodeByBlockId(model, "c1")!.minimized).toBe(true);
+    });
+
+    it("the chip option keeps today's header chip even next to an expanded pane", () => {
+        const model = fourPanes();
+
+        model.minimizeNodeToggle(idOf(model, "b1"), { chip: true });
+
+        expect(getNodeByBlockId(model, "b1")!.minimized).toBe(true);
+        expect(leaves(model)).toHaveLength(4);
+        expect(paneCommands()).toHaveLength(0);
     });
 });
 
