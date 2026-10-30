@@ -17,6 +17,7 @@ import type { LaunchPhase } from "../flows/launch-phase";
 import { rowStatusWords } from "../status/row-status";
 import { absorbedSummary, TRIGGER_LEAD_IN_MS, triggerLeadIn, workedVerb } from "../turn-trigger-text";
 import { Button } from "@/app/element/ui/Button";
+import { Tooltip } from "@/app/element/tooltip";
 import { fmtOutputTokens, fmtTurnTokens, ingToEd, pickThinkingPhrase } from "./status-formatters";
 
 // ── AgentWorkingRow ───────────────────────────────────────────────────────────
@@ -412,10 +413,7 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
                 <span class="agent-working-row-left">
                     <span class="agent-working-row-primary">{leftText().slice(0, revealed())}</span>
                 </span>
-                <span
-                    class="agent-working-row-right"
-                    title={compactionTitle()}
-                >
+                <Tooltip divClassName="agent-working-row-right" content={compactionTitle()} disable={!compactionTitle()}>
                     {rightText()}
                     <Show when={showCancelLogin()}>
                         <Button
@@ -426,7 +424,7 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
                             Cancel
                         </Button>
                     </Show>
-                </span>
+                </Tooltip>
                 <Show when={compactionBar()}>
                     {(bar) => (
                         <span

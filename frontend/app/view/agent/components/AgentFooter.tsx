@@ -7,7 +7,7 @@
  */
 
 
-import { Show, createMemo, createSignal, on, onCleanup, onMount, type JSX } from "solid-js";
+import { Show, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 import { getVoiceSession, type PaneVoiceHandle } from "@/app/hook/useVoiceInput";
 import { markEnd, markStart } from "@/perf";
 import { getSettingsKeyAtom, pushNotification } from "@/app/store/global";
