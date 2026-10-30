@@ -1274,9 +1274,8 @@ impl Handler {
         // also lands the message mid-turn (steering) instead of waiting for idle.
         // PTY-based shell/term agents report back so we fall through to keystrokes.
         if let Some(ref deliver) = self.message_sender {
-            let origin = super::sanitize::jekt_origin(&req, effective_tier, delivery_tier, &request_id, now as i64);
             let joins_turn = super::turn_audit::turn_in_flight(&block_id);
-            match deliver(&block_id, &final_msg, req.files_delivery.as_ref().map_or(&[][..], |d| &d.inline), &origin) {
+            match deliver(&block_id, &final_msg, req.files_delivery.as_ref().map_or(&[][..], |d| &d.inline), &super::sanitize::jekt_origin(&req, effective_tier, delivery_tier, &request_id, now as i64)) {
                 Ok(outcome @ (SenderDelivery::Delivered | SenderDelivery::Deferred)) => {
                     let deferred = outcome == SenderDelivery::Deferred;
                     self.delivery_turn = Some(if joins_turn && !deferred { "joined" } else { "started" });

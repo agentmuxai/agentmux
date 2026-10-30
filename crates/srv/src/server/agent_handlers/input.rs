@@ -4,7 +4,6 @@
 use std::sync::Arc;
 
 use crate::backend::blockcontroller;
-use crate::backend::message_origin::{MessageOrigin, RecordOrigin};
 use crate::backend::obj::Block;
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::{
@@ -714,7 +713,7 @@ pub async fn run_agent_turn(
     message: String,
     message_id: Option<String>,
     registration: TurnRegistration,
-    from: MessageOrigin,
+    from: crate::backend::message_origin::MessageOrigin,
     attachments: Vec<AttachmentRef>,
 ) -> Result<(), String> {
     run_agent_turn_joining(deps, block_id, message, message_id, registration, from, attachments, None).await
@@ -730,7 +729,7 @@ pub async fn run_agent_turn_joining(
     message: String,
     message_id: Option<String>,
     registration: TurnRegistration,
-    from: MessageOrigin,
+    from: crate::backend::message_origin::MessageOrigin,
     attachments: Vec<AttachmentRef>,
     joins_turn: Option<u64>,
 ) -> Result<(), String> {
@@ -958,8 +957,7 @@ pub async fn run_agent_turn_joining(
         crate::backend::attachments::prompt::append(&message, &prepared.list)
     };
     let (message, held_notes) = crate::backend::reactive::held_notes::attach_for_turn(&block_id, &message, origin);
-    // Where it came from and the notes that went with it, for the record of it.
-    let record = RecordOrigin { origin: from, notes: held_notes.note_texts() };
+    let record = crate::backend::message_origin::RecordOrigin { origin: from, notes: held_notes.note_texts() };
 
     // App Server owns a persistent thread/turn process and has its own typed
     // protocol path. Keep it ahead of the legacy stream-json branches.
@@ -1377,7 +1375,7 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                     message,
                     cmd.message_id,
                     TurnRegistration::Register,
-                    MessageOrigin::from_composer(origin),
+                    crate::backend::message_origin::MessageOrigin::from_composer(origin),
                     cmd.attachments.unwrap_or_default(),
                     cmd.joins_turn,
                 )

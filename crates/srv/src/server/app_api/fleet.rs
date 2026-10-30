@@ -19,7 +19,7 @@
 //! `run_agent_turn`) with a one-line `[BROADCAST:FROM=user VIA=swarm ...]` header
 //! from `reactive::broadcast_turn_message`, instead of a `self-declared` jekt from
 //! `unknown`. See `docs/specs/SPEC_SWARM_BROADCAST_AS_USER_MESSAGE_2026_10_01.md`.
-//! The turn is `BROADCAST_TURN_ORIGIN` (`User`): a broadcast is the human's own
+//! The turn is `MessageOrigin::broadcast()` (a `User` turn): a broadcast is the human's own
 //! message, with the same powers as typing it into each pane, including
 //! authorizing an agent's self-quit (owner decision 2026-10-06, spec §6 q2).
 //! The one exception is `App` `upgrade`: it is once per machine, so a broadcast
@@ -61,11 +61,6 @@ use crate::backend::rpc_types::*;
 use super::AppState;
 use super::agent_io::stop_one_agent_block;
 use crate::server::agent_handlers::{run_agent_turn, AgentTurnDeps, TurnRegistration};
-
-/// Every broadcast turn is attributed here, and only here: `User` — see the
-/// module doc. A test pins both this value and that `run_broadcast` hands it to
-/// the delivery function. It was `Automated` until 2026-10-06.
-pub(crate) const BROADCAST_TURN_ORIGIN: TurnOrigin = TurnOrigin::User;
 
 const FLEET_BROADCAST_AUDIT_ACTION: &str = "fleet.broadcast";
 
@@ -331,7 +326,7 @@ pub(crate) async fn forward_broadcast_to_channel(
 
 /// The receiving end of `forward_broadcast_to_channel`: builds the header here,
 /// from the target's own agent id, and delivers it as any broadcast turn
-/// (`BROADCAST_TURN_ORIGIN`). Audited on this side too, naming where it came
+/// (`MessageOrigin::broadcast()`). Audited on this side too, naming where it came
 /// from.
 pub(crate) async fn deliver_forwarded_broadcast(
     state: &AppState,
@@ -1242,7 +1237,7 @@ mod broadcast_core_tests {
     /// message, with the user's powers.
     #[test]
     fn broadcast_turns_are_attributed_to_the_user() {
-        assert_eq!(BROADCAST_TURN_ORIGIN, TurnOrigin::User);
+        assert_eq!(MessageOrigin::broadcast().turn_origin(), TurnOrigin::User);
     }
 
     #[tokio::test]
@@ -1266,7 +1261,7 @@ mod broadcast_core_tests {
         use crate::backend::blockcontroller::health::TurnProvenance;
         use crate::sagas::self_quit::{gate, GateRefusal};
         let text = broadcast_turn_message("agent-1", 3, "m1", "finish the PR then quit");
-        let p = |tainted| TurnProvenance { origin: BROADCAST_TURN_ORIGIN, tainted, user_text: Some(text.clone()) };
+        let p = |tainted| TurnProvenance { origin: MessageOrigin::broadcast().turn_origin(), tainted, user_text: Some(text.clone()) };
         assert_eq!(gate(Some(&p(false)), "then quit"), Ok(()));
         assert_eq!(gate(Some(&p(false)), "delete everything"), Err(GateRefusal::InstructionMismatch));
         assert_eq!(gate(Some(&p(true)), "then quit"), Err(GateRefusal::Tainted));
