@@ -9,6 +9,7 @@ import { paneCommandFor } from "@/app/keybindings";
 import { ContextMenuModel, showTextInputContextMenu } from "@/app/store/contextmenu";
 import { browserStartPageAtom, settingsAtom } from "@/store/config-signals";
 import { FlyoutMenu } from "@/app/element/flyoutmenu";
+import { Button } from "@/app/element/ui";
 import { ToolbarBookmarkIcon, ToolbarHomeIcon } from "./browser-toolbar-icons";
 import { reloadButtonState } from "./browser-reload-button";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -524,8 +525,9 @@ export function BrowserNavBar(props: {
                             title={reloadButtonState(model.loadingAtom()).label}
                             aria-label={reloadButtonState(model.loadingAtom()).label}
                         >{reloadButtonState(model.loadingAtom()).glyph}</button>
-                        <button
-                            class="browser-nav-btn"
+                        <Button
+                            tone="quiet"
+                            class="ui-icon-button browser-nav-btn"
                             data-testid="browser-home"
                             title={`Home: ${home()}`}
                             aria-label={`Home: ${home()}`}
@@ -546,7 +548,7 @@ export function BrowserNavBar(props: {
                             }}
                         >
                             <ToolbarHomeIcon />
-                        </button>
+                        </Button>
                     </div>
                     <div class="browser-nav-group browser-nav-group--bookmarks">
                         <FlyoutMenu
