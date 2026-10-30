@@ -61,6 +61,9 @@ const pinnable = (f: RowFlags): Disclosure => (f.pinned ? OPEN("pin", "pin") : C
 const FIXED_OPEN: Disclosure = { open: true, via: "default", toggle: null };
 
 export function rowDisclosure(node: DocumentNode, f: RowFlags): Disclosure {
+    // The pane's view asked this row to start folded or open (verbosity.ts); the user's pin or fold
+    // still applies, and a row that needs the user (pending, an answer) is never given a mode.
+    if (node.type !== "hidden_run" && node.viewMode) return node.viewMode === "collapsed" ? pinnable(f) : collapsible(f);
     switch (node.type) {
         case "tool": {
             // A finished content-first tool (WebSearch) reads like a message.
@@ -118,6 +121,7 @@ export function rowDisclosure(node: DocumentNode, f: RowFlags): Disclosure {
         case "resume_preflight":
         case "memory_reinjection":
         case "ambient_narration":
+        case "hidden_run":
             // Fixed-height or plain in-flow rows; never collapsible.
             return FIXED_OPEN;
 

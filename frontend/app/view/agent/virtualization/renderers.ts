@@ -86,6 +86,8 @@ export function estimateUnwrappedTextHeight(
 // flags any kind whose p50 actual diverges > 30% from estimate.
 const TOOL_COLLAPSED_PX = 32;
 const COLLAPSED_MESSAGE_PX = 32;
+/** A hidden-run line (verbosity.ts): one row of text. */
+const HIDDEN_RUN_PX = 32;
 /** The "Broadcast · N agents" note above a Swarm broadcast's body. */
 export const BROADCAST_NOTE_PX = 20;
 
@@ -221,6 +223,8 @@ export const STREAMING_CAPABLE: Record<NodeKind, boolean> = {
     resume_preflight: false,
     // Complete one-line narration delivered as a single broadcast — not chunked.
     ambient_narration: false,
+    // One derived line (verbosity.ts).
+    hidden_run: false,
 };
 
 /**
@@ -278,6 +282,7 @@ export function estimateNodeForState(
         case "resume_preflight":  return 56;
             case "ambient_narration": return estimateTextHeight(node.text);
             case "context_delivery":  return estimateCollapsedContextDelivery(node);
+            case "hidden_run":        return HIDDEN_RUN_PX;
         }
     }
     // expanded
@@ -301,5 +306,6 @@ export function estimateNodeForState(
         case "resume_preflight":  return 56;
         case "ambient_narration": return estimateTextHeight(node.text);
         case "context_delivery":  return estimateExpandedContextDelivery(node);
+        case "hidden_run":        return HIDDEN_RUN_PX;
     }
 }

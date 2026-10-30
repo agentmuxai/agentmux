@@ -841,6 +841,8 @@ declare global {
         /** v6 — DB row id of the AgentInstance currently bound to this pane. */
         agentInstanceId?: string;
         agentName?: string;
+        /** The pane's own agent view (what it shows), a preset name or the five switches; absent follows the `agent:view` setting. */
+        "agent:view"?: string | { thinking?: string; tools?: string; jekts?: string; notes?: string; context?: string };
         agentIcon?: string;
         agentMode?: string;
         agentProvider?: string;
@@ -1240,6 +1242,7 @@ declare global {
         "agent:livefeedturns"?: number;
         "agent:container_memory"?: string | number;
         "agent:container_cpus"?: string | number;
+        "agent:view"?: string | { thinking?: string; tools?: string; jekts?: string; notes?: string; context?: string };
         "markdown:streamtailinplace"?: boolean;
     };
 
