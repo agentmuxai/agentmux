@@ -47,6 +47,13 @@ fn the_value_leaves_the_hosts_answer_for_wiped_memory() {
 }
 
 #[test]
+fn the_answer_promises_screenshots_and_eval_only_when_the_element_was_marked() {
+    assert!(captured_note(true).contains("eval is refused"));
+    let unmarked = captured_note(false);
+    assert!(!unmarked.contains("eval is refused") && !unmarked.contains("screenshots"), "{unmarked}");
+}
+
+#[test]
 fn a_new_entry_keeps_the_pages_origin_and_says_where_it_came_from() {
     let s = store();
     let req = request(Some(CaptureAs { expires: Some("2027-10-30".into()), ..new_as(None, "GitHub OAuth secret") }), None);

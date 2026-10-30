@@ -165,9 +165,11 @@ pub(crate) async fn handle_browser_capture(
     super::vault_handlers::publish(&state);
     // Only now that it is stored is the element marked: a refused capture leaves no
     // mark (one that would keep eval refused on the tab for nothing).
+    let mut marked = false;
     if matches!(stored, Ok(Ok(_))) {
-        if let Err((_, e)) = proxy_value(&state, "capture_mark", json!({ "block_id": block_id, "ref": ref_ }), HOST_WAIT).await {
-            tracing::warn!(error = %e, "[vault] a captured element couldn't be marked");
+        match proxy_value(&state, "capture_mark", json!({ "block_id": block_id, "ref": ref_ }), HOST_WAIT).await {
+            Ok(_) => marked = true,
+            Err((_, e)) => tracing::warn!(error = %e, "[vault] a captured element couldn't be marked"),
         }
     }
     // The pane's own Log: what was captured, from where, never the value.
@@ -185,12 +187,23 @@ pub(crate) async fn handle_browser_capture(
                 "id": id,
                 "label": label,
                 "captured_from": origin,
-                "note": "Saved in the Vault; you never see the value. While it is on the page, screenshots black it out and eval is refused on this tab; snapshots keep hiding it while it shows as a secret, and always in a field.",
+                "marked": marked,
+                "note": captured_note(marked),
             })),
         )
             .into_response(),
         Ok(Err(e)) => err_response(StatusCode::BAD_REQUEST, format!("nothing was saved: {e}")),
         Err(e) => err_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
+/// What the agent is told about the page once the value is saved: what keeps
+/// hiding it there depends on whether the element could be marked.
+fn captured_note(marked: bool) -> &'static str {
+    if marked {
+        "Saved in the Vault; you never see the value. While it is on the page, screenshots black it out and eval is refused on this tab; snapshots keep hiding it while it shows as a secret, and always in a field."
+    } else {
+        "Saved in the Vault; you never see the value. The page changed before the element could be marked, so only a value with a secret's shape stays hidden on it: don't read the element again, and navigate away when you're done."
     }
 }
 

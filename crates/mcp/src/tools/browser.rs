@@ -901,8 +901,13 @@ async fn browser_capture(cx: &ToolCtx<'_>, auth: agentmux_common::api_types::UiA
 /// The agent's answer to a capture: the entry, never the value.
 fn capture_text(body: &Value) -> String {
     let s = |k: &str| body.get(k).and_then(Value::as_str).unwrap_or("");
+    let page = if body.get("marked").and_then(Value::as_bool).unwrap_or(false) {
+        "While it is on the page, screenshots black it out and eval is refused on this tab."
+    } else {
+        "The page changed before the element could be marked, so only a value with a secret's shape stays hidden on it: don't read the element again, and navigate away when you're done."
+    };
     format!(
-        "Browser capture: saved in the Vault as {} ({}), captured from {}. You never see the value: use the entry by id (Terminal run with secrets, Browser fill with vault). While it is on the page, screenshots black it out and eval is refused on this tab.",
+        "Browser capture: saved in the Vault as {} ({}), captured from {}. You never see the value: use the entry by id (Terminal run with secrets, Browser fill with vault). {page}",
         s("id"),
         s("label"),
         s("captured_from")
@@ -967,6 +972,15 @@ mod tests {
         assert!(said.contains("ssn-alex") && said.contains("https://irs.gov") && said.contains("Social Security Number"), "{said}");
         assert!(said.contains("Enter 9 digits") && said.contains("shortened or reformatted"), "{said}");
         assert!(!said.contains("123-45"), "{said}");
+    }
+
+    // `capture`: screenshots and eval are promised only when the element was marked.
+    #[test]
+    fn a_capture_answer_promises_what_hides_it_only_when_the_page_was_marked() {
+        let body = |marked: bool| serde_json::json!({ "id": "api-key-x", "label": "X", "captured_from": "https://x.example", "marked": marked });
+        assert!(capture_text(&body(true)).contains("eval is refused"));
+        let unmarked = capture_text(&body(false));
+        assert!(unmarked.contains("api-key-x") && !unmarked.contains("eval is refused"), "{unmarked}");
     }
 
     #[test]
