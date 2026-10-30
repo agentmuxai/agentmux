@@ -52,7 +52,9 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 anyhow::bail!("{name}: AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. Is this agent pane opened via AgentMux?");
             }
             let url = format!("{}/api/v1/google/{}", cx.local_url.trim_end_matches('/'), name.to_ascii_lowercase());
-            let body = crate::srv_http::srv_post_json(cx.client, &url, cx.auth_key, arguments, name).await?;
+            // `send_draft` and `trash_thread` wait for the person's answer (srv gives them two minutes).
+            let wait = (name == "Gmail").then_some(crate::srv_http::SHELL_CREATE_TIMEOUT);
+            let body = crate::srv_http::srv_post_json_within(cx.client, &url, cx.auth_key, arguments, name, wait).await?;
             Ok(untrusted(name, &body))
         }
         _ => Err(not_in_family()),

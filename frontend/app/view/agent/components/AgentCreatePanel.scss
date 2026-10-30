@@ -164,3 +164,49 @@
         white-space: pre;
     }
 }
+
+// The free sign-up guide above the create form (FreeStartGuide.tsx).
+.agent-free-guide {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding: var(--space-3);
+    border: 1px solid var(--accent-line);
+    background: var(--accent-bg);
+    border-radius: var(--radius-sm);
+}
+
+.agent-free-guide-title {
+    margin: 0;
+    font-size: var(--text-sm);
+}
+
+.agent-free-guide-lead,
+.agent-free-guide-note {
+    margin: 0;
+    font-size: var(--text-sm);
+    color: var(--secondary-text-color);
+}
+
+.agent-free-guide-open {
+    display: flex;
+}
+
+.agent-free-guide-steps,
+.agent-free-guide-catches {
+    margin: 0;
+    padding-left: var(--space-4);
+    font-size: var(--text-sm);
+    color: var(--secondary-text-color);
+    line-height: 1.4;
+}
+
+.agent-free-guide-checked {
+    margin: 0;
+    font-size: var(--text-xs);
+    color: var(--secondary-text-color);
+
+    &--stale {
+        color: var(--warning-text-color);
+    }
+}

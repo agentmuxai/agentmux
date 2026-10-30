@@ -4,7 +4,7 @@
 // A Google account's services, its agents' levels and its activity
 // (docs/specs/SPEC_GOOGLE_CONNECTORS_GMAIL_CALENDAR_DRIVE_2026_10_14.md §7, D4, D7).
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const google = vi.hoisted(() => vi.fn());
@@ -121,6 +121,33 @@ describe("GoogleServicesSection", () => {
         unmount();
         render(() => <GoogleServicesSection account={account([], "workspace")} />);
         expect(await screen.findByRole("button", { name: "Turn on Gmail" })).toBeTruthy();
+    });
+
+    it("offers Gmail writing once reading is on, with its own consent", async () => {
+        render(() => <GoogleServicesSection account={account(["gmail.readonly"], "byo")} />);
+        expect(await screen.findByText("Drafts, labels and sending")).toBeTruthy();
+        expect(screen.getByRole("button", { name: "Allow drafts, labels and sending" })).toBeTruthy();
+        expect(screen.getByText(/nothing happens until you approve it/)).toBeTruthy();
+    });
+
+    it("doesn't offer Gmail writing before reading is on, or once it is granted", async () => {
+        const { unmount } = render(() => <GoogleServicesSection account={account([], "byo")} />);
+        expect(await screen.findByRole("button", { name: "Turn on Gmail" })).toBeTruthy();
+        expect(screen.queryByText("Drafts, labels and sending")).toBeNull();
+        unmount();
+        render(() => <GoogleServicesSection account={account(["gmail.readonly", "gmail.compose", "gmail.modify"], "byo")} />);
+        expect(await screen.findByText("Drafts, labels and sending")).toBeTruthy();
+        expect(screen.queryByRole("button", { name: /Allow drafts/ })).toBeNull();
+    });
+
+    it("gives an agent the Read and write level on Gmail only, through the host", async () => {
+        panel.agents = [{ agentId: "def-1", name: "Naki", levels: { gmail: "read" } }];
+        render(() => <GoogleServicesSection account={account(["gmail.readonly"], "byo")} />);
+        const gmail = await screen.findByRole("radiogroup", { name: "Gmail for Naki" });
+        expect(within(gmail).getByRole("radio", { name: "Read" }).getAttribute("aria-checked")).toBe("true");
+        fireEvent.click(within(gmail).getByRole("radio", { name: "Read and write" }));
+        await waitFor(() => expect(google).toHaveBeenCalledWith("set", { account_id: "g1", agent_id: "def-1", service: "gmail", level: "write" }));
+        expect(within(screen.getByRole("radiogroup", { name: "Calendar for Naki" })).queryByRole("radio", { name: "Read and write" })).toBeNull();
     });
 
     it("says why Gmail can't be turned on with AgentMux's own client", async () => {

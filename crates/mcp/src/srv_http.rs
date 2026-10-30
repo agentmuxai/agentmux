@@ -69,10 +69,23 @@ pub(crate) async fn srv_post_json(
     body: &Value,
     what: &str,
 ) -> Result<Value> {
-    let resp = client
-        .post(url)
-        .header(AUTH_KEY_HEADER, auth_key)
-        .json(body)
+    srv_post_json_within(client, url, auth_key, body, what, None).await
+}
+
+/// [`srv_post_json`] with its own time limit, for a call that waits for the person's answer.
+pub(crate) async fn srv_post_json_within(
+    client: &reqwest::Client,
+    url: &str,
+    auth_key: &str,
+    body: &Value,
+    what: &str,
+    timeout: Option<std::time::Duration>,
+) -> Result<Value> {
+    let mut req = client.post(url).header(AUTH_KEY_HEADER, auth_key).json(body);
+    if let Some(t) = timeout {
+        req = req.timeout(t);
+    }
+    let resp = req
         .send()
         .await
         .map_err(|e| anyhow::anyhow!(describe_transport_error(what, url, &e)))?;
