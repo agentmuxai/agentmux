@@ -355,6 +355,10 @@
           "type": "boolean",
           "description": "Enable mDNS-based discovery of other AgentMux instances on the same host and LAN. Defaults to false to avoid the Windows Firewall prompt; toggle from the HostPopover panel. See docs/specs/lan-discovery-toggle.md."
         },
+        "network:remote_ops": {
+          "type": "boolean",
+          "description": "Carry out typed requests from agents on other proven machines (account moves, version and health reads, and the operations that follow). Default true (absent means on); set false to refuse every one. See docs/specs/SPEC_AGENTS_OPERATE_OTHER_MACHINES_2026_10_30.md."
+        },
         "voice:enabled": {
           "type": "boolean",
           "description": "Globally controls whether the per-pane microphone button is rendered. Default true (absent means enabled) — set false to fully hide the buttons across all panes. See docs/specs/SPEC_VOICE_INPUT_PER_PANE_2026_05_19.md."
@@ -649,11 +653,6 @@
           "type": "boolean",
           "default": true,
           "description": "Agent panes keep only the turn in flight (plus anything still running) always mounted; older messages are virtualized. Set false to restore the previous behaviour (the last 50 messages always mounted). Takes effect when a pane is next opened. See docs/specs/SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md §6.2."
-        },
-        "agent:onewayflow": {
-          "type": "boolean",
-          "default": true,
-          "description": "While an agent pane follows the conversation, text only moves up: nothing overshoots and scrolls back, and a tool preview that gets shorter leaves room at the bottom for the next content instead of pulling the conversation down. Set false to restore the previous behaviour (the glide and the shrink hold). Takes effect when a pane is next opened. See docs/specs/SPEC_AGENT_PANE_ONE_WAY_FLOW_2026_10_07.md."
         },
         "agent:followcontroller": {
           "type": "boolean",

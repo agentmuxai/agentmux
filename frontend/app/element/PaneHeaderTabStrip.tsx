@@ -76,6 +76,7 @@ export function PaneHeaderTabStrip<T>(props: PaneHeaderTabStripProps<T>): JSX.El
             useProgress={props.useProgress}
             collapsed={props.collapsed}
             isClosing={props.isClosing}
+            onTabContextMenu={props.onTabContextMenu}
             onActivate={props.onActivate}
             onSelect={props.onSelect}
             onClose={props.onClose}

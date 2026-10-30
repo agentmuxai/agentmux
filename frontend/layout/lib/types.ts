@@ -481,7 +481,8 @@ export interface NodeModel {
     ready: Accessor<boolean>;
     disablePointerEvents: Accessor<boolean>;
     toggleMagnify: () => void;
-    toggleMinimize: () => void;
+    /** `chip`: keep today's header chip instead of merging into a neighbour (Shift on the button). */
+    toggleMinimize: (opts?: { chip?: boolean }) => void;
     focusNode: () => void;
     onClose: () => void;
     // DOM refs in SolidJS are plain { current: T | null } objects

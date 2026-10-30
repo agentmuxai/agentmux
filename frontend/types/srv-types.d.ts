@@ -1140,6 +1140,7 @@ declare global {
         "conn:askbeforewshinstall"?: boolean;
         "conn:wshenabled"?: boolean;
         "network:lan_discovery"?: boolean;
+        "network:remote_ops"?: boolean;
         "cloud:publishpresence"?: boolean;
         "swarm:sharesummaries"?: boolean;
         "voice:enabled"?: boolean;
@@ -1227,7 +1228,6 @@ declare global {
         "agent:transcriptframes"?: boolean;
         "agent:transcriptdeltas"?: boolean;
         "agent:turnscopedtail"?: boolean;
-        "agent:onewayflow"?: boolean;
         "agent:followcontroller"?: boolean;
         "agent:livefeed"?: boolean;
         "agent:livefeedturns"?: number;

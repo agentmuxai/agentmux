@@ -37,8 +37,9 @@ import { remoteDisplay } from "@/app/store/remote-display";
 import { readSwarmSummary } from "@/app/store/activitySummary";
 import { readSeatMeta, seatTooltipLine } from "@/app/view/agent/seat-format";
 import { ErrorBoundary } from "@/element/errorboundary";
+import { ContextMenuModel } from "@/app/store/contextmenu";
 import { isBlockClosing } from "@/layout/lib/layoutClosing";
-import { closeBlockInStack, moveBlockInStack, moveBlocksInStack, setActiveBlockInStack, type NodeModel } from "@/layout/index";
+import { closeBlockInStack, moveBlockInStack, moveBlocksInStack, setActiveBlockInStack, splitOutStackMember, type NodeModel } from "@/layout/index";
 import { placePill, type PillZone } from "@/layout/lib/paneBodyDrop";
 import { paneStackIds } from "@/layout/lib/layoutNodeModels";
 import { allBlockIds } from "@/layout/lib/stackOrder";
@@ -461,6 +462,17 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
         if (model()?.onClose?.(blockId) === true) return;
         void closeBlockInStack(layoutModel, nodeModel.nodeId, blockId);
     };
+    // A pane tab's menu: take it out into a pane of its own beside this one. Only a tab of several
+    // has somewhere to leave (SPEC_MINIMIZE_MERGES_INTO_EXPANDED_NEIGHBOUR_2026_10_30.md §3).
+    const handleTabContextMenu = (blockId: string, e: MouseEvent) => {
+        if (stackIds().length < 2) return;
+        e.preventDefault();
+        e.stopPropagation();
+        ContextMenuModel.showContextMenu(
+            [{ label: "Open in Its Own Pane", icon: "table-columns", click: () => splitOutStackMember(layoutModel, blockId, { targetNodeId: nodeModel.nodeId }) }],
+            e
+        );
+    };
     const handleAdd = (e?: MouseEvent) => {
         if (!e) return;
         openPaneTabWidgetPicker(layoutModel, nodeModel.nodeId, e, model()?.newTabMeta);
@@ -567,6 +579,7 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
             useProgress={usePaneTabProgress}
             collapsed={() => nodeModel.isMinimized?.() ?? false}
             isClosing={(id) => (nodeModel.isClosing?.() ?? false) || isBlockClosing(layoutModel, id)}
+            onTabContextMenu={handleTabContextMenu}
             headerBgOverride={headerTailBg()}
             onActivate={handleActivate}
             onSelect={handleSelect}

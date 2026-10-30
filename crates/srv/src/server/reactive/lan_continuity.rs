@@ -108,7 +108,7 @@ pub(crate) fn check_cert(cert: &WanKeyRecord, agent: &str, observed_key: &[u8], 
 /// agent already, else live in the account's directory. An install this machine
 /// knows to be revoked is trusted by neither way, and a pin does not outlive a
 /// revocation the directory holds.
-async fn instance_trust(state: &AppState, instance_id: &str) -> Result<Path, String> {
+pub(crate) async fn instance_trust(state: &AppState, instance_id: &str) -> Result<Path, String> {
     use crate::muxbus::wan_verify::{instance_is_live_install, instance_is_revoked, Directory, GLOBAL_BUDGET};
     let wan = state.mstore.wan_identity().or_else(crate::backend::storage::wan_identity::global);
     if let Some(wan) = &wan {

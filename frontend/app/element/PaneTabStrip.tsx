@@ -262,6 +262,8 @@ export interface PaneTabStripProps<T> {
     collapsed?: Accessor<boolean>;
     /** This tab's close is under way: its pill dims and shows a spinner in place of its ×. */
     isClosing?: (tab: T) => boolean;
+    /** A right-click on a pill. The handler decides whether there is a menu to show. */
+    onTabContextMenu?: (tab: T, e: MouseEvent) => void;
 
     onActivate: (id: string) => void;
     /** A plain left-click on a pill, active or not, before `onActivate` (which a
@@ -792,6 +794,7 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
                             useProgress={props.useProgress}
                             collapsed={props.collapsed}
                             isClosing={props.isClosing}
+                            onContextMenu={props.onTabContextMenu}
                             onActivate={props.onActivate}
                             onSelect={props.onSelect}
                             selection={props.selection}
@@ -850,6 +853,7 @@ interface PaneTabStripItemProps<T> {
     useProgress?: (tab: T) => Accessor<PaneTabProgress | null>;
     collapsed?: Accessor<boolean>;
     isClosing?: (tab: T) => boolean;
+    onContextMenu?: (tab: T, e: MouseEvent) => void;
     onActivate: (id: string) => void;
     onSelect?: (id: string) => void;
     selection?: PaneTabSelectionApi;
@@ -1235,6 +1239,7 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
                 onMouseDown={onMouseDown}
                 onClick={onClick}
                 onDblClick={onDblClick}
+                onContextMenu={(e) => props.onContextMenu?.(props.tab, e)}
             >
                 <Show when={props.useProgress}>
                     <span
