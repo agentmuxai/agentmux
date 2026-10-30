@@ -14,11 +14,10 @@ use super::cdp::CdpSession;
 
 /// The key events for one typed character: a `keyDown` that carries the text
 /// (the page's editing then inserts it, as for a person) and the `keyUp`.
-/// `\n` is the Enter key. Letters and digits carry their key codes, since
+/// Letters and digits carry their key codes, since
 /// mask libraries branch on them; any other character is sent as text only.
 pub(super) fn key_events_for(c: char) -> Vec<Value> {
     let (key, code, vk, text) = match c {
-        '\n' | '\r' => ("Enter".to_string(), "Enter".to_string(), 13, Some("\r".to_string())),
         '0'..='9' => (c.to_string(), format!("Digit{c}"), c as i64, Some(c.to_string())),
         'a'..='z' | 'A'..='Z' => (c.to_string(), format!("Key{}", c.to_ascii_uppercase()), c.to_ascii_uppercase() as i64, Some(c.to_string())),
         ' ' => (" ".to_string(), "Space".to_string(), 32, Some(" ".to_string())),
@@ -58,8 +57,17 @@ pub(super) async fn clear_selection(cdp: &mut CdpSession) -> Result<(), String> 
     send(cdp, backspace_events()).await
 }
 
+/// Text that can be typed key by key: no control characters. A line break
+/// would be an Enter key, which submits the form a single-line field is in.
+pub(super) fn is_typable(text: &str) -> bool {
+    !text.chars().any(char::is_control)
+}
+
 /// Types `text` one key at a time where the focus is.
 pub(super) async fn type_keys(cdp: &mut CdpSession, text: &str) -> Result<(), String> {
+    if !is_typable(text) {
+        return Err("the text has a line break or control character, which can't be typed key by key".to_string());
+    }
     for c in text.chars() {
         send(cdp, key_events_for(c)).await?;
     }
@@ -101,10 +109,11 @@ mod tests {
     }
 
     #[test]
-    fn a_newline_is_the_enter_key() {
-        let events = key_events_for('\n');
-        assert_eq!(events[0]["key"], "Enter");
-        assert_eq!(events[0]["windowsVirtualKeyCode"], 13);
+    fn text_with_a_line_break_or_control_character_is_not_typed() {
+        assert!(is_typable("123-45-6789"));
+        for bad in ["a\nb", "a\rb", "a\tb"] {
+            assert!(!is_typable(bad));
+        }
     }
 
     #[test]

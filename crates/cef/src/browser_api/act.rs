@@ -1004,7 +1004,8 @@ async fn act(
             let mut method = "insertText";
             // Step 3 of the ladder: a mask reads keydown, not the inserted
             // text, so clear the field and type the text key by key.
-            if !text.is_empty() && got != text && after.get("contentEditable").is_none() {
+            // (Not for text with a line break: that would press Enter.)
+            if !text.is_empty() && got != text && after.get("contentEditable").is_none() && key_typing::is_typable(&text) {
                 call_on(cdp, &obj, PREPARE_FILL, vec![]).await?;
                 if let Some(why) = describe(cdp, backend).await.as_ref().and_then(snapshot::secret_reason) {
                     return Err(secret_refusal(why));
