@@ -4,6 +4,7 @@
 use std::sync::Arc;
 
 use crate::backend::blockcontroller;
+use crate::backend::message_origin::{MessageOrigin, RecordOrigin};
 use crate::backend::obj::Block;
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::{
@@ -713,10 +714,10 @@ pub async fn run_agent_turn(
     message: String,
     message_id: Option<String>,
     registration: TurnRegistration,
-    origin: crate::backend::blockcontroller::health::TurnOrigin,
+    from: MessageOrigin,
     attachments: Vec<AttachmentRef>,
 ) -> Result<(), String> {
-    run_agent_turn_joining(deps, block_id, message, message_id, registration, origin, attachments, None).await
+    run_agent_turn_joining(deps, block_id, message, message_id, registration, from, attachments, None).await
 }
 
 /// [`run_agent_turn`] for a message the pane held while turn `joins_turn`
@@ -729,10 +730,11 @@ pub async fn run_agent_turn_joining(
     message: String,
     message_id: Option<String>,
     registration: TurnRegistration,
-    origin: crate::backend::blockcontroller::health::TurnOrigin,
+    from: MessageOrigin,
     attachments: Vec<AttachmentRef>,
     joins_turn: Option<u64>,
 ) -> Result<(), String> {
+    let origin = from.turn_origin();
     let AgentTurnDeps {
         mstore,
         id_store,
@@ -956,6 +958,8 @@ pub async fn run_agent_turn_joining(
         crate::backend::attachments::prompt::append(&message, &prepared.list)
     };
     let (message, held_notes) = crate::backend::reactive::held_notes::attach_for_turn(&block_id, &message, origin);
+    // Where it came from and the notes that went with it, for the record of it.
+    let record = RecordOrigin { origin: from, notes: held_notes.note_texts() };
 
     // App Server owns a persistent thread/turn process and has its own typed
     // protocol path. Keep it ahead of the legacy stream-json branches.
@@ -1013,7 +1017,7 @@ pub async fn run_agent_turn_joining(
             message_id: message_id.clone(),
         };
         let input = crate::backend::blockcontroller::health::TurnInput { origin, text: message.clone(), joins_turn };
-        if let Err(e) = persistent_ctrl.send_message_with_images_from(message, inline_images, config, Some(input)) {
+        if let Err(e) = persistent_ctrl.send_message_with_images_from(message, inline_images, config, Some(input), record) {
             // A single-live-instance refusal from inside the controller (the spawn-time claim losing
             // to another instance or pane, or the pre-turn fence) gets the early check's pane treatment.
             if crate::backend::agent_admission::is_admission_refusal(&e) || blockcontroller::persistent::is_held_elsewhere_error(&e) {
@@ -1113,6 +1117,7 @@ pub async fn run_agent_turn_joining(
                     Some(persisted_session_id)
                 },
                 instance_id: instance_id.clone(),
+                record: Some(record),
             };
             let hint = arm_join_hint();
             subprocess_ctrl.spawn_container_turn(cm.clone(), container_name, base_cmd, config)?;
@@ -1136,6 +1141,7 @@ pub async fn run_agent_turn_joining(
                     Some(persisted_session_id)
                 },
                 instance_id,
+                record: Some(record),
             };
             let hint = arm_join_hint();
             subprocess_ctrl.spawn_turn(config)?;
@@ -1315,6 +1321,7 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                     // agentId from (dead code — unused by the
                     // frontend, per grep); empty disables leasing.
                     instance_id: String::new(),
+                    record: None,
                 };
                 subprocess_ctrl.spawn_turn(config)?;
                 Ok(())
@@ -1370,7 +1377,7 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                     message,
                     cmd.message_id,
                     TurnRegistration::Register,
-                    origin,
+                    MessageOrigin::from_composer(origin),
                     cmd.attachments.unwrap_or_default(),
                     cmd.joins_turn,
                 )

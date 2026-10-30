@@ -34,6 +34,7 @@
 //!   - `lifecycle.rs`    — stop/restart, `session_id`, `needs_spawn`
 //!   - `tests/`          — one file per former inline test module
 
+use crate::backend::message_origin::{MessageOrigin, RecordOrigin};
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -408,7 +409,7 @@ struct PersistentInner {
     /// write. Read and written only under this mutex, together with the
     /// must-wait state it depends on, so a message is never enqueued just as
     /// a drain observes the queue empty and exits.
-    deferred_deliveries: VecDeque<String>,
+    deferred_deliveries: VecDeque<Deferred>,
     /// Whether a deferred-delivery watchdog task is running for this
     /// controller — see `ensure_deferred_watchdog`. Set and cleared only
     /// under this lock, and cleared only by the watchdog itself when it
@@ -782,15 +783,19 @@ struct QueuedMessage {
     seq: u64,
     json_str: String,
     already_persisted: bool,
+    /// Where the message came from, for the record written when it is
+    /// delivered. `None` only for an `already_persisted` entry, whose record
+    /// was written on its first attempt.
+    record: Option<RecordOrigin>,
 }
 
 impl QueuedMessage {
-    fn fresh(seq: u64, json_str: String) -> Self {
-        Self { seq, json_str, already_persisted: false }
+    fn fresh(seq: u64, json_str: String, record: RecordOrigin) -> Self {
+        Self { seq, json_str, already_persisted: false, record: Some(record) }
     }
 
     fn already_persisted(seq: u64, json_str: String) -> Self {
-        Self { seq, json_str, already_persisted: true }
+        Self { seq, json_str, already_persisted: true, record: None }
     }
 }
 
@@ -899,6 +904,35 @@ pub struct PersistentSubprocessController {
     boot_id: Arc<str>,
 }
 
+/// A message waiting in `PersistentInner::deferred_deliveries`: the encoded
+/// stream-json stdin `line` and where the message came from, which the record
+/// of it carries when it is written (`message_origin`).
+#[derive(Clone, Debug)]
+pub(super) struct Deferred {
+    pub(super) line: String,
+    pub(super) record: crate::backend::message_origin::RecordOrigin,
+}
+
+impl std::ops::Deref for Deferred {
+    type Target = str;
+    fn deref(&self) -> &str {
+        &self.line
+    }
+}
+
+#[cfg(test)]
+impl From<String> for Deferred {
+    /// A test's queued line, from the human.
+    fn from(line: String) -> Self {
+        Deferred {
+            line,
+            record: crate::backend::message_origin::RecordOrigin::new(
+                crate::backend::message_origin::MessageOrigin::user(),
+            ),
+        }
+    }
+}
+
 /// The last line of defence for §4.5: whatever is still deferred when the
 /// controller goes away is reported, not silently discarded with it.
 ///
@@ -918,7 +952,7 @@ impl Drop for DeferredDropReport {
     fn drop(&mut self) {
         let Some((block_id, inner)) = self.0.take() else { return };
         // Never panic in `drop`: a poisoned lock still holds the queue.
-        let stranded: Vec<String> = match inner.lock() {
+        let stranded: Vec<Deferred> = match inner.lock() {
             Ok(mut g) => g.deferred_deliveries.drain(..).collect(),
             Err(poisoned) => poisoned.into_inner().deferred_deliveries.drain(..).collect(),
         };
@@ -1396,7 +1430,7 @@ impl Controller for PersistentSubprocessController {
                 // and the watchdog holds only a weak ref, so it dies with this
                 // controller. Returning first discarded the message unreported
                 // (codex P2 on #3562).
-                let stranded: Vec<String> = g.deferred_deliveries.drain(..).collect();
+                let stranded: Vec<Deferred> = g.deferred_deliveries.drain(..).collect();
                 // A pane close outranks a committed config restart in EVERY
                 // branch, including this no-process one: the restart's
                 // replacement may still be mid-spawn with no pid yet, and

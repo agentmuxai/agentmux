@@ -1125,7 +1125,7 @@ fn retry_after_resume_failure_with_no_entries_hands_a_queued_prompt_and_its_cand
         let seq = inner.take_next_message_seq();
         inner
             .pending_send_messages
-            .push_back(QueuedMessage::fresh(seq, "{\"queued\":\"behind the eager claim\"}".to_string()));
+            .push_back(QueuedMessage::fresh(seq, "{\"queued\":\"behind the eager claim\"}".to_string(), RecordOrigin::new(MessageOrigin::user())));
     }
     let mut env_vars = HashMap::new();
     env_vars.insert("CLAUDE_CONFIG_DIR".to_string(), config_dir);
@@ -1167,7 +1167,7 @@ fn respawn_once_for_leftover_queue_resumes_an_adopted_candidate_instead_of_clear
         let seq = inner.take_next_message_seq();
         inner
             .pending_send_messages
-            .push_back(QueuedMessage::fresh(seq, "{\"queued\":\"prompt\"}".to_string()));
+            .push_back(QueuedMessage::fresh(seq, "{\"queued\":\"prompt\"}".to_string(), RecordOrigin::new(MessageOrigin::user())));
     }
     let config = PersistentSpawnConfig {
         cli_command: "definitely-not-a-real-binary-xyz".to_string(),
@@ -1524,7 +1524,7 @@ fn decide_send_action_dedups_a_known_retry_of_an_already_queued_message() {
         inner.spawning_in_progress = true;
         inner
             .pending_send_messages
-            .push_back(QueuedMessage::fresh(7, "original-payload".to_string()));
+            .push_back(QueuedMessage::fresh(7, "original-payload".to_string(), RecordOrigin::new(MessageOrigin::user())));
     }
 
     let action = c.decide_send_action("original-payload", Some(7));
@@ -1552,7 +1552,7 @@ fn decide_send_action_does_not_dedup_a_retry_against_an_identical_text_different
         // the retried entry (seq 7).
         inner
             .pending_send_messages
-            .push_back(QueuedMessage::fresh(9, "original-payload".to_string()));
+            .push_back(QueuedMessage::fresh(9, "original-payload".to_string(), RecordOrigin::new(MessageOrigin::user())));
     }
 
     let action = c.decide_send_action("original-payload", Some(7));
@@ -1767,8 +1767,8 @@ async fn release_spawn_claim_and_drain_queue_delivers_everything_on_success() {
         let mut inner = c.inner.lock().unwrap();
         inner.stdin_tx = Some(tx);
         inner.spawning_in_progress = true;
-        inner.pending_send_messages.push_back(QueuedMessage::fresh(1, "first".to_string()));
-        inner.pending_send_messages.push_back(QueuedMessage::fresh(2, "second".to_string()));
+        inner.pending_send_messages.push_back(QueuedMessage::fresh(1, "first".to_string(), RecordOrigin::new(MessageOrigin::user())));
+        inner.pending_send_messages.push_back(QueuedMessage::fresh(2, "second".to_string(), RecordOrigin::new(MessageOrigin::user())));
     }
 
     // Never used for a fallback spawn in this test — the drain fully
@@ -1835,8 +1835,8 @@ async fn release_spawn_claim_and_drain_queue_falls_back_and_publishes_status_whe
     {
         let mut inner = c.inner.lock().unwrap();
         inner.spawning_in_progress = true;
-        inner.pending_send_messages.push_back(QueuedMessage::fresh(1, "stuck-one".to_string()));
-        inner.pending_send_messages.push_back(QueuedMessage::fresh(2, "stuck-two".to_string()));
+        inner.pending_send_messages.push_back(QueuedMessage::fresh(1, "stuck-one".to_string(), RecordOrigin::new(MessageOrigin::user())));
+        inner.pending_send_messages.push_back(QueuedMessage::fresh(2, "stuck-two".to_string(), RecordOrigin::new(MessageOrigin::user())));
         // stdin_tx stays None — simulates the process this claim was
         // spawning for having already died before the drain ran.
     }
@@ -1880,8 +1880,8 @@ fn release_spawn_claim_and_drain_queue_discards_only_the_failed_spawners_own_mes
     {
         let mut inner = c.inner.lock().unwrap();
         inner.spawning_in_progress = true;
-        inner.pending_send_messages.push_back(QueuedMessage::fresh(1, "the-one-that-failed".to_string()));
-        inner.pending_send_messages.push_back(QueuedMessage::fresh(2, "queued-by-someone-else".to_string()));
+        inner.pending_send_messages.push_back(QueuedMessage::fresh(1, "the-one-that-failed".to_string(), RecordOrigin::new(MessageOrigin::user())));
+        inner.pending_send_messages.push_back(QueuedMessage::fresh(2, "queued-by-someone-else".to_string(), RecordOrigin::new(MessageOrigin::user())));
     }
 
     c.release_spawn_claim_and_drain_queue(false, unreachable_fallback_config(), 1);
@@ -1924,8 +1924,8 @@ fn release_spawn_claim_and_drain_queue_discards_the_right_entry_when_it_is_not_a
         // Simulates leftovers surviving a prior "second stall" release
         // (queue non-empty, claim already given up by that path) plus a
         // later BecomeSpawner appending its own message behind them.
-        inner.pending_send_messages.push_back(QueuedMessage::fresh(1, "older-leftover-from-a-different-caller".to_string()));
-        inner.pending_send_messages.push_back(QueuedMessage::fresh(2, "this-spawners-own-message-that-just-failed".to_string()));
+        inner.pending_send_messages.push_back(QueuedMessage::fresh(1, "older-leftover-from-a-different-caller".to_string(), RecordOrigin::new(MessageOrigin::user())));
+        inner.pending_send_messages.push_back(QueuedMessage::fresh(2, "this-spawners-own-message-that-just-failed".to_string(), RecordOrigin::new(MessageOrigin::user())));
     }
 
     c.release_spawn_claim_and_drain_queue(
@@ -1984,7 +1984,7 @@ fn release_spawn_claim_and_drain_queue_never_silently_strands_a_racing_send() {
         {
             let mut inner = c.inner.lock().unwrap();
             inner.spawning_in_progress = true;
-            inner.pending_send_messages.push_back(QueuedMessage::fresh(1, "the-one-that-failed".to_string()));
+            inner.pending_send_messages.push_back(QueuedMessage::fresh(1, "the-one-that-failed".to_string(), RecordOrigin::new(MessageOrigin::user())));
         }
 
         let handles: Vec<_> = (0..8)
@@ -2660,8 +2660,8 @@ async fn drain_appends_later_messages_to_the_pending_resume_retry_without_duplic
         let mut inner = c.inner.lock().unwrap();
         inner.stdin_tx = Some(tx);
         inner.spawning_in_progress = true;
-        inner.pending_send_messages.push_back(QueuedMessage::fresh(1, "first".to_string()));
-        inner.pending_send_messages.push_back(QueuedMessage::fresh(2, "second".to_string()));
+        inner.pending_send_messages.push_back(QueuedMessage::fresh(1, "first".to_string(), RecordOrigin::new(MessageOrigin::user())));
+        inner.pending_send_messages.push_back(QueuedMessage::fresh(2, "second".to_string(), RecordOrigin::new(MessageOrigin::user())));
         // Simulates spawn_process's own synchronous stash for "first"
         // — the message that triggered this spawn.
         let generation = inner.spawn_generation;
@@ -2725,8 +2725,8 @@ async fn drain_identifies_the_seed_by_content_even_when_a_leftover_is_delivered_
         inner.spawning_in_progress = true;
         // Simulates a "second stall" leaving an older leftover queued
         // ahead of this spawn's own triggering message.
-        inner.pending_send_messages.push_back(QueuedMessage::fresh(1, "older-leftover".to_string()));
-        inner.pending_send_messages.push_back(QueuedMessage::fresh(2, "new-trigger".to_string()));
+        inner.pending_send_messages.push_back(QueuedMessage::fresh(1, "older-leftover".to_string(), RecordOrigin::new(MessageOrigin::user())));
+        inner.pending_send_messages.push_back(QueuedMessage::fresh(2, "new-trigger".to_string(), RecordOrigin::new(MessageOrigin::user())));
         // spawn_process's own synchronous stash — seeded with the
         // ACTUAL trigger message, not whatever happens to sit at the
         // front of the queue.
@@ -2792,8 +2792,8 @@ async fn drain_appends_to_confirmed_retry_once_already_promoted_from_pending() {
         let mut inner = c.inner.lock().unwrap();
         inner.stdin_tx = Some(tx);
         inner.spawning_in_progress = true;
-        inner.pending_send_messages.push_back(QueuedMessage::fresh(1, "first".to_string()));
-        inner.pending_send_messages.push_back(QueuedMessage::fresh(2, "second".to_string()));
+        inner.pending_send_messages.push_back(QueuedMessage::fresh(1, "first".to_string(), RecordOrigin::new(MessageOrigin::user())));
+        inner.pending_send_messages.push_back(QueuedMessage::fresh(2, "second".to_string(), RecordOrigin::new(MessageOrigin::user())));
         // Simulates poison_resume having ALREADY promoted the tentative
         // retry to confirmed before the drain got to "second".
         let generation = inner.spawn_generation;
@@ -2876,7 +2876,7 @@ fn decide_retry_batch_action_dedups_only_the_first_against_pre_existing_queue() 
     {
         let mut inner = c.inner.lock().unwrap();
         inner.spawning_in_progress = true;
-        inner.pending_send_messages.push_back(QueuedMessage::fresh(1, "first".to_string()));
+        inner.pending_send_messages.push_back(QueuedMessage::fresh(1, "first".to_string(), RecordOrigin::new(MessageOrigin::user())));
     }
 
     let action = c.decide_retry_batch_action(1, &qentry(1, "first"), &[qentry(2, "second")]);
@@ -2910,7 +2910,7 @@ fn decide_retry_batch_action_prepends_ahead_of_an_unrelated_later_message() {
         // started, while the retry's own trigger ("A") had already
         // been popped and delivered (and is no longer in the queue —
         // it's now tracked only in the confirmed retry batch).
-        inner.pending_send_messages.push_back(QueuedMessage::fresh(1, "later-message".to_string()));
+        inner.pending_send_messages.push_back(QueuedMessage::fresh(1, "later-message".to_string(), RecordOrigin::new(MessageOrigin::user())));
     }
 
     let action = c.decide_retry_batch_action(1, &qentry(2, "A"), &[]);
@@ -3337,7 +3337,7 @@ fn enqueue_deferred(c: &PersistentSubprocessController, text: &str) {
         .lock()
         .unwrap()
         .deferred_deliveries
-        .push_back(PersistentSubprocessController::encode_user_message(text));
+        .push_back(PersistentSubprocessController::encode_user_message(text).into());
 }
 
 /// Codex P1: a failed write is not an empty queue. The entry stays queued,
@@ -3427,7 +3427,7 @@ async fn the_watchdog_waits_while_anything_is_in_flight() {
         ("retry batch being replayed", |i, on| i.drain_claim = on),
         ("human messages queued", |i, on| {
             if on {
-                i.pending_send_messages.push_back(QueuedMessage::fresh(1, "human".to_string()));
+                i.pending_send_messages.push_back(QueuedMessage::fresh(1, "human".to_string(), RecordOrigin::new(MessageOrigin::user())));
             } else {
                 i.pending_send_messages.clear();
             }
@@ -3457,7 +3457,7 @@ async fn the_send_path_does_not_overtake_another_writer() {
         ("spawn in flight", |i, on| i.spawning_in_progress = on),
         ("human messages queued", |i, on| {
             if on {
-                i.pending_send_messages.push_back(QueuedMessage::fresh(1, "human".to_string()));
+                i.pending_send_messages.push_back(QueuedMessage::fresh(1, "human".to_string(), RecordOrigin::new(MessageOrigin::user())));
             } else {
                 i.pending_send_messages.clear();
             }
@@ -3515,7 +3515,7 @@ fn orphaned_backlog(c: &PersistentSubprocessController) {
     inner.stdin_tx = None;
     inner.spawning_in_progress = false;
     inner.drain_claim = false;
-    inner.pending_send_messages.push_back(QueuedMessage::fresh(1, "leftover".to_string()));
+    inner.pending_send_messages.push_back(QueuedMessage::fresh(1, "leftover".to_string(), RecordOrigin::new(MessageOrigin::user())));
 }
 
 /// Codex P1 on #3562: an orphaned backlog is not an active writer. A send
@@ -3740,11 +3740,11 @@ fn redelivery_persister_records_the_line_in_the_blocks_transcript() {
     let line = PersistentSubprocessController::encode_user_message("the user's answer");
     c.redelivery_persister().write(&line);
     let t = transcript(&fs, "block-redeliver-unit");
-    assert_eq!(
-        t.trim_end(),
-        line,
-        "exactly the re-delivered line, as one record"
-    );
+    // The re-delivered line as one record, with the human as its origin.
+    let mut stored: serde_json::Value = serde_json::from_str(t.trim_end()).expect("one record");
+    assert_eq!(stored["amx"]["origin"], serde_json::json!({ "kind": "user" }), "the human's own choice, sent again");
+    stored.as_object_mut().unwrap().remove("amx");
+    assert_eq!(stored, serde_json::from_str::<serde_json::Value>(&line).unwrap());
 }
 
 #[tokio::test]
@@ -3777,8 +3777,12 @@ async fn a_dead_air_answer_is_resent_and_recorded() {
         .expect("the answer is re-delivered as a follow-up line");
     assert!(resent.contains("\"type\":\"user\""));
     let t = transcript(&fs, "block-redeliver-answer");
+    let resent: serde_json::Value = serde_json::from_str(&resent).unwrap();
     assert!(
-        t.lines().any(|l| l == resent),
+        t.lines().filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok()).any(|mut l| {
+            l.as_object_mut().unwrap().remove("amx");
+            l == resent
+        }),
         "the re-delivered line must be in the transcript; got {t:?}"
     );
 }
@@ -3850,7 +3854,7 @@ async fn a_labelled_delivery_sets_the_turn_provenance_the_controller_reports() {
     use crate::backend::blockcontroller::Controller;
     let (c, mut rx) = idle_controller();
     let input = TurnInput { origin: TurnOrigin::User, text: "finish then quit".into(), joins_turn: None };
-    assert!(matches!(c.decide_send_action_from("m", None, Some(input)), SendAction::DeliverDirect { was_active: false }));
+    assert!(matches!(c.decide_send_action_from("m", None, Some(input), RecordOrigin::new(MessageOrigin::user())), SendAction::DeliverDirect { was_active: false }));
     let p = c.turn_provenance().expect("a turn is in flight");
     assert_eq!((p.origin, p.tainted), (TurnOrigin::User, false));
     // A jekt arriving now is delivered into this turn at once
@@ -3869,12 +3873,12 @@ async fn a_labelled_delivery_sets_the_turn_provenance_the_controller_reports() {
 async fn a_delivery_with_images_writes_content_blocks_before_the_text() {
     let (c, mut rx) = idle_controller();
     let image = serde_json::json!({ "type": "image", "source": { "type": "base64", "media_type": "image/png", "data": "AAAA" } });
-    c.send_user_message_with_images_from("look at this".to_string(), None, vec![image.clone()]).unwrap();
+    c.send_user_message_with_images_from("look at this".to_string(), None, vec![image.clone()], RecordOrigin::new(MessageOrigin::user())).unwrap();
     let line: serde_json::Value = serde_json::from_str(&rx.try_recv().unwrap()).unwrap();
     let content = line["message"]["content"].as_array().expect("blocks, not a string");
     assert_eq!(content[0], image);
     assert_eq!(content[1]["text"], "look at this");
-    c.send_user_message_with_images_from("plain".to_string(), None, Vec::new()).unwrap();
+    c.send_user_message_with_images_from("plain".to_string(), None, Vec::new(), RecordOrigin::new(MessageOrigin::user())).unwrap();
     let line: serde_json::Value = serde_json::from_str(&rx.try_recv().unwrap()).unwrap();
     assert_eq!(line["message"]["content"], "plain");
 }

@@ -24,7 +24,7 @@ use uuid::Uuid;
 use agentmux_common::time::now_ms;
 
 use crate::backend::agent_state::{self, AgentState};
-use crate::backend::blockcontroller::health::TurnOrigin;
+use crate::backend::message_origin::MessageOrigin;
 use crate::backend::reactive::sanitize::{neutralize_markers, quote_in_system_note, sanitize_message};
 use crate::backend::reactive::types::AgentRegistration;
 use crate::backend::rpc::engine::WshRpcEngine;
@@ -460,10 +460,10 @@ fn alive(reg: &AgentRegistration) -> bool {
 async fn tell(state: &AppState, reg: &AgentRegistration, from: &Actor, text: String) -> Result<(), String> {
     let deps = AgentTurnDeps::from_state(state);
     if from.is_operator {
-        return super::fleet::deliver_broadcast_turn(&deps, reg.block_id.clone(), text, TurnOrigin::User).await;
+        return super::fleet::deliver_broadcast_turn(&deps, reg.block_id.clone(), text, MessageOrigin::user()).await;
     }
     let text = format!("[From {}, an agent; not the operator]\n{text}", quote_in_system_note(&from.name));
-    super::fleet::deliver_broadcast_turn(&deps, reg.block_id.clone(), text, TurnOrigin::Automated).await
+    super::fleet::deliver_broadcast_turn(&deps, reg.block_id.clone(), text, MessageOrigin::from_sender(&from.name)).await
 }
 
 /// Text another agent wrote, quoted line by line so it reads as theirs.

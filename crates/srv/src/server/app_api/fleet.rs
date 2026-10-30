@@ -53,6 +53,7 @@ use agentmux_common::AUTH_KEY_HEADER;
 use std::sync::Arc;
 
 use crate::backend::blockcontroller::health::TurnOrigin;
+use crate::backend::message_origin::MessageOrigin;
 use crate::backend::reactive::broadcast_turn_message;
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::*;
@@ -128,7 +129,7 @@ pub(crate) async fn run_broadcast<R, D, Fut>(
 ) -> Vec<BroadcastOutcome>
 where
     R: Fn(&str) -> Option<String>,
-    D: Fn(String, String, TurnOrigin) -> Fut,
+    D: Fn(String, String, MessageOrigin) -> Fut,
     Fut: std::future::Future<Output = Result<(), String>>,
 {
     use futures_util::StreamExt;
@@ -150,7 +151,7 @@ where
                     None => Err(NO_REGISTERED_AGENT.to_string()),
                     Some(agent) => {
                         let text = broadcast_turn_message(agent, recipients, msg_id, body);
-                        deliver(block_id.clone(), text, BROADCAST_TURN_ORIGIN).await
+                        deliver(block_id.clone(), text, MessageOrigin::broadcast()).await
                     }
                 };
                 BroadcastOutcome { block_id, agent_id, result }
@@ -198,7 +199,7 @@ pub(crate) async fn deliver_broadcast_turn(
     deps: &AgentTurnDeps,
     block_id: String,
     text: String,
-    origin: TurnOrigin,
+    from: MessageOrigin,
 ) -> Result<(), String> {
     // An agent out of quota or signed out would fail the turn at once: say so
     // in the broadcast's result, where the operator sees it, rather than lose
@@ -214,15 +215,16 @@ pub(crate) async fn deliver_broadcast_turn(
     if let Some(u) = unavailable {
         return Err(format!("{}{}: not sent", crate::backend::reactive::UNAVAILABLE_PREFIX, u.reason()));
     }
+    let origin = from.turn_origin();
     let input = crate::backend::blockcontroller::health::TurnInput { origin, text: text.clone(), joins_turn: None };
-    match broadcast_action(crate::bootstrap::route_agent_message_from(&block_id, &text, Some(input), &[])) {
+    match broadcast_action(crate::bootstrap::route_agent_message_from(&block_id, &text, Some(input), from.clone(), &[])) {
         BroadcastAction::Done => Ok(()),
         BroadcastAction::Fail(e) => Err(e),
         // The block was resolved through the reactive handler's own agent map, so
         // it is already registered: skip re-registering, as the reactive-delivery
         // caller does.
         BroadcastAction::StartTurn => {
-            run_agent_turn(deps, block_id, text, None, TurnRegistration::Skip, origin, Vec::new()).await
+            run_agent_turn(deps, block_id, text, None, TurnRegistration::Skip, from, Vec::new()).await
         }
     }
 }
@@ -343,7 +345,7 @@ pub(crate) async fn deliver_forwarded_broadcast(
         Some(agent) => {
             let text = broadcast_turn_message(&agent.agent_id, recipients, msg_id, body);
             let deps = AgentTurnDeps::from_state(state);
-            deliver_broadcast_turn(&deps, block_id.to_string(), text, BROADCAST_TURN_ORIGIN).await
+            deliver_broadcast_turn(&deps, block_id.to_string(), text, MessageOrigin::broadcast()).await
         }
     };
     let target = state
@@ -1245,7 +1247,7 @@ mod broadcast_core_tests {
 
     #[tokio::test]
     async fn every_target_is_delivered_with_the_broadcast_origin() {
-        let seen: Arc<Mutex<Vec<TurnOrigin>>> = Arc::default();
+        let seen: Arc<Mutex<Vec<MessageOrigin>>> = Arc::default();
         let seen2 = seen.clone();
         let out = run_broadcast(ids(3), "hi", "m1", 4, agent_for, move |_b, _t, origin| {
             seen2.lock().unwrap().push(origin);
@@ -1253,7 +1255,7 @@ mod broadcast_core_tests {
         })
         .await;
         assert_eq!(out.len(), 3);
-        assert!(seen.lock().unwrap().iter().all(|o| *o == TurnOrigin::User));
+        assert!(seen.lock().unwrap().iter().all(|o| *o == MessageOrigin::broadcast() && o.turn_origin() == TurnOrigin::User));
     }
 
     /// The self-quit gate passes an untainted broadcast turn whose text has the

@@ -134,7 +134,7 @@ async fn shutdown_with_no_process_still_reports_deferred_messages() {
         .lock()
         .unwrap()
         .deferred_deliveries
-        .push_back(PersistentSubprocessController::encode_user_message("behind a failed spawn"));
+        .push_back(PersistentSubprocessController::encode_user_message("behind a failed spawn").into());
 
     let outcome = c.shutdown(std::time::Instant::now() + std::time::Duration::from_secs(1)).await;
 

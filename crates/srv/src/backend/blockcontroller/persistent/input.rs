@@ -139,23 +139,30 @@ impl PersistentSubprocessController {
     /// by the drain with whatever else is queued. Both stay unlabelled, as
     /// every automated delivery is, so the label can never vouch for input
     /// that isn't the user's.
+    #[cfg(test)]
     pub fn send_user_message_outcome_from(
         &self,
         message: String,
         origin: Option<crate::backend::blockcontroller::health::TurnInput>,
     ) -> Result<SendOutcome, String> {
-        self.send_user_message_with_images_from(message, origin, Vec::new())
+        let record = RecordOrigin::new(MessageOrigin::user());
+        self.send_user_message_with_images_from(message, origin, Vec::new(), record)
     }
 
     /// [`Self::send_user_message_outcome_from`] with Claude content blocks
     /// (images, PDFs) ahead of the text, as the composer sends attachments
     /// (`prompt::claude_user_line`). The stored copy drops their base64
     /// (`append_delivered_message`).
+    ///
+    /// `record` says where the message came from and which `[AgentMux]` notes
+    /// went with it; the record written for it carries both
+    /// ([`Self::append_delivered_message`]), also when it waits in the queue.
     pub fn send_user_message_with_images_from(
         &self,
         message: String,
         origin: Option<crate::backend::blockcontroller::health::TurnInput>,
         images: Vec<serde_json::Value>,
+        record: RecordOrigin,
     ) -> Result<SendOutcome, String> {
         // Pre-turn fence — see `send_message`.
         self.fence_check()?;
@@ -187,7 +194,7 @@ impl PersistentSubprocessController {
             // Always enqueue first, then write the whole backlog in order.
             // Writing this message directly while older ones are queued would
             // reorder it ahead of them.
-            inner.deferred_deliveries.push_back(json_str);
+            inner.deferred_deliveries.push_back(Deferred { line: json_str, record });
 
             // A spawn in flight counts as "wait" rather than as an error. This
             // is the startup race that used to drop jekts outright
@@ -237,8 +244,8 @@ impl PersistentSubprocessController {
                 self.spawn_status_heartbeat();
             }
             self.publish_status();
-            for line in &written {
-                self.append_delivered_message(line);
+            for queued in &written {
+                self.append_delivered_message(&queued.line, &queued.record);
             }
         }
         if let Some(e) = failure {
@@ -275,7 +282,7 @@ impl PersistentSubprocessController {
             joined
         };
         if joined {
-            self.append_delivered_message(&line);
+            self.append_delivered_message(&line, &RecordOrigin::new(MessageOrigin::system()));
         }
         joined
     }
@@ -370,10 +377,10 @@ impl PersistentSubprocessController {
     pub(super) fn flush_deferred_locked(
         inner: &mut PersistentInner,
         block_id: &str,
-    ) -> (Vec<String>, Option<String>) {
+    ) -> (Vec<Deferred>, Option<String>) {
         let mut written = Vec::new();
         while let Some(head) = inner.deferred_deliveries.front().cloned() {
-            if let Err(e) = Self::try_write_stdin_locked(inner, &head) {
+            if let Err(e) = Self::try_write_stdin_locked(inner, &head.line) {
                 tracing::warn!(
                     block_id = %block_id,
                     error = %e,
@@ -542,8 +549,8 @@ impl PersistentSubprocessController {
                 self.spawn_status_heartbeat();
             }
             self.publish_status();
-            for line in &written {
-                self.append_delivered_message(line);
+            for queued in &written {
+                self.append_delivered_message(&queued.line, &queued.record);
             }
         }
         WatchdogStep::Continue
@@ -564,7 +571,7 @@ impl PersistentSubprocessController {
     ///
     /// Takes `block_id` rather than `&self` so `shutdown`'s `'static` future,
     /// which holds no controller reference, can report through it too.
-    pub(super) fn log_stranded_deferred(block_id: &str, reason: &str, stranded: &[String]) {
+    pub(super) fn log_stranded_deferred(block_id: &str, reason: &str, stranded: &[Deferred]) {
         if stranded.is_empty() {
             return;
         }
@@ -574,8 +581,8 @@ impl PersistentSubprocessController {
             stranded = stranded.len(),
             "deferred messages were accepted but never delivered"
         );
-        for line in stranded {
-            tracing::warn!(block_id = %block_id, message = %line, "stranded deferred message");
+        for queued in stranded {
+            tracing::warn!(block_id = %block_id, message = %queued.line, "stranded deferred message");
         }
     }
 
@@ -592,7 +599,7 @@ impl PersistentSubprocessController {
     /// message where the agent actually received it. A queued message is
     /// therefore not yet visible — surfacing "N waiting" is a UI question
     /// tracked as spec §8 Q3.
-    pub(super) fn append_delivered_message(&self, json_str: &str) {
+    pub(super) fn append_delivered_message(&self, json_str: &str, record: &RecordOrigin) {
         let Some(ref broker) = self.broker else { return };
         // A line with inline images is stored without their base64, as
         // `persist_message_to_blockfile` stores one.
@@ -603,10 +610,12 @@ impl PersistentSubprocessController {
         // (`viewer::origin`); the agent's stdin got it without.
         let stamped = crate::backend::viewer::origin::stamp(&self.block_id, json_str.as_bytes())
             .and_then(|l| String::from_utf8(l).ok());
+        // Then where it came from and the notes that went with it.
+        let stored = crate::backend::message_origin::stamp_line(stamped.as_deref().unwrap_or(json_str), record);
         crate::backend::transcript::append::append_output_line(
             broker,
             &self.block_id,
-            stamped.as_deref().unwrap_or(json_str),
+            &stored,
             self.filestore.as_ref(),
             global_zone.as_deref(),
         );
@@ -1018,6 +1027,8 @@ impl RedeliveryPersister {
             record.as_bytes(),
             self.filestore.as_ref(),
             global_zone.as_deref(),
+            // The human's own choice, sent again.
+            Some(&RecordOrigin::new(MessageOrigin::user())),
         );
     }
 }

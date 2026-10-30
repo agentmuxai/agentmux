@@ -791,7 +791,14 @@ pub type InputSender = Arc<dyn Fn(&str, &[u8]) -> Result<(), String> + Send + Sy
 /// with the text, for a persistent Claude agent; every other controller
 /// ignores it. Empty for every delivery but a jekt's files from a verified
 /// sender (SPEC_JEKT_FILE_TRANSFER_2026_10_05.md §6.4).
-pub type MessageSender = Arc<dyn Fn(&str, &str, &[serde_json::Value]) -> Result<SenderDelivery, String> + Send + Sync>;
+///
+/// The fourth is where the message came from (`message_origin`), which the
+/// record of it carries: every sender says, none can leave it out.
+pub type MessageSender = Arc<
+    dyn Fn(&str, &str, &[serde_json::Value], &crate::backend::message_origin::MessageOrigin) -> Result<SenderDelivery, String>
+        + Send
+        + Sync,
+>;
 
 /// See [`MessageSender`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
