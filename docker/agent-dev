@@ -20,22 +20,35 @@ mkdir -p "$STATE"
 # True when PID is alive and its command line contains NEEDLE: a recycled PID is never signalled.
 is_ours() { [ -r "/proc/$1/cmdline" ] && tr '\0' ' ' < "/proc/$1/cmdline" | grep -q -- "$2"; }
 
+# Waits (up to 5 s) for PIDs it signalled to be gone: Xvfb removes its socket as it exits, and a restart that
+# looked for the socket before then would find the old display and start no new one.
+wait_gone() {
+    local pid n
+    for pid in "$@"; do
+        n=0
+        while kill -0 "$pid" 2>/dev/null && [ "$n" -lt 50 ]; do sleep 0.1; n=$((n + 1)); done
+    done
+}
+
 stop_all() {
-    local f pid
+    local f pid signalled=()
     # The launcher runs from <checkout>/dist/cef-dev and outlives a killed `task`; find it by its binary.
     if [ -f "$STATE/dir" ]; then
         local dir; dir="$(cat "$STATE/dir")"
         for pid in $(ls /proc | grep -E '^[0-9]+$'); do
-            [ "$(readlink "/proc/$pid/exe" 2>/dev/null || true)" = "$dir/dist/cef-dev/agentmux-launcher" ] && kill -TERM "$pid" 2>/dev/null || true
+            if [ "$(readlink "/proc/$pid/exe" 2>/dev/null || true)" = "$dir/dist/cef-dev/agentmux-launcher" ]; then
+                kill -TERM "$pid" 2>/dev/null && signalled+=("$pid")
+            fi
         done
     fi
     for f in task xvfb; do
         [ -f "$STATE/$f.pid" ] || continue
         pid="$(cat "$STATE/$f.pid")"
         case "$f" in task) needle="task" ;; xvfb) needle="Xvfb" ;; esac
-        is_ours "$pid" "$needle" && kill -TERM "$pid" 2>/dev/null || true
+        if is_ours "$pid" "$needle" && kill -TERM "$pid" 2>/dev/null; then signalled+=("$pid"); fi
         rm -f "$STATE/$f.pid"
     done
+    [ "${#signalled[@]}" -eq 0 ] || wait_gone "${signalled[@]}"
 }
 
 status() {
