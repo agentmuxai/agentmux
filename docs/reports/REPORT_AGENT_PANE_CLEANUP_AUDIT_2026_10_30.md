@@ -1,5 +1,7 @@
 # Report: agent pane cleanup audit (duplicate paths, state writers, the plan)
 
+**Status:** analysis — the plan in section 6 is carried out in small PRs; S0 (delete the old scroll-follow path) is in PR #PRNUM.
+
 Task #13043 (research), #13044 (build). Written 2026-10-30 by AgentX against `origin/main` 7f87ebba7 (`frontend/app/view/agent`). Ships with the first cleanup PR.
 
 Operator, 2026-10-30: "how is the agent pane looking, as far as code cleanliness and DRYness? i am noticing subtle bugs, some things sometimes dont work ... lets do the audit, clean it up, youll probably fix the bugs while doing that, once it delivers, Ill dogfood anew". Then, on the hand-made buttons: "ok lets fix all of this".
