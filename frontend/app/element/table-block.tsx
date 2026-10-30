@@ -3,6 +3,7 @@
 
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { cn } from "@/util/util";
+import { Button } from "@/element/ui";
 import { createSignal, JSX, Show } from "solid-js";
 
 function extractCsv(table: HTMLTableElement): string {
@@ -40,20 +41,20 @@ export function TableBlock(props: TableBlockProps): JSX.Element {
 
     return (
         <div class="table-block group relative my-4 overflow-x-auto rounded-lg border border-border">
-            <button
-                type="button"
+            <Button
+                density="compact"
                 class={cn(
-                    "absolute right-2 top-2 z-10 rounded border border-border px-2 py-0.5",
-                    "text-xs transition-opacity bg-panel hover:bg-hover",
-                    copied() ? "text-[var(--success-text-color)] opacity-100" : "text-muted opacity-0 group-hover:opacity-100"
+                    "absolute right-2 top-2 z-10 transition-opacity",
+                    copied() ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
                 )}
+                style={{ "--ui-bg": "var(--color-panel)", ...(copied() ? { "--ui-fg": "var(--success-text-color)" } : {}) }}
                 onClick={handleCopy}
                 title="Copy as CSV"
             >
                 <Show when={copied()} fallback="CSV">
                     ✓ copied
                 </Show>
-            </button>
+            </Button>
             <table ref={tableRef} class={cn("w-full border-collapse", props.class)}>
                 {props.children}
             </table>

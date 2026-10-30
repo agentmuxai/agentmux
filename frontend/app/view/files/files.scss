@@ -46,19 +46,12 @@
     white-space: nowrap;
 }
 
-.files-crumb {
+// `.ui-button.` outranks the kit's own padding and colour at equal source order.
+.ui-button.files-crumb {
     flex-shrink: 0;
-    padding: 2px 4px;
     border: none;
-    border-radius: var(--radius-sm);
-    background: transparent;
-    color: var(--main-text-color);
     font: inherit;
-    cursor: pointer;
-
-    &:hover {
-        background: var(--hover-bg-color);
-    }
+    color: var(--main-text-color);
 }
 
 /* The SSH host a remote pane is on, before its path. */
@@ -136,29 +129,12 @@
     justify-content: space-between;
 }
 
-.files-places-heading-action {
-    padding: 0 2px;
-    border: none;
-    background: none;
-    color: var(--secondary-text-color);
-    cursor: pointer;
-
-    &:hover {
-        color: var(--main-text-color);
-    }
-}
-
-.files-place {
-    display: flex;
-    align-items: center;
+.ui-button.files-place {
     gap: 8px;
-    padding: 3px 10px;
     border: none;
-    background: transparent;
-    color: var(--main-text-color);
     font: inherit;
-    text-align: left;
-    cursor: pointer;
+    padding: 3px 10px;
+    color: var(--main-text-color);
 
     span {
         @include mixins.truncate;
@@ -167,10 +143,6 @@
     i {
         width: 14px;
         color: var(--secondary-text-color);
-    }
-
-    &:hover {
-        background: var(--hover-bg-color);
     }
 
     /* The host this pane is on. */

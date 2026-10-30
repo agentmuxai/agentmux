@@ -121,7 +121,8 @@ const NodeTypeBar = (p: { model: DroneViewModel }): JSX.Element => {
 const NodeChip = (p: { model: DroneViewModel; kind: BlockKind }): JSX.Element => {
     const meta = blockMeta(p.kind);
     return (
-        <button
+        <Button
+            tone="quiet"
             class="drone-chip"
             style={{ "--block-color": meta.color }}
             draggable={true}
@@ -140,7 +141,7 @@ const NodeChip = (p: { model: DroneViewModel; kind: BlockKind }): JSX.Element =>
         >
             <span class="drone-chip-emoji">{meta.emoji}</span>
             <span class="drone-chip-label">{meta.label}</span>
-        </button>
+        </Button>
     );
 };
 
