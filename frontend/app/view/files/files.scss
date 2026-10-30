@@ -213,18 +213,30 @@
     background: var(--main-bg-color);
     border-bottom: 1px solid var(--border-color);
 
-    .files-cell {
+    .ui-button.files-cell {
+        --ui-fg: var(--secondary-text-color);
+        --ui-fg-hover: var(--main-text-color);
+        --ui-bg-hover: transparent;
+        justify-content: flex-start;
         height: 100%;
+        min-height: 0;
         border: none;
-        background: transparent;
-        color: var(--secondary-text-color);
+        border-radius: 0;
         font: inherit;
         font-weight: 600;
         text-align: left;
         cursor: pointer;
+    }
 
-        &:hover {
-            color: var(--main-text-color);
+    .ui-button.files-col-name {
+        gap: 6px;
+        flex: 1;
+        min-width: 120px;
+    }
+
+    .ui-button.files-col-kind {
+        @container (max-width: 520px) {
+            display: none;
         }
     }
 }
