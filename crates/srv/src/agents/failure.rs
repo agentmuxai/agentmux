@@ -400,12 +400,7 @@ pub fn classify(
     // Claude's plan limits read "You've hit your weekly limit · resets …" (or
     // "session limit", or "monthly spend limit · raise it at …"), with no
     // "usage" in them.
-    if hay.contains("usage limit")
-        || hay.contains("weekly limit")
-        || hay.contains("hit your limit")
-        || hay.contains("hit your session limit")
-        || hay.contains("spend limit")
-        || hay.contains("out of credits")
+    if names_plan_limit(&hay)
         || hay.contains("quota")
         || hay.contains("billing")
         || hay.contains("insufficient")
@@ -484,7 +479,6 @@ pub fn classify(
     )
 }
 
-#[allow(clippy::too_many_arguments)]
 /// Whether `hay` (lower-cased) says the plan itself is out: the phrases a usage limit uses, without
 /// the broad words (`quota`, `billing`, `insufficient`) the limit branch also takes.
 fn names_plan_limit(hay: &str) -> bool {
@@ -496,6 +490,7 @@ fn names_plan_limit(hay: &str) -> bool {
         || hay.contains("out of credits")
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build(
     code: FailureClass,
     title: &str,
