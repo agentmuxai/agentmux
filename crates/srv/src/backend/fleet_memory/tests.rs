@@ -21,6 +21,7 @@ fn entry(id: &str, text: &str, updated_at: i64) -> FleetEntry {
         instructions_by_provider: "{}".to_string(),
         context_files: "[]".to_string(),
         updated_at,
+        edited_by: String::new(),
     }
 }
 
@@ -87,7 +88,7 @@ fn an_entry_kept_on_this_machine_is_not_touched_by_a_write_or_a_removal() {
     put(&store, &entry("f1", "mine", 1_000));
     store.bundle_scope_set("f1", SCOPE_MACHINE).unwrap();
     assert_eq!(put(&store, &entry("f1", "theirs", 9_000)), Outcome::Skipped(Skipped::MachineScope));
-    let removal = FleetRemoval { id: "f1".into(), removed_at: 9_000 };
+    let removal = FleetRemoval { id: "f1".into(), removed_at: 9_000, edited_by: String::new() };
     assert_eq!(apply_remove(&store, &removal, REMOTE).unwrap(), Outcome::Skipped(Skipped::MachineScope));
     let b = store.bundle_get("f1").unwrap().unwrap();
     assert!(b.is_global);
@@ -115,7 +116,7 @@ fn agentmux_own_entries_the_blank_bundle_and_agent_presets_are_never_written() {
     assert_eq!(put(&store, &entry("seed-rules", "hijack", 9_000)), Outcome::Skipped(Skipped::Protected));
     assert_eq!(put(&store, &entry("blank", "hijack", 9_000)), Outcome::Skipped(Skipped::Protected));
     assert_eq!(put(&store, &entry("preset-1", "hijack", 9_000)), Outcome::Skipped(Skipped::NotMemory));
-    let removal = |id: &str| FleetRemoval { id: id.into(), removed_at: 9_000 };
+    let removal = |id: &str| FleetRemoval { id: id.into(), removed_at: 9_000, edited_by: String::new() };
     assert_eq!(apply_remove(&store, &removal("sys-1"), REMOTE).unwrap(), Outcome::Skipped(Skipped::Protected));
     assert_eq!(apply_remove(&store, &removal("preset-1"), REMOTE).unwrap(), Outcome::Skipped(Skipped::NotMemory));
     assert_eq!(store.bundle_get("sys-1").unwrap().unwrap().instructions, "agentmux rule");
@@ -128,22 +129,22 @@ fn a_removal_is_a_write_that_a_newer_edit_beats_and_an_older_one_loses_to() {
     put(&store, &entry("f1", "text", 1_000));
 
     assert_eq!(
-        apply_remove(&store, &FleetRemoval { id: "f1".into(), removed_at: 500 }, REMOTE).unwrap(),
+        apply_remove(&store, &FleetRemoval { id: "f1".into(), removed_at: 500, edited_by: String::new() }, REMOTE).unwrap(),
         Outcome::Skipped(Skipped::Older),
         "an edit made after the removal wins"
     );
     assert_eq!(
-        apply_remove(&store, &FleetRemoval { id: "f1".into(), removed_at: 2_000 }, REMOTE).unwrap(),
+        apply_remove(&store, &FleetRemoval { id: "f1".into(), removed_at: 2_000, edited_by: String::new() }, REMOTE).unwrap(),
         Outcome::Applied(Applied::Removed)
     );
     assert!(!store.bundle_get("f1").unwrap().unwrap().is_global);
     assert!(store.bundle_is_removed_global("f1").unwrap());
     assert_eq!(
-        apply_remove(&store, &FleetRemoval { id: "f1".into(), removed_at: 3_000 }, REMOTE).unwrap(),
+        apply_remove(&store, &FleetRemoval { id: "f1".into(), removed_at: 3_000, edited_by: String::new() }, REMOTE).unwrap(),
         Outcome::Skipped(Skipped::AlreadyRemoved)
     );
     assert_eq!(
-        apply_remove(&store, &FleetRemoval { id: "nope".into(), removed_at: 3_000 }, REMOTE).unwrap(),
+        apply_remove(&store, &FleetRemoval { id: "nope".into(), removed_at: 3_000, edited_by: String::new() }, REMOTE).unwrap(),
         Outcome::Skipped(Skipped::Unknown)
     );
 
@@ -158,7 +159,7 @@ fn a_removal_is_a_write_that_a_newer_edit_beats_and_an_older_one_loses_to() {
 fn a_removal_is_recorded_as_a_removal_by_the_remote_agent() {
     let store = store();
     put(&store, &entry("f1", "text", 1_000));
-    apply_remove(&store, &FleetRemoval { id: "f1".into(), removed_at: 2_000 }, REMOTE).unwrap();
+    apply_remove(&store, &FleetRemoval { id: "f1".into(), removed_at: 2_000, edited_by: String::new() }, REMOTE).unwrap();
     let v = store.bundle_version_latest("f1").unwrap().unwrap();
     assert_eq!((v.source.as_str(), v.written_by.as_str()), (REMOVE_SOURCE, "loap@charlie"));
 }
@@ -187,7 +188,7 @@ fn list_meta_has_the_fleet_entries_and_the_removals_and_nothing_else() {
     store.bundle_upsert(&bundle("seed-x", "s", true)).unwrap();
     put(&store, &entry("f1", "one", 1_000));
     put(&store, &entry("f2", "two", 2_000));
-    apply_remove(&store, &FleetRemoval { id: "f2".into(), removed_at: 3_000 }, REMOTE).unwrap();
+    apply_remove(&store, &FleetRemoval { id: "f2".into(), removed_at: 3_000, edited_by: String::new() }, REMOTE).unwrap();
 
     let mut metas = list_meta(&store).unwrap();
     metas.sort_by(|a, b| a.id.cmp(&b.id));
@@ -204,7 +205,8 @@ fn entry_for_push_returns_a_fleet_entry_and_nothing_for_the_rest() {
     store.bundle_scope_set("m1", SCOPE_MACHINE).unwrap();
     store.bundle_upsert(&bundle("p1", "preset", false)).unwrap();
 
-    assert_eq!(entry_for_push(&store, "f1").unwrap(), Some(entry("f1", "text", 1_000)));
+    let expected = FleetEntry { edited_by: "loap@charlie".into(), ..entry("f1", "text", 1_000) };
+    assert_eq!(entry_for_push(&store, "f1").unwrap(), Some(expected), "the writer it arrived from travels with it");
     assert_eq!(entry_for_push(&store, "m1").unwrap(), None);
     assert_eq!(entry_for_push(&store, "p1").unwrap(), None);
     assert_eq!(entry_for_push(&store, "seed-x").unwrap(), None);
@@ -250,7 +252,7 @@ fn two_machines_pushing_to_each_other_end_with_the_same_entries() {
     put(&a, &entry("only-a", "a only", 3_000));
     put(&b, &entry("gone", "b removes this", 1_000));
     put(&a, &entry("gone", "b removes this", 1_000));
-    apply_remove(&b, &FleetRemoval { id: "gone".into(), removed_at: 4_000 }, REMOTE).unwrap();
+    apply_remove(&b, &FleetRemoval { id: "gone".into(), removed_at: 4_000, edited_by: String::new() }, REMOTE).unwrap();
 
     // Each side lists the other and sends what to_push says, as the catch-up will.
     let sync = |from: &Store, to: &Store| {
@@ -260,7 +262,7 @@ fn two_machines_pushing_to_each_other_end_with_the_same_entries() {
                     let _ = apply_put(to, &entry_for_push(from, &id).unwrap().unwrap(), REMOTE).unwrap();
                 }
                 Push::Remove { id, removed_at } => {
-                    let _ = apply_remove(to, &FleetRemoval { id, removed_at }, REMOTE).unwrap();
+                    let _ = apply_remove(to, &FleetRemoval { id, removed_at, edited_by: String::new() }, REMOTE).unwrap();
                 }
             }
         }
@@ -278,4 +280,31 @@ fn two_machines_pushing_to_each_other_end_with_the_same_entries() {
     assert_eq!(ids, [("gone".to_string(), true), ("only-a".to_string(), false), ("shared".to_string(), false)]);
     assert_eq!(a.bundle_get("shared").unwrap().unwrap().instructions, "b wrote this later");
     assert!(to_push(&list_meta(&a).unwrap(), &list_meta(&b).unwrap()).is_empty(), "nothing left to send");
+}
+
+#[test]
+fn who_edited_it_travels_into_the_peer_history_and_is_not_part_of_the_content() {
+    let (a, b) = (store(), store());
+    a.bundle_upsert_with_version(&bundle("f1", "typed in the pane", true), "armory-ui", "", "human", "{}").unwrap();
+    let sent = entry_for_push(&a, "f1").unwrap().unwrap();
+    assert_eq!(sent.edited_by, "armory-ui");
+
+    apply_put(&b, &sent, Actor { label: "steward@narko", uid: "" }).unwrap();
+    let v = b.bundle_version_latest("f1").unwrap().unwrap();
+    assert_eq!(v.written_by, "steward@narko", "attributed to the agent that sent it, never to the operator");
+    let detail: serde_json::Value = serde_json::from_str(&v.source_detail).unwrap();
+    assert_eq!(detail["edited_by"], "armory-ui");
+    assert_eq!(detail["fleet_from"], "steward@narko");
+
+    let other = FleetEntry { edited_by: "someone else".into(), ..sent.clone() };
+    assert_eq!(sent.hash(), other.hash());
+}
+
+#[test]
+fn the_fingerprint_changes_with_the_entries_and_not_with_their_order() {
+    let (m1, m2) = (meta("a", "h1", 1, false), meta("b", "h2", 2, false));
+    assert_eq!(fingerprint(&[m1.clone(), m2.clone()]), fingerprint(&[m2.clone(), m1.clone()]));
+    assert_ne!(fingerprint(&[m1.clone(), m2.clone()]), fingerprint(&[m1.clone()]));
+    assert_ne!(fingerprint(&[m1.clone()]), fingerprint(&[meta("a", "h1", 1, true)]));
+    assert_ne!(fingerprint(&[m1]), fingerprint(&[meta("a", "h1", 2, false)]));
 }

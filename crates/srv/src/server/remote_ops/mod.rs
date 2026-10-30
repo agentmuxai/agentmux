@@ -13,6 +13,8 @@
 //! To add an operation: write `async fn` in a file of its own, and add one arm to [`lookup`].
 
 pub(crate) mod app_ops;
+pub(crate) mod fleet_sync;
+pub(crate) mod memory;
 pub(crate) mod receive;
 pub(crate) mod send;
 
@@ -103,16 +105,31 @@ pub(crate) struct Op {
     /// that pin comes from unauthenticated discovery, which is enough to read a version and too
     /// thin to stop an agent or move an account.
     pub changes_state: bool,
+    /// The most bytes of params this operation takes. The default is the transport's
+    /// `MAX_PARAMS_BYTES`; one that carries text raises it with [`Op::with_max_params`]. The sender
+    /// and the receiver both read it from here, the receiver before it verifies anything, so the
+    /// unsigned op name only bounds the work.
+    pub max_params: usize,
 }
 
 impl Op {
     pub(crate) const fn read(run: OpFn) -> Self {
-        Self { run, changes_state: false }
+        Self { run, changes_state: false, max_params: agentmux_common::remote_op::MAX_PARAMS_BYTES }
     }
 
     pub(crate) const fn write(run: OpFn) -> Self {
-        Self { run, changes_state: true }
+        Self { run, changes_state: true, max_params: agentmux_common::remote_op::MAX_PARAMS_BYTES }
     }
+
+    pub(crate) const fn with_max_params(mut self, max_params: usize) -> Self {
+        self.max_params = max_params;
+        self
+    }
+}
+
+/// The params limit of `op`: its own, or the default for one this build does not know.
+pub(crate) fn max_params_of(op: &str) -> usize {
+    lookup(op).map_or(agentmux_common::remote_op::MAX_PARAMS_BYTES, |o| o.max_params)
 }
 
 /// The operation `op`, if this build has one. One arm per operation: say whether it reads or writes.
@@ -120,6 +137,13 @@ pub(crate) fn lookup(op: &str) -> Option<Op> {
     Some(match op {
         "app.version" => Op::read(|state, caller, params| Box::pin(app_ops::version(state, caller, params))),
         "app.health" => Op::read(|state, caller, params| Box::pin(app_ops::health(state, caller, params))),
+        // A Global Memory entry is up to 1 MiB of text (the cap `globalmemory.write` has), so this one
+        // takes 1.2 MB of params; every other operation keeps the default.
+        "memory.global.put" => Op::write(|state, caller, params| Box::pin(memory::put(state, caller, params))).with_max_params(memory::MAX_PUT_PARAMS),
+        "memory.global.remove" => Op::write(|state, caller, params| Box::pin(memory::remove(state, caller, params))),
+        "memory.global.list" => Op::read(|state, caller, params| Box::pin(memory::list(state, caller, params))),
+        #[cfg(test)]
+        "test.big" => Op::read(|_, _, params| Box::pin(async move { Ok(serde_json::json!({ "bytes": params.to_string().len() })) })).with_max_params(1_200_000),
         #[cfg(test)]
         "test.change" => Op::write(|_, caller, _| Box::pin(async move { Ok(serde_json::json!({ "changed_by": caller.actor() })) })),
         _ => return None,

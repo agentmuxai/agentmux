@@ -25,6 +25,7 @@ import {
     openBlockInStack,
     pushBlockOntoStack,
     setActiveBlockInStack,
+    setDocPaneMerger,
     splitOutStackMember,
 } from "@/layout/lib/layoutStack";
 import { placePill } from "@/layout/lib/paneBodyDrop";
@@ -1862,6 +1863,97 @@ describe("minimizing next to a minimized pane (merge)", () => {
         expect(getNodeByBlockId(model, "b1")!.minimized).toBe(true);
         expect(leaves(model)).toHaveLength(4);
         expect(paneCommands()).toHaveLength(0);
+    });
+});
+
+describe("document panes merging after a person's move", () => {
+    beforeEach(() => {
+        layoutStateSignals.clear();
+        vi.useFakeTimers();
+        rpcCall.mockReset();
+        rpcCall.mockResolvedValue(undefined);
+    });
+    afterEach(() => {
+        setDocPaneMerger(undefined);
+        vi.useRealTimers();
+    });
+
+    function addPane(model: LayoutModel, blockId: string): string {
+        model.treeReducer({
+            type: LayoutTreeActionType.InsertNode,
+            node: newLayoutNode(undefined, undefined, undefined, { blockId }),
+            magnified: false,
+            focused: false,
+        } as LayoutTreeInsertNodeAction);
+        return getNodeByBlockId(model, blockId)!.id;
+    }
+    /** p1: [a1, a2], p2: [c1]. */
+    function twoPanes() {
+        const model = createLayoutModel();
+        const p1 = insertRootBlock(model, "a1");
+        pushBlockOntoStack(model, p1, "a2");
+        addPane(model, "c1");
+        model.updateTree();
+        return model;
+    }
+    const stackOf = (model: LayoutModel, blockId: string) => effectiveStack(getNodeByBlockId(model, blockId)!.data!);
+    const fakeMerger = (merged: (arriving: readonly string[]) => string[]) => {
+        const merge = vi.fn(async (_target: string, _stack: readonly string[], arriving: readonly string[]) => merged(arriving));
+        setDocPaneMerger({ merge, mergeable: () => [] });
+        return merge;
+    };
+
+    it("a pill moved into another pane asks the merger, then closes the panes it emptied", async () => {
+        const model = twoPanes();
+        const merge = fakeMerger((arriving) => [...arriving]);
+
+        expect(moveBlockInStack(model, "a2", "c1", "end", true)).toBe(true);
+        await vi.runAllTimersAsync();
+
+        expect(merge).toHaveBeenCalledWith("c1", ["c1", "a2"], ["a2"]);
+        expect(stackOf(model, "c1")).toEqual(["c1"]);
+    });
+
+    it("a pane the merger leaves alone stays as a pane tab", async () => {
+        const model = twoPanes();
+        const merge = fakeMerger(() => []);
+
+        moveBlockInStack(model, "a2", "c1", "end", true);
+        await vi.runAllTimersAsync();
+
+        expect(merge).toHaveBeenCalled();
+        expect(stackOf(model, "c1")).toEqual(["c1", "a2"]);
+    });
+
+    it("Alt on the drop (keepSeparate) keeps the two as separate pane tabs", async () => {
+        const model = twoPanes();
+        const merge = fakeMerger((arriving) => [...arriving]);
+
+        moveBlockInStack(model, "a2", "c1", "end", true, { keepSeparate: true });
+        moveBlocksInStack(model, ["a1"], "c1", undefined, { keepSeparate: true });
+        await vi.runAllTimersAsync();
+
+        expect(merge).not.toHaveBeenCalled();
+    });
+
+    it("a reorder inside one pane merges nothing", async () => {
+        const model = twoPanes();
+        const merge = fakeMerger((arriving) => [...arriving]);
+
+        moveBlockInStack(model, "a2", "a1", "before");
+        await vi.runAllTimersAsync();
+
+        expect(merge).not.toHaveBeenCalled();
+    });
+
+    it("moving several pills at once asks the merger with every block that moved", async () => {
+        const model = twoPanes();
+        const merge = fakeMerger(() => []);
+
+        moveBlocksInStack(model, ["a1", "a2"], "c1");
+        await vi.runAllTimersAsync();
+
+        expect(merge).toHaveBeenCalledWith("c1", ["c1", "a1", "a2"], ["a1", "a2"]);
     });
 });
 

@@ -28,10 +28,6 @@
 //! **No echo.** A write applied from another machine is recorded with source
 //! [`FLEET_SOURCE`]; the push on change (a later PR) does not push those back.
 
-// The remote-ops handlers and the push on change call this in the next PRs, once the transport
-// (`server::remote_ops`) has landed; until then only its tests do.
-#![allow(dead_code)]
-
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
@@ -73,6 +69,11 @@ pub struct FleetEntry {
     pub context_files: String,
     /// When the writing machine saved it (ms since the epoch).
     pub updated_at: i64,
+    /// Who last wrote it where it was written (`armory-ui` for the Memory pane, an agent's id, or
+    /// `slug@machine` for a copy that came from elsewhere). Shown in the history; not part of the
+    /// content, so it is not hashed, and never an authority.
+    #[serde(default)]
+    pub edited_by: String,
 }
 
 impl FleetEntry {
@@ -97,6 +98,9 @@ pub struct FleetRemoval {
     pub id: String,
     /// When the writing machine removed it.
     pub removed_at: i64,
+    /// Who removed it there; see [`FleetEntry::edited_by`].
+    #[serde(default)]
+    pub edited_by: String,
 }
 
 /// What a machine holds for one entry, without its text: `memory.global.list`'s rows.
@@ -147,6 +151,29 @@ pub enum Skipped {
 pub enum Outcome {
     Applied(Applied),
     Skipped(Skipped),
+}
+
+impl Outcome {
+    /// What the remote op answers: `{"outcome": ..., "reason": ...}` (a reason only for a skip).
+    pub fn to_json(self) -> serde_json::Value {
+        match self {
+            Outcome::Applied(a) => serde_json::json!({ "outcome": match a {
+                Applied::Created => "created",
+                Applied::Updated => "updated",
+                Applied::Restored => "restored",
+                Applied::Removed => "removed",
+            } }),
+            Outcome::Skipped(s) => serde_json::json!({ "outcome": "skipped", "reason": match s {
+                Skipped::Same => "same",
+                Skipped::Older => "older",
+                Skipped::MachineScope => "machine_scope",
+                Skipped::Protected => "protected",
+                Skipped::NotMemory => "not_memory",
+                Skipped::AlreadyRemoved => "already_removed",
+                Skipped::Unknown => "unknown",
+            } }),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -217,7 +244,11 @@ pub fn entry_for_push(store: &Store, id: &str) -> Result<Option<FleetEntry>, Sto
     if !is_fleet_id(id) || store.bundle_scope_get(id)? != crate::backend::storage::bundle_scope::SCOPE_FLEET {
         return Ok(None);
     }
-    Ok(store.bundle_get(id)?.filter(|b| b.is_global && !b.is_system && !b.is_blank).map(|b| FleetEntry {
+    let Some(b) = store.bundle_get(id)?.filter(|b| b.is_global && !b.is_system && !b.is_blank) else {
+        return Ok(None);
+    };
+    let edited_by = store.bundle_version_latest(id)?.map(|v| v.written_by).unwrap_or_default();
+    Ok(Some(FleetEntry {
         id: b.id,
         name: b.name,
         description: b.description,
@@ -225,7 +256,28 @@ pub fn entry_for_push(store: &Store, id: &str) -> Result<Option<FleetEntry>, Sto
         instructions_by_provider: b.instructions_by_provider,
         context_files: b.context_files,
         updated_at: b.updated_at,
+        edited_by,
     }))
+}
+
+/// A short fingerprint of what a machine lists: it changes when an entry is added, edited or
+/// removed, so the sync only talks to a peer when there is something new for it.
+pub fn fingerprint(metas: &[FleetMeta]) -> String {
+    let mut rows: Vec<String> = metas.iter().map(|m| format!("{}:{}:{}:{}", m.id, m.updated_at, m.hash, m.removed)).collect();
+    rows.sort();
+    let mut hasher = Sha256::new();
+    for row in rows {
+        hasher.update(row.as_bytes());
+        hasher.update(b"
+");
+    }
+    hex::encode(hasher.finalize())
+}
+
+/// The removal of `id` to send, with who removed it here.
+pub fn removal_for_push(store: &Store, id: &str, removed_at: i64) -> Result<FleetRemoval, StoreError> {
+    let edited_by = store.bundle_version_latest(id)?.map(|v| v.written_by).unwrap_or_default();
+    Ok(FleetRemoval { id: id.to_string(), removed_at, edited_by })
 }
 
 /// One thing to send a machine that is behind.
@@ -319,7 +371,7 @@ pub fn apply_put(store: &Store, entry: &FleetEntry, actor: Actor<'_>) -> Result<
     bundle.context_files = entry.context_files.clone();
     bundle.is_global = true;
     bundle.updated_at = entry.updated_at;
-    store.bundle_upsert_with_version(&bundle, actor.label, actor.uid, FLEET_SOURCE, &source_detail(actor))?;
+    store.bundle_upsert_with_version(&bundle, actor.label, actor.uid, FLEET_SOURCE, &source_detail(actor, &entry.edited_by))?;
     if applied != Applied::Updated {
         append_to_order(store, &bundle.id);
     }
@@ -353,12 +405,12 @@ pub fn apply_remove(store: &Store, removal: &FleetRemoval, actor: Actor<'_>) -> 
     }
     bundle.is_global = false;
     bundle.updated_at = removal.removed_at;
-    store.bundle_upsert_with_version(&bundle, actor.label, actor.uid, REMOVE_SOURCE, &source_detail(actor))?;
+    store.bundle_upsert_with_version(&bundle, actor.label, actor.uid, REMOVE_SOURCE, &source_detail(actor, &removal.edited_by))?;
     Ok(Outcome::Applied(Applied::Removed))
 }
 
-fn source_detail(actor: Actor<'_>) -> String {
-    serde_json::json!({ "fleet_from": actor.label }).to_string()
+fn source_detail(actor: Actor<'_>, edited_by: &str) -> String {
+    serde_json::json!({ "fleet_from": actor.label, "edited_by": edited_by }).to_string()
 }
 
 fn new_bundle(entry: &FleetEntry) -> Bundle {
