@@ -201,6 +201,10 @@ pub(super) fn pick<'a>(
     let same_email: Vec<&IdentityAccount> = accounts.iter().filter(|a| !email_of(a).is_empty() && email_of(a).eq_ignore_ascii_case(wanted)).collect();
     if !same_email.is_empty() {
         let with_quota: Vec<&IdentityAccount> = same_email.iter().copied().filter(|a| has_quota(a, &blocked)).collect();
+        // Already on one of them: that is the answer, and the switch reports it unchanged.
+        if let Some(own) = with_quota.iter().copied().find(|a| skip.contains(&a.id)) {
+            return Ok(own);
+        }
         return match with_quota.as_slice() {
             [one] => Ok(one),
             [] => Err(format!("NO_ACCOUNT_WITH_QUOTA: no {provider} account of {wanted} has quota now; the accounts are: {}", list(false))),

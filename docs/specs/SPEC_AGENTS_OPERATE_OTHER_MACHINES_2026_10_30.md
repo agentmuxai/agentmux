@@ -18,21 +18,20 @@ This spec adds **remote operations**: a typed request one AgentMux sends another
 - **What is sensitive locally is sensitive remotely**, and goes through the *receiving* machine's super agent and its countdown with a veto, as it does today.
 - **Everything is recorded on both machines, as the agent that did it.** Nothing is ever presented as the operator's words.
 
-The first operations are the ones that would have saved this morning: list another machine's accounts with their quota, and move its agents to an account that has quota. The rest of the list (section 4.3) closes the other gaps the research found: start and stop agents, seats, Global Memory, the task board, upgrade, reclaim, disk, logs.
+The first operations are the account ones: list another machine's accounts with their quota, and move its agents to an account that has quota. The rest of the list (section 4.3) closes the other gaps the research found: start and stop agents, seats, Global Memory, the task board, upgrade, reclaim, disk, logs.
 
 It also fixes four things that hurt on their own (section 5): a message to an out-of-quota agent on another machine is dropped, not held; agents can't see which accounts have quota; the same account has a different label on every machine; and nothing moves an agent off an exhausted account by itself.
 
-## 1. Why: the morning of 2026-10-30
+## 1. Why
 
-The weekly limit reset on one account and not on the other. On the leader's machine, the leader moved ten agents to the fresh account in a few minutes with `Identity switch`. On the other three machines it could not:
+When a plan's usage limit resets on one account and not on another, a person with agents on several machines has to move each machine's agents to the account that has quota. Today that cannot be done from one place:
 
-- `Identity switch` is a route on the agent's own AgentMux only (`crates/srv/src/server/http_self.rs:97`). There is no way to ask another AgentMux to do it.
-- On one machine every agent was out of quota, the steward included, so no agent there could do it either. The operator did it by hand.
-- On another, the leader asked an idle agent there to run the switch. Its first try was refused: the account the leader named, by its email, is labelled `·1` to `·4` there, because the same account is signed in four times, and `·2` on the leader's machine.
-- Meanwhile, every message the leader sent to an out-of-quota agent on another machine was **refused and not kept** ("agent unavailable: X's account is out of quota until Mon 6:00 PM", "the message was NOT kept"). On the leader's own machine the same message would have been held and delivered after the move.
-- Other machines kept seeing an agent as "limited" after a person moved its machine to a fresh account, because the agents themselves had not been moved.
+- `Identity switch` is a route on the agent's own AgentMux only (`crates/srv/src/server/http_self.rs`). There is no way to ask another AgentMux to do it, and if every agent on a machine is out of quota, nobody there can do it either.
+- The same provider account is labelled differently on each machine (`email ·1` to `·4`, by sign-in count), so an account named by its label on one machine is not found on another.
+- A message to an out-of-quota agent on another machine is refused and not kept, where on the sender's own machine it would be held and delivered after the move.
+- Another machine keeps showing an agent as limited after its account was changed, until the agent itself is moved.
 
-That is an hour of a leader's and the operator's time for something an agent could have done in one call per machine.
+Each of these is a few calls for an agent that has the reach, and a long manual job for a person without it.
 
 ## 2. What exists today (verified on `18e6b20eb`)
 

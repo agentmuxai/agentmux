@@ -863,7 +863,11 @@ async fn a_switch_names_the_account_by_id_or_numbered_label_and_refuses_what_can
     agent_def(&state, "ag");
     state.identity_store.agent_identity_link("ag", "one", "claude").unwrap();
 
-    let e = switch::switch(&state, "", &switch_req("ag", "me@example.com", AfterTurn)).unwrap_err();
+    // The agent is on one of the sign-ins sharing the email: the bare email is that one, unchanged.
+    let r = switch::switch(&state, "", &switch_req("ag", "me@example.com", AfterTurn)).unwrap();
+    assert_eq!((r.account_id.as_str(), r.status), ("one", switch::AccountSwitchStatus::Unchanged));
+    agent_def(&state, "elsewhere");
+    let e = switch::switch(&state, "", &switch_req("elsewhere", "me@example.com", AfterTurn)).unwrap_err();
     assert!(e.starts_with("AMBIGUOUS_ACCOUNT") && e.contains("me@example.com \u{b7}2"), "two with quota share the email: {e}");
     let e = switch::switch(&state, "", &switch_req("ag", "out", AfterTurn)).unwrap_err();
     assert!(e.starts_with("ACCOUNT_CANT_RUN"), "{e}");
@@ -877,7 +881,6 @@ async fn a_switch_names_the_account_by_id_or_numbered_label_and_refuses_what_can
     assert_eq!(r.account_label, "me@example.com \u{b7}2");
     assert_eq!(linked_account(&state, "ag"), ["two"]);
 }
-
 
 fn mail(id: &str, status: &str, email: &str) -> IdentityAccount {
     let mut a = account(id, "claude", status);
@@ -967,6 +970,10 @@ async fn a_switch_names_the_account_by_stable_id_or_by_an_email_with_exactly_one
 
     let e = switch::switch(&state, "", &switch_req("ag", "m@x.com", AfterTurn)).unwrap_err();
     assert!(e.starts_with("AMBIGUOUS_ACCOUNT"), "two sign-ins of m@x.com have quota: {e}");
+    agent_def(&state, "on_x1");
+    state.identity_store.agent_identity_link("on_x1", "x1", "claude").unwrap();
+    let r = switch::switch(&state, "", &switch_req("on_x1", "m@x.com", AfterTurn)).unwrap();
+    assert_eq!((r.account_id.as_str(), r.status), ("x1", switch::AccountSwitchStatus::Unchanged), "already on one of them");
 
     let limited = pane(&state, &tab, "other", "Other", "x1", Some(failure("usage_limit", Some(in_an_hour()), None)), false).await;
     let r = switch::switch(&state, "", &switch_req("ag", "M@X.com", AfterTurn)).unwrap();

@@ -10,9 +10,16 @@
 //! provider says the account is: for Claude, a hash of the OAuth account and
 //! organization ids its CLI recorded ([`identity_key_from_oauth_dir`]), so one
 //! email in a personal and a Team organization stays two accounts. Without
-//! those ids it falls back to a hash of the provider and email. Both are
-//! hashed: the id travels to other machines and into logs, the provider's own
-//! ids and the email do not.
+//! those ids it falls back to a hash of the provider and email.
+//!
+//! The id is a name, not a secret. It travels to other machines and into logs,
+//! so the provider's own ids and the email are hashed out of it; but an email
+//! is guessable, so the fallback form can be confirmed against a known address
+//! by anyone who sees the id. Two caveats: a sign-in in the provider's ambient
+//! home, or one whose `.claude.json` is unreadable, has no provider ids and gets
+//! the email form, so one provider account can show both forms on different
+//! machines. A matcher across machines treats an email-form id as a weaker
+//! claim and compares the email too.
 
 use sha2::{Digest, Sha256};
 
