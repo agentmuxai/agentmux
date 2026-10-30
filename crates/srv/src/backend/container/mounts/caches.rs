@@ -51,9 +51,12 @@ pub(super) fn parse_cache_dirs(label: &str, taken: &[String]) -> Vec<String> {
     dirs
 }
 
-/// The volume that keeps `dir` for `container_name`: `agentmux-cache-<container>-<dir as words>`, so a label that
-/// lists its directories in another order still finds each one's data.
+/// The volume that keeps `dir` for `container_name`: `agentmux-cache-<container>-<dir as words>-<hash>`. The words
+/// are for a person reading `docker volume ls`; the hash of the exact container and directory is what keeps two
+/// different ones (`/a/.cargo` and `/a/cargo`, `/Cache` and `/cache`, agent `a` with `/b/c` and agent `a-b` with `/c`)
+/// from sharing a volume, and a label that lists its directories in another order still finds each one's data.
 pub(super) fn cache_volume_name(container_name: &str, dir: &str) -> String {
+    use sha2::{Digest, Sha256};
     let mut words = String::new();
     for c in dir.chars() {
         let c = c.to_ascii_lowercase();
@@ -63,7 +66,8 @@ pub(super) fn cache_volume_name(container_name: &str, dir: &str) -> String {
             words.push('-');
         }
     }
-    format!("agentmux-cache-{container_name}-{}", words.trim_matches('-'))
+    let hash: String = Sha256::digest(format!("{container_name}\0{dir}")).iter().take(6).map(|b| format!("{b:02x}")).collect();
+    format!("agentmux-cache-{container_name}-{}-{hash}", words.trim_matches('-'))
 }
 
 fn cache_mount(container_name: &str, dir: &str) -> Mount {
@@ -141,9 +145,20 @@ mod tests {
     }
 
     #[test]
+    fn different_agents_and_directories_never_share_a_volume() {
+        let name = |c: &str, d: &str| cache_volume_name(c, d);
+        assert_ne!(name("agentmux-a", "/home/agent/.cargo"), name("agentmux-a", "/home/agent/cargo"), "a dot is not nothing");
+        assert_ne!(name("agentmux-a", "/Cache"), name("agentmux-a", "/cache"), "nor is a capital");
+        assert_ne!(name("agentmux-a", "/b/c"), name("agentmux-a-b", "/c"), "nor which side of the dash a word is on");
+        assert_ne!(name("agentmux-a", "/x"), name("agentmux-b", "/x"));
+    }
+
+    #[test]
     fn a_volume_is_named_by_its_agent_and_directory() {
-        assert_eq!(cache_volume_name("agentmux-demo", "/home/agent/.cargo"), "agentmux-cache-agentmux-demo-home-agent-cargo");
-        assert_eq!(cache_volume_name("agentmux-demo", "/home/agent/target"), "agentmux-cache-agentmux-demo-home-agent-target");
+        let cargo = cache_volume_name("agentmux-demo", "/home/agent/.cargo");
+        assert!(cargo.starts_with("agentmux-cache-agentmux-demo-home-agent-cargo-"), "readable: {cargo}");
+        assert_eq!(cargo, cache_volume_name("agentmux-demo", "/home/agent/.cargo"), "the same input, the same volume");
+        assert!(cache_volume_name("agentmux-demo", "/home/agent/target").starts_with("agentmux-cache-agentmux-demo-home-agent-target-"));
         let m = cache_mount("agentmux-demo", "/home/agent/target");
         assert_eq!(m.typ, Some(MountTypeEnum::VOLUME));
         let labels = m.volume_options.unwrap().labels.unwrap();
@@ -158,6 +173,8 @@ mod tests {
 /// recreated (what an image update does); deleting the agent removes the container and the volumes.
 #[cfg(test)]
 mod itest {
+    use bollard::container::{Config, CreateContainerOptions};
+    use bollard::image::{CommitContainerOptions, RemoveImageOptions};
     use futures_util::StreamExt as _;
 
     use super::*;
@@ -174,24 +191,36 @@ mod itest {
         out
     }
 
+    /// An image that is `debian:13` with the cache-dirs label, made by committing a container (no docker CLI).
+    async fn labelled_image(cm: &ContainerManager, image: &str) {
+        let maker = "agentmux-itest-cache-maker";
+        let _ = cm.docker().remove_container(maker, Some(bollard::container::RemoveContainerOptions { force: true, ..Default::default() })).await;
+        cm.docker()
+            .create_container(Some(CreateContainerOptions { name: maker, platform: None }), Config { image: Some("debian:13".to_string()), ..Default::default() })
+            .await
+            .expect("create the container to commit (debian:13 must be pulled)");
+        let labels = HashMap::from([(CACHE_DIRS_LABEL.to_string(), "/home/agent/.cargo:/home/agent/target".to_string())]);
+        let (repo, tag) = image.split_once(':').unwrap();
+        cm.docker()
+            .commit_container(
+                CommitContainerOptions { container: maker.to_string(), repo: repo.to_string(), tag: tag.to_string(), ..Default::default() },
+                Config::<String> { labels: Some(labels), cmd: Some(vec!["sleep".into(), "infinity".into()]), ..Default::default() },
+            )
+            .await
+            .expect("commit");
+        let _ = cm.docker().remove_container(maker, Some(bollard::container::RemoveContainerOptions { force: true, ..Default::default() })).await;
+    }
+
     #[tokio::test]
     #[ignore]
     async fn itest_cache_dirs_survive_a_recreate_and_go_with_the_agent() {
         let cm = ContainerManager::connect().expect("connect to docker (set DOCKER_HOST)");
         cm.check_available().await.expect("docker daemon must be reachable");
-        let dir = std::env::temp_dir().join(format!("agentmux-cache-itest-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(
-            dir.join("Dockerfile"),
-            "FROM debian:13\nRUN useradd -m agent && mkdir -p /home/agent/.cargo /home/agent/target /home/agent/.claude && chown -R agent /home/agent\nLABEL ai.agentmux.cache-dirs=\"/home/agent/.cargo:/home/agent/target\"\nUSER agent\nCMD [\"sleep\", \"infinity\"]\n",
-        )
-        .unwrap();
         let image = "agentmux-cache-itest:1";
-        let built = std::process::Command::new("docker").args(["build", "-q", "-t", image]).arg(&dir).status().expect("docker build");
-        assert!(built.success(), "the test image builds");
+        labelled_image(&cm, image).await;
 
         let name = "agentmux-itest-cache";
-        let _ = cm.remove_agent_storage(name).await;
+        cm.remove_agent_storage(name).await;
         let spec = ContainerMountSpec::default();
         cm.ensure_running_observed(name, image, &[], &[], &spec, &|_| {}).await.expect("ensure_running");
         let first = run(&cm, name, "echo built > /home/agent/target/artifact && echo registry > /home/agent/.cargo/crate && echo ok").await;
@@ -201,19 +230,29 @@ mod itest {
         let kept = run(&cm, name, "cat /home/agent/target/artifact /home/agent/.cargo/crate").await;
 
         let filter = HashMap::from([("label".to_string(), vec![format!("{VOLUME_AGENT_LABEL}={name}")])]);
-        let labelled: Vec<String> = cm.docker().list_volumes(Some(ListVolumesOptions { filters: filter.clone() })).await.unwrap().volumes.unwrap_or_default().into_iter().map(|v| v.name).collect();
+        let labelled: Vec<String> = cm
+            .docker()
+            .list_volumes(Some(ListVolumesOptions { filters: filter.clone() }))
+            .await
+            .unwrap()
+            .volumes
+            .unwrap_or_default()
+            .into_iter()
+            .map(|v| v.name)
+            .collect();
 
         cm.remove_agent_storage(name).await;
         let left = cm.docker().list_volumes(Some(ListVolumesOptions { filters: filter })).await.unwrap().volumes.unwrap_or_default().len();
         let container_gone = cm.docker().inspect_container(name, None).await.is_err();
-        let _ = std::process::Command::new("docker").args(["rmi", "-f", image]).status();
-        let _ = std::fs::remove_dir_all(&dir);
+        let _ = cm.docker().remove_image(image, Some(RemoveImageOptions { force: true, ..Default::default() }), None).await;
 
         assert!(first.contains("ok"), "the agent can write into both cache directories: {first}");
         assert_eq!(kept.trim(), "built\nregistry", "the data is there after the container was recreated: {kept:?}");
         let mut labelled = labelled;
         labelled.sort();
-        assert_eq!(labelled, [cache_volume_name(name, "/home/agent/.cargo"), cache_volume_name(name, "/home/agent/target")], "one labelled volume per directory");
+        let mut want = [cache_volume_name(name, "/home/agent/.cargo"), cache_volume_name(name, "/home/agent/target")];
+        want.sort();
+        assert_eq!(labelled, want, "one labelled volume per directory");
         assert_eq!(left, 0, "the agent's volumes are removed with it");
         assert!(container_gone, "and its container");
     }
