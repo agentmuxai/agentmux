@@ -195,6 +195,30 @@ fn a_few_reminders_show_one_each_and_more_share_one() {
 }
 
 #[test]
+fn an_entry_made_again_under_a_deleted_ones_id_inherits_none_of_its_reminders() {
+    let (s, (work, _dir)) = (store(), work());
+    let req = GenerateRequest {
+        kind: "api-key".into(),
+        label: "Stripe".into(),
+        why: String::new(),
+        fields: Default::default(),
+        rules: Default::default(),
+        expires: Some("2026-11-20".into()),
+    };
+    let old = generate_entry(&s, req, "agent2-6").unwrap();
+    send(&s, Some(&work), day("2026-11-10")).unwrap();
+    crate::backend::vault::delete(&s, &old.id).unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    let again = create(&s, key("Stripe", "2026-11-20")).unwrap();
+    assert_eq!(again, old.id, "the id is reused");
+    let sent = send(&s, Some(&work), day("2026-11-10")).unwrap();
+    assert_eq!(sent.notices.len(), 1, "the new entry's own reminder");
+    let (due, _) = &sent.notices[0];
+    assert!(due.first, "and its own rotation task");
+    assert_eq!(due.agent, None, "the person made this one, not the old entry's agent");
+}
+
+#[test]
 fn a_new_date_starts_the_reminders_again_and_the_change_is_recorded() {
     let (s, (work, _dir)) = (store(), work());
     let id = create(&s, key("Stripe", "2026-11-20")).unwrap();
