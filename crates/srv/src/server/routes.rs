@@ -313,6 +313,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/api/v1/vault/on_screen", get(super::vault_handlers::handle_vault_on_screen))
         // An agent's `Browser` `fill` with `vault`: the person says where it may go.
         .route("/api/v1/ui/browser/vault_fill", post(super::browser_vault_fill::handle_vault_fill))
+        .route("/api/v1/ui/browser/capture", post(super::browser_capture::handle_browser_capture))
         // Google connectors for agents: srv makes the call with the account's
         // token, for an agent with a grant (Calendar, then Drive and Gmail).
         .route("/api/v1/google/self/services", get(super::google_handlers::handle_google_self_services))

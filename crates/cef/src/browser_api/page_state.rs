@@ -125,6 +125,9 @@ pub struct SecretBoxes {
     /// document couldn't be read, or a frame could neither be read nor
     /// placed: the screenshot must then not be given out.
     pub complete: bool,
+    /// How many of the boxes hold a Vault value or a secret the page shows once
+    /// (spec §15.1), not just a password field: `eval` is refused while any does.
+    pub vault_values: usize,
 }
 
 /// Fields scanned per document. Past it the list is incomplete, which counts
@@ -149,16 +152,35 @@ const SECRET_CANDIDATES: &str = r#"((MAX) => {
       for (const a of el.attributes) { attrs.push(a.name, a.value); }
       const byIds = (el.getAttribute("aria-labelledby") || "").split(/\s+/).map(i => { const t = i && el.ownerDocument.getElementById(i); return t ? t.textContent : ""; }).join(" ");
       const label = ((el.labels ? Array.from(el.labels).map(l => l.textContent).join(" ") : "") + " " + byIds).replace(/\s+/g, " ").trim();
-      out.push({ localName: tag, attributes: attrs, label, x: r.left, y: r.top, w: r.width, h: r.height });
+      // A read-only field's value: where a page shows a secret once (spec §15.1).
+      const value = el.readOnly ? String(el.value == null ? "" : el.value) : "";
+      out.push({ localName: tag, attributes: attrs, label, value, x: r.left, y: r.top, w: r.width, h: r.height });
     }
   };
   visit(document);
-  return { fields: out, width: window.innerWidth, truncated };
+  // Text where a page shows a secret once: code, pre, kbd and samp, and the
+  // nearest container of a button named like "Copy". The host tests its shape.
+  const shown = [];
+  const box = (el) => {
+    if (shown.length >= MAX) { truncated = true; return; }
+    const r = el.getBoundingClientRect();
+    if (r.width === 0 || r.height === 0) return;
+    shown.push({ text: String(el.textContent || ""), x: r.left, y: r.top, w: r.width, h: r.height });
+  };
+  for (const el of document.querySelectorAll("code, pre, kbd, samp")) box(el);
+  for (const b of document.querySelectorAll("button, a, [role=button]")) {
+    const name = ((b.textContent || "") + " " + (b.getAttribute("aria-label") || "") + " " + (b.getAttribute("title") || "")).toLowerCase();
+    if (!name.includes("copy")) continue;
+    let c = b.parentElement;
+    for (let i = 0; c && c.children.length <= 1 && i < 4; i++) c = c.parentElement;
+    if (c) box(c);
+  }
+  return { fields: out, shown, width: window.innerWidth, truncated };
 })"#;
 
 /// The secret fields' boxes in one document (`frame_id`, or the main frame),
 /// in that document's viewport. `None`: it couldn't be read completely.
-async fn secret_boxes_in(cdp: &mut CdpSession, frame_id: Option<&str>) -> Option<(Vec<[f64; 4]>, Option<f64>)> {
+async fn secret_boxes_in(cdp: &mut CdpSession, frame_id: Option<&str>) -> Option<(Vec<[f64; 4]>, Option<f64>, usize)> {
     let ctx = isolated_context(cdp, frame_id).await.ok()?;
     let expression = format!("{SECRET_CANDIDATES}({MAX_SECRET_CANDIDATES})");
     let v = cdp
@@ -173,15 +195,29 @@ async fn secret_boxes_in(cdp: &mut CdpSession, frame_id: Option<&str>) -> Option
         return None;
     }
     let fields = result.get("fields")?.as_array()?;
-    let boxes = fields
-        .iter()
-        .filter(|f| snapshot::is_secret(&DomFacts::from_described(f)))
-        .filter_map(|f| {
-            let n = |k: &str| f.get(k).and_then(|v| v.as_f64());
-            Some([n("x")?, n("y")?, n("w")?, n("h")?])
-        })
-        .collect();
-    Some((boxes, result.get("width").and_then(|w| w.as_f64())))
+    let shown = result.get("shown").and_then(Value::as_array).cloned().unwrap_or_default();
+    let rect = |f: &Value| -> Option<[f64; 4]> {
+        let n = |k: &str| f.get(k).and_then(|v| v.as_f64());
+        Some([n("x")?, n("y")?, n("w")?, n("h")?])
+    };
+    let mut boxes = Vec::new();
+    let mut vault_values = 0;
+    for f in fields {
+        let facts = DomFacts::from_described(f);
+        let filled = !facts.attr(super::vault_fill::TAINT_ATTR).is_empty();
+        let once = f.get("value").and_then(Value::as_str).is_some_and(agentmux_common::shown_once::has_shown_once);
+        if snapshot::is_secret(&facts) || once {
+            boxes.extend(rect(f));
+            vault_values += usize::from(filled || once);
+        }
+    }
+    for s in &shown {
+        if s.get("text").and_then(Value::as_str).is_some_and(agentmux_common::shown_once::has_shown_once) {
+            boxes.extend(rect(s));
+            vault_values += 1;
+        }
+    }
+    Some((boxes, result.get("width").and_then(|w| w.as_f64()), vault_values))
 }
 
 /// Whether a `DOM.getDocument { depth: -1, pierce: true }` tree has a text
@@ -220,11 +256,12 @@ async fn has_unseen_fields(cdp: &mut CdpSession) -> Option<bool> {
 
 /// [`SecretBoxes`] for the whole pane: the top frame and every iframe.
 pub async fn secret_boxes(root: &mut CdpSession) -> SecretBoxes {
-    let mut out = SecretBoxes { boxes: Vec::new(), css_width: None, complete: true };
+    let mut out = SecretBoxes { boxes: Vec::new(), css_width: None, complete: true, vault_values: 0 };
     match secret_boxes_in(root, None).await {
-        Some((boxes, width)) => {
+        Some((boxes, width, vault)) => {
             out.boxes.extend(boxes);
             out.css_width = width;
+            out.vault_values += vault;
         }
         // The page itself couldn't be checked: there is nothing to hide whole
         // short of the screenshot itself.
@@ -266,10 +303,15 @@ pub async fn secret_boxes(root: &mut CdpSession) -> SecretBoxes {
             out.complete = false;
         }
         match secret_boxes_in(&mut on, Some(&fl.raw.id)).await {
-            Some((boxes, _)) if boxes.is_empty() => {}
-            Some((boxes, _)) if geometry.plain => {
+            Some((boxes, _, _)) if boxes.is_empty() => {}
+            Some((boxes, _, vault)) if geometry.plain => {
                 let (ox, oy) = geometry.offset;
                 out.boxes.extend(boxes.into_iter().map(|[x, y, w, h]| [x + ox, y + oy, w, h]));
+                out.vault_values += vault;
+            }
+            Some((_, _, vault)) if vault > 0 => {
+                out.boxes.push(geometry.bounds);
+                out.vault_values += vault;
             }
             // Couldn't look inside, or its own <iframe> is scaled or rotated
             // (its fields can't be placed by an offset): hide the whole frame.
@@ -292,9 +334,10 @@ pub fn merge_scans(before: SecretBoxes, after: SecretBoxes) -> SecretBoxes {
     };
     let complete = before.complete && after.complete && same && same_width;
     let css_width = before.css_width.or(after.css_width);
+    let vault_values = before.vault_values.max(after.vault_values);
     let mut boxes = before.boxes;
     boxes.extend(after.boxes);
-    SecretBoxes { boxes, css_width, complete }
+    SecretBoxes { boxes, css_width, complete, vault_values }
 }
 
 #[cfg(test)]
@@ -302,7 +345,7 @@ mod tests {
     use super::*;
 
     fn scan(boxes: &[[f64; 4]], complete: bool) -> SecretBoxes {
-        SecretBoxes { boxes: boxes.to_vec(), css_width: Some(800.0), complete }
+        SecretBoxes { boxes: boxes.to_vec(), css_width: Some(800.0), complete, vault_values: 0 }
     }
 
     #[test]

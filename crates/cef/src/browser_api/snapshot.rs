@@ -11,7 +11,7 @@
 //! inputs and act on the references. `find` reads the same tree but returns
 //! only the lines of elements named like what the agent asked for.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -341,8 +341,9 @@ pub fn render_with_frames(
             .or_else(|| nodes.first()),
     };
     let mut out = Snapshot { text: String::new(), refs: Vec::new(), ref_frames: Vec::new(), truncated: false };
+    let zones = super::shown_once::copy_zones(nodes);
     if let Some(root) = root {
-        walk(root, &by_id, facts, ref_prefix, 0, "", false, 0, frames, &mut out);
+        walk(root, &by_id, facts, &zones, false, ref_prefix, 0, "", false, 0, frames, &mut out);
     }
     if out.truncated {
         out.text.push_str("- … snapshot truncated at 40 KB: use find (a role and name), or pass `scope` (a reference, or a role and quoted name) to read one part of the page\n");
@@ -354,6 +355,8 @@ fn walk(
     node: &Value,
     by_id: &HashMap<&str, &Value>,
     facts: &HashMap<i64, DomFacts>,
+    zones: &HashSet<&str>,
+    in_zone: bool,
     ref_prefix: &str,
     depth: usize,
     parent_name: &str,
@@ -369,6 +372,7 @@ fn walk(
     let name = str_of(node, "name").trim();
     let backend = node.get("backendDOMNodeId").and_then(|v| v.as_i64());
     let transparent = is_transparent(node, role, name, hide_text, parent_name);
+    let in_zone = in_zone || super::shown_once::starts_zone(node, zones);
 
     let mut child_depth = depth;
     let mut name_for_children = parent_name;
@@ -376,8 +380,9 @@ fn walk(
         // The reference goes into the table only once its line is known to
         // fit: a line cut by the cap would hand out a reference the agent
         // never sees.
-        let r = takes_ref(role, backend, facts).then(|| next_ref(out, ref_prefix, frame));
-        let line = line_for(node, role, name, backend, facts, r.as_deref(), frame, frames);
+        let r = (takes_ref(role, backend, facts) || (backend.is_some() && masks_shown_once(node, role, name, in_zone)))
+            .then(|| next_ref(out, ref_prefix, frame));
+        let line = line_for(node, role, name, backend, facts, r.as_deref(), frame, frames, in_zone);
         let indent = "  ".repeat(depth);
         if out.text.len() + indent.len() + line.len() + 1 > MAX_SNAPSHOT_BYTES {
             out.truncated = true;
@@ -404,7 +409,7 @@ fn walk(
     if let Some(children) = node.get("childIds").and_then(|v| v.as_array()) {
         for c in children {
             if let Some(child) = c.as_str().and_then(|id| by_id.get(id)) {
-                walk(child, by_id, facts, ref_prefix, child_depth, name_for_children, hide_text || TEXT_SHOWN_ELSEWHERE.contains(&role), frame, frames, out);
+                walk(child, by_id, facts, zones, in_zone, ref_prefix, child_depth, name_for_children, hide_text || TEXT_SHOWN_ELSEWHERE.contains(&role), frame, frames, out);
             }
         }
     }
@@ -432,8 +437,9 @@ fn render_frame(f: &FrameTree, frames: &[FrameTree], depth: usize, out: &mut Sna
     let by_id: HashMap<&str, &Value> =
         f.nodes.iter().filter_map(|n| Some((n.get("nodeId")?.as_str()?, n))).collect();
     let root = f.nodes.iter().find(|n| n.get("parentId").is_none()).or_else(|| f.nodes.first());
+    let zones = super::shown_once::copy_zones(&f.nodes);
     if let Some(root) = root {
-        walk(root, &by_id, &f.facts, "", depth, "", false, f.ordinal, frames, out);
+        walk(root, &by_id, &f.facts, &zones, false, "", depth, "", false, f.ordinal, frames, out);
     }
 }
 
@@ -462,6 +468,13 @@ fn shown_role<'a>(role: &'a str, fact: Option<&DomFacts>) -> &'a str {
 fn takes_ref(role: &str, backend: Option<i64>, facts: &HashMap<i64, DomFacts>) -> bool {
     let Some(b) = backend else { return false };
     INTERACTIVE_ROLES.contains(&role) || facts.get(&b).is_some_and(DomFacts::is_file_input)
+}
+
+/// Whether `node`'s line masks a secret the page shows once: it then gets a
+/// reference, for `Browser` `capture`.
+fn masks_shown_once(node: &Value, role: &str, name: &str, in_zone: bool) -> bool {
+    let value = if VALUE_ROLES.contains(&role) { value_text(node) } else { None };
+    super::shown_once::masks(name, value.as_deref(), in_zone, truthy(prop(node, "readonly")))
 }
 
 /// The reference the next acted-on node in `frame` would get, without
@@ -493,13 +506,14 @@ fn line_for(
     r: Option<&str>,
     frame: usize,
     frames: &[FrameTree],
+    in_zone: bool,
 ) -> String {
     let fact = backend.and_then(|b| facts.get(&b));
     let secret = fact.and_then(secret_reason);
     let mut line = format!("- {}", shown_role(role, fact));
     if !name.is_empty() {
         line.push(' ');
-        line.push_str(&quote(name));
+        line.push_str(&quote(&super::shown_once::mask_where(name, in_zone)));
     }
     if let Some(r) = r {
         line.push_str(&format!(" [ref={r}]"));
@@ -551,7 +565,7 @@ fn line_for(
         line.push_str(&format!(" [secret: ask the user to fill this; {why}]"));
     } else if VALUE_ROLES.contains(&role) {
         match (fact, value_text(node)) {
-            (Some(_), Some(v)) => line.push_str(&format!(" value={}", quote(&v))),
+            (Some(_), Some(v)) => line.push_str(&format!(" value={}", quote(&super::shown_once::mask_where(&v, in_zone || truthy(prop(node, "readonly")))))),
             // Not checked: it could be a secret field, so its value stays hidden.
             (None, Some(v)) if !v.is_empty() => line.push_str(" [value hidden: not checked; take a scoped snapshot to see it]"),
             _ => {}
@@ -623,26 +637,29 @@ impl ElementQuery {
     }
 }
 
-/// A shown node, and its nearest shown ancestor with a name: `(role, name)`.
-type Shown<'a> = (&'a Value, Option<(&'a str, &'a str)>);
+/// A shown node, its nearest shown ancestor with a name (`(role, name)`), and
+/// whether it is where a page shows a secret once.
+type Shown<'a> = (&'a Value, Option<(&'a str, &'a str)>, bool);
 
 /// Every node a snapshot would show a line for, in document order, with its
 /// nearest shown ancestor that has a name, for context.
 fn shown_nodes(nodes: &[Value]) -> Vec<Shown<'_>> {
     let by_id: HashMap<&str, &Value> =
         nodes.iter().filter_map(|n| Some((n.get("nodeId")?.as_str()?, n))).collect();
+    let zones = super::shown_once::copy_zones(nodes);
     let mut out = Vec::new();
     let root = nodes.iter().find(|n| n.get("parentId").is_none()).or_else(|| nodes.first());
-    // (node, parent's name, hide text, named ancestor): iterative, children
-    // pushed in reverse so they come off in document order.
-    type Pending<'a> = (&'a Value, &'a str, bool, Option<(&'a str, &'a str)>);
-    let mut stack: Vec<Pending> = root.map(|r| (r, "", false, None)).into_iter().collect();
-    while let Some((node, parent_name, hide_text, context)) = stack.pop() {
+    // (node, parent's name, hide text, named ancestor, in a zone): iterative,
+    // children pushed in reverse so they come off in document order.
+    type Pending<'a> = (&'a Value, &'a str, bool, Option<(&'a str, &'a str)>, bool);
+    let mut stack: Vec<Pending> = root.map(|r| (r, "", false, None, false)).into_iter().collect();
+    while let Some((node, parent_name, hide_text, context, in_zone)) = stack.pop() {
         let role = str_of(node, "role");
         let name = str_of(node, "name").trim();
+        let in_zone = in_zone || super::shown_once::starts_zone(node, &zones);
         let (mut name_for_children, mut context_for_children) = (parent_name, context);
         if !is_transparent(node, role, name, hide_text, parent_name) {
-            out.push((node, context));
+            out.push((node, context, in_zone));
             name_for_children = name;
             if !name.is_empty() {
                 context_for_children = Some((if role == "StaticText" { "text" } else { role }, name));
@@ -652,7 +669,7 @@ fn shown_nodes(nodes: &[Value]) -> Vec<Shown<'_>> {
         if let Some(kids) = node.get("childIds").and_then(|v| v.as_array()) {
             for k in kids.iter().rev() {
                 if let Some(c) = k.as_str().and_then(|id| by_id.get(id)) {
-                    stack.push((c, name_for_children, hide, context_for_children));
+                    stack.push((c, name_for_children, hide, context_for_children, in_zone));
                 }
             }
         }
@@ -666,8 +683,8 @@ fn shown_nodes(nodes: &[Value]) -> Vec<Shown<'_>> {
 pub fn find_candidates<'a>(nodes: &'a [Value], q: &ElementQuery) -> Vec<&'a Value> {
     shown_nodes(nodes)
         .into_iter()
-        .filter(|(n, _)| q.matches(str_of(n, "role"), str_of(n, "name").trim(), None, false))
-        .map(|(n, _)| n)
+        .filter(|(n, _, _)| q.matches(str_of(n, "role"), str_of(n, "name").trim(), None, false))
+        .map(|(n, _, _)| n)
         .collect()
 }
 
@@ -695,7 +712,7 @@ pub struct Found {
 /// are `{ref_prefix}e1`, `{ref_prefix}e2`, …; top frame only.
 pub fn find(nodes: &[Value], facts: &HashMap<i64, DomFacts>, q: &ElementQuery, ref_prefix: &str) -> Found {
     let mut found = Found { text: String::new(), refs: Vec::new(), total: 0, frames: 0 };
-    for (node, context) in shown_nodes(nodes) {
+    for (node, context, in_zone) in shown_nodes(nodes) {
         let role = str_of(node, "role");
         let name = str_of(node, "name").trim();
         if is_iframe_role(role) {
@@ -709,10 +726,11 @@ pub fn find(nodes: &[Value], facts: &HashMap<i64, DomFacts>, q: &ElementQuery, r
         if found.total > MAX_FIND_MATCHES {
             continue;
         }
-        let r = takes_ref(role, backend, facts).then(|| format!("{ref_prefix}e{}", found.refs.len() + 1));
-        let mut line = line_for(node, role, name, backend, facts, r.as_deref(), 0, &[]);
+        let r = (takes_ref(role, backend, facts) || (backend.is_some() && masks_shown_once(node, role, name, in_zone)))
+            .then(|| format!("{ref_prefix}e{}", found.refs.len() + 1));
+        let mut line = line_for(node, role, name, backend, facts, r.as_deref(), 0, &[], in_zone);
         if let Some((in_role, in_name)) = context {
-            line.push_str(&format!(" (in {in_role} {})", quote(in_name)));
+            line.push_str(&format!(" (in {in_role} {})", quote(&super::shown_once::mask_where(in_name, in_zone))));
         }
         if let (Some(r), Some(b)) = (r, backend) {
             found.refs.push((r, b));

@@ -232,6 +232,15 @@ pub async fn eval(
         let _ = cdp.close().await;
         return ok_body(ApiResponse::err(e));
     }
+    // A script could read a Vault value filled into the page, or a secret the
+    // page shows once, which every other read hides (spec §10.1, §15.1).
+    if super::page_state::secret_boxes(&mut cdp).await.vault_values > 0 {
+        let _ = cdp.close().await;
+        return ok_body(ApiResponse::err(
+            "eval is refused on this tab while it holds a Vault value or shows a secret once: use snapshot or find to read it, or Browser capture to save the secret; it is allowed again once the tab navigates away"
+                .to_string(),
+        ));
+    }
 
     let eval_result = match cdp
         .call(
@@ -422,9 +431,9 @@ pub async fn screenshot(
             secrets = Some(match (before, after) {
                 (Some(mut b), Some(a)) => {
                     b.extend(a);
-                    super::page_state::SecretBoxes { boxes: b, css_width: Some(width), complete: true }
+                    super::page_state::SecretBoxes { boxes: b, css_width: Some(width), complete: true, vault_values: 0 }
                 }
-                _ => super::page_state::SecretBoxes { boxes: Vec::new(), css_width: Some(width), complete: false },
+                _ => super::page_state::SecretBoxes { boxes: Vec::new(), css_width: Some(width), complete: false, vault_values: 0 },
             });
             break;
         }
