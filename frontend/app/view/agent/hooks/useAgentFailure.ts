@@ -61,6 +61,9 @@ import { restoreRefusedSend } from "../failure/refused-send-restore";
 import { registerRecycleBlocker } from "@/app/store/recycle-blockers";
 import { copyErrorReport } from "@/app/errors/CopyErrorButton";
 import { formatErrorReport } from "@/app/errors/error-report";
+import { sourceOf } from "@/app/store/agent-pane-state/failure-precedence";
+import type { FailureClearReason } from "@/app/store/agent-pane-state/types";
+import { clearFailure, raiseFailure } from "../failure/failure-writer";
 
 /** How long an armed Take over waits for its confirming click. */
 export const TAKEOVER_CONFIRM_MS = 5000;
@@ -248,10 +251,10 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
         setCopyState("idle");
     };
 
-    const clear = () => {
+    const clear = (reason: FailureClearReason = "dismissed") => {
         cancelCountdown();
         disarmTakeover();
-        opts.model.dispatchPane({ type: "FailureCleared" });
+        clearFailure(opts.model, { reason });
         setExpanded(false);
         setRetrying(false);
         resetCopyState();
@@ -264,7 +267,7 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
     // persistently-throttled turn would auto-retry forever). Spec §6.
     const endEpisode = () => {
         autoRetries = 0;
-        clear();
+        clear("episode-ended");
     };
 
     const doRetry = () => {
@@ -280,7 +283,7 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
         // `autoRetries` — an auto-fired retry stays within the episode's cap
         // (the transition-effect below sees `selfInitiatedClear` and skips
         // the reset it would otherwise apply).
-        clear();
+        clear("retried");
     };
 
     const armAutoRetry = () => {
@@ -304,6 +307,7 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
         // tab switches and page reloads. Read once on mount; the MPS event
         // subscription below handles live updates for the current session.
         // (SPEC_AGENT_ERROR_FRAMEWORK_2026_06_20 §4 P1.2)
+        const mountedAt = Date.now();
         const persistedAtom = getBlockMetaKeyAtom(opts.blockId, "agent:last_failure");
         const pf = persistedAtom();
         // Seed the reducer's canonical `state.failure` (not a local signal —
@@ -329,7 +333,7 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
                 // A live failure or a turn that began while it waited is newer than the stored one.
                 if (opts.failure()) return;
                 if (verdictOf({ data: pf, at }) === "healed") return;
-                opts.model.dispatchPane({ type: "FailureObserved", failure: pf, at });
+                raiseFailure(opts.model, { source: "seed", failure: pf, at, since: mountedAt });
             };
             if (isTransient(pf.code)) setLadderEnded(true);
             if (isAccountCause(pf.code) && opts.liveAccount && opts.liveAccount() === "unknown") {
@@ -360,7 +364,7 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
                 // Reducer-side: records state.failure AND unconditionally ends
                 // a still-working turn — see FailureObserved's reducer case.
                 failureFromMeta = false;
-                opts.model.dispatchPane({ type: "FailureObserved", failure: f, at: Date.now() });
+                raiseFailure(opts.model, { source: "live", failure: f, at: Date.now() });
                 // A failure that finds the ladder spent is the end of it: the row becomes the lapsed note.
                 setLadderEnded(isTransient(f.code) && autoRetries >= AUTO_RETRY_BACKOFF_S.length);
                 if (isTransient(f.code) && !opts.reconnect?.waitsForReconnect(f.code)) armAutoRetry();
@@ -477,9 +481,9 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
                 setTakingOver(false);
                 const pf = opts.failure() ?? before;
                 if (!pf) return;
-                // Keep the row, but say why it failed.
-                opts.model.dispatchPane({
-                    type: "FailureObserved",
+                // Keep the row, but say why it failed: written as the row's own source, so it replaces it.
+                raiseFailure(opts.model, {
+                    source: sourceOf(pf),
                     failure: {
                         ...pf.data,
                         title: failedTitle,

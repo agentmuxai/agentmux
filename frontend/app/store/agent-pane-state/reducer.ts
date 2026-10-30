@@ -59,6 +59,7 @@ import {
     rewindowContextReading,
     type ContextReading,
 } from "./context-reading";
+import { failureDropped } from "./failure-precedence";
 import { rejectedEvent, withReading } from "./context-reading-state";
 import { outputSoFar, turnOutputTokens, withShownOutput } from "./turn-contribution";
 import { isNewerLedger } from "./turn-ledger";
@@ -1418,6 +1419,7 @@ export function update(
         }
 
         case "FailureObserved": {
+            if (failureDropped(state, command)) return { state, events: [] }; // failure-precedence.ts
             // Unconditionally end a working turn: a backend failure
             // classification is authoritative regardless of whether the
             // underlying CLI process ever exits (persistent-mode agents
@@ -1447,15 +1449,11 @@ export function update(
                         // synthetic pre-launch auth failure passes false.
                         // See PaneFailure.turnAttempted (types.ts).
                         turnAttempted: command.turnAttempted ?? true,
+                        ...(command.source ? { source: command.source } : {}),
                     },
-                    // reagent P1 on PR #2378 (round 3): a failure classification
-                    // ends the turn the same way TurnEnd/TurnReset/RequestStop/
-                    // StreamUnsubscribe do — same "whatever compaction was in
-                    // flight is now moot" reasoning as those, just reached via
-                    // an error instead of a clean transition. Without this, a
-                    // failure observed mid-compaction (e.g. the CLI erroring out
-                    // partway through) reproduces the exact stuck-"Compacting…"
-                    // bug this PR already fixed for the other four transitions.
+                    // A failure ends the turn like TurnEnd/TurnReset/RequestStop/StreamUnsubscribe,
+                    // so the compaction in flight is moot too (else a mid-compaction error leaves
+                    // "Compacting…" stuck; reagent P1 on PR #2378).
                     compacting: turnWasEnded ? null : state.compacting,
                     pendingCompactionPing: turnWasEnded ? null : state.pendingCompactionPing,
                 },
@@ -1467,9 +1465,10 @@ export function update(
 
         case "FailureCleared": {
             if (!state.failure) return { state, events: [] };
+            if (command.onlyCode && state.failure.data.code !== command.onlyCode) return { state, events: [] };
             return {
                 state: { ...state, failure: null },
-                events: [{ type: "failure-cleared" }],
+                events: [{ type: "failure-cleared", ...(command.reason ? { reason: command.reason } : {}) }],
             };
         }
 
