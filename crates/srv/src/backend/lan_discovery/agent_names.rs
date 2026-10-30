@@ -28,12 +28,17 @@ use std::collections::HashSet;
 ///   SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md §5, approved 2026-10-23): each
 ///   agent's seat as the operator set it (or a spawned worker's effective one),
 ///   for the Swarm's remote rows and `Agents list`'s `lan` entries.
+/// - `agent_accounts` (`{name: stable account id}`, SPEC_AGENTS_OPERATE_OTHER_MACHINES_2026_10_30.md
+///   §4.4, approved by the operator 2026-10-30): the account each agent's pane runs on, so
+///   `Agents list` and the Swarm can show "out until ..., on account X" for another machine.
+///   The id (`identity::stable_account`) is a hash, never the email, a provider id or a local id.
 ///
 /// An agent with no kind, state, line, provider or seat is left out of that map.
 pub(crate) fn agent_names_body(
     mstore: &crate::backend::storage::store::Store,
     settings: &crate::backend::wconfig::SettingsType,
     agents: &[crate::backend::reactive::types::AgentRegistration],
+    account_of_block: impl Fn(&str) -> Option<String>,
 ) -> serde_json::Value {
     let pairs = || agents.iter().map(|a| (a.agent_id.as_str(), a.block_id.as_str()));
     let kinds = crate::backend::fleet_source::kinds_by_name(pairs(), |block_id| {
@@ -50,6 +55,7 @@ pub(crate) fn agent_names_body(
             (!id.is_empty()).then_some((name, id))
         })
         .collect();
+    let accounts: BTreeMap<&str, String> = pairs().filter_map(|(name, block_id)| Some((name, account_of_block(block_id)?))).collect();
     let seats: BTreeMap<&str, crate::backend::rpc_types::SeatSummary> = agents
         .iter()
         .filter_map(|a| {
@@ -70,6 +76,9 @@ pub(crate) fn agent_names_body(
     });
     if !seats.is_empty() {
         body["agent_seats"] = json!(seats);
+    }
+    if !accounts.is_empty() {
+        body["agent_accounts"] = json!(accounts);
     }
     if let Some(lines) = crate::backend::agent_line::lines_by_name(mstore, settings, pairs()) {
         body["agent_lines"] = json!(lines);
@@ -94,6 +103,9 @@ pub(crate) struct PeerAgents {
     /// Lower-cased name → seat, for listed names only, bounded by
     /// `agent_seat::sanitize_peer_summary` (SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md §5).
     pub seats: BTreeMap<String, crate::backend::rpc_types::SeatSummary>,
+    /// Lower-cased name → stable account id, for listed names only, and only one of the
+    /// form `identity::stable_account` makes (`is_stable_id`).
+    pub accounts: BTreeMap<String, String>,
 }
 
 /// Reads an `agent-names` body: the names, capped as above, and each listed
@@ -169,7 +181,20 @@ pub(crate) fn parse_agent_names_body(value: &serde_json::Value) -> PeerAgents {
                 .collect()
         })
         .unwrap_or_default();
-    PeerAgents { names, status, lines, providers, seats }
+    let accounts = value
+        .get("agent_accounts")
+        .and_then(|s| s.as_object())
+        .map(|map| {
+            map.iter()
+                .filter(|(name, _)| listed.contains(&name.to_lowercase()))
+                .filter_map(|(name, id)| {
+                    let id = id.as_str()?;
+                    crate::identity::stable_account::is_stable_id(id).then(|| (name.to_lowercase(), id.to_string()))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    PeerAgents { names, status, lines, providers, seats, accounts }
 }
 
 /// Applies one poll of a peer's `agent-names` route to its entry, and says
@@ -184,9 +209,10 @@ pub(super) fn apply_agent_names_poll(
     now_secs: u64,
 ) -> bool {
     let Some(peer) = peer else {
-        let changed = !entry.agent_status.is_empty() || !entry.agent_lines.is_empty();
+        let changed = !entry.agent_status.is_empty() || !entry.agent_lines.is_empty() || !entry.agent_accounts.is_empty();
         entry.agent_status.clear();
         entry.agent_lines.clear();
+        entry.agent_accounts.clear();
         return changed;
     };
     entry.last_polled_ok = now_secs;
@@ -194,12 +220,14 @@ pub(super) fn apply_agent_names_poll(
         || entry.agent_status != peer.status
         || entry.agent_lines != peer.lines
         || entry.agent_providers != peer.providers
-        || entry.agent_seats != peer.seats;
+        || entry.agent_seats != peer.seats
+        || entry.agent_accounts != peer.accounts;
     entry.agents = peer.names;
     entry.agent_status = peer.status;
     entry.agent_lines = peer.lines;
     entry.agent_providers = peer.providers;
     entry.agent_seats = peer.seats;
+    entry.agent_accounts = peer.accounts;
     changed
 }
 
@@ -261,6 +289,51 @@ mod tests {
     }
 
     /// The Swarm's provider icon on remote rows (SPEC_SWARM_REFINEMENTS_2026_10_17.md §3).
+    /// `agent_accounts` is a name -> stable account id map: only listed agents, only ids of the
+    /// shape `identity::stable_account` makes, so a peer cannot put free text or an email in a row.
+    #[test]
+    fn agent_accounts_keep_only_stable_ids_for_listed_agents() {
+        let body = serde_json::json!({
+            "agents": ["Manoz", "Opaz", "Loap"],
+            "agent_accounts": {
+                "Manoz": "claude:0123456789abcdef",
+                "Opaz": "me@example.com",
+                "Loap": "claude:e0123456789abcde",
+                "Gone": "claude:0123456789abcdef",
+            }
+        });
+        let peer = parse_agent_names_body(&body);
+        let got: Vec<(&str, &str)> = peer.accounts.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+        assert_eq!(got, vec![("loap", "claude:e0123456789abcde"), ("manoz", "claude:0123456789abcdef")]);
+        assert!(parse_agent_names_body(&serde_json::json!({"agents": ["Manoz"]})).accounts.is_empty());
+    }
+
+    /// The body carries what the lookup says, and a failed poll forgets it with the states.
+    #[test]
+    fn agent_accounts_are_sent_and_a_failed_poll_clears_them() {
+        let store = crate::backend::storage::store::Store::open_in_memory().unwrap();
+        let reg = |name: &str| crate::backend::reactive::types::AgentRegistration {
+            agent_id: name.into(),
+            block_id: format!("blk-{name}"),
+            tab_id: None,
+            uid: None,
+            registered_at: 0,
+            last_seen: 0,
+            registration_nonce: 0,
+        };
+        let agents = [reg("Loap"), reg("shell")];
+        let body = agent_names_body(&store, &Default::default(), &agents, |b| (b == "blk-Loap").then(|| "claude:0123456789abcdef".to_string()));
+        assert_eq!(body["agent_accounts"], serde_json::json!({ "Loap": "claude:0123456789abcdef" }));
+        let none = agent_names_body(&store, &Default::default(), &agents, |_| None);
+        assert!(none.get("agent_accounts").is_none(), "no account, no field: {none}");
+
+        let mut inst = instance();
+        assert!(apply_agent_names_poll(&mut inst, Some(parse_agent_names_body(&body)), 1));
+        assert_eq!(inst.agent_accounts.get("loap").map(String::as_str), Some("claude:0123456789abcdef"));
+        assert!(apply_agent_names_poll(&mut inst, None, 2));
+        assert!(inst.agent_accounts.is_empty());
+    }
+
     #[test]
     fn agent_providers_keep_only_known_ids_for_listed_agents() {
         let body = serde_json::json!({
@@ -334,7 +407,7 @@ mod tests {
             registration_nonce: 0,
         };
         let agents = [reg("Loap", Some("uid-w")), reg("Camper", Some("uid-l")), reg("shell", None)];
-        let body = agent_names_body(&store, &Default::default(), &agents);
+        let body = agent_names_body(&store, &Default::default(), &agents, |_| None);
         assert_eq!(
             body["agent_seats"],
             serde_json::json!({ "Loap": { "role": "worker", "qualifier": null, "lead": { "id": "uid-l", "name": "Camper" }, "area": "panes" } })
@@ -438,6 +511,7 @@ mod tests {
             agent_status: Default::default(),
             agent_lines: Default::default(),
             agent_providers: Default::default(),
+            agent_accounts: Default::default(),
             agent_seats: Default::default(),
             first_seen: 0,
             last_seen: 0,
