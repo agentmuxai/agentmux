@@ -18,7 +18,8 @@ tower-http = { version = "0.6", features = ["cors", "fs"] }
 url = "2"
 tower = { version = "0.5" }
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# raw_value: a capture finds the exact text a JSON path matched, to clean it out of the output.
+serde_json = { version = "1", features = ["raw_value"] }
 memchr = "2"
 json_comments = "0.2"
 clap = { version = "4", features = ["derive"] }

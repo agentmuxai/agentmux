@@ -4,6 +4,7 @@
 use agentmux_common::api_types::CaptureInto;
 
 use super::*;
+use crate::backend::storage::vault_versions::CaptureWrite;
 use crate::backend::vault::{activity, create, reveal, versions};
 
 fn store() -> Store {
@@ -26,7 +27,7 @@ fn value(s: &Store, id: &str, part: &str) -> String {
 }
 
 fn one(from: CaptureFrom, stdout: &str) -> Result<String, String> {
-    extract(&rule_from(&from)?, stdout).map(|v| v.to_string())
+    extract(&rule_from(&from)?, stdout).map(|f| f.value.to_string())
 }
 
 const AWS: &str = r#"{
@@ -53,7 +54,7 @@ fn each_rule_kind_finds_its_value() {
 fn no_match_says_why_and_never_what() {
     let why = |from, out| one(from, out).unwrap_err();
     assert_eq!(why(CaptureFrom::Json("$.AccessKey.Missing".into()), AWS), "the JSON path matched nothing");
-    assert_eq!(why(CaptureFrom::Json("$.AccessKey".into()), AWS), "the JSON path matched an object or a list, not a value");
+    assert_eq!(why(CaptureFrom::Json("$.AccessKey".into()), AWS), "the JSON path matched an object, a list or true/false, not a value");
     assert_eq!(why(CaptureFrom::Json("$.a".into()), "Error: not json at all"), "the output isn't JSON");
     assert_eq!(why(CaptureFrom::Regex(r"key=(\w+)".into()), "nothing here"), "the regex matched nothing");
     assert_eq!(why(CaptureFrom::Line(5), "one\ntwo"), "the output has fewer than 5 lines");
@@ -164,4 +165,76 @@ fn a_failed_command_or_too_much_output_is_withheld() {
     assert!(why.contains("exit code 1"), "{why}");
     let Outcome::Withheld { why, .. } = cap.finish(&s, "x", "x", true, 0) else { panic!("withheld") };
     assert!(why.contains("over 1 MB"), "{why}");
+}
+
+#[test]
+fn a_json_value_with_escapes_is_cleaned_out_as_the_output_printed_it() {
+    let s = store();
+    // A password with a quote, a backslash and a slash, and a key over two lines.
+    let out = r#"{"password": "pa\"ss\\wo/rd-1234", "key": "-----BEGIN KEY-----\nMIIEabcdefgh\n-----END KEY-----"}"#;
+    let rules = [
+        new_key("Password", CaptureFrom::Json("$.password".into())),
+        CaptureRule { into: CaptureInto { kind: Some("note".into()), label: Some("Key".into()), ..Default::default() }, from: CaptureFrom::Json("$.key".into()) },
+    ];
+    let cap = plan(&s, &rules, "Agent2-6", "make-creds --json").unwrap();
+    let Outcome::Stored { ids, scrubber } = cap.finish(&s, out, out, false, 0) else { panic!("stored") };
+    assert_eq!(value(&s, &ids[0], "value"), "pa\"ss\\wo/rd-1234", "the value is stored decoded");
+    assert_eq!(value(&s, &ids[1], "text"), "-----BEGIN KEY-----\nMIIEabcdefgh\n-----END KEY-----");
+    let clean = scrubber.scrub(out);
+    assert_eq!(clean, format!(r#"{{"password": "[vault:{}]", "key": "[vault:{}]"}}"#, ids[0], ids[1]));
+}
+
+#[test]
+fn the_scrubber_knows_a_values_json_forms_whoever_prints_it() {
+    let s = crate::backend::vault::scrub::Scrubber::new(&[("login-x".to_string(), "pä\"ss/wörd\\1".to_string())]);
+    for printed in [r#"pä\"ss/wörd\\1"#, r#"pä\"ss\/wörd\\1"#, r#"p\u00e4\"ss/w\u00f6rd\\1"#] {
+        assert_eq!(s.scrub(&format!("{{\"p\": \"{printed}\"}}")), "{\"p\": \"[vault:login-x]\"}", "{printed}");
+    }
+}
+
+#[test]
+fn two_rules_writing_the_same_entry_are_refused() {
+    let s = store();
+    let twice = [new_key("Token", CaptureFrom::Line(1)), new_key("token", CaptureFrom::Line(2))];
+    assert!(plan(&s, &twice, "Agent2-6", "x").unwrap_err().contains("same entry"));
+    let id = create(&s, NewEntry { kind: "api-key".into(), label: "GitHub".into(), fields: Default::default(), tags: vec![], parts: Parts([("value".to_string(), "ghp_old_value_000".to_string())].into()) }).unwrap();
+    assert!(plan(&s, &[into_id(&id, CaptureFrom::Line(1)), into_id(&id, CaptureFrom::Line(2))], "Agent2-6", "x").unwrap_err().contains("same entry"));
+}
+
+#[test]
+fn a_capture_stores_all_its_values_or_none() {
+    let s = store();
+    let entry = |v: &str| NewEntry { kind: "api-key".into(), label: "GitHub".into(), fields: Default::default(), tags: vec![], parts: Parts([("value".to_string(), v.to_string())].into()) };
+    let id = create(&s, entry("ghp_old_value_000")).unwrap();
+    let rules = [new_key("Deploy key", CaptureFrom::Line(1)), into_id(&id, CaptureFrom::Line(2))];
+    let cap = plan(&s, &rules, "Agent2-6", "make-both").unwrap();
+    // The second rule's entry is deleted while the command runs: the first rule's new entry isn't made either.
+    crate::backend::vault::delete(&s, &id).unwrap();
+    let out = "deploy_value_0001\nghp_new_value_111";
+    let Outcome::Withheld { why, .. } = cap.finish(&s, out, out, false, 0) else { panic!("withheld") };
+    assert!(why.contains("deleted while the command ran"), "{why}");
+    assert!(s.vault_get("api-key-deploy-key").unwrap().is_none(), "nothing was stored");
+}
+
+#[test]
+fn the_commit_writes_nothing_when_an_entry_changed_since_it_was_read() {
+    let s = store();
+    let id = create(&s, NewEntry { kind: "api-key".into(), label: "GitHub".into(), fields: Default::default(), tags: vec![], parts: Parts([("value".to_string(), "ghp_old_value_000".to_string())].into()) }).unwrap();
+    let read = s.vault_get(&id).unwrap().unwrap();
+    // Someone writes a new value after the capture read the entry.
+    crate::backend::vault::update(
+        &s,
+        crate::backend::vault::EntryChange { id: id.clone(), label: "GitHub".into(), fields: Default::default(), tags: vec![], parts: Parts([("value".to_string(), "ghp_persons_value".to_string())].into()), clear: vec![] },
+    )
+    .unwrap();
+    let mut fresh = read.clone();
+    fresh.id = "api-key-other".into();
+    let writes = [
+        CaptureWrite::Insert(fresh),
+        CaptureWrite::Replace { row: VaultRow { updated_at: read.updated_at + 1, ..read.clone() }, was: read.sealed.clone(), kept: Some(versions::of(&read, "Agent2-6", CAPTURED)) },
+    ];
+    assert!(!s.vault_capture_commit(&writes).unwrap());
+    assert!(s.vault_get("api-key-other").unwrap().is_none(), "the insert was rolled back");
+    assert_eq!(value(&s, &id, "value"), "ghp_persons_value");
+    assert_eq!(versions::list(&s, &id).unwrap().len(), 1, "only the person's own edit kept a version");
 }

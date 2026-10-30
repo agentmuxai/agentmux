@@ -12,16 +12,18 @@
 //! can't tell which line held the secret: the output is withheld whole, and kept
 //! as a note the person can open with Reveal.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use agentmux_common::api_types::{CaptureFrom, CaptureRule};
 use agentmux_common::time::now_ms;
+use serde_json::value::RawValue;
 use zeroize::Zeroizing;
 
 use super::scrub::Scrubber;
-use super::{insert, kinds, record, seal, versions, NewEntry, Parts};
+use super::{insert, kinds, new_id, record, seal, validate, versions, NewEntry, Parts};
 use crate::backend::storage::store::Store;
 use crate::backend::storage::vault::VaultRow;
+use crate::backend::storage::vault_versions::CaptureWrite;
 
 /// Most rules one command may have.
 pub const MOST: usize = 8;
@@ -213,6 +215,14 @@ pub fn plan(store: &Store, rules: &[CaptureRule], agent: &str, cmd: &str) -> Res
             }
             (None, None) => return Err(which("\"as\" needs an entry's id, or a kind and label for a new one".into())),
         };
+        let same = |t: &Target| match (t, &into) {
+            (Target::New { kind: a, label: b, .. }, Target::New { kind: c, label: d, .. }) => a == c && b.eq_ignore_ascii_case(d),
+            (Target::Existing { id: a, .. }, Target::Existing { id: b, .. }) => a == b,
+            _ => false,
+        };
+        if out.iter().any(|r: &Rule| same(&r.into)) {
+            return Err(which("two rules write the same entry; give each its own".into()));
+        }
         out.push(Rule { into, from });
     }
     Ok(Capture { rules: out, agent: agent.to_string(), cmd: cmd.to_string() })
@@ -225,18 +235,27 @@ fn part_of(kind: &kinds::Kind, part: Option<&str>) -> Result<&'static str, Strin
     }
 }
 
-fn walk<'a>(mut v: &'a serde_json::Value, steps: &[Step]) -> Option<&'a serde_json::Value> {
+/// The JSON text at `steps`, exactly as the output printed it.
+fn walk<'a>(mut raw: &'a RawValue, steps: &[Step]) -> Option<&'a RawValue> {
     for s in steps {
-        v = match s {
-            Step::Key(k) => v.get(k.as_str())?,
-            Step::Index(i) => v.get(*i)?,
+        raw = match s {
+            Step::Key(k) => serde_json::from_str::<HashMap<String, &'a RawValue>>(raw.get()).ok()?.remove(k.as_str())?,
+            Step::Index(i) => serde_json::from_str::<Vec<&'a RawValue>>(raw.get()).ok()?.into_iter().nth(*i)?,
         };
     }
-    Some(v)
+    Some(raw)
+}
+
+/// A rule's value, and the text the output printed it as when that differs (a
+/// JSON string's escaped form), which is cleaned out of the output too.
+pub struct Found {
+    pub value: Zeroizing<String>,
+    pub printed: Option<Zeroizing<String>>,
 }
 
 /// One rule's value in `stdout`, or why there is none. Never says what it found.
-pub fn extract(from: &Source, stdout: &str) -> Result<Zeroizing<String>, String> {
+pub fn extract(from: &Source, stdout: &str) -> Result<Found, String> {
+    let mut printed = None;
     let value: Zeroizing<String> = match from {
         Source::All => Zeroizing::new(stdout.trim().to_string()),
         Source::Line(n) => Zeroizing::new(stdout.lines().nth(n - 1).ok_or_else(|| format!("the output has fewer than {n} lines"))?.trim().to_string()),
@@ -245,15 +264,21 @@ pub fn extract(from: &Source, stdout: &str) -> Result<Zeroizing<String>, String>
             Zeroizing::new(caps.get(1).ok_or("the regex's group matched nothing")?.as_str().trim().to_string())
         }
         Source::Json(steps) => {
-            let doc: Zeroizing<String> = Zeroizing::new(stdout.trim().to_string());
-            let parsed: serde_json::Value = serde_json::from_str(&doc).map_err(|_| "the output isn't JSON".to_string())?;
-            let found = match walk(&parsed, steps) {
-                Some(serde_json::Value::String(s)) => s.clone(),
-                Some(serde_json::Value::Number(n)) => n.to_string(),
-                Some(serde_json::Value::Null) | None => return Err("the JSON path matched nothing".into()),
-                Some(_) => return Err("the JSON path matched an object or a list, not a value".into()),
-            };
-            Zeroizing::new(found)
+            let top: &RawValue = serde_json::from_str(stdout.trim()).map_err(|_| "the output isn't JSON".to_string())?;
+            let raw = walk(top, steps).ok_or("the JSON path matched nothing")?.get();
+            match raw.as_bytes().first() {
+                Some(b'"') => {
+                    let decoded = Zeroizing::new(serde_json::from_str::<String>(raw).map_err(|_| "the output isn't JSON".to_string())?);
+                    let inner = &raw[1..raw.len() - 1];
+                    if inner != decoded.as_str() {
+                        printed = Some(Zeroizing::new(inner.to_string()));
+                    }
+                    decoded
+                }
+                Some(b'-' | b'0'..=b'9') => Zeroizing::new(raw.to_string()),
+                Some(b'n') => return Err("the JSON path matched nothing".into()),
+                _ => return Err("the JSON path matched an object, a list or true/false, not a value".into()),
+            }
         }
     };
     if value.is_empty() {
@@ -262,7 +287,7 @@ pub fn extract(from: &Source, stdout: &str) -> Result<Zeroizing<String>, String>
     if value.chars().count() < MIN_LEN {
         return Err(format!("the value it matched is shorter than {MIN_LEN} characters, too short to clean out of the output"));
     }
-    Ok(value)
+    Ok(Found { value, printed })
 }
 
 impl Capture {
@@ -287,37 +312,80 @@ impl Capture {
                 .map(|(n, r)| extract(&r.from, stdout).map_err(|e| if self.rules.len() > 1 { format!("capture rule {}: {e}", n + 1) } else { e }))
                 .collect::<Result<Vec<_>, _>>()
         };
-        let values = match why {
+        let found = match why {
             Ok(v) => v,
             Err(why) => return self.withhold(store, why, output),
         };
-        match self.store(store, &values) {
+        match self.store(store, &found) {
             Ok(ids) => {
-                let known: Vec<(String, String)> = ids.iter().zip(values.iter()).map(|(id, v)| (id.clone(), v.to_string())).collect();
+                let mut known: Vec<(String, String)> = Vec::new();
+                for (id, f) in ids.iter().zip(found.iter()) {
+                    known.push((id.clone(), f.value.to_string()));
+                    if let Some(p) = &f.printed {
+                        known.push((id.clone(), p.to_string()));
+                    }
+                }
                 Outcome::Stored { scrubber: Scrubber::new(&known), ids }
             }
             Err(why) => self.withhold(store, format!("the value couldn't be stored: {why}"), output),
         }
     }
 
-    fn store(&self, store: &Store, values: &[Zeroizing<String>]) -> Result<Vec<String>, String> {
-        let target = clip(&self.cmd, 160);
-        let mut ids = Vec::with_capacity(values.len());
-        for (rule, value) in self.rules.iter().zip(values) {
+    /// Stores every rule's value in one transaction: all of them, or none if an
+    /// entry one replaces changed, or was deleted or made again, while the command
+    /// ran. Each old main value is kept as a version in the same transaction.
+    fn store(&self, store: &Store, found: &[Found]) -> Result<Vec<String>, String> {
+        let key = seal::key(store.vault_count().map_err(|e| e.to_string())? == 0)?;
+        let now = now_ms();
+        let mut writes = Vec::with_capacity(found.len());
+        let mut made: Vec<(String, String)> = Vec::with_capacity(found.len());
+        for (rule, f) in self.rules.iter().zip(found) {
             match &rule.into {
                 Target::New { kind, label, part } => {
+                    let k = kinds::kind(kind).ok_or_else(|| format!("unknown kind {kind:?}"))?;
                     let mut parts = Parts::default();
-                    parts.0.insert(part.to_string(), value.to_string());
-                    let entry = NewEntry { kind: kind.to_string(), label: label.clone(), fields: BTreeMap::new(), tags: Vec::new(), parts };
-                    ids.push(insert(store, entry, &self.agent, CAPTURED, &target)?);
+                    parts.0.insert(part.to_string(), f.value.to_string());
+                    let (fields, tags) = (BTreeMap::new(), Vec::<String>::new());
+                    validate(k, label, &fields, &tags, &parts)?;
+                    let id = new_id(store, kind, label)?;
+                    writes.push(CaptureWrite::Insert(VaultRow {
+                        id: id.clone(),
+                        kind: kind.to_string(),
+                        label: label.clone(),
+                        fields: serde_json::to_string(&fields).map_err(|e| e.to_string())?,
+                        tags: serde_json::to_string(&tags).map_err(|e| e.to_string())?,
+                        sealed: seal::seal(&key, &id, &parts)?,
+                        created_at: now,
+                        updated_at: now,
+                        last_used_at: 0,
+                    }));
+                    made.push((id, label.clone()));
                 }
                 Target::Existing { id, created_at, label, part } => {
-                    set_part(store, id, *created_at, part, value, &self.agent, &target).map_err(|e| format!("{label}: {e}"))?;
-                    ids.push(id.clone());
+                    let gone = || format!("{label} was deleted while the command ran");
+                    let row = store.vault_get(id).map_err(|e| e.to_string())?.filter(|r| r.created_at == *created_at).ok_or_else(gone)?;
+                    let kind = kinds::kind(&row.kind).ok_or_else(|| format!("{label} has an unknown kind"))?;
+                    let mut parts = seal::open(&key, &row.id, &row.sealed)?;
+                    if let Some(mut old) = parts.0.insert(part.to_string(), f.value.to_string()) {
+                        zeroize::Zeroize::zeroize(&mut old);
+                    }
+                    let kept = (*part == kind.parts[0]).then(|| versions::of(&row, &self.agent, CAPTURED));
+                    let was = row.sealed.clone();
+                    let changed = VaultRow { sealed: seal::seal(&key, &row.id, &parts)?, updated_at: now, ..row };
+                    writes.push(CaptureWrite::Replace { row: changed, was, kept });
+                    made.push((id.clone(), label.clone()));
                 }
             }
         }
-        Ok(ids)
+        versions::prune(store);
+        if !store.vault_capture_commit(&writes).map_err(|e| e.to_string())? {
+            return Err("an entry it replaces changed while the command ran, so nothing was stored".into());
+        }
+        let target = clip(&self.cmd, 160);
+        for (id, label) in &made {
+            record(store, id, label, &self.agent, CAPTURED, &target, "done");
+        }
+        Ok(made.into_iter().map(|(id, _)| id).collect())
     }
 
     /// Keeps the withheld output as a note only the person opens (with Reveal), and
@@ -350,28 +418,6 @@ impl Capture {
         }
         Outcome::Withheld { why, kept_as }
     }
-}
-
-/// Replaces one part of an existing entry for an agent's capture, keeping the old
-/// value as a version when it is the main one.
-fn set_part(store: &Store, id: &str, created_at: i64, part: &str, value: &str, agent: &str, target: &str) -> Result<(), String> {
-    let row = store.vault_get(id).map_err(|e| e.to_string())?.filter(|r| r.created_at == created_at).ok_or("it was deleted while the command ran")?;
-    let kind = kinds::kind(&row.kind).ok_or("it has an unknown kind")?;
-    let key = seal::key(false)?;
-    let mut parts = seal::open(&key, &row.id, &row.sealed)?;
-    if part == kind.parts[0] {
-        versions::keep(store, &row, agent, CAPTURED)?;
-    }
-    if let Some(mut old) = parts.0.insert(part.to_string(), value.to_string()) {
-        zeroize::Zeroize::zeroize(&mut old);
-    }
-    let label = row.label.clone();
-    let changed = VaultRow { sealed: seal::seal(&key, &row.id, &parts)?, updated_at: now_ms(), ..row };
-    if !store.vault_update(&changed).map_err(|e| e.to_string())? {
-        return Err("it was deleted while the command ran".into());
-    }
-    record(store, id, &label, agent, CAPTURED, target, "done");
-    Ok(())
 }
 
 #[cfg(test)]

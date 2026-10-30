@@ -36,11 +36,10 @@ pub struct VaultVersionInfo {
     pub tail: String,
 }
 
-/// Keeps `row`'s current value before `by` replaces it (`how`: "replaced",
-/// "captured", …).
-pub(super) fn keep(store: &Store, row: &VaultRow, by: &str, how: &str) -> Result<(), String> {
-    prune(store);
-    let v = VaultVersionRow {
+/// `row`'s current value as the version `by` replaces it with (`how`:
+/// "replaced", "captured", …).
+pub(super) fn of(row: &VaultRow, by: &str, how: &str) -> VaultVersionRow {
+    VaultVersionRow {
         seq: 0,
         entry_id: row.id.clone(),
         entry_created_at: row.created_at,
@@ -49,8 +48,13 @@ pub(super) fn keep(store: &Store, row: &VaultRow, by: &str, how: &str) -> Result
         replaced_by: by.to_string(),
         how: how.to_string(),
         state: PREVIOUS.to_string(),
-    };
-    store.vault_version_add(&v).map_err(|e| e.to_string())?;
+    }
+}
+
+/// Keeps `row`'s current value before `by` replaces it.
+pub(super) fn keep(store: &Store, row: &VaultRow, by: &str, how: &str) -> Result<(), String> {
+    prune(store);
+    store.vault_version_add(&of(row, by, how)).map_err(|e| e.to_string())?;
     Ok(())
 }
 

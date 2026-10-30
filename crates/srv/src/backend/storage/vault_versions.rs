@@ -25,6 +25,17 @@ pub struct VaultVersionRow {
 
 const COLUMNS: &str = "seq, entry_id, entry_created_at, sealed, replaced_at, replaced_by, how, state";
 
+/// One write of a command's capture (`backend::vault::capture`), committed with
+/// the others it made or not at all.
+pub enum CaptureWrite {
+    /// A new entry.
+    Insert(super::vault::VaultRow),
+    /// A new sealed value for an entry, only if it is still the incarnation
+    /// (`row.created_at`) and value (`was`) that were read; `kept` is the value it
+    /// replaces, kept as a version.
+    Replace { row: super::vault::VaultRow, was: Vec<u8>, kept: Option<VaultVersionRow> },
+}
+
 fn row_of(r: &rusqlite::Row<'_>) -> rusqlite::Result<VaultVersionRow> {
     Ok(VaultVersionRow {
         seq: r.get(0)?,
@@ -97,6 +108,41 @@ impl Store {
                 previous.state
             ],
         )?;
+        tx.commit()?;
+        Ok(true)
+    }
+
+    /// Commits a capture's writes in one transaction. False, with nothing written,
+    /// if an entry it replaces changed or was made again since it was read.
+    pub fn vault_capture_commit(&self, writes: &[CaptureWrite]) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let tx = conn.unchecked_transaction()?;
+        for w in writes {
+            match w {
+                CaptureWrite::Insert(row) => {
+                    tx.execute(
+                        "INSERT INTO db_vault_entries (id, kind, label, fields, tags, sealed, created_at, updated_at, last_used_at)                          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                        params![row.id, row.kind, row.label, row.fields, row.tags, row.sealed, row.created_at, row.updated_at, row.last_used_at],
+                    )?;
+                }
+                CaptureWrite::Replace { row, was, kept } => {
+                    let n = tx.execute(
+                        "UPDATE db_vault_entries SET sealed = ?2, updated_at = ?3 WHERE id = ?1 AND created_at = ?4 AND sealed = ?5",
+                        params![row.id, row.sealed, row.updated_at, row.created_at, was],
+                    )?;
+                    if n == 0 {
+                        // Dropping `tx` rolls back what this capture wrote so far.
+                        return Ok(false);
+                    }
+                    if let Some(v) = kept {
+                        tx.execute(
+                            "INSERT INTO db_vault_versions (entry_id, entry_created_at, sealed, replaced_at, replaced_by, how, state)                              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                            params![v.entry_id, v.entry_created_at, v.sealed, v.replaced_at, v.replaced_by, v.how, v.state],
+                        )?;
+                    }
+                }
+            }
+        }
         tx.commit()?;
         Ok(true)
     }

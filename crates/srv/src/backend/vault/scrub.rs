@@ -50,7 +50,30 @@ fn forms(value: &str) -> Vec<String> {
     let hex: String = value.bytes().map(|b| format!("{b:02x}")).collect();
     out.push(hex.to_uppercase());
     out.push(hex);
+    out.extend(json_forms(value));
     out
+}
+
+/// A value as a JSON string holds it, without the quotes: escaped as serde_json
+/// writes it, with `/` escaped too, and with everything outside ASCII as `\uXXXX`.
+/// A tool that prints JSON prints a value with a quote, a backslash or a newline
+/// in one of these forms, never as is.
+fn json_forms(value: &str) -> Vec<String> {
+    let quoted = serde_json::to_string(value).unwrap_or_default();
+    let Some(plain) = quoted.strip_prefix('"').and_then(|q| q.strip_suffix('"')) else {
+        return Vec::new();
+    };
+    let ascii: String = plain
+        .chars()
+        .flat_map(|c| -> Vec<char> {
+            if c.is_ascii() {
+                vec![c]
+            } else {
+                c.encode_utf16(&mut [0; 2]).iter().flat_map(|u| format!("\\u{u:04x}").chars().collect::<Vec<_>>()).collect()
+            }
+        })
+        .collect();
+    vec![plain.to_string(), plain.replace('/', "\\/"), ascii]
 }
 
 impl Scrubber {
