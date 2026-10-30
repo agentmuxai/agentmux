@@ -169,8 +169,12 @@ export function checkFrame(prev: FrameSample, cur: FrameSample, events: readonly
     if (!worst) return { violation: null, gap };
     const gapBefore = blankGap(prev);
     const causes = [...inferCauses(prev, cur), ...events];
-    // A shrink or a taller scroller moves rows down by exactly that much; the bottom stays tight.
-    const tight = causes.some((c) => c.startsWith("content-shrink:") || c.startsWith("viewport-grow:"));
+    // A shrink or a taller scroller lowers the largest scrollTop by exactly that much, so the rows
+    // above can slide down by at most the sum and the bottom stays tight. Any move beyond it is not
+    // explained by the clamp, and stays a violation.
+    const allowed =
+        Math.max(0, prev.scrollHeight - cur.scrollHeight) + Math.max(0, cur.clientHeight - prev.clientHeight);
+    const tight = allowed > MOVE_TOLERANCE_PX && worst.dy <= allowed + MOVE_TOLERANCE_PX;
     return {
         gap,
         violation: {

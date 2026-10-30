@@ -61,6 +61,24 @@ describe("checkFrame — V1 (one direction)", () => {
         expect(v.causes).toContain("viewport-grow:60");
     });
 
+    it("a move down larger than the shrink that explains it is still a violation", () => {
+        // A 1 px shrink cannot account for rows sliding 100 px.
+        const down = pinned.map((r) => ({ ...r, top: r.top + 100, bottom: r.bottom + 100 }));
+        const small = checkFrame(frame(pinned), frame(down, { scrollHeight: 1599, scrollTop: 900 })).violation!;
+        expect(small.kind).toBe("down");
+        // 120 px of shrink explains 120 px, not 200.
+        const far = pinned.map((r) => ({ ...r, top: r.top + 200, bottom: r.bottom + 200 }));
+        const big = checkFrame(frame(pinned), frame(far, { scrollHeight: 1480, scrollTop: 800 })).violation!;
+        expect(big.kind).toBe("down");
+        expect(big.causes[0]).toBe("content-shrink:120");
+    });
+
+    it("a shrink and a taller scroller together account for the sum of both", () => {
+        const down = pinned.map((r) => ({ ...r, top: r.top + 150, bottom: r.bottom + 150 }));
+        const v = checkFrame(frame(pinned), frame(down, { scrollHeight: 1540, clientHeight: 690, scrollTop: 850 })).violation!;
+        expect(v.kind).toBe("tight");
+    });
+
     it("a move down with no allowed cause is still a violation", () => {
         const down = pinned.map((r) => ({ ...r, top: r.top + 30, bottom: r.bottom + 30 }));
         expect(checkFrame(frame(pinned), frame(down, { scrollTop: 970 })).violation!.kind).toBe("down");
