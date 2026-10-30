@@ -1,0 +1,23 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// The tooltip body of a card's Free or Local tag (AccessTagDetail.tsx). The tooltip is
+// portaled out of the card, so these rules cannot sit under `.agent-card`.
+.agent-access-tag-detail {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+}
+
+.agent-access-tag-detail-lead {
+    font-weight: 600;
+}
+
+.agent-access-tag-detail-checked {
+    color: var(--secondary-text-color);
+    font-size: var(--text-xs);
+
+    &--stale {
+        color: var(--warning-text-color);
+    }
+}
