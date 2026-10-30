@@ -55,6 +55,25 @@ pub struct GmailArgs {
     pub max_results: Option<u32>,
     #[serde(default)]
     pub page_token: Option<String>,
+    /// `create_draft`, `update_draft`: the recipients, the subject and the text of the mail.
+    #[serde(default)]
+    pub to: Option<Vec<String>>,
+    #[serde(default)]
+    pub cc: Option<Vec<String>>,
+    #[serde(default)]
+    pub bcc: Option<Vec<String>>,
+    #[serde(default)]
+    pub subject: Option<String>,
+    #[serde(default)]
+    pub body: Option<String>,
+    /// `update_draft`, `send_draft`: a draft id from `create_draft`.
+    #[serde(default)]
+    pub draft_id: Option<String>,
+    /// `label_thread`: label ids (from `list_labels`) to put on the thread and to take off it.
+    #[serde(default)]
+    pub add_label_ids: Option<Vec<String>>,
+    #[serde(default)]
+    pub remove_label_ids: Option<Vec<String>>,
 }
 
 /// The scopes an action can run with: any one is enough. Only `gmail.readonly` is asked for
@@ -83,7 +102,7 @@ pub fn granted_for(action: &str, granted: &[String]) -> bool {
 }
 
 /// An id in a URL path: Gmail's are hex, but accept letters, digits, `-` and `_`.
-fn id_arg(name: &str, v: Option<&str>) -> Result<String, String> {
+pub(super) fn id_arg(name: &str, v: Option<&str>) -> Result<String, String> {
     let id = v.map(str::trim).unwrap_or("");
     if id.is_empty() {
         return Err(format!("this action needs {name}: one from search_threads"));
@@ -94,13 +113,13 @@ fn id_arg(name: &str, v: Option<&str>) -> Result<String, String> {
     Ok(id.to_string())
 }
 
-fn url_of(tail: &[&str]) -> Result<String, String> {
+pub(super) fn url_of(tail: &[&str]) -> Result<String, String> {
     let mut url = url::Url::parse(API).map_err(|e| e.to_string())?;
     url.path_segments_mut().map_err(|_| "bad Gmail API URL".to_string())?.extend(tail);
     Ok(url.to_string())
 }
 
-fn get(url: String, query: Vec<(&'static str, String)>) -> GoogleRequest {
+pub(super) fn get(url: String, query: Vec<(&'static str, String)>) -> GoogleRequest {
     GoogleRequest { method: reqwest::Method::GET, url, query, body: None, text: false }
 }
 
@@ -136,12 +155,12 @@ pub fn summary_plan(thread_id: &str) -> Result<GoogleRequest, String> {
     Ok(get(url_of(&["threads", &id])?, q))
 }
 
-fn s<'a>(v: &'a Value, ptr: &str) -> &'a str {
+pub(super) fn s<'a>(v: &'a Value, ptr: &str) -> &'a str {
     v.pointer(ptr).and_then(Value::as_str).unwrap_or("")
 }
 
 /// A header's value (names compare case-insensitively), or empty.
-fn header<'a>(payload: &'a Value, name: &str) -> &'a str {
+pub(super) fn header<'a>(payload: &'a Value, name: &str) -> &'a str {
     payload
         .get("headers")
         .and_then(Value::as_array)
@@ -151,7 +170,7 @@ fn header<'a>(payload: &'a Value, name: &str) -> &'a str {
 }
 
 /// Header values hold what the sender typed: one line, cut.
-fn line(v: &str, max: usize) -> String {
+pub(super) fn line(v: &str, max: usize) -> String {
     clip(&v.split_whitespace().collect::<Vec<_>>().join(" "), max)
 }
 
@@ -258,7 +277,7 @@ pub fn fill_external(thread: &mut Value, parts: &std::collections::HashMap<Strin
 
 /// Whether a text part of `payload` is still stored outside it (it could not be fetched, or was
 /// too large to).
-fn has_unloaded_text(payload: &Value) -> bool {
+pub(super) fn has_unloaded_text(payload: &Value) -> bool {
     is_external_text(payload) || payload.get("parts").and_then(Value::as_array).is_some_and(|ps| ps.iter().any(has_unloaded_text))
 }
 
@@ -314,8 +333,8 @@ fn finish_text(text: String) -> String {
     text.replace("&nbsp;", " ").replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&#39;", "'").replace("&amp;", "&")
 }
 
-/// The message's readable text: its `text/plain` parts, else its `text/html` parts as text.
-fn body_text(payload: &Value) -> String {
+/// The decoded text of every readable part of `payload` of type `mime`, in order (files are not).
+pub(super) fn text_of_mime(payload: &Value, mime: &str) -> Vec<String> {
     fn collect(part: &Value, mime: &str, out: &mut Vec<String>) {
         if part.get("filename").and_then(Value::as_str).is_some_and(|f| !f.is_empty()) {
             return;
@@ -332,18 +351,27 @@ fn body_text(payload: &Value) -> String {
             }
         }
     }
-    let mut plain = Vec::new();
-    collect(payload, "text/plain", &mut plain);
+    let mut out = Vec::new();
+    collect(payload, mime, &mut out);
+    out
+}
+
+/// The message's readable text: its `text/plain` parts, else its `text/html` parts as text.
+pub(super) fn body_text(payload: &Value) -> String {
+    let plain = text_of_mime(payload, "text/plain");
     if !plain.is_empty() {
         return plain.join("\n");
     }
-    let mut html = Vec::new();
-    collect(payload, "text/html", &mut html);
-    html_text(&html.join("\n"))
+    html_alternative(payload)
+}
+
+/// The message's `text/html` parts as text (empty when it has none).
+pub(super) fn html_alternative(payload: &Value) -> String {
+    html_text(&text_of_mime(payload, "text/html").join("\n"))
 }
 
 /// Blank lines collapsed to one and the ends trimmed.
-fn tidy(text: &str) -> String {
+pub(super) fn tidy(text: &str) -> String {
     let mut out = String::new();
     let mut blank = 0;
     for l in text.replace('\r', "").lines() {
@@ -362,7 +390,7 @@ fn tidy(text: &str) -> String {
 }
 
 /// A message's attachments: name, type and size. Their bytes are not fetched.
-fn attachments(payload: &Value) -> Vec<Value> {
+pub(super) fn attachments(payload: &Value) -> Vec<Value> {
     fn walk(part: &Value, out: &mut Vec<Value>) {
         let name = s(part, "/filename");
         if !name.is_empty() && out.len() < ATTACHMENTS {
