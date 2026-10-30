@@ -413,7 +413,19 @@ jobs:
         # to read them off a separate `cargo check`; pipefail keeps a failing
         # build or test failing the step.
         shell: bash
-        run: cargo nextest run --profile ci -p agentmux-common -p agentmux-srv -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats 2>&1 | tee "$RUNNER_TEMP/nextest-build.log"
+        run: |
+          # This step has died ~4 minutes in, with no error from rustc, "The runner has received
+          # a shutdown signal" and exit 143, on about 1 ubuntu run in 9 (every time at the same
+          # point, once the agentmux-srv test crate is being built). A line every 5 s of memory,
+          # swap, free disk and the biggest process stays in the log up to the moment the runner
+          # goes, which says whether it is memory or disk. Remove it once that is fixed.
+          (while true; do
+            echo "[resources] $(free -m | awk 'NR==2{printf "mem_used=%dMB mem_avail=%dMB ", $3, $7} NR==3{printf "swap_used=%dMB", $3}') disk_root_avail=$(df -m --output=avail / | tail -1 | tr -d ' ')MB disk_mnt_avail=$(df -m --output=avail /mnt 2>/dev/null | tail -1 | tr -d ' ')MB top=$(ps -eo rss=,comm= --sort=-rss | head -1 | awk '{printf "%s:%dMB", $2, $1/1024}')"
+            sleep 5
+          done) &
+          monitor=$!
+          trap 'kill $monitor 2>/dev/null' EXIT
+          cargo nextest run --profile ci -p agentmux-common -p agentmux-srv -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats 2>&1 | tee "$RUNNER_TEMP/nextest-build.log"
       # nextest does not run doctests. Only these three have a library target.
       - name: cargo test --doc (CEF-free crates)
         if: matrix.os != 'windows-latest' && needs.changes.outputs.queue != 'true'
