@@ -516,14 +516,6 @@
     color: var(--secondary-text-color);
 }
 
-.files-link {
-    @include mixins.button-reset;
-    color: var(--accent-color);
-    font: inherit;
-    cursor: pointer;
-    text-decoration: underline;
-}
-
 // ── Copy and move: progress and conflicts (§7.1, §7.2) ─────────────────────
 
 .files-op {

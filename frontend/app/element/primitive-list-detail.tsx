@@ -13,6 +13,7 @@
 // never a nested category/group drill-down.
 
 import { Show, type JSX } from "solid-js";
+import { Button } from "@/app/element/ui";
 
 import "./primitive-list-detail.scss";
 
@@ -32,14 +33,14 @@ export function PrimitiveListDetail(props: {
             </Show>
             <Show when={props.showDetail}>
                 <div class="primitive-list-detail-detail">
-                    <button
-                        type="button"
+                    <Button
+                        density="compact"
+                        icon="chevron-left"
                         class="primitive-list-detail-back-btn"
                         onClick={() => props.onBack()}
                     >
-                        <i class="fa-solid fa-chevron-left" aria-hidden="true" />
-                        <span>{props.backLabel}</span>
-                    </button>
+                        {props.backLabel}
+                    </Button>
                     <div class="primitive-list-detail-detail-body">{props.detail}</div>
                 </div>
             </Show>
