@@ -46,7 +46,7 @@ pub(super) const ALWAYS: &[&str] = &[
     "POST /api/v1/agent/memory/write", "POST /api/v1/agent/open", "POST /api/v1/agent/open_many", "POST /api/v1/agent/pane/close",
     "POST /api/v1/agent/self/compact", "POST /api/v1/agent/self/fresh", "POST /api/v1/agent/self/mcp-heal",
     "POST /api/v1/agent/self/quit", "POST /api/v1/agent/self/upgrade", "POST /api/v1/agent/skill", "POST /api/v1/agent/spawn", "POST /api/v1/agent/spawn_many",
-    "POST /api/v1/agent/takeover", "POST /api/v1/coord/posts", "POST /api/v1/fleet/bulk-stop", "POST /api/v1/github/token",
+    "POST /api/v1/agent/takeover", "POST /api/v1/bulletin", "POST /api/v1/coord/posts", "POST /api/v1/fleet/bulk-stop", "POST /api/v1/github/token",
     "POST /api/v1/google/calendar", "POST /api/v1/google/drive", "POST /api/v1/google/gmail",
     "POST /api/v1/muxspect/dock/clear", "POST /api/v1/pane/open", "POST /api/v1/pane/title",
     "POST /api/v1/ptyshell/create", "POST /api/v1/ptyshell/input", "POST /api/v1/ptyshell/resize",

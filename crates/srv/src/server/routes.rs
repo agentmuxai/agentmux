@@ -228,6 +228,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/api/v1/work-claims", post(work_claims_handlers::handle_claim_work))
         .route("/api/v1/work-claims/release", post(work_claims_handlers::handle_release_work))
         .route("/api/v1/coord/posts", post(coord_channel_handlers::handle_post_to_channel))
+        .route("/api/v1/bulletin", post(bulletin_handlers::handle_post_bulletin))
         .route_layer(middleware::from_fn_with_state(state.clone(), agent_only::require_agent_token));
 
     // MessageBus routes (authed, localhost-only)
@@ -454,6 +455,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // PostToChannel / ReadChannel: a repository's coordination channel
         // (SPEC_AGENT_COORDINATION_CHANNEL_2026_10_15.md).
         .route("/api/v1/coord/posts", get(coord_channel_handlers::handle_read_channel))
+        .route("/api/v1/bulletin", get(bulletin_handlers::handle_read_bulletin))
         // MuxAPI — identity / preset / memory namespaces, the MCP-facing
         // slice of the app-API RPC surface (SPEC_AGENT_APP_API_MCP_BINDINGS_2026_06_28).
         // The agent identity (`agent_id`) is supplied by agentmux-mcp from its
