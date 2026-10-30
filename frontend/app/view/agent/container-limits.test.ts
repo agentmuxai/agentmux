@@ -23,10 +23,13 @@ describe("container limits as the panel edits them", () => {
     });
 
     it("refuses a custom amount that is empty, zero, negative or not a number", () => {
+        // 0.004 CPUs would round to "0", which srv reads as no limit.
         for (const amount of ["", "0", "-2", "lots"]) {
             expect(memoryStored({ mode: "custom", amount })).toEqual({ error: "Memory must be a number above 0" });
         }
         expect(cpuStored({ mode: "custom", amount: "x" })).toEqual({ error: "CPUs must be a number above 0" });
+        expect(cpuStored({ mode: "custom", amount: "0.004" })).toEqual({ error: "CPUs must be a number above 0" });
+        expect(cpuStored({ mode: "custom", amount: "0.01" })).toEqual({ value: "0.01" });
     });
 
     it("says memory in the unit a person would", () => {

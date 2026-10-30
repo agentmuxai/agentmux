@@ -17,6 +17,9 @@ use super::ContainerManager;
 /// Prints the cgroup's OOM counters, whichever cgroup version the container is on.
 const READ_COUNTER: &str = "cat /sys/fs/cgroup/memory.events 2>/dev/null || cat /sys/fs/cgroup/memory/memory.oom_control 2>/dev/null";
 
+/// The longest the counter is waited for; a counter that can't be read in that time is treated as unreadable.
+const READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// The `oom_kill` value in the text of `memory.events` / `memory.oom_control`.
 pub fn parse_oom_kill(text: &str) -> Option<u64> {
     text.lines().find_map(|line| {
@@ -34,14 +37,19 @@ pub struct OomEvent {
 
 impl ContainerManager {
     /// How many processes the kernel has killed in this container for memory since it started; `None` when it can't be read.
+    /// Bounded: a turn waits on it before it starts, where a stop can't reach it.
     pub async fn oom_kill_count(&self, container_name: &str) -> Option<u64> {
-        let session = self.exec(container_name, &["sh".to_string(), "-c".to_string(), READ_COUNTER.to_string()], None, &[], false).await.ok()?;
-        let mut text = String::new();
-        let mut output = session.output;
-        while let Some(Ok(frame)) = output.next().await {
-            text.push_str(&frame.to_string());
-        }
-        parse_oom_kill(&text)
+        let read = async {
+            let cmd = ["sh".to_string(), "-c".to_string(), READ_COUNTER.to_string()];
+            let session = self.exec(container_name, &cmd, None, &[], false).await.ok()?;
+            let mut text = String::new();
+            let mut output = session.output;
+            while let Some(Ok(frame)) = output.next().await {
+                text.push_str(&frame.to_string());
+            }
+            parse_oom_kill(&text)
+        };
+        tokio::time::timeout(READ_TIMEOUT, read).await.ok().flatten()
     }
 
     /// Whether a process was killed for memory since the count was `before`.

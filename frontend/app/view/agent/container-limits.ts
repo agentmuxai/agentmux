@@ -37,7 +37,10 @@ export function storedFromDraft(draft: LimitDraft, unit: number, what: string): 
     if (draft.mode === "auto") return { value: "" };
     if (draft.mode === "none") return { value: "0" };
     const n = Number(draft.amount.trim());
-    if (draft.amount.trim() === "" || !Number.isFinite(n) || n <= 0) return { error: `${what} must be a number above 0` };
+    // A value that rounds to 0 would be stored as "0", which means no limit: the opposite of what was asked.
+    if (draft.amount.trim() === "" || !Number.isFinite(n) || plain(n * unit) === "0" || n <= 0) {
+        return { error: `${what} must be a number above 0` };
+    }
     return { value: plain(n * unit) };
 }
 
