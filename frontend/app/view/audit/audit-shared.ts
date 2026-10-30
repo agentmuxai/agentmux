@@ -39,6 +39,12 @@ export const RANGES: { value: AuditRange; label: string; ms: number }[] = [
     { value: "7d", label: "Last 7 days", ms: 7 * 24 * 60 * 60 * 1000 },
 ];
 
+/**
+ * A relative range's start is rounded down to the minute: srv files the totals it keeps under the filter,
+ * start included, so a start that moved on every poll would rescan the audit file each time.
+ */
+const RANGE_STEP_MS = 60_000;
+
 export interface AuditFilter {
     agent: string;
     kinds: ReadonlySet<string>;
@@ -63,7 +69,7 @@ export function buildRequest(filter: AuditFilter, now: number, cursor?: string, 
         ...(requestKinds(filter.kinds) ? { kinds: requestKinds(filter.kinds) } : {}),
         ...(agent ? { agent_id: agent } : {}),
         ...(text ? { text } : {}),
-        ...(span ? { since_ms: now - span } : {}),
+        ...(span ? { since_ms: Math.floor((now - span) / RANGE_STEP_MS) * RANGE_STEP_MS } : {}),
         ...(cursor ? { cursor } : {}),
         ...(totals ? { totals: true } : {}),
     };

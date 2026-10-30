@@ -34,8 +34,18 @@ describe("the query the filters make", () => {
 
     it("turns a range into since_ms, trims the agent and text, and adds the cursor and totals only when given", () => {
         const f = { ...emptyFilter(" korp "), range: "1h" as const, text: " refused " };
-        expect(buildRequest(f, 10_000_000)).toEqual({ limit: 50, agent_id: "korp", text: "refused", since_ms: 10_000_000 - 3_600_000 });
+        expect(buildRequest(f, 10_000_000)).toEqual({ limit: 50, agent_id: "korp", text: "refused", since_ms: 6_360_000 });
         expect(buildRequest(emptyFilter(), 1, "c1", true)).toEqual({ limit: 50, cursor: "c1", totals: true });
+    });
+});
+
+describe("a relative range", () => {
+    it("starts at the same minute for every poll within it, so srv's kept totals are found again", () => {
+        const f = { ...emptyFilter(), range: "24h" as const };
+        const a = buildRequest(f, 100_020_000 + 1_000).since_ms;
+        const b = buildRequest(f, 100_020_000 + 30_000).since_ms;
+        expect(a).toBe(b);
+        expect(a! % 60_000).toBe(0);
     });
 });
 
