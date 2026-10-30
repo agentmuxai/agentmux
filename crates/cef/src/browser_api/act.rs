@@ -605,10 +605,12 @@ async fn explain_unclickable(cdp: &mut CdpSession, object_id: &str, error: Strin
         .await
         .ok()
         .and_then(|v| v.get("v").and_then(|b| b.as_bool()));
-    if attached == Some(true) {
-        error
-    } else {
+    // Only a probe that answered "detached" says so; a probe that failed too
+    // (a closed session, a timeout) leaves the original error to be read.
+    if attached == Some(false) {
         "the page changed since the snapshot (the element is gone); take a new snapshot".to_string()
+    } else {
+        error
     }
 }
 
