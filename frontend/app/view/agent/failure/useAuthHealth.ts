@@ -14,6 +14,7 @@ import { sleep } from "@/util/util";
 import { createEffect, onCleanup, untrack, type Accessor } from "solid-js";
 import { retryRecheckAfterBind } from "./recheck-after-bind";
 import { decideSyntheticRow } from "./synthetic-row";
+import { clearFailure, raiseFailure } from "./failure-writer";
 
 type PaneStateAndDispatch = Pick<AgentPaneModel, "state" | "dispatchPane">;
 
@@ -47,28 +48,26 @@ export function useSyntheticAuthRow(opts: { canRetry: Accessor<boolean>; paneMod
         prevFailure = untrack(() => paneModel.state.failure);
         syntheticDismissed = decision.syntheticDismissed;
         if (decision.action === "raise") {
-            paneModel.dispatchPane(
-                {
-                    type: "FailureObserved",
-                    at: Date.now(),
-                    turnAttempted: false,
-                    failure: {
-                        code: "auth",
-                        title: "Not signed in",
-                        detail:
-                            "This agent hasn't been signed in to its provider yet, so it never started. " +
-                            "Sign in to launch it — nothing has run, so there's no turn to retry.",
-                        retryable: true,
-                    },
+            raiseFailure(paneModel, {
+                source: "synthetic",
+                at: Date.now(),
+                turnAttempted: false,
+                failure: {
+                    code: "auth",
+                    title: "Not signed in",
+                    detail:
+                        "This agent hasn't been signed in to its provider yet, so it never started. " +
+                        "Sign in to launch it — nothing has run, so there's no turn to retry.",
+                    retryable: true,
                 },
-                "system"
-            );
+                system: true,
+            });
             // Keep prevFailure in step with what we just dispatched, so the
             // re-run this write triggers sees "our row is showing" rather than
             // "a row just appeared from nowhere".
             prevFailure = untrack(() => paneModel.state.failure);
         } else if (decision.action === "retract") {
-            paneModel.dispatchPane({ type: "FailureCleared" }, "system");
+            clearFailure(paneModel, { reason: "retracted", system: true });
             prevFailure = null;
         }
     });
@@ -113,7 +112,7 @@ export function useAuthHealth(opts: {
     const declareAuthHealthy = () => {
         opts.status.notifyControllerHealthy();
         if (deps.failureCode() === "auth") {
-            paneModel.dispatchPane({ type: "FailureCleared" }, "system");
+            clearFailure(paneModel, { reason: "recovered", onlyCode: "auth", system: true });
         }
     };
 

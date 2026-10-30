@@ -4,4 +4,8 @@
  * An earlier value as the pane shows it: when it was replaced and by whom, and
  * its last characters as the entry's own value shows them. No value.
  */
-export type VaultVersionInfo = { seq: number, replaced_at: number, replaced_by: string, how: string, tail: string, };
+export type VaultVersionInfo = { seq: number, replaced_at: number, replaced_by: string, how: string, tail: string, 
+/**
+ * "previous", "pending", "rotation failed at step 2", "rotation interrupted".
+ */
+state: string, };
