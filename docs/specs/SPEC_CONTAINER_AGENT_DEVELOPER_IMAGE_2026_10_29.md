@@ -1,6 +1,7 @@
 # Spec: a developer image for container agents (#11091; build #11092)
 
-**Date:** 2026-10-29 (measured 2026-10-30) · **Owner:** Maricon-2 · **Status:** approved 2026-10-30 ("go with your recommendations": decisions (a) to (d) in §9 as recommended); built in small PRs
+**Date:** 2026-10-29 (measured 2026-10-30) · **Owner:** Maricon-2
+**Status:** active. Approved 2026-10-30 (the operator: "go with your recommendations", which covers decisions (a) to (d) in §9); built in small PRs, #11092.
 **Related:** `SPEC_CONTAINER_AGENTS_WORK_FOR_EVERYONE_2026_10_07.md` (the base image), Loap-3's CPU/memory limits spec (#11089, `SPEC_CONTAINER_AGENT_RESOURCE_LIMITS_2026_10_29.md`), #5843 (an idle container moves to the current image).
 
 ## 1. The problem
