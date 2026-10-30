@@ -10,6 +10,9 @@ version: "3"
 dotenv: [".env"]
 
 vars:
+    # Where cargo puts its output: CARGO_TARGET_DIR when set (a container agent keeps it in a volume), else target/.
+    # Used by the Linux and macOS dev build and the clean tasks; Windows and the packagers read target/ as before.
+    TARGET_DIR: '{{if .CARGO_TARGET_DIR}}{{.CARGO_TARGET_DIR}}{{else}}target{{end}}'
     APP_NAME: "AgentMux"
     BIN_DIR: "bin"
     VERSION:
@@ -346,7 +349,7 @@ tasks:
         cmds:
             - bash -c '{{.CARGO_ENV}}source "$HOME/.cargo/env" 2>/dev/null; PATH="$HOME/.cargo/bin:$PATH" cargo build --release -p agentmux-srv'
             - mkdir -p dist/bin
-            - cp target/release/agentmux-srv dist/bin/agentmux-srv-{{.VERSION}}-darwin.arm64
+            - cp {{.TARGET_DIR}}/release/agentmux-srv dist/bin/agentmux-srv-{{.VERSION}}-darwin.arm64
             - echo "✓ Built agentmux-srv for macOS (dist/bin/agentmux-srv-{{.VERSION}}-darwin.arm64)"
 
     build:backend:rust:linux:
@@ -355,7 +358,7 @@ tasks:
         cmds:
             - bash -c '{{.CARGO_ENV}}source "$HOME/.cargo/env" 2>/dev/null; PATH="$HOME/.cargo/bin:$PATH" cargo build --release -p agentmux-srv'
             - mkdir -p dist/bin
-            - cp target/release/agentmux-srv dist/bin/agentmux-srv-{{.VERSION}}-linux.x64
+            - cp {{.TARGET_DIR}}/release/agentmux-srv dist/bin/agentmux-srv-{{.VERSION}}-linux.x64
             - echo "✓ Built agentmux-srv for Linux (dist/bin/agentmux-srv-{{.VERSION}}-linux.x64)"
 
     build:backend:rust:windows:
@@ -547,8 +550,8 @@ tasks:
             # layout) — see dev:serve's Unix branch.
             - bash -c '{{.CARGO_ENV}}source "$HOME/.cargo/env" 2>/dev/null; PATH="$HOME/.cargo/bin:$PATH" cargo build --release -p agentmux-cef -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp'
             - mkdir -p dist/cef
-            - cp target/release/agentmux-cef dist/cef/agentmux-cef
-            - cp target/release/agentmux-launcher dist/cef/agentmux-launcher
+            - cp {{.TARGET_DIR}}/release/agentmux-cef dist/cef/agentmux-cef
+            - cp {{.TARGET_DIR}}/release/agentmux-launcher dist/cef/agentmux-launcher
             - echo "✓ Built host + launcher + bashwrap for macOS"
 
     build:host:linux:
@@ -572,8 +575,8 @@ tasks:
             # guard hard-fails on Linux.
             - bash -c '{{.CARGO_ENV}}source "$HOME/.cargo/env" 2>/dev/null; PATH="$HOME/.cargo/bin:$PATH" cargo build --release -p agentmux-cef --features patched-libcef && PATH="$HOME/.cargo/bin:$PATH" cargo build --release -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp'
             - mkdir -p dist/cef
-            - cp target/release/agentmux-cef dist/cef/agentmux-cef
-            - cp target/release/agentmux-launcher dist/cef/agentmux-launcher
+            - cp {{.TARGET_DIR}}/release/agentmux-cef dist/cef/agentmux-cef
+            - cp {{.TARGET_DIR}}/release/agentmux-launcher dist/cef/agentmux-launcher
             - echo "✓ Built host + launcher + bashwrap for Linux"
 
     bundle:
@@ -1023,13 +1026,13 @@ tasks:
                   mkdir -p "$DEV_DIR/tools/bin"
                   # Fail loud: build:host:{darwin,linux} build -p agentmux-bashwrap,
                   # so a missing binary here is a real regression, not "optional".
-                  cp target/release/agentmux-bashwrap "$DEV_DIR/tools/bin/"
+                  cp {{.TARGET_DIR}}/release/agentmux-bashwrap "$DEV_DIR/tools/bin/"
                   # MCP server — the auto-injected .mcp.json uses the bare name
                   # "command": "agentmux-mcp", resolved via the bundled tools/bin
                   # that agentmux-srv prepends to the agent PATH (tool_store.rs:84).
                   # Without this the Shell tool is command-not-found under task dev.
                   # Built by build:host:{darwin,linux} (-p agentmux-mcp), like bashwrap.
-                  cp target/release/agentmux-mcp "$DEV_DIR/tools/bin/"
+                  cp {{.TARGET_DIR}}/release/agentmux-mcp "$DEV_DIR/tools/bin/"
                   if [ ! -f "$DEV_DIR/agentmux-launcher" ]; then
                     echo "❌ $DEV_DIR/agentmux-launcher not found — build:host:{{OS}} should have staged it"
                     exit 1
@@ -1460,7 +1463,7 @@ tasks:
             # version bumps (the staging is NOT version-keyed), so a 146→148 crate
             # bump kept serving the old 146 libcef. Remove it so the next build
             # re-downloads the CEF matching the linked crate.
-            - cmd: '{{.RMRF}} "target/cef-sdk"'
+            - cmd: '{{.RMRF}} "{{.TARGET_DIR}}/cef-sdk"'
               ignore_error: true
             # Drop cef-dll-sys build dirs so cargo re-runs its build script and
             # re-copies the correct CEF runtime into target/ on the next build.
@@ -1470,18 +1473,18 @@ tasks:
             # so a quoted glob would silently leave the cef-dll-sys-<hash> dirs
             # behind off-Windows. bash is already a build dependency everywhere
             # (build:host:linux/windows, package, scripts/* all shell out to it).
-            - cmd: bash -c 'rm -rf target/release/build/cef-dll-sys-* target/fast-release/build/cef-dll-sys-* target/debug/build/cef-dll-sys-*'
+            - cmd: bash -c 'rm -rf {{.TARGET_DIR}}/release/build/cef-dll-sys-* {{.TARGET_DIR}}/fast-release/build/cef-dll-sys-* {{.TARGET_DIR}}/debug/build/cef-dll-sys-*'
               ignore_error: true
             # Drop the top-level runtime copies that bundle:* reads from.
-            - cmd: '{{.RMRF}} "target/release/libcef.dll"'
+            - cmd: '{{.RMRF}} "{{.TARGET_DIR}}/release/libcef.dll"'
               ignore_error: true
-            - cmd: '{{.RMRF}} "target/release/libcef.so"'
+            - cmd: '{{.RMRF}} "{{.TARGET_DIR}}/release/libcef.so"'
               ignore_error: true
-            - cmd: '{{.RMRF}} "target/release/icudtl.dat"'
+            - cmd: '{{.RMRF}} "{{.TARGET_DIR}}/release/icudtl.dat"'
               ignore_error: true
-            - cmd: '{{.RMRF}} "target/release/v8_context_snapshot.bin"'
+            - cmd: '{{.RMRF}} "{{.TARGET_DIR}}/release/v8_context_snapshot.bin"'
               ignore_error: true
-            - cmd: '{{.RMRF}} "target/release/locales"'
+            - cmd: '{{.RMRF}} "{{.TARGET_DIR}}/release/locales"'
               ignore_error: true
             - echo "✓ Cleared CEF runtime artifacts — next 'task build:host' will re-materialize CEF"
 
