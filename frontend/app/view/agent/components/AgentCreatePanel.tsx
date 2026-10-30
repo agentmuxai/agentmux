@@ -27,6 +27,8 @@ import { SystemToolInstallInline } from "@/app/view/toolchain/SystemToolInstallI
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { getCliCatalogEntry } from "../defaults/cli-catalog";
 import { resolveEffectiveLaunchProvider } from "../agent-launch-env";
+import { checkCliAuth } from "../flows/login-and-confirm";
+import { checkProviderInstalled } from "../install-check-cache";
 import { agentInstallSession, onAgentInstallDone, watchAgentInstall } from "../install-sessions";
 import { getProvider } from "../providers";
 import { AgentCreateForm, type CreateDraft, type CreatedAgent } from "./AgentCreateForm";
@@ -100,9 +102,27 @@ export const AgentCreatePanel = (props: AgentCreatePanelProps): JSX.Element => {
             return null;
         }
     });
+    // A provider whose CLI keeps its own login (Antigravity) never gets an account, so
+    // the list can't tell a newcomer from someone signed in: ask the CLI's own check.
+    // `undefined` while it runs, `null` when it can't be answered (no guess, no guide).
+    const [cliSignedIn] = createResource(providerId, async (id): Promise<boolean | null> => {
+        const p = getProvider(id);
+        if (!p || p.authType !== "cli-managed" || p.authCheckCommand.length === 0) return false;
+        try {
+            const found = await checkProviderInstalled({
+                providerId: p.id,
+                cliCommand: p.cliCommand,
+                npmPackage: p.npmPackage || undefined,
+            });
+            if (!found.installed || !found.path) return false;
+            return (await checkCliAuth(found.path, p.authCheckCommand, undefined, 15000)).authenticated;
+        } catch {
+            return null;
+        }
+    });
     const showFreeGuide = () => {
         const list = accounts();
-        if (!list) return false;
+        if (!list || cliSignedIn() !== false) return false;
         const provider = providerId() ?? props.template.provider;
         return !list.some((acct) => acct.provider === provider);
     };
