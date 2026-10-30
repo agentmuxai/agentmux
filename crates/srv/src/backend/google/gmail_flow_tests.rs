@@ -426,3 +426,32 @@ async fn a_failure_after_the_yes_counts_as_a_question_asked() {
     let asked = w.store.google_calls_count("acc-1", "def-1", "gmail", &["send_draft", "trash_thread"], 0, CallsCounted::Asked).unwrap();
     assert_eq!(asked, 3);
 }
+
+#[tokio::test]
+async fn a_call_keeps_its_place_until_it_is_logged() {
+    let w = world(WRITE_SCOPES, Some(GrantLevel::Write));
+    // Nine questions are logged. A tenth call is answered no; it is counted once, in the log, and
+    // an eleventh is refused whether or not the tenth has been logged yet.
+    let now = chrono::Utc::now().timestamp_millis();
+    for i in 0..9 {
+        w.store
+            .google_call_log(
+                "acc-1",
+                &crate::backend::storage::google_grants::GoogleCall {
+                    at: now - 1000 - i,
+                    agent_id: "def-1".into(),
+                    agent_name: "Naki".into(),
+                    service: "gmail".into(),
+                    action: "trash_thread".into(),
+                    ids: String::new(),
+                    outcome: "ok".into(),
+                },
+            )
+            .unwrap();
+    }
+    let google = StubGoogle::new(vec![(200, json!({ "messages": [] }))]);
+    let e = run(&w, &google, &Person::says(Answer::No), "trash_thread", json!({ "thread_id": "t1" })).await.unwrap_err();
+    assert!(e.contains("said no"), "{e}");
+    let e = run(&w, &StubGoogle::new(vec![]), &Person::says(Answer::Yes), "trash_thread", json!({ "thread_id": "t1" })).await.unwrap_err();
+    assert!(e.contains("10 times in the last hour"), "{e}");
+}

@@ -63,8 +63,15 @@ pub async fn gmail_write<G: GoogleHttp, O: OAuthHttp, S: TokenSecrets, A: Approv
     }
     let access = access_for(deps.mstore, deps.id_store, deps.identity_store, def, Service::Gmail, account)?;
     let ids = logged_ids(action, args);
-    let result = write_with(deps, approver, &access, def, action, args, now).await;
+    // A call that puts a question to the person takes its place among the questions in flight here,
+    // and keeps it until its line is in the log: until then it is in neither count.
+    let asking = if write::always_asks(action) { reserve(deps, &access, def, now, action == "send_draft") } else { Ok(Asking(None)) };
+    let result = match &asking {
+        Ok(_) => write_with(deps, approver, &access, def, action, args, now).await,
+        Err(e) => Err(e.clone()),
+    };
     log_call(deps, &access, def, Service::Gmail, action, ids, &result, now);
+    drop(asking);
     result.map(|r| json!({ "account": access.email(), "result": r }))
 }
 
@@ -188,17 +195,18 @@ impl Drop for Asking {
 /// Take the limits' check and, if it passes, a place among the questions in flight until the
 /// returned guard is dropped. `send` is whether the call is a `send_draft`. The logged questions of
 /// the last hour and mails sent in the last day come from the store, for this agent and this
-/// account only.
+/// account only. The counts are read with the in-flight table locked, and a call leaves the table
+/// only after its line is logged, so a call that ends meanwhile is in one count or the other.
 fn reserve(deps: &CallDeps<'_, impl GoogleHttp, impl OAuthHttp, impl TokenSecrets>, access: &Access, def: &AgentDefinition, now: DateTime<Utc>, send: bool) -> Result<Asking, String> {
     let ms = now.timestamp_millis();
+    // Per store as well as account and agent: one store in srv, one per test.
+    let key = (std::sync::Arc::as_ptr(deps.identity_store) as usize, access.account.id.clone(), def.id.clone());
+    let mut pending = in_flight();
     let count = |actions: &[&str], since: i64, which: CallsCounted| {
         deps.identity_store.google_calls_count(&access.account.id, &def.id, "gmail", actions, since, which).map_err(|e| format!("store: {e}"))
     };
     let asked = count(&["send_draft", "trash_thread"], ms - 3_600_000, CallsCounted::Asked)?;
     let sent = if send { count(&["send_draft"], ms - 86_400_000, CallsCounted::Ok)? } else { 0 };
-    // Per store as well as account and agent: one store in srv, one per test.
-    let key = (std::sync::Arc::as_ptr(deps.identity_store) as usize, access.account.id.clone(), def.id.clone());
-    let mut pending = in_flight();
     let waiting = pending.get(&key).copied().unwrap_or(0);
     if send && sent + waiting >= SENDS_PER_DAY {
         return Err(format!("you have sent {SENDS_PER_DAY} mails from this account today, the most an agent may: wait until tomorrow"));
@@ -227,7 +235,6 @@ async fn send_draft<G: GoogleHttp, O: OAuthHttp, S: TokenSecrets, A: Approver>(
     now: DateTime<Utc>,
 ) -> Result<Value, String> {
     let fetch = write::draft_fetch_plan(args)?;
-    let _asking = reserve(deps, access, def, now, true)?;
     let view = read_draft(deps, access, &fetch).await?;
     if !view.has_recipient() {
         return Err("the draft has no recipient: update_draft it with to first".to_string());
@@ -280,7 +287,6 @@ async fn trash_thread<G: GoogleHttp, O: OAuthHttp, S: TokenSecrets, A: Approver>
 ) -> Result<Value, String> {
     let trash = write::trash_plan(args)?;
     let summary = gmail::summary_plan(args.thread_id.as_deref().unwrap_or(""))?;
-    let _asking = reserve(deps, access, def, now, false)?;
     let headers = send(deps, access, &summary).await?.body;
     let question = write::trash_question(&def.name, &access.email(), &headers);
     ask(approver, def, question, "Move to trash", "Keep it", "trashing").await?;
