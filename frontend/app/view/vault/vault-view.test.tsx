@@ -48,6 +48,7 @@ function ssn(over: Partial<VaultEntryInfo> = {}): VaultEntryInfo {
         parts_set: ["value"],
         grants: [],
         tail: "6789",
+        versions: 0,
         created_at: Date.now(),
         updated_at: Date.now(),
         last_used_at: 0,

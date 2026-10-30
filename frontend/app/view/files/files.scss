@@ -191,8 +191,7 @@
     outline: none;
 
     &:focus-visible .files-row-focused {
-        outline: 1px solid var(--accent-color);
-        outline-offset: -1px;
+        @include mixins.focus-ring-inset;
     }
 }
 
@@ -700,8 +699,7 @@
 }
 
 .files-list:focus-visible .files-tile.files-row-focused {
-    outline: 1px solid var(--accent-color);
-    outline-offset: -1px;
+    @include mixins.focus-ring-inset;
 }
 
 .files-tile-art {

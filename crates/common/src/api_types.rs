@@ -74,6 +74,52 @@ pub struct ShellCreateRequest {
     /// and a local `connection`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub secret_files: Option<HashMap<String, String>>,
+    /// Values the command prints that go straight into the Vault: srv holds the
+    /// output until the command ends, stores each match, and publishes the output
+    /// with the values taken out (`[vault:<id>]`). If a rule matches nothing, the
+    /// output is withheld whole. Needs `auth`; works over any `connection`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capture: Option<Vec<CaptureRule>>,
+}
+
+/// One value `Terminal` `run` takes out of a command's output into the Vault
+/// (SPEC_VAULT_GENERATE_CAPTURE_AND_BROWSER_SIGNINS_2026_10_28.md §4.2).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CaptureRule {
+    /// The entry it goes into.
+    #[serde(rename = "as")]
+    pub into: CaptureInto,
+    /// Where in the output it is.
+    pub from: CaptureFrom,
+}
+
+/// A new entry (`kind` and `label`), or an existing one by `id`, whose value is
+/// then replaced and the old one kept 7 days. `part` defaults to the kind's main
+/// value.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct CaptureInto {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub part: Option<String>,
+}
+
+/// Where a captured value is in the command's standard output.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum CaptureFrom {
+    /// `"all"`: the whole output, trimmed.
+    Stdout(String),
+    /// A field of JSON output: `$.AccessKey.SecretAccessKey`, `$.items[0].token`.
+    Json(String),
+    /// A pattern with one capture group; its first match.
+    Regex(String),
+    /// One line, counted from 1, trimmed.
+    Line(u32),
 }
 
 /// Response from `POST /api/v1/shell/create`
@@ -164,6 +210,12 @@ pub struct ShellOutputResponse {
     pub output: String,
     /// Older lines were left out, or a line was cut short.
     pub truncated: bool,
+    /// The entries `capture` stored, in the order of its rules, once the job ended.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub captured: Vec<String>,
+    /// Why `capture` failed, and so why the output is withheld.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub withheld: Option<String>,
 }
 
 // ── PTY Shell ─────────────────────────────────────────────────────────────────
@@ -1313,6 +1365,7 @@ mod app_api_manifest_contract_tests {
             secrets: Some(Default::default()),
             stdin_secret: Some("api-key-x".to_string()),
             secret_files: Some(Default::default()),
+            capture: Some(Vec::new()),
         };
         let value = serde_json::to_value(&instance).expect("must serialize");
         let struct_fields: HashSet<String> =

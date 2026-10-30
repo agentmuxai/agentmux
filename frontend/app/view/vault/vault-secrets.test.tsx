@@ -37,6 +37,7 @@ const entry = (over: Partial<VaultEntryInfo> = {}): VaultEntryInfo => ({
     parts_set: ["value"],
     grants: ["https://dashboard.stripe.com", "command:Agent1:value"],
     tail: "1234",
+    versions: 0,
     created_at: 1,
     updated_at: 1,
     last_used_at: 0,

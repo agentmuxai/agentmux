@@ -23,6 +23,8 @@ export interface SideButtonInput {
 export interface SideButtonContext {
     enabled: boolean;
     modalOpen: boolean;
+    /** A context menu (the pane menu, the "+" picker, a row's menu) is open. */
+    menuOpen: boolean;
 }
 
 export interface SideButtonDecision {
@@ -38,7 +40,7 @@ export function decideSideButton(e: SideButtonInput, ctx: SideButtonContext): Si
     const plain = !e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey;
     // Left held is a drag-select or a pane drag: the press isn't a navigation.
     const idle = (e.buttons & 1) === 0;
-    return { consume: true, act: plain && idle && !ctx.modalOpen ? dir : null };
+    return { consume: true, act: plain && idle && !ctx.modalOpen && !ctx.menuOpen ? dir : null };
 }
 
 /** What the host reports of a press the page never saw as its own. */
@@ -51,7 +53,7 @@ export interface HostSideButtonPress {
 
 /** Whether a host-reported press moves the selection history: the same rules as the page listener's. */
 export function hostPressActs(p: HostSideButtonPress, ctx: SideButtonContext): boolean {
-    return ctx.enabled && !ctx.modalOpen && !p.ctrl && !p.blocked;
+    return ctx.enabled && !ctx.modalOpen && !ctx.menuOpen && !p.ctrl && !p.blocked;
 }
 
 /** True when this press repeats `last` closely enough to be the same press. */

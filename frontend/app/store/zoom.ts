@@ -37,7 +37,9 @@ import { fireAndForget } from "@/util/util";
 import { isModKey } from "@/util/platformutil";
 import { createSignal, onCleanup, onMount } from "solid-js";
 import { chromeZoomAtom, setChromeZoomSignal } from "./chrome-zoom";
-import { clampZoom, DEFAULT_ZOOM, MAX_ZOOM, MIN_ZOOM, readZoom, writePaneZoom } from "./zoom-factor";
+import { heldPaneZoom, holdPaneZoom, paneZoom, settlePaneZoom } from "./pane-zoom-local";
+import { captureZoomAnchor, lastPointer, type ZoomPoint } from "./zoom-anchor";
+import { clampZoom, DEFAULT_ZOOM, MAX_ZOOM, MIN_ZOOM, writePaneZoom } from "./zoom-factor";
 import { setBlockMeta } from "@/app/store/block-meta";
 
 // Zoom constants
@@ -87,7 +89,7 @@ function getBlockZoom(blockId: string): number | null {
 
     const blockOref = MOS.makeORef("block", blockId);
     const blockData = MOS.getObjectValue<Block>(blockOref);
-    return blockData?.meta?.["term:zoom"] ?? 1.0;
+    return heldPaneZoom(blockId) ?? blockData?.meta?.["term:zoom"] ?? 1.0;
 }
 
 // Returns the actual clamped/rounded zoom that was written, so a caller
@@ -98,8 +100,23 @@ function getBlockZoom(blockId: string): number | null {
 // event back (global.ts's initGlobalEventSubs → MOS.updateMuxObject). A
 // getBlockZoom() call immediately after this one would read the STALE
 // pre-write value, not the one just computed here (ReAgent P1, PR #3090).
+//
+// The level is held locally (`pane-zoom-local.ts`) from this call until the write has settled, so a
+// pane that reads `paneZoom` shows it at once and the next step starts from it.
 function setBlockZoom(blockId: string, factor: number, showIndicator: boolean = true): number {
-    const newZoom = writePaneZoom((meta) => fireAndForget(() => setBlockMeta(blockId, meta)), factor);
+    let seq = 0;
+    const newZoom = writePaneZoom((meta) => {
+        seq = holdPaneZoom(blockId, meta["term:zoom"] ?? DEFAULT_ZOOM);
+        fireAndForget(async () => {
+            try {
+                await setBlockMeta(blockId, meta);
+                settlePaneZoom(blockId, seq, false);
+            } catch (e) {
+                settlePaneZoom(blockId, seq, true);
+                throw e;
+            }
+        });
+    }, factor);
 
     // Suppressed by the all-panes stepper below, which shows one summary
     // toast for the whole gesture instead of one per pane.
@@ -115,7 +132,8 @@ function stepZoom(
     step: number,
     direction: 1 | -1,
     showIndicator: boolean = true,
-    baseFontSizeOverride?: number
+    baseFontSizeOverride?: number,
+    anchor: ZoomPoint | null = null
 ): number {
     const baseFontSize = baseFontSizeOverride ?? getBaseFontSize(blockId);
     const currentFontSize = computeEffectiveFontSize(baseFontSize, zoom);
@@ -127,19 +145,23 @@ function stepZoom(
     ) {
         newZoom += MICRO_STEP * direction;
     }
+    // Note what is under the pointer before the level changes, so the pane can put it back. A step
+    // that lands on the same level (the limit) moves nothing, so there is nothing to hold.
+    if (Math.abs(clampZoom(roundZoom(newZoom)) - zoom) >= 0.005) captureZoomAnchor(blockId, anchor);
     return setBlockZoom(blockId, newZoom, showIndicator);
 }
 
-export function zoomBlockIn(blockId: string, step: number = WHEEL_STEP): void {
+/** `anchor`: where the pointer is, so the content under it stays under it. */
+export function zoomBlockIn(blockId: string, step: number = WHEEL_STEP, anchor: ZoomPoint | null = null): void {
     const zoom = getBlockZoom(blockId);
     if (zoom == null) return;
-    stepZoom(blockId, zoom, step, 1);
+    stepZoom(blockId, zoom, step, 1, true, undefined, anchor);
 }
 
-export function zoomBlockOut(blockId: string, step: number = WHEEL_STEP): void {
+export function zoomBlockOut(blockId: string, step: number = WHEEL_STEP, anchor: ZoomPoint | null = null): void {
     const zoom = getBlockZoom(blockId);
     if (zoom == null) return;
-    stepZoom(blockId, zoom, step, -1);
+    stepZoom(blockId, zoom, step, -1, true, undefined, anchor);
 }
 
 /**
@@ -149,9 +171,14 @@ export function zoomBlockOut(blockId: string, step: number = WHEEL_STEP): void {
  * such a block passes the font size it draws at (`baseFontSize`), which its
  * pane capability can't tell the stepper.
  */
-export function zoomBlockByWheel(blockId: string, deltaY: number, baseFontSize?: number): void {
+export function zoomBlockByWheel(
+    blockId: string,
+    deltaY: number,
+    baseFontSize?: number,
+    anchor: ZoomPoint | null = null
+): void {
     const meta = MOS.getObjectValue<Block>(MOS.makeORef("block", blockId))?.meta;
-    stepZoom(blockId, readZoom(meta), WHEEL_STEP, deltaY > 0 ? -1 : 1, true, baseFontSize);
+    stepZoom(blockId, paneZoom(blockId, meta), WHEEL_STEP, deltaY > 0 ? -1 : 1, true, baseFontSize, anchor);
 }
 
 /**
@@ -176,7 +203,7 @@ export function usePaneZoomWheel(
             // Also stops CEF's own Ctrl+scroll page zoom.
             ev.preventDefault();
             ev.stopPropagation();
-            zoomBlockByWheel(id, ev.deltaY, baseFontSize);
+            zoomBlockByWheel(id, ev.deltaY, baseFontSize, { clientX: ev.clientX, clientY: ev.clientY });
         };
         target.addEventListener("wheel", onWheel, { passive: false, capture: true });
         onCleanup(() => target.removeEventListener("wheel", onWheel, { capture: true }));
@@ -194,7 +221,7 @@ export function usePaneZoomWheel(
 // them already is today — no new filtering logic, this just reuses that
 // existing guard for every block in the window instead of one.
 
-function stepAllPanes(step: number, direction: 1 | -1): void {
+function stepAllPanes(step: number, direction: 1 | -1, anchor: ZoomPoint | null = null): void {
     let minZoom = Infinity;
     let maxZoom = -Infinity;
 
@@ -211,7 +238,8 @@ function stepAllPanes(step: number, direction: 1 | -1): void {
         // MOS's local cache isn't updated until the backend pushes a
         // MuxObjUpdate event back. Re-reading here would see the STALE
         // pre-step value on every call (ReAgent P1, PR #3090).
-        const newZoom = stepZoom(blockId, zoom, step, direction, false);
+        // Each pane takes the pointer if it is over it, else its own centre.
+        const newZoom = stepZoom(blockId, zoom, step, direction, false, undefined, anchor);
         minZoom = Math.min(minZoom, newZoom);
         maxZoom = Math.max(maxZoom, newZoom);
     }
@@ -236,12 +264,12 @@ export function zoomAllPanesReset(): void {
     if (any) showZoomIndicator("All panes: 100%");
 }
 
-export function zoomAllPanesIn(step: number = WHEEL_STEP): void {
-    stepAllPanes(step, 1);
+export function zoomAllPanesIn(step: number = WHEEL_STEP, anchor: ZoomPoint | null = null): void {
+    stepAllPanes(step, 1, anchor);
 }
 
-export function zoomAllPanesOut(step: number = WHEEL_STEP): void {
-    stepAllPanes(step, -1);
+export function zoomAllPanesOut(step: number = WHEEL_STEP, anchor: ZoomPoint | null = null): void {
+    stepAllPanes(step, -1, anchor);
 }
 
 export function zoomIn(step: number = KEYBOARD_STEP): void {
@@ -249,7 +277,8 @@ export function zoomIn(step: number = KEYBOARD_STEP): void {
     if (!blockId) return;
     const zoom = getBlockZoom(blockId);
     if (zoom == null) return;
-    stepZoom(blockId, zoom, step, 1);
+    // The keyboard has no pointer: the last one seen, if it is over the pane, else the pane's centre.
+    stepZoom(blockId, zoom, step, 1, true, undefined, lastPointer());
 }
 
 export function zoomOut(step: number = KEYBOARD_STEP): void {
@@ -257,7 +286,7 @@ export function zoomOut(step: number = KEYBOARD_STEP): void {
     if (!blockId) return;
     const zoom = getBlockZoom(blockId);
     if (zoom == null) return;
-    stepZoom(blockId, zoom, step, -1);
+    stepZoom(blockId, zoom, step, -1, true, undefined, lastPointer());
 }
 
 export function zoomReset(): void {

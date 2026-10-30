@@ -269,6 +269,28 @@
         }
     }
 
+    // The Free / Local / Installed chips above the new-agent cards (AgentCardFilters.tsx).
+    .agent-card-filters {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: var(--space-2);
+        margin: var(--space-2) 0;
+    }
+
+    .agent-card-filters-status,
+    .agent-card-filters-hint {
+        font-size: var(--text-xs);
+        color: var(--secondary-text-color);
+    }
+
+    .agent-card-filters-empty {
+        flex-basis: 100%;
+        margin: 0;
+        font-size: var(--text-sm);
+        color: var(--secondary-text-color);
+    }
+
     .agent-card {
         position: relative;                // anchor for absolutely-positioned actions
         // Tile layout: logo + title + caption stacked, uniform height so the
@@ -309,62 +331,31 @@
             cursor: not-allowed;
         }
 
-        // Install-state ribbon — anchored to the bottom-right corner
-        // of the card when the agent's CLI isn't in the per-version
-        // cache yet. Styled as a small "For Sale" sign tag so the user
-        // immediately understands clicking will start the install
-        // (modal) flow rather than launching the agent directly.
-        //
-        // Color: success-green, not warning-yellow. Installing is a
-        // *forward* action (the user wants this agent, the system can
-        // get it), not a warning.
-        .agent-card-install-ribbon {
-            position: absolute;
-            right: 0;            // anchored fully inside the card so
-            bottom: 0;           // the label can't clip on the right
-            padding: 3px 10px;   // a touch more horizontal breathing room
-            font-size: var(--text-2xs);
-            font-weight: 600;
-            @include mixins.label-caps;
-            color: #fff; /* stylelint-disable-line color-no-hex */
-            background: var(--success-color);
-            border-radius: 0;
-            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
-            pointer-events: none;
-            z-index: 1;
-            user-select: none;
-            transform-origin: bottom right;
-            transition: transform var(--duration-decorative-base) var(--ease-out), background var(--duration-decorative-base);
+        // The card's tags (AgentCard.tsx, the kit's Tag): the corner ribbon says what a click
+        // will do ("Click to install"), the chips under the caption say what the harness is
+        // (Free, Local, an update note). A card with chips reserves a line for them so the
+        // ribbon and "+ New" no longer cover the caption.
+        // docs/specs/SPEC_PROVIDER_CARD_TAGS_FREE_LOCAL_2026_10_29.md §3.
+        container-type: inline-size;
+
+        &--has-tags {
+            padding-bottom: calc(var(--space-4) + var(--space-3));
         }
 
-        &:hover .agent-card-install-ribbon {
-            background: color-mix(in srgb, var(--success-color) 80%, white);
-            transform: scale(1.06);
+        .agent-card-tags {
+            margin-top: auto;
         }
 
-        // Upgrade hint. Deliberately quieter than the install ribbon: that
-        // one is a CTA for a card you cannot use at all, this one is a note
-        // on a card that works fine — the agent launches either way, it just
-        // runs an older CLI than we validated. Top-right so it never collides
-        // with the ribbon or the "+ New" pill, both anchored bottom-right.
-        .agent-card-upgrade-badge {
-            position: absolute;
-            top: 6px;
-            right: 6px;
-            padding: 1px 6px;
-            font-size: var(--text-3xs);
-            font-weight: 600;
-            letter-spacing: 0.03em;
-            color: var(--warning-text-color);
-            background: var(--warning-bg);
-            border: 1px solid color-mix(in srgb, var(--warning-color) 35%, transparent);
-            border-radius: var(--radius-sm);
-            pointer-events: none;
-            z-index: 1;
-            user-select: none;
+        // A narrow card (AgentCard's ResizeObserver sets the class; a container query can't
+        // match the card, which is itself the container): the corner action gets a line of
+        // its own under the chips, so a chip is never hidden under the ribbon.
+        &.agent-card--narrow.agent-card--has-action {
+            .agent-card-tags {
+                margin-bottom: var(--space-4);
+            }
 
-            i {
-                font-size: 8px;
+            &.agent-card--has-tags {
+                padding-bottom: calc(var(--space-4) + var(--space-3) + var(--space-4));
             }
         }
 

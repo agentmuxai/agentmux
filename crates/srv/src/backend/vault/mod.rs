@@ -9,6 +9,7 @@
 //! the Vault makes itself (`generate`), which no one has seen. Everything here
 //! is blocking (the store, the keychain): call it off the async runtime.
 
+pub mod capture;
 pub mod expiry;
 pub mod files;
 pub mod generate;
@@ -23,6 +24,7 @@ pub mod seal;
 pub mod slots;
 pub mod transfer;
 pub mod uses;
+pub mod versions;
 mod wordlist;
 
 use std::collections::BTreeMap;
@@ -61,6 +63,8 @@ pub struct VaultEntryInfo {
     /// The sites an agent may fill this entry into without asking again.
     pub grants: Vec<String>,
     pub tail: String,
+    /// Earlier values kept for 7 days, which the person can put back.
+    pub versions: u32,
     #[ts(type = "number")]
     pub created_at: i64,
     #[ts(type = "number")]
@@ -169,6 +173,12 @@ fn drop_empty(parts: &mut Parts) {
 /// `ssn-alex`, unique with a number when taken. No `.`: P3 names a part as
 /// `<id>.<part>`.
 fn new_id(store: &Store, kind: &str, label: &str) -> Result<String, String> {
+    new_id_besides(store, kind, label, &[])
+}
+
+/// [`new_id`], also skipping the ids in `taken`: ones chosen for entries not
+/// written yet (a capture's rules, written together).
+fn new_id_besides(store: &Store, kind: &str, label: &str, taken: &[String]) -> Result<String, String> {
     let mut slug = String::new();
     for c in format!("{kind}-{label}").chars().flat_map(char::to_lowercase) {
         if c.is_ascii_alphanumeric() {
@@ -181,7 +191,7 @@ fn new_id(store: &Store, kind: &str, label: &str) -> Result<String, String> {
     base = base.trim_end_matches('-').to_string();
     for n in 1..1000 {
         let id = if n == 1 { base.clone() } else { format!("{base}-{n}") };
-        if store.vault_get(&id).map_err(|e| e.to_string())?.is_none() {
+        if !taken.contains(&id) && store.vault_get(&id).map_err(|e| e.to_string())?.is_none() {
             return Ok(id);
         }
     }
@@ -323,6 +333,11 @@ pub fn update(store: &Store, mut change: EntryChange) -> Result<(), String> {
     }
     // A new main value is the person's: the next rotation is theirs, not the agent's that made the old one.
     let replaced = change.parts.0.contains_key(kind.parts[0]);
+    let kept = replaced.then(|| versions::of(&row, PERSON, "replaced"));
+    if replaced {
+        versions::prune(store);
+    }
+    let was = row.sealed.clone();
     for (k, v) in std::mem::take(&mut change.parts.0) {
         if let Some(mut old) = parts.0.insert(k, v) {
             zeroize::Zeroize::zeroize(&mut old);
@@ -343,8 +358,10 @@ pub fn update(store: &Store, mut change: EntryChange) -> Result<(), String> {
         updated_at: now_ms(),
         ..row
     };
-    if !store.vault_update(&changed).map_err(|e| e.to_string())? {
-        return Err(format!("no entry {}", changed.id));
+    // Only over the value read above, and keeping the one it replaces in the same
+    // transaction: a capture or restore that landed meanwhile is never lost.
+    if !store.vault_update_kept(&changed, &was, kept.as_ref()).map_err(|e| e.to_string())? {
+        return Err(format!("{label} changed while you were editing it, so nothing was saved: open it again"));
     }
     record(store, &changed.id, &label, PERSON, if replaced { "replaced" } else { "changed" }, &target, "done");
     Ok(())
@@ -474,6 +491,8 @@ pub fn delete(store: &Store, id: &str) -> Result<(), String> {
 pub fn list_for_pane(store: &Store) -> Result<(Vec<VaultEntryInfo>, Option<String>), String> {
     let rows = store.vault_list().map_err(|e| e.to_string())?;
     let mut grants = store.vault_grants().map_err(|e| e.to_string())?;
+    versions::prune(store);
+    let counts = store.vault_version_counts().map_err(|e| e.to_string())?;
     let key = if rows.is_empty() { Ok(None) } else { seal::key(false).map(Some) };
     let mut problem = key.as_ref().err().cloned();
     let mut out = Vec::with_capacity(rows.len());
@@ -494,6 +513,7 @@ pub fn list_for_pane(store: &Store) -> Result<(Vec<VaultEntryInfo>, Option<Strin
             tags: serde_json::from_str(&row.tags).unwrap_or_default(),
             section: kind.section,
             grants: grants.remove(&row.id).unwrap_or_default(),
+            versions: counts.get(&row.id).filter(|(created, _)| *created == row.created_at).map(|(_, n)| *n).unwrap_or(0),
             id: row.id,
             kind: row.kind,
             label: row.label,
