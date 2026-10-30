@@ -722,6 +722,9 @@ declare global {
         "frame:hue"?: number | null;
         "frame:title"?: string;
         "frame:icon"?: string;
+        /** A pane tab's last real name and favicon from its view, so the tab reads the same before it is clicked (pane-tab-persist.ts). */
+        "pane:label"?: string;
+        "pane:favicon"?: string;
         "frame:text"?: string;
         // Tab accent color (frontend/app/tab/tab.tsx, tabbar.tsx). Was missing
         // here despite being a real, actively-set meta key — #859.
