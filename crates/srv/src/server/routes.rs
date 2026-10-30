@@ -214,7 +214,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/agentmux/cron/:id/run", post(cron::handle_cron_run_now))
         .route("/agentmux/cron/runs/:run_id/report", post(cron::handle_cron_report))
         .route("/agentmux/work", post(work_queue::handle_work_enqueue))
-        .route("/agentmux/work/claim", post(work_queue::handle_work_claim))
+        .route("/agentmux/work/claim", post(bulletin_handlers::handle_work_claim_with_bulletins))
         .route("/agentmux/work/:id/heartbeat", post(work_queue::handle_work_heartbeat))
         .route("/agentmux/work/:id/complete", post(work_queue::handle_work_complete))
         .route("/agentmux/work/:id/release", post(work_queue::handle_work_release))
