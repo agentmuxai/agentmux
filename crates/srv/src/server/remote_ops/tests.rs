@@ -239,6 +239,28 @@ async fn an_operation_that_changes_state_needs_a_certificate_backed_caller() {
 }
 
 #[tokio::test]
+async fn account_data_needs_an_approved_install_like_a_change_and_a_first_seen_peer_is_refused() {
+    let (public, private) = keys(23);
+    let (state, audience) = state_with_peer("rop-i", &public);
+    let listing = run(&state, PEER, request("rop-i", "n-i1", "identity.accounts", &audience, NOW, &private)).await;
+    assert_eq!(listing.refused_reason.as_deref(), Some("needs_certificate"), "no email goes to a pin alone: {listing:?}");
+    let switch = run(&state, PEER, request("rop-i", "n-i2", "identity.switch", &audience, NOW, &private)).await;
+    assert_eq!(switch.refused_reason.as_deref(), Some("needs_certificate"), "{switch:?}");
+
+    // A certificate from an install this machine has not approved backs nothing either.
+    let (_dir, cert) = certificate("rop-i", &public, NOW);
+    let instance = cert.instance_id.clone();
+    state.lan_discovery.seed_lan_cert_for_test("rop-i", cert);
+    let untrusted = run(&state, PEER, request("rop-i", "n-i3", "identity.accounts", &audience, NOW, &private)).await;
+    assert_eq!(untrusted.refused_reason.as_deref(), Some("install_not_trusted"), "{untrusted:?}");
+
+    trust_install(&state, &instance);
+    let ok = run(&state, PEER, request("rop-i", "n-i4", "identity.accounts", &audience, NOW, &private)).await;
+    assert_eq!(ok.status, OpStatus::Done, "{ok:?}");
+    assert!(ok.result["accounts"].is_array(), "{ok:?}");
+}
+
+#[tokio::test]
 async fn a_certificate_for_another_key_name_or_time_does_not_back_a_caller() {
     let (public, private) = keys(21);
     let (other_public, _) = keys(22);

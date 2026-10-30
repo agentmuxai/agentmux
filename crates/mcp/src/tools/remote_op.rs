@@ -58,6 +58,8 @@ fn refusal_hint(reason: &str) -> &'static str {
         "remote_ops_off" => "That machine has turned remote operations off (network:remote_ops in its settings).",
         "unknown_sender" | "unverified_sender" => "That machine does not yet trust this agent's key: ask one of its agents to jekt you once, so each side pins the other, then retry.",
         "bad_signature" | "wrong_audience" | "stale_request" => "Check that both machines' clocks are right and both run a build with remote operations.",
+        "needs_certificate" => "That machine holds no certificate from your agent's install. Approve this install on that machine (the instance is listed there), then retry; a first-seen peer is not enough for account data or changes.",
+        "install_not_trusted" => "That machine has not approved the install your agent runs on. Approve this instance on that machine, then retry.",
         "unknown_op" => "That machine's AgentMux does not know this operation: it needs a newer version.",
         "peer_cannot_do_remote_ops" => "That machine's AgentMux is too old for remote operations.",
         _ => "",
