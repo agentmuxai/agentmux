@@ -313,14 +313,14 @@ The widget bar shows the operator's own pinned list when they've set one (`widge
 [`crates/srv/src/config/widgets.json`](../../crates/srv/src/config/widgets.json) (`display:pinned`, ordered by `display:order`). Today
 those defaults pin four: Agent, Swarm, Armory, Sysinfo.
 
-**New default (operator, 2026-10-05):** eleven pinned, in this order; everything else goes in More. (Reordered later the same day at the operator's request: Swarm second, Connectors after Hangar. Shipped with the widget default colors work, `SPEC_WIDGET_DEFAULT_PANE_COLORS_2026_10_05.md` §7 PR 3.)
+**New default (operator, 2026-10-05):** eleven pinned, in this order; everything else goes in More. (Reordered later the same day at the operator's request: Swarm second, Connectors after Files. Shipped with the widget default colors work, `SPEC_WIDGET_DEFAULT_PANE_COLORS_2026_10_05.md` §7 PR 3.)
 
 | # | Widget | Key | Today |
 |---|---|---|---|
 | 1 | Agent | `defwidget@agent` | pinned |
 | 2 | Swarm | `defwidget@swarm` | pinned |
 | 3 | **Knowledge** | `defwidget@knowledge` (new) | replaces Armory |
-| 4 | Hangar | `defwidget@files` | in More |
+| 4 | Files | `defwidget@files` | in More |
 | 5 | **Connectors** | `defwidget@connectors` (new) | replaces Armory |
 | 6 | Terminal | `defwidget@terminal` | in More |
 | 7 | Editor | `defwidget@editor` | in More |
@@ -333,7 +333,7 @@ Everything else goes in More: Drone, Warden, Media, Toolchain and Settings.
 
 **How:** set `display:pinned` and give `display:order` 1–11 in that order in `widgets.json`,
 then renumber the rest after them. Today several widgets share an order value (Drone and Armory
-both 3, Sysinfo and Warden 4, Editor and Hangar 6), so their relative order is accidental; give
+both 3, Sysinfo and Warden 4, Editor and Files 6), so their relative order is accidental; give
 each a distinct value. The `armory` widget entry goes (its blocks migrate, §4.3).
 
 **Who sees it:** new installs, and anyone who has never customised the bar, since their bar is
@@ -460,7 +460,7 @@ it gets its own review. Phase 3 is trivial.
 3. **Knowledge** has four: **Global**, **Personal**, **Skills** and **Bundles**.
 4. **Bundles** package instructions, MCP, memory and skills, are harness-agnostic and bind to
    any agent; **ABF becomes Agent Bundle Format, cut as v0.3** (§4.6, §4.7).
-5. **The default widget bar:** Agent, Connectors, Knowledge, Swarm, Hangar, Terminal, Editor,
+5. **The default widget bar:** Agent, Connectors, Knowledge, Swarm, Files, Terminal, Editor,
    Browser, Messengers, Sysinfo, Help; the rest in More (§4.8).
 
 **Decided (operator, 2026-10-05, taking the recommendations):**

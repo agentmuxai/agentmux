@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! `Agents env_get` and `Agents env_set`: a host agent reads and edits the
+//! `Agents env_get` and `Agents env_set`: an agent, host or container, reads and edits the
 //! extra environment variables a definition launches with (its `env` content,
 //! `backend::agent_env`), its own or another's. The change applies at that
 //! agent's next launch.
@@ -74,9 +74,6 @@ fn actor_of(state: &AppState, caller: Option<&Caller>) -> Result<Actor, Refusal>
         .agent_def_get(uid)
         .map_err(|e| refuse(StatusCode::INTERNAL_SERVER_ERROR, format!("agent env: {e}")))?
         .ok_or_else(|| refuse(StatusCode::UNAUTHORIZED, "the agent token names no agent on this machine"))?;
-    if def.agent_type == "container" {
-        return Err(refuse(StatusCode::FORBIDDEN, "CONTAINER_AGENT: a container agent can't change environments"));
-    }
     Ok(Actor { uid: uid.to_string(), slug: def.slug, name: def.name })
 }
 
@@ -92,9 +89,6 @@ fn target_of(state: &AppState, actor: &Actor, agent: Option<&str>) -> Result<Age
         .agent_def_get(&id)
         .map_err(|e| refuse(StatusCode::INTERNAL_SERVER_ERROR, format!("agent env: {e}")))?
         .ok_or_else(|| refuse(StatusCode::NOT_FOUND, format!("no agent '{id}' on this machine")))?;
-    if def.agent_type == "container" {
-        return Err(refuse(StatusCode::FORBIDDEN, "CONTAINER_AGENT: a container agent's environment can't be changed from here"));
-    }
     if def.is_seeded != 0 {
         return Err(refuse(StatusCode::BAD_REQUEST, format!("{} is a template; only an agent has an environment", def.name)));
     }

@@ -78,11 +78,11 @@ The srv per-window `Workspace` object stays as the runtime container of one wind
 
 ### 3.1 Default pinned widgets
 
-Operator, 2026-10-23: the widget bar's default pins become **Agent, Swarm, Memory, Connectors, Hangar, Browser, Settings, Help**, in that order (`display:pinned` and `display:order` in `crates/srv/src/config/widgets.json`).
+Operator, 2026-10-23: the widget bar's default pins become **Agent, Swarm, Memory, Connectors, Files, Browser, Settings, Help**, in that order (`display:pinned` and `display:order` in `crates/srv/src/config/widgets.json`).
 
 | Widget | Today | New |
 |---|---|---|
-| Agent, Swarm, Memory, Hangar, Connectors, Browser, Help | pinned | pinned (reordered) |
+| Agent, Swarm, Memory, Files, Connectors, Browser, Help | pinned | pinned (reordered) |
 | Settings | unpinned (order 99) | **pinned**, before Help |
 | Kanban, Terminal, Editor, Messengers, Sysinfo | pinned | **unpinned**: in the widget bar's + menu |
 | Drone, Warden, Vault, Toolchain, Tower, Discord, Slack, Telegram, WhatsApp, Teams | unpinned | unpinned |

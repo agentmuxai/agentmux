@@ -26,10 +26,10 @@ Several remotes lists at once still work: open several Connectors panes, each on
 
 | Piece | Where |
 |---|---|
-| The Remotes pane manifest, `view: "remotes"` | [`frontend/app/view/remotes/remotes.tsx`](../../frontend/app/view/remotes/remotes.tsx), listed in `block/block-registry.ts` |
+| The Remotes pane manifest, `view: "remotes"` | `frontend/app/view/remotes/remotes.tsx`, listed in `block/block-registry.ts` |
 | The list: model (`RemotesViewModel`) and view (`RemotesView`) | `view/remotes/remotes-model.ts`, `remotes-view.tsx` |
 | Links into it from another pane: open Remotes as a tab in that pane, or switch to the one there, with a host's row expanded (`remotes:expand`) | `view/remotes/open-remotes.ts` (`openRemotesInPane`, `remoteSettingsMenuItems`) |
-| Who calls them: the connection picker's "Manage remotes…", Hangar's Remote heading, the pane menu's "Remote settings…" | `modals/conntypeahead.tsx`, `view/files/files-view.tsx`, `block/blockframe.tsx` |
+| Who calls them: the connection picker's "Manage remotes…", the Files pane's Remote heading, the pane menu's "Remote settings…" | `modals/conntypeahead.tsx`, `view/files/files-view.tsx`, `block/blockframe.tsx` |
 | Command palette "Open Remotes" | `store/command-registry.ts` |
 | The launcher widget `defwidget@remotes` (in More) | [`crates/srv/src/config/widgets.json`](../../crates/srv/src/config/widgets.json) |
 | Connectors: a section pane, one meta key `connectors:section` | `view/connectors/connectors.tsx`, `view/section-pane/` |

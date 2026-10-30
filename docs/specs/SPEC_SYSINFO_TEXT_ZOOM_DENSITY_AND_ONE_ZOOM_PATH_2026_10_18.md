@@ -4,7 +4,7 @@
 **Status:** implemented — Part A (one zoom path) in #5128; Parts B and C (Sysinfo text zoom, density and text placement) in #5133. §3 A.1 and A.6 and §5 C.2 record what changed from the plan while building.
 **Requested by:** the owner: "lets add zoom for the text of sysinfo. the charts would stay the same, but the text would change size on the same zoom system as the other panes. Also, look for any opportunities to tighten padding between panes, especially on the ones with many charts. so intelligent placement of text too"; then "lets also take this opportunity to DRY the zoom system. unless there is a good reason not to, it should be unified under a single path".
 **Author:** Manoz@Area54.
-**Builds on:** `SPEC_SYSINFO_CONTROLS_AND_EDGES_2026_10_16.md` (#5022: flush edges, floating control row), `SPEC_HANGAR_ZOOM_2026_10_08.md` (§5 lists the zoom duplication this spec removes), `SPEC_CTRL_SHIFT_SCROLL_ZOOM_ALL_PANES_2026_09_07.md`, `zoom-architecture.md`, `per-pane-zoom-hover.md`.
+**Builds on:** `SPEC_SYSINFO_CONTROLS_AND_EDGES_2026_10_16.md` (#5022: flush edges, floating control row), `SPEC_FILES_ZOOM_2026_10_08.md` (§5 lists the zoom duplication this spec removes), `SPEC_CTRL_SHIFT_SCROLL_ZOOM_ALL_PANES_2026_09_07.md`, `zoom-architecture.md`, `per-pane-zoom-hover.md`.
 
 **Files in scope:**
 - Zoom core: `frontend/app/store/zoom.ts`, `frontend/app/store/zoom-factor.ts`, `frontend/app/block/pane-tab-registry.ts`, `frontend/app/block/pane-tab-host.tsx`, `frontend/app/block/block.tsx`, `frontend/app/app.tsx`
@@ -32,7 +32,7 @@ What is already shared, and works:
 | Ctrl+scroll over a pane (`AppZoomHandler`), Ctrl+Shift+scroll over any pane (`AppAllPanesZoomHandler`), both window-level | `app.tsx` |
 | Who takes part: the `paneZoom: { baseFontSize }` capability | `block/pane-tab-registry.ts` |
 
-What is still duplicated (the Hangar spec's §5 list, re-checked today):
+What is still duplicated (the Files pane spec's §5 list, re-checked today):
 
 - **Six local Ctrl+scroll handlers**, each a copy of the same capture-phase listener (`STEP = 0.1`, clamp 0.5–2.0, `null` at 1.0, `stopPropagation`): `term.tsx:251`, `editor-view.tsx:224`, `AgentShellSubblock.tsx:442`, `section-pane.tsx:99`, `warden-view.tsx:49`, `swarm-view.tsx:84`. Because they stop propagation, the global handler never sees the wheel there, so these panes step by 0.1 with **no indicator**, and every other pane steps by 0.05 **with** one. Same gesture, two behaviours.
 - **Swarm repeats the global keys** (`+` `-` `0`) in a local `keydown` handler.

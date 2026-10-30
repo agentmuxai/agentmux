@@ -5,7 +5,7 @@
  * When an agent was last used, and the order the lists you pick an agent from
  * put it in: most recently used first. One source for every such list (My
  * Agents, the Seat lead picker, the job owner, the Skill and MCP bind pickers,
- * the Hidden agents picker, the account bind menu, the Hangar's Agents places),
+ * the Hidden agents picker, the account bind menu, the Files pane's Agents places),
  * so they agree.
  *
  * The time is the first of these an item has, all epoch ms:

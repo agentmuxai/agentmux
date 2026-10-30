@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! WSL folders in Hangar and the editor, through Windows' own share for a
+//! WSL folders in the Files pane and the editor, through Windows' own share for a
 //! distro's files, `\\wsl.localhost\<distro>\...` (P1 of
 //! SPEC_REMOTE_TERMINALS_AND_DURABLE_SESSIONS_2026_10_02.md).
 //!

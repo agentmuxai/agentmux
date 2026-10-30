@@ -14,7 +14,7 @@ The operator, 2026-10-21, after a comparison of the two highlighters: "yes, move
 
 | | highlight.js | shiki |
 |---|---|---|
-| Colours | Code blocks in markdown (`frontend/app/element/markdown.tsx` via `rehype-highlight`): agent replies, Memory and docs previews, `.md` files | Tool blocks, Hangar's file preview (`HighlightedCode`), shell commands (`shell-highlight/embedded-highlight.ts`), preview text (`preview-text/highlight.ts`) |
+| Colours | Code blocks in markdown (`frontend/app/element/markdown.tsx` via `rehype-highlight`): agent replies, Memory and docs previews, `.md` files | Tool blocks, the Files pane's file preview (`HighlightedCode`), shell commands (`shell-highlight/embedded-highlight.ts`), preview text (`preview-text/highlight.ts`) |
 | Theme | GitHub Dark Dimmed (`markdown.scss` imports `highlight.js/scss/github-dark-dimmed.scss`), in every app theme | GitHub Dark / Light High Contrast; the shell highlighter carries both and picks by the theme's polarity |
 | Loads | At startup, in every window (376 KB of source) | When first needed; each language on its own |
 | How | Pattern rules, synchronous, inside the rehype pipeline | VS Code's TextMate grammars, asynchronous |
@@ -69,7 +69,7 @@ Colour arriving re-renders that block's `<code>` only. The markdown processor no
 ### 4.6 Result
 
 - **Startup chunk:** 3,183,510 → 3,019,614 bytes (−164 KB, −5.1%). highlight.js, `rehype-highlight` and `lowlight` are gone from the build.
-- **Checked by hand** in a portable build, in Hangar's markdown preview of a sample with Rust, TypeScript, Python, shell, JSON, an unknown language and a block without one:
+- **Checked by hand** in a portable build, in the Files pane's markdown preview of a sample with Rust, TypeScript, Python, shell, JSON, an unknown language and a block without one:
   - in the dark theme, the five known languages are coloured, and the unknown language, the block without one and inline code stay plain;
   - in the light theme, the same blocks show GitHub Light colours on the light panel, where highlight.js had shown GitHub Dark Dimmed colours.
 

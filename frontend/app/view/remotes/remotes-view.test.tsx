@@ -168,7 +168,7 @@ describe("RemotesView", () => {
         expect(screen.getByText(/No remotes match/)).toBeTruthy();
     });
 
-    it("opens a terminal and Hangar beside this pane", async () => {
+    it("opens a terminal and Files beside this pane", async () => {
         await renderWith([remote("db1")]);
         fireEvent.click(screen.getByRole("button", { name: "New terminal on db1" }));
         fireEvent.click(screen.getByRole("button", { name: "Browse files on db1" }));

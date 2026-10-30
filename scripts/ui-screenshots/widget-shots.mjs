@@ -48,7 +48,7 @@ export const EXCLUDE = {
  *     machine's own data (its installs, paths), so it isn't published from an
  *     ordinary machine. The default, "review", means a human checks the image.
  *
- * Widgets that read the file system (Hangar, Terminal, Editor) are pointed at
+ * Widgets that read the file system (Files, Terminal, Editor) are pointed at
  * a demo project by the capture instance's own widgets.json, not here — see
  * the spec's §8. */
 const OVERRIDES = {
