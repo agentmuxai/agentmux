@@ -203,7 +203,10 @@ pub(crate) async fn handle_ui_browser_request_bypass(
         Answer::Yes | Answer::YesAlways if crate::server::browser_owner::owner_of(&pane) != owner_before => {
             return err_response(StatusCode::FORBIDDEN, "the user took over this pane, so auto-approve wasn't turned on".to_string());
         }
-        Answer::Yes => return granted(&bypass::grant(&state, &pane, &agent, origins, powers, minutes, How::Approved)),
+        Answer::Yes => {
+            crate::server::browser_standing::resume(&pane);
+            return granted(&bypass::grant(&state, &pane, &agent, origins, powers, minutes, How::Approved));
+        }
         // "Always for this agent on this site": the sites the banner named
         // become a standing row; the pane grant is made from it.
         Answer::YesAlways => {
@@ -212,6 +215,7 @@ pub(crate) async fn handle_ui_browser_request_bypass(
                 Ok(r) => r,
                 Err(e) => return err_response(StatusCode::BAD_REQUEST, e),
             };
+            crate::server::browser_standing::resume(&pane);
             let g = bypass::grant_standing(&state, &pane, &agent, row.origins.clone(), row.powers(), &row.id);
             return granted(&g);
         }
@@ -261,7 +265,10 @@ pub(crate) async fn handle_host_browser_bypass(
     let block_id = s("block_id");
     let pane = bypass_pane(&block_id);
     if body.get("on").and_then(|v| v.as_bool()) != Some(true) {
-        let ended = bypass::end(&state, &pane, "the user turned it off", false, How::ByUser);
+        // A standing grant would be made again by the agent's next call:
+        // Stop also holds that off until the person turns it on again.
+        let ended = bypass::active_for_any(&pane);
+        crate::server::browser_standing::stop_by_person(&state, &pane);
         return (StatusCode::OK, Json(json!({ "ok": true, "data": { "ended": ended } }))).into_response();
     }
     let block = match state.mstore.get::<crate::backend::obj::Block>(&pane) {
@@ -299,6 +306,7 @@ pub(crate) async fn handle_host_browser_bypass(
     }
     let minutes = bypass::clamp_minutes(body.get("minutes").and_then(|v| v.as_u64()));
     // The header's button turns on what Auto-approve always was: committing clicks.
+    crate::server::browser_standing::resume(&pane);
     let g = bypass::grant(&state, &pane, &owner, origins, vec![Power::Clicks], minutes, How::ByUser);
     (
         StatusCode::OK,

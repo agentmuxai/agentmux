@@ -269,14 +269,47 @@ pub(crate) fn revoke(state: &AppState, id: &str) -> bool {
     removed
 }
 
+/// Panes whose standing grant the person ended with Stop. A standing row
+/// would make the grant again on the agent's next call, so Stop would end
+/// only the call in flight: until the person turns auto-approve on again or
+/// answers the agent's request, the pane's calls ask as they did before.
+fn stopped() -> std::sync::MutexGuard<'static, std::collections::HashSet<String>> {
+    static S: OnceLock<Mutex<std::collections::HashSet<String>>> = OnceLock::new();
+    S.get_or_init(Default::default).lock().unwrap_or_else(|p| p.into_inner())
+}
+
+/// The person pressed Stop on `pane`'s grant: if it is a standing one, hold
+/// off making it again. Returns whether it was a standing one.
+pub(crate) fn stop_by_person(state: &AppState, pane: &str) -> bool {
+    let standing = bypass::is_standing(pane);
+    if standing {
+        stopped().insert(pane.to_string());
+    }
+    bypass::end(state, pane, "the user turned it off", false, crate::server::browser_actions::How::ByUser);
+    standing
+}
+
+/// The person turned auto-approve on again, or answered the agent's request:
+/// a standing row may make `pane`'s grant again.
+pub(crate) fn resume(pane: &str) {
+    stopped().remove(pane);
+}
+
 /// The pane grant for `agent` on `pane`, made from a standing row that names
 /// the site `url` (the address the host read from the page itself). None: no
-/// row says so. A grant `agent` already holds there is not replaced.
+/// row says so, or the person stopped the grant on this pane and hasn't
+/// turned it on again. A grant `agent` already holds there is not replaced.
 pub(crate) fn activate_at(state: &AppState, pane: &str, agent: &str, url: &str) -> Option<bypass::Grant> {
     if let Some(g) = bypass::active_for(pane, agent) {
         return Some(g);
     }
-    let row = find(&store().rows, agent, url)?.clone();
+    if stopped().contains(pane) {
+        return None;
+    }
+    // The grant is made with the store locked: a revoke that lands after the
+    // row was read waits here, then ends the grant it finds.
+    let s = store();
+    let row = find(&s.rows, agent, url)?;
     Some(bypass::grant_standing(state, pane, agent, row.origins.clone(), row.powers(), &row.id))
 }
 
@@ -381,5 +414,43 @@ mod tests {
         s.rows.clear();
         std::fs::write(&path, b"{ not json").unwrap();
         assert!(Store::open(path).rows.is_empty());
+    }
+
+    /// The process-wide store, with no file behind it, holding one row for `agent` on `site`.
+    fn row_in_store(agent: &str, site: &str) -> String {
+        let mut s = store();
+        s.path = None;
+        upsert_in(&mut s.rows, agent, &sites(&[site]), &["terminal".to_string()], false, 1).unwrap().id
+    }
+
+    #[tokio::test]
+    async fn stop_holds_off_the_standing_grant_until_the_person_turns_it_on_again() {
+        let state = crate::server::tests::test_state();
+        let (agent, url, pane) = ("stop-test-agent", "https://stop-test.example.com/x", "stop-test-pane");
+        let id = row_in_store(agent, "stop-test.example.com");
+        assert!(activate_at(&state, pane, agent, url).is_some());
+        assert!(bypass::is_standing(pane));
+        // Stop ends it, and the agent's next call doesn't make it again.
+        assert!(stop_by_person(&state, pane));
+        assert!(bypass::active_for(pane, agent).is_none());
+        assert!(activate_at(&state, pane, agent, url).is_none());
+        // The person turns it on again (or answers the agent's request).
+        resume(pane);
+        assert!(activate_at(&state, pane, agent, url).is_some());
+        // Revoke ends the grant, and nothing makes it again.
+        assert!(revoke(&state, &id));
+        assert!(bypass::active_for(pane, agent).is_none());
+        assert!(activate_at(&state, pane, agent, url).is_none());
+    }
+
+    #[tokio::test]
+    async fn stop_on_a_grant_the_person_made_by_hand_holds_nothing_off() {
+        let state = crate::server::tests::test_state();
+        let (agent, pane) = ("stop-hand-agent", "stop-hand-pane");
+        let id = row_in_store(agent, "stop-hand.example.com");
+        bypass::grant(&state, pane, agent, vec!["https://stop-hand.example.com".to_string()], vec![Power::Clicks], 15, crate::server::browser_actions::How::ByUser);
+        assert!(!stop_by_person(&state, pane));
+        assert!(activate_at(&state, pane, agent, "https://stop-hand.example.com/").is_some());
+        revoke(&state, &id);
     }
 }

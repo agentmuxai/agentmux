@@ -160,6 +160,16 @@ pub(crate) fn active_for(pane: &str, agent: &str) -> Option<Grant> {
     g.agent.eq_ignore_ascii_case(agent).then_some(g)
 }
 
+/// Does `pane` hold a live grant, whoever's?
+pub(crate) fn active_for_any(pane: &str) -> bool {
+    table().grants.get(pane).is_some_and(|l| l.grant.live())
+}
+
+/// Is the live grant on `pane` one made from a standing row?
+pub(crate) fn is_standing(pane: &str) -> bool {
+    table().grants.get(pane).is_some_and(|l| l.grant.standing.is_some() && l.grant.live())
+}
+
 /// Did the person decline a request on `pane` too recently for another?
 pub(crate) fn cooling_down(pane: &str) -> Option<Duration> {
     let mut t = table();
@@ -193,8 +203,10 @@ pub(crate) fn grant(
 
 /// A grant with no time limit, made from the person's standing row `row_id`
 /// when `agent` works on a pane showing a site the row names. It ends like
-/// any other (Stop, Take over, the pane closing, going idle: the next call
-/// makes it again), and when the row is revoked or changed.
+/// any other (Stop, Take over, the pane closing, going idle), and when the row
+/// is revoked or changed. After going idle or a changed row the next call makes
+/// it again; after the person's Stop it doesn't, until they turn it on again
+/// (`browser_standing::stop_by_person`).
 pub(crate) fn grant_standing(
     state: &AppState,
     pane: &str,
