@@ -1205,6 +1205,9 @@ pub async fn open_pane(state: &AppState, mut cmd: CommandPaneOpenData) -> Result
     // a queued `stackpush` action. Replaces `skip_placement` + a frontend
     // push, whose gap could leave the block in no pane.
     if let Some(target) = cmd.stack_onto_block_id.clone().filter(|t| !t.is_empty()) {
+        // The new tab is the visible one unless the caller said not to take focus
+        // (`focus: false`: an agent's popup must not switch the person's tab).
+        let activate = cmd.focus.unwrap_or(true);
         let tab_id = resolve_tab_id_for_block(&mstore, &target)
             .map_err(|e| format!("pane.open: stack_onto_block_id: {e}"))?;
         let meta_val = serde_json::to_value(&meta)
@@ -1215,7 +1218,7 @@ pub async fn open_pane(state: &AppState, mut cmd: CommandPaneOpenData) -> Result
                 tab_id: tab_id.clone(),
                 target_block_id: target.clone(),
                 meta: meta_val,
-                activate: true,
+                activate,
             },
         )
         .await;
@@ -1239,7 +1242,7 @@ pub async fn open_pane(state: &AppState, mut cmd: CommandPaneOpenData) -> Result
         }
         crate::server::service::publish_events(state, &events);
         if let Err(e) =
-            crate::server::service::layout_helpers::queue_target_stack_push(state, &tab_id, &block_id, &target, true).await
+            crate::server::service::layout_helpers::queue_target_stack_push(state, &tab_id, &block_id, &target, activate).await
         {
             tracing::warn!(block_id = %block_id, "pane.open: stack_onto_block_id: stackpush queue failed: {e}");
         }

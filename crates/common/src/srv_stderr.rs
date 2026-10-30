@@ -51,8 +51,9 @@
 //!   instance:<id> pending_migrations:<n>` — ready ([`Estart`]).
 //! - `AGENTMUXSRV-EVENT:<json>` — a startup event for the launcher to log
 //!   ([`parse_event_line`]).
-//! - `AGENTMUXSRV-UPGRADE version:<v> launcher:<path>` (a portable) or
-//!   `… installer:<path>` (a `setup.exe` install) — any time after ESTART: the
+//! - `AGENTMUXSRV-UPGRADE version:<v> [approved:<how>:<id>] launcher:<path>` (a portable) or
+//!   `… installer:<path>` (a `setup.exe` install; the digest is `sha256:<hex>` before it). The optional
+//!   `approved:` token says who approved the restart; the launcher skips it. Any time after ESTART: the
 //!   user chose "Upgrade & restart" and `<path>` is the launcher, or the
 //!   installer, of a release srv downloaded and verified. The launcher checks it again, asks
 //!   the user itself, and restarts into it (`crates/launcher/src/upgrade_restart.rs`).
@@ -317,11 +318,16 @@ pub fn upgrade_line(version: &str, target: &UpgradeTarget) -> String {
 }
 
 /// Parse an `UPGRADE_PREFIX` line. `None` for any other line, or one missing
-/// a field (an installer needs its 64-hex-digit `sha256:`).
+/// a field (an installer needs its 64-hex-digit `sha256:`). An `approved:<how>:<id>`
+/// token after `version:` is skipped.
 pub fn parse_upgrade_line(line: &str) -> Option<UpgradeRequest> {
     let rest = line.strip_prefix(UPGRADE_PREFIX)?.trim_start();
     let (version, rest) = rest.strip_prefix("version:")?.split_once(' ')?;
-    let rest = rest.trim_start();
+    let mut rest = rest.trim_start();
+    // `approved:<how>:<id>` (who approved the restart) may come before the target; the launcher doesn't use it.
+    if let Some(approved) = rest.strip_prefix("approved:") {
+        rest = approved.split_once(' ')?.1.trim_start();
+    }
     let target = if let Some(p) = rest.strip_prefix("launcher:") {
         UpgradeTarget::Launcher(p.trim().into())
     } else {
@@ -399,6 +405,20 @@ mod tests {
         assert!(!is_migrating_line("AGENTMUXSRV-MIGRATION-BEGIN id:x description:y"));
         assert_eq!(parse_event_line(r#"AGENTMUXSRV-EVENT:{"a":1}"#), Some(r#"{"a":1}"#));
         assert_eq!(parse_event_line("AGENTMUXSRV-ESTART ws:x"), None);
+    }
+
+    #[test]
+    fn an_approved_token_before_the_target_is_skipped() {
+        let sha = "cd".repeat(32);
+        let launcher = parse_upgrade_line("AGENTMUXSRV-UPGRADE version:0.60.8 approved:agent:agenty launcher:/opt/a b/agentmux.sh").unwrap();
+        assert_eq!(launcher.target, UpgradeTarget::Launcher("/opt/a b/agentmux.sh".into()));
+        let line = format!("AGENTMUXSRV-UPGRADE version:0.60.8 approved:person:win-1 sha256:{sha} installer:/var/u s/AgentMux_0.60.8_amd64.deb");
+        let installer = parse_upgrade_line(&line).unwrap();
+        assert_eq!(installer.version, "0.60.8");
+        assert_eq!(installer.target, UpgradeTarget::Installer { installer: "/var/u s/AgentMux_0.60.8_amd64.deb".into(), sha256: sha });
+        // The token alone is not a target.
+        assert_eq!(parse_upgrade_line("AGENTMUXSRV-UPGRADE version:0.60.8 approved:agent:agenty"), None);
+        assert_eq!(parse_upgrade_line("AGENTMUXSRV-UPGRADE version:0.60.8 approved:agent:agenty "), None);
     }
 
     #[test]

@@ -7,7 +7,7 @@
 //!
 //! Two kinds, by what the page asked for:
 //! - **popup panes** (a link or window asking for a tab or window): srv opens
-//!   a browser pane beside the opener when the host asks
+//!   a pane tab of the opener (a window: beside it) when the host asks
 //!   (`/api/v1/host/browser_popup`); remembered here per opener.
 //! - **popup windows** (`window.open` with popup features): the host creates
 //!   a native CEF popup itself and reports it (`/api/v1/host/browser_popup_window`);

@@ -368,8 +368,8 @@ fn srv_error(err: &str) -> String {
 }
 
 /// Report a popup a browser pane's page opened, as the host, and return
-/// srv's `data`: `{admitted: true, pane}` when srv opened it as a pane beside
-/// its opener, `{admitted: false, reason}` when the caller should open it in
+/// srv's `data`: `{admitted: true, pane}` when srv opened it as a pane tab (a
+/// window: beside its opener), `{admitted: false, reason}` when the caller should open it in
 /// the system browser (SPEC_BROWSER_PANE_POPUPS_ADOPTED_2026_10_08.md).
 /// Blocking: run it off the UI thread.
 pub(crate) fn backend_browser_popup(
