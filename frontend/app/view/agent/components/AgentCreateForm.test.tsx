@@ -483,9 +483,6 @@ describe("AgentCreateForm", () => {
         expect((await submitAndGetPayload()).model_vendor_base_url).toBe("");
     });
 
-    // #2594 follow-up: harness-then-model creation flow. The template
-    // card already picked the harness (claude); these cover the model
-    // picker that lets the user choose WHICH model that harness runs.
     describe("the container image choice", () => {
         const containerOn = async () => {
             vi.mocked(RpcApi.ContainerRuntimeAvailableCommand).mockResolvedValue({ available: true });
@@ -541,6 +538,9 @@ describe("AgentCreateForm", () => {
         });
     });
 
+    // #2594 follow-up: harness-then-model creation flow. The template
+    // card already picked the harness (claude); these cover the model
+    // picker that lets the user choose WHICH model that harness runs.
     describe("model picker (harness-then-model creation flow)", () => {
         it("renders a model select defaulting to the harness's own default model", () => {
             renderForm();
