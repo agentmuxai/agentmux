@@ -31,18 +31,29 @@ function hasOwnText(el: HTMLElement): boolean {
 }
 
 /**
- * Move `el`'s `title` to `data-title-tip` while the pointer is on it, keeping its accessible label.
+ * Take `el`'s `title` for the shared tooltip while the pointer is on it, keeping its accessible
+ * label. The attribute is left as `title=""` (which also keeps the browser's own tooltip away) so
+ * that an application removing or changing the title meanwhile shows up as a difference.
  * Returns the label ("" for none). `giveTitleBack` undoes it.
  */
 export function takeTitle(el: HTMLElement): string {
     const title = el.getAttribute("title");
-    if (title === null) return el.dataset.titleTip ?? "";
-    el.removeAttribute("title");
+    const held = el.dataset.titleTip;
+    if (title === "" && held !== undefined) return held;
+    if (title === null) {
+        // Removed by the application while we held it, or never titled.
+        if (held !== undefined) {
+            delete el.dataset.titleTip;
+            clearLabel(el);
+        }
+        return "";
+    }
     clearLabel(el);
     if (title === "") {
         delete el.dataset.titleTip;
         return "";
     }
+    el.setAttribute("title", "");
     el.dataset.titleTip = title;
     if (el.hasAttribute("aria-label") && !el.hasAttribute(LABELLED)) return title;
     if (el.hasAttribute("aria-labelledby") || hasOwnText(el)) {
@@ -63,14 +74,14 @@ function clearLabel(el: HTMLElement): void {
 }
 
 /**
- * Put the title back when the pointer leaves, so an application that later changes or removes it
- * (a reactive label) is seen the next time, and the native title is there for assistive technology.
+ * Put the title back when the pointer leaves, so the native title is there for assistive
+ * technology. A title the application removed or changed meanwhile is left as it set it.
  */
 export function giveTitleBack(el: HTMLElement): void {
     const text = el.dataset.titleTip;
     delete el.dataset.titleTip;
     clearLabel(el);
-    if (text !== undefined && !el.hasAttribute("title")) el.setAttribute("title", text);
+    if (text !== undefined && el.getAttribute("title") === "") el.setAttribute("title", text);
 }
 
 /**
@@ -179,7 +190,8 @@ export function initTitleTooltips(doc: Document = document): () => void {
             }
             // A reactive label may have changed while it is open.
             const text = takeTitle(el);
-            if (text && panel && panel.textContent !== text) panel.textContent = text;
+            if (!text) return closeNow();
+            if (panel && panel.textContent !== text) panel.textContent = text;
             return;
         }
         if (isPrimaryButtonDown()) return;

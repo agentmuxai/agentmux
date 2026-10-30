@@ -42,7 +42,7 @@ describe("takeTitle", () => {
     it("moves the title to data-title-tip and labels an element that has no text of its own", () => {
         const el = add('<button title="Close"><i></i></button>');
         expect(takeTitle(el)).toBe("Close");
-        expect(el.hasAttribute("title")).toBe(false);
+        expect(el.getAttribute("title")).toBe("");
         expect(el.dataset.titleTip).toBe("Close");
         expect(el.getAttribute("aria-label")).toBe("Close");
     });
@@ -58,15 +58,18 @@ describe("takeTitle", () => {
         expect(labelled.getAttribute("aria-label")).toBe("Mine");
     });
 
-    it("replaces the label it set earlier when the title changes, and drops it for an empty title", () => {
+    it("replaces the label it set earlier when the title changes, and drops it when the application removes the title", () => {
         const el = add('<button title="One"><i></i></button>');
         takeTitle(el);
         el.setAttribute("title", "Two");
         expect(takeTitle(el)).toBe("Two");
         expect(el.getAttribute("aria-label")).toBe("Two");
-        el.setAttribute("title", "");
+        el.removeAttribute("title");
         expect(takeTitle(el)).toBe("");
         expect(el.dataset.titleTip).toBeUndefined();
+        expect(el.hasAttribute("aria-label")).toBe(false);
+        giveTitleBack(el);
+        expect(el.hasAttribute("title")).toBe(false);
     });
 });
 
@@ -108,6 +111,23 @@ describe("the delegated tooltip", () => {
         expect(panel()).toBeNull();
     });
 
+    it("closes when the application removes the title while the pointer is on it, and does not bring it back", async () => {
+        const el = add('<button title="Cancel sign-in">x</button>');
+        const plain = add('<span class="plain">y</span>');
+        over(el);
+        await settle(100);
+        expect(panel()!.textContent).toBe("Cancel sign-in");
+        el.removeAttribute("title");
+        over(el);
+        expect(panel()).toBeNull();
+        over(plain);
+        await settle(150);
+        expect(el.hasAttribute("title")).toBe(false);
+        over(el);
+        await settle(150);
+        expect(panel()).toBeNull();
+    });
+
     it("keeps showing while the pointer moves inside an element whose title it took", async () => {
         const el = add('<button title="Save"><i class="icon"></i></button>');
         over(el);
@@ -120,7 +140,7 @@ describe("the delegated tooltip", () => {
     it("shows the shared tooltip after the short rest, instead of the native one", async () => {
         const el = add('<button title="Save"><i></i></button>');
         over(el);
-        expect(el.hasAttribute("title")).toBe(false);
+        expect(el.getAttribute("title")).toBe("");
         await settle(20);
         expect(panel()!.textContent).toBe("Save");
         expect(panel()!.style.opacity).toBe("0");
