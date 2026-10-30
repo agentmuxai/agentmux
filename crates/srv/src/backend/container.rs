@@ -20,6 +20,7 @@
 pub(crate) mod drift;
 pub mod limits;
 pub mod oom;
+mod keychain_credentials;
 mod mount_source;
 mod mounts;
 mod pull;
@@ -85,6 +86,10 @@ pub struct ContainerMountSpec {
     /// `None` keeps the old behavior (an empty per-agent named volume), which is
     /// correct only for an agent with no bound oauth account.
     pub claude_config_host_dir: Option<String>,
+    /// The bound account's Claude config dir when its login is in the macOS Keychain and not in a file: the
+    /// start of the container stages that login (see [`keychain_credentials`]) and fills
+    /// [`Self::claude_config_host_dir`] with the staging folder. `None` everywhere else.
+    pub keychain_config_dir: Option<String>,
     /// The agent's working directory on the host, bind-mounted at
     /// [`CONTAINER_WORKSPACE_DIR`]. `None`/empty leaves `/workspace` empty, which
     /// is what shipped before this existed.
@@ -120,9 +125,9 @@ pub const CLAUDE_CREDENTIALS_FILE: &str = ".credentials.json";
 /// authenticate on macOS" into "container agents cannot START on macOS" — a
 /// strictly worse failure than the one this fix exists to remove.
 ///
-/// Returning `None` degrades to exactly the previous behavior (an empty per-agent
-/// volume) instead, and logs why. Keychain-backed provisioning is a separate
-/// piece of work; this only guarantees we do not regress it.
+/// Returning `None` degrades to an empty per-agent volume and logs why. On macOS the
+/// container's start then stages the account's Keychain login instead (see
+/// [`ContainerMountSpec::keychain_config_dir`] and `keychain_credentials`).
 pub fn credentials_dir_if_file_backed(claude_config_host_dir: &str) -> Option<String> {
     if claude_config_host_dir.is_empty() {
         return None;
@@ -525,6 +530,7 @@ impl ContainerManager {
                     tracing::info!(container = container_name, reason, "container spec drift detected — recreating");
                     let _ = self.stop(container_name, 10).await;
                     self.remove(container_name, true).await?;
+                    self.restage_keychain_login(container_name, spec).await;
                     None
                 }
                 None => Some(status),
@@ -1052,6 +1058,8 @@ impl ContainerManager {
     /// Remove a container (must be stopped first or use `force = true`).
     pub async fn remove(&self, container_name: &str, force: bool) -> Result<(), ContainerError> {
         use bollard::container::RemoveContainerOptions;
+        // A login the container refreshed goes back to the Keychain while the container is still there to ask.
+        self.write_back_keychain_login(container_name).await;
         self.inner.docker
             .remove_container(container_name, Some(RemoveContainerOptions {
                 force,
@@ -1059,6 +1067,7 @@ impl ContainerManager {
             }))
             .await?;
         tracing::info!(container = container_name, "removed container");
+        self.drop_staged_keychain_login(container_name).await;
         self.forget_cli_ready(container_name).await;
         self.cleanup_dev_proxy_routes(container_name).await;
         Ok(())

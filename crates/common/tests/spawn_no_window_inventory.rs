@@ -200,6 +200,8 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
      "not-windows: macOS/Linux/unix-only code path"),
     ("crates/srv/src/identity/secret_store.rs", "\"/usr/bin/security\"", 1,
      "test: adds a keychain entry that trusts no app, for the ignored macOS needs-consent test"),
+    ("crates/srv/src/backend/container/keychain_credentials.rs", "\"/usr/bin/security\"", 4,
+     "not-windows: macOS-only code path (the Keychain calls and their ignored live tests)"),
     ("crates/srv/src/backend/process_tracker/cgroup_linux.rs", "\"sleep\"", 2,
      "test: unit-test or fixture code, never on a user machine"),
     ("crates/srv/src/bootstrap/watchers.rs", "\"sleep\"", 1,
