@@ -1232,6 +1232,9 @@ pub(crate) async fn handle_host_browser_popup(
     let s = |k: &str| body.get(k).and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
     let (opener, url, opener_url) = (s("opener"), s("url"), s("opener_url"));
     let user_gesture = body.get("user_gesture").and_then(|v| v.as_bool()).unwrap_or(false);
+    // A new window (shift-click) opens beside its opener; a new tab, or an older
+    // host that doesn't say, joins the opener's pane as a pane tab.
+    let as_window = s("asked") == "window";
     let refused = |reason: &str| {
         (StatusCode::OK, Json(json!({ "ok": true, "data": { "admitted": false, "reason": reason } }))).into_response()
     };
@@ -1273,16 +1276,16 @@ pub(crate) async fn handle_host_browser_popup(
         cwd: None,
         title: None,
         tab_id: None,
-        split_direction: Some("right".to_string()),
-        split_reference_block_id: Some(opener.clone()),
+        split_direction: as_window.then(|| "right".to_string()),
+        split_reference_block_id: as_window.then(|| opener.clone()),
         // The person clicked: show them the popup. An agent's popup opens
-        // beside its pane without taking the person's focus, like OpenBrowser.
+        // without taking the person's focus, like OpenBrowser.
         focus: Some(owner.is_none()),
         tree_expanded: None,
         floating: None,
         meta: None,
         skip_placement: None,
-        stack_onto_block_id: None,
+        stack_onto_block_id: (!as_window).then(|| opener.clone()),
         connection: None,
         auth: None,
         ..Default::default()

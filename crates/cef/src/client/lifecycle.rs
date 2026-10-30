@@ -922,7 +922,7 @@ impl AgentMuxHandler {
                     }
                     Route::Pane => {
                         if let Some(opener) = opener {
-                            self.offer_popup_as_pane(opener, opener_url, url, user_gesture);
+                            self.offer_popup_as_pane(opener, opener_url, url, user_gesture, asked);
                         }
                         return true;
                     }
@@ -994,12 +994,14 @@ impl AgentMuxHandler {
         origins
     }
 
-    /// Ask srv to open a popup from the browser pane `opener` as a pane beside
-    /// it; open it in the system browser if srv says no or can't be reached.
+    /// Ask srv to open a popup from the browser pane `opener` as a pane: a new
+    /// tab (`target=_blank`, `window.open(url)`, middle-click) joins the opener's
+    /// pane as a pane tab, a new window (shift-click) opens beside it. Open it in
+    /// the system browser if srv says no or can't be reached.
     /// srv makes the call because only it knows whether an agent owns the
     /// opener. The request runs on its own thread: `on_before_popup` holds
     /// this handler's lock on the UI thread and must return at once.
-    fn offer_popup_as_pane(&self, opener: String, opener_url: String, url: String, user_gesture: bool) {
+    fn offer_popup_as_pane(&self, opener: String, opener_url: String, url: String, user_gesture: bool, asked: super::popup_route::Asked) {
         let web_endpoint = self.state.backend_endpoints.lock().web_endpoint.clone();
         let auth_key = self.state.auth_key.lock().clone();
         let ipc_token = self.state.ipc_token.clone();
@@ -1008,6 +1010,9 @@ impl AgentMuxHandler {
             "opener_url": opener_url,
             "url": url,
             "user_gesture": user_gesture,
+            // What the page asked for: srv stacks a "tab" onto the opener's pane
+            // and splits for a "window". An older host sends none (a tab).
+            "asked": if asked == super::popup_route::Asked::Window { "window" } else { "tab" },
         });
         let fallback_url = url.clone();
         let spawned = std::thread::Builder::new().name("browser-popup".into()).spawn(move || {
