@@ -260,15 +260,6 @@ describe("AgentComposerStrip — zone-assignment identity stability (reagent P1 
     });
 });
 
-/**
- * Coverage for Rev 6's real-width zone-balancing search (see this file's
- * own Rev 6 header comment and
- * docs/specs/SPEC_COMPOSER_STRIP_DYNAMIC_BALANCE_2026_08_24.md) — pure,
- * so these run without needing a real layout engine to produce widths
- * (unlike the component itself, which falls back to the fixed `side`
- * pairing under JSDOM's always-zero widths — see AgentComposerStrip.tsx's
- * `zones` memo).
- */
 describe("AgentComposerStrip — interactive elements flush against the row edge", () => {
     // b must FOLLOW a in document order.
     const precedes = (a: Element, b: Element) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
@@ -356,10 +347,9 @@ describe("AgentComposerStrip — interactive elements flush against the row edge
 });
 
 /**
- * The stats-placement decision (ReAgent P2, PR #2817) — extracted as a
- * pure function precisely so this guard exists: this exact stats-width
- * math has regressed twice before (Codex P1 #2812's overflow, the
- * post-#2813 wrapper trap) with no automated coverage.
+ * The sign-in chip names the account: its email, shortened to 22 characters
+ * (identity-model's shortenEmail), full address in the tooltip. The green dot
+ * stays; without a recorded email it keeps saying "Logged in".
  */
 describe("AgentComposerStrip — sign-in chip shows the account email", () => {
     const chip = (container: HTMLElement) => container.querySelector(".agent-composer-strip-auth")!;

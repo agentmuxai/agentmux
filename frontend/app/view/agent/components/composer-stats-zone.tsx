@@ -29,8 +29,8 @@ export function useStatsZone(
     // see that spec), so `statsZone()` below never renders a content
     // span anymore and this effect now always measures 0. Left in place
     // rather than removed — see that spec's Non-goals — a permanently-0
-    // `statsWidth` is harmless input to `statsInline` (line ~1000-ish
-    // below), not wrong input, and this effect's own history (right
+    // `statsWidth` is harmless input to `statsInline` (the `layout` memo
+    // in AgentComposerStrip.tsx), not wrong input, and this effect's own history (right
     // below) is worth keeping intact for whoever eventually does remove
     // this scaffolding for real.
     //
@@ -84,9 +84,9 @@ export function useStatsZone(
     // session totals in the same visual shape AgentWorkingRow uses for
     // PER-TURN stats, with no label distinguishing the two).
     // AgentWorkingRow is now the sole surface for these stats. The
-    // wrapper span (and the row-layout accommodation below) stays —
-    // removing it would mean touching this file's most fragile,
-    // heavily-revised logic (module doc comment above) for a
+    // wrapper span (and the row-layout accommodation in AgentComposerStrip.tsx) stays —
+    // removing it would mean touching the strip's most fragile,
+    // heavily-revised logic (composer-row-layout.ts's module comment) for a
     // permanently-inert case, not a functional gain; see that spec's
     // Non-goals. Was: always centered (this zone's identity at every
     // tier). Rendered in ONE of two places, mutually
@@ -109,11 +109,11 @@ export function useStatsZone(
     // populated yet. Deliberately NOT folded into the row-pairing
     // algorithm itself (spec §3.4) — a third, always-centered concern,
     // not a left/right slot; its real measured footprint feeds the
-    // `layout` memo's `statsInline` decision above (since 2026-08-26;
+    // `layout` memo's `statsInline` decision in AgentComposerStrip.tsx (since 2026-08-26;
     // previously `computeComposerRows`'s now-removed `reservedWidth`
     // param, Codex P1 PR #2812), which picks between these two mount
     // positions so the shared line is never overflowed. `variant`
-    // tags which of the two mutually-exclusive call sites below is
+    // tags which of the two mutually-exclusive call sites in AgentComposerStrip.tsx is
     // mounting this instance, so the measurement effect above can tell
     // them apart (see that effect's own doc comment).
     const statsZone = (variant: "single" | "multi") => (

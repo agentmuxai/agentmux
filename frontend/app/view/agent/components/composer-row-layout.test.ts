@@ -13,6 +13,15 @@ import {
     type ComposerRow,
 } from "./composer-row-layout";
 
+/**
+ * Coverage for Rev 6's real-width zone-balancing search (see the Rev 6 paragraph in
+ * composer-row-layout.ts and
+ * docs/specs/SPEC_COMPOSER_STRIP_DYNAMIC_BALANCE_2026_08_24.md) — pure,
+ * so these run without needing a real layout engine to produce widths
+ * (unlike the component itself, which falls back to the fixed `side`
+ * pairing under JSDOM's always-zero widths — see AgentComposerStrip.tsx's
+ * `layout` memo).
+ */
 describe("computeBalancedLeftKeys", () => {
     it("returns an empty set when there are no movable slots", () => {
         expect(computeBalancedLeftKeys([], 90)).toEqual(new Set());
@@ -612,6 +621,12 @@ describe("orderKeysForEdgePriority", () => {
 });
 
 
+/**
+ * The stats-placement decision (ReAgent P2, PR #2817) — extracted as a
+ * pure function precisely so this guard exists: this exact stats-width
+ * math has regressed twice before (Codex P1 #2812's overflow, the
+ * post-#2813 wrapper trap) with no automated coverage.
+ */
 describe("computeStatsInline", () => {
     it("keeps stats inline when slots-plus-stats-plus-gap fit the single row", () => {
         // slots 70 + stats 20 + gap 5 = 95 <= 100
@@ -641,7 +656,3 @@ describe("computeStatsInline", () => {
         expect(computeStatsInline(1, 70, 26, 5, 100)).toBe(false);
     });
 });
-
-// The sign-in chip names the account: its email, shortened to 22 characters
-// (identity-model's shortenEmail), full address in the tooltip. The green dot
-// stays; without a recorded email it keeps saying "Logged in".

@@ -63,7 +63,7 @@
  *     commit, and the split that minimizes left/right width difference
  *     wins the NEXT render. `hostShell` stays pinned right regardless
  *     (the strip's one action keeps a stable, predictable position); the
- *     `side` field on each slot below still exists as the fallback used
+ *     `side` field on each slot in AgentComposerStrip.tsx still exists as the fallback used
  *     until the first real measurement lands (avoids an arbitrary/empty
  *     split on first paint) and in any environment with no real layout
  *     engine (e.g. this file's own unit tests run under JSDOM, which
@@ -84,7 +84,7 @@
  *     screenshot verification) to actually notice, and
  *     docs/specs/SPEC_COMPOSER_STRIP_ROW_BASED_LAYOUT_2026_08_26.md for
  *     the full design. Replaced the two zones with an explicit list of
- *     ROWS (`computeComposerRows`, `rows()` below) — every row has both a
+ *     ROWS (`computeComposerRows`, `rows()` in AgentComposerStrip.tsx) — every row has both a
  *     left and right occupant except one named, mathematically
  *     unavoidable exception (an odd total slot count leaves exactly one
  *     row unpaired) and the pre-existing fully-degenerate single-slot-
@@ -157,7 +157,7 @@ export function computeBalancedLeftKeys(
         }
         // A completely empty left with movable slots available is never
         // "balanced" — that's the pre-existing "never a dead zone" rule,
-        // applied by the caller (zones() below) as a uniform override
+        // applied by the caller (the `layout` memo in AgentComposerStrip.tsx) as a uniform override
         // regardless of which path (measured or fallback) produced the
         // split, so it's deliberately not special-cased again here.
         //
