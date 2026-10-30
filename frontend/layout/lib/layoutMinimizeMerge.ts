@@ -2,10 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Minimizing a pane next to a minimized pane merges its tabs into that pane.
- * docs/specs/SPEC_MINIMIZE_MERGES_INTO_ADJACENT_MINIMIZED_PANE_2026_10_28.md.
+ * Minimizing a pane next to a minimized pane merges its tabs into that pane; with none, into the
+ * nearest expanded pane of its split (`findExpandedMergeTarget`).
+ * docs/specs/SPEC_MINIMIZE_MERGES_INTO_ADJACENT_MINIMIZED_PANE_2026_10_28.md,
+ * amended by SPEC_MINIMIZE_MERGES_INTO_EXPANDED_NEIGHBOUR_2026_10_30.md.
  *
- * Only the person's own minimize merges: `mergeIntoMinimizedNeighbour`
+ * Only the person's own minimize merges: `mergeIntoNeighbour`
  * (layoutMinimizeMergeApply.ts) runs from `minimizeNodeToggle` and `collapseMaximizedNode` (the
  * header button, shortcut, pane menu and palette), never from an agent's `Pane` minimize (srv), a
  * layout load or a restore. There is no undo; dragging a pill out of the merged pane is the way back.

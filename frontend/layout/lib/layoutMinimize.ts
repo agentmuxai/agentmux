@@ -83,8 +83,8 @@ export function countExpandedLeaves(root: LayoutNode | undefined): number {
     return count;
 }
 
-/** Merges a pane into its minimized neighbour instead of minimizing it (layoutMinimizeMergeApply.ts);
- *  false when there is none. Registered by layout/index.ts: it needs the stack mutators, which this
+/** Merges a pane into its neighbour (a minimized one, else the nearest expanded one) instead of
+ *  minimizing it (layoutMinimizeMergeApply.ts); false when there is none. Registered by layout/index.ts: it needs the stack mutators, which this
  *  module (imported by the pure layout code) must not import. */
 type MinimizeMerger = (model: LayoutModel, nodeId: string) => boolean;
 let minimizeMerger: MinimizeMerger | undefined;

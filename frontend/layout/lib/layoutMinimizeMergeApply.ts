@@ -24,7 +24,7 @@ import { effectiveStack, moveBlocksInStack } from "./layoutStack";
  * (its space goes to the other panes, as for a minimize). Returns false, touching nothing, when
  * there is no target or the move could not be applied, so the caller minimizes as before.
  */
-export function mergeIntoMinimizedNeighbour(model: LayoutModel, nodeId: string): boolean {
+export function mergeIntoNeighbour(model: LayoutModel, nodeId: string): boolean {
     const root = model.treeState.rootNode;
     // A minimized pane to join first (tabs that were hidden together stay together), else the expanded
     // neighbour: its tabs go in as background tabs and the pane's own tile goes.

@@ -15,7 +15,7 @@ import { activeKeyFor, getNodeByBlockId, paneStackIds } from "@/layout/lib/layou
 import { closeNode, removeMovedBlock } from "@/layout/lib/layoutMagnify";
 import { collapseMaximizedNode, setMinimizeMerger } from "@/layout/lib/layoutMinimize";
 import { LANDING_BOUNCE_MS, landedTab } from "@/app/element/pane-tab-landing";
-import { mergeIntoMinimizedNeighbour } from "@/layout/lib/layoutMinimizeMergeApply";
+import { mergeIntoNeighbour } from "@/layout/lib/layoutMinimizeMergeApply";
 import {
     addWidgetAsPaneTab,
     closeBlockInStack,
@@ -1582,7 +1582,7 @@ describe("minimizing next to a minimized pane (merge)", () => {
         vi.useFakeTimers();
         rpcCall.mockReset();
         rpcCall.mockResolvedValue(undefined);
-        setMinimizeMerger(mergeIntoMinimizedNeighbour);
+        setMinimizeMerger(mergeIntoNeighbour);
     });
     afterEach(() => {
         setMinimizeMerger(undefined);
@@ -1844,11 +1844,11 @@ describe("minimizing next to a minimized pane (merge)", () => {
         expect(leaves(model)).toHaveLength(3);
     });
 
-    it("skips a minimized pane to merge into the nearest expanded one", () => {
+    it("joins the adjacent chip rather than merging into an expanded pane", () => {
         const model = fourPanes();
         model.minimizeNodeToggle(idOf(model, "c1"), { chip: true });
 
-        model.minimizeNodeToggle(idOf(model, "d1")); // c1 is a chip and adjacent: joins it
+        model.minimizeNodeToggle(idOf(model, "d1")); // c1 is a chip and adjacent: a minimized target comes first
 
         expect(effectiveStack(getNodeByBlockId(model, "c1")!.data!)).toEqual(["c1", "d1"]);
         expect(getNodeByBlockId(model, "c1")!.minimized).toBe(true);
