@@ -15,6 +15,7 @@
 pub(crate) mod app_ops;
 pub(crate) mod receive;
 pub(crate) mod send;
+pub(crate) mod tasks;
 
 use futures_util::future::BoxFuture;
 use serde_json::Value;
@@ -120,6 +121,9 @@ pub(crate) fn lookup(op: &str) -> Option<Op> {
     Some(match op {
         "app.version" => Op::read(|state, caller, params| Box::pin(app_ops::version(state, caller, params))),
         "app.health" => Op::read(|state, caller, params| Box::pin(app_ops::health(state, caller, params))),
+        // Filing a task changes the board, so it needs a certified caller; reading it does not.
+        "tasks.enqueue" => Op::write(|state, caller, params| Box::pin(tasks::enqueue(state, caller, params))),
+        "tasks.list" => Op::read(|state, caller, params| Box::pin(tasks::list(state, caller, params))),
         #[cfg(test)]
         "test.change" => Op::write(|_, caller, _| Box::pin(async move { Ok(serde_json::json!({ "changed_by": caller.actor() })) })),
         _ => return None,

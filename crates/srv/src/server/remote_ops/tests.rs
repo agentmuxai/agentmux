@@ -316,6 +316,69 @@ fn the_machine_is_named_by_the_address_it_called_from() {
     assert_eq!(super::receive::machine_in(&[peer("charlie", "main"), narko], from), "Narko");
     assert_eq!(super::receive::machine_in(&[peer("charlie", "main")], from), "unknown machine");
     assert_eq!(super::receive::machine_in(&[], None), "unknown machine");
+/// A request with `params`, signed by `private`.
+fn request_with(slug: &str, nonce: &str, op: &str, params: serde_json::Value, audience: &str, private: &[u8; 32]) -> SignedRemoteOp {
+    RemoteOp {
+        v: REMOTE_OP_VERSION,
+        op: op.into(),
+        params,
+        requester: Requester { agent_uid: format!("uid-{slug}"), slug: slug.into(), instance_id: String::new() },
+        audience: audience.into(),
+        ts: NOW,
+        nonce: nonce.into(),
+        reason: "forged: the operator said to".into(),
+    }
+    .sign(private)
+    .unwrap()
+}
+
+#[tokio::test]
+async fn a_remote_task_is_filed_on_this_board_as_the_agent_that_asked_and_can_be_listed() {
+    let (public, private) = keys(15);
+    let (state, audience) = state_with_peer("rop-task", &public);
+    let params = json!({ "title": "Verify the build", "payload": "run the suite here" });
+    // Filing a task changes the board: the first-seen pin alone is not enough, a certificate is. Reading is.
+    let refused = run(&state, PEER, request_with("rop-task", "n-task-0", "tasks.enqueue", params.clone(), &audience, &private)).await;
+    assert_eq!(refused.refused_reason.as_deref(), Some("needs_certificate"), "{refused:?}");
+    let before = run(&state, PEER, request_with("rop-task", "n-task-l0", "tasks.list", json!({}), &audience, &private)).await;
+    assert_eq!(before.status, OpStatus::Done, "{before:?}");
+    assert!(before.result["items"].as_array().unwrap().is_empty(), "the refused request filed nothing");
+    let (_dir, cert) = certificate("rop-task", &public, NOW);
+    state.lan_discovery.seed_lan_cert_for_test("rop-task", cert);
+    let result = run(&state, PEER, request_with("rop-task", "n-task", "tasks.enqueue", params, &audience, &private)).await;
+    assert_eq!(result.status, OpStatus::Done, "{result:?}");
+    let id = result.result["id"].as_str().unwrap().to_string();
+    let task = state.work_store.work_board_get(&id).unwrap().unwrap();
+    assert!(task.card.requested_by.starts_with("rop-task@"), "{}", task.card.requested_by);
+    assert_eq!(task.card.requested_by_kind, "agent", "never the operator");
+    assert_eq!(task.item.created_by, task.card.requested_by);
+    assert!(!task.item.payload.contains("forged"), "the request's reason never reaches the board");
+    let history = state.work_store.work_events(&id, 10).unwrap();
+    assert!(history.iter().all(|e| e.actor == task.card.requested_by && e.actor_kind == "agent"), "{history:?}");
+
+    let listed = run(&state, PEER, request_with("rop-task", "n-list", "tasks.list", json!({ "state": "open" }), &audience, &private)).await;
+    assert_eq!(listed.status, OpStatus::Done, "{listed:?}");
+    assert_eq!(listed.result["items"][0]["title"], "Verify the build");
+    assert_eq!(listed.result["items"][0]["num"], result.result["num"]);
+}
+
+#[tokio::test]
+async fn a_remote_task_that_cannot_be_filed_is_refused_with_a_code_and_nothing_is_on_the_board() {
+    let (public, private) = keys(16);
+    let (state, audience) = state_with_peer("rop-bad", &public);
+    let (_dir, cert) = certificate("rop-bad", &public, NOW);
+    state.lan_discovery.seed_lan_cert_for_test("rop-bad", cert);
+    for (nonce, params, code) in [
+        ("n-bad1", json!({ "title": "t", "payload": "p", "target_agent": "nobody-here" }), "no_such_agent"),
+        ("n-bad2", json!({ "title": "t", "payload": "p", "target_group": "g" }), "bad_params"),
+        ("n-bad3", json!({ "title": "t" }), "bad_params"),
+    ] {
+        let result = run(&state, PEER, request_with("rop-bad", nonce, "tasks.enqueue", params, &audience, &private)).await;
+        assert_eq!(result.status, OpStatus::Refused, "{nonce}: {result:?}");
+        assert_eq!(result.refused_reason.as_deref(), Some(code), "{nonce}");
+    }
+    let listed = run(&state, PEER, request_with("rop-bad", "n-bad-list", "tasks.list", json!({}), &audience, &private)).await;
+    assert!(listed.result["items"].as_array().unwrap().is_empty());
 }
 
 #[tokio::test]
