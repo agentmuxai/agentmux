@@ -61,7 +61,8 @@ vi.mock("@/app/store/block-meta", () => ({ setBlockMeta: setBlockMetaMock }));
 const writeTextMock = vi.fn();
 vi.mock("@/util/clipboard", () => ({ writeText: (text: string) => writeTextMock(text) }));
 
-import { jitteredBackoffSeconds, TAKEOVER_CONFIRM_MS, useAgentFailure, type UseAgentFailureResult } from "./useAgentFailure";
+import { jitteredBackoffSeconds, SEED_WAIT_MS, TAKEOVER_CONFIRM_MS, useAgentFailure, type UseAgentFailureResult } from "./useAgentFailure";
+import type { AccountState } from "../failure/failure-verdict";
 import type { AgentFailure } from "@/types/rpc/AgentFailure";
 
 const BLOCK_ID = "b";
@@ -224,8 +225,9 @@ describe("useAgentFailure auto-retry budget (§6)", () => {
             failingTurn(); // one past the ladder → capped
             vi.advanceTimersByTime(600000);
             expect(onRetry).toHaveBeenCalledTimes(ladderMs.length); // cap holds
-            // Manual retry still offered (label without countdown).
-            expect((ui.row()?.actions ?? []).some((a) => a.label === "Retry now")).toBe(true);
+            // Manual retry still offered, as the lapsed note (no countdown, no error colour).
+            expect(ui.verdict()).toBe("lapsed");
+            expect((ui.row()?.actions ?? []).some((a) => a.label === "Retry")).toBe(true);
 
             dispose();
         });
@@ -864,6 +866,121 @@ describe("useAgentFailure — a network failure that waits for its API", () => {
             await Promise.resolve();
             fire("agentfailure", network());
             expect(counting(ui)).toBe(true);
+            dispose();
+        });
+    });
+});
+
+describe("useAgentFailure follows the live state (SPEC_AGENT_PANE_FAILURE_ROW_FOLLOWS_LIVE_STATE)", () => {
+    beforeEach(() => {
+        hub.handlers.clear();
+        hub.persistedFailure = null;
+        vi.useFakeTimers();
+    });
+    afterEach(() => vi.useRealTimers());
+
+    const authFailure = (): AgentFailure => ({ code: "auth", title: "Not authenticated", detail: "401", retryable: false });
+    const mkLive = (initial: AccountState) => {
+        const { model, failure } = makeFakeModel();
+        const [account, setAccount] = createSignal<AccountState>(initial);
+        const ui = useAgentFailure({
+            blockId: BLOCK_ID, model, failure, liveAccount: account,
+            onRetry() {}, onLoginAgain() {}, onLoginViaTerminal() {}, onOpenAccounts() {}, onNewSession() {},
+        });
+        return { ui, setAccount };
+    };
+    const labels = (ui: UseAgentFailureResult) => (ui.row()?.actions ?? []).map((a) => a.label ?? a.glyph);
+
+    it("raises nothing at mount for a sign-in failure srv says is over", async () => {
+        hub.persistedFailure = authFailure();
+        await createRoot(async (dispose) => {
+            const { ui } = mkLive("can_work");
+            await Promise.resolve();
+            expect(ui.row()).toBeNull();
+            dispose();
+        });
+    });
+
+    it("shows a sign-in failure srv still reports, and clears it without a click when the agent can work", async () => {
+        hub.persistedFailure = authFailure();
+        await createRoot(async (dispose) => {
+            const { ui, setAccount } = mkLive("signed_out");
+            await Promise.resolve();
+            expect(ui.row()).not.toBeNull();
+            expect(ui.verdict()).toBe("active");
+            setAccount("can_work");
+            expect(ui.row()).toBeNull();
+            dispose();
+        });
+    });
+
+    it("waits for srv's state before showing a persisted sign-in failure, then shows it after SEED_WAIT_MS", async () => {
+        hub.persistedFailure = authFailure();
+        await createRoot(async (dispose) => {
+            const { ui } = mkLive("unknown");
+            await Promise.resolve();
+            expect(ui.row()).toBeNull();
+            vi.advanceTimersByTime(SEED_WAIT_MS);
+            expect(ui.row()).not.toBeNull();
+            dispose();
+        });
+    });
+
+    it("does not clear a sign-in failure that has just arrived on a state that was already idle", async () => {
+        await createRoot(async (dispose) => {
+            const { ui, setAccount } = mkLive("can_work");
+            await Promise.resolve();
+            fire("agentfailure", authFailure());
+            expect(ui.row()).not.toBeNull();
+            expect(ui.verdict()).toBe("active");
+            // srv then marks the agent signed out, and later able to work: that heals it.
+            vi.advanceTimersByTime(10);
+            setAccount("signed_out");
+            expect(ui.row()).not.toBeNull();
+            vi.advanceTimersByTime(10);
+            setAccount("can_work");
+            expect(ui.row()).toBeNull();
+            dispose();
+        });
+    });
+
+    it("a rate limit never offers an account action, whatever srv says", async () => {
+        for (const account of ["signed_out", "limited", "can_work", "unknown"] as const) {
+            await createRoot(async (dispose) => {
+                const { ui } = mkLive(account);
+                await Promise.resolve();
+                fire("agentfailure", transient());
+                const l = labels(ui);
+                expect(l.some((x) => /Accounts|Connectors|Use |Log/.test(String(x)))).toBe(false);
+                expect(l.some((x) => String(x).startsWith("Retry now"))).toBe(true);
+                dispose();
+            });
+        }
+    });
+
+    it("a completed turn clears a failure, and a transient one read at mount is a lapsed note until then", async () => {
+        hub.persistedFailure = transient();
+        await createRoot(async (dispose) => {
+            const { ui } = mkLive("can_work");
+            await Promise.resolve();
+            expect(ui.verdict()).toBe("lapsed");
+            expect(ui.row()!.accent).toBe("idle");
+            expect(labels(ui)).toEqual(["Retry", "×"]);
+            vi.advanceTimersByTime(5);
+            successfulTurnEnded();
+            expect(ui.row()).toBeNull();
+            dispose();
+        });
+    });
+
+    it("a failure that finds the retry ladder spent becomes the lapsed note", async () => {
+        await createRoot(async (dispose) => {
+            const { ui } = mkLive("can_work");
+            await Promise.resolve();
+            burnBudgetToCap(failingTurn);
+            fire("agentfailure", transient());
+            expect(ui.verdict()).toBe("lapsed");
+            expect(ui.row()!.accent).toBe("idle");
             dispose();
         });
     });

@@ -396,3 +396,33 @@ describe("auth row: bind-account vs Connectors → Accounts (SPEC_AGENT_LOGIN_FL
         expect(on._calls.bindAccount).toBe(1);
     });
 });
+
+describe("failureToRow: verdict", () => {
+    it("a lapsed failure is one muted note with Retry and Dismiss, and no account action", () => {
+        const on = mkActions();
+        const row = failureToRow(
+            mkFailure({ code: "rate_limited", title: "Rate limited" }),
+            mkView({ verdict: "lapsed", agoLabel: "12 min ago" }),
+            on,
+        );
+        expect(row.accent).toBe("idle");
+        expect(row.title).toBe("Rate limited · 12 min ago");
+        expect(row.actions.map((a) => a.label ?? a.glyph)).toEqual(["Retry", "×"]);
+        row.actions[0].onClick?.();
+        expect(on._calls.retry).toBe(1);
+    });
+
+    it("only a sign-in or usage-limit failure offers an account action, in any state of the view", () => {
+        const accountWords = /Accounts|Connectors|Use |Log in|Login/;
+        for (const code of ["rate_limited", "overloaded", "network", "killed", "no_output", "unknown_non_zero", "max_turns", "context_exceeded", "agent_deleted"] as const) {
+            for (const verdict of ["active", "lapsed", undefined] as const) {
+                const row = failureToRow(mkFailure({ code }), mkView({ verdict, bindCandidates: [{ id: "a", name: "Work" }] }), mkActions());
+                expect(row.actions.some((a) => accountWords.test(a.label ?? "")), `${code}/${verdict}`).toBe(false);
+            }
+        }
+        for (const code of ["auth", "usage_limit"] as const) {
+            const row = failureToRow(mkFailure({ code }), mkView({ verdict: "active" }), mkActions());
+            expect(row.actions.some((a) => accountWords.test(a.label ?? ""))).toBe(true);
+        }
+    });
+});
