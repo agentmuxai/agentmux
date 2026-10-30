@@ -255,7 +255,7 @@ impl SubprocessController {
         // time out with "no stdin data received in 3s".
         let message = config.message;
         let block_id_stdin = self.block_id.clone();
-        let user_record = self.user_record_sink(config.message_id.is_some());
+        let user_record = self.user_record_sink(config.message_id.is_some(), config.record.clone());
         {
             // Convert Tokio's async ChildStdin to a raw OS handle, then
             // wrap in a std::fs::File for synchronous write. The pipe

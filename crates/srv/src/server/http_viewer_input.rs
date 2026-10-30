@@ -26,6 +26,7 @@ use serde::Deserialize;
 use super::http_viewer::{agent_hidden, ViewerCaller};
 use super::*;
 use crate::backend::blockcontroller::health::{TurnInput, TurnOrigin};
+use crate::backend::message_origin::MessageOrigin;
 use crate::backend::reactive::{device_turn_message, SenderDelivery, MAX_MESSAGE_LENGTH};
 use crate::backend::viewer::origin::{self, DeviceOrigin};
 use crate::backend::viewer::sends::{Admit, Sent};
@@ -71,7 +72,7 @@ fn delivery_refusal(error: &str) -> Response {
 /// broadcast is (`app_api::fleet::deliver_broadcast_turn`).
 async fn deliver(state: &AppState, block_id: &str, text: &str) -> Result<Sent, Response> {
     let input = TurnInput { origin: TurnOrigin::User, text: text.to_string(), joins_turn: None };
-    match crate::bootstrap::route_agent_message_from(block_id, text, Some(input), &[]) {
+    match crate::bootstrap::route_agent_message_from(block_id, text, Some(input), MessageOrigin::user(), &[]) {
         Ok(AgentRoute::Sent(SenderDelivery::Delivered)) => Ok(Sent::Delivered),
         Ok(AgentRoute::Sent(SenderDelivery::Deferred)) => Ok(Sent::Queued),
         Ok(AgentRoute::Sent(SenderDelivery::Pty)) => Err(refuse(
@@ -83,7 +84,7 @@ async fn deliver(state: &AppState, block_id: &str, text: &str) -> Result<Sent, R
         // The block came from the agent registry, so it is registered.
         Ok(AgentRoute::StartTurn { .. }) => {
             let deps = AgentTurnDeps::from_state(state);
-            run_agent_turn(&deps, block_id.to_string(), text.to_string(), None, TurnRegistration::Skip, TurnOrigin::User, Vec::new())
+            run_agent_turn(&deps, block_id.to_string(), text.to_string(), None, TurnRegistration::Skip, MessageOrigin::user(), Vec::new())
                 .await
                 .map(|()| Sent::Delivered)
                 .map_err(|e| delivery_refusal(&e))

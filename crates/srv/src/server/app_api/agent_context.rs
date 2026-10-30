@@ -227,7 +227,7 @@ async fn fresh_when_turn_ends(state: AppState, block_id: String, handoff: String
         handoff_message(&handoff),
         None,
         crate::server::agent_handlers::TurnRegistration::Register,
-        crate::backend::blockcontroller::health::TurnOrigin::System,
+        crate::backend::message_origin::MessageOrigin::system(),
         Vec::new(),
     )
     .await;
@@ -275,7 +275,7 @@ async fn compact_when_turn_ends(state: AppState, block_id: String, message: Stri
         message,
         None,
         crate::server::agent_handlers::TurnRegistration::Register,
-        crate::backend::blockcontroller::health::TurnOrigin::System,
+        crate::backend::message_origin::MessageOrigin::system(),
         Vec::new(),
     )
     .await;

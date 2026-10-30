@@ -273,7 +273,7 @@ async fn a_candidate_respawn_refused_by_the_guard_discards_and_reports_the_queue
         inner.session_id = Some(sid.clone());
         inner.leftover_resume_candidate = Some(sid.clone());
         let seq = inner.take_next_message_seq();
-        inner.pending_send_messages.push_back(QueuedMessage::fresh(seq, MSG.to_string()));
+        inner.pending_send_messages.push_back(QueuedMessage::fresh(seq, MSG.to_string(), RecordOrigin::new(MessageOrigin::user())));
     }
 
     c.respawn_once_for_leftover_queue(resume_config(&sid));

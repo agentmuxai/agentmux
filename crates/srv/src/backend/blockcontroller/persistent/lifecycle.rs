@@ -136,7 +136,7 @@ impl PersistentSubprocessController {
     /// into the process being killed, and leave the report an empty queue:
     /// lost, with no stranded warning (codex P2 on #3562). Once this lock is
     /// released, `stop_pending` holds anything queued later.
-    pub(super) fn request_stop_draining_deferred(&self, request: KillRequest) -> Vec<String> {
+    pub(super) fn request_stop_draining_deferred(&self, request: KillRequest) -> Vec<Deferred> {
         Self::request_stop_inner(&self.inner, request, true, false)
     }
 
@@ -150,7 +150,7 @@ impl PersistentSubprocessController {
         request: KillRequest,
         drain_deferred: bool,
         config_restart: bool,
-    ) -> Vec<String> {
+    ) -> Vec<Deferred> {
         let (kill_tx, drained) = Self::stop_locked(&mut inner_arc.lock().unwrap(), drain_deferred, config_restart);
         if let Some(tx) = kill_tx {
             let _ = tx.send(request);
@@ -164,7 +164,7 @@ impl PersistentSubprocessController {
         inner: &mut PersistentInner,
         drain_deferred: bool,
         config_restart: bool,
-    ) -> (Option<tokio::sync::oneshot::Sender<KillRequest>>, Vec<String>) {
+    ) -> (Option<tokio::sync::oneshot::Sender<KillRequest>>, Vec<Deferred>) {
         // Recorded unconditionally, not only when `kill_tx` is already
         // `None` — codex P1 on PR #2360 (round 16, commit ce1642d90):
         // `stop_process` can race a process that already exited (a

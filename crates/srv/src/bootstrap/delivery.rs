@@ -65,7 +65,7 @@ pub(crate) enum AgentRoute {
 // route text alone.
 #[cfg(test)]
 pub(crate) fn route_agent_message(block_id: &str, message: &str) -> Result<AgentRoute, String> {
-    route_agent_message_from(block_id, message, None, &[])
+    route_agent_message_from(block_id, message, None, backend::message_origin::MessageOrigin::system(), &[])
 }
 
 /// [`route_agent_message`], saying who the input is from: the Swarm broadcast
@@ -75,6 +75,7 @@ pub(crate) fn route_agent_message_from(
     block_id: &str,
     message: &str,
     origin: Option<backend::blockcontroller::health::TurnInput>,
+    from: backend::message_origin::MessageOrigin,
     inline: &[serde_json::Value],
 ) -> Result<AgentRoute, String> {
     let Some(ctrl) = backend::blockcontroller::get_controller(block_id) else {
@@ -91,7 +92,7 @@ pub(crate) fn route_agent_message_from(
     if is_subprocess {
         return Ok(AgentRoute::StartTurn { subprocess: true });
     }
-    match backend::blockcontroller::deliver_agent_message_from(block_id, message, origin, inline) {
+    match backend::blockcontroller::deliver_agent_message_from(block_id, message, origin, from, inline) {
         Ok(backend::blockcontroller::AgentDelivery::Structured) => {
             Ok(AgentRoute::Sent(reactive::SenderDelivery::Delivered))
         }
@@ -163,13 +164,13 @@ pub fn install_agent_turn_delivery(state: &AppState) {
     let deps = crate::server::agent_handlers::AgentTurnDeps::from_state(state);
     state
         .reactive_handler
-        .set_message_sender(Arc::new(move |block_id: &str, message: &str, inline: &[serde_json::Value]| {
+        .set_message_sender(Arc::new(move |block_id: &str, message: &str, inline: &[serde_json::Value], from: &backend::message_origin::MessageOrigin| {
             // Which controller kinds take a structured message and which need a turn
             // started is `route_agent_message`, shared with the Swarm broadcast so
             // the two cannot drift.
             // Inline blocks reach a running persistent Claude only; a turn
             // started below gets the text, whose list still names every file.
-            let is_subprocess = match route_agent_message_from(block_id, message, None, inline)? {
+            let is_subprocess = match route_agent_message_from(block_id, message, None, from.clone(), inline)? {
                 AgentRoute::Sent(outcome) => return Ok(outcome),
                 AgentRoute::StartTurn { subprocess } => subprocess,
             };
@@ -224,6 +225,7 @@ pub fn install_agent_turn_delivery(state: &AppState) {
             let deps = deps.clone();
             let block_id_owned = block_id.to_string();
             let message = message.to_string();
+            let from = from.clone();
             tracing::info!(
                 block_id = %block_id_owned,
                 kind = if is_subprocess { "subprocess" } else { "persistent (not yet spawned)" },
@@ -236,8 +238,8 @@ pub fn install_agent_turn_delivery(state: &AppState) {
                     message,
                     None,
                     crate::server::agent_handlers::TurnRegistration::Skip,
-                    // Reactive delivery: a jekt, cron, nudge, broadcast, loop.
-                    crate::backend::blockcontroller::health::TurnOrigin::Automated,
+                    // Reactive delivery: a jekt, cron, nudge, loop, or AgentMux's own note.
+                    from,
                     Vec::new(),
                 ))
             });

@@ -56,6 +56,8 @@ pub(crate) enum Kind {
     Check,
     Key,
     Upload,
+    /// A secret the page showed, saved into the Vault (`Browser` `capture`).
+    Capture,
     Eval,
     Handoff,
     AutoApproveOn,

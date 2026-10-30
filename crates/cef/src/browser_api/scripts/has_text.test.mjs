@@ -15,10 +15,24 @@ const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "has_text
 const hasText = (document, text) => new Function("document", `return (${src});`)(document)(text);
 
 const boxes = (n) => ({ getClientRects: () => new Array(n).fill({}) });
-const page = ({ root, body, text = "Resource group" }) => ({
+// `zones` are the elements `querySelectorAll` finds: { selector, text, copy?, vault? }.
+const el = ({ text, copy = false, vault = false, parent = null }) => ({
+    textContent: text,
+    innerText: text,
+    parentElement: parent,
+    children: [{}, {}],
+    hasAttribute: (a) => vault && a === "data-agentmux-vault",
+    getAttribute: () => (copy ? "Copy" : null),
+});
+const page = ({ root, body, text = "Resource group", zones = [] }) => ({
     documentElement: boxes(root),
     body: { ...boxes(body), innerText: text },
+    querySelectorAll: (sel) =>
+        sel.startsWith("button")
+            ? zones.filter((z) => z.copy).map((z) => ({ ...el({ text: "Copy" }), parentElement: el(z) }))
+            : zones.filter((z) => !z.copy).map(el),
 });
+const SECRET = "Xy8Q~abcDEF1234ghijKLmnoPQRstu.vwxYZ0123";
 
 describe("has_text: text counts only in a frame that is shown", () => {
     it("finds text on an ordinary page", () => {
@@ -39,5 +53,29 @@ describe("has_text: text counts only in a frame that is shown", () => {
 
     it("finds nothing on a page with no body yet", () => {
         expect(hasText({ documentElement: boxes(1), body: null }, "x")).toBe(false);
+    });
+});
+
+describe("has_text: a secret the page shows once can't be waited for a piece at a time", () => {
+    const shown = (zones) => page({ root: 1, body: 1, text: `New client secret Value ${SECRET} Copy`, zones });
+
+    it("leaves a secret in code out, but not the text around it", () => {
+        const p = shown([{ text: SECRET }]);
+        expect(hasText(p, SECRET.slice(0, 8))).toBe(false);
+        expect(hasText(p, "New client secret")).toBe(true);
+    });
+
+    it("leaves it out of a Copy button's container", () => {
+        expect(hasText(shown([{ text: `Value ${SECRET}`, copy: true }]), SECRET.slice(4, 12))).toBe(false);
+    });
+
+    it("leaves an element holding a captured value out whole", () => {
+        const p = page({ root: 1, body: 1, text: "Your code: 48213 done", zones: [{ text: "48213", vault: true }] });
+        expect(hasText(p, "4821")).toBe(false);
+        expect(hasText(p, "done")).toBe(true);
+    });
+
+    it("finds the same value outside where a page shows a secret", () => {
+        expect(hasText(shown([]), SECRET.slice(0, 8))).toBe(true);
     });
 });

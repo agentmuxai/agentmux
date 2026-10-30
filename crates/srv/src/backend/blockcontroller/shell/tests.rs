@@ -913,6 +913,7 @@ use std::sync::Arc;
             line,
             Some(&fs),
             Some("agent:tsidx-silent:current"),
+            None,
         );
 
         let entries = read_tsidx(&fs, block_id);

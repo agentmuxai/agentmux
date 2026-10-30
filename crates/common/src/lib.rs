@@ -38,6 +38,7 @@ pub mod process_hardening;
 pub mod pii_mask;
 pub mod redact;
 pub mod runtime_mode;
+pub mod shown_once;
 pub mod secret_eq;
 pub mod secret_env;
 pub mod settings_jsonc;
