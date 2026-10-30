@@ -285,6 +285,8 @@ impl OutgoingJektSignatures {
             lan_sig_v2: self.lan_sig_v2,
             files: None,
             priority: None,
+            reply: None,
+            in_reply_to: None,
         }
     }
 }

@@ -1251,6 +1251,7 @@ impl Handler {
             priority,
             req.held_sent_at_ms,
             req.files_delivery.as_ref(),
+            req.reply.as_deref() == Some("none"),
         );
 
         // Legacy source-prefix format preserved for PTY controllers that don't

@@ -54,7 +54,10 @@ import { asDocTabDragData, docTabItemType, paneTabItemType, type DocTabDragData 
 import { createScrollEdges } from "./scroll-edges";
 import { usePaneTabVisibility } from "@/app/block/pane-tab-visibility";
 import { useWindowTabDisplayed } from "@/app/workspace/window-tab-visibility";
-import { beginHover, type Hover, type HoverFlash } from "./drop-blink-clock";
+import { beginHover, edgeFlashArea, type Hover, type HoverFlash } from "./drop-blink-clock";
+import type { LayoutModel } from "@/layout/lib/layoutModel";
+import { clearPillGhost, pillZone, showPillGhost, type PillZone } from "@/layout/lib/paneBodyDrop";
+import type { DropDirection } from "@/layout/lib/types";
 import type { PaneTabSelectionApi } from "./pane-tab-selection";
 import { createStripReveal, registerStripWithPane } from "./strip-reveal-controller";
 import type { PaneTabProgress } from "@/app/store/pane-tab-progress";
@@ -341,6 +344,19 @@ export interface PaneTabStripProps<T> {
      *  `blockIds` is not already in it. Without it a multi-tab drag is accepted only
      *  from another pane, as a single tab is. */
     acceptsForeignTabs?: (blockIds: readonly string[]) => boolean;
+    /** Opt in to placing a single pill dropped on this pane's body as a pane of its own. The
+     *  header and the middle of the body still join the pill to this pane's tabs; the rest of the
+     *  body shows the placement ghost (as when a whole pane is dragged) and `place` splits the
+     *  tab out on the side the ghost shows. `place` returns the new pane's key (the pill bounces
+     *  there), or `false` when it was refused. Without it a drop anywhere on the pane joins, as
+     *  before. A multi-tab drag always joins.
+     *  SPEC_PANE_TAB_DRAG_BODY_PLACEMENT_AND_EDGE_GLOW_2026_10_29.md §3.1. */
+    bodyDrop?: {
+        model: LayoutModel;
+        /** False for a header-only pane (minimized, collapsed): no body zone. */
+        hasBody: () => boolean;
+        place: (blockId: string, zone: Extract<PillZone, { kind: "place" }>) => string | false;
+    };
     /** Ctrl/Cmd+click multi-select for a Pane's own header strip. Omitted by document
      *  tabs and the agent History strip, which have no selection. */
     selection?: PaneTabSelectionApi;
@@ -415,7 +431,9 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
     let flashEl: HTMLElement | undefined;
     const flashArea = (): number | undefined => {
         const r = flashEl?.getBoundingClientRect();
-        return r ? r.width * r.height : undefined;
+        if (!r) return undefined;
+        // A pane header flashes its two edge strips only; a strip used as its own drop zone, all of it.
+        return flashEl?.matches(PANE_HEADER_SELECTOR) ? edgeFlashArea(r.width, r.height) : r.width * r.height;
     };
     const beginForeignHover = () => {
         hover?.end();
@@ -457,11 +475,64 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
             // would be permanent.
             createEffect(() => {
                 highlightEl.classList.toggle("pane-header--foreign-hover", foreignHover());
-                highlightEl.classList.toggle("pane-header--no-blink", foreignHover() && flash() === "steady");
-                highlightEl.classList.toggle("pane-header--no-invert", foreignHover() && flash() === "plain");
+                highlightEl.classList.toggle("pane-header--no-blink", foreignHover() && flash() !== "blink");
             });
-            onCleanup(() => highlightEl.classList.remove("pane-header--foreign-hover", "pane-header--no-blink", "pane-header--no-invert"));
+            onCleanup(() => highlightEl.classList.remove("pane-header--foreign-hover", "pane-header--no-blink"));
         }
+        // A single pill over this pane, with `bodyDrop`: what the pointer is over decides the
+        // feedback (the header glow, or the placement ghost), read again as it moves.
+        const body = props.bodyDrop;
+        let zone: PillZone = { kind: "none" };
+        let ghost: DropDirection | undefined;
+        let lastFollow = -Infinity;
+        type PillArgs = {
+            source: { data: Record<string | symbol, unknown> };
+            location: { current: { input: { clientX: number; clientY: number } } };
+        };
+        const singlePill = (args?: PillArgs) => !!body && !!args?.source && !multiIdsOf(args.source.data);
+        const zoneInput = (args: PillArgs) => {
+            const { clientX, clientY } = args.location.current.input;
+            return {
+                model: body!.model,
+                nodeId: paneKey,
+                blockId: args.source.data.blockId as string,
+                pointer: { x: clientX, y: clientY },
+                headerRect: highlightEl.getBoundingClientRect(),
+                ownPane: args.source.data.sourceNodeId === paneKey,
+                hasBody: body!.hasBody(),
+            };
+        };
+        const followPill = (args: PillArgs, force = false) => {
+            const now = performance.now();
+            if (!force && now - lastFollow < 30) return;
+            lastFollow = now;
+            const input = zoneInput(args);
+            zone = pillZone(input);
+            // The header glows where the pill would join, and nowhere else.
+            if (zone.kind === "join") {
+                if (!hover) beginForeignHover();
+            } else if (hover) {
+                endForeignHover();
+            }
+            if (zone.kind === "place") {
+                body!.model.showOverlay._set(true);
+                if (zone.direction !== ghost) {
+                    ghost = zone.direction;
+                    showPillGhost(body!.model, input, zone);
+                }
+            } else if (ghost !== undefined) {
+                ghost = undefined;
+                clearPillGhost(body!.model);
+            }
+        };
+        const endPillFeedback = () => {
+            zone = { kind: "none" };
+            if (!body) return;
+            if (ghost !== undefined) clearPillGhost(body.model);
+            ghost = undefined;
+            body.model.showOverlay._set(false);
+        };
+        onCleanup(endPillFeedback);
         const cleanup = dropTargetForElements({
             element: el,
             canDrop: ({ source }) => {
@@ -470,20 +541,46 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
                 // the pane the grabbed tab came from (gathering into where you started).
                 const many = multiIdsOf(source.data);
                 if (many && props.acceptsForeignTabs) return props.acceptsForeignTabs(many);
+                // A single pill from this very pane can only be placed (it is already a tab here),
+                // which needs another tab to stay behind.
+                if (props.bodyDrop && !many && source.data.sourceNodeId === paneKey) return props.tabs.length >= 2;
                 return source.data.sourceNodeId !== paneKey;
             },
             // A drag that starts inside this pane (gathering tabs into the pane the grabbed one came
             // from) is over this drop zone from the first moment: pragmatic-dnd calls onDragStart for
             // that, not onDragEnter.
-            onDragStart: beginForeignHover,
-            onDragEnter: beginForeignHover,
-            onDragLeave: endForeignHover,
-            onDrop: ({ source }) => {
+            onDragStart: (args) => (singlePill(args) ? followPill(args, true) : beginForeignHover()),
+            onDragEnter: (args) => (singlePill(args) ? followPill(args, true) : beginForeignHover()),
+            onDrag: (args) => {
+                if (singlePill(args)) followPill(args);
+            },
+            onDragLeave: () => {
                 endForeignHover();
+                endPillFeedback();
+            },
+            onDrop: (args) => {
+                const { source } = args;
+                endForeignHover();
+                // Read again where the pointer was released, not where the throttled drag last looked.
+                const dropZone = singlePill(args) ? pillZone(zoneInput(args)) : zone;
+                endPillFeedback();
+                const blockId = source.data.blockId as string | undefined;
+                if (body && blockId && !multiIdsOf(source.data)) {
+                    // Over this pane's header, or the pill's own pane where it cannot be placed.
+                    if (dropZone.kind === "none") return;
+                    if (dropZone.kind === "place") {
+                        setCurrentDragPayload(null);
+                        // Next task, like a join: the move unmounts the dragged pill (see below).
+                        setTimeout(() => {
+                            const landedIn = body.place(blockId, dropZone);
+                            if (landedIn !== false) markLanded(blockId, landedIn);
+                        }, 0);
+                        return;
+                    }
+                }
                 // Handled in-window: the cross-window monitor must not also
                 // tear this tab off on dragend (pane-tab-tearoff.ts).
                 setCurrentDragPayload(null);
-                const blockId = source.data.blockId as string | undefined;
                 if (!blockId) return;
                 const many = multiIdsOf(source.data);
                 // Commit on the next task, after pragmatic-dnd has finished

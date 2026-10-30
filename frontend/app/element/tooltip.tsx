@@ -16,6 +16,7 @@ import { createEffect, createSignal, JSX, onCleanup, Show } from "solid-js";
 import { Portal } from "solid-js/web";
 import type { Properties as CSSProperties } from "csstype";
 import { isPrimaryButtonDown, onPrimaryButtonRelease } from "@/app/util/pointer-drag-state";
+import { claimOpen, forgetOpen, HIDE_DELAY_MS, releaseOpen, SHOW_DELAY_MS, isWarm, type OpenTip } from "./tooltip-timing";
 
 interface TooltipProps {
     children?: JSX.Element;
@@ -42,26 +43,13 @@ interface TooltipProps {
     immediate?: boolean;
 }
 
-/** Hovers are near-instant (operator, 2026-10-29): a short rest before the first tooltip shows. */
-const SHOW_DELAY_MS = 40;
-/** How long a tooltip lingers after the pointer leaves, so crossing a gap between items does not flicker. */
-const HIDE_DELAY_MS = 100;
-/** After one tooltip closes, the next one within this time shows at once. */
-const WARM_MS = 400;
-
-let lastClosedAt = Number.NEGATIVE_INFINITY;
-/** The one default-mode tooltip that is open; opening another closes it at once. */
-let openTooltip: { close: () => void } | null = null;
-
 function TooltipInner(props: TooltipProps): JSX.Element {
     // Portal-mounted: drop its pane hole while its window tab is hidden (pane-overlay.ts).
     const hiddenTab = useHiddenTabMarker();
     const placement: Placement = props.placement ?? "top";
     const forceOpen = () => props.forceOpen ?? false;
     const immediate = () => props.immediate ?? false;
-    // Warm: another tooltip is open or has just closed, so the pointer is moving along a row of them.
-    const warm = () => (openTooltip !== null && openTooltip !== self) || performance.now() - lastClosedAt < WARM_MS;
-    const showDelayMs = () => (immediate() ? 0 : (props.delayMs ?? (warm() ? 0 : SHOW_DELAY_MS)));
+    const showDelayMs = () => (immediate() ? 0 : (props.delayMs ?? (isWarm(self) ? 0 : SHOW_DELAY_MS)));
     const hideDelayMs = () => (immediate() ? 0 : (props.delayMs ?? HIDE_DELAY_MS));
 
     const [isOpen, setIsOpen] = createSignal(forceOpen());
@@ -83,18 +71,14 @@ function TooltipInner(props: TooltipProps): JSX.Element {
     };
 
     // Closes this tooltip now, without the lingering grace.
-    const self = {
+    const self: OpenTip = {
         close: () => {
             clearTimeouts();
-            markClosed();
+            releaseOpen(self);
             setIsOpen(false);
             setIsVisible(false);
             setIsPositioned(false);
         },
-    };
-    const markClosed = () => {
-        lastClosedAt = performance.now();
-        if (openTooltip === self) openTooltip = null;
     };
 
     const updatePosition = async () => {
@@ -140,8 +124,10 @@ function TooltipInner(props: TooltipProps): JSX.Element {
     // stuck open indefinitely whenever mouseleave fired mid-drag but the
     // button was released elsewhere, since no further mouseenter/
     // mouseleave would ever fire for an anchor the cursor had already left.
+    // Hover is tracked even while `forceOpen` holds the tooltip open, so the pointer state is true when
+    // the hold ends (a chip pinned by focus that the pointer has since left must close on blur).
     const handleMouseEnter = () => {
-        if (forceOpen() || isPrimaryButtonDown()) return;
+        if (isPrimaryButtonDown()) return;
         setIsHovering(true);
     };
 
@@ -158,7 +144,6 @@ function TooltipInner(props: TooltipProps): JSX.Element {
     );
 
     const handleMouseLeave = () => {
-        if (forceOpen()) return;
         setIsHovering(false);
     };
 
@@ -184,13 +169,12 @@ function TooltipInner(props: TooltipProps): JSX.Element {
             setIsOpen(false);
             setIsVisible(false);
             setIsPositioned(false);
-            markClosed();
+            releaseOpen(self);
         } else if (forceOpen()) {
             setIsOpen(true);
             setIsVisible(true);
         } else if (isHovering()) {
-            if (openTooltip && openTooltip !== self) openTooltip.close();
-            if (!immediate()) openTooltip = self;
+            claimOpen(self, !immediate());
             setIsOpen(true);
             const delay = showDelayMs();
             if (immediate() || delay === 0) setIsVisible(true);
@@ -201,8 +185,9 @@ function TooltipInner(props: TooltipProps): JSX.Element {
                 // Gone the moment the pointer leaves: no grace period, no fade.
                 setIsOpen(false);
                 setIsPositioned(false);
+                forgetOpen(self);
             } else {
-                hideTimeout = setTimeout(() => { setIsOpen(false); setIsPositioned(false); markClosed(); }, hideDelayMs());
+                hideTimeout = setTimeout(() => { setIsOpen(false); setIsPositioned(false); releaseOpen(self); }, hideDelayMs());
             }
         }
     });
@@ -210,7 +195,7 @@ function TooltipInner(props: TooltipProps): JSX.Element {
     onCleanup(() => {
         clearTimeouts();
         cleanupAutoUpdate?.();
-        if (openTooltip === self) openTooltip = null;
+        forgetOpen(self);
     });
 
     return (

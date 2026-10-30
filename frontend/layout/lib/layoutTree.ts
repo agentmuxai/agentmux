@@ -252,9 +252,11 @@ export function computeMoveNode(layoutState: LayoutTreeState, computeInsertActio
     // redock, which splits the target pane and can't split a chip (it minimizes the pane after
     // placing it instead), so it is offered the targets an expanded pane gets.
     const movedAs = isForeignNode ? { ...nodeToMove, minimized: undefined } : nodeToMove;
-    if (newMoveOperation && moveIsLockedByMinimize(movedAs, findNode(rootNode, newMoveOperation.parentId))) return;
+    // No place to put it (a split beside a lone pane whose root still points the other way, say).
+    if (!newMoveOperation) return;
+    if (moveIsLockedByMinimize(movedAs, findNode(rootNode, newMoveOperation.parentId))) return;
     if (
-        newMoveOperation?.parentId !== nodeToMoveParent()?.id ||
+        newMoveOperation.parentId !== nodeToMoveParent()?.id ||
         (newMoveOperation.index !== nodeToMoveIndexInParent() &&
             newMoveOperation.index !== nodeToMoveIndexInParent() + 1)
     )

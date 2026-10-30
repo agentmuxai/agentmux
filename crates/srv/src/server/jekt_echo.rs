@@ -161,6 +161,7 @@ pub(super) fn echo_jekt_to_sender_with_files(
         priority,
         None,
         files,
+        false,
     );
     let line = serde_json::json!({
         "type": "user",

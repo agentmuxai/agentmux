@@ -31,8 +31,7 @@ import {
     LayoutTreeActionType,
     LayoutTreeComputeMoveNodeAction,
 } from "./types";
-import { chipOverChipDirection } from "./chipPlaceholder";
-import { determineDropDirection } from "./utils";
+import { previewPlacement } from "./placementPreview";
 import {
     clampCrossTabDirection,
     noteCrossTabDrop,
@@ -297,27 +296,15 @@ export const OverlayNodeWrapper = (props: OverlayNodeWrapperProps) => {
         };
 
         const crossTab = isCrossTabDrag(props.layoutModel);
-        const rawDirection =
-            (crossTab
-                ? undefined
-                : chipOverChipDirection(
-                      props.layoutModel.treeState.rootNode,
-                      bestLeafId,
-                      dragNodeId,
-                      bestRect,
-                      clampedOffset
-                  )) ?? determineDropDirection(bestRect, clampedOffset);
-        // Cross-tab Outer* clamp — see clampCrossTabDirection.
-        const direction = crossTab ? clampCrossTabDirection(rawDirection) : rawDirection;
-        const compute = {
-            type: LayoutTreeActionType.ComputeMove,
-            nodeId: bestLeafId,
-            nodeToMoveId: dragNodeId,
-            direction,
-            // Cross-tab: see OverlayNode.computeDropDirection — preview only.
-            nodeToMove: crossTab ? dragState.node : undefined,
-        } as LayoutTreeComputeMoveNodeAction;
-        props.layoutModel.treeReducer(compute);
+        // Cross-tab: the dragged node isn't in this tree, so it rides on the action (preview only);
+        // see OverlayNode.computeDropDirection.
+        const { direction, compute } = previewPlacement(props.layoutModel, {
+            targetId: bestLeafId,
+            rect: bestRect,
+            offset: clampedOffset,
+            draggedId: dragNodeId,
+            foreignNode: crossTab ? (dragState.node ?? undefined) : undefined,
+        });
         if (crossTab) {
             const blockId = dragState.node?.data?.blockId;
             const sourceTabId = dragState.layoutModel?.tabAtom()?.oid;
@@ -414,31 +401,17 @@ const OverlayNode = (props: OverlayNodeProps) => {
         if (props.layoutModel.displayContainerRef?.current && additionalProps()?.rect) {
             const containerRect = props.layoutModel.displayContainerRef.current.getBoundingClientRect();
             const offset = { x: clientX - containerRect.x, y: clientY - containerRect.y };
-            const rawDirection =
-                (crossTab
-                    ? undefined
-                    : chipOverChipDirection(
-                          props.layoutModel.treeState.rootNode,
-                          props.node.id,
-                          dragNodeId,
-                          additionalProps().rect,
-                          offset
-                      )) ?? determineDropDirection(additionalProps().rect, offset);
-            // Cross-tab: Outer* directions are clamped to their inner
-            // equivalents so the ghost matches the committed split — see
-            // clampCrossTabDirection in crossTabDrag.ts.
-            const direction = crossTab ? clampCrossTabDirection(rawDirection) : rawDirection;
-            const compute = {
-                type: LayoutTreeActionType.ComputeMove,
-                nodeId: props.node.id,
-                nodeToMoveId: dragNodeId,
-                direction,
-                // Cross-tab: the dragged node isn't in this tree; pass it so
-                // the ghost placeholder can still be computed (preview only —
-                // the drop below routes to redockDraggedPane, never a local commit).
-                nodeToMove: crossTab ? dragState.node : undefined,
-            } as LayoutTreeComputeMoveNodeAction;
-            props.layoutModel.treeReducer(compute);
+            // Cross-tab: the dragged node isn't in this tree, so it rides on the action (the ghost
+            // can still be computed; the drop below routes to redockDraggedPane, never a local commit),
+            // and Outer* is clamped to its inner equivalent so the ghost matches the committed split
+            // (clampCrossTabDirection in crossTabDrag.ts).
+            const { direction, compute } = previewPlacement(props.layoutModel, {
+                targetId: props.node.id,
+                rect: additionalProps().rect,
+                offset,
+                draggedId: dragNodeId,
+                foreignNode: crossTab ? (dragState.node ?? undefined) : undefined,
+            });
             // Capture the cross-tab drop record NOW (globals are alive during
             // onDrag) — drop handlers must not read the drag globals, since
             // the source draggable's own onDrop may null them first.

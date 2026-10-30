@@ -14,6 +14,8 @@ import {
     deadFallbacks,
     declarations,
     handFocusRings,
+    handRolledTags,
+    nativeTitleAttributes,
     parseCatFileBatch,
     pickBase,
     rawDurations,
@@ -366,5 +368,102 @@ describe("pickBase", () => {
 
     it("has nothing to compare against for a root commit", () => {
         expect(pickBase("head", "head", null)).toBeNull();
+    });
+});
+
+describe("rule 13: hand-drawn tags", () => {
+    const box = "padding: 0 8px; font-size: var(--text-xs); border-radius: var(--radius-full);";
+    const nl = "\n";
+
+    it("counts a rule named like a tag that gives itself a box", () => {
+        const scss = `.card-badge { ${box} } .row-chip { ${box} } .x-tag { ${box} } .a-pill { ${box} } .install-ribbon { ${box} }`;
+        expect(handRolledTags(scss)).toEqual([".card-badge", ".row-chip", ".x-tag", ".a-pill", ".install-ribbon"]);
+    });
+
+    it("takes a background as the box, and padding-inline as padding", () => {
+        expect(handRolledTags(".n-badge { padding-inline: 4px; font-size: 10px; background: var(--tint-2); }")).toEqual([".n-badge"]);
+        expect(handRolledTags(".n-badge { padding: 4px; font-size: 10px; background-color: var(--tint-2); }")).toEqual([".n-badge"]);
+    });
+
+    it("adds up a rule written in two blocks, and resolves nesting", () => {
+        const scss = ".list { .x-chip { padding: 0 4px; } .x-chip { font-size: 10px; border-radius: 0; } }";
+        expect(handRolledTags(scss)).toEqual([".list .x-chip"]);
+    });
+
+    it("leaves out a rule that is only a colour or a position, a modifier, a state and a class not named like a tag", () => {
+        expect(handRolledTags(".a-badge { color: red; position: absolute; }")).toEqual([]);
+        expect(handRolledTags(`.a-badge--active { ${box} }`)).toEqual([]);
+        expect(handRolledTags(`.a-badge:hover { ${box} }`)).toEqual([]);
+        expect(handRolledTags(`.badges-row { ${box} }`)).toEqual([]);
+        expect(handRolledTags(`.attachment { ${box} }`)).toEqual([]);
+    });
+
+    it("does not count a mixin's body, or a rule marked // tag: fixed (above it, on it or inside it)", () => {
+        expect(handRolledTags(`@mixin m { .a-chip { ${box} } }`)).toEqual([]);
+        expect(handRolledTags(`// tag: fixed - a toggle, not a tag${nl}.a-chip { ${box} }`)).toEqual([]);
+        expect(handRolledTags(`.a-chip { // tag: fixed${nl}${box} }`)).toEqual([]);
+        expect(handRolledTags(`.a-chip {${nl}padding: 0 4px;${nl}// tag: fixed${nl}font-size: 10px; border-radius: 0; }`)).toEqual([]);
+        expect(handRolledTags(`// tag: fixed${nl}.a-chip { ${box} }${nl}${nl}${nl}${nl}.b-chip { ${box} }`)).toEqual([".b-chip"]);
+    });
+
+    it("collect counts them per file outside element/ui, and not in the kit itself", () => {
+        const files = [
+            { path: "frontend/app/view/x/x.scss", source: `.x-badge { ${box} } .y-tag { ${box} }` },
+            { path: "frontend/app/element/ui/tag.scss", source: `.ui-tag { ${box} }` },
+        ];
+        expect(collect(files).tags).toEqual({ "frontend/app/view/x/x.scss": 2 });
+    });
+
+    it("compare fails a file whose count grows", () => {
+        const { grew } = compare({ tags: { "a.scss": 3 } }, { tags: { "a.scss": 2 } });
+        expect(grew).toEqual(["tags: a.scss has 3, base 2"]);
+    });
+});
+
+describe("rule 14: native title= labels", () => {
+    const lines = (src) => nativeTitleAttributes(src);
+
+    it("counts a title on a lowercase element, with its line", () => {
+        const src = 'const a = <button title="Close" onClick={f}>x</button>;\nconst b = (\n    <span\n        class="k"\n        title={label()}\n    />\n);';
+        expect(lines(src)).toEqual([1, 5]);
+    });
+
+    it("does not count a title prop on a component, or the word title elsewhere", () => {
+        const src = '<Modal title="Settings" /><Pill title="x" /><div class="title" data-title="x">{props.title}</div>';
+        expect(lines(src)).toEqual([]);
+    });
+
+    it("skips option, optgroup, iframe and an element marked data-native-title", () => {
+        const src = '<option title="a"/><optgroup title="b"/><iframe title="c"/><span data-native-title title="d"/>';
+        expect(lines(src)).toEqual([]);
+    });
+
+    it("is not thrown off by braces, arrows and strings inside other attributes", () => {
+        const src =
+            '<button onClick={() => { if (a > b) go({ x: "}" }); }} class={`a ${b ? "c" : "d"}`} title="Go">x</button>' +
+            "<div title='single' />";
+        expect(lines(src)).toEqual([1, 1]);
+    });
+
+    it("does not take a generic or a comparison for a tag", () => {
+        const src = 'const m = new Map<string, number>(); const [a] = createSignal<string>("x"); const t = a<b ? 1 : 2; foo(title="x")';
+        expect(lines(src)).toEqual([]);
+    });
+
+    it("ignores titles in comments", () => {
+        expect(lines('// <span title="x" />\n/* <div title="y"/> */')).toEqual([]);
+    });
+
+    it("is counted per file outside element/ui and tests, and compared like the others", () => {
+        const files = [
+            { path: "frontend/app/view/x/x.tsx", source: '<button title="a"/><span title="b"/>' },
+            { path: "frontend/app/element/ui/IconButton.tsx", source: '<button title="kit"/>' },
+            { path: "frontend/app/view/x/x.test.tsx", source: '<button title="test"/>' },
+        ];
+        const now = collect(files);
+        expect(now.nativeTitles).toEqual({ "frontend/app/view/x/x.tsx": 2 });
+        const before = collect([{ path: "frontend/app/view/x/x.tsx", source: '<button title="a"/>' }]);
+        expect(compare(now, before).grew).toEqual(["nativeTitles: frontend/app/view/x/x.tsx has 2, base 1"]);
+        expect(compare(before, now).shrank).toEqual(["nativeTitles: frontend/app/view/x/x.tsx has 1, base 2"]);
     });
 });

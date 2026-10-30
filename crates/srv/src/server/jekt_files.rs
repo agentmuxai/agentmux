@@ -429,6 +429,7 @@ async fn receive<R: tokio::io::AsyncRead + Unpin>(
     if tier == "lan" && withheld {
         return refused(&req, format!("files refused: {}", withheld_reason(&req).unwrap_or_default()));
     }
+    super::jekt_ack::remember_arrival(&state.mstore, &req);
     let msgid = req.request_id.clone().unwrap_or_default();
     let claimed = tier == "lan" && !withheld;
     if claimed && !reserve(&msgid) {

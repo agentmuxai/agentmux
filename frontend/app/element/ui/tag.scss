@@ -1,0 +1,206 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Tag, TagList, FilterChip (Tag.tsx). A tag is `Pill`'s tones with an opaque wash and the full
+// tone colour as its line. The percentages here are the ones in tag-tokens.ts (a test,
+// tag-contrast.test.ts, pins the two together and measures every bundled theme). Colour never
+// carries the status alone: the words and the icon do too.
+// docs/specs/SPEC_UI_PANEL_PRIMITIVE_2026_10_29.md §9.
+
+@use "../../mixins.scss";
+
+.ui-tag {
+    // The tag sits on a card or a row; a ribbon or a count covers the card's text, so the wash
+    // is mixed with a solid surface rather than left see-through.
+    --tag-surface: var(--modal-bg-color);
+    --tag-fill-pct: 14%;
+    --tag-tone: var(--accent-color);
+    --tag-edge: var(--accent-edge);
+
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    box-sizing: border-box;
+    max-width: 100%;
+    padding: 0 var(--space-2);
+    border: 1px solid var(--tag-edge);
+    border-radius: var(--radius-full);
+    background: color-mix(in srgb, var(--tag-tone) var(--tag-fill-pct), var(--tag-surface));
+    color: var(--main-text-color);
+    font-weight: 500;
+    line-height: var(--leading-tight);
+    white-space: nowrap;
+
+    > i {
+        color: var(--tag-tone);
+    }
+
+    // ── Tones ────────────────────────────────────────────────────────────────
+    &--neutral {
+        --tag-fill-pct: 10%;
+        --tag-tone: var(--secondary-text-color);
+        --tag-edge: color-mix(in srgb, var(--secondary-text-color) 80%, var(--tag-surface));
+    }
+
+    &--ok {
+        --tag-tone: var(--success-color);
+        --tag-edge: var(--success-edge);
+    }
+
+    &--warn {
+        --tag-tone: var(--warning-color);
+        --tag-edge: var(--warning-edge);
+    }
+
+    &--error {
+        --tag-tone: var(--error-color);
+        --tag-edge: var(--error-edge);
+    }
+
+    &--accent {
+        --tag-tone: var(--accent-color);
+        --tag-edge: var(--accent-edge);
+    }
+
+    // ── Sizes ────────────────────────────────────────────────────────────────
+    &--sm {
+        font-size: var(--text-xs);
+    }
+
+    &--xs {
+        font-size: var(--text-2xs);
+        padding: 0 var(--space-1-5);
+    }
+
+    // ── Kinds ────────────────────────────────────────────────────────────────
+    // A ribbon says what a click on the card will do; a count is a number. Both sit on a corner of
+    // their card (a positioned ancestor), square, so they read as part of the card's edge.
+    &--ribbon,
+    &--count {
+        position: absolute;
+        border-radius: var(--radius-sm);
+        pointer-events: none;
+    }
+
+    &--count {
+        min-width: 1.5em;
+        justify-content: center;
+    }
+
+    &--top-right {
+        top: 0;
+        right: 0;
+    }
+
+    &--bottom-right {
+        bottom: 0;
+        right: 0;
+    }
+
+    &--top-left {
+        top: 0;
+        left: 0;
+    }
+
+    &--bottom-left {
+        bottom: 0;
+        left: 0;
+    }
+}
+
+// ── A chip with a detail ──────────────────────────────────────────────────────
+.ui-tag-anchor {
+    display: inline-flex;
+    max-width: 100%;
+}
+
+.ui-tag[tabindex] {
+    cursor: help;
+
+    &:focus-visible {
+        @include mixins.focus-ring;
+    }
+}
+
+// The detail is also in the page as hidden text, so a screen reader finds it by `aria-describedby`.
+.ui-tag-sr {
+    @include mixins.sr-only;
+}
+
+.ui-tag-detail {
+    max-width: var(--panel-w-sm);
+    white-space: normal;
+    text-align: left;
+}
+
+// ── TagList ───────────────────────────────────────────────────────────────────
+.ui-tag-list {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-1);
+    min-width: 0;
+}
+
+.ui-tag-more {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+// ── FilterChip ────────────────────────────────────────────────────────────────
+.ui-filter-chips {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-1);
+}
+
+// A toggle: quiet at rest (the neutral line and no wash), the tone's line and wash while on.
+.ui-filter-chip {
+    // Not `button-reset`: it clears the border, fill and padding `.ui-tag` paints, at the same specificity and later.
+    appearance: none;
+    font: inherit;
+    @include mixins.control-transition;
+    --tag-fill-pct: 0%;
+    --tag-edge: color-mix(in srgb, var(--secondary-text-color) 80%, var(--tag-surface));
+    // The line a chip takes on hover and while on: the tone's edge token, never its raw colour,
+    // so it holds 3:1 in every theme (tag-contrast.test.ts).
+    --tag-edge-on: var(--accent-edge);
+    cursor: pointer;
+
+    &.ui-tag--ok {
+        --tag-edge-on: var(--success-edge);
+    }
+
+    &.ui-tag--warn {
+        --tag-edge-on: var(--warning-edge);
+    }
+
+    &.ui-tag--error {
+        --tag-edge-on: var(--error-edge);
+    }
+
+    &:hover:not(:disabled),
+    &[aria-pressed="true"] {
+        --tag-edge: var(--tag-edge-on);
+    }
+
+    &[aria-pressed="true"] {
+        --tag-fill-pct: 14%;
+    }
+
+    &:focus-visible {
+        @include mixins.focus-ring;
+    }
+
+    &:disabled {
+        opacity: 0.4;
+        cursor: var(--cursor-disabled);
+    }
+}
+
+.ui-filter-chip-count {
+    color: var(--secondary-text-color);
+    font-variant-numeric: tabular-nums;
+}

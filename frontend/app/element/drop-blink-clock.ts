@@ -42,6 +42,24 @@
  *  the same frame as the one it enters. */
 export const EXEMPT_AREA_PX2 = (341 * 256) / 4 / 2;
 
+/** The pane header's edge glow: a strip is `min(EDGE_STRIP_SHARE of the header's width, EDGE_STRIP_PX)`,
+ *  at the header's own zoom, and the header is `HEADER_PX` tall at zoom 1. Must equal
+ *  `$drop-edge-strip-px` and `$drop-edge-strip-share` in drop-feedback.scss and `--header-height`
+ *  (theme.scss); a test checks the first two. */
+export const EDGE_STRIP_PX = 40;
+export const EDGE_STRIP_SHARE = 0.25;
+export const HEADER_PX = 33;
+
+/**
+ * The area (CSS px²) that flashes when a pane header's edge glow blinks: its two strips, not the
+ * header. `width` and `height` are the header's rendered size, which carries its zoom, so the
+ * strip's 40 px scale with `height / HEADER_PX`.
+ */
+export function edgeFlashArea(width: number, height: number): number {
+    const strip = Math.min(width * EDGE_STRIP_SHARE, EDGE_STRIP_PX * (height / HEADER_PX));
+    return 2 * strip * height;
+}
+
 /** Blinks in a burst. Must equal `$drop-blink-count` in drop-feedback.scss (a test checks). */
 export const BLINK_COUNT = 2;
 

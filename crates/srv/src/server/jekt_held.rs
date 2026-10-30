@@ -264,6 +264,8 @@ pub(crate) fn request_from_held(row: &HeldJekt) -> InjectionRequest {
     req.transcript_request_escalate_forced = row.transcript_request_escalate_forced;
     req.audit_source_uid = row.audit_source_uid.clone();
     req.held_sent_at_ms = Some(row.sent_at_ms);
+    // The row has no `reply` column; srv remembers an hour of `reply: none` ids, which covers most holds.
+    req.reply = crate::backend::ack_policy::asked_for_no_reply(&row.request_id).then(|| "none".to_string());
     req.files = (!row.files_json.is_empty())
         .then(|| serde_json::from_str(&row.files_json).ok())
         .flatten();

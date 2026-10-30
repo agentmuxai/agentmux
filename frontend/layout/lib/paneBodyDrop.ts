@@ -1,0 +1,140 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * A single tab pill dragged over another pane (or its own, when it has two tabs or more): the
+ * header and the middle of the body join the pill to that pane's tabs; the rest of the body is a
+ * drop zone for a new pane next to it, shown with the standard placement ghost, exactly as when a
+ * whole pane is dragged. The zone is a pure function of the pointer; the strip's drop target feeds
+ * it and turns the result into feedback (`PaneTabStrip`), and the drop into `splitOutStackMember`.
+ * docs/specs/SPEC_PANE_TAB_DRAG_BODY_PLACEMENT_AND_EDGE_GLOW_2026_10_29.md §3.1, §3.2.
+ */
+
+import { findNodeByBlockId } from "./layoutNode";
+import { getNodeRectById } from "./layoutNodeModels";
+import { effectiveStack, splitOutStackMember } from "./layoutStack";
+import { computeMoveNode } from "./layoutTree";
+import type { LayoutModel } from "./layoutModel";
+import { placementDirection, showPlacement, sideOfDirection, type PlacementSide } from "./placementPreview";
+import {
+    DropDirection,
+    FlexDirection,
+    LayoutTreeActionType,
+    type LayoutNode,
+    type LayoutTreeComputeMoveNodeAction,
+} from "./types";
+
+export type PillZone =
+    /** Nothing here takes the pill (a pane's own header, or its own middle). */
+    | { kind: "none" }
+    /** The pill joins this pane's tabs. */
+    | { kind: "join" }
+    /** The pill becomes its own pane on `side` of this one, shown by the ghost for `direction`. */
+    | { kind: "place"; direction: DropDirection; side: PlacementSide };
+
+/** The stand-in for a pill in a preview: a leaf that is in no tree, as a pane from another tab is. */
+export function pillStandIn(blockId: string): LayoutNode {
+    return { id: `pill:${blockId}`, data: { blockId } } as LayoutNode;
+}
+
+export interface PillZoneInput {
+    model: LayoutModel;
+    /** The hovered pane. */
+    nodeId: string;
+    /** The dragged pill's block. */
+    blockId: string;
+    /** The pointer, in client coordinates. */
+    pointer: { x: number; y: number };
+    /** The hovered pane's header row, in client coordinates. */
+    headerRect?: { left: number; top: number; right: number; bottom: number };
+    /** The pill came from this pane: it can only be placed, never joined to where it already is. */
+    ownPane: boolean;
+    /** A header-only pane (minimized, collapsed) has no body to place against. */
+    hasBody: boolean;
+}
+
+const inside = (p: { x: number; y: number }, r: NonNullable<PillZoneInput["headerRect"]>): boolean =>
+    p.x >= r.left && p.x <= r.right && p.y >= r.top && p.y <= r.bottom;
+
+/** What the pill would do if released at the pointer. */
+export function pillZone(input: PillZoneInput): PillZone {
+    const join: PillZone = input.ownPane ? { kind: "none" } : { kind: "join" };
+    if (input.headerRect && inside(input.pointer, input.headerRect)) return join;
+    if (!input.hasBody) return join;
+    const container = input.model.displayContainerRef?.current;
+    const rect = getNodeRectById(input.model, input.nodeId);
+    if (!container || !rect) return join;
+    const box = container.getBoundingClientRect();
+    const direction = placementDirection(input.model, {
+        targetId: input.nodeId,
+        rect,
+        offset: { x: input.pointer.x - box.x, y: input.pointer.y - box.y },
+        draggedId: pillStandIn(input.blockId).id,
+        foreignNode: pillStandIn(input.blockId),
+    });
+    const side = sideOfDirection(direction);
+    if (direction === undefined || !side) return join;
+    return { kind: "place", direction, side };
+}
+
+/**
+ * A lone pane at the root has no layout axis, but it keeps the one its tree had before the others
+ * closed. The ghost for a split beside it is drawn along that axis, so point it the way the split goes.
+ */
+function alignLoneRoot(model: LayoutModel, nodeId: string, side: PlacementSide | undefined): void {
+    const root = model.treeState.rootNode;
+    if (!side || root?.id !== nodeId || root.children?.length) return;
+    root.flexDirection = side === "left" || side === "right" ? FlexDirection.Row : FlexDirection.Column;
+}
+
+/** The same direction held again is not a new ghost: the caller keeps the last one it showed. */
+export function showPillGhost(model: LayoutModel, input: PillZoneInput, zone: Extract<PillZone, { kind: "place" }>): void {
+    const stand = pillStandIn(input.blockId);
+    const container = model.displayContainerRef?.current;
+    const rect = getNodeRectById(model, input.nodeId);
+    if (!container || !rect) return;
+    const box = container.getBoundingClientRect();
+    alignLoneRoot(model, input.nodeId, zone.side);
+    showPlacement(
+        model,
+        {
+            targetId: input.nodeId,
+            rect,
+            offset: { x: input.pointer.x - box.x, y: input.pointer.y - box.y },
+            draggedId: stand.id,
+            foreignNode: stand,
+        },
+        zone.direction
+    );
+}
+
+/**
+ * Drop the pill on a `place` zone. A tab with others behind it leaves its stack for a new pane
+ * (`splitOutStackMember`); a pane's only tab has nothing to leave, so the pane itself moves next
+ * to the hovered one, as when it is dragged by its header. Returns the key of the pane the tab
+ * is in afterwards, or false when nothing could be done.
+ */
+export function placePill(model: LayoutModel, blockId: string, targetNodeId: string, zone: Extract<PillZone, { kind: "place" }>): string | false {
+    const root = model.treeState.rootNode;
+    const source = root && findNodeByBlockId(root, blockId);
+    if (!root || !source?.data || source.id === targetNodeId && effectiveStack(source.data).length <= 1) return false;
+    if (effectiveStack(source.data).length > 1) {
+        if (!splitOutStackMember(model, blockId, { targetNodeId, side: zone.side })) return false;
+    } else {
+        const move = computeMoveNode(model.treeState, {
+            type: LayoutTreeActionType.ComputeMove,
+            nodeId: targetNodeId,
+            nodeToMoveId: source.id,
+            direction: zone.direction,
+        } as LayoutTreeComputeMoveNodeAction);
+        if (!move) return false;
+        model.treeReducer(move);
+    }
+    const after = model.treeState.rootNode;
+    return (after && findNodeByBlockId(after, blockId)?.id) || false;
+}
+
+/** Take the ghost down. */
+export function clearPillGhost(model: LayoutModel): void {
+    model.treeReducer({ type: LayoutTreeActionType.ClearPendingAction });
+}
