@@ -346,19 +346,4 @@
         visibility: hidden;
         opacity: 0;
     }
-
-    // Room left by content that got shorter (or a taller viewport) while
-    // following, filled by the next content. Its height is set by
-    // one-way-flow.ts; display:none at 0 so it adds no flex gap, and the
-    // negative margin cancels the gap it adds when shown. R3.
-    .agent-document-bottom-spacer {
-        flex: none;
-        margin-top: -4px;
-        pointer-events: none;
-        overflow-anchor: none;
-
-        &:not([style*="height"]) {
-            display: none;
-        }
-    }
 }

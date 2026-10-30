@@ -606,6 +606,7 @@ partial list.
 | [`SPEC_AGENT_OPEN_FIRST_SCREEN_THEN_REST_2026_10_19`](SPEC_AGENT_OPEN_FIRST_SCREEN_THEN_REST_2026_10_19.md) | Spec: opening an agent shows its first screen at once, and loads the rest afterwards |
 | [`SPEC_AGENT_OVERLAP_AWARENESS_2026_10_10`](SPEC_AGENT_OVERLAP_AWARENESS_2026_10_10.md) | SPEC: agents can see who else is working on the same thing |
 | [`SPEC_AGENT_PANE_BASH_HIGHLIGHTING_2026_10_04`](SPEC_AGENT_PANE_BASH_HIGHLIGHTING_2026_10_04.md) | SPEC: Robust highlighting for Bash tool panels in the agent pane |
+| [`SPEC_AGENT_PANE_BOTTOM_TIGHT_INVARIANT_2026_10_29`](SPEC_AGENT_PANE_BOTTOM_TIGHT_INVARIANT_2026_10_29.md) | Agent pane: the latest message stays tight against the bottom edge, always |
 | [`SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23`](SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md) | SPEC: Agent pane bounded live window — migration plan |
 | [`SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18`](SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md) | SPEC: Closing a pane shuts down every agent in it — gracefully, in order |
 | [`SPEC_AGENT_PANE_FILE_ATTACHMENTS_2026_09_26`](SPEC_AGENT_PANE_FILE_ATTACHMENTS_2026_09_26.md) | SPEC: Attach any file in the agent composer (PDF, Office, text, code, …) |
