@@ -4,19 +4,17 @@
 /**
  * New profile: a name and a colour, then a tab in the new profile opens in
  * the pane it was asked from (docs/specs/SPEC_BROWSER_PANE_PROFILES_MENU_2026_10_09.md §3).
+ * Rendered inside the browser pane, so it locks that pane only.
  */
 
 import { createSignal, For, Show, type JSX } from "solid-js";
 import clsx from "clsx";
 import { Button, Field, TextInput } from "@/app/element/ui";
 import { Modal, ModalBody, ModalFooter, ModalHeader } from "@/element/modal";
-import type { ModalCloseProps } from "@/app/store/modalmodel";
 import { browserProfiles, createBrowserProfile, PROFILE_COLORS } from "./browser-profiles";
 import type { BrowserProfile } from "@/types/rpc/BrowserProfile";
 
-export function NewProfileModal(
-    props: { onCreated: (profile: BrowserProfile) => void } & ModalCloseProps
-): JSX.Element {
+export function NewProfileModal(props: { onCreated: (profile: BrowserProfile) => void; close: () => void }): JSX.Element {
     const [name, setName] = createSignal("");
     // The next colour in turn, as srv would pick, so most people never choose.
     const [color, setColor] = createSignal(PROFILE_COLORS[browserProfiles().length % PROFILE_COLORS.length]);
@@ -39,7 +37,7 @@ export function NewProfileModal(
     };
 
     return (
-        <Modal open={true} onClose={props.close} size="sm" ariaLabel="New browser profile">
+        <Modal open={true} scope="pane" onClose={props.close} size="sm" ariaLabel="New browser profile">
             <ModalHeader title="New profile" />
             <ModalBody>
                 <div class="browser-new-profile">

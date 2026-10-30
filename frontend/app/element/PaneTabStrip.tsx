@@ -335,13 +335,17 @@ export interface PaneTabStripProps<T> {
      *  Called one task AFTER the drop, not inside it (see the drop handler).
      *  Return `false` when the move was refused (same contract as
      *  `onReorder`). */
-    onReceiveForeignTab?: (blockId: string) => boolean | void;
+    onReceiveForeignTab?: (blockId: string, opts?: { keepSeparate?: boolean }) => boolean | void;
     /** Several tabs dragged together (Ctrl/Cmd+click selection) dropped on this pane:
      *  `blockIds` is the whole drag, `grabbed` the pill the pointer held. Returns the
      *  blocks that moved (they bounce), or `false` when nothing could be moved. Called
      *  one task after the drop, like `onReceiveForeignTab`.
      *  SPEC_PANE_TAB_MULTI_SELECT_MOVE_AND_COLLAPSED_EXPAND_2026_10_24.md §4.3. */
-    onReceiveForeignTabs?: (blockIds: readonly string[], grabbed: string) => readonly string[] | false;
+    onReceiveForeignTabs?: (
+        blockIds: readonly string[],
+        grabbed: string,
+        opts?: { keepSeparate?: boolean }
+    ) => readonly string[] | false;
     /** Whether this pane would take a multi-tab drag: true when at least one of
      *  `blockIds` is not already in it. Without it a multi-tab drag is accepted only
      *  from another pane, as a single tab is. */
@@ -595,17 +599,21 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
                 // catalogs; one task of delay costs nothing visible.
                 // The hover styling above clears synchronously.
                 // SPEC_PANE_TAB_DRAG_LANDING_FLASH_AND_LAST_TAB_CLOSE_2026_09_24.md §4.2.
+                // Alt held on the drop keeps two document panes as two pane tabs (the layout merges them
+                // otherwise). Passed only when held, so a plain drop is the call it always was.
+                const keepSeparate = args.location?.current?.input?.altKey === true;
                 if (many && props.onReceiveForeignTabs) {
                     const receiveMany = props.onReceiveForeignTabs;
                     setTimeout(() => {
-                        const moved = receiveMany(many, blockId);
+                        const moved = keepSeparate ? receiveMany(many, blockId, { keepSeparate }) : receiveMany(many, blockId);
                         if (moved !== false) markLanded(moved, paneKey);
                     }, 0);
                     return;
                 }
                 const receive = props.onReceiveForeignTab!;
                 setTimeout(() => {
-                    if (receive(blockId) !== false) markLanded(blockId, paneKey);
+                    const moved = keepSeparate ? receive(blockId, { keepSeparate }) : receive(blockId);
+                    if (moved !== false) markLanded(blockId, paneKey);
                 }, 0);
             },
         });
