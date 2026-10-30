@@ -35,9 +35,27 @@ describe("findMinimizeMergeTarget", () => {
         expect(targetOf(split(FlexDirection.Row, a, b, c), b)).toBe("a");
     });
 
-    it("does not reach past an expanded pane", () => {
+    it("does not reach past an expanded pane in a Column, where chips lie along the column", () => {
         const [a, x, b, y, c] = [leaf("a", true), leaf("x"), leaf("b"), leaf("y"), leaf("c", true)];
-        expect(targetOf(split(FlexDirection.Row, a, x, b, y, c), b)).toBeUndefined();
+        expect(targetOf(split(FlexDirection.Column, a, x, b, y, c), b)).toBeUndefined();
+    });
+
+    it("in a Row, takes a chip that stacks over the same expanded pane although that pane sits between them", () => {
+        // a docks right onto x; once b is minimized it docks right onto y: not the same pane, no target.
+        const [a, x, b, y, c] = [leaf("a", true), leaf("x"), leaf("b"), leaf("y"), leaf("c", true)];
+        expect(targetOf(split(FlexDirection.Row, a, x, b, y, c), b)).toBe("c");
+        // The operator's case: chip, expanded pane, then the pane minimized: both stack over the middle one.
+        const [p, q, r] = [leaf("p", true), leaf("q"), leaf("r")];
+        expect(targetOf(split(FlexDirection.Row, p, q, r), r)).toBe("p");
+        // And with the chip on the right of the pane that minimizes.
+        const [s1, s2, s3] = [leaf("s1"), leaf("s2"), leaf("s3", true)];
+        expect(targetOf(split(FlexDirection.Row, s1, s2, s3), s1)).toBe("s3");
+    });
+
+    it("in a Row, a chip that docks onto a different expanded pane is not a target", () => {
+        const [a, x, b, y] = [leaf("a", true), leaf("x"), leaf("b"), leaf("y")];
+        // a docks onto x; b, once minimized, docks onto y.
+        expect(targetOf(split(FlexDirection.Row, a, x, b, y), b)).toBeUndefined();
     });
 
     it("steps over a fully-collapsed branch, which is a group and never a target", () => {

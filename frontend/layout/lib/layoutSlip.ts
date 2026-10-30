@@ -25,11 +25,12 @@ import type { LayoutNode } from "./types";
  * locally even though the last-expanded-pane guard prevents it globally,
  * since that guard counts leaves across the whole tree, not per row).
  * Multiple children can resolve to the same target; callers stack them.
+ * `alsoMinimized` names one more child to treat as minimized: where it would dock if it were.
  * Pure; exported for unit tests.
  */
-export function resolveRowSlipTargets(children: LayoutNode[]): Map<string, LayoutNode> {
+export function resolveRowSlipTargets(children: LayoutNode[], alsoMinimized?: string): Map<string, LayoutNode> {
     const targets = new Map<string, LayoutNode>();
-    const minimized = children.map(isEffectivelyMinimized);
+    const minimized = children.map((c) => c.id === alsoMinimized || isEffectivelyMinimized(c));
     for (let i = 0; i < children.length; i++) {
         if (!minimized[i]) continue;
         let target: LayoutNode | undefined;
