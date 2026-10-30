@@ -9,10 +9,11 @@
  * checked live (SPEC_BROWSER_PANE_NAV_BAR_RESPONSIVE_AND_CHROME_ZOOM_2026_10_14.md §6).
  */
 
-import { cleanup, render } from "@solidjs/testing-library";
+import { cleanup, fireEvent, render } from "@solidjs/testing-library";
+import { createSignal } from "solid-js";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { isOverChrome } from "@/app/store/chrome-zoom-target";
 import { makeTestHostApi } from "@/app/host/test-host";
@@ -21,9 +22,15 @@ import type { BrowserViewModel } from "./browser-model";
 
 afterEach(() => cleanup());
 
-function renderBar() {
-    window.api = makeTestHostApi();
+function renderBar(opts: { loading?: () => boolean; reload?: () => Promise<void>; stop?: () => Promise<void> } = {}) {
+    window.api = makeTestHostApi({
+        browserPanes: {
+            reload: opts.reload ?? (() => Promise.resolve()),
+            stop: opts.stop ?? (() => Promise.resolve()),
+        } as unknown as AppApi["browserPanes"],
+    });
     const model = {
+        loadingAtom: opts.loading ?? (() => false),
         blockId: "block-1",
         urlAtom: () => "https://example.com/",
         titleAtom: () => "Example",
@@ -85,6 +92,67 @@ describe("BrowserNavBar layout structure", () => {
         const profile = bar.querySelector(".browser-nav-group--profile")!;
         expect(profile.children).toHaveLength(1);
         expect(profile.querySelector(".browser-profile-btn")).toBeTruthy();
+    });
+});
+
+describe("the Reload / Stop button", () => {
+    const button = (bar: Element) => bar.querySelector<HTMLButtonElement>('[data-testid="browser-reload-stop"]')!;
+
+    it("is Reload while the page is idle, and a press reloads", () => {
+        const reload = vi.fn(() => Promise.resolve());
+        const stop = vi.fn(() => Promise.resolve());
+        const bar = renderBar({ reload, stop });
+        const b = button(bar);
+        expect(b.textContent).toBe("↻");
+        expect(b.getAttribute("title")).toBe("Reload");
+        expect(b.getAttribute("aria-label")).toBe("Reload");
+        fireEvent.click(b);
+        expect(reload).toHaveBeenCalledWith("block-1");
+        expect(stop).not.toHaveBeenCalled();
+    });
+
+    it("is Stop while the page loads, and a press stops the load instead of reloading", () => {
+        const reload = vi.fn(() => Promise.resolve());
+        const stop = vi.fn(() => Promise.resolve());
+        const bar = renderBar({ loading: () => true, reload, stop });
+        const b = button(bar);
+        expect(b.textContent).toBe("✕");
+        expect(b.getAttribute("title")).toBe("Stop loading");
+        expect(b.getAttribute("aria-label")).toBe("Stop loading");
+        fireEvent.click(b);
+        expect(stop).toHaveBeenCalledWith("block-1");
+        expect(reload).not.toHaveBeenCalled();
+    });
+
+    it("goes back to Reload, with its tooltip and name, when the load ends", () => {
+        const [loading, setLoading] = createSignal(true);
+        const bar = renderBar({ loading });
+        const b = button(bar);
+        expect(b.getAttribute("aria-label")).toBe("Stop loading");
+        setLoading(false);
+        expect(b.textContent).toBe("↻");
+        expect(b.getAttribute("title")).toBe("Reload");
+        expect(b.getAttribute("aria-label")).toBe("Reload");
+    });
+});
+
+describe("the Home and Bookmarks icons", () => {
+    it("are outlines, not Font Awesome's solid glyphs", () => {
+        const bar = renderBar();
+        const home = bar.querySelector('[data-testid="browser-home"]')!;
+        const bookmarks = bar.querySelector('.browser-nav-group--bookmarks button[title="Bookmarks"]')!;
+        for (const el of [home, bookmarks]) {
+            const svg = el.querySelector("svg")!;
+            expect(svg.getAttribute("fill")).toBe("none");
+            expect(svg.getAttribute("stroke")).toBe("currentColor");
+            expect(el.querySelector(".fa-solid")).toBeNull();
+        }
+    });
+
+    it("keep Home's tooltip and accessible name", () => {
+        const home = renderBar().querySelector('[data-testid="browser-home"]')!;
+        expect(home.getAttribute("title")).toMatch(/^Home: /);
+        expect(home.getAttribute("aria-label")).toMatch(/^Home: /);
     });
 });
 
