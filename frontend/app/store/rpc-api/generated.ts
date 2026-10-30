@@ -16,6 +16,7 @@ import type { AgentAccountSwitchReq } from "@/types/rpc/AgentAccountSwitchReq";
 import type { AgentAccountSwitchResult } from "@/types/rpc/AgentAccountSwitchResult";
 import type { AgentArchiveRow } from "@/types/rpc/AgentArchiveRow";
 import type { AgentBundlesResult } from "@/types/rpc/AgentBundlesResult";
+import type { AgentContainerLimitsResult } from "@/types/rpc/AgentContainerLimitsResult";
 import type { AgentContent } from "@/types/rpc/AgentContent";
 import type { AgentDefCreateFromTemplateResult } from "@/types/rpc/AgentDefCreateFromTemplateResult";
 import type { AgentDefHideResult } from "@/types/rpc/AgentDefHideResult";
@@ -149,6 +150,7 @@ import type { CommandGetAllAgentContentData } from "@/types/rpc/CommandGetAllAge
 import type { CommandGetBuildSlotData } from "@/types/rpc/CommandGetBuildSlotData";
 import type { CommandGetBundleData } from "@/types/rpc/CommandGetBundleData";
 import type { CommandGetClaudeGlobalConfigData } from "@/types/rpc/CommandGetClaudeGlobalConfigData";
+import type { CommandGetContainerLimitsData } from "@/types/rpc/CommandGetContainerLimitsData";
 import type { CommandGetIdentityAccountData } from "@/types/rpc/CommandGetIdentityAccountData";
 import type { CommandGlobalMemoryDiffData } from "@/types/rpc/CommandGlobalMemoryDiffData";
 import type { CommandGlobalMemoryHistoryData } from "@/types/rpc/CommandGlobalMemoryHistoryData";
@@ -225,6 +227,7 @@ import type { CommandSessionRestoreData } from "@/types/rpc/CommandSessionRestor
 import type { CommandSessionResumePreflightData } from "@/types/rpc/CommandSessionResumePreflightData";
 import type { CommandSetAgentBundlesData } from "@/types/rpc/CommandSetAgentBundlesData";
 import type { CommandSetAgentContentData } from "@/types/rpc/CommandSetAgentContentData";
+import type { CommandSetContainerLimitsData } from "@/types/rpc/CommandSetContainerLimitsData";
 import type { CommandShellExecData } from "@/types/rpc/CommandShellExecData";
 import type { CommandShellStatusData } from "@/types/rpc/CommandShellStatusData";
 import type { CommandShellStopData } from "@/types/rpc/CommandShellStopData";
@@ -1417,6 +1420,14 @@ export const GeneratedApi = {
   ): Promise<ClaudeGlobalConfig> {
     return client.rpcCall("getclaudeglobalconfig", data ?? {}, opts);
   },
+  // command "getcontainerlimits"
+  GetContainerLimitsCommand(
+    client: RpcClient,
+    data: CommandGetContainerLimitsData,
+    opts?: RpcOpts
+  ): Promise<AgentContainerLimitsResult> {
+    return client.rpcCall("getcontainerlimits", data, opts);
+  },
   // command "getdrone"
   GetDroneCommand(client: RpcClient, data: GetDroneReq, opts?: RpcOpts): Promise<DroneDefinition | null> {
     return client.rpcCall("getdrone", data, opts);
@@ -2274,6 +2285,14 @@ export const GeneratedApi = {
   // command "setconfig"
   SetConfigCommand(client: RpcClient, data: SettingsType, opts?: RpcOpts): Promise<void> {
     return client.rpcCall("setconfig", data, opts);
+  },
+  // command "setcontainerlimits"
+  SetContainerLimitsCommand(
+    client: RpcClient,
+    data: CommandSetContainerLimitsData,
+    opts?: RpcOpts
+  ): Promise<AgentContainerLimitsResult> {
+    return client.rpcCall("setcontainerlimits", data, opts);
   },
   // command "setmeta"
   SetMetaCommand(client: RpcClient, data: CommandSetMetaData, opts?: RpcOpts): Promise<void> {

@@ -17,6 +17,7 @@ import { useFreezeFrame } from "./use-freeze-frame";
 import { useBrowserAuth } from "./use-browser-auth";
 import { Button } from "@/app/element/ui";
 import { BrowserNavBar } from "./browser-nav-bar";
+import { DownloadStrip } from "./download-strip";
 import { ActionLogStrip, DrivenByStrip } from "./driven-by-strip";
 import { hasTerminalPower, minutesLabel, siteLabel } from "./bypass";
 import { attentionLook, dialogMessage } from "./attention-kinds";
@@ -824,6 +825,7 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
             >
                 {(agent) => <DrivenByStrip model={model} agent={agent()} />}
             </Show>
+            <DownloadStrip model={model} />
             <Show when={model.errorAtom()}>
                 <div class="browser-error">{model.errorAtom()}</div>
             </Show>

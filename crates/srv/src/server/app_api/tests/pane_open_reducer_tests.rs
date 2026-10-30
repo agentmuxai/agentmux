@@ -1772,6 +1772,98 @@ async fn a_popup_opens_as_a_pane_beside_its_opener_and_inherits_its_owner() {
     assert_eq!(body["data"]["admitted"], true, "{body}");
 }
 
+/// A link that opens a new tab joins the opener's pane as a pane tab; a new
+/// window (shift-click) opens beside it. The person's click shows the new tab;
+/// an agent's popup doesn't take the person's view.
+#[tokio::test]
+async fn a_popup_tab_stacks_onto_its_opener_and_a_popup_window_splits() {
+    use axum::http::StatusCode;
+    let state = test_state();
+    let ws_id = dispatch_apply(&state, Command::CreateWorkspace { name: "w".into() })
+        .await
+        .iter()
+        .find_map(|e| match e {
+            Event::WorkspaceCreated { workspace_id, .. } => Some(workspace_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let tab_id = dispatch_apply(&state, Command::CreateTab { workspace_id: ws_id, name: "t".into() })
+        .await
+        .iter()
+        .find_map(|e| match e {
+            Event::TabCreated { tab_id, .. } => Some(tab_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let own = stand_in_pane(&state, &tab_id).await;
+    let (_, auth) = signed_agent_on(&state, &own);
+    *state.host_ipc.lock().await = Some(crate::server::state::HostIpc { port: 1, token: "host-ipc-token".into() });
+    let app = crate::server::build_router(state.clone());
+    let host = [("X-Host-Token", "host-ipc-token")];
+
+    let (s, body) = post_json(&app, "/api/v1/ui/browser/open", merged(&auth, serde_json::json!({ "url": "https://console.example.com/" }))).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    let agents = body["data"]["pane"].as_str().unwrap().to_string();
+    let mut cmd = editor_open_cmd(Some(tab_id.clone()), "/tmp/unused.txt", None, None);
+    cmd.view = "browser".into();
+    cmd.file = None;
+    cmd.url = Some("https://shop.example.net/".into());
+    let persons = open_pane(&state, cmd).await.unwrap().block_id;
+
+    // The pane holding `id`: its visible block and its stack.
+    let leaf_of = |id: &str| {
+        let s = state.srv_state.try_lock().expect("srv state free");
+        let root = s.tabs[&tab_id].rootnode.clone().expect("layout tree");
+        let leaf = crate::backend::layout::find_leaf_containing_block(&root, id).expect("a pane holds the block").clone();
+        let data = leaf.data.clone().unwrap();
+        (leaf.id.clone(), data.block_id, data.block_stack)
+    };
+    let popup = |opener: &str, opener_url: &str, url: &str, asked: Option<&str>| {
+        let mut b = serde_json::json!({ "opener": opener, "opener_url": opener_url, "url": url, "user_gesture": true });
+        if let Some(a) = asked {
+            b["asked"] = serde_json::json!(a);
+        }
+        b
+    };
+
+    // The person's pane, a new tab: a pane tab in the same pane, shown. An older
+    // host that sends no `asked` gets the same.
+    let (opener_leaf, _, _) = leaf_of(&persons);
+    for asked in [Some("tab"), None] {
+        let body = popup(&persons, "https://shop.example.net/", "https://checkout.example.net/", asked);
+        let (_, body) = post_json_headers(&app, "/api/v1/host/browser_popup", body, &host).await;
+        assert_eq!(body["data"]["admitted"], true, "{body}");
+        let tab = body["data"]["pane"].as_str().unwrap().to_string();
+        let (leaf, visible, stack) = leaf_of(&tab);
+        assert_eq!(leaf, opener_leaf, "the tab joins the opener's pane");
+        assert!(stack.contains(&persons) && stack.contains(&tab), "{stack:?}");
+        assert_eq!(visible, tab, "the person's click shows the new tab");
+        let block = state.mstore.must_get::<crate::backend::obj::Block>(&tab).unwrap();
+        assert_eq!(block.meta.get("browser:popup_of").and_then(|v| v.as_str()), Some(persons.as_str()));
+    }
+
+    // A new window opens beside the opener, in a pane of its own.
+    let body = popup(&persons, "https://shop.example.net/", "https://checkout.example.net/", Some("window"));
+    let (_, body) = post_json_headers(&app, "/api/v1/host/browser_popup", body, &host).await;
+    assert_eq!(body["data"]["admitted"], true, "{body}");
+    let win = body["data"]["pane"].as_str().unwrap().to_string();
+    let (leaf, visible, stack) = leaf_of(&win);
+    assert_ne!(leaf, opener_leaf, "a window gets its own pane");
+    assert_eq!(visible, win);
+    assert!(!stack.contains(&persons));
+
+    // The agent's pane: its popup tab joins the pane without switching the
+    // person's view away from the page they are looking at.
+    let body = popup(&agents, "https://console.example.com/home", "https://signin.example.com/", Some("tab"));
+    let (_, body) = post_json_headers(&app, "/api/v1/host/browser_popup", body, &host).await;
+    assert_eq!(body["data"]["admitted"], true, "{body}");
+    let tab = body["data"]["pane"].as_str().unwrap().to_string();
+    let (agents_leaf, visible, stack) = leaf_of(&agents);
+    assert_eq!(leaf_of(&tab).0, agents_leaf, "the agent's popup tab joins its pane");
+    assert!(stack.contains(&tab), "{stack:?}");
+    assert_eq!(visible, agents, "an agent's popup doesn't take the view");
+}
+
 /// A popup window (a native window a pane's page opened) is driven by the
 /// agent that owns its opener, through the opener
 /// (SPEC_BROWSER_PANE_NATIVE_POPUPS_AGENT_DRIVEN_2026_10_08.md §4–§7).

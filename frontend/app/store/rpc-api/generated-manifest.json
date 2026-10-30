@@ -602,6 +602,10 @@
             "send": "data ?? {}"
         },
         {
+            "command": "getcontainerlimits",
+            "method": "GetContainerLimitsCommand"
+        },
+        {
             "command": "getdrone",
             "method": "GetDroneCommand"
         },
@@ -1255,6 +1259,10 @@
             "command": "setconfig",
             "method": "SetConfigCommand",
             "dataType": "SettingsType"
+        },
+        {
+            "command": "setcontainerlimits",
+            "method": "SetContainerLimitsCommand"
         },
         {
             "command": "setmeta",

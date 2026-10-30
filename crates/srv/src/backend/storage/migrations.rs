@@ -1439,6 +1439,8 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
         // why it is held ('' or `idle`). No bump: an older build ignores them, replays text only.
         "ALTER TABLE db_jekt_held ADD COLUMN files_json TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE db_jekt_held ADD COLUMN hold_reason TEXT NOT NULL DEFAULT ''",
+        // A held WAN message's verdict, kept for its replay (no bump: an older build ignores it).
+        "ALTER TABLE db_jekt_held ADD COLUMN wan_json TEXT NOT NULL DEFAULT ''",
     ] {
         if let Err(e) = conn.execute_batch(stmt) {
             let msg = e.to_string();

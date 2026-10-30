@@ -5,6 +5,7 @@
  */
 export type HistoryUsageStore = { 
 /**
- * `provider-files`, `pane-history`, `channel-copies`, `archives` or `audit`.
+ * `provider-files`, `pane-history`, `channel-copies` (listed, not in the
+ * total), `archives` or `audit`.
  */
 key: string, label: string, bytes: number, files: number, };

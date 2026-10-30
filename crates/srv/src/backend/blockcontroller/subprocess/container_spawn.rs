@@ -387,6 +387,9 @@ impl SubprocessController {
             // Starting the container is what binds the listener on a first turn.
             let mut container_env = container_env;
             crate::backend::container_listener::point_env_at_listener(&mut container_env);
+            // What the kernel has killed for memory in this container so far: a rise by the end of the turn says why
+            // something in it died (SPEC_CONTAINER_AGENT_RESOURCE_LIMITS_2026_10_29.md §5).
+            let oom_before = if startup_failed { None } else { cm.oom_kill_count(&container_name).await };
             let exec_result: Result<_, Option<crate::backend::container::ContainerError>> = if startup_failed {
                 Err(None)
             } else {
@@ -685,6 +688,17 @@ impl SubprocessController {
                         &combined_tail,
                         last_result_frame.as_ref(),
                     ));
+                }
+            }
+
+            // A memory kill in the container is often a child of the CLI (the `cargo` of a Bash tool), so the turn may
+            // have ended cleanly: the pane says so either way, and a turn that died of it says why.
+            if !killed {
+                if let Some(event) = cm.oom_since(&container_name, oom_before).await {
+                    crate::backend::container::oom::note_in_pane(&event, &block_id, &broker, &filestore, &mstore);
+                    if let Some(failure) = run_failure.as_mut() {
+                        crate::backend::container::oom::explain_failure(failure, &event);
+                    }
                 }
             }
 

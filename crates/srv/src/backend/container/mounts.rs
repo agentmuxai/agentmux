@@ -52,6 +52,7 @@ impl ContainerMountSpec {
             workspace_host_dir: Some(working_dir.to_string()).filter(|d| !d.is_empty()),
             memory_host_dir: config_dir.and_then(|dir| personal_memory_host_dir(Some(dir), working_dir)),
             github_hooks_host_dir: crate::identity::github_tokens::container_git_hooks().map(|d| d.to_string_lossy().into_owned()),
+            limits: Default::default(),
         }
     }
 }
