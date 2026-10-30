@@ -151,3 +151,70 @@ mod tests {
         assert_eq!(labels.get(VOLUME_KIND_LABEL).map(String::as_str), Some("cache"));
     }
 }
+
+/// Live check against a real Docker daemon:
+///   cargo test -p agentmux-srv --bins -- --ignored --nocapture itest_cache_dirs
+/// An image that names cache directories gets a labelled volume for each; the data survives the container being
+/// recreated (what an image update does); deleting the agent removes the container and the volumes.
+#[cfg(test)]
+mod itest {
+    use futures_util::StreamExt as _;
+
+    use super::*;
+    use crate::backend::container::ContainerMountSpec;
+
+    async fn run(cm: &ContainerManager, name: &str, script: &str) -> String {
+        let session = cm.exec(name, &["sh".into(), "-c".into(), script.into()], None, &[], false).await.expect("exec");
+        drop(session.input);
+        let mut out = String::new();
+        let mut stream = session.output;
+        while let Some(Ok(chunk)) = stream.next().await {
+            out.push_str(&String::from_utf8_lossy(&chunk.into_bytes()));
+        }
+        out
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn itest_cache_dirs_survive_a_recreate_and_go_with_the_agent() {
+        let cm = ContainerManager::connect().expect("connect to docker (set DOCKER_HOST)");
+        cm.check_available().await.expect("docker daemon must be reachable");
+        let dir = std::env::temp_dir().join(format!("agentmux-cache-itest-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("Dockerfile"),
+            "FROM debian:13\nRUN useradd -m agent && mkdir -p /home/agent/.cargo /home/agent/target /home/agent/.claude && chown -R agent /home/agent\nLABEL ai.agentmux.cache-dirs=\"/home/agent/.cargo:/home/agent/target\"\nUSER agent\nCMD [\"sleep\", \"infinity\"]\n",
+        )
+        .unwrap();
+        let image = "agentmux-cache-itest:1";
+        let built = std::process::Command::new("docker").args(["build", "-q", "-t", image]).arg(&dir).status().expect("docker build");
+        assert!(built.success(), "the test image builds");
+
+        let name = "agentmux-itest-cache";
+        let _ = cm.remove_agent_storage(name).await;
+        let spec = ContainerMountSpec::default();
+        cm.ensure_running_observed(name, image, &[], &[], &spec, &|_| {}).await.expect("ensure_running");
+        let first = run(&cm, name, "echo built > /home/agent/target/artifact && echo registry > /home/agent/.cargo/crate && echo ok").await;
+        // What an image update does: the container goes, the volumes stay.
+        cm.update_container(name).await.expect("remove the container");
+        cm.ensure_running_observed(name, image, &[], &[], &spec, &|_| {}).await.expect("ensure_running again");
+        let kept = run(&cm, name, "cat /home/agent/target/artifact /home/agent/.cargo/crate").await;
+
+        let filter = HashMap::from([("label".to_string(), vec![format!("{VOLUME_AGENT_LABEL}={name}")])]);
+        let labelled: Vec<String> = cm.docker().list_volumes(Some(ListVolumesOptions { filters: filter.clone() })).await.unwrap().volumes.unwrap_or_default().into_iter().map(|v| v.name).collect();
+
+        cm.remove_agent_storage(name).await;
+        let left = cm.docker().list_volumes(Some(ListVolumesOptions { filters: filter })).await.unwrap().volumes.unwrap_or_default().len();
+        let container_gone = cm.docker().inspect_container(name, None).await.is_err();
+        let _ = std::process::Command::new("docker").args(["rmi", "-f", image]).status();
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert!(first.contains("ok"), "the agent can write into both cache directories: {first}");
+        assert_eq!(kept.trim(), "built\nregistry", "the data is there after the container was recreated: {kept:?}");
+        let mut labelled = labelled;
+        labelled.sort();
+        assert_eq!(labelled, [cache_volume_name(name, "/home/agent/.cargo"), cache_volume_name(name, "/home/agent/target")], "one labelled volume per directory");
+        assert_eq!(left, 0, "the agent's volumes are removed with it");
+        assert!(container_gone, "and its container");
+    }
+}
