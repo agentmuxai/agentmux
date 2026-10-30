@@ -47,7 +47,7 @@ export async function mergeArrivingDocumentPanes(
             .map((b) => docTabHost(b))
             .find((h) => canMergeDocPanes(h, source));
         if (!destination) continue;
-        const result = destination.mergeFrom!(source);
+        const result = await destination.mergeFrom!(source);
         if (result.merged) merged.push(id);
         else if (result.merged === false && result.reason) notifyDrop.cantMove("its documents", result.reason);
     }

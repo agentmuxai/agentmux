@@ -100,7 +100,7 @@ async function openLoaded(model: EditorViewModel, path: string) {
     await until(() => model.contentAtom() === h.files.get(path));
 }
 
-const mergeInto = (into: EditorViewModel, from: EditorViewModel) => docTabHost(into.blockId)!.mergeFrom!(docTabHost(from.blockId)!);
+const mergeInto = async (into: EditorViewModel, from: EditorViewModel) => docTabHost(into.blockId)!.mergeFrom!(docTabHost(from.blockId)!);
 
 beforeEach(() => {
     h.files = new Map([
@@ -132,7 +132,7 @@ describe("merging an Editor pane into another", () => {
         const edited = from.activeIdAtom()!;
         await openLoaded(from, "c:/repo/c.ts");
 
-        expect(mergeInto(dest, from)).toEqual({ merged: true });
+        expect(await mergeInto(dest, from)).toEqual({ merged: true });
 
         expect(pathsOf(dest)).toEqual(["c:/repo/a.ts", "c:/repo/b.ts", "c:/repo/c.ts"]);
         expect(tabsOf(from)).toEqual([]);
@@ -148,7 +148,7 @@ describe("merging an Editor pane into another", () => {
         const mine = dest.activeIdAtom();
         await openLoaded(from, "c:/repo/a.ts");
 
-        expect(mergeInto(dest, from)).toEqual({ merged: true });
+        expect(await mergeInto(dest, from)).toEqual({ merged: true });
 
         expect(tabsOf(dest).map((t) => t.id)).toEqual([mine]);
         expect(tabsOf(from)).toEqual([]);
@@ -163,7 +163,7 @@ describe("merging an Editor pane into another", () => {
         from.onContentChange("const a = 7; // unsaved\n");
         const unsaved = from.activeIdAtom()!;
 
-        expect(mergeInto(dest, from)).toEqual({ merged: true });
+        expect(await mergeInto(dest, from)).toEqual({ merged: true });
 
         expect(pathsOf(dest)).toEqual(["c:/repo/a.ts", "c:/repo/b.ts"]);
         expect(tabsOf(dest)[0].id).toBe(unsaved);
@@ -179,14 +179,31 @@ describe("merging an Editor pane into another", () => {
         await openLoaded(from, "c:/repo/a.ts");
         from.onContentChange("theirs\n");
 
-        expect(mergeInto(dest, from)).toEqual({ merged: true });
-        await until(() => tabsOf(dest).length === 2);
+        expect(await mergeInto(dest, from)).toEqual({ merged: true });
+        expect(tabsOf(dest)).toHaveLength(2);
 
         expect(dest._contentByTab.get(mine)).toBe("mine\n");
         const copy = tabsOf(dest).find((t) => t.id !== mine)!;
         expect(copy.isScratch).toBe(true);
         expect(dest._contentByTab.get(copy.id)).toBe("theirs\n");
         expect(tabsOf(from)).toEqual([]);
+    });
+
+    it("different unsaved copies whose second one can't be kept stop the merge, and nothing moves", async () => {
+        const dest = mount();
+        const from = mount();
+        await openLoaded(dest, "c:/repo/a.ts");
+        dest.onContentChange("mine\n");
+        await openLoaded(from, "c:/repo/a.ts");
+        from.onContentChange("binary\u0000data\n");
+        await openLoaded(from, "c:/repo/b.ts");
+
+        const result = await mergeInto(dest, from);
+
+        expect(result.merged).toBe(false);
+        expect(tabsOf(dest)).toHaveLength(1);
+        expect(tabsOf(from)).toHaveLength(2);
+        expect(from._contentByTab.size).toBeGreaterThan(0);
     });
 
     it("two identical unsaved copies are one tab", async () => {
@@ -197,7 +214,7 @@ describe("merging an Editor pane into another", () => {
         await openLoaded(from, "c:/repo/a.ts");
         from.onContentChange("same\n");
 
-        expect(mergeInto(dest, from)).toEqual({ merged: true });
+        expect(await mergeInto(dest, from)).toEqual({ merged: true });
 
         expect(tabsOf(dest)).toHaveLength(1);
         expect(tabsOf(from)).toEqual([]);
@@ -210,7 +227,7 @@ describe("merging an Editor pane into another", () => {
         let finish!: () => void;
         const saved = trackSave(from, from.activeIdAtom(), new Promise<void>((r) => (finish = r)));
 
-        expect(mergeInto(dest, from)).toEqual({ merged: false, reason: "It is still being saved. Try again in a moment." });
+        expect(await mergeInto(dest, from)).toEqual({ merged: false, reason: "It is still being saved. Try again in a moment." });
         expect(tabsOf(from)).toHaveLength(1);
         expect(tabsOf(dest)).toEqual([]);
         finish();

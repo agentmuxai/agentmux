@@ -50,7 +50,7 @@ export interface DocTabHost {
     take(transfer: DocTransfer, at?: DocDropAt): void;
     /** Take in every document tab of `source`, a pane of the same type and scope that has just
      *  landed in this pane's stack (doc-pane-merge.ts). Only a type that merges has it. */
-    mergeFrom?(source: DocTabHost): MergeResult;
+    mergeFrom?(source: DocTabHost): MergeResult | Promise<MergeResult>;
     /** Open a new, empty document tab in this pane (what Ctrl+T does). */
     newDocument?(): void;
 }

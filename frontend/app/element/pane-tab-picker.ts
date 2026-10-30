@@ -25,19 +25,21 @@
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import { atoms, pushNotification } from "@/app/store/global";
 import { buildPaneWidgetMenuItems } from "@/app/window/action-widgets-config";
-import { addWidgetAsPaneTab } from "@/layout/index";
+import { addWidgetAsPaneTab, setActiveBlockInStack } from "@/layout/index";
 import type { LayoutModel } from "@/layout/lib/layoutModel";
 import { effectiveStack } from "@/layout/lib/layoutStack";
 import { findNode } from "@/layout/lib/layoutNode";
 import { docTabHost, type DocTabHost } from "@/app/doc-tabs/doc-tab-hosts";
 
 /** The Editor already in pane `nodeId`'s stack, if one is mounted. */
-function editorHostOfPane(model: LayoutModel, nodeId: string): DocTabHost | undefined {
+function editorHostOfPane(model: LayoutModel, nodeId: string): { blockId: string; host: DocTabHost } | undefined {
     const data = findNode(model.treeState.rootNode, nodeId)?.data;
     if (!data) return undefined;
-    return effectiveStack(data)
-        .map((id) => docTabHost(id))
-        .find((h) => h?.docType === "editor" && (h.scope?.() ?? "") === "" && h.newDocument);
+    for (const blockId of effectiveStack(data)) {
+        const host = docTabHost(blockId);
+        if (host?.docType === "editor" && (host.scope?.() ?? "") === "" && host.newDocument) return { blockId, host };
+    }
+    return undefined;
 }
 
 export function openPaneTabWidgetPicker(
@@ -59,8 +61,10 @@ export function openPaneTabWidgetPicker(
         // An Editor picked in a pane that has one is a new document tab of it, not a second Editor
         // pane tab (SPEC_DOCUMENT_PANES_MERGE_DOCUMENT_TABS_2026_10_30.md §1, row 3).
         const here = view === "editor" ? editorHostOfPane(model, nodeId) : undefined;
-        if (here?.newDocument) {
-            here.newDocument();
+        if (here?.host.newDocument) {
+            // Its pane tab in front too: a hidden Editor would take the tab where nobody sees it.
+            setActiveBlockInStack(model, nodeId, here.blockId);
+            here.host.newDocument();
             return;
         }
         void addWidgetAsPaneTab(model, nodeId, blockDef, newTabMeta?.(view)).catch((err: unknown) => {
