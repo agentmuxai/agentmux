@@ -188,6 +188,23 @@
     color: var(--warning-text-color);
 }
 
+// An entry's earlier values: last characters, when and by whom replaced, Restore.
+.vault-versions {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
+.vault-version {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+
+    > :last-child {
+        margin-left: auto;
+    }
+}
+
 // Export and import.
 .vault-export-entries {
     display: flex;

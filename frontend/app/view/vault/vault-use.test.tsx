@@ -187,6 +187,7 @@ describe("the sites an entry may be filled into", () => {
                 parts_set: ["value"],
                 grants: ["https://www.irs.gov", "https://ssa.gov"],
                 tail: "6789",
+                versions: 0,
                 created_at: 1,
                 updated_at: 1,
                 last_used_at: 0,
