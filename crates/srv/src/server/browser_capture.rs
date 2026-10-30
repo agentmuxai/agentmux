@@ -30,6 +30,7 @@ use agentmux_common::api_types::{CaptureFrom, CaptureInto, CaptureRule, UiAutoma
 use crate::backend::vault::capture::{self, Found, Target};
 use crate::backend::vault::uses::{Decision, UseRequest};
 
+use super::browser_actions::{note, How, Kind};
 use super::ui_handlers::{err_response, proxy_value, target_block_id};
 use super::AppState;
 
@@ -162,6 +163,13 @@ pub(crate) async fn handle_browser_capture(
     let (store, given, from) = (state.identity_store.clone(), req.into, origin.clone());
     let stored = tokio::task::spawn_blocking(move || store_captured(&store, plan, value, &from, given.as_ref())).await;
     super::vault_handlers::publish(&state);
+    // The pane's own Log: what was captured, from where, never the value.
+    let log = note(&block_id, &agent, Kind::Capture).target(&ref_);
+    match &stored {
+        Ok(Ok((_, label))) => log.detail(&format!("{label}, captured from {origin}")).how(How::Allowed).record(&state),
+        Ok(Err(e)) => log.how(How::Refused(e.chars().take(160).collect())).record(&state),
+        Err(_) => {}
+    }
     match stored {
         Ok(Ok((id, label))) => (
             StatusCode::OK,
@@ -170,7 +178,7 @@ pub(crate) async fn handle_browser_capture(
                 "id": id,
                 "label": label,
                 "captured_from": origin,
-                "note": "Saved in the Vault; you never see the value. The element is marked as holding a Vault value, so snapshots and screenshots keep it hidden.",
+                "note": "Saved in the Vault; you never see the value. While it is on the page, screenshots black it out and eval is refused on this tab; snapshots keep hiding it while it shows as a secret, and always in a field.",
             })),
         )
             .into_response(),

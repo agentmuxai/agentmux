@@ -902,7 +902,7 @@ async fn browser_capture(cx: &ToolCtx<'_>, auth: agentmux_common::api_types::UiA
 fn capture_text(body: &Value) -> String {
     let s = |k: &str| body.get(k).and_then(Value::as_str).unwrap_or("");
     format!(
-        "Browser capture: saved in the Vault as {} ({}), captured from {}. You never see the value: use the entry by id (Terminal run with secrets, Browser fill with vault). The element is marked as holding a Vault value.",
+        "Browser capture: saved in the Vault as {} ({}), captured from {}. You never see the value: use the entry by id (Terminal run with secrets, Browser fill with vault). While it is on the page, screenshots black it out and eval is refused on this tab.",
         s("id"),
         s("label"),
         s("captured_from")

@@ -43,14 +43,21 @@ pub struct Captured {
     pub page: String,
 }
 
-/// The element's value or text, trimmed, after marking it as a Vault value.
-/// A text node is read whole and its parent element marked.
-const READ_AND_MARK: &str = r#"function (attr) {
+/// The element's value or text, trimmed, and whether it is a field (whose whole
+/// value is the secret). A text node is read whole.
+const READ: &str = r#"function () {
   const el = this.nodeType === 1 ? this : this.parentElement;
-  const isField = el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA") && el === this;
-  const v = isField ? String(this.value == null ? "" : this.value) : String(this.textContent || "");
+  const field = !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA") && el === this;
+  const v = field ? String(this.value == null ? "" : this.value) : String(this.textContent || "");
+  return { value: v.trim(), field };
+}"#;
+
+/// Marks the element (a text node's parent) as holding a Vault value: only once
+/// the value is known to be saved, so a refused capture leaves no mark.
+const MARK: &str = r#"function (attr) {
+  const el = this.nodeType === 1 ? this : this.parentElement;
   if (el) el.setAttribute(attr, "1");
-  return v.trim();
+  return true;
 }"#;
 
 /// `POST /agentmux/browser/capture_value`.
@@ -80,13 +87,29 @@ async fn capture(state: &Arc<AppState>, root: &mut super::cdp::CdpSession, req: 
     let cdp = &mut in_frame;
     let ctx = isolated_context(cdp, frame.as_ref().map(|f| f.frame_id.as_str())).await?;
     let obj = resolve(cdp, backend, ctx, &req.ref_).await?;
-    let read = call_on(cdp, &obj, READ_AND_MARK, vec![json!(TAINT_ATTR)]).await?;
-    let value = match read {
-        Value::String(s) => s,
-        _ => return Err(format!("{} has no text to save", req.ref_)),
+    let read = call_on(cdp, &obj, READ, vec![]).await?;
+    let Some(text) = read.get("value").and_then(Value::as_str) else {
+        return Err(format!("{} has no text to save", req.ref_));
     };
-    check(&value, &req.ref_)?;
+    let field = read.get("field").and_then(Value::as_bool).unwrap_or(false);
+    let value = pick(text, field, &req.ref_)?;
+    call_on(cdp, &obj, MARK, vec![json!(TAINT_ATTR)]).await?;
     Ok(Captured { value, origin: located.origin, page: located.page })
+}
+
+/// The secret in what was read: a field's whole value; in text, its one token with
+/// a one-time secret's shape (text like "Value: <secret>" is more than the secret).
+fn pick(text: &str, field: bool, ref_: &str) -> Result<String, String> {
+    check(text, ref_)?;
+    if field || !text.chars().any(char::is_whitespace) {
+        return Ok(text.to_string());
+    }
+    let tokens: Vec<&str> = text.split_whitespace().filter(|t| agentmux_common::shown_once::looks_shown_once(t)).collect();
+    match tokens.as_slice() {
+        [one] => Ok(one.to_string()),
+        [] => Err(format!("{ref_} holds text, not one secret: capture the element that holds only the value (its own line in a scoped snapshot)")),
+        _ => Err(format!("{ref_} holds {} secrets: capture the element that holds only the one you want", tokens.len())),
+    }
 }
 
 /// A value worth saving: not empty, and not a page's worth of text.
@@ -103,6 +126,19 @@ fn check(value: &str, ref_: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn text_around_a_secret_is_left_out_and_a_fields_value_is_kept_whole() {
+        let secret = "Xy8Q~abcDEF1234ghijKLmnoPQRstu.vwxYZ0123";
+        assert_eq!(pick(&format!("Value {secret}"), false, "e5").unwrap(), secret);
+        assert_eq!(pick(secret, false, "e5").unwrap(), secret);
+        let codes = "recovery codes:\nabcd-1234 efgh-5678\nijkl-9012";
+        assert_eq!(pick(codes, true, "e8").unwrap(), codes, "a field's value is the secret, spaces, lines and all");
+        let none = pick("Copy this value now please", false, "e5").unwrap_err();
+        assert!(none.contains("not one secret"), "{none}");
+        let two = pick(&format!("{secret} and {secret}"), false, "e5").unwrap_err();
+        assert!(two.contains("holds 2 secrets") && !two.contains(secret), "{two}");
+    }
 
     #[test]
     fn an_empty_or_page_sized_element_is_refused_without_quoting_it() {

@@ -159,21 +159,30 @@ const SECRET_CANDIDATES: &str = r#"((MAX) => {
   };
   visit(document);
   // Text where a page shows a secret once: code, pre, kbd and samp, and the
-  // nearest container of a button named like "Copy". The host tests its shape.
+  // nearest container of a button named like "Copy"; and any element holding a
+  // captured Vault value. Only words that could be one leave the page (the host
+  // tests the exact shape), at most WORDS per element: one with more is boxed whole.
+  const WORDS = 20;
   const shown = [];
-  const box = (el) => {
+  const could = (w) => w.length >= 20 && w.length <= 512 && !/^[0-9a-fA-F]+$/.test(w) && !w.includes("://")
+    && [/[a-z]/, /[A-Z]/, /[0-9]/, /[^A-Za-z0-9]/].filter((c) => c.test(w)).length >= 2;
+  const box = (el, tainted) => {
     if (shown.length >= MAX) { truncated = true; return; }
     const r = el.getBoundingClientRect();
     if (r.width === 0 || r.height === 0) return;
-    shown.push({ text: String(el.textContent || ""), x: r.left, y: r.top, w: r.width, h: r.height });
+    const words = tainted ? [] : String(el.textContent || "").split(/\s+/).filter(could);
+    shown.push({ words: words.slice(0, WORDS), many: words.length > WORDS, tainted, x: r.left, y: r.top, w: r.width, h: r.height });
   };
-  for (const el of document.querySelectorAll("code, pre, kbd, samp")) box(el);
+  for (const el of document.querySelectorAll("[data-agentmux-vault]")) {
+    if (el.localName !== "input" && el.localName !== "textarea" && !el.isContentEditable) box(el, true);
+  }
+  for (const el of document.querySelectorAll("code, pre, kbd, samp")) box(el, false);
   for (const b of document.querySelectorAll("button, a, [role=button]")) {
     const name = ((b.textContent || "") + " " + (b.getAttribute("aria-label") || "") + " " + (b.getAttribute("title") || "")).toLowerCase();
     if (!name.includes("copy")) continue;
     let c = b.parentElement;
     for (let i = 0; c && c.children.length <= 1 && i < 4; i++) c = c.parentElement;
-    if (c) box(c);
+    if (c) box(c, false);
   }
   return { fields: out, shown, width: window.innerWidth, truncated };
 })"#;
@@ -212,9 +221,16 @@ async fn secret_boxes_in(cdp: &mut CdpSession, frame_id: Option<&str>) -> Option
         }
     }
     for s in &shown {
-        if s.get("text").and_then(Value::as_str).is_some_and(agentmux_common::shown_once::has_shown_once) {
+        let flag = |k: &str| s.get(k).and_then(Value::as_bool).unwrap_or(false);
+        let words = s.get("words").and_then(Value::as_array);
+        let once = words.is_some_and(|w| w.iter().filter_map(Value::as_str).any(agentmux_common::shown_once::looks_shown_once));
+        if flag("tainted") || once {
             boxes.extend(rect(s));
             vault_values += 1;
+        } else if flag("many") {
+            // Too many words to send: hidden whole in the image, but not counted
+            // as a secret (a long code listing mustn't block eval).
+            boxes.extend(rect(s));
         }
     }
     Some((boxes, result.get("width").and_then(|w| w.as_f64()), vault_values))
