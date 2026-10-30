@@ -74,8 +74,18 @@ impl BrowserPaneManager {
         if let Some(b) = self.live_browser(state, block_id) { b.reload(); }
     }
     /// The toolbar's Stop button (Reload turns into it while the page loads).
+    ///
+    /// A navigation stopped before it commits ends in `ERR_ABORTED`, which the
+    /// load-error path ignores (a superseded navigation is aborted too), and
+    /// the loading-state callback only reports the pane's own mark, so nothing
+    /// else would clear it: the button would stay Stop. The person asked for
+    /// the stop, so the mark is cleared here, and the toolbar hears it.
     pub fn stop(&self, block_id: &str, state: &Arc<AppState>) {
-        if let Some(b) = self.live_browser(state, block_id) { b.stop_load(); }
+        if let Some(b) = self.live_browser(state, block_id) {
+            b.stop_load();
+            let url = crate::browser_pane::callbacks::main_frame_url(&b);
+            crate::browser_pane::callbacks::set_pane_main_frame_loading(state, block_id, &b, &url, false);
+        }
     }
 
     /// "Print" from the unified browser-pane context menu
