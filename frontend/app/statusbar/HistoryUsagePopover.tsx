@@ -22,6 +22,9 @@ interface HistoryUsagePopoverProps {
     onClose: () => void;
 }
 
+/** The per-version copies: listed, but not in the total, so no share of it. */
+const OLD_COPIES = "channel-copies";
+
 /** "5 min ago", "just now": when the numbers were measured. */
 export function measuredAgo(computedAtMs: number, nowMs: number): string {
     const min = Math.floor(Math.max(0, nowMs - computedAtMs) / 60_000);
@@ -68,9 +71,11 @@ export const HistoryUsagePopover = (props: HistoryUsagePopoverProps): JSX.Elemen
                                 {(s) => (
                                     <div class="history-usage-row" data-store={s.key}>
                                         <span class="history-usage-label">{s.label}</span>
-                                        <span class="history-usage-bar" aria-hidden="true">
-                                            <span class="history-usage-bar-fill" style={{ width: `${share(s.bytes)}%` }} />
-                                        </span>
+                                        <Show when={s.key !== OLD_COPIES} fallback={<span class="history-usage-bar" aria-hidden="true" />}>
+                                            <span class="history-usage-bar" aria-hidden="true">
+                                                <span class="history-usage-bar-fill" style={{ width: `${share(s.bytes)}%` }} />
+                                            </span>
+                                        </Show>
                                         <span class="history-usage-bytes">{formatBytes(s.bytes)}</span>
                                     </div>
                                 )}
