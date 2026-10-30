@@ -308,7 +308,7 @@ impl SubprocessController {
         let turn_id = uuid::Uuid::new_v4().to_string();
         let turn_message = config.message.clone();
         let startup = self.container_startup.lock().unwrap().clone();
-        let user_record = self.user_record_sink(config.message_id.is_some());
+        let user_record = self.user_record_sink(config.message_id.is_some(), config.record.clone());
         let self_ref_done = self.self_ref.lock().unwrap().clone().unwrap_or_default();
 
         // Spawn all async work (exec + I/O) into a background task so this

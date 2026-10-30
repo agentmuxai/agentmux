@@ -941,7 +941,7 @@ async fn a_gate_decline_with_queued_work_surfaces_a_failure_and_keeps_the_queue(
         let seq = inner.take_next_message_seq();
         inner
             .pending_send_messages
-            .push_back(QueuedMessage::fresh(seq, "{\"accepted\":\"prompt\"}".to_string()));
+            .push_back(QueuedMessage::fresh(seq, "{\"accepted\":\"prompt\"}".to_string(), RecordOrigin::new(MessageOrigin::user())));
     }
 
     let meta = meta_with_session("sid-gate-strand", &[stub.to_string_lossy().as_ref()]);
@@ -1241,7 +1241,7 @@ async fn an_ownership_refusal_with_queued_work_reports_and_discards_the_queue_in
         let seq = inner.take_next_message_seq();
         inner
             .pending_send_messages
-            .push_back(QueuedMessage::fresh(seq, "{\"accepted\":\"prompt\"}".to_string()));
+            .push_back(QueuedMessage::fresh(seq, "{\"accepted\":\"prompt\"}".to_string(), RecordOrigin::new(MessageOrigin::user())));
     }
 
     c.settle_eager_spawn_failure(&held_elsewhere_error("blk-other", false), bogus_config("sid-owned"));
@@ -1289,7 +1289,7 @@ async fn a_generic_spawn_failure_with_queued_work_still_falls_back_to_a_fresh_re
         let seq = inner.take_next_message_seq();
         inner
             .pending_send_messages
-            .push_back(QueuedMessage::fresh(seq, "{\"accepted\":\"prompt\"}".to_string()));
+            .push_back(QueuedMessage::fresh(seq, "{\"accepted\":\"prompt\"}".to_string(), RecordOrigin::new(MessageOrigin::user())));
     }
 
     c.settle_eager_spawn_failure("failed to spawn: No such file or directory", bogus_config("sid-any"));
@@ -1320,7 +1320,7 @@ async fn a_restart_cancelled_by_stop_does_not_respawn_for_queued_prompts() {
         let seq = inner.take_next_message_seq();
         inner
             .pending_send_messages
-            .push_back(QueuedMessage::fresh(seq, "{\"queued\":\"prompt\"}".to_string()));
+            .push_back(QueuedMessage::fresh(seq, "{\"queued\":\"prompt\"}".to_string(), RecordOrigin::new(MessageOrigin::user())));
     }
 
     c.settle_eager_spawn_failure(super::super::eager_resume::RESTART_OVERRIDDEN, bogus_config("sid-kept"));

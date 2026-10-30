@@ -1952,7 +1952,7 @@ fn test_handler_inject_structured_delivery_skips_pty() {
         Ok(())
     }));
     // Structured controller: report delivered (Ok(true)).
-    handler.set_message_sender(Arc::new(move |block_id: &str, message: &str, _inline: &[serde_json::Value]| {
+    handler.set_message_sender(Arc::new(move |block_id: &str, message: &str, _inline: &[serde_json::Value], _origin: &crate::backend::message_origin::MessageOrigin| {
         msg_clone
             .lock()
             .unwrap()
@@ -1996,7 +1996,7 @@ fn test_handler_inject_structured_delivery_skips_pty() {
 #[test]
 fn test_handler_inject_reports_deferred_delivery() {
     let mut handler = Handler::new();
-    handler.set_message_sender(Arc::new(|_block_id: &str, _message: &str, _inline: &[serde_json::Value]| Ok(SenderDelivery::Deferred)));
+    handler.set_message_sender(Arc::new(|_block_id: &str, _message: &str, _inline: &[serde_json::Value], _origin: &crate::backend::message_origin::MessageOrigin| Ok(SenderDelivery::Deferred)));
     handler.register_agent("agent1", "block1", None).unwrap();
     let resp = handler.inject_message(InjectionRequest {
         target_agent: "agent1".to_string(),
@@ -2025,7 +2025,7 @@ async fn test_handler_inject_pty_fallback() {
             .push((block_id.to_string(), data.to_vec()));
         Ok(())
     }));
-    handler.set_message_sender(Arc::new(|_block_id: &str, _message: &str, _inline: &[serde_json::Value]| Ok(SenderDelivery::Pty)));
+    handler.set_message_sender(Arc::new(|_block_id: &str, _message: &str, _inline: &[serde_json::Value], _origin: &crate::backend::message_origin::MessageOrigin| Ok(SenderDelivery::Pty)));
     handler.register_agent("agent1", "block1", None).unwrap();
 
     let resp = handler.inject_message(InjectionRequest {
@@ -2070,7 +2070,7 @@ fn test_handler_inject_structured_failure_no_pty_fallback() {
             .push((block_id.to_string(), data.to_vec()));
         Ok(())
     }));
-    handler.set_message_sender(Arc::new(|_block_id: &str, _message: &str, _inline: &[serde_json::Value]| {
+    handler.set_message_sender(Arc::new(|_block_id: &str, _message: &str, _inline: &[serde_json::Value], _origin: &crate::backend::message_origin::MessageOrigin| {
         Err("persistent process not running".to_string())
     }));
     handler.register_agent("agent1", "block1", None).unwrap();
@@ -3097,7 +3097,7 @@ fn the_handler_lock_is_held_across_the_message_sender() {
     let (in_sender_tx, in_sender_rx) = mpsc::channel::<()>();
     let (release_tx, release_rx) = mpsc::channel::<()>();
     let release_rx = std::sync::Mutex::new(release_rx);
-    handler.set_message_sender(std::sync::Arc::new(move |_block_id, _message, _inline| {
+    handler.set_message_sender(std::sync::Arc::new(move |_block_id, _message, _inline, _origin| {
         in_sender_tx.send(()).unwrap();
         // Hold here until the probe has had its chance.
         let _ = release_rx.lock().unwrap().recv_timeout(Duration::from_secs(60));
@@ -3194,7 +3194,7 @@ fn reentrant_registration_from_the_message_sender_fails_fast_not_hangs() {
 
     let handler_for_sender = handler.clone();
     let (reentrant_result_tx, reentrant_result_rx) = mpsc::channel::<Result<(), String>>();
-    handler.set_message_sender(std::sync::Arc::new(move |_block_id, _message, _inline| {
+    handler.set_message_sender(std::sync::Arc::new(move |_block_id, _message, _inline, _origin| {
         // Simulates `PersistentSubprocessController::spawn_process`'s
         // auto-registration, invoked synchronously on the injecting thread
         // (as it is in production via `block_in_place`) while
@@ -3275,7 +3275,7 @@ fn reentrant_try_get_agent_by_block_fails_fast_not_hangs() {
 
     let handler_for_sender = handler.clone();
     let (reentrant_result_tx, reentrant_result_rx) = mpsc::channel::<Option<super::types::AgentRegistration>>();
-    handler.set_message_sender(std::sync::Arc::new(move |_block_id, _message, _inline| {
+    handler.set_message_sender(std::sync::Arc::new(move |_block_id, _message, _inline, _origin| {
         // Simulates spawn_process's skip-arm nonce lookup, running
         // synchronously on the injecting thread while inject_message's
         // lock is held — exactly where the real regression lived.
@@ -3994,7 +3994,7 @@ fn test_inline_files_reach_the_structured_sender() {
     let seen: Arc<Mutex<Vec<usize>>> = Arc::default();
     let sink = seen.clone();
     let mut handler = Handler::new();
-    handler.set_message_sender(Arc::new(move |_block_id: &str, _message: &str, inline: &[serde_json::Value]| {
+    handler.set_message_sender(Arc::new(move |_block_id: &str, _message: &str, inline: &[serde_json::Value], _origin: &crate::backend::message_origin::MessageOrigin| {
         sink.lock().unwrap().push(inline.len());
         Ok(SenderDelivery::Delivered)
     }));
@@ -4302,7 +4302,7 @@ fn test_system_note_is_delivered_verbatim_without_a_jekt_block() {
     let msgs = Arc::new(Mutex::new(Vec::<(String, String)>::new()));
     let msg_clone = msgs.clone();
     let mut handler = Handler::new();
-    handler.set_message_sender(Arc::new(move |block_id: &str, message: &str, _inline: &[serde_json::Value]| {
+    handler.set_message_sender(Arc::new(move |block_id: &str, message: &str, _inline: &[serde_json::Value], _origin: &crate::backend::message_origin::MessageOrigin| {
         msg_clone.lock().unwrap().push((block_id.to_string(), message.to_string()));
         Ok(SenderDelivery::Delivered)
     }));
@@ -4324,7 +4324,7 @@ fn test_system_note_falls_back_to_keystrokes_for_a_terminal_agent() {
         typed_clone.lock().unwrap().push(data.to_vec());
         Ok(())
     }));
-    handler.set_message_sender(Arc::new(|_block_id: &str, _message: &str, _inline: &[serde_json::Value]| Ok(SenderDelivery::Pty)));
+    handler.set_message_sender(Arc::new(|_block_id: &str, _message: &str, _inline: &[serde_json::Value], _origin: &crate::backend::message_origin::MessageOrigin| Ok(SenderDelivery::Pty)));
     handler.register_agent("agent1", "block1", None).unwrap();
     handler.deliver_system_note("agent1", "[AgentMux] hi").unwrap();
     let typed = typed.lock().unwrap();

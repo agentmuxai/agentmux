@@ -1275,7 +1275,7 @@ impl Handler {
         // PTY-based shell/term agents report back so we fall through to keystrokes.
         if let Some(ref deliver) = self.message_sender {
             let joins_turn = super::turn_audit::turn_in_flight(&block_id);
-            match deliver(&block_id, &final_msg, req.files_delivery.as_ref().map_or(&[][..], |d| &d.inline)) {
+            match deliver(&block_id, &final_msg, req.files_delivery.as_ref().map_or(&[][..], |d| &d.inline), &super::sanitize::jekt_origin(&req, effective_tier, delivery_tier, &request_id, now as i64)) {
                 Ok(outcome @ (SenderDelivery::Delivered | SenderDelivery::Deferred)) => {
                     let deferred = outcome == SenderDelivery::Deferred;
                     self.delivery_turn = Some(if joins_turn && !deferred { "joined" } else { "started" });
@@ -1488,7 +1488,7 @@ impl Handler {
     /// controller takes it, else typed and submitted.
     fn send_to_block(&self, block_id: &str, text: &str) -> Result<(), String> {
         if let Some(deliver) = &self.message_sender {
-            match deliver(block_id, text, &[])? {
+            match deliver(block_id, text, &[], &crate::backend::message_origin::MessageOrigin::system())? {
                 SenderDelivery::Delivered | SenderDelivery::Deferred => return Ok(()),
                 SenderDelivery::Pty => {}
             }

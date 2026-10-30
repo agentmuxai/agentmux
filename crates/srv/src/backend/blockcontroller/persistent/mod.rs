@@ -34,6 +34,7 @@
 //!   - `lifecycle.rs`    — stop/restart, `session_id`, `needs_spawn`
 //!   - `tests/`          — one file per former inline test module
 
+use crate::backend::message_origin::{MessageOrigin, RecordOrigin};
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -408,7 +409,7 @@ struct PersistentInner {
     /// write. Read and written only under this mutex, together with the
     /// must-wait state it depends on, so a message is never enqueued just as
     /// a drain observes the queue empty and exits.
-    deferred_deliveries: VecDeque<String>,
+    deferred_deliveries: VecDeque<Deferred>,
     /// Whether a deferred-delivery watchdog task is running for this
     /// controller — see `ensure_deferred_watchdog`. Set and cleared only
     /// under this lock, and cleared only by the watchdog itself when it
@@ -763,55 +764,6 @@ impl QueueDrainClaim {
     }
 }
 
-/// A single entry in `pending_send_messages`: the formatted stdin JSON
-/// payload plus whether it's already been persisted to the blockfile.
-/// codex P2 on PR #2360 (sixth review pass, round 7): a stale-resume
-/// retry's redelivery has already been correctly persisted on its
-/// original (failed) attempt — see `retry_after_resume_failure`'s own doc
-/// comment — but the drain used to persist EVERY message it delivers
-/// unconditionally, double-persisting a replayed retry batch into the
-/// blockfile transcript.
-#[derive(Clone, Debug)]
-struct QueuedMessage {
-    /// Queue identity (issue #2365): assigned once from
-    /// `PersistentInner::next_message_seq` at first enqueue and preserved
-    /// verbatim across redelivery (`QueuedRetryEntry::seq` carries it
-    /// through a stale-resume retry batch), so dedup / own-message /
-    /// seed checks are exact identity — two genuinely different messages
-    /// with identical text can never be conflated.
-    seq: u64,
-    json_str: String,
-    already_persisted: bool,
-}
-
-impl QueuedMessage {
-    fn fresh(seq: u64, json_str: String) -> Self {
-        Self { seq, json_str, already_persisted: false }
-    }
-
-    fn already_persisted(seq: u64, json_str: String) -> Self {
-        Self { seq, json_str, already_persisted: true }
-    }
-}
-
-impl PartialEq<str> for QueuedMessage {
-    fn eq(&self, other: &str) -> bool {
-        self.json_str == other
-    }
-}
-
-impl PartialEq<&str> for QueuedMessage {
-    fn eq(&self, other: &&str) -> bool {
-        self.json_str == *other
-    }
-}
-
-impl PartialEq<String> for QueuedMessage {
-    fn eq(&self, other: &String) -> bool {
-        self.json_str == *other
-    }
-}
-
 /// Result of `try_eager_resume` — see `start()`'s doc comment. `DeclinedTo`
 /// carries a short, non-exhaustive reason for the log line; it is not meant
 /// to be pattern-matched on by callers, just read.
@@ -918,7 +870,7 @@ impl Drop for DeferredDropReport {
     fn drop(&mut self) {
         let Some((block_id, inner)) = self.0.take() else { return };
         // Never panic in `drop`: a poisoned lock still holds the queue.
-        let stranded: Vec<String> = match inner.lock() {
+        let stranded: Vec<Deferred> = match inner.lock() {
             Ok(mut g) => g.deferred_deliveries.drain(..).collect(),
             Err(poisoned) => poisoned.into_inner().deferred_deliveries.drain(..).collect(),
         };
@@ -1396,7 +1348,7 @@ impl Controller for PersistentSubprocessController {
                 // and the watchdog holds only a weak ref, so it dies with this
                 // controller. Returning first discarded the message unreported
                 // (codex P2 on #3562).
-                let stranded: Vec<String> = g.deferred_deliveries.drain(..).collect();
+                let stranded: Vec<Deferred> = g.deferred_deliveries.drain(..).collect();
                 // A pane close outranks a committed config restart in EVERY
                 // branch, including this no-process one: the restart's
                 // replacement may still be mid-spawn with no pid yet, and
@@ -1627,6 +1579,8 @@ pub(crate) mod lifecycle;
 pub(crate) mod outcome_line;
 mod process_waiter;
 mod queue;
+mod queued;
+use queued::{Deferred, QueuedMessage};
 mod resume_retry;
 mod segments;
 pub(crate) use resume_retry::pane_history_session_id;
