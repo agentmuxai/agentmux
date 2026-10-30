@@ -20,7 +20,7 @@ export function splitBlockDefFor(source: Block | undefined, fallback: () => Bloc
 
 /**
  * What every split of `source` creates: a Shortcuts pane, which remembers the pane it came from
- * (its Terminal and Hangar tiles start where that pane was). Splitting a Shortcuts pane passes on
+ * (its Terminal and Files tiles start where that pane was). Splitting a Shortcuts pane passes on
  * the pane it came from. The caller's `fallback` is for a split with no pane to split.
  * SPEC_SHORTCUTS_PANE_FOR_SPLITS_2026_10_28.md §2.1.
  */

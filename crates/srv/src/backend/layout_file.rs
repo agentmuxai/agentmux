@@ -1114,10 +1114,10 @@ impl PlanBuilder<'_> {
             "files" => {
                 meta.insert("view".into(), "files".into());
                 if let Some(path) = cfg_str(view, "path").map(|p| expand_home(p, home)) {
-                    self.summary.push(format!("Hangar: {}", path.display()));
+                    self.summary.push(format!("Files: {}", path.display()));
                     meta.insert("files:path".into(), Value::String(path.to_string_lossy().to_string()));
                 } else {
-                    self.summary.push("Hangar".to_string());
+                    self.summary.push("Files".to_string());
                 }
             }
             "sysinfo" => {

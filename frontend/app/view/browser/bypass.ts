@@ -42,6 +42,11 @@ export function minutesLabel(m: number): string {
     return m >= 60 ? `${m / 60} hour${m === 60 ? "" : "s"}` : `${m} min`;
 }
 
+/** Does a grant (or a request for one) carry the terminal power? */
+export function hasTerminalPower(powers: readonly string[] | undefined): boolean {
+    return !!powers?.includes("terminal");
+}
+
 /** A site for display: its host, without the scheme. */
 export function siteLabel(origin: string): string {
     return origin.replace(/^https:\/\//, "");

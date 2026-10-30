@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The Hangar's system icons: one request per file type and size, never a path;
+ * The Files pane's system icons: one request per file type and size, never a path;
  * the offered size covers the display scale times the pane's zoom; at most six
  * at once; abandoned when every row that asked has gone; a failure not retried;
  * a 501 switches the whole feature off for the session.

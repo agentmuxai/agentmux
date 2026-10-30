@@ -76,7 +76,7 @@ async fn app_main() {
     }
     // -2b. File icon child: srv re-runs itself to ask the operating system for a file type's
     //      icon, since the shell loads third-party code that can hang or crash; the parent
-    //      kills it at its deadline (SPEC_HANGAR_SYSTEM_FILE_ICONS_2026_10_27.md §4.2).
+    //      kills it at its deadline (SPEC_FILES_SYSTEM_FILE_ICONS_2026_10_27.md §4.2).
     {
         let args: Vec<String> = std::env::args().collect();
         if args.get(1).map(String::as_str) == Some(backend::file_icons::CHILD_ARG) {
