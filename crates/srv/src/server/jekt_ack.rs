@@ -41,7 +41,8 @@ pub(super) fn refuse_empty_reply(state: &AppState, auth_via: super::auth::Reacti
             &canon(&state.mstore, &req.target_agent),
             &req.message,
             req.in_reply_to.as_deref(),
-            ack_policy::refuses_bare_acks(&extra),
+            // A caption on an attachment is not a bare acknowledgement: the files are the news.
+            ack_policy::refuses_bare_acks(&extra) && req.files.as_ref().is_none_or(|f| f.is_empty()),
         ) {
             tracing::info!(source, target = %req.target_agent, "reactive inject: refusing a reply that says nothing");
             return Some(serde_json::json!({
