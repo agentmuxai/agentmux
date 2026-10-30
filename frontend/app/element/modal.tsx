@@ -199,6 +199,13 @@ export interface ModalProps {
     children: JSX.Element;
 }
 
+/** A scoped modal with no provider locks the whole window: a wiring bug. A
+ *  warning in a release build, an error with a stack in dev. */
+function reportFallback(message: string): void {
+    if (import.meta.env.DEV) console.error(message, new Error("modal scope fallback").stack);
+    else console.warn(message);
+}
+
 export const Modal: Component<ModalProps> = (props) => {
     const id = createUniqueId();
     const defaultTitleId = `modal-title-${id}`;
@@ -227,6 +234,10 @@ export const Modal: Component<ModalProps> = (props) => {
     // falls back to window (no provider). Drives `data-scope` so the CSS
     // positioning matches where the modal actually mounted.
     const [resolvedScope, setResolvedScope] = createSignal<ModalScope>("window");
+    // The scope asked for, when it fell back to window for want of a provider.
+    // Marked on the root (`data-scope-fallback`) so a pane modal that locks the
+    // whole window is easy to find in the DOM, and reported loudly in dev.
+    const [fellBackFrom, setFellBackFrom] = createSignal<ModalScope | null>(null);
 
     /**
      * Resolve the scope this modal renders into. Returns the Portal
@@ -239,27 +250,24 @@ export const Modal: Component<ModalProps> = (props) => {
      *   back to window scope with a console.warn — an un-hosted scoped
      *   modal is a wiring bug, not a crash.
      */
-    const resolveScope = (): { scope: ModalScope; mount: HTMLElement; region: HTMLElement } => {
+    const resolveScope = (): { scope: ModalScope; mount: HTMLElement; region: HTMLElement; fellBackFrom?: ModalScope } => {
         const requested = props.scope ?? "window";
+        const fallback = (missing: string): string =>
+            `[modal] scope="${requested}" used with no <${missing}> provider (or it has no ` +
+            `mount node yet) — falling back to scope="window".`;
 
         if (requested === "tab") {
             const node = tabMount?.();
             if (node) return { scope: "tab", mount: node, region: node };
-            console.warn(
-                "[modal] scope=\"tab\" used with no <TabModalScope> provider (or it has no " +
-                    "mount node yet) — falling back to scope=\"window\".",
-            );
+            reportFallback(fallback("TabModalScope"));
         } else if (requested === "pane") {
             const node = paneMount?.();
             if (node) return { scope: "pane", mount: node, region: node };
-            console.warn(
-                "[modal] scope=\"pane\" used with no <PaneModalScope> provider (or it has no " +
-                    "mount node yet) — falling back to scope=\"window\".",
-            );
+            reportFallback(fallback("PaneModalScope"));
         }
 
         const body = resolveMountDocument().body;
-        return { scope: "window", mount: body, region: body };
+        return { scope: "window", mount: body, region: body, fellBackFrom: requested === "window" ? undefined : requested };
     };
 
     // Track `open` changes to run the open/close lifecycle.
@@ -283,6 +291,7 @@ export const Modal: Component<ModalProps> = (props) => {
         lockRegion = resolved.region;
         setPortalMount(mountNode);
         setResolvedScope(resolved.scope);
+        setFellBackFrom(resolved.fellBackFrom ?? null);
 
         // Acquire the per-region scroll + inert lock. Reference-counted
         // per lock-region element: the first modal in a region performs
@@ -404,6 +413,7 @@ export const Modal: Component<ModalProps> = (props) => {
                             }}
                             class="modal-root"
                             data-scope={resolvedScope()}
+                            data-scope-fallback={fellBackFrom() ?? undefined}
                             data-placement={props.placement ?? "center"}
                             data-operator-only={props.operatorOnly ? "" : undefined}
                             role="dialog"
