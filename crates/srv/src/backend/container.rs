@@ -334,6 +334,9 @@ pub enum ContainerError {
     /// A `container_volumes` entry whose source is the host's CLI session folder.
     #[error("the volume source {path} is a host folder the container may not mount")]
     VolumeRefused { path: String },
+    /// The macOS Keychain login couldn't be given to the container (plain reason); raised before the image is pulled.
+    #[error("no login for the container: {0}")]
+    NoLogin(String),
 }
 
 impl ContainerError {
@@ -354,6 +357,7 @@ impl ContainerError {
             Self::NoRuntime(message) => message.clone(),
             Self::NoId { .. } => docker_error_message("the container was created without an id"),
             Self::CliInstall { command, detail } => cli_install_failure_message(command, detail),
+            Self::NoLogin(reason) => keychain_credentials::no_login_message(reason),
             Self::VolumeRefused { path } => format!(
                 "This agent's volumes list a host folder a container may not mount ({path}): remove it from the agent's volumes."
             ),
