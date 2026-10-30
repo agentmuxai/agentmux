@@ -500,7 +500,9 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
     // side; the new pane's key is where the pill bounces. SPEC_PANE_TAB_DRAG_BODY_PLACEMENT_AND_EDGE_GLOW_2026_10_29.md.
     const bodyDrop = {
         model: layoutModel,
-        hasBody: () => !(nodeModel.isMinimized?.() ?? false),
+        // No body zones while a pane is maximized: the layout keeps every pane's tiled rectangle, which is
+        // not where the displayed pane is, so the pointer could not be placed against it.
+        hasBody: () => !(nodeModel.isMinimized?.() ?? false) && !layoutModel.treeState.magnifiedNodeId,
         place: (blockId: string, zone: Extract<PillZone, { kind: "place" }>): string | false => {
             const landedIn = placePill(layoutModel, blockId, nodeModel.nodeId, zone);
             if (landedIn !== false && paneTabSelection().has(blockId)) clearPaneTabSelection();
