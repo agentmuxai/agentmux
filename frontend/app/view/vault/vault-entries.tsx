@@ -1,8 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// One Vault section's entries: label, kind, plain details, the main value's
-// last characters, and Change / Delete. Values are never shown.
+// One Vault section's entries: label, kind, plain details and expiry, the main
+// value's last characters, and Change / Delete. Values are never shown.
 
 import { createMemo, createSignal, For, Show, type JSX } from "solid-js";
 
@@ -12,15 +12,16 @@ import type { VaultEntryInfo } from "@/types/rpc/VaultEntryInfo";
 import type { VaultSection } from "@/types/rpc/VaultSection";
 import { VaultEntryForm, type VaultFormTarget } from "./vault-entry-form";
 import { VaultRevealDialog } from "./vault-reveal";
-import { formatWhen } from "./vault-format";
+import { EXPIRING_SOON_DAYS, expiryOf, formatWhen } from "./vault-format";
 import { SECTION_LABELS, vaultKind } from "./vault-kinds";
 import { COMMAND_GRANT, commandGrantLabel, siteOf } from "./vault-use-prompts";
 import { deleteEntry, revokeGrant, vaultEntries, vaultLoading } from "./vault-store";
 
 import "@/app/view/warden-shared/warden-manager-chrome.scss";
 
-/** The plain details worth a glance, in the order a person reads them. */
-const DETAIL_FIELDS = ["owner", "service", "site", "username", "bank", "env_name", "issuer", "expires"];
+/** The plain details worth a glance, in the order a person reads them. The expiry
+ *  date has its own line (`expiryOf`). */
+const DETAIL_FIELDS = ["owner", "service", "site", "username", "bank", "env_name", "issuer"];
 
 export function entryDetails(e: VaultEntryInfo): string {
     return DETAIL_FIELDS.map((f) => e.fields[f])
@@ -31,17 +32,26 @@ export function entryDetails(e: VaultEntryInfo): string {
 export function entryMatches(e: VaultEntryInfo, filter: string): boolean {
     const q = filter.trim().toLowerCase();
     if (!q) return true;
-    return [e.label, e.id, vaultKind(e.kind)?.label ?? e.kind, entryDetails(e), ...e.tags].some((s) => s.toLowerCase().includes(q));
+    return [e.label, e.id, vaultKind(e.kind)?.label ?? e.kind, entryDetails(e), e.fields.expires ?? "", ...e.tags].some((s) => s.toLowerCase().includes(q));
+}
+
+/** Past its date or within `EXPIRING_SOON_DAYS` of it. */
+export function expiringSoon(e: VaultEntryInfo, now = new Date()): boolean {
+    const x = expiryOf(e.fields.expires, now);
+    return x !== null && x.days <= EXPIRING_SOON_DAYS;
 }
 
 export function VaultEntries(props: { section: VaultSection }): JSX.Element {
     const [filter, setFilter] = createSignal("");
+    const [soonOnly, setSoonOnly] = createSignal(false);
     const [form, setForm] = createSignal<VaultFormTarget | null>(null);
     const [deleting, setDeleting] = createSignal<VaultEntryInfo | null>(null);
     const [revealing, setRevealing] = createSignal<VaultEntryInfo | null>(null);
     const [error, setError] = createSignal<string | null>(null);
-    const rows = createMemo(() => (vaultEntries() ?? []).filter((e) => e.section === props.section && entryMatches(e, filter())));
-    const total = createMemo(() => (vaultEntries() ?? []).filter((e) => e.section === props.section).length);
+    const inSection = createMemo(() => (vaultEntries() ?? []).filter((e) => e.section === props.section));
+    const dated = createMemo(() => inSection().some((e) => expiryOf(e.fields.expires) !== null));
+    const rows = createMemo(() => inSection().filter((e) => entryMatches(e, filter()) && (!soonOnly() || !dated() || expiringSoon(e))));
+    const total = createMemo(() => inSection().length);
 
     const revoke = async (id: string, origin: string) => {
         try {
@@ -69,6 +79,11 @@ export function VaultEntries(props: { section: VaultSection }): JSX.Element {
             <div class="vault-bar">
                 <Show when={total() > 0}>
                     <FilterInput value={filter()} onInput={setFilter} placeholder={`Filter ${SECTION_LABELS[props.section].toLowerCase()}`} />
+                </Show>
+                <Show when={dated()}>
+                    <Button density="compact" icon="clock" pressed={soonOnly()} onClick={() => setSoonOnly(!soonOnly())}>
+                        Expiring soon
+                    </Button>
                 </Show>
                 <Button tone="accent" density="compact" icon="plus" onClick={() => setForm({ mode: "new", section: props.section })}>
                     Add
@@ -142,7 +157,16 @@ export function VaultEntries(props: { section: VaultSection }): JSX.Element {
                                         </Show>
                                     </td>
                                     <td>{vaultKind(e.kind)?.label ?? e.kind}</td>
-                                    <td class="warden-manager-dim">{entryDetails(e)}</td>
+                                    <td class="warden-manager-dim">
+                                        {entryDetails(e)}
+                                        <Show when={expiryOf(e.fields.expires)}>
+                                            {(x) => (
+                                                <div class={x().warn ? "vault-expiry vault-expiry-warn" : "vault-expiry"} title={e.fields.expires}>
+                                                    {x().text}
+                                                </div>
+                                            )}
+                                        </Show>
+                                    </td>
                                     <td class="warden-manager-mono">{e.tail ? `•••• ${e.tail}` : "••••"}</td>
                                     <td class="warden-manager-dim">{formatWhen(e.updated_at)}</td>
                                     <td class="vault-actions">

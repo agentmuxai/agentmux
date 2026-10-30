@@ -37,6 +37,8 @@ pub(super) const VAULT_SCHEMA: &str = "
         target      TEXT NOT NULL DEFAULT '',
         outcome     TEXT NOT NULL DEFAULT ''
     );
+    -- An entry's own lines: its expiry reminders, and who made its value.
+    CREATE INDEX IF NOT EXISTS idx_vault_activity_entry ON db_vault_activity (entry_id, seq);
     -- Where the person let an agent use an entry without asking again: the
     -- origin of a site, for one entry (spec section 6.4).
     CREATE TABLE IF NOT EXISTS db_vault_grants (
@@ -305,6 +307,35 @@ impl Store {
              ORDER BY seq DESC LIMIT ?1",
         )?;
         let rows = stmt.query_map(params![limit], |r| {
+            Ok(VaultActivityRow {
+                at: r.get(0)?,
+                entry_id: r.get(1)?,
+                entry_label: r.get(2)?,
+                actor: r.get(3)?,
+                action: r.get(4)?,
+                target: r.get(5)?,
+                outcome: r.get(6)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// One entry's latest `limit` activity rows with one of `actions`, from
+    /// `since_ms` on, newest first. Filtered by action, so its many uses never
+    /// push these out; bounded by time, so a deleted entry whose id was reused
+    /// lends the new one none of its lines.
+    pub fn vault_activity_for_entry(&self, entry_id: &str, actions: &[&str], since_ms: i64, limit: i64) -> Result<Vec<VaultActivityRow>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let marks = vec!["?"; actions.len()].join(", ");
+        let mut stmt = conn.prepare(&format!(
+            "SELECT at, entry_id, entry_label, actor, action, target, outcome FROM db_vault_activity \
+             WHERE entry_id = ? AND action IN ({marks}) AND at >= ? ORDER BY seq DESC LIMIT ?"
+        ))?;
+        let mut args: Vec<rusqlite::types::Value> = vec![entry_id.to_string().into()];
+        args.extend(actions.iter().map(|a| rusqlite::types::Value::from(a.to_string())));
+        args.push(since_ms.into());
+        args.push(limit.into());
+        let rows = stmt.query_map(rusqlite::params_from_iter(args), |r| {
             Ok(VaultActivityRow {
                 at: r.get(0)?,
                 entry_id: r.get(1)?,

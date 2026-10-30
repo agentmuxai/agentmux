@@ -179,6 +179,15 @@
     border: 1px solid var(--border-color);
 }
 
+// An entry's expiry date, read against today; near or past it, in the warning colour.
+.vault-expiry {
+    margin-top: var(--space-1);
+}
+
+.vault-expiry-warn {
+    color: var(--warning-text-color);
+}
+
 // Export and import.
 .vault-export-entries {
     display: flex;
