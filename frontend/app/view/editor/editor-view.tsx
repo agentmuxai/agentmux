@@ -1055,15 +1055,13 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
                         // leads the document bar (the tree's own toolbar hides
                         // it). An editor on a remote host has no tree.
                         <Show when={showTreeButton()}>
-                            <button
-                                type="button"
+                            <IconButton
+                                icon="folder-tree"
+                                label="Show file tree"
+                                density="compact"
                                 class="editor-tree-toggle"
-                                title="Show file tree"
-                                aria-label="Show file tree"
                                 onClick={() => void model.toggleTreeExpanded()}
-                            >
-                                <i class="fa fa-folder-tree" />
-                            </button>
+                            />
                         </Show>
                     }
                     tooltipOf={(t) => t.payload.filePath}
@@ -1152,14 +1150,14 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
                                     <div class="editor-lsp-banner-row editor-lsp-banner-install">
                                         <span>Install:</span>
                                         <code class="editor-lsp-banner-cmd">{hint!.install}</code>
-                                        <button
-                                            class="editor-lsp-banner-copy"
+                                        <Button
+                                            density="compact"
                                             // SPEC_ERROR_COPY_EVERYWHERE_2026_09_24.md §5 — moved to the redacted path.
                                             onClick={() => copyToClipboard(redactSecrets(hint!.install))}
                                             title="Copy install command"
                                         >
                                             Copy
-                                        </button>
+                                        </Button>
                                         <a
                                             class="editor-lsp-banner-docs"
                                             href={hint!.docs}
