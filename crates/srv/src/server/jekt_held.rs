@@ -259,9 +259,9 @@ pub(crate) fn request_from_held(row: &HeldJekt) -> InjectionRequest {
         req.wan_verified = (wan["verified"] == true && req.wan_instance.is_some()).then_some(true);
     }
     req.sig_verified = row.sig_verified;
-    // Not restored: only host-tier jekts are held (`hold_for_absent_target`)
-    // and reagent verification is WAN-only, so a held row never carries a
-    // real reagent verdict — and a replayed `Some(true)` without its key id
+    // Not restored: reagent verification is WAN-only and no held row carries a
+    // real reagent verdict (a verified WAN peer is held on its `wan_verified`
+    // verdict, restored above), and a replayed `Some(true)` without its key id
     // would read as a failed verification.
     req.reagent_verified = None;
     req.lan_verified = row.lan_verified;

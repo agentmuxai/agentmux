@@ -342,8 +342,9 @@ pub(super) fn verified_peer(req: &InjectionRequest) -> bool {
 }
 
 /// The conditions under which this instance may hold a jekt at all (durable
-/// jekt spec §2.1): a full-key, host-tier request (a LAN caller never fills
-/// the hold); not a periodic `cron` fire; and an id to key the row by.
+/// jekt spec §2.1): a full-key, host-tier request; not a periodic `cron` fire;
+/// and an id to key the row by. A LAN or WAN caller fills the hold only for an agent
+/// that can't work, and only with proof of its sender (`hold_applies_to_peer`).
 pub(super) fn hold_applies(
     auth_via: super::ReactiveAuthVia,
     req: &InjectionRequest,
