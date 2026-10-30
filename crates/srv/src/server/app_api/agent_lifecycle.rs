@@ -238,6 +238,18 @@ async fn detach(state: &AppState, req: &LifecycleRequest) -> Result<Value, Refus
 
 async fn run(state: &AppState, caller: Option<&Caller>, action: &str, req: LifecycleRequest) -> Result<Value, Refusal> {
     let actor = actor_of(state, caller, action)?;
+    run_as(state, actor, action, req).await
+}
+
+/// `start` or `stop` of `agent` for an agent on another machine (`remote_ops::agent_ops`): the same
+/// code a local call runs, with `who` (`slug@machine`) as the actor. Such a caller owns no worker here,
+/// so a stop of another agent always waits for the person's override window.
+pub(crate) async fn run_remote(state: &AppState, who: &str, action: &str, agent: &str) -> Result<Value, (StatusCode, String)> {
+    let actor = Actor { uid: format!("remote:{who}"), slug: who.to_string() };
+    run_as(state, actor, action, LifecycleRequest { agent: agent.to_string() }).await.map_err(|r| (r.status, r.message))
+}
+
+async fn run_as(state: &AppState, actor: Actor, action: &str, req: LifecycleRequest) -> Result<Value, Refusal> {
     let outcome = match action {
         "start" => start(state, &actor, &req).await,
         "stop" => stop(state, &actor, &req).await,
