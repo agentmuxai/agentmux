@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { findMinimizeMergeTarget } from "../lib/layoutMinimizeMerge";
+import { findExpandedMergeTarget, findMinimizeMergeTarget } from "../lib/layoutMinimizeMerge";
 import { newLayoutNode } from "../lib/layoutNode";
 import { FlexDirection, type LayoutNode } from "../lib/types";
 
@@ -85,5 +85,49 @@ describe("findMinimizeMergeTarget", () => {
         expect(findMinimizeMergeTarget(undefined, "a")).toBeUndefined();
         const only = leaf("only");
         expect(findMinimizeMergeTarget(only, only.id)).toBeUndefined();
+    });
+});
+
+describe("findExpandedMergeTarget", () => {
+    const expandedOf = (root: LayoutNode, node: LayoutNode) => findExpandedMergeTarget(root, node.id)?.data?.blockId;
+
+    it("takes the nearest expanded sibling after the pane, else before, in a Row and in a Column", () => {
+        for (const direction of [FlexDirection.Row, FlexDirection.Column]) {
+            const [a, b, c] = [leaf("a"), leaf("b"), leaf("c")];
+            const root = split(direction, a, b, c);
+            expect(expandedOf(root, a)).toBe("b");
+            expect(expandedOf(root, b)).toBe("c");
+            expect(expandedOf(root, c)).toBe("b");
+        }
+    });
+
+    it("steps over a minimized pane lying between the pane and the expanded one", () => {
+        const [a, m, c] = [leaf("a"), leaf("m", true), leaf("c")];
+        expect(expandedOf(split(FlexDirection.Row, a, m, c), a)).toBe("c");
+        const [d, n, e] = [leaf("d"), leaf("n", true), leaf("e")];
+        expect(expandedOf(split(FlexDirection.Column, d, n, e), e)).toBe("d");
+    });
+
+    it("takes the leaf of a split sibling nearest to the pane", () => {
+        // Along the split's own axis: the first child when coming from before it, the last from after.
+        const [a, x, y] = [leaf("a"), leaf("x"), leaf("y")];
+        expect(expandedOf(split(FlexDirection.Row, a, split(FlexDirection.Row, x, y)), a)).toBe("x");
+        const [x2, y2, a2] = [leaf("x2"), leaf("y2"), leaf("a2")];
+        expect(expandedOf(split(FlexDirection.Row, split(FlexDirection.Row, x2, y2), a2), a2)).toBe("y2");
+        // Across it every child touches the near edge: the first (topmost) one.
+        const [a3, x3, y3] = [leaf("a3"), leaf("x3"), leaf("y3")];
+        expect(expandedOf(split(FlexDirection.Row, a3, split(FlexDirection.Column, x3, y3)), a3)).toBe("x3");
+    });
+
+    it("skips a split sibling whose leaves are all minimized", () => {
+        const [a, x, y, z] = [leaf("a"), leaf("x", true), leaf("y", true), leaf("z")];
+        expect(expandedOf(split(FlexDirection.Row, a, split(FlexDirection.Column, x, y), z), a)).toBe("z");
+    });
+
+    it("has no target when every other pane is minimized, or the pane is alone", () => {
+        const [a, b, c] = [leaf("a"), leaf("b", true), leaf("c", true)];
+        expect(expandedOf(split(FlexDirection.Row, a, b, c), a)).toBeUndefined();
+        const only = leaf("only");
+        expect(expandedOf(split(FlexDirection.Row, only), only)).toBeUndefined();
     });
 });

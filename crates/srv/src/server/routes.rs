@@ -228,6 +228,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/api/v1/work-claims", post(work_claims_handlers::handle_claim_work))
         .route("/api/v1/work-claims/release", post(work_claims_handlers::handle_release_work))
         .route("/api/v1/coord/posts", post(coord_channel_handlers::handle_post_to_channel))
+        .route("/api/v1/bulletin", post(bulletin_handlers::handle_post_bulletin).get(bulletin_handlers::handle_read_bulletin))
         .route_layer(middleware::from_fn_with_state(state.clone(), agent_only::require_agent_token));
 
     // MessageBus routes (authed, localhost-only)

@@ -27,16 +27,20 @@ pub(super) async fn scoped_snapshot(
     scope_ref: &str,
     backend: i64,
     frame: &FrameRef,
+    allowed: Option<&[String]>,
 ) -> Result<SnapshotData, String> {
     frames::check_frame(cdp, frame, scope_ref).await?;
     let mut describes_left = super::act::MAX_DESCRIBES;
-    let (trees, refs) = frames::read_frames(cdp, &mut describes_left).await;
+    let (trees, refs) = frames::read_frames(cdp, &mut describes_left, allowed).await;
     let ordinal = refs
         .iter()
         .find(|(_, r)| r.frame_id == frame.frame_id && r.session == frame.session)
         .map(|(ordinal, _)| *ordinal)
         .ok_or_else(|| format!("the frame holding {scope_ref} couldn't be read; take a new snapshot"))?;
     let tree = trees.iter().find(|t| t.ordinal == ordinal).ok_or_else(|| format!("the frame holding {scope_ref} couldn't be read; take a new snapshot"))?;
+    if tree.blocked {
+        return Err(format!("the frame holding {scope_ref} isn't on this pane's allowed sites, so it can't be read for acting: ask the user to allow it"));
+    }
     if let Some(note) = &tree.note {
         return Err(format!("the frame holding {scope_ref} is {note}"));
     }

@@ -2,10 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Minimizing a pane next to a minimized pane merges its tabs into that pane.
- * docs/specs/SPEC_MINIMIZE_MERGES_INTO_ADJACENT_MINIMIZED_PANE_2026_10_28.md.
+ * Minimizing a pane next to a minimized pane merges its tabs into that pane; with none, into the
+ * nearest expanded pane of its split (`findExpandedMergeTarget`).
+ * docs/specs/SPEC_MINIMIZE_MERGES_INTO_ADJACENT_MINIMIZED_PANE_2026_10_28.md,
+ * amended by SPEC_MINIMIZE_MERGES_INTO_EXPANDED_NEIGHBOUR_2026_10_30.md.
  *
- * Only the person's own minimize merges: `mergeIntoMinimizedNeighbour`
+ * Only the person's own minimize merges: `mergeIntoNeighbour`
  * (layoutMinimizeMergeApply.ts) runs from `minimizeNodeToggle` and `collapseMaximizedNode` (the
  * header button, shortcut, pane menu and palette), never from an agent's `Pane` minimize (srv), a
  * layout load or a restore. There is no undo; dragging a pill out of the merged pane is the way back.
@@ -56,5 +58,45 @@ function dockedTogether(parent: LayoutNode | undefined, node: LayoutNode): Layou
     const isChipHere = (c: LayoutNode) => !!c.minimized && !c.children?.length && !!c.data && docksHere.get(c.id)?.id === dock.id;
     for (let i = at - 1; i >= 0; i--) if (isChipHere(siblings[i])) return siblings[i];
     for (let i = at + 1; i < siblings.length; i++) if (isChipHere(siblings[i])) return siblings[i];
+    return undefined;
+}
+
+/**
+ * The expanded pane `nodeId`'s tabs go into when there is no minimized pane to merge into
+ * (SPEC_MINIMIZE_MERGES_INTO_EXPANDED_NEIGHBOUR_2026_10_30.md §2.3): the same pane its chip would
+ * dock onto, the nearest expanded sibling after it (right or below), else the nearest before it
+ * (left or above). A sibling that is a split of several panes gives the leaf of it nearest to
+ * `nodeId` (`nearestExpandedLeaf`). Only siblings of one split. Pure.
+ */
+export function findExpandedMergeTarget(root: LayoutNode | undefined, nodeId: string): LayoutNode | undefined {
+    if (!root) return undefined;
+    const node = findNode(root, nodeId);
+    if (!node || node.children?.length || !node.data || isNodeLocked(node)) return undefined;
+    const parent = findParent(root, nodeId);
+    const siblings = parent?.children;
+    if (!parent || !siblings) return undefined;
+    const at = siblings.indexOf(node);
+    for (const step of [1, -1]) {
+        for (let i = at + step; i >= 0 && i < siblings.length; i += step) {
+            const leaf = nearestExpandedLeaf(siblings[i], parent.flexDirection, step === 1);
+            if (leaf) return leaf;
+        }
+    }
+    return undefined;
+}
+
+/**
+ * The expanded leaf of `node` nearest to a pane approaching from one side along `axis`: `node`
+ * itself when it is a leaf; in a split along the same axis the first child (when `after`, the
+ * approach is from before it) or the last; in a split across it every child touches the near edge,
+ * so the first (leftmost, topmost). Minimized panes and fully-collapsed branches are stepped over.
+ */
+function nearestExpandedLeaf(node: LayoutNode, axis: FlexDirection, after: boolean): LayoutNode | undefined {
+    if (!node.children?.length) return node.data && !isEffectivelyMinimized(node) ? node : undefined;
+    const kids = node.flexDirection === axis && !after ? [...node.children].reverse() : node.children;
+    for (const kid of kids) {
+        const leaf = nearestExpandedLeaf(kid, axis, after);
+        if (leaf) return leaf;
+    }
     return undefined;
 }
