@@ -63,6 +63,8 @@ jobs:
 
       - name: Pick the releases
         id: pick
+        # After a release this must not turn the Release run red; a manual run should see its own mistake.
+        continue-on-error: ${{ github.event_name != 'workflow_dispatch' }}
         shell: bash
         env:
           FROM_IN: ${{ inputs.from-version }}
@@ -92,6 +94,10 @@ jobs:
             echo "Upgrading $FROM to $TO." >> "$GITHUB_STEP_SUMMARY"
           fi
 
+      - name: The releases couldn't be picked
+        if: ${{ steps.pick.outcome == 'failure' }}
+        run: echo "::error::The Linux package upgrade check couldn't pick the releases to compare, so it did not run. See the 'Pick the releases' step."
+
       - name: Run the harness
         id: harness
         if: ${{ steps.pick.outputs.run == 'true' }}
@@ -102,8 +108,11 @@ jobs:
           TO_VERSION: ${{ steps.pick.outputs.to }}
           HARNESS_ID: ci
           DISTROS: ${{ inputs.distros }}
+          # A pull request tests the helper it changes; a release is tested with the helper its package installed.
+          HELPER_UNDER_TEST: ${{ github.event_name == 'pull_request' && format('{0}/scripts/agentmux-install-update.sh', github.workspace) || '' }}
         run: |
           set -o pipefail
+          [ -z "$HELPER_UNDER_TEST" ] || export HELPER="$HELPER_UNDER_TEST"
           # shellcheck disable=SC2086
           scripts/linux-upgrade-harness/run.sh ${DISTROS:-ubuntu24 ubuntu26 fedora42 debian13 tumbleweed} 2>&1 | tee "$RUNNER_TEMP/upgrade-check.log"
 
@@ -113,7 +122,7 @@ jobs:
         run: |
           {
             echo '```'
-            grep -E '^(==|- |  (PASS|FAIL|SETUP))' "$RUNNER_TEMP/upgrade-check.log" | cut -c1-300 || true
+            grep -E '^(==|- |  (PASS|FAIL|SETUP))|SETUP FAILED|can.t download|didn.t start|failed; see' "$RUNNER_TEMP/upgrade-check.log" | cut -c1-300 || true
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -127,7 +136,8 @@ jobs:
         run: |
           set -uo pipefail
           title="Linux package upgrade check failed: $FROM_VERSION to $TO_VERSION"
-          failed=$(grep -E '^(  FAIL|  SETUP|== )' "$RUNNER_TEMP/upgrade-check.log" | cut -c1-300 | head -n 30)
+          failed=$(grep -E '^(  FAIL|  SETUP|== )|SETUP FAILED|can.t download|didn.t start|failed; see' "$RUNNER_TEMP/upgrade-check.log" | cut -c1-300 | head -n 30)
+          [ -n "$failed" ] || failed=$(tail -n 30 "$RUNNER_TEMP/upgrade-check.log" | cut -c1-300)
           body=$(printf 'The .deb/.rpm upgrade check from %s to %s failed after the release published.\n\nRun: %s\n\n```\n%s\n```\n\nRun it again by hand: `FROM_VERSION=%s TO_VERSION=%s scripts/linux-upgrade-harness/run.sh` (see its README).\n' \
             "$FROM_VERSION" "$TO_VERSION" "$RUN_URL" "$failed" "$FROM_VERSION" "$TO_VERSION")
           existing=$(gh issue list --state open --search "\"$title\" in:title" --json number --jq '.[0].number // empty')
