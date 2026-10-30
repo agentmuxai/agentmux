@@ -165,6 +165,24 @@ async fn the_agents_lead_gets_one_line_too() {
     cleanup(&[&block, &lead_pane]);
 }
 
+/// A re-sign-in that rebuilds the account's context keeps the operator's mark.
+#[tokio::test]
+async fn a_rewritten_account_keeps_its_mark() {
+    let state = test_state();
+    state.id_store.identity_upsert(&mail("a", "valid", "a@x.com")).unwrap();
+    state.id_store.identity_set_never_failover("a", true).unwrap();
+
+    let mut rebuilt = mail("a", "valid", "a@x.com");
+    rebuilt.context = json!({ "email": "a@x.com" });
+    state.id_store.identity_upsert(&rebuilt).unwrap();
+    assert!(failover::is_never(&state.id_store.identity_get("a").unwrap().unwrap()));
+
+    // A write that says so changes it.
+    rebuilt.context = json!({ "email": "a@x.com", "never_failover": false });
+    state.id_store.identity_upsert(&rebuilt).unwrap();
+    assert!(!failover::is_never(&state.id_store.identity_get("a").unwrap().unwrap()));
+}
+
 /// `identity.account.set_failover` marks and unmarks, `identity.accounts` shows the mark, and an
 /// unknown account is refused.
 #[tokio::test]

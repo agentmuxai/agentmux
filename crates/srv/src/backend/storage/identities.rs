@@ -427,6 +427,12 @@ impl Store {
         let stored: Option<String> = conn.query_row("SELECT context FROM db_accounts WHERE id = ?1", params![account.id], |r| r.get(0)).ok();
         if let Some(stored) = stored.and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok()) {
             crate::identity::account_numbering::carry_over(&stored, &mut context);
+            // The operator's "never fail over to this" mark survives a re-sign-in that rebuilds the
+            // context; only `identity_set_never_failover` (or a context that says so) changes it.
+            let key = crate::server::account_episodes::failover::NEVER_FAILOVER;
+            if let (Some(mark), Some(ctx)) = (stored.get(key), context.as_object_mut()) {
+                ctx.entry(key).or_insert_with(|| mark.clone());
+            }
         }
         let context_json = serde_json::to_string(&context)?;
         conn.execute(
