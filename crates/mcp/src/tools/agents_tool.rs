@@ -38,6 +38,7 @@ pub(super) const ACTS: &[Act] = &[
     Act { action: "update_container", tool: "AgentUpdateContainer", rename: &[] },
     Act { action: "message_stats", tool: "AgentMessageStats", rename: &[] },
     Act { action: "set_container_limits", tool: "AgentSetContainerLimits", rename: &[] },
+    Act { action: "container_caches", tool: "AgentContainerCaches", rename: &[] },
 ];
 
 pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
@@ -75,6 +76,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 "AgentUpdateContainer" => update_container(cx, &args).await,
                 "AgentMessageStats" => message_stats(cx, &args).await,
                 "AgentSetContainerLimits" => set_container_limits(cx, &args).await,
+                "AgentContainerCaches" => container_caches(cx, &args).await,
                 _ => history::call(act.tool, &args, cx).await,
             };
             let result = result.map_err(|e| anyhow::anyhow!(public_params(&format!("{e:#}"), act.rename)));
@@ -371,6 +373,30 @@ async fn set_container_limits(cx: &ToolCtx<'_>, args: &Value) -> Result<String> 
     Ok(serde_json::to_string_pretty(&body)?)
 }
 
+/// `container_caches`: a container agent's cache volumes, read (their sizes) or, with `clear`, removed, by srv as the
+/// agent this process's token names (`/api/v1/agent/container/caches`).
+async fn container_caches(cx: &ToolCtx<'_>, args: &Value) -> Result<String> {
+    require_agent_env(cx.local_url, cx.auth_key, cx.block_id)?;
+    let Some(agent) = str_arg(args, "agent") else {
+        anyhow::bail!("Agents container_caches needs agent: the container agent's id or slug");
+    };
+    let url = format!("{}/api/v1/agent/container/caches", cx.local_url.trim_end_matches('/'));
+    let resp = cx
+        .client
+        .post(&url)
+        .header(AUTH_KEY_HEADER, cx.auth_key)
+        .json(&json!({ "agent": agent, "clear": args.get("clear").and_then(Value::as_bool).unwrap_or(false) }))
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+    let status = resp.status();
+    let body: Value = resp.json().await.unwrap_or(Value::Null);
+    if !status.is_success() {
+        anyhow::bail!("Agents container_caches: {}", body["error"].as_str().map(str::to_string).unwrap_or_else(|| format!("srv answered {status}: {body}")));
+    }
+    Ok(serde_json::to_string_pretty(&body)?)
+}
+
 /// `set_seat`: seats set or cleared by srv as the agent this process's token
 /// names, which records each change under that agent (`/api/v1/agent/seats`).
 /// `seats` goes as given; srv checks the shape and every seat.
@@ -625,6 +651,13 @@ mod tests {
         let m = brief_message("loap", "Loap #4", "loap-4", "b");
         assert!(m.contains("a PR title starts \"Loap-4@<host>: \""), "{m}");
         assert!(m.contains("You are Loap #4 (AGENTMUX_AGENT_ID loap-4)"), "{m}");
+    }
+
+    #[test]
+    fn container_caches_names_the_agent_and_clears_only_when_asked() {
+        let (act, args) = pick("Agents", ACTS, &json!({ "action": "container_caches", "agent": "Korp", "clear": true })).unwrap();
+        assert_eq!(act.tool, "AgentContainerCaches");
+        assert_eq!(args, json!({ "agent": "Korp", "clear": true }));
     }
 
     #[test]

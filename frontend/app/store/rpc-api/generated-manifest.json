@@ -29,6 +29,10 @@
             "dataType": "{ provider: string; name?: string; clientId?: string; clientSecret?: string; clientMode?: \"byo\" | \"workspace\"; saveClient?: boolean; scopes?: string[]; accountId?: string; replaceGithubUser?: boolean }"
         },
         {
+            "command": "clearcontainercaches",
+            "method": "ClearContainerCachesCommand"
+        },
+        {
             "command": "session:activity_summary",
             "method": "AgentActivitySummaryCommand"
         },
@@ -600,6 +604,10 @@
             "command": "getclaudeglobalconfig",
             "method": "GetClaudeGlobalConfigCommand",
             "send": "data ?? {}"
+        },
+        {
+            "command": "getcontainercaches",
+            "method": "GetContainerCachesCommand"
         },
         {
             "command": "getcontainerlimits",

@@ -384,6 +384,11 @@ pub const COMMAND_CONTAINER_RUNTIME_AVAILABLE: &str = "containerruntimeavailable
 /// Remove a container agent's container so its next message starts it from the current agent
 /// image (the pane row's "Update container"). Only between turns.
 pub const COMMAND_UPDATE_CONTAINER: &str = "updatecontainer";
+/// A container agent's cache volumes and their sizes (`CommandContainerCachesData` -> `AgentContainerCachesResult`).
+pub const COMMAND_GET_CONTAINER_CACHES: &str = "getcontainercaches";
+/// Remove them (same types, answering with `freed_bytes`); the container starts again at the next message. The
+/// operator's client only: an agent uses `Agents container_caches`.
+pub const COMMAND_CLEAR_CONTAINER_CACHES: &str = "clearcontainercaches";
 /// A container agent's CPU and memory limits, and what Docker has (`CommandGetContainerLimitsData` ->
 /// `AgentContainerLimitsResult`).
 pub const COMMAND_GET_CONTAINER_LIMITS: &str = "getcontainerlimits";

@@ -2036,6 +2036,25 @@
     }
   },
   {
+    "command": "clearcontainercaches",
+    "request": "agentmux_srv::backend::rpc_types::agent::CommandContainerCachesData",
+    "requestName": "CommandContainerCachesData",
+    "requestTs": {
+      "imports": [
+        "CommandContainerCachesData"
+      ],
+      "name": "CommandContainerCachesData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::agent::AgentContainerCachesResult",
+    "responseName": "AgentContainerCachesResult",
+    "responseTs": {
+      "imports": [
+        "AgentContainerCachesResult"
+      ],
+      "name": "AgentContainerCachesResult"
+    }
+  },
+  {
     "command": "connconnect",
     "request": "serde_json::value::Value",
     "requestName": "Value",
@@ -3234,6 +3253,25 @@
         "ClaudeGlobalConfig"
       ],
       "name": "ClaudeGlobalConfig"
+    }
+  },
+  {
+    "command": "getcontainercaches",
+    "request": "agentmux_srv::backend::rpc_types::agent::CommandContainerCachesData",
+    "requestName": "CommandContainerCachesData",
+    "requestTs": {
+      "imports": [
+        "CommandContainerCachesData"
+      ],
+      "name": "CommandContainerCachesData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::agent::AgentContainerCachesResult",
+    "responseName": "AgentContainerCachesResult",
+    "responseTs": {
+      "imports": [
+        "AgentContainerCachesResult"
+      ],
+      "name": "AgentContainerCachesResult"
     }
   },
   {

@@ -9,6 +9,7 @@ use bollard::models::{Mount, MountTypeEnum, MountVolumeOptions};
 use bollard::volume::{ListVolumesOptions, RemoveVolumeOptions};
 
 use super::{ContainerManager, CONTAINER_CLAUDE_DIR, CONTAINER_WORKSPACE_DIR};
+use crate::backend::rpc_types::ContainerCacheVolume;
 
 /// The image label that lists directories (absolute paths, separated by `:`) to keep in per-agent volumes.
 pub const CACHE_DIRS_LABEL: &str = "ai.agentmux.cache-dirs";
@@ -96,6 +97,38 @@ impl ContainerManager {
         let Some(label) = labels.as_ref().and_then(|l| l.get(CACHE_DIRS_LABEL)) else { return Vec::new() };
         let taken: Vec<String> = taken.iter().filter_map(|m| m.target.clone()).collect();
         parse_cache_dirs(label, &taken).iter().map(|dir| cache_mount(container_name, dir)).collect()
+    }
+
+    /// The cache volumes of `container_name` and what each holds, largest first (Docker's own disk-usage report,
+    /// which does not scan the volumes; a volume whose driver can't say is counted as 0).
+    pub(crate) async fn cache_volumes(&self, container_name: &str) -> Result<Vec<ContainerCacheVolume>, String> {
+        let usage = self.docker().df().await.map_err(|e| format!("Docker would not report volume sizes: {e}"))?;
+        let mut out: Vec<ContainerCacheVolume> = usage
+            .volumes
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|v| v.labels.get(VOLUME_AGENT_LABEL).map(String::as_str) == Some(container_name) && v.labels.get(VOLUME_KIND_LABEL).map(String::as_str) == Some("cache"))
+            .map(|v| ContainerCacheVolume { bytes: v.usage_data.map_or(0, |u| u.size.max(0) as u64), name: v.name })
+            .collect();
+        out.sort_by(|a, b| b.bytes.cmp(&a.bytes).then_with(|| a.name.cmp(&b.name)));
+        Ok(out)
+    }
+
+    /// Removes the container and its cache volumes (the CLI and Claude home volumes stay): the next message starts a
+    /// new container, which fills them again. Returns what was removed. The caller makes sure no turn is using the
+    /// container.
+    pub(crate) async fn clear_caches(&self, container_name: &str) -> Result<Vec<ContainerCacheVolume>, String> {
+        let volumes = self.cache_volumes(container_name).await?;
+        let _ = self.stop(container_name, 10).await;
+        let _ = self.remove(container_name, true).await;
+        let mut removed = Vec::new();
+        for v in volumes {
+            match self.docker().remove_volume(&v.name, Some(RemoveVolumeOptions { force: true })).await {
+                Ok(()) | Err(bollard::errors::Error::DockerResponseServerError { status_code: 404, .. }) => removed.push(v),
+                Err(e) => return Err(format!("couldn't remove the volume {}: {e}", v.name)),
+            }
+        }
+        Ok(removed)
     }
 
     /// Removes the container and every volume made for an agent, once the agent is deleted: its cache volumes
@@ -241,6 +274,12 @@ mod itest {
             .map(|v| v.name)
             .collect();
 
+        // Their sizes as Docker reports them, and clearing them (the container goes with them).
+        let sized = cm.cache_volumes(name).await.expect("volume sizes");
+        let freed = cm.clear_caches(name).await.expect("clear");
+        let after_clear = cm.cache_volumes(name).await.expect("volume sizes after clearing");
+        let container_gone_after_clear = cm.docker().inspect_container(name, None).await.is_err();
+
         cm.remove_agent_storage(name).await;
         let left = cm.docker().list_volumes(Some(ListVolumesOptions { filters: filter })).await.unwrap().volumes.unwrap_or_default().len();
         let container_gone = cm.docker().inspect_container(name, None).await.is_err();
@@ -253,6 +292,10 @@ mod itest {
         let mut want = [cache_volume_name(name, "/home/agent/.cargo"), cache_volume_name(name, "/home/agent/target")];
         want.sort();
         assert_eq!(labelled, want, "one labelled volume per directory");
+        assert_eq!(sized.len(), 2, "both caches are reported: {sized:?}");
+        assert!(sized.iter().all(|v| v.bytes > 0), "each holds what was written (Docker's own count): {sized:?}");
+        assert_eq!(freed.len(), 2, "clearing removed both");
+        assert!(after_clear.is_empty() && container_gone_after_clear, "and left nothing behind, the container included: {after_clear:?}");
         assert_eq!(left, 0, "the agent's volumes are removed with it");
         assert!(container_gone, "and its container");
     }

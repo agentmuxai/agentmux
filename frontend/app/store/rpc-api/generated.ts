@@ -16,6 +16,7 @@ import type { AgentAccountSwitchReq } from "@/types/rpc/AgentAccountSwitchReq";
 import type { AgentAccountSwitchResult } from "@/types/rpc/AgentAccountSwitchResult";
 import type { AgentArchiveRow } from "@/types/rpc/AgentArchiveRow";
 import type { AgentBundlesResult } from "@/types/rpc/AgentBundlesResult";
+import type { AgentContainerCachesResult } from "@/types/rpc/AgentContainerCachesResult";
 import type { AgentContainerLimitsResult } from "@/types/rpc/AgentContainerLimitsResult";
 import type { AgentContent } from "@/types/rpc/AgentContent";
 import type { AgentDefCreateFromTemplateResult } from "@/types/rpc/AgentDefCreateFromTemplateResult";
@@ -122,6 +123,7 @@ import type { CommandBrowserProfilesListData } from "@/types/rpc/CommandBrowserP
 import type { CommandBundleImportCommitData } from "@/types/rpc/CommandBundleImportCommitData";
 import type { CommandBundleImportPreviewData } from "@/types/rpc/CommandBundleImportPreviewData";
 import type { CommandCheckCliAuthData } from "@/types/rpc/CommandCheckCliAuthData";
+import type { CommandContainerCachesData } from "@/types/rpc/CommandContainerCachesData";
 import type { CommandContainerImageCheckData } from "@/types/rpc/CommandContainerImageCheckData";
 import type { CommandCopyForkHistoryData } from "@/types/rpc/CommandCopyForkHistoryData";
 import type { CommandCreateAgentDefinitionData } from "@/types/rpc/CommandCreateAgentDefinitionData";
@@ -610,6 +612,14 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<AccountOAuthStartResult> {
     return client.rpcCall("account.oauth.start", data, opts);
+  },
+  // command "clearcontainercaches"
+  ClearContainerCachesCommand(
+    client: RpcClient,
+    data: CommandContainerCachesData,
+    opts?: RpcOpts
+  ): Promise<AgentContainerCachesResult> {
+    return client.rpcCall("clearcontainercaches", data, opts);
   },
   // command "session:activity_summary"
   AgentActivitySummaryCommand(
@@ -1419,6 +1429,14 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<ClaudeGlobalConfig> {
     return client.rpcCall("getclaudeglobalconfig", data ?? {}, opts);
+  },
+  // command "getcontainercaches"
+  GetContainerCachesCommand(
+    client: RpcClient,
+    data: CommandContainerCachesData,
+    opts?: RpcOpts
+  ): Promise<AgentContainerCachesResult> {
+    return client.rpcCall("getcontainercaches", data, opts);
   },
   // command "getcontainerlimits"
   GetContainerLimitsCommand(
