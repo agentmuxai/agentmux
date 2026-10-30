@@ -84,6 +84,7 @@ mod muxbus_handlers;
 mod muxspect_handlers;
 mod transcript_tail;
 mod coord_channel_handlers;
+mod bulletin_handlers;
 mod work_claims_handlers;
 mod work_facts_handlers;
 mod message_stats_handler;

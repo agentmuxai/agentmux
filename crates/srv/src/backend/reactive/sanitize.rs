@@ -683,6 +683,7 @@ const MARKER_WORDS: &[(&str, &str)] = &[
     ("broadcast", "BROADCAST"),
     ("supervisor", "SUPERVISOR"),
     ("agentmux", "AGENTMUX"),
+    ("bulletin", "BULLETIN"),
 ];
 
 /// If `chars[i..]` starts a marker delimiter — `[`, optional `/`, `word`,
