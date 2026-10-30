@@ -51,13 +51,6 @@ pub(super) fn of(row: &VaultRow, by: &str, how: &str) -> VaultVersionRow {
     }
 }
 
-/// Keeps `row`'s current value before `by` replaces it.
-pub(super) fn keep(store: &Store, row: &VaultRow, by: &str, how: &str) -> Result<(), String> {
-    prune(store);
-    store.vault_version_add(&of(row, by, how)).map_err(|e| e.to_string())?;
-    Ok(())
-}
-
 /// Deletes what is past its 7 days; a failure is logged, not raised.
 pub fn prune(store: &Store) {
     if let Err(e) = store.vault_versions_prune(now_ms() - KEEP_MS) {

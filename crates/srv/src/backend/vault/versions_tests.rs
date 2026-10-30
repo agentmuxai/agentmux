@@ -131,3 +131,18 @@ fn a_restore_from_a_stale_read_never_overwrites_a_value_written_since() {
     assert_eq!(current(&s, &id), "sk_live_third_value");
     assert_eq!(list(&s, &id).unwrap().len(), 2, "both earlier values are still kept, and nothing stale was added");
 }
+
+#[test]
+fn an_edit_from_a_stale_read_saves_nothing_and_keeps_no_stray_version() {
+    let s = store();
+    let id = create(&s, key("sk_live_first_value")).unwrap();
+    let read = s.vault_get(&id).unwrap().unwrap();
+    // A capture or restore writes a new value after the edit form read the entry.
+    set(&s, &id, Some("sk_live_captured_value"), "");
+    let edited = crate::backend::storage::vault::VaultRow { label: "Renamed".into(), updated_at: read.updated_at + 1, ..read.clone() };
+    let kept = of(&read, "you", "replaced");
+    assert!(!s.vault_update_kept(&edited, &read.sealed, Some(&kept)).unwrap());
+    assert_eq!(current(&s, &id), "sk_live_captured_value");
+    assert_eq!(s.vault_get(&id).unwrap().unwrap().label, "Stripe");
+    assert_eq!(list(&s, &id).unwrap().len(), 1, "only the write that went through kept a version");
+}

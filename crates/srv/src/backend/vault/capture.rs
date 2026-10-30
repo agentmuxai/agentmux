@@ -20,7 +20,7 @@ use serde_json::value::RawValue;
 use zeroize::Zeroizing;
 
 use super::scrub::Scrubber;
-use super::{insert, kinds, new_id, record, seal, validate, versions, NewEntry, Parts};
+use super::{insert, kinds, new_id_besides, record, seal, validate, versions, NewEntry, Parts};
 use crate::backend::storage::store::Store;
 use crate::backend::storage::vault::VaultRow;
 use crate::backend::storage::vault_versions::CaptureWrite;
@@ -347,7 +347,8 @@ impl Capture {
                     parts.0.insert(part.to_string(), f.value.to_string());
                     let (fields, tags) = (BTreeMap::new(), Vec::<String>::new());
                     validate(k, label, &fields, &tags, &parts)?;
-                    let id = new_id(store, kind, label)?;
+                    let taken: Vec<String> = made.iter().map(|(id, _)| id.clone()).collect();
+                    let id = new_id_besides(store, kind, label, &taken)?;
                     writes.push(CaptureWrite::Insert(VaultRow {
                         id: id.clone(),
                         kind: kind.to_string(),

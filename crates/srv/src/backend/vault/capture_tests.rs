@@ -238,3 +238,14 @@ fn the_commit_writes_nothing_when_an_entry_changed_since_it_was_read() {
     assert_eq!(value(&s, &id, "value"), "ghp_persons_value");
     assert_eq!(versions::list(&s, &id).unwrap().len(), 1, "only the person's own edit kept a version");
 }
+
+#[test]
+fn two_labels_that_make_the_same_id_get_ids_of_their_own() {
+    let s = store();
+    let rules = [new_key("AWS key", CaptureFrom::Line(1)), new_key("AWS-key", CaptureFrom::Line(2))];
+    let cap = plan(&s, &rules, "Agent2-6", "make-two").unwrap();
+    let out = "first_value_00001\nsecond_value_0002";
+    let Outcome::Stored { ids, .. } = cap.finish(&s, out, out, false, 0) else { panic!("stored") };
+    assert_eq!(ids, ["api-key-aws-key", "api-key-aws-key-2"]);
+    assert_eq!(value(&s, &ids[1], "value"), "second_value_0002");
+}

@@ -173,6 +173,12 @@ fn drop_empty(parts: &mut Parts) {
 /// `ssn-alex`, unique with a number when taken. No `.`: P3 names a part as
 /// `<id>.<part>`.
 fn new_id(store: &Store, kind: &str, label: &str) -> Result<String, String> {
+    new_id_besides(store, kind, label, &[])
+}
+
+/// [`new_id`], also skipping the ids in `taken`: ones chosen for entries not
+/// written yet (a capture's rules, written together).
+fn new_id_besides(store: &Store, kind: &str, label: &str, taken: &[String]) -> Result<String, String> {
     let mut slug = String::new();
     for c in format!("{kind}-{label}").chars().flat_map(char::to_lowercase) {
         if c.is_ascii_alphanumeric() {
@@ -185,7 +191,7 @@ fn new_id(store: &Store, kind: &str, label: &str) -> Result<String, String> {
     base = base.trim_end_matches('-').to_string();
     for n in 1..1000 {
         let id = if n == 1 { base.clone() } else { format!("{base}-{n}") };
-        if store.vault_get(&id).map_err(|e| e.to_string())?.is_none() {
+        if !taken.contains(&id) && store.vault_get(&id).map_err(|e| e.to_string())?.is_none() {
             return Ok(id);
         }
     }
@@ -327,9 +333,11 @@ pub fn update(store: &Store, mut change: EntryChange) -> Result<(), String> {
     }
     // A new main value is the person's: the next rotation is theirs, not the agent's that made the old one.
     let replaced = change.parts.0.contains_key(kind.parts[0]);
+    let kept = replaced.then(|| versions::of(&row, PERSON, "replaced"));
     if replaced {
-        versions::keep(store, &row, PERSON, "replaced")?;
+        versions::prune(store);
     }
+    let was = row.sealed.clone();
     for (k, v) in std::mem::take(&mut change.parts.0) {
         if let Some(mut old) = parts.0.insert(k, v) {
             zeroize::Zeroize::zeroize(&mut old);
@@ -350,8 +358,10 @@ pub fn update(store: &Store, mut change: EntryChange) -> Result<(), String> {
         updated_at: now_ms(),
         ..row
     };
-    if !store.vault_update(&changed).map_err(|e| e.to_string())? {
-        return Err(format!("no entry {}", changed.id));
+    // Only over the value read above, and keeping the one it replaces in the same
+    // transaction: a capture or restore that landed meanwhile is never lost.
+    if !store.vault_update_kept(&changed, &was, kept.as_ref()).map_err(|e| e.to_string())? {
+        return Err(format!("{label} changed while you were editing it, so nothing was saved: open it again"));
     }
     record(store, &changed.id, &label, PERSON, if replaced { "replaced" } else { "changed" }, &target, "done");
     Ok(())

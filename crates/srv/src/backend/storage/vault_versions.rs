@@ -112,6 +112,31 @@ impl Store {
         Ok(true)
     }
 
+    /// Saves the person's edit of an entry: its label, fields, tags and sealed
+    /// parts, only if it still holds the value `was` read, and keeps `kept` (the
+    /// value a new one replaces) in the same transaction. False, with nothing
+    /// written, if the entry changed or is gone.
+    pub fn vault_update_kept(&self, row: &super::vault::VaultRow, was: &[u8], kept: Option<&VaultVersionRow>) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let tx = conn.unchecked_transaction()?;
+        let n = tx.execute(
+            "UPDATE db_vault_entries SET label = ?2, fields = ?3, tags = ?4, sealed = ?5, updated_at = ?6 WHERE id = ?1 AND created_at = ?7 AND sealed = ?8",
+            params![row.id, row.label, row.fields, row.tags, row.sealed, row.updated_at, row.created_at, was],
+        )?;
+        if n == 0 {
+            return Ok(false);
+        }
+        if let Some(v) = kept {
+            tx.execute(
+                "INSERT INTO db_vault_versions (entry_id, entry_created_at, sealed, replaced_at, replaced_by, how, state) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![v.entry_id, v.entry_created_at, v.sealed, v.replaced_at, v.replaced_by, v.how, v.state],
+            )?;
+        }
+        tx.commit()?;
+        Ok(true)
+    }
+
     /// Commits a capture's writes in one transaction. False, with nothing written,
     /// if an entry it replaces changed or was made again since it was read.
     pub fn vault_capture_commit(&self, writes: &[CaptureWrite]) -> Result<bool, StoreError> {
