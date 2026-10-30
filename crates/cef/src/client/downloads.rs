@@ -336,13 +336,6 @@ fn with_throttle<R>(f: impl FnOnce(&mut ProgressThrottle) -> R) -> R {
     f(THROTTLE.lock().get_or_insert_with(ProgressThrottle::default))
 }
 
-fn now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
-}
-
 /// What CEF reports for an interrupted download, in words for the strip. The
 /// reason is CEF's own and never page text, so it is safe to show.
 fn failure_reason(reason: &str) -> String {
@@ -576,7 +569,7 @@ wrap_download_handler! {
             } else {
                 DownloadState::Running
             };
-            if !with_throttle(|t| t.allow(&block_id, id, state, now_ms())) {
+            if !with_throttle(|t| t.allow(&block_id, id, state, agentmux_common::time::now_ms_u64())) {
                 return;
             }
             let snap = DownloadSnapshot {
