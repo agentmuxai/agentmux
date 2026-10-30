@@ -54,16 +54,8 @@
 
 .amx-error-banner-details-toggle {
     align-self: flex-start;
-    @include mixins.button-reset;
     margin-top: var(--space-1);
-    color: var(--secondary-text-color);
-    font-size: var(--text-xs);
-    text-decoration: underline dotted;
-    cursor: default;
-
-    &:hover {
-        color: var(--main-text-color);
-    }
+    --ui-link-font-size: var(--text-xs);
 }
 
 .amx-error-banner-raw {

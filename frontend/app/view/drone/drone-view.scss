@@ -235,19 +235,10 @@
     z-index: 12; // above the run-log overlay so zoom stays reachable
 }
 
-.drone-ctrl {
+.drone-controls .drone-ctrl {
     width: 26px;
     height: 26px;
-    @include mixins.flex-center;
-    background: var(--main-bg-color);
-    border: 1px solid var(--border-color);
-    color: inherit;
-    cursor: default;
     font-size: 15px;
-    line-height: 1;
-    &:hover {
-        background: var(--tint-3);
-    }
 }
 
 .drone-node {

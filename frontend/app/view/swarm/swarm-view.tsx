@@ -6,7 +6,7 @@ import { createMemo, createSignal, createEffect, onCleanup, untrack, For, Show, 
 import type { SwarmViewModel, AgentTreeNode, ActiveSubagent, ActiveShell, ActiveCron, WorkflowDispatch, DispatchActivityEntry, TodoItem } from "./swarm-model";
 import { subagentDisplayLabel, subagentRowKey, subagentToolDetail, workflowRetireSignal, AUTO_RETIRE_DELAY_MS } from "./swarm-model";
 import { LOCAL_PROVIDER_UNKNOWN, REMOTE_PROVIDER_UNKNOWN, SwarmProviderIcon } from "./swarm-provider-icon";
-import { IconButton } from "@/app/element/ui";
+import { Button, IconButton } from "@/app/element/ui";
 import AnsiLine from "@/element/ansiline";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -53,14 +53,13 @@ export function focusedActiveBlockId(layoutModel: Pick<LayoutModel, "localTreeSt
 export function ClearCompletedButton(props: { model: SwarmViewModel; count: number }): JSX.Element {
     return (
         <div class="swarm-toolbar">
-            <button
-                type="button"
-                class="swarm-clear-completed-btn"
+            <Button
+                density="compact"
                 title="Dismiss every completed/interrupted row currently shown"
                 onClick={() => props.model.retireAllCompleted()}
             >
                 Clear completed ({props.count})
-            </button>
+            </Button>
         </div>
     );
 }
@@ -730,9 +729,7 @@ function ShellRow({ shell }: { shell: ActiveShell }): JSX.Element {
         >
             <span class="swarm-shell-title">{shell.title}</span>
             <span class="swarm-shell-elapsed">{elapsed()}</span>
-            <button class="swarm-shell-stop" title="Stop" onClick={handleStop}>
-                <i class="fa-solid fa-stop" />
-            </button>
+            <IconButton icon="stop" label="Stop" density="compact" class="swarm-shell-stop" onClick={handleStop} />
         </div>
     );
 }
