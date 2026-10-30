@@ -8,7 +8,7 @@
 // (crates/srv/src/server/app_api/browser_grants.rs), and an agent's own
 // request for auto-approve can add one when the person answers "Always".
 
-import { Button, Select, TextInput } from "@/app/element/ui";
+import { Button, Notice, Select, TextInput } from "@/app/element/ui";
 import { createSignal, For, onMount, Show, type JSX } from "solid-js";
 
 import { RpcApi, type AgentDefinition } from "@/app/store/rpc-api";
@@ -23,8 +23,7 @@ export const AGENT_SITE_GRANTS_SETTING = {
     id: "browser.agent_sites",
     label: "Agents on sites",
     description:
-        "What an agent may do on a site without asking each time, until you revoke it. Every row lets the agent make committing clicks there without asking (a payment still asks). Add Terminal to let it type and run commands in a web terminal there, such as Cloud Shell: nobody checks each line, so Stop, Pause and Take over in the pane are how you stop it, and Revoke here ends it at once. " +
-        LATE_PROMPT_LIMIT,
+        "What an agent may do on a site without asking each time, until you revoke it. Every row lets the agent make committing clicks there without asking (a payment still asks). Add Terminal to let it type and run commands in a web terminal there, such as Cloud Shell: nobody checks each line, so Stop, Pause and Take over in the pane are how you stop it, and Revoke here ends it at once.",
     section: "browser",
     keywords: ["agent", "agents", "site", "sites", "grant", "auto-approve", "terminal", "cloud shell", "revoke", "always", "standing", "permission"],
 } satisfies SettingsIndexEntry;
@@ -94,6 +93,9 @@ export function AgentSiteGrants(): JSX.Element {
     return (
         <div id={`setting-${AGENT_SITE_GRANTS_SETTING.id}`} class="setting-row agent-site-grants">
             <div class="setting-devices-description">{AGENT_SITE_GRANTS_SETTING.description}</div>
+            <Notice tone="warning" title={<>One limit of the Terminal power</>}>
+                {LATE_PROMPT_LIMIT}
+            </Notice>
             <Show when={error()}>
                 <div class="settings-config-error" role="alert">
                     {error()}

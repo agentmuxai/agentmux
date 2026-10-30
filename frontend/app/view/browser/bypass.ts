@@ -57,7 +57,7 @@ export function siteLabel(origin: string): string {
  *  lines waits about 2.6 seconds, so a prompt that appears later can still
  *  get the next line typed into it. */
 export const LATE_PROMPT_LIMIT =
-    "One limit: between lines the agent waits about 2.6 seconds and reads the screen for a password or code prompt before it types the next line, so a prompt that appears later (ssh to a slow host, say) can still get the next line typed into it. Run such a command yourself.";
+    "Between lines the agent waits about 2.6 seconds and reads the screen for a password or code prompt before it types the next line, so a prompt that appears later (ssh to a slow host, say) can still get the next line typed into it. Run such a command yourself.";
 
 /** The strip's time note: a standing grant has no clock. */
 export function leftLabel(always: boolean | undefined, minutesLeft: number): string {

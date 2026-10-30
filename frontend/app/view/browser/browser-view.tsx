@@ -724,7 +724,7 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
                                 It also asks to <b>run commands in the terminal</b> on {(a().origins ?? []).map(siteLabel).join(", ")}:
                                 it types real keys and presses Enter with no question per line. You can read every line in the
                                 pane's Log, and Stop or Pause end it at once. Passwords and codes stay yours to type.{" "}
-                                {LATE_PROMPT_LIMIT}
+                                One limit: {LATE_PROMPT_LIMIT}
                             </div>
                         </Show>
                         <Show when={a().window}>

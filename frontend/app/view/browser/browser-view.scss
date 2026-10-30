@@ -344,6 +344,7 @@ $browser-nav-stack-below: 388px;
 
     .browser-attention-actions {
         display: flex;
+        flex-wrap: wrap;
         gap: var(--space-2);
     }
 
