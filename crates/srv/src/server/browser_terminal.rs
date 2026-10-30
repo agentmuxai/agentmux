@@ -38,6 +38,11 @@ pub(crate) const MAX_CHARS: usize = 20_000;
 /// rows to catch up and is checked again, about a second and a half apiece,
 /// so this keeps a call well inside the MCP client's timeout.
 const MAX_LINES: usize = 40;
+/// The longest a call spends typing before it stops and says how far it got.
+/// Lines are capped, but a long line is many pieces, each checked again; this
+/// keeps any call inside the MCP client's 120 s (plus the output wait), so a
+/// client that gave up never leaves the handler typing with nobody waiting.
+const TYPE_BUDGET: Duration = Duration::from_secs(90);
 /// Keys per call to the host. A brake is checked between calls.
 const CHUNK: usize = 32;
 /// How long xterm.js's screen-reader rows can trail the screen: it redraws
@@ -577,7 +582,15 @@ pub(crate) async fn handle_ui_browser_terminal(
     let mut stopped: Option<String> = None;
     let mut secret_stop = false;
     let parts = pieces(&steps, CHUNK);
+    let started = Instant::now();
     for (n, chunk) in parts.iter().enumerate() {
+        if started.elapsed() >= TYPE_BUDGET {
+            stopped = Some(format!(
+                "this call has been typing for {} s, the most one call does; the rest was not typed: send it in another call",
+                TYPE_BUDGET.as_secs()
+            ));
+            break;
+        }
         if crate::server::browser_actions::not_paused(&block_id).is_err() {
             stopped = Some(
                 "the user paused this pane, so the rest was not typed; your calls on it wait until they resume it"
