@@ -91,26 +91,41 @@ export function Tag(props: TagProps): JSX.Element {
  */
 function DetailedChip(props: { class: string; detail: JSX.Element; children: JSX.Element }): JSX.Element {
     const [pinned, setPinned] = createSignal(false);
+    // Escape dismisses the detail even while the pointer is still over the chip, until the pointer
+    // leaves or the chip is touched again.
+    const [dismissed, setDismissed] = createSignal(false);
     const descId = `ui-tag-detail-${createUniqueId()}`;
     return (
         <Tooltip
-            content={<div class="ui-tag-detail">{props.detail}</div>}
+            content={<div class="ui-tag-detail">{copyOf(props.detail)}</div>}
             placement="top"
             forceOpen={pinned()}
+            disable={dismissed()}
             divClassName="ui-tag-anchor"
         >
             <span
                 class={props.class}
                 tabindex="0"
                 aria-describedby={descId}
-                onFocus={() => setPinned(true)}
-                onBlur={() => setPinned(false)}
+                onFocus={() => {
+                    setDismissed(false);
+                    setPinned(true);
+                }}
+                onBlur={() => {
+                    setDismissed(false);
+                    setPinned(false);
+                }}
+                onMouseLeave={() => setDismissed(false)}
                 // A tap focuses first and clicks second, so a click only pins; blur or Escape unpins.
-                onClick={() => setPinned(true)}
+                onClick={() => {
+                    setDismissed(false);
+                    setPinned(true);
+                }}
                 onKeyDown={(e) => {
                     if (e.key === "Escape" && pinned()) {
                         e.stopPropagation();
                         setPinned(false);
+                        setDismissed(true);
                     }
                 }}
             >
@@ -122,6 +137,16 @@ function DetailedChip(props: { class: string; detail: JSX.Element; children: JSX
             </span>
         </Tooltip>
     );
+}
+
+/**
+ * A second copy of `detail` for the tooltip. The page keeps the original as the hidden description, and a
+ * DOM node given to two places is moved, not copied, so opening the tooltip would empty the description.
+ */
+function copyOf(detail: JSX.Element): JSX.Element {
+    if (typeof Node !== "undefined" && detail instanceof Node) return detail.cloneNode(true) as unknown as JSX.Element;
+    if (Array.isArray(detail)) return detail.map(copyOf);
+    return detail;
 }
 
 // ── TagList ───────────────────────────────────────────────────────────────────

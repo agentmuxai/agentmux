@@ -130,6 +130,33 @@ describe("Tag", () => {
             expect(document.querySelector(".ui-tag-detail")).toBeNull();
         });
 
+        it("Escape closes the detail even while the pointer is still over the chip", async () => {
+            render(() => <Tag detail="More">Free</Tag>);
+            const tag = screen.getByText("Free").closest(".ui-tag") as HTMLElement;
+            const anchor = tag.closest(".ui-tag-anchor") as HTMLElement;
+            fireEvent.mouseEnter(anchor);
+            fireEvent.focus(tag);
+            await tick();
+            expect(document.querySelector(".ui-tag-detail")).not.toBeNull();
+            fireEvent.keyDown(tag, { key: "Escape" });
+            await afterHide();
+            expect(document.querySelector(".ui-tag-detail")).toBeNull();
+        });
+
+        it("a detail that is a stored JSX node stays in the hidden description after the tooltip opens and closes", async () => {
+            const stored = (<b>Checked 3 days ago</b>) as unknown as HTMLElement;
+            render(() => <Tag detail={stored}>Free</Tag>);
+            const tag = screen.getByText("Free").closest(".ui-tag") as HTMLElement;
+            const hidden = document.getElementById(tag.getAttribute("aria-describedby")!)!;
+            fireEvent.focus(tag);
+            await tick();
+            expect(document.querySelector(".ui-tag-detail")?.textContent).toBe("Checked 3 days ago");
+            expect(hidden.textContent).toBe("Checked 3 days ago");
+            fireEvent.blur(tag);
+            await afterHide();
+            expect(hidden.textContent).toBe("Checked 3 days ago");
+        });
+
         it("a tap pins the detail open and Escape closes it", async () => {
             render(() => <Tag detail="More">Free</Tag>);
             const tag = screen.getByText("Free").closest(".ui-tag") as HTMLElement;
