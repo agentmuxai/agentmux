@@ -3323,7 +3323,7 @@ mod fleet_tests {
         write_raw_shared_entry(&shared_dir, "peer-agent-y", &peer_url, &block_id, "peer-secret-key");
         let state = test_state();
 
-        let result = crate::server::app_api::fleet::agent_bulk_stop(&state, "Korp", vec![block_id.clone()], None, None).await;
+        let result = crate::server::app_api::agent_io::agent_bulk_stop(&state, "Korp", vec![block_id.clone()], None, None).await;
         std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
 
         assert!(result.succeeded.is_empty() && result.failed.is_empty(), "nothing is stopped at once");
