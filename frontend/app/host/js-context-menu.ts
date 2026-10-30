@@ -28,6 +28,11 @@ let activeContextMenuUpdate: ((items: NativeContextMenuItem[]) => void) | null =
 // Called whenever a menu closes, by any path (click, Escape, outside click, another menu).
 const closeListeners = new Set<() => void>();
 
+/** Whether a JS context menu is open now. */
+export function isJsContextMenuOpen(): boolean {
+    return activeContextMenuClose != null;
+}
+
 /** Close the open JS context menu (if any), releasing its pane-overlay holes. */
 export function closeJsContextMenu(): void {
     activeContextMenuClose?.();

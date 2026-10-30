@@ -232,6 +232,30 @@ describe("Tooltip default timing", () => {
         expect(screen.getByText("third").closest("[data-pane-overlay]")!.getAttribute("style")).toContain("opacity: 0");
     });
 
+    it("closes the open default tooltip when an immediate one opens, though it does not take its place", async () => {
+        vi.useFakeTimers();
+        render(() => (
+            <>
+                <Tooltip content={<span>first</span>}>
+                    <span>anchor-first</span>
+                </Tooltip>
+                <Tooltip immediate content={<span>quick</span>}>
+                    <span>anchor-quick</span>
+                </Tooltip>
+            </>
+        ));
+        const first = screen.getByText("anchor-first").parentElement!;
+        const quick = screen.getByText("anchor-quick").parentElement!;
+        fireEvent.mouseEnter(first);
+        await vi.advanceTimersByTimeAsync(100);
+        fireEvent.mouseLeave(first);
+        fireEvent.mouseEnter(quick);
+        await vi.advanceTimersByTimeAsync(20);
+        // Not left for the first one's 100 ms grace.
+        expect(screen.queryByText("first")).toBeNull();
+        expect(screen.getByText("quick")).toBeInTheDocument();
+    });
+
     it("is invisible again until it has been placed when it reopens", async () => {
         vi.useFakeTimers();
         const [a] = two();
@@ -287,12 +311,14 @@ describe("Tooltip immediate", () => {
             </Tooltip>
         ));
         fireEvent.mouseEnter(screen.getByText("anchor-now").parentElement!);
-        fireEvent.mouseEnter(screen.getByText("anchor-later").parentElement!);
         await frame();
         const now = screen.getByText("now").closest("[data-pane-overlay]") as HTMLElement;
-        const later = screen.getByText("later").closest("[data-pane-overlay]") as HTMLElement;
         expect(now.getAttribute("style")).toContain("opacity: 1");
         expect(now.getAttribute("style")).toContain("transition: none");
+        fireEvent.mouseLeave(screen.getByText("anchor-now").parentElement!);
+        fireEvent.mouseEnter(screen.getByText("anchor-later").parentElement!);
+        await frame();
+        const later = screen.getByText("later").closest("[data-pane-overlay]") as HTMLElement;
         // The default shows after its 40 ms rest, with the short fade token.
         expect(later.getAttribute("style")).toContain("opacity: 1");
         expect(later.getAttribute("style")).toContain("opacity var(--duration-instant)");

@@ -64,6 +64,7 @@ import { captureOnScreen, restoreOnScreen } from "./keep-on-screen";
 import { useSettleOnShow } from "../scroll/settle-on-show";
 import { useScrolledOffRelease, type AwayArrivals } from "./held-release";
 import { useScrollMemo } from "./scroll-memo";
+import { useListZoomAnchor } from "./zoom-anchor-adapter";
 import { inFlowState, ROW_GAP_PX, type ExpansionState } from "@/app/store/agent-pane-layout/types";
 import {
     initialStickyFrontierId,
@@ -1184,6 +1185,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         if (cmd) untrack(() => scrollToNode(cmd.nodeId));
     });
     useScrollMemo({ blockId: props.blockId, scroller: () => scrollRef, following: props.viewState.stickToBottom, zoom: props.zoomFactor, historyReady: props.viewState.historyReady, scrollToRow: scrollToNode });
+    useListZoomAnchor(props, () => scrollRef, () => follow);
 
     // Collapse held-open tools once they scroll off the top while the reader
     // watches: never while hidden, nor on the catch-up drawn on return (`held-release.ts`).

@@ -17,6 +17,7 @@ import type { ImportResult } from "@/types/rpc/ImportResult";
 import type { MappingNeeded } from "@/types/rpc/MappingNeeded";
 import type { VaultActivity } from "@/types/rpc/VaultActivity";
 import type { VaultEntryInfo } from "@/types/rpc/VaultEntryInfo";
+import type { VaultVersionInfo } from "@/types/rpc/VaultVersionInfo";
 import type { UseRequest } from "@/types/rpc/UseRequest";
 import type { VaultRequest } from "@/types/rpc/VaultRequest";
 
@@ -273,6 +274,10 @@ export const suggestPassphrase = () => call<{ passphrase: string }>("suggest_pas
 export const createEntry = (entry: NewVaultEntry) => call<{ id: string }>("create", { ...entry });
 export const updateEntry = (change: VaultEntryChange) => call<unknown>("update", { ...change });
 export const deleteEntry = (id: string) => call<unknown>("delete", { id });
+/** An entry's earlier values, kept 7 days: when and by whom each was replaced, and its last characters. */
+export const loadVersions = (id: string) => call<{ versions: VaultVersionInfo[] }>("versions", { id }).then((r) => r.versions);
+/** Puts an earlier value back; the current one is kept in its place. */
+export const restoreVersion = (id: string, seq: number) => call<unknown>("restore", { id, seq });
 export const declineRequest = (requestId: string) => call<unknown>("decline_request", { request_id: requestId });
 export const loadActivity = (limit = 200) => call<{ activity: VaultActivity[] }>("activity", { limit }).then((r) => r.activity);
 /** An entry with standing permissions, from a read that needs no key (Warden's view). */

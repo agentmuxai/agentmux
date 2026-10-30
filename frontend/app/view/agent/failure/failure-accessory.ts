@@ -17,6 +17,7 @@
 
 import type { PaneRowAction } from "../components/PaneRow";
 import type { AgentFailure } from "@/types/rpc/AgentFailure";
+import type { FailureVerdict } from "./failure-verdict";
 
 /** Handlers the pane wires to the recovery actions. */
 export interface FailureActions {
@@ -107,6 +108,11 @@ export interface FailureViewState {
     reconnectHint?: string | null;
     /** `open_in_other_pane`: the message the pane refused, which Move here sends. */
     notSent?: string;
+    /** The failure judged against what is true now (failure-verdict.ts). `lapsed` is a transient failure
+     *  whose retries are spent: a muted note with Retry and Dismiss. Omitted is `active`. */
+    verdict?: FailureVerdict;
+    /** "12 min ago", for the lapsed note. */
+    agoLabel?: string;
 }
 
 /** Per-class sigil. */
@@ -142,9 +148,9 @@ export interface FailureRow {
      * border — the same `--accent-color` blue the deleted "Log in" bar
      * used) for the never-signed-in pre-launch case: an agent that has
      * simply not been signed in yet has not failed at anything, and
-     * painting it red overstates it.
+     * painting it red overstates it. "idle" (muted) for a lapsed failure.
      */
-    accent: "error" | "active";
+    accent: "error" | "active" | "idle";
     actions: PaneRowAction[];
     expanded: boolean;
     /** Human-readable explanation (rendered in the expanded body). */
@@ -153,8 +159,29 @@ export interface FailureRow {
     stderrTail?: string;
 }
 
+/**
+ * A transient failure whose retries are spent: one muted line saying how long ago, with Retry and
+ * Dismiss. No error colour and no account action (it was never about the account); it goes with the next
+ * completed turn or a Dismiss.
+ */
+function lapsedRow(f: AgentFailure, view: FailureViewState, on: FailureActions): FailureRow {
+    return {
+        sigil: ICON[f.code] ?? "⚠",
+        title: `${f.title || "Agent run failed"} · ${view.agoLabel ?? "earlier"}`,
+        meta: "no longer retrying",
+        accent: "idle",
+        actions: [
+            { glyph: "↻", label: "Retry", title: "Re-run the last turn", disabled: view.retrying, onClick: on.retry },
+            { glyph: "×", title: "Dismiss", danger: true, onClick: on.dismiss },
+        ],
+        expanded: false,
+        detail: f.detail,
+    };
+}
+
 /** Project a failure + view state + handlers into a PaneRow descriptor. */
 export function failureToRow(f: AgentFailure, view: FailureViewState, on: FailureActions): FailureRow {
+    if (view.verdict === "lapsed") return lapsedRow(f, view, on);
     const turnAttempted = view.turnAttempted ?? true;
     const meta: string[] = [f.code];
     if (f.signal != null) meta.push(`signal ${f.signal}`);

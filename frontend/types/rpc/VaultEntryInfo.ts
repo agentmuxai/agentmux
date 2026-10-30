@@ -13,4 +13,8 @@ parts_set: Array<string>,
 /**
  * The sites an agent may fill this entry into without asking again.
  */
-grants: Array<string>, tail: string, created_at: number, updated_at: number, last_used_at: number, };
+grants: Array<string>, tail: string, 
+/**
+ * Earlier values kept for 7 days, which the person can put back.
+ */
+versions: number, created_at: number, updated_at: number, last_used_at: number, };

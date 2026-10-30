@@ -468,6 +468,7 @@
     --duration-base:     calc(160ms * var(--motion-scale));
     --duration-moderate: calc(240ms * var(--motion-scale));
     --duration-slow:     calc(280ms * var(--motion-scale));
+    --duration-pulse:    calc(1200ms * var(--motion-scale)); // one breath of a status pulse (am-pulse, agent-pulse)
 
     // Decorative motion (hover and focus colour fades, hover lifts) also
     // scales by `--motion-scale-decorative`, 1 today. A policy that reduces

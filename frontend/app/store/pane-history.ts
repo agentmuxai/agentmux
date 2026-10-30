@@ -16,6 +16,7 @@ import { findNodeByBlockId } from "@/layout/lib/layoutNode";
 import {
     dropEntry,
     emptyHistory,
+    locatePane,
     moveTo,
     recordPane,
     stepHistory,
@@ -48,14 +49,16 @@ export function resetPaneHistory(): void {
     queue = Promise.resolve();
 }
 
-/** Whether `ref` can still be selected: its tab is in this window and still holds the block. */
-function isLive(ref: PaneRef): boolean {
+/** Where `ref`'s pane is now: its tab, the tab it was moved to in this window, or nowhere. */
+function locate(ref: PaneRef): PaneRef | null {
     const ws = atoms.workspace();
     const tabIds = [...(ws?.pinnedtabids ?? []), ...(ws?.tabids ?? [])];
-    if (!tabIds.includes(ref.tabId)) return false;
     // A tab whose object isn't loaded can't be checked here; selecting it settles the question.
-    const tab = getObjectValue<Tab>(makeORef("tab", ref.tabId));
-    return tab == null || (tab.blockids ?? []).includes(ref.blockId);
+    const tabs = tabIds.map((tabId) => {
+        const tab = getObjectValue<Tab>(makeORef("tab", tabId));
+        return { tabId, blockIds: tab == null ? null : (tab.blockids ?? []) };
+    });
+    return locatePane(ref, tabs);
 }
 
 function nextFrame(): Promise<void> {
@@ -88,7 +91,7 @@ async function step(dir: -1 | 1, startEpoch: number): Promise<void> {
     navigating++;
     try {
         for (let tries = 0; tries < 10; tries++) {
-            const { history: pruned, target } = stepHistory(history, dir, isLive);
+            const { history: pruned, target } = stepHistory(history, dir, locate);
             history = pruned;
             if (!target) return;
             if (await selectPane(target)) {

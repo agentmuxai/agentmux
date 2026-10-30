@@ -22,6 +22,7 @@ const entry = (id: string, label: string, kind: string, section: VaultEntryInfo[
     tags: [],
     parts_set: ["value"],
     tail: "6789",
+    versions: 0,
     created_at: 1,
     updated_at: 1,
     last_used_at: 0,

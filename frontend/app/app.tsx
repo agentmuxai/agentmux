@@ -246,8 +246,9 @@ const AppZoomHandler = () => {
             const blockId = blockEl?.getAttribute("data-blockid");
             if (!blockId) return;
 
-            if (zoomOut) zoomBlockOut(blockId, WHEEL_STEP);
-            else zoomBlockIn(blockId, WHEEL_STEP);
+            const anchor = { clientX: e.clientX, clientY: e.clientY };
+            if (zoomOut) zoomBlockOut(blockId, WHEEL_STEP, anchor);
+            else zoomBlockIn(blockId, WHEEL_STEP, anchor);
         };
 
         // Add with passive: false to allow preventDefault
@@ -286,8 +287,9 @@ const AppAllPanesZoomHandler = () => {
                 return;
             }
 
-            if (zoomOut) zoomAllPanesOut(WHEEL_STEP);
-            else zoomAllPanesIn(WHEEL_STEP);
+            const anchor = { clientX: e.clientX, clientY: e.clientY };
+            if (zoomOut) zoomAllPanesOut(WHEEL_STEP, anchor);
+            else zoomAllPanesIn(WHEEL_STEP, anchor);
         };
 
         window.addEventListener("wheel", handleWheel, { passive: false });

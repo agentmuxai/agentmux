@@ -71,6 +71,8 @@ registerPaneTab(stubPaneTab("browser"));
 
 import { setPlatform } from "@/util/platformutil";
 import { chromeZoomAtom } from "./chrome-zoom";
+import { LOCAL_ZOOM_HOLD_MS, paneZoom, resetPaneZoomForTests } from "./pane-zoom-local";
+import { useZoomAnchor } from "./zoom-anchor";
 import { chromeZoomIn, initChromeZoom, usePaneZoomWheel, zoomAllPanesIn, zoomAllPanesOut, zoomBlockByWheel, zoomBlockIn, zoomIndicatorTextAtom } from "./zoom";
 
 // term:fontsize is pinned to 20 for every test block so effective font size
@@ -92,6 +94,7 @@ function currentZoom(id: string): number {
 }
 
 beforeEach(() => {
+    resetPaneZoomForTests();
     blockMetas = new Map();
     blockViewTypes = new Map();
     setMetaMock.mockClear();
@@ -368,5 +371,104 @@ describe("zoomBlockByWheel / usePaneZoomWheel", () => {
         expect(setMetaMock).not.toHaveBeenCalled();
         dispose();
         el.remove();
+    });
+});
+
+describe("a zoom is held until its write settles", () => {
+    const meta = (id: string) => blockMetas.get(id);
+
+    it("two wheel ticks before the update arrives are two steps, not one", () => {
+        setBlock("t1", "term");
+        setMetaMock.mockImplementation(() => new Promise(() => {})); // the backend has not answered
+
+        zoomBlockByWheel("t1", -1, 20);
+        zoomBlockByWheel("t1", -1, 20);
+
+        expect(meta("t1")?.["term:zoom"]).toBeUndefined();
+        expect(paneZoom("t1", meta("t1"))).toBeCloseTo(1.1, 5);
+    });
+
+    it("lets go once the write has settled and its update has had time to arrive", async () => {
+        vi.useFakeTimers();
+        try {
+            setBlock("t1", "term");
+            zoomBlockByWheel("t1", -1, 20);
+            expect(paneZoom("t1", { "term:zoom": 1 })).toBeCloseTo(1.05, 5); // held
+            await vi.advanceTimersByTimeAsync(LOCAL_ZOOM_HOLD_MS + 1);
+            expect(paneZoom("t1", { "term:zoom": 1 })).toBe(1); // the meta rules again
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it("goes back to the stored level at once when the write is refused", async () => {
+        setBlock("t1", "term", 1.2);
+        setMetaMock.mockImplementation(() => Promise.reject(new Error("refused")));
+        const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+
+        zoomBlockByWheel("t1", -1, 20);
+        expect(paneZoom("t1", meta("t1"))).toBeCloseTo(1.25, 5);
+        await new Promise((r) => setTimeout(r, 0));
+
+        expect(paneZoom("t1", meta("t1"))).toBe(1.2);
+        errors.mockRestore();
+    });
+
+    it("an older write settling does not let go of a newer level", async () => {
+        vi.useFakeTimers();
+        try {
+            setBlock("t1", "term");
+            zoomBlockByWheel("t1", -1, 20);
+            await vi.advanceTimersByTimeAsync(LOCAL_ZOOM_HOLD_MS - 100);
+            zoomBlockByWheel("t1", -1, 20);
+            await vi.advanceTimersByTimeAsync(200); // the first write's hold would have ended by now
+            expect(paneZoom("t1", { "term:zoom": 1 })).toBeCloseTo(1.1, 5);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+});
+
+describe("zoom takes an anchor from the pointer", () => {
+    function pane(id: string) {
+        const capture = vi.fn(() => ({ held: true }));
+        const restore = vi.fn(() => true);
+        let dispose = () => {};
+        createRoot((d) => {
+            dispose = d;
+            useZoomAnchor({ blockId: id, zoom: () => 1, scroller: () => undefined, following: () => false, adapter: { capture, restore } });
+        });
+        return { capture, restore, dispose: () => dispose() };
+    }
+
+    it("a wheel step hands the pane the pointer's position", () => {
+        setBlock("a1", "agent");
+        const p = pane("a1");
+
+        zoomBlockByWheel("a1", -1, 20, { clientX: 40, clientY: 90 });
+
+        expect(p.capture).toHaveBeenCalledWith({ clientX: 40, clientY: 90 });
+        p.dispose();
+    });
+
+    it("the window's Ctrl+wheel handler and the all-panes step pass it on as well", () => {
+        setBlock("a1", "agent");
+        const p = pane("a1");
+
+        zoomBlockIn("a1", 0.05, { clientX: 1, clientY: 2 });
+        expect(p.capture).toHaveBeenLastCalledWith({ clientX: 1, clientY: 2 });
+        zoomAllPanesOut(0.05, { clientX: 7, clientY: 8 });
+        expect(p.capture).toHaveBeenLastCalledWith({ clientX: 7, clientY: 8 });
+        p.dispose();
+    });
+
+    it("a step that lands on the limit moves nothing, so nothing is held", () => {
+        setBlock("a1", "agent", 2);
+        const p = pane("a1");
+
+        zoomBlockByWheel("a1", -1, 20, { clientX: 40, clientY: 90 });
+
+        expect(p.capture).not.toHaveBeenCalled();
+        p.dispose();
     });
 });

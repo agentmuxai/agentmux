@@ -153,6 +153,17 @@ pub(crate) async fn handle_host_vault(State(state): State<AppState>, headers: He
                 vault::delete(&store, id)?;
                 Ok((json!({}), true))
             }
+            // An entry's earlier values, and putting one back (spec §4.4 of the generate spec).
+            "versions" => {
+                let id = body.get("id").and_then(Value::as_str).unwrap_or("");
+                Ok((json!({ "versions": vault::versions::list(&store, id)? }), false))
+            }
+            "restore" => {
+                let id = body.get("id").and_then(Value::as_str).unwrap_or("");
+                let seq = body.get("seq").and_then(Value::as_i64).ok_or("restore needs the version's seq")?;
+                vault::versions::restore(&store, id, seq)?;
+                Ok((json!({}), true))
+            }
             "decline_request" => {
                 let id = body.get("request_id").and_then(Value::as_str).unwrap_or("");
                 if let Some(req) = requests::requests().get(id) {

@@ -35,29 +35,55 @@ export function recordPane(h: PaneHistory, ref: PaneRef): PaneHistory {
     return { entries, index: entries.length - 1 };
 }
 
+/** A tab of the window and the blocks it holds; `blockIds` is null when the tab isn't loaded. */
+interface TabBlocks {
+    tabId: string;
+    blockIds: string[] | null;
+}
+
+/**
+ * Where the pane `ref` is now: `ref` itself when its tab still holds the block (or can't be checked),
+ * the tab that holds the block when it was moved to another, null when it is nowhere in `tabs`.
+ */
+export function locatePane(ref: PaneRef, tabs: TabBlocks[]): PaneRef | null {
+    const own = tabs.find((t) => t.tabId === ref.tabId);
+    if (own && (own.blockIds == null || own.blockIds.includes(ref.blockId))) return ref;
+    const holder = tabs.find((t) => t.tabId !== ref.tabId && t.blockIds?.includes(ref.blockId));
+    return holder ? { tabId: holder.tabId, blockId: ref.blockId } : null;
+}
+
 export interface StepResult {
-    /** `h` without the dead entries passed on the way; the cursor still on the current entry. */
+    /** `h` without the dead entries passed on the way, and the entry to go to re-pointed if its pane
+     *  was moved to another tab; the cursor still on the current entry. */
     history: PaneHistory;
-    /** The entry to go to, or null when nothing live lies that way. */
+    /** The entry to go to (an entry of `history`), or null when nothing live lies that way. */
     target: PaneRef | null;
 }
 
 /**
- * The next live entry from the cursor in `dir` (-1 Back, +1 Forward). Entries
- * that no longer exist are skipped and removed. Doesn't move the cursor:
- * `moveTo` does, once the pane is selected.
+ * The next live entry from the cursor in `dir` (-1 Back, +1 Forward). `locate` says where an entry's
+ * pane is now: the same place, another tab (the entry follows it), or null (gone: the entry is skipped
+ * and removed). Doesn't move the cursor: `moveTo` does, once the pane is selected.
  */
-export function stepHistory(h: PaneHistory, dir: -1 | 1, isLive: (ref: PaneRef) => boolean): StepResult {
+export function stepHistory(h: PaneHistory, dir: -1 | 1, locate: (ref: PaneRef) => PaneRef | null): StepResult {
     const current = h.entries[h.index];
     const dead = new Set<PaneRef>();
     let j = h.index + dir;
-    while (j >= 0 && j < h.entries.length && !isLive(h.entries[j])) {
-        dead.add(h.entries[j]);
+    let target: PaneRef | null = null;
+    let moved: { from: PaneRef; to: PaneRef } | null = null;
+    while (j >= 0 && j < h.entries.length) {
+        const entry = h.entries[j];
+        const where = locate(entry);
+        if (where) {
+            target = samePane(where, entry) ? entry : { ...where };
+            if (target !== entry) moved = { from: entry, to: target };
+            break;
+        }
+        dead.add(entry);
         j += dir;
     }
-    const target = j >= 0 && j < h.entries.length ? h.entries[j] : null;
-    if (dead.size === 0) return { history: h, target };
-    const entries = h.entries.filter((e) => !dead.has(e));
+    if (dead.size === 0 && !moved) return { history: h, target };
+    const entries = h.entries.filter((e) => !dead.has(e)).map((e) => (e === moved?.from ? moved.to : e));
     return { history: { entries, index: current ? entries.indexOf(current) : -1 }, target };
 }
 

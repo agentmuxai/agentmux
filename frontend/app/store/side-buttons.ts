@@ -8,6 +8,7 @@
 // Both paths share one debounce, so a press the host reports twice acts once.
 // SPEC_MOUSE_SIDE_BUTTONS_PANE_AND_TAB_NAV_2026_10_19.md §5.
 
+import { isJsContextMenuOpen } from "@/app/host/js-context-menu";
 import { getApi } from "@/app/store/app-api";
 import { settingsAtom } from "@/app/store/global";
 import { modalsModel } from "@/app/store/modalmodel";
@@ -21,6 +22,14 @@ function enabled(): boolean {
 }
 
 let last: { dir: -1 | 1; at: number } | null = null;
+
+/** What stops a press from acting: the setting, an open modal, an open context menu. */
+function pressContext(on = enabled()) {
+    return { enabled: on, modalOpen: modalsModel.hasOpenModals(), menuOpen: isJsContextMenuOpen() };
+}
+
+/** Buttons whose press was ignored: the release must be too, though the press may have closed the menu. */
+const ignored = new Set<number>();
 
 function perform(dir: -1 | 1, via: string): void {
     const now = performance.now();
@@ -53,14 +62,21 @@ function onHostSideButton(p: HostSideButton): void {
         }
         return;
     }
-    if (!hostPressActs(p, { enabled: true, modalOpen: modalsModel.hasOpenModals() })) return;
+    if (!hostPressActs(p, pressContext(true))) return;
     perform(dir, `host:${p.source}`);
 }
 
 export function installSideButtons(): () => void {
     const handler = (e: MouseEvent): void => {
-        const d = decideSideButton(e, { enabled: enabled(), modalOpen: modalsModel.hasOpenModals() });
+        const d = decideSideButton(e, pressContext());
         if (!d.consume) return;
+        const down = e.type === "pointerdown" || e.type === "mousedown";
+        if (down) {
+            if (d.act == null) ignored.add(e.button);
+            else ignored.delete(e.button);
+        }
+        const up = e.type === "pointerup" || e.type === "mouseup";
+        if (up && ignored.delete(e.button)) d.act = null;
         e.preventDefault();
         e.stopPropagation();
         // Press and release are consumed; the release acts, like a click. It is the
