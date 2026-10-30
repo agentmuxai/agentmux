@@ -1483,6 +1483,12 @@ section above, do not bulk-restamp them.
 | [`cef-drag-window-management`](cef-drag-window-management.md) | Spec: CEF Drag, Drop, and Window Management |
 | [`cef-transparency-architecture`](cef-transparency-architecture.md) | Spec: CEF Transparency Architecture |
 
+**`approved`**
+
+| Spec | Title |
+|---|---|
+| [`SPEC_CHEAPER_FLEET_MESSAGING_2026_10_30`](SPEC_CHEAPER_FLEET_MESSAGING_2026_10_30.md) | Spec: cheaper fleet messaging: a bulletin that never wakes, quota mode as a setting, no-ack messages, and a count |
+
 **`assessment`**
 
 | Spec | Title |
