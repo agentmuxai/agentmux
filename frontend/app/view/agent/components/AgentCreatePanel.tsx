@@ -30,6 +30,8 @@ import { resolveEffectiveLaunchProvider } from "../agent-launch-env";
 import { agentInstallSession, onAgentInstallDone, watchAgentInstall } from "../install-sessions";
 import { getProvider } from "../providers";
 import { AgentCreateForm, type CreateDraft, type CreatedAgent } from "./AgentCreateForm";
+import { FreeStartGuide } from "./FreeStartGuide";
+import { refreshAccountCache } from "@/app/view/identity/identity-model";
 import type { AgentDefinition } from "@/app/store/rpc-api";
 import "./AgentCreatePanel.scss";
 
@@ -85,6 +87,17 @@ export const AgentCreatePanel = (props: AgentCreatePanelProps): JSX.Element => {
     const name = () => getCliCatalogEntry(providerId() ?? props.template.provider)?.displayName ?? props.template.name;
     /** AgentMux doesn't install this CLI: the user installs it with its own installer. */
     const userInstalled = () => !!provider() && !provider()!.npmPackage;
+
+    // The free sign-up guide is for someone new to this provider: not shown once an
+    // account for it exists (the list is fetched here as the form fetches it).
+    const [accounts] = createResource(async () => {
+        try {
+            return await refreshAccountCache();
+        } catch {
+            return [];
+        }
+    });
+    const hasAccount = () => (accounts() ?? []).some((acct) => acct.provider === (providerId() ?? props.template.provider));
 
     // ── Tools ────────────────────────────────────────────────────────
     const [missing, setMissing] = createSignal<MissingPrereq[] | null>(null);
@@ -382,6 +395,11 @@ export const AgentCreatePanel = (props: AgentCreatePanelProps): JSX.Element => {
                 </Match>
 
                 <Match when={step() === "create"}>
+                    {/* A provider with a free sign-in route, for someone with no
+                        account for it yet: the link to sign up, then the steps. */}
+                    <Show when={!hasAccount()}>
+                        <FreeStartGuide provider={providerId() ?? props.template.provider} name={name()} />
+                    </Show>
                     <AgentCreateForm
                         template={props.template}
                         draft={props.draft}

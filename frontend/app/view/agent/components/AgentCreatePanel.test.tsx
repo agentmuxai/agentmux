@@ -108,6 +108,13 @@ vi.mock("../agent-launch-env", () => ({
     resolveEffectiveLaunchProvider: vi.fn(async (t: { provider: string }) => t.provider),
 }));
 
+// The accounts the panel looks for (the free sign-up guide shows only without one).
+const { accountsForTest } = vi.hoisted(() => ({ accountsForTest: { list: [] as { provider: string }[] } }));
+vi.mock("@/app/view/identity/identity-model", async (importOriginal) => ({
+    ...(await importOriginal<typeof import("@/app/view/identity/identity-model")>()),
+    refreshAccountCache: vi.fn(async () => accountsForTest.list),
+}));
+
 // The Create step's own behaviour is AgentCreateForm.test.tsx's.
 vi.mock("./AgentCreateForm", () => ({
     AgentCreateForm: () => <div data-testid="agent-create-form" />,
@@ -564,5 +571,35 @@ describe("AgentCreatePanel — Install step, a CLI AgentMux doesn't install", ()
         await waitFor(() => expect(recheckInstalled).toHaveBeenCalledTimes(1));
         await waitFor(() => expect((screen.getByTestId("agent-create-check-again") as HTMLButtonElement).disabled).toBe(false));
         expect(screen.getByTestId("agent-create-vendor-install")).toBeInTheDocument();
+    });
+});
+
+describe("the free sign-up guide in the Create step", () => {
+    beforeEach(() => {
+        accountsForTest.list = [];
+    });
+
+    const agyTemplate = () => baseTemplate({ provider: "antigravity", name: "Antigravity" });
+
+    it("shows for a provider with a free sign-in route when the person has no account for it", async () => {
+        renderPanel({ template: agyTemplate() });
+        await waitFor(() => expect(screen.getByTestId("agent-create-form")).toBeTruthy());
+        await waitFor(() => expect(screen.getByTestId("agent-free-guide")).toBeTruthy());
+        fireEvent.click(screen.getByTestId("agent-free-guide-open"));
+        expect(openExternal).toHaveBeenCalledWith("https://antigravity.google/docs/getting-started?tab=cli");
+    });
+
+    it("is hidden once an account for the provider exists", async () => {
+        accountsForTest.list = [{ provider: "antigravity" }];
+        renderPanel({ template: agyTemplate() });
+        await waitFor(() => expect(screen.getByTestId("agent-create-form")).toBeTruthy());
+        await new Promise((r) => setTimeout(r, 0));
+        expect(screen.queryByTestId("agent-free-guide")).toBeNull();
+    });
+
+    it("is not shown for a provider with no free route", async () => {
+        renderPanel();
+        await waitFor(() => expect(screen.getByTestId("agent-create-form")).toBeTruthy());
+        expect(screen.queryByTestId("agent-free-guide")).toBeNull();
     });
 });
