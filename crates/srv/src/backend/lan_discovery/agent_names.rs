@@ -288,7 +288,6 @@ mod tests {
         assert_eq!(peer.lines.len(), 2, "{:?}", peer.lines);
     }
 
-    /// The Swarm's provider icon on remote rows (SPEC_SWARM_REFINEMENTS_2026_10_17.md §3).
     /// `agent_accounts` is a name -> stable account id map: only listed agents, only ids of the
     /// shape `identity::stable_account` makes, so a peer cannot put free text or an email in a row.
     #[test]
@@ -334,6 +333,7 @@ mod tests {
         assert!(inst.agent_accounts.is_empty());
     }
 
+    /// The Swarm's provider icon on remote rows (SPEC_SWARM_REFINEMENTS_2026_10_17.md §3).
     #[test]
     fn agent_providers_keep_only_known_ids_for_listed_agents() {
         let body = serde_json::json!({
