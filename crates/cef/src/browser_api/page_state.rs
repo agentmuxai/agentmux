@@ -125,6 +125,41 @@ pub struct SecretBoxes {
     /// document couldn't be read, or a frame could neither be read nor
     /// placed: the screenshot must then not be given out.
     pub complete: bool,
+    /// How many of the boxes hold a Vault value or a secret the page shows once
+    /// (spec §15.1), not just a password field: `eval` is refused while any does.
+    pub vault_values: usize,
+    /// Every document's contents were read, hidden frames included. A frame
+    /// that couldn't be read is hidden whole, which keeps a screenshot
+    /// `complete`, but whether it holds a Vault value is unknown: `eval` is
+    /// refused then too.
+    pub read_all: bool,
+}
+
+/// One frame's scan: its boxes in its own viewport, its width, and how many hold a
+/// Vault value; `None` when it couldn't be read.
+type FrameScan = Option<(Vec<[f64; 4]>, Option<f64>, usize)>;
+
+/// What one shown frame adds to the pane's scan. `plain`: its contents can be
+/// placed on the page by `offset`; otherwise the frame is hidden whole (`bounds`).
+fn add_frame(out: &mut SecretBoxes, scan: FrameScan, plain: bool, (ox, oy): (f64, f64), bounds: [f64; 4]) {
+    match scan {
+        Some((boxes, _, _)) if boxes.is_empty() => {}
+        Some((boxes, _, vault)) if plain => {
+            out.boxes.extend(boxes.into_iter().map(|[x, y, w, h]| [x + ox, y + oy, w, h]));
+            out.vault_values += vault;
+        }
+        // Its own <iframe> is scaled or rotated (its fields can't be placed by
+        // an offset): hide the whole frame.
+        Some((_, _, vault)) => {
+            out.boxes.push(bounds);
+            out.vault_values += vault;
+        }
+        // Couldn't look inside: hide the whole frame; what it holds is unknown.
+        None => {
+            out.boxes.push(bounds);
+            out.read_all = false;
+        }
+    }
 }
 
 /// Fields scanned per document. Past it the list is incomplete, which counts
@@ -149,16 +184,44 @@ const SECRET_CANDIDATES: &str = r#"((MAX) => {
       for (const a of el.attributes) { attrs.push(a.name, a.value); }
       const byIds = (el.getAttribute("aria-labelledby") || "").split(/\s+/).map(i => { const t = i && el.ownerDocument.getElementById(i); return t ? t.textContent : ""; }).join(" ");
       const label = ((el.labels ? Array.from(el.labels).map(l => l.textContent).join(" ") : "") + " " + byIds).replace(/\s+/g, " ").trim();
-      out.push({ localName: tag, attributes: attrs, label, x: r.left, y: r.top, w: r.width, h: r.height });
+      // A read-only field's value: where a page shows a secret once (spec §15.1).
+      const value = el.readOnly ? String(el.value == null ? "" : el.value) : "";
+      out.push({ localName: tag, attributes: attrs, label, value, x: r.left, y: r.top, w: r.width, h: r.height });
     }
   };
   visit(document);
-  return { fields: out, width: window.innerWidth, truncated };
+  // Text where a page shows a secret once: code, pre, kbd and samp, and the
+  // nearest container of a button named like "Copy"; and any element holding a
+  // captured Vault value. Only words that could be one leave the page (the host
+  // tests the exact shape), at most WORDS per element: one with more is boxed whole.
+  const WORDS = 20;
+  const shown = [];
+  const could = (w) => w.length >= 20 && w.length <= 512 && !/^[0-9a-fA-F]+$/.test(w) && !w.includes("://")
+    && [/[a-z]/, /[A-Z]/, /[0-9]/, /[^A-Za-z0-9]/].filter((c) => c.test(w)).length >= 2;
+  const box = (el, tainted) => {
+    if (shown.length >= MAX) { truncated = true; return; }
+    const r = el.getBoundingClientRect();
+    if (r.width === 0 || r.height === 0) return;
+    const words = tainted ? [] : String(el.textContent || "").split(/\s+/).filter(could);
+    shown.push({ words: words.slice(0, WORDS), many: words.length > WORDS, tainted, x: r.left, y: r.top, w: r.width, h: r.height });
+  };
+  for (const el of document.querySelectorAll("[data-agentmux-vault]")) {
+    if (el.localName !== "input" && el.localName !== "textarea" && !el.isContentEditable) box(el, true);
+  }
+  for (const el of document.querySelectorAll("code, pre, kbd, samp")) box(el, false);
+  for (const b of document.querySelectorAll("button, a, [role=button]")) {
+    const name = ((b.textContent || "") + " " + (b.getAttribute("aria-label") || "") + " " + (b.getAttribute("title") || "")).toLowerCase();
+    if (!name.includes("copy")) continue;
+    let c = b.parentElement;
+    for (let i = 0; c && c.children.length <= 1 && i < 4; i++) c = c.parentElement;
+    if (c) box(c, false);
+  }
+  return { fields: out, shown, width: window.innerWidth, truncated };
 })"#;
 
 /// The secret fields' boxes in one document (`frame_id`, or the main frame),
 /// in that document's viewport. `None`: it couldn't be read completely.
-async fn secret_boxes_in(cdp: &mut CdpSession, frame_id: Option<&str>) -> Option<(Vec<[f64; 4]>, Option<f64>)> {
+async fn secret_boxes_in(cdp: &mut CdpSession, frame_id: Option<&str>) -> Option<(Vec<[f64; 4]>, Option<f64>, usize)> {
     let ctx = isolated_context(cdp, frame_id).await.ok()?;
     let expression = format!("{SECRET_CANDIDATES}({MAX_SECRET_CANDIDATES})");
     let v = cdp
@@ -173,15 +236,36 @@ async fn secret_boxes_in(cdp: &mut CdpSession, frame_id: Option<&str>) -> Option
         return None;
     }
     let fields = result.get("fields")?.as_array()?;
-    let boxes = fields
-        .iter()
-        .filter(|f| snapshot::is_secret(&DomFacts::from_described(f)))
-        .filter_map(|f| {
-            let n = |k: &str| f.get(k).and_then(|v| v.as_f64());
-            Some([n("x")?, n("y")?, n("w")?, n("h")?])
-        })
-        .collect();
-    Some((boxes, result.get("width").and_then(|w| w.as_f64())))
+    let shown = result.get("shown").and_then(Value::as_array).cloned().unwrap_or_default();
+    let rect = |f: &Value| -> Option<[f64; 4]> {
+        let n = |k: &str| f.get(k).and_then(|v| v.as_f64());
+        Some([n("x")?, n("y")?, n("w")?, n("h")?])
+    };
+    let mut boxes = Vec::new();
+    let mut vault_values = 0;
+    for f in fields {
+        let facts = DomFacts::from_described(f);
+        let filled = !facts.attr(super::vault_fill::TAINT_ATTR).is_empty();
+        let once = f.get("value").and_then(Value::as_str).is_some_and(agentmux_common::shown_once::has_shown_once);
+        if snapshot::is_secret(&facts) || once {
+            boxes.extend(rect(f));
+            vault_values += usize::from(filled || once);
+        }
+    }
+    for s in &shown {
+        let flag = |k: &str| s.get(k).and_then(Value::as_bool).unwrap_or(false);
+        let words = s.get("words").and_then(Value::as_array);
+        let once = words.is_some_and(|w| w.iter().filter_map(Value::as_str).any(agentmux_common::shown_once::looks_shown_once));
+        if flag("tainted") || once {
+            boxes.extend(rect(s));
+            vault_values += 1;
+        } else if flag("many") {
+            // Too many words to send: hidden whole in the image, but not counted
+            // as a secret (a long code listing mustn't block eval).
+            boxes.extend(rect(s));
+        }
+    }
+    Some((boxes, result.get("width").and_then(|w| w.as_f64()), vault_values))
 }
 
 /// Whether a `DOM.getDocument { depth: -1, pierce: true }` tree has a text
@@ -220,15 +304,19 @@ async fn has_unseen_fields(cdp: &mut CdpSession) -> Option<bool> {
 
 /// [`SecretBoxes`] for the whole pane: the top frame and every iframe.
 pub async fn secret_boxes(root: &mut CdpSession) -> SecretBoxes {
-    let mut out = SecretBoxes { boxes: Vec::new(), css_width: None, complete: true };
+    let mut out = SecretBoxes { boxes: Vec::new(), css_width: None, complete: true, vault_values: 0, read_all: true };
     match secret_boxes_in(root, None).await {
-        Some((boxes, width)) => {
+        Some((boxes, width, vault)) => {
             out.boxes.extend(boxes);
             out.css_width = width;
+            out.vault_values += vault;
         }
         // The page itself couldn't be checked: there is nothing to hide whole
         // short of the screenshot itself.
-        None => out.complete = false,
+        None => {
+            out.complete = false;
+            out.read_all = false;
+        }
     }
     if out.css_width.is_none() {
         out.css_width = root
@@ -254,8 +342,15 @@ pub async fn secret_boxes(root: &mut CdpSession) -> SecretBoxes {
         let geometry = match frames::chain_geometry(root, &fl.chain).await {
             frames::Placement::Shown(g) if fl.placeable && g.outer_plain => g,
             // Not drawn (a hidden tracking or captcha frame): nothing of it
-            // can appear in the image.
-            frames::Placement::NotRendered if fl.placeable => continue,
+            // can appear in the image, but it may still hold a Vault value.
+            frames::Placement::NotRendered if fl.placeable => {
+                let mut on = root.in_session(fl.raw.session.as_deref());
+                match secret_boxes_in(&mut on, Some(&fl.raw.id)).await {
+                    Some((_, _, vault)) => out.vault_values += vault,
+                    None => out.read_all = false,
+                }
+                continue;
+            }
             _ => {
                 out.complete = false;
                 continue;
@@ -265,16 +360,8 @@ pub async fn secret_boxes(root: &mut CdpSession) -> SecretBoxes {
         if fl.is_session_root && has_unseen_fields(&mut on).await != Some(false) {
             out.complete = false;
         }
-        match secret_boxes_in(&mut on, Some(&fl.raw.id)).await {
-            Some((boxes, _)) if boxes.is_empty() => {}
-            Some((boxes, _)) if geometry.plain => {
-                let (ox, oy) = geometry.offset;
-                out.boxes.extend(boxes.into_iter().map(|[x, y, w, h]| [x + ox, y + oy, w, h]));
-            }
-            // Couldn't look inside, or its own <iframe> is scaled or rotated
-            // (its fields can't be placed by an offset): hide the whole frame.
-            _ => out.boxes.push(geometry.bounds),
-        }
+        let scan = secret_boxes_in(&mut on, Some(&fl.raw.id)).await;
+        add_frame(&mut out, scan, geometry.plain, geometry.offset, geometry.bounds);
     }
     out
 }
@@ -292,9 +379,11 @@ pub fn merge_scans(before: SecretBoxes, after: SecretBoxes) -> SecretBoxes {
     };
     let complete = before.complete && after.complete && same && same_width;
     let css_width = before.css_width.or(after.css_width);
+    let vault_values = before.vault_values.max(after.vault_values);
+    let read_all = before.read_all && after.read_all;
     let mut boxes = before.boxes;
     boxes.extend(after.boxes);
-    SecretBoxes { boxes, css_width, complete }
+    SecretBoxes { boxes, css_width, complete, vault_values, read_all }
 }
 
 #[cfg(test)]
@@ -302,7 +391,25 @@ mod tests {
     use super::*;
 
     fn scan(boxes: &[[f64; 4]], complete: bool) -> SecretBoxes {
-        SecretBoxes { boxes: boxes.to_vec(), css_width: Some(800.0), complete }
+        SecretBoxes { boxes: boxes.to_vec(), css_width: Some(800.0), complete, vault_values: 0, read_all: true }
+    }
+
+    #[test]
+    fn a_frame_that_couldnt_be_read_is_hidden_whole_and_leaves_eval_refused() {
+        let bounds = [10.0, 20.0, 300.0, 200.0];
+        let mut out = scan(&[], true);
+        add_frame(&mut out, None, true, (10.0, 20.0), bounds);
+        assert_eq!(out.boxes, vec![bounds]);
+        assert!(out.complete, "the screenshot is still safe: the frame is hidden whole");
+        assert!(!out.read_all, "but what it holds is unknown");
+
+        let mut out = scan(&[], true);
+        add_frame(&mut out, Some((vec![[1.0, 2.0, 3.0, 4.0]], None, 1)), false, (10.0, 20.0), bounds);
+        assert_eq!((out.boxes.clone(), out.vault_values, out.read_all), (vec![bounds], 1, true), "read, but hidden whole");
+
+        let mut out = scan(&[], true);
+        add_frame(&mut out, Some((vec![[1.0, 2.0, 3.0, 4.0]], None, 0)), true, (10.0, 20.0), bounds);
+        assert_eq!((out.boxes.clone(), out.vault_values, out.read_all), (vec![[11.0, 22.0, 3.0, 4.0]], 0, true));
     }
 
     #[test]

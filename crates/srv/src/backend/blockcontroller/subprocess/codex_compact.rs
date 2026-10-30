@@ -72,7 +72,7 @@ impl SubprocessController {
         self.emit_message_accepted(&config);
         // In the transcript like any delivered turn's message, so it is still
         // there after a reload and in History.
-        self.user_record_sink(config.message_id.is_some()).write(&config.message);
+        self.user_record_sink(config.message_id.is_some(), config.record.clone()).write(&config.message);
         let (kill_tx, mut kill_rx) = tokio::sync::oneshot::channel::<bool>();
         {
             let mut inner = self.inner.lock().unwrap();

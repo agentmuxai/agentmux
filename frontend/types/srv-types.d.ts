@@ -621,7 +621,7 @@ declare global {
         ts: number;
         agent: string;
         /** navigate, back, forward, reload, click, fill, select, check, key,
-         *  upload, terminal, eval, handoff, auto-approve-on, auto-approve-off, pause, resume. */
+         *  upload, capture, terminal, eval, handoff, auto-approve-on, auto-approve-off, pause, resume. */
         kind: string;
         url?: string;
         /** The element's label or ref, or a field's ref for a fill. */

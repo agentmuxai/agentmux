@@ -127,6 +127,7 @@ fn test_subprocess_controller_concurrent_spawn_blocked() {
         message_id: None,
         session_id: None,
         instance_id: String::new(),
+        record: None,
     };
 
     let result = ctrl.spawn_turn(config);
@@ -336,6 +337,7 @@ fn spawn_turn_preserves_session_id_in_queued_config() {
         message_id: None,
         session_id: Some("prior-sid".to_string()),
         instance_id: String::new(),
+        record: None,
     };
     let _ = ctrl.spawn_turn(config);
 
@@ -397,6 +399,7 @@ fn spawn_turn_refuses_when_lease_held_by_another_process() {
         message_id: None,
         session_id: None,
         instance_id: "instance-under-test".to_string(),
+        record: None,
     };
 
     let result = ctrl.spawn_turn(config);
@@ -491,6 +494,7 @@ async fn a_turn_stamps_its_spawn_time_and_last_output() {
         message_id: None,
         session_id: None,
         instance_id: String::new(),
+        record: None,
     };
     ctrl.spawn_turn(config).unwrap();
     let spawned = tracker.spawned_at_ms().expect("the turn's process stamps its spawn time");
@@ -520,6 +524,7 @@ fn container_config() -> SubprocessSpawnConfig {
         message_id: None,
         session_id: None,
         instance_id: "inst-1".to_string(),
+        record: None,
     }
 }
 

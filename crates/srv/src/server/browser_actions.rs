@@ -60,6 +60,8 @@ pub(crate) enum Kind {
     Upload,
     /// Typed into a web terminal under the person's grant.
     Terminal,
+    /// A secret the page showed, saved into the Vault (`Browser` `capture`).
+    Capture,
     Eval,
     Handoff,
     AutoApproveOn,
