@@ -38,11 +38,11 @@ pub(super) fn key_events_for(c: char) -> Vec<Value> {
     vec![down, up]
 }
 
-/// The key events for pressing Backspace once.
-fn backspace_events() -> Vec<Value> {
+/// The key events for pressing a named key once (no text).
+fn press_events(key: &str, vk: i64) -> Vec<Value> {
     ["keyDown", "keyUp"]
         .iter()
-        .map(|t| json!({ "type": t, "key": "Backspace", "code": "Backspace", "windowsVirtualKeyCode": 8, "nativeVirtualKeyCode": 8 }))
+        .map(|t| json!({ "type": t, "key": key, "code": key, "windowsVirtualKeyCode": vk, "nativeVirtualKeyCode": vk }))
         .collect()
 }
 
@@ -55,7 +55,18 @@ async fn send(cdp: &mut CdpSession, events: Vec<Value>) -> Result<(), String> {
 
 /// Deletes the selection (the field's whole content, after `PREPARE_FILL`).
 pub(super) async fn clear_selection(cdp: &mut CdpSession) -> Result<(), String> {
-    send(cdp, backspace_events()).await
+    send(cdp, press_events("Backspace", 8)).await
+}
+
+/// Presses ArrowDown or Enter where the focus is (a combobox's keyboard
+/// pattern); other keys aren't needed here.
+pub(super) async fn press(cdp: &mut CdpSession, key: &str) -> Result<(), String> {
+    let vk = match key {
+        "ArrowDown" => 40,
+        "Enter" => 13,
+        other => return Err(format!("key_typing can't press {other:?}")),
+    };
+    send(cdp, press_events(key, vk)).await
 }
 
 /// Types `text` one key at a time where the focus is.
@@ -109,7 +120,7 @@ mod tests {
 
     #[test]
     fn backspace_is_a_key_down_and_up_without_text() {
-        let events = backspace_events();
+        let events = press_events("Backspace", 8);
         assert_eq!(events[0]["key"], "Backspace");
         assert!(events[0].get("text").is_none());
         assert_eq!(events[1]["type"], "keyUp");

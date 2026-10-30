@@ -31,6 +31,7 @@ use crate::state::AppState;
 pub mod act;
 pub mod capture;
 pub mod cdp;
+pub mod combobox;
 pub mod dates;
 pub mod frames;
 pub mod hibernation;
