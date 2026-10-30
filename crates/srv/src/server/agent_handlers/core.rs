@@ -297,6 +297,11 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 crate::sagas::park_agents::delete_parked_blocks_of(&state, &cmd.id).await;
                 mstore.agent_def_delete(&cmd.id).map_err(|e| format!("deleteagent: {e}"))?;
                 super::purge_identity_store_rows(&identity_store, &id_store, &cmd.id, "deleteagent");
+                // A container agent's container and volumes (a developer agent's build output is gigabytes) go with it.
+                if let Some(cm) = state.container_manager.get().await {
+                    let name = crate::backend::container::container_name_for_slug(&cmd.id);
+                    tokio::spawn(async move { cm.remove_agent_storage(&name).await });
+                }
                 broker.publish_event::<crate::backend::mps_events::AgentsChanged>(&(), vec![], 0);
                 Ok(())
             }
