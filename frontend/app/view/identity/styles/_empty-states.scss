@@ -18,17 +18,3 @@
     p { margin: 0; }
 }
 
-.identity-empty-add {
-    padding: 5px 14px;
-    font-size: var(--text-sm);
-    border-radius: 0;
-    border: 1px solid var(--accent-color);
-    background: transparent;
-    color: var(--accent-color);
-    cursor: default;
-
-    &:hover {
-        background: var(--hover-bg-color);
-    }
-}
-
