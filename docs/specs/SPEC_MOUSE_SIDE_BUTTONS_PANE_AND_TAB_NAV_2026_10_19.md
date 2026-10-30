@@ -93,8 +93,8 @@ Forward  → select tab4·G, caret in G's input   (index 1)
   content has settled, so a switch records its destination pane and not a half-restored one); an agent pane picker is
   recorded like any pane.
 - **Cap:** 100 entries; oldest dropped.
-- **Dead entries:** a pane or tab that no longer exists, or a block now in another tab, is skipped and removed when
-  the cursor reaches it, and the press continues to the next live entry in that direction. If none is left, nothing
+- **Dead entries:** a pane or tab that no longer exists is skipped and removed when
+  the cursor reaches it (a block now in another tab of the window is not dead: the entry follows it), and the press continues to the next live entry in that direction. If none is left, nothing
   happens.
 
 ### 4.2 Back and Forward
@@ -160,7 +160,7 @@ A 150 ms same-direction debounce is the backstop against any remaining double de
 - **Pinned tabs, hidden/warm tabs:** tab switching uses the real `setActiveTab` path, so reveal gating applies.
 - **A tab closed and its panes gone:** all its entries are dead and skipped.
 - **Pane moved between tabs:** the entry is dead for its old tab; if the block exists elsewhere, re-point it on lookup
-  (cheap: find the block's current tab). *Open Q3.*
+  (cheap: find the block's current tab). Built 2026-10-30 (§10).
 - **F6 and Ctrl+Tab bursts** fill the history with every pane passed through. That is the browser model; see Q2.
 - **Remapped buttons** (vendor software sending Alt+Left etc.) arrive as keys and are unaffected.
 
@@ -207,6 +207,10 @@ The §9 recommendations were taken as written (Q1–Q6). Differences from the pl
   listener consumes nothing, and a plain press over a browser pane does the page's own back / forward.
 - **Commands:** `pane:history:back` / `pane:history:forward` are in the command palette; no shortcut-table rows (a row
   without keys would show in Help).
+- **A pane moved to another tab (2026-10-30):** Q3's recommendation, built: the entry follows the pane. `locatePane`
+  (`pane-history-core.ts`) finds the tab of this window that now holds the block, and `stepHistory` re-points the entry
+  there. An entry is dead only when the block is in no tab of the window. A tab whose object isn't loaded is
+  trusted, as before. Not checked in a live window.
 - **Code:** `app/store/pane-history-core.ts` (the reducer), `pane-history.ts` (recording and stepping),
   `side-button-rules.ts` (the press rules), `side-buttons.ts` (listener and host event), `crates/cef/src/side_buttons.rs`
   (Win32 decoding).
