@@ -5,7 +5,7 @@
  * AgentContainerCaches: the "Build cache" section of the Container limits panel. A container agent on the developer
  * image keeps its cargo registry and build output in volumes that outlive the container; this shows how much they hold
  * and clears them (docs/specs/SPEC_CONTAINER_AGENT_DEVELOPER_IMAGE_2026_10_29.md section 5). Nothing shows for an agent
- * that keeps no cache.
+ * that keeps no cache, and nothing when Docker does not answer.
  */
 
 import { createSignal, onMount, Show, type JSX } from "solid-js";
@@ -34,9 +34,8 @@ export const AgentContainerCaches = (props: AgentContainerCachesProps): JSX.Elem
         void (async () => {
             try {
                 setCaches(await RpcApi.GetContainerCachesCommand(TabRpcClient, { agent_id: props.agentId }));
-            } catch (e) {
-                // Docker not answering is not this section's news: the limits above say it.
-                setError(errorText(e));
+            } catch {
+                // Docker not answering is not this section's news (the limits above say it): the section stays hidden.
             }
         })();
     });

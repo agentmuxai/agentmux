@@ -38,6 +38,15 @@ describe("AgentContainerCaches", () => {
         expect(screen.queryByTestId("container-caches")).toBeNull();
     });
 
+    it("stays hidden, with no error, when the caches can't be read (Docker not answering)", async () => {
+        vi.mocked(RpcApi.GetContainerCachesCommand).mockRejectedValue(new Error("Docker is not available on this machine"));
+        renderIt();
+        await waitFor(() => expect(RpcApi.GetContainerCachesCommand).toHaveBeenCalled());
+        await Promise.resolve();
+        expect(screen.queryByTestId("container-caches")).toBeNull();
+        expect(screen.queryByTestId("container-caches-error")).toBeNull();
+    });
+
     it("says how much the volumes hold, and that is a lot only above the warning level", async () => {
         vi.mocked(RpcApi.GetContainerCachesCommand).mockResolvedValue(caches(3.2 * GB) as any);
         renderIt();
