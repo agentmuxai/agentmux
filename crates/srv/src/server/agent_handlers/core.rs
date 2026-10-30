@@ -14,7 +14,8 @@ use crate::backend::rpc_types::{
     COMMAND_RESEED_AGENTS,
     COMMAND_CONTAINER_RUNTIME_AVAILABLE, COMMAND_CONTAINER_IMAGE_CHECK, COMMAND_UPDATE_CONTAINER,
     CommandUpdateContainerData, UpdateContainerResult,
-    COMMAND_GET_CONTAINER_LIMITS, COMMAND_SET_CONTAINER_LIMITS, CommandGetContainerLimitsData, CommandSetContainerLimitsData,
+    COMMAND_CLEAR_CONTAINER_CACHES, COMMAND_GET_CONTAINER_CACHES, COMMAND_GET_CONTAINER_LIMITS, COMMAND_SET_CONTAINER_LIMITS,
+    CommandContainerCachesData, CommandGetContainerLimitsData, CommandSetContainerLimitsData,
     CommandContainerImageCheckData, ContainerImageCheckResult,
     CommandListAgentDefinitionsData,
     CommandContainerRuntimeAvailableData, CommandReseedAgentsData, CommandExportAgentsData,
@@ -368,6 +369,25 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             crate::server::app_api::container_limits::set(&state, &uid, &def, memory.as_ref(), cpus.as_ref(), "you")
                 .await
                 .map_err(|(_, m)| m)
+        }
+    });
+    // getcontainercaches / clearcontainercaches → a container agent's cache volumes (`app_api::container_caches`);
+    // the operator's client clears them, an agent uses MuxAPI.
+    let state_gc = state.clone();
+    engine.register_typed(COMMAND_GET_CONTAINER_CACHES, move |cmd: CommandContainerCachesData, _ctx| {
+        let state = state_gc.clone();
+        async move {
+            let (uid, _def) = crate::server::app_api::container_limits::container_agent(&state, &cmd.agent_id).map_err(|(_, m)| m)?;
+            crate::server::app_api::container_caches::view(&state, &uid).await.map_err(|(_, m)| m)
+        }
+    });
+    let state_cc = state.clone();
+    engine.register_typed(COMMAND_CLEAR_CONTAINER_CACHES, move |cmd: CommandContainerCachesData, ctx| {
+        let state = state_cc.clone();
+        async move {
+            ctx.operator_only("only the operator's client clears a container's caches here; an agent uses Agents container_caches")?;
+            let (uid, _def) = crate::server::app_api::container_limits::container_agent(&state, &cmd.agent_id).map_err(|(_, m)| m)?;
+            crate::server::app_api::container_caches::clear(&state, &uid).await.map_err(|(_, m)| m)
         }
     });
     // containerimagecheck → can this image be had on this machine? Answers from

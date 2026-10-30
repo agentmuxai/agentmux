@@ -52,6 +52,7 @@ pub(crate) mod agent_context;
 pub(crate) mod agent_env;
 pub(crate) mod agent_io;
 mod agent_define;
+pub(crate) mod container_caches;
 pub(crate) mod container_limits;
 pub(crate) mod container_update;
 /// Re-exported so the human-facing creation/edit RPC handlers

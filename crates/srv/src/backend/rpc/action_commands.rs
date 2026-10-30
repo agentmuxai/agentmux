@@ -59,7 +59,7 @@ pub const ALWAYS: &[&str] = &[
     "upsertsystemmemory", "viewer.pair-start", "viewer.revoke", "widget.api", "widgets.call",
     "widgets.catalog.install", "widgets.install", "widgets.rescan", "widgets.session", "widgets.setenabled",
     "widgets.uninstall", "writeagentconfig", "writeeditorfile",
-    "updatecontainer", "setcontainerlimits",
+    "updatecontainer", "setcontainerlimits", "clearcontainercaches",
     "identity.account.set_failover", "identity.account.signed_in", "identity.account.validate",
 ];
 
@@ -95,7 +95,7 @@ pub const READ_ONLY: &[&str] = &[
     "connectivity.status", "connlist", "connlistaws", "connsessions", "containerimagecheck",
     "containerruntimeavailable", "eventreadhistory", "exportagents", "fileprobe", "fleet.group.list",
     "forkagentdefinitionsuggest", "fs.git_status", "fs.list", "fs.places", "getagentbundles", "getagentcontent",
-    "getagentinstance", "getallagentcontent", "getbuildslot", "getclaudeglobalconfig", "getcontainerlimits", "getdrone", "geteditorhome",
+    "getagentinstance", "getallagentcontent", "getbuildslot", "getclaudeglobalconfig", "getcontainercaches", "getcontainerlimits", "getdrone", "geteditorhome",
     "geteditorroots", "getfullconfig", "getidentityaccount", "getmemory", "getmeta", "gettoolstatus",
     "getwaveairatelimit", "globalmemory:diff", "globalmemory:history", "globalmemory:import_sources",
     "globalmemory:removed", "globalmemory:sections", "history.agent_sessions", "history.agents", "history.locate",
