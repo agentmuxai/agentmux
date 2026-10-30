@@ -25,6 +25,7 @@ fn audit_entry(ts: u64, from: &str, to: &str) -> AuditLogEntry {
         lan_claimed_uid: String::new(),
         wan: None,
         cli_native: None,
+        turn: None,
     }
 }
 

@@ -447,6 +447,8 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // (SPEC_AGENT_OVERLAP_AWARENESS_2026_10_10.md §3.1, §3.2). Read-only.
         .route("/api/v1/work-facts", get(work_facts_handlers::handle_work_facts))
         .route("/api/v1/work-facts/who", get(work_facts_handlers::handle_who_is_working_on))
+        // What messages cost per agent per day (SPEC_CHEAPER_FLEET_MESSAGING_2026_10_30.md section 7). Read-only.
+        .route("/api/v1/message-stats", get(message_stats_handler::handle_message_stats))
         // ClaimWork / ReleaseWork (same spec, §3.4): informational claims,
         // never a lock.
         // PostToChannel / ReadChannel: a repository's coordination channel

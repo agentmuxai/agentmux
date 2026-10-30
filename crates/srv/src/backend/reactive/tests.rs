@@ -2206,6 +2206,7 @@ fn test_audit_log_entry_outcome_field_serde_roundtrip() {
         lan_claimed_uid: String::new(),
         wan: None,
         cli_native: None,
+        turn: None,
     };
     let json = serde_json::to_value(&with_outcome).unwrap();
     assert_eq!(json["outcome"], "held_retry");
