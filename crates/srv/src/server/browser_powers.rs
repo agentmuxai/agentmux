@@ -59,6 +59,12 @@ pub(crate) fn parse(asked: Option<&[String]>) -> Result<Vec<Power>, String> {
     Ok(out)
 }
 
+/// The powers a standing grant can carry beyond committing clicks, which every
+/// grant has: what Settings offers a checkbox for.
+pub(crate) fn granted_by_the_person() -> Vec<String> {
+    Power::ALL.iter().filter(|p| **p != Power::Clicks).map(|p| p.name().to_string()).collect()
+}
+
 /// The wire names of `powers`, for the pane's strip and the banner.
 pub(crate) fn names(powers: &[Power]) -> Vec<&'static str> {
     powers.iter().map(|p| p.name()).collect()

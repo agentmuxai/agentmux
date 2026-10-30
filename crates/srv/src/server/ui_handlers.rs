@@ -1160,7 +1160,7 @@ pub(crate) async fn handle_ui_browser_handoff(
     };
     note(&block_id, &req.auth.agent_id, Kind::Handoff).target(&reason).how(How::from_answer(answer)).record(&state);
     let answer = match answer {
-        crate::server::browser_attention::Answer::Yes => "done",
+        crate::server::browser_attention::Answer::Yes | crate::server::browser_attention::Answer::YesAlways => "done",
         crate::server::browser_attention::Answer::Cancelled => "cancelled",
         crate::server::browser_attention::Answer::TimedOut => "timed_out",
     };
@@ -1499,12 +1499,12 @@ pub(crate) async fn handle_ui_browser_act(
     match answer {
         // The user may have taken the pane over while the banner was up:
         // their Take over wins over an Approve that comes after it.
-        crate::server::browser_attention::Answer::Yes
+        crate::server::browser_attention::Answer::Yes | crate::server::browser_attention::Answer::YesAlways
             if crate::server::browser_owner::owner_of(&banner_at) != owner_before =>
         {
             asked().fail(&state, StatusCode::FORBIDDEN, "the user took over this pane, so the approved click wasn't made".to_string())
         }
-        crate::server::browser_attention::Answer::Yes => {
+        crate::server::browser_attention::Answer::Yes | crate::server::browser_attention::Answer::YesAlways => {
             crate::server::browser_dialog::note_approved_click(&block_id, &ask);
             let clicked = proxy_value(&state, "act", body(Some(&ask)), std::time::Duration::from_secs(20)).await;
             asked().how(How::Approved).outcome(&state, crate::server::browser_actions::approved_by_user(clicked, asked_at.elapsed()))

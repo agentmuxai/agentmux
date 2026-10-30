@@ -608,6 +608,8 @@ declare global {
         expires_at: number;
         /** What the grant allows: `clicks` always, and e.g. `terminal`. */
         powers?: string[];
+        /** A standing grant (Settings, Agents on sites): no time limit; `expires_at` is far off. */
+        always?: boolean;
         /** Set while the person has paused the pane: the time left, in ms,
          *  which isn't running down; `expires_at` moves on resume. */
         paused_left?: number;

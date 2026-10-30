@@ -103,7 +103,7 @@ impl How {
     pub(crate) fn from_answer(a: crate::server::browser_attention::Answer) -> How {
         use crate::server::browser_attention::Answer;
         match a {
-            Answer::Yes => How::Approved,
+            Answer::Yes | Answer::YesAlways => How::Approved,
             Answer::Cancelled => How::Declined,
             Answer::TimedOut => How::TimedOut,
         }

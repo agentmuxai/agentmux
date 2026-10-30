@@ -1108,6 +1108,27 @@
             "method": "PresenceStatusCommand"
         },
         {
+            "command": "browsergrants.list",
+            "method": "BrowserGrantsListCommand",
+            "send": "data ?? {}"
+        },
+        {
+            "command": "browsergrants.set",
+            "method": "BrowserGrantsSetCommand"
+        },
+        {
+            "command": "browsergrants.preset",
+            "method": "BrowserGrantsPresetCommand"
+        },
+        {
+            "command": "browsergrants.revoke",
+            "method": "BrowserGrantsRevokeCommand"
+        },
+        {
+            "command": "browsergrants.powers",
+            "method": "BrowserGrantsPowersCommand"
+        },
+        {
             "command": "pins.adopt",
             "method": "PinsAdoptCommand"
         },
@@ -1616,7 +1637,6 @@
             "command": "agent.input-draft",
             "method": "AgentInputDraftCommand"
         },
-
         {
             "command": "app.upgrade-requests",
             "method": "AppUpgradeRequestsCommand"

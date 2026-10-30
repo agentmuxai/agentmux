@@ -1770,6 +1770,101 @@
     }
   },
   {
+    "command": "browsergrants.list",
+    "request": "agentmux_srv::backend::rpc_types::browser_grants::CommandBrowserGrantsListData",
+    "requestName": "CommandBrowserGrantsListData",
+    "requestTs": {
+      "imports": [
+        "CommandBrowserGrantsListData"
+      ],
+      "name": "CommandBrowserGrantsListData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::browser_grants::BrowserGrantsResult",
+    "responseName": "BrowserGrantsResult",
+    "responseTs": {
+      "imports": [
+        "BrowserGrantsResult"
+      ],
+      "name": "BrowserGrantsResult"
+    }
+  },
+  {
+    "command": "browsergrants.powers",
+    "request": "agentmux_srv::backend::rpc_types::browser_grants::CommandBrowserGrantsPowersData",
+    "requestName": "CommandBrowserGrantsPowersData",
+    "requestTs": {
+      "imports": [
+        "CommandBrowserGrantsPowersData"
+      ],
+      "name": "CommandBrowserGrantsPowersData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::browser_grants::BrowserGrantsResult",
+    "responseName": "BrowserGrantsResult",
+    "responseTs": {
+      "imports": [
+        "BrowserGrantsResult"
+      ],
+      "name": "BrowserGrantsResult"
+    }
+  },
+  {
+    "command": "browsergrants.preset",
+    "request": "agentmux_srv::backend::rpc_types::browser_grants::CommandBrowserGrantsPresetData",
+    "requestName": "CommandBrowserGrantsPresetData",
+    "requestTs": {
+      "imports": [
+        "CommandBrowserGrantsPresetData"
+      ],
+      "name": "CommandBrowserGrantsPresetData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::browser_grants::BrowserGrantsResult",
+    "responseName": "BrowserGrantsResult",
+    "responseTs": {
+      "imports": [
+        "BrowserGrantsResult"
+      ],
+      "name": "BrowserGrantsResult"
+    }
+  },
+  {
+    "command": "browsergrants.revoke",
+    "request": "agentmux_srv::backend::rpc_types::browser_grants::CommandBrowserGrantsRevokeData",
+    "requestName": "CommandBrowserGrantsRevokeData",
+    "requestTs": {
+      "imports": [
+        "CommandBrowserGrantsRevokeData"
+      ],
+      "name": "CommandBrowserGrantsRevokeData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::browser_grants::BrowserGrantsResult",
+    "responseName": "BrowserGrantsResult",
+    "responseTs": {
+      "imports": [
+        "BrowserGrantsResult"
+      ],
+      "name": "BrowserGrantsResult"
+    }
+  },
+  {
+    "command": "browsergrants.set",
+    "request": "agentmux_srv::backend::rpc_types::browser_grants::CommandBrowserGrantsSetData",
+    "requestName": "CommandBrowserGrantsSetData",
+    "requestTs": {
+      "imports": [
+        "CommandBrowserGrantsSetData"
+      ],
+      "name": "CommandBrowserGrantsSetData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::browser_grants::BrowserGrantsResult",
+    "responseName": "BrowserGrantsResult",
+    "responseTs": {
+      "imports": [
+        "BrowserGrantsResult"
+      ],
+      "name": "BrowserGrantsResult"
+    }
+  },
+  {
     "command": "bundle.delete",
     "request": "agentmux_srv::backend::rpc_types::bundle::CommandDeleteBundleData",
     "requestName": "CommandDeleteBundleData",
