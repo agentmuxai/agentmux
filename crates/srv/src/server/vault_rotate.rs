@@ -163,7 +163,8 @@ pub(crate) async fn handle_vault_rotate(State(state): State<AppState>, Json(body
         _ => None,
     };
     // A set that never started gave no service the value: it is dropped, not kept.
-    if let Err(why) = &set_ran {
+    // One that started and was stopped, or lost, may have: it is kept (step 2).
+    if let Err(RunError { started: false, why }) = &set_ran {
         let (store, r) = (state.identity_store.clone(), rotation);
         let _ = tokio::task::spawn_blocking(move || versions::abandon_rotation(&store, &r)).await;
         vault::record(&state.identity_store, &row.id, &row.label, &agent, ROTATED, &clip(&set), "failed: set couldn't start");
@@ -178,12 +179,7 @@ pub(crate) async fn handle_vault_rotate(State(state): State<AppState>, Json(body
         }))
         .into_response();
     }
-    let failed = match (&set_ran, &verify_ran) {
-        (Ok(s), _) if !s.ok() => Some(2),
-        (_, Some(Ok(v))) if !v.ok() => Some(3),
-        (_, Some(Err(_))) => Some(3),
-        _ => None,
-    };
+    let failed = step_failed(&set_ran, verify_ran.as_ref());
 
     // 4. Current on success; kept, marked, on failure.
     let (store, id, a) = (state.identity_store.clone(), row.id.clone(), agent.clone());
@@ -232,10 +228,31 @@ impl Ran {
     }
 }
 
-fn ran_json(r: &Result<Ran, String>) -> Value {
+/// Why a command has no exit code: it never started (nothing ran), or it started
+/// and was stopped or lost track of (it may have done its work).
+#[derive(Debug)]
+struct RunError {
+    started: bool,
+    why: String,
+}
+
+/// The step a rotation failed at: 2 when `set` didn't succeed (it exited non-zero,
+/// or was stopped or lost after it started), 3 when `verify` didn't; `None` when
+/// both succeeded.
+fn step_failed(set: &Result<Ran, RunError>, verify: Option<&Result<Ran, RunError>>) -> Option<u8> {
+    if !set.as_ref().is_ok_and(Ran::ok) {
+        return Some(2);
+    }
+    match verify {
+        Some(v) if !v.as_ref().is_ok_and(Ran::ok) => Some(3),
+        _ => None,
+    }
+}
+
+fn ran_json(r: &Result<Ran, RunError>) -> Value {
     match r {
         Ok(r) => json!({ "exit_code": r.exit_code, "output": r.output }),
-        Err(e) => json!({ "error": e }),
+        Err(e) => json!({ "error": e.why, "started": e.started }),
     }
 }
 
@@ -257,7 +274,8 @@ async fn run(
     cmd: &str,
     cwd: Option<&str>,
     secrets: HashMap<String, String>,
-) -> Result<Ran, String> {
+) -> Result<Ran, RunError> {
+    let not_started = |why: String| RunError { started: false, why };
     let req: ShellCreateRequest = serde_json::from_value(json!({
         "agent_block_id": block_id,
         "cmd": cmd,
@@ -266,16 +284,18 @@ async fn run(
         "auth": auth,
         "secrets": &secrets,
     }))
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| not_started(e.to_string()))?;
     let approved = super::shell_secrets::Preapproved { env: secrets };
     let resp = super::http_shell::create_shell(state.clone(), req, Some(&approved)).await;
     let status = resp.status();
-    let body = axum::body::to_bytes(resp.into_body(), 1 << 20).await.map_err(|e| e.to_string())?;
+    // A success means the shell was spawned: from here on it may have run.
+    let lost = |why: String| RunError { started: status.is_success(), why };
+    let body = axum::body::to_bytes(resp.into_body(), 1 << 20).await.map_err(|e| lost(e.to_string()))?;
     let v: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
     if !status.is_success() {
-        return Err(v.get("error").and_then(Value::as_str).unwrap_or("the command couldn't start").to_string());
+        return Err(not_started(v.get("error").and_then(Value::as_str).unwrap_or("the command couldn't start").to_string()));
     }
-    let shell_id = v.get("shell_id").and_then(Value::as_str).ok_or("the command couldn't start")?.to_string();
+    let shell_id = v.get("shell_id").and_then(Value::as_str).ok_or_else(|| lost("srv lost track of the command".to_string()))?.to_string();
     let deadline = tokio::time::Instant::now() + COMMAND_WAIT;
     loop {
         if let Some(s) = state.shell_sessions.get_status_if_known(&shell_id).filter(|s| !s.running) {
@@ -284,7 +304,7 @@ async fn run(
         }
         if tokio::time::Instant::now() >= deadline {
             state.shell_sessions.stop(&shell_id);
-            return Err(format!("{} was still running after {} minutes, so it was stopped", clip(cmd), COMMAND_WAIT.as_secs() / 60));
+            return Err(RunError { started: true, why: format!("{} was still running after {} minutes, so it was stopped", clip(cmd), COMMAND_WAIT.as_secs() / 60) });
         }
         tokio::time::sleep(Duration::from_millis(250)).await;
     }
