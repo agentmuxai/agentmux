@@ -3914,7 +3914,7 @@ fn test_marker_with_files_counts_them_and_lists_them_after_the_message() {
     let files = shot_list();
     let m = crate::backend::reactive::sanitize::wrap_jekt_message_with_files(
         "look at this", Some("agent2"), "agent1", "coord", "host", Some(true), None, None, None, None, false,
-        "m.files-v1.abc", "normal", None, Some(&files),
+        "m.files-v1.abc", "normal", None, Some(&files), false,
     );
     assert!(tag_line(&m).contains(" FILES=1 MSGID="), "got: {m}");
     assert!(m.contains("look at this\n<attached_files>\nagent2 sent 1 image"), "got: {m}");
@@ -3923,6 +3923,18 @@ fn test_marker_with_files_counts_them_and_lists_them_after_the_message() {
         "look", Some("agent2"), "agent1", "coord", "host", Some(true), None, None, None, None, false, "m", "normal", None,
     );
     assert!(!plain.contains("FILES="), "got: {plain}");
+}
+
+#[test]
+fn test_the_marker_says_reply_none_only_when_the_sender_asked_for_no_reply() {
+    let wrap = |reply_none| {
+        crate::backend::reactive::sanitize::wrap_jekt_message_with_files(
+            "fyi", Some("agentx"), "agent1", "coord", "host", Some(true), None, None, None, None, false,
+            "m1", "normal", None, None, reply_none,
+        )
+    };
+    assert!(tag_line(&wrap(true)).contains(" REPLY=none MSGID=m1 "), "got: {}", wrap(true));
+    assert!(!tag_line(&wrap(false)).contains("REPLY="), "got: {}", wrap(false));
 }
 
 /// A file's name, and its stored copy's path that carries it, go inside srv's
@@ -3949,7 +3961,7 @@ fn test_a_file_name_cannot_close_the_block_or_open_a_list() {
     };
     let m = crate::backend::reactive::sanitize::wrap_jekt_message_with_files(
         "look", Some("agent2"), "agent1", "coord", "host", Some(true), None, None, None, None, false,
-        "m", "normal", None, Some(&files),
+        "m", "normal", None, Some(&files), false,
     );
     assert_eq!(m.matches("[/JEKT]").count(), 1, "{m}");
     assert_eq!(m.matches("[JEKT:").count(), 1, "{m}");

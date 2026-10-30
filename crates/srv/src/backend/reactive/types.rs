@@ -43,6 +43,12 @@ pub struct InjectionRequest {
     pub request_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub priority: Option<String>,
+    /// `none`: the sender asked for no reply (`REPLY=none` in the marker; `backend::ack_policy`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reply: Option<String>,
+    /// The MSGID this message answers; a reply to a `reply: none` message is refused.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub in_reply_to: Option<String>,
     /// Sensitivity tier declared by the sender. When absent, defaults to `Coord`.
     /// The handler may escalate to `Sensitive` based on keyword scanning.
     #[serde(default, skip_serializing_if = "Option::is_none")]

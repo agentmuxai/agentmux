@@ -395,6 +395,7 @@ pub fn wrap_jekt_message(
         priority,
         held_sent_at_ms,
         None,
+        false,
     )
 }
 
@@ -421,6 +422,7 @@ pub fn wrap_jekt_message_with_files(
     priority: &str,
     held_sent_at_ms: Option<i64>,
     files: Option<&super::types::FilesDelivery>,
+    reply_none: bool,
 ) -> String {
     let now_secs = agentmux_common::time::now_secs_u64();
     // A held message shows when it was sent, and how long it waited — never
@@ -484,10 +486,12 @@ pub fn wrap_jekt_message_with_files(
     };
 
     let files_field = files.map(|f| format!(" FILES={}", f.delivered)).unwrap_or_default();
+    // The sender asked for no reply: a reply would only start a turn, and srv refuses one.
+    let reply_field = if reply_none { " REPLY=none" } else { "" };
     let files_text = files.map(|f| format!("\n{}", f.text)).unwrap_or_default();
 
     let structured_tag = format!(
-        "[JEKT:FROM={from} TO={target_agent} TIER={effective_tier} DELIVERY={delivery_tier}{held_field} TRUST={trust}{instance_field}{sig_field}{escalate_field}{files_field} MSGID={msg_id} PRIORITY={priority} TS={ts_secs}]"
+        "[JEKT:FROM={from} TO={target_agent} TIER={effective_tier} DELIVERY={delivery_tier}{held_field} TRUST={trust}{instance_field}{sig_field}{escalate_field}{files_field}{reply_field} MSGID={msg_id} PRIORITY={priority} TS={ts_secs}]"
     );
 
     let sensitive_warning = if effective_tier == "sensitive" {

@@ -265,6 +265,11 @@ pub(crate) fn send_message_outcome(to: &str, result: &Value) -> Result<String> {
         Some(id) if !id.is_empty() => format!(" id={id}"),
         _ => String::new(),
     };
+    // srv refused it before delivery (a reply that says nothing): nothing was sent, no turn started.
+    if result.get("refused").and_then(|v| v.as_bool()) == Some(true) {
+        let why = result.get("error").and_then(|v| v.as_str()).unwrap_or("Not sent.");
+        return Ok(format!("NOT SENT to {to} — {why}"));
+    }
     if result.get("success").and_then(|v| v.as_bool()) == Some(true) {
         // `success: true` spans two very different outcomes and the old
         // message conflated them, which made agent-to-agent delivery
