@@ -37,7 +37,8 @@ use crate::backend::vault::capture::{self, Found, Target};
 use crate::backend::vault::uses::{Decision, UseRequest};
 
 use super::browser_actions::{note, How, Kind};
-use super::ui_handlers::{approve_click, err_response, proxy_value, target_block_id, ClickRefused};
+use super::browser_click_approval::{approve_click, ClickRefused};
+use super::ui_handlers::{err_response, proxy_value, target_block_id};
 use super::AppState;
 
 const HOST_WAIT: Duration = Duration::from_secs(30);

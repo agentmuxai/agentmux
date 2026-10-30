@@ -98,6 +98,7 @@ pub(crate) mod browser_allowlist;
 pub(crate) mod browser_attention;
 pub(crate) mod browser_bypass;
 pub(crate) mod browser_bypass_routes;
+pub(crate) mod browser_click_approval;
 pub(crate) mod browser_dialog;
 pub(crate) mod browser_find;
 pub(crate) mod browser_hibernation;
