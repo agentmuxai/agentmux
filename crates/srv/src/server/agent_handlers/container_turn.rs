@@ -343,7 +343,11 @@ impl ContainerStartup {
         let mut mount_spec = self.mount_spec.clone();
         if mount_spec.claude_config_host_dir.is_none() {
             if let Some(config_dir) = mount_spec.keychain_config_dir.clone() {
-                mount_spec.claude_config_host_dir = self.cm.stage_keychain_login(&self.container_name, &config_dir).await;
+                match self.cm.stage_keychain_login(&self.container_name, &config_dir).await {
+                    Ok(dir) => mount_spec.claude_config_host_dir = Some(dir),
+                    // Stop before anything is pulled: a container with no login can only sit there signed out.
+                    Err(reason) => return Err(self.fail(&ContainerError::NoLogin(reason), report_failure)),
+                }
             }
         }
         let image = resolve_container_image(&self.image);
