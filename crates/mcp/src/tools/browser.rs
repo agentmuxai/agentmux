@@ -156,6 +156,12 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             }
             vault_fill(cx, auth, pane_arg(arguments), &r, VaultSource::Typed { kind: &kind, label: &label }).await
         }
+        // `capture`: a secret the page shows once goes into the Vault, read by the host.
+        "BrowserCapture" => {
+            require_agent_env(local_url, auth_key, block_id)?;
+            let auth = sign_ui_automation_auth()?;
+            browser_capture(cx, auth, pane_arg(arguments), arguments).await
+        }
         "BrowserClick" | "BrowserFill" | "BrowserSelect" | "BrowserCheck" => {
             require_agent_env(local_url, auth_key, block_id)?;
             let auth = sign_ui_automation_auth()?;
@@ -864,6 +870,50 @@ async fn vault_fill(
     Ok(vault_fill_text(r, &body))
 }
 
+async fn browser_capture(cx: &ToolCtx<'_>, auth: agentmux_common::api_types::UiAutomationAuth, pane: Option<String>, arguments: &Value) -> Result<String> {
+    let mut body = json!({ "auth": auth, "pane": pane });
+    for k in ["ref", "as", "entry", "download"] {
+        if let Some(v) = arguments.get(k).filter(|v| !v.is_null()) {
+            body[k] = v.clone();
+        }
+    }
+    let url = format!("{}/api/v1/ui/browser/capture", cx.local_url.trim_end_matches('/'));
+    // Replacing an existing entry's value waits for the person.
+    let resp = cx
+        .client
+        .post(&url)
+        .header(AUTH_KEY_HEADER, cx.auth_key)
+        .json(&body)
+        .timeout(std::time::Duration::from_secs(11 * 60))
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+    let status = resp.status();
+    let text = resp.text().await.unwrap_or_default();
+    let body: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
+    if !status.is_success() {
+        let why = body.get("error").and_then(Value::as_str).map(str::to_string).unwrap_or(text);
+        anyhow::bail!("Browser capture: {why}");
+    }
+    Ok(capture_text(&body))
+}
+
+/// The agent's answer to a capture: the entry, never the value.
+fn capture_text(body: &Value) -> String {
+    let s = |k: &str| body.get(k).and_then(Value::as_str).unwrap_or("");
+    let page = if body.get("marked").and_then(Value::as_bool).unwrap_or(false) {
+        "While it is on the page, screenshots black it out and eval is refused on this tab."
+    } else {
+        "The page changed before the element could be marked, so only a value with a secret's shape stays hidden on it: don't read the element again, and navigate away when you're done."
+    };
+    format!(
+        "Browser capture: saved in the Vault as {} ({}), captured from {}. You never see the value: use the entry by id (Terminal run with secrets, Browser fill with vault). {page}",
+        s("id"),
+        s("label"),
+        s("captured_from")
+    )
+}
+
 /// The agent's answer to a Vault fill: where it went, and anything the page said.
 fn vault_fill_text(r: &str, body: &Value) -> String {
     let d = |k: &str| body.pointer(&format!("/data/{k}")).and_then(Value::as_str).unwrap_or("");
@@ -922,6 +972,15 @@ mod tests {
         assert!(said.contains("ssn-alex") && said.contains("https://irs.gov") && said.contains("Social Security Number"), "{said}");
         assert!(said.contains("Enter 9 digits") && said.contains("shortened or reformatted"), "{said}");
         assert!(!said.contains("123-45"), "{said}");
+    }
+
+    // `capture`: screenshots and eval are promised only when the element was marked.
+    #[test]
+    fn a_capture_answer_promises_what_hides_it_only_when_the_page_was_marked() {
+        let body = |marked: bool| serde_json::json!({ "id": "api-key-x", "label": "X", "captured_from": "https://x.example", "marked": marked });
+        assert!(capture_text(&body(true)).contains("eval is refused"));
+        let unmarked = capture_text(&body(false));
+        assert!(unmarked.contains("api-key-x") && !unmarked.contains("eval is refused"), "{unmarked}");
     }
 
     #[test]

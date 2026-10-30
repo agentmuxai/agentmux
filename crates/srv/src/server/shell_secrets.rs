@@ -131,7 +131,7 @@ const NO_ANSWER: &str = "the person didn't answer in time: the command did not r
 
 /// Asks the person in every window and waits for the answer; `None` if none came
 /// in time.
-async fn ask(state: &AppState, agent_block_id: &str, request: UseRequest, headline: &str) -> Option<Decision> {
+pub(super) async fn ask(state: &AppState, agent_block_id: &str, request: UseRequest, headline: &str) -> Option<Decision> {
     let use_id = request.id.clone();
     let answer = uses::uses().ask(request);
     let _waiting = Waiting::new(use_id, state.clone());
