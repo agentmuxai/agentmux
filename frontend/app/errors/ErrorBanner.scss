@@ -55,7 +55,7 @@
 .amx-error-banner-details-toggle {
     align-self: flex-start;
     margin-top: var(--space-1);
-    font-size: var(--text-xs);
+    --ui-link-font-size: var(--text-xs);
 }
 
 .amx-error-banner-raw {
