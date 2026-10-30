@@ -21,7 +21,7 @@ fn roots(base: &Path) -> Roots {
 }
 
 #[test]
-fn each_store_is_measured_and_the_total_is_their_sum() {
+fn each_store_is_measured_and_the_total_leaves_out_the_old_copies() {
     let dir = tempfile::tempdir().unwrap();
     let r = roots(dir.path());
     // Two identities' Claude session files (one nested), and a folder that isn't Claude's.
@@ -45,7 +45,7 @@ fn each_store_is_measured_and_the_total_is_their_sum() {
     assert_eq!((by("channel-copies").bytes, by("channel-copies").files), (300, 2));
     assert_eq!(by("archives").bytes, 60);
     assert_eq!(by("audit").bytes, 40);
-    assert_eq!(u.total_bytes, 1750 + 4300 + 300 + 60 + 40);
+    assert_eq!(u.total_bytes, 1750 + 4300 + 60 + 40, "the per-version copies are listed but not in the total");
     assert_eq!(u.computed_at_ms, 42);
 }
 
