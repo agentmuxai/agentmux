@@ -581,7 +581,10 @@ pub(super) async fn click_element(
     frame: Option<&FrameRef>,
     object_id: &str,
 ) -> Result<(), String> {
-    let p = call_on(cdp, object_id, CLICK_POINT, vec![]).await?;
+    let p = match call_on(cdp, object_id, CLICK_POINT, vec![]).await {
+        Ok(p) => p,
+        Err(e) => return Err(explain_unclickable(cdp, object_id, e).await),
+    };
     let mut x = p.get("x").and_then(|v| v.as_f64()).ok_or("no click point")?;
     let mut y = p.get("y").and_then(|v| v.as_f64()).ok_or("no click point")?;
     if let Some(f) = frame {
@@ -593,6 +596,24 @@ pub(super) async fn click_element(
         y += oy;
     }
     click_at(root, x, y).await
+}
+
+/// An element that can't be clicked, as the agent should read it: "not
+/// visible" reads like a layout problem, but an element the page removed since
+/// the snapshot (a popup that closed itself) is the likelier cause
+/// (docs/specs/PLAN_BROWSER_PANE_FORM_FILLING_FIXES_2026_10_17.md §3.4).
+async fn explain_unclickable(cdp: &mut CdpSession, object_id: &str, error: String) -> String {
+    let attached = call_on(cdp, object_id, "function () { return { v: this.isConnected }; }", vec![])
+        .await
+        .ok()
+        .and_then(|v| v.get("v").and_then(|b| b.as_bool()));
+    // Only a probe that answered "detached" says so; a probe that failed too
+    // (a closed session, a timeout) leaves the original error to be read.
+    if attached == Some(false) {
+        "the page changed since the snapshot (the element is gone); take a new snapshot".to_string()
+    } else {
+        error
+    }
 }
 
 /// The secret-field guard for typing into whatever has focus (spec §5.1),
@@ -647,7 +668,7 @@ pub(super) fn fail<T>(msg: impl Into<String>) -> (StatusCode, Json<ApiResponse<T
 /// or a file input apart from an ordinary one: value-bearing fields first
 /// (a field without facts has its value hidden, `snapshot::render`), then
 /// buttons (a file input's role).
-const MAX_DESCRIBES: usize = 600;
+pub(super) const MAX_DESCRIBES: usize = 600;
 
 /// `POST /agentmux/browser/snapshot`.
 pub async fn snapshot_route(
@@ -670,13 +691,19 @@ pub async fn snapshot_route(
     let scope = match &req.scope {
         Some(r) => {
             let table = state.browser_api.ref_tables.get(&req.block_id).unwrap_or_default();
-            if table.frames.contains_key(r) {
-                let _ = cdp.close().await;
-                return fail(format!(
-                    "{r} is inside an iframe, and scoping to a part of a frame isn't supported yet: take a snapshot without scope"
-                ));
-            }
             let now = page_url(&mut cdp).await;
+            if let (Some(frame), Some(backend)) = (table.frames.get(r), table.refs.get(r).copied()) {
+                if table.url != now {
+                    let _ = cdp.close().await;
+                    return fail(format!("the page changed since {r} was handed out; take a snapshot without scope first"));
+                }
+                let out = super::frame_scope::scoped_snapshot(&mut cdp, &state.browser_api.ref_tables, &req.block_id, epoch, &now, r, backend, frame).await;
+                let _ = cdp.close().await;
+                return match out {
+                    Ok(data) => (StatusCode::OK, Json(ApiResponse::ok(data))),
+                    Err(e) => fail(e),
+                };
+            }
             match table.refs.get(r).copied() {
                 Some(b) if table.url == now => Some(b),
                 Some(_) => {
