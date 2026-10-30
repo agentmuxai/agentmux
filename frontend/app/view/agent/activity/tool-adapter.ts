@@ -28,6 +28,7 @@
  * §3 step 1, §4.1-4.3.
  */
 
+import { injectedTurn } from "../cli-wrappers";
 import { toolDetailOf } from "../tool-meta/tool-descriptors";
 import { TOOL_STATUS } from "../tool-meta/tool-status";
 import type { BashParams, BashResult, DocumentNode, ToolLogChunk, ToolNode } from "../types";
@@ -209,10 +210,11 @@ export function parseTaskNotification(message: string): { toolUseId: string; sta
 function backgroundCompletions(nodes: ReadonlyArray<DocumentNode>): Map<string, { status: ActivityStatus; endedAt?: number }> {
     const out = new Map<string, { status: ActivityStatus; endedAt?: number }>();
     for (const n of nodes) {
-        if (n.type !== "user_message") continue;
-        const parsed = parseTaskNotification(n.message);
+        const turn = injectedTurn(n);
+        if (!turn) continue;
+        const parsed = parseTaskNotification(turn.text);
         if (!parsed) continue;
-        out.set(parsed.toolUseId, { status: parsed.status, endedAt: n.timestamp });
+        out.set(parsed.toolUseId, { status: parsed.status, endedAt: turn.timestamp });
     }
     return out;
 }

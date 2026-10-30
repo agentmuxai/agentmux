@@ -62,9 +62,10 @@ impl HeldNotes {
 
     /// Hold `text` for `block_id` under `key`, replacing a note held under it.
     pub fn hold(&mut self, block_id: &str, key: &str, text: &str) {
+        let text = super::sanitize::with_system_note_marker(text);
         let pane = self.pane(block_id);
         pane.notes.retain(|(k, _)| k != key);
-        pane.notes.push((key.to_string(), text.to_string()));
+        pane.notes.push((key.to_string(), text.into_owned()));
         if pane.notes.len() > MAX_PER_PANE {
             pane.notes.remove(0);
         }
@@ -414,11 +415,11 @@ mod tests {
     fn the_queue_is_bounded_per_pane_and_in_panes() {
         let mut h = HeldNotes::default();
         for i in 0..MAX_PER_PANE + 3 {
-            h.hold("b", &format!("k{i}"), &format!("n{i}"));
+            h.hold("b", &format!("k{i}"), &format!("[AgentMux] n{i}"));
         }
         let notes = h.take("b");
         assert_eq!(notes.len(), MAX_PER_PANE);
-        assert_eq!(notes[0].1, "n3", "the oldest went first");
+        assert_eq!(notes[0].1, "[AgentMux] n3", "the oldest went first");
         for i in 0..MAX_PANES + 1 {
             h.hold(&format!("pane{i}"), "k", "n");
         }
@@ -435,7 +436,7 @@ mod tests {
         let taken = h.take("b");
         h.hold("b", "a", "new a");
         h.put_back("b", taken);
-        assert_eq!(texts(&h.take("b")), ["c", "new a"]);
+        assert_eq!(texts(&h.take("b")), ["[AgentMux] c", "[AgentMux] new a"]);
     }
 
     #[test]
@@ -535,5 +536,15 @@ mod tests {
         let (message, notes) = attach(block, "what's next?");
         notes.delivered();
         assert_eq!(message, "what's next?\n\n[AgentMux] were");
+    }
+
+    #[test]
+    fn a_held_note_without_the_marker_gets_it() {
+        let block = "held-notes-marker-test";
+        hold(block, "unmarked", "Task #5 can start");
+        hold(block, "marked", "[AgentMux] already marked");
+        let (message, notes) = attach(block, "go");
+        notes.delivered();
+        assert_eq!(message, "go\n\n[AgentMux] Task #5 can start\n[AgentMux] already marked");
     }
 }

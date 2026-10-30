@@ -12,10 +12,11 @@ import { Show, type JSX } from "solid-js";
 import type { SystemNoteNode } from "../types";
 
 export function SystemNoteBlock(props: { node: SystemNoteNode }): JSX.Element {
+    const cli = () => props.node.source === "cli";
     return (
-        <div class="agent-system-note">
+        <div class="agent-system-note" classList={{ "agent-system-note--cli": cli() }}>
             <span class="agent-system-note__label">
-                <i class="fa-solid fa-circle-info" aria-hidden="true" /> AgentMux
+                <i class={cli() ? "fa-solid fa-terminal" : "fa-solid fa-circle-info"} aria-hidden="true" /> {cli() ? "CLI message" : "AgentMux"}
             </span>
             <Show when={props.node.delay}>
                 {(delay) => <span class="agent-system-note__delay">{delay()}</span>}

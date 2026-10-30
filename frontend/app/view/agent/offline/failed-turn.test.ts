@@ -58,6 +58,9 @@ describe("pure rules", () => {
         expect(failedTurnSnapshot([user("a"), jekt()])).toEqual({ message: null, toolRan: false });
         expect(failedTurnSnapshot([user("keep going", { supervisor: true })]).message).toBeNull();
         expect(failedTurnSnapshot([])).toEqual({ message: null, toolRan: false });
+        // Started by a background task's notice from the CLI: not the operator's earlier message.
+        const notice: DocumentNode = { type: "system_note", id: "n1", text: "Monitor event", source: "cli", raw: "<task-notification/>", timestamp: 99 };
+        expect(failedTurnSnapshot([user("a"), notice, tool()])).toEqual({ message: null, toolRan: true, sentAt: 99 });
         expect(failedTurnSnapshot([user("b", { timestamp: 1234, attachments: [PNG] })])).toEqual({
             message: { text: "b", attachments: [PNG] },
             toolRan: false,

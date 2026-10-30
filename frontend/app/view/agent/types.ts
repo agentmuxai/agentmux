@@ -426,6 +426,13 @@ export interface SystemNoteNode {
     /** "sent 14:30, delivered 14:41" when it arrived late. */
     delay?: string;
     timestamp?: number;
+    /**
+     * `cli`: a turn the CLI wrote itself (a task notification, a system reminder, a hook's output),
+     * shown as a "CLI message" and never in the human's style. Absent: one of AgentMux's own notes.
+     */
+    source?: "cli";
+    /** For a `cli` note: the wrapper text as the CLI wrote it (the dock reads task notifications from it). */
+    raw?: string;
 }
 
 /**
