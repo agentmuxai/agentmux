@@ -155,12 +155,14 @@ export interface AgentDocumentVirtualListProps {
      */
     tailPolicy?: "turn" | "count";
     /**
-     * One-way flow while following (`agent:onewayflow`): visible rows never move
-     * down, nothing overshoots. One observer compensates any downward move of a
-     * visible row, a bottom spacer makes the room that needs, and a follower
-     * eases toward content appended below. The glide, the shrink hold and the
-     * old pin paths are off on this path. Read once at mount.
-     * SPEC_AGENT_PANE_ONE_WAY_FLOW_2026_10_07.md.
+     * One-way flow while following (`agent:onewayflow`): growth never moves a
+     * visible row down, nothing overshoots, and there is never blank room below
+     * the latest content. One observer compensates any downward move that growth
+     * caused; a shrink, or a taller scroller, slides the rows down and the bottom
+     * stays tight; a follower eases toward content appended below. The glide, the
+     * shrink hold and the old pin paths are off on this path. Read once at mount.
+     * SPEC_AGENT_PANE_ONE_WAY_FLOW_2026_10_07.md,
+     * SPEC_AGENT_PANE_BOTTOM_TIGHT_INVARIANT_2026_10_29.md.
      */
     oneWayFlow?: boolean;
     /**
@@ -179,8 +181,6 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // below (never used for anything else, so it's fine that it's only set
     // once the buffer first mounts).
     let streamingBufferRef: HTMLDivElement | undefined;
-    // One-way path (props.oneWayFlow): the trailing spacer it sizes.
-    let bottomSpacerRef: HTMLDivElement | undefined;
     const oneWay = untrack(() => props.oneWayFlow === true);
     // Guard against concurrent older-history fetches triggered by scroll.
     let loadingOlderInFlight = false;
@@ -248,7 +248,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                 pin: (cause) => {
                     noteOneWay(paneTag(), `pin:${cause}`);
                     // A send or a queued turn starting is a commit point for the
-                    // one-way path (it gives up spacer room); typing is not.
+                    // one-way path; typing is not.
                     if (oneWayFlow) oneWayFlow.jumpToBottom(cause === "jump-to-bottom:sent" || cause === "jump-to-bottom:queued-turn");
                     else scrollToTrueBottom();
                 },
@@ -1134,8 +1134,8 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         }
         transitionFollow(`jump-to-bottom:${reason ?? "unspecified"}`, undefined, () => props.viewState.engageStickToBottom());
         noteOneWay(paneTag(), `pin:jump:${reason ?? "unspecified"}`);
-        // A send or a queued turn starting is a commit point (it gives up
-        // spacer room); each keystroke while typing is not.
+        // A send or a queued turn starting is a commit point; each keystroke
+        // while typing is not.
         if (oneWayFlow) oneWayFlow.jumpToBottom(reason === "sent" || reason === "queued-turn");
         else scrollToTrueBottom();
     };
@@ -1249,23 +1249,18 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         if (follow) {
             const wasFollowing = follow.following();
             follow.scrolled(geo, hadUserInput);
-            // One-way path: re-baseline the rows and let go of spacer room now
-            // below the viewport. Not after a re-attach: its pin did both. The
-            // controller's next comparison must see the scrollHeight that left.
+            // One-way path: re-baseline the rows. Not after a re-attach: its pin did it.
             if (oneWayFlow && hadUserInput && (wasFollowing || !follow.following())) {
-                const spacerBefore = oneWayFlow.spacerHeight;
                 oneWayFlow.userScrolled(geo);
-                const freed = spacerBefore - oneWayFlow.spacerHeight;
-                if (freed !== 0) follow.noteGeometry({ ...geo, scrollHeight: scrollHeight - freed });
             }
             if (props.viewState.stickToBottom() && !trustPin) releaseScrolledOffHolds();
             syncOverflowState(geo);
             return;
         }
 
-        // One-way path: a user scroll re-baselines the rows it keeps in place and
-        // lets go of spacer room now below the viewport; moving the transcript
-        // up while following releases follow at once, however small the move.
+        // One-way path: a user scroll re-baselines the rows it keeps in place;
+        // moving the transcript up while following releases follow at once,
+        // however small the move.
         if (oneWayFlow && hadUserInput && !trustPin && oneWayFlow.userScrolled(geo) && props.viewState.stickToBottom()) {
             transitionFollow(
                 input.scrollbarHeld() ? "user-scroll:scrollbar" : "user-scroll-up",
@@ -1614,12 +1609,12 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     const showCovered = useSettleOnShow(oneWayFlow, props.viewState.stickToBottom, { changes: props.viewState.nodes, observe: () => [virtualContainerRef, streamingBufferRef] });
     showCoveredNow = () => untrack(showCovered);
     onMount(() => {
-        if (oneWayFlow && scrollRef && bottomSpacerRef) {
-            oneWayFlow.attach(scrollRef, bottomSpacerRef, [virtualContainerRef, streamingBufferRef]);
+        if (oneWayFlow && scrollRef) {
+            oneWayFlow.attach(scrollRef, [virtualContainerRef, streamingBufferRef]);
         }
     });
     if (oneWayFlow || useFollowController) {
-        // `/clear` or a fresh session: no room is owed to anything, and the
+        // `/clear` or a fresh session: nothing to compare against, and the
         // pane follows the new conversation.
         createEffect(() => {
             if (props.viewState.nodes().length !== 0) return;
@@ -1794,12 +1789,6 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                         </Key>
                     </div>
                 )}
-            </Show>
-            {/* One-way path: room left by content that got shorter (or a taller
-                viewport) while following, sized by OneWayFlow, filled by the
-                next content. Not a row: never measured into the layout slice. */}
-            <Show when={oneWay}>
-                <div class="agent-document-bottom-spacer" aria-hidden="true" ref={(el) => { bottomSpacerRef = el; }} />
             </Show>
         </div>
     );

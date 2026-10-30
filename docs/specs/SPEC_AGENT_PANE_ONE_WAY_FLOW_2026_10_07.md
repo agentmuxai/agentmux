@@ -8,6 +8,7 @@ and Phase 3 in #4891, all behind `agent:followcontroller`; Phases 4–5 open. Wi
 follow and detach on this path too, and `OneWayFlow` keeps the pin, the compensation and the spacer: its §8.1. Its
 Phase 3 is the half of this spec's Phase 2 that has `ToolOverlayLog` share the transcript's user-intent window and log
 format; the other half, a Write/Bash preview that doesn't shrink while visible, remains).
+**Amended 2026-10-29:** R3 (the bottom spacer) and §7 decision 1 ("accept blank space at the bottom") are replaced by `SPEC_AGENT_PANE_BOTTOM_TIGHT_INVARIANT_2026_10_29.md`: while following there is never room below the latest content, and a shrink or a taller scroller slides the rows down instead.
 **Date:** 2026-10-07.
 **Requested by:** repo owner (asafebgi): "what i continue to see in the agent pane is the overshoot followed by
 correction. That model for new conversation content may be no good, it may need a rethink. the UX we want is a simple
