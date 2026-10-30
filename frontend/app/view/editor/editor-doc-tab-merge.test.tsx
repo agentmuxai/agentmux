@@ -183,6 +183,7 @@ describe("merging an Editor pane into another", () => {
         expect(tabsOf(dest)).toHaveLength(2);
 
         expect(dest._contentByTab.get(mine)).toBe("mine\n");
+        expect(dest.activeIdAtom()).toBe(mine); // the person stays on their own document
         const copy = tabsOf(dest).find((t) => t.id !== mine)!;
         expect(copy.isScratch).toBe(true);
         expect(dest._contentByTab.get(copy.id)).toBe("theirs\n");

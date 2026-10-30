@@ -210,6 +210,8 @@ async function mergeEditorFrom(model: EditorViewModel, host: DocTabHost, source:
         if (reason) return { merged: false, reason };
     }
     const mine = editorDocTabs(model);
+    // Read before any kept copy opens: opening a tab makes it the active one.
+    const front = mine.activeId();
 
     // Unsaved in both, and different: the arriving text must survive the merge, so it is made a tab
     // of its own before anything moves.
@@ -238,7 +240,6 @@ async function mergeEditorFrom(model: EditorViewModel, host: DocTabHost, source:
         noteKeptCopy(tab.title);
     }
 
-    const front = mine.activeId();
     let last: string | undefined;
     const placeAfterLast = (): { targetId: string; position: "after" } | undefined =>
         last ? { targetId: last, position: "after" } : undefined;
