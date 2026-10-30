@@ -474,8 +474,11 @@ pub(crate) async fn handle_ui_browser_terminal(
     let mut sent = 0usize;
     let mut stopped: Option<String> = None;
     for chunk in steps.chunks(CHUNK) {
-        if let Err((_, why)) = crate::server::browser_actions::not_paused(&block_id) {
-            stopped = Some(why);
+        if crate::server::browser_actions::not_paused(&block_id).is_err() {
+            stopped = Some(
+                "the user paused this pane, so the rest was not typed; your calls on it wait until they resume it"
+                    .to_string(),
+            );
             break;
         }
         if !bypass::active_for(&pane, &agent).is_some_and(|g| g.id == grant.id) {
@@ -685,7 +688,9 @@ mod tests {
         }
         // Built from pieces, so no key marker sits in the source.
         let key_kind = ["PRIVATE", "KEY"].join(" ");
-        let key = format!("echo '-----BEGIN RSA {key_kind}-----\nMIIE\n-----END RSA {key_kind}-----' > k");
+        let key = format!(
+            "echo '-----BEGIN RSA {key_kind}-----\nMIIE\n-----END RSA {key_kind}-----' > k"
+        );
         assert!(credential_line(&key), "{key}");
         for fine in [
             "gcloud functions deploy hello --runtime python312",
