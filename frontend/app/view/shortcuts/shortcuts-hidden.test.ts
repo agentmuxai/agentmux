@@ -7,7 +7,6 @@
 
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("@/app/asset/logo.svg?url", () => ({ default: "logo.svg" }));
 vi.mock("@/app/store/global", async () => {
     const signals = await import("@/app/store/config-signals");
     return { atoms: { fullConfigAtom: signals.fullConfigAtom }, replaceBlock: vi.fn(), createBlock: vi.fn(), openOrFocusPaneByView: vi.fn() };

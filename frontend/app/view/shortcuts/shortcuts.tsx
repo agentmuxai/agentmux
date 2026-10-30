@@ -2,7 +2,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import logoUrl from "@/app/asset/logo.svg?url";
+import { EmptyPaneLogo } from "@/app/element/EmptyPaneLogo";
 import { atoms, MOS, replaceBlock } from "@/app/store/global";
 import { closeBlockInStack, getLayoutModelForStaticTab } from "@/layout/index";
 import { findOpenBlockByView } from "@/app/util/reveal-block";
@@ -280,17 +280,9 @@ function ShortcutsView(props: { model: ShortcutsViewModel }): JSX.Element {
 
     const GAP = 16;
     const LABEL_THRESHOLD = 60;
-    const MARGIN_BOTTOM = 24;
     const MAX_TILE_SIZE = 120;
 
-    const calculatedLogoWidth = createMemo(() => containerSize().width * 0.3);
-    const logoWidth = createMemo(() =>
-        containerSize().width >= 100 ? Math.min(Math.max(calculatedLogoWidth(), 100), 300) : 0
-    );
-    const showLogo = createMemo(() => logoWidth() >= 100);
-    const availableHeight = createMemo(
-        () => containerSize().height - (showLogo() ? logoWidth() + MARGIN_BOTTOM : 0)
-    );
+    const availableHeight = createMemo(() => containerSize().height);
 
     const gridLayout = createMemo<GridLayoutType>(() => {
         const cw = containerSize().width;
@@ -337,88 +329,85 @@ function ShortcutsView(props: { model: ShortcutsViewModel }): JSX.Element {
     });
 
     return (
-        <div ref={containerRef!} class="w-full h-full p-4 box-border flex flex-col items-center justify-center">
-            {/* Hidden input for search */}
-            <input
-                ref={(el) => { inputRef = el; model.inputRef.current = el; }}
-                type="text"
-                value={searchTerm()}
-                onKeyDown={keydownWrapper(model.keyDownHandler.bind(model))}
-                onChange={(e) => model.searchTerm._set((e.target as HTMLInputElement).value)}
-                class="sr-only dummy"
-                aria-label="Search shortcuts"
-            />
+        <div ref={containerRef!} class="relative w-full h-full p-4 box-border overflow-hidden">
+            {/* Faded brain mark behind the tiles, as in an empty Editor */}
+            <EmptyPaneLogo />
+            <div class="relative z-[1] w-full h-full flex flex-col items-center justify-center">
+                {/* Hidden input for search */}
+                <input
+                    ref={(el) => { inputRef = el; model.inputRef.current = el; }}
+                    type="text"
+                    value={searchTerm()}
+                    onKeyDown={keydownWrapper(model.keyDownHandler.bind(model))}
+                    onChange={(e) => model.searchTerm._set((e.target as HTMLInputElement).value)}
+                    class="sr-only dummy"
+                    aria-label="Search shortcuts"
+                />
 
-            {/* Logo */}
-            <Show when={showLogo()}>
-                <div class="mb-6" style={{ width: `${logoWidth()}px`, "max-width": "300px" }}>
-                    <img src={logoUrl} class="w-full h-auto filter grayscale brightness-70 opacity-70" alt="Logo" />
-                </div>
-            </Show>
-
-            {/* Breadcrumb — shown only once drilled into a parent widget
-                (e.g. "Messengers"). Escape does the same thing; this is the
-                mouse-driven equivalent for discoverability. */}
-            <Show when={model.activeParent()}>
-                {(parent) => (
-                    <div
-                        class="mb-2 flex items-center gap-1 text-secondary text-xs cursor-pointer hover:text-foreground"
-                        onClick={() => model.goBack()}
-                    >
-                        <i class="fa-solid fa-chevron-left" />
-                        <span>{parent().label}</span>
-                    </div>
-                )}
-            </Show>
-
-            {/* Grid of widgets */}
-            <div
-                class="grid gap-4 justify-center"
-                style={{ "grid-template-columns": `repeat(${gridLayout().columns}, ${finalTileWidth()}px)` }}
-            >
-                <For each={filteredWidgets()}>
-                    {(widget, index) => (
+                {/* Breadcrumb — shown only once drilled into a parent widget
+                    (e.g. "Messengers"). Escape does the same thing; this is the
+                    mouse-driven equivalent for discoverability. */}
+                <Show when={model.activeParent()}>
+                    {(parent) => (
                         <div
-                            onClick={(e) => void model.handleWidgetSelect(widget, { forceNew: e.shiftKey })}
-                            title={widget.description || widget.label}
-                            class={clsx(
-                                "flex flex-col items-center justify-center rounded-md p-2 text-center",
-                                "transition-colors duration-150",
-                                index() === selectedIndex()
-                                    ? "bg-highlightbg text-foreground"
-                                    : "bg-hover hover:bg-highlightbg text-secondary hover:text-foreground"
-                            )}
-                            style={{ width: `${finalTileWidth()}px`, height: `${finalTileHeight()}px` }}
+                            class="mb-2 flex items-center gap-1 text-secondary text-xs cursor-pointer hover:text-foreground"
+                            onClick={() => model.goBack()}
                         >
-                            <div class="relative" style={{ color: widgetEntryColor(widget, "identity") }}>
-                                <i class={makeIconClass(widget.icon, true, { defaultIcon: "window-maximize" })} />
-                                <Show when={model.isParentWidget(widget)}>
-                                    <i class="fa-solid fa-chevron-right absolute -right-2.5 top-1/2 -translate-y-1/2 text-[8px] opacity-60" />
-                                </Show>
-                            </div>
-                            <Show when={gridLayout().showLabel && !isBlank(widget.label)}>
-                                <div class="mt-1 w-full text-[11px] leading-4 overflow-hidden text-ellipsis whitespace-nowrap">
-                                    {widget.label}
-                                </div>
-                            </Show>
+                            <i class="fa-solid fa-chevron-left" />
+                            <span>{parent().label}</span>
                         </div>
                     )}
-                </For>
-            </div>
-
-            {/* Search instructions */}
-            <div class="mt-4 text-secondary text-xs">
-                <Show
-                    when={filteredWidgets().length === 0}
-                    fallback={
-                        <span>
-                            {searchTerm() == "" ? "Type to Filter" : `Searching "${searchTerm()}"`}, Enter to Launch,
-                            <Show when={searchTerm() == ""}>{" "}Arrow Keys to Navigate</Show>
-                        </span>
-                    }
-                >
-                    <span>No widgets found. Press Escape to clear search.</span>
                 </Show>
+
+                {/* Grid of widgets */}
+                <div
+                    class="grid gap-4 justify-center"
+                    style={{ "grid-template-columns": `repeat(${gridLayout().columns}, ${finalTileWidth()}px)` }}
+                >
+                    <For each={filteredWidgets()}>
+                        {(widget, index) => (
+                            <div
+                                onClick={(e) => void model.handleWidgetSelect(widget, { forceNew: e.shiftKey })}
+                                title={widget.description || widget.label}
+                                class={clsx(
+                                    "flex flex-col items-center justify-center rounded-md p-2 text-center",
+                                    "transition-colors duration-150",
+                                    index() === selectedIndex()
+                                        ? "bg-highlightbg text-foreground"
+                                        : "bg-hover hover:bg-highlightbg text-secondary hover:text-foreground"
+                                )}
+                                style={{ width: `${finalTileWidth()}px`, height: `${finalTileHeight()}px` }}
+                            >
+                                <div class="relative" style={{ color: widgetEntryColor(widget, "identity") }}>
+                                    <i class={makeIconClass(widget.icon, true, { defaultIcon: "window-maximize" })} />
+                                    <Show when={model.isParentWidget(widget)}>
+                                        <i class="fa-solid fa-chevron-right absolute -right-2.5 top-1/2 -translate-y-1/2 text-[8px] opacity-60" />
+                                    </Show>
+                                </div>
+                                <Show when={gridLayout().showLabel && !isBlank(widget.label)}>
+                                    <div class="mt-1 w-full text-[11px] leading-4 overflow-hidden text-ellipsis whitespace-nowrap">
+                                        {widget.label}
+                                    </div>
+                                </Show>
+                            </div>
+                        )}
+                    </For>
+                </div>
+
+                {/* Search instructions */}
+                <div class="mt-4 text-secondary text-xs">
+                    <Show
+                        when={filteredWidgets().length === 0}
+                        fallback={
+                            <span>
+                                {searchTerm() == "" ? "Type to Filter" : `Searching "${searchTerm()}"`}, Enter to Launch,
+                                <Show when={searchTerm() == ""}>{" "}Arrow Keys to Navigate</Show>
+                            </span>
+                        }
+                    >
+                        <span>No widgets found. Press Escape to clear search.</span>
+                    </Show>
+                </div>
             </div>
         </div>
     );
