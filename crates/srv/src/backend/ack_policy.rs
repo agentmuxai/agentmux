@@ -78,7 +78,25 @@ impl AckPolicy {
         if self.no_reply.len() > MAX_KEPT || self.last_sent.len() > MAX_KEPT {
             self.no_reply.retain(|_, (_, _, at)| now_ms.saturating_sub(*at) <= REMEMBER_MS);
             self.last_sent.retain(|_, at| now_ms.saturating_sub(*at) <= ACK_WINDOW_MS);
+            // All fresh and still over the cap: drop the oldest half, so the tables never grow past it.
+            if self.no_reply.len() > MAX_KEPT {
+                let mut ages: Vec<i64> = self.no_reply.values().map(|(_, _, at)| *at).collect();
+                ages.sort_unstable();
+                let cut = ages[ages.len() / 2];
+                self.no_reply.retain(|_, (_, _, at)| *at > cut);
+            }
+            if self.last_sent.len() > MAX_KEPT {
+                let mut ages: Vec<i64> = self.last_sent.values().copied().collect();
+                ages.sort_unstable();
+                let cut = ages[ages.len() / 2];
+                self.last_sent.retain(|_, at| *at > cut);
+            }
         }
+    }
+
+    /// Whether `msg_id` was sent with `reply: none` and is still remembered.
+    pub fn asked_for_no_reply(&self, msg_id: &str, now_ms: i64) -> bool {
+        self.no_reply.get(msg_id).is_some_and(|(_, _, at)| now_ms.saturating_sub(*at) <= REMEMBER_MS)
     }
 
     /// Why `from` may not send `text` to `to`, or `Ok`.
@@ -120,6 +138,12 @@ static POLICY: LazyLock<Mutex<AckPolicy>> = LazyLock::new(Default::default);
 pub fn record(from: &str, to: &str, msg_id: Option<&str>, no_reply: bool) {
     let mut p = POLICY.lock().unwrap_or_else(|e| e.into_inner());
     p.record(from, to, msg_id, no_reply, agentmux_common::time::now_ms());
+}
+
+/// [`AckPolicy::asked_for_no_reply`] on the process-wide table.
+pub fn asked_for_no_reply(msg_id: &str) -> bool {
+    let p = POLICY.lock().unwrap_or_else(|e| e.into_inner());
+    p.asked_for_no_reply(msg_id, agentmux_common::time::now_ms())
 }
 
 /// [`AckPolicy::check`] on the process-wide table.
@@ -179,6 +203,18 @@ mod tests {
         assert!(p.check("agent1", "agentx", "got it", None, true, NOW + ACK_WINDOW_MS + 1).is_ok(), "too long ago");
         assert!(p.check("agent1", "agentx", "got it, merged #5850", None, true, NOW + 60_000).is_ok(), "says something");
         assert!(p.check("agent1", "agenty", "got it", None, true, NOW + 60_000).is_ok(), "agenty sent nothing");
+    }
+
+    #[test]
+    fn the_tables_stay_under_the_cap_even_when_every_entry_is_fresh() {
+        let mut p = AckPolicy::default();
+        for i in 0..(MAX_KEPT + 50) {
+            p.record("a", &format!("b{i}"), Some(&format!("m{i}")), true, NOW + i as i64);
+        }
+        assert!(p.no_reply.len() <= MAX_KEPT && p.last_sent.len() <= MAX_KEPT);
+        let newest = MAX_KEPT + 49;
+        assert!(p.asked_for_no_reply(&format!("m{newest}"), NOW + newest as i64), "the newest is kept");
+        assert!(!p.asked_for_no_reply("m0", NOW + newest as i64), "the oldest went");
     }
 
     #[test]
