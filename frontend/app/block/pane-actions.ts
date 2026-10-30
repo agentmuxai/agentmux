@@ -107,6 +107,9 @@ export type PaneMenuSection =
 export interface PaneContextMenuOpts {
     magnified: boolean;
     onMagnifyToggle: () => void;
+    /** "Minimize to Header": today's header chip, kept in place, where a plain minimize puts the
+     *  pane's tabs into a neighbouring pane. Omit where the pane cannot minimize. */
+    onMinimizeToHeader?: () => void;
     onClose: () => void;
     /**
      * Right-click coordinates in window-relative pixels. When supplied, the
@@ -184,6 +187,9 @@ export function buildPaneContextMenu(
     const paneActions: ContextMenuItem[] = [
         ...(has("magnify")
             ? [{ label: opts.magnified ? "Un-Magnify Pane" : "Magnify Pane", icon: opts.magnified ? MENU_ICON.unmagnify : MENU_ICON.magnify, sublabel: hint("pane:magnify"), click: opts.onMagnifyToggle }]
+            : []),
+        ...(has("magnify") && opts.onMinimizeToHeader
+            ? [{ label: "Minimize to Header", icon: MENU_ICON.minimize, click: opts.onMinimizeToHeader }]
             : []),
         ...(has("close") ? [{ label: "Close Pane", icon: MENU_ICON.close, sublabel: hint("pane:close"), click: opts.onClose }] : []),
     ];
