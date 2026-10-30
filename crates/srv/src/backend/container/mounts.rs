@@ -37,6 +37,39 @@ pub(crate) fn personal_memory_host_dir(claude_config_dir: Option<&str>, working_
     Some(dir.to_string_lossy().into_owned())
 }
 
+/// The account config dir to hand to [`ContainerMountSpec::claude_config_host_dir`],
+/// or `None` when this account has no file-backed credential to mount.
+///
+/// The existence check is load-bearing, not defensive tidiness (codex P1 on PR
+/// #2933). **On macOS Claude Code keeps OAuth credentials in the encrypted
+/// Keychain and never writes this file at all** — see
+/// `identity/resolver/oauth_probe.rs` and
+/// `docs/retro/retro-macos-keychain-credential-isolation-gap-2026-08-17.md`.
+/// Binding a source that does not exist makes Docker reject `create_container`
+/// outright, so an unguarded bind would turn "container agents cannot
+/// authenticate on macOS" into "container agents cannot START on macOS" — a
+/// strictly worse failure than the one this fix exists to remove.
+///
+/// Returning `None` degrades to an empty per-agent volume and logs why. On macOS the
+/// container's start then stages the account's Keychain login instead (see
+/// [`ContainerMountSpec::keychain_config_dir`] and `keychain_credentials`).
+pub(super) fn credentials_dir_if_file_backed(claude_config_host_dir: &str) -> Option<String> {
+    if claude_config_host_dir.is_empty() {
+        return None;
+    }
+    let creds = std::path::Path::new(claude_config_host_dir).join(CLAUDE_CREDENTIALS_FILE);
+    if creds.is_file() {
+        return Some(claude_config_host_dir.to_string());
+    }
+    tracing::warn!(
+        dir = %claude_config_host_dir,
+        "container agent: no {CLAUDE_CREDENTIALS_FILE} in the bound account's config dir — \
+         not mounting credentials (expected on macOS, where Claude Code stores them in the \
+         Keychain). The agent will start but will not be authenticated."
+    );
+    None
+}
+
 impl ContainerMountSpec {
     /// What an agent started with `env_vars` in `working_dir` gets mounted: its bound
     /// account's credentials, its workspace, and, for an agent with a Claude config dir,
@@ -48,7 +81,10 @@ impl ContainerMountSpec {
         let working_dir = working_dir.as_str();
         let config_dir = env_vars.get("CLAUDE_CONFIG_DIR").map(String::as_str).filter(|d| !d.is_empty());
         Self {
-            claude_config_host_dir: config_dir.and_then(super::credentials_dir_if_file_backed),
+            claude_config_host_dir: config_dir.and_then(credentials_dir_if_file_backed),
+            keychain_config_dir: config_dir
+                .filter(|dir| cfg!(target_os = "macos") && !std::path::Path::new(dir).join(CLAUDE_CREDENTIALS_FILE).is_file())
+                .map(str::to_string),
             workspace_host_dir: Some(working_dir.to_string()).filter(|d| !d.is_empty()),
             memory_host_dir: config_dir.and_then(|dir| personal_memory_host_dir(Some(dir), working_dir)),
             github_hooks_host_dir: crate::identity::github_tokens::container_git_hooks().map(|d| d.to_string_lossy().into_owned()),
@@ -212,6 +248,39 @@ mod tests {
         mounts.iter().find(|m| m.target.as_deref() == Some(target))
     }
 
+    /// macOS keeps OAuth credentials in the Keychain and never writes this file
+    /// (oauth_probe.rs). Binding a nonexistent source makes Docker refuse to
+    /// create the container, so an unguarded bind would turn "cannot
+    /// authenticate on macOS" into "cannot START on macOS".
+    #[test]
+    fn a_config_dir_with_no_credentials_file_is_not_offered_for_mounting() {
+        let dir = std::env::temp_dir().join("agentmux-creds-guard-empty");
+        std::fs::create_dir_all(&dir).unwrap();
+        let _ = std::fs::remove_file(dir.join(CLAUDE_CREDENTIALS_FILE));
+
+        assert_eq!(
+            credentials_dir_if_file_backed(&dir.to_string_lossy()),
+            None,
+            "no credentials file (the macOS Keychain case) must not produce a bind",
+        );
+        assert_eq!(credentials_dir_if_file_backed(""), None);
+    }
+
+    /// …and when the file IS there, it is offered, so the fix still applies on
+    /// every platform that writes it.
+    #[test]
+    fn a_config_dir_holding_a_credentials_file_is_offered_for_mounting() {
+        let dir = std::env::temp_dir().join("agentmux-creds-guard-present");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(CLAUDE_CREDENTIALS_FILE), b"{}").unwrap();
+
+        assert_eq!(
+            credentials_dir_if_file_backed(&dir.to_string_lossy()).as_deref(),
+            Some(dir.to_string_lossy().as_ref()),
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn claude_reads_memory_from_the_folder_it_names_for_the_workspace() {
         assert_eq!(container_memory_dir(), "/home/agent/.claude/projects/-workspace/memory");
@@ -228,6 +297,20 @@ mod tests {
             let without = ContainerMountSpec { github_hooks_host_dir: none, ..Default::default() };
             assert!(bind_at(&agent_home_mounts("agentmux-abc", &without), crate::identity::github_tokens::CONTAINER_HOOKS_DIR).is_none());
         }
+    }
+
+    #[test]
+    fn an_account_with_a_credentials_file_is_mounted_and_one_without_is_left_to_the_keychain_on_macos() {
+        let account = tempfile::tempdir().unwrap();
+        let env = |dir: &std::path::Path| HashMap::from([("CLAUDE_CONFIG_DIR".to_string(), dir.to_string_lossy().into_owned())]);
+        let without = ContainerMountSpec::for_agent(&env(account.path()), "");
+        assert_eq!(without.claude_config_host_dir, None);
+        assert_eq!(without.keychain_config_dir.is_some(), cfg!(target_os = "macos"), "only macOS keeps a login outside a file");
+        std::fs::write(account.path().join(CLAUDE_CREDENTIALS_FILE), "{}").unwrap();
+        let with = ContainerMountSpec::for_agent(&env(account.path()), "");
+        assert_eq!(with.claude_config_host_dir.as_deref(), Some(account.path().to_str().unwrap()));
+        assert_eq!(with.keychain_config_dir, None, "a file-backed account is never staged from the Keychain");
+        assert_eq!(ContainerMountSpec::for_agent(&HashMap::new(), "").keychain_config_dir, None, "no bound account, nothing to stage");
     }
 
     #[test]

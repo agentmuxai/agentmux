@@ -18,6 +18,7 @@
 //! Docker best practices here were researched independently.
 
 pub(crate) mod drift;
+mod keychain_credentials;
 mod mount_source;
 mod mounts;
 mod pull;
@@ -83,6 +84,10 @@ pub struct ContainerMountSpec {
     /// `None` keeps the old behavior (an empty per-agent named volume), which is
     /// correct only for an agent with no bound oauth account.
     pub claude_config_host_dir: Option<String>,
+    /// The bound account's Claude config dir when its login is in the macOS Keychain and not in a file: the
+    /// start of the container stages that login (see [`keychain_credentials`]) and fills
+    /// [`Self::claude_config_host_dir`] with the staging folder. `None` everywhere else.
+    pub keychain_config_dir: Option<String>,
     /// The agent's working directory on the host, bind-mounted at
     /// [`CONTAINER_WORKSPACE_DIR`]. `None`/empty leaves `/workspace` empty, which
     /// is what shipped before this existed.
@@ -102,39 +107,6 @@ fn normalize_host_path(path: &str) -> String {
 
 /// The credentials file inside the account's config dir, and inside the image.
 pub const CLAUDE_CREDENTIALS_FILE: &str = ".credentials.json";
-
-/// The account config dir to hand to [`ContainerMountSpec::claude_config_host_dir`],
-/// or `None` when this account has no file-backed credential to mount.
-///
-/// The existence check is load-bearing, not defensive tidiness (codex P1 on PR
-/// #2933). **On macOS Claude Code keeps OAuth credentials in the encrypted
-/// Keychain and never writes this file at all** — see
-/// `identity/resolver/oauth_probe.rs` and
-/// `docs/retro/retro-macos-keychain-credential-isolation-gap-2026-08-17.md`.
-/// Binding a source that does not exist makes Docker reject `create_container`
-/// outright, so an unguarded bind would turn "container agents cannot
-/// authenticate on macOS" into "container agents cannot START on macOS" — a
-/// strictly worse failure than the one this fix exists to remove.
-///
-/// Returning `None` degrades to exactly the previous behavior (an empty per-agent
-/// volume) instead, and logs why. Keychain-backed provisioning is a separate
-/// piece of work; this only guarantees we do not regress it.
-pub fn credentials_dir_if_file_backed(claude_config_host_dir: &str) -> Option<String> {
-    if claude_config_host_dir.is_empty() {
-        return None;
-    }
-    let creds = std::path::Path::new(claude_config_host_dir).join(CLAUDE_CREDENTIALS_FILE);
-    if creds.is_file() {
-        return Some(claude_config_host_dir.to_string());
-    }
-    tracing::warn!(
-        dir = %claude_config_host_dir,
-        "container agent: no {CLAUDE_CREDENTIALS_FILE} in the bound account's config dir — \
-         not mounting credentials (expected on macOS, where Claude Code stores them in the \
-         Keychain). The agent will start but will not be authenticated."
-    );
-    None
-}
 
 /// Rewrite a host-loopback `AGENTMUX_LOCAL_URL` (e.g. `http://127.0.0.1:PORT`)
 /// into something a container's network namespace can actually reach.
@@ -521,6 +493,7 @@ impl ContainerManager {
                     tracing::info!(container = container_name, reason, "container spec drift detected — recreating");
                     let _ = self.stop(container_name, 10).await;
                     self.remove(container_name, true).await?;
+                    self.restage_keychain_login(container_name, spec).await;
                     None
                 }
                 None => Some(status),
@@ -1047,6 +1020,8 @@ impl ContainerManager {
     /// Remove a container (must be stopped first or use `force = true`).
     pub async fn remove(&self, container_name: &str, force: bool) -> Result<(), ContainerError> {
         use bollard::container::RemoveContainerOptions;
+        // A login the container refreshed goes back to the Keychain while the container is still there to ask.
+        self.write_back_keychain_login(container_name).await;
         self.inner.docker
             .remove_container(container_name, Some(RemoveContainerOptions {
                 force,
@@ -1054,6 +1029,7 @@ impl ContainerManager {
             }))
             .await?;
         tracing::info!(container = container_name, "removed container");
+        self.drop_staged_keychain_login(container_name).await;
         self.forget_cli_ready(container_name).await;
         self.cleanup_dev_proxy_routes(container_name).await;
         Ok(())
@@ -1658,39 +1634,6 @@ mod tests {
         assert!(owned.contains(&format!("{CONTAINER_CLAUDE_DIR}/{CLAUDE_CREDENTIALS_FILE}")));
         assert!(owned.contains(&crate::identity::github_tokens::CONTAINER_HOOKS_DIR.to_string()));
         assert_eq!(owned.len(), 4, "a user volume target must never appear here");
-    }
-
-    /// macOS keeps OAuth credentials in the Keychain and never writes this file
-    /// (oauth_probe.rs). Binding a nonexistent source makes Docker refuse to
-    /// create the container, so an unguarded bind would turn "cannot
-    /// authenticate on macOS" into "cannot START on macOS".
-    #[test]
-    fn a_config_dir_with_no_credentials_file_is_not_offered_for_mounting() {
-        let dir = std::env::temp_dir().join("agentmux-creds-guard-empty");
-        std::fs::create_dir_all(&dir).unwrap();
-        let _ = std::fs::remove_file(dir.join(CLAUDE_CREDENTIALS_FILE));
-
-        assert_eq!(
-            credentials_dir_if_file_backed(&dir.to_string_lossy()),
-            None,
-            "no credentials file (the macOS Keychain case) must not produce a bind",
-        );
-        assert_eq!(credentials_dir_if_file_backed(""), None);
-    }
-
-    /// …and when the file IS there, it is offered, so the fix still applies on
-    /// every platform that writes it.
-    #[test]
-    fn a_config_dir_holding_a_credentials_file_is_offered_for_mounting() {
-        let dir = std::env::temp_dir().join("agentmux-creds-guard-present");
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join(CLAUDE_CREDENTIALS_FILE), b"{}").unwrap();
-
-        assert_eq!(
-            credentials_dir_if_file_backed(&dir.to_string_lossy()).as_deref(),
-            Some(dir.to_string_lossy().as_ref()),
-        );
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

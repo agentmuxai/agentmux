@@ -338,6 +338,13 @@ impl ContainerStartup {
         if let Some(dir) = self.mount_spec.workspace_host_dir.clone() {
             let _ = tokio::task::spawn_blocking(move || crate::backend::mcp_json_identity::strip_workspace_signing_keys(&dir)).await;
         }
+        // On macOS a Keychain-backed account has no credentials file to mount: its login is staged for the container.
+        let mut mount_spec = self.mount_spec.clone();
+        if mount_spec.claude_config_host_dir.is_none() {
+            if let Some(config_dir) = mount_spec.keychain_config_dir.clone() {
+                mount_spec.claude_config_host_dir = self.cm.stage_keychain_login(&self.container_name, &config_dir).await;
+            }
+        }
         let image = resolve_container_image(&self.image);
         let began = Instant::now();
         let start_id = uuid::Uuid::new_v4().to_string();
@@ -367,7 +374,7 @@ impl ContainerStartup {
         };
         if let Err(e) = self
             .cm
-            .ensure_running_observed(&self.container_name, &image, &self.volumes, &[], &self.mount_spec, &observe)
+            .ensure_running_observed(&self.container_name, &image, &self.volumes, &[], &mount_spec, &observe)
             .await
         {
             if shown.load(Ordering::Relaxed) {
