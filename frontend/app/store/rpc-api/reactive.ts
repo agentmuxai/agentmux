@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// Jekt/muxbus registration status for one agent — powers Warden → Host
+// Jekt/muxbus registration status for one agent — powers the Swarm row's registration badge
 // (issue #2696). Backed by the `reactive.registrations`
 // WS RPC command (crates/srv/src/server/reactive.rs's
 // register_reactive_ws_handlers), not the pre-existing `/agentmux/reactive/*`

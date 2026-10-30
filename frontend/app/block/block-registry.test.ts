@@ -28,22 +28,21 @@ const OLD_ICONS: Record<string, string> = {
 };
 const OLD_LABELS: Record<string, string> = {
     agent: "Agent", browser: "Browser", drone: "Drone", editor: "Editor", help: "Help", identity: "Identity",
-    memory: "Memory", swarm: "Swarm", sysinfo: "Sysinfo", term: "Terminal", warden: "Warden",
+    memory: "Memory", swarm: "Swarm", sysinfo: "Sysinfo", term: "Terminal",
 };
 
 // Deliberate differences since the tables: "cpuplot" is sysinfo under an older
 // name, and as a native tab (Phase 2c) it names and icons itself like sysinfo
 // — its header always showed sysinfo's chart icon; only its tab pill didn't.
-// Warden likewise always showed its own icon in the header
-// (`shield-halved`) but not in its pills.
+// Warden is the Jobs pane now: it names and icons itself that way.
 // So did the last five legacy views, whose pills fell back to "square" and
 // three of them to their lowercase view name.
 const NEW_ICONS: Record<string, string> = {
-    cpuplot: "chart-line", warden: "shield-halved", connectors: "plug",
+    cpuplot: "chart-line", warden: "calendar-check", connectors: "plug",
     shortcuts: "shapes", memory: "brain", identity: "user", toolchain: "wrench", settings: "cog",
 };
 const NEW_LABELS: Record<string, string> = {
-    cpuplot: "Sysinfo", connectors: "Connectors", shortcuts: "Shortcuts", toolchain: "Toolchain", settings: "Settings",
+    cpuplot: "Sysinfo", warden: "Jobs", connectors: "Connectors", shortcuts: "Shortcuts", toolchain: "Toolchain", settings: "Settings",
 };
 
 describe("built-in pane tabs (block-registry.ts)", () => {
@@ -92,10 +91,10 @@ describe("built-in pane tabs (block-registry.ts)", () => {
         // 5b: zoom.ts's allowlist and editor's base size, paste, Ctrl+F, cwd.
         // Over every built-in pane (VIEWS above is the old map's list, without Hangar and Tower), so a
         // new pane that leaves out zoom fails here (REPORT_PANE_ZOOM_COVERAGE_2026_10_22.md).
-        const zoomHolders = [...VIEWS, "files", "tower"].filter((v) => paneTabCapability(v, "paneZoom") != null).sort();
+        const zoomHolders = [...VIEWS, "files", "tower", "vault", "history", "audit"].filter((v) => paneTabCapability(v, "paneZoom") != null).sort();
         expect(zoomHolders).toEqual([
-            "agent", "connectors", "cpuplot", "drone", "editor", "files", "help", "memory", "settings", "swarm", "sysinfo",
-            "term", "toolchain", "tower", "warden",
+            "agent", "audit", "connectors", "cpuplot", "drone", "editor", "files", "help", "history", "memory", "settings",
+            "swarm", "sysinfo", "term", "toolchain", "tower", "vault", "warden",
         ]);
         expect(paneTabCapability("tower", "paneZoom")?.baseFontSize).toBe(13);
         expect(paneTabCapability("toolchain", "paneZoom")?.baseFontSize).toBe(12);

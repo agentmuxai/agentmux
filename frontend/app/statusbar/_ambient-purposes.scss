@@ -1,0 +1,51 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// The dot on the token indicator when one of AgentMux's own purposes is failing.
+.token-usage-indicator-dot {
+    width: var(--space-1-5);
+    height: var(--space-1-5);
+    border-radius: var(--radius-full);
+    background: var(--error-color);
+}
+
+.ambient-purposes {
+    padding-left: calc(var(--space-3) + var(--space-2));
+    font-size: var(--text-xs);
+}
+
+.ambient-purposes-note {
+    padding: var(--space-1) 0;
+    opacity: 0.6;
+    font-size: var(--text-2xs);
+}
+
+.ambient-purpose-head {
+    width: 100%;
+    justify-content: flex-start;
+
+    .ambient-purpose-name {
+        flex: 1;
+        text-align: left;
+    }
+
+    .ambient-purpose-total {
+        opacity: 0.55;
+        font-variant-numeric: tabular-nums;
+    }
+}
+
+.ambient-purpose[data-state="failing"] .ambient-purpose-failed {
+    color: var(--error-color);
+}
+
+.ambient-purpose-counts {
+    padding-left: var(--space-5);
+}
+
+.ambient-purpose-count {
+    display: flex;
+    justify-content: space-between;
+    opacity: 0.8;
+    font-variant-numeric: tabular-nums;
+}

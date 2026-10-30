@@ -161,7 +161,7 @@ fn describe_reclaim(st: &Value, what: &str) -> String {
         out.push_str(&format!(
             "A reclaim of the pane-history store is asked for{}. It runs at the next start of AgentMux, before the store opens: \
              the store is rewritten without its free pages, which takes a while for a large store and needs free disk of about \
-             the store's live size plus 1 GB. The person sees it pending in Warden > History > Storage and can cancel it there; \
+             the store's live size plus 1 GB. The person sees it pending in History > Storage and can cancel it there; \
              App history_reclaim with reclaim \"cancel\" withdraws it too.",
             if by.is_empty() { String::new() } else { format!(" (by {by})") }
         ));
@@ -320,7 +320,7 @@ mod tests {
         let pending = json!({ "pending": true, "requested_by": "loap-3", "requested_at_ms": 1, "last_done_ms": 0, "last_before_bytes": 0, "last_after_bytes": 0 });
         let text = describe_reclaim(&pending, "request");
         assert!(text.contains("is asked for (by loap-3)"), "{text}");
-        assert!(text.contains("next start of AgentMux") && text.contains("Warden > History > Storage"), "{text}");
+        assert!(text.contains("next start of AgentMux") && text.contains("History > Storage"), "{text}");
         assert!(text.contains("reclaim \"cancel\"") && text.contains("keeps the first request"), "{text}");
         assert!(!describe_reclaim(&pending, "status").contains("keeps the first request"));
 

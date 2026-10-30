@@ -727,17 +727,29 @@ pub struct WidgetConfigType {
     pub block_def: BlockDef,
 }
 
-/// Sections that moved out of a pane, as `(old view, section, new view, new section)`. An entry that
-/// still names the old pair opens the pane that holds it now: a section of another pane, or (no new
-/// section) a pane of its own, as the Kanban is. The frontend has the same table (`MOVED_SECTIONS` in
-/// `pane-sections.ts`).
-const MOVED_SECTIONS: &[(&str, &str, &str, Option<&str>)] = &[("warden", "kanban", "kanban", None), ("swarm", "kanban", "kanban", None)];
+/// Sections that moved out of a pane, as `(old view, section, new view)`. An entry that still names
+/// the old pair opens the pane that holds it now: a pane of its own, as the Kanban, Vault, History
+/// and Audit are, or the Swarm (Warden's old Host section). A `vault/<sub>` section keeps its `<sub>`
+/// as the Vault pane's own section (`vault:section`). The frontend has the same table
+/// (`MOVED_SECTIONS` in `frontend/app/block/pane-sections.ts`).
+const MOVED_SECTIONS: &[(&str, &str, &str)] = &[
+    ("warden", "kanban", "kanban"),
+    ("swarm", "kanban", "kanban"),
+    ("warden", "vault", "vault"),
+    ("warden", "history", "history"),
+    ("warden", "audit", "audit"),
+    ("warden", "host", "swarm"),
+];
+
+/// Sections that have no pane now, as `(view, section)`. An entry that names one keeps its view and
+/// loses the section, so the pane opens on its default.
+const RETIRED_SECTIONS: &[(&str, &str)] = &[("warden", "lan"), ("warden", "internet"), ("warden", "ambient")];
 
 impl WidgetConfigType {
     /// Writes `section` into the blockdef's meta under `<view>:section`, and a
     /// sub-section under `<section>:section`. Nothing without a section or a view.
     /// A section that moved panes (`MOVED_SECTIONS`) is written for the pane it lives in now,
-    /// and the blockdef's `view` follows it. One that became a pane of its own leaves no section.
+    /// and the blockdef's `view` follows it. A retired one (`RETIRED_SECTIONS`) leaves no section.
     pub fn resolve_section(&mut self) {
         if self.section.is_empty() {
             return;
@@ -745,21 +757,26 @@ impl WidgetConfigType {
         let Some(mut view) = self.block_def.meta.get("view").and_then(|v| v.as_str()).map(str::to_owned) else {
             return;
         };
-        if let Some((_, _, to, to_section)) = MOVED_SECTIONS.iter().find(|(from, id, _, _)| *from == view && *id == self.section) {
-            view = (*to).to_owned();
-            self.block_def.meta.insert("view".to_owned(), Value::String(view.clone()));
-            match to_section {
-                Some(section) => self.section = (*section).to_owned(),
-                None => {
-                    self.section.clear();
-                    return;
-                }
-            }
-        }
         let (id, sub) = match self.section.split_once('/') {
             Some((id, sub)) => (id.to_owned(), Some(sub.to_owned())),
             None => (self.section.clone(), None),
         };
+        if RETIRED_SECTIONS.iter().any(|(from, retired)| *from == view && *retired == id) {
+            self.section.clear();
+            return;
+        }
+        if let Some((from, _, to)) = MOVED_SECTIONS.iter().find(|(from, moved, _)| *from == view && *moved == id) {
+            self.block_def.meta.remove(&format!("{from}:section"));
+            view = (*to).to_owned();
+            self.block_def.meta.insert("view".to_owned(), Value::String(view.clone()));
+            self.section.clear();
+            if view == "vault" {
+                if let Some(sub) = sub {
+                    self.block_def.meta.insert("vault:section".to_owned(), Value::String(sub));
+                }
+            }
+            return;
+        }
         if let Some(sub) = sub {
             self.block_def.meta.insert(format!("{id}:section"), Value::String(sub));
         }

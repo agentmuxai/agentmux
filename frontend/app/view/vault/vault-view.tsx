@@ -1,9 +1,9 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// The Vault, Warden's Vault section (vault-in-warden.ts): the person's secrets, which agents use by name without
+// The Vault pane (vault.tsx): the person's secrets, which agents use by name without
 // seeing them (docs/specs/SPEC_VAULT_PANE_AGENTS_USE_SECRETS_UNSEEN_2026_10_19.md §5).
-// A rail of sections like Warden's; agents' requests for new entries on top.
+// A rail of sections; agents' requests for new entries on top.
 
 import { createEffect, createSignal, For, on, onCleanup, Show, type JSX } from "solid-js";
 
@@ -20,7 +20,7 @@ import { VaultEntryForm, type VaultFormTarget } from "./vault-entry-form";
 import { formatWhen } from "./vault-format";
 import { VAULT_SECTIONS, vaultKind, type VaultPaneSection } from "./vault-kinds";
 import { vaultPromptNotes } from "./vault-prompts";
-import { openWarden } from "@/app/view/warden/open-warden";
+import { openOrFocusPaneByView } from "@/app/store/block-component-registry";
 import { getPlatform } from "@/util/platformutil";
 import type { VaultViewModel } from "./vault-model";
 import {
@@ -173,8 +173,8 @@ function VaultActivityLog(props: { visible: boolean }): JSX.Element {
         <div class="warden-manager-body">
             <p class="warden-manager-summary">
                 Every change to the Vault and every use of an entry: who, what, where. Never a value.{" "}
-                <Button density="compact" onClick={() => void openWarden("audit")}>
-                    See agents' use in Warden
+                <Button density="compact" onClick={() => void openOrFocusPaneByView("audit")}>
+                    See agents' use in the Audit
                 </Button>
             </p>
             <Show when={error()}>
@@ -223,7 +223,7 @@ export function VaultView(props: { model: VaultViewModel }): JSX.Element {
     };
 
     // Only while shown: the list decrypts every entry, which can make the OS ask for the Vault key,
-    // so a Vault that is hidden (another Warden section, another tab) or closed never reads it.
+    // so a Vault that is hidden (another tab) or closed never reads it.
     createEffect(() => {
         if (!vaultAvailable() || !model.shown()) return;
         followVault();

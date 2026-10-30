@@ -33,7 +33,7 @@ function confirmedBy(platform: string): string {
 
 export const CONFIRM_UNAVAILABLE = "Reveal and Copy aren't available on this system yet: there is no standard way to confirm it is you without administrator rights, which the Vault never asks for.";
 
-/** Whether the Vault is on screen: its pane, or Warden on its Vault section (vault-in-warden.ts). */
+/** Whether the Vault is on screen: its pane is in the active tab of a shown window. */
 export const VaultShown = createContext<Accessor<boolean>>(() => true);
 
 export function VaultRevealDialog(props: { entry: VaultEntryInfo; onClose: () => void }): JSX.Element {
@@ -61,7 +61,7 @@ export function VaultRevealDialog(props: { entry: VaultEntryInfo; onClose: () =>
     // an earlier value on screen. The pending Reveal still shows its own result.
     const onBlur = hideAll;
     onMount(() => window.addEventListener("blur", onBlur));
-    // Switching away (another Warden section, another tab) closes it, which hides every value:
+    // Switching away (another tab) closes it, which hides every value:
     // the section stays mounted, so a value would otherwise wait in a hidden dialog.
     const shownNow = useContext(VaultShown);
     createEffect(on(shownNow, (on) => !on && props.onClose(), { defer: true }));

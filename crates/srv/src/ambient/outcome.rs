@@ -8,7 +8,7 @@
 //! took a database copy (docs/specs/SPEC_AMBIENT_SWARM_SUMMARY_HARDENING_2026_10_02.md
 //! section 2.1 defect 6, section 5.8). Every call now ends in exactly one
 //! [`Outcome`], written as one structured info line and counted per purpose, and
-//! the counts are readable over the `ambient.outcomes` RPC (Warden's Ambient section).
+//! the counts are readable over the `ambient.outcomes` RPC (the token popover's AgentMux internal row).
 //! The rejected text is logged, truncated, because rejected values are the corpus
 //! the title predicate is tuned with.
 

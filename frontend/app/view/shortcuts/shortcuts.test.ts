@@ -35,7 +35,6 @@ const h = vi.hoisted(() => {
     return state;
 });
 
-vi.mock("@/app/asset/logo.svg?url", () => ({ default: "logo.svg" }));
 // The same module under both of its import names.
 vi.mock("@/app/store/global", () => h.globalMock());
 vi.mock("@/store/global", () => h.globalMock());

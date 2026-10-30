@@ -377,6 +377,20 @@ http://sn,,,,\"NoteType:Credit Card\nNumber:4111111111111111\nSecurity Code:123\
 }
 
 #[test]
+fn an_imported_expiry_in_another_format_is_kept_not_refused() {
+    let s = store();
+    let dir = tempfile::tempdir().unwrap();
+    let csv = "url,username,password,totp,extra,name,grouping,fav\n\
+http://sn,,,,\"NoteType:Driver's License\nNumber:D1234567\nExpiration Date:June,2028\nName:Alex Doe\",Licence,,0\n";
+    let path = write(&dir, "lastpass_vault_export.csv", csv);
+    let preview = inspect(&s, &path, None).unwrap();
+    assert_eq!((preview.total, preview.skipped.len()), (1, 0), "{:?}", preview.skipped);
+    commit(&s, &preview.token, Duplicates::Skip).unwrap();
+    let row = s.vault_get("drivers-licence-licence").unwrap().unwrap();
+    assert!(row.fields.contains("\"expires\":\"2028-06-30\""), "the month's last day: {}", row.fields);
+}
+
+#[test]
 fn a_second_import_of_the_same_export_marks_every_entry_a_duplicate() {
     let s = store();
     let dir = tempfile::tempdir().unwrap();

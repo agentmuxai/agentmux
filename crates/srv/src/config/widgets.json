@@ -142,30 +142,42 @@
             }
         }
     },
-    "defwidget@warden": {
+    "defwidget@vault": {
         "singleton": true,
         "display:order": 15,
         "display:pinned": false,
-        "icon": "shield-halved",
-        "label": "Warden",
-        "description": "Monitor and control AgentMux instances across Host / LAN / Internet layers, plus a jekt audit trail (spec: SPEC_WARDEN_WIDGET_2026-05-25.md)",
+        "icon": "lock",
+        "label": "Vault",
+        "description": "Your secrets: ID numbers, cards and bank accounts, API keys, logins and notes. Agents use them by name without seeing them",
         "blockdef": {
             "meta": {
-                "view": "warden"
+                "view": "vault"
             }
         }
     },
-    "defwidget@vault": {
+    "defwidget@history": {
         "singleton": true,
         "display:order": 16,
         "display:pinned": false,
-        "icon": "lock",
-        "label": "Vault",
-        "description": "Your secrets: ID numbers, cards and bank accounts, API keys, logins and notes. Agents use them by name without seeing them (Warden's Vault section)",
-        "section": "vault",
+        "icon": "clock-rotate-left",
+        "label": "History",
+        "description": "Every agent's recorded conversation: open it, see what you typed, and where it is kept and for how long",
         "blockdef": {
             "meta": {
-                "view": "warden"
+                "view": "history"
+            }
+        }
+    },
+    "defwidget@audit": {
+        "singleton": true,
+        "display:order": 19,
+        "display:pinned": false,
+        "icon": "list-check",
+        "label": "Audit",
+        "description": "What agents did: every jekt, fleet and pane action, and what they did with your secrets",
+        "blockdef": {
+            "meta": {
+                "view": "audit"
             }
         }
     },

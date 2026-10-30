@@ -266,10 +266,11 @@ mod tests {
         let next = migrated_widgets(&widgets).unwrap();
         assert_eq!(next["my@cards"]["section"], "vault/cards");
         assert!(next["my@vault"].get("section").is_none());
-        // And srv then opens Warden on the Vault's Cards, not on a "cards" section Warden lacks.
+        // And srv then opens the Vault pane on its Cards, not on a "cards" section Warden lacks.
         let mut cards: crate::backend::wconfig::WidgetConfigType = serde_json::from_value(next["my@cards"].clone()).unwrap();
         cards.resolve_section();
-        assert_eq!(cards.block_def.meta.get("warden:section").and_then(|v| v.as_str()), Some("vault"));
+        assert_eq!(cards.block_def.meta.get("view").and_then(|v| v.as_str()), Some("vault"));
+        assert!(cards.block_def.meta.get("warden:section").is_none());
         assert_eq!(cards.block_def.meta.get("vault:section").and_then(|v| v.as_str()), Some("cards"));
     }
 

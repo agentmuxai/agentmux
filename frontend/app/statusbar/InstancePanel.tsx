@@ -215,7 +215,9 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
         drone: "Drone",
         swarm: "Swarm",
         help: "Help",
-        warden: "Warden",
+        warden: "Jobs",
+        history: "History",
+        audit: "Audit",
         vault: "Vault",
     };
 

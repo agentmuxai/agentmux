@@ -126,6 +126,13 @@ export const NOTIFICATIONS_SETTINGS = {
         section: "notifications",
         keywords: ["job", "cron", "schedule", "failed", "incident", "notify:os:jobfailed"],
     },
+    osVaultExpiring: {
+        id: "notifications.os_vault_expiring",
+        label: "A Vault entry is expiring",
+        description: "14 days before an entry's expiry date, 3 days before and on the day, once each",
+        section: "notifications",
+        keywords: ["vault", "expiry", "expires", "rotate", "key", "token", "notify:os:vaultexpiring"],
+    },
     pauseAllowAttention: {
         id: "notifications.pause_allow_attention",
         label: "While paused, still alert when an agent needs me",
@@ -267,6 +274,7 @@ export function NotificationsSection(): JSX.Element {
                 {kindRow(NOTIFICATIONS_SETTINGS.osCloudSignedOut, "notify:os:cloudsignedout")}
                 {kindRow(NOTIFICATIONS_SETTINGS.osAccountUnavailable, "notify:os:accountunavailable")}
                 {kindRow(NOTIFICATIONS_SETTINGS.osJobFailed, "notify:os:jobfailed")}
+                {kindRow(NOTIFICATIONS_SETTINGS.osVaultExpiring, "notify:os:vaultexpiring")}
                 {kindRow(NOTIFICATIONS_SETTINGS.osSummary, "notify:os:summary")}
                 {kindRow(NOTIFICATIONS_SETTINGS.taskbarAttention, "notify:taskbar:attention")}
                 <SettingRow

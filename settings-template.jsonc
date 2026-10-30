@@ -110,6 +110,7 @@
     // "notify:os:cloudsignedout":               true,
     // "notify:os:accountunavailable":           true,         // agents out of quota or signed out, once per account
     // "notify:os:jobfailed":                    true,         // a job started failing, once per incident
+    // "notify:os:vaultexpiring":                true,         // a Vault entry expires in 14 days, 3 days, today
     // "notify:pause:until":                     0,            // epoch ms; set from the tray
     // "notify:pause:allowattention":            false,
     // "notify:taskbar:attention":               true,         // badge + flash the taskbar button

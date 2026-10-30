@@ -54,14 +54,33 @@ export function sectionOf<Id extends string>(
 }
 
 /** A section that moved out of a pane: to a section of another pane, or (no `section`) to a pane of its
- *  own (the Kanban left Warden for the Swarm, then the Swarm for the Kanban pane). An old pin, widget
- *  entry, saved pane or `am.panes.open` call naming the old pair keeps working through this table:
- *  the widget bridge, `sectionProblem`, the widget bar's pins, `openWarden` and srv's
- *  `resolve_section` (crates/srv/src/backend/wconfig/types.rs, which has the same table) all read it. */
+ *  own (the Kanban left Warden for the Swarm, then the Swarm for the Kanban pane; Warden's Vault,
+ *  History and Audit became panes). An old pin, widget entry, saved pane or `am.panes.open` call
+ *  naming the old pair keeps working through this table: the widget bridge, `sectionProblem`, the
+ *  widget bar's pins, `openWarden` and srv's `resolve_section`
+ *  (crates/srv/src/backend/wconfig/types.rs, which has the same table) all read it. A section of the
+ *  Vault (`vault/cards`) keeps its own `vault:section`, which the Vault pane reads under the same key. */
 const MOVED_SECTIONS: readonly { from: { view: string; section: string }; to: { view: string; section?: string } }[] = [
     { from: { view: "warden", section: "kanban" }, to: { view: "kanban" } },
     { from: { view: "swarm", section: "kanban" }, to: { view: "kanban" } },
+    { from: { view: "warden", section: "vault" }, to: { view: "vault" } },
+    { from: { view: "warden", section: "history" }, to: { view: "history" } },
+    { from: { view: "warden", section: "audit" }, to: { view: "audit" } },
+    { from: { view: "warden", section: "host" }, to: { view: "swarm" } },
 ];
+
+/** Sections that left a pane with nowhere to go as a pane, and where they are instead. Naming one
+ *  opens the pane with no section, and `sectionProblem` and the widget bridge say where it went. */
+const RETIRED_SECTIONS: readonly { view: string; section: string; now: string }[] = [
+    { view: "warden", section: "lan", now: "LAN peers are in the status bar's network pill" },
+    { view: "warden", section: "ambient", now: "AgentMux's own model calls are in the token popover, under AgentMux internal" },
+    { view: "warden", section: "internet", now: "the Internet section is gone; the cloud relay is in the network pill's MuxBus Cloud block" },
+];
+
+/** Where a retired section went, in words, or null when `view`'s `section` was not retired. */
+export function retiredSection(view: string | null | undefined, section: string): string | null {
+    return RETIRED_SECTIONS.find((r) => r.view === view && r.section === section)?.now ?? null;
+}
 
 /** Where `view`'s `section` lives now, or null when it has not moved. */
 export function movedSection(view: string | null | undefined, section: string): { view: string; section?: string } | null {
@@ -76,7 +95,12 @@ export function movedMeta(meta: Record<string, unknown> | undefined): Record<str
 export function movedMeta(meta: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
     if (!meta) return meta;
     const view = typeof meta.view === "string" ? meta.view : undefined;
-    const to = movedSection(view, String(meta[sectionKeyOf(view ?? "")]));
+    const section = String(meta[sectionKeyOf(view ?? "")]);
+    if (view && retiredSection(view, section)) {
+        const { [sectionKeyOf(view)]: _retired, ...rest } = meta;
+        return rest;
+    }
+    const to = movedSection(view, section);
     if (!view || !to) return meta;
     const { [sectionKeyOf(view)]: _old, ...rest } = meta;
     return to.section === undefined ? { ...rest, view: to.view } : { ...rest, view: to.view, [sectionKeyOf(to.view)]: to.section };
@@ -98,8 +122,10 @@ export function sectionProblem(view: string | null | undefined, section: string)
     const name = resolvePaneTabView(view);
     if (name !== view) return `"${view}" is now the ${name} pane: use "view": "${name}"`;
     const [id, sub, ...rest] = section.split("/");
-    // A moved pair is not wrong: it opens where the section lives now.
-    if (sub === undefined && movedSection(name, id)) return null;
+    // A moved pair is not wrong: it opens where the section lives now. A retired one is, and says where it went.
+    const retired = retiredSection(name, id);
+    if (retired) return `the ${name} pane's "${id}" section is gone: ${retired}`;
+    if (movedSection(name, id)) return null;
     if (!hasSection(sections, id)) {
         return `the ${name} pane has no "${id}" section (it has ${sections.items.map((s) => s.id).join(", ")})`;
     }

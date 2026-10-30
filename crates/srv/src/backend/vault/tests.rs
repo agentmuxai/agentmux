@@ -116,7 +116,7 @@ fn every_change_is_in_the_activity_log_without_values() {
     update(&s, EntryChange { id: id.clone(), label: "Alex".into(), fields: Default::default(), tags: vec![], parts: parts(&[("value", "987-65-4321")]), clear: vec![] }).unwrap();
     delete(&s, &id).unwrap();
     let log = activity(&s, 10).unwrap();
-    assert_eq!(log.iter().map(|a| a.action.as_str()).collect::<Vec<_>>(), ["deleted", "changed", "created"]);
+    assert_eq!(log.iter().map(|a| a.action.as_str()).collect::<Vec<_>>(), ["deleted", "replaced", "created"]);
     assert!(log.iter().all(|a| a.actor == PERSON && a.entry_label == "Alex"));
     let text = serde_json::to_string(&log).unwrap();
     assert!(!text.contains("6789") && !text.contains("4321"));
@@ -175,7 +175,7 @@ fn a_reveal_of_a_missing_part_or_an_unknown_use_is_refused() {
 }
 
 fn gen(kind: &str, label: &str) -> GenerateRequest {
-    GenerateRequest { kind: kind.into(), label: label.into(), why: "deploy key for the staging site".into(), fields: BTreeMap::new(), rules: Default::default() }
+    GenerateRequest { kind: kind.into(), label: label.into(), why: "deploy key for the staging site".into(), fields: BTreeMap::new(), rules: Default::default(), expires: None }
 }
 
 #[test]
@@ -189,7 +189,7 @@ fn generate_makes_an_entry_whose_value_nobody_was_given() {
     assert_eq!(value.chars().count(), generate::DEFAULT_LENGTH);
     // What an agent can see names it, and nothing else.
     let listed = list_for_agent(&s).unwrap();
-    assert_eq!(listed, vec![VaultAgentEntry { id: made.id.clone(), label: "Staging deploy key".into(), kind: "api-key".into(), section: VaultSection::ApiKeys }]);
+    assert_eq!(listed, vec![VaultAgentEntry { id: made.id.clone(), label: "Staging deploy key".into(), kind: "api-key".into(), section: VaultSection::ApiKeys, expires: None }]);
     // The record names the agent, and never the value.
     let rows = activity(&s, 10).unwrap();
     let line = rows.iter().find(|r| r.action == "generated").unwrap();

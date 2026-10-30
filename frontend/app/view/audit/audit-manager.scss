@@ -1,0 +1,129 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// The Audit pane's feed. `.audit-container` (audit-instance.tsx) carries the container the
+// width queries below answer.
+
+@use "../../mixins.scss";
+
+.warden-audit-feed {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 0.85em;
+}
+
+.warden-audit-row {
+    display: grid;
+    grid-template-columns: 70px 1fr 55px 50px 1fr;
+    gap: var(--space-2);
+    padding: 2px var(--space-2);
+    border-radius: 0;
+
+    &[data-variant="err"] {
+        background: var(--error-bg);
+    }
+}
+
+.warden-audit-time {
+    opacity: 0.55;
+    font-family: monospace;
+}
+
+.warden-audit-flow {
+    @include mixins.truncate;
+}
+
+.warden-audit-status {
+    text-align: center;
+    text-transform: uppercase;
+    font-size: 0.8em;
+
+    &--ok {
+        color: var(--success-text-color);
+    }
+
+    &--err {
+        color: var(--error-text-color);
+    }
+}
+
+.warden-audit-bytes {
+    text-align: right;
+    opacity: 0.55;
+    font-family: monospace;
+}
+
+.warden-audit-error {
+    opacity: 0.8;
+    color: var(--error-text-color);
+    font-size: 0.95em;
+    @include mixins.truncate;
+}
+
+.warden-audit-reason {
+    opacity: 0.8;
+    color: var(--accent-color);
+    font-size: 0.95em;
+    @include mixins.truncate;
+}
+
+// ── Responsive container queries ─────────────────────────────────────────────
+
+// sm: drop bytes + error/reason columns from audit grid (3-col layout)
+@container audit (max-width: 767px) {
+    .warden-audit-row {
+        grid-template-columns: 60px 1fr 50px;
+    }
+
+    .warden-audit-bytes,
+    .warden-audit-error,
+    .warden-audit-reason {
+        display: none;
+    }
+}
+
+// xs: audit rows become stacked two-line cards
+@container audit (max-width: 479px) {
+    .warden-audit-row {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        padding: 4px var(--space-2);
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .warden-audit-bytes,
+    .warden-audit-error,
+    .warden-audit-reason {
+        display: block;
+    }
+
+    .warden-audit-flow {
+        white-space: normal;
+        overflow: visible;
+        text-overflow: unset;
+    }
+}
+
+// The Vault's oversight half (what agents did with secrets, and where each may use one).
+.vault-secrets {
+    margin-top: var(--space-4);
+}
+
+// Does not scroll itself (the feed's body does): a container that scrolls would resize with its own scrollbar.
+.audit-container {
+    width: 100%;
+    height: 100%;
+    container-type: inline-size;
+    container-name: audit;
+}
+
+.audit-pane {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+}

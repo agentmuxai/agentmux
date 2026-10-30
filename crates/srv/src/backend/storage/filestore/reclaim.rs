@@ -4,7 +4,7 @@
 //! Giving disk space back (`docs/specs/SPEC_HISTORY_STORE_RECLAIM_SPACE_2026_10_23.md`).
 //!
 //! The framer deletes part rows as it writes frames, and SQLite keeps the
-//! freed pages inside the file. Once, asked for from Warden's Storage view,
+//! freed pages inside the file. Once, asked for from History > Storage,
 //! the shared transcript store is rewritten into a new file (`VACUUM INTO`) at
 //! an srv's start, before it opens the store and only when no other srv runs,
 //! and swapped in. The new file is `auto_vacuum=INCREMENTAL`, so from then on

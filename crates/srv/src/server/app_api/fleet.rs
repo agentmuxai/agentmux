@@ -482,7 +482,7 @@ const FLEET_BULK_STOP_AUDIT_ACTION: &str = "fleet.bulk-stop";
 /// `stop_one_agent_block`, one call per target, and — unlike that
 /// single-target primitive, which involves no jekt signing and so was
 /// never audited — records one `AuditLogEntry` per target via
-/// `ReactiveHandler::log_fleet_action_audit`, so Warden's Audit tab sees
+/// `ReactiveHandler::log_fleet_action_audit`, so the Audit pane sees
 /// every fleet-initiated stop (`SPEC_MULTI_AGENT_FLEET_CONTROL_2026_08_20.md`
 /// §6; reagent/Codex P2, PR #2687 review — this was missing entirely).
 /// Without `staged`, runs every target as a single batch (still returns
