@@ -27,6 +27,7 @@ use serde_json::{json, Value};
 use super::cdp::CdpSession;
 use super::dates;
 use super::frames::{self, FrameRef};
+use super::key_typing;
 use super::snapshot::{self, DomFacts};
 use super::types::ApiResponse;
 use crate::state::AppState;
@@ -999,7 +1000,27 @@ async fn act(
                 call(cdp, "Input.insertText", json!({ "text": text })).await?;
             }
             let mut after = call_on(cdp, &obj, READ_BACK, vec![]).await?;
-            let got = after.get("value").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let mut got = after.get("value").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let mut method = "insertText";
+            // Step 3 of the ladder: a mask reads keydown, not the inserted
+            // text, so clear the field and type the text key by key.
+            if !text.is_empty() && got != text && after.get("contentEditable").is_none() {
+                call_on(cdp, &obj, PREPARE_FILL, vec![]).await?;
+                if let Some(why) = describe(cdp, backend).await.as_ref().and_then(snapshot::secret_reason) {
+                    return Err(secret_refusal(why));
+                }
+                refuse_typing_in_frame(cdp, frame_id).await?;
+                key_typing::clear_selection(cdp).await?;
+                let emptied = call_on(cdp, &obj, READ_BACK, vec![]).await?;
+                if emptied.get("value").and_then(|v| v.as_str()).is_some_and(|v| !v.is_empty()) {
+                    call_on(cdp, &obj, SET_VALUE, vec![json!("")]).await?;
+                    call_on(cdp, &obj, PREPARE_FILL, vec![]).await?;
+                }
+                key_typing::type_keys(cdp, &text).await?;
+                method = "keys";
+                after = call_on(cdp, &obj, READ_BACK, vec![]).await?;
+                got = after.get("value").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            }
             // Set the value directly only for a widget that took nothing from
             // the inserted text (the value is empty or what it was). A value
             // the page changed (cut to a limit, reformatted by a mask) is the
@@ -1009,8 +1030,12 @@ async fn act(
             if forced {
                 call_on(cdp, &obj, SET_VALUE, vec![json!(text)]).await?;
                 after = call_on(cdp, &obj, READ_BACK, vec![]).await?;
+                method = "set";
             }
             let mut after = warn_if_changed(after, &text);
+            if let Some(o) = after.as_object_mut() {
+                o.insert("filledBy".to_string(), json!(method));
+            }
             if forced {
                 // Never silent: a field that rejected the text on purpose was overridden.
                 if let Some(o) = after.as_object_mut() {
