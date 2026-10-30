@@ -15,6 +15,7 @@
 pub(crate) mod app_ops;
 pub(crate) mod receive;
 pub(crate) mod send;
+pub(crate) mod tasks;
 
 use futures_util::future::BoxFuture;
 use serde_json::Value;
@@ -89,6 +90,8 @@ pub(crate) fn lookup(op: &str) -> Option<OpFn> {
     Some(match op {
         "app.version" => |state, caller, params| Box::pin(app_ops::version(state, caller, params)),
         "app.health" => |state, caller, params| Box::pin(app_ops::health(state, caller, params)),
+        "tasks.enqueue" => |state, caller, params| Box::pin(tasks::enqueue(state, caller, params)),
+        "tasks.list" => |state, caller, params| Box::pin(tasks::list(state, caller, params)),
         _ => return None,
     })
 }

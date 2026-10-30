@@ -185,7 +185,8 @@ pub(crate) const TASKS_TOOL: &str = r#"{
       "links":        { "type": "object", "properties": { "pr": { "type": "string" }, "branch": { "type": "string" }, "doc": { "type": "string" } }, "description": "update, submit: the PR URL and branch; doc: the full path (absolute, not relative to your clone) of the spec or report the task wrote, which its build's card shows" },
       "question":     { "type": "string", "description": "ask: what you need the operator to decide or give you" },
       "state":        { "type": "string", "description": "list: open, held, claimed, blocked, review, done, failed or cancelled (default all)" },
-      "limit":        { "type": "integer", "description": "list: the most items to return (1-500, default 50)" }
+      "limit":        { "type": "integer", "description": "list: the most items to return (1-500, default 50)" },
+      "host":         { "type": "string", "description": "enqueue, list: another machine, by the name Agents list shows (or name/channel when it runs several AgentMux instances), to file the task on its board or read its board, instead of this one. Named on each call, never remembered; the machine must be a LAN peer that has pinned your key. target_agent is an agent of that machine; for \"me\" and target_group don't apply there. The task is recorded as you, never as the operator. The answer says which machine gave it. Absent means this machine." }
     },
     "required": ["action"]
   }
