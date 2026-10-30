@@ -261,7 +261,7 @@ async fn launch(
     }
 }
 
-/// The verified caller, if it may spawn: a host agent's own pane, not a
+/// The verified caller, if it may spawn: an agent's own pane, host or container, not a
 /// worker's.
 fn leader_of(
     state: &AppState,
