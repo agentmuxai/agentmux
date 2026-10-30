@@ -100,6 +100,9 @@ export function initTitleTooltips(doc: Document = document): () => void {
     let showTimer: ReturnType<typeof setTimeout> | null = null;
     let hideTimer: ReturnType<typeof setTimeout> | null = null;
     let stopAutoUpdate: (() => void) | null = null;
+    // After a click, a key or a wheel turn the tooltip goes but the pointer is still on the element:
+    // its title stays taken (so the browser's slow tooltip does not follow) until the pointer leaves it.
+    let held: HTMLElement | null = null;
 
     const self: OpenTip = { close: () => closeNow() };
 
@@ -127,13 +130,14 @@ export function initTitleTooltips(doc: Document = document): () => void {
         paint();
     };
 
-    function closeNow(): void {
+    function closeNow(keepTitle = false): void {
         clearTimers();
         stopAutoUpdate?.();
         stopAutoUpdate = null;
         if (current) {
             releaseOpen(self);
-            giveTitleBack(current);
+            if (keepTitle) held = current;
+            else giveTitleBack(current);
         }
         current = null;
         visible = false;
@@ -179,7 +183,17 @@ export function initTitleTooltips(doc: Document = document): () => void {
         hideTimer = setTimeout(closeNow, HIDE_DELAY_MS);
     };
 
+    const letGo = () => {
+        if (held) giveTitleBack(held);
+        held = null;
+    };
+
     const onOver = (e: Event) => {
+        if (held) {
+            // Still on the element that was clicked: it stays quiet until the pointer leaves it.
+            if (e.target instanceof Node && held.contains(e.target)) return;
+            letGo();
+        }
         // The title is off the element while the pointer is on it, so inside it the element itself is the candidate.
         const el = candidateFor(e.target) ?? (current && e.target instanceof Node && current.contains(e.target) ? current : null);
         if (!el) return scheduleClose();
@@ -200,24 +214,28 @@ export function initTitleTooltips(doc: Document = document): () => void {
         openFor(el, text);
     };
 
-    // A click, a key, a wheel or a scroll means the pointer is not resting any more.
-    const hideNow = () => closeNow();
+    // A click, a key or a wheel turn means the pointer is not resting any more.
+    const hideNow = () => closeNow(true);
+    const hideAll = () => {
+        closeNow();
+        letGo();
+    };
 
     doc.addEventListener("pointerover", onOver, true);
     doc.addEventListener("pointerdown", hideNow, true);
     doc.addEventListener("keydown", hideNow, true);
     doc.addEventListener("wheel", hideNow, { capture: true, passive: true });
     doc.documentElement.addEventListener("pointerleave", scheduleClose);
-    win.addEventListener("blur", hideNow);
+    win.addEventListener("blur", hideAll);
 
     const stop = () => {
-        closeNow();
+        hideAll();
         doc.removeEventListener("pointerover", onOver, true);
         doc.removeEventListener("pointerdown", hideNow, true);
         doc.removeEventListener("keydown", hideNow, true);
         doc.removeEventListener("wheel", hideNow, true);
         doc.documentElement.removeEventListener("pointerleave", scheduleClose);
-        win.removeEventListener("blur", hideNow);
+        win.removeEventListener("blur", hideAll);
         started = null;
     };
     started = stop;

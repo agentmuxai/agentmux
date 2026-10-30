@@ -140,6 +140,27 @@ describe("the delegated tooltip", () => {
         forgetOpen(summary);
     });
 
+    it("after a click the tooltip is gone but the title stays taken until the pointer leaves the element", async () => {
+        const el = add('<button title="Save"><i class="icon"></i></button>');
+        const plain = add('<span class="plain">y</span>');
+        over(el);
+        await settle(100);
+        expect(panel()).not.toBeNull();
+        el.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+        expect(panel()).toBeNull();
+        expect(el.getAttribute("title")).toBe("");
+        // Moving inside it does not bring the tooltip back, or the native title.
+        over(el.querySelector(".icon")!);
+        await settle(150);
+        expect(panel()).toBeNull();
+        expect(el.getAttribute("title")).toBe("");
+        over(plain);
+        expect(el.getAttribute("title")).toBe("Save");
+        over(el);
+        await settle(100);
+        expect(panel()!.textContent).toBe("Save");
+    });
+
     it("keeps showing while the pointer moves inside an element whose title it took", async () => {
         const el = add('<button title="Save"><i class="icon"></i></button>');
         over(el);
