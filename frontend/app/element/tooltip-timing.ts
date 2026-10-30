@@ -41,3 +41,9 @@ export function releaseOpen(tip: OpenTip): void {
 export function forgetOpen(tip: OpenTip): void {
     if (openTip === tip) openTip = null;
 }
+
+/** For tests: forget every open tooltip and the last close, so nothing counts as warm. */
+export function resetTooltipTiming(): void {
+    openTip = null;
+    lastClosedAt = Number.NEGATIVE_INFINITY;
+}

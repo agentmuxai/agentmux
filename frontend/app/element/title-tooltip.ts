@@ -3,7 +3,7 @@
 //
 // One delegated listener that shows the shared tooltip for every element with a native `title=`
 // (the browser's own waits 0.5 to 1 s and cannot be sped up). The first time the pointer rests on
-// one, its `title` moves to `data-tip` and tooltip-timing.ts takes over. The label stays for
+// one, its `title` moves to `data-title-tip` and tooltip-timing.ts takes over. The label stays for
 // assistive technology: `aria-label` on an element with no text, else `aria-description`.
 // Opt out with `data-native-title`; option, optgroup and iframe keep their native title.
 
@@ -11,10 +11,11 @@ import { autoUpdate, computePosition, flip, offset, shift } from "@floating-ui/d
 import { isPrimaryButtonDown } from "@/app/util/pointer-drag-state";
 import { claimOpen, HIDE_DELAY_MS, isWarm, releaseOpen, SHOW_DELAY_MS, type OpenTip } from "./tooltip-timing";
 
-const CANDIDATE = "[title], [data-tip]";
+// Not `data-tip`: status bar items and the editor toolbar already draw tooltips from that attribute.
+const CANDIDATE = "[title], [data-title-tip]";
 const KEEP_NATIVE = "option, optgroup, iframe, [data-native-title]";
 /** Set on an element whose `aria-label` is this tooltip's text, so a changed title can replace it. */
-const LABELLED = "data-tip-aria";
+const LABELLED = "data-title-tip-aria";
 
 const PANEL_CLASS =
     "bg-modalbg border border-border rounded-md px-2 py-1 text-xs text-foreground shadow-xl z-[var(--z-tooltip)]";
@@ -30,16 +31,16 @@ function hasOwnText(el: HTMLElement): boolean {
     return (el.textContent ?? "").trim() !== "" || (el instanceof HTMLImageElement && el.alt !== "");
 }
 
-/** Move `el`'s `title` to `data-tip`, keeping its accessible label. Returns the label ("" for none). */
+/** Move `el`'s `title` to `data-title-tip`, keeping its accessible label. Returns the label ("" for none). */
 export function takeTitle(el: HTMLElement): string {
     const title = el.getAttribute("title");
-    if (title === null) return el.dataset.tip ?? "";
+    if (title === null) return el.dataset.titleTip ?? "";
     el.removeAttribute("title");
     if (title === "") {
-        delete el.dataset.tip;
+        delete el.dataset.titleTip;
         return "";
     }
-    el.dataset.tip = title;
+    el.dataset.titleTip = title;
     if (el.hasAttribute("aria-label") && !el.hasAttribute(LABELLED)) return title;
     if (el.hasAttribute("aria-labelledby") || hasOwnText(el)) el.setAttribute("aria-description", title);
     else {
@@ -104,6 +105,8 @@ export function initTitleTooltips(doc: Document = document): () => void {
     }
 
     const openFor = (el: HTMLElement, text: string) => {
+        // Moving straight from one titled element to the next is a hand-over, whatever the shared state says.
+        const handOver = current !== null;
         clearTimers();
         stopAutoUpdate?.();
         claimOpen(self);
@@ -124,7 +127,7 @@ export function initTitleTooltips(doc: Document = document): () => void {
         doc.body.append(panel);
         stopAutoUpdate = autoUpdate(el, panel, () => void place());
         void place();
-        const delay = isWarm(self) ? 0 : SHOW_DELAY_MS;
+        const delay = handOver || isWarm(self) ? 0 : SHOW_DELAY_MS;
         const show = () => {
             visible = true;
             paint();

@@ -13,11 +13,14 @@ vi.mock("@floating-ui/dom", () => ({
 }));
 
 import { initTitleTooltips, takeTitle } from "./title-tooltip";
+import { resetTooltipTiming } from "./tooltip-timing";
 
 let stop: () => void;
 beforeEach(() => {
     vi.useFakeTimers();
     stop = initTitleTooltips(document);
+    // Whatever an earlier test left open or just closed no longer counts as warm.
+    resetTooltipTiming();
 });
 afterEach(() => {
     stop();
@@ -36,11 +39,11 @@ function add(html: string): HTMLElement {
 }
 
 describe("takeTitle", () => {
-    it("moves the title to data-tip and labels an element that has no text of its own", () => {
+    it("moves the title to data-title-tip and labels an element that has no text of its own", () => {
         const el = add('<button title="Close"><i></i></button>');
         expect(takeTitle(el)).toBe("Close");
         expect(el.hasAttribute("title")).toBe(false);
-        expect(el.dataset.tip).toBe("Close");
+        expect(el.dataset.titleTip).toBe("Close");
         expect(el.getAttribute("aria-label")).toBe("Close");
     });
 
@@ -63,7 +66,7 @@ describe("takeTitle", () => {
         expect(el.getAttribute("aria-label")).toBe("Two");
         el.setAttribute("title", "");
         expect(takeTitle(el)).toBe("");
-        expect(el.dataset.tip).toBeUndefined();
+        expect(el.dataset.titleTip).toBeUndefined();
     });
 });
 
@@ -99,10 +102,13 @@ describe("the delegated tooltip", () => {
         expect(panel()).toBeNull();
     });
 
-    it("moves to the next titled element at once", async () => {
+    it("moves to the next titled element at once, from a cold start", async () => {
         const host = add('<div><button title="One">1</button><button title="Two">2</button></div>');
         const [one, two] = [...host.querySelectorAll("button")];
         over(one);
+        await settle(20);
+        // The first one is still within its 40 ms rest: a cold start waits.
+        expect(panel()!.style.opacity).toBe("0");
         await settle(100);
         over(two);
         await settle(20);
@@ -129,6 +135,13 @@ describe("the delegated tooltip", () => {
             expect(el.getAttribute("title")).not.toBeNull();
             expect(panel()).toBeNull();
         }
+    });
+
+    it("leaves an element that has its own data-tip tooltip alone", async () => {
+        const el = add('<span data-tip="Mine">x</span>');
+        over(el);
+        await settle(100);
+        expect(panel()).toBeNull();
     });
 
     it("shows nothing for an empty title", async () => {
