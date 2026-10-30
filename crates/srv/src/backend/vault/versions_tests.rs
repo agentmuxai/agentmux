@@ -167,3 +167,65 @@ fn a_version_past_its_seven_days_is_never_put_back_even_before_it_is_pruned() {
     let err = restore(&s, &id, seq).unwrap_err();
     assert!(err.contains("past its 7 days"), "{err}");
 }
+
+fn value_of(s: &Store, vault: &str) -> String {
+    let t = crate::backend::vault::command_target(s, vault).unwrap();
+    crate::backend::vault::value_for_command(s, &t).unwrap().to_string()
+}
+
+#[test]
+fn a_rotation_keeps_its_value_pending_until_it_succeeds() {
+    let s = store();
+    let id = create(&s, key("sk_live_first_value")).unwrap();
+    let r = start_rotation(&s, &id, "sk_live_rotated_value", "Agent2-6").unwrap();
+    assert_eq!(current(&s, &id), "sk_live_first_value", "nothing is given the new value yet");
+    assert_eq!(value_of(&s, &format!("{id}@pending")), "sk_live_rotated_value");
+    assert!(start_rotation(&s, &id, "sk_live_another_value", "Agent2-6").unwrap_err().contains("being rotated already"));
+    finish_rotation(&s, &id, &r, Ok(()), "Agent2-6").unwrap();
+    assert_eq!(current(&s, &id), "sk_live_rotated_value");
+    assert_eq!(value_of(&s, &format!("{id}@previous")), "sk_live_first_value", "the old value is kept, and a command can name it");
+    let versions = list(&s, &id).unwrap();
+    assert_eq!(versions.len(), 1, "the pending row became the value: only the old one is left");
+    assert_eq!((versions[0].state.as_str(), versions[0].how.as_str()), (PREVIOUS, "rotated"));
+}
+
+#[test]
+fn a_failed_rotation_keeps_the_old_value_and_marks_the_new_one_with_its_step() {
+    let s = store();
+    let id = create(&s, key("sk_live_first_value")).unwrap();
+    let r = start_rotation(&s, &id, "sk_live_rotated_value", "Agent2-6").unwrap();
+    finish_rotation(&s, &id, &r, Err(3), "Agent2-6").unwrap();
+    assert_eq!(current(&s, &id), "sk_live_first_value");
+    let versions = list(&s, &id).unwrap();
+    assert_eq!(versions[0].state, "rotation failed at step 3");
+    // The service may hold it: the person can put it in.
+    restore(&s, &id, versions[0].seq).unwrap();
+    assert_eq!(current(&s, &id), "sk_live_rotated_value");
+    // And a new rotation may start once the failed one is done with.
+    assert!(start_rotation(&s, &id, "sk_live_third_value", "Agent2-6").is_ok());
+}
+
+#[test]
+fn a_pending_value_left_by_a_stopped_srv_is_marked_interrupted_and_frees_the_entry() {
+    let s = store();
+    let id = create(&s, key("sk_live_first_value")).unwrap();
+    let row = s.vault_get(&id).unwrap().unwrap();
+    let mut stale = of(&row, "Agent2-6", "rotated");
+    stale.state = PENDING.into();
+    stale.replaced_at = now_ms() - 60 * 60 * 1000;
+    s.vault_version_add(&stale).unwrap();
+    start_rotation(&s, &id, "sk_live_rotated_value", "Agent2-6").unwrap();
+    let states: Vec<String> = list(&s, &id).unwrap().into_iter().map(|v| v.state).collect();
+    assert!(states.contains(&INTERRUPTED.to_string()) && states.contains(&PENDING.to_string()), "{states:?}");
+}
+
+#[test]
+fn a_command_names_only_previous_or_pending_and_says_when_there_is_none() {
+    let s = store();
+    let id = create(&s, key("sk_live_first_value")).unwrap();
+    let Err(e) = crate::backend::vault::command_target(&s, &format!("{id}@latest")) else { panic!("@latest is refused") };
+    assert!(e.contains("@previous"), "{e}");
+    let t = crate::backend::vault::command_target(&s, &format!("{id}@previous.value")).unwrap();
+    assert_eq!((t.version, t.part), (Some("previous"), "value"));
+    assert!(crate::backend::vault::value_for_command(&s, &t).unwrap_err().contains("no previous value"));
+}

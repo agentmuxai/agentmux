@@ -180,6 +180,41 @@ impl Store {
         Ok(true)
     }
 
+    /// Keeps a rotation's new value, not yet the entry's (`state` "pending"), and
+    /// returns its number; `None` when the entry already has one waiting since
+    /// `stale_before` or later (one rotation at a time). An older one waiting is
+    /// marked `interrupted`: its rotation never finished (srv stopped).
+    pub fn vault_version_pending(&self, v: &VaultVersionRow, stale_before: i64, interrupted: &str) -> Result<Option<i64>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let tx = conn.unchecked_transaction()?;
+        let waiting: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM db_vault_versions WHERE entry_id = ?1 AND entry_created_at = ?2 AND state = ?3 AND replaced_at >= ?4",
+            params![v.entry_id, v.entry_created_at, v.state, stale_before],
+            |r| r.get(0),
+        )?;
+        if waiting > 0 {
+            return Ok(None);
+        }
+        tx.execute(
+            "UPDATE db_vault_versions SET state = ?4 WHERE entry_id = ?1 AND entry_created_at = ?2 AND state = ?3",
+            params![v.entry_id, v.entry_created_at, v.state, interrupted],
+        )?;
+        tx.execute(
+            "INSERT INTO db_vault_versions (entry_id, entry_created_at, sealed, replaced_at, replaced_by, how, state) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![v.entry_id, v.entry_created_at, v.sealed, v.replaced_at, v.replaced_by, v.how, v.state],
+        )?;
+        let seq = tx.last_insert_rowid();
+        tx.commit()?;
+        Ok(Some(seq))
+    }
+
+    /// Sets version `seq`'s state (a rotation that failed); false if it is gone.
+    pub fn vault_version_mark(&self, seq: i64, state: &str) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        Ok(conn.execute("UPDATE db_vault_versions SET state = ?2 WHERE seq = ?1", params![seq, state])? > 0)
+    }
+
     /// Deletes the versions replaced before `before_ms`; returns how many.
     pub fn vault_versions_prune(&self, before_ms: i64) -> Result<usize, StoreError> {
         let conn = self.conn.lock().unwrap();

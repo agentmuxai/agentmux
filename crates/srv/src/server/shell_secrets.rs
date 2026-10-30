@@ -222,6 +222,34 @@ pub(super) async fn plan_capture(
 
 /// Resolves, asks for and reads the entries a command was given. `None` when it
 /// was given none.
+/// Commands a rotation (`Vault` `rotate`) runs, by agent and command line, which
+/// the person approved with the rotation: the next `inject` for one asks nothing
+/// more and may hand it the rotation's pending value (`id@pending`). Each is used
+/// once. Only srv's own rotation adds one; nothing an agent sends can.
+static PREAPPROVED: std::sync::LazyLock<std::sync::Mutex<Vec<(String, String)>>> = std::sync::LazyLock::new(Default::default);
+
+/// Marks `cmd`, run next for `agent`, as approved with its rotation.
+pub(super) fn preapprove(agent: &str, cmd: &str) {
+    PREAPPROVED.lock().unwrap_or_else(|e| e.into_inner()).push((agent.to_string(), cmd.to_string()));
+}
+
+/// Drops a mark a rotation's command never used (it couldn't start).
+pub(super) fn forget_preapproved(agent: &str, cmd: &str) {
+    take_preapproved(agent, cmd);
+}
+
+/// Whether `cmd` for `agent` was approved with a rotation, using the mark up.
+fn take_preapproved(agent: &str, cmd: &str) -> bool {
+    let mut marks = PREAPPROVED.lock().unwrap_or_else(|e| e.into_inner());
+    match marks.iter().position(|(a, c)| a == agent && c == cmd) {
+        Some(i) => {
+            marks.remove(i);
+            true
+        }
+        None => false,
+    }
+}
+
 pub(super) async fn inject(
     state: &AppState,
     agent_block_id: &str,
@@ -257,6 +285,11 @@ pub(super) async fn inject(
             .map_err(|e| refuse(StatusCode::BAD_REQUEST, e))?;
         targets.push((delivery, target));
     }
+    // A rotation's own command was approved with it; nothing else gets its pending value.
+    let preapproved = take_preapproved(&agent, cmd);
+    if !preapproved && targets.iter().any(|(_, t)| t.version == Some("pending")) {
+        return Err(refuse(StatusCode::BAD_REQUEST, "@pending is a rotation's new value: only that rotation's own commands get it"));
+    }
     let record = |t: &FillTarget, outcome: &str| {
         vault::record(&state.identity_store, &t.id, &t.label, &agent, "ran a command", &clip(cmd, 160), outcome);
         // Every window's Vault pane shows the new line of the record.
@@ -267,6 +300,9 @@ pub(super) async fn inject(
     // to use in commands: a grant is for one part (a card's expiry is not its number).
     let mut asked: Vec<&str> = Vec::new();
     for (_, first) in &targets {
+        if preapproved {
+            break;
+        }
         if asked.contains(&first.id.as_str()) {
             continue;
         }
@@ -327,8 +363,8 @@ pub(super) async fn inject(
     let mut files = Vec::new();
     let mut known: Vec<(String, String)> = Vec::new();
     for (delivery, target) in &targets {
-        let (store, id, part, created) = (state.identity_store.clone(), target.id.clone(), target.part, target.created_at);
-        let value = match tokio::task::spawn_blocking(move || vault::value_for_fill(&store, &id, created, part)).await {
+        let (store, t) = (state.identity_store.clone(), target.clone());
+        let value = match tokio::task::spawn_blocking(move || vault::value_for_command(&store, &t)).await {
             Ok(Ok(v)) => v,
             Ok(Err(e)) => {
                 record(target, "failed");
