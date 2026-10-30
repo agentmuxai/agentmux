@@ -14,7 +14,7 @@
 //! `requester`), re-timed or given other parameters.
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
-use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
+use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -165,6 +165,19 @@ fn plain(field: &str) -> bool {
     !field.contains(FIELD_SEP)
 }
 
+/// `reason` cut to what [`RemoteOp::check_shape`] takes: at most [`MAX_REASON_LEN`] bytes, on a character boundary.
+pub fn clip_reason(reason: &str) -> String {
+    let reason = reason.trim();
+    if reason.len() <= MAX_REASON_LEN {
+        return reason.to_string();
+    }
+    let mut end = MAX_REASON_LEN;
+    while !reason.is_char_boundary(end) {
+        end -= 1;
+    }
+    reason[..end].to_string()
+}
+
 impl RemoteOp {
     /// Why this envelope can't be signed or acted on, if it can't: a field that
     /// would blur the signed material, one that is empty or over its limit, or a
@@ -235,7 +248,7 @@ impl SignedRemoteOp {
         let Ok(key) = VerifyingKey::from_bytes(&key) else { return false };
         let Ok(bytes) = BASE64.decode(&self.sig) else { return false };
         let Ok(bytes) = <[u8; 64]>::try_from(bytes.as_slice()) else { return false };
-        key.verify(self.op.signed_material().as_bytes(), &Signature::from_bytes(&bytes)).is_ok()
+        key.verify_strict(self.op.signed_material().as_bytes(), &Signature::from_bytes(&bytes)).is_ok()
     }
 }
 
@@ -351,6 +364,19 @@ mod tests {
         big.params = json!({ "k": "z".repeat(MAX_PARAMS_BYTES) });
         assert_eq!(big.check_shape(), Err("too_long"));
         assert!(op().sign(&private[..31]).is_none());
+    }
+
+    #[test]
+    fn a_long_reason_in_any_script_is_clipped_to_a_signable_length() {
+        let (_, private) = keys();
+        for text in ["x".repeat(2000), "é".repeat(2000), "日本語".repeat(500), format!("  {}  ", "ü".repeat(MAX_REASON_LEN))] {
+            let clipped = clip_reason(&text);
+            assert!(clipped.len() <= MAX_REASON_LEN && !clipped.is_empty());
+            let mut o = op();
+            o.reason = clipped;
+            assert!(o.sign(&private).is_some());
+        }
+        assert_eq!(clip_reason("  short  "), "short");
     }
 
     #[test]

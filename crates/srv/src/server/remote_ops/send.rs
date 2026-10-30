@@ -112,7 +112,7 @@ async fn call_as(state: &AppState, slug: &str, uid: &str, host: &str, op: &str, 
         audience: lan_audience(&peer.auth_key),
         ts: agentmux_common::time::now_secs(),
         nonce: fresh_nonce(),
-        reason: reason.trim().chars().take(agentmux_common::remote_op::MAX_REASON_LEN).collect(),
+        reason: agentmux_common::remote_op::clip_reason(reason),
     };
     let nonce = envelope.nonce.clone();
     let Some(signed) = envelope.sign(&key) else {

@@ -41,6 +41,11 @@ impl Verification {
 }
 
 /// Who asks, as the receiving machine proved it.
+///
+/// The identity is the **slug**: the key this machine pinned for that name signed the request.
+/// `agent_uid` and `reason` are signed too, but nothing ties the uid to the key, so a handler
+/// uses them to describe the caller and never to authorize it. `instance_id` is the install
+/// whose certificate vouches for the agent's key; it is empty when no valid certificate is held.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RemoteCaller {
     pub agent_uid: String,
@@ -84,11 +89,34 @@ pub(crate) type RemoteResult = Result<Value, RemoteRefusal>;
 
 pub(crate) type OpFn = for<'a> fn(&'a AppState, &'a RemoteCaller, Value) -> BoxFuture<'a, RemoteResult>;
 
-/// The handler for `op`, if this build has one. One arm per operation.
-pub(crate) fn lookup(op: &str) -> Option<OpFn> {
+/// One operation: its handler, and whether it changes anything on this machine.
+#[derive(Clone, Copy)]
+pub(crate) struct Op {
+    pub run: OpFn,
+    /// A state-changing operation needs a caller backed by a certificate from the install that
+    /// hosts the agent (`needs_certificate` otherwise). A read can go on the first-seen pin alone:
+    /// that pin comes from unauthenticated discovery, which is enough to read a version and too
+    /// thin to stop an agent or move an account.
+    pub changes_state: bool,
+}
+
+impl Op {
+    pub(crate) const fn read(run: OpFn) -> Self {
+        Self { run, changes_state: false }
+    }
+
+    pub(crate) const fn write(run: OpFn) -> Self {
+        Self { run, changes_state: true }
+    }
+}
+
+/// The operation `op`, if this build has one. One arm per operation: say whether it reads or writes.
+pub(crate) fn lookup(op: &str) -> Option<Op> {
     Some(match op {
-        "app.version" => |state, caller, params| Box::pin(app_ops::version(state, caller, params)),
-        "app.health" => |state, caller, params| Box::pin(app_ops::health(state, caller, params)),
+        "app.version" => Op::read(|state, caller, params| Box::pin(app_ops::version(state, caller, params))),
+        "app.health" => Op::read(|state, caller, params| Box::pin(app_ops::health(state, caller, params))),
+        #[cfg(test)]
+        "test.change" => Op::write(|_, caller, _| Box::pin(async move { Ok(serde_json::json!({ "changed_by": caller.actor() })) })),
         _ => return None,
     })
 }

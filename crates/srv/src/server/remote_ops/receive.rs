@@ -9,12 +9,14 @@
 //! 1. the call came over the LAN key (a peer), not a local credential;
 //! 2. this machine takes remote operations at all (`network:remote_ops`);
 //! 3. the envelope is well formed, and meant for this machine (`audience`);
-//! 4. it is fresh (a minute either way);
+//! 4. it is fresh (a minute either way) and not older than this srv: the nonce store is in
+//!    memory, so a request signed before a restart could be replayed after it;
 //! 5. its signature verifies under the key this machine pins for that agent
 //!    (`reactive::lan_signer`, the same judgement a LAN jekt gets), and the install
 //!    the agent's certificate names, when one is on hand, is the install it claims;
-//! 6. the nonce is new, or the first answer is repeated;
-//! 7. the operation exists, and runs under a [`RemoteCaller`].
+//! 6. the operation exists, and a state-changing one has a certificate-backed caller;
+//! 7. the nonce is new, or the first answer is repeated;
+//! 8. the operation runs under a [`RemoteCaller`].
 //!
 //! The broadcast `lan_key` only gets a request here; it never authorizes one.
 
@@ -54,6 +56,13 @@ struct Entry {
 
 static NONCES: LazyLock<Mutex<HashMap<(String, String), Entry>>> = LazyLock::new(Default::default);
 
+/// When this srv started, in Unix seconds: forced when the routes are built.
+static STARTED_AT: LazyLock<i64> = LazyLock::new(agentmux_common::time::now_secs);
+
+pub(crate) fn mark_started() {
+    LazyLock::force(&STARTED_AT);
+}
+
 /// What a nonce said when it came in.
 enum Reservation {
     First,
@@ -82,16 +91,49 @@ fn settle(key: &(String, String), result: &RemoteOpResult) {
     }
 }
 
-/// The name of the machine at `ip`, from the LAN peers; a short label when none is known.
-fn machine_name(state: &AppState, from: Option<SocketAddr>) -> String {
+/// The name of the machine at `from`, among the LAN `peers`; a short label when none is known.
+pub(super) fn machine_in(peers: &[crate::backend::lan_discovery::LanInstance], from: Option<SocketAddr>) -> String {
     let Some(ip) = from.map(|a| a.ip().to_string()) else { return "unknown machine".into() };
-    state
-        .lan_discovery
-        .get_instances()
-        .into_iter()
+    peers
+        .iter()
         .find(|p| p.address == ip && !p.hostname.trim().is_empty())
         .map(|p| p.hostname.trim().to_string())
         .unwrap_or_else(|| "unknown machine".into())
+}
+
+fn machine_name(state: &AppState, from: Option<SocketAddr>) -> String {
+    machine_in(&state.lan_discovery.get_instances(), from)
+}
+
+/// Peers whose unproven refusal was written to the audit trail lately, so a flood of bad requests
+/// from one address makes one row a minute, not a row each.
+static UNPROVEN_AUDITED: LazyLock<Mutex<HashMap<(String, String), i64>>> = LazyLock::new(Default::default);
+const UNPROVEN_AUDIT_EVERY_SECS: i64 = 60;
+const UNPROVEN_AUDIT_MAX_PEERS: usize = 256;
+
+/// A request refused before its signature verified: nobody is proven, so the row names the peer's
+/// address, not the agent the request claims to be, and keeps none of the request's own text.
+fn audit_unproven(state: &AppState, from: Option<SocketAddr>, reason: &str, now: i64) {
+    let peer = from.map(|a| a.ip().to_string()).unwrap_or_else(|| "unknown peer".into());
+    {
+        let mut seen = UNPROVEN_AUDITED.lock().unwrap_or_else(|e| e.into_inner());
+        seen.retain(|_, at| now - *at < UNPROVEN_AUDIT_EVERY_SECS);
+        let key = (peer.clone(), reason.to_string());
+        if seen.contains_key(&key) || seen.len() >= UNPROVEN_AUDIT_MAX_PEERS {
+            return;
+        }
+        seen.insert(key, now);
+    }
+    state.reactive_handler.log_fleet_action_audit(
+        Some(&format!("unproven peer {peer}")),
+        "remote-op",
+        "",
+        "remote.refused (unproven)",
+        false,
+        Some(reason),
+        "",
+        None,
+    );
 }
 
 /// The audit row on this machine: `remote.<op>`, by `agent@machine`, with how it was proven and how it ended.
@@ -118,16 +160,27 @@ pub(crate) async fn handle_remote_op(
 ) -> Json<RemoteOpResult> {
     let peer_ip = peer.map(|c| c.0);
     let via = via.map(|Extension(v)| v);
-    Json(receive(&state, via, peer_ip, signed, agentmux_common::time::now_secs()).await)
+    Json(receive(&state, via, peer_ip, signed, agentmux_common::time::now_secs(), *STARTED_AT).await)
 }
 
-/// [`handle_remote_op`] without the HTTP: `now` is the clock.
-pub(super) async fn receive(state: &AppState, via: Option<ReactiveAuthVia>, from: Option<SocketAddr>, signed: SignedRemoteOp, now: i64) -> RemoteOpResult {
+/// [`handle_remote_op`] without the HTTP: `now` is the clock and `started_at` when this srv began.
+pub(super) async fn receive(
+    state: &AppState,
+    via: Option<ReactiveAuthVia>,
+    from: Option<SocketAddr>,
+    signed: SignedRemoteOp,
+    now: i64,
+    started_at: i64,
+) -> RemoteOpResult {
     let op = &signed.op;
     let who = format!("{}@{}", op.requester.slug, machine_name(state, from));
     let refuse = |reason: &str, proof: &str| {
         let result = RemoteOpResult::refused(reason);
-        audit(state, &who, &op.op, proof, &result, &op.nonce, &op.reason);
+        if proof == "unproven" {
+            audit_unproven(state, from, reason, now);
+        } else {
+            audit(state, &who, &op.op, proof, &result, &op.nonce, &op.reason);
+        }
         result
     };
     if via != Some(ReactiveAuthVia::LanKey) {
@@ -145,6 +198,9 @@ pub(super) async fn receive(state: &AppState, via: Option<ReactiveAuthVia>, from
     if (now - op.ts).abs() > REMOTE_OP_MAX_SKEW_SECS {
         return refuse("stale_request", "unproven");
     }
+    if op.ts < started_at {
+        return refuse("signed_before_restart", "unproven");
+    }
     let key = match lan_signer::resolve(state, &op.requester.slug).await {
         SignerKey::Pinned(key) => key,
         SignerKey::Unknown => return refuse("unknown_sender", "unproven"),
@@ -155,7 +211,13 @@ pub(super) async fn receive(state: &AppState, via: Option<ReactiveAuthVia>, from
     }
     // The install is named by the certificate its agent's host issued, when this machine holds
     // one; the request's own claim must agree with it, and is not believed alone.
-    let instance_id = match state.lan_discovery.cached_lan_cert(&op.requester.slug) {
+    // A certificate counts only if it certifies this agent's name and exactly this key, on the LAN
+    // channel, and is fresh (`lan_continuity::check_cert`); the cert carries the slug, not the uid.
+    let cert = state
+        .lan_discovery
+        .cached_lan_cert(&op.requester.slug)
+        .filter(|cert| crate::server::reactive::lan_continuity::check_cert(cert, &op.requester.slug, &key, 0, now).is_ok());
+    let instance_id = match cert {
         Some(cert) if !op.requester.instance_id.is_empty() && cert.instance_id != op.requester.instance_id => {
             return refuse("install_mismatch", "lan-verified");
         }
@@ -171,19 +233,19 @@ pub(super) async fn receive(state: &AppState, via: Option<ReactiveAuthVia>, from
         reason: op.reason.clone(),
     };
     let proof = caller.verification.as_str();
+    let Some(operation) = lookup(&op.op) else {
+        return refuse("unknown_op", proof);
+    };
+    if operation.changes_state && caller.instance_id.is_empty() {
+        return refuse("needs_certificate", proof);
+    }
     let nonce_key = (op.requester.slug.to_ascii_lowercase(), op.nonce.clone());
     match reserve(&nonce_key, now) {
         Ok(Reservation::First) => {}
         Ok(Reservation::Repeat(first)) => return first,
         Err(why) => return refuse(why, proof),
     }
-    let Some(handler) = lookup(&op.op) else {
-        let result = RemoteOpResult::refused("unknown_op");
-        audit(state, &who, &op.op, proof, &result, &op.nonce, &op.reason);
-        settle(&nonce_key, &result);
-        return result;
-    };
-    let ran: RemoteResult = match tokio::time::timeout(RUN_TIMEOUT, handler(state, &caller, op.params.clone())).await {
+    let ran: RemoteResult = match tokio::time::timeout(RUN_TIMEOUT, (operation.run)(state, &caller, op.params.clone())).await {
         Ok(ran) => ran,
         Err(_) => Err(super::RemoteRefusal::failed("the operation did not finish in time")),
     };

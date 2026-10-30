@@ -105,6 +105,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
     // broader surface (the general `auth_middleware` there requires the
     // full `auth_key` only). See `lan_or_full_auth_middleware`'s doc
     // comment for why this can't just be nested inside `authed_routes`.
+    super::remote_ops::receive::mark_started();
     let lan_forward_routes = Router::new()
         .route("/agentmux/reactive/inject", post(reactive::handle_reactive_inject))
         // A typed request from an agent on another machine, which this srv carries out itself
