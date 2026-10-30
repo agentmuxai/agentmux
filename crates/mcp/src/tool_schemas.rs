@@ -424,7 +424,9 @@ pub(crate) const IDENTITY_TOOL: &str = r#"{
       "scope":      { "type": "string", "enum": ["mine", "machine"], "description": "accounts: mine (default) or machine: every signed-in account here, with quota" },
       "account":    { "type": "string", "description": "switch: the account to move to: stable_id, account_id, label, email, or any with quota" },
       "agent":      { "type": "string", "description": "switch: the agent to move, or all limited; yourself when absent" },
-      "when":       { "type": "string", "enum": ["after_turn", "now"], "description": "switch: after_turn (default) or now" }
+      "when":       { "type": "string", "enum": ["after_turn", "now"], "description": "switch: after_turn (default) or now" },
+      "host":       { "type": "string", "description": "accounts, switch: another machine, by the name Agents list shows, to run it there instead of here (accounts lists that machine's accounts; switch needs agent, which is an agent on that machine). Named on each call, never remembered. A switch there needs that machine to trust your install (needs_certificate otherwise). Absent means this machine." },
+      "reason":     { "type": "string", "description": "accounts, switch with a host: one line, why; the other machine records it" }
     },
     "required": ["action"]
   }

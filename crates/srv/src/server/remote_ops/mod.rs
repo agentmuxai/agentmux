@@ -14,6 +14,7 @@
 
 pub(crate) mod app_ops;
 pub(crate) mod fleet_sync;
+pub(crate) mod identity_ops;
 pub(crate) mod memory;
 pub(crate) mod receive;
 pub(crate) mod send;
@@ -137,6 +138,10 @@ pub(crate) fn lookup(op: &str) -> Option<Op> {
     Some(match op {
         "app.version" => Op::read(|state, caller, params| Box::pin(app_ops::version(state, caller, params))),
         "app.health" => Op::read(|state, caller, params| Box::pin(app_ops::health(state, caller, params))),
+        // The signed-in accounts here with quota, and moving an agent to one: a switch changes
+        // state, so it needs a certificate-backed caller.
+        "identity.accounts" => Op::read(|state, caller, params| Box::pin(identity_ops::accounts(state, caller, params))),
+        "identity.switch" => Op::write(|state, caller, params| Box::pin(identity_ops::switch(state, caller, params))),
         // A Global Memory entry is up to 1 MiB of text (the cap `globalmemory.write` has), so this one
         // takes 1.2 MB of params; every other operation keeps the default.
         "memory.global.put" => Op::write(|state, caller, params| Box::pin(memory::put(state, caller, params))).with_max_params(memory::MAX_PUT_PARAMS),

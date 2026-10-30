@@ -6,8 +6,45 @@
 
 use super::*;
 
+fn str_arg(args: &Value, key: &str) -> Option<String> {
+    args.get(key).and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty()).map(str::to_string)
+}
+
+/// The remote operation and params for `accounts` or `switch` with a `host`.
+fn remote_request(name: &str, arguments: &Value) -> Result<(&'static str, Value)> {
+    match name {
+        "IdentityAccounts" => Ok(("identity.accounts", json!({}))),
+        _ => {
+            let account = str_arg(arguments, "account").ok_or_else(|| anyhow::anyhow!("missing required parameter: account"))?;
+            let agent = str_arg(arguments, "agent")
+                .ok_or_else(|| anyhow::anyhow!("with a host, name the agent on that machine (or \"all limited\"): there is no \"yourself\" across machines"))?;
+            let mut params = json!({ "agent_id": agent, "account": account });
+            if let Some(when) = str_arg(arguments, "when") {
+                params["when"] = json!(when);
+            }
+            Ok(("identity.switch", params))
+        }
+    }
+}
+
+/// `accounts` or `switch` on another machine, from its own answer.
+async fn remote(name: &str, arguments: &Value, cx: &ToolCtx<'_>, host: &str) -> Result<String> {
+    let (op, params) = remote_request(name, arguments)?;
+    let reason = str_arg(arguments, "reason").unwrap_or_else(|| format!("Identity {}", op.trim_start_matches("identity.")));
+    let answer = remote_op::remote_op_call(cx, host, op, params, &reason).await?;
+    match remote_op::explain_not_done(host, op, &answer) {
+        Some(problem) => anyhow::bail!("{problem}"),
+        None => Ok(remote_op::pretty(host, &answer)),
+    }
+}
+
 pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     let ToolCtx { local_url, auth_key, block_id, client, .. } = *cx;
+    if matches!(name, "IdentityAccounts" | "IdentitySwitch") {
+        if let Some(host) = remote_op::host_arg(arguments) {
+            return remote(name, arguments, cx, &host).await;
+        }
+    }
     match name {
         "IdentityAccounts" => {
             require_agent_env(local_url, auth_key, block_id)?;
@@ -97,5 +134,27 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))
         }
         _ => Err(not_in_family()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn accounts_on_a_host_asks_for_the_listing() {
+        let (op, params) = remote_request("IdentityAccounts", &json!({ "host": "charlie" })).unwrap();
+        assert_eq!((op, params), ("identity.accounts", json!({})));
+    }
+
+    #[test]
+    fn a_switch_on_a_host_names_the_agent_and_the_account() {
+        let args = json!({ "host": "charlie", "agent": "Opaz", "account": "any with quota", "when": "now" });
+        let (op, params) = remote_request("IdentitySwitch", &args).unwrap();
+        assert_eq!(op, "identity.switch");
+        assert_eq!(params, json!({ "agent_id": "Opaz", "account": "any with quota", "when": "now" }));
+        let e = remote_request("IdentitySwitch", &json!({ "host": "charlie", "account": "x" })).unwrap_err().to_string();
+        assert!(e.contains("name the agent"), "{e}");
+        assert!(remote_request("IdentitySwitch", &json!({ "host": "charlie", "agent": "Opaz" })).is_err());
     }
 }
