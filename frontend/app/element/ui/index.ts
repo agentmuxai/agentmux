@@ -29,6 +29,22 @@ export { SegmentedControl, type SegmentedControlProps, type SegmentedOption } fr
 export { densityClass, type UiDensity, type UiTone } from "./shared";
 export { StatusDot, type StatusDotProps, type StatusTone } from "./StatusDot";
 export {
+    FilterChip,
+    FilterChips,
+    Tag,
+    TagList,
+    TAG_GROUPS,
+    type FilterChipProps,
+    type FilterChipsProps,
+    type TagCorner,
+    type TagGroup,
+    type TagKind,
+    type TagListProps,
+    type TagProps,
+    type TagSpec,
+    type TagTone,
+} from "./Tag";
+export {
     TabbedPane,
     tabId,
     tabPanelId,

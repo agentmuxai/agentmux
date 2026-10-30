@@ -14,6 +14,7 @@ import {
     deadFallbacks,
     declarations,
     handFocusRings,
+    handRolledTags,
     parseCatFileBatch,
     pickBase,
     rawDurations,
@@ -366,5 +367,54 @@ describe("pickBase", () => {
 
     it("has nothing to compare against for a root commit", () => {
         expect(pickBase("head", "head", null)).toBeNull();
+    });
+});
+
+describe("rule 13: hand-drawn tags", () => {
+    const box = "padding: 0 8px; font-size: var(--text-xs); border-radius: var(--radius-full);";
+    const nl = "\n";
+
+    it("counts a rule named like a tag that gives itself a box", () => {
+        const scss = `.card-badge { ${box} } .row-chip { ${box} } .x-tag { ${box} } .a-pill { ${box} } .install-ribbon { ${box} }`;
+        expect(handRolledTags(scss)).toEqual([".card-badge", ".row-chip", ".x-tag", ".a-pill", ".install-ribbon"]);
+    });
+
+    it("takes a background as the box, and padding-inline as padding", () => {
+        expect(handRolledTags(".n-badge { padding-inline: 4px; font-size: 10px; background: var(--tint-2); }")).toEqual([".n-badge"]);
+        expect(handRolledTags(".n-badge { padding: 4px; font-size: 10px; background-color: var(--tint-2); }")).toEqual([".n-badge"]);
+    });
+
+    it("adds up a rule written in two blocks, and resolves nesting", () => {
+        const scss = ".list { .x-chip { padding: 0 4px; } .x-chip { font-size: 10px; border-radius: 0; } }";
+        expect(handRolledTags(scss)).toEqual([".list .x-chip"]);
+    });
+
+    it("leaves out a rule that is only a colour or a position, a modifier, a state and a class not named like a tag", () => {
+        expect(handRolledTags(".a-badge { color: red; position: absolute; }")).toEqual([]);
+        expect(handRolledTags(`.a-badge--active { ${box} }`)).toEqual([]);
+        expect(handRolledTags(`.a-badge:hover { ${box} }`)).toEqual([]);
+        expect(handRolledTags(`.badges-row { ${box} }`)).toEqual([]);
+        expect(handRolledTags(`.attachment { ${box} }`)).toEqual([]);
+    });
+
+    it("does not count a mixin's body, or a rule marked // tag: fixed (above it, on it or inside it)", () => {
+        expect(handRolledTags(`@mixin m { .a-chip { ${box} } }`)).toEqual([]);
+        expect(handRolledTags(`// tag: fixed - a toggle, not a tag${nl}.a-chip { ${box} }`)).toEqual([]);
+        expect(handRolledTags(`.a-chip { // tag: fixed${nl}${box} }`)).toEqual([]);
+        expect(handRolledTags(`.a-chip {${nl}padding: 0 4px;${nl}// tag: fixed${nl}font-size: 10px; border-radius: 0; }`)).toEqual([]);
+        expect(handRolledTags(`// tag: fixed${nl}.a-chip { ${box} }${nl}${nl}${nl}${nl}.b-chip { ${box} }`)).toEqual([".b-chip"]);
+    });
+
+    it("collect counts them per file outside element/ui, and not in the kit itself", () => {
+        const files = [
+            { path: "frontend/app/view/x/x.scss", source: `.x-badge { ${box} } .y-tag { ${box} }` },
+            { path: "frontend/app/element/ui/tag.scss", source: `.ui-tag { ${box} }` },
+        ];
+        expect(collect(files).tags).toEqual({ "frontend/app/view/x/x.scss": 2 });
+    });
+
+    it("compare fails a file whose count grows", () => {
+        const { grew } = compare({ tags: { "a.scss": 3 } }, { tags: { "a.scss": 2 } });
+        expect(grew).toEqual(["tags: a.scss has 3, base 2"]);
     });
 });
