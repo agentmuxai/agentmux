@@ -60,6 +60,19 @@ fn without_provider_ids_the_email_names_the_account() {
 }
 
 #[test]
+fn only_the_shape_a_stable_id_has_passes_for_one() {
+    for ok in ["claude:0123456789abcdef", "claude:e0123456789abcde", "codex:e1"] {
+        assert!(is_stable_id(ok), "{ok}");
+    }
+    for bad in ["", "claude", "claude:", ":abc", "me@example.com", "claude:ABC", "claude:a b", "claude:a:b", &"x".repeat(80)] {
+        assert!(!is_stable_id(bad), "{bad}");
+    }
+    let dir = signed_in_dir("acc-1", "org-1", "me@example.com");
+    let made = stable_account_id(&account("x", "claude", dir.path(), "me@example.com")).unwrap();
+    assert!(is_stable_id(&made), "{made}");
+}
+
+#[test]
 fn an_account_with_no_provider_ids_and_no_email_has_no_stable_id() {
     let empty = tempfile::tempdir().unwrap();
     let mut a = account("x", "anthropic", empty.path(), "");
