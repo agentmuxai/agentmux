@@ -224,6 +224,17 @@ fn apply(state: &AppState, actor: &Actor, changes: Vec<SeatChange>, remote: &[St
 
 async fn run(state: &AppState, caller: Option<&Caller>, req: SetSeatsRequest) -> Result<Value, Refusal> {
     let actor = actor_of(state, caller)?;
+    run_as(state, actor, req).await
+}
+
+/// `set_seat` for an agent on another machine (`remote_ops::agent_ops`): the same checks and write a
+/// local call has, recorded under `who` (`slug@machine`).
+pub(crate) async fn run_remote(state: &AppState, who: &str, req: SetSeatsRequest) -> Result<Value, (StatusCode, String)> {
+    let actor = Actor { uid: format!("remote:{who}"), slug: who.to_string(), name: who.to_string() };
+    run_as(state, actor, req).await.map_err(|r| (r.status, r.message))
+}
+
+async fn run_as(state: &AppState, actor: Actor, req: SetSeatsRequest) -> Result<Value, Refusal> {
     let outcome = {
         let (s, a) = (state.clone(), Actor { uid: actor.uid.clone(), slug: actor.slug.clone(), name: actor.name.clone() });
         tokio::task::spawn_blocking(move || changes_of(&s, req).and_then(|(changes, remote)| apply(&s, &a, changes, &remote)))

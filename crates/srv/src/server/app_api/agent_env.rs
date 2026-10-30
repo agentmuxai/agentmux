@@ -154,6 +154,21 @@ static ENV_WRITE: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn run(state: &AppState, caller: Option<&Caller>, req: AgentEnvRequest) -> Result<Value, Refusal> {
     let actor = actor_of(state, caller)?;
+    run_as(state, actor, req)
+}
+
+/// `env_get` or `env_set` for an agent on another machine (`remote_ops::agent_ops`): the same rules and
+/// write a local call has, recorded under `who` (`slug@machine`). The agent must be named: a remote
+/// caller has no definition here to default to.
+pub(crate) fn run_remote(state: &AppState, who: &str, req: AgentEnvRequest) -> Result<Value, (StatusCode, String)> {
+    if req.agent.as_deref().map(str::trim).filter(|a| !a.is_empty()).is_none() {
+        return Err((StatusCode::BAD_REQUEST, "INVALID_ARG: agent is required: the id or slug of an agent on this machine".to_string()));
+    }
+    let actor = Actor { uid: format!("remote:{who}"), slug: who.to_string(), name: who.to_string() };
+    run_as(state, actor, req).map_err(|r| (r.status, r.message))
+}
+
+fn run_as(state: &AppState, actor: Actor, req: AgentEnvRequest) -> Result<Value, Refusal> {
     let target = target_of(state, &actor, req.agent.as_deref())?;
     let _writing = (req.action == "set").then(|| ENV_WRITE.lock().unwrap_or_else(|poisoned| poisoned.into_inner()));
     let current = current_text(state, &target.id)?;

@@ -12,6 +12,7 @@
 //!
 //! To add an operation: write `async fn` in a file of its own, and add one arm to [`lookup`].
 
+pub(crate) mod agent_ops;
 pub(crate) mod app_ops;
 pub(crate) mod receive;
 pub(crate) mod send;
@@ -120,6 +121,12 @@ pub(crate) fn lookup(op: &str) -> Option<Op> {
     Some(match op {
         "app.version" => Op::read(|state, caller, params| Box::pin(app_ops::version(state, caller, params))),
         "app.health" => Op::read(|state, caller, params| Box::pin(app_ops::health(state, caller, params))),
+        "agents.start" => Op::write(|state, caller, params| Box::pin(agent_ops::start(state, caller, params))),
+        "agents.stop" => Op::write(|state, caller, params| Box::pin(agent_ops::stop(state, caller, params))),
+        "agents.set_seat" => Op::write(|state, caller, params| Box::pin(agent_ops::set_seat(state, caller, params))),
+        // A write too: an environment holds the operator's own lines, and a read can go on a first-seen pin.
+        "agents.env_get" => Op::write(|state, caller, params| Box::pin(agent_ops::env_get(state, caller, params))),
+        "agents.env_set" => Op::write(|state, caller, params| Box::pin(agent_ops::env_set(state, caller, params))),
         #[cfg(test)]
         "test.change" => Op::write(|_, caller, _| Box::pin(async move { Ok(serde_json::json!({ "changed_by": caller.actor() })) })),
         _ => return None,

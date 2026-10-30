@@ -472,6 +472,8 @@ pub(crate) const AGENTS_TOOL: &str = r#"{
     "type": "object",
     "properties": {
       "action":           { "type": "string", "enum": ["list", "conversations", "transcript", "open", "spawn", "workers", "start", "stop", "detach", "watch", "search_history", "context", "compact", "fresh", "env_get", "env_set", "set_seat", "update_container", "message_stats", "set_container_limits"], "description": "What to do" },
+      "host":             { "type": "string", "description": "start, stop, set_seat, env_get, env_set: another machine, by the name Agents list shows, to run it there instead of here; agent (or seats) then names agents on that machine. Named on each call, never remembered; it must be a LAN peer that has pinned your key and whose install this machine trusts. The answer says which machine gave it; a stop of an agent there still waits for its user's keep-running window. Absent means this machine; the other actions refuse it." },
+      "reason":           { "type": "string", "description": "host: one line, why; the other machine shows it as yours" },
       "agent":            { "type": "string", "description": "transcript: the agent's name (its AGENTMUX_AGENT_ID); open: its name or definition id, case-insensitive; start, stop, detach, watch: its id or slug (required); env_get, env_set: the definition's id or slug (default: yours); update_container, set_container_limits: the container agent's id or slug (required)" },
       "days":             { "type": "integer", "description": "message_stats: how many days back (default 7, at most 31)" },
       "max_lines":        { "type": "integer", "description": "transcript, watch: the most lines to return (default 100, at most 500)" },
