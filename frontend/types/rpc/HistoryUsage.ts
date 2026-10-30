@@ -18,4 +18,9 @@ computed_at_ms: number,
 /**
  * The shared pane-history store's compression; absent when that store isn't open.
  */
-compression?: HistoryCompression, };
+compression?: HistoryCompression, 
+/**
+ * Free space inside the shared pane-history store's file. Not in `total_bytes`
+ * or in any store's `bytes`: the store reuses it, and a reclaim gives it back.
+ */
+reclaimable_bytes: number, };

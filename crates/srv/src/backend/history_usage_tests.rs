@@ -50,6 +50,37 @@ fn each_store_is_measured_and_the_total_is_their_sum() {
 }
 
 #[test]
+fn pane_history_counts_the_data_stored_and_shows_free_pages_apart() {
+    let dir = tempfile::tempdir().unwrap();
+    let r = roots(dir.path());
+    std::fs::create_dir_all(r.transcripts_db.parent().unwrap()).unwrap();
+    // A store from before new ones were made incremental, so its free pages stay in the file.
+    rusqlite::Connection::open(&r.transcripts_db).unwrap().execute_batch("CREATE TABLE seed(x); DROP TABLE seed;").unwrap();
+    let fs = FileStore::open_global_transcripts(&r.transcripts_db).unwrap();
+    let mut x = 7u64;
+    for zone in ["agent:keep:current", "agent:gone:current"] {
+        fs.make_file(zone, "output", FileMeta::new(), FileOpts::default()).unwrap();
+        let mut data = Vec::new();
+        while data.len() < 2_000_000 {
+            x = x.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            data.extend_from_slice(format!("{{\"n\":{x}}}\n").as_bytes());
+        }
+        fs.append_lines(zone, "output", &data).unwrap();
+    }
+    fs.delete_zone("agent:gone:current").unwrap();
+    fs.checkpoint_truncate_apart().unwrap();
+    let file_len = std::fs::metadata(&r.transcripts_db).unwrap().len();
+
+    let u = compute(&r, Some(&fs), |_| None, 1);
+
+    let pane = u.stores.iter().find(|s| s.key == "pane-history").unwrap();
+    assert!(u.reclaimable_bytes > 500_000, "the delete left free pages ({})", u.reclaimable_bytes);
+    assert_eq!(pane.bytes + u.reclaimable_bytes, file_len, "stored data plus free pages is the file");
+    assert!(pane.bytes < file_len);
+    assert_eq!(u.total_bytes, pane.bytes, "the free pages are not in the total");
+}
+
+#[test]
 fn a_missing_store_counts_as_empty() {
     let dir = tempfile::tempdir().unwrap();
     let u = compute(&roots(dir.path()), None, |_| None, 1);
