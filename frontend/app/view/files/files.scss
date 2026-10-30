@@ -49,6 +49,7 @@
 // `.ui-button.` outranks the kit's own padding and colour at equal source order.
 .ui-button.files-crumb {
     flex-shrink: 0;
+    font: inherit;
     color: var(--main-text-color);
 }
 
@@ -129,6 +130,7 @@
 
 .ui-button.files-place {
     gap: 8px;
+    font: inherit;
     padding: 3px 10px;
     color: var(--main-text-color);
 
