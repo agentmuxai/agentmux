@@ -72,7 +72,7 @@ export function useStatsZone(
         const zone = statsRefs.single?.isConnected ? statsRefs.single : statsRefs.multi?.isConnected ? statsRefs.multi : undefined;
         const content = zone?.firstElementChild;
         // ceil, not round — same optimistic-fit reasoning as the slot
-        // measurement effect above.
+        // measurement effect in AgentComposerStrip.tsx.
         setStatsWidth(content ? Math.ceil(content.getBoundingClientRect().width / 8) * 8 : 0);
     });
 

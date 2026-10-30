@@ -81,7 +81,7 @@ describe("computeBalancedLeftKeys", () => {
 });
 
 /**
- * Coverage for Rev 7's row-building (see this file's own Rev 7 header
+ * Coverage for Rev 7's row-building (see composer-row-layout.ts's Rev 7 header
  * comment, `computeComposerRows`'s own doc comment, and
  * docs/specs/SPEC_COMPOSER_STRIP_ROW_BASED_LAYOUT_2026_08_26.md) — pure,
  * same rigor as `computeBalancedLeftKeys`'s own tests above. §7.2's
@@ -619,7 +619,6 @@ describe("orderKeysForEdgePriority", () => {
         expect(orderKeysForEdgePriority([], "left", () => true)).toEqual([]);
     });
 });
-
 
 /**
  * The stats-placement decision (ReAgent P2, PR #2817) — extracted as a
