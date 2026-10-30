@@ -590,6 +590,19 @@ jobs:
             -f event_type=release \
             -F client_payload[version]="${VERSION}"
 
+  # After the release is out: the previous release's .deb and .rpm upgrade to this one in containers
+  # (scripts/linux-upgrade-harness). It only reports (an issue on a failure); the release is already published.
+  linux-upgrade-check:
+    name: Linux package upgrade check
+    needs: [gate, publish]
+    if: ${{ !cancelled() && needs.publish.result == 'success' }}
+    permissions:
+      contents: read
+      issues: write
+    uses: agentmuxai/agentmux/.github/workflows/linux-upgrade-check.yml@main
+    with:
+      to-version: ${{ needs.gate.outputs.version }}
+
   # ── Phase 4: Distribution channels ────────────────────────────────────────
   # WinGet automation never worked (see header comment above): its job body is
   # kept for reference, fully commented out. The Microsoft Store job follows it.
