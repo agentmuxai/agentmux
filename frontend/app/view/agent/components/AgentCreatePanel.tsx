@@ -105,6 +105,7 @@ export const AgentCreatePanel = (props: AgentCreatePanelProps): JSX.Element => {
     // A provider whose CLI keeps its own login (Antigravity) never gets an account, so
     // the list can't tell a newcomer from someone signed in: ask the CLI's own check.
     // `undefined` while it runs, `null` when it can't be answered (no guess, no guide).
+    // Providers with no check command (Grok, OpenCode, Kilo, Cline) can't be told apart: the guide stays.
     const [cliSignedIn] = createResource(providerId, async (id): Promise<boolean | null> => {
         const p = getProvider(id);
         if (!p || p.authType !== "cli-managed" || p.authCheckCommand.length === 0) return false;
