@@ -52,6 +52,11 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                      another agent's conversation is shared through its own visibility setting"
                 );
             }
+            if let Some(host) = remote_op::host_arg(&args) {
+                let result = remote_agents(cx, act.action, &args, &host).await;
+                let result = result.map_err(|e| anyhow::anyhow!(public_params(&format!("{e:#}"), act.rename)));
+                return relabeled("Agents", ACTS, result);
+            }
             let result = match act.tool {
                 "DiscoverAgents" => fleet::call(act.tool, &args, cx).await,
                 "OpenAgent" if args.get("agents").is_some_and(|a| !a.is_null()) => open_many(&args, cx).await,
@@ -81,6 +86,30 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             relabeled("Agents", ACTS, result)
         }
         _ => Err(not_in_family()),
+    }
+}
+
+/// `start`, `stop`, `set_seat`, `env_get` or `env_set` on another machine (`host`): srv signs the request
+/// as this agent and the other machine's srv carries it out (`agents.<action>`, spec §4.3). Any other
+/// action refuses a `host`, so a call never quietly runs here when it was meant for there.
+async fn remote_agents(cx: &ToolCtx<'_>, action: &str, args: &Value, host: &str) -> Result<String> {
+    let params = match action {
+        "start" | "stop" | "env_get" => json!({ "agent": str_arg(args, "agent") }),
+        "env_set" => json!({
+            "agent": str_arg(args, "agent"),
+            "lines": args.get("lines"),
+            "set": args.get("set"),
+            "unset": args.get("unset"),
+        }),
+        "set_seat" => json!({ "seats": args.get("seats") }),
+        other => anyhow::bail!("Agents {other}: host applies to start, stop, set_seat, env_get and env_set; the other actions run on this machine"),
+    };
+    let op = format!("agents.{action}");
+    let reason = str_arg(args, "reason").unwrap_or_else(|| format!("Agents {action}"));
+    let answer = remote_op::remote_op_call(cx, host, &op, params, &reason).await?;
+    match remote_op::explain_not_done(host, &op, &answer) {
+        Some(problem) => anyhow::bail!("{problem}"),
+        None => Ok(remote_op::pretty(host, &answer)),
     }
 }
 
@@ -564,6 +593,20 @@ mod tests {
         let cx = ToolCtx { local_url: "http://127.0.0.1:1", auth_key: "k", block_id: "b", client: &client, loops: &loops, loop_counter: &counter };
         let e = call("Agents", &json!({ "action": "stop" }), &cx).await.unwrap_err().to_string();
         assert!(e.contains("missing required parameter: agent"), "{e}");
+    }
+
+    /// A `host` makes the call remote, so an action that has no remote form refuses it instead of
+    /// quietly running here.
+    #[tokio::test]
+    async fn a_host_on_an_action_without_a_remote_form_is_refused_before_anything_is_sent() {
+        let client = reqwest::Client::new();
+        let loops = LoopRegistry::default();
+        let counter = std::sync::atomic::AtomicU64::new(0);
+        let cx = ToolCtx { local_url: "", auth_key: "", block_id: "", client: &client, loops: &loops, loop_counter: &counter };
+        for action in ["list", "spawn", "detach", "watch"] {
+            let e = call("Agents", &json!({ "action": action, "host": "narko" }), &cx).await.unwrap_err().to_string();
+            assert!(e.contains("host applies to start, stop, set_seat, env_get and env_set"), "{action}: {e}");
+        }
     }
 
     #[test]
