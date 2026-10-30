@@ -301,6 +301,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                     let target_agent = block_to_agent.get(&target).cloned().unwrap_or_else(|| target.clone());
                     let mut req = signed_jekt_with_files(source_agent.clone(), &target_agent, message, files.clone());
                     req.priority = priority.clone();
+                    req.reply = reply_arg(arguments);
                     let outcome = async {
                         let resp = client
                             .post(&url)
