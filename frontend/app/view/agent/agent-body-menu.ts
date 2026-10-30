@@ -46,6 +46,15 @@ export function agentBodyMenuItems(host: AgentBodyMenuHost): ContextMenuItem[] {
                 icon: MENU_ICON.seat,
                 click: () => host.openModal?.({ kind: "agent-seat", agentId, agentName }),
             },
+            ...(host.meta?.["agentMode"] === "container"
+                ? [
+                      {
+                          label: "Container limits…",
+                          icon: MENU_ICON.seat,
+                          click: () => host.openModal?.({ kind: "agent-container-limits", agentId, agentName }),
+                      },
+                  ]
+                : []),
             {
                 label: "Bundles…",
                 icon: MENU_ICON.bundles,

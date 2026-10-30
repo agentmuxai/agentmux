@@ -341,6 +341,8 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // Remove a container agent's container so its next message starts it from the current
         // agent image (`Agents update_container`); only between turns.
         .route("/api/v1/agent/container/update", post(app_api::container_update::handle_update_container))
+        // A container agent's CPU and memory limits (`Agents set_container_limits`).
+        .route("/api/v1/agent/container/limits", post(app_api::container_limits::handle_container_limits))
         // A leader's own workers and how each is doing (§3.4).
         .route("/api/v1/agent/workers", post(app_api::agent_spawn::handle_agent_workers))
         // Start, stop or detach an agent (`Agents start`, `stop`, `detach`); a stop of another agent waits for the person's override window.
