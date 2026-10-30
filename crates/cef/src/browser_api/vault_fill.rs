@@ -133,6 +133,7 @@ pub(super) async fn locate(
     }
     if let Some(f) = &frame {
         frames::check_frame(cdp, f, ref_).await?;
+        frames::refuse_if_blocked(cdp, state.site_limits.list(block_id).as_deref(), f, ref_).await?;
     }
     let mut in_frame = cdp.in_session(frame.as_ref().and_then(|f| f.session.as_deref()));
     let facts = describe(&mut in_frame, backend).await.ok_or_else(|| format!("the element for {ref_} is gone from the page; take a new snapshot"))?;

@@ -14,7 +14,17 @@ use super::*;
 pub(super) async fn handle_shell_create(
     State(state): State<AppState>,
     Json(req): Json<ShellCreateRequest>,
-) -> impl IntoResponse {
+) -> Response {
+    create_shell(state, req, None).await
+}
+
+/// Starts a shell for `req`. `preapproved`: the person approved its secrets with a
+/// rotation (`Vault` `rotate`), which runs its commands through here.
+pub(super) async fn create_shell(
+    state: AppState,
+    req: ShellCreateRequest,
+    preapproved: Option<&super::shell_secrets::Preapproved>,
+) -> Response {
     // Where it runs. Checked before anything is published, so a refused
     // connection (no ssh, a distro that isn't installed, a bad name) fails the
     // call with its reason instead of running the command here.
@@ -68,6 +78,7 @@ pub(super) async fn handle_shell_create(
         remote,
         &req.cmd,
         req.cwd.as_deref().unwrap_or(""),
+        preapproved,
     )
     .await
     {

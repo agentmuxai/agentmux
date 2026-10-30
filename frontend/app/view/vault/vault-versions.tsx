@@ -14,6 +14,16 @@ import type { VaultEntryInfo } from "@/types/rpc/VaultEntryInfo";
 import { formatWhen } from "./vault-format";
 import { loadVersions, restoreVersion } from "./vault-store";
 
+/** What a version that isn't a plain earlier value is: a rotation's new value. */
+export function stateNote(state: string): string | undefined {
+    if (state === "pending") return "New value from a rotation that is still running";
+    if (state === "rotation interrupted") return "New value from a rotation that never finished: the service may hold it";
+    if (state.startsWith("rotation failed at step 3")) return "New value: the service took it but its check failed, so it may hold it";
+    if (state.startsWith("rotation failed at step 2")) return "New value from a rotation whose set command failed";
+    if (state.startsWith("rotation")) return "New value from a rotation that didn't finish: the service may hold it";
+    return undefined;
+}
+
 export function VaultVersionsDialog(props: { entry: VaultEntryInfo; onClose: () => void }): JSX.Element {
     const [versions, { refetch }] = createResource(() => props.entry.id, loadVersions);
     const [busy, setBusy] = createSignal<number | null>(null);
@@ -53,9 +63,12 @@ export function VaultVersionsDialog(props: { entry: VaultEntryInfo; onClose: () 
                                     <span class="warden-manager-dim">
                                         {v.how} by {v.replaced_by}, {formatWhen(v.replaced_at)}
                                     </span>
-                                    <Button density="compact" icon="rotate-left" busy={busy() === v.seq} onClick={() => void restore(v.seq)}>
-                                        Restore
-                                    </Button>
+                                    <Show when={stateNote(v.state)}>{(note) => <span class="warden-manager-dim">{note()}</span>}</Show>
+                                    <Show when={v.state !== "pending"}>
+                                        <Button density="compact" icon="rotate-left" busy={busy() === v.seq} onClick={() => void restore(v.seq)}>
+                                            Restore
+                                        </Button>
+                                    </Show>
                                 </div>
                             )}
                         </For>

@@ -408,6 +408,7 @@ pub fn record_copy(store: &Store, id: &str, part: &str, done: bool) -> Result<()
 
 /// What a web form fill needs to know about an entry, before anything is asked:
 /// the entry, the part, and the kind of field that part belongs in.
+#[derive(Clone)]
 pub struct FillTarget {
     /// Empty for a value the person will type, with no entry yet.
     pub id: String,
@@ -425,6 +426,9 @@ pub struct FillTarget {
     /// new one of the same kind and label, and neither a grant nor a value may
     /// cross from one to the other while the person decides.
     pub created_at: i64,
+    /// A version a command names instead of the current value: `previous` (the
+    /// value the last change replaced) or `pending` (a rotation's new value).
+    pub version: Option<&'static str>,
 }
 
 /// Resolves `"id"` or `"id.part"` for a fill, or says why it can't be filled.
@@ -435,7 +439,7 @@ pub fn fill_target(store: &Store, vault: &str) -> Result<FillTarget, String> {
     let part = slots::fillable_part(kind, part)?;
     let slot = slots::slot(kind, part);
     let what = slots::what(kind, part);
-    Ok(FillTarget { id: row.id, kind: kind.name, typed: false, kind_info: kind, label: row.label, part, slot, what, created_at: row.created_at })
+    Ok(FillTarget { id: row.id, kind: kind.name, typed: false, kind_info: kind, label: row.label, part, slot, what, created_at: row.created_at, version: None })
 }
 
 /// For a value no entry holds yet: the kind's main part, to be typed by the person.
@@ -446,7 +450,7 @@ pub fn request_target(kind: &str, label: &str) -> Result<FillTarget, String> {
         return Err("request_value needs a label saying what the value is, e.g. \"Alex's SSN\"".into());
     }
     let part = slots::fillable_part(kind, None)?;
-    Ok(FillTarget { id: String::new(), kind: kind.name, typed: true, kind_info: kind, label: label.to_string(), part, slot: slots::slot(kind, part), what: slots::what(kind, part), created_at: 0 })
+    Ok(FillTarget { id: String::new(), kind: kind.name, typed: true, kind_info: kind, label: label.to_string(), part, slot: slots::slot(kind, part), what: slots::what(kind, part), created_at: 0, version: None })
 }
 
 /// What a command's `secrets` entry names (`"id"` or `"id.part"`): the entry and
@@ -454,6 +458,28 @@ pub fn request_target(kind: &str, label: &str) -> Result<FillTarget, String> {
 /// Unlike a web form, a command may be given any kind of entry; the person is
 /// asked first (spec section 7.3).
 pub fn command_target(store: &Store, vault: &str) -> Result<FillTarget, String> {
+    // `id@previous` or `id@pending`, then `.part` as usual.
+    let (vault, version) = match vault.trim().split_once('@') {
+        Some((id, rest)) => {
+            let (which, part) = rest.split_once('.').map(|(w, p)| (w, Some(p))).unwrap_or((rest, None));
+            let which = match which {
+                "previous" => "previous",
+                "pending" => "pending",
+                other => return Err(format!("{id}@{other}: a command can name {id}@previous (the value the last change replaced), not @{other}")),
+            };
+            (part.map(|p| format!("{id}.{p}")).unwrap_or_else(|| id.to_string()), Some(which))
+        }
+        None => (vault.to_string(), None),
+    };
+    let mut target = command_target_now(store, &vault)?;
+    target.version = version;
+    if let Some(v) = version {
+        target.what = format!("{} ({v} value)", target.what);
+    }
+    Ok(target)
+}
+
+fn command_target_now(store: &Store, vault: &str) -> Result<FillTarget, String> {
     let (id, part) = slots::split(vault);
     let row = store.vault_get(id).map_err(|e| e.to_string())?.ok_or_else(|| format!("no Vault entry {id:?}: Vault's list action shows the entries"))?;
     let kind = kinds::kind(&row.kind).ok_or_else(|| format!("entry {id} has an unknown kind"))?;
@@ -461,7 +487,7 @@ pub fn command_target(store: &Store, vault: &str) -> Result<FillTarget, String> 
         None => kind.parts[0],
         Some(p) => *kind.parts.iter().find(|x| **x == p).ok_or_else(|| format!("{} has no part {p:?}; its parts are {}", row.label, kind.parts.join(", ")))?,
     };
-    Ok(FillTarget { id: row.id, kind: kind.name, typed: false, kind_info: kind, label: row.label, part, slot: None, what: slots::what(kind, part), created_at: row.created_at })
+    Ok(FillTarget { id: row.id, kind: kind.name, typed: false, kind_info: kind, label: row.label, part, slot: None, what: slots::what(kind, part), created_at: row.created_at, version: None })
 }
 
 /// A part's value for the host to type; never returned to an agent. The use is
@@ -474,6 +500,21 @@ pub fn value_for_fill(store: &Store, id: &str, created_at: i64, part: &str) -> R
     let key = seal::key(false)?;
     let parts = seal::open(&key, &row.id, &row.sealed)?;
     let value = parts.get(part).ok_or_else(|| format!("{} has no {part} saved", row.label))?;
+    Ok(zeroize::Zeroizing::new(value.to_string()))
+}
+
+/// A part's value for a command: the current value, or the version `t` names
+/// (`id@previous`, a rotation's `id@pending`). Never returned to an agent.
+pub fn value_for_command(store: &Store, t: &FillTarget) -> Result<zeroize::Zeroizing<String>, String> {
+    let Some(which) = t.version else { return value_for_fill(store, &t.id, t.created_at, t.part) };
+    let row = store.vault_get(&t.id).map_err(|e| e.to_string())?.ok_or_else(|| format!("no entry {}", t.id))?;
+    if row.created_at != t.created_at {
+        return Err(format!("{} was replaced while the person was deciding: nothing was run", row.label));
+    }
+    let (_, sealed) = versions::sealed_version(store, &row, which)?;
+    let key = seal::key(false)?;
+    let parts = seal::open(&key, &row.id, &sealed)?;
+    let value = parts.get(t.part).ok_or_else(|| format!("{}'s {which} value has no {}", row.label, t.part))?;
     Ok(zeroize::Zeroizing::new(value.to_string()))
 }
 

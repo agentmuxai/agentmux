@@ -1,0 +1,149 @@
+name: Linux package upgrade check
+
+# After a release publishes: install the previous release's .deb or .rpm in containers and upgrade it to this
+# release the way the app does (the installed helper, the real signed manifest from github.com), then go back,
+# plus the launcher's waiter and the corrupt-package refusal. The cases are scripts/linux-upgrade-harness/.
+#
+# One job on one runner. It is called from release-core.yml after `publish` (a tag push gives no other reliable
+# "after the release is out" signal: workflow_run has not fired reliably in this repo, and a release made with the
+# default token starts no workflow). It can also be run by hand for any pair of published releases.
+#
+# A pull request that changes the harness or this file runs it too, on the latest published release against the one
+# before it, so neither can rot unseen.
+#
+# It reports and never blocks: the release is already published when it runs. A failure opens (or comments on) an
+# issue and leaves an error annotation; the job itself ends green so a flaky registry never marks the Release red.
+# (On a pull request nothing is filed; the run's own log is the report.)
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/linux-upgrade-check.yml'
+      - 'scripts/linux-upgrade-harness/**'
+      - 'scripts/agentmux-install-update.sh'
+      - 'crates/launcher/src/upgrade_package.rs'
+  workflow_call:
+    inputs:
+      to-version:
+        description: 'The release to upgrade to, like 0.60.8 (no leading v)'
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      to-version:
+        description: 'The release to upgrade to, like 0.60.8 (no leading v; blank: the latest published release)'
+        required: false
+        default: ''
+        type: string
+      from-version:
+        description: 'The release to upgrade from (blank: the latest published release before it)'
+        required: false
+        default: ''
+      distros:
+        description: 'Distros to run (blank: ubuntu24 ubuntu26 fedora42 debian13 tumbleweed)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: previous release to this release, .deb and .rpm in containers
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TO: ${{ inputs.to-version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pick the releases
+        id: pick
+        # After a release this must not turn the Release run red; a manual run should see its own mistake.
+        continue-on-error: ${{ github.event_name != 'workflow_dispatch' }}
+        shell: bash
+        env:
+          FROM_IN: ${{ inputs.from-version }}
+        run: |
+          set -euo pipefail
+          published() { # published releases, newest last
+            gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --paginate \
+              --jq '.[] | select((.draft | not) and (.prerelease | not)) | .tag_name | ltrimstr("v")' \
+              | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -uV
+          }
+          TO="${TO#v}"
+          [ -n "$TO" ] || TO=$(published | tail -n 1)
+          [[ "$TO" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::'$TO' is not a release version"; exit 1; }
+          FROM="${FROM_IN#v}"
+          if [ -z "$FROM" ]; then
+            # The latest published release below TO (drafts and pre-releases are not upgrade sources).
+            FROM=$(published | awk -v to="$TO" '$0 == to { seen = 1 } !seen { last = $0 } END { print last }')
+          fi
+          echo "from=$FROM" >> "$GITHUB_OUTPUT"
+          echo "to=$TO" >> "$GITHUB_OUTPUT"
+          # v0.60.5 is the first release whose helper and launcher check the signed manifest the cases rely on.
+          if [ -z "$FROM" ] || [ "$(printf '%s\n%s\n' 0.60.5 "$FROM" | sort -V | head -n 1)" != 0.60.5 ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "Nothing to check: the previous release is '${FROM:-none}', older than 0.60.5." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "Upgrading $FROM to $TO." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: The releases couldn't be picked
+        if: ${{ steps.pick.outcome == 'failure' }}
+        run: echo "::error::The Linux package upgrade check couldn't pick the releases to compare, so it did not run. See the 'Pick the releases' step."
+
+      - name: Run the harness
+        id: harness
+        if: ${{ steps.pick.outputs.run == 'true' }}
+        continue-on-error: true
+        shell: bash
+        env:
+          FROM_VERSION: ${{ steps.pick.outputs.from }}
+          TO_VERSION: ${{ steps.pick.outputs.to }}
+          HARNESS_ID: ci
+          DISTROS: ${{ inputs.distros }}
+          # A pull request tests the helper it changes; a release is tested with the helper its package installed.
+          HELPER_UNDER_TEST: ${{ github.event_name == 'pull_request' && format('{0}/scripts/agentmux-install-update.sh', github.workspace) || '' }}
+        run: |
+          set -o pipefail
+          [ -z "$HELPER_UNDER_TEST" ] || export HELPER="$HELPER_UNDER_TEST"
+          # shellcheck disable=SC2086
+          scripts/linux-upgrade-harness/run.sh ${DISTROS:-ubuntu24 ubuntu26 fedora42 debian13 tumbleweed} 2>&1 | tee "$RUNNER_TEMP/upgrade-check.log"
+
+      - name: Summary
+        if: ${{ always() && steps.pick.outputs.run == 'true' }}
+        shell: bash
+        run: |
+          {
+            echo '```'
+            grep -E '^(==|- |  (PASS|FAIL|SETUP))|SETUP FAILED|can.t download|didn.t start|failed; see' "$RUNNER_TEMP/upgrade-check.log" | cut -c1-300 || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Report a failure
+        if: ${{ steps.harness.outcome == 'failure' && github.event_name != 'pull_request' }}
+        shell: bash
+        env:
+          FROM_VERSION: ${{ steps.pick.outputs.from }}
+          TO_VERSION: ${{ steps.pick.outputs.to }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -uo pipefail
+          title="Linux package upgrade check failed: $FROM_VERSION to $TO_VERSION"
+          failed=$(grep -E '^(  FAIL|  SETUP|== )|SETUP FAILED|can.t download|didn.t start|failed; see' "$RUNNER_TEMP/upgrade-check.log" | cut -c1-300 | head -n 30)
+          [ -n "$failed" ] || failed=$(tail -n 30 "$RUNNER_TEMP/upgrade-check.log" | cut -c1-300)
+          body=$(printf 'The .deb/.rpm upgrade check from %s to %s failed after the release published.\n\nRun: %s\n\n```\n%s\n```\n\nRun it again by hand: `FROM_VERSION=%s TO_VERSION=%s scripts/linux-upgrade-harness/run.sh` (see its README).\n' \
+            "$FROM_VERSION" "$TO_VERSION" "$RUN_URL" "$failed" "$FROM_VERSION" "$TO_VERSION")
+          existing=$(gh issue list --state open --search "\"$title\" in:title" --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+          else
+            gh issue create --title "$title" --body "$body"
+          fi
+          echo "::error::The Linux package upgrade check from $FROM_VERSION to $TO_VERSION failed; see the issue and the summary."

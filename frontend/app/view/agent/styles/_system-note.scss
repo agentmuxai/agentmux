@@ -30,5 +30,13 @@
             white-space: pre-wrap;
             overflow-wrap: anywhere;
         }
+
+        // A CLI turn can be long (a reminder's whole text): a few lines, the rest is in the transcript.
+        &--cli &__text {
+            display: -webkit-box;
+            -webkit-box-orient: vertical;
+            -webkit-line-clamp: 4;
+            overflow: hidden;
+        }
     }
 }

@@ -1,5 +1,5 @@
 ARG BASE
 FROM ${BASE}
-RUN zypper --non-interactive install --no-recommends ca-certificates curl util-linux procps shadow polkit && zypper clean -a
+RUN zypper --non-interactive install --no-recommends ca-certificates curl util-linux procps shadow polkit pkexec gawk cpio && zypper clean -a
 COPY ca.crt /etc/pki/trust/anchors/amx-harness-ca.crt
 RUN update-ca-certificates

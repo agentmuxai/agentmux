@@ -125,6 +125,7 @@ import type { DocumentNode } from "./types";
 import { ShutdownOverlay } from "./shutdown/ShutdownOverlay";
 import { useAgentStream } from "./useAgentStream";
 import { setBlockMeta } from "@/app/store/block-meta";
+import { clearFailure } from "./failure/failure-writer";
 
 // Launch flow lives in `flows/launch-flow.ts` — Step 2 of
 // docs/specs/SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13.md.
@@ -610,7 +611,7 @@ export const AgentPresentationView = ({
             // relogin always did, decided at click time from the row's own
             // turnAttempted, and calls onReady() instead of this on its
             // no-retry path. So every caller that reaches here wants a retry.
-            paneModel.dispatchPane({ type: "FailureCleared" }, "system");
+            clearFailure(paneModel, { reason: "recovered", system: true });
             retryLastTurn();
         },
         getInitialTermSize: () => computeTermSizeFromEl(rootRef),
