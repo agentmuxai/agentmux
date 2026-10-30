@@ -52,6 +52,10 @@ pub struct HeldJekt {
     /// cold (`backend::cold_hold`); '' for the others, which wait for the
     /// agent to be there at all.
     pub hold_reason: String,
+    /// The WAN verdict a message from another machine was accepted with, as JSON
+    /// (`{"verified":true,"instance":{...}}`); '' for a host or LAN message. Restored on replay,
+    /// so a held message keeps its tier and its proof (the cross-machine operations spec, §4.5).
+    pub wan_json: String,
 }
 
 impl HeldJekt {
@@ -103,6 +107,7 @@ fn row_to_held(row: &Row) -> rusqlite::Result<HeldJekt> {
         attempts: row.get("attempts")?,
         last_error: row.get("last_error")?,
         hold_reason: row.get("hold_reason")?,
+        wan_json: row.get("wan_json")?,
     })
 }
 
@@ -128,8 +133,8 @@ impl Store {
                  message, priority, jekt_tier, delivery_tier,
                  sig_verified, reagent_verified, lan_verified, channel_verified,
                  is_transcript_request, transcript_request_escalate_forced, files_json,
-                 sent_at_ms, expires_at_ms, attempts, last_error, hold_reason)
-             SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?18, ?19, ?20, ?14, ?15, 0, '', ?21
+                 sent_at_ms, expires_at_ms, attempts, last_error, hold_reason, wan_json)
+             SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?18, ?19, ?20, ?14, ?15, 0, '', ?21, ?22
               WHERE (SELECT COUNT(*) FROM db_jekt_held WHERE target_uid = ?2) < ?16
                 AND (SELECT COUNT(*) FROM db_jekt_held) < ?17",
             params![
@@ -154,6 +159,7 @@ impl Store {
                 i64::from(held.transcript_request_escalate_forced),
                 held.files_json,
                 held.hold_reason,
+                held.wan_json,
             ],
         )?;
         Ok(if n > 0 { HoldOutcome::Held } else { HoldOutcome::Full })
@@ -269,6 +275,7 @@ mod tests {
             attempts: 0,
             last_error: String::new(),
             hold_reason: String::new(),
+            wan_json: String::new(),
         }
     }
 

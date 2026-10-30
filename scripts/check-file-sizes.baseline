@@ -25,7 +25,7 @@
 1903 crates/srv/src/backend/history/mod.rs
 3203 crates/srv/src/backend/lan_discovery.rs
 2073 crates/srv/src/backend/reactive/handler.rs
-2494 crates/srv/src/backend/storage/migrations.rs
+2496 crates/srv/src/backend/storage/migrations.rs
 1799 crates/srv/src/backend/storage/muxbus.rs
 3365 crates/srv/src/identity/resolver/inject.rs
 2185 crates/srv/src/muxbus/cloud_subscriber.rs
