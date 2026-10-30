@@ -88,6 +88,7 @@ export function PaneHeaderTabStrip<T>(props: PaneHeaderTabStripProps<T>): JSX.El
             onReceiveForeignTab={props.onReceiveForeignTab}
             onReceiveForeignTabs={props.onReceiveForeignTabs}
             acceptsForeignTabs={props.acceptsForeignTabs}
+            bodyDrop={props.bodyDrop}
             selection={props.selection}
             // Derived from `nodeModel` (this strip's own Pane) rather than
             // requiring a redundant caller-supplied prop — `PaneTabStrip`'s

@@ -30,40 +30,84 @@
 $drop-blink-cycle: 200ms;
 $drop-blink-count: 2;
 
+// The pane header's edge glow (SPEC_PANE_TAB_DRAG_BODY_PLACEMENT_AND_EDGE_GLOW_2026_10_29.md §3.4,
+// option B): two gradient strips at the header's ends in the pane's identity colour. Only the
+// strips blink on entry, so the flashing area is `2 * strip * header height` and, at a strip of
+// `min(25% of the width, $drop-edge-strip-px)`, is at or under the exempt area of
+// element/drop-blink-clock.ts for any header at any chrome zoom up to 2.03 (the header's own
+// `zoom` scales these px with it). A test pins `$drop-edge-strip-px` to the clock's constant.
+$drop-edge-strip-px: 40px;
+$drop-edge-strip-share: 25%;
+$drop-edge-breath: 2.4s;
+$drop-edge-dip: 0.55;
+
 // The animations the mixins below combine, each written once.
 $drop-strobe: tab-drop-invert-strobe 400ms steps(1, end) 2;
 $drop-hold: tab-drop-invert-hold $drop-blink-cycle steps(1, end) $drop-blink-count forwards;
 $drop-pulse: tab-drop-pulse 0.4s var(--ease-in-out) infinite alternate;
 $drop-pulse-reduced: tab-drop-pulse 0.4s ease-in-out infinite alternate;
+// One blink is lit, dark, lit (`am-blink`); the burst's blinks end lit, which then holds. The
+// breath (`am-pulse`: a full cycle of a dip and back, 2.4 s, so a change every 1.2 s) starts when
+// the burst ends. Both move opacity only, on the two edge strips, never the header itself.
+$drop-edge-blink: am-blink $drop-blink-cycle steps(1, end) $drop-blink-count forwards;
+$drop-edge-breathe: am-pulse $drop-edge-breath ease-in-out ($drop-blink-cycle * $drop-blink-count) infinite;
 
 // --- Mixins ---
+
+// One edge strip of the pane header's glow, `$side` left or right. Positioned inside the header's
+// own box, so a pane's rounded corners cannot clip it and it cannot reach the next pane. The colour
+// is the pane's identity colour (blockframe.tsx), the accent when it has none. `$motion`:
+//   blink   the burst, then lit with the slow breath
+//   steady  lit with the breath, no blink (the flash budget is short)
+// and under reduced motion (feedback) it is simply lit.
+@mixin drop-edge-strip($side, $motion: blink) {
+    // The strip fades towards the header's middle.
+    $towards: right;
+
+    @if $side == right {
+        $towards: left;
+    }
+
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    #{$side}: 0;
+    width: #{"min(#{$drop-edge-strip-share}, #{$drop-edge-strip-px})"};
+    z-index: var(--z-pane-overlay);
+    pointer-events: none;
+    --pulse-min: #{$drop-edge-dip};
+    background: linear-gradient(
+        to $towards,
+        var(--block-identity-color, var(--drop-target-border)),
+        transparent
+    );
+
+    @if $motion == blink {
+        animation: $drop-edge-blink, $drop-edge-breathe;
+    } @else {
+        animation: $drop-edge-breathe;
+    }
+
+    @include mixins.when-motion-reduced(feedback) {
+        animation: none;
+    }
+}
 
 // The `$hold` look without its blink: the target is simply negative (with the
 // pulsing outline) for as long as the hover lasts. It is the reduced treatment,
 // and what a hover gets when the budget has room for its two changes but not a burst.
-// `drop-target-steady-exempt` is the matching cancel on the tabs.
 @mixin drop-target-steady {
     filter: invert(1);
     animation: $drop-pulse-reduced;
 }
 
-@mixin drop-target-steady-exempt {
-    animation: none;
-    filter: invert(1);
-}
-
 // What a hover gets when the window's flash budget is nearly spent (a change was
 // made within the last second, element/drop-blink-clock.ts): the outline pulse alone,
-// no negative at all, in either motion tier. `drop-target-plain-exempt` is the
-// matching state of the tabs, which have nothing to cancel.
+// no negative at all, in either motion tier.
 @mixin drop-target-plain {
     filter: none;
     animation: $drop-pulse;
-}
-
-@mixin drop-target-plain-exempt {
-    filter: none;
-    animation: none;
 }
 
 // Something is being dragged over a valid drop target: the instant the hover
@@ -103,35 +147,6 @@ $drop-pulse-reduced: tab-drop-pulse 0.4s ease-in-out infinite alternate;
         // Reduced treatment (feedback), dormant under the motion policy.
         @include mixins.when-motion-reduced(feedback) {
             animation: $drop-pulse-reduced;
-        }
-    }
-}
-
-// Exempt a descendant of a `drop-target-hover` element from its strobe by
-// running the same strobe on it. invert(1) is its own inverse (each channel
-// c → 1-c → c), so the parent's invert on top of this one gives back the
-// descendant's exact original pixels. Both start in the same style recalc
-// (one class toggle on the parent) and use steps(1, end), so they flip on the
-// same frame. Mirrors `drop-target-hover`'s pulse-only treatment (dormant
-// under `feedback`): no parent strobe there, so nothing to cancel.
-//
-// `$hold: true` pairs with `drop-target-hover($hold: true)`: the descendant
-// runs the same blink and then stays inverted too, so the pair cancels for as
-// long as the hover lasts, not only during the flash. Under the reduced
-// treatment the parent holds the negative with no animation, so the
-// descendant holds it the same way.
-@mixin drop-target-strobe-exempt($hold: false) {
-    @if $hold {
-        animation: $drop-hold;
-
-        @include mixins.when-motion-reduced(feedback) {
-            @include drop-target-steady-exempt;
-        }
-    } @else {
-        animation: $drop-strobe;
-
-        @include mixins.when-motion-reduced(feedback) {
-            animation: none;
         }
     }
 }

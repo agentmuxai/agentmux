@@ -175,59 +175,33 @@
     }
 }
 
-// Same drop-to-append hover as above, on the whole Pane header row — the
-// actual drop zone (`foreignDropRootFor`, PaneTabStrip.tsx). Applied
-// imperatively to blockframe.tsx's `[data-role="block-header"]` element,
-// which is why this rule is a bare class rather than nested under
-// `.pane-tab-strip`.
+// Same drop-to-append hover as above, on the Pane header row: a pill that would join this pane's
+// tabs. Applied imperatively to blockframe.tsx's `[data-role="block-header"]` element, which is
+// why this rule is a bare class rather than nested under `.pane-tab-strip`.
 //
-// The treatment a Window Tab gets when a pane is dragged over it
-// (drop-feedback.scss), in its `$hold` form: one invert flash that then LANDS
-// inverted and stays so until the pointer leaves or the drop happens, with a
-// pulsing 2px outline on top (SPEC_DROP_TARGET_LANDS_INVERTED_2026_10_21.md).
-// `outline` composes with the header's own box-shadow (has-summary case,
-// block.scss) instead of replacing it, and the negative offset keeps it
-// inside the row, so the pane's rounded corners can't clip it and it can't
-// overlap the neighbouring pane.
-//
-// The tabs themselves don't flash: the header's invert covers its
-// background and non-tab chrome (ConnectionButton, header text, end icons),
-// and the pill-strip wrapper runs the same invert, cancelling it out.
-// Inverting the chrome along with the background (rather than the
-// background alone) keeps the header text/icons readable mid-flash — their
-// color was picked for contrast against the un-inverted background.
-// SPEC_PANE_TAB_DRAG_LANDING_FLASH_AND_LAST_TAB_CLOSE_2026_09_24.md §3.2.
+// Two gradient strips at the header's ends, in the pane's bright selection colour (its identity
+// colour; the accent when it has none). They blink on entry and then hold lit with a slow breath;
+// the header itself does not change, so its tabs are never inverted and the flashing area stays
+// small enough that every header, however wide, is outside the flash rule (drop-feedback.scss
+// `drop-edge-strip`). SPEC_PANE_TAB_DRAG_BODY_PLACEMENT_AND_EDGE_GLOW_2026_10_29.md §3.4.
 .pane-header--foreign-hover {
-    @include drop.drop-target-hover($hold: true);
+    position: relative;
 
-    .block-frame-default-header-tabstrip {
-        @include drop.drop-target-strobe-exempt($hold: true);
+    &::before {
+        @include drop.drop-edge-strip(left);
     }
 
-    // Flash budget short: the held negative without the blink, for this hover only.
-    &.pane-header--no-blink {
-        @include drop.drop-target-steady;
-
-        .block-frame-default-header-tabstrip {
-            @include drop.drop-target-steady-exempt;
-        }
+    &::after {
+        @include drop.drop-edge-strip(right);
     }
 
-    // ... or the outline alone.
-    &.pane-header--no-invert {
-        @include drop.drop-target-plain;
+    // Flash budget short (the strips are exempt, so only if a theme ever widened them): lit without the blink.
+    &.pane-header--no-blink::before {
+        @include drop.drop-edge-strip(left, steady);
+    }
 
-        .block-frame-default-header-tabstrip {
-            @include drop.drop-target-plain-exempt;
-        }
-
-        @include mixins.when-motion-reduced(feedback) {
-            @include drop.drop-target-plain;
-
-            .block-frame-default-header-tabstrip {
-                @include drop.drop-target-plain-exempt;
-            }
-        }
+    &.pane-header--no-blink::after {
+        @include drop.drop-edge-strip(right, steady);
     }
 }
 

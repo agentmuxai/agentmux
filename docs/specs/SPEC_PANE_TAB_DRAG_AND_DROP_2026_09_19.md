@@ -294,6 +294,8 @@ being hovered and the same `tab_id`/leaf — same-leaf move, no cross-pane
 RPC branch needed at the frontend call-site (the reducer command shape is
 identical either way; see §5).
 
+> **Amended 2026-10-30:** a single pill dragged over a pane's body is now placed again: the header and the middle fifth of the body join, the rest of the body shows the pane drag's placement ghost and the drop makes the tab a pane of its own on that side. A multi-tab drag still joins anywhere. See `SPEC_PANE_TAB_DRAG_BODY_PLACEMENT_AND_EDGE_GLOW_2026_10_29.md`. What follows is the 2026-09-24 state.
+
 ### 3.3 Cross-pane drop on a Pane's BODY → same as the header: join that pane (revised 2026-09-24)
 
 **Original design (dropped):** a drop on another pane's content area would

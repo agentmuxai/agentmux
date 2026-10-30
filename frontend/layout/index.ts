@@ -20,6 +20,7 @@ import {
     moveBlocksInStack,
     openBlockInStack,
     setActiveBlockInStack,
+    splitOutStackMember,
 } from "./lib/layoutStack";
 import { setMinimizeMerger } from "./lib/layoutMinimize";
 import { mergeIntoMinimizedNeighbour } from "./lib/layoutMinimizeMergeApply";
@@ -55,6 +56,7 @@ export {
     openBlockInStack,
     redockDraggedPane,
     setActiveBlockInStack,
+    splitOutStackMember,
     TileLayout,
     useDebouncedNodeInnerRect,
 };
