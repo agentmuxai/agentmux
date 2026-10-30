@@ -34,6 +34,8 @@ pub const ACTOR: &str = "Vault";
 pub const REMINDED: &str = "reminded";
 /// The rotation task's `kind`.
 pub const TASK_KIND: &str = "vault-rotation";
+/// In a reminder's activity line once its rotation task is filed.
+const TASK_MARK: &str = "; rotation task #";
 /// How often srv looks, besides at start.
 const EVERY: Duration = Duration::from_secs(6 * 60 * 60);
 /// The actions that make or replace an entry's value: the agent behind the
@@ -124,7 +126,8 @@ pub struct Due {
     pub date: NaiveDate,
     pub days_left: i64,
     pub stage: Stage,
-    /// No reminder for this date was sent before: this one files the rotation task.
+    /// No rotation task was filed for this date yet: this reminder files it, so
+    /// one that couldn't be filed is tried again at the next reminder.
     pub first: bool,
     /// The agent that made or last replaced the value, if one did.
     pub agent: Option<String>,
@@ -148,7 +151,7 @@ pub fn due(store: &Store, today: NaiveDate) -> Result<Vec<Due>, String> {
         // The latest line that made the value.
         let made = store.vault_activity_for_entry(&row.id, MADE, 1).map_err(|e| e.to_string())?;
         let agent = made.into_iter().next().map(|l| l.actor).filter(|a| a != PERSON && !a.is_empty());
-        out.push(Due { id: row.id, label: row.label, date, days_left, stage, first: sent.is_empty(), agent });
+        out.push(Due { id: row.id, label: row.label, date, days_left, stage, first: !sent.iter().any(|t| t.contains(TASK_MARK)), agent });
     }
     Ok(out)
 }
@@ -233,7 +236,7 @@ pub fn send(store: &Store, work: Option<&Store>, today: NaiveDate) -> Result<Sen
                     Ok(num) => {
                         sent.filed = true;
                         let whom = d.agent.as_deref().map(|a| format!(" for {a}")).unwrap_or_default();
-                        target.push_str(&format!("; rotation task #{num}{whom}"));
+                        target.push_str(&format!("{TASK_MARK}{num}{whom}"));
                     }
                     Err(e) => tracing::warn!(entry = %d.id, error = %e, "vault: couldn't file a rotation task"),
                 }
@@ -251,14 +254,18 @@ pub fn notify_key(id: &str) -> String {
     format!("vault:{id}")
 }
 
-/// Looks at start and every 6 hours. A reminder is recorded as sent, so the
-/// first look waits for the notification router, which starts with the first
-/// window: a reminder sent before it would be recorded and never shown.
+/// Looks at start and every 6 hours. A reminder is recorded as sent, so a look
+/// waits until it can be shown: for the notification router, which starts with
+/// the first window, and past a pause or quiet hours, which would drop it.
 pub async fn run(store: Arc<Store>, work: Arc<Store>, broker: Arc<Broker>) {
-    while crate::backend::notify::router::get(&broker).is_none() {
-        tokio::time::sleep(Duration::from_secs(60)).await;
-    }
     loop {
+        match crate::backend::notify::router::get(&broker) {
+            Some(router) if !router.holds_back_attention() => {}
+            _ => {
+                tokio::time::sleep(Duration::from_secs(15 * 60)).await;
+                continue;
+            }
+        }
         let (s, w) = (store.clone(), work.clone());
         match tokio::task::spawn_blocking(move || send(&s, Some(&w), today())).await {
             Ok(Ok(sent)) => {

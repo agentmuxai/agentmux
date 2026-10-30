@@ -730,6 +730,13 @@ impl Router {
         settings_from_extra(&self.config.get_settings().extra)
     }
 
+    /// Whether a pause or quiet hours would drop an Attention notification now.
+    /// A source that records what it sent (`vault::expiry`) waits it out.
+    pub fn holds_back_attention(&self) -> bool {
+        let s = self.settings();
+        agentmux_common::time::now_ms() < s.pause_until_ms.max(s.quiet_until_ms) && !s.pause_allow_attention
+    }
+
     /// Whether the user asked to hear about turns something other than them
     /// started (`notify:os:turncompleted:external`): the Swarm Supervisor
     /// applies the same rule to its own "finished" notice.

@@ -124,8 +124,8 @@ fn the_rotation_task_goes_to_the_agent_that_made_the_value() {
     assert!(line.target.ends_with(" for agent2-6"), "{}", line.target);
 }
 
-// muxreview on #5854: the newest 500 lines once decided this, so a key used often
-// enough lost its reminder and its maker, and was reminded again every look.
+// A key's uses must never push out the line that says a reminder was sent, or
+// the one naming who made the value (#5854).
 #[test]
 fn a_much_used_key_is_still_reminded_once_and_its_maker_still_known() {
     let (s, (work, _dir)) = (store(), work());
@@ -149,6 +149,27 @@ fn a_much_used_key_is_still_reminded_once_and_its_maker_still_known() {
     let filed = tasks(&work);
     assert_eq!(filed.len(), 1);
     assert_eq!(filed[0].target_agent, "agent2-6");
+}
+
+#[test]
+fn a_rotation_task_that_couldnt_be_filed_is_filed_at_the_next_reminder() {
+    let (s, (work, _dir)) = (store(), work());
+    create(&s, key("Stripe", "2026-11-20")).unwrap();
+    // No queue to file it in: the reminder is sent, the task isn't.
+    let sent = send(&s, None, day("2026-11-10")).unwrap();
+    assert!(sent.notices[0].0.first);
+    let sent = send(&s, Some(&work), day("2026-11-18")).unwrap();
+    assert!(sent.notices[0].0.first, "still no task for this date");
+    assert_eq!(tasks(&work).len(), 1);
+    assert!(!send(&s, Some(&work), day("2026-11-20")).unwrap().notices[0].0.first);
+}
+
+#[test]
+fn a_reminder_is_shown_while_agentmux_has_focus() {
+    use crate::backend::notify::policy::{NotifyKind, Priority};
+    // It is recorded as sent when emitted: a gated-out one would be lost. A pause
+    // or quiet hours are waited out by `run` (`holds_back_attention`).
+    assert_eq!(NotifyKind::VaultExpiring.priority(), Priority::Attention);
 }
 
 #[test]

@@ -99,9 +99,9 @@ impl NotifyKind {
             | NotifyKind::ShutdownPending
             | NotifyKind::CloudSignedOut
             | NotifyKind::AccountUnavailable
-            | NotifyKind::JobFailed => {
-                Priority::Attention
-            }
+            | NotifyKind::JobFailed
+            // Recorded as sent when it is emitted, so it must not be gated out.
+            | NotifyKind::VaultExpiring => Priority::Attention,
             _ => Priority::Normal,
         }
     }
