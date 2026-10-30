@@ -647,7 +647,7 @@ pub(super) fn fail<T>(msg: impl Into<String>) -> (StatusCode, Json<ApiResponse<T
 /// or a file input apart from an ordinary one: value-bearing fields first
 /// (a field without facts has its value hidden, `snapshot::render`), then
 /// buttons (a file input's role).
-const MAX_DESCRIBES: usize = 600;
+pub(super) const MAX_DESCRIBES: usize = 600;
 
 /// `POST /agentmux/browser/snapshot`.
 pub async fn snapshot_route(
@@ -670,13 +670,19 @@ pub async fn snapshot_route(
     let scope = match &req.scope {
         Some(r) => {
             let table = state.browser_api.ref_tables.get(&req.block_id).unwrap_or_default();
-            if table.frames.contains_key(r) {
-                let _ = cdp.close().await;
-                return fail(format!(
-                    "{r} is inside an iframe, and scoping to a part of a frame isn't supported yet: take a snapshot without scope"
-                ));
-            }
             let now = page_url(&mut cdp).await;
+            if let (Some(frame), Some(backend)) = (table.frames.get(r), table.refs.get(r).copied()) {
+                if table.url != now {
+                    let _ = cdp.close().await;
+                    return fail(format!("the page changed since {r} was handed out; take a snapshot without scope first"));
+                }
+                let out = super::frame_scope::scoped_snapshot(&mut cdp, &state.browser_api.ref_tables, &req.block_id, epoch, &now, r, backend, frame).await;
+                let _ = cdp.close().await;
+                return match out {
+                    Ok(data) => (StatusCode::OK, Json(ApiResponse::ok(data))),
+                    Err(e) => fail(e),
+                };
+            }
             match table.refs.get(r).copied() {
                 Some(b) if table.url == now => Some(b),
                 Some(_) => {

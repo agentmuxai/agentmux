@@ -33,6 +33,7 @@ pub mod capture;
 pub mod cdp;
 pub mod combobox;
 pub mod dates;
+pub mod frame_scope;
 pub mod frames;
 pub mod hibernation;
 pub mod key_typing;
