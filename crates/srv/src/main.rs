@@ -427,6 +427,8 @@ async fn app_main() {
     // One notice per account its agents are out of quota or signed out on
     // (SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §6).
     server::account_episodes::install(state.clone());
+    // Fleet Global Memory: entries scoped to the fleet are sent to the machines on the LAN that are behind.
+    server::remote_ops::fleet_sync::install(state.clone());
     // Agents' cargo caches are cleared as tasks finish, and the disk is watched
     // (SPEC_BUILD_CACHE_CLEANUP_2026_10_26.md).
     backend::build_cache_service::install(Arc::clone(&state.mstore), Arc::clone(&state.config_watcher));
