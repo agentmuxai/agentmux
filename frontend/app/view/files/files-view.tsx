@@ -977,8 +977,8 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                     <div class="files-row files-header" role="row" aria-rowindex={1}>
                         <For each={COLUMNS}>
                             {(col) => (
-                                <button
-                                    type="button"
+                                <Button
+                                    tone="quiet"
                                     role="columnheader"
                                     class={`files-cell ${col.class}`}
                                     aria-sort={model.sortKey() === col.key ? (model.sortDir() === "asc" ? "ascending" : "descending") : "none"}
@@ -988,7 +988,7 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                                     <Show when={model.sortKey() === col.key}>
                                         <i class={`fa fa-caret-${model.sortDir() === "asc" ? "up" : "down"} files-sort-mark`} aria-hidden="true" />
                                     </Show>
-                                </button>
+                                </Button>
                             )}
                         </For>
                     </div>
