@@ -22,6 +22,9 @@
 //!   blocked agent holds. A worker's leader already hears from
 //!   `backend::worker_notes`.
 //!
+//! An agent that hits a usage limit moves by itself to an account with quota after its turn
+//! ([`failover`]).
+//!
 //! `identity.account.move_agents` ([`moves`]) links an episode's idle agents
 //! to another signed-in account of the same provider and restarts their
 //! panes; any link change clears the failure its old account caused
@@ -29,6 +32,7 @@
 //! account works clears its panes' "signed out" ([`after_sign_in`]).
 
 mod accounts;
+pub mod failover;
 mod machine;
 mod moves;
 mod switch;
@@ -45,7 +49,7 @@ use crate::backend::eventbus::EventBus;
 use crate::backend::mps::MuxEvent;
 use crate::backend::obj::{self, Block, Tab};
 use crate::backend::rpc::engine::WshRpcEngine;
-use crate::backend::rpc_types::{NoArgsReq, COMMAND_IDENTITY_ACCOUNT_AVAILABILITY, COMMAND_AGENT_ACCOUNT_SWITCH, COMMAND_IDENTITY_ACCOUNT_MOVE_AGENTS, COMMAND_IDENTITY_ACCOUNT_SIGNED_IN};
+use crate::backend::rpc_types::{NoArgsReq, COMMAND_IDENTITY_ACCOUNT_AVAILABILITY, COMMAND_AGENT_ACCOUNT_SWITCH, COMMAND_IDENTITY_ACCOUNT_MOVE_AGENTS, COMMAND_IDENTITY_ACCOUNT_SET_FAILOVER, COMMAND_IDENTITY_ACCOUNT_SIGNED_IN};
 use crate::backend::storage::store::Store;
 use crate::server::AppState;
 
@@ -168,6 +172,7 @@ pub struct IdentityAccountSignedInResult {
     pub cleared: u32,
 }
 
+use failover::IdentityAccountSetFailoverReq;
 use moves::IdentityAccountMoveAgentsReq;
 pub(crate) use accounts::IdentityAccountsResult;
 pub(crate) use switch::{is_all_limited, AccountSwitchAllResult, AccountSwitchWhen, AgentAccountSwitchReq, AgentAccountSwitchResult};
@@ -236,11 +241,12 @@ fn refresh() {
     let Some(rt) = RUNTIME.get() else { return };
     let now = agentmux_common::time::now_ms_u64();
     let panes = scan(&rt.state, now);
-    let effects = rt.episodes.lock().unwrap_or_else(|e| e.into_inner()).update(panes, now);
+    let effects = rt.episodes.lock().unwrap_or_else(|e| e.into_inner()).update(panes.clone(), now);
     for effect in effects {
         apply(&rt.state, effect);
     }
     switch::apply_pending(&rt.state);
+    failover::run(&rt.state, &panes);
     crate::identity::credential_watch::check(&rt.state.id_store, &rt.state.identity_store, Some(&rt.state.broker));
 }
 
@@ -628,6 +634,18 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 .await
                 .map_err(|e| e.to_string())?;
             Ok(IdentityAccountSignedInResult { cleared: u32::try_from(cleared).unwrap_or(u32::MAX) })
+        }
+    });
+    // The mark is for the operator's window and for agents: it changes where agents are moved
+    // when they run out, not any credential.
+    let s = state.clone();
+    engine.register_typed(COMMAND_IDENTITY_ACCOUNT_SET_FAILOVER, move |req: IdentityAccountSetFailoverReq, ctx| {
+        let s = s.clone();
+        async move {
+            if ctx.agent_id.is_empty() {
+                ctx.operator_only("only the AgentMux window or an agent marks an account never to fail over to")?;
+            }
+            tokio::task::spawn_blocking(move || failover::set_failover(&s, &req)).await.map_err(|e| e.to_string())?
         }
     });
     let s = state.clone();

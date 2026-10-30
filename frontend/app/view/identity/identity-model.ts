@@ -56,6 +56,12 @@ export interface AccountContext {
      * Shown as `email ·N` only while two or more accounts share the email.
      */
     seq?: number;
+    /**
+     * Marked "never fail over to this": an agent out of quota is never moved onto this account by
+     * itself (`agent:accountfailover`, srv's `account_episodes::failover`). Set with
+     * `identity.account.set_failover`.
+     */
+    never_failover?: boolean;
     github_username?: string;
     github_scopes?: string[];
     aws_profile?: string;
