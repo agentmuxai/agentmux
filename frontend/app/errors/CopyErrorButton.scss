@@ -1,29 +1,15 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-@use "../mixins.scss";
-
 .copy-error-button {
     display: inline-flex;
     align-items: center;
     gap: 6px;
 }
 
+// The two buttons are the kit's; these rules only colour the copied and failed
+// states.
 .copy-error-button-action {
-    appearance: none;
-    border: 1px solid var(--border-color);
-    background: transparent;
-    color: var(--secondary-text-color);
-    border-radius: var(--radius-sm);
-    font-size: var(--text-sm);
-    padding: 3px 8px;
-    cursor: pointer;
-
-    &:hover {
-        color: var(--main-text-color);
-        background: var(--highlight-bg-color);
-    }
-
     &.is-copied {
         color: var(--success-text-color);
         border-color: var(--success-color);
@@ -36,22 +22,6 @@
 }
 
 .copy-error-button-icon {
-    appearance: none;
-    border: none;
-    background: transparent;
-    color: var(--secondary-text-color);
-    font-size: var(--text-xs);
-    width: 20px;
-    height: 20px;
-    @include mixins.flex-center(inline-flex);
-    border-radius: var(--radius-sm);
-    cursor: pointer;
-
-    &:hover {
-        color: var(--main-text-color);
-        background: var(--hover-bg-color);
-    }
-
     &.is-copied i {
         color: var(--success-text-color);
     }
