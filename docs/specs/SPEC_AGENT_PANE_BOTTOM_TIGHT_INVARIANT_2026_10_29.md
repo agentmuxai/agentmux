@@ -1,6 +1,6 @@
 # Agent pane: the latest message stays tight against the bottom edge, always
 
-**Status:** active — approved by the operator 2026-10-29 ("approve all recommended"); Phase 1 (the spacer removed, the resize snap, the recorder's tight class and cause log) in PR #PENDING; Phase 2 (docked rows ease their height) and Phase 3 (the kill-switch path) are open.
+**Status:** active — approved by the operator 2026-10-29 ("approve all recommended"); Phase 1 (the spacer removed, the resize snap, the recorder's tight class and cause log) in PR #5866; Phase 2 (docked rows ease their height) and Phase 3 (the kill-switch path) are open.
 **Date:** 2026-10-29.
 **Requested by:** the operator, 2026-10-29: "we need some refining to the scroll on agent panes: I am also noticing overshoot in the agent pane, where an agent will be outputting tool calls and messages, and appears ok, but then spontaneously, a large blank space appears, that the agent only slowly fills up with new messages. Another thing, we also have cases where if we resize the agent pane, a gap can grow at the bottom if the pane is made shorter than taller again. so we want to keep the latest message tight against the edge no matter what, robust thinking".
 **Operator's answer on the shrink, 2026-10-29:** "ah, for moving down, yes, on pane resize, thats likely the only way. but during normal agent converstaion, we'd rather simply not overshoot during normal converstions".
