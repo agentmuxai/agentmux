@@ -48,9 +48,10 @@ fn setup() -> AppState {
 }
 
 #[test]
-fn listing_is_a_read_and_switching_a_write() {
-    assert!(!lookup("identity.accounts").unwrap().changes_state);
-    assert!(lookup("identity.switch").unwrap().changes_state, "moving an agent needs a certificate-backed caller");
+fn the_listing_and_the_switch_both_need_an_approved_install() {
+    let (list, switch) = (lookup("identity.accounts").unwrap(), lookup("identity.switch").unwrap());
+    assert!(!list.changes_state && list.needs_approved_install, "account emails are personal data: a first-seen pin is not enough");
+    assert!(switch.changes_state && switch.needs_approved_install);
 }
 
 #[tokio::test]

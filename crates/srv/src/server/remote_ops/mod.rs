@@ -106,6 +106,10 @@ pub(crate) struct Op {
     /// that pin comes from unauthenticated discovery, which is enough to read a version and too
     /// thin to stop an agent or move an account.
     pub changes_state: bool,
+    /// A read of personal data (an account's email) takes the same proof as a write: a certificate
+    /// from an install this machine has approved. A first-seen pin proves only that the peer stayed
+    /// the same, not that anyone approved it. Always `true` for a write.
+    pub needs_approved_install: bool,
     /// The most bytes of params this operation takes. The default is the transport's
     /// `MAX_PARAMS_BYTES`; one that carries text raises it with [`Op::with_max_params`]. The sender
     /// and the receiver both read it from here, the receiver before it verifies anything, so the
@@ -115,11 +119,17 @@ pub(crate) struct Op {
 
 impl Op {
     pub(crate) const fn read(run: OpFn) -> Self {
-        Self { run, changes_state: false, max_params: agentmux_common::remote_op::MAX_PARAMS_BYTES }
+        Self { run, changes_state: false, needs_approved_install: false, max_params: agentmux_common::remote_op::MAX_PARAMS_BYTES }
+    }
+
+    /// A read that returns personal data: refused (`needs_certificate`, `install_not_trusted`) to
+    /// a peer that is only first-seen, as a write is.
+    pub(crate) const fn read_personal(run: OpFn) -> Self {
+        Self { run, changes_state: false, needs_approved_install: true, max_params: agentmux_common::remote_op::MAX_PARAMS_BYTES }
     }
 
     pub(crate) const fn write(run: OpFn) -> Self {
-        Self { run, changes_state: true, max_params: agentmux_common::remote_op::MAX_PARAMS_BYTES }
+        Self { run, changes_state: true, needs_approved_install: true, max_params: agentmux_common::remote_op::MAX_PARAMS_BYTES }
     }
 
     pub(crate) const fn with_max_params(mut self, max_params: usize) -> Self {
@@ -138,9 +148,9 @@ pub(crate) fn lookup(op: &str) -> Option<Op> {
     Some(match op {
         "app.version" => Op::read(|state, caller, params| Box::pin(app_ops::version(state, caller, params))),
         "app.health" => Op::read(|state, caller, params| Box::pin(app_ops::health(state, caller, params))),
-        // The signed-in accounts here with quota, and moving an agent to one: a switch changes
-        // state, so it needs a certificate-backed caller.
-        "identity.accounts" => Op::read(|state, caller, params| Box::pin(identity_ops::accounts(state, caller, params))),
+        // The signed-in accounts here with quota, and moving an agent to one. The listing has account
+        // emails and a switch changes state: both need a certificate from an approved install.
+        "identity.accounts" => Op::read_personal(|state, caller, params| Box::pin(identity_ops::accounts(state, caller, params))),
         "identity.switch" => Op::write(|state, caller, params| Box::pin(identity_ops::switch(state, caller, params))),
         // A Global Memory entry is up to 1 MiB of text (the cap `globalmemory.write` has), so this one
         // takes 1.2 MB of params; every other operation keeps the default.
