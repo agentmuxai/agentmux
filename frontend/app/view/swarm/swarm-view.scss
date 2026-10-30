@@ -651,10 +651,14 @@
     font-variant-numeric: tabular-nums;
 }
 
+// Two classes, so the variable beats the tone's own `--ui-fg-hover`: Stop reads red when the
+// pointer is on it.
+.swarm-shell-row .swarm-shell-stop {
+    --ui-fg-hover: var(--error-text-color);
+}
+
 .swarm-shell-stop {
     flex-shrink: 0;
-    // The kit's hover colour; Stop reads red when the pointer is on it.
-    --ui-fg-hover: var(--error-text-color);
     opacity: 0;
     transition: opacity var(--duration-decorative-base) var(--ease-standard);
 }
