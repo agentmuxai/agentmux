@@ -432,6 +432,13 @@ pub struct CommandAgentDefCreateFromTemplateData {
     #[serde(default)]
     #[ts(optional)]
     pub model_vendor_base_url: Option<String>,
+    /// The container image the new agent runs in, when it runs in a container: `ghcr.io/agentmuxai/agent-base:developer`
+    /// for the developer image, or `ghcr.io/agentmuxai/agent-base:latest` for the standard one. Absent → keep the
+    /// template's own. Any other image is refused here (an agent's own image is set by editing its definition).
+    /// Ignored for a native agent.
+    #[serde(default)]
+    #[ts(optional)]
+    pub container_image: Option<String>,
 }
 
 /// Response for `agentdefcreatefromtemplate`. The frontend uses

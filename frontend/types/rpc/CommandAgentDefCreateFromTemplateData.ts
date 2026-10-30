@@ -68,4 +68,11 @@ agent_type?: string,
  * `AgentDefCreateFromTemplateCommand`), which never expressed `null`
  * as a meaningful value here, only omission (codex P2 on #3107).
  */
-model_vendor_base_url?: string, };
+model_vendor_base_url?: string, 
+/**
+ * The container image the new agent runs in, when it runs in a container: `ghcr.io/agentmuxai/agent-base:developer`
+ * for the developer image, or `ghcr.io/agentmuxai/agent-base:latest` for the standard one. Absent → keep the
+ * template's own. Any other image is refused here (an agent's own image is set by editing its definition).
+ * Ignored for a native agent.
+ */
+container_image?: string, };
