@@ -74,13 +74,9 @@ struct EnqueueParams {
 
 /// The uid of the agent here that `typed` names, or why none can be named.
 async fn target_uid(state: &AppState, typed: &str) -> Result<String, Failure> {
-    use crate::backend::name_resolution::{resolve_name_to_uid, NameResolution};
-    let (mstore, registry, name) = (state.mstore.clone(), state.reactive_handler, typed.to_string());
-    // A synchronous store read, so off the async worker.
-    let resolved = tokio::task::spawn_blocking(move || resolve_name_to_uid(&mstore, registry, &name))
-        .await
-        .map_err(|e| fail("failed", format!("resolving the agent failed: {e}")))?
-        .map_err(|e| fail("failed", e))?;
+    use crate::backend::name_resolution::NameResolution;
+    // The typed name is interpreted at the boundary layer, never here.
+    let resolved = super::name_resolution::resolve_typed_name(state, typed).await.map_err(|e| fail("failed", e))?;
     match resolved {
         NameResolution::One { uid, .. } => Ok(uid),
         NameResolution::Ambiguous { candidates } => {
