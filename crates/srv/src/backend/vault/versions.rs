@@ -79,8 +79,14 @@ pub(super) fn of(row: &VaultRow, by: &str, how: &str) -> VaultVersionRow {
     }
 }
 
-/// Deletes what is past its 7 days; a failure is logged, not raised.
+/// Deletes what is past its 7 days, and marks a rotation's pending value that
+/// has waited longer than any rotation runs as interrupted (its request was
+/// dropped, or srv stopped): the person can then put it in. A failure is
+/// logged, not raised.
 pub fn prune(store: &Store) {
+    if let Err(e) = store.vault_versions_restate_before(PENDING, now_ms() - ROTATION_MS, INTERRUPTED) {
+        tracing::warn!(error = %e, "vault: couldn't mark interrupted rotations");
+    }
     if let Err(e) = store.vault_versions_prune(now_ms() - KEEP_MS) {
         tracing::warn!(error = %e, "vault: couldn't delete old versions");
     }
@@ -142,6 +148,9 @@ pub struct Rotation {
     pub seq: i64,
     pub label: String,
     created_at: i64,
+    /// The entry's value when the rotation started: if anything else writes it
+    /// meanwhile, the rotation doesn't overwrite that.
+    was: Vec<u8>,
 }
 
 /// Starts a rotation of entry `id`: `value` goes into its main part as a pending
@@ -167,7 +176,7 @@ pub fn start_rotation(store: &Store, id: &str, value: &str, agent: &str) -> Resu
     };
     prune(store);
     match store.vault_version_pending(&pending, now - ROTATION_MS, INTERRUPTED).map_err(|e| e.to_string())? {
-        Some(seq) => Ok(Rotation { seq, label: row.label, created_at: row.created_at }),
+        Some(seq) => Ok(Rotation { seq, label: row.label, created_at: row.created_at, was: row.sealed }),
         None => Err(format!("{} is being rotated already: wait for that rotation to finish", row.label)),
     }
 }
@@ -184,12 +193,19 @@ pub fn finish_rotation(store: &Store, id: &str, r: &Rotation, outcome: Result<()
     let changed = || format!("{} changed while it was rotated: the new value is kept as a version", r.label);
     let row = store.vault_get(id).map_err(|e| e.to_string())?.filter(|row| row.created_at == r.created_at).ok_or_else(changed)?;
     let now = now_ms();
-    let previous = of(&row, agent, "rotated");
+    // Swapped only if the entry still holds the value the rotation started from.
+    let previous = VaultVersionRow { sealed: r.was.clone(), ..of(&row, agent, "rotated") };
     if !store.vault_version_swap(&row.id, r.seq, &previous, now, now - KEEP_MS).map_err(|e| e.to_string())? {
         let _ = store.vault_version_mark(r.seq, OVERTAKEN);
         return Err(changed());
     }
     Ok(())
+}
+
+/// Drops a rotation whose `set` never started: no service saw its value, so
+/// there is nothing to keep or put back.
+pub fn abandon_rotation(store: &Store, r: &Rotation) -> Result<(), String> {
+    store.vault_version_delete(r.seq).map_err(|e| e.to_string())
 }
 
 /// Version `seq` of entry `id` (this incarnation), for a command that names it:

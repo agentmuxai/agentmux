@@ -162,9 +162,24 @@ pub(crate) async fn handle_vault_rotate(State(state): State<AppState>, Json(body
         (Ok(r), false) if r.ok() => Some(run(&state, &block_id, &auth, &agent, &verify, cwd, HashMap::from([("NEW_SECRET".to_string(), pending)])).await),
         _ => None,
     };
+    // A set that never started gave no service the value: it is dropped, not kept.
+    if let Err(why) = &set_ran {
+        let (store, r) = (state.identity_store.clone(), rotation);
+        let _ = tokio::task::spawn_blocking(move || versions::abandon_rotation(&store, &r)).await;
+        vault::record(&state.identity_store, &row.id, &row.label, &agent, ROTATED, &clip(&set), "failed: set couldn't start");
+        super::vault_handlers::publish(&state);
+        return Json(json!({
+            "id": row.id,
+            "label": row.label,
+            "rotated": false,
+            "failed_step": 2,
+            "set": ran_json(&set_ran),
+            "note": format!("set couldn't start ({why}), so nothing changed: the entry keeps its value and the new one was dropped."),
+        }))
+        .into_response();
+    }
     let failed = match (&set_ran, &verify_ran) {
         (Ok(s), _) if !s.ok() => Some(2),
-        (Err(_), _) => Some(2),
         (_, Some(Ok(v))) if !v.ok() => Some(3),
         (_, Some(Err(_))) => Some(3),
         _ => None,

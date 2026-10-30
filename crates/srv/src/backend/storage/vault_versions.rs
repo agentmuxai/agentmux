@@ -209,6 +209,20 @@ impl Store {
         Ok(Some(seq))
     }
 
+    /// Marks every version in `from` replaced before `before_ms` as `to` (a
+    /// rotation's pending value that never finished); returns how many.
+    pub fn vault_versions_restate_before(&self, from: &str, before_ms: i64, to: &str) -> Result<usize, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        Ok(conn.execute("UPDATE db_vault_versions SET state = ?3 WHERE state = ?1 AND replaced_at < ?2", params![from, before_ms, to])?)
+    }
+
+    /// Deletes version `seq` (a rotation's value no service ever saw).
+    pub fn vault_version_delete(&self, seq: i64) -> Result<(), StoreError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM db_vault_versions WHERE seq = ?1", params![seq])?;
+        Ok(())
+    }
+
     /// Sets version `seq`'s state (a rotation that failed); false if it is gone.
     pub fn vault_version_mark(&self, seq: i64, state: &str) -> Result<bool, StoreError> {
         let conn = self.conn.lock().unwrap();

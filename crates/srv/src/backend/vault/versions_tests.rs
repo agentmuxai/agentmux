@@ -229,3 +229,36 @@ fn a_command_names_only_previous_or_pending_and_says_when_there_is_none() {
     assert_eq!((t.version, t.part), (Some("previous"), "value"));
     assert!(crate::backend::vault::value_for_command(&s, &t).unwrap_err().contains("no previous value"));
 }
+
+#[test]
+fn an_edit_during_a_rotation_is_never_overwritten() {
+    let s = store();
+    let id = create(&s, key("sk_live_first_value")).unwrap();
+    let r = start_rotation(&s, &id, "sk_live_rotated_value", "Agent2-6").unwrap();
+    set(&s, &id, Some("sk_live_edited_meanwhile"), "the person edited it");
+    assert!(finish_rotation(&s, &id, &r, Ok(()), "Agent2-6").unwrap_err().contains("changed while it was rotated"));
+    assert_eq!(current(&s, &id), "sk_live_edited_meanwhile");
+    assert!(list(&s, &id).unwrap().iter().any(|v| v.state == OVERTAKEN), "the new value is kept, marked");
+}
+
+#[test]
+fn a_rotation_left_waiting_is_marked_interrupted_when_the_versions_are_read() {
+    let s = store();
+    let id = create(&s, key("sk_live_first_value")).unwrap();
+    let row = s.vault_get(&id).unwrap().unwrap();
+    let mut stale = of(&row, "Agent2-6", "rotated");
+    stale.state = PENDING.into();
+    stale.replaced_at = now_ms() - 60 * 60 * 1000;
+    s.vault_version_add(&stale).unwrap();
+    assert_eq!(list(&s, &id).unwrap()[0].state, INTERRUPTED);
+}
+
+#[test]
+fn a_rotation_whose_set_never_started_leaves_nothing_behind() {
+    let s = store();
+    let id = create(&s, key("sk_live_first_value")).unwrap();
+    let r = start_rotation(&s, &id, "sk_live_rotated_value", "Agent2-6").unwrap();
+    abandon_rotation(&s, &r).unwrap();
+    assert!(list(&s, &id).unwrap().is_empty());
+    assert_eq!(current(&s, &id), "sk_live_first_value");
+}

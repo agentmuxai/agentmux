@@ -120,6 +120,7 @@ Captured keys (`aws iam create-access-key`) usually rotate by creating a new key
 - **The new value's rules:** entries don't keep the rules they were made under, so the new value follows `rules` given to `rotate`, or the default of 20 characters.
 - **One rotation at a time:** a second rotation of an entry is refused while one runs. A pending value whose rotation never finished (srv stopped) is marked "rotation interrupted" after 30 minutes.
 - **Restoring:** the person can put a failed or interrupted rotation's value in from the Vault pane, since the service may hold it. A running rotation's value can't be restored.
+- **When `set` never starts** (a refused secret, a spawn failure), no service saw the new value, so it is dropped rather than kept. An entry written while it was rotated is never overwritten: the rotation fails and its value is kept, marked.
 - **Not yet:** `rotate` with a `capture` rule (a key the service makes) is the existing `Terminal` `run` with `capture` naming the entry, then a second `run` with `id@previous`.
 
 ## 5. B. The browser saves sign-ins and fills them on approval
