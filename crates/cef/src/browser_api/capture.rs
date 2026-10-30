@@ -4,12 +4,14 @@
 //! Reading a secret a page shows once, for the Vault
 //! (docs/specs/SPEC_VAULT_GENERATE_CAPTURE_AND_BROWSER_SIGNINS_2026_10_28.md §15.1).
 //!
-//! `/agentmux/browser/capture_value`, for srv only: reads the element a reference
-//! names (an input's value, otherwise its text, trimmed), marks it as holding a
-//! Vault value (`data-agentmux-vault`, on the element or a text node's parent), and
-//! answers with the value and the origin of the frame it is in, taken from the
-//! host's own frame map, never from the page. srv stores it; the agent never sees
-//! it.
+//! Two routes, for srv only:
+//! - `/agentmux/browser/capture_value` reads the element a reference names (an
+//!   input's value, otherwise its text's one secret) and answers with the value and
+//!   the origin of the frame it is in, taken from the host's own frame map, never
+//!   from the page. srv stores it; the agent never sees it.
+//! - `/agentmux/browser/capture_mark`, once srv has stored it, marks the element as
+//!   holding a Vault value (`data-agentmux-vault`, on the element or a text node's
+//!   parent). A capture srv refused leaves no mark.
 
 use std::sync::Arc;
 
@@ -93,8 +95,38 @@ async fn capture(state: &Arc<AppState>, root: &mut super::cdp::CdpSession, req: 
     };
     let field = read.get("field").and_then(Value::as_bool).unwrap_or(false);
     let value = pick(text, field, &req.ref_)?;
-    call_on(cdp, &obj, MARK, vec![json!(TAINT_ATTR)]).await?;
     Ok(Captured { value, origin: located.origin, page: located.page })
+}
+
+/// `POST /agentmux/browser/capture_mark`: the element's value is in the Vault now.
+pub async fn capture_mark_route(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(req): Json<CaptureReq>,
+) -> (StatusCode, Json<ApiResponse<Value>>) {
+    if !super::routes::authorized_pub(&headers, &state.ipc_token) {
+        return unauthorized();
+    }
+    let mut cdp = match super::routes::open_dedicated_pane(&state, &req.block_id, "vault-capture-mark").await {
+        Ok(c) => c,
+        Err(e) => return fail(e),
+    };
+    let result = mark(&state, &mut cdp, &req).await;
+    let _ = cdp.close().await;
+    match result {
+        Ok(()) => (StatusCode::OK, Json(ApiResponse::ok(json!({ "marked": true })))),
+        Err(e) => fail(e),
+    }
+}
+
+async fn mark(state: &Arc<AppState>, root: &mut super::cdp::CdpSession, req: &CaptureReq) -> Result<(), String> {
+    let (_, backend, frame) = locate(state, &req.block_id, &req.ref_, root).await?;
+    let mut in_frame = root.in_session(frame.as_ref().and_then(|f| f.session.as_deref()));
+    let cdp = &mut in_frame;
+    let ctx = isolated_context(cdp, frame.as_ref().map(|f| f.frame_id.as_str())).await?;
+    let obj = resolve(cdp, backend, ctx, &req.ref_).await?;
+    call_on(cdp, &obj, MARK, vec![json!(TAINT_ATTR)]).await?;
+    Ok(())
 }
 
 /// The secret in what was read: a field's whole value; in text, its one token with

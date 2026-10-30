@@ -68,6 +68,7 @@ pub fn register_routes(router: Router<Arc<AppState>>) -> Router<Arc<AppState>> {
         .route("/agentmux/browser/field_info", post(vault_fill::field_info_route))
         .route("/agentmux/browser/vault_fill", post(vault_fill::vault_fill_route))
         .route("/agentmux/browser/capture_value", post(capture::capture_value_route))
+        .route("/agentmux/browser/capture_mark", post(capture::capture_mark_route))
         .route("/agentmux/browser/screenshot", post(routes::screenshot))
         .route("/agentmux/browser/click_element", post(routes::click_element))
         .route("/agentmux/browser/focus_element", post(routes::focus_element))

@@ -62,6 +62,20 @@ pub fn starts_zone(node: &Value, zones: &HashSet<&str>) -> bool {
     CODE_ROLES.contains(&role(node)) || node.get("nodeId").and_then(Value::as_str).is_some_and(|id| zones.contains(id))
 }
 
+/// Whether one of `node`'s ancestors starts a zone: a scoped snapshot that begins
+/// inside one is still in it.
+pub fn under_zone(node: &Value, by_id: &std::collections::HashMap<&str, &Value>, zones: &HashSet<&str>) -> bool {
+    let mut at = node;
+    for _ in 0..256 {
+        let Some(parent) = at.get("parentId").and_then(Value::as_str).and_then(|p| by_id.get(p)) else { return false };
+        if starts_zone(parent, zones) {
+            return true;
+        }
+        at = parent;
+    }
+    false
+}
+
 /// Whether a line masks a one-time secret: in its name, inside a zone, or in its
 /// value, inside a zone or in a read-only field.
 pub fn masks(name: &str, value: Option<&str>, in_zone: bool, readonly: bool) -> bool {

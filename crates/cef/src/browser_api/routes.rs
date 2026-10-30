@@ -234,12 +234,15 @@ pub async fn eval(
     }
     // A script could read a Vault value filled into the page, or a secret the
     // page shows once, which every other read hides (spec §10.1, §15.1).
-    if super::page_state::secret_boxes(&mut cdp).await.vault_values > 0 {
+    let scan = super::page_state::secret_boxes(&mut cdp).await;
+    if scan.vault_values > 0 || !scan.complete {
         let _ = cdp.close().await;
-        return ok_body(ApiResponse::err(
+        let why = if scan.vault_values > 0 {
             "eval is refused on this tab while it holds a Vault value or shows a secret once: use snapshot or find to read it, or Browser capture to save the secret; it is allowed again once the tab navigates away"
-                .to_string(),
-        ));
+        } else {
+            "eval is refused on this tab: AgentMux couldn't check all of the page for Vault values or secrets it shows once (too many elements, or a frame it can't read); use snapshot or find instead"
+        };
+        return ok_body(ApiResponse::err(why.to_string()));
     }
 
     let eval_result = match cdp

@@ -163,6 +163,13 @@ pub(crate) async fn handle_browser_capture(
     let (store, given, from) = (state.identity_store.clone(), req.into, origin.clone());
     let stored = tokio::task::spawn_blocking(move || store_captured(&store, plan, value, &from, given.as_ref())).await;
     super::vault_handlers::publish(&state);
+    // Only now that it is stored is the element marked: a refused capture leaves no
+    // mark (one that would keep eval refused on the tab for nothing).
+    if matches!(stored, Ok(Ok(_))) {
+        if let Err((_, e)) = proxy_value(&state, "capture_mark", json!({ "block_id": block_id, "ref": ref_ }), HOST_WAIT).await {
+            tracing::warn!(error = %e, "[vault] a captured element couldn't be marked");
+        }
+    }
     // The pane's own Log: what was captured, from where, never the value.
     let log = note(&block_id, &agent, Kind::Capture).target(&ref_);
     match &stored {

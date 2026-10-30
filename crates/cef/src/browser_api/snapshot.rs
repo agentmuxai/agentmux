@@ -343,7 +343,9 @@ pub fn render_with_frames(
     let mut out = Snapshot { text: String::new(), refs: Vec::new(), ref_frames: Vec::new(), truncated: false };
     let zones = super::shown_once::copy_zones(nodes);
     if let Some(root) = root {
-        walk(root, &by_id, facts, &zones, false, ref_prefix, 0, "", false, 0, frames, &mut out);
+        // A scope inside a zone is still in it: its secret stays masked.
+        let in_zone = super::shown_once::under_zone(root, &by_id, &zones);
+        walk(root, &by_id, facts, &zones, in_zone, ref_prefix, 0, "", false, 0, frames, &mut out);
     }
     if out.truncated {
         out.text.push_str("- … snapshot truncated at 40 KB: use find (a role and name), or pass `scope` (a reference, or a role and quoted name) to read one part of the page\n");

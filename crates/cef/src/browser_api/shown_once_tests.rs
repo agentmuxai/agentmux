@@ -80,6 +80,14 @@ fn ids_and_text_outside_where_a_page_shows_a_secret_stay_visible() {
 }
 
 #[test]
+fn a_snapshot_scoped_to_the_masked_line_keeps_it_masked() {
+    for backend in [3, 5] {
+        let s = render(&console(), &text_input(&[8, 12]), Some(backend), "");
+        assert!(s.text.contains(SHOWN_ONCE) && !s.text.contains(SECRET), "scope {backend}: {}", s.text);
+    }
+}
+
+#[test]
 fn find_masks_it_too() {
     let q = ElementQuery { role: Some("text".into()), name: "value".into(), ..Default::default() };
     let found = find(&console(), &HashMap::new(), &q, "");
