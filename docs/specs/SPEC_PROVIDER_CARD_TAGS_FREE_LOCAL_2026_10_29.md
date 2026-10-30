@@ -1,6 +1,6 @@
 # SPEC: provider-card tags (Free, Local), card filters, and a free-signup guide
 
-**Status:** active — approved by the operator on 2026-10-29 ("sounds good, go with recommendations"). Shipped in PR #5849: the access data, its freshness rules and the card filters' logic (§5, §6 as pure functions), with tests. Remains: the card tags on the kit's `Tag` primitive, the filter chips, the "Get started free" step, and the follow-ups in §10. Owner: Korp@narko. Written 2026-10-29 against origin/main `ff3eff050`.
+**Status:** active — approved by the operator on 2026-10-29 ("sounds good, go with recommendations"). Shipped: the access data, its freshness rules and the filter logic (PR #5849); the sign-up guide for the six sign-in providers (PR #5860). Remains: the card tags on the kit's `Tag` primitive, the filter chips, and the follow-ups in §10; the Gemini key route is AgentX's own spec (§7). Owner: Korp@narko. Written 2026-10-29 against origin/main `ff3eff050`.
 Inputs: `docs/reports/REPORT_FREE_AND_LOCAL_PROVIDER_OPTIONS_2026_10_29.md` (every claim in the data file below comes from it, with its source and date) and Camper-2's `SPEC_UI_PANEL_PRIMITIVE_2026_10_29.md` §9 (the `Tag` primitive this builds on).
 Mock (rendered from real tokens, not built): `docs/specs/mock-10964/cards.png`, source `cards.html` next to it.
 
@@ -180,6 +180,8 @@ Two routes, from the data's `route`:
 3. Start. The limits and the training catch show once, under the field, in the person's words ("free-tier data may train Google's models outside the EEA").
 
 **What AgentMux writes for a key-based option.** Gemini CLI needs only the account. The Codex-with-another-key case from the report (`model_providers` in `CODEX_HOME/config.toml`, the key read from the variable named in `env_key`, `wire_api = "responses"`) is not part of this build: no free cloud key is verified to work with Codex. It belongs to the Local/model-source spec (§10), where AgentMux writes that file.
+
+**The key route comes later, and is not built by #10964 (AgentX, 2026-10-29).** A pasted key must land in an account backed by the Vault and be injected per use; that is accounts and identity-form work, which AgentX owns as its own spec, and `GEMINI_API_KEY` is on the agent environment's reserved list for that reason. So #10964 builds no key field and no place for a key. Gemini CLI keeps its Free tag and data, and has **no guide** until the key route exists: its Google sign-in does not give the free tier any more (it moved to Antigravity on 2026-06-18), so a sign-in guide for it would send people to a route that doesn't work. The decided rule below stands for when it is built.
 
 **Where the key lives (decided 2026-10-29 by AgentY and AgentX).** The bound account in the OS keychain, entered through the masked-field pattern, so a key typed here behaves exactly like one entered in Connectors or Accounts. The rule from AgentY: a key is never typed into or shown in a chat or transcript, and never goes into a container. (The Vault pane is a separate store that agents request from; it is not used here.)
 

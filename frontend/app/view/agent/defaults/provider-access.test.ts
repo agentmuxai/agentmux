@@ -12,6 +12,7 @@ import {
     checkedNote,
     daysSince,
     filterCounts,
+    freeGuideFor,
     freeTagFor,
     localTagFor,
     matchesFilters,
@@ -213,5 +214,34 @@ describe("the card filters", () => {
 
     it("has the three chips the spec names", () => {
         expect([...CARD_FILTERS]).toEqual(["free", "local", "installed"]);
+    });
+});
+
+describe("the free sign-up guide", () => {
+    it("is the link, the steps, the limit and the catches for a sign-in provider", () => {
+        const g = freeGuideFor("antigravity", CHECKED)!;
+        expect(g.signupUrl).toBe("https://antigravity.google/docs/getting-started?tab=cli");
+        expect(g.steps.length).toBeGreaterThanOrEqual(2);
+        expect(g.lead).toBe("Free with a Google sign-in");
+        expect(g.checked.text).toBe("checked 2026-10-29");
+        expect(g.stale).toBe(false);
+    });
+
+    it("says when its claims are stale, and still shows", () => {
+        const g = freeGuideFor("kilo", daysAfter("2026-10-29", STALE_DAYS + 1))!;
+        expect(g.stale).toBe(true);
+        expect(g.checked.text).toBe("Not re-checked since 2026-10-29");
+    });
+
+    it("is not offered where the route is a pasted key, for no free route, or for a provider the file doesn't know", () => {
+        expect(freeGuideFor("gemini", CHECKED)).toBeNull();
+        expect(freeGuideFor("codex", CHECKED)).toBeNull();
+        expect(freeGuideFor("claude", CHECKED)).toBeNull();
+        expect(freeGuideFor("not-a-provider", CHECKED)).toBeNull();
+    });
+
+    it("is offered for exactly the six sign-in providers", () => {
+        const offered = PROVIDER_ACCESS.map((a) => a.provider).filter((p) => freeGuideFor(p, CHECKED) !== null);
+        expect(offered.sort()).toEqual(["antigravity", "cline", "copilot", "grok", "kilo", "opencode"]);
     });
 });

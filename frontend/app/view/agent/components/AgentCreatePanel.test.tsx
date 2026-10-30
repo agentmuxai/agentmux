@@ -39,6 +39,8 @@ vi.mock("@/app/store/rpc-api", () => ({
         InstallCheckCommand: vi.fn(),
         ToolchainResolveInstallCommandCommand: vi.fn(),
         ToolchainInstallSystemToolCommand: vi.fn(),
+        ListIdentityAccountsCommand: vi.fn(),
+        CheckCliAuthCommand: vi.fn(),
     },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
@@ -95,6 +97,8 @@ vi.mock("../providers", async (importOriginal) => ({
                 id: "antigravity",
                 displayName: "Antigravity",
                 cliCommand: "agy",
+                authType: "cli-managed",
+                authCheckCommand: ["models"],
                 npmPackage: "",
                 pinnedVersion: "",
                 docsUrl: "https://example.test/agy-docs",
@@ -107,6 +111,16 @@ vi.mock("../providers", async (importOriginal) => ({
 vi.mock("../agent-launch-env", () => ({
     resolveEffectiveLaunchProvider: vi.fn(async (t: { provider: string }) => t.provider),
 }));
+
+// The accounts the panel looks for (the free sign-up guide shows only without one).
+const accountsForTest = {
+    list: [] as { provider: string }[],
+    /** While set, the account list hasn't arrived yet. */
+    gate: null as null | Promise<void>,
+    fail: false,
+    /** The CLI's own sign-in check: true/false, or "throws". */
+    cliSignedIn: false as boolean | "throws",
+};
 
 // The Create step's own behaviour is AgentCreateForm.test.tsx's.
 vi.mock("./AgentCreateForm", () => ({
@@ -564,5 +578,98 @@ describe("AgentCreatePanel — Install step, a CLI AgentMux doesn't install", ()
         await waitFor(() => expect(recheckInstalled).toHaveBeenCalledTimes(1));
         await waitFor(() => expect((screen.getByTestId("agent-create-check-again") as HTMLButtonElement).disabled).toBe(false));
         expect(screen.getByTestId("agent-create-vendor-install")).toBeInTheDocument();
+    });
+});
+
+describe("the free sign-up guide in the Create step", () => {
+    beforeEach(() => {
+        accountsForTest.list = [];
+        accountsForTest.gate = null;
+        accountsForTest.fail = false;
+        accountsForTest.cliSignedIn = false;
+        vi.mocked(RpcApi.InstallCheckCommand).mockResolvedValue({ installed: true, version: null, path: "/bin/agy", source: "system_path" } as any);
+        vi.mocked(RpcApi.CheckCliAuthCommand).mockImplementation((async () => {
+            if (accountsForTest.cliSignedIn === "throws") throw new Error("check failed");
+            return { authenticated: accountsForTest.cliSignedIn };
+        }) as any);
+        vi.mocked(RpcApi.ListIdentityAccountsCommand).mockImplementation((async () => {
+            if (accountsForTest.gate) await accountsForTest.gate;
+            if (accountsForTest.fail) throw new Error("accounts unavailable");
+            return accountsForTest.list;
+        }) as any);
+    });
+
+    const agyTemplate = () => baseTemplate({ provider: "antigravity", name: "Antigravity" });
+
+    it("shows for a provider with a free sign-in route when the person has no account for it", async () => {
+        renderPanel({ template: agyTemplate() });
+        await waitFor(() => expect(screen.getByTestId("agent-create-form")).toBeTruthy());
+        await waitFor(() => expect(screen.getByTestId("agent-free-guide")).toBeTruthy());
+        fireEvent.click(screen.getByTestId("agent-free-guide-open"));
+        expect(openExternal).toHaveBeenCalledWith("https://antigravity.google/docs/getting-started?tab=cli");
+    });
+
+    it("is hidden once an account for the provider exists", async () => {
+        accountsForTest.list = [{ provider: "antigravity" }];
+        renderPanel({ template: agyTemplate() });
+        await waitFor(() => expect(screen.getByTestId("agent-create-form")).toBeTruthy());
+        await new Promise((r) => setTimeout(r, 0));
+        expect(screen.queryByTestId("agent-free-guide")).toBeNull();
+    });
+
+    it("does not flash in for someone who has an account while the account list is still loading", async () => {
+        let release!: () => void;
+        accountsForTest.gate = new Promise<void>((r) => (release = r));
+        accountsForTest.list = [{ provider: "antigravity" }];
+        renderPanel({ template: agyTemplate() });
+        await waitFor(() => expect(screen.getByTestId("agent-create-form")).toBeTruthy());
+        await new Promise((r) => setTimeout(r, 0));
+        expect(screen.queryByTestId("agent-free-guide")).toBeNull();
+        release();
+        await new Promise((r) => setTimeout(r, 0));
+        expect(screen.queryByTestId("agent-free-guide")).toBeNull();
+    });
+
+    it("waits for the list, then shows for someone with no account", async () => {
+        let release!: () => void;
+        accountsForTest.gate = new Promise<void>((r) => (release = r));
+        renderPanel({ template: agyTemplate() });
+        await waitFor(() => expect(screen.getByTestId("agent-create-form")).toBeTruthy());
+        expect(screen.queryByTestId("agent-free-guide")).toBeNull();
+        release();
+        await waitFor(() => expect(screen.getByTestId("agent-free-guide")).toBeTruthy());
+    });
+
+    it("stays away when the account list can't be read", async () => {
+        accountsForTest.fail = true;
+        renderPanel({ template: agyTemplate() });
+        await waitFor(() => expect(screen.getByTestId("agent-create-form")).toBeTruthy());
+        await new Promise((r) => setTimeout(r, 0));
+        expect(screen.queryByTestId("agent-free-guide")).toBeNull();
+    });
+
+    it("is hidden for someone already signed in to a CLI that keeps its own login (no account exists)", async () => {
+        accountsForTest.cliSignedIn = true;
+        renderPanel({ template: agyTemplate() });
+        await waitFor(() => expect(screen.getByTestId("agent-create-form")).toBeTruthy());
+        await waitFor(() => expect(RpcApi.CheckCliAuthCommand).toHaveBeenCalled());
+        await new Promise((r) => setTimeout(r, 0));
+        expect(screen.queryByTestId("agent-free-guide")).toBeNull();
+        expect(vi.mocked(RpcApi.CheckCliAuthCommand).mock.calls[0][1]).toMatchObject({ cli_path: "/bin/agy", auth_check_args: ["models"] });
+    });
+
+    it("stays away when the CLI's sign-in check can't be answered", async () => {
+        accountsForTest.cliSignedIn = "throws";
+        renderPanel({ template: agyTemplate() });
+        await waitFor(() => expect(screen.getByTestId("agent-create-form")).toBeTruthy());
+        await waitFor(() => expect(RpcApi.CheckCliAuthCommand).toHaveBeenCalled());
+        await new Promise((r) => setTimeout(r, 0));
+        expect(screen.queryByTestId("agent-free-guide")).toBeNull();
+    });
+
+    it("is not shown for a provider with no free route", async () => {
+        renderPanel();
+        await waitFor(() => expect(screen.getByTestId("agent-create-form")).toBeTruthy());
+        expect(screen.queryByTestId("agent-free-guide")).toBeNull();
     });
 });
