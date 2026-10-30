@@ -210,7 +210,11 @@ The §9 recommendations were taken as written (Q1–Q6). Differences from the pl
 - **Code:** `app/store/pane-history-core.ts` (the reducer), `pane-history.ts` (recording and stepping),
   `side-button-rules.ts` (the press rules), `side-buttons.ts` (listener and host event), `crates/cef/src/side_buttons.rs`
   (Win32 decoding).
-- **Not built:** the §4.2 "ignore while a context menu is open" rule (only modals are detected).
+- **Context menus (2026-10-30):** a press is ignored while a context menu is open, as §4.2 says.
+  `isJsContextMenuOpen()` (`host/js-context-menu.ts`) feeds `menuOpen` into `decideSideButton` and `hostPressActs`.
+  The button is still consumed, so Chromium doesn't navigate. An ignored press's release is ignored too, because a
+  press that reaches the menu's own mousedown listener (a chord) closes the menu before the release. Not checked in a
+  live window.
 
 ### 10.1 Linux and macOS browser panes (P3)
 

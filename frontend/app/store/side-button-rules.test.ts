@@ -21,7 +21,7 @@ const press = (over: Partial<SideButtonInput> = {}): SideButtonInput => ({
     metaKey: false,
     ...over,
 });
-const on = { enabled: true, modalOpen: false };
+const on = { enabled: true, modalOpen: false, menuOpen: false };
 
 describe("decideSideButton", () => {
     it("acts on Back and Forward, and consumes them", () => {
@@ -36,7 +36,7 @@ describe("decideSideButton", () => {
     });
 
     it("does nothing, and consumes nothing, when the setting is off", () => {
-        expect(decideSideButton(press(), { enabled: false, modalOpen: false })).toEqual({ consume: false, act: null });
+        expect(decideSideButton(press(), { ...on, enabled: false })).toEqual({ consume: false, act: null });
     });
 
     it("consumes but does not act with a modifier held (Ctrl + button is the browser pane's page history)", () => {
@@ -51,7 +51,12 @@ describe("decideSideButton", () => {
     });
 
     it("does not act while a modal is open, but still keeps Chromium from navigating", () => {
-        expect(decideSideButton(press(), { enabled: true, modalOpen: true })).toEqual({ consume: true, act: null });
+        expect(decideSideButton(press(), { ...on, modalOpen: true })).toEqual({ consume: true, act: null });
+    });
+
+    it("does not act while a context menu is open, but still keeps Chromium from navigating", () => {
+        expect(decideSideButton(press(), { ...on, menuOpen: true })).toEqual({ consume: true, act: null });
+        expect(decideSideButton(press({ button: SIDE_BUTTON_FORWARD }), { ...on, menuOpen: true })).toEqual({ consume: true, act: null });
     });
 });
 
@@ -68,7 +73,6 @@ describe("isRepeat", () => {
 });
 
 describe("hostPressActs", () => {
-    const on = { enabled: true, modalOpen: false };
 
     it("acts on a plain press the host reports", () => {
         expect(hostPressActs({ ctrl: false }, on)).toBe(true);
@@ -81,7 +85,8 @@ describe("hostPressActs", () => {
 
     it("leaves Ctrl presses to the host and respects the setting and open modals", () => {
         expect(hostPressActs({ ctrl: true }, on)).toBe(false);
-        expect(hostPressActs({ ctrl: false }, { enabled: false, modalOpen: false })).toBe(false);
-        expect(hostPressActs({ ctrl: false }, { enabled: true, modalOpen: true })).toBe(false);
+        expect(hostPressActs({ ctrl: false }, { ...on, enabled: false })).toBe(false);
+        expect(hostPressActs({ ctrl: false }, { ...on, modalOpen: true })).toBe(false);
+        expect(hostPressActs({ ctrl: false }, { ...on, menuOpen: true })).toBe(false);
     });
 });
