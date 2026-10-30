@@ -619,3 +619,30 @@ async fn itest_dev_proxy_network_attach_and_ip_resolution() {
         "remove() must clear this agent's dev-proxy registrations, not leave a stale route"
     );
 }
+
+/// A container agent that switches account must be recreated with the new account's credentials:
+/// the file it has mounted is the old account's, so the drift check sees a changed source.
+#[test]
+fn a_container_made_for_one_account_has_drift_for_another_account() {
+    use bollard::models::{ContainerInspectResponse, MountPoint};
+    let spec_of = |dir: &str| ContainerMountSpec { claude_config_host_dir: Some(dir.into()), workspace_host_dir: Some("/work/a".into()), ..Default::default() };
+    let old = spec_of("/ids/acct-1/claude");
+    let made_for = |spec: &ContainerMountSpec| ContainerInspectResponse {
+        mounts: Some(
+            ContainerManager::desired_owned_mounts("agentmux-a-1", spec)
+                .into_iter()
+                .map(|(target, source)| {
+                    let named = !source.contains('/');
+                    MountPoint { destination: Some(target), name: named.then(|| source.clone()), source: Some(source), ..Default::default() }
+                })
+                .collect(),
+        ),
+        ..Default::default()
+    };
+    let details = made_for(&old);
+    assert!(ContainerManager::mounts_match(&details, "agentmux-a-1", &old));
+    assert!(!ContainerManager::mounts_match(&details, "agentmux-a-1", &spec_of("/ids/acct-2/claude")), "the new account's login is not mounted yet");
+    // And one that has no account any more.
+    let none = ContainerMountSpec { workspace_host_dir: Some("/work/a".into()), ..Default::default() };
+    assert!(!ContainerManager::mounts_match(&details, "agentmux-a-1", &none));
+}

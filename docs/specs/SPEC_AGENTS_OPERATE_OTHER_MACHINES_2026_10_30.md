@@ -1,6 +1,6 @@
 # SPEC: Agents operate other machines: typed remote operations between AgentMux instances, accounts first
 
-**Status:** active — approved by the operator, 2026-10-30 ("yes, spec looks good"), with every recommendation in section 9 (D1-D8). The local half of P1 accounts shipped in PR #5915 (the stable account id, `identity.accounts`, `identity.switch` by stable id, email or `any with quota`, `all limited`). The LAN transport, `app.version` and `app.health` shipped in #5896. Not done: the relay message kind and the remote `identity.*` arms, failover, and P2-P6. The account id is also in the LAN agent list (`agent_accounts`), which `Agents list` and the Swarm read.
+**Status:** active — approved by the operator, 2026-10-30 ("yes, spec looks good"), with every recommendation in section 9 (D1-D8). The local half of P1 accounts shipped in PR #5915 (the stable account id, `identity.accounts`, `identity.switch` by stable id, email or `any with quota`, `all limited`). The LAN transport, `app.version` and `app.health` shipped in #5896. Automatic failover shipped after it: an agent that hits a usage limit moves to a signed-in account with quota after its turn, `agent:accountfailover` turns it off, and an account marked "never fail over to this" (right-click it in Connectors) is never chosen. The remote `identity.accounts` and `identity.switch` followed on the LAN transport, with the `host` argument on `Identity`; both need a certificate from an install the receiving machine has approved (a peer known only by its first-seen pin is refused, with a message that says to approve the instance), because the listing carries account emails. Not done: the relay message kind, and P2-P6. The account id is also in the LAN agent list (`agent_accounts`), which `Agents list` and the Swarm read.
 **Date:** 2026-10-30
 **Author:** AgentY, at the operator's request: "lets also write a spec that allows agents to set the accounts on other machines, remember agents need superpowers, so fill in other operational gaps you find."
 **Tasks:** spec #12438, build #12439 (split into the phase tasks in section 8 once approved).
@@ -100,7 +100,7 @@ Version 1. "Local rule" means: whatever the same call does on the agent's own ma
 
 | Op | What it does on the target | Sensitive there? | Phase |
 |---|---|---|---|
-| `identity.accounts` | Signed-in accounts with stable id, provider, email, label, sign-in state, **quota state and reset time**, and which agents use each | no (read) | P1 |
+| `identity.accounts` | Signed-in accounts with stable id, provider, email, label, sign-in state, **quota state and reset time**, and which agents use each | no (read), but only for a caller whose install this machine has approved: it returns account emails | P1 |
 | `identity.switch` | Move an agent (or `"all limited"`) to an account named by stable id, or to `"any with quota"` of the same provider; `after_turn` or `now` | no (local rule) | P1 |
 | `agents.list`, `agents.conversations` | Already cross-machine for names and status; adds the full host entry (runtime, seat, availability) | no | P1 |
 | `agents.start`, `agents.open` | Start an agent there (into a tab the target picks, never the operator's active one) | no | P3 |

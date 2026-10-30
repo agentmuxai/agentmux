@@ -239,7 +239,7 @@ pub(super) async fn receive(
     let Some(operation) = lookup(&op.op) else {
         return refuse("unknown_op", proof);
     };
-    if operation.changes_state {
+    if operation.changes_state || operation.needs_approved_install {
         if caller.instance_id.is_empty() {
             return refuse("needs_certificate", proof);
         }

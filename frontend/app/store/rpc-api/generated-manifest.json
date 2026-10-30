@@ -1646,6 +1646,10 @@
             "method": "IdentityAccountSignedInCommand"
         },
         {
+            "command": "identity.account.set_failover",
+            "method": "IdentityAccountSetFailoverCommand"
+        },
+        {
             "command": "app.desktop",
             "method": "AppDesktopCommand"
         },

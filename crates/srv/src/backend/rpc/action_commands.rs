@@ -60,7 +60,7 @@ pub const ALWAYS: &[&str] = &[
     "widgets.catalog.install", "widgets.install", "widgets.rescan", "widgets.session", "widgets.setenabled",
     "widgets.uninstall", "writeagentconfig", "writeeditorfile",
     "updatecontainer", "setcontainerlimits", "clearcontainercaches",
-    "identity.account.signed_in", "identity.account.validate",
+    "identity.account.set_failover", "identity.account.signed_in", "identity.account.validate",
 ];
 
 /// The window's own view and bookkeeping state.

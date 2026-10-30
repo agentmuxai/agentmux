@@ -3769,6 +3769,25 @@
     }
   },
   {
+    "command": "identity.account.set_failover",
+    "request": "agentmux_srv::server::account_episodes::failover::IdentityAccountSetFailoverReq",
+    "requestName": "IdentityAccountSetFailoverReq",
+    "requestTs": {
+      "imports": [
+        "IdentityAccountSetFailoverReq"
+      ],
+      "name": "IdentityAccountSetFailoverReq"
+    },
+    "response": "agentmux_srv::server::account_episodes::failover::IdentityAccountSetFailoverResult",
+    "responseName": "IdentityAccountSetFailoverResult",
+    "responseTs": {
+      "imports": [
+        "IdentityAccountSetFailoverResult"
+      ],
+      "name": "IdentityAccountSetFailoverResult"
+    }
+  },
+  {
     "command": "identity.account.signed_in",
     "request": "agentmux_srv::server::account_episodes::IdentityAccountSignedInReq",
     "requestName": "IdentityAccountSignedInReq",
