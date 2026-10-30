@@ -298,6 +298,8 @@ declare global {
         goBack(blockId: string): Promise<void>;
         goForward(blockId: string): Promise<void>;
         reload(blockId: string): Promise<void>;
+        /** Stop the page's load (the toolbar's Reload turns into Stop while it loads). */
+        stop(blockId: string): Promise<void>;
         focus(blockId: string): Promise<void>;
         cut(blockId: string): Promise<void>;
         copy(blockId: string): Promise<void>;
