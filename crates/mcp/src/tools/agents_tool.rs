@@ -36,6 +36,7 @@ pub(super) const ACTS: &[Act] = &[
     Act { action: "env_set", tool: "AgentEnvSet", rename: &[] },
     Act { action: "set_seat", tool: "AgentSetSeat", rename: &[] },
     Act { action: "update_container", tool: "AgentUpdateContainer", rename: &[] },
+    Act { action: "message_stats", tool: "AgentMessageStats", rename: &[] },
 ];
 
 pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
@@ -71,6 +72,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 "AgentEnvSet" => env(cx, "set", &args).await,
                 "AgentSetSeat" => set_seats(cx, &args).await,
                 "AgentUpdateContainer" => update_container(cx, &args).await,
+                "AgentMessageStats" => message_stats(cx, &args).await,
                 _ => history::call(act.tool, &args, cx).await,
             };
             let result = result.map_err(|e| anyhow::anyhow!(public_params(&format!("{e:#}"), act.rename)));
@@ -441,6 +443,26 @@ async fn env(cx: &ToolCtx<'_>, action: &str, args: &Value) -> Result<String> {
         anyhow::bail!("Agents env_{action}: {}", body["error"].as_str().map(str::to_string).unwrap_or_else(|| format!("srv answered {status}: {body}")));
     }
     Ok(serde_json::to_string_pretty(&body)?)
+}
+
+/// `Agents message_stats`: what messages cost per agent per day, from srv's audit file (read-only).
+async fn message_stats(cx: &ToolCtx<'_>, args: &Value) -> Result<String> {
+    let ToolCtx { local_url, auth_key, client, .. } = *cx;
+    if local_url.is_empty() || auth_key.is_empty() {
+        anyhow::bail!("AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. Is this agent pane opened via AgentMux?");
+    }
+    let mut url = format!("{}/api/v1/message-stats", local_url.trim_end_matches('/'));
+    if let Some(days) = args.get("days").and_then(|d| d.as_u64()) {
+        url.push_str(&format!("?days={days}"));
+    }
+    let resp = client.get(&url).header(AUTH_KEY_HEADER, auth_key).send().await.map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        anyhow::bail!("message stats failed: HTTP {status} - {text}");
+    }
+    let result: Value = resp.json().await.map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
+    Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))
 }
 
 #[cfg(test)]

@@ -34,7 +34,7 @@ import {
 } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { readZoom } from "@/app/store/zoom-factor";
+import { paneZoom } from "@/app/store/pane-zoom-local";
 import { PaneLoadingCover } from "@/app/element/PaneLoadingCover";
 import {
     accountLabel,
@@ -94,6 +94,8 @@ import { useAgentControllerStatus } from "./hooks/useAgentControllerStatus";
 import { useAgentDecisions } from "./hooks/useAgentDecisions";
 import { useAgentDropAttach } from "./hooks/useAgentDropAttach";
 import { useAgentFailure } from "./hooks/useAgentFailure";
+import { sharedAgentRuntime } from "@/app/store/agent-runtime-live";
+import { accountStateOf } from "./failure/failure-verdict";
 import { lastUserMessage, useOfflineInput } from "./offline/useOfflineInput";
 import { useAgentAccountBinding } from "./failure/useAgentAccountBinding";
 import { useAuthHealth, useSyntheticAuthRow } from "./failure/useAuthHealth";
@@ -1017,6 +1019,8 @@ export const AgentPresentationView = ({
         // Per-pane model keeps dispatch sites default-safe; see useAgentStream above.
         model: paneModel,
         failure: (() => paneModel.state.failure),
+        // What srv says about this agent's account: a sign-in or limit row ends when it can work again.
+        liveAccount: () => accountStateOf(sharedAgentRuntime().rows().find((r) => r.block_id === model.blockId)?.state),
         onRetry: retryLastTurn,
         reconnect: offline.recovery,
         // live_elsewhere — take the agent over from the other AgentMux instance running it, then
@@ -1129,7 +1133,8 @@ export const AgentPresentationView = ({
     });
 
     // Per-pane zoom: read term:zoom from block meta (same key as terminal panes).
-    const zoomFactor = createMemo(() => readZoom(block()?.meta));
+    // The level just asked for while its write is on its way, else the stored one.
+    const zoomFactor = createMemo(() => paneZoom(model.blockId, block()?.meta));
 
     // Persistence is owned by the universal zoom framework — see the
     // note below where the inline handlers were removed.

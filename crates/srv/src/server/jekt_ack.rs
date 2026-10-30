@@ -45,6 +45,7 @@ pub(super) fn refuse_empty_reply(state: &AppState, auth_via: super::auth::Reacti
             ack_policy::refuses_bare_acks(&extra) && req.files.as_ref().is_none_or(|f| f.is_empty()),
         ) {
             tracing::info!(source, target = %req.target_agent, "reactive inject: refusing a reply that says nothing");
+            state.reactive_handler.log_ack_refused(source, &req.target_agent, req.request_id.as_deref().unwrap_or_default(), &why);
             return Some(serde_json::json!({
                 "success": false,
                 "refused": true,

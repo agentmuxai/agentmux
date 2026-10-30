@@ -300,6 +300,7 @@ dependencies = [
  "proptest",
  "quick-xml 0.39.4",
  "rcgen",
+ "regex",
  "reqwest",
  "ring",
  "rusqlite",

@@ -24,7 +24,7 @@
 2217 crates/srv/src/backend/history/index.rs
 1903 crates/srv/src/backend/history/mod.rs
 3203 crates/srv/src/backend/lan_discovery.rs
-2065 crates/srv/src/backend/reactive/handler.rs
+2073 crates/srv/src/backend/reactive/handler.rs
 2494 crates/srv/src/backend/storage/migrations.rs
 1799 crates/srv/src/backend/storage/muxbus.rs
 3365 crates/srv/src/identity/resolver/inject.rs
@@ -41,6 +41,6 @@
 2224 crates/srv/src/server/websocket.rs
 1976 frontend/app/store/agent-pane-state/reducer.ts
 1566 frontend/app/view/agent/components/AgentComposerStrip.tsx
-1795 frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx
+1797 frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx
 1547 frontend/app/view/files/files-view.tsx
 2093 frontend/app/view/swarm/swarm-model.ts

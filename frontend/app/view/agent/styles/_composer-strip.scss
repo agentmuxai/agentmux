@@ -464,7 +464,7 @@
     &--critical {
         color: var(--error-text-color);
         --pulse-max: 0.8;
-        animation: am-pulse 1.2s var(--ease-in-out) infinite;
+        animation: am-pulse var(--duration-pulse) var(--ease-in-out) infinite;
     }
 }
 

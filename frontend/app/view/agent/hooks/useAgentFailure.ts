@@ -44,7 +44,7 @@
  * docs/specs/SPEC_OFFLINE_RESILIENCE_2026_10_20.md §4.3.
  */
 
-import { createEffect, createSignal, onCleanup, onMount, type Accessor } from "solid-js";
+import { createEffect, createMemo, createSignal, onCleanup, onMount, type Accessor } from "solid-js";
 import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import * as MOS from "@/app/store/mos";
@@ -55,6 +55,7 @@ import type { AgentPaneModel } from "@/app/store/agent-pane-model";
 import type { PaneFailure } from "@/app/store/agent-pane-state/types";
 import type { FailedTurnRecovery } from "../offline/failed-turn";
 import { failureToRow, isTransient, type FailureRow } from "../failure/failure-accessory";
+import { agoLabel, failureVerdict, isAccountCause, type AccountState, type FailureVerdict } from "../failure/failure-verdict";
 import { forgetRefusedSend, refusedSendOf } from "../failure/refused-send";
 import { restoreRefusedSend } from "../failure/refused-send-restore";
 import { registerRecycleBlocker } from "@/app/store/recycle-blockers";
@@ -101,6 +102,9 @@ export function jitteredBackoffSeconds(baseSeconds: number, rand: () => number =
     return Math.max(1, Math.round(baseSeconds * factor));
 }
 
+/** How long a persisted account failure waits for srv's state of the agent before it is shown. */
+export const SEED_WAIT_MS = 1500;
+
 export interface UseAgentFailureOptions {
     blockId: string;
     /** Per-pane dispatch handle — default-safe against post-unmount races. */
@@ -109,6 +113,12 @@ export interface UseAgentFailureOptions {
      *  truth, set by `FailureObserved` / cleared by `FailureCleared` or the
      *  next `TurnStart`). */
     failure: Accessor<PaneFailure | null>;
+    /**
+     * What srv says about this agent's account (`accountStateOf` of its `agentruntime` state): the live
+     * fact an `auth` or `usage_limit` row is judged against. Omitted is `unknown`: the row stays until
+     * a turn completes or it is dismissed, as before.
+     */
+    liveAccount?: Accessor<AccountState>;
     /** Re-run the failed turn (re-send the last user message). */
     onRetry: () => void;
     /**
@@ -169,6 +179,15 @@ export interface UseAgentFailureOptions {
 export interface UseAgentFailureResult {
     /** The PaneRow descriptor for the current failure, or null when clear. */
     row: Accessor<FailureRow | null>;
+    /** The current failure judged against what is true now, or null when there is none. A row is never
+     *  hidden while this is `active`. */
+    verdict: Accessor<FailureVerdict | null>;
+}
+
+/** The time a stored failure was recorded (`atMs`, written by srv), else `fallback`. */
+function recordedAt(f: unknown, fallback: number): number {
+    const at = (f as { atMs?: unknown } | null)?.atMs;
+    return typeof at === "number" && Number.isFinite(at) && at > 0 ? at : fallback;
 }
 
 export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureResult {
@@ -187,6 +206,13 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
     // timing nothing else needs to agree on.
     const [copyState, setCopyState] = createSignal<"idle" | "copied" | "failed">("idle");
     let copyResetTimer: ReturnType<typeof setTimeout> | undefined;
+
+    // What the failure is judged against, besides srv's account state (`opts.liveAccount`): the pane's last
+    // completed turn, whether the auto-retry ladder is spent (a persisted failure read at mount has had no
+    // ladder in this pane, so it starts spent), and a tick for a usage limit's reset passing.
+    const [completedTurnAt, setCompletedTurnAt] = createSignal<number | null>(null);
+    const [ladderEnded, setLadderEnded] = createSignal(false);
+    const [clockTick, setClockTick] = createSignal(0);
 
     let countdown: ReturnType<typeof setInterval> | undefined;
     let autoRetries = 0;
@@ -284,9 +310,46 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
         // see the module doc comment). The pane is freshly mounted here, so
         // there's no working turn to force-end; FailureObserved's `turnWasEnded`
         // check is false and it just records the failure.
-        if (pf) opts.model.dispatchPane({ type: "FailureObserved", failure: pf, at: Date.now() });
+        //
+        // Judged before it is shown (spec §3.4): a failure whose cause is over by now is not
+        // raised at all. An account failure waits briefly for srv's state of the agent, so a healed
+        // one never flashes; a transient one has had no ladder in this pane, so it comes back as a
+        // lapsed note, not as a live retry.
+        let seedTimer: ReturnType<typeof setTimeout> | undefined;
+        // Set once the persisted failure has been judged, or overtaken by a live failure or a new turn.
+        let seeded = false;
+        const settleSeed = () => {
+            seeded = true;
+            clearTimeout(seedTimer);
+        };
+        if (pf) {
+            const at = recordedAt(pf, Date.now());
+            failureFromMeta = true;
+            const seed = () => {
+                // A live failure or a turn that began while it waited is newer than the stored one.
+                if (opts.failure()) return;
+                if (verdictOf({ data: pf, at }) === "healed") return;
+                opts.model.dispatchPane({ type: "FailureObserved", failure: pf, at });
+            };
+            if (isTransient(pf.code)) setLadderEnded(true);
+            if (isAccountCause(pf.code) && opts.liveAccount && opts.liveAccount() === "unknown") {
+                // Until srv says, or for SEED_WAIT_MS, whichever comes first.
+                const once = () => {
+                    if (seeded) return;
+                    seeded = true;
+                    seed();
+                };
+                seedTimer = setTimeout(once, SEED_WAIT_MS);
+                createEffect(() => {
+                    if (opts.liveAccount!() !== "unknown") once();
+                });
+            } else {
+                seed();
+            }
+        }
 
         const unsubFailure = onMuxEvent(WpsEvent.AgentFailure, (f) => {
+                settleSeed();
                 cancelCountdown();
                 // A new failure never inherits an armed Take over: its row must
                 // start at the first click again (ReAgent P1 on #3742).
@@ -296,7 +359,10 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
                 resetCopyState();
                 // Reducer-side: records state.failure AND unconditionally ends
                 // a still-working turn — see FailureObserved's reducer case.
+                failureFromMeta = false;
                 opts.model.dispatchPane({ type: "FailureObserved", failure: f, at: Date.now() });
+                // A failure that finds the ladder spent is the end of it: the row becomes the lapsed note.
+                setLadderEnded(isTransient(f.code) && autoRetries >= AUTO_RETRY_BACKOFF_S.length);
                 if (isTransient(f.code) && !opts.reconnect?.waitsForReconnect(f.code)) armAutoRetry();
             }, MOS.makeORef("block", opts.blockId));
 
@@ -316,12 +382,15 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
         // never misfire on a failure.
         const unsubTurnEnded = addPaneEventListener((blockId, event) => {
             if (blockId !== opts.blockId) return;
+            if (event.type === "turn-started") settleSeed();
             if (event.type === "turn-ended" && event.outcome === "completed") {
                 autoRetries = 0;
+                setCompletedTurnAt(Date.now());
             }
         });
 
         onCleanup(() => {
+            clearTimeout(seedTimer);
             unsubFailure();
             unsubTurnEnded();
             cancelCountdown();
@@ -430,6 +499,54 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
         if (onMoveHere) confirmed(onMoveHere, "Could not move it here");
     };
 
+    // The failure against what is true now (failure-verdict.ts).
+    //
+    // srv's account state can lag a failure that just arrived (the agent still reads idle for a moment
+    // after an auth failure), so for a failure that arrived in this pane the state counts only once it
+    // has changed since. A failure read back at mount is older than the pane, and the state is current.
+    let failureFromMeta = false;
+    const [accountChangedAt, setAccountChangedAt] = createSignal(0);
+    let lastAccount = opts.liveAccount?.() ?? "unknown";
+    createEffect(() => {
+        const now = opts.liveAccount?.() ?? "unknown";
+        if (now === lastAccount) return;
+        lastAccount = now;
+        setAccountChangedAt(Date.now());
+    });
+    const verdictOf = (pf: { data: PaneFailure["data"]; at: number; turnAttempted?: boolean }): FailureVerdict => {
+        clockTick();
+        const stateIsCurrent = failureFromMeta || accountChangedAt() > pf.at;
+        return failureVerdict(
+            pf,
+            {
+                account: stateIsCurrent ? (opts.liveAccount?.() ?? "unknown") : "unknown",
+                completedTurnAt: completedTurnAt(),
+                ladderEnded: ladderEnded(),
+            },
+            Date.now(),
+        );
+    };
+    const verdict = createMemo((): FailureVerdict | null => {
+        const pf = opts.failure();
+        return pf ? verdictOf(pf) : null;
+    });
+
+    // A usage limit ends when its reset passes, with no event to say so: look again then.
+    createEffect(() => {
+        const reset = opts.failure()?.data.resetsAtMs;
+        if (reset == null) return;
+        const wait = reset - Date.now();
+        if (wait <= 0 || wait > 2 ** 31 - 1) return;
+        const timer = setTimeout(() => setClockTick((n) => n + 1), wait + 1000);
+        onCleanup(() => clearTimeout(timer));
+    });
+
+    // A healed failure leaves without a click (spec §3.2): the cause is over, and the transcript and the
+    // Swarm already show the agent working again. Silent, as the operator decided.
+    createEffect(() => {
+        if (verdict() === "healed") endEpisode();
+    });
+
     const row = (): FailureRow | null => {
         const pf = opts.failure();
         if (!pf) return null;
@@ -449,6 +566,8 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
                 copyState: copyState(),
                 reconnectHint: opts.reconnect?.reconnectHint() ?? null,
                 notSent: f.code === "open_in_other_pane" ? refusedSendOf(opts.blockId)?.text : undefined,
+                verdict: verdict() ?? undefined,
+                agoLabel: agoLabel(pf.at, Date.now()),
             },
             {
                 retry: doRetry,
@@ -488,5 +607,5 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
         );
     };
 
-    return { row };
+    return { row, verdict };
 }

@@ -609,6 +609,7 @@ partial list.
 | [`SPEC_AGENT_PANE_BOTTOM_TIGHT_INVARIANT_2026_10_29`](SPEC_AGENT_PANE_BOTTOM_TIGHT_INVARIANT_2026_10_29.md) | Agent pane: the latest message stays tight against the bottom edge, always |
 | [`SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23`](SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md) | SPEC: Agent pane bounded live window — migration plan |
 | [`SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18`](SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md) | SPEC: Closing a pane shuts down every agent in it — gracefully, in order |
+| [`SPEC_AGENT_PANE_FAILURE_ROW_FOLLOWS_LIVE_STATE_2026_10_29`](SPEC_AGENT_PANE_FAILURE_ROW_FOLLOWS_LIVE_STATE_2026_10_29.md) | Spec: the agent pane's failure row follows the agent's live state |
 | [`SPEC_AGENT_PANE_FILE_ATTACHMENTS_2026_09_26`](SPEC_AGENT_PANE_FILE_ATTACHMENTS_2026_09_26.md) | SPEC: Attach any file in the agent composer (PDF, Office, text, code, …) |
 | [`SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05`](SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05.md) | SPEC: Align pane scrollback with actual model context, and make cross-instance opens honest |
 | [`SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26`](SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md) | SPEC: Paste and drop images into the agent pane input |
@@ -820,6 +821,7 @@ partial list.
 | [`SPEC_WINDOW_RESIZE_NO_PAINT_DELAY_2026_09_24`](SPEC_WINDOW_RESIZE_NO_PAINT_DELAY_2026_09_24.md) | SPEC — Window resize repaints pane content every frame, with no settle delay |
 | [`SPEC_WINGET_PACKAGE_BOOTSTRAP_2026_09_10`](SPEC_WINGET_PACKAGE_BOOTSTRAP_2026_09_10.md) | WinGet package bootstrap: `AgentMux.AI` |
 | [`SPEC_WORKSPACES_2026_10_23`](SPEC_WORKSPACES_2026_10_23.md) | SPEC: Workspaces — a named set of windows, saved as you go |
+| [`SPEC_ZOOM_ANCHOR_AND_AUDIT_2026_10_29`](SPEC_ZOOM_ANCHOR_AND_AUDIT_2026_10_29.md) | SPEC: zoom that keeps the content under the pointer in place, and an audit of the zoom system |
 | [`linux-pool-startup-fill-2026-05-08`](linux-pool-startup-fill-2026-05-08.md) | Linux/macOS: wire startup-time window-pool fill |
 
 ### proposed

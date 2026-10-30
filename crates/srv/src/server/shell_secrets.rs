@@ -17,6 +17,7 @@ use std::time::Duration;
 
 use axum::http::StatusCode;
 
+use crate::backend::vault::capture;
 use crate::backend::vault::scrub::{self, Scrubber};
 use crate::backend::vault::uses::{self, Decision, UseRequest};
 use crate::backend::vault::{self, FillTarget};
@@ -125,6 +126,100 @@ fn clip(s: &str, n: usize) -> String {
     out
 }
 
+const SAID_NO: &str = "the person said no: the command did not run";
+const NO_ANSWER: &str = "the person didn't answer in time: the command did not run; ask again when they are there";
+
+/// Asks the person in every window and waits for the answer; `None` if none came
+/// in time.
+async fn ask(state: &AppState, agent_block_id: &str, request: UseRequest, headline: &str) -> Option<Decision> {
+    let use_id = request.id.clone();
+    let answer = uses::uses().ask(request);
+    let _waiting = Waiting::new(use_id, state.clone());
+    super::vault_handlers::publish(state);
+    let _asking = crate::backend::user_attention::Asking::start(&state.broker, &state.mstore, agent_block_id, "vault", headline);
+    match tokio::time::timeout(ANSWER_WAIT, answer).await {
+        Ok(Ok(a)) => Some(a.decision),
+        Ok(Err(_)) => Some(Decision::Deny),
+        Err(_) => None,
+    }
+}
+
+/// The agent asking, proved by its own signature: a prompt names them, and what
+/// they make or are allowed is theirs alone.
+fn agent_of(state: &AppState, agent_block_id: &str, auth: Option<&agentmux_common::api_types::UiAutomationAuth>, needs: &str) -> Result<String, Refusal> {
+    let agent = super::app_api::connections::verified_agent(state, agent_block_id, auth)
+        .map_err(|e| refuse(StatusCode::FORBIDDEN, format!("{needs} needs the agent's signed identity: {}", e.replace("an SSH connection needs", "this needs"))))?;
+    Ok(agent.chars().take(64).collect())
+}
+
+/// Checks a command's `capture` before it runs (spec §4.2 of the generate spec).
+/// A rule that makes a new entry asks nobody: like `generate`, it holds nothing
+/// of the person's yet, and the agent could run the command without it and read
+/// the value. A rule that replaces an existing entry's value asks the person, each
+/// time, naming the command. `None` when there is no capture.
+pub(super) async fn plan_capture(
+    state: &AppState,
+    agent_block_id: &str,
+    auth: Option<&agentmux_common::api_types::UiAutomationAuth>,
+    rules: Option<&[agentmux_common::api_types::CaptureRule]>,
+    cmd: &str,
+    cwd: &str,
+) -> Result<Option<capture::Job>, Refusal> {
+    let Some(rules) = rules.filter(|r| !r.is_empty()) else {
+        return Ok(None);
+    };
+    let agent = agent_of(state, agent_block_id, auth, "capture")?;
+    let (store, rules, a, c) = (state.identity_store.clone(), rules.to_vec(), agent.clone(), cmd.to_string());
+    let plan = tokio::task::spawn_blocking(move || capture::plan(&store, &rules, &a, &c))
+        .await
+        .map_err(|e| refuse(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .map_err(|e| refuse(StatusCode::BAD_REQUEST, e))?;
+    let replaced: Vec<(String, String, &'static str)> = plan
+        .replaces()
+        .filter_map(|t| match t {
+            capture::Target::Existing { id, label, part, .. } => Some((id.clone(), label.clone(), *part)),
+            capture::Target::New { .. } => None,
+        })
+        .collect();
+    if !replaced.is_empty() && (cmd.chars().count() > MAX_COMMAND || cwd.chars().count() > MAX_CWD) {
+        return Err(refuse(
+            StatusCode::BAD_REQUEST,
+            format!("a command that replaces a Vault value must fit in the approval prompt ({MAX_COMMAND} characters, folder {MAX_CWD}): put the steps in a script file and run that"),
+        ));
+    }
+    for (id, label, part) in &replaced {
+        let request = UseRequest {
+            id: uuid::Uuid::new_v4().to_string(),
+            agent: agent.clone(),
+            entry_id: id.clone(),
+            entry_label: label.clone(),
+            what: part.to_string(),
+            origin: String::new(),
+            field: String::new(),
+            offer_always: false,
+            reason: "what the command prints replaces the value".into(),
+            needs_value: false,
+            kind: String::new(),
+            command: cmd.to_string(),
+            cwd: cwd.to_string(),
+            replaces: true,
+            requested_ms: agentmux_common::time::now_ms_u64(),
+        };
+        let outcome = match ask(state, agent_block_id, request, &format!("{agent} wants to replace {label} with what a command prints")).await {
+            Some(Decision::Once | Decision::Always) => None,
+            Some(Decision::Deny) => Some(("denied", refuse(StatusCode::FORBIDDEN, SAID_NO))),
+            None => Some(("timed out", refuse(StatusCode::REQUEST_TIMEOUT, NO_ANSWER))),
+        };
+        if let Some((logged, refusal)) = outcome {
+            vault::record(&state.identity_store, id, label, &agent, capture::CAPTURED, &clip(cmd, 160), logged);
+            super::vault_handlers::publish(state);
+            return Err(refusal);
+        }
+    }
+    let changed_state = state.clone();
+    Ok(Some(capture::Job { capture: plan, store: state.identity_store.clone(), changed: Box::new(move || super::vault_handlers::publish(&changed_state)) }))
+}
+
 /// Resolves, asks for and reads the entries a command was given. `None` when it
 /// was given none.
 pub(super) async fn inject(
@@ -152,12 +247,7 @@ pub(super) async fn inject(
             format!("a command given Vault secrets must fit in the approval prompt ({MAX_COMMAND} characters, folder {MAX_CWD}): put the steps in a script file and run that"),
         ));
     }
-    // Who is asking, proved by the agent's own signature: the prompt names them, and
-    // a grant is theirs alone.
-    let agent = super::app_api::connections::verified_agent(state, agent_block_id, auth).map_err(|e| {
-        refuse(StatusCode::FORBIDDEN, format!("a Vault secret needs the agent's signed identity: {}", e.replace("an SSH connection needs", "this needs")))
-    })?;
-    let agent: String = agent.chars().take(64).collect();
+    let agent = agent_of(state, agent_block_id, auth, "a Vault secret")?;
     let mut targets: Vec<(Delivery, FillTarget)> = Vec::new();
     for (delivery, entry) in wanted {
         let store = state.identity_store.clone();
@@ -192,12 +282,11 @@ pub(super) async fn inject(
         if waiting_on.is_empty() {
             continue;
         }
-        let use_id = uuid::Uuid::new_v4().to_string();
         let mut whats: Vec<&str> = waiting_on.iter().map(|(_, t)| t.what.as_str()).collect();
         whats.dedup();
         let what = whats.join(" and ");
         let request = UseRequest {
-            id: use_id.clone(),
+            id: uuid::Uuid::new_v4().to_string(),
             agent: agent.clone(),
             entry_id: first.id.clone(),
             entry_label: first.label.clone(),
@@ -210,33 +299,24 @@ pub(super) async fn inject(
             kind: first.kind.to_string(),
             command: cmd.to_string(),
             cwd: cwd.to_string(),
+            replaces: false,
             requested_ms: agentmux_common::time::now_ms_u64(),
         };
-        let answer = uses::uses().ask(request);
-        let _waiting = Waiting::new(use_id, state.clone());
-        super::vault_handlers::publish(state);
-        let _asking = crate::backend::user_attention::Asking::start(
-            &state.broker,
-            &state.mstore,
-            agent_block_id,
-            "vault",
-            &format!("{agent} wants to run a command with your {what}"),
-        );
-        match tokio::time::timeout(ANSWER_WAIT, answer).await {
-            Ok(Ok(a)) if a.decision == Decision::Once => {}
-            Ok(Ok(a)) if a.decision == Decision::Always => {
+        match ask(state, agent_block_id, request, &format!("{agent} wants to run a command with your {what}")).await {
+            Some(Decision::Once) => {}
+            Some(Decision::Always) => {
                 for (_, t) in &waiting_on {
                     let (store, id, key, created) = (state.identity_store.clone(), t.id.clone(), grant_key(&agent, t.part), t.created_at);
                     let _ = tokio::task::spawn_blocking(move || store.vault_grant_add(&id, &key, agentmux_common::time::now_ms(), created)).await;
                 }
             }
-            Ok(_) => {
+            Some(Decision::Deny) => {
                 record(first, "denied");
-                return Err(refuse(StatusCode::FORBIDDEN, "the person said no: the command did not run"));
+                return Err(refuse(StatusCode::FORBIDDEN, SAID_NO));
             }
-            Err(_) => {
+            None => {
                 record(first, "timed out");
-                return Err(refuse(StatusCode::REQUEST_TIMEOUT, "the person didn't answer in time: the command did not run; ask again when they are there"));
+                return Err(refuse(StatusCode::REQUEST_TIMEOUT, NO_ANSWER));
             }
         }
     }

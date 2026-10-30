@@ -83,7 +83,9 @@ srv applies the rules to the raw output **before** anything is published, stores
 Details:
 - **No match** fails the capture, and the output is withheld from the agent, whole, because srv can't tell which line held the secret. The agent gets the exit code, the line count and the reason ("the JSON path matched nothing"). The person can open the full output in the Vault, behind the OS confirmation that Reveal uses.
 - A captured value shorter than 8 characters is refused, since the output couldn't be cleaned of it reliably.
-- Capture works with or without `secrets`. The command is approved the way §7.3 of the Vault spec approves a command given secrets, so the person sees the command line once per agent and command. "Always" covers only that command line.
+- Capture works with or without `secrets`, and over any `connection`: the value comes back to this machine, where a secret given to a command would leave it.
+- **Approval, as built in V2.** A rule that makes a new entry asks nobody. Like `generate`, it holds nothing of the person's yet, and the agent could run the same command without `capture` and read the value; a prompt there would only make the safer path the slower one. A rule that replaces an existing entry's value (`as: {id}`) asks the person every time, with the command line and no "Always": the person's value changes, and the old one is kept 7 days (§4.4). This replaces the first draft's "approved once per agent and command line, like `secrets`".
+- The rules read standard output; the agent gets back both streams, cleaned. A command that exits non-zero, or prints more than 1 MB, fails the capture the same way as no match.
 
 ### 4.3 Delivering a value: environment, stdin, file
 

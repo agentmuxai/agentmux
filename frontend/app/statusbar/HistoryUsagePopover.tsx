@@ -76,6 +76,12 @@ export const HistoryUsagePopover = (props: HistoryUsagePopoverProps): JSX.Elemen
                                 )}
                             </For>
                         </div>
+                        <Show when={(usage().reclaimable_bytes ?? 0) > 0}>
+                            <div class="history-usage-row" data-store="reclaimable">
+                                <span class="history-usage-label">Reclaimable (not in the total)</span>
+                                <span class="history-usage-bytes">{formatBytes(usage().reclaimable_bytes)}</span>
+                            </div>
+                        </Show>
                         <Show when={usage().agents.length > 0}>
                             <div class="history-usage-subtitle">Largest pane histories</div>
                             <div class="history-usage-list">

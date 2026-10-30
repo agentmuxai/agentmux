@@ -631,3 +631,7 @@ mod self_owner_tests;
 #[cfg(test)]
 #[path = "tests/agent_io_open_wire_tests.rs"]
 mod agent_io_open_wire_tests;
+
+#[cfg(test)]
+#[path = "tests/block_transcript_write_tests.rs"]
+mod block_transcript_write_tests;

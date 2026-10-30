@@ -669,6 +669,11 @@ pub struct AuditLogEntry {
     /// other through the CLI's own messaging (`backend::cli_native`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cli_native: Option<CliNativeAudit>,
+    /// For a delivery to a running agent: whether it started a turn (`started`) or joined one in
+    /// flight (`joined`), so the Audit can count the turns messages cause
+    /// (`SPEC_CHEAPER_FLEET_MESSAGING_2026_10_30.md` §7). Absent for every other entry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn: Option<String>,
 }
 
 /// What a `cli_native` audit line adds to the ordinary entry. The entry's

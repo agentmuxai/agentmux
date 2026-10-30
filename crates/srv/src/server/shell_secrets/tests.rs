@@ -290,3 +290,40 @@ async fn a_name_given_both_as_a_variable_and_as_a_file_is_refused_without_asking
     assert!(err.1.contains("usable environment variable"), "{err:?}");
     assert!(uses::uses().list().iter().all(|u| u.agent != s.auth.agent_id));
 }
+
+fn capture_rule(into: agentmux_common::api_types::CaptureInto) -> Vec<agentmux_common::api_types::CaptureRule> {
+    vec![agentmux_common::api_types::CaptureRule { into, from: agentmux_common::api_types::CaptureFrom::Stdout("all".into()) }]
+}
+
+#[tokio::test]
+async fn a_capture_into_a_new_entry_asks_nobody_but_needs_the_agents_signature() {
+    let s = setup().await;
+    let rules = capture_rule(agentmux_common::api_types::CaptureInto { kind: Some("api-key".into()), label: Some("GitHub token".into()), ..Default::default() });
+    let job = tokio::time::timeout(Duration::from_secs(5), plan_capture(&s.state, &s.block, Some(&s.auth), Some(&rules), "gh auth token", "C:/work"))
+        .await
+        .expect("didn't wait for an answer")
+        .expect("planned")
+        .expect("a job");
+    assert_eq!(job.capture.agent, s.auth.agent_id);
+    let unsigned = plan_capture(&s.state, &s.block, None, Some(&rules), "gh auth token", "").await.err().expect("refused");
+    assert_eq!(unsigned.0, StatusCode::FORBIDDEN);
+    assert!(plan_capture(&s.state, &s.block, None, Some(&[]), "true", "").await.unwrap().is_none(), "no rules, no capture");
+    let bad = capture_rule(agentmux_common::api_types::CaptureInto { kind: Some("api-key".into()), ..Default::default() });
+    assert_eq!(plan_capture(&s.state, &s.block, Some(&s.auth), Some(&bad), "true", "").await.err().expect("refused").0, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn a_capture_that_replaces_a_value_asks_each_time_naming_the_command() {
+    let s = setup().await;
+    let rules = capture_rule(agentmux_common::api_types::CaptureInto { id: Some(s.entry.clone()), ..Default::default() });
+    let ask = tokio::spawn(answer_when_asked(s.auth.agent_id.clone(), Decision::Once));
+    assert!(plan_capture(&s.state, &s.block, Some(&s.auth), Some(&rules), "stripe keys roll", "C:/work").await.unwrap().is_some());
+    let shown = ask.await.unwrap();
+    assert!(shown.replaces && !shown.offer_always, "replacing a value is asked about every time");
+    assert_eq!((shown.entry_id.as_str(), shown.command.as_str(), shown.cwd.as_str()), (s.entry.as_str(), "stripe keys roll", "C:/work"));
+    let ask = tokio::spawn(answer_when_asked(s.auth.agent_id.clone(), Decision::Deny));
+    let err = plan_capture(&s.state, &s.block, Some(&s.auth), Some(&rules), "stripe keys roll", "C:/work").await.err().expect("refused");
+    ask.await.unwrap();
+    assert_eq!(err.0, StatusCode::FORBIDDEN);
+    assert!(activity(&s).contains("captured stripe keys roll denied"), "{}", activity(&s));
+}
