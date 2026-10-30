@@ -275,6 +275,8 @@ fn describe_status(st: &Value) -> String {
                 "ready" => out.push_str(" It is downloaded and ready to restart into."),
                 "waiting" => out.push_str(" A restart into it is waiting for agents to finish their turn."),
                 "restarting" => out.push_str(" AgentMux is asking the user to confirm the restart."),
+                // A remote answer carries no error text (srv allow-lists what leaves a machine).
+                "failed" if s(d, "error").is_empty() => out.push_str(" Its download failed."),
                 "failed" => out.push_str(&format!(" Its download failed: {}.", s(d, "error"))),
                 _ => {}
             }
@@ -288,10 +290,9 @@ fn describe_status(st: &Value) -> String {
         } else if st["can_download"].as_bool() == Some(true) {
             out.push_str(" This install can upgrade itself: App with action \"upgrade\" asks for it.");
         } else {
-            out.push_str(&format!(
-                " This install can't upgrade itself yet; the user can download it from {}.",
-                s(st, "url")
-            ));
+            // A remote answer carries no release URL either: the latest release's page is fixed.
+            let url = Some(s(st, "url")).filter(|u| !u.is_empty()).unwrap_or("https://github.com/agentmuxai/agentmux/releases/latest");
+            out.push_str(&format!(" This install can't upgrade itself yet; the user can download it from {url}."));
         }
     }
     out
@@ -410,6 +411,19 @@ mod tests {
         assert!(!text.contains("Nothing AgentMux has checked is down") && text.contains("may be the network"), "{text}");
 
         assert_eq!(describe_network(&json!({ "services": [] }), now), "AgentMux hasn't checked the network yet.");
+    }
+
+    #[test]
+    fn a_remote_status_without_a_url_or_an_error_still_reads_whole() {
+        // What `app.version` gives: srv leaves the release URL and the download's error text out.
+        let st = json!({ "state": "available", "current": "0.60.7", "latest": "0.60.8", "install": "windows-portable",
+            "can_download": false, "checked_ms": 1 });
+        let text = describe_status(&st);
+        assert!(text.contains("download it from https://github.com/agentmuxai/agentmux/releases/latest."), "{text}");
+        let failed = json!({ "state": "available", "current": "0.60.7", "latest": "0.60.8", "install": "windows-setup",
+            "can_download": true, "download": { "version": "0.60.8", "state": "failed" } });
+        let text = describe_status(&failed);
+        assert!(text.contains("Its download failed.") && !text.contains("failed:"), "{text}");
     }
 
     #[test]
