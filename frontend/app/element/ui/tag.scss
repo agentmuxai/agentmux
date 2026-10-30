@@ -158,7 +158,9 @@
 
 // A toggle: quiet at rest (the neutral line and no wash), the tone's line and wash while on.
 .ui-filter-chip {
-    @include mixins.button-reset;
+    // Not `button-reset`: it clears the border, fill and padding `.ui-tag` paints, at the same specificity and later.
+    appearance: none;
+    font: inherit;
     @include mixins.control-transition;
     --tag-fill-pct: 0%;
     --tag-edge: color-mix(in srgb, var(--secondary-text-color) 80%, var(--tag-surface));

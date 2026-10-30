@@ -67,6 +67,13 @@ describe("tag.scss paints the numbers the contrast test measures", () => {
         }
     });
 
+    it("a filter chip keeps the tag's border, fill and padding (no button reset over them)", () => {
+        const chip = scss.slice(scss.indexOf(".ui-filter-chip {"));
+        const block = chip.slice(0, chip.indexOf("&:hover")).replace(/\/\/.*$/gm, "");
+        expect(block).not.toContain("button-reset");
+        expect(block).not.toMatch(/(border|padding|background):/);
+    });
+
     it("the fill is mixed over the modal surface", () => {
         expect(scss).toContain("--tag-surface: var(--modal-bg-color)");
     });
