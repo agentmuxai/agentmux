@@ -243,6 +243,33 @@ fn an_entry_made_again_under_a_deleted_ones_id_inherits_none_of_its_reminders() 
 }
 
 #[test]
+fn a_value_the_person_put_in_is_theirs_to_rotate() {
+    let (s, (work, _dir)) = (store(), work());
+    let req = GenerateRequest {
+        kind: "api-key".into(),
+        label: "Deploy token".into(),
+        why: String::new(),
+        fields: Default::default(),
+        rules: Default::default(),
+        expires: Some("2026-11-20".into()),
+    };
+    let made = generate_entry(&s, req, "agent2-6").unwrap();
+    let change = |date: &str, value: Option<&str>| EntryChange {
+        id: made.id.clone(),
+        label: "Deploy token".into(),
+        fields: [("expires".to_string(), date.to_string())].into(),
+        tags: vec![],
+        parts: seal::Parts(value.map(|v| ("value".to_string(), v.to_string())).into_iter().collect()),
+        clear: vec![],
+    };
+    update(&s, change("2026-11-21", None)).unwrap();
+    assert_eq!(due(&s, day("2026-11-10")).unwrap()[0].agent.as_deref(), Some("agent2-6"), "a new date alone keeps the maker");
+    update(&s, change("2026-11-22", Some("tok_typed_by_the_person"))).unwrap();
+    assert_eq!(due(&s, day("2026-11-10")).unwrap()[0].agent, None, "the person's value: the task is for anyone");
+    assert!(tasks(&work).is_empty());
+}
+
+#[test]
 fn a_new_date_starts_the_reminders_again_and_the_change_is_recorded() {
     let (s, (work, _dir)) = (store(), work());
     let id = create(&s, key("Stripe", "2026-11-20")).unwrap();

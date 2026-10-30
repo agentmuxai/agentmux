@@ -321,6 +321,8 @@ pub fn update(store: &Store, mut change: EntryChange) -> Result<(), String> {
             zeroize::Zeroize::zeroize(&mut v);
         }
     }
+    // A new main value is the person's: the next rotation is theirs, not the agent's that made the old one.
+    let replaced = change.parts.0.contains_key(kind.parts[0]);
     for (k, v) in std::mem::take(&mut change.parts.0) {
         if let Some(mut old) = parts.0.insert(k, v) {
             zeroize::Zeroize::zeroize(&mut old);
@@ -344,7 +346,7 @@ pub fn update(store: &Store, mut change: EntryChange) -> Result<(), String> {
     if !store.vault_update(&changed).map_err(|e| e.to_string())? {
         return Err(format!("no entry {}", changed.id));
     }
-    record(store, &changed.id, &label, PERSON, "changed", &target, "done");
+    record(store, &changed.id, &label, PERSON, if replaced { "replaced" } else { "changed" }, &target, "done");
     Ok(())
 }
 

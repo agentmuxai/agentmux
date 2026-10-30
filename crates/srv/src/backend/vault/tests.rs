@@ -116,7 +116,7 @@ fn every_change_is_in_the_activity_log_without_values() {
     update(&s, EntryChange { id: id.clone(), label: "Alex".into(), fields: Default::default(), tags: vec![], parts: parts(&[("value", "987-65-4321")]), clear: vec![] }).unwrap();
     delete(&s, &id).unwrap();
     let log = activity(&s, 10).unwrap();
-    assert_eq!(log.iter().map(|a| a.action.as_str()).collect::<Vec<_>>(), ["deleted", "changed", "created"]);
+    assert_eq!(log.iter().map(|a| a.action.as_str()).collect::<Vec<_>>(), ["deleted", "replaced", "created"]);
     assert!(log.iter().all(|a| a.actor == PERSON && a.entry_label == "Alex"));
     let text = serde_json::to_string(&log).unwrap();
     assert!(!text.contains("6789") && !text.contains("4321"));

@@ -40,7 +40,7 @@ const TASK_MARK: &str = "; rotation task #";
 const EVERY: Duration = Duration::from_secs(6 * 60 * 60);
 /// The actions that make or replace an entry's value: the agent behind the
 /// latest one is asked to rotate it.
-const MADE: &[&str] = &["generated", "captured", "rotated"];
+const MADE: &[&str] = &["generated", "captured", "rotated", "replaced", "created"];
 
 /// A date as the Vault keeps it, or why it isn't one.
 pub fn parse(text: &str) -> Result<NaiveDate, String> {
