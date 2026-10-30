@@ -16,6 +16,7 @@
 #   - element/flyoutmenu.tsx      migrated (Phase 2)
 #   - element/popover.tsx         migrated (Phase 2)
 #   - element/tooltip.tsx         spec Q3 — already correct, migration optional
+#   - element/title-tooltip.ts    the tooltip for native title= labels: a hover label, same placement as tooltip.tsx
 #
 # Grandfathered (NOT menus — pre-date the spec, out of the menu framework's
 # scope per spec §3's surface inventory; they are autocomplete/search-result
@@ -40,6 +41,7 @@ ALLOWLIST=(
     "frontend/app/element/flyoutmenu.tsx"
     "frontend/app/element/popover.tsx"
     "frontend/app/element/tooltip.tsx"
+    "frontend/app/element/title-tooltip.ts"
     "frontend/app/suggestion/suggestion.tsx"
     "frontend/app/element/search.tsx"
 )
