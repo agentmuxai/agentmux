@@ -493,6 +493,7 @@ impl ContainerManager {
                     tracing::info!(container = container_name, reason, "container spec drift detected — recreating");
                     let _ = self.stop(container_name, 10).await;
                     self.remove(container_name, true).await?;
+                    self.restage_keychain_login(container_name, spec).await;
                     None
                 }
                 None => Some(status),

@@ -25,7 +25,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 
-use super::{ContainerManager, CLAUDE_CREDENTIALS_FILE};
+use super::{ContainerManager, ContainerMountSpec, CLAUDE_CREDENTIALS_FILE};
 
 /// Folder under the AgentMux root that holds one staging folder per container.
 pub(crate) const STAGING_ROOT: &str = "container-credentials";
@@ -408,6 +408,18 @@ impl ContainerManager {
         {
             let _ = (container_name, config_dir);
             None
+        }
+    }
+
+    /// After a drift removal, which is followed at once by a create from the same mount spec: the folder `remove`
+    /// deleted is made again, since Docker refuses a bind mount whose source is missing.
+    pub(crate) async fn restage_keychain_login(
+        &self,
+        container_name: &str,
+        spec: &ContainerMountSpec,
+    ) {
+        if let Some(config_dir) = spec.keychain_config_dir.as_deref() {
+            let _ = self.stage_keychain_login(container_name, config_dir).await;
         }
     }
 
