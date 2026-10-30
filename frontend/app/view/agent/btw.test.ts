@@ -130,6 +130,14 @@ describe("buildBtwContextSnapshot", () => {
         expect(buildBtwContextSnapshot(nodes)).toBe("User: still here");
     });
 
+    it("labels a note by who wrote it: the CLI's turns are not AgentMux's", () => {
+        const nodes: DocumentNode[] = [
+            { type: "system_note", id: "n1", text: "Upgraded to 0.60.7." },
+            { type: "system_note", id: "n2", text: "Monitor event: PR checks changed", source: "cli", raw: "<task-notification/>" },
+        ];
+        expect(buildBtwContextSnapshot(nodes)).toBe("AgentMux note: Upgraded to 0.60.7.\nCLI message: Monitor event: PR checks changed");
+    });
+
     it("caps the number of included nodes, keeping only the most recent", () => {
         const nodes: DocumentNode[] = Array.from({ length: 60 }, (_, i) => userMsg(String(i), `message ${i}`));
 

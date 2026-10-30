@@ -1989,7 +1989,7 @@ impl ReactiveHandler {
 
     /// See [`Handler::deliver_system_note`].
     pub fn deliver_system_note(&self, target_agent: &str, text: &str) -> Result<(), String> {
-        self.inner.lock().unwrap().deliver_system_note(target_agent, text)
+        self.inner.lock().unwrap().deliver_system_note(target_agent, &super::sanitize::with_system_note_marker(text))
     }
 
     /// See [`Handler::inject_held`].
