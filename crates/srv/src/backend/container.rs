@@ -1028,7 +1028,7 @@ impl ContainerManager {
             }))
             .await?;
         tracing::info!(container = container_name, "removed container");
-        self.drop_staged_keychain_login(container_name);
+        self.drop_staged_keychain_login(container_name).await;
         self.forget_cli_ready(container_name).await;
         self.cleanup_dev_proxy_routes(container_name).await;
         Ok(())

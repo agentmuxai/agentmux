@@ -177,14 +177,28 @@ pub(crate) fn prepare(
         label
     };
 
-    let in_keychain = keychain
-        .read(&service)
-        .map_err(|e| format!("couldn't read the account's login from the Keychain: {e}"))?;
-    let in_keychain = in_keychain.filter(|raw| expires_at(raw).is_some());
     let staged = std::fs::read_to_string(&file)
         .ok()
         .map(Zeroizing::new)
         .filter(|raw| expires_at(raw).is_some());
+    let in_keychain = match keychain.read(&service) {
+        Ok(entry) => entry.filter(|raw| expires_at(raw).is_some()),
+        Err(e) => {
+            let reason = format!("couldn't read the account's login from the Keychain: {e}");
+            moved(Moved {
+                direction: Direction::KeychainToContainer,
+                account: label,
+                outcome: Err(reason.clone()),
+            });
+            // A login that is already staged stays mounted and untouched, so the container is not changed under a
+            // running agent and a refresh it made is not lost; it is synced at the next start that can read.
+            return if staged.is_some() {
+                Ok(dir)
+            } else {
+                Err(reason)
+            };
+        }
+    };
 
     match (in_keychain, staged) {
         (None, None) => {
@@ -245,6 +259,25 @@ pub(crate) fn staged_config_dir(root: &Path, container_name: &str) -> Option<Str
     serde_json::from_str::<Meta>(&text)
         .ok()
         .map(|m| m.config_dir)
+}
+
+/// Whether the staged login holds a refresh that is not in the Keychain yet: it expires later than the Keychain's,
+/// or the Keychain can't be read to tell. Deleting the staged login then would lose a rotated token.
+pub(crate) fn refresh_pending(keychain: &dyn Keychain, root: &Path, container_name: &str) -> bool {
+    let Some(config_dir) = staged_config_dir(root, container_name) else {
+        return false;
+    };
+    let staged =
+        std::fs::read_to_string(staging_dir(root, container_name).join(CLAUDE_CREDENTIALS_FILE))
+            .ok()
+            .map(Zeroizing::new)
+            .and_then(|raw| expires_at(&raw));
+    let Some(staged) = staged else { return false };
+    match keychain.read(&service_name(&config_dir)) {
+        Err(_) => true,
+        Ok(None) => false,
+        Ok(Some(raw)) => expires_at(&raw).is_none_or(|kc| staged > kc),
+    }
 }
 
 /// Deletes the staging folder of a removed container.
@@ -392,11 +425,26 @@ impl ContainerManager {
         let _ = container_name;
     }
 
-    /// After a container is removed: deletes its staged login.
-    pub(crate) fn drop_staged_keychain_login(&self, container_name: &str) {
-        if let Ok(root) = agentmux_common::data_paths::agentmux_root() {
-            remove_staging(&root, container_name);
+    /// After a container is removed: deletes its staged login, unless it holds a refresh that did not reach the
+    /// Keychain (it stays until a later sync can write it back).
+    pub(crate) async fn drop_staged_keychain_login(&self, container_name: &str) {
+        let Ok(root) = agentmux_common::data_paths::agentmux_root() else {
+            return;
+        };
+        #[cfg(target_os = "macos")]
+        {
+            let (root_for_check, name) = (root.clone(), container_name.to_string());
+            let pending = tokio::task::spawn_blocking(move || {
+                refresh_pending(&SecurityCli, &root_for_check, &name)
+            })
+            .await
+            .unwrap_or(true);
+            if pending {
+                tracing::warn!(container = container_name, "container agent: keeping the staged login, it holds a refresh the Keychain doesn't have yet");
+                return;
+            }
         }
+        remove_staging(&root, container_name);
     }
 
     /// The account id the container's own `.claude.json` names, or `None` when there is no container or file. Read
@@ -487,12 +535,14 @@ mod tests {
     struct Fake {
         entries: RefCell<HashMap<String, String>>,
         touched: RefCell<Vec<String>>,
+        unreadable: std::cell::Cell<bool>,
     }
     impl Fake {
         fn with(service: &str, raw: Option<String>) -> Self {
             let fake = Fake {
                 entries: RefCell::new(HashMap::new()),
                 touched: RefCell::new(Vec::new()),
+                unreadable: std::cell::Cell::new(false),
             };
             if let Some(raw) = raw {
                 fake.entries.borrow_mut().insert(service.to_string(), raw);
@@ -503,6 +553,9 @@ mod tests {
     impl Keychain for Fake {
         fn read(&self, service: &str) -> Result<Option<Zeroizing<String>>, String> {
             self.touched.borrow_mut().push(format!("read {service}"));
+            if self.unreadable.get() {
+                return Err("locked".to_string());
+            }
             Ok(self
                 .entries
                 .borrow()
@@ -912,5 +965,75 @@ mod tests {
             None
         );
         assert_eq!(account_in_archive(b""), None);
+    }
+
+    #[test]
+    fn an_unreadable_keychain_keeps_the_staged_login_and_deletes_nothing() {
+        let (tmp, config) = setup();
+        let kc = Fake::with(&service_name(&config), Some(login(100, "old")));
+        let dir = run(&kc, &tmp, &config, None).0.unwrap();
+        std::fs::write(dir.join(".credentials.json"), login(300, "container")).unwrap();
+        kc.unreadable.set(true);
+        let (result, moved) = run(&kc, &tmp, &config, Some(ACCOUNT));
+        assert_eq!(
+            result.unwrap(),
+            dir,
+            "the mount does not change under a running agent"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join(".credentials.json")).unwrap(),
+            login(300, "container")
+        );
+        assert!(
+            matches!(
+                moved.as_slice(),
+                [Moved {
+                    outcome: Err(_),
+                    ..
+                }]
+            ),
+            "{moved:?}"
+        );
+        assert!(!kc.touched.borrow().iter().any(|t| t.starts_with("write")));
+        // With nothing staged, an unreadable Keychain is an error the pane can show.
+        let (tmp2, config2) = setup();
+        let kc2 = Fake::with(&service_name(&config2), Some(login(100, "x")));
+        kc2.unreadable.set(true);
+        assert!(run(&kc2, &tmp2, &config2, None).0.is_err());
+    }
+
+    #[test]
+    fn a_staged_refresh_the_keychain_lacks_is_pending_and_is_not_deleted_with_the_container() {
+        let (tmp, config) = setup();
+        let root = tmp.path().join("root");
+        let service = service_name(&config);
+        let kc = Fake::with(&service, Some(login(100, "old")));
+        assert!(
+            !refresh_pending(&kc, &root, "agentmux-c1"),
+            "nothing staged"
+        );
+        let dir = run(&kc, &tmp, &config, None).0.unwrap();
+        assert!(
+            !refresh_pending(&kc, &root, "agentmux-c1"),
+            "staged equals the Keychain's"
+        );
+        std::fs::write(dir.join(".credentials.json"), login(300, "container")).unwrap();
+        assert!(
+            refresh_pending(&kc, &root, "agentmux-c1"),
+            "the container refreshed and nothing was written back"
+        );
+        kc.unreadable.set(true);
+        assert!(
+            refresh_pending(&kc, &root, "agentmux-c1"),
+            "can't tell: keep it"
+        );
+        kc.unreadable.set(false);
+        kc.entries
+            .borrow_mut()
+            .insert(service, login(300, "container"));
+        assert!(
+            !refresh_pending(&kc, &root, "agentmux-c1"),
+            "written back: safe to delete"
+        );
     }
 }
