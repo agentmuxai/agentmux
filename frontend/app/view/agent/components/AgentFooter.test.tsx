@@ -17,7 +17,8 @@ import userEvent from "@testing-library/user-event";
 import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { AgentFooter, AgentWorkingRow } from "./AgentFooter";
+import { AgentFooter } from "./AgentFooter";
+import { AgentWorkingRow } from "./working-row";
 import { SPINNER_FRAMES, SPINNER_STILL } from "@/app/element/AsciiSpinner";
 import { recordCompactionSample } from "../compaction-estimate";
 import type { TurnLedger } from "@/app/store/agent-pane-state/turn-ledger";

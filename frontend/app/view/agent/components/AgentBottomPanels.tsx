@@ -19,7 +19,7 @@ import { AgentDecisionPanel } from "./AgentDecisionPanel";
 import { AgentDisconnectedBanner } from "./AgentDisconnectedBanner";
 import { DesktopDrivingBar } from "./DesktopDrivingBar";
 import { AgentAuthPanel } from "./AgentDocumentView";
-import { AgentWorkingRow } from "./AgentFooter";
+import { AgentWorkingRow } from "./working-row";
 import { ApiRetryRow } from "./ApiRetryRow";
 import { HeldInputPanel } from "../offline/HeldInputPanel";
 import type { useOfflineInput } from "../offline/useOfflineInput";
