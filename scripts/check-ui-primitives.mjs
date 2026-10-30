@@ -10,7 +10,9 @@
 // merge-base with origin/main, or $GITHUB_BASE_REF):
 //
 //   1. buttons      hand-rolled `<button` elements in .tsx outside element/ui/,
-//                   per file
+//                   per file. Outside the agent pane (view/agent/) this is a hard
+//                   zero: a file passes only through BUTTON_ALLOWLIST below, with a
+//                   reason. The agent pane still ratchets down (#13044).
 //   2. solidFills   SCSS rules on a control (a button, tab, toggle or an
 //                   active/primary/confirm/danger state) whose background is a
 //                   solid `var(--accent-color|--error-color|--success-color)`
@@ -113,6 +115,71 @@ const isTest = (p) => /\.test\.(tsx?|mjs)$/.test(p);
 
 export function countButtons(source) {
     return (stripScriptComments(source).match(/<button\b/g) ?? []).length;
+}
+
+/** The agent pane is owned by the agent-pane work; its buttons only ratchet down. */
+export const AGENT_PANE_DIR = "frontend/app/view/agent/";
+
+/**
+ * The only hand-rolled `<button>`s allowed outside the agent pane: the file,
+ * how many, and why the kit's Button / IconButton can't be it. Adding a line
+ * here is a design decision for the kit's owner, not a way past the check.
+ */
+export const BUTTON_ALLOWLIST = {
+    "frontend/app/window/window-controls.win32.tsx": {
+        max: 3,
+        reason: "Windows caption buttons (minimise, maximise, close) draw the OS's own glyphs and hover fills",
+    },
+    "frontend/app/window/window-controls.darwin.tsx": {
+        max: 3,
+        reason: "macOS traffic lights are round coloured dots, not a line control",
+    },
+    "frontend/app/window/hamburger-menu.tsx": {
+        max: 1,
+        reason: "the window-chrome menu trigger: a hand-drawn three-bar glyph that must stay pixel-exact, inside the drag region",
+    },
+    "frontend/app/element/iconbutton.tsx": {
+        max: 2,
+        reason: "the older widget IconButton (wave-iconbutton, with long-click) that the kit's IconButton replaces",
+    },
+    "frontend/app/element/PaneTabStrip.tsx": {
+        max: 2,
+        reason: "the tab strip's own add (+) and close (x) controls: drawn glyph, hover-revealed, sized to the tab",
+    },
+    "frontend/app/statusbar/StatusBar.tsx": {
+        max: 1,
+        reason: "the version readout uses the status bar's stat-button recipe (full-height, inset focus ring)",
+    },
+    "frontend/app/statusbar/SystemStats.tsx": {
+        max: 2,
+        reason: "the CPU and Disk readouts use the status bar's stat-button recipe (full-height, inset focus ring)",
+    },
+    "frontend/app/statusbar/TokenUsageIndicator.tsx": {
+        max: 1,
+        reason: "the token readout uses the status bar's stat-button recipe (full-height, inset focus ring)",
+    },
+    "frontend/app/element/markdown-media.tsx": {
+        max: 1,
+        reason: "the round play overlay on a video poster is a solid accent disc over the picture; the kit never fills",
+    },
+};
+
+/**
+ * Lines for every hand-rolled button the hard zero refuses: any file outside
+ * the agent pane that isn't allowlisted, or has more than it is allowed, and
+ * any allowlist entry whose file has none left (remove it).
+ */
+export function buttonViolations(buttons, allowlist = BUTTON_ALLOWLIST) {
+    const out = [];
+    for (const [file, n] of Object.entries(buttons).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
+        if (file.startsWith(AGENT_PANE_DIR)) continue;
+        const allowed = allowlist[file]?.max ?? 0;
+        if (n > allowed) out.push(`buttons: ${file} has ${n}, allowed ${allowed}`);
+    }
+    for (const file of Object.keys(allowlist).sort()) {
+        if (!buttons[file]) out.push(`buttons: ${file} has none; remove it from BUTTON_ALLOWLIST`);
+    }
+    return out;
 }
 
 // ── SCSS walking (rules 2 and 3) ────────────────────────────────────────────
@@ -701,6 +768,7 @@ if (isMain(import.meta.url)) {
     const current = collect(walk(FRONTEND).map((p) => ({ path: rel(p), source: readFileSync(p, "utf8") })));
     const before = collect(filesAtRef(base));
     const { grew, shrank } = compare(current, before);
+    grew.unshift(...buttonViolations(current.buttons));
 
     if (grew.length > 0) {
         console.log("ERROR: new UI that bypasses the line-style component set");
