@@ -149,6 +149,11 @@ pub(super) async fn select(
     refuse_typing_in_frame(cdp, frame_id).await?;
     insert_text(cdp, want).await?;
     tokio::time::sleep(Duration::from_millis(300)).await;
+    // Enter with no option to take would submit the form the field is in.
+    let listed = shown_options(cdp, obj).await;
+    if listed.as_array().map_or(true, |o| o.is_empty()) {
+        return Err(format!("no option {want:?} in this combobox: typing it showed no options (nothing was chosen)"));
+    }
     key_typing::press(cdp, "ArrowDown").await?;
     key_typing::press(cdp, "Enter").await?;
     tokio::time::sleep(Duration::from_millis(150)).await;
@@ -157,7 +162,7 @@ pub(super) async fn select(
     if !shown.contains(&want.trim().to_lowercase()) {
         return Err(format!(
             "no option {want:?} was shown, and choosing the first match of what was typed left the combobox at {shown:?}; options shown: {}",
-            shown_options(cdp, obj).await
+            listed
         ));
     }
     Ok(after)
