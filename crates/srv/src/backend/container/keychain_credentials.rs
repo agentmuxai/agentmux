@@ -257,15 +257,15 @@ pub(crate) fn remove_staging(root: &Path, container_name: &str) {
     }
 }
 
-/// The account id in a container's `.claude.json`, from the output of the `grep` that reads it.
-pub(crate) fn container_account_from(output: &str) -> Option<String> {
-    let line = output.lines().find(|l| l.contains("accountUuid"))?;
-    let value = line
-        .split(':')
-        .nth(1)?
-        .trim()
-        .trim_matches(|c: char| c == '"' || c == ',' || c.is_whitespace());
-    (!value.is_empty()).then(|| value.to_string())
+/// The account id in the `.claude.json` that a Docker archive download holds (a tar with that one file).
+fn account_in_archive(tar_bytes: &[u8]) -> Option<String> {
+    use std::io::Read as _;
+    const LIMIT: u64 = 4 * 1024 * 1024;
+    let mut archive = tar::Archive::new(tar_bytes);
+    let mut file = archive.entries().ok()?.next()?.ok()?;
+    let mut text = String::new();
+    file.by_ref().take(LIMIT).read_to_string(&mut text).ok()?;
+    Some(account_in(&text).0).filter(|id| !id.is_empty())
 }
 
 /// The real Keychain, through `/usr/bin/security`: the entries Claude Code writes allow that tool to read them
@@ -399,19 +399,27 @@ impl ContainerManager {
         }
     }
 
-    /// The account id the container's own `.claude.json` names, or `None` when it isn't running or has none.
+    /// The account id the container's own `.claude.json` names, or `None` when there is no container or file. Read
+    /// through Docker's archive API, which works for a stopped container too: a container is stopped before it is
+    /// removed, and its login must be written back then.
     #[cfg(target_os = "macos")]
     async fn container_account(&self, container_name: &str) -> Option<String> {
-        let script = format!(
-            "grep -o '\"accountUuid\": *\"[^\"]*\"' {}/.claude.json | head -n 1",
-            super::CONTAINER_CLAUDE_DIR
-        );
-        let argv = vec!["sh".to_string(), "-c".to_string(), script];
-        let outcome = self
-            .exec_collect(container_name, &argv, std::time::Duration::from_secs(10))
-            .await
-            .ok()?;
-        container_account_from(&outcome.output)
+        use bollard::container::DownloadFromContainerOptions;
+        use futures_util::StreamExt as _;
+        const LIMIT: usize = 4 * 1024 * 1024;
+        let path = format!("{}/.claude.json", super::CONTAINER_CLAUDE_DIR);
+        let mut stream = self
+            .inner
+            .docker
+            .download_from_container(container_name, Some(DownloadFromContainerOptions { path }));
+        let mut tar_bytes = Vec::new();
+        while let Some(chunk) = stream.next().await {
+            tar_bytes.extend_from_slice(&chunk.ok()?);
+            if tar_bytes.len() > LIMIT {
+                return None;
+            }
+        }
+        account_in_archive(&tar_bytes)
     }
 
     #[cfg(target_os = "macos")]
@@ -549,9 +557,9 @@ mod tests {
 
     #[test]
     fn the_service_name_is_claudes_for_that_config_dir() {
-        // A real identity dir on a Mac whose Keychain holds this entry.
-        let dir = "/Users/asafebgi/.agentmux/shared/identities/1df1eda9-f078-40cb-b7b4-5c337a10772d/claude";
-        assert_eq!(service_name(dir), "Claude Code-credentials-d3a8476f");
+        // A placeholder path: the name is a hash of the whole path, so any path has one.
+        let dir = "/Users/example/.agentmux/shared/identities/00000000-0000-0000-0000-000000000000/claude";
+        assert_eq!(service_name(dir), "Claude Code-credentials-c6fb88e5");
     }
 
     #[test]
@@ -743,20 +751,6 @@ mod tests {
         remove_staging(&root, "agentmux-c1"); // already gone: fine
     }
 
-    #[test]
-    fn the_containers_account_is_read_from_the_grep_line() {
-        assert_eq!(
-            container_account_from("    \"accountUuid\": \"acct-1111\",\n").as_deref(),
-            Some("acct-1111")
-        );
-        assert_eq!(
-            container_account_from("\"accountUuid\": \"x\"").as_deref(),
-            Some("x")
-        );
-        assert_eq!(container_account_from(""), None);
-        assert_eq!(container_account_from("grep: no such file"), None);
-    }
-
     /// Against the real login keychain, with an entry of its own that this test creates and deletes (never a
     /// Claude entry): `cargo test -p agentmux-srv -- --ignored keychain_credentials_live`
     #[cfg(target_os = "macos")]
@@ -892,5 +886,31 @@ mod tests {
                 (Direction::KeychainToContainer, true)
             ]
         );
+    }
+
+    #[test]
+    fn the_containers_account_is_read_from_the_archive_docker_returns() {
+        let tar_of = |name: &str, body: &str| {
+            let mut builder = tar::Builder::new(Vec::new());
+            let mut header = tar::Header::new_gnu();
+            header.set_size(body.len() as u64);
+            header.set_mode(0o600);
+            header.set_cksum();
+            builder
+                .append_data(&mut header, name, body.as_bytes())
+                .unwrap();
+            builder.into_inner().unwrap()
+        };
+        let with = tar_of(
+            ".claude.json",
+            r#"{"oauthAccount":{"accountUuid":"acct-1111"},"other":1}"#,
+        );
+        assert_eq!(account_in_archive(&with).as_deref(), Some("acct-1111"));
+        assert_eq!(account_in_archive(&tar_of(".claude.json", "{}")), None);
+        assert_eq!(
+            account_in_archive(&tar_of(".claude.json", "not json")),
+            None
+        );
+        assert_eq!(account_in_archive(b""), None);
     }
 }

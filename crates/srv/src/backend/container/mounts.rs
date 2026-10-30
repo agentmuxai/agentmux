@@ -37,6 +37,39 @@ pub(crate) fn personal_memory_host_dir(claude_config_dir: Option<&str>, working_
     Some(dir.to_string_lossy().into_owned())
 }
 
+/// The account config dir to hand to [`ContainerMountSpec::claude_config_host_dir`],
+/// or `None` when this account has no file-backed credential to mount.
+///
+/// The existence check is load-bearing, not defensive tidiness (codex P1 on PR
+/// #2933). **On macOS Claude Code keeps OAuth credentials in the encrypted
+/// Keychain and never writes this file at all** — see
+/// `identity/resolver/oauth_probe.rs` and
+/// `docs/retro/retro-macos-keychain-credential-isolation-gap-2026-08-17.md`.
+/// Binding a source that does not exist makes Docker reject `create_container`
+/// outright, so an unguarded bind would turn "container agents cannot
+/// authenticate on macOS" into "container agents cannot START on macOS" — a
+/// strictly worse failure than the one this fix exists to remove.
+///
+/// Returning `None` degrades to an empty per-agent volume and logs why. On macOS the
+/// container's start then stages the account's Keychain login instead (see
+/// [`ContainerMountSpec::keychain_config_dir`] and `keychain_credentials`).
+pub(super) fn credentials_dir_if_file_backed(claude_config_host_dir: &str) -> Option<String> {
+    if claude_config_host_dir.is_empty() {
+        return None;
+    }
+    let creds = std::path::Path::new(claude_config_host_dir).join(CLAUDE_CREDENTIALS_FILE);
+    if creds.is_file() {
+        return Some(claude_config_host_dir.to_string());
+    }
+    tracing::warn!(
+        dir = %claude_config_host_dir,
+        "container agent: no {CLAUDE_CREDENTIALS_FILE} in the bound account's config dir — \
+         not mounting credentials (expected on macOS, where Claude Code stores them in the \
+         Keychain). The agent will start but will not be authenticated."
+    );
+    None
+}
+
 impl ContainerMountSpec {
     /// What an agent started with `env_vars` in `working_dir` gets mounted: its bound
     /// account's credentials, its workspace, and, for an agent with a Claude config dir,
@@ -48,7 +81,7 @@ impl ContainerMountSpec {
         let working_dir = working_dir.as_str();
         let config_dir = env_vars.get("CLAUDE_CONFIG_DIR").map(String::as_str).filter(|d| !d.is_empty());
         Self {
-            claude_config_host_dir: config_dir.and_then(super::credentials_dir_if_file_backed),
+            claude_config_host_dir: config_dir.and_then(credentials_dir_if_file_backed),
             keychain_config_dir: config_dir
                 .filter(|dir| cfg!(target_os = "macos") && !std::path::Path::new(dir).join(CLAUDE_CREDENTIALS_FILE).is_file())
                 .map(str::to_string),
@@ -213,6 +246,39 @@ mod tests {
 
     fn bind_at<'a>(mounts: &'a [Mount], target: &str) -> Option<&'a Mount> {
         mounts.iter().find(|m| m.target.as_deref() == Some(target))
+    }
+
+    /// macOS keeps OAuth credentials in the Keychain and never writes this file
+    /// (oauth_probe.rs). Binding a nonexistent source makes Docker refuse to
+    /// create the container, so an unguarded bind would turn "cannot
+    /// authenticate on macOS" into "cannot START on macOS".
+    #[test]
+    fn a_config_dir_with_no_credentials_file_is_not_offered_for_mounting() {
+        let dir = std::env::temp_dir().join("agentmux-creds-guard-empty");
+        std::fs::create_dir_all(&dir).unwrap();
+        let _ = std::fs::remove_file(dir.join(CLAUDE_CREDENTIALS_FILE));
+
+        assert_eq!(
+            credentials_dir_if_file_backed(&dir.to_string_lossy()),
+            None,
+            "no credentials file (the macOS Keychain case) must not produce a bind",
+        );
+        assert_eq!(credentials_dir_if_file_backed(""), None);
+    }
+
+    /// …and when the file IS there, it is offered, so the fix still applies on
+    /// every platform that writes it.
+    #[test]
+    fn a_config_dir_holding_a_credentials_file_is_offered_for_mounting() {
+        let dir = std::env::temp_dir().join("agentmux-creds-guard-present");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(CLAUDE_CREDENTIALS_FILE), b"{}").unwrap();
+
+        assert_eq!(
+            credentials_dir_if_file_backed(&dir.to_string_lossy()).as_deref(),
+            Some(dir.to_string_lossy().as_ref()),
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
