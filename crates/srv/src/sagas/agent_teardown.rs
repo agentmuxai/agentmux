@@ -862,6 +862,7 @@ mod tests {
             ("backend/process_tracker/", "the tracker itself"),
             ("backend/shell_node.rs", "ShellSessionRegistry's own stop/stop_all"),
             ("server/http_shell.rs", "the ShellStop tool: the agent stopping one shell on purpose"),
+            ("server/vault_rotate.rs", "a Vault rotation stopping its own set or verify command that ran past its time"),
         ];
         const PATTERNS: &[&str] = &[
             "release_block_processes(",

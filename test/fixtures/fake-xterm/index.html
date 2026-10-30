@@ -1,0 +1,51 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Fake shell</title>
+<link rel="stylesheet" href="/xterm.css">
+</head>
+<body>
+<div id="term" style="width:700px;height:300px"></div>
+<script src="/xterm.js"></script>
+<script>
+window.__ran = [];
+window.__keys = [];
+window.__sigint = 0;
+window.__pasted = [];
+const term = new Terminal({ screenReaderMode: true, rows: 12, cols: 80 });
+term.open(document.getElementById("term"));
+const prompt = () => term.write("$ ");
+term.writeln("fake shell ready");
+prompt();
+let line = "";
+term.onData((d) => {
+    window.__keys.push(d);
+    for (const ch of d) {
+        if (ch === "\r") {
+            term.write("\r\n");
+            window.__ran.push(line);
+            if (line) term.writeln("ran: " + line);
+            line = "";
+            prompt();
+        } else if (ch === "\x7f") {
+            if (line) {
+                line = line.slice(0, -1);
+                term.write("\b \b");
+            }
+        } else if (ch === "\x03") {
+            window.__sigint++;
+            line = "";
+            term.write("^C\r\n");
+            prompt();
+        } else if (ch >= " ") {
+            line += ch;
+            term.write(ch);
+        }
+    }
+});
+term.textarea.addEventListener("paste", (e) => window.__pasted.push(e.clipboardData && e.clipboardData.getData("text")));
+window.__term = term;
+</script>
+</body>
+</html>

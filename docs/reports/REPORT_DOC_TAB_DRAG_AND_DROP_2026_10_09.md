@@ -136,7 +136,7 @@ Tests, per phase: reducer cases in `doc-tabs.test.ts` (`moveDocTo` group bounds;
 
 - Cross-type moves (Editor ↔ Media), as asked and as `SPEC_DOCUMENT_TABS` §2 rules out.
 - Tearing a document tab off into its own window, and cross-window moves (Phase 4 at the earliest).
-- Dragging a file from Hangar onto a document pane. That is a different drag: a native path drag (`beginPathDrag` in `files-view.tsx`) handled by the file-drop facility, not a document-tab move.
+- Dragging a file from the Files pane onto a document pane. That is a different drag: a native path drag (`beginPathDrag` in `files-view.tsx`) handled by the file-drop facility, not a document-tab move.
 
 ## 6. Open questions for the repo owner
 

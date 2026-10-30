@@ -220,6 +220,14 @@ pub(super) async fn plan_capture(
     Ok(Some(capture::Job { capture: plan, store: state.identity_store.clone(), changed: Box::new(move || super::vault_handlers::publish(&changed_state)) }))
 }
 
+/// A rotation's command, approved by the person with the rotation (`Vault`
+/// `rotate`): exactly these secrets (`NEW_SECRET` naming the entry's pending
+/// value, `OLD_SECRET` its current one). Only srv's rotation makes one, and hands
+/// it to [`inject`] directly; nothing an agent sends can.
+pub(super) struct Preapproved {
+    pub env: std::collections::HashMap<String, String>,
+}
+
 /// Resolves, asks for and reads the entries a command was given. `None` when it
 /// was given none.
 pub(super) async fn inject(
@@ -230,7 +238,12 @@ pub(super) async fn inject(
     remote: bool,
     cmd: &str,
     cwd: &str,
+    preapproved: Option<&Preapproved>,
 ) -> Result<Option<Injected>, Refusal> {
+    // A rotation's approval covers exactly the secrets it approved, nothing more.
+    let preapproved = preapproved.is_some_and(|p| {
+        wanted.stdin.is_none_or(|s| s.trim().is_empty()) && wanted.files.is_none_or(|f| f.is_empty()) && wanted.env == Some(&p.env)
+    });
     let wanted = deliveries(wanted)?;
     if wanted.is_empty() {
         return Ok(None);
@@ -257,6 +270,10 @@ pub(super) async fn inject(
             .map_err(|e| refuse(StatusCode::BAD_REQUEST, e))?;
         targets.push((delivery, target));
     }
+    // Only a rotation's own command, approved with it, gets its pending value.
+    if !preapproved && targets.iter().any(|(_, t)| t.version == Some("pending")) {
+        return Err(refuse(StatusCode::BAD_REQUEST, "@pending is a rotation's new value: only that rotation's own commands get it"));
+    }
     let record = |t: &FillTarget, outcome: &str| {
         vault::record(&state.identity_store, &t.id, &t.label, &agent, "ran a command", &clip(cmd, 160), outcome);
         // Every window's Vault pane shows the new line of the record.
@@ -267,6 +284,9 @@ pub(super) async fn inject(
     // to use in commands: a grant is for one part (a card's expiry is not its number).
     let mut asked: Vec<&str> = Vec::new();
     for (_, first) in &targets {
+        if preapproved {
+            break;
+        }
         if asked.contains(&first.id.as_str()) {
             continue;
         }
@@ -327,8 +347,8 @@ pub(super) async fn inject(
     let mut files = Vec::new();
     let mut known: Vec<(String, String)> = Vec::new();
     for (delivery, target) in &targets {
-        let (store, id, part, created) = (state.identity_store.clone(), target.id.clone(), target.part, target.created_at);
-        let value = match tokio::task::spawn_blocking(move || vault::value_for_fill(&store, &id, created, part)).await {
+        let (store, t) = (state.identity_store.clone(), target.clone());
+        let value = match tokio::task::spawn_blocking(move || vault::value_for_command(&store, &t)).await {
             Ok(Ok(v)) => v,
             Ok(Err(e)) => {
                 record(target, "failed");

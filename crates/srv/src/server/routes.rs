@@ -314,6 +314,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // the person's writes come only from the host, below.
         .route("/api/v1/vault", get(super::vault_handlers::handle_vault_list))
         .route("/api/v1/vault/generate", post(super::vault_handlers::handle_vault_generate))
+        .route("/api/v1/vault/rotate", post(super::vault_rotate::handle_vault_rotate))
         .route("/api/v1/vault/request", post(super::vault_handlers::handle_vault_request))
         .route("/api/v1/vault/on_screen", get(super::vault_handlers::handle_vault_on_screen))
         // An agent's `Browser` `fill` with `vault`: the person says where it may go.
@@ -540,6 +541,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/api/v1/host/browser_attention", post(ui_handlers::handle_host_browser_attention))
         .route("/api/v1/ui/browser/request_bypass", post(crate::server::browser_bypass_routes::handle_ui_browser_request_bypass))
         .route("/api/v1/ui/browser/end_bypass", post(crate::server::browser_bypass_routes::handle_ui_browser_end_bypass))
+        .route("/api/v1/ui/browser/terminal", post(crate::server::browser_terminal::handle_ui_browser_terminal))
         .route("/api/v1/host/browser_bypass", post(crate::server::browser_bypass_routes::handle_host_browser_bypass))
         // The pane's action log (Browser's log) and the person's Pause / Resume.
         .route("/api/v1/ui/browser/actions", post(crate::server::browser_actions::handle_ui_browser_actions))

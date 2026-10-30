@@ -189,7 +189,7 @@ windows = { version = "0.61", features = [
     "Win32_System_Variant",
     "Win32_NetworkManagement_WindowsFirewall",
     "Win32_Networking_NetworkListManager",
-    # The system's own file icons for the Hangar (backend/file_icons): the shell's image
+    # The system's own file icons for the Files pane (backend/file_icons): the shell's image
     # lists by file type, their bitmaps, and the registry's file associations.
     "Win32_UI_Shell",
     "Win32_UI_Controls",

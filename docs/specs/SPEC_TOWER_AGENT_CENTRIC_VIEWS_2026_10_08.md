@@ -4,7 +4,7 @@
 **Date:** 2026-10-08
 **Builds on:** `SPEC_TOWER_TASK_MANAGER_PANE_2026_10_08.md` (Tower as shipped in
 #4498, #4499, #4500).
-**Related:** `SPEC_FILE_BROWSER_PANE_2026_10_01.md` (Hangar, the layout this
+**Related:** `SPEC_FILE_BROWSER_PANE_2026_10_01.md` (Files, the layout this
 copies), `SPEC_BACKGROUND_TASK_PID_CAPTURE_2026_08_20.md` and
 `SPEC_BACKGROUND_TASK_STRUCTURED_FEED_AND_SWARM_OWNERSHIP_2026_09_27.md` (where
 "which tool call started this" comes from),
@@ -15,7 +15,7 @@ copies), `SPEC_BACKGROUND_TASK_PID_CAPTURE_2026_08_20.md` and
 From the operator, after using Tower:
 
 > the tower's specialty is showing what agents are running and the resources
-> they are using. Lets model it a bit like the hangar, where the list of agents
+> they are using. Lets model it a bit like the files, where the list of agents
 > by color is listed on the left, and when selecting it, you see the tasks the
 > agent is running. … often we want to know which instance of rustc.exe is
 > being driven by who, and how much CPU and memory is the agent taking overall.
@@ -84,7 +84,7 @@ AgentMux computers) and the CPU convention. The two tabs become:
 | **Agents** (default) | Tasks | "What is each agent doing, and what is it costing?" |
 | **Processes** | Host | "What is using this machine, and whose is it?" |
 
-### 3.1 Agents view: a rail and a detail, like Hangar
+### 3.1 Agents view: a rail and a detail, like Files
 
 ```
 ┌──────────────────────┬──────────────────────────────────────────────────┐
@@ -101,7 +101,7 @@ AgentMux computers) and the CPU convention. The two tabs become:
 ```
 
 **The rail** (left, the Files pane's `.files-places` pattern; hidden below
-~420 px wide with a toolbar toggle, like Hangar):
+~420 px wide with a toolbar toggle, like Files):
 
 - One row per **agent** running here: its **color swatch and name** (never
   color alone), provider icon, a status dot (working / waiting / idle, words

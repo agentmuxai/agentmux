@@ -4,7 +4,7 @@
 //! `GET /agentmux/file-icon?kind=<file|dir>&ext=<ext>&px=<n>`: the icon the
 //! operating system shows for a file type, as a PNG. Takes no path: only a
 //! validated type and one of a fixed list of sizes, and answers with pixels
-//! alone (docs/specs/SPEC_HANGAR_SYSTEM_FILE_ICONS_2026_10_27.md §4.1, §6).
+//! alone (docs/specs/SPEC_FILES_SYSTEM_FILE_ICONS_2026_10_27.md §4.1, §6).
 
 use axum::{
     extract::Query,

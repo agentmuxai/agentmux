@@ -113,6 +113,16 @@ If `set` succeeded but `verify` failed, the service may already hold the new val
 
 Captured keys (`aws iam create-access-key`) usually rotate by creating a new key and deleting the old. That is `rotate` with `set` creating it, a `capture` rule naming the entry, and a second `run` with the old version (`id@previous`) that deletes it.
 
+**As built (V3):**
+- **How the commands run:** srv runs `set` and `verify` itself, as `Terminal` `run` with secrets would (in the agent's folder, on this machine, output cleaned of both values, at most 10 minutes each), and waits for their exit codes. Success means exit code 0.
+- **The person's approval:** they approve the rotation once, the prompt naming both command lines and that the value at the service changes. "Always" covers those two command lines for that agent and entry.
+- **The pending value:** a command names it as `id@pending`, and only that rotation's own commands get it. `id@previous` names the value the last change replaced, for any command, approved like the entry itself.
+- **The new value's rules:** entries don't keep the rules they were made under, so the new value follows `rules` given to `rotate`, or the default of 20 characters.
+- **One rotation at a time:** a second rotation of an entry is refused while one runs. A pending value whose rotation never finished (srv stopped) is marked "rotation interrupted" after 30 minutes.
+- **Restoring:** the person can put a failed or interrupted rotation's value in from the Vault pane, since the service may hold it. A running rotation's value can't be restored.
+- **When `set` never starts** (a refused secret, a spawn failure), no service saw the new value, so it is dropped rather than kept. An entry written while it was rotated is never overwritten: the rotation fails and its value is kept, marked.
+- **Not yet:** `rotate` with a `capture` rule (a key the service makes) is the existing `Terminal` `run` with `capture` naming the entry, then a second `run` with `id@previous`.
+
 ## 5. B. The browser saves sign-ins and fills them on approval
 
 ### 5.1 Noticing a sign-in

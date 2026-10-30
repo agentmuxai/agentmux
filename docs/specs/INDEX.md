@@ -657,6 +657,7 @@ partial list.
 | [`SPEC_BROWSER_PANE_POPUPS_ADOPTED_2026_10_08`](SPEC_BROWSER_PANE_POPUPS_ADOPTED_2026_10_08.md) | SPEC: Popups from a browser pane stay in AgentMux, and an agent can drive them |
 | [`SPEC_BROWSER_PANE_PROFILES_MENU_2026_10_09`](SPEC_BROWSER_PANE_PROFILES_MENU_2026_10_09.md) | SPEC: Home and Profile buttons in the browser pane's toolbar, with Incognito and named profiles |
 | [`SPEC_BROWSER_PANE_THIN_BAR_AND_MENUS_IN_PANE_2026_10_18`](SPEC_BROWSER_PANE_THIN_BAR_AND_MENUS_IN_PANE_2026_10_18.md) | SPEC: The browser pane's thin bar puts Bookmarks on the right with a line between its rows, and its menus stay inside the pane |
+| [`SPEC_BROWSER_WEB_TERMINAL_TYPING_2026_10_23`](SPEC_BROWSER_WEB_TERMINAL_TYPING_2026_10_23.md) | SPEC: On a site the person has granted, an agent runs freely in a web terminal, and Enter, Space and uploads work |
 | [`SPEC_BUILD_CACHE_CLEANUP_2026_10_26`](SPEC_BUILD_CACHE_CLEANUP_2026_10_26.md) | Spec: Build-cache cleanup and a low-disk warning |
 | [`SPEC_BUILD_SLOT_ENFORCEMENT_2026_10_20`](SPEC_BUILD_SLOT_ENFORCEMENT_2026_10_20.md) | Spec: The build slot — one heavy build or test at a time on a machine, enforced for agents' cargo |
 | [`SPEC_BUNDLE_CONTENTS_MEMORY_NOT_MCP_2026_10_07`](SPEC_BUNDLE_CONTENTS_MEMORY_NOT_MCP_2026_10_07.md) | SPEC: A bundle holds instructions, context, skills, Global Memory and Personal Memory — not MCP servers |
@@ -672,6 +673,7 @@ partial list.
 | [`SPEC_COMPACTION_ESTIMATED_PROGRESS_AND_STREAM_FRAMES_2026_10_01`](SPEC_COMPACTION_ESTIMATED_PROGRESS_AND_STREAM_FRAMES_2026_10_01.md) | SPEC: compaction progress — what the CLI really emits, an estimated progress bar (Tier 4), and a stream-frame bug found on the way |
 | [`SPEC_CONNECTORS_MCP_WHAT_AGENTS_RUN_2026_10_10`](SPEC_CONNECTORS_MCP_WHAT_AGENTS_RUN_2026_10_10.md) | SPEC: Connectors → MCP servers shows what agents run |
 | [`SPEC_CONTAINER_AGENTS_AT_PARITY_2026_10_27`](SPEC_CONTAINER_AGENTS_AT_PARITY_2026_10_27.md) | SPEC: container agents at parity with native agents: start responsive, same context |
+| [`SPEC_CONTAINER_AGENT_DEVELOPER_IMAGE_2026_10_29`](SPEC_CONTAINER_AGENT_DEVELOPER_IMAGE_2026_10_29.md) | Spec: a developer image for container agents (#11091; build #11092) |
 | [`SPEC_CONTAINER_AGENT_RESOURCE_LIMITS_2026_10_29`](SPEC_CONTAINER_AGENT_RESOURCE_LIMITS_2026_10_29.md) | Container agents get CPU and memory limits |
 | [`SPEC_CONTENT_RESIZE_CONTRACT_2026_08_31`](SPEC_CONTENT_RESIZE_CONTRACT_2026_08_31.md) | SPEC: A single content-resize contract for the agent pane |
 | [`SPEC_CONTEXT_DELIVERY_2026_09_30`](SPEC_CONTEXT_DELIVERY_2026_09_30.md) | SPEC: Context deliveries — what the agent was given, one item at a time |
@@ -694,7 +696,9 @@ partial list.
 | [`SPEC_FILESTORE_APPEND_WITHOUT_COPIES_2026_10_18`](SPEC_FILESTORE_APPEND_WITHOUT_COPIES_2026_10_18.md) | Spec: A transcript append without whole-part copies |
 | [`SPEC_FILESTORE_RECEIVE_TIME_SIDECAR_THROTTLE_2026_10_19`](SPEC_FILESTORE_RECEIVE_TIME_SIDECAR_THROTTLE_2026_10_19.md) | Spec: the receive-time sidecar is written at most once a second per file |
 | [`SPEC_FILESTORE_STORE_CALLS_OFF_WORKERS_2026_10_19`](SPEC_FILESTORE_STORE_CALLS_OFF_WORKERS_2026_10_19.md) | Spec: store calls stop pinning tokio workers while they wait for the connection |
-| [`SPEC_FILE_BROWSER_PANE_2026_10_01`](SPEC_FILE_BROWSER_PANE_2026_10_01.md) | SPEC: A rich file browser pane (working title "Hangar") |
+| [`SPEC_FILES_SYSTEM_FILE_ICONS_2026_10_27`](SPEC_FILES_SYSTEM_FILE_ICONS_2026_10_27.md) | Files: the system's own file icons, and real thumbnails for images and video |
+| [`SPEC_FILES_ZOOM_2026_10_08`](SPEC_FILES_ZOOM_2026_10_08.md) | Zoom in the Files pane, through the shared pane zoom |
+| [`SPEC_FILE_BROWSER_PANE_2026_10_01`](SPEC_FILE_BROWSER_PANE_2026_10_01.md) | SPEC: A rich file browser pane (the Files pane) |
 | [`SPEC_FLOATING_PANE_ALWAYS_ON_TOP_2026_09_27`](SPEC_FLOATING_PANE_ALWAYS_ON_TOP_2026_09_27.md) | SPEC: "Always on top" for floating panes |
 | [`SPEC_FLOATING_PANE_REDOCK_DWELL_2026_09_09`](SPEC_FLOATING_PANE_REDOCK_DWELL_2026_09_09.md) | SPEC: Floating-pane redock — hover-intent dwell and a neutral parking zone |
 | [`SPEC_FOCUS_FOLLOWS_SELECTION_2026_10_08`](SPEC_FOCUS_FOLLOWS_SELECTION_2026_10_08.md) | Focus follows the selection: after any close, you can type right away |
@@ -704,8 +708,6 @@ partial list.
 | [`SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27`](SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md) | Spec: Global Memory delivery into agents — single source of truth |
 | [`SPEC_GOOGLE_CONNECTORS_GMAIL_CALENDAR_DRIVE_2026_10_14`](SPEC_GOOGLE_CONNECTORS_GMAIL_CALENDAR_DRIVE_2026_10_14.md) | SPEC: Google in Connectors: Gmail, Calendar and Drive for every agent |
 | [`SPEC_GPU_MEMORY_TRACING_SCAFFOLDING_2026_07_24`](SPEC_GPU_MEMORY_TRACING_SCAFFOLDING_2026_07_24.md) | Spec: GPU Memory Tracing Scaffolding — a real trace, not another process-level guess |
-| [`SPEC_HANGAR_SYSTEM_FILE_ICONS_2026_10_27`](SPEC_HANGAR_SYSTEM_FILE_ICONS_2026_10_27.md) | Hangar: the system's own file icons, and real thumbnails for images and video |
-| [`SPEC_HANGAR_ZOOM_2026_10_08`](SPEC_HANGAR_ZOOM_2026_10_08.md) | Zoom in the Hangar, through the shared pane zoom |
 | [`SPEC_HEADLESS_TRANSIENT_RETRY_2026_08_31`](SPEC_HEADLESS_TRANSIENT_RETRY_2026_08_31.md) | Transient-failure retry for turns with no rendered pane |
 | [`SPEC_HELP_HIDDEN_TIPS_2026_10_10`](SPEC_HELP_HIDDEN_TIPS_2026_10_10.md) | Hidden tips in the Help pane: the gestures nobody would guess |
 | [`SPEC_HELP_PANE_FILTER_2026_10_08`](SPEC_HELP_PANE_FILTER_2026_10_08.md) | A filter for the Help pane, on one shared filter box |

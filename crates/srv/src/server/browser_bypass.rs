@@ -28,6 +28,7 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Value};
 
 use crate::server::browser_actions::{How, Kind};
+use crate::server::browser_powers::{self, Power};
 use crate::server::AppState;
 
 /// Block meta key the browser pane's header reads.
@@ -57,6 +58,8 @@ pub(crate) struct Grant {
     pub agent: String,
     /// The bound sites, in `allowed_origins` normal form.
     pub origins: Vec<String>,
+    /// What the person allowed: committing clicks always, and any more they were shown.
+    pub powers: Vec<Power>,
     pub minutes: u64,
     pub expires: Instant,
     /// For the header's countdown: milliseconds since the Unix epoch.
@@ -98,6 +101,10 @@ impl Grant {
             _ => return false,
         }
         true
+    }
+
+    pub(crate) fn allows(&self, power: Power) -> bool {
+        self.powers.contains(&power)
     }
 
     /// Is `url` on the sites this grant is bound to? A page with no web
@@ -169,8 +176,16 @@ pub(crate) fn note_declined(pane: &str) {
 /// pane's header, log it (`how`: the person's header button, or their answer
 /// to the agent's request), and end it when its time is up or its agent goes
 /// quiet. Replaces any grant the pane had.
-pub(crate) fn grant(state: &AppState, pane: &str, agent: &str, origins: Vec<String>, minutes: u64, how: How) -> Grant {
-    grant_watched(state, pane, agent, origins, minutes, how, IDLE_LIMIT)
+pub(crate) fn grant(
+    state: &AppState,
+    pane: &str,
+    agent: &str,
+    origins: Vec<String>,
+    powers: Vec<Power>,
+    minutes: u64,
+    how: How,
+) -> Grant {
+    grant_watched(state, pane, agent, origins, powers, minutes, how, IDLE_LIMIT)
 }
 
 fn grant_watched(
@@ -178,6 +193,7 @@ fn grant_watched(
     pane: &str,
     agent: &str,
     origins: Vec<String>,
+    powers: Vec<Power>,
     minutes: u64,
     how: How,
     idle: Duration,
@@ -189,6 +205,7 @@ fn grant_watched(
         id: uuid::Uuid::new_v4().to_string(),
         agent: agent.to_string(),
         origins,
+        powers,
         minutes,
         expires: now + dur,
         expires_at_ms: chrono::Utc::now().timestamp_millis() + dur.as_millis() as i64,
@@ -206,7 +223,7 @@ fn grant_watched(
         "[browser-bypass] granted: the agent acts without asking"
     );
     publish(state, pane, strip_value(&g));
-    let detail = format!("{minutes} min on {}", g.origins.join(", "));
+    let detail = format!("{minutes} min on {} ({})", g.origins.join(", "), browser_powers::names(&g.powers).join(", "));
     crate::server::browser_actions::note(pane, agent, Kind::AutoApproveOn).detail(&detail).how(how).record(state);
     tokio::spawn(watch(state.clone(), pane.to_string(), g.id.clone(), idle));
     g
@@ -330,7 +347,10 @@ fn end_if(state: &AppState, pane: &str, id: Option<&str>, reason: &str, say_why:
 
 /// The header strip's copy of a live grant.
 fn strip_value(g: &Grant) -> Value {
-    let mut v = json!({ "agent": g.agent, "origins": g.origins, "minutes": g.minutes, "expires_at": g.expires_at_ms });
+    let mut v = json!({
+        "agent": g.agent, "origins": g.origins, "powers": browser_powers::names(&g.powers),
+        "minutes": g.minutes, "expires_at": g.expires_at_ms,
+    });
     // Paused: the header shows the time left, which isn't running down.
     if g.paused_at.is_some() {
         v["paused_left"] = json!(g.left(Instant::now()).as_millis() as u64);
@@ -412,7 +432,7 @@ pub(crate) fn tests_put(pane: &str, agent: &str) {
 /// `Browser` call, for other modules' tests.
 #[cfg(test)]
 pub(crate) fn tests_grant_idle(state: &AppState, pane: &str, agent: &str, idle: Duration) -> Grant {
-    grant_watched(state, pane, agent, vec!["https://github.com".to_string()], 15, How::ByUser, idle)
+    grant_watched(state, pane, agent, vec!["https://github.com".to_string()], vec![Power::Clicks], 15, How::ByUser, idle)
 }
 
 #[cfg(test)]
@@ -424,6 +444,7 @@ mod tests {
             id: format!("{pane}-id"),
             agent: agent.to_string(),
             origins: origins.iter().map(|s| s.to_string()).collect(),
+            powers: vec![Power::Clicks],
             minutes: 1,
             expires: Instant::now() + Duration::from_secs(secs),
             expires_at_ms: 0,
@@ -524,6 +545,17 @@ mod tests {
         put("bp-time", "naki", &["https://github.com"], 0);
         assert_eq!(due("bp-time", "bp-time-id", Duration::from_secs(900), Instant::now(), true), Due::End(TIME_UP_REASON));
         forget("bp-time", "test");
+    }
+
+    #[test]
+    fn a_grant_allows_only_the_powers_it_names() {
+        put("bp-powers", "naki", &["https://github.com"], 60);
+        let g = active_for("bp-powers", "naki").unwrap();
+        assert!(g.allows(Power::Clicks));
+        assert!(!g.allows(Power::Terminal), "a grant made for clicks does not carry the terminal");
+        table().grants.get_mut("bp-powers").unwrap().grant.powers.push(Power::Terminal);
+        assert!(active_for("bp-powers", "naki").unwrap().allows(Power::Terminal));
+        forget("bp-powers", "test");
     }
 
     #[test]

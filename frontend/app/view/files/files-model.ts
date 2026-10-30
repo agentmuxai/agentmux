@@ -86,7 +86,7 @@ type UndoEntry =
     | { kind: "create"; path: string };
 
 /** An SSH host in the Remote section of Places. */
-export interface HangarRemote {
+export interface FilesRemote {
     /** The connection name. */
     name: string;
     /** Its nickname, else the name. */
@@ -96,7 +96,7 @@ export interface HangarRemote {
 
 /** The Remote section's hosts: SSH remotes in the order Connectors > Remotes shows them
  *  (pinned, SSH hosts, recent), hidden ones left out. */
-export function hangarRemotes(records: RemoteRecord[]): HangarRemote[] {
+export function filesRemotes(records: RemoteRecord[]): FilesRemote[] {
     return groupRemotes(records.filter((r) => r.kind === "ssh"))
         .filter((g) => g.section !== "hidden")
         .flatMap((g) => g.records)
@@ -222,8 +222,8 @@ export class FilesModel {
     readonly connection: () => string;
     private readonly setConnection: (c: string) => void;
     /** SSH hosts for the Remote section of Places. */
-    readonly remotes: () => HangarRemote[];
-    private readonly setRemotes: (r: HangarRemote[]) => void;
+    readonly remotes: () => FilesRemote[];
+    private readonly setRemotes: (r: FilesRemote[]) => void;
     readonly agents: () => AgentPlace[];
     /** What git says about the folder shown: markers per entry, the branch. */
     readonly git: () => FsGitStatus | null;
@@ -285,7 +285,7 @@ export class FilesModel {
         [this.places, this.setPlaces] = createSignal<FsPlace[]>([]);
         const conn = ctx.meta()?.[META_CONN];
         [this.connection, this.setConnection] = createSignal(isSshConnection(conn) ? String(conn).trim() : "");
-        [this.remotes, this.setRemotes] = createSignal<HangarRemote[]>([]);
+        [this.remotes, this.setRemotes] = createSignal<FilesRemote[]>([]);
         [this.agents, this.setAgents] = createSignal<AgentPlace[]>([]);
         [this.git, this.setGit] = createSignal<FsGitStatus | null>(null);
         this.gitStateOf = createMemo(() => new Map((this.git()?.entries ?? []).map((e) => [e.name, e.state])));
@@ -396,7 +396,7 @@ export class FilesModel {
     private async loadRemotes(): Promise<void> {
         try {
             const records = await RpcApi.RemotesListCommand(TabRpcClient, { timeout: 5000 });
-            if (!this.disposed) this.setRemotes(hangarRemotes(records ?? []));
+            if (!this.disposed) this.setRemotes(filesRemotes(records ?? []));
         } catch {
             // No Remote section.
         }
@@ -877,7 +877,7 @@ export class FilesModel {
 
     // ── Clipboard and transfers (§7.1) ─────────────────────────────────────
 
-    /** Ctrl+C / Ctrl+X: the selection onto the shared Hangar clipboard. */
+    /** Ctrl+C / Ctrl+X: the selection onto the shared Files clipboard. */
     copyToClipboard(kind: "copy" | "cut", entries: FsEntry[]): void {
         if (entries.length === 0) return;
         setClipboard({ kind, paths: entries.map((e) => this.pathOf(e.name)), connection: this.connection() || undefined });
@@ -922,13 +922,13 @@ export class FilesModel {
     }
 
     /** What dropping `sources` here does: move within a drive when the drag
-     *  came from another Hangar pane, copy otherwise (as file managers do). */
-    dropKind(sources: string[], fromHangar: boolean, destDir: string = this.path()): "copy" | "move" {
+     *  came from another Files pane, copy otherwise (as file managers do). */
+    dropKind(sources: string[], fromFiles: boolean, destDir: string = this.path()): "copy" | "move" {
         // Onto a host: always a copy. The sources are on this computer (drags
         // out of a host pane are off), and their roots looking alike (`/` and
         // `/`) says nothing about it being one disk.
         if (this.connection()) return "copy";
-        return fromHangar && sameVolume(sources, destDir) ? "move" : "copy";
+        return fromFiles && sameVolume(sources, destDir) ? "move" : "copy";
     }
 
     // ── Git markers ──────────────────────────────────────────────────────────
