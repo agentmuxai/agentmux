@@ -94,9 +94,13 @@ pub fn join_split(nodes: &[Value]) -> Cow<'_, [Value]> {
         if pieces.len() < 2 {
             continue;
         }
+        // Only a secret no piece holds whole: one that does is masked on its own
+        // line, and gluing it to its neighbours would make a token of them all.
+        if pieces.iter().any(|(_, t)| shown_once::has_shown_once(t)) {
+            continue;
+        }
         let whole: String = pieces.iter().map(|(_, t)| *t).collect();
-        let apart: String = pieces.iter().map(|(_, t)| shown_once::mask(t)).collect();
-        if !shown_once::has_shown_once(&whole) || apart == shown_once::mask(&whole) {
+        if !shown_once::has_shown_once(&whole) {
             continue;
         }
         joined.insert(pieces[0].0.to_string(), (whole, root.get("backendDOMNodeId").and_then(Value::as_i64)));
@@ -121,7 +125,8 @@ pub fn join_split(nodes: &[Value]) -> Cow<'_, [Value]> {
 }
 
 /// The text nodes under `root`, in document order, with their raw text (spaces
-/// kept: they separate words). A text node's own children repeat its text.
+/// kept: they separate words). A text node's own children repeat its text; a
+/// button's or link's text ("Copy") is its name, never part of a secret.
 fn text_pieces<'a>(root: &'a Value, by_id: &HashMap<&str, &'a Value>) -> Vec<(&'a str, &'a str)> {
     let mut out = Vec::new();
     let mut stack = vec![root];
@@ -131,6 +136,9 @@ fn text_pieces<'a>(root: &'a Value, by_id: &HashMap<&str, &'a Value>) -> Vec<(&'
             if let Some(id) = node.get("nodeId").and_then(Value::as_str) {
                 out.push((id, text));
             }
+            continue;
+        }
+        if matches!(role(node), "button" | "link") {
             continue;
         }
         if let Some(kids) = node.get("childIds").and_then(Value::as_array) {

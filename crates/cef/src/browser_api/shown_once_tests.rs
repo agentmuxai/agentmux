@@ -161,6 +161,26 @@ fn pieces_that_only_join_into_ordinary_text_are_left_as_they_are() {
 }
 
 #[test]
+fn a_copy_rows_label_secret_and_button_text_are_never_glued_into_one_value() {
+    // A real Copy row: the label, the secret in a span of its own, and the button's text.
+    let nodes = vec![
+        n("1", None, "RootWebArea", "", Some(1), &["2"]),
+        n("2", Some("1"), "row", "", Some(2), &["3", "4", "6"]),
+        n("3", Some("2"), "StaticText", "Client secret", Some(3), &[]),
+        n("4", Some("2"), "generic", "", Some(4), &["5"]),
+        n("5", Some("4"), "StaticText", SECRET, Some(5), &[]),
+        n("6", Some("2"), "button", "Copy", Some(6), &["7"]),
+        n("7", Some("6"), "StaticText", "Copy", Some(7), &[]),
+    ];
+    assert!(matches!(super::join_split(&nodes), std::borrow::Cow::Borrowed(_)), "nothing is joined");
+    let s = render(&nodes, &HashMap::new(), None, "");
+    assert!(s.text.contains("Client secret") && !s.text.contains(SECRET), "{}", s.text);
+    let line = s.text.lines().find(|l| l.contains(SHOWN_ONCE)).unwrap();
+    let r = line.split("[ref=").nth(1).unwrap().split(']').next().unwrap();
+    assert_eq!(s.refs.iter().find(|(x, _)| x == r).map(|(_, b)| *b), Some(5), "the secret's own element, not the row: {line}");
+}
+
+#[test]
 fn a_copy_buttons_container_is_its_nearest_ancestor_with_more_than_the_button() {
     // The button sits in a wrapper of its own; the row above it holds the secret.
     let nodes = vec![
