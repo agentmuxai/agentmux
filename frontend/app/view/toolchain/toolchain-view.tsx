@@ -19,7 +19,7 @@ import { CliDiskSpace } from "./CliDiskSpace";
 import { toolNotes, toolStatus, widgetStatus } from "./toolchain-status";
 import { WidgetPortField } from "./WidgetPortField";
 import "./toolchain-view.scss";
-import { Button, Card, CardGrid, FilterInput, IconButton, Pill } from "@/app/element/ui";
+import { Button, Card, CardGrid, EmptyState, FilterInput, IconButton, Pill, SectionHeader } from "@/app/element/ui";
 import { matchesEveryWord } from "@/app/util/fuzzysearch";
 
 // ── Port/localStorage helpers (unchanged from modal) ─────────────────────────
@@ -596,7 +596,7 @@ export function ToolchainView(props: { zoom?: () => number } = {}): JSX.Element 
 
     const group = (title: string, keys: () => string[], card: (key: string) => JSX.Element, detail: (key: string) => JSX.Element) => (
         <Show when={keys().length > 0}>
-            <h4 class="ui-card-group-heading">{title}</h4>
+            <SectionHeader variant="group" level={4} title={title} />
             <CardGrid
                 ariaLabel={title}
                 items={keys()}
@@ -611,8 +611,7 @@ export function ToolchainView(props: { zoom?: () => number } = {}): JSX.Element 
 
     return (
         <div class="toolchain-view ui-density-compact" style={{ zoom: props.zoom?.() ?? 1 }}>
-            <div class="ui-card-section-header toolchain-view-header">
-                <span class="ui-card-section-title">Toolchain</span>
+            <SectionHeader class="toolchain-view-header" title="Toolchain">
                 {/* The one-glance answer to "am I behind?" — counts only what
                     the user can act on. A pin trailing upstream is ours and is
                     deliberately excluded, so this never nags about something
@@ -635,10 +634,10 @@ export function ToolchainView(props: { zoom?: () => number } = {}): JSX.Element 
                 >
                     Check latest versions
                 </Button>
-            </div>
+            </SectionHeader>
             <div class="toolchain-body">
                 <section class="toolchain-section">
-                    <h4 class="ui-card-group-heading">Environment</h4>
+                    <SectionHeader variant="group" level={4} title="Environment" />
                     <Show when={env()} fallback={<div class="toolchain-env-line">Loading…</div>}>
                         {(e) => (
                             <>
@@ -680,7 +679,7 @@ export function ToolchainView(props: { zoom?: () => number } = {}): JSX.Element 
                 {group("Agent CLIs", () => toolKeys("provider"), toolCard, toolDetail)}
                 {group("External widgets", widgetKeys, widgetCard, widgetDetail)}
                 <Show when={nothingMatches()}>
-                    <div class="ui-card-empty">No tools match “{filter()}”.</div>
+                    <EmptyState>No tools match “{filter()}”.</EmptyState>
                 </Show>
             </div>
         </div>

@@ -44,6 +44,34 @@ describe("rovingTarget", () => {
     });
 });
 
+describe("Button variants", () => {
+    it("a row or link is quiet unless it names a tone, and marks its variant", () => {
+        render(() => (
+            <>
+                <Button variant="row">Home</Button>
+                <Button variant="link" tone="accent">
+                    Show details
+                </Button>
+            </>
+        ));
+        const row = screen.getByRole("button", { name: "Home" });
+        expect(row.classList.contains("ui-button--row")).toBe(true);
+        expect(row.classList.contains("ui-tone-quiet")).toBe(true);
+        const link = screen.getByRole("button", { name: "Show details" });
+        expect(link.classList.contains("ui-button--link")).toBe(true);
+        expect(link.classList.contains("ui-tone-accent")).toBe(true);
+    });
+
+    it("a row carries the pressed state for the selected item", () => {
+        render(() => (
+            <Button variant="row" pressed>
+                Documents
+            </Button>
+        ));
+        expect(screen.getByRole("button", { name: "Documents" }).getAttribute("aria-pressed")).toBe("true");
+    });
+});
+
 describe("Button", () => {
     it("is a neutral, non-submitting button by default", () => {
         render(() => <Button>Cancel</Button>);

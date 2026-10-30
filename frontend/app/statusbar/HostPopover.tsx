@@ -26,7 +26,7 @@ import { MuxBusSignOutButton } from "@/app/view/accounts/muxbus-sign-out";
 import { isLinux, isMacOS } from "@/util/platformutil";
 import { PairDevicePanel } from "./PairDevicePanel";
 
-import { Switch } from "@/app/element/ui";
+import { Button, Switch } from "@/app/element/ui";
 import type { LanInstance } from "@/types/rpc/LanInstance";
 
 /** Whether the host's reported name is srv's machine (names compare case-insensitively). */
@@ -135,15 +135,15 @@ const HostPopoverPanel = (props: HostPopoverPanelProps): JSX.Element => {
                         manager. The host resolves the directory from a closed
                         target, never from this path string.
                         Spec: SPEC_STATUSBAR_HOST_POPOVER_INSTANCE_AND_OPEN_DATA_DIR_2026_09_25.md §4 */}
-                    <button
-                        type="button"
+                    <Button
+                        variant="link"
                         class="status-bar-popover-mono status-bar-popover-link"
                         style={{ "font-size": "0.85em" }}
                         data-tip={fileManagerLabel()}
                         onClick={() => void openDataDir()}
                     >
                         {props.hostInfo()!.dataDir}
-                    </button>
+                    </Button>
                 </div>
                 <Show when={openDirError()}>
                     <div

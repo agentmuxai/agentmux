@@ -17,6 +17,7 @@
 // Context menu: docs/specs/SPEC_FILE_TREE_CONTEXT_MENU_2026_06_14.md
 
 import { createEffect, createMemo, createSignal, For, on, onCleanup, Show, type Accessor, type JSX } from "solid-js";
+import { IconButton } from "@/app/element/ui";
 import { fileIcon } from "./file-icons";
 import { FileTreeModel, type Root } from "./file-tree-model";
 import { isOpenFile, joinPath, shownEntries, treeMove, TreeTypeAhead, visibleRows } from "./tree-keyboard";
@@ -257,44 +258,32 @@ function FileTreeToolbar(props: FileTreeToolbarProps): JSX.Element {
             {/* The tree's own hide button; the editor's document bar has the
                 one that shows it again. */}
             <Show when={props.onHideTree}>
-                <button
-                    type="button"
-                    class="file-tree-toolbar-btn"
-                    data-tip="Hide file tree"
-                    aria-label="Hide file tree"
+                <IconButton
+                    icon="angles-left"
+                    label="Hide file tree"
+                    density="compact"
                     onClick={() => props.onHideTree?.()}
-                >
-                    <i class="fa fa-angles-left" />
-                </button>
+                />
             </Show>
-            <button
-                type="button"
-                class="file-tree-toolbar-btn"
-                classList={{ "file-tree-toolbar-btn--active": props.showHidden }}
-                data-tip={props.showHidden ? "Hide hidden files" : "Show hidden files"}
-                aria-label={props.showHidden ? "Hide hidden files" : "Show hidden files"}
+            <IconButton
+                icon={props.showHidden ? "eye" : "eye-slash"}
+                label={props.showHidden ? "Hide hidden files" : "Show hidden files"}
+                density="compact"
+                pressed={props.showHidden}
                 onClick={props.onToggleHidden}
-            >
-                <i class={`fa ${props.showHidden ? "fa-eye" : "fa-eye-slash"}`} />
-            </button>
-            <button
-                type="button"
-                class="file-tree-toolbar-btn"
-                data-tip="Collapse all folders"
-                aria-label="Collapse all folders"
+            />
+            <IconButton
+                icon="square-minus"
+                label="Collapse all folders"
+                density="compact"
                 onClick={() => props.model.collapseAll()}
-            >
-                <i class="fa fa-square-minus" />
-            </button>
-            <button
-                type="button"
-                class="file-tree-toolbar-btn"
-                data-tip="Refresh tree"
-                aria-label="Refresh tree"
+            />
+            <IconButton
+                icon="arrows-rotate"
+                label="Refresh tree"
+                density="compact"
                 onClick={() => void props.model.refresh()}
-            >
-                <i class="fa fa-arrows-rotate" />
-            </button>
+            />
         </div>
     );
 }

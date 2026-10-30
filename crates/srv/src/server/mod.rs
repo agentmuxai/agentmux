@@ -17,6 +17,7 @@ pub(crate) mod agent_move_here;
 pub(crate) mod agent_takeover;
 mod pane_binding;
 mod pane_commands;
+mod agent_config_guard;
 mod editor_handlers;
 mod fs_handlers;
 pub(crate) mod identity_auth_dirs;
