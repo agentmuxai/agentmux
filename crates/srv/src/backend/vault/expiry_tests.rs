@@ -124,6 +124,33 @@ fn the_rotation_task_goes_to_the_agent_that_made_the_value() {
     assert!(line.target.ends_with(" for agent2-6"), "{}", line.target);
 }
 
+// muxreview on #5854: the newest 500 lines once decided this, so a key used often
+// enough lost its reminder and its maker, and was reminded again every look.
+#[test]
+fn a_much_used_key_is_still_reminded_once_and_its_maker_still_known() {
+    let (s, (work, _dir)) = (store(), work());
+    let req = GenerateRequest {
+        kind: "api-key".into(),
+        label: "Busy token".into(),
+        why: String::new(),
+        fields: Default::default(),
+        rules: Default::default(),
+        expires: Some("2026-12-01".into()),
+    };
+    let made = generate_entry(&s, req, "agent2-6").unwrap();
+    for _ in 0..600 {
+        crate::backend::vault::record(&s, &made.id, "Busy token", "agent2-6", "ran a command", "deploy", "done");
+    }
+    send(&s, Some(&work), day("2026-11-20")).unwrap();
+    for _ in 0..600 {
+        crate::backend::vault::record(&s, &made.id, "Busy token", "agent2-6", "ran a command", "deploy", "done");
+    }
+    assert!(send(&s, Some(&work), day("2026-11-21")).unwrap().notices.is_empty(), "not sent again");
+    let filed = tasks(&work);
+    assert_eq!(filed.len(), 1);
+    assert_eq!(filed[0].target_agent, "agent2-6");
+}
+
 #[test]
 fn a_new_date_starts_the_reminders_again_and_the_change_is_recorded() {
     let (s, (work, _dir)) = (store(), work());

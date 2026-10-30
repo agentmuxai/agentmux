@@ -137,14 +137,17 @@ pub fn due(store: &Store, today: NaiveDate) -> Result<Vec<Due>, String> {
         let Some(date) = of(&row) else { continue };
         let days_left = (date - today).num_days();
         let Some(stage) = Stage::due(days_left) else { continue };
-        let lines = store.vault_activity_for_entry(&row.id, 500).map_err(|e| e.to_string())?;
+        // By action, so a key's many uses never push these lines out. Three
+        // reminders a date: an entry's whole history of them is short.
+        let reminded = store.vault_activity_for_entry(&row.id, &[REMINDED], 10_000).map_err(|e| e.to_string())?;
         let sent_for_date = format!("expires {date}, ");
-        let sent: Vec<&str> = lines.iter().filter(|l| l.action == REMINDED && l.target.starts_with(&sent_for_date)).map(|l| l.target.as_str()).collect();
+        let sent: Vec<&str> = reminded.iter().filter(|l| l.target.starts_with(&sent_for_date)).map(|l| l.target.as_str()).collect();
         if sent.iter().any(|t| t.starts_with(&reminder_key(date, stage))) {
             continue;
         }
-        // Newest first: the latest line that made the value.
-        let agent = lines.iter().find(|l| MADE.contains(&l.action.as_str())).map(|l| l.actor.clone()).filter(|a| a != PERSON && !a.is_empty());
+        // The latest line that made the value.
+        let made = store.vault_activity_for_entry(&row.id, MADE, 1).map_err(|e| e.to_string())?;
+        let agent = made.into_iter().next().map(|l| l.actor).filter(|a| a != PERSON && !a.is_empty());
         out.push(Due { id: row.id, label: row.label, date, days_left, stage, first: sent.is_empty(), agent });
     }
     Ok(out)

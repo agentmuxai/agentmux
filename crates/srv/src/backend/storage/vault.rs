@@ -320,14 +320,19 @@ impl Store {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
-    /// One entry's latest `limit` activity rows, newest first.
-    pub fn vault_activity_for_entry(&self, entry_id: &str, limit: i64) -> Result<Vec<VaultActivityRow>, StoreError> {
+    /// One entry's latest `limit` activity rows with one of `actions`, newest
+    /// first. Filtered by action, so its many uses never push these out.
+    pub fn vault_activity_for_entry(&self, entry_id: &str, actions: &[&str], limit: i64) -> Result<Vec<VaultActivityRow>, StoreError> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
+        let marks = vec!["?"; actions.len()].join(", ");
+        let mut stmt = conn.prepare(&format!(
             "SELECT at, entry_id, entry_label, actor, action, target, outcome FROM db_vault_activity \
-             WHERE entry_id = ?1 ORDER BY seq DESC LIMIT ?2",
-        )?;
-        let rows = stmt.query_map(params![entry_id, limit], |r| {
+             WHERE entry_id = ? AND action IN ({marks}) ORDER BY seq DESC LIMIT ?"
+        ))?;
+        let mut args: Vec<rusqlite::types::Value> = vec![entry_id.to_string().into()];
+        args.extend(actions.iter().map(|a| rusqlite::types::Value::from(a.to_string())));
+        args.push(limit.into());
+        let rows = stmt.query_map(rusqlite::params_from_iter(args), |r| {
             Ok(VaultActivityRow {
                 at: r.get(0)?,
                 entry_id: r.get(1)?,
