@@ -19,6 +19,7 @@ import { SkillImportModel } from "./skill-import-model";
 import { SkillImportPanel, SkillImportResult } from "./skill-import";
 import { SkillMatrix } from "./skill-matrix";
 import "./skill-import.scss";
+import "./skill-manager.scss";
 import "../agent/components/AgentPrimitiveModal.scss";
 import { Button, Switch } from "@/app/element/ui";
 import { focusOnOpen } from "@/util/focusutil";
@@ -123,9 +124,12 @@ export const SkillManager = (): JSX.Element => {
             >
                 <For each={model.skillsAtom()}>
                     {(skill) => (
-                        <button
-                            class="agent-primitive-modal-list-item"
-                            classList={{ "is-selected": model.selectedIdAtom() === skill.id }}
+                        <Button
+                            class={
+                                model.selectedIdAtom() === skill.id
+                                    ? "agent-primitive-modal-list-item is-selected"
+                                    : "agent-primitive-modal-list-item"
+                            }
                             onClick={() => {
                                 setImporting(null);
                                 setShowMatrix(false);
@@ -138,7 +142,7 @@ export const SkillManager = (): JSX.Element => {
                                     ? "all agents"
                                     : `${skill.bound_count} ${skill.bound_count === 1 ? "agent" : "agents"}`}
                             </span>
-                        </button>
+                        </Button>
                     )}
                 </For>
             </Show>
