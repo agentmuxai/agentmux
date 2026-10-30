@@ -78,6 +78,9 @@ zeroize = { version = "1", features = ["zeroize_derive"] }
 age = { version = "0.11", default-features = false }
 # The Vault's importers read the CSV files other password managers export (spec section 8.4).
 csv = "1"
+# `Terminal` `run`'s capture rules find a value in a command's output with a regex
+# (SPEC_VAULT_GENERATE_CAPTURE_AND_BROWSER_SIGNINS_2026_10_28.md §4.2).
+regex = "1"
 mdns-sd = "0.12"
 # Interface enumeration for LAN listener bind addresses (backend/lan_listeners.rs).
 # Already in the tree transitively via mdns-sd, so declaring it directly adds no

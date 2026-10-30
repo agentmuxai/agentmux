@@ -1,0 +1,379 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+//! `Terminal` `run`'s `capture`: a value a command prints goes straight into the
+//! Vault (docs/specs/SPEC_VAULT_GENERATE_CAPTURE_AND_BROWSER_SIGNINS_2026_10_28.md §4.2).
+//!
+//! srv holds the command's output until it ends ([`crate::backend::shell_node`]),
+//! then [`Capture::finish`] applies the rules to its standard output, stores each
+//! match as a new entry or as a new value of an existing one (the old value kept 7
+//! days, §4.4), and returns a [`Scrubber`] for the values, so the output is
+//! published with `[vault:<id>]` where each was. If a rule matches nothing, srv
+//! can't tell which line held the secret: the output is withheld whole, and kept
+//! as a note the person can open with Reveal.
+
+use std::collections::BTreeMap;
+
+use agentmux_common::api_types::{CaptureFrom, CaptureRule};
+use agentmux_common::time::now_ms;
+use zeroize::Zeroizing;
+
+use super::scrub::Scrubber;
+use super::{insert, kinds, record, seal, versions, NewEntry, Parts};
+use crate::backend::storage::store::Store;
+use crate::backend::storage::vault::VaultRow;
+
+/// Most rules one command may have.
+pub const MOST: usize = 8;
+/// A shorter value is refused: the output couldn't be cleaned of it reliably.
+pub const MIN_LEN: usize = 8;
+/// The most output held for a capture; past it the capture fails and the
+/// output kept for the person is cut here.
+pub const MAX_HELD: usize = 1024 * 1024;
+/// The longest regex, JSON path or label a rule may give.
+const MAX_RULE: usize = 500;
+/// The action an entry's activity log names a capture by.
+pub const CAPTURED: &str = "captured";
+
+/// Where one rule's value goes.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Target {
+    New { kind: &'static str, label: String, part: &'static str },
+    /// An existing entry, as it was when the command was approved: a value is
+    /// never stored into an entry deleted and made again since.
+    Existing { id: String, created_at: i64, label: String, part: &'static str },
+}
+
+/// Where a rule finds its value in standard output.
+#[derive(Debug, Clone)]
+pub enum Source {
+    All,
+    Json(Vec<Step>),
+    Regex(regex::Regex),
+    Line(usize),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Step {
+    Key(String),
+    Index(usize),
+}
+
+#[derive(Debug, Clone)]
+pub struct Rule {
+    pub into: Target,
+    pub from: Source,
+}
+
+/// A command's capture, checked before it runs.
+#[derive(Debug, Clone)]
+pub struct Capture {
+    pub rules: Vec<Rule>,
+    /// The agent that ran the command, as its verified identity names it.
+    pub agent: String,
+    /// The command line, for the activity log and the kept output's label.
+    pub cmd: String,
+}
+
+/// A capture as the command's runner holds it: the rules, the store they write
+/// to, and a call that tells every Vault pane its entries changed.
+pub struct Job {
+    pub capture: Capture,
+    pub store: std::sync::Arc<Store>,
+    pub changed: Box<dyn Fn() + Send + Sync>,
+}
+
+/// What a capture came to, once the command ended.
+pub enum Outcome {
+    /// Every rule matched: the entries, in rule order, and the values to take
+    /// out of the output.
+    Stored { ids: Vec<String>, scrubber: Scrubber },
+    /// The output is withheld: why, and the note the person can open it in.
+    Withheld { why: String, kept_as: Option<String> },
+}
+
+fn clip(s: &str, n: usize) -> String {
+    let mut out: String = s.chars().take(n).collect();
+    if out.len() < s.len() {
+        out.push('…');
+    }
+    out
+}
+
+/// `$.a.b[0]['c d']` as steps. `$` alone is the whole document.
+pub fn json_path(path: &str) -> Result<Vec<Step>, String> {
+    let bad = |why: &str| format!("the JSON path {:?} {why}; write it like $.AccessKey.SecretAccessKey or $.items[0].token", clip(path, 60));
+    let rest = path.trim().strip_prefix('$').ok_or_else(|| bad("doesn't start with $"))?;
+    let mut steps = Vec::new();
+    let mut chars = rest.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '.' => {
+                let mut key = String::new();
+                while let Some(&n) = chars.peek() {
+                    if n == '.' || n == '[' {
+                        break;
+                    }
+                    key.push(n);
+                    chars.next();
+                }
+                if key.is_empty() {
+                    return Err(bad("has an empty name"));
+                }
+                steps.push(Step::Key(key));
+            }
+            '[' => {
+                let quote = chars.peek().copied().filter(|q| *q == '\'' || *q == '"');
+                let mut inner = String::new();
+                if let Some(q) = quote {
+                    chars.next();
+                    loop {
+                        match chars.next() {
+                            Some(c) if c == q && chars.peek() == Some(&']') => break,
+                            Some(c) => inner.push(c),
+                            None => return Err(bad("has an unclosed quote")),
+                        }
+                    }
+                    chars.next();
+                    steps.push(Step::Key(inner));
+                } else {
+                    loop {
+                        match chars.next() {
+                            Some(']') => break,
+                            Some(c) => inner.push(c),
+                            None => return Err(bad("has an unclosed [")),
+                        }
+                    }
+                    steps.push(Step::Index(inner.trim().parse().map_err(|_| bad("has an index that isn't a number"))?));
+                }
+            }
+            _ => return Err(bad("has a step that isn't .name or [n]")),
+        }
+    }
+    Ok(steps)
+}
+
+fn rule_from(from: &CaptureFrom) -> Result<Source, String> {
+    match from {
+        CaptureFrom::Stdout(s) if s == "all" => Ok(Source::All),
+        CaptureFrom::Stdout(s) => Err(format!("\"stdout\" takes \"all\", not {:?}", clip(s, 40))),
+        CaptureFrom::Json(p) if p.len() > MAX_RULE => Err(format!("a JSON path is at most {MAX_RULE} characters")),
+        CaptureFrom::Json(p) => Ok(Source::Json(json_path(p)?)),
+        CaptureFrom::Regex(r) if r.len() > MAX_RULE => Err(format!("a regex is at most {MAX_RULE} characters")),
+        CaptureFrom::Regex(r) => {
+            let re = regex::RegexBuilder::new(r).size_limit(1 << 20).build().map_err(|e| format!("the regex doesn't compile: {e}"))?;
+            if re.captures_len() != 2 {
+                return Err(format!("the regex needs exactly one capture group, the value; it has {}", re.captures_len() - 1));
+            }
+            Ok(Source::Regex(re))
+        }
+        CaptureFrom::Line(0) => Err("lines are counted from 1".into()),
+        CaptureFrom::Line(n) => Ok(Source::Line(*n as usize)),
+    }
+}
+
+/// Checks a command's capture before it runs: every rule readable, every entry
+/// it names there, every new one makeable.
+pub fn plan(store: &Store, rules: &[CaptureRule], agent: &str, cmd: &str) -> Result<Capture, String> {
+    if rules.is_empty() {
+        return Err("capture needs at least one rule".into());
+    }
+    if rules.len() > MOST {
+        return Err(format!("a command takes at most {MOST} capture rules"));
+    }
+    let mut out = Vec::with_capacity(rules.len());
+    for (n, r) in rules.iter().enumerate() {
+        let which = |e: String| if rules.len() > 1 { format!("capture rule {}: {e}", n + 1) } else { e };
+        let from = rule_from(&r.from).map_err(which)?;
+        let into = match (&r.into.id, &r.into.kind) {
+            (Some(_), Some(_)) => return Err(which("\"as\" names an entry by id, or a new one by kind and label, not both".into())),
+            (Some(id), None) => {
+                let row = store.vault_get(id.trim()).map_err(|e| e.to_string())?.ok_or_else(|| which(format!("there is no entry {id:?}")))?;
+                let kind = kinds::kind(&row.kind).ok_or_else(|| which(format!("entry {id} has an unknown kind")))?;
+                let part = part_of(kind, r.into.part.as_deref()).map_err(which)?;
+                if r.into.label.as_deref().is_some_and(|l| l.trim() != row.label) {
+                    return Err(which(format!("{id} is called {:?}: leave label out to keep it", row.label)));
+                }
+                Target::Existing { id: row.id, created_at: row.created_at, label: row.label, part }
+            }
+            (None, Some(kind)) => {
+                let k = kinds::kind(kind.trim()).ok_or_else(|| which(format!("unknown kind {kind:?}")))?;
+                let label = r.into.label.as_deref().map(str::trim).unwrap_or("");
+                if label.is_empty() {
+                    return Err(which("a new entry needs a label".into()));
+                }
+                if label.chars().count() > MAX_RULE {
+                    return Err(which(format!("a label is at most {MAX_RULE} characters")));
+                }
+                let part = part_of(k, r.into.part.as_deref()).map_err(which)?;
+                if part != k.parts[0] {
+                    return Err(which(format!("a new {} entry is made from its {}; capture the {part} into it once it exists", k.name, k.parts[0])));
+                }
+                Target::New { kind: k.name, label: label.to_string(), part }
+            }
+            (None, None) => return Err(which("\"as\" needs an entry's id, or a kind and label for a new one".into())),
+        };
+        out.push(Rule { into, from });
+    }
+    Ok(Capture { rules: out, agent: agent.to_string(), cmd: cmd.to_string() })
+}
+
+fn part_of(kind: &kinds::Kind, part: Option<&str>) -> Result<&'static str, String> {
+    match part.map(str::trim).filter(|p| !p.is_empty()) {
+        None => Ok(kind.parts[0]),
+        Some(p) => kind.parts.iter().copied().find(|k| *k == p).ok_or_else(|| format!("a {} entry has no part {p:?}; its parts are {}", kind.name, kind.parts.join(", "))),
+    }
+}
+
+fn walk<'a>(mut v: &'a serde_json::Value, steps: &[Step]) -> Option<&'a serde_json::Value> {
+    for s in steps {
+        v = match s {
+            Step::Key(k) => v.get(k.as_str())?,
+            Step::Index(i) => v.get(*i)?,
+        };
+    }
+    Some(v)
+}
+
+/// One rule's value in `stdout`, or why there is none. Never says what it found.
+pub fn extract(from: &Source, stdout: &str) -> Result<Zeroizing<String>, String> {
+    let value: Zeroizing<String> = match from {
+        Source::All => Zeroizing::new(stdout.trim().to_string()),
+        Source::Line(n) => Zeroizing::new(stdout.lines().nth(n - 1).ok_or_else(|| format!("the output has fewer than {n} lines"))?.trim().to_string()),
+        Source::Regex(re) => {
+            let caps = re.captures(stdout).ok_or("the regex matched nothing")?;
+            Zeroizing::new(caps.get(1).ok_or("the regex's group matched nothing")?.as_str().trim().to_string())
+        }
+        Source::Json(steps) => {
+            let doc: Zeroizing<String> = Zeroizing::new(stdout.trim().to_string());
+            let parsed: serde_json::Value = serde_json::from_str(&doc).map_err(|_| "the output isn't JSON".to_string())?;
+            let found = match walk(&parsed, steps) {
+                Some(serde_json::Value::String(s)) => s.clone(),
+                Some(serde_json::Value::Number(n)) => n.to_string(),
+                Some(serde_json::Value::Null) | None => return Err("the JSON path matched nothing".into()),
+                Some(_) => return Err("the JSON path matched an object or a list, not a value".into()),
+            };
+            Zeroizing::new(found)
+        }
+    };
+    if value.is_empty() {
+        return Err("the value it matched is empty".into());
+    }
+    if value.chars().count() < MIN_LEN {
+        return Err(format!("the value it matched is shorter than {MIN_LEN} characters, too short to clean out of the output"));
+    }
+    Ok(value)
+}
+
+impl Capture {
+    /// Whether any rule replaces the value of an entry that exists: the person is
+    /// asked first.
+    pub fn replaces(&self) -> impl Iterator<Item = &Target> {
+        self.rules.iter().map(|r| &r.into).filter(|i| matches!(i, Target::Existing { .. }))
+    }
+
+    /// Applies the rules to `stdout` and stores what they match. `output` is the
+    /// whole output as it would be published, kept for the person if the capture
+    /// fails; `cut` says it was longer than [`MAX_HELD`].
+    pub fn finish(&self, store: &Store, stdout: &str, output: &str, cut: bool, exit_code: i32) -> Outcome {
+        let why = if cut {
+            Err(format!("the output is over {} MB, more than a capture holds", MAX_HELD / (1024 * 1024)))
+        } else if exit_code != 0 {
+            Err(format!("the command failed (exit code {exit_code}), so nothing it printed is taken as the value"))
+        } else {
+            self.rules
+                .iter()
+                .enumerate()
+                .map(|(n, r)| extract(&r.from, stdout).map_err(|e| if self.rules.len() > 1 { format!("capture rule {}: {e}", n + 1) } else { e }))
+                .collect::<Result<Vec<_>, _>>()
+        };
+        let values = match why {
+            Ok(v) => v,
+            Err(why) => return self.withhold(store, why, output),
+        };
+        match self.store(store, &values) {
+            Ok(ids) => {
+                let known: Vec<(String, String)> = ids.iter().zip(values.iter()).map(|(id, v)| (id.clone(), v.to_string())).collect();
+                Outcome::Stored { scrubber: Scrubber::new(&known), ids }
+            }
+            Err(why) => self.withhold(store, format!("the value couldn't be stored: {why}"), output),
+        }
+    }
+
+    fn store(&self, store: &Store, values: &[Zeroizing<String>]) -> Result<Vec<String>, String> {
+        let target = clip(&self.cmd, 160);
+        let mut ids = Vec::with_capacity(values.len());
+        for (rule, value) in self.rules.iter().zip(values) {
+            match &rule.into {
+                Target::New { kind, label, part } => {
+                    let mut parts = Parts::default();
+                    parts.0.insert(part.to_string(), value.to_string());
+                    let entry = NewEntry { kind: kind.to_string(), label: label.clone(), fields: BTreeMap::new(), tags: Vec::new(), parts };
+                    ids.push(insert(store, entry, &self.agent, CAPTURED, &target)?);
+                }
+                Target::Existing { id, created_at, label, part } => {
+                    set_part(store, id, *created_at, part, value, &self.agent, &target).map_err(|e| format!("{label}: {e}"))?;
+                    ids.push(id.clone());
+                }
+            }
+        }
+        Ok(ids)
+    }
+
+    /// Keeps the withheld output as a note only the person opens (with Reveal), and
+    /// logs the failed capture against each entry that exists.
+    fn withhold(&self, store: &Store, why: String, output: &str) -> Outcome {
+        let mut cut = output.len().min(MAX_HELD);
+        while !output.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        let kept = output[..cut].trim_end();
+        let kept_as = if kept.is_empty() {
+            None
+        } else {
+            let mut parts = Parts::default();
+            parts.0.insert("text".into(), kept.to_string());
+            let label = format!("Output withheld from {}: {}", self.agent, clip(&self.cmd, 60));
+            let entry = NewEntry { kind: "note".into(), label, fields: BTreeMap::new(), tags: vec!["capture".into()], parts };
+            match insert(store, entry, &self.agent, "output withheld", &clip(&why, 160)) {
+                Ok(id) => Some(id),
+                Err(e) => {
+                    tracing::warn!(error = %e, "vault: couldn't keep a failed capture's output");
+                    None
+                }
+            }
+        };
+        for rule in &self.rules {
+            if let Target::Existing { id, label, .. } = &rule.into {
+                record(store, id, label, &self.agent, CAPTURED, &clip(&why, 160), "failed");
+            }
+        }
+        Outcome::Withheld { why, kept_as }
+    }
+}
+
+/// Replaces one part of an existing entry for an agent's capture, keeping the old
+/// value as a version when it is the main one.
+fn set_part(store: &Store, id: &str, created_at: i64, part: &str, value: &str, agent: &str, target: &str) -> Result<(), String> {
+    let row = store.vault_get(id).map_err(|e| e.to_string())?.filter(|r| r.created_at == created_at).ok_or("it was deleted while the command ran")?;
+    let kind = kinds::kind(&row.kind).ok_or("it has an unknown kind")?;
+    let key = seal::key(false)?;
+    let mut parts = seal::open(&key, &row.id, &row.sealed)?;
+    if part == kind.parts[0] {
+        versions::keep(store, &row, agent, CAPTURED)?;
+    }
+    if let Some(mut old) = parts.0.insert(part.to_string(), value.to_string()) {
+        zeroize::Zeroize::zeroize(&mut old);
+    }
+    let label = row.label.clone();
+    let changed = VaultRow { sealed: seal::seal(&key, &row.id, &parts)?, updated_at: now_ms(), ..row };
+    if !store.vault_update(&changed).map_err(|e| e.to_string())? {
+        return Err("it was deleted while the command ran".into());
+    }
+    record(store, id, &label, agent, CAPTURED, target, "done");
+    Ok(())
+}
+
+#[cfg(test)]
+#[path = "capture_tests.rs"]
+mod tests;

@@ -921,10 +921,14 @@ async fn await_prompt(cx: &ToolCtx<'_>, id: &str) -> Result<()> {
     }
 }
 
-/// Whether `run` hands the command Vault values: `secrets`, `stdin_secret` or `secret_files`.
+/// Whether `run` touches Vault values: gives the command some (`secrets`,
+/// `stdin_secret`, `secret_files`) or keeps what it prints (`capture`).
 fn gives_secrets(arguments: &Value) -> bool {
     let named = |k: &str| arguments.get(k).is_some_and(|s| s.as_object().is_some_and(|o| !o.is_empty()));
-    named("secrets") || named("secret_files") || arguments.get("stdin_secret").and_then(Value::as_str).is_some_and(|s| !s.trim().is_empty())
+    named("secrets")
+        || named("secret_files")
+        || arguments.get("stdin_secret").and_then(Value::as_str).is_some_and(|s| !s.trim().is_empty())
+        || arguments.get("capture").and_then(Value::as_array).is_some_and(|a| !a.is_empty())
 }
 
 /// How long `run` with `secrets` waits for srv to know the job before saying it may not have started.
@@ -981,14 +985,22 @@ async fn run_with_secrets(arguments: &Value, command: &str, cx: &ToolCtx<'_>) ->
         let output = lines[lines.len().saturating_sub(MAX_RUN_LINES)..].join("\n");
         // The job ended, as the last good poll saw it; a poll that failed since is not news.
         if !r.running {
-            return Ok(json!({
+            let mut done = json!({
                 "terminal": id,
                 "exit_code": r.exit_code,
                 "output": output,
                 "truncated": r.truncated || cut,
                 "duration_ms": started.elapsed().as_millis() as u64,
-                "note": "The output is cleaned of the Vault values the command was given: they show as [vault:<id>].",
-            }));
+                "note": "The output is cleaned of the Vault values the command was given or printed: they show as [vault:<id>].",
+            });
+            if !r.captured.is_empty() {
+                done["captured"] = json!(r.captured);
+            }
+            if let Some(why) = r.withheld {
+                done["withheld"] = json!(why);
+                done["note"] = json!("The capture failed, so the output is withheld: nothing it printed went into the Vault. The person can open the output in the Vault.");
+            }
+            return Ok(done);
         }
         if Instant::now() >= deadline {
             return Ok(json!({
@@ -997,7 +1009,11 @@ async fn run_with_secrets(arguments: &Value, command: &str, cx: &ToolCtx<'_>) ->
                 "running": true,
                 "output": output,
                 "truncated": r.truncated || cut,
-                "note": "Still running as a background job: wait with until \"exit\" waits for it; close stops it.",
+                "note": if arguments.get("capture").is_some_and(|c| !c.is_null()) {
+                    "Still running as a background job; its output is held until it ends, for capture: wait with until \"exit\" waits for it; close stops it."
+                } else {
+                    "Still running as a background job: wait with until \"exit\" waits for it; close stops it."
+                },
             }));
         }
         tokio::time::sleep(POLL).await;

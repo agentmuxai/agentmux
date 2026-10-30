@@ -43,6 +43,9 @@ pub struct UseRequest {
     pub command: String,
     /// The command's working directory, when `command` is set.
     pub cwd: String,
+    /// What `command` prints replaces the entry's value (`capture`); nothing is
+    /// given to the command.
+    pub replaces: bool,
     #[ts(type = "number")]
     pub requested_ms: u64,
 }
@@ -152,6 +155,7 @@ mod tests {
             kind: "ssn".into(),
             command: String::new(),
             cwd: String::new(),
+            replaces: false,
             requested_ms: 0,
         }
     }
