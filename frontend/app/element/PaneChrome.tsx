@@ -38,7 +38,15 @@ import { readSwarmSummary } from "@/app/store/activitySummary";
 import { readSeatMeta, seatTooltipLine } from "@/app/view/agent/seat-format";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { isBlockClosing } from "@/layout/lib/layoutClosing";
-import { closeBlockInStack, moveBlockInStack, moveBlocksInStack, setActiveBlockInStack, type NodeModel } from "@/layout/index";
+import {
+    closeBlockInStack,
+    moveBlockInStack,
+    moveBlocksInStack,
+    setActiveBlockInStack,
+    splitOutStackMember,
+    type NodeModel,
+} from "@/layout/index";
+import { findNodeByBlockId } from "@/layout/lib/layoutNode";
 import { paneStackIds } from "@/layout/lib/layoutNodeModels";
 import { allBlockIds } from "@/layout/lib/stackOrder";
 import { useWindowTabDisplayed } from "@/app/workspace/window-tab-visibility";
@@ -495,6 +503,18 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
         clearPaneTabSelection();
         return moved;
     };
+    // A single pill dropped on this pane's body, outside its middle, becomes a pane of its own on that
+    // side; the new pane's key is where the pill bounces. SPEC_PANE_TAB_DRAG_BODY_PLACEMENT_AND_EDGE_GLOW_2026_10_29.md.
+    const bodyDrop = {
+        model: layoutModel,
+        hasBody: () => !(nodeModel.isMinimized?.() ?? false),
+        place: (blockId: string, side: "left" | "right" | "up" | "down"): string | false => {
+            if (!splitOutStackMember(layoutModel, blockId, { targetNodeId: nodeModel.nodeId, side })) return false;
+            if (paneTabSelection().has(blockId)) clearPaneTabSelection();
+            const root = layoutModel.treeState.rootNode;
+            return (root && findNodeByBlockId(root, blockId)?.id) || false;
+        },
+    };
     const acceptsForeignTabs = (blockIds: readonly string[]) => {
         const here = new Set(stackIds());
         return blockIds.some((id) => !here.has(id));
@@ -555,6 +575,7 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
             onReceiveForeignTab={handleReceiveForeignTab}
             onReceiveForeignTabs={handleReceiveForeignTabs}
             acceptsForeignTabs={acceptsForeignTabs}
+            bodyDrop={bodyDrop}
             selection={paneTabSelectionApi}
             onTabDoubleClick={(id) => tabInfos().get(id)?.rename && setRenamingId(id)}
             renderLabel={(id) =>

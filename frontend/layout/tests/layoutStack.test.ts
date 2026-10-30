@@ -25,6 +25,7 @@ import {
     openBlockInStack,
     pushBlockOntoStack,
     setActiveBlockInStack,
+    splitOutStackMember,
 } from "@/layout/lib/layoutStack";
 import type { NodeModel } from "@/layout/lib/types";
 import { LayoutNodeAdditionalProps, LayoutTreeActionType, LayoutTreeInsertNodeAction } from "@/layout/lib/types";
@@ -1807,5 +1808,104 @@ describe("minimizing next to a minimized pane (merge)", () => {
         expect(model.treeState.magnifiedNodeId).toBeUndefined();
         expect(effectiveStack(getNodeByBlockId(model, "a1")!.data!)).toEqual(["a1", "a2", "b1", "b2"]);
         expect(leaves(model)).toHaveLength(3);
+    });
+});
+
+describe("splitOutStackMember", () => {
+    beforeEach(() => {
+        layoutStateSignals.clear();
+        vi.useFakeTimers();
+        rpcCall.mockReset();
+        rpcCall.mockResolvedValue(undefined);
+        intentCall.mockClear();
+    });
+    afterEach(() => vi.useRealTimers());
+
+    function addPane(model: LayoutModel, blockId: string): string {
+        model.treeReducer({
+            type: LayoutTreeActionType.InsertNode,
+            node: newLayoutNode(undefined, undefined, undefined, { blockId }),
+            magnified: false,
+            focused: false,
+        } as LayoutTreeInsertNodeAction);
+        return getNodeByBlockId(model, blockId)!.id;
+    }
+
+    const stackOf = (model: LayoutModel, blockId: string) => effectiveStack(getNodeByBlockId(model, blockId)!.data!);
+    const intentTypes = () => intentCall.mock.calls.map((c) => JSON.stringify(c).match(/"type":"(\w+)"/g)).flat();
+
+    it("takes the tab out of its stack into a new pane on the right, and focuses it", async () => {
+        const model = createLayoutModel();
+        const p1 = insertRootBlock(model, "b1");
+        pushBlockOntoStack(model, p1, "b2");
+
+        expect(splitOutStackMember(model, "b2", { side: "right" })).toBe(true);
+
+        expect(stackOf(model, "b1")).toEqual(["b1"]);
+        const root = model.treeState.rootNode!;
+        expect(root.children).toHaveLength(2);
+        expect(root.children![0].id).toBe(p1);
+        expect(root.children![1].data?.blockId).toBe("b2");
+        expect(model.treeState.focusedNodeId).toBe(root.children![1].id);
+        await settle();
+        expect(rpcCall).toHaveBeenCalledWith("pane.removeTab", { block_id: "b2", action_id: expect.any(String) }, {});
+        expect(intentTypes()).toContain('"type":"splithorizontal"');
+    });
+
+    it("up puts the new pane above, in a column", async () => {
+        const model = createLayoutModel();
+        const p1 = insertRootBlock(model, "b1");
+        pushBlockOntoStack(model, p1, "b2");
+
+        expect(splitOutStackMember(model, "b2", { side: "up" })).toBe(true);
+
+        const root = model.treeState.rootNode!;
+        expect(root.children![0].data?.blockId).toBe("b2");
+        expect(root.children![1].id).toBe(p1);
+        await settle();
+        expect(intentTypes()).toContain('"type":"splitvertical"');
+    });
+
+    it("splits the hovered pane, not the one the tab came from", () => {
+        const model = createLayoutModel();
+        const p1 = insertRootBlock(model, "a1");
+        pushBlockOntoStack(model, p1, "a2");
+        const p2 = addPane(model, "c1");
+        model.updateTree();
+
+        expect(splitOutStackMember(model, "a2", { targetNodeId: p2, side: "left" })).toBe(true);
+
+        const order = [] as string[];
+        const walk = (n: any) => (n.children?.length ? n.children.forEach(walk) : order.push(n.data.blockId));
+        walk(model.treeState.rootNode);
+        expect(order).toEqual(["a1", "a2", "c1"]);
+        expect(stackOf(model, "a1")).toEqual(["a1"]);
+    });
+
+    it("refuses a pane's only tab and a block that is in no pane, touching nothing", async () => {
+        const model = createLayoutModel();
+        insertRootBlock(model, "b1");
+
+        expect(splitOutStackMember(model, "b1")).toBe(false);
+        expect(splitOutStackMember(model, "nope")).toBe(false);
+
+        expect(model.treeState.rootNode!.children).toBeUndefined();
+        await settle();
+        expect(rpcCall).not.toHaveBeenCalled();
+    });
+
+    it("defaults to the right in a row and below in a column", () => {
+        const model = createLayoutModel();
+        const p1 = insertRootBlock(model, "b1");
+        pushBlockOntoStack(model, p1, "b2");
+        pushBlockOntoStack(model, p1, "b3");
+
+        splitOutStackMember(model, "b3");
+        const root = model.treeState.rootNode!;
+        expect(root.children![1].data?.blockId).toBe("b3");
+
+        splitOutStackMember(model, "b2", { targetNodeId: root.children![1].id, side: "down" });
+        const col = model.treeState.rootNode!.children![1];
+        expect(col.children!.map((c) => c.data?.blockId)).toEqual(["b3", "b2"]);
     });
 });
