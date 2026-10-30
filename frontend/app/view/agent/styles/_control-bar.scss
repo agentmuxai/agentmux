@@ -298,14 +298,12 @@
                 }
             }
 
+            // The kit's link Button, in the row's own text colour.
             .agent-working-row-cancel-login {
                 margin-left: var(--space-2);
-                @include mixins.button-reset;
-                color: inherit;
-                font: inherit;
-                text-decoration: underline;
+                --ui-fg: currentColor;
+                --ui-fg-hover: currentColor;
                 opacity: 0.85;
-                cursor: default;
 
                 &:hover {
                     opacity: 1;

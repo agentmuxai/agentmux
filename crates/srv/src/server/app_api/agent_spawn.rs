@@ -12,7 +12,8 @@
 //! it is sent as the leader's own message.
 //!
 //! Launching an agent spends tokens until someone stops it, so (§3.5): only
-//! a verified host agent spawns, a worker doesn't, a leader has at most
+//! a verified agent spawns, host or container (a container leader gets container workers: same image,
+//! each with its own container and workspace), a worker doesn't, a leader has at most
 //! [`MAX_LIVE_WORKERS`], and unless the user's own turn asked for it the user
 //! is asked first.
 
@@ -260,7 +261,7 @@ async fn launch(
     }
 }
 
-/// The verified caller, if it may spawn: a host agent's own pane, not a
+/// The verified caller, if it may spawn: an agent's own pane, host or container, not a
 /// worker's.
 fn leader_of(
     state: &AppState,
@@ -272,8 +273,8 @@ fn leader_of(
     leader_at(state, block_id)
 }
 
-/// The leader whose pane is `block_id`, if it may spawn: a host agent, not a
-/// worker.
+/// The leader whose pane is `block_id`, if it may spawn: an agent of any kind, host or container, not a
+/// worker. A container leader's worker is a container worker (`copy_definition` keeps the type and the image).
 fn leader_at(state: &AppState, block_id: String) -> Result<Leader, SpawnError> {
     let block = state
         .mstore
@@ -297,9 +298,6 @@ fn leader_at(state: &AppState, block_id: String) -> Result<Leader, SpawnError> {
         .into_iter()
         .find(|d| !def_id.is_empty() && d.id == def_id)
         .ok_or_else(|| refuse(StatusCode::CONFLICT, "NOT_AN_AGENT_PANE: your pane isn't an agent from My Agents"))?;
-    if def.agent_type == "container" {
-        return Err(refuse(StatusCode::FORBIDDEN, "CONTAINER_AGENT: a container agent can't start workers"));
-    }
     Ok(Leader { block_id, def })
 }
 
