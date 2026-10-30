@@ -25,10 +25,13 @@ export function isWarm(self?: OpenTip): boolean {
     return (openTip !== null && openTip !== self) || performance.now() - lastClosedAt < WARM_MS;
 }
 
-/** `tip` is opening: close the one that was open, so two are never shown together. */
-export function claimOpen(tip: OpenTip): void {
+/**
+ * `tip` is opening: close the one that was open, so two are never shown together. A tooltip that
+ * goes the moment the pointer leaves (`immediate`) closes the others without taking the place.
+ */
+export function claimOpen(tip: OpenTip, register = true): void {
     if (openTip && openTip !== tip) openTip.close();
-    openTip = tip;
+    if (register) openTip = tip;
 }
 
 /** `tip` has closed (or is going away). */

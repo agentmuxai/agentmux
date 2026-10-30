@@ -11,10 +11,9 @@ import { autoUpdate, computePosition, flip, offset, shift } from "@floating-ui/d
 import { isPrimaryButtonDown } from "@/app/util/pointer-drag-state";
 import { claimOpen, HIDE_DELAY_MS, isWarm, releaseOpen, SHOW_DELAY_MS, type OpenTip } from "./tooltip-timing";
 
-// Not `data-tip`: status bar items and the editor toolbar already draw tooltips from that attribute.
-const CANDIDATE = "[title], [data-title-tip]";
+const CANDIDATE = "[title]";
 const KEEP_NATIVE = "option, optgroup, iframe, [data-native-title]";
-/** Set on an element whose `aria-label` is this tooltip's text, so a changed title can replace it. */
+/** Set on an element whose `aria-label` or `aria-description` is this tooltip's text, so it can be taken back. */
 const LABELLED = "data-title-tip-aria";
 
 const PANEL_CLASS =
@@ -31,23 +30,47 @@ function hasOwnText(el: HTMLElement): boolean {
     return (el.textContent ?? "").trim() !== "" || (el instanceof HTMLImageElement && el.alt !== "");
 }
 
-/** Move `el`'s `title` to `data-title-tip`, keeping its accessible label. Returns the label ("" for none). */
+/**
+ * Move `el`'s `title` to `data-title-tip` while the pointer is on it, keeping its accessible label.
+ * Returns the label ("" for none). `giveTitleBack` undoes it.
+ */
 export function takeTitle(el: HTMLElement): string {
     const title = el.getAttribute("title");
     if (title === null) return el.dataset.titleTip ?? "";
     el.removeAttribute("title");
+    clearLabel(el);
     if (title === "") {
         delete el.dataset.titleTip;
         return "";
     }
     el.dataset.titleTip = title;
     if (el.hasAttribute("aria-label") && !el.hasAttribute(LABELLED)) return title;
-    if (el.hasAttribute("aria-labelledby") || hasOwnText(el)) el.setAttribute("aria-description", title);
-    else {
+    if (el.hasAttribute("aria-labelledby") || hasOwnText(el)) {
+        el.setAttribute("aria-description", title);
+        el.setAttribute(LABELLED, "description");
+    } else {
         el.setAttribute("aria-label", title);
-        el.setAttribute(LABELLED, "");
+        el.setAttribute(LABELLED, "label");
     }
     return title;
+}
+
+function clearLabel(el: HTMLElement): void {
+    const kind = el.getAttribute(LABELLED);
+    if (kind === "label") el.removeAttribute("aria-label");
+    else if (kind === "description") el.removeAttribute("aria-description");
+    el.removeAttribute(LABELLED);
+}
+
+/**
+ * Put the title back when the pointer leaves, so an application that later changes or removes it
+ * (a reactive label) is seen the next time, and the native title is there for assistive technology.
+ */
+export function giveTitleBack(el: HTMLElement): void {
+    const text = el.dataset.titleTip;
+    delete el.dataset.titleTip;
+    clearLabel(el);
+    if (text !== undefined && !el.hasAttribute("title")) el.setAttribute("title", text);
 }
 
 /**
@@ -97,7 +120,10 @@ export function initTitleTooltips(doc: Document = document): () => void {
         clearTimers();
         stopAutoUpdate?.();
         stopAutoUpdate = null;
-        if (current) releaseOpen(self);
+        if (current) {
+            releaseOpen(self);
+            giveTitleBack(current);
+        }
         current = null;
         visible = false;
         positioned = false;
@@ -107,6 +133,7 @@ export function initTitleTooltips(doc: Document = document): () => void {
     const openFor = (el: HTMLElement, text: string) => {
         // Moving straight from one titled element to the next is a hand-over, whatever the shared state says.
         const handOver = current !== null;
+        if (current && current !== el) giveTitleBack(current);
         clearTimers();
         stopAutoUpdate?.();
         claimOpen(self);
@@ -142,7 +169,8 @@ export function initTitleTooltips(doc: Document = document): () => void {
     };
 
     const onOver = (e: Event) => {
-        const el = candidateFor(e.target);
+        // The title is off the element while the pointer is on it, so inside it the element itself is the candidate.
+        const el = candidateFor(e.target) ?? (current && e.target instanceof Node && current.contains(e.target) ? current : null);
         if (!el) return scheduleClose();
         if (el === current) {
             if (hideTimer !== null) {

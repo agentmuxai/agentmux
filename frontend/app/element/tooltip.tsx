@@ -174,7 +174,7 @@ function TooltipInner(props: TooltipProps): JSX.Element {
             setIsOpen(true);
             setIsVisible(true);
         } else if (isHovering()) {
-            if (!immediate()) claimOpen(self);
+            claimOpen(self, !immediate());
             setIsOpen(true);
             const delay = showDelayMs();
             if (immediate() || delay === 0) setIsVisible(true);

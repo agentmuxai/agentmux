@@ -12,7 +12,7 @@ vi.mock("@floating-ui/dom", () => ({
     shift: vi.fn(() => ({})),
 }));
 
-import { initTitleTooltips, takeTitle } from "./title-tooltip";
+import { giveTitleBack, initTitleTooltips, takeTitle } from "./title-tooltip";
 import { resetTooltipTiming } from "./tooltip-timing";
 
 let stop: () => void;
@@ -70,7 +70,53 @@ describe("takeTitle", () => {
     });
 });
 
+describe("giveTitleBack", () => {
+    it("puts the title back and removes the label it made", () => {
+        const el = add('<button title="Close"><i></i></button>');
+        takeTitle(el);
+        giveTitleBack(el);
+        expect(el.getAttribute("title")).toBe("Close");
+        expect(el.hasAttribute("aria-label")).toBe(false);
+        expect(el.hasAttribute("data-title-tip-aria")).toBe(false);
+        expect(el.dataset.titleTip).toBeUndefined();
+    });
+
+    it("leaves a label of the element's own, and a title the application set meanwhile", () => {
+        const el = add('<button aria-label="Mine" title="Close"><i></i></button>');
+        takeTitle(el);
+        el.setAttribute("title", "Newer");
+        giveTitleBack(el);
+        expect(el.getAttribute("aria-label")).toBe("Mine");
+        expect(el.getAttribute("title")).toBe("Newer");
+    });
+});
+
 describe("the delegated tooltip", () => {
+    it("gives the title back when the pointer has left, so a title the application removes later shows nothing", async () => {
+        const el = add('<button title="Cancel sign-in">x</button>');
+        const plain = add('<span class="plain">y</span>');
+        over(el);
+        await settle(100);
+        over(plain);
+        await settle(150);
+        expect(panel()).toBeNull();
+        expect(el.getAttribute("title")).toBe("Cancel sign-in");
+        // The application clears it (a reactive label that is no longer set).
+        el.removeAttribute("title");
+        over(el);
+        await settle(150);
+        expect(panel()).toBeNull();
+    });
+
+    it("keeps showing while the pointer moves inside an element whose title it took", async () => {
+        const el = add('<button title="Save"><i class="icon"></i></button>');
+        over(el);
+        await settle(100);
+        over(el.querySelector(".icon")!);
+        await settle(150);
+        expect(panel()!.textContent).toBe("Save");
+    });
+
     it("shows the shared tooltip after the short rest, instead of the native one", async () => {
         const el = add('<button title="Save"><i></i></button>');
         over(el);
