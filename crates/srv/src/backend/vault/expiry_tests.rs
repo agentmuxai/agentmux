@@ -44,6 +44,30 @@ fn a_date_is_yyyy_mm_dd_and_nothing_else() {
 }
 
 #[test]
+fn another_managers_month_becomes_its_last_day() {
+    assert_eq!(normalize("2026-11-20").as_deref(), Some("2026-11-20"));
+    assert_eq!(normalize("06/2028").as_deref(), Some("2028-06-30"));
+    assert_eq!(normalize("2/2028").as_deref(), Some("2028-02-29"));
+    assert_eq!(normalize("2028-12").as_deref(), Some("2028-12-31"));
+    for other in ["13/2028", "06/28", "next year", ""] {
+        assert_eq!(normalize(other), None, "{other:?}");
+    }
+}
+
+#[test]
+fn an_imported_expiry_that_isnt_a_date_moves_to_the_notes() {
+    let kind = kinds::kind("api-key").unwrap();
+    let mut fields: std::collections::BTreeMap<String, String> =
+        [("expires".to_string(), "end of next year".to_string()), ("notes".to_string(), "rotate by hand".to_string())].into();
+    settle_imported(kind, &mut fields);
+    assert!(!fields.contains_key("expires"));
+    assert_eq!(fields["notes"], "rotate by hand\nExpires: end of next year");
+    let mut dated: std::collections::BTreeMap<String, String> = [("expires".to_string(), "06/2028".to_string())].into();
+    settle_imported(kind, &mut dated);
+    assert_eq!(dated["expires"], "2028-06-30");
+}
+
+#[test]
 fn the_nearest_reminder_is_the_one_due() {
     assert_eq!(Stage::due(30), None);
     assert_eq!(Stage::due(14), Some(Stage::TwoWeeks));

@@ -51,6 +51,40 @@ pub fn parse(text: &str) -> Result<NaiveDate, String> {
     NaiveDate::parse_from_str(text, "%Y-%m-%d").map_err(|_| format!("expires is a date as YYYY-MM-DD, not {:?}", clip(text)))
 }
 
+/// A date another manager or an older backup wrote: `YYYY-MM-DD` as it is, and a
+/// month (`06/2028`, `6/2028`, `2028-06`) as its last day. None for anything else.
+pub fn normalize(text: &str) -> Option<String> {
+    let text = text.trim();
+    if let Ok(d) = parse(text) {
+        return Some(d.to_string());
+    }
+    let (y, m) = match text.split_once('/') {
+        Some((m, y)) => (y.trim(), m.trim()),
+        None => text.split_once('-')?,
+    };
+    let (y, m): (i32, u32) = (y.parse().ok().filter(|_| y.len() == 4)?, m.parse().ok()?);
+    let first_of_next = if m == 12 { NaiveDate::from_ymd_opt(y + 1, 1, 1) } else { NaiveDate::from_ymd_opt(y, m + 1, 1) };
+    first_of_next.filter(|_| (1..=12).contains(&m)).and_then(|d| d.pred_opt()).map(|d| d.to_string())
+}
+
+/// An imported entry's `expires`, made a date the Vault keeps: normalized when it
+/// can be, else moved into the entry's notes, so no entry is refused for it and
+/// no text is lost.
+pub fn settle_imported(kind: &kinds::Kind, fields: &mut std::collections::BTreeMap<String, String>) {
+    let Some(text) = fields.remove(FIELD) else { return };
+    match normalize(&text) {
+        Some(date) => {
+            fields.insert(FIELD.to_string(), date);
+        }
+        None if kind.fields.contains(&"notes") => {
+            let line = format!("Expires: {text}");
+            let notes = fields.remove("notes").filter(|n| !n.is_empty()).map(|n| format!("{n}\n{line}")).unwrap_or(line);
+            fields.insert("notes".to_string(), notes);
+        }
+        None => {}
+    }
+}
+
 fn clip(text: &str) -> String {
     text.chars().take(40).collect()
 }
