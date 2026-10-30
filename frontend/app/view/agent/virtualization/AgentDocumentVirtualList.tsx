@@ -214,9 +214,9 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // ── Follow state machine (props.followController) ───────────────────
     // When on, `follow` alone decides whether the pane follows; stickToBottom
     // is its projection (written only in `transition` below), so every
-    // existing reader keeps working. The pin writers stay where they are: the
-    // ResizeObservers below (or OneWayFlow) report each observation to it and
-    // pin when it says so. Created on mount: it needs the scroller.
+    // existing reader keeps working. The ResizeObservers below report each
+    // observation to it; OneWayFlow does the pinning. Created on mount: it
+    // needs the scroller.
     const useFollowController = untrack(() => props.followController === true);
     let follow: FollowScroll | null = null;
     onMount(() => {

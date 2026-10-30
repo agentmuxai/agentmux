@@ -281,9 +281,8 @@
     // "flash on send". Measured on 2026-10-01: layout shift 0.09 → 0.00 and
     // three changing frames → one without it. Agent output still fades in.
     // REPORT_LIVE_FEED_ROLL_OFF_TOO_AGGRESSIVE_2026_09_30 (docs/reports) §7.
-    // 180 ms and an 8px rise: 120 ms / 4px read as an instant pop. The
-    // content above glides up by the same arrival (AgentDocumentVirtualList's
-    // glideContent). Its reduced treatment (none) is below, dormant.
+    // 180 ms and an 8px rise: 120 ms / 4px read as an instant pop. Its
+    // reduced treatment (none) is below, dormant.
     // REPORT_AGENT_PANE_ROW_ENTER_MOTION_2026_10_01 (docs/reports) §5.
     .agent-document-streaming-buffer[data-animate] .agent-document-row:not([data-node-type="user_message"]) {
         opacity: 1;

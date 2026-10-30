@@ -141,7 +141,7 @@ export function inferCauses(prev: FrameSample, cur: FrameSample): string[] {
  * samples follow, neither is inside a user-input window, and the pane's width
  * and zoom are unchanged (user-initiated changes are exempt, spec §1).
  * `events` are the code's own notes since the previous frame (pin paths,
- * hold, glide), appended to the inferred causes.
+ * holds), appended to the inferred causes.
  */
 export function checkFrame(prev: FrameSample, cur: FrameSample, events: readonly string[] = []): FrameResult {
     const gap = blankGap(cur);
@@ -527,7 +527,7 @@ export function sampleOneWayFrame(pane: string): void {
     recorders.get(pane)?.sampleFromFlow();
 }
 
-/** Record that the code itself did something that can move the content (a pin, a hold, a glide). */
+/** Record that the code itself did something that can move the content (a pin, a hold). */
 export function noteOneWay(pane: string, label: string): void {
     if (!enabled) return;
     recorders.get(pane)?.note(label);
