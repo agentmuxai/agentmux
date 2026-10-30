@@ -11,10 +11,11 @@
 //! (`kbd` and `samp` have no role of their own in the tree; the screenshot scan,
 //! which sees tag names, covers them.)
 
-use std::collections::HashSet;
+use std::borrow::Cow;
+use std::collections::{HashMap, HashSet};
 
 use agentmux_common::shown_once;
-use serde_json::Value;
+use serde_json::{json, Value};
 
 /// Roles whose text is shown as code.
 const CODE_ROLES: &[&str] = &["code", "pre"];
@@ -74,6 +75,69 @@ pub fn under_zone(node: &Value, by_id: &std::collections::HashMap<&str, &Value>,
         at = parent;
     }
     false
+}
+
+/// `nodes`, with each secret a zone splits over several text nodes joined back
+/// together. A syntax-highlighted `<code>` gives each token a span of its own, so
+/// no piece alone has a secret's shape and each would be shown. The zone's text is
+/// joined into its first piece, which takes the zone element's backend id (so
+/// `capture` of its reference reads the whole element), and the other pieces are
+/// emptied (an empty text node shows no line). Borrowed when nothing is split.
+pub fn join_split(nodes: &[Value]) -> Cow<'_, [Value]> {
+    let by_id: HashMap<&str, &Value> = nodes.iter().filter_map(|n| Some((n.get("nodeId")?.as_str()?, n))).collect();
+    let zones = copy_zones(nodes);
+    // The first piece's id → (joined text, the zone's backend id); others → "".
+    let mut joined: HashMap<String, (String, Option<i64>)> = HashMap::new();
+    let mut emptied: HashSet<String> = HashSet::new();
+    for root in nodes.iter().filter(|n| starts_zone(n, &zones) && !under_zone(n, &by_id, &zones)) {
+        let pieces = text_pieces(root, &by_id);
+        if pieces.len() < 2 {
+            continue;
+        }
+        let whole: String = pieces.iter().map(|(_, t)| *t).collect();
+        let apart: String = pieces.iter().map(|(_, t)| shown_once::mask(t)).collect();
+        if !shown_once::has_shown_once(&whole) || apart == shown_once::mask(&whole) {
+            continue;
+        }
+        joined.insert(pieces[0].0.to_string(), (whole, root.get("backendDOMNodeId").and_then(Value::as_i64)));
+        emptied.extend(pieces[1..].iter().map(|(id, _)| id.to_string()));
+    }
+    if joined.is_empty() {
+        return Cow::Borrowed(nodes);
+    }
+    let mut out = nodes.to_vec();
+    for n in &mut out {
+        let Some(id) = n.get("nodeId").and_then(Value::as_str).map(str::to_string) else { continue };
+        if let Some((text, backend)) = joined.get(&id) {
+            n["name"] = json!({ "type": "computedString", "value": text });
+            if let Some(b) = backend {
+                n["backendDOMNodeId"] = json!(b);
+            }
+        } else if emptied.contains(&id) {
+            n["name"] = json!({ "type": "computedString", "value": "" });
+        }
+    }
+    Cow::Owned(out)
+}
+
+/// The text nodes under `root`, in document order, with their raw text (spaces
+/// kept: they separate words). A text node's own children repeat its text.
+fn text_pieces<'a>(root: &'a Value, by_id: &HashMap<&str, &'a Value>) -> Vec<(&'a str, &'a str)> {
+    let mut out = Vec::new();
+    let mut stack = vec![root];
+    while let Some(node) = stack.pop() {
+        if role(node) == "StaticText" {
+            let text = node.get("name").and_then(|v| v.get("value")).and_then(Value::as_str).unwrap_or("");
+            if let Some(id) = node.get("nodeId").and_then(Value::as_str) {
+                out.push((id, text));
+            }
+            continue;
+        }
+        if let Some(kids) = node.get("childIds").and_then(Value::as_array) {
+            stack.extend(kids.iter().rev().filter_map(|k| k.as_str().and_then(|id| by_id.get(id)).copied()));
+        }
+    }
+    out
 }
 
 /// Whether a line masks a one-time secret: in its name, inside a zone, or in its

@@ -107,6 +107,59 @@ fn a_query_cant_read_it_a_piece_at_a_time() {
     assert_eq!(super::super::snapshot::first_match(&console(), &exact), None);
 }
 
+/// A syntax-highlighted `<code>`: a span per token, so no piece alone has the shape.
+fn highlighted() -> Vec<Value> {
+    let (a, b, c) = (&SECRET[..10], &SECRET[10..25], &SECRET[25..]);
+    vec![
+        n("1", None, "RootWebArea", "", Some(1), &["2", "9"]),
+        n("2", Some("1"), "code", "", Some(2), &["3", "4", "6", "8"]),
+        n("3", Some("2"), "StaticText", "key = ", Some(3), &[]),
+        n("4", Some("2"), "generic", "", Some(4), &["5"]),
+        n("5", Some("4"), "StaticText", a, Some(5), &[]),
+        n("6", Some("2"), "generic", "", Some(6), &["7"]),
+        n("7", Some("6"), "StaticText", b, Some(7), &[]),
+        n("8", Some("2"), "StaticText", c, Some(8), &[]),
+        n("9", Some("1"), "paragraph", "", Some(9), &["10"]),
+        n("10", Some("9"), "StaticText", "Store it now", Some(10), &[]),
+    ]
+}
+
+#[test]
+fn a_secret_split_over_highlighted_spans_is_masked_and_captured_whole() {
+    let s = render(&highlighted(), &HashMap::new(), None, "");
+    for piece in [&SECRET[..10], &SECRET[10..25], &SECRET[25..]] {
+        assert!(!s.text.contains(piece), "{piece}: {}", s.text);
+    }
+    assert_eq!(s.text.matches(SHOWN_ONCE).count(), 1, "{}", s.text);
+    assert!(s.text.contains("key =") && s.text.contains("Store it now"), "the rest stays: {}", s.text);
+    // Its reference is the code element, whose whole text capture reads.
+    let line = s.text.lines().find(|l| l.contains(SHOWN_ONCE)).unwrap();
+    let r = line.split("[ref=").nth(1).unwrap().split(']').next().unwrap();
+    assert_eq!(s.refs.iter().find(|(x, _)| x == r).map(|(_, b)| *b), Some(2), "{line}");
+}
+
+#[test]
+fn find_and_a_scope_by_name_dont_match_a_piece_of_a_split_secret() {
+    let q = ElementQuery { role: Some("text".into()), name: SECRET[10..25].into(), ..Default::default() };
+    assert_eq!(find(&highlighted(), &HashMap::new(), &q, "").total, 0);
+    assert!(super::super::snapshot::find_candidates(&highlighted(), &q).is_empty());
+    let found = find(&highlighted(), &HashMap::new(), &ElementQuery { role: Some("text".into()), ..Default::default() }, "");
+    assert!(!found.text.contains(&SECRET[10..25]) && found.text.contains(SHOWN_ONCE), "{}", found.text);
+}
+
+#[test]
+fn pieces_that_only_join_into_ordinary_text_are_left_as_they_are() {
+    let nodes = vec![
+        n("1", None, "RootWebArea", "", Some(1), &["2"]),
+        n("2", Some("1"), "code", "", Some(2), &["3", "4"]),
+        n("3", Some("2"), "StaticText", "cargo ", Some(3), &[]),
+        n("4", Some("2"), "StaticText", "test", Some(4), &[]),
+    ];
+    assert!(matches!(super::join_split(&nodes), std::borrow::Cow::Borrowed(_)));
+    // A secret already whole in one piece needs no joining.
+    assert!(matches!(super::join_split(&console()), std::borrow::Cow::Borrowed(_)));
+}
+
 #[test]
 fn a_copy_buttons_container_is_its_nearest_ancestor_with_more_than_the_button() {
     // The button sits in a wrapper of its own; the row above it holds the secret.
