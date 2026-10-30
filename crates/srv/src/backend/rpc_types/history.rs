@@ -19,7 +19,8 @@ pub struct HistoryUsageReq {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct HistoryUsageStore {
-    /// `provider-files`, `pane-history`, `channel-copies`, `archives` or `audit`.
+    /// `provider-files`, `pane-history`, `channel-copies` (listed, not in the
+    /// total), `archives` or `audit`.
     pub key: String,
     pub label: String,
     #[ts(type = "number")]

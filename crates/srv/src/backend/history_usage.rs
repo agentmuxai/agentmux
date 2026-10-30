@@ -112,11 +112,14 @@ pub fn compute(
     let stores = vec![
         store("provider-files", "Session files (the CLI's own)", cli),
         store("pane-history", "Pane history (shared)", pane),
-        store("channel-copies", "Pane history copies (per version)", channels),
+        store("channel-copies", "Old copies, per version (not in the total)", channels),
         store("archives", "Archived sessions", dir_size(&roots.archives)),
         store("audit", "Jekt audit trail", file_size(&roots.audit)),
     ];
-    let total_bytes = stores.iter().map(|s| s.bytes).sum();
+    // Each version keeps its own copy of the pane store (the recovery source after
+    // an upgrade). They are listed, but they are not the history itself, so they
+    // stay out of the total.
+    let total_bytes = stores.iter().filter(|s| s.key != "channel-copies").map(|s| s.bytes).sum();
 
     HistoryUsage {
         total_bytes,
