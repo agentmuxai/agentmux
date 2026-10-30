@@ -83,7 +83,13 @@
     color: var(--secondary-text-color);
     font-size: var(--text-2xs);
 
+    // A row, like the line of text it replaces: the icon, the words and a
+    // button sit side by side and wrap when the pane is narrow.
     &--inline {
+        flex-direction: row;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: var(--space-1-5) var(--space-2);
         padding: var(--space-2) 0;
     }
 
