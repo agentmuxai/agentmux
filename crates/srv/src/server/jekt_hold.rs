@@ -394,12 +394,13 @@ pub(crate) fn hold_wan_for_unavailable(
 }
 
 /// [`hold_applies`] for a verified message from another machine ([`verified_peer`]): the same
-/// exclusions (a cron fire, no id to key the row by), without the full-key, host-tier condition.
+/// exclusions (a cron fire, no id to key the row by), without the full-key, host-tier condition. Not for a
+/// message with files: they are sent after the hold on the files route, so a replay would find none.
 fn hold_applies_to_peer(
     req: &InjectionRequest,
     resp: &crate::backend::reactive::types::InjectionResponse,
 ) -> bool {
-    verified_peer(req) && req.source_agent.as_deref() != Some("cron") && !resp.request_id.is_empty()
+    verified_peer(req) && req.files.is_none() && req.source_agent.as_deref() != Some("cron") && !resp.request_id.is_empty()
 }
 
 #[cfg(test)]
@@ -481,6 +482,8 @@ mod tests {
         assert!(hold_applies_to_peer(&lan, &resp));
         assert!(!hold_applies_to_peer(&InjectionRequest { source_agent: Some("cron".into()), ..lan.clone() }, &resp));
         assert!(!hold_applies_to_peer(&peer("lan"), &resp));
+        let with_files = InjectionRequest { files: Some(vec![agentmux_common::jekt_files::JektFile { sha256: "0".repeat(64), name: "a.txt".into(), size: 1 }]), ..lan.clone() };
+        assert!(!hold_applies_to_peer(&with_files, &resp), "its files arrive after the hold");
         let no_id = crate::backend::reactive::types::InjectionResponse { request_id: String::new(), ..resp };
         assert!(!hold_applies_to_peer(&lan, &no_id));
     }
