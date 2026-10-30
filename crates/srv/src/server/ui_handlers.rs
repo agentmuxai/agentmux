@@ -1230,11 +1230,8 @@ pub(crate) async fn handle_host_browser_popup(
         return err_response(StatusCode::FORBIDDEN, "only the AgentMux host can report a popup".to_string());
     }
     let s = |k: &str| body.get(k).and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
-    let (opener, url, opener_url) = (s("opener"), s("url"), s("opener_url"));
+    let (opener, url, opener_url, as_window) = (s("opener"), s("url"), s("opener_url"), s("asked") == "window");
     let user_gesture = body.get("user_gesture").and_then(|v| v.as_bool()).unwrap_or(false);
-    // A new window (shift-click) opens beside its opener; a new tab, or an older
-    // host that doesn't say, joins the opener's pane as a pane tab.
-    let as_window = s("asked") == "window";
     let refused = |reason: &str| {
         (StatusCode::OK, Json(json!({ "ok": true, "data": { "admitted": false, "reason": reason } }))).into_response()
     };
